@@ -484,3 +484,19 @@ Running log of fixes made by Codex. Read before modifying code to avoid re-apply
 **Why it was needed**: cross-device consistency for the coverage/consumption surface, using the data the server already owns — client becomes a thin display layer.
 
 **Verification**: warehouseCoverage 7/7; regressions 93/93 (warehouseCoverage, warehouseGrouping, inventoryFinalizationCoverage, inventoryShared.incidentReporting, LiveTabMemo.snappy); run-calculator typecheck clean.
+
+## Server-side migration — completion audit (slice 8, docs only)
+
+**Date**: 2026-09-14
+**Branch**: `chore/migration-closeout`
+**Files changed**:
+- `docs/idea-backlog.md` — §13 restructured to `Done`: documents all seven server-owned surfaces, the end state ("thin display layer + input collector"), and the audited intentionally-local paths.
+- `.agents/memory/codex-fixes.md` — this entry.
+
+**What was wrong / missing**: slices 1–7 moved every live time-varying surface server-side, but the backlog still listed them as "What's Left" and no final audit existed to prove no adoptable display derivation remained client-only.
+
+**What the fix was**: triaged every remaining client-side derivation call site in `home.tsx`, `runShaping.ts`, `packagingManager.ts`, `runInsights.ts`, `lineSpeed.ts`, `inventoryShared.ts`, `useAutoTrack.ts`. Confirmed each is intentional: setup-form need rows/validation (write-decisions over unsaved edits), exports (CSV/shop-list), history/AI analysis inputs (`buildShapedRun`, `statFromRun`, PPM heuristic), prior-run freezer-drain auto-track (ended run has no server projection; client write-claim, server response canonical per sync-invariant-check §8), and day-totals table (already `runSummaryStatsById.get(...) ??` server-adopted). No code migration remains — parallel surfaces use the same shared `@workspace/live-calc` math, so offline matches server exactly.
+
+**Why it was needed**: closes the migration program with a documented end state and prevents future agents from re-opening "move X to server" for surfaces that must stay client-side.
+
+**Verification**: regression suites re-run (live-calc 25/25; api-server sync.liveCalcTick 20/20; run-calculator focused + slice-7 sets green; both typechecks clean).

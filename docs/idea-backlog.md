@@ -405,41 +405,67 @@ Reduce battery drain and improve performance, especially on mobile devices.
 
 ## 13. Server-Side Migration
 
-**Status**: In progress (Replit working on it)  
+**Status**: Done (slices 1–7 merged; Replit saw the same goal)  
 **Priority**: High
 
 ### Summary
-Move more logic from client to server to improve consistency, reduce battery, and enable cross-device sync.
+Server owns every live, time-varying operational surface the server can compute, streamed over the sync SSE:
+calc → per-run consumption `runLines` + `summaryStats` → batch/finish `timers` → 3-stage `linePhases` → warehouse
+coverage consumption. The client adopts the server projection while confirmed/fresh, and runs the same shared math
+(`@workspace/live-calc`) locally only when offline, stale, or when the server has no counterpart for the surface
+(unsaved form edits, history, prior-run drain). Cross-device consistency is guaranteed by construction; no surface
+dual-owns state.
 
-### What's Moved So Far
-- Auto-track schedule computation (server-owned)
-- Wall-clock bootstrap (server-side timing)
-- Client skip-latch (reduces redundant network ticks)
-- **Live server-calc streaming (slice 1 — DONE)** — server is the live calc authority for the active run: a 5s calc tick on the sync SSE while a run is active; client adopts the streamed `serverCalc` inside a 10s freshness window and falls back to local `computeCalc` on stale/offline/run-switch. Pure tick helper + per-client SSE tick on the API (`artifacts/api-server/src/lib/liveCalcTick.ts`, `sync.ts`), freshness-window guard on the web (`operationalState.ts` `shouldUseServerCalc`), adoption in `LiveRunContext` / `home.tsx` SSE receive. Spec: `docs/superpowers/specs/2026-09-13-server-live-calc-stream-design.md`. Plan: `docs/superpowers/plans/2026-09-13-server-live-calc-stream.md`.
+### Server-Owned Surfaces (adopted when online)
+- **Live calc** (slice 1) — server 5s calc tick on the sync SSE for any active run; client adopts inside a 10s
+  freshness window; local `computeCalc` fallback on stale/offline/run-switch.
+- **Setup-form calc** (slice 2) — tick emits `setupTick: true` frames for pending selected runs so the Live tab has a
+  fresh server calc on switch, covering the "form calculations (yield, batch needs, dough supply)" item.
+- **Per-run consumption + summary** (slice 3) — server streams `runLines` (ingredient + packaging consumption) and
+  `summaryStats` for every run in the SSE frame; client stores lines in `serverRunLinesRef` and adopts current-run
+  summaryStats (covers the "ingredient math" item).
+- **Batch/finish timing** (slice 4) — `OperationalProjection.timers` carries `currentBatchNum`, `secUntilNextBatch`,
+  `totalBatchesNeeded` computed from the server clock (covers the "run timing calculations" item).
+- **Line phases** (slice 5) — server computes the 3-stage press/tunnel/packaging model in the projection; client
+  adopts with countdown extrapolation and exact-local fallback.
+- **Phase display strips** (slice 6) — the ended-run badge, 3-phase status strip, and line-stage section read
+  `useLiveRun().linePhases`; the client is a thin display for the phase surface.
+- **Warehouse coverage** (slice 7) — Inventory coverage consumes server-streamed per-run `runLines` via
+  `computeWarehouseCoverage(..., serverConsumptionLinesByRunId?)`, replacing local lines when the run id matches.
 
-### What's Left
-- Move form calculations to server (yield, batch needs, dough supply)
-- Move ingredient math to server
-- Move run timing calculations to server
-- Client becomes thin display layer + input collector
-- **Live server-calc streaming (slice 2 — DONE)** — server tick widened to any selected run with `runValues` (not just active runs); the `shouldEmitSetupCalcTick` + `buildSetupCalcTickFrame` helpers emit a `setupTick: true` frame for pending runs so the Live tab gets a fresh server calc on switch without cold-start delay. Spec: `docs/superpowers/specs/2026-09-13-server-live-calc-stream-slice2-design.md`. Plan: `docs/superpowers/plans/2026-09-13-server-live-calc-stream-slice2.md`.
-- **Live server-calc streaming (slice 3 — DONE)** — server streams per-run `runLines` (ingredient + packaging consumption, via `computeRunConsumptionLines`) in every SSE frame alongside `summaryStats`; client stores them in `serverRunLinesRef` and adopts server summaryStats for the **current** run when online (local fallback when offline/stale). Spec: `docs/superpowers/specs/2026-09-13-server-live-calc-stream-slice3-design.md`. Plan: `docs/superpowers/plans/2026-09-13-server-live-calc-stream-slice3.md`.
-- **Live server-calc streaming (slice 4 — DONE)** — batch/finish timing moved server-side: `OperationalProjection.timers` now carries `currentBatchNum`, `secUntilNextBatch`, `totalBatchesNeeded` (same formulas the client used, computed from the server `effectiveElapsedSec` anchor); the client reads them from the confirmed projection with local fallback for older servers/offline. Spec: `docs/superpowers/specs/2026-09-14-server-live-calc-stream-slice4-design.md`. Plan: `docs/superpowers/plans/2026-09-14-server-live-calc-stream-slice4.md`.
+### Intentionally Local Paths (audited, keep client-side)
+These are NOT migration gaps — each has no server counterpart or must reflect unsaved client state:
+- **Setup-form need rows / validation** (`buildNeedRows`, packaging need rows, `productionNeedsAvailable` gate) —
+  write-decisions over unsaved form edits; server calc only covers confirmed/current runs.
+- **Auto-track propose/claim** (`useAutoTrack` suggestion + case-tick write, prior-run freezer-drain advance) —
+  client proposes/claims writes; the server response is canonical (sync-invariant-check §8). The draining run is
+  ended and has no server projection.
+- **Exports** (CSV run rows, shop-list text) — deterministic serialization of saved day-state.
+- **History / AI analysis inputs** (`buildShapedRun` → aiSummary/aiSchedule/aiAnomaly; `statFromRun` → runInsights;
+  historical PPM heuristic) — offline analysis of historical/planned runs the server does not stream calcs for.
+- **Day totals table** — already `runSummaryStatsById.get(run.id) ?? computeSummaryStats(...)` (server-adopted with
+  local fallback).
 
-- **Live server-calc streaming (slice 5 — DONE)** — line-phase model moved server-side: `OperationalProjection` now carries `linePhases` (3-stage press/tunnel/packaging model) computed by `buildOperationalProjection` from day-state lifecycle, pause policies, and effective timing values; `LiveRunContext` adopts the confirmed projection's phases (extrapolating `remainMs` from `capturedAtServerMs`) with exact local fallback on lifecycle mismatch, missing field, or imminent phase transitions. Spec: `docs/superpowers/specs/2026-09-14-server-live-calc-stream-slice5-design.md`. Plan: `docs/superpowers/plans/2026-09-14-server-live-calc-stream-slice5.md`.
+### End State
+"Client becomes thin display layer + input collector": achieved for every live surface. Local math is the exact same
+shared `@workspace/live-calc`/`inventory-math` code the server runs, so offline mode is pixel-identical, and online
+mode converges to the server in ≤1 tick. Remaining server-migration appetite (if any) is capped by surfaces the
+server genuinely cannot stream (unsaved edits, history, ended-run drain).
 
-- **Live server-calc streaming (slice 6 — DONE)** — phase display strips adopt the server model: the three `computeLinePhases` call sites in `home.tsx` (ended-run badge, 3-phase line status strip, line-stage section) now read `useLiveRun().linePhases` (server-adopted with internal local fallback); local derivations remain only as defensive fallbacks. Spec: `docs/superpowers/specs/2026-09-14-server-live-calc-stream-slice6-design.md`. Plan: `docs/superpowers/plans/2026-09-14-server-live-calc-stream-slice6.md`.
-
-- **Warehouse coverage adopts streamed run lines (DONE)** — the Inventory tab's coverage advisory now consumes the server-streamed per-run consumption `runLines` (slice 3 built the stream; the client previously never read it) via `computeWarehouseCoverage(..., serverConsumptionLinesByRunId?)`, falling back to local `computeRunConsumptionLines` per run when offline/absent. Spec: `docs/superpowers/specs/2026-09-14-server-warehouse-coverage-runlines-design.md`. Plan: `docs/superpowers/plans/2026-09-14-server-warehouse-coverage-runlines.md`.
+### Specs / Plans
+- `docs/superpowers/specs/2026-09-13-server-live-calc-stream-design.md` / `...-slice2-design.md` ... `...-slice6-design.md`
+- `docs/superpowers/specs/2026-09-14-server-live-calc-stream-slice4-design.md` ... `...-slice6-design.md`
+- `docs/superpowers/specs/2026-09-14-server-warehouse-coverage-runlines-design.md`
+- Plans live alongside each spec under `docs/superpowers/plans/`.
 
 ### Code References
-- `lib/live-calc/src/index.ts` — core calculation engine
-- `artifacts/run-calculator/src/liveRunCalc.ts` — client-side calc (to be migrated)
-- `artifacts/api-server/src/routes/run-calc.ts` — server calc endpoint (new)
-- `artifacts/api-server/src/lib/liveCalcTick.ts` — active-run calc tick policy
+- `lib/live-calc/src/index.ts` — shared calculation engine (client + server)
+- `lib/live-calc/src/operationalProjection.ts` — server projection (calc/timers/linePhases)
+- `artifacts/api-server/src/routes/sync.ts` — SSE stream + live calc tick
+- `artifacts/api-server/src/lib/liveCalcTick.ts` — tick policy helpers
+- `artifacts/run-calculator/src/contexts/LiveRunContext.tsx` — adoption + local fallback
 - `artifacts/run-calculator/src/operationalState.ts` — `shouldUseServerCalc` freshness gate
-
----
+- `artifacts/run-calculator/src/inventoryShared.ts` — server-consumption-aware coverage
 
 ## 14. Responsive Design & Visual Quality
 
