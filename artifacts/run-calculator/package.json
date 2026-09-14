@@ -86,7 +86,7 @@
     "class-variance-authority": "catalog:",
     "clsx": "catalog:",
     "cmdk": "^1.1.1",
-    "date-fns": "^3.6.0",
+    "date-fns": "^4.4.0",
     "embla-carousel-react": "^8.6.0",
     "framer-motion": "catalog:",
     "heic2any": "^0.0.4",
