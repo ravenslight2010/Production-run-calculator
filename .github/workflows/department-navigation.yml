@@ -64,7 +64,6 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
-          cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -148,14 +147,14 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: department-navigation-server-logs
+          name: department-navigation-server-logs-${{ github.run_id }}
           path: /tmp/department-*.log
 
       - name: Upload Playwright evidence on failure
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: department-navigation-playwright-evidence
+          name: department-navigation-playwright-evidence-${{ github.run_id }}
           path: |
             artifacts/run-calculator/playwright-report
             artifacts/run-calculator/test-results/department

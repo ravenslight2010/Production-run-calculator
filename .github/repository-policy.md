@@ -37,6 +37,30 @@ The legacy `push:main` helper is not a routine delivery path under this policy;
 the live rule requires a pull request and status checks. It remains only as a
 historical guard for repositories that explicitly permit direct delivery.
 
+## Workflow privilege and isolation contract
+
+Every maintained workflow must declare a top-level least-privilege
+`permissions` block with `contents: read`, explicit top-level `concurrency`, and
+run-scoped cache and artifact namespaces. Pull-request workflows must not use
+implicit `setup-node` caches; any future cache must include
+`${{ github.run_id }}` in its key or scope. Artifact names must also include
+`${{ github.run_id }}` so reruns and untrusted pull requests cannot collide
+with a retained result.
+
+Write permissions are exceptions, not defaults. The current approved
+exceptions are:
+
+| Workflow/job | Capability | Boundary |
+| --- | --- | --- |
+| CI / `docker-publish` | `packages: write` | Only a push of `main` publishes immutable image tags. |
+| Stable branch protection / `notify` | `issues: write` | Only a scheduled failure updates one maintainer alert issue. |
+
+Each exception is documented beside the permission in its workflow. The
+workflow guard rejects undocumented writes, broad `read-all`/`write-all`
+defaults, missing concurrency, unscoped caches, and unscoped artifact names.
+The guard is static and read-only: it inspects workflow files and runs
+actionlint without dispatching any workflow.
+
 Validate the live setting with:
 
 ```sh
@@ -64,7 +88,7 @@ When the workflow fails:
 
 1. Open the failed run and read the **Check live main branch protection** step
    or its **Stable branch protection check** job summary.
-2. Download the `stable-branch-protection-check` artifact if the run needs to be
+2. Download the `stable-branch-protection-check-${{ github.run_id }}` artifact if the run needs to be
    retained or shared during investigation. The artifact contains only the
    checker's bounded result and is retained for 14 days.
 3. Use the failure's named field (for example,

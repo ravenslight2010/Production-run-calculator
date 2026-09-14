@@ -52,6 +52,13 @@ name: CI
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: fixture-ci-${{ github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   fixture:
     runs-on: ubuntu-latest
@@ -64,6 +71,13 @@ name: Release check
 
 on:
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fixture-release-${{ github.run_id }}
+  cancel-in-progress: false
 
 jobs:
   fixture-release:
@@ -78,6 +92,13 @@ name: Nightly large-spec harness
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: fixture-nightly-${{ github.run_id }}
+  cancel-in-progress: false
+
 jobs:
   fixture-nightly:
     runs-on: ubuntu-latest
@@ -90,6 +111,13 @@ name: Department navigation
 
 on:
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fixture-department-${{ github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   fixture-department-navigation:
@@ -104,6 +132,13 @@ name: Release concurrency calibration
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: fixture-calibration-${{ github.run_id }}
+  cancel-in-progress: false
+
 jobs:
   fixture-release-concurrency:
     runs-on: ubuntu-latest
@@ -117,6 +152,13 @@ name: Stable branch protection
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: fixture-stable-${{ github.run_id }}
+  cancel-in-progress: false
+
 jobs:
   fixture-stable-branch:
     runs-on: ubuntu-latest
@@ -129,6 +171,13 @@ name: Workflow lint
 
 env:
   ${ci_declaration}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fixture-lint-\${{ github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   fixture-workflow-lint:
@@ -291,7 +340,8 @@ test_schema_safe_rollback_ci_contract() {
   assert_contains "$job_block" "            cat rollback-rehearsal-report.md >> \"\$GITHUB_STEP_SUMMARY\""
   assert_contains "$job_block" \
     "        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4"
-  assert_contains "$job_block" "          name: schema-safe-rollback-rehearsal"
+  assert_contains "$job_block" \
+    "          name: schema-safe-rollback-rehearsal-\${{ github.run_id }}"
   assert_contains "$job_block" "          path: rollback-rehearsal-report.md"
   assert_contains "$job_block" "          retention-days: 14"
   assert_contains "$scripts_package" \
@@ -337,7 +387,8 @@ test_stable_branch_protection_workflow_contract() {
   assert_contains "$upload_block" "if: always()"
   assert_contains "$upload_block" \
     "uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4"
-  assert_contains "$upload_block" "name: stable-branch-protection-check"
+  assert_contains "$upload_block" \
+    "name: stable-branch-protection-check-\${{ github.run_id }}"
   assert_contains "$upload_block" \
     "path: \${{ runner.temp }}/stable-branch-protection-check.txt"
   assert_contains "$upload_block" "if-no-files-found: error"
@@ -415,6 +466,133 @@ EOF
     return 1
   }
   echo "PASS: rejects mutable workflow service images"
+}
+
+test_accepts_privilege_and_isolation_contracts() {
+  local workspace
+  workspace=$(make_timeout_workflow_workspace "security-contracts")
+  run_check "$workspace"
+  [[ "$CHECK_STATUS" -eq 0 ]] || {
+    printf 'Expected complete workflow security contracts to pass. Output:\n%s\n' \
+      "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" \
+    "GitHub Actions workflow syntax and expressions are valid."
+  echo "PASS: accepts workflow privilege and isolation contracts"
+}
+
+test_rejects_missing_workflow_permissions_contract() {
+  local workspace
+  workspace=$(make_workspace missing-permissions 1.7.12 1.7.12)
+  sed -i '/^permissions:$/,+1d' "$workspace/.github/workflows/ci.yml"
+  run_check "$workspace"
+  [[ "$CHECK_STATUS" -eq 1 ]] || {
+    printf 'Expected a missing permissions block to fail. Output:\n%s\n' \
+      "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" \
+    "every workflow must declare a top-level permissions block"
+  [[ ! -e "$FAKE_ACTIONLINT_MARKER" ]] || {
+    printf 'Expected permissions contract failure before linting.\n' >&2
+    return 1
+  }
+  echo "PASS: rejects workflows without explicit least-privilege permissions"
+}
+
+test_rejects_missing_workflow_concurrency_contract() {
+  local workspace
+  workspace=$(make_workspace missing-concurrency 1.7.12 1.7.12)
+  sed -i '/^concurrency:$/,+2d' "$workspace/.github/workflows/ci.yml"
+  run_check "$workspace"
+  [[ "$CHECK_STATUS" -eq 1 ]] || {
+    printf 'Expected a missing concurrency block to fail. Output:\n%s\n' \
+      "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" \
+    "every workflow must declare top-level concurrency"
+  [[ ! -e "$FAKE_ACTIONLINT_MARKER" ]] || {
+    printf 'Expected concurrency contract failure before linting.\n' >&2
+    return 1
+  }
+  echo "PASS: rejects workflows without explicit concurrency"
+}
+
+test_rejects_undocumented_workflow_write_permission() {
+  local workspace
+  workspace=$(make_workspace undocumented-write 1.7.12 1.7.12)
+  cat >> "$workspace/.github/workflows/ci.yml" <<'EOF'
+
+jobs:
+  unsafe-write:
+    permissions:
+      contents: read
+      issues: write
+EOF
+  run_check "$workspace"
+  [[ "$CHECK_STATUS" -eq 1 ]] || {
+    printf 'Expected an undocumented write permission to fail. Output:\n%s\n' \
+      "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" \
+    "write permissions require a nearby workflow-contract: write-exception comment"
+  [[ ! -e "$FAKE_ACTIONLINT_MARKER" ]] || {
+    printf 'Expected undocumented write failure before linting.\n' >&2
+    return 1
+  }
+  echo "PASS: rejects undocumented workflow write permissions"
+}
+
+test_rejects_unscoped_workflow_cache() {
+  local workspace
+  workspace=$(make_workspace unscoped-cache 1.7.12 1.7.12)
+  cat >> "$workspace/.github/workflows/ci.yml" <<'EOF'
+
+          cache-from: type=gha,scope=shared
+EOF
+  run_check "$workspace"
+  [[ "$CHECK_STATUS" -eq 1 ]] || {
+    printf 'Expected an unscoped cache to fail. Output:\n%s\n' \
+      "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" \
+    "cache scopes must include github.run_id for isolation"
+  [[ ! -e "$FAKE_ACTIONLINT_MARKER" ]] || {
+    printf 'Expected cache isolation failure before linting.\n' >&2
+    return 1
+  }
+  echo "PASS: rejects unscoped workflow caches"
+}
+
+test_rejects_unscoped_workflow_artifact() {
+  local workspace
+  workspace=$(make_workspace unscoped-artifact 1.7.12 1.7.12)
+  cat >> "$workspace/.github/workflows/ci.yml" <<'EOF'
+
+jobs:
+  unsafe-artifact:
+    steps:
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: shared-artifact
+EOF
+  run_check "$workspace"
+  [[ "$CHECK_STATUS" -eq 1 ]] || {
+    printf 'Expected an unscoped artifact to fail. Output:\n%s\n' \
+      "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" \
+    "artifact names must include \${{ github.run_id }} for run isolation"
+  [[ ! -e "$FAKE_ACTIONLINT_MARKER" ]] || {
+    printf 'Expected artifact isolation failure before linting.\n' >&2
+    return 1
+  }
+  echo "PASS: rejects unscoped workflow artifacts"
 }
 
 test_stable_branch_protection_alert_fixture() {
@@ -1173,3 +1351,9 @@ test_stable_branch_protection_workflow_contract
 test_stable_branch_protection_alert_fixture
 test_rejects_floating_workflow_dependencies
 test_rejects_mutable_service_images
+test_accepts_privilege_and_isolation_contracts
+test_rejects_missing_workflow_permissions_contract
+test_rejects_missing_workflow_concurrency_contract
+test_rejects_undocumented_workflow_write_permission
+test_rejects_unscoped_workflow_cache
+test_rejects_unscoped_workflow_artifact

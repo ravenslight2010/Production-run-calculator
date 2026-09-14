@@ -28,7 +28,6 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
-          cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Typecheck (workspace + libs)
         run: pnpm run typecheck
@@ -54,7 +53,6 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
-          cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Run web unit tests
         run: pnpm --filter @workspace/run-calculator test
@@ -77,7 +75,6 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
-          cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Validate calibration history fixtures
         # Keep this fixture-only regression check separate from the disposable
@@ -119,7 +116,6 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
-          cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Apply schema
         run: pnpm --filter @workspace/db run push-force
@@ -139,7 +135,6 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
-          cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Rehearse application rollback on forward schema
         run: pnpm run check:schema-safe-rollback
@@ -153,7 +148,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: schema-safe-rollback-rehearsal
+          name: schema-safe-rollback-rehearsal-${{ github.run_id }}
           path: rollback-rehearsal-report.md
           if-no-files-found: error
           retention-days: 14
@@ -174,7 +169,6 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
-          cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Report high-severity production dependency advisories
         # Reports known advisories without blocking: what remains is Expo/Metro
@@ -210,8 +204,8 @@ jobs:
           platforms: linux/amd64
           tags: |
             ghcr.io/${{ github.repository_owner }}/runcalc-api:${{ github.sha }}
-          cache-from: type=gha,scope=docker-build-${{ github.event_name }}-${{ github.ref_name }}
-          cache-to: type=gha,mode=max,scope=docker-build-${{ github.event_name }}-${{ github.ref_name }}
+          cache-from: type=gha,scope=docker-build-${{ github.run_id }}
+          cache-to: type=gha,mode=max,scope=docker-build-${{ github.run_id }}
 
       - name: Build api migration image
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
@@ -222,8 +216,8 @@ jobs:
           platforms: linux/amd64
           tags: |
             ghcr.io/${{ github.repository_owner }}/runcalc-api-migrate:${{ github.sha }}
-          cache-from: type=gha,scope=docker-build-${{ github.event_name }}-${{ github.ref_name }}
-          cache-to: type=gha,mode=max,scope=docker-build-${{ github.event_name }}-${{ github.ref_name }}
+          cache-from: type=gha,scope=docker-build-${{ github.run_id }}
+          cache-to: type=gha,mode=max,scope=docker-build-${{ github.run_id }}
 
       - name: Build web image (caddy static)
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
@@ -234,8 +228,8 @@ jobs:
           platforms: linux/amd64
           tags: |
             ghcr.io/${{ github.repository_owner }}/runcalc-web:${{ github.sha }}
-          cache-from: type=gha,scope=docker-build-${{ github.event_name }}-${{ github.ref_name }}
-          cache-to: type=gha,mode=max,scope=docker-build-${{ github.event_name }}-${{ github.ref_name }}
+          cache-from: type=gha,scope=docker-build-${{ github.run_id }}
+          cache-to: type=gha,mode=max,scope=docker-build-${{ github.run_id }}
 
   docker-publish:
     name: Publish Docker images
@@ -245,6 +239,8 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+      # workflow-contract: write-exception
+      # Main-branch publication is the only job allowed to write package images.
       packages: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -268,8 +264,8 @@ jobs:
           push: true
           platforms: linux/amd64
           tags: ghcr.io/${{ github.repository_owner }}/runcalc-api:${{ github.sha }}
-          cache-from: type=gha,scope=docker-publish-api
-          cache-to: type=gha,mode=max,scope=docker-publish-api
+          cache-from: type=gha,scope=docker-publish-api-${{ github.run_id }}
+          cache-to: type=gha,mode=max,scope=docker-publish-api-${{ github.run_id }}
       - name: Publish api migration image
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
@@ -278,8 +274,8 @@ jobs:
           push: true
           platforms: linux/amd64
           tags: ghcr.io/${{ github.repository_owner }}/runcalc-api-migrate:${{ github.sha }}
-          cache-from: type=gha,scope=docker-publish-api-migrate
-          cache-to: type=gha,mode=max,scope=docker-publish-api-migrate
+          cache-from: type=gha,scope=docker-publish-api-migrate-${{ github.run_id }}
+          cache-to: type=gha,mode=max,scope=docker-publish-api-migrate-${{ github.run_id }}
       - name: Publish web image (caddy static)
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
@@ -288,8 +284,8 @@ jobs:
           push: true
           platforms: linux/amd64
           tags: ghcr.io/${{ github.repository_owner }}/runcalc-web:${{ github.sha }}
-          cache-from: type=gha,scope=docker-publish-web
-          cache-to: type=gha,mode=max,scope=docker-publish-web
+          cache-from: type=gha,scope=docker-publish-web-${{ github.run_id }}
+          cache-to: type=gha,mode=max,scope=docker-publish-web-${{ github.run_id }}
 
   build:
     name: Build (web + API)
@@ -310,7 +306,6 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
-          cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Build web app
         run: pnpm --filter @workspace/run-calculator run build

@@ -43,6 +43,10 @@ on:
         required: false
         default: ''
 
+concurrency:
+  group: nightly-large-spec
+  cancel-in-progress: false
+
 permissions:
   contents: read
 jobs:
@@ -133,7 +137,6 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
-          cache: 'pnpm'
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -171,7 +174,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: api-server-log
+          name: api-server-log-${{ github.run_id }}
           path: /tmp/api-server.log
           retention-days: 7
 
@@ -194,7 +197,3 @@ jobs:
           if [ -n "${API_SERVER_PID:-}" ]; then
             kill "$API_SERVER_PID" 2>/dev/null || true
           fi
-
-concurrency:
-  group: nightly-large-spec
-  cancel-in-progress: false

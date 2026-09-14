@@ -8,6 +8,7 @@ on:
       - .github/**
       - .github/dependabot.yml
       - .github/workflows/**
+      - .github/repository-policy.md
       - package.json
       - pnpm-lock.yaml
       - scripts/package.json
