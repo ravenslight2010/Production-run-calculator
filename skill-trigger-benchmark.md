@@ -1,14 +1,14 @@
 # Skill trigger benchmark
 
-- Skills: **23**
-- Coverage: **18** project-owned, **5** managed curated fixtures
-- Prompts: **92** (46 should-trigger, 46 near-miss should-not-trigger)
+- Skills: **31**
+- Coverage: **26** project-owned, **5** managed curated fixtures
+- Prompts: **124** (62 should-trigger, 62 near-miss should-not-trigger)
 - Catalog validation: **PASS** (every prompt targets an available skill; managed fixtures are intentional and documented)
-- Runtime model rates: **blocked** (the complete 92-prompt run and balanced held-out run were attempted with three repetitions, but every subprocess failed because `claude` is unavailable)
+- Runtime model rates: **blocked** (the complete 124-prompt run and balanced held-out run were attempted with three repetitions, but every subprocess failed because `claude` is unavailable)
 
 ## Runtime attempt
 
-The runtime attempt targeted this 92-prompt corpus: 92 prompts × 3 repetitions (276 attempts). A deterministic balanced held-out split (one positive and one near-miss per skill) was also exercised: 46 prompts × 3 repetitions (138 attempts). Every attempt failed before model evaluation with `[Errno 2] No such file or directory: 'claude'`.
+The runtime attempt targeted this 124-prompt corpus: 124 prompts × 3 repetitions (372 attempts). A deterministic balanced held-out split (one positive and one near-miss per skill) was also exercised: 62 prompts × 3 repetitions (186 attempts). Every attempt failed before model evaluation with `[Errno 2] No such file or directory: 'claude'`.
 
 Because `run_eval.py` records failed subprocesses as non-triggers, its resulting 0/3 rates are synthetic failure output, not model observations. Precision, recall, false-positive, and false-negative rates are therefore **unavailable** for every skill.
 
@@ -22,14 +22,21 @@ Runtime precision, recall, false-positive rate, and false-negative rate are **un
 
 | Skill | Precision | Recall | False-positive rate | False-negative rate | Signals |
 | --- | --- | --- | --- | --- | --- |
+| `api-design` | N/A | N/A | N/A | N/A | none |
 | `brainstorming` | N/A | N/A | N/A | N/A | none |
+| `ci-security-review` | N/A | N/A | N/A | N/A | none |
 | `customer-import-audit` | N/A | N/A | N/A | N/A | under-trigger candidate (1) |
+| `data-cleanup` | N/A | N/A | N/A | N/A | none |
 | `data-heal-playbook` | N/A | N/A | N/A | N/A | none |
 | `db-schema-change` | N/A | N/A | N/A | N/A | under-trigger candidate (1) |
+| `documentation-claim-review` | N/A | N/A | N/A | N/A | none |
+| `error-handling` | N/A | N/A | N/A | N/A | over-trigger candidate (1) |
+| `evidence-hygiene` | N/A | N/A | N/A | N/A | none |
 | `external-skill-import` | N/A | N/A | N/A | N/A | none |
 | `import-bug-investigation` | N/A | N/A | N/A | N/A | none |
 | `operational-browser-verification` | N/A | N/A | N/A | N/A | none |
 | `production-go` | N/A | N/A | N/A | N/A | over-trigger candidate (1) |
+| `property-based-testing` | N/A | N/A | N/A | N/A | none |
 | `release-checklist` | N/A | N/A | N/A | N/A | none |
 | `rollback-recovery` | N/A | N/A | N/A | N/A | none |
 | `schema-change-checklist` | N/A | N/A | N/A | N/A | none |
@@ -39,6 +46,7 @@ Runtime precision, recall, false-positive rate, and false-negative rate are **un
 | `sync-invariant-check` | N/A | N/A | N/A | N/A | under-trigger candidate (2) |
 | `test-gap-triage` | N/A | N/A | N/A | N/A | none |
 | `verify-before-commit` | N/A | N/A | N/A | N/A | none |
+| `writing-quality-editor` | N/A | N/A | N/A | N/A | none |
 | `wrong-number-triage` | N/A | N/A | N/A | N/A | none |
 | `ad-creative` | N/A | N/A | N/A | N/A | under-trigger candidate (2) |
 | `deep-research` | N/A | N/A | N/A | N/A | under-trigger candidate (1) |
@@ -48,5 +56,5 @@ Runtime precision, recall, false-positive rate, and false-negative rate are **un
 
 ## Interpretation
 
-The preflight surfaced 8 skills for review: `customer-import-audit`, `db-schema-change`, `production-go`, `sync-invariant-check`, `ad-creative`, `deep-research`, `design-thinker`, `recipe-creator`.
+The preflight surfaced 9 skills for review: `customer-import-audit`, `db-schema-change`, `error-handling`, `production-go`, `sync-invariant-check`, `ad-creative`, `deep-research`, `design-thinker`, `recipe-creator`.
 No skill description was changed: the runtime attempt produced no model-trigger evidence. The lexical flags remain review signals only and must not be converted into description edits until the held-out model run succeeds.

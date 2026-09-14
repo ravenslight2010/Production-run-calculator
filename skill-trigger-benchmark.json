@@ -19,14 +19,21 @@
     ],
     "coverage": {
       "project_owned": [
+        "api-design",
         "brainstorming",
+        "ci-security-review",
         "customer-import-audit",
+        "data-cleanup",
         "data-heal-playbook",
         "db-schema-change",
+        "documentation-claim-review",
+        "error-handling",
+        "evidence-hygiene",
         "external-skill-import",
         "import-bug-investigation",
         "operational-browser-verification",
         "production-go",
+        "property-based-testing",
         "release-checklist",
         "rollback-recovery",
         "schema-change-checklist",
@@ -36,6 +43,7 @@
         "sync-invariant-check",
         "test-gap-triage",
         "verify-before-commit",
+        "writing-quality-editor",
         "wrong-number-triage"
       ],
       "managed_curated": [
@@ -48,8 +56,16 @@
     }
   },
   "runtime_evaluator": ".agents/skills/skill-creator/scripts/run_eval.py",
-  "runtime_status": "blocked: run_eval.py was exercised on 92 prompts with 3 repetitions and a balanced held-out split, but the claude CLI is unavailable",
+  "runtime_status": "blocked: run_eval.py was exercised on 124 prompts with 3 repetitions and a balanced held-out split, but the claude CLI is unavailable",
   "runtime_metrics": [
+    {
+      "skill": "api-design",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    },
     {
       "skill": "brainstorming",
       "precision": null,
@@ -59,7 +75,23 @@
       "status": "unavailable: claude CLI missing before model evaluation"
     },
     {
+      "skill": "ci-security-review",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    },
+    {
       "skill": "customer-import-audit",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    },
+    {
+      "skill": "data-cleanup",
       "precision": null,
       "recall": null,
       "false_positive_rate": null,
@@ -76,6 +108,30 @@
     },
     {
       "skill": "db-schema-change",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    },
+    {
+      "skill": "documentation-claim-review",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    },
+    {
+      "skill": "error-handling",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    },
+    {
+      "skill": "evidence-hygiene",
       "precision": null,
       "recall": null,
       "false_positive_rate": null,
@@ -108,6 +164,14 @@
     },
     {
       "skill": "production-go",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    },
+    {
+      "skill": "property-based-testing",
       "precision": null,
       "recall": null,
       "false_positive_rate": null,
@@ -187,6 +251,14 @@
       "status": "unavailable: claude CLI missing before model evaluation"
     },
     {
+      "skill": "writing-quality-editor",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: claude CLI missing before model evaluation"
+    },
+    {
       "skill": "wrong-number-triage",
       "precision": null,
       "recall": null,
@@ -237,6 +309,36 @@
   ],
   "skills": [
     {
+      "name": "api-design",
+      "metadata_name": "api-design",
+      "ownership": "project-owned",
+      "coverage": "project-owned",
+      "path": ".agents/skills/api-design/SKILL.md",
+      "description": "Design and review this project's HTTP APIs, including resource naming, methods, status codes, validation, authorization, pagination, rate limits, error responses, OpenAPI updates, and generated-client compatibility. Use when adding or changing an API endpoint or reviewing an API contract.",
+      "evals": [
+        {
+          "id": "api-design-trigger-1",
+          "query": "Add a paginated HTTP endpoint and design its resource path, method, validation, authorization, status codes, safe errors, and OpenAPI contract.",
+          "should_trigger": true
+        },
+        {
+          "id": "api-design-trigger-2",
+          "query": "Review this proposed API contract for backward compatibility, request and response shapes, rate limits, and generated-client compatibility.",
+          "should_trigger": true
+        },
+        {
+          "id": "api-design-near-miss-1",
+          "query": "Fix the database query behind an existing endpoint without changing its HTTP contract.",
+          "should_trigger": false
+        },
+        {
+          "id": "api-design-near-miss-2",
+          "query": "Improve the React client's retry message when the existing API returns 503; the server contract stays unchanged.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
       "name": "brainstorming",
       "metadata_name": "brainstorming",
       "ownership": "project-owned",
@@ -267,6 +369,36 @@
       ]
     },
     {
+      "name": "ci-security-review",
+      "metadata_name": "ci-security-review",
+      "ownership": "project-owned",
+      "coverage": "project-owned",
+      "path": ".agents/skills/ci-security-review/SKILL.md",
+      "description": "Perform a read-only security review of CI/CD workflows, especially GitHub Actions, for unsafe permissions, untrusted input interpolation, secret exposure, dependency pinning, artifact/cache poisoning, privileged pull-request execution, and deployment boundary mistakes. Use when adding or changing workflows, release automation, repository bots, or CI credentials, and before trusting an external workflow.",
+      "evals": [
+        {
+          "id": "ci-security-review-trigger-1",
+          "query": "Review our GitHub Actions workflows for unsafe permissions, secret exposure, untrusted input interpolation, and privileged pull-request execution.",
+          "should_trigger": true
+        },
+        {
+          "id": "ci-security-review-trigger-2",
+          "query": "Audit this release workflow's credential boundaries, dependency pinning, caches, and artifact handling before we trust it.",
+          "should_trigger": true
+        },
+        {
+          "id": "ci-security-review-near-miss-1",
+          "query": "Run a dependency vulnerability scan on the production application packages.",
+          "should_trigger": false
+        },
+        {
+          "id": "ci-security-review-near-miss-2",
+          "query": "Threat-model the web application's authentication and database boundaries rather than its CI workflows.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
       "name": "customer-import-audit",
       "metadata_name": "customer-import-audit",
       "ownership": "project-owned",
@@ -292,6 +424,36 @@
         {
           "id": "customer-import-audit-near-miss-2",
           "query": "I need to import a new workbook and build the customer setup from scratch.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
+      "name": "data-cleanup",
+      "metadata_name": "data-cleanup",
+      "ownership": "project-owned",
+      "coverage": "project-owned",
+      "path": ".agents/skills/data-cleanup/SKILL.md",
+      "description": "Clean and standardize messy tabular data such as CSVs, spreadsheet pastes, and system exports while preserving the original, surfacing ambiguity, accounting for every row, and producing a reviewable transformation log. Use when asked to clean data, standardize a CSV, deduplicate a list, normalize columns, or repair inconsistent tabular values. For imported customer/spec workbooks, route first through the project's import audit skills; if incorrect values are already persisted, also use data-heal-playbook.",
+      "evals": [
+        {
+          "id": "data-cleanup-trigger-1",
+          "query": "Clean this messy CSV by normalizing columns, standardizing values, deduplicating rows, and producing a reviewable transformation log.",
+          "should_trigger": true
+        },
+        {
+          "id": "data-cleanup-trigger-2",
+          "query": "Repair inconsistent spreadsheet data while preserving the original and accounting for every input row.",
+          "should_trigger": true
+        },
+        {
+          "id": "data-cleanup-near-miss-1",
+          "query": "Audit whether a newly imported customer's workbook landed correctly in profiles and recipe pools.",
+          "should_trigger": false
+        },
+        {
+          "id": "data-cleanup-near-miss-2",
+          "query": "Fix the importer bug that wrote incorrect values into persisted production records.",
           "should_trigger": false
         }
       ]
@@ -352,6 +514,96 @@
         {
           "id": "db-schema-change-near-miss-2",
           "query": "Rename a client-only TypeScript property that is never persisted or exposed by the API.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
+      "name": "documentation-claim-review",
+      "metadata_name": "documentation-claim-review",
+      "ownership": "project-owned",
+      "coverage": "project-owned",
+      "path": ".agents/skills/documentation-claim-review/SKILL.md",
+      "description": "Verify claims in READMEs, release notes, setup guides, help text, and other public-facing documentation against designated repository evidence. Use when asked to fact-check docs, find stale or overstated claims, confirm release notes match implementation, or identify statements that need stronger evidence. Report claim-by-claim findings and evidence gaps; do not silently rewrite unsupported claims.",
+      "evals": [
+        {
+          "id": "documentation-claim-review-trigger-1",
+          "query": "Fact-check the README's setup and feature claims against repository evidence and report each unsupported or stale statement.",
+          "should_trigger": true
+        },
+        {
+          "id": "documentation-claim-review-trigger-2",
+          "query": "Verify that these release notes accurately describe the shipped implementation without silently rewriting unsupported claims.",
+          "should_trigger": true
+        },
+        {
+          "id": "documentation-claim-review-near-miss-1",
+          "query": "Polish this accurate help article for clarity and tone without changing its factual meaning.",
+          "should_trigger": false
+        },
+        {
+          "id": "documentation-claim-review-near-miss-2",
+          "query": "Review the implementation for bugs and then write new documentation for the feature.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
+      "name": "error-handling",
+      "metadata_name": "error-handling",
+      "ownership": "project-owned",
+      "coverage": "project-owned",
+      "path": ".agents/skills/error-handling/SKILL.md",
+      "description": "Design, implement, and review robust error handling in this project's TypeScript API and React client. Use when adding error types, API failure responses, client non-OK handling, retries, timeouts, user-facing failure messages, or recovery behavior.",
+      "evals": [
+        {
+          "id": "error-handling-trigger-1",
+          "query": "Design robust API and React error handling for non-OK responses, timeouts, retries, and safe user-facing recovery messages.",
+          "should_trigger": true
+        },
+        {
+          "id": "error-handling-trigger-2",
+          "query": "Review this TypeScript endpoint and client flow so failures use consistent error types and never expose internal details.",
+          "should_trigger": true
+        },
+        {
+          "id": "error-handling-near-miss-1",
+          "query": "Design the successful response shape and pagination contract for a new HTTP endpoint.",
+          "should_trigger": false
+        },
+        {
+          "id": "error-handling-near-miss-2",
+          "query": "Fix a TypeScript type error in a component that has no failure or recovery behavior.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
+      "name": "evidence-hygiene",
+      "metadata_name": "evidence-hygiene",
+      "ownership": "project-owned",
+      "coverage": "project-owned",
+      "path": ".agents/skills/evidence-hygiene/SKILL.md",
+      "description": "Safely capture, sanitize, label, store, and review operational evidence such as screenshots, HAR files, browser traces, logs, test reports, exports, and release artifacts. Use whenever evidence may contain credentials, personal data, production records, request payloads, or environment-specific results, especially during release, security, browser, and incident verification.",
+      "evals": [
+        {
+          "id": "evidence-hygiene-trigger-1",
+          "query": "Sanitize and store these browser traces, logs, screenshots, and test reports without retaining credentials or production personal data.",
+          "should_trigger": true
+        },
+        {
+          "id": "evidence-hygiene-trigger-2",
+          "query": "Review this release evidence bundle for sensitive payloads, environment-specific data, and safe retention labels.",
+          "should_trigger": true
+        },
+        {
+          "id": "evidence-hygiene-near-miss-1",
+          "query": "Run the release checklist and decide whether the application is ready to publish.",
+          "should_trigger": false
+        },
+        {
+          "id": "evidence-hygiene-near-miss-2",
+          "query": "Compare two public website screenshots for visual layout differences.",
           "should_trigger": false
         }
       ]
@@ -472,6 +724,36 @@
         {
           "id": "production-go-near-miss-2",
           "query": "The production deploy is broken; investigate its server logs and repair the incident.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
+      "name": "property-based-testing",
+      "metadata_name": "property-based-testing",
+      "ownership": "project-owned",
+      "coverage": "project-owned",
+      "path": ".agents/skills/property-based-testing/SKILL.md",
+      "description": "Writes, reviews, and debugs property-based tests \u2014 Hypothesis, fast-check, proptest, jqwik, rapid, and Echidna or Medusa for Solidity invariants. Use whenever tests should cover a whole input domain instead of a hand-picked list of examples: encode/decode and serialize/deserialize pairs, parsers, canonicalizers and normalizers, validators, numeric and Decimal types, comparators and sort order, data structures, and smart-contract state invariants. Also use when adding cases to an existing @given, fast-check, or proptest suite, when judging whether existing property tests assert anything real, and when a generator has shrunk a counterexample and you need to tell a wrong property from a genuine bug. Not for coverage-guided binary fuzzing (libFuzzer, AFL), mutation-testing campaigns, static analysis, benchmarking, or end-to-end UI tests.",
+      "evals": [
+        {
+          "id": "property-based-testing-trigger-1",
+          "query": "Add fast-check properties for this parser and canonicalizer across the full input domain, including shrinking useful counterexamples.",
+          "should_trigger": true
+        },
+        {
+          "id": "property-based-testing-trigger-2",
+          "query": "Review these Hypothesis round-trip tests and strengthen generators so invalid inputs do not make the property meaningless.",
+          "should_trigger": true
+        },
+        {
+          "id": "property-based-testing-near-miss-1",
+          "query": "Add three example-based unit tests for known API validation regressions.",
+          "should_trigger": false
+        },
+        {
+          "id": "property-based-testing-near-miss-2",
+          "query": "Run coverage-guided binary fuzzing against this native image decoder.",
           "should_trigger": false
         }
       ]
@@ -747,6 +1029,36 @@
       ]
     },
     {
+      "name": "writing-quality-editor",
+      "metadata_name": "writing-quality-editor",
+      "ownership": "project-owned",
+      "coverage": "project-owned",
+      "path": ".agents/skills/writing-quality-editor/SKILL.md",
+      "description": "Compose, assess, revise, or adapt user-facing writing while preserving factual meaning, quotations, numbers, conditions, identifiers, warnings, and the author's useful voice. Use when asked to draft, polish, clarify, tighten, localize, or review documentation, UI copy, error messages, reports, instructions, or release notes. Do not use wording changes to conceal unsupported claims.",
+      "evals": [
+        {
+          "id": "writing-quality-editor-trigger-1",
+          "query": "Tighten this user-facing help text while preserving every warning, number, condition, identifier, and factual claim.",
+          "should_trigger": true
+        },
+        {
+          "id": "writing-quality-editor-trigger-2",
+          "query": "Rewrite these error messages in plain language without changing their meaning or hiding unsupported statements.",
+          "should_trigger": true
+        },
+        {
+          "id": "writing-quality-editor-near-miss-1",
+          "query": "Fact-check the README claims against the current implementation and list evidence gaps.",
+          "should_trigger": false
+        },
+        {
+          "id": "writing-quality-editor-near-miss-2",
+          "query": "Implement the React component that displays this already-approved copy.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
       "name": "wrong-number-triage",
       "metadata_name": "wrong-number-triage",
       "ownership": "project-owned",
@@ -929,6 +1241,20 @@
   ],
   "preflight": [
     {
+      "name": "api-design",
+      "positive_overlap": [
+        10,
+        7
+      ],
+      "negative_overlap": [
+        4,
+        2
+      ],
+      "under_trigger_signal": 0,
+      "over_trigger_signal": 0,
+      "status": "no lexical flag"
+    },
+    {
       "name": "brainstorming",
       "positive_overlap": [
         2,
@@ -936,6 +1262,20 @@
       ],
       "negative_overlap": [
         0,
+        1
+      ],
+      "under_trigger_signal": 0,
+      "over_trigger_signal": 0,
+      "status": "no lexical flag"
+    },
+    {
+      "name": "ci-security-review",
+      "positive_overlap": [
+        14,
+        6
+      ],
+      "negative_overlap": [
+        1,
         1
       ],
       "under_trigger_signal": 0,
@@ -955,6 +1295,20 @@
       "under_trigger_signal": 1,
       "over_trigger_signal": 0,
       "status": "review"
+    },
+    {
+      "name": "data-cleanup",
+      "positive_overlap": [
+        9,
+        10
+      ],
+      "negative_overlap": [
+        3,
+        3
+      ],
+      "under_trigger_signal": 0,
+      "over_trigger_signal": 0,
+      "status": "no lexical flag"
     },
     {
       "name": "data-heal-playbook",
@@ -983,6 +1337,48 @@
       "under_trigger_signal": 1,
       "over_trigger_signal": 0,
       "status": "review"
+    },
+    {
+      "name": "documentation-claim-review",
+      "positive_overlap": [
+        9,
+        7
+      ],
+      "negative_overlap": [
+        1,
+        2
+      ],
+      "under_trigger_signal": 0,
+      "over_trigger_signal": 0,
+      "status": "no lexical flag"
+    },
+    {
+      "name": "error-handling",
+      "positive_overlap": [
+        13,
+        5
+      ],
+      "negative_overlap": [
+        1,
+        5
+      ],
+      "under_trigger_signal": 0,
+      "over_trigger_signal": 1,
+      "status": "review"
+    },
+    {
+      "name": "evidence-hygiene",
+      "positive_overlap": [
+        12,
+        6
+      ],
+      "negative_overlap": [
+        1,
+        1
+      ],
+      "under_trigger_signal": 0,
+      "over_trigger_signal": 0,
+      "status": "no lexical flag"
     },
     {
       "name": "external-skill-import",
@@ -1039,6 +1435,20 @@
       "under_trigger_signal": 0,
       "over_trigger_signal": 1,
       "status": "review"
+    },
+    {
+      "name": "property-based-testing",
+      "positive_overlap": [
+        3,
+        3
+      ],
+      "negative_overlap": [
+        1,
+        3
+      ],
+      "under_trigger_signal": 0,
+      "over_trigger_signal": 0,
+      "status": "no lexical flag"
     },
     {
       "name": "release-checklist",
@@ -1161,6 +1571,20 @@
       "negative_overlap": [
         2,
         2
+      ],
+      "under_trigger_signal": 0,
+      "over_trigger_signal": 0,
+      "status": "no lexical flag"
+    },
+    {
+      "name": "writing-quality-editor",
+      "positive_overlap": [
+        5,
+        4
+      ],
+      "negative_overlap": [
+        1,
+        1
       ],
       "under_trigger_signal": 0,
       "over_trigger_signal": 0,

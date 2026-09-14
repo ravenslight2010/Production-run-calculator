@@ -41,11 +41,23 @@ INTENTIONAL_FIXTURE_SKILLS = MANAGED_FIXTURE_SKILLS
 # positive, plus two adjacent negative cases. The negatives share vocabulary
 # with the skill and are therefore useful near-misses rather than easy rejects.
 PROMPTS: dict[str, tuple[list[str], list[str]]] = {
+    "api-design": (
+        ["Add a paginated HTTP endpoint and design its resource path, method, validation, authorization, status codes, safe errors, and OpenAPI contract.",
+         "Review this proposed API contract for backward compatibility, request and response shapes, rate limits, and generated-client compatibility."],
+        ["Fix the database query behind an existing endpoint without changing its HTTP contract.",
+         "Improve the React client's retry message when the existing API returns 503; the server contract stays unchanged."],
+    ),
     "brainstorming": (
         ["Help me design a new customer-facing workflow before anyone writes code.",
          "I have a fuzzy product idea; explore the intent, compare approaches, and get approval on a design first."],
         ["Implement this small fix directly; do not spend time exploring alternatives.",
          "Review the finished API implementation for bugs and type errors."],
+    ),
+    "ci-security-review": (
+        ["Review our GitHub Actions workflows for unsafe permissions, secret exposure, untrusted input interpolation, and privileged pull-request execution.",
+         "Audit this release workflow's credential boundaries, dependency pinning, caches, and artifact handling before we trust it."],
+        ["Run a dependency vulnerability scan on the production application packages.",
+         "Threat-model the web application's authentication and database boundaries rather than its CI workflows."],
     ),
     "customer-import-audit": (
         ["A new customer's workbook was imported yesterday; audit what landed in profiles and pools and tell me if it is correct.",
@@ -58,6 +70,12 @@ PROMPTS: dict[str, tuple[list[str], list[str]]] = {
          "The bug is fixed but production rows are already poisoned—repair persisted profiles safely and verify the heal."],
         ["A new workbook was imported; only audit whether the result is correct, do not repair anything.",
          "The UI displays the wrong number, but no incorrect value has been saved yet."],
+    ),
+    "data-cleanup": (
+        ["Clean this messy CSV by normalizing columns, standardizing values, deduplicating rows, and producing a reviewable transformation log.",
+         "Repair inconsistent spreadsheet data while preserving the original and accounting for every input row."],
+        ["Audit whether a newly imported customer's workbook landed correctly in profiles and recipe pools.",
+         "Fix the importer bug that wrote incorrect values into persisted production records."],
     ),
     "db-schema-change": (
         ["Add a new Drizzle table and carry the Postgres schema change through push-force, API codegen, and typechecks.",
@@ -89,6 +107,24 @@ PROMPTS: dict[str, tuple[list[str], list[str]]] = {
         ["The bug and solution are already clear; implement the ticket without exploring alternatives.",
          "Audit the finished page's colors, spacing, and responsive layout."],
     ),
+    "documentation-claim-review": (
+        ["Fact-check the README's setup and feature claims against repository evidence and report each unsupported or stale statement.",
+         "Verify that these release notes accurately describe the shipped implementation without silently rewriting unsupported claims."],
+        ["Polish this accurate help article for clarity and tone without changing its factual meaning.",
+         "Review the implementation for bugs and then write new documentation for the feature."],
+    ),
+    "error-handling": (
+        ["Design robust API and React error handling for non-OK responses, timeouts, retries, and safe user-facing recovery messages.",
+         "Review this TypeScript endpoint and client flow so failures use consistent error types and never expose internal details."],
+        ["Design the successful response shape and pagination contract for a new HTTP endpoint.",
+         "Fix a TypeScript type error in a component that has no failure or recovery behavior."],
+    ),
+    "evidence-hygiene": (
+        ["Sanitize and store these browser traces, logs, screenshots, and test reports without retaining credentials or production personal data.",
+         "Review this release evidence bundle for sensitive payloads, environment-specific data, and safe retention labels."],
+        ["Run the release checklist and decide whether the application is ready to publish.",
+         "Compare two public website screenshots for visual layout differences."],
+    ),
     "import-bug-investigation": (
         ["The cheese Excel import skipped several varieties and created duplicate links; trace parse versus apply versus pool data.",
          "A premix workbook misnamed recipes after import—investigate which layer produced the bad result before changing code."],
@@ -106,6 +142,12 @@ PROMPTS: dict[str, tuple[list[str], list[str]]] = {
          "Can we safely publish this application today, including production safety and deployment readiness?"],
         ["Please run the pre-publish checklist before I decide whether to deploy.",
          "The production deploy is broken; investigate its server logs and repair the incident."],
+    ),
+    "property-based-testing": (
+        ["Add fast-check properties for this parser and canonicalizer across the full input domain, including shrinking useful counterexamples.",
+         "Review these Hypothesis round-trip tests and strengthen generators so invalid inputs do not make the property meaningless."],
+        ["Add three example-based unit tests for known API validation regressions.",
+         "Run coverage-guided binary fuzzing against this native image decoder."],
     ),
     "release-checklist": (
         ["Before publishing, run the app's release tests, typechecks, workflow restart, and live-data-heal checks.",
@@ -178,6 +220,12 @@ PROMPTS: dict[str, tuple[list[str], list[str]]] = {
          "A run shows the wrong yield and batch count—identify the source of the displayed value and verify the correction."],
         ["The displayed number is correct; I only want a layout redesign.",
          "A database import created incorrect stored values across many profiles."],
+    ),
+    "writing-quality-editor": (
+        ["Tighten this user-facing help text while preserving every warning, number, condition, identifier, and factual claim.",
+         "Rewrite these error messages in plain language without changing their meaning or hiding unsupported statements."],
+        ["Fact-check the README claims against the current implementation and list evidence gaps.",
+         "Implement the React component that displays this already-approved copy."],
     ),
 }
 
