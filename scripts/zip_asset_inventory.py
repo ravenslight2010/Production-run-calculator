@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -26,7 +27,11 @@ from typing import Iterable, Mapping, Sequence
 DEFAULT_MAX_ENTRIES = 100_000
 DEFAULT_MAX_ENTRY_BYTES = 256 * 1024 * 1024
 DEFAULT_MAX_EXPANDED_BYTES = 512 * 1024 * 1024
+MAX_RETAINED_REVIEW_BYTES = 16 * 1024 * 1024
 COMMAND_ID = "scripts/zip_asset_inventory.py"
+INTEGRITY_FIELD = "integrity"
+INTEGRITY_ALGORITHM = "sha256"
+INTEGRITY_SCOPE = "report-excluding-integrity"
 ENVIRONMENT_CLASSES = frozenset(
     {"development", "isolated-test", "staging", "production", "unknown"}
 )
@@ -55,6 +60,85 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _canonical_report_bytes(report: Mapping[str, object]) -> bytes:
+    """Serialize every report field except the integrity envelope deterministically."""
+
+    payload = {
+        key: value for key, value in report.items() if key != INTEGRITY_FIELD
+    }
+    return json.dumps(
+        payload,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+
+
+def report_integrity_sha256(report: Mapping[str, object]) -> str:
+    """Hash the complete report without recursively hashing its own digest."""
+
+    return hashlib.sha256(_canonical_report_bytes(report)).hexdigest()
+
+
+def add_report_integrity(report: dict[str, object]) -> dict[str, object]:
+    """Attach bounded, secret-free change-detection metadata to a report."""
+
+    report[INTEGRITY_FIELD] = {
+        "algorithm": INTEGRITY_ALGORITHM,
+        "scope": INTEGRITY_SCOPE,
+        "sha256": report_integrity_sha256(report),
+    }
+    return report
+
+
+def verify_report_integrity(report: Mapping[str, object]) -> bool:
+    """Return whether a retained report has valid, supported integrity metadata."""
+
+    integrity = report.get(INTEGRITY_FIELD)
+    if not isinstance(integrity, Mapping):
+        return False
+    if set(integrity) != {"algorithm", "scope", "sha256"}:
+        return False
+    stored_digest = integrity.get("sha256")
+    if (
+        integrity.get("algorithm") != INTEGRITY_ALGORITHM
+        or integrity.get("scope") != INTEGRITY_SCOPE
+        or not isinstance(stored_digest, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", stored_digest)
+    ):
+        return False
+    return hmac.compare_digest(stored_digest, report_integrity_sha256(report))
+
+
+def _load_retained_report(path: Path) -> tuple[dict[str, object] | None, str]:
+    """Load a bounded retained report without exposing parser or filesystem details."""
+
+    try:
+        if path.is_symlink() or not path.is_file():
+            return None, "unreadable_review"
+        with path.open("rb") as source:
+            raw_report = source.read(MAX_RETAINED_REVIEW_BYTES + 1)
+        if len(raw_report) > MAX_RETAINED_REVIEW_BYTES:
+            return None, "review_too_large"
+        report = json.loads(raw_report.decode("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None, "malformed_review"
+    if not isinstance(report, dict):
+        return None, "malformed_review"
+    return report, ""
+
+
+def verify_retained_report(path: Path) -> tuple[bool, str]:
+    """Verify a retained JSON review and return a stable, non-sensitive result."""
+
+    report, error = _load_retained_report(path)
+    if report is None:
+        return False, error
+    if not verify_report_integrity(report):
+        return False, "integrity_mismatch"
+    return True, "integrity_valid"
 
 
 def _truthy(value: str | None) -> bool:
@@ -347,7 +431,7 @@ def inventory_archives(
 
     unsafe_count = sum(bool(archive["unsafe_metadata"]) for archive in archives)
     duplicate_archive_count = sum(len(group) - 1 for group in duplicate_groups)
-    return {
+    return add_report_integrity({
         "format": "zip-asset-inventory/v1",
         "label": "REVIEW EVIDENCE ONLY — NOT INSTALLATION APPROVAL",
         "provenance": build_provenance(),
@@ -367,7 +451,7 @@ def inventory_archives(
             "duplicate_archive_count": duplicate_archive_count,
             "review_ready": unsafe_count == 0,
         },
-    }
+    })
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -401,6 +485,12 @@ def _parser() -> argparse.ArgumentParser:
         "--output",
         type=Path,
         help="write the JSON review evidence to this file instead of stdout",
+    )
+    parser.add_argument(
+        "--verify",
+        type=Path,
+        metavar="REVIEW_JSON",
+        help="verify the retained JSON review integrity instead of scanning ZIP files",
     )
     parser.set_defaults(default_root=repository_root / "attached_assets")
     return parser
@@ -440,6 +530,12 @@ def _text_report(report: dict[str, object]) -> str:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
+    if args.verify:
+        if args.paths or args.output or args.format != "json":
+            parser.error("--verify cannot be combined with paths, --output, or --format text")
+        valid, status = verify_retained_report(args.verify)
+        print(status)
+        return 0 if valid else 1
     if min(args.max_entries, args.max_entry_bytes, args.max_expanded_bytes) < 1:
         parser.error("all limits must be positive")
 

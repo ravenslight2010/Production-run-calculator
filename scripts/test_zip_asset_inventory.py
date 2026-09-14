@@ -17,10 +17,14 @@ from pathlib import Path
 from zip_asset_inventory import (
     COMMAND_ID,
     DEFAULT_MAX_EXPANDED_BYTES,
+    MAX_RETAINED_REVIEW_BYTES,
     classify_environment,
     current_revision,
     inspect_archive,
     inventory_archives,
+    report_integrity_sha256,
+    verify_report_integrity,
+    verify_retained_report,
 )
 
 
@@ -53,6 +57,33 @@ class ZipAssetInventoryTests(unittest.TestCase):
             or re.fullmatch(r"[0-9a-f]{7,64}", provenance["revision"])
         )
         self.assertNotIn(str(Path(directory)), json.dumps(report))
+
+    def test_report_integrity_covers_all_fields_without_hashing_itself(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            archive_path = Path(directory) / "safe.zip"
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr("safe.txt", "review metadata only")
+
+            report = inventory_archives([archive_path])
+
+        integrity = report["integrity"]
+        self.assertEqual(integrity["algorithm"], "sha256")
+        self.assertEqual(integrity["scope"], "report-excluding-integrity")
+        self.assertRegex(integrity["sha256"], r"^[0-9a-f]{64}$")
+        self.assertTrue(verify_report_integrity(report))
+        self.assertEqual(integrity["sha256"], report_integrity_sha256(report))
+
+        changed_report = json.loads(json.dumps(report))
+        changed_report["summary"]["archive_count"] = 99
+        self.assertFalse(verify_report_integrity(changed_report))
+
+        changed_integrity = json.loads(json.dumps(report))
+        changed_integrity["integrity"]["scope"] = "report-including-integrity"
+        self.assertTrue(
+            report_integrity_sha256(changed_integrity)
+            == report_integrity_sha256(report)
+        )
+        self.assertFalse(verify_report_integrity(changed_integrity))
 
     def test_environment_classification_uses_only_approved_classes(self) -> None:
         self.assertEqual(
@@ -113,6 +144,94 @@ class ZipAssetInventoryTests(unittest.TestCase):
             )
             self.assertEqual(retained["provenance"]["command"], COMMAND_ID)
             self.assertNotIn(str(Path(directory)), output_path.read_text())
+
+    def test_verify_cli_detects_tampering_and_accepts_original_report(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            archive_path = Path(directory) / "safe.zip"
+            output_path = Path(directory) / "review.json"
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                safe_entry = zipfile.ZipInfo("safe.txt")
+                safe_entry.external_attr = (stat.S_IFREG | 0o644) << 16
+                archive.writestr(safe_entry, "review metadata only")
+
+            create_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(REPOSITORY_ROOT / "scripts" / "zip_asset_inventory.py"),
+                    str(archive_path),
+                    "--output",
+                    str(output_path),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                env={**os.environ, "PYTHONPATH": str(REPOSITORY_ROOT / "scripts")},
+            )
+            self.assertEqual(create_process.returncode, 0)
+            self.assertEqual(verify_retained_report(output_path), (True, "integrity_valid"))
+
+            verify_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(REPOSITORY_ROOT / "scripts" / "zip_asset_inventory.py"),
+                    "--verify",
+                    str(output_path),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                env={**os.environ, "PYTHONPATH": str(REPOSITORY_ROOT / "scripts")},
+            )
+            self.assertEqual(verify_process.returncode, 0)
+            self.assertEqual(verify_process.stdout, "integrity_valid\n")
+
+            retained = json.loads(output_path.read_text(encoding="utf-8"))
+            retained["summary"]["review_ready"] = False
+            output_path.write_text(json.dumps(retained), encoding="utf-8")
+            self.assertEqual(
+                verify_retained_report(output_path),
+                (False, "integrity_mismatch"),
+            )
+
+            tampered_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(REPOSITORY_ROOT / "scripts" / "zip_asset_inventory.py"),
+                    "--verify",
+                    str(output_path),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                env={**os.environ, "PYTHONPATH": str(REPOSITORY_ROOT / "scripts")},
+            )
+            self.assertEqual(tampered_process.returncode, 1)
+            self.assertEqual(tampered_process.stdout, "integrity_mismatch\n")
+            self.assertEqual(tampered_process.stderr, "")
+
+    def test_verify_retained_report_fails_closed_for_legacy_or_malformed_reviews(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            legacy_path = Path(directory) / "legacy.json"
+            legacy_path.write_text(json.dumps({"format": "zip-asset-inventory/v1"}))
+            malformed_path = Path(directory) / "malformed.json"
+            malformed_path.write_text("{not-json")
+            oversized_path = Path(directory) / "oversized.json"
+            oversized_path.write_bytes(b" " * (MAX_RETAINED_REVIEW_BYTES + 1))
+
+            self.assertEqual(
+                verify_retained_report(legacy_path),
+                (False, "integrity_mismatch"),
+            )
+            self.assertEqual(
+                verify_retained_report(malformed_path),
+                (False, "malformed_review"),
+            )
+            self.assertEqual(
+                verify_retained_report(oversized_path),
+                (False, "review_too_large"),
+            )
 
     def test_current_exact_duplicate_pairs_are_reconciled_by_hash(self) -> None:
         pairs = [

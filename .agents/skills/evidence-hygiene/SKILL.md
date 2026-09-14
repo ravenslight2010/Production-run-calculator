@@ -58,7 +58,14 @@ logs, screenshots, filenames, report titles, or metadata.
   frame plus embedded network data before sharing.
 - **Reports/exports:** include only the minimum rows and columns needed for the conclusion.
 - **Hashes:** hash source artifacts when integrity matters, but do not treat a hash as
-  sanitization or proof that the underlying source was safe.
+  sanitization or proof that the underlying source was safe. Retained ZIP inventory JSON
+  includes a secret-free `integrity` envelope with a SHA-256 digest over the canonical
+  report with that envelope excluded. Check it with
+  `python3 scripts/zip_asset_inventory.py --verify <review.json>`; `integrity_valid`
+  means the retained report matches the scanner output, while any other result is a
+  failed or unverifiable review. Verification reads at most 16 MiB. This detects later
+  changes but is not a signature: someone who can rewrite the entire file can also
+  replace its digest.
 
 ## Provenance and authority
 
