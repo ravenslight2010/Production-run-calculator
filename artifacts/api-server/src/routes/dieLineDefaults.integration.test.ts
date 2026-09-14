@@ -149,6 +149,7 @@ async function req(
 
 type ApiEntry = {
   name: string;
+  updatedAt?: string;
   crustsPerCycle: number;
   cycleSpeed: number;
   speedAdjustment: number;
@@ -204,14 +205,64 @@ describe("die-line-defaults auth boundary", () => {
 
 describe("die-line-defaults upsert semantics", () => {
   it("upserts idempotently across spellings (case-folded id), last write wins", async () => {
-    await req(MANAGER, "POST", "/api/die-line-defaults", { entries: [entry()] });
+    const created = await req(MANAGER, "POST", "/api/die-line-defaults", { entries: [entry()] });
+    const createdBody = (await created.json()) as { entries: ApiEntry[] };
     await req(MANAGER, "POST", "/api/die-line-defaults", {
-      entries: [entry({ name: '7" DIES', freezerTime: 25 })],
+      entries: [entry({
+        name: '7" DIES',
+        freezerTime: 25,
+        updatedAt: createdBody.entries[0].updatedAt,
+      })],
     });
     const items = await listAs(MANAGER);
     expect(items).toHaveLength(1);
     expect(items[0].freezerTime).toBe(25);
     expect(items[0].name).toBe('7" DIES');
+  });
+
+  it("accepts newer and equal revisions but rejects stale and missing revisions", async () => {
+    const created = await req(MANAGER, "POST", "/api/die-line-defaults", {
+      entries: [entry()],
+    });
+    const first = (await created.json()) as { entries: ApiEntry[] };
+    const firstRevision = first.entries[0].updatedAt;
+    expect(firstRevision).toBeTruthy();
+
+    const equal = await req(MANAGER, "POST", "/api/die-line-defaults", {
+      entries: [entry({ updatedAt: firstRevision })],
+    });
+    expect(equal.status).toBe(200);
+    const equalBody = (await equal.json()) as { entries: ApiEntry[] };
+    expect(equalBody.entries[0].updatedAt).toBe(firstRevision);
+
+    const newerRevision = new Date(new Date(firstRevision!).getTime() + 1).toISOString();
+    const newer = await req(MANAGER, "POST", "/api/die-line-defaults", {
+      entries: [entry({ freezerTime: 25, updatedAt: newerRevision })],
+    });
+    expect(newer.status).toBe(200);
+    const newerBody = (await newer.json()) as { entries: ApiEntry[] };
+    expect(newerBody.entries[0].freezerTime).toBe(25);
+    expect(new Date(newerBody.entries[0].updatedAt!).getTime()).toBeGreaterThan(
+      new Date(firstRevision!).getTime(),
+    );
+
+    const stale = await req(MANAGER, "POST", "/api/die-line-defaults", {
+      entries: [entry({ freezerTime: 99, updatedAt: firstRevision })],
+    });
+    expect(stale.status).toBe(409);
+    const staleBody = (await stale.json()) as {
+      error: string;
+      rejectedIds: string[];
+      entries: ApiEntry[];
+    };
+    expect(staleBody.error).toBe("STALE_DIE_LINE_DEFAULTS_SNAPSHOT");
+    expect(staleBody.rejectedIds).toEqual(['7" dies']);
+    expect(staleBody.entries[0].freezerTime).toBe(25);
+
+    const missing = await req(MANAGER, "POST", "/api/die-line-defaults", {
+      entries: [entry({ freezerTime: 100 })],
+    });
+    expect(missing.status).toBe(409);
   });
 
   it("saves and returns explicit tunnel time overrides", async () => {

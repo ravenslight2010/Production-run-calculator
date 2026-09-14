@@ -7397,7 +7397,7 @@ export const getSaveDieLineDefaultsUrl = () => {
 }
 
 /**
- * Upserts a batch of per-die line-setting defaults keyed by die name (case-insensitive). Malformed entries are dropped. Manager role required.
+ * Upserts a batch of per-die line-setting defaults keyed by die name (case-insensitive). Existing rows require a current or newer updatedAt revision; stale or revision-less updates are rejected atomically. Revision-less entries remain compatible for first-time creation. Malformed entries are dropped. Manager role required.
  * @summary Create or update per-die line-setting defaults (manager only)
  */
 export const saveDieLineDefaults = async (saveDieLineDefaultsInput: SaveDieLineDefaultsInput, options?: Parameters<typeof customFetch>[1]): Promise<DieLineDefaultsList> => {

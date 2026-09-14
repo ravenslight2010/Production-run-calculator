@@ -1955,8 +1955,10 @@ paths:
       summary: Create or update per-die line-setting defaults (manager only)
       description: >-
         Upserts a batch of per-die line-setting defaults keyed by die name
-        (case-insensitive). Malformed entries are dropped. Manager role
-        required.
+        (case-insensitive). Existing rows require a current or newer updatedAt
+        revision; stale or revision-less updates are rejected atomically.
+        Revision-less entries remain compatible for first-time creation.
+        Malformed entries are dropped. Manager role required.
       requestBody:
         required: true
         content:
@@ -1974,6 +1976,8 @@ paths:
           description: Invalid input
         "403":
           description: Manager role required
+        "409":
+          description: One or more existing die-default revisions are stale or missing
     delete:
       operationId: deleteDieLineDefaults
       tags: [dieLineDefaults]
@@ -8742,6 +8746,10 @@ components:
         name:
           type: string
           description: Die-type display name (matched case-insensitively)
+        updatedAt:
+          type: string
+          format: date-time
+          description: Server-issued optimistic-concurrency revision; required when updating an existing row
         crustsPerCycle:
           type: number
         cycleSpeed:

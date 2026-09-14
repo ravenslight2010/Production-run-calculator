@@ -313,7 +313,12 @@ import {
   runTemplatesQueryKey,
   RUN_TEMPLATES_QUERY_KEY,
 } from "../hooks/useRunTemplates";
-import { resolveDieLineDefaultsOnSwitch, resolveCrustLineDefaults, dieLineDefaultsFor } from "../dieDefaults";
+import {
+  resolveDieLineDefaultsOnSwitch,
+  resolveCrustLineDefaults,
+  dieDefaultsKey,
+  dieLineDefaultsFor,
+} from "../dieDefaults";
 import { saveDieLineDefaults } from "../dieLineDefaultsServer";
 import { DIE_LINE_DEFAULTS_QUERY_KEY } from "../hooks/useDieLineDefaults";
 import RunInsightsCard from "../components/RunInsightsCard";
@@ -5006,7 +5011,10 @@ export default function Home() {
   );
   // Manager-set per-die line-setting overrides (server master-data); the run
   // form's die pre-fill resolves through these first, then the built-in map.
-  const { overrides: dieLineDefaultOverrides } = useDieLineDefaults();
+  const {
+    entries: dieLineDefaultEntries,
+    overrides: dieLineDefaultOverrides,
+  } = useDieLineDefaults();
 
   // Push every locally-saved dough / sauce recipe preset up into the server pool
   // (match-by-name, no clobber) so they become factory-wide master-data like
@@ -12029,9 +12037,12 @@ export default function Home() {
       // Only update the die default when a complete existing base is
       // available — an unknown/custom die must never get an all-zero
       // override minted for it (buildTunnelDieDefaultEntry returns null).
+      const storedDieEntry = dieLineDefaultEntries.find(
+        (candidate) => dieDefaultsKey(candidate.name) === dieDefaultsKey(s.dieType),
+      );
       const entry = buildTunnelDieDefaultEntry(
         s.dieType,
-        dieLineDefaultsFor(s.dieType, dieLineDefaultOverrides),
+        storedDieEntry ?? dieLineDefaultsFor(s.dieType, dieLineDefaultOverrides),
         s.recommendedValue,
       );
       if (entry) {
@@ -12101,7 +12112,9 @@ export default function Home() {
     const dieEntry = s.dieType
       ? buildTunnelDieDefaultEntry(
           s.dieType,
-          dieLineDefaultsFor(s.dieType, dieLineDefaultOverrides),
+          dieLineDefaultEntries.find(
+            (candidate) => dieDefaultsKey(candidate.name) === dieDefaultsKey(s.dieType),
+          ) ?? dieLineDefaultsFor(s.dieType, dieLineDefaultOverrides),
           s.recommendedValue,
         )
       : null;

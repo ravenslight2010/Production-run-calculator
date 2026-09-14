@@ -2469,6 +2469,7 @@ export const ReplaceFreezerSurplusAllocationResponse = zod.object({
 export const ListDieLineDefaultsResponse = zod.object({
   "entries": zod.array(zod.object({
   "name": zod.string().describe('Die-type display name (matched case-insensitively)'),
+  "updatedAt": zod.coerce.date().optional().describe('Server-issued optimistic-concurrency revision; required when updating an existing row'),
   "crustsPerCycle": zod.number(),
   "cycleSpeed": zod.number(),
   "speedAdjustment": zod.number(),
@@ -2481,12 +2482,13 @@ export const ListDieLineDefaultsResponse = zod.object({
 
 
 /**
- * Upserts a batch of per-die line-setting defaults keyed by die name (case-insensitive). Malformed entries are dropped. Manager role required.
+ * Upserts a batch of per-die line-setting defaults keyed by die name (case-insensitive). Existing rows require a current or newer updatedAt revision; stale or revision-less updates are rejected atomically. Revision-less entries remain compatible for first-time creation. Malformed entries are dropped. Manager role required.
  * @summary Create or update per-die line-setting defaults (manager only)
  */
 export const SaveDieLineDefaultsBody = zod.object({
   "entries": zod.array(zod.object({
   "name": zod.string().describe('Die-type display name (matched case-insensitively)'),
+  "updatedAt": zod.coerce.date().optional().describe('Server-issued optimistic-concurrency revision; required when updating an existing row'),
   "crustsPerCycle": zod.number(),
   "cycleSpeed": zod.number(),
   "speedAdjustment": zod.number(),
@@ -2500,6 +2502,7 @@ export const SaveDieLineDefaultsBody = zod.object({
 export const SaveDieLineDefaultsResponse = zod.object({
   "entries": zod.array(zod.object({
   "name": zod.string().describe('Die-type display name (matched case-insensitively)'),
+  "updatedAt": zod.coerce.date().optional().describe('Server-issued optimistic-concurrency revision; required when updating an existing row'),
   "crustsPerCycle": zod.number(),
   "cycleSpeed": zod.number(),
   "speedAdjustment": zod.number(),
@@ -2522,6 +2525,7 @@ export const DeleteDieLineDefaultsBody = zod.object({
 export const DeleteDieLineDefaultsResponse = zod.object({
   "entries": zod.array(zod.object({
   "name": zod.string().describe('Die-type display name (matched case-insensitively)'),
+  "updatedAt": zod.coerce.date().optional().describe('Server-issued optimistic-concurrency revision; required when updating an existing row'),
   "crustsPerCycle": zod.number(),
   "cycleSpeed": zod.number(),
   "speedAdjustment": zod.number(),

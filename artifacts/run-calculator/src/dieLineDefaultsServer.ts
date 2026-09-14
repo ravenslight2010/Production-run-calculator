@@ -11,6 +11,7 @@ import { dieDefaultsKey, type DieLineDefaults, type DieLineDefaultsOverrides } f
 
 export interface DieLineDefaultsEntry extends DieLineDefaults {
   name: string;
+  updatedAt?: string;
 }
 
 function coerceEntry(raw: unknown): DieLineDefaultsEntry | null {
@@ -24,6 +25,7 @@ function coerceEntry(raw: unknown): DieLineDefaultsEntry | null {
   };
   const entry: DieLineDefaultsEntry = {
     name,
+    updatedAt: typeof r.updatedAt === "string" ? r.updatedAt : undefined,
     crustsPerCycle: num(r.crustsPerCycle),
     cycleSpeed: num(r.cycleSpeed),
     speedAdjustment: num(r.speedAdjustment),

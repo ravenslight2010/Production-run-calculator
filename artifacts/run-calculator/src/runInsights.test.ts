@@ -168,9 +168,14 @@ describe("buildTunnelDieDefaultEntry", () => {
   };
 
   it("copies the existing base and swaps only freezerTime", () => {
-    const entry = buildTunnelDieDefaultEntry('7"', { ...base, preTunnelMin: 3 }, 25);
+    const entry = buildTunnelDieDefaultEntry(
+      '7"',
+      { ...base, preTunnelMin: 3, updatedAt: "2026-09-14T12:00:00.000Z" },
+      25,
+    );
     expect(entry).toEqual({
       name: '7"',
+      updatedAt: "2026-09-14T12:00:00.000Z",
       crustsPerCycle: 2,
       cycleSpeed: 5,
       speedAdjustment: 1,
@@ -178,6 +183,10 @@ describe("buildTunnelDieDefaultEntry", () => {
       freezerTime: 25,
       preTunnelMin: 3,
     });
+  });
+
+  it("keeps revision-less built-in defaults compatible for first-time creation", () => {
+    expect(buildTunnelDieDefaultEntry('7"', base, 25)).not.toHaveProperty("updatedAt");
   });
 
   it("returns null for an unknown/custom die (no base) — never mints a zero override", () => {

@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, dieLineDefaultsTable, type DieLineDefaultsRow } from "@workspace/db";
 import { SaveDieLineDefaultsBody, DeleteDieLineDefaultsBody } from "@workspace/api-zod";
 import { FACTORY_SPEED_ADJUSTMENT_BASELINE } from "@workspace/factory-constants";
@@ -18,6 +18,12 @@ const router: IRouter = Router();
 
 const MAX_BATCH = 200;
 
+class DieLineDefaultsRevisionConflict extends Error {
+  constructor(readonly rejectedIds: string[]) {
+    super("Die line defaults snapshot is stale");
+  }
+}
+
 // Case-folded canonical id so upserts are idempotent across spellings while
 // the display spelling (`name`) is preserved.
 function dieId(name: string): string {
@@ -26,6 +32,7 @@ function dieId(name: string): string {
 
 interface ApiEntry {
   name: string;
+  updatedAt?: string;
   crustsPerCycle: number;
   cycleSpeed: number;
   speedAdjustment: number;
@@ -54,6 +61,12 @@ function normalizeEntry(raw: unknown): ApiEntry | null {
   if (!name || name.length > 200) return null;
   const out: ApiEntry = {
     name,
+    updatedAt:
+      r.updatedAt instanceof Date && Number.isFinite(r.updatedAt.getTime())
+        ? r.updatedAt.toISOString()
+        : typeof r.updatedAt === "string"
+          ? r.updatedAt
+          : undefined,
     crustsPerCycle: 0,
     cycleSpeed: 0,
     speedAdjustment: FACTORY_SPEED_ADJUSTMENT_BASELINE,
@@ -78,6 +91,7 @@ function normalizeEntry(raw: unknown): ApiEntry | null {
 function toApiEntry(row: DieLineDefaultsRow): ApiEntry {
   const entry: ApiEntry = {
     name: row.name,
+    updatedAt: row.updatedAt.toISOString(),
     crustsPerCycle: row.crustsPerCycle,
     cycleSpeed: row.cycleSpeed,
     speedAdjustment: row.speedAdjustment,
@@ -87,6 +101,15 @@ function toApiEntry(row: DieLineDefaultsRow): ApiEntry {
   if (row.preTunnelMin != null) entry.preTunnelMin = row.preTunnelMin;
   if (row.postTunnelMin != null) entry.postTunnelMin = row.postTunnelMin;
   return entry;
+}
+
+function comparable(entry: ApiEntry): string {
+  const { updatedAt: _updatedAt, ...values } = entry;
+  return JSON.stringify(values);
+}
+
+function nextRevision(previous?: Date): Date {
+  return new Date(Math.max(Date.now(), (previous?.getTime() ?? 0) + 1));
 }
 
 async function listAll(): Promise<ApiEntry[]> {
@@ -122,26 +145,65 @@ router.post(
       if (entry) byId.set(dieId(entry.name), entry);
     }
     try {
-      for (const [id, entry] of byId) {
-        const values = {
-          id,
-          scope: currentScope(),
-          name: entry.name,
-          crustsPerCycle: entry.crustsPerCycle,
-          cycleSpeed: entry.cycleSpeed,
-          speedAdjustment: entry.speedAdjustment,
-          freezerTime: entry.freezerTime,
-          casesPerLayer: entry.casesPerLayer,
-          preTunnelMin: entry.preTunnelMin ?? null,
-          postTunnelMin: entry.postTunnelMin ?? null,
-          updatedAt: new Date(),
-        };
-        await db
-          .insert(dieLineDefaultsTable)
-          .values(values)
-          .onConflictDoUpdate({
-            target: [dieLineDefaultsTable.id, dieLineDefaultsTable.scope],
-            set: {
+      const scope = currentScope();
+      await db.transaction(async (tx) => {
+        await tx.execute(
+          sql`SELECT pg_advisory_xact_lock(hashtext(${"die-line-defaults:" + scope}))`,
+        );
+        const existingRows = await tx
+          .select()
+          .from(dieLineDefaultsTable)
+          .where(eq(dieLineDefaultsTable.scope, scope))
+          .for("update");
+        const existingById = new Map(existingRows.map((row) => [row.id, row]));
+        const rejectedIds: string[] = [];
+
+        for (const [id, entry] of byId) {
+          const existing = existingById.get(id);
+          if (!existing) continue;
+          const incomingRevision = entry.updatedAt ? new Date(entry.updatedAt) : null;
+          if (
+            !incomingRevision ||
+            !Number.isFinite(incomingRevision.getTime()) ||
+            incomingRevision.getTime() < existing.updatedAt.getTime()
+          ) {
+            rejectedIds.push(id);
+          }
+        }
+        if (rejectedIds.length > 0) {
+          throw new DieLineDefaultsRevisionConflict(rejectedIds);
+        }
+
+        for (const [id, entry] of byId) {
+          const existing = existingById.get(id);
+          if (
+            existing &&
+            entry.updatedAt &&
+            new Date(entry.updatedAt).getTime() === existing.updatedAt.getTime() &&
+            comparable(entry) === comparable(toApiEntry(existing))
+          ) {
+            continue;
+          }
+          const values = {
+            id,
+            scope,
+            name: entry.name,
+            crustsPerCycle: entry.crustsPerCycle,
+            cycleSpeed: entry.cycleSpeed,
+            speedAdjustment: entry.speedAdjustment,
+            freezerTime: entry.freezerTime,
+            casesPerLayer: entry.casesPerLayer,
+            preTunnelMin: entry.preTunnelMin ?? null,
+            postTunnelMin: entry.postTunnelMin ?? null,
+            updatedAt: nextRevision(existing?.updatedAt),
+          };
+          if (!existing) {
+            await tx.insert(dieLineDefaultsTable).values(values);
+            continue;
+          }
+          await tx
+            .update(dieLineDefaultsTable)
+            .set({
               name: values.name,
               crustsPerCycle: values.crustsPerCycle,
               cycleSpeed: values.cycleSpeed,
@@ -151,11 +213,25 @@ router.post(
               preTunnelMin: values.preTunnelMin,
               postTunnelMin: values.postTunnelMin,
               updatedAt: values.updatedAt,
-            },
-          });
-      }
+            })
+            .where(
+              and(
+                eq(dieLineDefaultsTable.id, id),
+                eq(dieLineDefaultsTable.scope, scope),
+              ),
+            );
+        }
+      });
       res.json({ entries: await listAll() });
     } catch (err) {
+      if (err instanceof DieLineDefaultsRevisionConflict) {
+        res.status(409).json({
+          error: "STALE_DIE_LINE_DEFAULTS_SNAPSHOT",
+          rejectedIds: err.rejectedIds,
+          entries: await listAll(),
+        });
+        return;
+      }
       req.log.error({ err }, "failed to save die line defaults");
       res.status(500).json({ error: "Failed to save die line defaults" });
     }

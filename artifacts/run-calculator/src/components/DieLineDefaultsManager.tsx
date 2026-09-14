@@ -77,7 +77,14 @@ export default function DieLineDefaultsManager({ dieTypes }: { dieTypes: string[
       });
       setMessage(`Saved defaults for ${entry.name}.`);
     },
-    onError: () => setMessage("Couldn't save — try again."),
+    onError: (error) => {
+      qc.invalidateQueries({ queryKey: DIE_LINE_DEFAULTS_QUERY_KEY });
+      setMessage(
+        error instanceof Error && error.message.includes("(409)")
+          ? "These defaults changed on another page. The latest values were reloaded; review your edit and save again."
+          : "Couldn't save — try again.",
+      );
+    },
   });
 
   const resetMutation = useMutation({
@@ -112,6 +119,7 @@ export default function DieLineDefaultsManager({ dieTypes }: { dieTypes: string[
       {dies.map((die) => {
         const key = dieDefaultsKey(die);
         const stored = overrides[key] ?? null;
+        const storedEntry = entries.find((entry) => dieDefaultsKey(entry.name) === key);
         const builtin = dieLineDefaultsFor(die);
         const base = stored ?? builtin;
         const draft = drafts[key] ?? toDraft(base);
@@ -166,7 +174,15 @@ export default function DieLineDefaultsManager({ dieTypes }: { dieTypes: string[
               <button
                 type="button"
                 disabled={busy || !valid || (!dirty && !!stored)}
-                onClick={() => saveMutation.mutate({ name: die, ...(parsed as DieLineDefaults) })}
+                onClick={() =>
+                  saveMutation.mutate({
+                    name: die,
+                    ...(parsed as DieLineDefaults),
+                    ...(storedEntry?.updatedAt
+                      ? { updatedAt: storedEntry.updatedAt }
+                      : {}),
+                  })
+                }
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 disabled:opacity-50"
                 data-testid={`die-defaults-save-${key}`}
               >

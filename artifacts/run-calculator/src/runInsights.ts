@@ -277,6 +277,7 @@ export function computeFollowUpNote(
 export function buildTunnelDieDefaultEntry(
   dieType: string,
   base: {
+    updatedAt?: string;
     crustsPerCycle: number;
     cycleSpeed: number;
     speedAdjustment: number;
@@ -287,6 +288,7 @@ export function buildTunnelDieDefaultEntry(
   recommendedFreezerTime: number,
 ): {
   name: string;
+  updatedAt?: string;
   crustsPerCycle: number;
   cycleSpeed: number;
   speedAdjustment: number;
@@ -305,6 +307,7 @@ export function buildTunnelDieDefaultEntry(
   if (!Number.isFinite(recommendedFreezerTime) || recommendedFreezerTime <= 0) return null;
   return {
     name: dieType,
+    ...(base.updatedAt ? { updatedAt: base.updatedAt } : {}),
     crustsPerCycle: base.crustsPerCycle,
     cycleSpeed: base.cycleSpeed,
     speedAdjustment: base.speedAdjustment,

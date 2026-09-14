@@ -3393,6 +3393,8 @@ export interface DieTypeList {
 export interface DieLineDefaultsEntry {
   /** Die-type display name (matched case-insensitively) */
   name: string;
+  /** Server-issued optimistic-concurrency revision; required when updating an existing row */
+  updatedAt?: string;
   crustsPerCycle: number;
   cycleSpeed: number;
   speedAdjustment: number;
