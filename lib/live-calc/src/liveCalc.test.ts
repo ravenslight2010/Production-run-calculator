@@ -295,3 +295,74 @@ describe("shared live calculation boundary", () => {
     }).effectiveElapsedSec).toBe(5);
   });
 });
+describe("operational projection — batch timing (slice 4)", () => {
+  function projectionFor(values: Record<string, unknown>, runMeta: Record<string, unknown> = {}) {
+    const base = {
+      dayState: {
+        currentIndex: 0,
+        runs: [{ id: "run-timing", startedAt: 1_000, ...runMeta }],
+      },
+      runValues: {
+        "run-timing": {
+          pizzasPerCase: 10, casesPerSkid: 20, casesNeeded: 100,
+          crustsPerCycle: 4, cycleSpeed: 10, speedAdjustment: 1,
+          freezerTime: 10, doughballsPerTray: 6, doughBatchYield: 300,
+          targetDoughballWeight: 5,
+          ...values,
+        },
+      },
+    } as never;
+    const serverCalc = computeServerCalc(base, [], 8_000)!;
+    const schedule = computeAutoTrackSchedule({
+      runId: "run-timing",
+      startedAt: 1_000,
+      metaUpdatedAt: 22,
+      nowMs: 8_000,
+      v: base.runValues["run-timing"] as never,
+      calc: serverCalc.calc,
+    });
+    return buildOperationalProjection({
+      payload: base,
+      serverCalc,
+      schedule,
+      nowMs: 8_000,
+    });
+  }
+
+  it("matches the client batch-timing formulas from effectiveElapsedSec", () => {
+    const p = projectionFor({});
+    const tc = p.calc.timePerBatchSec;
+    const eff = p.effectiveElapsedSec;
+    expect(p.timers.currentBatchNum).toBe(tc > 0 ? Math.floor(eff / tc) : 0);
+    expect(p.timers.secUntilNextBatch).toBe(tc > 0 ? tc - (eff % tc) : 0);
+    expect(p.timers.totalBatchesNeeded).toBe(
+      tc > 0 && p.calc.totalTimeSec > 0 ? Math.ceil(p.calc.totalTimeSec / tc) : 0,
+    );
+  });
+
+  it("is deterministic across two builds", () => {
+    const args = (() => {
+      const base = {
+        dayState: { currentIndex: 0, runs: [{ id: "run-timing", startedAt: 1_000 }] },
+        runValues: { "run-timing": { pizzasPerCase: 10, casesPerSkid: 20, casesNeeded: 100, crustsPerCycle: 4, cycleSpeed: 10, speedAdjustment: 1, freezerTime: 10, doughballsPerTray: 6, doughBatchYield: 300, targetDoughballWeight: 5 } },
+      } as never;
+      const serverCalc = computeServerCalc(base, [], 8_000)!;
+      const schedule = computeAutoTrackSchedule({
+        runId: "run-timing", startedAt: 1_000, metaUpdatedAt: 22, nowMs: 8_000,
+        v: base.runValues["run-timing"] as never, calc: serverCalc.calc,
+      });
+      return { payload: base, serverCalc, schedule, nowMs: 8_000 };
+    })();
+    expect(buildOperationalProjection(args)).toEqual(buildOperationalProjection(args));
+  });
+
+  it("never emits NaN/Infinity when timePerBatchSec is zero", () => {
+    const p = projectionFor({ doughballsPerTray: 0, doughBatchYield: 0, targetDoughballWeight: 0 });
+    expect(p.timers.currentBatchNum).toBe(0);
+    expect(p.timers.secUntilNextBatch).toBe(0);
+    expect(p.timers.totalBatchesNeeded).toBe(0);
+    expect(Number.isFinite(p.timers.currentBatchNum)).toBe(true);
+    expect(Number.isFinite(p.timers.secUntilNextBatch)).toBe(true);
+    expect(Number.isFinite(p.timers.totalBatchesNeeded)).toBe(true);
+  });
+});

@@ -371,13 +371,27 @@ export function LiveRunProvider({
       : 0;
   const casesPctWithFreezer = Math.min(1, casesPct + casesFreezerPct);
 
-  const currentBatchNum = calc.timePerBatchSec > 0 ? Math.floor(elapsedBatchSec / calc.timePerBatchSec) : 0;
+  // Slice 4: batch/finish timing is server-authoritative when a confirmed
+  // projection exists (older servers without the new fields fall back locally).
+  // The server computes the same formulas from its effectiveElapsedSec anchor,
+  // so all devices display the same batch counter / next-batch countdown.
+  const serverBatchTiming = confirmedProjection
+    ? confirmedProjection.timers
+    : null;
+  const currentBatchNum =
+    (serverBatchTiming != null && Number.isFinite(serverBatchTiming.currentBatchNum))
+      ? serverBatchTiming.currentBatchNum
+      : (calc.timePerBatchSec > 0 ? Math.floor(elapsedBatchSec / calc.timePerBatchSec) : 0);
   const secUntilNextBatch =
-    calc.timePerBatchSec > 0 ? calc.timePerBatchSec - (elapsedBatchSec % calc.timePerBatchSec) : 0;
+    (serverBatchTiming != null && Number.isFinite(serverBatchTiming.secUntilNextBatch))
+      ? serverBatchTiming.secUntilNextBatch
+      : (calc.timePerBatchSec > 0 ? calc.timePerBatchSec - (elapsedBatchSec % calc.timePerBatchSec) : 0);
   const totalBatchesNeeded =
-    calc.timePerBatchSec > 0 && calc.totalTimeSec > 0
-      ? Math.ceil(calc.totalTimeSec / calc.timePerBatchSec)
-      : 0;
+    (serverBatchTiming != null && Number.isFinite(serverBatchTiming.totalBatchesNeeded))
+      ? serverBatchTiming.totalBatchesNeeded
+      : (calc.timePerBatchSec > 0 && calc.totalTimeSec > 0
+        ? Math.ceil(calc.totalTimeSec / calc.timePerBatchSec)
+        : 0);
   // Both the Sauce tab and batch-alert suppression measure the active barrel
   // on this net-production clock. The stored anchor is updated when the crew
   // starts a replacement barrel, so paused time never depletes sauce and a new
