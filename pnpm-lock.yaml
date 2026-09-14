@@ -197,6 +197,9 @@ importers:
       '@workspace/db':
         specifier: workspace:*
         version: link:../../lib/db
+      '@workspace/factory-constants':
+        specifier: workspace:*
+        version: link:../../lib/factory-constants
       '@workspace/freezer-pull':
         specifier: workspace:*
         version: link:../../lib/freezer-pull
@@ -513,6 +516,9 @@ importers:
       '@workspace/downtime-trends':
         specifier: workspace:*
         version: link:../../lib/downtime-trends
+      '@workspace/factory-constants':
+        specifier: workspace:*
+        version: link:../../lib/factory-constants
       '@workspace/fill-missing':
         specifier: workspace:*
         version: link:../../lib/fill-missing
@@ -949,6 +955,9 @@ importers:
 
   lib/db:
     dependencies:
+      '@workspace/factory-constants':
+        specifier: workspace:*
+        version: link:../factory-constants
       drizzle-orm:
         specifier: 'catalog:'
         version: 0.45.2(@types/pg@8.23.1)(pg@8.23.0)
@@ -978,7 +987,13 @@ importers:
         specifier: ^4.1.9
         version: 4.1.9(@types/node@25.6.2)(jiti@2.7.0)(jsdom@29.1.1)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.23.13)(yaml@2.9.0)
 
-  lib/fill-missing: {}
+  lib/factory-constants: {}
+
+  lib/fill-missing:
+    dependencies:
+      '@workspace/factory-constants':
+        specifier: workspace:*
+        version: link:../factory-constants
 
   lib/formula-guard:
     devDependencies:
@@ -1031,6 +1046,9 @@ importers:
 
   lib/live-calc:
     dependencies:
+      '@workspace/factory-constants':
+        specifier: workspace:*
+        version: link:../factory-constants
       '@workspace/inventory-math':
         specifier: workspace:*
         version: link:../inventory-math

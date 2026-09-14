@@ -34,6 +34,7 @@ import fs from "fs";
 import path from "path";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
+import { FACTORY_SPEED_ADJUSTMENT_BASELINE } from "@workspace/factory-constants";
 
 import { DEFAULT_VALUES, MACHINE_TIME_DEFAULTS, PRE_POST_TUNNEL_DEFAULT_MIN } from "./types";
 
@@ -48,6 +49,18 @@ const PROTECT_FILE = path.join(
   "lib",
   "protectRunValues.ts",
 );
+const WORKSPACE_ROOT = path.join(__dirname, "..", "..", "..");
+const BASELINE_CONSUMER_FILES = [
+  "artifacts/run-calculator/src/types.ts",
+  "artifacts/run-calculator/src/dieDefaults.ts",
+  "artifacts/run-calculator/src/lineSpeed.ts",
+  "artifacts/api-server/src/lib/protectRunValues.ts",
+  "artifacts/api-server/src/lib/repairs/speedAdjustmentBaselineRepair.ts",
+  "artifacts/api-server/src/routes/dieLineDefaults.ts",
+  "lib/live-calc/src/index.ts",
+  "lib/fill-missing/src/index.ts",
+  "lib/db/src/schema/dieLineDefaults.ts",
+] as const;
 
 // ── AST value evaluator ──────────────────────────────────────────────────────
 // Evaluate a TypeScript AST expression node to a plain JS value. Handles the
@@ -82,6 +95,13 @@ function evalLiteral(node: ts.Expression): unknown {
   if (ts.isArrayLiteralExpression(node)) {
     if (node.elements.length === 0) return [];
     return UNRESOLVED;
+  }
+
+  if (
+    ts.isIdentifier(node) &&
+    node.text === "FACTORY_SPEED_ADJUSTMENT_BASELINE"
+  ) {
+    return FACTORY_SPEED_ADJUSTMENT_BASELINE;
   }
 
   // Anything else (property access, identifier, …) cannot be safely evaluated
@@ -158,6 +178,10 @@ const currentBlankEntries = extractObjectEntries(
 );
 const currentBlankKeys = currentBlankEntries.map((e) => e.key).sort();
 const currentBlankMap = new Map(currentBlankEntries.map((e) => [e.key, e]));
+const legacyBlankMap = new Map(
+  extractObjectEntries(protectSrc, "LEGACY_BLANK_RUN_VALUE", "protectRunValues.ts")
+    .map((e) => [e.key, e]),
+);
 
 const defaultValuesKeys = Object.keys(DEFAULT_VALUES).sort();
 const defaultSet = new Set(defaultValuesKeys);
@@ -165,6 +189,23 @@ const blankSet = new Set(currentBlankKeys);
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 describe("source guard: CURRENT_BLANK_RUN_VALUE must mirror DEFAULT_VALUES keys and values", () => {
+  it("keeps every required runtime default on the shared factory baseline", () => {
+    for (const relativePath of BASELINE_CONSUMER_FILES) {
+      const source = fs.readFileSync(path.join(WORKSPACE_ROOT, relativePath), "utf8");
+      expect(
+        source,
+        `${relativePath} must consume FACTORY_SPEED_ADJUSTMENT_BASELINE so a baseline change cannot drift between services`,
+      ).toContain("FACTORY_SPEED_ADJUSTMENT_BASELINE");
+    }
+  });
+
+  it("locks the current baseline and compatibility-only legacy sentinel contract", () => {
+    expect(DEFAULT_VALUES.speedAdjustment).toBe(FACTORY_SPEED_ADJUSTMENT_BASELINE);
+    expect(currentBlankMap.get("speedAdjustment")?.value).toBe(FACTORY_SPEED_ADJUSTMENT_BASELINE);
+    expect(legacyBlankMap.get("speedAdjustment")?.value).toBe(1);
+    expect(legacyBlankMap.get("speedAdjustment")?.value).not.toBe(FACTORY_SPEED_ADJUSTMENT_BASELINE);
+  });
+
   it("CURRENT_BLANK_RUN_VALUE has every key that DEFAULT_VALUES has (and no extras)", () => {
     const missingFromBlank = defaultValuesKeys.filter((k) => !blankSet.has(k));
     expect(

@@ -1,9 +1,10 @@
 import { and, eq } from "drizzle-orm";
 import { brandProfilesTable, dieLineDefaultsTable } from "@workspace/db";
+import { FACTORY_SPEED_ADJUSTMENT_BASELINE } from "@workspace/factory-constants";
 import type { RepairDefinition, RepairTransaction } from "../repairRegistry";
 
 export const SPEED_ADJUSTMENT_BASELINE_REPAIR_ID = "speed-adjustment-baseline-v1";
-export const SPEED_ADJUSTMENT_BASELINE = 0.92;
+export const SPEED_ADJUSTMENT_BASELINE = FACTORY_SPEED_ADJUSTMENT_BASELINE;
 
 export const speedAdjustmentBaselineRepair: RepairDefinition<RepairTransaction> = Object.freeze({
   id: SPEED_ADJUSTMENT_BASELINE_REPAIR_ID,

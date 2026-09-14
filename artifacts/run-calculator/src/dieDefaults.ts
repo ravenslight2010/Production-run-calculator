@@ -9,6 +9,7 @@
 // override fall back to the built-in hard-coded map below.
 
 import { PRE_POST_TUNNEL_DEFAULT_MIN } from "./types";
+import { FACTORY_SPEED_ADJUSTMENT_BASELINE } from "@workspace/factory-constants";
 
 export interface DieLineDefaults {
   crustsPerCycle: number;
@@ -27,7 +28,7 @@ export interface DieLineDefaults {
 const SEVEN: DieLineDefaults = {
   crustsPerCycle: 6,
   cycleSpeed: 8,
-  speedAdjustment: 0.92,
+  speedAdjustment: FACTORY_SPEED_ADJUSTMENT_BASELINE,
   freezerTime: 22,
   casesPerLayer: 6,
   // 7" line has a longer overall cycle; oven and wrapper stages are proportionally longer.
@@ -37,7 +38,7 @@ const SEVEN: DieLineDefaults = {
 const TWELVE: DieLineDefaults = {
   crustsPerCycle: 5,
   cycleSpeed: 8,
-  speedAdjustment: 0.92,
+  speedAdjustment: FACTORY_SPEED_ADJUSTMENT_BASELINE,
   freezerTime: 15,
   casesPerLayer: 6,
   // 12" line runs faster overall; pre/post stages are shorter.
@@ -47,7 +48,7 @@ const TWELVE: DieLineDefaults = {
 const ELEVEN_OR_ARGUS: DieLineDefaults = {
   crustsPerCycle: 5,
   cycleSpeed: 8,
-  speedAdjustment: 0.92,
+  speedAdjustment: FACTORY_SPEED_ADJUSTMENT_BASELINE,
   freezerTime: 16,
   casesPerLayer: 6,
   // 11"/Argus line dwell times match the factory-wide 2.5 min default, so
@@ -56,13 +57,13 @@ const ELEVEN_OR_ARGUS: DieLineDefaults = {
 
 // Untouched form defaults — the values a fresh run starts with (DEFAULT_VALUES
 // in types.ts). A field still holding one of these is considered "blank" and
-// safe to fill. speedAdjustment's untouched value is 0.92 (not 0).
+// safe to fill. speedAdjustment uses the shared factory baseline (not 0).
 // preTunnelMin/postTunnelMin: both 0 AND PRE_POST_TUNNEL_DEFAULT_MIN (2.5)
 // are considered untouched for those fields — see isTunnelUntouched below.
 const UNTOUCHED: Required<DieLineDefaults> = {
   crustsPerCycle: 0,
   cycleSpeed: 0,
-  speedAdjustment: 0.92,
+  speedAdjustment: FACTORY_SPEED_ADJUSTMENT_BASELINE,
   freezerTime: 0,
   casesPerLayer: 0,
   preTunnelMin: 0,
@@ -149,14 +150,14 @@ export interface CrustLineDefaults {
 
 export const CRUST_LINE_DEFAULTS: CrustLineDefaults = {
   approxLineSpeed: 40,
-  speedAdjustment: 0.92,
+  speedAdjustment: FACTORY_SPEED_ADJUSTMENT_BASELINE,
   freezerTime: 9.2,
   casesPerLayer: 2,
 };
 
 const CRUST_UNTOUCHED: CrustLineDefaults = {
   approxLineSpeed: 0,
-  speedAdjustment: 0.92,
+  speedAdjustment: FACTORY_SPEED_ADJUSTMENT_BASELINE,
   freezerTime: 0,
   casesPerLayer: 0,
 };

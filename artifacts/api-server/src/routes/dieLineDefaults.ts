@@ -2,6 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { and, eq, inArray } from "drizzle-orm";
 import { db, dieLineDefaultsTable, type DieLineDefaultsRow } from "@workspace/db";
 import { SaveDieLineDefaultsBody, DeleteDieLineDefaultsBody } from "@workspace/api-zod";
+import { FACTORY_SPEED_ADJUSTMENT_BASELINE } from "@workspace/factory-constants";
 import { requireCapability } from "../middlewares/requireCapability";
 import { currentScope } from "../lib/requestScope";
 
@@ -55,7 +56,7 @@ function normalizeEntry(raw: unknown): ApiEntry | null {
     name,
     crustsPerCycle: 0,
     cycleSpeed: 0,
-    speedAdjustment: 0.92,
+    speedAdjustment: FACTORY_SPEED_ADJUSTMENT_BASELINE,
     freezerTime: 0,
     casesPerLayer: 0,
   };

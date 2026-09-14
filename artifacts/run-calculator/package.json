@@ -129,6 +129,7 @@
     "@workspace/day-summary": "workspace:*",
     "@workspace/live-calc": "workspace:*",
     "@workspace/downtime-trends": "workspace:*",
+    "@workspace/factory-constants": "workspace:*",
     "@workspace/fill-missing": "workspace:*",
     "@workspace/formula-guard": "workspace:*",
     "@workspace/freezer-pull": "workspace:*",

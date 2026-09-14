@@ -1,3 +1,5 @@
+import { FACTORY_SPEED_ADJUSTMENT_BASELINE } from "@workspace/factory-constants";
+
 export type LineSpeedMode = "dough" | "crusts";
 
 export type EffectiveLineSpeedInput = {
@@ -28,11 +30,10 @@ export function computeEffectiveLineSpeed(input: EffectiveLineSpeedInput): numbe
 
   const crustsPerCycle = finiteOrZero(input.crustsPerCycle);
   const cycleSpeed = finiteOrZero(input.cycleSpeed);
-  // The schema default is 0.92. A missing legacy value should retain that safe
-  // default, while an explicit zero remains disabled instead of inventing a
-  // line speed.
+  // A missing legacy value should retain the shared factory baseline, while an
+  // explicit zero remains disabled instead of inventing a line speed.
   const speedAdjustment = input.speedAdjustment == null || !Number.isFinite(input.speedAdjustment)
-    ? 0.92
+    ? FACTORY_SPEED_ADJUSTMENT_BASELINE
     : Number(input.speedAdjustment);
   const adjustedPpm = crustsPerCycle * cycleSpeed * speedAdjustment;
   return adjustedPpm > 0 ? Math.round(adjustedPpm * 100) / 100 : 0;

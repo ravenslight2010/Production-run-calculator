@@ -1,3 +1,5 @@
+import { FACTORY_SPEED_ADJUSTMENT_BASELINE } from "@workspace/factory-constants";
+
 // Per-run + run-list protective merge AND payload sanitization for the shared
 // day-state sync row.
 //
@@ -116,9 +118,10 @@ function deepEqualValue(a: unknown, b: unknown): boolean {
 //     batch-lbs fields defaulted to 25. Stored rows / stale clients can still
 //     carry this shape.
 //   - CURRENT_BLANK_RUN_VALUE: today's DEFAULT_VALUES — all quantity fields 0
-//     (only speedAdjustment is 1.0), including the pep "B"-slot and timer
-//     fields added since. The legacy 1.0 value remains recognized so stale
-//     clients cannot bypass blank-over-populated protection during rollout.
+//     (only speedAdjustment uses the shared factory baseline), including the pep
+//     "B"-slot and timer fields added since.
+// The legacy template's 1.0 is compatibility-only. It must not use the runtime
+// baseline: stale clients can still send that exact historical blank shape.
 // Additionally, a current-shape value whose ONLY difference is all four pep
 // batch fields at 25 (the exact legacy default signature) is blank — mirroring
 // the web's isAllDefaultRunValue. A lone 25 (some but not all four) is treated
@@ -188,12 +191,12 @@ const LEGACY_BLANK_RUN_VALUE: Record<string, unknown> = {
   slipSheets: "no",
 };
 
-// Today's DEFAULT_VALUES shape (all-zero quantities; speedAdjustment 0.92).
+// Today's DEFAULT_VALUES shape (all-zero quantities plus the shared baseline).
 const CURRENT_BLANK_RUN_VALUE: Record<string, unknown> = {
   casesNeeded: 0,
   crustsPerCycle: 0,
   cycleSpeed: 0,
-  speedAdjustment: 0.92,
+  speedAdjustment: FACTORY_SPEED_ADJUSTMENT_BASELINE,
   approxLineSpeed: 0,
   freezerTime: 0,
   pizzasPerCase: 0,
