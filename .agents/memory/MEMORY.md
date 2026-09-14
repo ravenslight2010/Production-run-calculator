@@ -154,3 +154,4 @@
 - [Acknowledged master-data propagation](acknowledged-master-data-propagation.md) — local recipe saves must explicitly drive pending-run refresh; cache effects alone can misclassify a save as bootstrap.
 - [ZIP asset inventory safety](zip-asset-inventory.md) — inspect central-directory metadata only; fail closed on unsafe members and label output as review evidence, not installation approval.
 - [AI evaluation framework boundary](ai-evaluation-framework-boundary.md) — adapt provider-neutral invariants into project-owned offline TypeScript/Vitest; do not import external harness runtimes.
+- [AI benchmark network boundary](ai-benchmark-network-boundary.md) — routine evaluations stay offline; live provider checks require explicit opt-in and are never CI evidence.

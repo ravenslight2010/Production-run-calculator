@@ -3,7 +3,9 @@
 
 This is deliberately separate from run_eval.py: Gemini classification is not
 Claude tool-selection evidence. Provider failures remain failures and are
-never converted into do-not-trigger decisions.
+never converted into do-not-trigger decisions. Live provider access is
+explicitly opt-in; ordinary test and evaluation commands must inject a fake
+adapter instead.
 """
 
 from __future__ import annotations
@@ -378,7 +380,12 @@ def _number(value: Any) -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description=(
+            "Run the provider-backed Gemini skill-trigger check. This command is "
+            "not CI evidence and requires an explicit live-provider opt-in."
+        )
+    )
     parser.add_argument("command", nargs="?", choices=("benchmark", "review"), default="benchmark")
     parser.add_argument(
         "review_action_positional",
@@ -394,9 +401,12 @@ def main() -> None:
     parser.add_argument("--confidence-threshold", type=float, default=DEFAULT_CONFIDENCE)
     parser.add_argument("--retries", type=int, default=2)
     parser.add_argument(
-        "--fail-on-provider-error",
+        "--live-provider",
         action="store_true",
-        help="exit non-zero after writing artifacts when Gemini has provider or structured-output failures",
+        help=(
+            "allow real Gemini network access; never use this flag in routine CI "
+            "or deterministic evaluation"
+        ),
     )
     parser.add_argument(
         "--decisions",
@@ -422,12 +432,19 @@ def main() -> None:
         args.review_action = review_action
         _review_command(args)
         return
+    if not args.live_provider:
+        parser.error(
+            "benchmark is offline by default; pass --live-provider only for an "
+            "intentional provider-backed check (not CI evidence)"
+        )
     corpus = json.loads(args.corpus.read_text())
     adapter = GeminiAdapter(model=args.model)
     records = evaluate(corpus, adapter, args.confidence_threshold, args.retries)
     result = {
         "provider": "gemini",
         "model": args.model,
+        "execution_mode": "live_provider_opt_in",
+        "ci_evidence": False,
         "run_at": datetime.now(timezone.utc).isoformat(),
         "claude_evidence": "unavailable and intentionally unchanged",
         "metrics": metrics(records),
@@ -437,15 +454,14 @@ def main() -> None:
     args.queue.write_text(json.dumps({"provider": "gemini", "manual_decisions_excluded_from_metrics": True, "cases": review_queue(records)}, indent=2) + "\n")
     write_report(args.report, result)
     print(json.dumps({"provider": "gemini", "evaluated": result["metrics"]["evaluated"], "excluded": result["metrics"]["excluded"]}, indent=2))
-    if args.fail_on_provider_error:
-        failures = provider_failure_cases(records)
-        if failures:
-            print(
-                "Gemini provider health check failed for: "
-                + ", ".join(f"{record['id']} ({record['status']})" for record in failures),
-                file=sys.stderr,
-            )
-            raise SystemExit(1)
+    failures = provider_failure_cases(records)
+    if failures:
+        print(
+            "Gemini provider health check failed for: "
+            + ", ".join(f"{record['id']} ({record['status']})" for record in failures),
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

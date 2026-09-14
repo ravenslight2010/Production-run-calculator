@@ -70,7 +70,7 @@ jobs:
         id: gemini-benchmark
         run: |
           python3 scripts/gemini_skill_trigger_benchmark.py \
-            --fail-on-provider-error \
+            --live-provider \
             --results gemini-live-results.json \
             --report gemini-live-report.md \
             --queue gemini-live-review-queue.json

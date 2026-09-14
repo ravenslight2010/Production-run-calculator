@@ -51,7 +51,7 @@ drop-in framework:
 | Mocked provider contracts | `artifacts/api-server/src/routes/aiParseSpecSheet.route.test.ts`, `runSuggestions.integration.test.ts`, `costLimit.integration.test.ts`, `artifacts/api-server/src/lib/aiJsonRetry.test.ts` | Detects malformed output, provider failures, unexpected calls, cost limits, and deterministic fallbacks offline |
 | Cache and deduplication contracts | `artifacts/api-server/src/lib/aiResultCache.test.ts` | Covers stable fingerprints, expiry, invalid rows, lock failure, cache outage, and retryable provider failures |
 | Source-bound value benchmark | `scripts/src/second-pass-reviewer-benchmark.mts`, `docs/second-pass-reviewer-benchmark-2026-09-05.md` | Uses predeclared thresholds, source hashes, deterministic/model contribution accounting, and fail-closed cost evidence |
-| Trigger benchmark with explicit failure states | `scripts/gemini_skill_trigger_benchmark.py`, `scripts/test_gemini_skill_trigger_benchmark.py`, `gemini-skill-trigger-benchmark.md` | Separates provider unavailable, provider failure, invalid output, review-needed, and observed model results |
+| Trigger benchmark with explicit failure states | `scripts/gemini_skill_trigger_benchmark.py`, `scripts/test_gemini_skill_trigger_benchmark.py`, `gemini-skill-trigger-benchmark.md` | Offline by default; live access requires `--live-provider`, is labeled as non-CI evidence, fails closed on provider/invalid-output states, and keeps those states separate from deterministic injected-adapter results |
 | Privacy and retention policy | `docs/ai-data-retention-policy-2026-09-05.md`, `docs/ai-feature-value-audit-2026-09-05.md` | Requires scoped cleanup, bounded candidate sets, minimized reports, and corpus/review evidence rather than click telemetry |
 
 The normal compatibility target is Node 24, TypeScript 5.9, pnpm workspaces,
@@ -146,9 +146,11 @@ could be useful if separately approved:
    evaluations, recording corpus hash, thresholds, dependency versions,
    provider/model identity, token/cost/latency, retries, seed, privacy mode, and
    explicit unavailable/failed states.
-2. An enforced offline/no-network test mode with dependency injection, so
-   ordinary CI cannot accidentally turn provider infrastructure into benchmark
-   evidence.
+2. The trigger benchmark enforces offline/no-network operation by default and
+   uses dependency injection for deterministic tests, so ordinary CI cannot
+   accidentally turn provider infrastructure into benchmark evidence. Its live
+   provider check requires `--live-provider`, is explicitly non-CI evidence,
+   and exits non-zero for unavailable, failed, or invalid provider output.
 3. A small sanitized privacy fixture set for redaction, prompt minimization,
    provider-payload stripping, and output leakage assertions. It must contain
    synthetic data only and retain no raw workbook/photo/provider payload.

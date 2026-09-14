@@ -175,6 +175,22 @@ class GeminiBenchmarkTests(unittest.TestCase):
         self.assertEqual(result[0]["status"], "invalid_output")
         self.assertEqual(review_queue(result)[0]["reason"], "invalid_output")
 
+    def test_provider_failure_remains_distinct_from_invalid_output(self):
+        adapter = Fixture([RuntimeError("provider connection failed")] * 2)
+        result = evaluate(corpus(), adapter, retries=0)
+        self.assertEqual([row["status"] for row in result], ["provider_failure", "provider_failure"])
+        self.assertTrue(all(row["error"] == "provider_failure" for row in result))
+
+    def test_deterministic_success_uses_only_the_injected_adapter(self):
+        adapter = Fixture([
+            {"decision": "trigger", "confidence": 1, "rationale": "fixture"},
+            {"decision": "do_not_trigger", "confidence": 1, "rationale": "fixture"},
+        ])
+        with patch.object(GeminiAdapter, "classify", side_effect=AssertionError("live adapter used")):
+            result = evaluate(corpus(), adapter, retries=0)
+        self.assertEqual([row["status"] for row in result], ["included", "included"])
+        self.assertEqual(adapter.calls, 2)
+
     def test_transient_failure_retries(self):
         adapter = Fixture([RuntimeError("transient timeout"), {"decision": "trigger", "confidence": 1, "rationale": "clear"}, {"decision": "do_not_trigger", "confidence": 1, "rationale": "clear"}])
         result = evaluate(corpus(), adapter, retries=1, sleep=lambda _: None)
@@ -296,6 +312,7 @@ class GeminiBenchmarkTests(unittest.TestCase):
             corpus_path.write_text(json.dumps({"skills": []}))
             benchmark = run_cli(
                 "benchmark",
+                "--live-provider",
                 "--corpus", str(corpus_path),
                 "--results", str(root / "results.json"),
                 "--report", str(root / "report.md"),
@@ -306,7 +323,7 @@ class GeminiBenchmarkTests(unittest.TestCase):
             self.assertIn('"evaluated": 0', benchmark.stdout)
             self.assertEqual(decisions.read_bytes(), decisions_before_benchmark)
 
-    def test_strict_provider_mode_writes_artifacts_then_fails(self):
+    def test_benchmark_refuses_live_access_without_explicit_opt_in(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
             corpus_path = root / "corpus.json"
@@ -319,9 +336,36 @@ class GeminiBenchmarkTests(unittest.TestCase):
                     "benchmark",
                     "--corpus", str(corpus_path),
                     "--results", str(root / "results.json"),
+                ],
+                cwd=root,
+                env={
+                    **os.environ,
+                    "AI_INTEGRATIONS_GEMINI_API_KEY": "must-not-be-used",
+                    "AI_INTEGRATIONS_GEMINI_BASE_URL": "https://must-not-be-used.invalid",
+                },
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("benchmark is offline by default", result.stderr)
+            self.assertFalse((root / "results.json").exists())
+
+    def test_live_provider_mode_writes_artifacts_then_fails_closed(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            corpus_path = root / "corpus.json"
+            corpus_path.write_text(json.dumps(corpus()))
+            script = Path(__file__).with_name("gemini_skill_trigger_benchmark.py").resolve()
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "benchmark",
+                    "--live-provider",
+                    "--corpus", str(corpus_path),
+                    "--results", str(root / "results.json"),
                     "--report", str(root / "report.md"),
                     "--queue", str(root / "queue.json"),
-                    "--fail-on-provider-error",
                 ],
                 cwd=root,
                 env={
@@ -337,6 +381,9 @@ class GeminiBenchmarkTests(unittest.TestCase):
             self.assertTrue((root / "results.json").exists())
             self.assertTrue((root / "report.md").exists())
             self.assertTrue((root / "queue.json").exists())
+            payload = json.loads((root / "results.json").read_text())
+            self.assertEqual(payload["execution_mode"], "live_provider_opt_in")
+            self.assertFalse(payload["ci_evidence"])
 
 
 if __name__ == "__main__":
