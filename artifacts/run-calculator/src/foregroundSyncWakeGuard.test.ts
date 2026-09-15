@@ -9,38 +9,70 @@
  */
 import fs from "fs";
 import path from "path";
+import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { createForegroundSyncWakeGuard } from "./foregroundSyncWakeGuard";
 import {
   coordinateForegroundAdoption,
+  createForegroundSyncTodayRequest,
   releaseForegroundRecovery,
+  useHomeSyncCoordination,
 } from "./hooks/useHomeSyncCoordination";
+import { VisibleTabScheduler } from "./visibleTabScheduler";
 
 const HOME_FILE = path.join(__dirname, "pages", "home.tsx");
 const SYNC_MANAGER_FILE = path.join(__dirname, "hooks", "useHomeSyncCoordination.ts");
 const HOOK_FILE = path.join(__dirname, "hooks", "useAutoTrack.ts");
-const SCHEDULER_FILE = path.join(__dirname, "visibleTabScheduler.ts");
 const RECOVERY_STATUS_FILE = path.join(__dirname, "components", "ForegroundRecoveryStatus.tsx");
 const RECOVERY_RESPONSE_FILE = path.join(__dirname, "foregroundRecoveryResponse.ts");
 const homeSource = fs.readFileSync(HOME_FILE, "utf8");
 const syncManagerSource = fs.readFileSync(SYNC_MANAGER_FILE, "utf8");
 const hookSource = fs.readFileSync(HOOK_FILE, "utf8");
-const schedulerSource = fs.readFileSync(SCHEDULER_FILE, "utf8");
 const recoveryStatusSource = fs.readFileSync(RECOVERY_STATUS_FILE, "utf8");
 const recoveryResponseSource = fs.readFileSync(RECOVERY_RESPONSE_FILE, "utf8");
 
 describe("foreground wake sync barrier", () => {
-  it("pulls the date-scoped row through the established inbound merge", () => {
-    expect(syncManagerSource).toContain("createForegroundSyncWakeGuard");
-    expect(homeSource).toContain("setAutoTrackBlocked(true)");
-    expect(homeSource).toContain("`/api/sync/today?today=${todayStr()}`");
-    expect(homeSource).toContain('cache: "no-store"');
-    expect(homeSource).toContain("applySyncCallbackRef.current(payload)");
-    expect(syncManagerSource).toContain('id: "foreground-reconcile"');
-    expect(schedulerSource).toContain('document.addEventListener("visibilitychange", this.onVisibility)');
-    expect(schedulerSource).toContain('window.addEventListener("focus", this.onFocus)');
-    expect(syncManagerSource).toContain('window.addEventListener("online", onOnline)');
-    expect(homeSource).toContain("registerForegroundRecovery(visibleTabScheduler");
+  it("dispatches focus, visibility, and online to the registered date-scoped recovery", async () => {
+    const { result, unmount } = renderHook(() => useHomeSyncCoordination());
+    const signals: Array<{
+      name: string;
+      dispatch: () => void;
+    }> = [
+      { name: "focus", dispatch: () => window.dispatchEvent(new Event("focus")) },
+      { name: "visibility", dispatch: () => document.dispatchEvent(new Event("visibilitychange")) },
+      { name: "online", dispatch: () => window.dispatchEvent(new Event("online")) },
+    ];
+
+    try {
+      for (const { name, dispatch } of signals) {
+        const fetchRecovery = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+        const recover = vi.fn(async () => {
+          const request = createForegroundSyncTodayRequest("snapshot-a", "2026-09-15");
+          await fetchRecovery(request.url, request.init);
+          return true;
+        });
+        const scheduler = new VisibleTabScheduler();
+        const registration = result.current.registerForegroundRecovery(scheduler, recover);
+        scheduler.start();
+
+        await act(async () => {
+          dispatch();
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+
+        expect(recover, `${name} should trigger recovery`).toHaveBeenCalledTimes(1);
+        expect(fetchRecovery).toHaveBeenCalledWith(
+          "/api/sync/today?today=2026-09-15&snapshot=snapshot-a",
+          { cache: "no-store" },
+        );
+
+        registration.dispose();
+        scheduler.stop();
+      }
+    } finally {
+      unmount();
+    }
   });
 
   it("coalesces overlapping wake signals into one pull, then allows a later wake", async () => {

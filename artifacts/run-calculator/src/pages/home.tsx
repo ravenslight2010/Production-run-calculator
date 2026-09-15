@@ -9,6 +9,7 @@ import {
 import { useRunLifecycleManager } from "../hooks/useRunLifecycleManager";
 import {
   coordinateForegroundAdoption,
+  createForegroundSyncTodayRequest,
   initialResetRequiresReload,
   releaseForegroundRecovery,
   useHomeSyncCoordination,
@@ -9495,10 +9496,10 @@ export default function Home() {
           }
 
           const snapshot = syncSnapshotIdRef.current;
-          const syncTodayUrl = `/api/sync/today?today=${todayStr()}`;
+          const syncTodayRequest = createForegroundSyncTodayRequest(snapshot);
           const res = await fetchWithTimeout(
-            snapshot ? `${syncTodayUrl}&snapshot=${snapshot}` : syncTodayUrl,
-            { cache: "no-store" },
+            syncTodayRequest.url,
+            syncTodayRequest.init,
             10_000,
           );
           const recovery = await consumeForegroundRecoveryResponse({

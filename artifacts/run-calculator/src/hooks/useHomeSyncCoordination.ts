@@ -49,6 +49,17 @@ type ForegroundScheduler = {
   }) => () => void;
 };
 
+export function createForegroundSyncTodayRequest(
+  snapshot: string | undefined,
+  clientDate: string = todayStr(),
+): { url: string; init: RequestInit } {
+  const syncTodayUrl = `/api/sync/today?today=${clientDate}`;
+  return {
+    url: snapshot ? `${syncTodayUrl}&snapshot=${snapshot}` : syncTodayUrl,
+    init: { cache: "no-store" },
+  };
+}
+
 type ForegroundAdoptionOptions<TPayload, TLifecycle, TProfile, TFactory> = {
   payload: TPayload;
   prepareLifecycle: () => { value: TLifecycle; adopted: boolean };
