@@ -3,12 +3,14 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "declaration-contract-test-"));
 const baseline = path.join(root, "baseline");
 const candidate = path.join(root, "candidate");
 const report = path.join(root, "report");
 const script = new URL("./compare-declaration-contracts.mts", import.meta.url);
+const compiler = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../node_modules/typescript/bin/tsc");
 
 function write(tree: string, file: string, content: string): void {
   const target = path.join(tree, file);
@@ -22,24 +24,30 @@ function run(extra: string[] = []) {
   });
 }
 
+const compatibilityCompilers = [
+  "--compatibility-compiler", "typescript-6", compiler,
+  "--compatibility-compiler", "typescript-7", compiler,
+];
+
 try {
   write(baseline, "lib/api-client-react/dist/api.d.ts", 'export type State = "ready";\n');
   write(candidate, "lib/api-client-react/dist/api.d.ts", "export type State = 'ready';\n");
   write(baseline, "lib/api-zod/dist/api.d.ts", "export type Count = number;\n");
-  write(candidate, "lib/api-zod/dist/api.d.ts", "export type Count = string;\n");
+  write(candidate, "lib/api-zod/dist/api.d.ts", "export type Count = number | string;\n");
   write(baseline, "lib/db/dist/schema.d.ts", "export type Id = number;\n");
   write(candidate, "lib/db/dist/schema.d.ts", "export type Id = number;\n");
   write(baseline, "lib/db/dist/module.d.mts", "export type ModuleId = number;\n");
-  write(candidate, "lib/db/dist/module.d.mts", "export type ModuleId = string;\n");
+  write(candidate, "lib/db/dist/module.d.mts", "export type ModuleId = number;\nexport declare const label: string;\n");
   write(baseline, "lib/db/dist/legacy.d.cts", "export type LegacyId = number;\n");
+  write(candidate, "lib/db/dist/legacy.d.cts", "export type LegacyId = number;\n");
 
   const blocked = run();
   assert.notEqual(blocked.status, 0);
-  assert.match(blocked.stderr, /3 unexplained semantic declaration change/);
+  assert.match(blocked.stderr, /2 unexplained semantic declaration change/);
   const blockedReport = JSON.parse(fs.readFileSync(path.join(report, "declaration-contracts.json"), "utf8"));
   assert.equal(blockedReport.categories[0].formattingOnly, 1);
   assert.equal(blockedReport.categories[1].unexplainedSemantic, 1);
-  assert.equal(blockedReport.categories[2].unexplainedSemantic, 2);
+  assert.equal(blockedReport.categories[2].unexplainedSemantic, 1);
 
   const baselineText = fs.readFileSync(path.join(baseline, "lib/api-zod/dist/api.d.ts"), "utf8");
   const candidateText = fs.readFileSync(path.join(candidate, "lib/api-zod/dist/api.d.ts"), "utf8");
@@ -58,18 +66,28 @@ try {
       }, {
         path: "lib/db/dist/module.d.mts",
         baselineSha256: digest("export type ModuleId = number;\n"),
-        candidateSha256: digest("export type ModuleId = string;\n"),
+        candidateSha256: digest("export type ModuleId = number;\nexport declare const label: string;\n"),
         reason: "Reviewed module fixture change.",
-      }, {
-        path: "lib/db/dist/legacy.d.cts",
-        baselineSha256: digest("export type LegacyId = number;\n"),
-        candidateSha256: null,
-        reason: "Reviewed fixture removal.",
       }],
     }),
   );
-  const approved = run(["--approvals", approvals]);
+  const incompatible = run(["--approvals", approvals, ...compatibilityCompilers]);
+  assert.notEqual(incompatible.status, 0);
+  assert.match(incompatible.stderr, /export surface differs|rejected approved declaration compatibility/);
+
+  write(candidate, "lib/api-zod/dist/api.d.ts", "export type Count = (number);\n");
+  write(candidate, "lib/db/dist/module.d.mts", "export type ModuleId = (number);\n");
+  const compatibleApprovals = JSON.parse(fs.readFileSync(approvals, "utf8"));
+  compatibleApprovals.approvals[0].candidateSha256 = digest("export type Count = (number);\n");
+  compatibleApprovals.approvals[1].candidateSha256 = digest("export type ModuleId = (number);\n");
+  fs.writeFileSync(approvals, JSON.stringify(compatibleApprovals));
+  const missingCompilers = run(["--approvals", approvals]);
+  assert.notEqual(missingCompilers.status, 0);
+  assert.match(missingCompilers.stderr, /exactly two distinctly named compatibility compilers/);
+  const approved = run(["--approvals", approvals, ...compatibilityCompilers]);
   assert.equal(approved.status, 0, approved.stderr);
+  assert.equal(fs.existsSync(path.join(report, "compatibility/typescript-6.stdout")), true);
+  assert.equal(fs.existsSync(path.join(report, "compatibility/typescript-7.stdout")), true);
 
   const validApprovals = JSON.parse(fs.readFileSync(approvals, "utf8"));
   validApprovals.approvals.push({
@@ -79,7 +97,7 @@ try {
     reason: "Stale fixture approval.",
   });
   fs.writeFileSync(approvals, JSON.stringify(validApprovals));
-  const staleApproval = run(["--approvals", approvals]);
+  const staleApproval = run(["--approvals", approvals, ...compatibilityCompilers]);
   assert.notEqual(staleApproval.status, 0);
   assert.match(staleApproval.stderr, /Unused or stale semantic approval/);
 
@@ -121,6 +139,8 @@ try {
   assert.match(reproductionSource, /Expected TypeScript baseline Version 6\.0\.3/);
   assert.match(reproductionSource, /Expected TypeScript candidate Version 7\.0\.2/);
   assert.match(reproductionSource, /Checked-in declaration approvals were not fully consumed/);
+  assert.match(reproductionSource, /--compatibility-compiler typescript-6/);
+  assert.match(reproductionSource, /--compatibility-compiler typescript-7/);
   const destructiveGuard = spawnSync("bash", [reproduction, guardedOutput], {
     encoding: "utf8",
     env: { ...process.env, TMPDIR: process.cwd() },

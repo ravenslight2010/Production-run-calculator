@@ -250,6 +250,18 @@ capture_declarations() {
     -print0 | sort -z)
 }
 
+link_declaration_dependencies() {
+  local destination="$1"
+  local source
+  local relative
+  while IFS= read -r -d '' source; do
+    relative="${source#"$REPO"/}"
+    mkdir -p "$destination/$(dirname "$relative")"
+    ln -s "$source" "$destination/$relative"
+  done < <(find -L "$REPO/lib" "$REPO/artifacts" \
+    -mindepth 2 -maxdepth 2 -name node_modules -type d -print0)
+}
+
 run_no_emit_matrix() {
   local label="$1"
   local compiler="$2"
@@ -274,11 +286,13 @@ cd "$COPY"
 run_timed typescript-6-shared-build \
   "$TS6" --build --force --pretty false --extendedDiagnostics
 capture_declarations "$OUT/typescript-6-declarations"
+link_declaration_dependencies "$OUT/typescript-6-declarations"
 
 "$TS7" --build --clean >"$OUT/typescript-7-clean.stdout" 2>"$OUT/typescript-7-clean.stderr"
 run_timed typescript-7-shared-build \
   "$TS7" --build --force --pretty false --extendedDiagnostics
 capture_declarations "$OUT/typescript-7-declarations"
+link_declaration_dependencies "$OUT/typescript-7-declarations"
 
 (
   cd "$OUT/typescript-6-declarations"
@@ -303,6 +317,8 @@ set +e
   "$OUT/typescript-7-declarations" \
   "$CONTRACT_REPORT" \
   --approvals "$CONTRACT_APPROVALS" \
+  --compatibility-compiler typescript-6 "$TS6" \
+  --compatibility-compiler typescript-7 "$TS7" \
   >"$OUT/declaration-contract-comparison.stdout" \
   2>"$OUT/declaration-contract-comparison.stderr"
 contract_comparison_status=$?
@@ -402,9 +418,16 @@ const summary = {
         categoryCount("api-zod") -
         categoryCount("db"),
     },
-    contractComparison: JSON.parse(
-      fs.readFileSync(path.join(output, "declaration-contract-report", "declaration-contracts.json"), "utf8"),
-    ),
+    contractComparison: fs.existsSync(
+      path.join(output, "declaration-contract-report", "declaration-contracts.json"),
+    )
+      ? JSON.parse(
+          fs.readFileSync(
+            path.join(output, "declaration-contract-report", "declaration-contracts.json"),
+            "utf8",
+          ),
+        )
+      : null,
   },
   elapsedSeconds: elapsed,
 };
