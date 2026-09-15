@@ -1,5 +1,6 @@
 import { and, desc, eq, gte, lt, notInArray, sql } from "drizzle-orm";
 import { backgroundOperationEventsTable, db } from "@workspace/db";
+import { createSharedDiagnosticPersistence } from "./sharedDiagnosticPersistence";
 
 export const BACKGROUND_OPERATION_FAILURE_THRESHOLD = 3;
 export const BACKGROUND_OPERATION_RETRY_DELAY_MS = 100;
@@ -8,6 +9,11 @@ export const BACKGROUND_OPERATION_FAILURE_MAX_EVENTS = 100;
 const BACKGROUND_OPERATION_SHARED_TIMEOUT_MS = 1_000;
 const BACKGROUND_OPERATION_SHARED_DB_TIMEOUT_MS =
   BACKGROUND_OPERATION_SHARED_TIMEOUT_MS - 100;
+const sharedBackgroundOperationPersistence = createSharedDiagnosticPersistence({
+  callerTimeoutMs: BACKGROUND_OPERATION_SHARED_TIMEOUT_MS,
+  databaseTimeoutMs: BACKGROUND_OPERATION_SHARED_DB_TIMEOUT_MS,
+  timeoutMessage: "background operation diagnostics timed out",
+});
 
 export type BackgroundOperationName =
   | "daily-rollover"
@@ -39,7 +45,6 @@ const operationNames: BackgroundOperationName[] = [
   "web-push-schedule",
 ];
 const states = new Map<BackgroundOperationName, OperationState>();
-const pendingSharedWrites = new Set<Promise<unknown>>();
 
 function errorCode(error: unknown): string | undefined {
   if (!error || typeof error !== "object") return undefined;
@@ -83,11 +88,8 @@ export async function recordBackgroundOperationFailure(
     lastSuccessAt: previous?.lastSuccessAt,
     lastErrorCode: safeCode,
   });
-  const sharedWrite = recordSharedFailure(name, safeCode, now);
-  pendingSharedWrites.add(sharedWrite);
-  sharedWrite.then(
-    () => pendingSharedWrites.delete(sharedWrite),
-    () => pendingSharedWrites.delete(sharedWrite),
+  const sharedWrite = sharedBackgroundOperationPersistence.track(
+    recordSharedFailure(name, safeCode, now),
   );
   await sharedWrite;
 }
@@ -142,46 +144,13 @@ function localBackgroundOperationDiagnostics(
   })) as Record<BackgroundOperationName, BackgroundOperationDiagnostic>;
 }
 
-async function withSharedTimeout<T>(work: Promise<T>): Promise<T> {
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      work,
-      new Promise<never>((_, reject) => {
-        timeout = setTimeout(
-          () => reject(new Error("background operation diagnostics timed out")),
-          BACKGROUND_OPERATION_SHARED_TIMEOUT_MS,
-        );
-        timeout.unref?.();
-      }),
-    ]);
-  } finally {
-    if (timeout) clearTimeout(timeout);
-  }
-}
-
-async function configureSharedTimeout(tx: {
-  execute: (query: ReturnType<typeof sql>) => Promise<unknown>;
-}): Promise<void> {
-  await tx.execute(sql`SELECT set_config(
-    'statement_timeout',
-    ${`${BACKGROUND_OPERATION_SHARED_DB_TIMEOUT_MS}ms`},
-    true
-  ), set_config(
-    'lock_timeout',
-    ${`${BACKGROUND_OPERATION_SHARED_DB_TIMEOUT_MS}ms`},
-    true
-  )`);
-}
-
 async function recordSharedFailure(
   name: BackgroundOperationName,
   code: string,
   now: number,
 ): Promise<void> {
-  try {
-    await withSharedTimeout(db.transaction(async (tx) => {
-      await configureSharedTimeout(tx);
+  await sharedBackgroundOperationPersistence.runOrFallback(
+    async (tx) => {
       await tx.execute(
         sql`SELECT pg_advisory_xact_lock(
           hashtextextended(${`background-operation:${name}`}, 0)
@@ -218,18 +187,16 @@ async function recordSharedFailure(
           ),
         );
       }
-    }));
-  } catch {
-    // Shared telemetry must never change the outcome of background work.
-  }
+    },
+    () => undefined,
+  );
 }
 
 async function readSharedDiagnostics(
   now: number,
 ): Promise<Record<BackgroundOperationName, BackgroundOperationDiagnostic>> {
   const cutoff = new Date(now - BACKGROUND_OPERATION_FAILURE_WINDOW_MS);
-  const rows = await withSharedTimeout(db.transaction(async (tx) => {
-    await configureSharedTimeout(tx);
+  const rows = await sharedBackgroundOperationPersistence.run(async (tx) => {
     await tx.delete(backgroundOperationEventsTable).where(
       lt(backgroundOperationEventsTable.occurredAt, cutoff),
     );
@@ -243,7 +210,7 @@ async function readSharedDiagnostics(
       .where(gte(backgroundOperationEventsTable.occurredAt, cutoff))
       .orderBy(desc(backgroundOperationEventsTable.occurredAt), desc(backgroundOperationEventsTable.id))
       .limit(BACKGROUND_OPERATION_FAILURE_MAX_EVENTS * operationNames.length);
-  }));
+  });
   return Object.fromEntries(operationNames.map((name) => {
     const operationRows = rows.filter((row) => row.operation === name)
       .slice(0, BACKGROUND_OPERATION_FAILURE_MAX_EVENTS);
@@ -306,9 +273,7 @@ export async function clearBackgroundOperationDiagnosticsForTests(
   options: { preserveShared?: boolean } = {},
 ): Promise<void> {
   states.clear();
-  if (pendingSharedWrites.size > 0) {
-    await Promise.allSettled([...pendingSharedWrites]);
-  }
+  await sharedBackgroundOperationPersistence.settlePending();
   if (options.preserveShared) return;
   try {
     await db.delete(backgroundOperationEventsTable);

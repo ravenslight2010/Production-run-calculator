@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { and, desc, eq, gte, lt, notInArray, sql } from "drizzle-orm";
 import { cacheMaintenanceEventsTable, db } from "@workspace/db";
 import { logger } from "./logger";
+import { createSharedDiagnosticPersistence } from "./sharedDiagnosticPersistence";
 import type { StartupHealthSnapshot } from "./startupHealth";
 
 export type OperationOutcome = "success" | "error" | "degraded";
@@ -35,16 +36,11 @@ const cacheMaintenanceAlerts = new Set<string>();
 // The cache path records diagnostics fire-and-forget so telemetry can never
 // block a cache operation. Track the in-flight shared-failure writes so test
 // isolation can wait for them before asserting on the shared events table.
-const pendingSharedCacheMaintenance = new Set<Promise<unknown>>();
-
-function trackPendingSharedCacheMaintenance<T>(promise: Promise<T>): Promise<T> {
-  pendingSharedCacheMaintenance.add(promise);
-  promise.then(
-    () => pendingSharedCacheMaintenance.delete(promise),
-    () => pendingSharedCacheMaintenance.delete(promise),
-  );
-  return promise;
-}
+const sharedCacheMaintenancePersistence = createSharedDiagnosticPersistence({
+  callerTimeoutMs: CACHE_MAINTENANCE_SHARED_TIMEOUT_MS,
+  databaseTimeoutMs: CACHE_MAINTENANCE_SHARED_DB_TIMEOUT_MS,
+  timeoutMessage: "cache maintenance diagnostics timed out",
+});
 
 const OPERATION_NAMES: Array<[RegExp, string]> = [
   [/^\/(?:api\/)?(?:healthz|readyz|livez)\/?$/, "health"],
@@ -165,48 +161,13 @@ function sharedCacheMaintenanceWhere(scope: CacheMaintenanceScope, cutoff: Date)
   );
 }
 
-async function withSharedDiagnosticsTimeout<T>(work: Promise<T>): Promise<T> {
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      work,
-      new Promise<never>((_, reject) => {
-        timeout = setTimeout(
-          () => reject(new Error("cache maintenance diagnostics timed out")),
-          CACHE_MAINTENANCE_SHARED_TIMEOUT_MS,
-        );
-        timeout.unref?.();
-      }),
-    ]);
-  } finally {
-    if (timeout) clearTimeout(timeout);
-  }
-}
-
-async function configureSharedDiagnosticsTimeout(tx: {
-  execute: (query: ReturnType<typeof sql>) => Promise<unknown>;
-}): Promise<void> {
-  await tx.execute(
-    sql`SELECT set_config(
-      'statement_timeout',
-      ${`${CACHE_MAINTENANCE_SHARED_DB_TIMEOUT_MS}ms`},
-      true
-    ), set_config(
-      'lock_timeout',
-      ${`${CACHE_MAINTENANCE_SHARED_DB_TIMEOUT_MS}ms`},
-      true
-    )`,
-  );
-}
-
 async function readSharedCacheMaintenanceDiagnostic(
   scope: CacheMaintenanceScope,
   now: number,
 ): Promise<CacheMaintenanceDiagnostic> {
   const cutoff = new Date(now - CACHE_MAINTENANCE_FAILURE_WINDOW_MS);
-  const rows = await withSharedDiagnosticsTimeout(
-    db.transaction(async (tx) => {
-      await configureSharedDiagnosticsTimeout(tx);
+  const rows = await sharedCacheMaintenancePersistence.run(
+    async (tx) => {
       await tx
         .delete(cacheMaintenanceEventsTable)
         .where(
@@ -222,7 +183,7 @@ async function readSharedCacheMaintenanceDiagnostic(
         .where(sharedCacheMaintenanceWhere(scope, cutoff))
         .orderBy(desc(cacheMaintenanceEventsTable.occurredAt), desc(cacheMaintenanceEventsTable.id))
         .limit(CACHE_MAINTENANCE_SHARED_MAX_ROWS);
-    }),
+    },
   );
   const lastError = rows[0]?.occurredAt;
   return {
@@ -238,9 +199,8 @@ async function recordSharedCacheMaintenanceFailure(
   scope: CacheMaintenanceScope,
   now: number,
 ): Promise<SharedCacheMaintenanceResult> {
-  return withSharedDiagnosticsTimeout(
-    db.transaction(async (tx) => {
-      await configureSharedDiagnosticsTimeout(tx);
+  return sharedCacheMaintenancePersistence.run(
+    async (tx) => {
       const lockKey = `cache-maintenance:${scope}:${CACHE_MAINTENANCE_OPERATION}`;
       await tx.execute(
         // Serialize the read/insert/trim sequence so exactly one API instance
@@ -303,7 +263,7 @@ async function recordSharedCacheMaintenanceFailure(
           before.length < CACHE_MAINTENANCE_FAILURE_THRESHOLD &&
           keep.length >= CACHE_MAINTENANCE_FAILURE_THRESHOLD,
       };
-    }),
+    },
   );
 }
 
@@ -346,7 +306,7 @@ export function recordCacheMaintenance(
 
   if (fields.outcome !== "error") return Promise.resolve();
 
-  return trackPendingSharedCacheMaintenance(
+  return sharedCacheMaintenancePersistence.track(
     recordSharedCacheMaintenanceFailure(fields.scope, now),
   )
     .then((sharedRecurrence) => {
@@ -396,10 +356,7 @@ export async function clearCacheMaintenanceDiagnosticsForTests(): Promise<void> 
   // Fire-and-forget diagnostics from the cache path can still be committing a
   // last event after the triggering test finishes; wait for them so the
   // subsequent delete is deterministic instead of racing the insert.
-  const pending = [...pendingSharedCacheMaintenance];
-  if (pending.length > 0) {
-    await Promise.allSettled(pending);
-  }
+  await sharedCacheMaintenancePersistence.settlePending();
   try {
     await db.delete(cacheMaintenanceEventsTable);
   } catch {
