@@ -18,6 +18,12 @@ through the privacy-safe `calculator-performance` event:
 | Import commit | 10,000 ms |
 | Workbook export | 10,000 ms |
 
+The full calculator Vitest suite has a 150-second wall-clock validation budget.
+Run `pnpm --filter @workspace/run-calculator run test:budget` for the normal
+assertions plus a summary of the file count, test count, and elapsed time. The
+guard runs the same suite once and fails with the measured overage when the
+budget is exceeded.
+
 The timing records contain only an operation name, duration, and kind. The
 in-memory diagnostic ring retains the latest 40 records and never stores
 customer names, recipes, run values, URLs, or response bodies. Chromium heap

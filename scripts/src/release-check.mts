@@ -859,7 +859,7 @@ const steps: ReleaseStep[] = [
   ...RELEASE_CHECK_API_SHARD_STEPS,
   {
     label: "run calculator tests",
-    args: ["--filter", "@workspace/run-calculator", "run", "test"],
+    args: ["--filter", "@workspace/run-calculator", "run", "test:budget"],
     stage: "release-tests",
   },
   {
