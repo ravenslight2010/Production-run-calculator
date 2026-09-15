@@ -258,7 +258,7 @@ test.beforeEach(async () => {
   try {
     await db.connect();
     await db.query(
-      "UPDATE action_items SET status = 'open', version = 1, updated_at = NOW() WHERE id = $1",
+      "UPDATE action_items SET status = 'open', defer_reason = NULL, resolution_note = NULL, version = 1, updated_at = NOW() WHERE id = $1",
       [staleWriteFixtureId],
     );
   } finally {
@@ -426,7 +426,7 @@ test("shows a stale update error, then refreshes and safely retries", async ({ b
     await first.getByLabel("Filter action category").selectOption("report");
     await second.getByLabel("Filter action category").selectOption("report");
 
-  const title = `Resolved sync merge ${resolvedSyncDedupKey}`;
+    const title = `Stale queue item ${staleWriteDedupKey}`;
     await expect(first.getByText(title, { exact: true })).toBeVisible();
     await expect(second.getByText(title, { exact: true })).toBeVisible();
     await first.getByLabel("Filter action status").selectOption("all");
@@ -454,6 +454,8 @@ test("shows a stale update error, then refreshes and safely retries", async ({ b
     await expect((await firstUpdate).status()).toBe(200);
     await expect(firstStatus).toHaveValue("in_progress");
     await secondStatus.selectOption("resolved");
+    await second.getByLabel(`Note for ${title}`).fill("Completed by the second manager");
+    await second.getByRole("button", { name: "Confirm resolved", exact: true }).click();
 
     await expect(second.getByRole("alert")).toContainText("changed; refresh and try again");
     await second.screenshot({ path: testInfo.outputPath("queue-stale-error.png") });
@@ -475,6 +477,8 @@ test("shows a stale update error, then refreshes and safely retries", async ({ b
         response.request().method() === "PATCH",
     );
     await second.getByLabel(`Status for ${title}`).selectOption("resolved");
+    await second.getByLabel(`Note for ${title}`).fill("Completed after refreshing");
+    await second.getByRole("button", { name: "Confirm resolved", exact: true }).click();
     await expect((await retryUpdate).status()).toBe(200);
     await expect(second.getByRole("alert")).toHaveCount(0);
     await second.screenshot({ path: testInfo.outputPath("queue-recovered.png") });
@@ -522,8 +526,9 @@ test("opens a scoped sync queue item in the sync diagnostics workflow", async ({
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
   await openQueue(page);
   await page.getByLabel("Filter action category").selectOption("sync");
+  await page.getByLabel("Filter action status").selectOption("resolved");
 
-  const title = `Resolved sync merge ${resolvedSyncDedupKey}`;
+  const title = `Review completed sync merge #${resolvedSyncConflictFixtureId}`;
   // This journey exercises the real sync source link. Scope the queue before
   // locating it so accumulated historical action items do not turn a
   // navigation assertion into a full-history render.
@@ -552,7 +557,7 @@ test("opens a scoped sync queue item in the sync diagnostics workflow", async ({
   expect(browserErrors).toEqual([]);
 });
 
-test("downgrades a resolved sync merge to required review in the manager queue", async ({
+test("keeps a completed sync merge in resolved review history", async ({
   page,
 }, testInfo: TestInfo) => {
   const username = uniqueTestId("e2e_manager_sync_reload");
@@ -571,8 +576,9 @@ test("downgrades a resolved sync merge to required review in the manager queue",
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
   await openQueue(page);
   await page.getByLabel("Filter action category").selectOption("sync");
+  await page.getByLabel("Filter action status").selectOption("resolved");
 
-  const title = `Resolved sync merge ${resolvedSyncDedupKey}`;
+  const title = `Review completed sync merge #${resolvedSyncConflictFixtureId}`;
   const itemTitle = page.getByText(title, { exact: true });
   await expect(itemTitle).toBeVisible();
   const itemCard = itemTitle.locator(
@@ -620,7 +626,7 @@ test("opens an incident queue item in the matching incident review surface", asy
   // not merely the hash that the source link wrote.
   await expect(page).toHaveURL(new RegExp(`#incidents/${incidentFixtureId}$`));
   await expect(page.getByText("Reported issues", { exact: true })).toBeVisible();
-  const selectedIncident = directPage
+  const selectedIncident = page
     .getByText(`Unique incident review ${incidentFixtureId}`, { exact: true })
     .first();
   await expect(selectedIncident).toBeVisible();
@@ -631,17 +637,16 @@ test("opens an incident queue item in the matching incident review surface", asy
     selectedIncidentCard.getByRole("button", { name: "Mark reviewed", exact: true }),
   ).toBeVisible();
 
-  await directPage.reload({ waitUntil: "domcontentloaded" });
-  await expect(directPage).toHaveURL(new RegExp(`#incidents/${incidentFixtureId}$`));
-  await expect(directPage.getByText("Reported issues", { exact: true })).toBeVisible();
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(page).toHaveURL(new RegExp(`#incidents/${incidentFixtureId}$`));
+  await expect(page.getByText("Reported issues", { exact: true })).toBeVisible();
   await expect(selectedIncident).toBeVisible();
   await expect(selectedIncidentCard).toContainText("Queue fixture manager (manager)");
   await expect(selectedIncidentCard.getByText("Diagnostic reference:", { exact: true })).toBeVisible();
   await expect(
     selectedIncidentCard.getByRole("button", { name: "Mark reviewed", exact: true }),
   ).toBeVisible();
-  await directPage.screenshot({ path: testInfo.outputPath("incident-direct-link-reload.png"), fullPage: true });
-  await directPage.close();
+  await page.screenshot({ path: testInfo.outputPath("incident-direct-link-reload.png"), fullPage: true });
   expect(browserErrors).toEqual([]);
 });
 

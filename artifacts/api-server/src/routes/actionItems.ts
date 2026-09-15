@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, notInArray, sql } from "drizzle-orm";
 import {
   actionItemsTable,
   auditLogsTable,
@@ -18,7 +18,7 @@ const router = Router();
 const statuses = new Set(["open", "in_progress", "deferred", "resolved"]);
 const activeStatuses = ["open", "in_progress", "deferred"] as const;
 const HISTORY_PAGE_SIZE = 100;
-const refreshes = new Map<string, Promise<void>>();
+const refreshes = new Map<string, Promise<Candidate[]>>();
 
 type Candidate = {
   dedupKey: string;
@@ -31,7 +31,18 @@ type Candidate = {
   sourcePath: string;
   attentionState?: "blocker" | "review" | "stale" | "info";
   nextAction?: string;
+  actionable?: boolean;
 };
+
+const derivedCategories = ["incident", "import", "data-health", "sync", "production-rule"] as const;
+type QueueExecutor = Pick<typeof db, "select">;
+
+function canAccessCategory(category: string, capabilities: Set<string>): boolean {
+  if (category === "incident") return capabilities.has("review-incidents");
+  if (category === "import") return capabilities.has("manage-profiles") || capabilities.has("manage-inventory");
+  if (category === "production-rule") return capabilities.has("edit-production-rules");
+  return category === "sync" || category === "report" || category === "data-health";
+}
 
 function attentionStateFor(severity: string): Candidate["attentionState"] {
   if (severity === "urgent" || severity === "error") return "blocker";
@@ -65,26 +76,26 @@ function clean(value: unknown, max: number): string {
   return String(value ?? "").trim().slice(0, max);
 }
 
-async function candidates(): Promise<Candidate[]> {
+async function candidates(executor: QueueExecutor): Promise<Candidate[]> {
   const scope = currentScope();
   const [incidents, imports, conflicts, rules, health] = await Promise.all([
-    db.select().from(incidentsTable).where(and(
+    executor.select().from(incidentsTable).where(and(
       eq(incidentsTable.scope, scope),
       inArray(incidentsTable.workflowState, ["new", "assigned", "waiting"]),
     )),
-    db.select().from(importHistoryTable).where(and(
+    executor.select().from(importHistoryTable).where(and(
       eq(importHistoryTable.scope, scope),
       inArray(importHistoryTable.status, ["partial", "failed"]),
     )),
-    db.select().from(syncConflictLogsTable).where(and(
+    executor.select().from(syncConflictLogsTable).where(and(
       eq(syncConflictLogsTable.scope, scope),
       sql`${syncConflictLogsTable.conflictCount} > 0`,
     )),
-    db.select().from(productionRulesTable).where(and(
+    executor.select().from(productionRulesTable).where(and(
       eq(productionRulesTable.scope, scope),
       eq(productionRulesTable.enabled, true),
     )),
-    dataHealthWorkspace(db),
+    dataHealthWorkspace(executor),
   ]);
   const out: Candidate[] = [];
   for (const item of incidents) out.push({
@@ -121,11 +132,12 @@ async function candidates(): Promise<Candidate[]> {
     // written. A large field count is useful review context, but it is not an
     // active unsent-write failure and must not become a queue blocker.
     severity: "warning",
-    title: "Review completed sync merge",
+    title: `Review completed sync merge #${item.id}`,
     description: `Protected sync merge completed for ${item.conflictCount} conflicting field${item.conflictCount === 1 ? "" : "s"} on ${item.date}. Review sync history for context; this is historical merge evidence, not an active unsent-write failure.`,
     sourceType: "sync", sourceId: String(item.id), sourcePath: "#sync-diagnostics",
     attentionState: attentionStateFor("warning"),
     nextAction: "Review sync history",
+    actionable: false,
   });
   for (const item of rules.filter((rule) => (rule.checklist?.length ?? 0) > 0)) out.push({
     dedupKey: `production-rule:${item.id}`, category: "production-rule", severity: "warning",
@@ -135,7 +147,7 @@ async function candidates(): Promise<Candidate[]> {
   return out;
 }
 
-async function refreshQueue(): Promise<void> {
+async function refreshQueue(): Promise<Candidate[]> {
   const scope = currentScope();
   const currentRefresh = refreshes.get(scope);
   if (currentRefresh) return currentRefresh;
@@ -144,34 +156,83 @@ async function refreshQueue(): Promise<void> {
   // findings, delaying manually inserted queue items behind hundreds of
   // round-trips and making concurrent manager views race their UI budget.
   const refresh = (async () => {
-    const items = await candidates();
-    if (items.length === 0) return;
-    await db.insert(actionItemsTable).values(items.map((item) => ({ scope, ...item }))).onConflictDoUpdate({
-      target: [actionItemsTable.scope, actionItemsTable.dedupKey],
-      set: {
-        category: sql`excluded.category`,
-        severity: sql`excluded.severity`,
-        title: sql`excluded.title`,
-        description: sql`excluded.description`,
-        sourceType: sql`excluded.source_type`,
-        sourceId: sql`excluded.source_id`,
-        sourcePath: sql`excluded.source_path`,
-        updatedAt: sql`NOW()`,
-      },
-      setWhere: sql`
-        ${actionItemsTable.category} IS DISTINCT FROM excluded.category OR
-        ${actionItemsTable.severity} IS DISTINCT FROM excluded.severity OR
-        ${actionItemsTable.title} IS DISTINCT FROM excluded.title OR
-        ${actionItemsTable.description} IS DISTINCT FROM excluded.description OR
-        ${actionItemsTable.sourceType} IS DISTINCT FROM excluded.source_type OR
-        ${actionItemsTable.sourceId} IS DISTINCT FROM excluded.source_id OR
-        ${actionItemsTable.sourcePath} IS DISTINCT FROM excluded.source_path
-      `,
-    });
+    return db.transaction(async (tx) => {
+      const items = await candidates(tx);
+      const actionableItems = items.filter((item) => item.actionable !== false);
+      const actionableKeys = actionableItems.map((item) => item.dedupKey);
+      if (items.length > 0) {
+        await tx.insert(actionItemsTable).values(items.map(({ attentionState: _attentionState, nextAction: _nextAction, actionable, ...item }) => ({
+          scope,
+          ...item,
+          ...(actionable === false ? { status: "resolved" } : {}),
+        }))).onConflictDoUpdate({
+          target: [actionItemsTable.scope, actionItemsTable.dedupKey],
+          set: {
+            category: sql`excluded.category`,
+            severity: sql`excluded.severity`,
+            title: sql`excluded.title`,
+            description: sql`excluded.description`,
+            sourceType: sql`excluded.source_type`,
+            sourceId: sql`excluded.source_id`,
+            sourcePath: sql`excluded.source_path`,
+            updatedAt: sql`NOW()`,
+          },
+          setWhere: sql`
+            ${actionItemsTable.category} IS DISTINCT FROM excluded.category OR
+            ${actionItemsTable.severity} IS DISTINCT FROM excluded.severity OR
+            ${actionItemsTable.title} IS DISTINCT FROM excluded.title OR
+            ${actionItemsTable.description} IS DISTINCT FROM excluded.description OR
+            ${actionItemsTable.sourceType} IS DISTINCT FROM excluded.source_type OR
+            ${actionItemsTable.sourceId} IS DISTINCT FROM excluded.source_id OR
+            ${actionItemsTable.sourcePath} IS DISTINCT FROM excluded.source_path
+          `,
+        });
+      }
+      if (actionableKeys.length > 0) {
+        await tx.update(actionItemsTable).set({
+          status: "open",
+          updatedAt: new Date(),
+          version: sql`${actionItemsTable.version} + 1`,
+        }).where(and(
+          eq(actionItemsTable.scope, scope),
+          eq(actionItemsTable.status, "resolved"),
+          inArray(actionItemsTable.dedupKey, actionableKeys),
+          sql`NOT EXISTS (
+            SELECT 1 FROM ${auditLogsTable}
+            WHERE ${auditLogsTable.scope} = ${scope}
+              AND ${auditLogsTable.resource} = ('action_item:' || ${actionItemsTable.id}::text)
+              AND ${auditLogsTable.action} = 'manager_action_item_update'
+              AND ${auditLogsTable.changes}->>'status' = 'resolved'
+          )`,
+        ));
+      }
+      const reconcilerOwned = sql`(
+        (${actionItemsTable.category} = 'incident' AND ${actionItemsTable.dedupKey} = ('incident:' || ${actionItemsTable.sourceId})) OR
+        (${actionItemsTable.category} = 'import' AND ${actionItemsTable.dedupKey} = ('import:' || ${actionItemsTable.sourceId})) OR
+        (${actionItemsTable.category} = 'data-health' AND ${actionItemsTable.dedupKey} = ('data-health:' || ${actionItemsTable.sourceId})) OR
+        (${actionItemsTable.category} = 'sync' AND ${actionItemsTable.dedupKey} = ('sync:' || ${actionItemsTable.sourceId})) OR
+        (${actionItemsTable.category} = 'production-rule' AND ${actionItemsTable.dedupKey} = ('production-rule:' || ${actionItemsTable.sourceId}))
+      )`;
+      const activeDerived = and(
+        eq(actionItemsTable.scope, scope),
+        inArray(actionItemsTable.category, [...derivedCategories]),
+        inArray(actionItemsTable.status, [...activeStatuses]),
+        reconcilerOwned,
+        ...(actionableKeys.length > 0
+          ? [notInArray(actionItemsTable.dedupKey, actionableKeys)]
+          : []),
+      );
+      await tx.update(actionItemsTable).set({
+        status: "resolved",
+        updatedAt: new Date(),
+        version: sql`${actionItemsTable.version} + 1`,
+      }).where(activeDerived);
+      return items;
+    }, { isolationLevel: "repeatable read" });
   })();
   refreshes.set(scope, refresh);
   try {
-    await refresh;
+    return await refresh;
   } finally {
     if (refreshes.get(scope) === refresh) refreshes.delete(scope);
   }
@@ -190,9 +251,20 @@ router.get("/manager-action-queue", requireCapability("manage-staff"), async (re
     return;
   }
   try {
-    await refreshQueue();
+    const refreshedCandidates = await refreshQueue();
+    const metadata = new Map(refreshedCandidates.map((item) => [item.dedupKey, item]));
     const scope = currentScope();
-    const baseConditions = [eq(actionItemsTable.scope, scope)];
+    const capabilities = new Set(req.capabilities ?? []);
+    const allowedCategories = [...derivedCategories, "report"].filter((category) =>
+      canAccessCategory(category, capabilities));
+    if (requestedCategory && requestedCategory !== "all" && !allowedCategories.includes(requestedCategory)) {
+      res.status(403).json({ error: "Missing capability for this action queue source" });
+      return;
+    }
+    const baseConditions = [
+      eq(actionItemsTable.scope, scope),
+      inArray(actionItemsTable.category, allowedCategories),
+    ];
     if (requestedCategory && requestedCategory !== "all") {
       baseConditions.push(eq(actionItemsTable.category, requestedCategory));
     }
@@ -229,14 +301,24 @@ router.get("/manager-action-queue", requireCapability("manage-staff"), async (re
         status: actionItemsTable.status,
         count: sql<number>`count(*)::int`,
       }).from(actionItemsTable)
-        .where(eq(actionItemsTable.scope, scope))
+        .where(and(
+          eq(actionItemsTable.scope, scope),
+          inArray(actionItemsTable.category, allowedCategories),
+        ))
         .groupBy(actionItemsTable.status),
     ]);
     const hasMore = historyRows.length > HISTORY_PAGE_SIZE;
     const rows = [
       ...activeRows,
       ...historyRows.slice(0, HISTORY_PAGE_SIZE),
-    ];
+    ].map((row) => {
+      const derived = metadata.get(row.dedupKey);
+      return {
+        ...row,
+        attentionState: derived?.attentionState ?? attentionStateFor(row.severity),
+        nextAction: derived?.nextAction ?? nextActionFor(attentionStateFor(row.severity)),
+      };
+    });
     const nextCursor = hasMore ? encodeQueueCursor(historyRows[HISTORY_PAGE_SIZE - 1]) : null;
     const counts = Object.fromEntries(["open", "in_progress", "deferred", "resolved"].map((status) => [
       status,
@@ -258,24 +340,33 @@ router.patch("/manager-action-queue/:id", requireCapability("manage-staff"), asy
   const body = req.body && typeof req.body === "object" ? req.body as Record<string, unknown> : {};
   const status = body.status === undefined ? undefined : clean(body.status, 30);
   const version = Number(body.version);
+  const deferReason = body.deferReason === undefined ? undefined : clean(body.deferReason, 2000);
+  const resolutionNote = body.resolutionNote === undefined ? undefined : clean(body.resolutionNote, 2000);
   if (!Number.isInteger(id) || !Number.isInteger(version) ||
       (status !== undefined && !statuses.has(status)) ||
-      (body.deferReason !== undefined && clean(body.deferReason, 2000).length < 3) ||
-      (body.resolutionNote !== undefined && clean(body.resolutionNote, 2000).length < 1)) {
+      (body.deferReason !== undefined && deferReason!.length < 3) ||
+      (body.resolutionNote !== undefined && resolutionNote!.length < 1) ||
+      (status === "deferred" && (!deferReason || deferReason.length < 3)) ||
+      (status === "resolved" && !resolutionNote)) {
     res.status(400).json({ error: "Invalid action item update" });
     return;
   }
   try {
     const actor = await getStaffMember(req.userId!);
     const scope = currentScope();
+    const capabilities = new Set(req.capabilities ?? []);
+    if (actor.sandbox !== (scope === "sandbox")) {
+      res.status(403).json({ error: "Actor is not eligible in this scope" });
+      return;
+    }
     let assigneeId: string | null | undefined;
     let assigneeName: string | null | undefined;
     if (body.assigneeId !== undefined) {
       assigneeId = body.assigneeId === "me" ? req.userId!
         : body.assigneeId === null || body.assigneeId === "" ? null : clean(body.assigneeId, 160);
       if (assigneeId) {
-        const staff = await getStaffMember(assigneeId);
-        if (staff.sandbox || !staff.name) {
+        const staff = assigneeId === req.userId! ? actor : await getStaffMember(assigneeId);
+        if (staff.sandbox !== (scope === "sandbox") || !staff.name) {
           res.status(400).json({ error: "Assignee is not eligible" });
           return;
         }
@@ -285,26 +376,44 @@ router.patch("/manager-action-queue/:id", requireCapability("manage-staff"), asy
     const patch = {
       ...(status ? { status } : {}),
       ...(assigneeId !== undefined ? { assigneeId, assigneeName } : {}),
-      ...(body.deferReason !== undefined ? { deferReason: clean(body.deferReason, 2000) } : {}),
-      ...(body.resolutionNote !== undefined ? { resolutionNote: clean(body.resolutionNote, 2000) } : {}),
+      ...(deferReason !== undefined ? { deferReason } : {}),
+      ...(resolutionNote !== undefined ? { resolutionNote } : {}),
       updatedAt: new Date(),
       version: sql`${actionItemsTable.version} + 1`,
     };
-    const updated = await db.update(actionItemsTable).set(patch).where(and(
-      eq(actionItemsTable.id, id), eq(actionItemsTable.scope, scope),
-      eq(actionItemsTable.version, version),
-    )).returning();
-    if (!updated[0]) {
+    const updated = await db.transaction(async (tx) => {
+      const [target] = await tx.select({
+        category: actionItemsTable.category,
+      }).from(actionItemsTable).where(and(
+        eq(actionItemsTable.id, id),
+        eq(actionItemsTable.scope, scope),
+      )).for("update");
+      if (!target) return { outcome: "conflict" as const };
+      if (!canAccessCategory(target.category, capabilities)) {
+        return { outcome: "forbidden" as const };
+      }
+      const rows = await tx.update(actionItemsTable).set(patch).where(and(
+        eq(actionItemsTable.id, id), eq(actionItemsTable.scope, scope),
+        eq(actionItemsTable.version, version),
+      )).returning();
+      if (!rows[0]) return { outcome: "conflict" as const };
+      await tx.insert(auditLogsTable).values({
+        scope, actor: actor.name ?? req.userId!, action: "manager_action_item_update",
+        resource: `action_item:${id}`,
+        changes: { status, assigneeId, deferReason: deferReason !== undefined, resolutionNote: resolutionNote !== undefined },
+        ipAddress: req.ip, userAgent: req.get("user-agent") ?? undefined,
+      });
+      return { outcome: "updated" as const, item: rows[0] };
+    });
+    if (updated.outcome === "forbidden") {
+      res.status(403).json({ error: "Missing capability for this action queue source" });
+      return;
+    }
+    if (updated.outcome === "conflict") {
       res.status(409).json({ error: "This action item changed; refresh and try again." });
       return;
     }
-    await db.insert(auditLogsTable).values({
-      scope, actor: actor.name ?? req.userId!, action: "manager_action_item_update",
-      resource: `action_item:${id}`,
-      changes: { status, assigneeId, deferReason: body.deferReason !== undefined, resolutionNote: body.resolutionNote !== undefined },
-      ipAddress: req.ip, userAgent: req.get("user-agent") ?? undefined,
-    });
-    res.json({ item: updated[0] });
+    res.json({ item: updated.item });
   } catch (err) {
     req.log.error({ err }, "failed to update manager action item");
     res.status(500).json({ error: "Failed to update manager action item" });

@@ -3,11 +3,11 @@ import { BarChart2, ChevronDown } from "lucide-react";
 import { useHomeTabCtx } from "../contexts/HomeTabCtx";
 import OperationalReportPanel, { type OperationalReportDetailRange } from "./OperationalReportPanel";
 import ManagerActionQueue from "./ManagerActionQueue";
+import { actionQueueDestination } from "../actionQueue";
 import ShiftHandoffDigest from "./ShiftHandoffDigest";
 import { buildDaySummaryInput, buildWeekSummaryInput } from "../aiSummary";
 import { loadRunValues } from "../storage";
 import { todayStr } from "../utils";
-import type { HomeTab } from "../hooks/useHomeNavigation";
 import CanonicalRunViewCard from "./CanonicalRunViewCard";
 
 // Memo'd manager "Operations desk" tools header extracted from home.tsx
@@ -32,7 +32,15 @@ export default memo(function SummaryToolsContent() {
                       </div>
                     </div>
                     <div className="mb-3" data-testid="summary-priority-actions">
-                      <ManagerActionQueue onNavigate={(tab) => setActiveTab(tab as HomeTab)} />
+                      <ManagerActionQueue onNavigate={(item) => {
+                        const destination = actionQueueDestination(item);
+                        if (destination.kind === "tab") {
+                          setActiveTab(destination.tab);
+                          return;
+                        }
+                        setManageCategory(destination.category);
+                        setShowManageDialog(true);
+                      }} />
                     </div>
                      {currentRunId && (
                        <CanonicalRunViewCard date={todayStr()} runId={currentRunId} />

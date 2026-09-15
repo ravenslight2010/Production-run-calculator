@@ -13,6 +13,18 @@ export type ActionItem = {
   createdAt: string; updatedAt: string; version: number;
 };
 
+export type ActionQueueDestination =
+  | { kind: "tab"; tab: "incidents" | "summary" }
+  | { kind: "manage"; category: "import" | "rules" | "audit" };
+
+export function actionQueueDestination(item: Pick<ActionItem, "sourceType">): ActionQueueDestination {
+  if (item.sourceType === "incident") return { kind: "tab", tab: "incidents" };
+  if (item.sourceType === "sync") return { kind: "tab", tab: "summary" };
+  if (item.sourceType === "import") return { kind: "manage", category: "import" };
+  if (item.sourceType === "production-rule") return { kind: "manage", category: "rules" };
+  return { kind: "manage", category: "audit" };
+}
+
 function headers(json = false): Record<string, string> {
   return { "x-client-id": inventoryClientId(), ...(json ? { "Content-Type": "application/json" } : {}) };
 }

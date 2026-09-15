@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { ChevronDown, ClipboardCheck, ExternalLink, Lock, RefreshCw } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,26 +26,41 @@ const ActionQueueItemCard = memo(function ActionQueueItemCard({
   item,
   assignees,
   mutationPending,
-  noteOpen,
-  note,
-  onNoteChange,
-  onToggleNote,
+  mutationErrorAt,
   onUpdate,
   onNavigate,
 }: {
   item: ActionItem;
   assignees: Array<{ userId: string; name: string }>;
   mutationPending: boolean;
-  noteOpen: boolean;
-  note: string;
-  onNoteChange: (value: string) => void;
-  onToggleNote: (id: number) => void;
+  mutationErrorAt: number;
   onUpdate: (item: ActionItem, input: Parameters<typeof updateActionItem>[1]) => void;
-  onNavigate?: (tab: string) => void;
+  onNavigate?: (item: ActionItem) => void;
 }) {
   const state = (item.attentionState ?? attentionStateForSeverity(item.severity, item.status)) as AttentionState;
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [pendingStatus, setPendingStatus] = useState<"deferred" | "resolved" | null>(null);
+  useEffect(() => {
+    if (!mutationErrorAt) return;
+    setPendingStatus(null);
+    setNoteOpen(false);
+    setDraft("");
+  }, [mutationErrorAt]);
   const primaryLabel = item.status === "open" ? "Claim" : "Open source";
+  const requestStatus = (status: ActionItem["status"]) => {
+    if (status === "deferred" || status === "resolved") {
+      setPendingStatus(status);
+      setDraft("");
+      setNoteOpen(true);
+      return;
+    }
+    setPendingStatus(null);
+    setNoteOpen(false);
+    setDraft("");
+    onUpdate(item, { version: item.version, status });
+  };
   return <div key={item.id} className="rounded-md border border-border bg-background p-3" style={{ contentVisibility: "auto", containIntrinsicSize: "0 124px" }}>
     <div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0">
       <div className="flex flex-wrap items-center gap-1.5"><span className="font-medium text-sm">{item.title}</span><span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${ATTENTION_STATE_CLASS[state]}`} data-testid={`attention-state-${item.id}`}>{ATTENTION_STATE_LABEL[state]}</span><span className="rounded bg-muted px-1.5 py-0.5 text-[10px]">{labels[item.category] ?? item.category}</span></div>
@@ -53,9 +68,7 @@ const ActionQueueItemCard = memo(function ActionQueueItemCard({
     </div><a className="hidden shrink-0 items-center gap-1 text-xs text-primary hover:underline sm:inline-flex" href={item.sourcePath} onClick={(event) => {
       event.preventDefault();
       window.location.hash = item.sourcePath.replace(/^#/, "");
-      onNavigate?.(item.sourcePath.startsWith("#incidents/")
-        ? "incidents"
-        : item.sourceType === "sync" ? "summary" : "setup");
+      onNavigate?.(item);
     }}>Open source <ExternalLink className="h-3 w-3" /></a></div>
     <p className="mt-2 text-[11px] font-semibold text-muted-foreground">Next: {item.nextAction ?? nextActionForAttention(state, item.status)}</p>
     <div className="mt-3 grid grid-cols-[1fr_auto] gap-2 sm:flex sm:flex-wrap">
@@ -63,34 +76,51 @@ const ActionQueueItemCard = memo(function ActionQueueItemCard({
         <Button asChild className="min-h-11 sm:min-h-9"><a href={item.sourcePath} onClick={(event) => {
           event.preventDefault();
           window.location.hash = item.sourcePath.replace(/^#/, "");
-          onNavigate?.(item.sourcePath.startsWith("#incidents/") ? "incidents" : item.sourceType === "sync" ? "summary" : "setup");
+          onNavigate?.(item);
         }}>{primaryLabel}</a></Button>}
       <Button type="button" variant="outline" className="min-h-11 min-w-11 sm:min-h-9" aria-expanded={detailsOpen} onClick={() => setDetailsOpen((open) => !open)}>
         Details <ChevronDown className={`ml-1 h-4 w-4 transition-transform ${detailsOpen ? "rotate-180" : ""}`} />
       </Button>
     </div>
     {detailsOpen && <div className="mt-3 flex flex-col gap-2 rounded-md bg-muted/20 p-2 sm:flex-row sm:flex-wrap sm:items-center">
-      <select aria-label={`Status for ${item.title}`} className="min-h-11 rounded border border-border bg-background px-3 text-sm sm:min-h-9 sm:text-xs" value={item.status} disabled={mutationPending} onChange={(e) => onUpdate(item, { version: item.version, status: e.target.value as ActionItem["status"] })}>
+      <select aria-label={`Status for ${item.title}`} className="min-h-11 rounded border border-border bg-background px-3 text-sm sm:min-h-9 sm:text-xs" value={pendingStatus ?? item.status} disabled={mutationPending} onChange={(e) => requestStatus(e.target.value as ActionItem["status"])}>
         {queueStatuses.map((value) => <option key={value} value={value}>{value.replace("_", " ")}</option>)}
       </select>
       <select aria-label={`Owner for ${item.title}`} className="min-h-11 w-full rounded border border-border bg-background px-3 text-sm sm:min-h-9 sm:max-w-44 sm:text-xs" value={item.assigneeId ?? ""} disabled={mutationPending} onChange={(e) => onUpdate(item, { version: item.version, assigneeId: e.target.value || null })}>
         <option value="">Unassigned</option>{assignees.map((person) => <option key={person.userId} value={person.userId}>{person.name}</option>)}
       </select>
-      <Button size="sm" variant="ghost" className="min-h-11 sm:min-h-9" onClick={() => onToggleNote(item.id)}>Add note</Button>
+      <Button size="sm" variant="ghost" className="min-h-11 sm:min-h-9" onClick={() => {
+        setPendingStatus(null);
+        setDraft("");
+        setNoteOpen((open) => !open);
+      }}>Add note</Button>
     </div>}
-      {detailsOpen && noteOpen && <div className="mt-2 flex flex-col gap-2 sm:flex-row"><input className="min-h-11 min-w-0 flex-1 rounded border border-border bg-background px-3 text-base sm:text-sm" placeholder={item.status === "deferred" ? "Why defer this?" : "Resolution or handoff note"} value={note} onChange={(e) => onNoteChange(e.target.value)} /><Button className="min-h-11" disabled={!note.trim() || mutationPending} onClick={() => onUpdate(item, { version: item.version, ...(item.status === "deferred" ? { deferReason: note } : { resolutionNote: note }) })}>Save note</Button></div>}
+      {detailsOpen && noteOpen && <div className="mt-2 flex flex-col gap-2 sm:flex-row"><input aria-label={pendingStatus === "deferred" ? `Defer reason for ${item.title}` : `Note for ${item.title}`} className="min-h-11 min-w-0 flex-1 rounded border border-border bg-background px-3 text-base sm:text-sm" placeholder={pendingStatus === "deferred" ? "Why defer this?" : "Resolution or handoff note"} value={draft} onChange={(e) => setDraft(e.target.value)} /><Button className="min-h-11" disabled={(pendingStatus === "deferred" ? draft.trim().length < 3 : !draft.trim()) || mutationPending} onClick={() => {
+        const text = draft.trim();
+        onUpdate(item, {
+          version: item.version,
+          ...(pendingStatus ? { status: pendingStatus } : {}),
+          ...(pendingStatus === "deferred" ? { deferReason: text } : { resolutionNote: text }),
+        });
+      }}>{pendingStatus ? `Confirm ${pendingStatus}` : "Save note"}</Button></div>}
     {item.deferReason && <p className="mt-1 text-xs text-amber-600">Deferred: {item.deferReason}</p>}{item.resolutionNote && <p className="mt-1 text-xs text-muted-foreground">Note: {item.resolutionNote}</p>}
   </div>;
 });
 
-export default function ManagerActionQueue({ onNavigate }: { onNavigate?: (tab: string) => void }) {
+export default function ManagerActionQueue({ onNavigate }: { onNavigate?: (item: ActionItem) => void }) {
   const { hasCapability, isLoading: roleLoading } = useMe();
   const canView = hasCapability("manage-staff");
+  const canReviewIncidents = hasCapability("review-incidents");
+  const availableLabels = useMemo(() => Object.entries(labels).filter(([value]) =>
+    value !== "incident" || canReviewIncidents
+  ).filter(([value]) =>
+    value !== "import" || hasCapability("manage-profiles") || hasCapability("manage-inventory")
+  ).filter(([value]) =>
+    value !== "production-rule" || hasCapability("edit-production-rules")
+  ), [canReviewIncidents, hasCapability]);
   const client = useQueryClient();
   const [filter, setFilter] = useState("open");
   const [category, setCategory] = useState("all");
-  const [noteFor, setNoteFor] = useState<number | null>(null);
-  const [note, setNote] = useState("");
   const queryKey = ["manager-action-queue", filter, category] as const;
   const query = useInfiniteQuery<QueueData, Error, InfiniteData<QueueData, string | undefined>, typeof queryKey, string | undefined>({
     queryKey: queryKey,
@@ -109,7 +139,7 @@ export default function ManagerActionQueue({ onNavigate }: { onNavigate?: (tab: 
     // views are refreshed explicitly with the existing Refresh action.
     refetchInterval: filter === "all" || filter === "resolved" ? false : 30_000,
   });
-  const assignees = useQuery({ queryKey: ["incidentAssignees"], queryFn: fetchIncidentAssignees, enabled: canView });
+  const assignees = useQuery({ queryKey: ["incidentAssignees"], queryFn: fetchIncidentAssignees, enabled: canView && canReviewIncidents });
   const mutation = useMutation({
     mutationFn: ({ item, input }: QueueMutationVariables) => updateActionItem(item.id, input),
     onSuccess: (updated, variables) => {
@@ -130,13 +160,8 @@ export default function ManagerActionQueue({ onNavigate }: { onNavigate?: (tab: 
         },
       );
       void client.invalidateQueries({ queryKey: ["manager-action-queue"] });
-      setNoteFor(null);
-      setNote("");
     },
   });
-  const handleToggleNote = useCallback((id: number) => {
-    setNoteFor((current) => current === id ? null : id);
-  }, []);
   const handleUpdate = useCallback((item: ActionItem, input: Parameters<typeof updateActionItem>[1]) => {
     mutation.mutate({ item, input, queryKey });
   }, [mutation.mutate, queryKey]);
@@ -162,21 +187,18 @@ export default function ManagerActionQueue({ onNavigate }: { onNavigate?: (tab: 
            {[...queueStatuses, "all"].map((value) => <option key={value} value={value}>{value === "all" ? "All" : value.replace("_", " ")}{value !== "all" ? ` (${counts[value] ?? 0})` : ""}</option>)}
         </select>
         <select aria-label="Filter action category" className="min-h-11 flex-1 rounded border border-border bg-background px-3 text-sm sm:min-h-9 sm:flex-none sm:text-xs" value={category} onChange={(e) => setCategory(e.target.value)}>
-          <option value="all">All sources</option>{Object.entries(labels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+           <option value="all">All sources</option>{availableLabels.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </select>
       </div>
       {query.isLoading ? <p className="py-8 text-center text-sm text-muted-foreground">Loading manager actions…</p> :
         query.isError ? <p className="py-8 text-center text-sm text-destructive">Could not load manager actions.</p> :
         items.length === 0 ? <p className="py-8 text-center text-sm text-muted-foreground">{filter === "open" ? "No open actions. The facility is caught up." : "No actions match these filters."}</p> :
          <div className="space-y-2">{items.map((item) => <ActionQueueItemCard
-           key={item.id}
+           key={`${item.id}:${item.version}`}
            item={item}
            assignees={assignees.data ?? []}
            mutationPending={mutation.isPending}
-           noteOpen={noteFor === item.id}
-           note={note}
-           onNoteChange={setNote}
-           onToggleNote={handleToggleNote}
+           mutationErrorAt={mutation.isError && mutation.variables?.item.id === item.id ? mutation.submittedAt : 0}
            onUpdate={handleUpdate}
            onNavigate={onNavigate}
          />)}</div>}

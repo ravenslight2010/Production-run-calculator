@@ -16,6 +16,8 @@ type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
 let pool: DbModule["pool"];
 let actionItemsTable: DbModule["actionItemsTable"];
+let auditLogsTable: DbModule["auditLogsTable"];
+let incidentsTable: DbModule["incidentsTable"];
 let dailySyncTable: DbModule["dailySyncTable"];
 let completedRunHistoryTable: DbModule["completedRunHistoryTable"];
 let finalizedOperationalReportsTable: DbModule["finalizedOperationalReportsTable"];
@@ -36,6 +38,7 @@ let baseUrl: string;
 const MANAGER = "operational-manager";
 const OPERATOR = "operational-operator";
 const SANDBOX_MANAGER = "operational-sandbox-manager";
+const QUEUE_MANAGER = "operational-queue-manager";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const REPORT_SIGNING_KEYRING = {
   activeKeyId: "test-current",
@@ -79,6 +82,8 @@ beforeAll(async () => {
   db = dbMod.db;
   pool = dbMod.pool;
   actionItemsTable = dbMod.actionItemsTable;
+  auditLogsTable = dbMod.auditLogsTable;
+  incidentsTable = dbMod.incidentsTable;
   dailySyncTable = dbMod.dailySyncTable;
   completedRunHistoryTable = dbMod.completedRunHistoryTable;
   finalizedOperationalReportsTable = dbMod.finalizedOperationalReportsTable;
@@ -119,17 +124,24 @@ beforeEach(async () => {
   process.env.OPERATIONAL_REPORT_SIGNING_KEYS = JSON.stringify(REPORT_SIGNING_KEYRING);
   clearUserValidityCache();
   clearSandboxCache();
-  await db.execute(sql`TRUNCATE ${actionItemsTable}, ${syncConflictLogsTable}, ${finalizedOperationalReportsTable}, ${completedRunHistoryTable}, ${dailySyncTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE ${auditLogsTable}, ${actionItemsTable}, ${incidentsTable}, ${syncConflictLogsTable}, ${finalizedOperationalReportsTable}, ${completedRunHistoryTable}, ${dailySyncTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
   await db.insert(usersTable).values([
     { id: MANAGER, username: MANAGER, passwordHash: "x" },
     { id: OPERATOR, username: OPERATOR, passwordHash: "x" },
     { id: SANDBOX_MANAGER, username: SANDBOX_MANAGER, passwordHash: "x", sandbox: true },
+    { id: QUEUE_MANAGER, username: QUEUE_MANAGER, passwordHash: "x" },
   ]);
+  await db.insert(rolesTable).values({
+    name: "queue-manager",
+    capabilities: ["manage-staff"],
+    builtin: false,
+  });
   await db.insert(userRolesTable).values([
     { userId: MANAGER, role: "manager" },
     { userId: OPERATOR, role: "operator" },
     { userId: SANDBOX_MANAGER, role: "manager" },
+    { userId: QUEUE_MANAGER, role: "queue-manager" },
   ]);
 });
 
@@ -158,6 +170,218 @@ function snapshot(run: Record<string, unknown>, casesNeeded = 100, date = "2026-
 }
 
 describe("operational report endpoints", () => {
+  it("reconciles a closed incident queue item without losing manager-owned history", async () => {
+    const incidentId = "queue-closed-incident";
+    const activeIncidentId = "queue-active-incident";
+    await db.insert(incidentsTable).values([
+      {
+        id: incidentId,
+        scope: "live",
+        source: "user_report",
+        screen: "Run",
+        appPlatform: "web",
+        context: { description: "Closed fixture" },
+        workflowState: "resolved",
+      },
+      {
+        id: activeIncidentId,
+        scope: "live",
+        source: "user_report",
+        screen: "Run",
+        appPlatform: "web",
+        context: { description: "Active fixture" },
+        workflowState: "new",
+      },
+    ]);
+    const [queueItem] = await db.insert(actionItemsTable).values({
+      scope: "live",
+      dedupKey: `incident:${incidentId}`,
+      category: "incident",
+      severity: "error",
+      title: "Old incident blocker",
+      description: "Old incident copy",
+      sourceType: "incident",
+      sourceId: incidentId,
+      sourcePath: `#incidents/${incidentId}`,
+      status: "deferred",
+      assigneeId: MANAGER,
+      assigneeName: MANAGER,
+      deferReason: "Waiting for source owner",
+      resolutionNote: "Prior handoff note",
+      version: 4,
+    }).returning();
+    const [activeQueueItem] = await db.insert(actionItemsTable).values({
+      scope: "live",
+      dedupKey: `incident:${activeIncidentId}`,
+      category: "incident",
+      severity: "warning",
+      title: "Active incident",
+      description: "Active fixture",
+      sourceType: "incident",
+      sourceId: activeIncidentId,
+      sourcePath: `#incidents/${activeIncidentId}`,
+      status: "resolved",
+    }).returning();
+    const [nonOwnedQueueItem] = await db.insert(actionItemsTable).values({
+      scope: "live",
+      dedupKey: "manual:incident-follow-up",
+      category: "incident",
+      severity: "warning",
+      title: "Manager-created incident follow-up",
+      description: "Must not be reconciled by source derivation",
+      sourceType: "incident",
+      sourceId: "not-a-derived-source",
+      sourcePath: "#incidents",
+      status: "open",
+    }).returning();
+
+    const response = await req(MANAGER, "GET", "/api/manager-action-queue?status=resolved&category=incident");
+    expect(response.status).toBe(200);
+    const body = await response.json() as { items: Array<Record<string, unknown>> };
+    expect(body.items).toContainEqual(expect.objectContaining({
+      id: queueItem!.id,
+      status: "resolved",
+      assigneeId: MANAGER,
+      deferReason: "Waiting for source owner",
+      resolutionNote: "Prior handoff note",
+      version: 5,
+    }));
+    expect(await db.select().from(actionItemsTable)
+      .where(eq(actionItemsTable.id, activeQueueItem!.id)))
+      .toMatchObject([{ status: "open", version: 2 }]);
+    expect(await db.select().from(actionItemsTable)
+      .where(eq(actionItemsTable.id, nonOwnedQueueItem!.id)))
+      .toMatchObject([{ status: "open", version: 1 }]);
+  });
+
+  it("requires transition text and persists queue updates with their audit record atomically", async () => {
+    const [queueItem] = await db.insert(actionItemsTable).values({
+      scope: "live",
+      dedupKey: "report:atomic-update",
+      category: "report",
+      severity: "warning",
+      title: "Atomic queue update",
+      description: "Fixture",
+      sourceType: "report",
+      sourceId: "atomic-update",
+      sourcePath: "#manager-action-queue",
+    }).returning();
+
+    expect((await req(MANAGER, "PATCH", `/api/manager-action-queue/${queueItem!.id}`, {
+      version: 1,
+      status: "deferred",
+    })).status).toBe(400);
+    expect((await req(MANAGER, "PATCH", `/api/manager-action-queue/${queueItem!.id}`, {
+      version: 1,
+      status: "resolved",
+    })).status).toBe(400);
+
+    await db.execute(sql`
+      CREATE FUNCTION reject_queue_audit() RETURNS trigger AS $$
+      BEGIN
+        IF NEW.action = 'manager_action_item_update' THEN
+          RAISE EXCEPTION 'forced audit failure';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql
+    `);
+    await db.execute(sql`
+      CREATE TRIGGER reject_queue_audit_trigger
+      BEFORE INSERT ON audit_logs
+      FOR EACH ROW EXECUTE FUNCTION reject_queue_audit()
+    `);
+    const failed = await req(MANAGER, "PATCH", `/api/manager-action-queue/${queueItem!.id}`, {
+      version: 1,
+      status: "deferred",
+      deferReason: "Waiting for maintenance",
+    });
+    expect(failed.status).toBe(500);
+    expect(await db.select().from(actionItemsTable).where(eq(actionItemsTable.id, queueItem!.id)))
+      .toMatchObject([{ status: "open", version: 1 }]);
+    await db.execute(sql`DROP TRIGGER reject_queue_audit_trigger ON audit_logs`);
+    await db.execute(sql`DROP FUNCTION reject_queue_audit()`);
+
+    const succeeded = await req(MANAGER, "PATCH", `/api/manager-action-queue/${queueItem!.id}`, {
+      version: 1,
+      status: "deferred",
+      deferReason: "Waiting for maintenance",
+    });
+    expect(succeeded.status).toBe(200);
+    expect(await succeeded.json()).toMatchObject({
+      item: { status: "deferred", deferReason: "Waiting for maintenance", version: 2 },
+    });
+    expect(await db.select().from(auditLogsTable)
+      .where(eq(auditLogsTable.resource, `action_item:${queueItem!.id}`)))
+      .toHaveLength(1);
+  });
+
+  it("enforces source capabilities and keeps assignments inside the request scope", async () => {
+    const [incidentItem] = await db.insert(actionItemsTable).values({
+      scope: "live",
+      dedupKey: "manual:restricted-incident",
+      category: "incident",
+      severity: "warning",
+      title: "Restricted incident",
+      description: "Capability fixture",
+      sourceType: "incident",
+      sourceId: "restricted-incident",
+      sourcePath: "#incidents/restricted-incident",
+      status: "open",
+    }).returning();
+    expect((await req(QUEUE_MANAGER, "PATCH", `/api/manager-action-queue/${incidentItem!.id}`, {
+      version: incidentItem!.version,
+      status: "in_progress",
+      assigneeId: "me",
+    })).status).toBe(403);
+
+    const [liveItem] = await db.insert(actionItemsTable).values({
+      scope: "live",
+      dedupKey: "manual:live-report",
+      category: "report",
+      severity: "warning",
+      title: "Live report",
+      description: "Scope fixture",
+      sourceType: "report",
+      sourceId: "live-report",
+      sourcePath: "#summary",
+      status: "open",
+    }).returning();
+    expect((await req(MANAGER, "PATCH", `/api/manager-action-queue/${liveItem!.id}`, {
+      version: liveItem!.version,
+      assigneeId: SANDBOX_MANAGER,
+    })).status).toBe(400);
+
+    const [sandboxItem] = await db.insert(actionItemsTable).values({
+      scope: "sandbox",
+      dedupKey: "manual:sandbox-report",
+      category: "report",
+      severity: "warning",
+      title: "Sandbox report",
+      description: "Scope fixture",
+      sourceType: "report",
+      sourceId: "sandbox-report",
+      sourcePath: "#summary",
+      status: "open",
+    }).returning();
+    expect((await req(SANDBOX_MANAGER, "PATCH", `/api/manager-action-queue/${sandboxItem!.id}`, {
+      version: sandboxItem!.version,
+      assigneeId: MANAGER,
+    })).status).toBe(400);
+    const claimed = await req(SANDBOX_MANAGER, "PATCH", `/api/manager-action-queue/${sandboxItem!.id}`, {
+      version: sandboxItem!.version,
+      status: "in_progress",
+      assigneeId: "me",
+    });
+    expect(claimed.status).toBe(200);
+    const claimedBody = await claimed.json() as { item: Record<string, unknown> };
+    expect(claimedBody.item).toMatchObject({
+      scope: "sandbox",
+      assigneeId: SANDBOX_MANAGER,
+      status: "in_progress",
+    });
+  });
+
   it("keeps resolved sync conflicts review-only and repairs old queue severity without losing manager metadata", async () => {
     const [conflict] = await db.insert(syncConflictLogsTable).values({
       scope: "live",
@@ -189,12 +413,12 @@ describe("operational report endpoints", () => {
       sourceType: "sync",
       sourceId: String(conflict!.id),
       sourcePath: "#sync-diagnostics",
-      status: "in_progress",
+      status: "resolved",
       assigneeId: "prior-manager",
       assigneeName: "Prior manager",
       deferReason: "Waiting for historical review",
       resolutionNote: "Reviewed during the prior shift",
-      version: 7,
+      version: 8,
     }).returning({ id: actionItemsTable.id });
 
     const queueResponse = await req(MANAGER, "GET", "/api/manager-action-queue?category=sync");
@@ -219,14 +443,14 @@ describe("operational report endpoints", () => {
       id: oldQueueItem!.id,
       dedupKey,
       severity: "warning",
-      title: "Review completed sync merge",
+      title: `Review completed sync merge #${conflict!.id}`,
       description: expect.stringContaining("Protected sync merge completed"),
       sourcePath: "#sync-diagnostics",
-      status: "in_progress",
+      status: "resolved",
       assigneeName: "Prior manager",
       deferReason: "Waiting for historical review",
       resolutionNote: "Reviewed during the prior shift",
-      version: 7,
+      version: 8,
     });
     expect(repaired?.description).toContain("Review sync history for context");
     expect(repaired?.description).toContain("not an active unsent-write failure");
@@ -236,12 +460,12 @@ describe("operational report endpoints", () => {
       .where(eq(actionItemsTable.id, oldQueueItem!.id));
     expect(persisted).toMatchObject([{
       severity: "warning",
-      status: "in_progress",
+      status: "resolved",
       assigneeId: "prior-manager",
       assigneeName: "Prior manager",
       deferReason: "Waiting for historical review",
       resolutionNote: "Reviewed during the prior shift",
-      version: 7,
+      version: 8,
     }]);
 
     const handoffResponse = await req(MANAGER, "GET", "/api/reports/handoff?date=2026-09-06");
