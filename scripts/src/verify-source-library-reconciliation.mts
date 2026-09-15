@@ -536,7 +536,10 @@ export type SourceLibraryPreflightOutput = {
   ok: boolean;
 };
 
+export const SOURCE_LIBRARY_PREFLIGHT_DIAGNOSTIC_VERSION = 1 as const;
+
 export type SourceLibraryPreflightDiagnostic = {
+  contractVersion: typeof SOURCE_LIBRARY_PREFLIGHT_DIAGNOSTIC_VERSION;
   database: SourceLibraryPreflightOutput["database"];
   expected: SourceLibraryPreflightOutput["expected"];
   observed: SourceLibraryPreflightOutput["observed"];
@@ -546,6 +549,36 @@ export type SourceLibraryPreflightDiagnostic = {
 
 const PREFLIGHT_DIAGNOSTIC_MAX_COUNT = 1_000_000;
 const PREFLIGHT_DIAGNOSTIC_MAX_FAILURES = 20;
+const PREFLIGHT_OUTPUT_KEYS = [
+  "verifier",
+  "environment",
+  "revision",
+  "capturedAt",
+  "healId",
+  "report",
+  "database",
+  "expected",
+  "observed",
+  "failures",
+  "ok",
+] as const;
+const PREFLIGHT_DIAGNOSTIC_KEYS = [
+  "contractVersion",
+  "database",
+  "expected",
+  "observed",
+  "failures",
+  "ok",
+] as const;
+const LEGACY_PREFLIGHT_DIAGNOSTIC_KEYS = PREFLIGHT_DIAGNOSTIC_KEYS.slice(1);
+
+function hasExactKeys(
+  value: Record<string, unknown>,
+  keys: readonly string[],
+): boolean {
+  const actual = Object.keys(value);
+  return actual.length === keys.length && keys.every((key) => actual.includes(key));
+}
 
 function boundedPreflightDiagnosticCount(value: unknown): value is number {
   return (
@@ -556,25 +589,45 @@ function boundedPreflightDiagnosticCount(value: unknown): value is number {
   );
 }
 
-/**
- * Reduce preflight output to operator-safe diagnostics.
- *
- * Release checkpoints may outlive the process that produced them, so they
- * must not retain the verifier's JSON payload. Keep only the database-shape
- * classification, bounded counts, marker state, and bounded failure names.
- */
-export function summarizeSourceLibraryPreflight(
+function parsePreflightFailures(
   value: unknown,
-): SourceLibraryPreflightDiagnostic | undefined {
+): Array<{ check: string; count: number }> | undefined {
+  if (!Array.isArray(value) || value.length > PREFLIGHT_DIAGNOSTIC_MAX_FAILURES) {
+    return undefined;
+  }
+  const failures = value.flatMap((failure) => {
+    if (
+      !isRecord(failure) ||
+      !hasExactKeys(failure, ["check", "count"]) ||
+      typeof failure.check !== "string" ||
+      !/^[A-Za-z0-9_-]{1,80}$/u.test(failure.check) ||
+      !boundedPreflightDiagnosticCount(failure.count)
+    ) {
+      return [];
+    }
+    return [{ check: failure.check, count: failure.count }];
+  });
+  return failures.length === value.length ? failures : undefined;
+}
+
+function parsePreflightDiagnosticFields(
+  value: Record<string, unknown>,
+): Omit<SourceLibraryPreflightDiagnostic, "contractVersion"> | undefined {
   if (
-    !isRecord(value) ||
-    value.verifier !== "source-library-reconciliation-preflight" ||
     (value.database !== "approved-matching" &&
       value.database !== "partial-fixture" &&
       value.database !== "unverified") ||
     !isRecord(value.expected) ||
+    !hasExactKeys(value.expected, ["poolRows", "aliases"]) ||
     !isRecord(value.observed) ||
-    !Array.isArray(value.failures) ||
+    !hasExactKeys(value.observed, [
+      "poolRows",
+      "aliasesExact",
+      "aliasesMissing",
+      "aliasesMismatched",
+      "markerPresent",
+      "markerValid",
+    ]) ||
     typeof value.ok !== "boolean" ||
     !boundedPreflightDiagnosticCount(value.expected.poolRows) ||
     !boundedPreflightDiagnosticCount(value.expected.aliases) ||
@@ -587,23 +640,8 @@ export function summarizeSourceLibraryPreflight(
   ) {
     return undefined;
   }
-
-  const failures = value.failures
-    .slice(0, PREFLIGHT_DIAGNOSTIC_MAX_FAILURES)
-    .flatMap((failure) => {
-      if (
-        !isRecord(failure) ||
-        typeof failure.check !== "string" ||
-        !/^[A-Za-z0-9_-]{1,80}$/u.test(failure.check) ||
-        !boundedPreflightDiagnosticCount(failure.count)
-      ) {
-        return [];
-      }
-      return [{ check: failure.check, count: failure.count }];
-    });
-
-  if (failures.length !== value.failures.length) return undefined;
-
+  const failures = parsePreflightFailures(value.failures);
+  if (failures === undefined) return undefined;
   return {
     database: value.database,
     expected: {
@@ -621,6 +659,90 @@ export function summarizeSourceLibraryPreflight(
     failures,
     ok: value.ok,
   };
+}
+
+/**
+ * Validate the checkpoint-facing diagnostic contract.
+ *
+ * New writers emit v1. Readers also accept the exact unversioned shape
+ * written by earlier release checks and normalize it to v1. Unknown keys,
+ * unsupported versions, and any recipe/alias/source payload are rejected.
+ */
+export function parseSourceLibraryPreflightDiagnostic(
+  value: unknown,
+): SourceLibraryPreflightDiagnostic | undefined {
+  if (!isRecord(value)) return undefined;
+  if (hasExactKeys(value, PREFLIGHT_DIAGNOSTIC_KEYS)) {
+    if (value.contractVersion !== SOURCE_LIBRARY_PREFLIGHT_DIAGNOSTIC_VERSION) {
+      return undefined;
+    }
+  } else if (!hasExactKeys(value, LEGACY_PREFLIGHT_DIAGNOSTIC_KEYS)) {
+    return undefined;
+  }
+  const fields = parsePreflightDiagnosticFields(value);
+  return fields === undefined
+    ? undefined
+    : { contractVersion: SOURCE_LIBRARY_PREFLIGHT_DIAGNOSTIC_VERSION, ...fields };
+}
+
+/**
+ * Reduce preflight output to operator-safe diagnostics.
+ *
+ * Release checkpoints may outlive the process that produced them, so they
+ * must not retain the verifier's JSON payload. Keep only the database-shape
+ * classification, bounded counts, marker state, and bounded failure names.
+ */
+export function summarizeSourceLibraryPreflight(
+  value: unknown,
+): SourceLibraryPreflightDiagnostic | undefined {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, PREFLIGHT_OUTPUT_KEYS) ||
+    value.verifier !== "source-library-reconciliation-preflight" ||
+    (value.environment !== "development" && value.environment !== "release") ||
+    typeof value.revision !== "string" ||
+    value.revision.length === 0 ||
+    value.revision.length > 128 ||
+    typeof value.capturedAt !== "string" ||
+    value.capturedAt.length === 0 ||
+    value.capturedAt.length > 128 ||
+    typeof value.healId !== "string" ||
+    value.healId.length === 0 ||
+    value.healId.length > 128 ||
+    !isRecord(value.report) ||
+    !hasExactKeys(value.report, [
+      "sha256",
+      "formatVersion",
+      "automaticProposals",
+      "stubs",
+    ]) ||
+    typeof value.report.sha256 !== "string" ||
+    !/^[a-f0-9]{64}$/u.test(value.report.sha256) ||
+    !boundedPreflightDiagnosticCount(value.report.formatVersion) ||
+    !boundedPreflightDiagnosticCount(value.report.automaticProposals) ||
+    !boundedPreflightDiagnosticCount(value.report.stubs) ||
+    (value.database !== "approved-matching" &&
+      value.database !== "partial-fixture" &&
+      value.database !== "unverified") ||
+    !isRecord(value.expected) ||
+    !isRecord(value.observed) ||
+    typeof value.ok !== "boolean" ||
+    !boundedPreflightDiagnosticCount(value.expected.poolRows) ||
+    !boundedPreflightDiagnosticCount(value.expected.aliases) ||
+    !boundedPreflightDiagnosticCount(value.observed.poolRows) ||
+    !boundedPreflightDiagnosticCount(value.observed.aliasesExact) ||
+    !boundedPreflightDiagnosticCount(value.observed.aliasesMissing) ||
+    !boundedPreflightDiagnosticCount(value.observed.aliasesMismatched) ||
+    typeof value.observed.markerPresent !== "boolean" ||
+    typeof value.observed.markerValid !== "boolean"
+  ) {
+    return undefined;
+  }
+
+  const fields = parsePreflightDiagnosticFields(value);
+  return fields === undefined
+    ? undefined
+    : { contractVersion: SOURCE_LIBRARY_PREFLIGHT_DIAGNOSTIC_VERSION, ...fields };
 }
 
 async function selectPoolIds(

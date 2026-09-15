@@ -51,6 +51,7 @@ import {
   DEFAULT_FROM_DATE,
   DEFAULT_HEAL_ID,
   DEFAULT_REPORT,
+  parseSourceLibraryPreflightDiagnostic as parseStoredSourceLibraryPreflightDiagnostic,
 } from "./verify-source-library-reconciliation.mts";
 
 const sourceReportSha256 = createHash("sha256")
@@ -504,6 +505,16 @@ async function run(): Promise<void> {
   const approvedPreflight = parseSourceLibraryPreflightDiagnostic(
     `${JSON.stringify({
       verifier: "source-library-reconciliation-preflight",
+      environment: "development",
+      revision: "development-unbound",
+      capturedAt: "2026-09-08T12:00:00.000Z",
+      healId: DEFAULT_HEAL_ID,
+      report: {
+        sha256: "a".repeat(64),
+        formatVersion: 1,
+        automaticProposals: 68,
+        stubs: 3,
+      },
       database: "approved-matching",
       expected: { poolRows: 68, aliases: 25 },
       observed: {
@@ -516,11 +527,10 @@ async function run(): Promise<void> {
       },
       failures: [],
       ok: true,
-      components: [{ ingredient: "must not be retained" }],
-      aliases: [{ old: "must not be retained" }],
     })}\n`,
   );
   assert.deepEqual(approvedPreflight, {
+    contractVersion: 1,
     database: "approved-matching",
     expected: { poolRows: 68, aliases: 25 },
     observed: {
@@ -534,14 +544,75 @@ async function run(): Promise<void> {
     failures: [],
     ok: true,
   });
+  const legacyPreflightInput: Record<string, unknown> = {
+    ...approvedPreflight,
+  };
+  delete legacyPreflightInput.contractVersion;
+  const legacyPreflight = parseStoredSourceLibraryPreflightDiagnostic(
+    legacyPreflightInput,
+  );
+  assert.deepEqual(
+    legacyPreflight,
+    approvedPreflight,
+    "the reader must normalize the exact pre-v1 checkpoint shape without accepting extra fields",
+  );
   assert.doesNotMatch(
     JSON.stringify(approvedPreflight),
     /ingredient|must not be retained/,
     "release diagnostics must not retain recipe payloads or alias identities",
   );
+  const unsafePreflight = parseSourceLibraryPreflightDiagnostic(
+    `${JSON.stringify({
+      verifier: "source-library-reconciliation-preflight",
+      environment: "development",
+      revision: "development-unbound",
+      capturedAt: "2026-09-08T12:00:00.000Z",
+      healId: DEFAULT_HEAL_ID,
+      report: {
+        sha256: "a".repeat(64),
+        formatVersion: 1,
+        automaticProposals: 68,
+        stubs: 3,
+      },
+      database: "approved-matching",
+      expected: { poolRows: 68, aliases: 25 },
+      observed: {
+        poolRows: 68,
+        aliasesExact: 25,
+        aliasesMissing: 0,
+        aliasesMismatched: 0,
+        markerPresent: true,
+        markerValid: true,
+      },
+      failures: [],
+      ok: true,
+      components: [{ ingredient: "must be rejected" }],
+    })}\n`,
+  );
+  assert.equal(unsafePreflight.database, "unverified");
+  assert.deepEqual(
+    unsafePreflight.failures,
+    [{ check: "output", count: 1 }],
+    "unknown recipe/source fields must fail closed rather than be silently ignored",
+  );
+  assert.equal(
+    unsafePreflight.contractVersion,
+    1,
+    "fallback diagnostics must still use the current bounded contract",
+  );
   const partialPreflight = parseSourceLibraryPreflightDiagnostic(
     `${JSON.stringify({
       verifier: "source-library-reconciliation-preflight",
+      environment: "development",
+      revision: "development-unbound",
+      capturedAt: "2026-09-08T12:00:00.000Z",
+      healId: DEFAULT_HEAL_ID,
+      report: {
+        sha256: "a".repeat(64),
+        formatVersion: 1,
+        automaticProposals: 68,
+        stubs: 3,
+      },
       database: "partial-fixture",
       expected: { poolRows: 68, aliases: 25 },
       observed: {

@@ -934,6 +934,37 @@ async function runSourceLibraryPreflightFanoutScenario(): Promise<void> {
   const browserMarker = join(markerDir, "browser");
   const sourcePreflightLabel =
     "source-library reconciliation database preflight";
+  const unsafePreflightOutput = JSON.stringify({
+    verifier: "source-library-reconciliation-preflight",
+    environment: "development",
+    revision: "development-unbound",
+    capturedAt: "2026-09-08T12:00:00.000Z",
+    healId: "source-library-reconciliation-2026-08-26-v2",
+    report: {
+      sha256: "a".repeat(64),
+      formatVersion: 1,
+      automaticProposals: 68,
+      stubs: 3,
+    },
+    database: "partial-fixture",
+    expected: { poolRows: 68, aliases: 25 },
+    observed: {
+      poolRows: 21,
+      aliasesExact: 25,
+      aliasesMissing: 0,
+      aliasesMismatched: 0,
+      markerPresent: true,
+      markerValid: true,
+    },
+    failures: [{ check: "databaseShape", count: 47 }],
+    ok: false,
+    components: [{ ingredient: "must not reach checkpoint state" }],
+  });
+  const preflightScript = [
+    `console.log(${JSON.stringify(unsafePreflightOutput)});`,
+    "console.error('source-library preflight rejected partial fixture');",
+    "process.exit(1);",
+  ].join("");
   const expensiveGateScript = [
     "const fs = require('node:fs');",
     "fs.writeFileSync(process.env.RELEASE_FANOUT_MARKER, 'started\\n');",
@@ -945,10 +976,7 @@ async function runSourceLibraryPreflightFanoutScenario(): Promise<void> {
       command: process.execPath,
       args: [
         "-e",
-        [
-          "console.error('source-library preflight rejected partial fixture');",
-          "process.exit(1);",
-        ].join(" "),
+        preflightScript,
         "--",
         "--preflight",
       ],
@@ -1015,6 +1043,7 @@ async function runSourceLibraryPreflightFanoutScenario(): Promise<void> {
         passed: boolean;
         status: string;
         blockedBy?: string[];
+        sourceLibraryPreflight?: Record<string, unknown>;
       }>;
     };
     assert.deepEqual(
@@ -1036,6 +1065,31 @@ async function runSourceLibraryPreflightFanoutScenario(): Promise<void> {
         ["browser smoke tests", false, "BLOCKED", [sourcePreflightLabel]],
       ],
       "the checkpoint must preserve the failed preflight and every blocked dependent gate",
+    );
+    const retainedPreflight = checkpoint.results[0]?.sourceLibraryPreflight;
+    assert.deepEqual(
+      retainedPreflight,
+      {
+        contractVersion: 1,
+        database: "unverified",
+        expected: { poolRows: 0, aliases: 0 },
+        observed: {
+          poolRows: 0,
+          aliasesExact: 0,
+          aliasesMissing: 0,
+          aliasesMismatched: 0,
+          markerPresent: false,
+          markerValid: false,
+        },
+        failures: [{ check: "output", count: 1 }],
+        ok: false,
+      },
+      "checkpoint state must retain only the versioned bounded diagnostic",
+    );
+    assert.doesNotMatch(
+      JSON.stringify(retainedPreflight),
+      /ingredient|components|source-library-reconciliation-2026-08-26-v2/i,
+      "recipe/source payloads must not cross the checkpoint contract boundary",
     );
 
     const checkpointReport = await readFile(

@@ -22,7 +22,9 @@ import {
   DEFAULT_FROM_DATE,
   DEFAULT_HEAL_ID,
   DEFAULT_REPORT,
+  SOURCE_LIBRARY_PREFLIGHT_DIAGNOSTIC_VERSION,
   computeSourceLibraryEvidenceId,
+  parseSourceLibraryPreflightDiagnostic as parseStoredSourceLibraryPreflightDiagnostic,
   parseSourceLibraryEvidenceEnvironment,
   summarizeSourceLibraryPreflight,
   type SourceLibraryEvidenceEnvironment,
@@ -2281,6 +2283,7 @@ export function runStep(
 const unverifiedSourceLibraryPreflight = (
   check: string,
 ): SourceLibraryPreflightDiagnostic => ({
+  contractVersion: SOURCE_LIBRARY_PREFLIGHT_DIAGNOSTIC_VERSION,
   database: "unverified",
   expected: { poolRows: 0, aliases: 0 },
   observed: {
@@ -2776,7 +2779,28 @@ async function readCheckpoint(
     ) {
       throw new Error(STALE_CHECKPOINT_MESSAGE);
     }
-    return checkpoint as ReleaseCheckpoint;
+    const results = checkpoint.results.map((result) => {
+      if (
+        result === null ||
+        typeof result !== "object" ||
+        Array.isArray(result)
+      ) {
+        throw new Error(DAMAGED_CHECKPOINT_MESSAGE);
+      }
+      const candidate = result as Record<string, unknown>;
+      if (!("sourceLibraryPreflight" in candidate)) return result;
+      const diagnostic = parseStoredSourceLibraryPreflightDiagnostic(
+        candidate.sourceLibraryPreflight,
+      );
+      if (
+        candidate.label !== SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL ||
+        diagnostic === undefined
+      ) {
+        throw new Error(DAMAGED_CHECKPOINT_MESSAGE);
+      }
+      return { ...result, sourceLibraryPreflight: diagnostic };
+    });
+    return { ...checkpoint, results } as ReleaseCheckpoint;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     if (
