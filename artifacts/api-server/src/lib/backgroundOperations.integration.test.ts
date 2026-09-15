@@ -502,6 +502,42 @@ describe("background operation PostgreSQL reconnection", () => {
     expect(await db.select().from(scheduledAlertRecordsTable)).toHaveLength(1);
   });
 
+  it("keeps one queued scheduled job when enqueue confirmation is lost", async () => {
+    const now = Date.parse("2030-04-01T12:00:00.000Z");
+    await db.insert(dailySyncTable).values({
+      date: ALERT_DATE,
+      scope: SCOPE,
+      data: { dayState: { date: ALERT_DATE, runs: [] }, runValues: {} },
+    });
+
+    let enqueueAttempts = 0;
+    let retryPid: number | undefined;
+    const result = await runBackgroundOperation("web-push-schedule", async () => {
+      enqueueAttempts += 1;
+      const enqueueResult = await enqueueScheduledWebPushAlerts(now);
+      if (enqueueAttempts === 1) await loseCommittedReply();
+      return enqueueResult;
+    }, {
+      delay: async () => { retryPid = await freshBackendPid(); },
+    });
+
+    expect(enqueueAttempts).toBe(2);
+    expect(retryPid).toBeTypeOf("number");
+    expect(result).toEqual({ examined: 1, enqueued: 0 });
+
+    const jobs = await db.select().from(serverJobsTable);
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]).toMatchObject({
+      scope: SCOPE,
+      actorId: "system:scheduled-alert-scheduler",
+      type: "scheduled-evaluation",
+      idempotencyKey: `scheduled-evaluation:${ALERT_DATE}:${now}`,
+      status: "queued",
+      attempt: 0,
+    });
+    expect(await db.select().from(serverJobAttemptsTable)).toHaveLength(0);
+  });
+
   it("keeps rollover and scheduled-job effects single after committed replies are lost", async () => {
     const now = ROLLOVER_NOW;
     const alertNow = Date.now();
