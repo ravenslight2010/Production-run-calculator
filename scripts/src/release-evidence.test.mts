@@ -815,6 +815,54 @@ async function run(): Promise<void> {
     /\.source-library-reconciliation\.json\.pending$/,
     "failed release gates must not overwrite retained source-library evidence",
   );
+  const sourceBlockedLabels = releaseGateLabelsForMode("standard");
+  const blockedSourceReport = formatReleaseReport(
+    sourceBlockedLabels.map((label) => ({
+      label,
+      status:
+        label === "source-library reconciliation verification"
+          ? ("BLOCKED" as const)
+          : ("PASS" as const),
+      elapsedMs: 100,
+    })),
+    "standard",
+    new Set(),
+    {
+      revision: "current-revision",
+      environment: "disposable release test",
+      sourceLibraryEnvironment: "development",
+      sourceLibraryRevision: "current-revision",
+      decision: "NO-GO",
+    },
+  );
+  assert.doesNotThrow(
+    () =>
+      validateReleaseReport(blockedSourceReport, {
+        currentRevision: "current-revision",
+        expectedMode: "standard",
+        expectedLabels: sourceBlockedLabels,
+      }),
+    "a failed source capture must remain an explicit blocked NO-GO, not partial passing metadata",
+  );
+  const missingSourceEvidenceRoot = await fixture(
+    RELEASE_EVIDENCE_ALLOWLIST.filter(
+      (file) => file !== SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
+    ),
+    blockedSourceReport,
+  );
+  try {
+    await assert.rejects(
+      verifyReleaseEvidence(missingSourceEvidenceRoot, {
+        currentRevision: "current-revision",
+        expectedMode: "standard",
+        expectedLabels: sourceBlockedLabels,
+      }),
+      /Required release evidence is missing:[\s\S]*source-library-reconciliation\.json/,
+      "release evidence verification must block when a failed capture produced no source evidence",
+    );
+  } finally {
+    await rm(missingSourceEvidenceRoot, { recursive: true, force: true });
+  }
   assert.equal(
     defaultReleaseEvidenceDir("standard"),
     "release-evidence",

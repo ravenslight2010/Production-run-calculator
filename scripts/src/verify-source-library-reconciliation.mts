@@ -1381,7 +1381,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
       outputArgument >= 0 && process.argv[outputArgument + 1]
         ? path.resolve(process.cwd(), process.argv[outputArgument + 1])
         : undefined;
-    if (outputPath) {
+    // A failed production capture is not evidence. In particular, do not leave
+    // a failure-shaped JSON file for the importer or release checker to treat
+    // as a retained artifact. Development verifier failures still write their
+    // bounded diagnostic because the fixture tests use that output to explain
+    // a failed gate.
+    if (outputPath && !process.argv.includes("--capture-production")) {
       try {
         fs.writeFileSync(outputPath, `${JSON.stringify(output)}\n`, "utf8");
       } catch {

@@ -23,6 +23,9 @@ const rootDir = path.resolve(new URL("../../", import.meta.url).pathname);
 const verifierPath = path.resolve(
   new URL("./verify-source-library-reconciliation.mts", import.meta.url).pathname,
 );
+const importerPath = path.resolve(
+  new URL("./import-source-library-reconciliation-evidence.mts", import.meta.url).pathname,
+);
 const tsxPath = path.resolve(rootDir, "scripts/node_modules/tsx/dist/cli.mjs");
 
 assert.equal(report.proposals.length, 68);
@@ -541,12 +544,13 @@ export async function resolve(specifier, context, nextResolve) {
 }
 `;
 
-function runVerifierCli(
+function runScriptCli(
+  scriptPath: string,
   args: readonly string[],
   env: Record<string, string>,
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolveRun, reject) => {
-    const child = spawn(process.execPath, [tsxPath, verifierPath, ...args], {
+    const child = spawn(process.execPath, [tsxPath, scriptPath, ...args], {
       cwd: rootDir,
       env: { ...process.env, ...env },
       stdio: ["ignore", "pipe", "pipe"],
@@ -564,6 +568,13 @@ function runVerifierCli(
       resolveRun({ code: code ?? 1, stdout, stderr }),
     );
   });
+}
+
+function runVerifierCli(
+  args: readonly string[],
+  env: Record<string, string>,
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  return runScriptCli(verifierPath, args, env);
 }
 
 function assertBoundedCliEvidence(value: Record<string, unknown>) {
@@ -780,6 +791,62 @@ try {
   ) as Record<string, unknown>;
   assert.equal(partialOutput.database, "partial-fixture");
   assert.equal(partialOutput.ok, false);
+
+  const failedCaptureOutputPath = path.join(cliRoot, "failed-production-capture.json");
+  const failedImportOutputPath = path.join(cliRoot, "failed-production-import.json");
+  const failedCaptureResult = await runVerifierCli(
+    [
+      "--report",
+      reportPath,
+      "--heal-id",
+      "source-library-reconciliation-2026-08-26-v1",
+      "--from-date",
+      "2026-08-26",
+      "--capture-production",
+      "--environment",
+      "release",
+      "--revision",
+      "a".repeat(40),
+      "--output",
+      failedCaptureOutputPath,
+    ],
+    { DATABASE_URL: "" },
+  );
+  assert.equal(failedCaptureResult.code, 1);
+  assert.match(
+    failedCaptureResult.stdout,
+    /requires DATABASE_URL for the read-only production database/,
+  );
+  assert.equal(
+    fs.existsSync(failedCaptureOutputPath),
+    false,
+    "a failed production capture must not create an evidence file",
+  );
+
+  const failedImportResult = await runScriptCli(
+    importerPath,
+    [
+      "--input",
+      failedCaptureOutputPath,
+      "--output",
+      failedImportOutputPath,
+      "--report",
+      reportPath,
+      "--heal-id",
+      "source-library-reconciliation-2026-08-26-v1",
+      "--from-date",
+      "2026-08-26",
+      "--revision",
+      "a".repeat(40),
+    ],
+    {},
+  );
+  assert.equal(failedImportResult.code, 1);
+  assert.equal(
+    fs.existsSync(failedImportOutputPath),
+    false,
+    "the importer must not create retained evidence when capture input is absent",
+  );
 } finally {
   await rm(cliRoot, { recursive: true, force: true });
 }
