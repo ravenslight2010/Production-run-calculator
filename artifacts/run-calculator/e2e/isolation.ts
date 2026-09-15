@@ -197,6 +197,8 @@ export async function cleanupTestUsers(
   usernames: Iterable<string>,
 ): Promise<void> {
   for (const username of usernames) {
+    // The SQL text is constant and pg sends username separately as bind $1.
+    // nosemgrep: javascript.express.db.pg-express.pg-express
     await db.query("DELETE FROM users WHERE username = $1", [username]);
   }
 }
