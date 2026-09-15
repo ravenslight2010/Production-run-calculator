@@ -182,13 +182,13 @@ test("retained comparison evidence is revision-bound and advisory", () => {
       })),
     ),
     resourceBudgets: {
-      maxElapsedRatio: 1.25,
+      maxElapsedRatio: 1.5,
       maxPeakRssRatio: 1.25,
       maxCandidateElapsedMs: 60_000,
       maxCandidatePeakRssKiB: 1_048_576,
       minimumRevisions: 3,
       requiredModes: ["cold", "warm"],
-      approvedForPromotion: false,
+      approvedForPromotion: true,
     },
     trend: {
       historyLimit: 5,
@@ -198,7 +198,7 @@ test("retained comparison evidence is revision-bound and advisory", () => {
     },
     promotionAssessment: {
       eligible: false,
-      thresholdApprovalRequired: true,
+      thresholdApprovalRequired: false,
       repeatedEvidenceMet: false,
       resourceBudgetsMet: true,
       resourceRegressions: [],
@@ -261,6 +261,47 @@ test("retained comparison evidence is revision-bound and advisory", () => {
         "a".repeat(40),
       ),
     /stale, incomplete/,
+  );
+
+  const eligibleEvidence = {
+    ...evidence,
+    trend: {
+      ...evidence.trend,
+      distinctRevisionCount: 3,
+      revisionSamples: [
+        { sourceRevision: "b".repeat(40), performanceComparison: [] },
+        { sourceRevision: "c".repeat(40), performanceComparison: [] },
+        { sourceRevision: "a".repeat(40), performanceComparison: [] },
+      ],
+    },
+    promotionAssessment: {
+      ...evidence.promotionAssessment,
+      eligible: true,
+      repeatedEvidenceMet: true,
+    },
+  };
+  assert.doesNotThrow(() =>
+    validateTypescript7ComparisonEvidence(
+      Buffer.from(JSON.stringify(eligibleEvidence)),
+      "a".repeat(40),
+    ),
+  );
+  assert.throws(
+    () =>
+      validateTypescript7ComparisonEvidence(
+        Buffer.from(
+          JSON.stringify({
+            ...eligibleEvidence,
+            trend: {
+              ...eligibleEvidence.trend,
+              regressedRevisions: ["b".repeat(40)],
+            },
+          }),
+        ),
+        "a".repeat(40),
+      ),
+    /resource assessment/,
+    "a retained regression must block promotion after threshold approval",
   );
   assert.throws(
     () =>

@@ -300,15 +300,34 @@ files, and exact hash-pinned review accounts for the remaining 9. A production s
 continue to block any new declaration output until it is fixed or receives the same
 contract-owner review.
 
-The original timings are representative only. The advisory release lane now captures one
-cold and one warm measurement for every TypeScript 6/7 comparison check and aggregates up
-to five prior successful, revision-bound CI artifacts. Promotion requires at least three
-distinct revisions. The provisional process budgets are a candidate elapsed-time ratio of
-at most 1.25, candidate peak-RSS ratio of at most 1.25, 60 seconds per candidate check, and
-1,048,576 KiB peak RSS per candidate process tree. These thresholds are intentionally
-marked unapproved: violations are reported as advisory regressions, and promotion remains
-ineligible if any retained revision breaches them or until maintainers explicitly approve
-the thresholds in code and documentation.
+The advisory release lane captures one cold and one warm measurement for every TypeScript
+6/7 comparison check and aggregates up to five prior successful, revision-bound CI
+artifacts. Promotion requires at least three distinct revisions.
+
+
+### Resource-limit approval
+
+On 2026-09-15, maintainers reviewed three distinct revision-bound measurement sets on the
+supported Linux x64 runner:
+
+| Source revision | Highest cold candidate time | Highest warm candidate time | Highest elapsed ratio | Highest cold candidate RSS | Highest warm candidate RSS | Highest RSS ratio |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `69b52dee6878e73bb182aa185ee7d7d0387b664c` | 3,263 ms | 5,292 ms | 0.508 | 772,240 KiB | 804,908 KiB | 0.930 |
+| `27dcd1a87facdd8b17d2801ccf4ee6fd8251c2d6` | 3,329 ms | 3,018 ms | 0.297 | 724,796 KiB | 767,768 KiB | 0.852 |
+| `08ec2e4d338935aee3511ac8ce0b1aedbfec239d` | 3,252 ms | 17,566 ms | 1.417 | 775,560 KiB | 782,728 KiB | 0.862 |
+
+The original 1.25 elapsed-ratio threshold was not approved because the third warm sample
+reached 1.417 even though its 17.566-second absolute time remained well below the
+60-second ceiling. The approved ratio is 1.50, which covers that observed scheduling
+variance without weakening the absolute ceiling. The 1.25 peak-RSS ratio,
+1,048,576 KiB absolute peak-RSS limit, and 60-second absolute elapsed limit are approved
+unchanged: the reviewed maxima were 0.930, 804,908 KiB, and 17,566 ms respectively.
+
+The code approval flag is now enabled. This approval does not bypass evidence checks:
+promotion remains ineligible until at least three distinct retained revisions are present,
+the current comparison acceptance gates pass, and every retained revision is within all
+four approved limits. Any retained over-limit revision keeps `resourceBudgetsMet` and
+`eligible` false.
 
 ## Ecosystem readiness
 

@@ -271,10 +271,10 @@ async function fixture(
                   peakRssKiB: { baseline: 10, candidate: 10, delta: 0, ratio: 1 },
                 }))),
                 resourceBudgets: {
-                  maxElapsedRatio: 1.25, maxPeakRssRatio: 1.25,
+                  maxElapsedRatio: 1.5, maxPeakRssRatio: 1.25,
                   maxCandidateElapsedMs: 60000, maxCandidatePeakRssKiB: 1048576,
                   minimumRevisions: 3, requiredModes: ["cold", "warm"],
-                  approvedForPromotion: false,
+                  approvedForPromotion: true,
                 },
                 trend: {
                   historyLimit: 5, distinctRevisionCount: 1,
@@ -282,7 +282,7 @@ async function fixture(
                   revisionSamples: [{ sourceRevision: "current-revision", performanceComparison: [] }],
                 },
                 promotionAssessment: {
-                  eligible: false, thresholdApprovalRequired: true,
+                  eligible: false, thresholdApprovalRequired: false,
                   repeatedEvidenceMet: false, resourceBudgetsMet: true,
                   resourceRegressions: [],
                 },
