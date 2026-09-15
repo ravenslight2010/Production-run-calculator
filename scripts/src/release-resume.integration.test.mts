@@ -922,6 +922,172 @@ async function runIndependentFailureFanoutScenario(): Promise<void> {
   );
 }
 
+async function runSourceLibraryPreflightFanoutScenario(): Promise<void> {
+  const evidenceDir = await mkdtemp(
+    join(tmpdir(), "release-resume-source-preflight-"),
+  );
+  const markerDir = await mkdtemp(
+    join(tmpdir(), "release-resume-source-preflight-marker-"),
+  );
+  const apiMarker = join(markerDir, "api");
+  const releaseTestMarker = join(markerDir, "release-test");
+  const browserMarker = join(markerDir, "browser");
+  const sourcePreflightLabel =
+    "source-library reconciliation database preflight";
+  const expensiveGateScript = [
+    "const fs = require('node:fs');",
+    "fs.writeFileSync(process.env.RELEASE_FANOUT_MARKER, 'started\\n');",
+    "console.log(`EXPENSIVE_GATE_STARTED ${process.env.RELEASE_FANOUT_KIND}`);",
+  ].join("");
+  const steps: FixtureStep[] = [
+    {
+      label: sourcePreflightLabel,
+      command: process.execPath,
+      args: [
+        "-e",
+        [
+          "console.error('source-library preflight rejected partial fixture');",
+          "process.exit(1);",
+        ].join(" "),
+        "--",
+        "--preflight",
+      ],
+      stage: "source-library-preflight",
+      dependsOn: [],
+    },
+    {
+      label: "API integration tests (release shard 2/7)",
+      command: process.execPath,
+      args: ["-e", expensiveGateScript, "api-release-shard"],
+      env: {
+        RELEASE_FANOUT_MARKER: apiMarker,
+        RELEASE_FANOUT_KIND: "api-release-shard",
+      },
+      group: "api-test-shards",
+      stage: "release-tests",
+      dependsOn: [sourcePreflightLabel],
+    },
+    {
+      label: "run calculator tests",
+      command: process.execPath,
+      args: ["-e", expensiveGateScript, "release-test-suite"],
+      env: {
+        RELEASE_FANOUT_MARKER: releaseTestMarker,
+        RELEASE_FANOUT_KIND: "release-test-suite",
+      },
+      stage: "release-tests",
+      dependsOn: [sourcePreflightLabel],
+    },
+    {
+      label: "browser smoke tests",
+      command: process.execPath,
+      args: ["-e", expensiveGateScript, "browser-smoke"],
+      env: {
+        RELEASE_FANOUT_MARKER: browserMarker,
+        RELEASE_FANOUT_KIND: "browser-smoke",
+      },
+      stage: "browser-smoke",
+      concurrencyLimit: 1,
+      dependsOn: [sourcePreflightLabel],
+    },
+  ];
+
+  try {
+    const result = await runReleaseCheck(evidenceDir, steps);
+    assert.equal(result.code, 1, result.output);
+    assert.match(
+      result.output,
+      /FAIL source-library reconciliation database preflight/,
+      "the partial source-library fixture must fail at the preflight boundary",
+    );
+    for (const marker of [apiMarker, releaseTestMarker, browserMarker]) {
+      await assert.rejects(
+        readFile(marker, "utf8"),
+        "a source-library preflight failure must not start dependent gates",
+      );
+    }
+
+    const checkpoint = JSON.parse(
+      await readFile(join(evidenceDir, "release-check-state.json"), "utf8"),
+    ) as {
+      results: Array<{
+        label: string;
+        passed: boolean;
+        status: string;
+        blockedBy?: string[];
+      }>;
+    };
+    assert.deepEqual(
+      checkpoint.results.map(({ label, passed, status, blockedBy }) => [
+        label,
+        passed,
+        status,
+        blockedBy,
+      ]),
+      [
+        [sourcePreflightLabel, false, "FAIL", undefined],
+        [
+          "API integration tests (release shard 2/7)",
+          false,
+          "BLOCKED",
+          [sourcePreflightLabel],
+        ],
+        ["run calculator tests", false, "BLOCKED", [sourcePreflightLabel]],
+        ["browser smoke tests", false, "BLOCKED", [sourcePreflightLabel]],
+      ],
+      "the checkpoint must preserve the failed preflight and every blocked dependent gate",
+    );
+
+    const checkpointReport = await readFile(
+      join(evidenceDir, "release-check-checkpoint.md"),
+      "utf8",
+    );
+    for (const label of [
+      sourcePreflightLabel,
+      "API integration tests (release shard 2/7)",
+      "run calculator tests",
+      "browser smoke tests",
+    ]) {
+      assert.match(
+        checkpointReport,
+        new RegExp(
+          `\\| ${escapeRegExp(label)} \\| ${
+            label === sourcePreflightLabel ? "FAIL" : "BLOCKED"
+          } \\|`,
+        ),
+        `checkpoint report must record ${label}`,
+      );
+    }
+    assert.match(
+      checkpointReport,
+      /Blocked gates: API integration tests \(release shard 2\/7\) \(blocked by source-library reconciliation database preflight\); run calculator tests \(blocked by source-library reconciliation database preflight\); browser smoke tests \(blocked by source-library reconciliation database preflight\)/,
+      "checkpoint report must identify the source preflight as the common blocker",
+    );
+
+    const executionLog = await readFile(
+      join(evidenceDir, "release-check.log"),
+      "utf8",
+    );
+    assert.match(
+      executionLog,
+      /source-library preflight rejected partial fixture/,
+      "the execution log must retain the failing partial-fixture preflight output",
+    );
+    assert.doesNotMatch(
+      executionLog,
+      /EXPENSIVE_GATE_STARTED (api-release-shard|release-test-suite|browser-smoke)/,
+      "the execution log must prove no expensive dependent command started",
+    );
+  } finally {
+    await rm(evidenceDir, { recursive: true, force: true });
+    await rm(markerDir, { recursive: true, force: true });
+  }
+
+  console.log(
+    "Source-library preflight fan-out scenario passed (partial fixture blocks API, release-test, and browser gates).",
+  );
+}
+
 async function getCurrentRevision(): Promise<string> {
   return new Promise((resolveRevision, reject) => {
     execFile("git", ["rev-parse", "HEAD"], { cwd: rootDir }, (error, stdout) =>
@@ -1753,6 +1919,7 @@ if (process.env.RELEASE_STOPPED_SUMMARY_ONLY === "1") {
   await runOnboardingGuardStopScenario();
   await runParallelStageScenario();
   await runIndependentFailureFanoutScenario();
+  await runSourceLibraryPreflightFanoutScenario();
   await runApiShardConcurrencyScenario();
   await runParallelResumeScenario();
   await runFullModeScenario();
