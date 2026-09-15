@@ -11,6 +11,7 @@ import {
   initialResetRequiresReload,
   useHomeSyncCoordination,
 } from "../hooks/useHomeSyncCoordination";
+import { consumeForegroundRecoveryResponse } from "../foregroundRecoveryResponse";
 import { closeTopmostImportDialog, useHomeImportDialogs } from "../hooks/useHomeImportDialogs";
 import {
   applyTemporaryOverrides,
@@ -9498,53 +9499,33 @@ export default function Home() {
             { cache: "no-store" },
             10_000,
           );
-          if (!isCurrentRecovery()) return false;
-          if (!res.ok) throw new Error(`foreground sync GET failed: ${res.status}`);
-          const parsedRecovery = await readCurrentRecoveryJson(res, isCurrentRecovery);
-          if (!parsedRecovery.current) return false;
-          const body = parsedRecovery.body as SyncPayload | {
-            unchanged?: boolean;
-            snapshotId?: string;
-            canonicalRevision?: number;
-          } | null;
-          if (body && typeof body === "object" && "unchanged" in body && body.unchanged === true) {
-            if (!isUnchangedSyncResponse(body)) {
-              throw new Error("foreground sync GET returned a malformed unchanged response");
-            }
-            const unchangedSnapshot = body.snapshotId;
-            if (!isValidSyncSnapshotId(unchangedSnapshot)) {
-              throw new Error("foreground sync GET returned an invalid snapshot identity");
-            }
-            if (unchangedSnapshot !== snapshot) {
-              throw new Error("foreground sync GET unchanged identity does not match its request");
-            }
-            adoptOperationalRevision(body.canonicalRevision);
-            syncSnapshotIdRef.current = unchangedSnapshot;
-            pushAcknowledgedRef.current = true;
+          const recovery = await consumeForegroundRecoveryResponse({
+            response: res,
+            expectedDate: todayStr(),
+            requestedSnapshotId: snapshot,
+            isCurrent: isCurrentRecovery,
+            adoptUnchanged: (body) => {
+              adoptOperationalRevision(body.canonicalRevision);
+              syncSnapshotIdRef.current = body.snapshotId;
+              pushAcknowledgedRef.current = true;
+            },
+            adoptCanonical: (payload, responseSnapshot) => {
+              adoptOperationalRevision(payload.canonicalRevision);
+              syncSnapshotIdRef.current = responseSnapshot;
+              if (payload.operationalProjection) {
+                adoptOperationalProjection(
+                  payload.operationalProjection,
+                  responseSnapshot,
+                );
+              }
+            },
+          });
+          if (!recovery.accepted) return false;
+          if (recovery.kind === "unchanged") {
             reconciled = true;
             return true;
           }
-          const responseCompleteness = res.headers.get("X-Sync-Response");
-          if (!isCanonicalRecoverySyncPayload(body, todayStr(), responseCompleteness)) {
-            throw new Error("foreground sync GET returned a malformed canonical response");
-          }
-          const responseSnapshot = res.headers.get("X-Sync-Snapshot");
-          if (!isValidSyncSnapshotId(responseSnapshot)) {
-            throw new Error("foreground sync GET returned an invalid snapshot identity");
-          }
-          const payload = body;
-          if (!await syncPayloadMatchesSnapshot(payload, responseSnapshot, { stripReadModel: true })) {
-            throw new Error("foreground sync GET snapshot does not match its canonical payload");
-          }
-          if (!isCurrentRecovery()) return false;
-          adoptOperationalRevision(payload.canonicalRevision);
-          syncSnapshotIdRef.current = responseSnapshot;
-          if (payload.operationalProjection) {
-            adoptOperationalProjection(
-              payload.operationalProjection,
-              responseSnapshot,
-            );
-          }
+          const payload = recovery.payload;
           // A missing row is a valid empty baseline, but do not erase local
           // offline work here. The normal stamped push path will seed it.
           if (!isCurrentRecovery()) return false;

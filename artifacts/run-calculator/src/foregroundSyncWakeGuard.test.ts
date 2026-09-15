@@ -18,12 +18,14 @@ const SYNC_MANAGER_FILE = path.join(__dirname, "hooks", "useHomeSyncCoordination
 const HOOK_FILE = path.join(__dirname, "hooks", "useAutoTrack.ts");
 const SCHEDULER_FILE = path.join(__dirname, "visibleTabScheduler.ts");
 const RECOVERY_STATUS_FILE = path.join(__dirname, "components", "ForegroundRecoveryStatus.tsx");
+const RECOVERY_RESPONSE_FILE = path.join(__dirname, "foregroundRecoveryResponse.ts");
 const homeSource = fs.readFileSync(HOME_FILE, "utf8");
 const lifecycleManagerSource = fs.readFileSync(LIFECYCLE_MANAGER_FILE, "utf8");
 const syncManagerSource = fs.readFileSync(SYNC_MANAGER_FILE, "utf8");
 const hookSource = fs.readFileSync(HOOK_FILE, "utf8");
 const schedulerSource = fs.readFileSync(SCHEDULER_FILE, "utf8");
 const recoveryStatusSource = fs.readFileSync(RECOVERY_STATUS_FILE, "utf8");
+const recoveryResponseSource = fs.readFileSync(RECOVERY_RESPONSE_FILE, "utf8");
 
 describe("foreground wake sync barrier", () => {
   it("pulls the date-scoped row through the established inbound merge before releasing auto-track", () => {
@@ -165,7 +167,9 @@ describe("foreground wake sync barrier", () => {
     expect(homeSource).toContain("syncPushGenerationRef.current += 1");
     expect(homeSource).toContain("controller.abort()");
     expect(homeSource).toContain("generation !== syncPushGenerationRef.current");
-    expect(homeSource).toContain("if (!res.ok) throw new Error(`foreground sync GET failed: ${res.status}`)");
+    expect(recoveryResponseSource).toContain(
+      "if (!response.ok) throw new Error(`foreground sync GET failed: ${response.status}`)",
+    );
     expect(homeSource).toContain("reconciled = true");
     expect(homeSource).toContain("if (shouldPush)");
     expect(homeSource).toContain("foregroundRecoveryNotice");
@@ -180,11 +184,12 @@ describe("foreground wake sync barrier", () => {
   });
 
   it("rejects malformed unchanged recovery responses and fences superseded responses", () => {
-    expect(homeSource).toContain("malformed unchanged response");
-    expect(homeSource).toContain("malformed canonical response");
+    expect(homeSource).toContain("consumeForegroundRecoveryResponse");
+    expect(recoveryResponseSource).toContain("malformed unchanged response");
+    expect(recoveryResponseSource).toContain("malformed canonical response");
     expect(homeSource).toContain("const isCurrentRecovery = ()");
-    expect(homeSource).toContain("if (!isCurrentRecovery()) return false;");
-    expect(homeSource).toContain("isUnchangedSyncResponse(body)");
+    expect(recoveryResponseSource).toContain('reason: "obsolete"');
+    expect(recoveryResponseSource).toContain("isUnchangedSyncResponse(body)");
     expect(syncManagerSource).toContain("foregroundRecoveryRequestRef");
   });
 
@@ -200,6 +205,7 @@ describe("foreground wake sync barrier", () => {
   });
 
   it("durably adopts a newer lifecycle before releasing recovery work", () => {
+    const transaction = homeSource.indexOf("consumeForegroundRecoveryResponse({");
     const resetGate = homeSource.indexOf("const acceptsRemoteLifecycle = shouldAcceptSyncDaySnapshot({");
     const adopt = homeSource.indexOf("adoptStrictlyNewerRemoteLifecycles(");
     const persist = homeSource.indexOf(
@@ -212,7 +218,8 @@ describe("foreground wake sync barrier", () => {
     );
     const generalMerge = homeSource.indexOf("applySyncCallbackRef.current(payload)", updateRef);
     const release = homeSource.indexOf("foregroundSyncBarrierRef.current = false", generalMerge);
-    expect(resetGate).toBeGreaterThan(-1);
+    expect(transaction).toBeGreaterThan(-1);
+    expect(resetGate).toBeGreaterThan(transaction);
     expect(adopt).toBeGreaterThan(resetGate);
     expect(persist).toBeGreaterThan(adopt);
     expect(updateRef).toBeGreaterThan(persist);
