@@ -135,6 +135,8 @@ import type {
   MixList,
   MixReconcileInput,
   MixReconcileResult,
+  MixSurplusLedger,
+  MixSurplusMutationResponse,
   NamedRecipeList,
   ObserveRunSuggestion200,
   ObserveRunSuggestionInput,
@@ -162,7 +164,9 @@ import type {
   QualityCheckRecord,
   QualityCheckRecordInput,
   QualityCheckResult,
+  RecordMixSurplusInput,
   ReplaceFreezerSurplusAllocationInput,
+  ReplaceMixSurplusAllocationInput,
   ReportIncidentInput,
   ResetPasswordRequest,
   ResetStaffPassword,
@@ -7284,6 +7288,287 @@ export const useReplaceFreezerSurplusAllocation = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getReplaceFreezerSurplusAllocationMutationOptions(options), queryClient);
+    }
+
+export const getListMixSurplusUrl = () => {
+
+
+
+
+  return `/api/mix-surplus`
+}
+
+/**
+ * Returns scoped mix surplus lots (dated over-production of prep mixes), explicit make-day allocations, and a per-mix balance rollup (remaining lbs > 0) used by the Mixes tab's "freezer stock" reminder. Lots are ledger/audit rows only — using surplus never re-deducts inventory.
+ * @summary List dated prep-mix surplus ledger and freezer balances
+ */
+export const listMixSurplus = async ( options?: Parameters<typeof customFetch>[1]): Promise<MixSurplusLedger> => {
+
+  return customFetch<MixSurplusLedger>(getListMixSurplusUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListMixSurplusQueryKey = () => {
+    return [
+    `/api/mix-surplus`
+    ] as const;
+    }
+
+
+export const getListMixSurplusQueryOptions = <TData = Awaited<ReturnType<typeof listMixSurplus>>, TError = ErrorType<unknown>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMixSurplus>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListMixSurplusQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listMixSurplus>>> = ({ signal }) => listMixSurplus({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listMixSurplus>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListMixSurplusQueryResult = NonNullable<Awaited<ReturnType<typeof listMixSurplus>>>
+export type ListMixSurplusQueryError = ErrorType<unknown>
+
+
+export function useListMixSurplus<TData = Awaited<ReturnType<typeof listMixSurplus>>, TError = ErrorType<unknown>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMixSurplus>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listMixSurplus>>,
+          TError,
+          Awaited<ReturnType<typeof listMixSurplus>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListMixSurplus<TData = Awaited<ReturnType<typeof listMixSurplus>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMixSurplus>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listMixSurplus>>,
+          TError,
+          Awaited<ReturnType<typeof listMixSurplus>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListMixSurplus<TData = Awaited<ReturnType<typeof listMixSurplus>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMixSurplus>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List dated prep-mix surplus ledger and freezer balances
+ */
+
+export function useListMixSurplus<TData = Awaited<ReturnType<typeof listMixSurplus>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMixSurplus>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListMixSurplusQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getRecordMixSurplusUrl = () => {
+
+
+
+
+  return `/api/mix-surplus`
+}
+
+/**
+ * Manager-confirmed record of surplus mix (pounds already made beyond a day's fresh need) as freezer stock. Creates a dated lot with remaining equal to the entered amount. Ledger action only — no inventory writes.
+ * @summary Record a confirmed prep-mix surplus lot
+ */
+export const recordMixSurplus = async (recordMixSurplusInput: RecordMixSurplusInput, options?: Parameters<typeof customFetch>[1]): Promise<MixSurplusMutationResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<MixSurplusMutationResponse>(getRecordMixSurplusUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(recordMixSurplusInput)
+  }
+);}
+
+
+
+
+
+export const getRecordMixSurplusMutationKey = () => ['recordMixSurplus'] as const;
+
+export const getRecordMixSurplusMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordMixSurplus>>, TError,RecordMixSurplusMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof recordMixSurplus>>, TError,RecordMixSurplusMutationVariables, TContext> => {
+
+const mutationKey = getRecordMixSurplusMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof recordMixSurplus>>, RecordMixSurplusMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  recordMixSurplus(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RecordMixSurplusMutationResult = NonNullable<Awaited<ReturnType<typeof recordMixSurplus>>>
+    export type RecordMixSurplusMutationBody = BodyType<RecordMixSurplusInput>
+    export type RecordMixSurplusMutationError = ErrorType<void>
+    export type RecordMixSurplusMutationVariables = {data: BodyType<RecordMixSurplusInput>}
+
+    /**
+ * @summary Record a confirmed prep-mix surplus lot
+ */
+export const useRecordMixSurplus = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordMixSurplus>>, TError,RecordMixSurplusMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof recordMixSurplus>>,
+        TError,
+        RecordMixSurplusMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRecordMixSurplusMutationOptions(options), queryClient);
+    }
+
+export const getReplaceMixSurplusAllocationsUrl = (runDate: string,) => {
+
+
+
+
+  return `/api/mix-surplus/allocations/${runDate}`
+}
+
+/**
+ * Replaces the surplus allocations for a make-day. Confirming ("Use on next run") decrements each lot's remaining balance and records the dated allocation; zeroed amounts release/void them and decrement the mix's amountAlreadyMade so the plan reducer stays in sync with the ledger. Ledger action only — never writes inventory.
+ * @summary Apply or release mix surplus for a make-day
+ */
+export const replaceMixSurplusAllocations = async (runDate: string,
+    replaceMixSurplusAllocationInput: ReplaceMixSurplusAllocationInput, options?: Parameters<typeof customFetch>[1]): Promise<MixSurplusMutationResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<MixSurplusMutationResponse>(getReplaceMixSurplusAllocationsUrl(runDate),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(replaceMixSurplusAllocationInput)
+  }
+);}
+
+
+
+
+
+export const getReplaceMixSurplusAllocationsMutationKey = () => ['replaceMixSurplusAllocations'] as const;
+
+export const getReplaceMixSurplusAllocationsMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof replaceMixSurplusAllocations>>, TError,ReplaceMixSurplusAllocationsMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof replaceMixSurplusAllocations>>, TError,ReplaceMixSurplusAllocationsMutationVariables, TContext> => {
+
+const mutationKey = getReplaceMixSurplusAllocationsMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof replaceMixSurplusAllocations>>, ReplaceMixSurplusAllocationsMutationVariables> = (props) => {
+          const {runDate,data} = props ?? {};
+
+          return  replaceMixSurplusAllocations(runDate,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReplaceMixSurplusAllocationsMutationResult = NonNullable<Awaited<ReturnType<typeof replaceMixSurplusAllocations>>>
+    export type ReplaceMixSurplusAllocationsMutationBody = BodyType<ReplaceMixSurplusAllocationInput>
+    export type ReplaceMixSurplusAllocationsMutationError = ErrorType<void>
+    export type ReplaceMixSurplusAllocationsMutationVariables = {runDate: string;data: BodyType<ReplaceMixSurplusAllocationInput>}
+
+    /**
+ * @summary Apply or release mix surplus for a make-day
+ */
+export const useReplaceMixSurplusAllocations = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof replaceMixSurplusAllocations>>, TError,ReplaceMixSurplusAllocationsMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof replaceMixSurplusAllocations>>,
+        TError,
+        ReplaceMixSurplusAllocationsMutationVariables,
+        TContext
+      > => {
+      return useMutation(getReplaceMixSurplusAllocationsMutationOptions(options), queryClient);
     }
 
 export const getListDieLineDefaultsUrl = () => {
