@@ -284,10 +284,11 @@ async function signUp(page: Page, role: "manager" | "supervisor" = "manager"): P
       }
       await currentPage.waitForTimeout(500);
       await currentPage.keyboard.press("Escape");
-      if (role !== "manager") {
-        await currentPage.reload({ waitUntil: "domcontentloaded" });
-        await currentPage.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
-      }
+      // Role and capability changes happen after the initial app hydration.
+      // Reload every fixture so the browser exercises the role that was just
+      // persisted instead of retaining the pre-seed operator snapshot.
+      await currentPage.reload({ waitUntil: "domcontentloaded" });
+      await currentPage.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
     },
   });
 }
