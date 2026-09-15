@@ -61,7 +61,7 @@
     "check:schema-safe-rollback": "tsx ./src/rehearse-schema-safe-rollback.mts",
     "test:schema-safe-rollback": "tsx ./src/rehearse-schema-safe-rollback.test.mts",
     "push:main": "bash ./src/push-main.sh",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "node ../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@workspace/typescript-api-v6": "workspace:*",

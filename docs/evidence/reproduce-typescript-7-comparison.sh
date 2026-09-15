@@ -27,6 +27,7 @@ WORK="$(mktemp -d /tmp/typescript-7-comparison.XXXXXX)"
 COPY="$WORK/repository"
 TOOLS="$WORK/tools"
 CONTRACT_REPORT="$OUT/declaration-contract-report"
+CONTRACT_APPROVALS="$REPO/docs/evidence/typescript-7-declaration-approvals.json"
 
 cleanup() {
   rm -rf "$WORK"
@@ -64,11 +65,25 @@ npm install \
   typescript@7.0.2 \
   >"$OUT/candidate-install.log" 2>&1
 
-TS6="$REPO/node_modules/.bin/tsc"
-TS7="$TOOLS/node_modules/.bin/tsc"
+TS6="$(realpath -e "$REPO/node_modules/typescript/bin/tsc")"
+TS7="$(realpath -e "$TOOLS/node_modules/typescript/bin/tsc")"
 
 "$TS6" --version >"$OUT/typescript-6.version"
 "$TS7" --version >"$OUT/typescript-7.version"
+if [[ "$TS6" == "$TS7" ]]; then
+  printf 'TypeScript baseline and candidate resolve to the same compiler: %s\n' "$TS6" >&2
+  exit 2
+fi
+if [[ "$(<"$OUT/typescript-6.version")" != "Version 6.0.3" ]]; then
+  printf 'Expected TypeScript baseline Version 6.0.3, got %s from %s\n' \
+    "$(<"$OUT/typescript-6.version")" "$TS6" >&2
+  exit 2
+fi
+if [[ "$(<"$OUT/typescript-7.version")" != "Version 7.0.2" ]]; then
+  printf 'Expected TypeScript candidate Version 7.0.2, got %s from %s\n' \
+    "$(<"$OUT/typescript-7.version")" "$TS7" >&2
+  exit 2
+fi
 node --version >"$OUT/node.version"
 pnpm --version >"$OUT/pnpm.version"
 git -C "$REPO" rev-parse HEAD >"$OUT/source-revision.txt"
@@ -159,10 +174,38 @@ set +e
   "$OUT/typescript-6-declarations" \
   "$OUT/typescript-7-declarations" \
   "$CONTRACT_REPORT" \
+  --approvals "$CONTRACT_APPROVALS" \
   >"$OUT/declaration-contract-comparison.stdout" \
   2>"$OUT/declaration-contract-comparison.stderr"
 contract_comparison_status=$?
 set -e
+if [[ "$contract_comparison_status" -eq 0 ]]; then
+  node - "$CONTRACT_REPORT/declaration-contracts.json" "$CONTRACT_APPROVALS" <<'NODE'
+const fs = require("node:fs");
+
+const report = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const approvals = JSON.parse(fs.readFileSync(process.argv[3], "utf8")).approvals;
+const approved = report.files.filter((file) => file.classification === "approved-semantic");
+const unexplained = report.categories.reduce(
+  (total, category) => total + category.unexplainedSemantic,
+  0,
+);
+if (
+  report.status !== "pass" ||
+  unexplained !== 0 ||
+  approved.length !== approvals.length ||
+  approvals.some((approval) => !approved.some((file) =>
+    file.path === approval.path &&
+    file.baselineSha256 === approval.baselineSha256 &&
+    file.candidateSha256 === approval.candidateSha256 &&
+    file.approvalReason === approval.reason
+  ))
+) {
+  throw new Error("Checked-in declaration approvals were not fully consumed.");
+}
+NODE
+  contract_comparison_status=$?
+fi
 printf '%s\n' "$contract_comparison_status" \
   >"$OUT/declaration-contract-comparison.exit-code"
 

@@ -115,6 +115,12 @@ try {
 
   const guardedOutput = path.join(process.cwd(), ".declaration-contract-destructive-probe");
   const reproduction = path.resolve(path.dirname(script.pathname), "../../docs/evidence/reproduce-typescript-7-comparison.sh");
+  const reproductionSource = fs.readFileSync(reproduction, "utf8");
+  assert.match(reproductionSource, /node_modules\/typescript\/bin\/tsc/);
+  assert.doesNotMatch(reproductionSource, /node_modules\/\.bin\/tsc/);
+  assert.match(reproductionSource, /Expected TypeScript baseline Version 6\.0\.3/);
+  assert.match(reproductionSource, /Expected TypeScript candidate Version 7\.0\.2/);
+  assert.match(reproductionSource, /Checked-in declaration approvals were not fully consumed/);
   const destructiveGuard = spawnSync("bash", [reproduction, guardedOutput], {
     encoding: "utf8",
     env: { ...process.env, TMPDIR: process.cwd() },

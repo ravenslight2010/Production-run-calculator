@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import ts from "typescript";
+import ts from "@workspace/typescript-api-v6";
 
 type Category = "api-client-react" | "api-zod" | "db" | "other";
 

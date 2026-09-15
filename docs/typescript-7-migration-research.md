@@ -27,11 +27,11 @@ The production toolchain should not switch yet for three reasons:
 2. The current TypeDoc 0.28.20 peer range ends at TypeScript 6.0.x. TypeDoc is pulled in by
    Orval, so replacing the root compiler would make the resolved code-generation toolchain
    unsupported even though Orval itself does not declare a TypeScript peer.
-3. TypeScript 7 produced textual declaration differences in 203 of 715 emitted `.d.ts`
-   files. The observed changes were concentrated in generated API/Zod declarations and
-   database declarations. Most inspected differences were quote-style or equivalent
-   literal-type renderings, but output equality has not been established and fixing or
-   accepting those differences is outside this research task.
+3. TypeScript 7 produces textual declaration differences concentrated in generated API/Zod
+   declarations and database declarations. The fail-closed contract comparison now
+   classifies equivalent formatting changes and pins every reviewed non-formatting change
+   to the exact TypeScript 6 and TypeScript 7 output hashes. Any new or changed semantic
+   output still blocks promotion.
 
 Microsoft explicitly recommends running TypeScript 7 side-by-side with the
 `@typescript/typescript6` compatibility package for tools that still need the old API.
@@ -64,11 +64,14 @@ TypeScript 7 CLI is ready to become the editor service.
 
 ### Compiler commands and project modes
 
-The root package pins `typescript: ~6.0.3` and uses:
+The root package pins `typescript: ~6.0.3` as the authority and installs TypeScript 7 under
+the `typescript-native` alias. Both packages expose a binary named `tsc`, so authoritative
+commands must not rely on pnpm's shared `.bin/tsc` link. They invoke
+`node_modules/typescript/bin/tsc` explicitly for:
 
-- `tsc --build` for the root project-reference graph.
-- `tsc --build --force` for generated API declarations and selected prerequisite libraries.
-- `tsc -p ... --noEmit` for the API server, web client, mockup sandbox, scripts, and two
+- `--build` for the root project-reference graph.
+- `--build --force` for generated API declarations and selected prerequisite libraries.
+- `-p ... --noEmit` for the API server, web client, mockup sandbox, scripts, and two
   standalone library checks.
 
 The root `tsconfig.json` references 35 shared libraries. The comparison build reported 36
@@ -199,6 +202,10 @@ approval file pins the exact baseline and candidate SHA-256 values with a review
 Both declaration trees and the report directory must be outside the repository; the
 comparator refuses authoritative workspace paths.
 
+The reproduction uses the reviewed approvals in
+[`typescript-7-declaration-approvals.json`](evidence/typescript-7-declaration-approvals.json).
+An approval is deliberately invalidated if either compiler's complete file output changes.
+
 For an already-captured pair of disposable trees:
 
 ```bash
@@ -213,6 +220,27 @@ An approval file has schema version 1 and an `approvals` array. Each entry conta
 absent for an approved addition or removal. Approvals are therefore invalidated by any
 later output change rather than becoming a broad path allowlist.
 
+
+### Semantic declaration review
+
+The nine changes not covered by formatting normalization were reviewed against their source
+contracts:
+
+- The generated API client aggregate changes string-literal delimiters in query and mutation
+  key tuple types. The literal values and tuple structure are unchanged.
+- The generated API Zod aggregate emits direct `zod.*` names where TypeScript 6 emits the
+  equivalent `zod.z.*` namespace alias, and reorders members in structural object types.
+- Seven database schema declarations change a quote delimiter and reorder members in
+  structural Zod object types.
+
+For each complete module, both the TypeScript 6 declaration namespace extends the
+TypeScript 7 namespace and the TypeScript 7 namespace extends the TypeScript 6 namespace.
+That bidirectional check passed when consumed by both compilers. These are intentional
+emitter differences, not public contract regressions, so each file has an exact
+baseline/candidate SHA-256 approval and a file-specific reason. The disposable reproduction
+passes with 195 formatting-only changes, 9 approved semantic changes, and no unexplained
+semantic drift.
+
 ### Results
 
 | Check | TypeScript 6.0.3 | TypeScript 7.0.2 |
@@ -226,21 +254,23 @@ later output change rather than becoming a broad path allowlist.
 | Corpus harness library `--noEmit` | Pass, 0.80s | Pass, 0.16s |
 | Generated API client/Zod forced build | Pass | Pass |
 | Diagnostic count in checks above | 0 | 0 |
-| Declaration file count | 715 | 715 |
-| Declaration files with textual differences | baseline | 203 |
+| Declaration file count | 719 | 719 |
+| Declaration files with textual differences | baseline | 204 |
+| Declaration contract comparison | baseline | Pass (195 formatting-only, 9 approved semantic, 0 unexplained) |
 
 The declaration differences break down as:
 
 - 2 `api-client-react` generated declarations,
-- 141 `api-zod` generated declarations, and
+- 142 `api-zod` generated declarations, and
 - 60 database schema declarations.
 
 There were 2,664 removed and 2,664 added diff lines. Inspected database differences were
 double-quote to single-quote changes in string literal types. Generated API declarations
 also changed some quoted literal renderings to template-literal or single-quoted forms.
-The two builds typechecked successfully, but this research does not claim that all 203
-files are semantically identical. A production switch must either prove semantic
-equivalence and accept a reviewed baseline update, or wait for output compatibility.
+The two builds typechecked successfully. Formatting normalization accounts for 195 changed
+files, and exact hash-pinned review accounts for the remaining 9. A production switch must
+continue to block any new declaration output until it is fixed or receives the same
+contract-owner review.
 
 The original timings are representative only. The advisory release lane now captures one
 cold and one warm measurement for every TypeScript 6/7 comparison check and aggregates up
@@ -270,15 +300,15 @@ There is no ESLint or `@typescript-eslint` installation in this workspace.
 
 ### Stage 0 — retain the current authority
 
-Keep `typescript@6.0.3` and the current lockfile unchanged. The existing release checks
-remain authoritative.
+Keep `typescript@6.0.3` and its explicit package binary authoritative. The existing
+TypeScript 6 release checks remain authoritative.
 
 ### Stage 1 — add a non-gating parallel native lane
 
 The release check now implements this stage as an advisory comparison:
 
-1. Add TypeScript 7 under a distinct alias and invoke its binary by an explicit package
-   path so pnpm binary linking cannot silently select TypeScript 6.
+1. Add TypeScript 7 under a distinct alias and invoke both compiler binaries by explicit
+   package paths so pnpm binary linking cannot silently select either one.
 2. Keep `typescript` resolving to 6.0.3 for all existing JavaScript API consumers and
    TypeDoc/Orval.
 3. Create a disposable checkout/copy for every native emitting build. Link or install the
