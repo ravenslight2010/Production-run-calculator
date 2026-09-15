@@ -263,6 +263,30 @@ export async function cleanupFixtureRoles(
   await db.query("DELETE FROM roles WHERE name = ANY($1::text[])", [roleNames]);
 }
 
+export async function authorizeFixtureAccount(
+  db: Client,
+  roleName: string,
+  userId: string,
+  capabilities: readonly E2ECapability[],
+  onboardingSeen: boolean,
+): Promise<void> {
+  await db.query(
+    `INSERT INTO roles (name, capabilities, builtin)
+     VALUES ($1, $2::jsonb, false)`,
+    [roleName, JSON.stringify([...capabilities])],
+  );
+  await db.query(
+    `INSERT INTO user_roles (user_id, role)
+     VALUES ($1, $2)
+     ON CONFLICT (user_id) DO UPDATE SET role = $2, updated_at = NOW()`,
+    [userId, roleName],
+  );
+  await db.query("UPDATE users SET onboarding_seen = $2 WHERE id = $1", [
+    userId,
+    onboardingSeen,
+  ]);
+}
+
 async function responseFailure(response: APIResponse): Promise<string> {
   return `${response.status()} ${await response.text().catch(() => "")}`.trim();
 }
@@ -394,21 +418,13 @@ export class AuthorizedBrowserFixtures {
     this.roleNames.add(roleName);
 
     await this.withDatabase("authorize browser fixture account", async (db) => {
-      await db.query(
-        `INSERT INTO roles (name, capabilities, builtin)
-         VALUES ($1, $2::jsonb, false)`,
-        [roleName, JSON.stringify([...options.capabilities])],
-      );
-      await db.query(
-        `INSERT INTO user_roles (user_id, role)
-         VALUES ($1, $2)
-         ON CONFLICT (user_id) DO UPDATE SET role = $2, updated_at = NOW()`,
-        [auth.user.userId, roleName],
-      );
-      await db.query("UPDATE users SET onboarding_seen = $2 WHERE id = $1", [
+      await authorizeFixtureAccount(
+        db,
+        roleName,
         auth.user.userId,
+        options.capabilities,
         options.onboardingSeen ?? true,
-      ]);
+      );
     });
 
     return {

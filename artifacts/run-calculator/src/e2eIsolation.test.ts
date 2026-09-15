@@ -1,6 +1,7 @@
 import type { Client } from "pg";
 import { describe, expect, it, vi } from "vitest";
 import {
+  authorizeFixtureAccount,
   cleanupBrandProfiles,
   cleanupCheeseRecipes,
   cleanupDailySync,
@@ -32,6 +33,35 @@ describe("cleanupTestUsers", () => {
     expect(query.mock.calls).toEqual([
       ["DELETE FROM users WHERE username = $1", [usernames[0]]],
       ["DELETE FROM users WHERE username = $1", [usernames[1]]],
+    ]);
+  });
+});
+
+describe("authorizeFixtureAccount", () => {
+  it("binds SQL-shaped role names and user IDs without changing query text", async () => {
+    const { db, query } = mockedClient();
+    const roleName = "manager'); DROP TABLE roles; --";
+    const userId = "user-id'); DELETE FROM users; --";
+    const capabilities = ["manage-staff", "manage-profiles"] as const;
+
+    await authorizeFixtureAccount(db, roleName, userId, capabilities, false);
+
+    expect(query.mock.calls).toEqual([
+      [
+        `INSERT INTO roles (name, capabilities, builtin)
+     VALUES ($1, $2::jsonb, false)`,
+        [roleName, JSON.stringify([...capabilities])],
+      ],
+      [
+        `INSERT INTO user_roles (user_id, role)
+     VALUES ($1, $2)
+     ON CONFLICT (user_id) DO UPDATE SET role = $2, updated_at = NOW()`,
+        [userId, roleName],
+      ],
+      [
+        "UPDATE users SET onboarding_seen = $2 WHERE id = $1",
+        [userId, false],
+      ],
     ]);
   });
 });
