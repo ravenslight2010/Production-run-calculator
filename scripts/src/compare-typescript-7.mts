@@ -16,6 +16,13 @@ import {
   diagnosticsEqualForPairs,
   releaseRevisionGitArgs,
 } from "./typescript-7-evidence.mts";
+import {
+  TYPESCRIPT_7_RESOURCE_BUDGETS,
+  classifyTypescript7ResourceRegressions,
+  type Typescript7ResourceBudgets,
+} from "./typescript-7-resource-contract.mts";
+
+export { TYPESCRIPT_7_RESOURCE_BUDGETS } from "./typescript-7-resource-contract.mts";
 
 type CommandEvidence = {
   name: string;
@@ -38,15 +45,6 @@ const RESOURCE_APPROVAL_EVIDENCE_PATH =
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const REVISION_PATTERN = /^[a-f0-9]{40}$/u;
 
-export const TYPESCRIPT_7_RESOURCE_BUDGETS = {
-  maxElapsedRatio: 1.25,
-  maxPeakRssRatio: 1.25,
-  maxCandidateElapsedMs: 60_000,
-  maxCandidatePeakRssKiB: 1_048_576,
-  minimumRevisions: 3,
-  requiredModes: ["cold", "warm"] as const,
-  approvedForPromotion: true,
-} as const;
 export const TYPESCRIPT_7_HISTORY_LIMIT = 5;
 
 function exactKeys(
@@ -285,46 +283,13 @@ export function typescript7RunnerFingerprint(): Typescript7RunnerFingerprint {
 
 export function typescript7ResourceRegressions(
   value: unknown,
+  resourceBudgets: Typescript7ResourceBudgets = TYPESCRIPT_7_RESOURCE_BUDGETS,
 ): string[] | null {
-  if (!Array.isArray(value) || value.length !== 14) return null;
-  const expected = new Set(
-    TYPESCRIPT_7_RESOURCE_BUDGETS.requiredModes.flatMap((mode) =>
-      comparedChecks.map((check) => `${mode}:${check}`),
-    ),
+  return classifyTypescript7ResourceRegressions(
+    value,
+    comparedChecks,
+    resourceBudgets,
   );
-  const failures: string[] = [];
-  for (const entry of value) {
-    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
-      return null;
-    }
-    const item = entry as Record<string, unknown>;
-    const key = `${item.mode}:${item.check}`;
-    const elapsed = item.elapsedMs as Record<string, unknown> | undefined;
-    const memory = item.peakRssKiB as Record<string, unknown> | undefined;
-    if (
-      !expected.delete(key) ||
-      typeof elapsed?.candidate !== "number" ||
-      typeof elapsed.ratio !== "number" ||
-      typeof memory?.candidate !== "number" ||
-      typeof memory.ratio !== "number"
-    ) {
-      return null;
-    }
-    if (
-      elapsed.ratio > TYPESCRIPT_7_RESOURCE_BUDGETS.maxElapsedRatio ||
-      elapsed.candidate > TYPESCRIPT_7_RESOURCE_BUDGETS.maxCandidateElapsedMs
-    ) {
-      failures.push(`${key}:elapsed`);
-    }
-    if (
-      memory.ratio > TYPESCRIPT_7_RESOURCE_BUDGETS.maxPeakRssRatio ||
-      memory.candidate >
-        TYPESCRIPT_7_RESOURCE_BUDGETS.maxCandidatePeakRssKiB
-    ) {
-      failures.push(`${key}:peak-rss`);
-    }
-  }
-  return expected.size === 0 ? failures : null;
 }
 
 export function selectTypescript7HistoricalReports(

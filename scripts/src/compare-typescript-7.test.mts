@@ -19,6 +19,10 @@ import {
   diagnosticsEqualForPairs,
   releaseRevisionGitArgs,
 } from "./typescript-7-evidence.mts";
+import {
+  TYPESCRIPT_7_RESOURCE_BUDGETS,
+  typescript7ResourceBudgetsEqual,
+} from "./typescript-7-resource-contract.mts";
 
 test("normalizes diagnostic paths and ordering", () => {
   assert.deepEqual(
@@ -83,6 +87,48 @@ test("diagnostics compare within exact pairs and ignore clean output", () => {
       checks,
     ),
     false,
+  );
+});
+
+test("shared resource contract drives comparison and validation thresholds", () => {
+  const checks = [
+    "build",
+    "scripts",
+    "api-server",
+    "run-calculator",
+    "mockup-sandbox",
+    "ai-evaluation",
+    "corpus-harness",
+  ];
+  const measurements = TYPESCRIPT_7_RESOURCE_BUDGETS.requiredModes.flatMap(
+    (mode) =>
+      checks.map((check) => ({
+        check,
+        mode,
+        elapsedMs: { candidate: 15, ratio: 1.5 },
+        peakRssKiB: { candidate: 10, ratio: 1 },
+      })),
+  );
+  const revisedContract = {
+    ...TYPESCRIPT_7_RESOURCE_BUDGETS,
+    maxElapsedRatio: 1.5,
+  };
+
+  assert.equal(
+    typescript7ResourceRegressions(measurements)?.length,
+    measurements.length,
+  );
+  assert.deepEqual(
+    typescript7ResourceRegressions(measurements, revisedContract),
+    [],
+  );
+  assert.equal(
+    typescript7ResourceBudgetsEqual(revisedContract),
+    false,
+  );
+  assert.equal(
+    typescript7ResourceBudgetsEqual(revisedContract, revisedContract),
+    true,
   );
 });
 
