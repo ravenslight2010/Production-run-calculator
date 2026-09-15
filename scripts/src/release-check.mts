@@ -250,6 +250,18 @@ const typescript7Promotion = process.argv.includes(
   "--typescript-7-promotion",
 );
 export type ReleaseMode = "standard" | "full" | "typescript-7-promotion";
+
+function releaseEvidenceVerificationCommand(mode: ReleaseMode): string {
+  switch (mode) {
+    case "full":
+      return "pnpm --filter @workspace/scripts exec tsx ./src/release-check.mts --full --verify-evidence";
+    case "typescript-7-promotion":
+      return "pnpm --filter @workspace/scripts exec tsx ./src/release-check.mts --typescript-7-promotion --verify-evidence";
+    case "standard":
+      return "pnpm run release:check -- --verify-evidence";
+  }
+}
+
 const releaseMode: ReleaseMode = typescript7Promotion
   ? "typescript-7-promotion"
   : fullRun
@@ -1813,7 +1825,7 @@ export async function verifyReleaseEvidence(
     throw new Error(
       [
         `Evidence directory contains a ${reportMode} report, but ${options.expectedMode} verification was requested.`,
-        `Use the ${reportMode} command for this directory, or point the verifier at a ${options.expectedMode} evidence directory.`,
+        `Verify this directory with \`${releaseEvidenceVerificationCommand(reportMode)}\`, or point the verifier at a ${options.expectedMode} evidence directory.`,
       ].join(" "),
     );
   }
