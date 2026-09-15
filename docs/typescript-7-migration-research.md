@@ -1,0 +1,346 @@
+# TypeScript 7 Migration Research
+
+**Assessment date:** 2026-09-15  
+**Current compiler:** TypeScript 6.0.3  
+**Compared compiler:** TypeScript 7.0.2  
+**Recommendation:** **Pilot TypeScript 7 in parallel; do not replace TypeScript 6 yet.**
+
+## Executive summary
+
+The native TypeScript 7 command-line compiler is compatible with the repository's current
+TypeScript projects and is substantially faster in this isolated comparison:
+
+- The 35-project shared-library build completed without diagnostics under both compilers.
+- The API server, web client, mockup sandbox, and scripts typechecked without diagnostics
+  under both compilers.
+- TypeScript 7 accepted the repository's project-reference, declaration-only, bundler
+  resolution, and `allowImportingTsExtensions` configurations.
+- Representative elapsed times improved from 11.82s to 2.97s for a forced shared-library
+  build and from 50.76s to 3.73s for the web-client typecheck. These are single local runs,
+  not a benchmark suitable for capacity planning.
+
+The production toolchain should not switch yet for three reasons:
+
+1. TypeScript 7.0 deliberately has no stable programmatic API. Its root `typescript` export
+   exposes version information, not the TypeScript 6 parser/traversal/transpile API used by
+   seven repository files.
+2. The current TypeDoc 0.28.20 peer range ends at TypeScript 6.0.x. TypeDoc is pulled in by
+   Orval, so replacing the root compiler would make the resolved code-generation toolchain
+   unsupported even though Orval itself does not declare a TypeScript peer.
+3. TypeScript 7 produced textual declaration differences in 203 of 715 emitted `.d.ts`
+   files. The observed changes were concentrated in generated API/Zod declarations and
+   database declarations. Most inspected differences were quote-style or equivalent
+   literal-type renderings, but output equality has not been established and fixing or
+   accepting those differences is outside this research task.
+
+Microsoft explicitly recommends running TypeScript 7 side-by-side with the
+`@typescript/typescript6` compatibility package for tools that still need the old API.
+This repository should first add a non-gating TypeScript 7 lane while retaining 6.0.3 as
+the authoritative compiler and API package.
+
+## Repository compiler coupling
+
+### Compiler commands and project modes
+
+The root package pins `typescript: ~6.0.3` and uses:
+
+- `tsc --build` for the root project-reference graph.
+- `tsc --build --force` for generated API declarations and selected prerequisite libraries.
+- `tsc -p ... --noEmit` for the API server, web client, mockup sandbox, scripts, and two
+  standalone library checks.
+
+The root `tsconfig.json` references 35 shared libraries. The comparison build reported 36
+projects in scope and 35 built projects after transitive references were included.
+
+Shared libraries use `composite: true`, `declarationMap: true`,
+`emitDeclarationOnly: true`, and an explicit `rootDir`/`outDir`. The repository contains 39
+such composite/declaration-only configurations. Application and script projects use
+`noEmit` where appropriate.
+
+The shared base configuration explicitly sets the TypeScript 7-sensitive defaults:
+
+- `module: "esnext"`
+- `target: "es2022"`
+- `moduleResolution: "bundler"`
+- `types: []`
+- `alwaysStrict: true`
+- `customConditions: ["workspace"]`
+
+No repository tsconfig uses the removed `target: "es5"`, `moduleResolution: "node"`,
+`moduleResolution: "classic"`, `baseUrl`, `module: "amd"`, `module: "umd"`,
+`module: "system"`, or `module: "none"` settings. TypeScript 7 still lists
+`downlevelIteration` in CLI help, but the repository does not set it.
+
+Three projects use `allowImportingTsExtensions`; each also satisfies TypeScript 7's
+requirement by using `moduleResolution: "bundler"` with either `noEmit` or
+`emitDeclarationOnly`.
+
+The repository does not use `tsc --watch` in package scripts. Vite owns the interactive
+development workflow. TypeScript 7's rebuilt watcher is therefore not a migration gate,
+though editor validation remains a later pilot concern.
+
+### Generated API and declaration checks
+
+`check:api-generated` combines:
+
+1. the API specification generated-file check,
+2. API Zod tests, and
+3. forced declaration builds for `api-client-react` and `api-zod`.
+
+The compiler-neutral generated-file check and API Zod tests passed under the current
+workspace. The exact TypeScript 7 forced-build command for the two generated packages also
+passed without diagnostics in the isolated copy.
+
+### Direct `typescript` module consumers
+
+TypeScript 7.0's root module cannot replace any consumer that currently calls the
+TypeScript 6 compiler API. The TypeScript 7 package does expose `typescript/unstable/*`
+entry points, but Microsoft labels the API unstable and says a stable, different API is
+planned for TypeScript 7.1 or later. Rewriting against unstable entry points is not an
+acceptable production migration path.
+
+| Consumer | TypeScript 6 API use | TypeScript 7 disposition |
+| --- | --- | --- |
+| `scripts/src/check-evaluation-report-retention.mts` | Parse source, AST node types and guards, traversal | Keep on TypeScript 6 compatibility API. Later evaluate a stable TypeScript 7 AST/parser API. |
+| `artifacts/run-calculator/e2e/validate-browser-spec-syntax.ts` | Parse diagnostics, diagnostic flattening, filesystem read | Keep on TypeScript 6. A CLI/subprocess syntax check is a possible later isolation strategy. |
+| `artifacts/run-calculator/src/freezerDomainIsolation.test.ts` | TSX parse and AST traversal | Keep test tooling on TypeScript 6 until a stable native AST API exists. |
+| `artifacts/run-calculator/src/blankRunValueSync.test.ts` | Parse and evaluate AST literals | Keep test tooling on TypeScript 6 until a stable native AST API exists. |
+| `artifacts/run-calculator/src/runValueStampGuard.test.ts` | TSX parse and AST traversal | Keep test tooling on TypeScript 6 until a stable native AST API exists. |
+| `artifacts/run-calculator/src/applyCaseUpdateChoices.web.test.ts` | TSX parse/traversal and `transpileModule` | Keep on TypeScript 6. `transpileModule` has no stable TypeScript 7.0 root equivalent. |
+| `artifacts/run-calculator/scripts/check-vite-config-loading.mjs` | `preProcessFile` for import discovery | Keep on TypeScript 6 for the pilot. The import scanner can later be replaced or isolated; it is not safe to assume the native unstable AST is compatible. |
+
+The current direct-consumer smoke covered the retention checker, Vite config loading, and
+all four AST-based client test files: 29 tests passed.
+
+## Official TypeScript 7 compatibility findings
+
+Microsoft describes TypeScript 7.0 as command-line compatible with TypeScript 6.0 when
+TypeScript 6 uses stable type ordering and does not suppress deprecations. The repository
+does not set `ignoreDeprecations`, and TypeScript 6.0.3 reports stable type ordering as the
+default.
+
+TypeScript 7 makes TypeScript 6 deprecations hard errors. The removed options and defaults
+documented in the 7.0 announcement were checked against repository tsconfigs; no configured
+option blocks the tested projects.
+
+One command-line behavior needs to remain in the migration checklist: when the current
+directory contains a tsconfig, TypeScript 7 does not accept source file paths unless
+`--ignoreConfig` is passed. Current production scripts use `--build` or `-p`, so they do
+not hit this restriction. Ad-hoc developer commands and future scripts should still be
+audited.
+
+TypeScript 7 adds native platform packages as optional dependencies. The tested
+`typescript@7.0.2` package selected the Linux x64 binary successfully under the repository's
+Node 24 environment. A later lockfile change must retain the required platform package in
+CI and deployment installations; dependency-pruning policy must not remove all native
+optional packages.
+
+## Isolated comparison
+
+### Method
+
+- Installed `typescript@7.0.2` under `/tmp`, outside the workspace.
+- Copied tracked working files to `/tmp` without `.git`, build output, or the pnpm store.
+- Linked the existing dependency installation read-only for module resolution.
+- Ran TypeScript 6 from the workspace and TypeScript 7 from the temporary package.
+- Cleaned and rebuilt temporary project outputs before each declaration capture.
+- Did not modify `package.json`, `pnpm-lock.yaml`, tracked declarations, or the production
+  compiler installation.
+
+The comparison ran on Linux x86-64 with Node 24.13.0, pnpm 11.5.2, 8 reported processors,
+an Intel Xeon Platinum 8581C host CPU, and 16,400,840 KiB reported memory. The compact
+machine-readable record is
+[`docs/evidence/typescript-7-comparison-2026-09-15.json`](evidence/typescript-7-comparison-2026-09-15.json).
+
+The exact executable comparison sequence is retained in
+[`reproduce-typescript-7-comparison.sh`](evidence/reproduce-typescript-7-comparison.sh).
+It creates and enters a disposable repository copy, installs TypeScript 7 outside the
+workspace, runs every comparison command with separate output/exit/timing files, captures
+both declaration trees, writes sorted per-file SHA-256 manifests, and retains the complete
+recursive diff:
+
+```bash
+bash docs/evidence/reproduce-typescript-7-comparison.sh /tmp/typescript-7-comparison-evidence
+```
+
+The original full 13,723-line diff is not committed because it duplicates generated
+output. The retained script deterministically regenerates the evidence structure and all
+declaration contents; diff headers contain temporary paths and timestamps, so the compact
+record intentionally does not claim that the raw diff itself is byte-stable.
+
+### Results
+
+| Check | TypeScript 6.0.3 | TypeScript 7.0.2 |
+| --- | ---: | ---: |
+| Forced shared-library project build | Pass, 11.82s | Pass, 2.97s |
+| Scripts `--noEmit` | Pass, 3.31s | Pass, 0.69s |
+| API server `--noEmit` | Pass, 8.97s | Pass, 1.63s |
+| Web client `--noEmit` | Pass, 44.00s | Pass, 2.71s |
+| Mockup sandbox `--noEmit` | Pass, 4.16s | Pass, 0.77s |
+| AI evaluation library `--noEmit` | Pass, 0.40s | Pass, 0.10s |
+| Corpus harness library `--noEmit` | Pass, 0.80s | Pass, 0.16s |
+| Generated API client/Zod forced build | Pass | Pass |
+| Diagnostic count in checks above | 0 | 0 |
+| Declaration file count | 715 | 715 |
+| Declaration files with textual differences | baseline | 203 |
+
+The declaration differences break down as:
+
+- 2 `api-client-react` generated declarations,
+- 141 `api-zod` generated declarations, and
+- 60 database schema declarations.
+
+There were 2,664 removed and 2,664 added diff lines. Inspected database differences were
+double-quote to single-quote changes in string literal types. Generated API declarations
+also changed some quoted literal renderings to template-literal or single-quoted forms.
+The two builds typechecked successfully, but this research does not claim that all 203
+files are semantically identical. A production switch must either prove semantic
+equivalence and accept a reviewed baseline update, or wait for output compatibility.
+
+The timings are representative only. They were one warm-environment run per command and
+included different native/JavaScript compiler startup and caching behavior. They support a
+pilot but not a guaranteed speedup percentage.
+
+## Ecosystem readiness
+
+| Tool | Resolved version | TypeScript 7 status |
+| --- | ---: | --- |
+| TypeDoc | 0.28.20 | **Blocked:** peer range is TypeScript 5.0.x through 6.0.x. The current npm release has the same ceiling. |
+| Orval | 8.32.0 | No TypeScript peer, but depends on TypeDoc and its plugins. Current npm 8.33.0 still depends on TypeDoc 0.28.x, so a patch upgrade does not remove the blocker. |
+| TypeDoc markdown/coverage plugins | 4.13.0 / 4.0.3 | Coupled to TypeDoc 0.28.x; validate as a unit with TypeDoc. |
+| Vite | 8.3.0 | No TypeScript peer constraint. Its bundle/runner/native config-loader smoke passed with the current API fallback. |
+| Vitest | 5.0.0 | No TypeScript peer constraint; its declared Vite range includes Vite 8. The direct compiler-API tests passed while using TypeScript 6. |
+| tsx | 4.23.13 | No TypeScript peer constraint; scripts run through tsx successfully with the TypeScript 6 API fallback. |
+| Drizzle Kit / Drizzle ORM | 0.31.10 / 0.45.2 | No direct TypeScript peer constraint in the resolved metadata. TypeScript 7 emitted changed text for database declarations, so declaration review is still required. |
+
+There is no ESLint or `@typescript-eslint` installation in this workspace.
+
+## Staged and reversible upgrade sequence
+
+### Stage 0 — retain the current authority
+
+Keep `typescript@6.0.3` and the current lockfile unchanged. The existing release checks
+remain authoritative.
+
+### Stage 1 — add a non-gating parallel native lane
+
+In a later implementation task:
+
+1. Add TypeScript 7 under a distinct alias and invoke its binary by an explicit package
+   path so pnpm binary linking cannot silently select TypeScript 6.
+2. Keep `typescript` resolving to 6.0.3 for all existing JavaScript API consumers and
+   TypeDoc/Orval.
+3. Create a disposable checkout/copy for every native emitting build. Link or install the
+   frozen dependencies there, and direct every TypeScript 7 `--build --force` invocation
+   at that disposable tree. Do not run native emitting builds in the authoritative
+   workspace because project configs fix their own output and build-info paths.
+4. Run native `--build --force` and every application and standalone-library `--noEmit`
+   check after the TypeScript 6 checks.
+5. Store normalized diagnostics, declaration manifests/diffs, and timing summaries from
+   the disposable tree.
+
+**Rollback:** delete the disposable tree and remove the alias and parallel command. The
+lane must prove `git status --short` is unchanged before and after it, so no TypeScript 7
+declarations or build metadata can survive rollback.
+
+### Stage 2 — make native CLI results release-gating
+
+Proceed only when:
+
+- TypeScript 6 and 7 diagnostic sets are identical for all project builds and no-emit
+  checks.
+- The generated API checks pass before and after the native CLI checks.
+- Declaration differences are zero, or every changed declaration category has a reviewed
+  semantic-equivalence rule and an approved baseline update.
+- CI proves the native binary installs on every supported runner architecture.
+- Repeated measurements show the selected `--checkers`/`--builders` settings stay within
+  release memory/process budgets.
+
+**Rollback:** return the native lane to advisory status; TypeScript 6 remains authoritative.
+
+### Stage 3 — separate or migrate programmatic consumers
+
+Do not start until Microsoft publishes a stable TypeScript 7 API and migration guidance.
+Classify each of the seven consumers against that API. Consumers without a stable
+replacement must stay in a TypeScript 6-isolated package or process.
+
+The official `@typescript/typescript6` compatibility package is currently 6.0.2, while this
+repository uses 6.0.3. Do not silently downgrade the API consumers. Either wait for a
+matching compatibility release, explicitly validate the patch difference, or retain
+6.0.3 under the `typescript` name while TypeScript 7 remains aliased.
+
+### Stage 4 — switch the root compiler
+
+Replace the root compiler only after:
+
+- TypeDoc broadens its peer range to TypeScript 7 and Orval's resolved TypeDoc/plugin graph
+  installs without overrides or ignored peer failures.
+- All seven direct consumers have stable replacements or an explicitly maintained
+  TypeScript 6 isolation boundary.
+- The full standard release check passes with the new lockfile.
+- Clean-install, generated-file, declaration, Vite config-loader, unit-test, and editor
+  smoke gates pass.
+
+**Rollback condition:** any diagnostic drift, unexplained declaration drift, native binary
+installation failure, Orval/TypeDoc peer failure, editor regression, or release-budget
+regression restores the previous `package.json` and lockfile together.
+
+## Acceptance gates for a future implementation
+
+1. Frozen pnpm install succeeds with no new peer-resolution exceptions.
+2. `tsc --version` is asserted separately for the TypeScript 6 API compiler and native
+   compiler so binary selection cannot drift.
+3. The complete root project-reference build passes under both compilers.
+4. Scripts, API server, run calculator, mockup sandbox, AI evaluation library, and corpus
+   harness no-emit checks pass under both.
+5. Diagnostic files are normalized and compared by code, file, position, and message.
+6. All emitted declaration paths and contents are compared from clean temporary outputs.
+7. `check:api-generated`, API Zod tests, Orval generation/check mode, and generated
+   declaration builds pass.
+8. The retention checker, browser-spec syntax validator, Vite config loader, and four
+   AST-based tests pass through the intended TypeScript 6 isolation boundary.
+9. Vite build, Vitest, tsx scripts, Drizzle schema tooling, and TypeDoc/Orval smoke checks
+   pass without hidden TypeScript peer overrides.
+10. Representative cold and warm timings are repeated in CI with peak memory captured;
+    parallel worker settings stay within release budgets.
+11. The editor explicitly selects the intended language service and completes a
+    diagnostics/navigation smoke test.
+12. Reverting `package.json` and `pnpm-lock.yaml` restores the prior release checks without
+    generated-file cleanup.
+
+## Evidence
+
+Repository evidence:
+
+- `package.json`
+- `pnpm-lock.yaml`
+- `tsconfig.json`
+- `tsconfig.base.json`
+- `scripts/package.json`
+- `scripts/tsconfig.json`
+- `scripts/src/check-evaluation-report-retention.mts`
+- `artifacts/api-server/package.json`
+- `artifacts/run-calculator/package.json`
+- `artifacts/run-calculator/tsconfig.json`
+- `artifacts/run-calculator/scripts/check-vite-config-loading.mjs`
+- `artifacts/run-calculator/e2e/validate-browser-spec-syntax.ts`
+- the four AST-based tests listed in the direct-consumer table
+- `docs/evidence/typescript-7-comparison-2026-09-15.json`
+- `docs/evidence/reproduce-typescript-7-comparison.sh`
+
+Official and package evidence:
+
+- [Announcing TypeScript 7.0](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/)
+  — native compiler release, compatibility conditions, removed options, side-by-side
+  TypeScript 6 package, API status, parallel build controls, and editor limitations.
+- [TypeScript 7 staging repository](https://github.com/microsoft/typescript-go)
+  and [compatibility changes](https://github.com/microsoft/typescript-go/blob/main/CHANGES.md)
+  — native implementation and tracked TypeScript 6/7 behavior differences.
+- [`typescript@7.0.2` package metadata](https://www.npmjs.com/package/typescript/v/7.0.2)
+  — `tsc` binary, native optional platform packages, and `typescript/unstable/*` exports.
+- [`@typescript/typescript6` package metadata](https://www.npmjs.com/package/@typescript/typescript6)
+  — compatibility compiler/API package and current 6.0.2 version.
+- [`typedoc@0.28.20` package metadata](https://www.npmjs.com/package/typedoc/v/0.28.20)
+  — TypeScript peer range ending at 6.0.x.
+- [`orval` package metadata](https://www.npmjs.com/package/orval)
+  — current TypeDoc/plugin dependency family and absence of a direct TypeScript peer.
