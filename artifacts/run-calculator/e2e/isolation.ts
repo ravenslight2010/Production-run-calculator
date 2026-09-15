@@ -240,8 +240,16 @@ export async function cleanupNamedRecipes(
   kind: "dough" | "sauce",
   ids: readonly string[],
 ): Promise<void> {
+  const tableByKind = {
+    dough: "dough_recipes",
+    sauce: "sauce_recipes",
+  } as const;
+  const table = tableByKind[kind];
+  if (!table) {
+    throw new Error(`Unsupported named recipe fixture kind: ${String(kind)}`);
+  }
   await db.query(
-    `DELETE FROM ${kind}_recipes WHERE id = ANY($1::text[]) AND scope = $2`,
+    `DELETE FROM ${table} WHERE id = ANY($1::text[]) AND scope = $2`,
     [ids, "live"],
   );
 }

@@ -120,6 +120,16 @@ describe("browser fixture cleanup queries", () => {
     },
   );
 
+  it("rejects named recipe kinds outside the table allowlist", async () => {
+    const { db, query } = mockedClient();
+    const invalidKind = "dough; DROP TABLE users; --" as "dough";
+
+    await expect(
+      cleanupNamedRecipes(db, invalidKind, ["fixture-id"]),
+    ).rejects.toThrow("Unsupported named recipe fixture kind");
+    expect(query).not.toHaveBeenCalled();
+  });
+
   it("binds mix IDs without changing query text", async () => {
     const { db, query } = mockedClient();
     const ids = ["mix-id'); DROP TABLE mixes; --"];
