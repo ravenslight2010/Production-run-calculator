@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "pnpm --filter @workspace/db run push-force && pnpm run dev:without-schema-push",
+    "dev": "../../scripts/node_modules/.bin/tsx ../../scripts/src/start-api-development.mts",
     "dev:without-schema-push": "export NODE_ENV=development && pnpm run build && exec pnpm run start",
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",

@@ -52,6 +52,7 @@ test("production markers override every disposable approval signal", () => {
     { NODE_ENV: "production" },
     { APP_ENV: "prod" },
     { REPLIT_DEPLOYMENT: "1" },
+    { REPLIT_DEPLOYMENT_ID: "deployment-id" },
   ]) {
     assert.throws(
       () =>
