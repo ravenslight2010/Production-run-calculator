@@ -30,11 +30,13 @@ let userRolesTable: DbModule["userRolesTable"];
 let rolesTable: DbModule["rolesTable"];
 let seedRoles: () => Promise<void>;
 let clearUserValidityCache: () => void;
+let clearSandboxCache: () => void;
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 
 let adminPool: pg.Pool;
 let killer: pg.Client;
 let testDbName: string;
+let testDatabaseUrl: string;
 let originalDatabaseUrl: string | undefined;
 let originalPoolMax: string | undefined;
 let server: Server;
@@ -46,6 +48,9 @@ let loseFirstConfirmation = false;
 type IsolatedApiProcess = ChildProcessByStdio<null, Readable, Readable>;
 
 const ACTOR = "route-job-actor";
+const OTHER_LIVE_ACTOR = "route-job-other-live-actor";
+const SANDBOX_ACTOR = "route-job-sandbox-actor";
+const OTHER_SANDBOX_ACTOR = "route-job-other-sandbox-actor";
 const IDEMPOTENCY_KEY = "route-job-confirmation-lost";
 const JOB_BODY = {
   type: "workbook-parse",
@@ -65,6 +70,7 @@ beforeAll(async () => {
   const testUrl = new URL(originalDatabaseUrl);
   testUrl.pathname = `/${testDbName}`;
   const testUrlString = testUrl.toString();
+  testDatabaseUrl = testUrlString;
   const push = spawnSync("pnpm", ["--filter", "@workspace/db", "run", "push-force"], {
     cwd: repoRoot,
     env: { ...process.env, DATABASE_URL: testUrlString },
@@ -84,6 +90,7 @@ beforeAll(async () => {
   const routerMod = await import("./index");
   const rolesMod = await import("../lib/roles");
   const userValidityMod = await import("../lib/userValidity");
+  const sandboxMod = await import("../lib/sandbox");
   db = dbMod.db;
   pool = dbMod.pool;
   serverJobsTable = dbMod.serverJobsTable;
@@ -92,6 +99,7 @@ beforeAll(async () => {
   rolesTable = dbMod.rolesTable;
   seedRoles = rolesMod.seedRoles;
   clearUserValidityCache = userValidityMod.clearUserValidityCache;
+  clearSandboxCache = sandboxMod.clearSandboxCache;
 
   killer = new pg.Client({ connectionString: testUrlString });
   killer.on("error", () => {});
@@ -160,12 +168,39 @@ beforeEach(async () => {
     RESTART IDENTITY CASCADE
   `);
   await seedRoles();
-  await db.insert(usersTable).values({
-    id: ACTOR,
-    username: "route-job-actor",
-    passwordHash: "synthetic-test-password-hash",
-  });
-  await db.insert(userRolesTable).values({ userId: ACTOR, role: "manager" });
+  clearSandboxCache();
+  await db.insert(usersTable).values([
+    {
+      id: ACTOR,
+      username: "route-job-actor",
+      passwordHash: "synthetic-test-password-hash",
+      sandbox: false,
+    },
+    {
+      id: OTHER_LIVE_ACTOR,
+      username: "route-job-other-live-actor",
+      passwordHash: "synthetic-test-password-hash",
+      sandbox: false,
+    },
+    {
+      id: SANDBOX_ACTOR,
+      username: "route-job-sandbox-actor",
+      passwordHash: "synthetic-test-password-hash",
+      sandbox: true,
+    },
+    {
+      id: OTHER_SANDBOX_ACTOR,
+      username: "route-job-other-sandbox-actor",
+      passwordHash: "synthetic-test-password-hash",
+      sandbox: true,
+    },
+  ]);
+  await db.insert(userRolesTable).values([
+    { userId: ACTOR, role: "manager" },
+    { userId: OTHER_LIVE_ACTOR, role: "manager" },
+    { userId: SANDBOX_ACTOR, role: "manager" },
+    { userId: OTHER_SANDBOX_ACTOR, role: "manager" },
+  ]);
 });
 
 
@@ -189,22 +224,26 @@ async function loseCommittedReply(): Promise<number> {
   throw new Error(`Timed out terminating committed route backend ${pid}`);
 }
 
-function headers(): Record<string, string> {
+function headers(actorId = ACTOR): Record<string, string> {
   return {
     "content-type": "application/json",
-    authorization: `Bearer ${signToken(ACTOR)}`,
+    authorization: `Bearer ${signToken(actorId)}`,
   };
 }
 
-async function submitJob(): Promise<globalThis.Response> {
-  return submitJobAt(baseUrl);
+async function submitJob(actorId = ACTOR, body = JOB_BODY): Promise<globalThis.Response> {
+  return submitJobAt(baseUrl, actorId, body);
 }
 
-async function submitJobAt(url: string): Promise<globalThis.Response> {
+async function submitJobAt(
+  url: string,
+  actorId = ACTOR,
+  body = JOB_BODY,
+): Promise<globalThis.Response> {
   return fetch(`${url}/api/server-jobs`, {
     method: "POST",
-    headers: headers(),
-    body: JSON.stringify(JOB_BODY),
+    headers: headers(actorId),
+    body: JSON.stringify(body),
   });
 }
 
@@ -214,7 +253,7 @@ async function startIsolatedApiProcess(): Promise<{
 }> {
   const child = spawn(apiProcessEntrypoint, [apiProcessFixture], {
     cwd: repoRoot,
-    env: { ...process.env, DATABASE_POOL_MAX: "2" },
+    env: { ...process.env, DATABASE_URL: testDatabaseUrl, DATABASE_POOL_MAX: "2" },
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -337,6 +376,77 @@ describe("server job route idempotency", () => {
     expect(responseBodies.filter((body) => body.idempotentReplay)).toHaveLength(11);
   });
 
+  it("isolates identical keys by actor and by live or sandbox scope", async () => {
+    const actors = [
+      { id: ACTOR, scope: "live" },
+      { id: OTHER_LIVE_ACTOR, scope: "live" },
+      { id: SANDBOX_ACTOR, scope: "sandbox" },
+      { id: OTHER_SANDBOX_ACTOR, scope: "sandbox" },
+    ] as const;
+
+    const created = await Promise.all(actors.map(async ({ id }) => {
+      const result = await submitJob(id);
+      expect(result.status).toBe(202);
+      return {
+        actorId: id,
+        body: await result.json() as { id: string; idempotentReplay: boolean },
+      };
+    }));
+
+    expect(created.every(({ body }) => !body.idempotentReplay)).toBe(true);
+    expect(new Set(created.map(({ body }) => body.id))).toHaveLength(actors.length);
+
+    for (const { actorId, body } of created) {
+      const replay = await submitJob(actorId);
+      expect(replay.status).toBe(200);
+      expect(await replay.json()).toMatchObject({
+        id: body.id,
+        idempotentReplay: true,
+      });
+    }
+
+    for (const { actorId, body } of created) {
+      const list = await fetch(`${baseUrl}/api/server-jobs`, {
+        headers: headers(actorId),
+      });
+      expect(list.status).toBe(200);
+      expect(await list.json()).toEqual([
+        expect.objectContaining({ id: body.id }),
+      ]);
+
+      for (const other of created) {
+        if (other.actorId === actorId) continue;
+
+        const detail = await fetch(`${baseUrl}/api/server-jobs/${other.body.id}`, {
+          headers: headers(actorId),
+        });
+        expect(detail.status).toBe(404);
+
+        const cancel = await fetch(`${baseUrl}/api/server-jobs/${other.body.id}/cancel`, {
+          method: "POST",
+          headers: headers(actorId),
+          body: "{}",
+        });
+        expect(cancel.status).toBe(404);
+      }
+    }
+
+    const persisted = await db.select({
+      id: serverJobsTable.id,
+      scope: serverJobsTable.scope,
+      actorId: serverJobsTable.actorId,
+      idempotencyKey: serverJobsTable.idempotencyKey,
+    }).from(serverJobsTable).where(eq(serverJobsTable.idempotencyKey, IDEMPOTENCY_KEY));
+    expect(persisted).toHaveLength(actors.length);
+    expect(persisted).toEqual(expect.arrayContaining(actors.map(({ id, scope }) => (
+      expect.objectContaining({
+        scope,
+        actorId: id,
+        idempotencyKey: IDEMPOTENCY_KEY,
+      })
+    ))));
+  });
+
   it("returns one canonical job across isolated API processes", async () => {
     const instances = await Promise.all([
       startIsolatedApiProcess(),
@@ -348,7 +458,9 @@ describe("server job route idempotency", () => {
         instances.map(({ url }) => submitJobAt(url)),
       );
 
-      expect(responses.every((candidate) => candidate.status === 200 || candidate.status === 202)).toBe(true);
+      expect(
+        responses.every((candidate) => candidate.status === 200 || candidate.status === 202),
+      ).toBe(true);
       const responseBodies = await Promise.all(responses.map(async (candidate) => (
         await candidate.json() as {
           id: string;
