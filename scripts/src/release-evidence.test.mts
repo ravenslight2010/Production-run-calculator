@@ -18,6 +18,8 @@ import {
   IMPORT_CORPUS_EVALUATION_EVIDENCE,
   SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
   SOURCE_LIBRARY_RECONCILIATION_FIXTURE_STEP,
+  SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL,
+  SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_STEP,
   SOURCE_LIBRARY_RECONCILIATION_STEP,
   resolveSourceLibraryEvidenceEnvironment,
   resolveSourceLibraryReleaseRevision,
@@ -30,6 +32,7 @@ import {
   parseBrowserDurationRegressions,
   releaseConcurrencyLimit,
   releaseGateLabelsForMode,
+  releaseStepDependencies,
   runStep,
   resolveReleaseEvidenceDir,
   sourceLibraryReconciliationRequired,
@@ -471,6 +474,31 @@ async function run(): Promise<void> {
       "source-library reconciliation verification",
     ),
     "standard release checks must include source-library reconciliation verification",
+  );
+  assert.equal(
+    SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_STEP.args.includes("--preflight"),
+    true,
+    "production reconciliation must have a bounded database preflight",
+  );
+  assert.equal(
+    SOURCE_LIBRARY_RECONCILIATION_STEP.dependsOn?.includes(
+      SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL,
+    ),
+    true,
+    "full reconciliation must wait for the database preflight",
+  );
+  assert.equal(
+    releaseStepDependencies(
+      { label: "release-tests", args: [], stage: "release-tests" },
+      0,
+    ).includes(SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL),
+    true,
+    "expensive release tests must wait for the database preflight",
+  );
+  assert.equal(
+    SOURCE_LIBRARY_RECONCILIATION_FIXTURE_STEP.args.includes("--preflight"),
+    false,
+    "disposable CI must retain the focused fixture verifier instead",
   );
   assert.ok(
     releaseGateLabelsForMode("standard").includes(

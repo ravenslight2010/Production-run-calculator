@@ -641,6 +641,28 @@ export function resolveSourceLibraryReleaseRevision(
   }
   return revision;
 }
+export const SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL =
+  "source-library reconciliation database preflight";
+export const SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_STEP: ReleaseStep = {
+  label: SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL,
+  args: [
+    "--filter",
+    "@workspace/scripts",
+    "exec",
+    "tsx",
+    "./src/verify-source-library-reconciliation.mts",
+    "--report",
+    sourceLibraryReport,
+    "--heal-id",
+    sourceLibraryHealId,
+    "--from-date",
+    sourceLibraryFromDate,
+    "--environment",
+    sourceLibraryEnvironment,
+    "--preflight",
+  ],
+  stage: "source-library-preflight",
+};
 export const SOURCE_LIBRARY_RECONCILIATION_STEP: ReleaseStep = {
   label: "source-library reconciliation verification",
   args: [
@@ -665,6 +687,7 @@ export const SOURCE_LIBRARY_RECONCILIATION_STEP: ReleaseStep = {
     ),
   ],
   stage: "prerequisites",
+  dependsOn: [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL],
 };
 
 export const SOURCE_LIBRARY_RECONCILIATION_FIXTURE_STEP: ReleaseStep = {
@@ -734,8 +757,14 @@ const importsProductionSourceLibraryReconciliation =
 const hasProductionSourceLibraryReconciliation =
   requiresProductionSourceLibraryReconciliation ||
   importsProductionSourceLibraryReconciliation;
+const sourceLibraryPreflightEnabled =
+  requiresProductionSourceLibraryReconciliation &&
+  process.env.RELEASE_CHECK_FIXTURE_STEPS === undefined;
 
 const steps: ReleaseStep[] = [
+  ...(sourceLibraryPreflightEnabled
+    ? [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_STEP]
+    : []),
   {
     label: REPORT_KEY_ROTATION_PREFLIGHT_LABEL,
     args: [
@@ -1003,16 +1032,54 @@ const RELEASE_STAGE_DEPENDENCIES: Readonly<Record<string, readonly string[]>> =
   {
     prerequisites: [],
     "shared-output": [],
-    "consumer-typechecks": ["shared library typechecks"],
-    "clean-start": [],
-    "container-smoke": [],
-    "release-tests": [],
-    "browser-guard": [],
-    "browser-smoke": ["onboarding bypass guard"],
-    "browser-calendar": ["onboarding bypass guard"],
-    "browser-accessibility": ["onboarding bypass guard"],
-    "browser-webkit": ["onboarding bypass guard"],
-    "browser-full": ["onboarding bypass guard"],
+    "consumer-typechecks": [
+      "shared library typechecks",
+      ...(sourceLibraryPreflightEnabled
+        ? [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL]
+        : []),
+    ],
+    "clean-start": sourceLibraryPreflightEnabled
+      ? [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL]
+      : [],
+    "container-smoke": sourceLibraryPreflightEnabled
+      ? [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL]
+      : [],
+    "release-tests": sourceLibraryPreflightEnabled
+      ? [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL]
+      : [],
+    "browser-guard": sourceLibraryPreflightEnabled
+      ? [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL]
+      : [],
+    "browser-smoke": [
+      ...(sourceLibraryPreflightEnabled
+        ? [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL]
+        : []),
+      "onboarding bypass guard",
+    ],
+    "browser-calendar": [
+      ...(sourceLibraryPreflightEnabled
+        ? [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL]
+        : []),
+      "onboarding bypass guard",
+    ],
+    "browser-accessibility": [
+      ...(sourceLibraryPreflightEnabled
+        ? [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL]
+        : []),
+      "onboarding bypass guard",
+    ],
+    "browser-webkit": [
+      ...(sourceLibraryPreflightEnabled
+        ? [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL]
+        : []),
+      "onboarding bypass guard",
+    ],
+    "browser-full": [
+      ...(sourceLibraryPreflightEnabled
+        ? [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL]
+        : []),
+      "onboarding bypass guard",
+    ],
   };
 
 assertUniqueReleaseSteps(steps);

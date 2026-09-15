@@ -510,6 +510,186 @@ export type VerificationOutput = {
   failures: Array<{ check: string; count: number }>;
 };
 
+export type SourceLibraryPreflightOutput = {
+  verifier: "source-library-reconciliation-preflight";
+  environment: SourceLibraryEvidenceEnvironment;
+  revision: string;
+  capturedAt: string;
+  healId: string;
+  report: {
+    sha256: string;
+    formatVersion: number;
+    automaticProposals: number;
+    stubs: number;
+  };
+  database: "approved-matching" | "partial-fixture" | "unverified";
+  expected: { poolRows: number; aliases: number };
+  observed: {
+    poolRows: number;
+    aliasesExact: number;
+    aliasesMissing: number;
+    aliasesMismatched: number;
+    markerPresent: boolean;
+    markerValid: boolean;
+  };
+  failures: Array<{ check: string; count: number }>;
+  ok: boolean;
+};
+
+async function selectPoolIds(
+  query: ReadOnlyQuery,
+  table: RecipeTable,
+  ids: string[],
+): Promise<Array<Record<string, unknown>>> {
+  if (ids.length === 0) return [];
+  const result = await query(
+    `SELECT id FROM ${table} WHERE scope = 'live' AND id = ANY($1::text[])`,
+    [ids],
+  );
+  return result.rows;
+}
+
+function preflightMarkerIsValid(
+  marker: Record<string, unknown> | undefined,
+  report: Report,
+): { present: boolean; valid: boolean } {
+  const result = marker?.result;
+  const allowed = [
+    "replacements",
+    "aliasesInserted",
+    "repointedProfiles",
+    "repointedRuns",
+    "deletedStubs",
+  ];
+  const validResult =
+    isRecord(result) &&
+    Object.keys(result).sort().join(",") === allowed.slice().sort().join(",") &&
+    allowed.every((key) => boundedCount(result[key])) &&
+    Number(result.replacements) <=
+      report.proposals.filter(
+        (proposal) =>
+          (proposal as unknown as Proposal).action ===
+          "replace-components-from-approved-source",
+      ).length &&
+    Number(result.aliasesInserted) <=
+      report.proposals.filter(
+        (proposal) =>
+          (proposal as unknown as Proposal).action ===
+          "link-source-identity",
+      ).length + report.findings.allZeroStubs.length &&
+    Number(result.deletedStubs) <= report.findings.allZeroStubs.length;
+  return {
+    present: Boolean(marker),
+    valid:
+      validResult &&
+      (typeof marker?.appliedAt === "string" ||
+        marker?.appliedAt instanceof Date),
+  };
+}
+
+/**
+ * Cheap, bounded identity check used before expensive release gates.
+ *
+ * This checks only live recipe IDs, alias identities, and the marker shape. It
+ * does not inspect recipe payloads, references, or mutate the database. A
+ * complete identity match is not a substitute for the full verifier below; it
+ * only prevents a partial fixture database from allowing expensive release
+ * work to start.
+ */
+export async function preflightSourceLibraryReconciliation(
+  report: Report,
+  reportBytes: Buffer,
+  healId: string,
+  query: ReadOnlyQuery,
+  environment: SourceLibraryEvidenceEnvironment,
+  revision: string,
+): Promise<SourceLibraryPreflightOutput> {
+  const proposals = report.proposals as unknown as Proposal[];
+  const idsByTable = Object.fromEntries(
+    TABLES.map((table) => [
+      table,
+      [
+        ...new Set(
+          proposals
+            .filter((proposal) => proposal.table === table)
+            .map((proposal) => proposal.before.id),
+        ),
+      ],
+    ]),
+  ) as Record<RecipeTable, string[]>;
+  const poolRowsByTable = {} as Record<
+    RecipeTable,
+    Array<Record<string, unknown>>
+  >;
+  for (const table of TABLES) {
+    poolRowsByTable[table] = await selectPoolIds(
+      query,
+      table,
+      idsByTable[table],
+    );
+  }
+  const aliases = compareAliases(await selectAliases(query, report));
+  const markerResult = await query(
+    'SELECT applied_at AS "appliedAt", result FROM data_heals WHERE id = $1 LIMIT 1',
+    [healId],
+  );
+  const marker = preflightMarkerIsValid(markerResult.rows[0], report);
+  const expectedPoolRows = report.proposals.length;
+  const observedPoolRows = TABLES.reduce(
+    (total, table) => total + poolRowsByTable[table].length,
+    0,
+  );
+  const expectedAliases =
+    report.proposals.filter(
+      (proposal) =>
+        (proposal as unknown as Proposal).action === "link-source-identity",
+    ).length + report.findings.allZeroStubs.length;
+  const failureCandidates: Array<[string, number]> = [
+    ["databaseShape", expectedPoolRows - observedPoolRows],
+    ["aliases", aliases.counts.missing + aliases.counts.mismatches],
+    ["marker", Number(!marker.valid)],
+  ];
+  const failures = failureCandidates
+    .filter(([, count]) => count > 0)
+    .map(([check, count]) => ({ check, count }));
+  const database =
+    failures.length === 0
+      ? "approved-matching"
+      : failures.some(
+            (failure) =>
+              failure.check === "databaseShape" ||
+              failure.check === "aliases" ||
+              !marker.present,
+          )
+        ? "partial-fixture"
+        : "unverified";
+  return {
+    verifier: "source-library-reconciliation-preflight",
+    environment,
+    revision,
+    capturedAt: new Date().toISOString(),
+    healId,
+    report: {
+      sha256: sha256(reportBytes),
+      formatVersion: report.formatVersion,
+      automaticProposals: report.proposals.length,
+      stubs: report.findings.allZeroStubs.length,
+    },
+    database,
+    expected: { poolRows: expectedPoolRows, aliases: expectedAliases },
+    observed: {
+      poolRows: observedPoolRows,
+      aliasesExact: aliases.counts.exactMatches,
+      aliasesMissing: aliases.counts.missing,
+      aliasesMismatched: aliases.counts.mismatches,
+      markerPresent: marker.present,
+      markerValid: marker.valid,
+    },
+    failures,
+    ok: failures.length === 0,
+  };
+}
+
 export function computeSourceLibraryEvidenceId(
   evidence: Record<string, unknown>,
 ): string {
@@ -675,6 +855,7 @@ async function main() {
     argument("--revision", process.env.SOURCE_LIBRARY_RECONCILIATION_REVISION),
   );
   const outputPath = outputPathArgument();
+  const preflightOnly = process.argv.includes("--preflight");
   if (!/^\d{4}-\d{2}-\d{2}$/u.test(fromDate)) throw new Error("Invalid --from-date; expected YYYY-MM-DD");
   const reportBytes = fs.readFileSync(reportPath);
   const report = parseReport(JSON.parse(reportBytes.toString("utf8")));
@@ -682,18 +863,28 @@ async function main() {
   const client = await pool.connect();
   try {
     await client.query("BEGIN TRANSACTION READ ONLY");
-    const output = await verifySourceLibraryReconciliation(
-      report,
-      reportBytes,
-      healId,
-      async (text, values) => {
-        const result = await client.query(text, values ? [...values] : undefined);
-        return { rows: result.rows as Array<Record<string, unknown>> };
-      },
-      fromDate,
-      environment,
-      revision,
-    );
+    const query: ReadOnlyQuery = async (text, values) => {
+      const result = await client.query(text, values ? [...values] : undefined);
+      return { rows: result.rows as Array<Record<string, unknown>> };
+    };
+    const output = preflightOnly
+      ? await preflightSourceLibraryReconciliation(
+          report,
+          reportBytes,
+          healId,
+          query,
+          environment,
+          revision,
+        )
+      : await verifySourceLibraryReconciliation(
+          report,
+          reportBytes,
+          healId,
+          query,
+          fromDate,
+          environment,
+          revision,
+        );
     await client.query("ROLLBACK");
     await writeOutput(outputPath, output);
     process.stdout.write(`${JSON.stringify(output)}\n`);
@@ -716,7 +907,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
         ? process.argv[revisionIndex + 1]
         : process.env.SOURCE_LIBRARY_RECONCILIATION_REVISION;
     const output = {
-      verifier: "source-library-reconciliation",
+      verifier: process.argv.includes("--preflight")
+        ? "source-library-reconciliation-preflight"
+        : "source-library-reconciliation",
       environment: requestedEnvironment ?? "unknown",
       revision: requestedRevision ?? "unknown",
       capturedAt: new Date().toISOString(),

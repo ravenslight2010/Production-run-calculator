@@ -7,6 +7,7 @@ import path from "node:path";
 import {
   ownedFields,
   parseReport,
+  preflightSourceLibraryReconciliation,
   resolveSourceLibraryRevision,
   stable,
   verifySourceLibraryReconciliation,
@@ -189,6 +190,49 @@ assert.equal(output.stubs.unexpectedlyRemaining, 0);
 assert.doesNotMatch(JSON.stringify(output), /basha|pepperoni|bbq chicken/i);
 assert.match(output.idempotencyFingerprint.value, /^[a-f0-9]{64}$/);
 assert.ok(queries.length > 0);
+
+const preflight = await preflightSourceLibraryReconciliation(
+  report,
+  reportBytes,
+  "source-library-reconciliation-2026-08-26-v1",
+  query,
+  "development",
+  "development-unbound",
+);
+assert.equal(preflight.ok, true);
+assert.equal(preflight.database, "approved-matching");
+assert.deepEqual(preflight.expected, { poolRows: 68, aliases: 25 });
+assert.deepEqual(preflight.observed, {
+  poolRows: 68,
+  aliasesExact: 25,
+  aliasesMissing: 0,
+  aliasesMismatched: 0,
+  markerPresent: true,
+  markerValid: true,
+});
+assert.deepEqual(preflight.failures, []);
+assert.doesNotMatch(
+  JSON.stringify(preflight),
+  /Replacement \d|Canonical (?:Link|Stub)|Legacy (?:Link|Stub)|components|sourceName/i,
+);
+
+const partialPreflight = await preflightSourceLibraryReconciliation(
+  report,
+  reportBytes,
+  "source-library-reconciliation-2026-08-26-v1",
+  async (text, values) => {
+    if (text.includes("FROM mixes")) return { rows: [] };
+    return query(text, values);
+  },
+  "development",
+  "development-unbound",
+);
+assert.equal(partialPreflight.ok, false);
+assert.equal(partialPreflight.database, "partial-fixture");
+assert.deepEqual(partialPreflight.failures, [{
+  check: "databaseShape",
+  count: report.proposals.filter((proposal) => proposal.table === "mixes").length,
+}]);
 
 const mutableMixRow = rowsByTable.get("mixes")!.find((row) =>
   row.id === (mixWithNotes.before as Record<string, unknown>).id);
@@ -580,6 +624,82 @@ try {
       `${scenario} CLI stdout and retained evidence should match`,
     );
   }
+  const preflightFixture = createCliFixture("pass");
+  const preflightReportPath = path.join(cliRoot, "preflight-report.json");
+  const preflightQueriesPath = path.join(cliRoot, "preflight-queries.json");
+  const preflightOutputPath = path.join(cliRoot, "preflight-output.json");
+  await writeFile(preflightReportPath, preflightFixture.reportBytes);
+  await writeFile(
+    preflightQueriesPath,
+    JSON.stringify(preflightFixture.fixture),
+  );
+  const preflightResult = await runVerifierCli(
+    [
+      "--report",
+      preflightReportPath,
+      "--heal-id",
+      "source-library-reconciliation-2026-08-26-v1",
+      "--from-date",
+      "2026-08-26",
+      "--environment",
+      "development",
+      "--preflight",
+      "--output",
+      preflightOutputPath,
+    ],
+    {
+      SOURCE_LIBRARY_VERIFIER_QUERY_FIXTURE: preflightQueriesPath,
+      NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --loader=${loaderPath}`.trim(),
+    },
+  );
+  assert.equal(preflightResult.code, 0, preflightResult.stderr);
+  const preflightOutput = JSON.parse(
+    await readFile(preflightOutputPath, "utf8"),
+  ) as Record<string, unknown>;
+  assert.equal(
+    preflightOutput.verifier,
+    "source-library-reconciliation-preflight",
+  );
+  assert.equal(preflightOutput.database, "approved-matching");
+  assert.equal(preflightOutput.ok, true);
+  assert.equal(
+    JSON.stringify(preflightOutput),
+    preflightResult.stdout.trim(),
+    "preflight stdout and retained diagnostic should match",
+  );
+
+  const partialFixture = createCliFixture("pass");
+  partialFixture.fixture.poolRows.mixes.pop();
+  const partialReportPath = path.join(cliRoot, "partial-report.json");
+  const partialQueriesPath = path.join(cliRoot, "partial-queries.json");
+  const partialOutputPath = path.join(cliRoot, "partial-output.json");
+  await writeFile(partialReportPath, partialFixture.reportBytes);
+  await writeFile(partialQueriesPath, JSON.stringify(partialFixture.fixture));
+  const partialResult = await runVerifierCli(
+    [
+      "--report",
+      partialReportPath,
+      "--heal-id",
+      "source-library-reconciliation-2026-08-26-v1",
+      "--from-date",
+      "2026-08-26",
+      "--environment",
+      "development",
+      "--preflight",
+      "--output",
+      partialOutputPath,
+    ],
+    {
+      SOURCE_LIBRARY_VERIFIER_QUERY_FIXTURE: partialQueriesPath,
+      NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --loader=${loaderPath}`.trim(),
+    },
+  );
+  assert.equal(partialResult.code, 1);
+  const partialOutput = JSON.parse(
+    await readFile(partialOutputPath, "utf8"),
+  ) as Record<string, unknown>;
+  assert.equal(partialOutput.database, "partial-fixture");
+  assert.equal(partialOutput.ok, false);
 } finally {
   await rm(cliRoot, { recursive: true, force: true });
 }
