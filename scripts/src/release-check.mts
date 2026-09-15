@@ -1207,6 +1207,9 @@ function printHelp(): void {
     "  --source-library-revision <sha>   Exact deployed 40-character SHA for production reconciliation evidence",
   );
   console.log(
+    "  pnpm --silent --filter @workspace/scripts exec tsx ./src/verify-source-library-reconciliation.mts --capture-production --environment release --revision <deployed-40-character-sha>  Capture bounded production evidence (read-only)",
+  );
+  console.log(
     "  pnpm --filter @workspace/scripts run check:release-evidence -- --evidence-dir <directory>  Verify a selected evidence directory (mode is read from its report)",
   );
   console.log(

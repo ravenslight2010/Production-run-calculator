@@ -9,6 +9,7 @@ import {
   parseReport,
   preflightSourceLibraryReconciliation,
   resolveSourceLibraryRevision,
+  assertProductionSourceLibraryCapture,
   stable,
   verifySourceLibraryReconciliation,
 } from "./verify-source-library-reconciliation.mts";
@@ -53,6 +54,67 @@ assert.throws(
 assert.throws(
   () => resolveSourceLibraryRevision("release", "unknown"),
   /full 40-character Git commit SHA/,
+);
+assert.doesNotThrow(() =>
+  assertProductionSourceLibraryCapture({
+    environmentArgument: "release",
+    configuredRevision: "a".repeat(40),
+    revisionArgumentProvided: true,
+    outputPath: undefined,
+    preflight: false,
+    environment: { DATABASE_URL: "postgresql://production.example/app" },
+  }),
+);
+assert.throws(
+  () =>
+    assertProductionSourceLibraryCapture({
+      environmentArgument: "development",
+      configuredRevision: "a".repeat(40),
+      revisionArgumentProvided: true,
+      outputPath: undefined,
+      preflight: false,
+      environment: { DATABASE_URL: "postgresql://production.example/app" },
+    }),
+  /explicit --environment release/,
+);
+assert.throws(
+  () =>
+    assertProductionSourceLibraryCapture({
+      environmentArgument: "release",
+      configuredRevision: "a".repeat(40),
+      revisionArgumentProvided: true,
+      outputPath: undefined,
+      preflight: false,
+      environment: {
+        DATABASE_URL: "postgresql://production.example/app",
+        SOURCE_LIBRARY_VERIFIER_QUERY_FIXTURE: "/tmp/fixture.json",
+      },
+    }),
+  /refuses SOURCE_LIBRARY_VERIFIER_QUERY_FIXTURE/,
+);
+assert.throws(
+  () =>
+    assertProductionSourceLibraryCapture({
+      environmentArgument: "release",
+      configuredRevision: "a".repeat(40),
+      revisionArgumentProvided: true,
+      outputPath: undefined,
+      preflight: true,
+      environment: { DATABASE_URL: "postgresql://production.example/app" },
+    }),
+  /does not support --preflight/,
+);
+assert.throws(
+  () =>
+    assertProductionSourceLibraryCapture({
+      environmentArgument: "release",
+      configuredRevision: "a".repeat(40),
+      revisionArgumentProvided: false,
+      outputPath: undefined,
+      preflight: false,
+      environment: { DATABASE_URL: "postgresql://production.example/app" },
+    }),
+  /requires --revision on the command line/,
 );
 
 const rowsByTable = new Map<string, Array<Record<string, unknown>>>();

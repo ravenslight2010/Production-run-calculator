@@ -124,6 +124,32 @@ try {
     }),
     /regular file/,
   );
+
+  const stdinInput = path.join(directory, "stdin-output.json");
+  const originalStdin = process.stdin;
+  Object.defineProperty(process, "stdin", {
+    configurable: true,
+    value: (async function* () {
+      yield await readFile(input);
+    })(),
+  });
+  try {
+    await importSourceLibraryReconciliationEvidence({
+      input: "-",
+      output: stdinInput,
+      report,
+      healId: DEFAULT_HEAL_ID,
+      fromDate: DEFAULT_FROM_DATE,
+      revision,
+      now,
+    });
+    assert.deepEqual(await readFile(stdinInput), await readFile(input));
+  } finally {
+    Object.defineProperty(process, "stdin", {
+      configurable: true,
+      value: originalStdin,
+    });
+  }
 } finally {
   await rm(directory, { recursive: true, force: true });
 }

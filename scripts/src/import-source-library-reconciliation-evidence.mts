@@ -26,6 +26,22 @@ function argument(name: string, fallback?: string): string {
   return value;
 }
 
+async function readInput(input: string): Promise<Buffer> {
+  if (input !== "-") {
+    const stats = await lstat(input);
+    if (!stats.isFile() || stats.isSymbolicLink()) {
+      throw new Error("Imported source-library evidence must be a regular file.");
+    }
+    return readFile(input);
+  }
+
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
+}
+
 export async function importSourceLibraryReconciliationEvidence(
   options: SourceLibraryEvidenceImportOptions,
 ): Promise<void> {
@@ -50,12 +66,8 @@ export async function importSourceLibraryReconciliationEvidence(
     );
   }
 
-  const stats = await lstat(input);
-  if (!stats.isFile() || stats.isSymbolicLink()) {
-    throw new Error("Imported source-library evidence must be a regular file.");
-  }
   const [evidenceBytes, reportBytes] = await Promise.all([
-    readFile(input),
+    readInput(options.input === "-" ? "-" : input),
     readFile(report),
   ]);
   validateSourceLibraryReconciliationEvidence(evidenceBytes, {

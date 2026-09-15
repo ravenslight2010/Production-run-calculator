@@ -1042,6 +1042,50 @@ export function resolveSourceLibraryRevision(
   return revision;
 }
 
+export function assertProductionSourceLibraryCapture(options: {
+  environmentArgument: string | undefined;
+  configuredRevision: string | undefined;
+  revisionArgumentProvided: boolean;
+  outputPath: string | undefined;
+  preflight: boolean;
+  environment: NodeJS.ProcessEnv;
+}): void {
+  if (options.environmentArgument !== "release") {
+    throw new Error(
+      "Production source-library capture requires the explicit --environment release flag.",
+    );
+  }
+  if (!options.configuredRevision?.trim()) {
+    throw new Error(
+      "Production source-library capture requires the explicit --revision deployed Git SHA.",
+    );
+  }
+  if (!options.revisionArgumentProvided) {
+    throw new Error(
+      "Production source-library capture requires --revision on the command line; do not rely on an ambient revision variable.",
+    );
+  }
+  resolveSourceLibraryRevision("release", options.configuredRevision);
+  if (options.preflight) {
+    throw new Error(
+      "Production source-library capture does not support --preflight; capture the full bounded verifier result.",
+    );
+  }
+  if (!options.environment.DATABASE_URL?.trim()) {
+    throw new Error(
+      "Production source-library capture requires DATABASE_URL for the read-only production database.",
+    );
+  }
+  if (options.environment.SOURCE_LIBRARY_VERIFIER_QUERY_FIXTURE?.trim()) {
+    throw new Error(
+      "Production source-library capture refuses SOURCE_LIBRARY_VERIFIER_QUERY_FIXTURE; do not substitute development fixtures for production.",
+    );
+  }
+  if (options.outputPath !== undefined && options.outputPath.trim() === "") {
+    throw new Error("Production source-library capture output path cannot be empty.");
+  }
+}
+
 async function main() {
   const reportArgument = argument("--report");
   const reportPath = reportArgument
@@ -1059,12 +1103,26 @@ async function main() {
     );
   }
   const environment = parseSourceLibraryEvidenceEnvironment(environmentArgument);
+  const captureProduction = process.argv.includes("--capture-production");
+  const revisionArgumentProvided = process.argv.includes("--revision");
+  const configuredRevisionArgument =
+    argument("--revision", process.env.SOURCE_LIBRARY_RECONCILIATION_REVISION);
   const revision = resolveSourceLibraryRevision(
     environment,
-    argument("--revision", process.env.SOURCE_LIBRARY_RECONCILIATION_REVISION),
+    configuredRevisionArgument,
   );
   const outputPath = outputPathArgument();
   const preflightOnly = process.argv.includes("--preflight");
+  if (captureProduction) {
+    assertProductionSourceLibraryCapture({
+      environmentArgument,
+      configuredRevision: configuredRevisionArgument,
+      revisionArgumentProvided,
+      outputPath,
+      preflight: preflightOnly,
+      environment: process.env,
+    });
+  }
   if (!/^\d{4}-\d{2}-\d{2}$/u.test(fromDate)) throw new Error("Invalid --from-date; expected YYYY-MM-DD");
   const reportBytes = fs.readFileSync(reportPath);
   const report = parseReport(JSON.parse(reportBytes.toString("utf8")));
