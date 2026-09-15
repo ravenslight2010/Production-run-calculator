@@ -867,6 +867,71 @@ describe("background operation PostgreSQL reconnection", () => {
     }
   });
 
+  it("keeps a long protected effect owned past lease expiry", async () => {
+    const leaseMs = 100;
+    let markCommitEntered!: () => void;
+    let releaseCommit!: () => void;
+    const commitEntered = new Promise<void>((resolve) => { markCommitEntered = resolve; });
+    const commitRelease = new Promise<void>((resolve) => { releaseCommit = resolve; });
+    let protectedEffects = 0;
+    registerServerJob("protected-lease-renewal-test", {
+      capability: "review-incidents",
+      handler: async (context) => {
+        await context.commit(async () => {
+          markCommitEntered();
+          await commitRelease;
+          protectedEffects += 1;
+          return { receipt: "protected-effect-1" };
+        });
+        return { protectedEffects };
+      },
+    });
+    const { job } = await enqueueServerJob({
+      scope: SCOPE,
+      actorId: "protected-lease-renewal-actor",
+      type: "protected-lease-renewal-test",
+      idempotencyKey: "protected-lease-renewal",
+      input: {},
+    });
+    const firstWorkerRun = new ServerJobWorker("protected-lease-owner", leaseMs).runOnce();
+    await commitEntered;
+
+    // The effect remains active beyond the lease interval while commit() owns
+    // the row lock and renews the lease in its transaction.
+    await new Promise((resolve) => setTimeout(resolve, leaseMs * 2));
+    let secondWorkerSettled = false;
+    const secondWorkerRun = new ServerJobWorker("protected-lease-reclaimer", leaseMs)
+      .runOnce()
+      .then((result) => {
+        secondWorkerSettled = true;
+        return result;
+      });
+    await new Promise((resolve) => setTimeout(resolve, leaseMs / 2));
+    expect(secondWorkerSettled).toBe(false);
+    expect(protectedEffects).toBe(0);
+
+    releaseCommit();
+    await expect(firstWorkerRun).resolves.toBe(true);
+    await expect(secondWorkerRun).resolves.toBe(false);
+
+    expect(protectedEffects).toBe(1);
+    const [finalJob] = await db.select().from(serverJobsTable);
+    expect(finalJob).toMatchObject({
+      id: job.id,
+      status: "succeeded",
+      attempt: 1,
+      result: { protectedEffects: 1 },
+    });
+    const attempts = await db.select().from(serverJobAttemptsTable);
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]).toMatchObject({
+      jobId: job.id,
+      attempt: 1,
+      workerId: "protected-lease-owner",
+      outcome: "succeeded",
+    });
+  });
+
   it("recovers expired final lease terminalization with one logical attempt", async () => {
     const [job] = await db.insert(serverJobsTable).values({
       scope: SCOPE,
