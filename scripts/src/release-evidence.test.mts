@@ -556,6 +556,14 @@ async function run(): Promise<void> {
     approvedPreflight,
     "the reader must normalize the exact pre-v1 checkpoint shape without accepting extra fields",
   );
+  assert.equal(
+    parseStoredSourceLibraryPreflightDiagnostic({
+      ...approvedPreflight,
+      components: [{ ingredient: "must be rejected" }],
+    }),
+    undefined,
+    "the stored diagnostic reader must reject unknown source-preflight fields",
+  );
   assert.doesNotMatch(
     JSON.stringify(approvedPreflight),
     /ingredient|must not be retained/,

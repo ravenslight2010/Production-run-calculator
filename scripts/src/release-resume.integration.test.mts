@@ -2020,6 +2020,97 @@ async function runStaleCheckpointScenarios(): Promise<void> {
   );
 }
 
+async function runTamperedSourceLibraryPreflightCheckpointScenario(): Promise<void> {
+  const evidenceDir = await mkdtemp(
+    join(tmpdir(), "release-resume-tampered-source-preflight-"),
+  );
+  const markerDir = await mkdtemp(
+    join(tmpdir(), "release-resume-tampered-source-preflight-marker-"),
+  );
+  const marker = join(markerDir, "gate-started");
+  const revision = await getCurrentRevision();
+  const sourcePreflightLabel =
+    "source-library reconciliation database preflight";
+  const steps: FixtureStep[] = [
+    {
+      label: "fixture gate must not start",
+      command: process.execPath,
+      args: [
+        "-e",
+        `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'started\\n');`,
+      ],
+    },
+  ];
+
+  try {
+    await writeFile(
+      join(evidenceDir, "release-check-state.json"),
+      `${JSON.stringify(
+        {
+          revision,
+          sourceLibraryRevision: revision,
+          mode: "standard",
+          results: [
+            {
+              label: sourcePreflightLabel,
+              passed: false,
+              status: "FAIL",
+              elapsedMs: 1,
+              sourceLibraryPreflight: {
+                contractVersion: 1,
+                database: "partial-fixture",
+                expected: { poolRows: 68, aliases: 25 },
+                observed: {
+                  poolRows: 21,
+                  aliasesExact: 25,
+                  aliasesMissing: 0,
+                  aliasesMismatched: 0,
+                  markerPresent: true,
+                  markerValid: true,
+                },
+                failures: [{ check: "databaseShape", count: 47 }],
+                ok: false,
+                components: [{ ingredient: "must not reach a resumed gate" }],
+              },
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const rejected = await runReleaseCheck(evidenceDir, steps, ["--resume"]);
+    assert.equal(rejected.code, 1, rejected.output);
+    assert.match(
+      rejected.output,
+      /Release checkpoint is malformed or unreadable\. Rerun without --resume to create a fresh checkpoint\./,
+      "a tampered source-preflight diagnostic must be rejected as a damaged checkpoint",
+    );
+    assert.doesNotMatch(
+      rejected.output,
+      /must not reach a resumed gate|uncaught|at readCheckpoint|Cannot resume release check:/i,
+      "tampered checkpoint rejection must not expose diagnostic payloads or parser details",
+    );
+    await assert.rejects(
+      readFile(marker, "utf8"),
+      "a tampered source-preflight diagnostic must be rejected before any fixture gate starts",
+    );
+    await assert.rejects(
+      readFile(join(evidenceDir, "release-check-report.md"), "utf8"),
+      "a rejected checkpoint must not create retained release evidence",
+    );
+  } finally {
+    await rm(evidenceDir, { recursive: true, force: true });
+    await rm(markerDir, { recursive: true, force: true });
+  }
+
+  console.log(
+    "Release resume tampered source-preflight scenario passed (damaged checkpoint rejected before gates or retained evidence).",
+  );
+}
+
 async function runDamagedCheckpointScenarios(): Promise<void> {
   for (const scenario of ["truncated", "unreadable"]) {
     const evidenceDir = await mkdtemp(
@@ -2073,5 +2164,6 @@ if (process.env.RELEASE_STOPPED_SUMMARY_ONLY === "1") {
   await runParallelResumeScenario();
   await runFullModeScenario();
   await runStaleCheckpointScenarios();
+  await runTamperedSourceLibraryPreflightCheckpointScenario();
   await runDamagedCheckpointScenarios();
 }
