@@ -229,6 +229,29 @@ async function freshBackendPid(): Promise<number> {
   throw lastError ?? new Error("Timed out waiting for a fresh pooled backend");
 }
 
+async function loseCommittedReply(): Promise<number> {
+  const pid = await pooledBackendPid();
+  const clients = (pool as pg.Pool & { _clients?: pg.Client[] })._clients ?? [];
+  clients.find((client) => (client as pg.Client & { processID?: number }).processID === pid)
+    ?.on("error", () => {});
+  await killer.query("select pg_terminate_backend($1)", [pid]);
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const present = await killer.query<{ pid: number }>(
+      "select pid::int from pg_stat_activity where pid = $1",
+      [pid],
+    );
+    if (present.rows.length === 0) {
+      throw Object.assign(
+        new Error("connection lost before the committed operation reply was acknowledged"),
+        { code: "08006", committedPid: pid },
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out terminating committed backend ${pid}`);
+}
+
 async function preserveTransientDatabaseCause<T>(operation: () => Promise<T>): Promise<T> {
   try {
     return await operation();
@@ -444,6 +467,132 @@ describe("background operation PostgreSQL reconnection", () => {
       alertKind: "freezerEmpty",
       status: "no-subscriptions",
     });
+    expect(await db.select().from(scheduledAlertRecordsTable)).toHaveLength(1);
+  });
+
+  it("keeps rollover and scheduled-job effects single after committed replies are lost", async () => {
+    const now = ROLLOVER_NOW;
+    const alertNow = Date.now();
+    const endedAt = alertNow - 120_000;
+    const dueAt = endedAt + 60_000;
+    await db.insert(dailySyncTable).values({
+      date: ALERT_DATE,
+      scope: SCOPE,
+      data: {
+        dayState: {
+          date: ALERT_DATE,
+          runs: [{ id: "ambiguous-commit-alert-run", startedAt: alertNow - 300_000, endedAt }],
+        },
+        runValues: { "ambiguous-commit-alert-run": { freezerTime: 1 } },
+      },
+    });
+    await runWebPushAlerts(dueAt - 1, { scope: SCOPE, date: ALERT_DATE });
+    expect(await enqueueScheduledWebPushAlerts(alertNow)).toEqual({ examined: 1, enqueued: 1 });
+    await db.insert(dailySyncTable).values([
+      {
+        date: ROLLOVER_DATE,
+        scope: SCOPE,
+        data: {
+          dayState: {
+            date: ROLLOVER_DATE,
+            runs: [{ id: ROLLOVER_RUN, startedAt: now - 3_600_000 }],
+          },
+          runValues: {
+            [ROLLOVER_RUN]: {
+              casesNeeded: 0,
+              pizzasPerCase: 0,
+              casesPerLayer: 0,
+              sauceBarrelLbs: 0,
+              sauceOzPerPizza: 0,
+              app1OzPerPizza: 0,
+              app1BatchLbs: 0,
+              app1Type: "",
+              app2OzPerPizza: 0,
+              app2BatchLbs: 0,
+              app2Type: "",
+              app3OzPerPizza: 0,
+              app3BatchLbs: 0,
+              app3Type: "",
+              app4OzPerPizza: 0,
+              app4BatchLbs: 0,
+              app4Type: "",
+              pep1OzPerPizza: 0,
+              pep1Sticks: 4,
+              pep1BatchLbs: 0,
+              pep1Type: "Pepperoni Stick",
+              pep2OzPerPizza: 0,
+              pep2Sticks: 0,
+              pep2BatchLbs: 0,
+              pep2Type: "",
+              crustsPerCycle: 0,
+              cycleSpeed: 0,
+              speedAdjustment: 0,
+              doughballWeightOz: 0,
+              doughBatchYield: 0,
+              cartonsPerCase: 0,
+            },
+          },
+        },
+      },
+      {
+        date: NEXT_DATE,
+        scope: SCOPE,
+        data: { dayState: { date: NEXT_DATE, runs: [] }, runValues: {} },
+      },
+    ]);
+    const [item] = await db.insert(inventoryItemsTable).values({
+      scope: SCOPE,
+      key: "ingredient:Pepperoni Stick:lbs",
+      category: "ingredient",
+      name: "Pepperoni Stick",
+      unit: "lbs",
+    }).returning();
+    await db.insert(inventoryLotsTable).values({
+      scope: SCOPE,
+      itemId: item.id,
+      qtyReceived: 20,
+      qtyRemaining: 20,
+    });
+    let rolloverAttempts = 0;
+    let rolloverRetryPid: number | undefined;
+    const rollover = await runBackgroundOperation("daily-rollover", async () => {
+      rolloverAttempts += 1;
+      const result = await runDailyRollover(SCOPE, {
+        nowMs: now,
+        timeZone: "America/Chicago",
+      });
+      if (rolloverAttempts === 1) await loseCommittedReply();
+      return result;
+    }, {
+      delay: async () => { rolloverRetryPid = await freshBackendPid(); },
+    });
+
+    const worker = new ServerJobWorker("ambiguous-commit-worker");
+    let workerAttempts = 0;
+    let workerRetryPid: number | undefined;
+    const ran = await runBackgroundOperation("server-job-run", async () => {
+      workerAttempts += 1;
+      const result = await worker.runOnce();
+      if (workerAttempts === 1) await loseCommittedReply();
+      return result;
+    }, {
+      delay: async () => { workerRetryPid = await freshBackendPid(); },
+    });
+
+    expect(rolloverAttempts).toBe(2);
+    expect(rolloverRetryPid).toBeTypeOf("number");
+    expect(rollover).toMatchObject({ rolled: false, epoch: 1, finalizedRuns: 0 });
+    expect(workerAttempts).toBe(2);
+    expect(workerRetryPid).toBeTypeOf("number");
+    expect(ran).toBe(false);
+
+    expect((await db.select().from(inventoryLotsTable))[0]!.qtyRemaining).toBe(16);
+    expect(await db.select().from(completedRunHistoryTable)).toHaveLength(1);
+    expect(await db.select().from(inventoryConsumedRunsTable)).toHaveLength(1);
+    expect(await db.select().from(inventoryLedgerTable)).toHaveLength(1);
+    const [job] = await db.select().from(serverJobsTable);
+    expect(job).toMatchObject({ status: "succeeded", attempt: 1 });
+    expect(await db.select().from(serverJobAttemptsTable)).toHaveLength(1);
     expect(await db.select().from(scheduledAlertRecordsTable)).toHaveLength(1);
   });
 
