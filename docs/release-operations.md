@@ -167,7 +167,13 @@ pnpm run release:check -- \
 
 Release captures and imports reject a missing, malformed, `unknown`, or
 different revision. The production revision must come from the controlled
-deployment/report path; never substitute the current repository `HEAD`.
+deployment/report path; never substitute the current repository `HEAD`. The
+retained release report records both `Source-library evidence revision` and
+`Deployed revision`; for release evidence those values must match the SHA
+returned by the deployed operational report. The release runner passes that SHA
+explicitly to the source verifier's preflight and full verification/import
+steps, so an older release-state file or an omitted preflight value cannot
+silently qualify.
 
 When a job stops before all gates complete, the workflow writes a separate
 NO-GO summary with the uploaded checkpoint-artifact link, the matching resume

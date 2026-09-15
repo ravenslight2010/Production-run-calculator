@@ -539,6 +539,71 @@ async function run(): Promise<void> {
     /Environment: disposable CI gate test \(not production reconciliation evidence\)[\s\S]*Decision: NO-GO/,
     "disposable CI validation must never be rendered as production-ready evidence",
   );
+  const validLabels = ["gate one", "gate two"];
+  const checkoutRevision = "c".repeat(40);
+  const deployedRevision = "d".repeat(40);
+  const deployedRevisionReport = formatReleaseReport(
+    validLabels.map((label) => ({
+      label,
+      status: "PASS" as const,
+      elapsedMs: 100,
+    })),
+    "standard",
+    new Set(),
+    {
+      revision: checkoutRevision,
+      environment: "release validation",
+      sourceLibraryEnvironment: "release",
+      sourceLibraryRevision: deployedRevision,
+      deployedRevision,
+      decision: "GO",
+    },
+  );
+  assert.match(deployedRevisionReport, new RegExp(`^Deployed revision: ${deployedRevision}$`, "m"));
+  assert.doesNotThrow(
+    () =>
+      validateReleaseReport(deployedRevisionReport, {
+        currentRevision: checkoutRevision,
+        expectedMode: "standard",
+        expectedLabels: validLabels,
+        expectedSourceLibraryEnvironment: "release",
+        expectedSourceLibraryRevision: deployedRevision,
+      }),
+    "release evidence must expose and validate the deployed revision handoff",
+  );
+  assert.throws(
+    () =>
+      validateReleaseReport(
+        deployedRevisionReport.replace(
+          `Deployed revision: ${deployedRevision}`,
+          `Deployed revision: ${"e".repeat(40)}`,
+        ),
+        {
+          currentRevision: checkoutRevision,
+          expectedMode: "standard",
+          expectedLabels: validLabels,
+          expectedSourceLibraryEnvironment: "release",
+          expectedSourceLibraryRevision: deployedRevision,
+        },
+      ),
+    /deployed revision is missing or stale/,
+    "a release report with a mismatched deployed revision must fail closed",
+  );
+  assert.throws(
+    () =>
+      validateReleaseReport(
+        deployedRevisionReport.replace(/^Deployed revision:.*\n/m, ""),
+        {
+          currentRevision: checkoutRevision,
+          expectedMode: "standard",
+          expectedLabels: validLabels,
+          expectedSourceLibraryEnvironment: "release",
+          expectedSourceLibraryRevision: deployedRevision,
+        },
+      ),
+    /deployed revision is missing or stale/,
+    "a release report without a deployed revision must fail closed",
+  );
   assert.deepEqual(
     SOURCE_LIBRARY_RECONCILIATION_STEP.args.slice(0, 5),
     [
@@ -667,7 +732,6 @@ async function run(): Promise<void> {
     ]),
     /\| timed-out fixture \| INFRASTRUCTURE TIMEOUT \|/,
   );
-  const validLabels = ["gate one", "gate two"];
   const validReport = formatReleaseReport(
     validLabels.map((label) => ({
       label,

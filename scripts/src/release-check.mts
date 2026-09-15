@@ -2079,6 +2079,9 @@ export function validateReleaseReport(
   const sourceLibraryReportRevision = report.match(
     /^Source-library evidence revision:\s*(\S+)\s*$/m,
   )?.[1];
+  const deployedRevision = report.match(
+    /^Deployed revision:\s*(\S+)\s*$/m,
+  )?.[1];
   if (
     options.expectedSourceLibraryEnvironment !== undefined &&
     sourceLibraryReportEnvironment !== options.expectedSourceLibraryEnvironment
@@ -2093,6 +2096,18 @@ export function validateReleaseReport(
   ) {
     throw new Error(
       `Release report source-library evidence revision is missing or stale (expected ${options.expectedSourceLibraryRevision}).`,
+    );
+  }
+  if (
+    options.expectedSourceLibraryEnvironment === "release" &&
+    (!deployedRevision ||
+      !/^[a-f0-9]{40}$/u.test(deployedRevision) ||
+      options.expectedSourceLibraryRevision === undefined ||
+      !/^[a-f0-9]{40}$/u.test(options.expectedSourceLibraryRevision) ||
+      deployedRevision !== options.expectedSourceLibraryRevision)
+  ) {
+    throw new Error(
+      `Release report deployed revision is missing or stale (expected ${options.expectedSourceLibraryRevision ?? "the deployed revision"}).`,
     );
   }
   const exceptions = report.match(/^Accepted exceptions:\s*(.+)$/m)?.[1];
@@ -2269,6 +2284,7 @@ export function formatReleaseReport(
     environment?: string;
     sourceLibraryEnvironment?: SourceLibraryEvidenceEnvironment;
     sourceLibraryRevision?: string;
+    deployedRevision?: string;
     decision?: "GO" | "NO-GO";
     browserDurationRegressions?: readonly BrowserDurationRegression[];
     expectedLabels?: readonly string[];
@@ -2375,6 +2391,12 @@ export function formatReleaseReport(
     `Environment: ${metadata.environment ?? "release validation environment"}`,
     `Source-library evidence environment: ${metadata.sourceLibraryEnvironment ?? sourceLibraryEnvironment}`,
     `Source-library evidence revision: ${metadata.sourceLibraryRevision ?? revision}`,
+    `Deployed revision: ${
+      metadata.deployedRevision ??
+      ((metadata.sourceLibraryEnvironment ?? sourceLibraryEnvironment) === "release"
+        ? metadata.sourceLibraryRevision ?? revision
+        : "not applicable")
+    }`,
     "Commands: listed in the gate results table below",
     `Evidence paths: ${releaseEvidenceDir}/ and retained files linked below`,
     "",
@@ -2481,6 +2503,7 @@ async function writeReleaseReport(
   metadata: {
     revision: string;
     sourceLibraryRevision: string;
+    deployedRevision?: string;
     decision: "GO" | "NO-GO";
     expectedLabels?: readonly string[];
     timing?: ReleaseTiming;
@@ -2594,6 +2617,11 @@ async function writeReleaseReport(
           : "local release validation",
         sourceLibraryEnvironment,
         sourceLibraryRevision: metadata.sourceLibraryRevision,
+        deployedRevision:
+          metadata.deployedRevision ??
+          (sourceLibraryEnvironment === "release"
+            ? metadata.sourceLibraryRevision
+            : undefined),
         browserDurationRegressions,
         timing: metadata.timing,
       },
@@ -3020,22 +3048,31 @@ async function main(): Promise<void> {
           console.log(`[${index + 1}/${steps.length}] ${step.label}`);
           let task: Promise<void>;
           task = (async () => {
+            const isSourceLibraryStep =
+              step.label === SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL ||
+              step.label === SOURCE_LIBRARY_RECONCILIATION_STEP.label;
             const effectiveStep =
               step.label === FULL_BROWSER_GATE_LABEL ||
               step.label === REPORT_KEY_ROTATION_PREFLIGHT_LABEL ||
-              step.label === SOURCE_LIBRARY_RECONCILIATION_STEP.label
+              isSourceLibraryStep
                 ? {
                     ...step,
+                    ...(isSourceLibraryStep
+                      ? {
+                          args: [
+                            ...step.args,
+                            "--revision",
+                            sourceLibraryRevision,
+                          ],
+                        }
+                      : {}),
                     env: {
                       ...step.env,
                       ...(step.label === FULL_BROWSER_GATE_LABEL
                         ? { RELEASE_REVISION: revision }
                         : step.label === REPORT_KEY_ROTATION_PREFLIGHT_LABEL
                           ? { REPORT_KEY_ROTATION_PREFLIGHT_REVISION: revision }
-                          : {
-                              SOURCE_LIBRARY_RECONCILIATION_REVISION:
-                                sourceLibraryRevision,
-                            }),
+                          : {}),
                     },
                   }
                 : step;
