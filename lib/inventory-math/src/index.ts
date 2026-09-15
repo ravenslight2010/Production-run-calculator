@@ -512,6 +512,89 @@ export function computeMixComponentConsumptionLines(
   return [...map.entries()].map(([itemKey, qty]) => ({ itemKey, qty }));
 }
 
+// ── Mix surplus recording (over-production ledger) ────────────────────────────
+//
+// Structural stand-ins for buildMixPlan output (@workspace/mixes). MixPlanGroup
+// / MixPlanEntry are structurally assignable to these, so this module never has
+// to import the mixes package (same convention as LotForConsumption).
+export type MixSurplusPlanEntry = {
+  mixId: string;
+  name?: string;
+  totalLbs: number;
+  remainingLbs: number;
+};
+
+export type MixSurplusPlanRun = {
+  brand: string;
+  flavor: string;
+  mixes: MixSurplusPlanEntry[];
+};
+
+export type MixSurplusPlanGroup = {
+  runs: MixSurplusPlanRun[];
+  prepMixes: MixSurplusPlanEntry[];
+};
+
+// One dated surplus lot to record: the mix over-produced `amountRemaining` lbs
+// beyond the fresh need (`amountActuallyMade` total), so that much is now
+// "freezer stock" available to future runs.
+export type MixSurplusRecordingRow = {
+  mixId: string;
+  name: string;
+  brand: string;
+  flavor: string;
+  isPrep: boolean;
+  amountMade: number;
+  amountRemaining: number;
+};
+
+// Derive surplus lots from a day's mix plan and the mixer's entered
+// "made today" amounts (actualMadeByMixId). Mirrors the day-start Feature B2
+// convention: blank/0 actualMade means "assume the plan's needed amount" (no
+// surplus); entered actualMade above the fresh remaining need produces a lot
+// for the excess. Rounds surplus to 2 decimals to match the route's carry math.
+export function buildMixSurplusRecording(
+  planGroups: MixSurplusPlanGroup[],
+  actualMadeByMixId: Record<string, number | undefined>,
+): MixSurplusRecordingRow[] {
+  const rows: MixSurplusRecordingRow[] = [];
+  for (const group of planGroups) {
+    for (const run of group.runs) {
+      for (const entry of run.mixes) {
+        const row = surplusRow(entry, run.brand, run.flavor, false, actualMadeByMixId);
+        if (row) rows.push(row);
+      }
+    }
+    for (const entry of group.prepMixes) {
+      const row = surplusRow(entry, "", "", true, actualMadeByMixId);
+      if (row) rows.push(row);
+    }
+  }
+  return rows;
+}
+
+function surplusRow(
+  entry: MixSurplusPlanEntry,
+  brand: string,
+  flavor: string,
+  isPrep: boolean,
+  actualMadeByMixId: Record<string, number | undefined>,
+): MixSurplusRecordingRow | null {
+  const actualMade = Math.max(0, Number(actualMadeByMixId[entry.mixId]) || 0);
+  if (actualMade <= 0 || entry.remainingLbs <= 0) return null;
+  const surplus = Math.max(0, actualMade - entry.remainingLbs);
+  if (surplus <= 0) return null;
+  return {
+    mixId: entry.mixId,
+    name: entry.name ?? "",
+    brand,
+    flavor,
+    isPrep,
+    amountMade: actualMade,
+    amountRemaining: Math.round(surplus * 100) / 100,
+  };
+}
+
 // ── Daily supply consumption (Feature E7) ───────────────────────────────────
 //
 // Fixed daily production supplies (tape, glue, ink) consumed once per
