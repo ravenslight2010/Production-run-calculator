@@ -9,7 +9,7 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { cpus, totalmem, tmpdir } from "node:os";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -78,6 +78,42 @@ export function editorServiceEvidenceFromResult(result: {
   };
 }
 
+export type Typescript7RunnerFingerprint = {
+  image: string;
+  hardwareClass: string;
+  logicalCpuCount: number;
+  memoryGiB: number;
+};
+
+function boundedRunnerLabel(value: string | undefined): string {
+  const normalized = value?.trim().replace(/[^A-Za-z0-9._@+-]/g, "-").slice(0, 80);
+  return normalized || "unknown";
+}
+
+export function typescript7RunnerFingerprint(): Typescript7RunnerFingerprint {
+  const processors = cpus();
+  const logicalCpuCount = processors.length;
+  const memoryGiB = Math.max(1, Math.round(totalmem() / 1024 ** 3));
+  const cpuModel = processors[0]?.model.trim().replace(/\s+/g, " ") ?? "unknown";
+  const image = boundedRunnerLabel(
+    process.env.ImageOS && process.env.ImageVersion
+      ? `${process.env.ImageOS}@${process.env.ImageVersion}`
+      : process.env.TYPESCRIPT_7_RUNNER_IMAGE ?? process.env.ImageOS,
+  );
+  const hardwareClass = createHash("sha256")
+    .update(
+      JSON.stringify({
+        platform: process.platform,
+        arch: process.arch,
+        cpuModel,
+        logicalCpuCount,
+        memoryGiB,
+      }),
+    )
+    .digest("hex");
+  return { image, hardwareClass, logicalCpuCount, memoryGiB };
+}
+
 export function typescript7ResourceRegressions(
   value: unknown,
 ): string[] | null {
@@ -125,6 +161,7 @@ export function typescript7ResourceRegressions(
 export function selectTypescript7HistoricalReports(
   history: readonly unknown[],
   currentRevision: string,
+  currentHardwareClass: string,
 ): Array<Record<string, unknown>> {
   const revisions = new Set([currentRevision]);
   const selected: Array<Record<string, unknown>> = [];
@@ -133,16 +170,18 @@ export function selectTypescript7HistoricalReports(
       item === null ||
       typeof item !== "object" ||
       Array.isArray(item) ||
-      (item as Record<string, unknown>).schemaVersion !== 2
+      (item as Record<string, unknown>).schemaVersion !== 3
     ) {
       continue;
     }
     const report = item as Record<string, unknown>;
+    const runner = report.runner as Record<string, unknown> | undefined;
     const revision = report.sourceRevision;
     if (
       typeof revision !== "string" ||
       !/^[a-f0-9]{40}$/.test(revision) ||
       revisions.has(revision) ||
+      runner?.hardwareClass !== currentHardwareClass ||
       typescript7ResourceRegressions(report.performanceComparison) === null
     ) {
       continue;
@@ -455,6 +494,7 @@ async function main(): Promise<void> {
       typescript7ResourceRegressions(performanceComparison) ??
       ["current:malformed-resource-measurements"];
     const historyPath = process.env.TYPESCRIPT_7_HISTORY_JSON;
+    const runnerFingerprint = typescript7RunnerFingerprint();
     let historicalReports: unknown[] = [];
     if (historyPath) {
       try {
@@ -467,6 +507,7 @@ async function main(): Promise<void> {
     const historicalRevisions = selectTypescript7HistoricalReports(
       historicalReports,
       sourceRevision(),
+      runnerFingerprint.hardwareClass,
     );
     const revisionSamples = [
       ...historicalRevisions.map((item) => ({
@@ -525,7 +566,7 @@ async function main(): Promise<void> {
         promotionAssessment.eligible === true);
 
     report = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       sourceRevision: sourceRevision(),
       status:
         advisoryPassed && promotionGatesMet
@@ -540,6 +581,7 @@ async function main(): Promise<void> {
         arch: process.arch,
         supported: platformSupported,
         supportedRunners,
+        ...runnerFingerprint,
       },
       commands,
       performanceComparison,

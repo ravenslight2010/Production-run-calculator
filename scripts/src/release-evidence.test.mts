@@ -241,7 +241,7 @@ async function fixture(
                   diagnostics: [],
                 });
                 return {
-                schemaVersion: 2,
+                schemaVersion: 3,
                 sourceRevision: "current-revision",
                 status: "PASS",
                 authoritativeCompiler: "Version 6.0.3",
@@ -255,6 +255,10 @@ async function fixture(
                     platform: process.platform,
                     arch: process.arch,
                   }],
+                  image: "test-image",
+                  hardwareClass: "f".repeat(64),
+                  logicalCpuCount: 4,
+                  memoryGiB: 16,
                 },
                 commands: [command("frozen-install"), command("typescript-6-clean"),
                   ...["cold", "warm"].flatMap((mode) => checks.flatMap((check) => [

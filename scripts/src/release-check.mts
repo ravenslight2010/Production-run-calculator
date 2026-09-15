@@ -429,7 +429,7 @@ export function validateTypescript7ComparisonEvidence(
     ),
   ]);
   if (
-    report.schemaVersion !== 2 ||
+    report.schemaVersion !== 3 ||
     report.sourceRevision !== expectedRevision ||
     report.authoritativeCompiler !== "Version 6.0.3" ||
     report.candidateCompiler !== "Version 7.0.2" ||
@@ -443,6 +443,17 @@ export function validateTypescript7ComparisonEvidence(
     runner?.platform !== process.platform ||
     runner?.arch !== process.arch ||
     runner?.supported !== true ||
+    typeof runner.image !== "string" ||
+    runner.image.length < 1 ||
+    runner.image.length > 80 ||
+    !/^[A-Za-z0-9._@+-]+$/.test(runner.image) ||
+    !/^[a-f0-9]{64}$/.test(String(runner.hardwareClass ?? "")) ||
+    !Number.isInteger(runner.logicalCpuCount) ||
+    Number(runner.logicalCpuCount) < 1 ||
+    Number(runner.logicalCpuCount) > 1024 ||
+    !Number.isInteger(runner.memoryGiB) ||
+    Number(runner.memoryGiB) < 1 ||
+    Number(runner.memoryGiB) > 16_384 ||
     !TYPESCRIPT_7_SUPPORTED_RUNNERS.some(
       (item) =>
         item.platform === process.platform && item.arch === process.arch,

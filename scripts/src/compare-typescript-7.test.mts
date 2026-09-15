@@ -8,6 +8,7 @@ import {
   editorServiceEvidenceFromResult,
   normalizeDiagnostics,
   selectTypescript7HistoricalReports,
+  typescript7RunnerFingerprint,
   typescript7ResourceRegressions,
 } from "./compare-typescript-7.mts";
 import { validateTypescript7ComparisonEvidence } from "./release-check.mts";
@@ -105,6 +106,29 @@ test("declaration manifests retain paths and content hashes", async () => {
   }
 });
 
+test("runner fingerprints retain only bounded non-sensitive labels", () => {
+  const previousImage = process.env.TYPESCRIPT_7_RUNNER_IMAGE;
+  const previousImageOs = process.env.ImageOS;
+  const previousImageVersion = process.env.ImageVersion;
+  try {
+    delete process.env.ImageOS;
+    delete process.env.ImageVersion;
+    process.env.TYPESCRIPT_7_RUNNER_IMAGE = `ubuntu label/${"x".repeat(100)}`;
+    const fingerprint = typescript7RunnerFingerprint();
+    assert.match(fingerprint.image, /^[A-Za-z0-9._@+-]{1,80}$/);
+    assert.match(fingerprint.hardwareClass, /^[a-f0-9]{64}$/);
+    assert.ok(fingerprint.logicalCpuCount > 0);
+    assert.ok(fingerprint.memoryGiB > 0);
+  } finally {
+    if (previousImage === undefined) delete process.env.TYPESCRIPT_7_RUNNER_IMAGE;
+    else process.env.TYPESCRIPT_7_RUNNER_IMAGE = previousImage;
+    if (previousImageOs === undefined) delete process.env.ImageOS;
+    else process.env.ImageOS = previousImageOs;
+    if (previousImageVersion === undefined) delete process.env.ImageVersion;
+    else process.env.ImageVersion = previousImageVersion;
+  }
+});
+
 test("retained comparison evidence is revision-bound and advisory", () => {
   const checks = [
     "build",
@@ -123,7 +147,7 @@ test("retained comparison evidence is revision-bound and advisory", () => {
     diagnostics: [],
   });
   const evidence = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     sourceRevision: "a".repeat(40),
     status: "PASS",
     authoritativeCompiler: "Version 6.0.3",
@@ -134,6 +158,10 @@ test("retained comparison evidence is revision-bound and advisory", () => {
       arch: process.arch,
       supported: true,
       supportedRunners: [{ platform: process.platform, arch: process.arch }],
+      image: "test-image",
+      hardwareClass: "f".repeat(64),
+      logicalCpuCount: 4,
+      memoryGiB: 16,
     },
     commands: [
       command("frozen-install"),
@@ -379,14 +407,16 @@ test("history deduplicates revisions and evaluates each sample independently", (
   const cleanRevision = "c".repeat(40);
   const history = [
     {
-      schemaVersion: 2,
+      schemaVersion: 3,
       sourceRevision: breachedRevision,
+      runner: { hardwareClass: "f".repeat(64) },
       performanceComparison: measurements(2),
       promotionAssessment: { resourceBudgetsMet: false },
     },
     {
-      schemaVersion: 2,
+      schemaVersion: 3,
       sourceRevision: cleanRevision,
+      runner: { hardwareClass: "f".repeat(64) },
       performanceComparison: measurements(),
       promotionAssessment: {
         resourceBudgetsMet: false,
@@ -394,14 +424,16 @@ test("history deduplicates revisions and evaluates each sample independently", (
       },
     },
     {
-      schemaVersion: 2,
+      schemaVersion: 3,
       sourceRevision: cleanRevision,
+      runner: { hardwareClass: "f".repeat(64) },
       performanceComparison: measurements(),
     },
   ];
   const selected = selectTypescript7HistoricalReports(
     history,
     "a".repeat(40),
+    "f".repeat(64),
   );
   assert.deepEqual(
     selected.map((report) => report.sourceRevision),
@@ -421,4 +453,28 @@ test("history deduplicates revisions and evaluates each sample independently", (
     [],
     "a clean revision must not inherit an older aggregate regression",
   );
+});
+
+test("history rejects a different runner class without weakening advisory evidence", () => {
+  const measurements = ["cold", "warm"].flatMap((mode) =>
+    ["build", "scripts", "api-server", "run-calculator", "mockup-sandbox", "ai-evaluation", "corpus-harness"].map((check) => ({
+      check,
+      mode,
+      elapsedMs: { baseline: 10, candidate: 10, delta: 0, ratio: 1 },
+      peakRssKiB: { baseline: 10, candidate: 10, delta: 0, ratio: 1 },
+    })),
+  );
+  const selected = selectTypescript7HistoricalReports(
+    [
+      {
+        schemaVersion: 3,
+        sourceRevision: "b".repeat(40),
+        runner: { hardwareClass: "e".repeat(64) },
+        performanceComparison: measurements,
+      },
+    ],
+    "a".repeat(40),
+    "f".repeat(64),
+  );
+  assert.deepEqual(selected, []);
 });

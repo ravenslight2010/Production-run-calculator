@@ -29,7 +29,7 @@ while IFS=$'\t' read -r run_id; do
   unzip -q "$zip" -d "$dir" || continue
   report="$(find "$dir" -type f -name typescript-7-comparison.json -print -quit)"
   [[ -n "$report" ]] || continue
-  jq -e '.schemaVersion == 2 and (.sourceRevision | strings) and (.performanceComparison | arrays | length == 14)' "$report" >/dev/null || continue
+  jq -e '.schemaVersion == 3 and (.sourceRevision | strings) and (.runner.image | strings | length > 0 and length <= 80) and (.runner.hardwareClass | strings | test("^[a-f0-9]{64}$")) and (.performanceComparison | arrays | length == 14)' "$report" >/dev/null || continue
   revision="$(jq -r '.sourceRevision' "$report")"
   if jq -e --arg revision "$revision" 'any(.sourceRevision == $revision)' "$history" >/dev/null; then
     echo "Ignoring duplicate TypeScript 7 evidence for revision ${revision}."
