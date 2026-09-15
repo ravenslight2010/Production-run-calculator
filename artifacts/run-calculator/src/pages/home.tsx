@@ -11,6 +11,7 @@ import {
   coordinateForegroundAdoption,
   createForegroundSyncTodayRequest,
   initialResetRequiresReload,
+  releaseCancelledForegroundRecovery,
   releaseForegroundRecovery,
   useHomeSyncCoordination,
 } from "../hooks/useHomeSyncCoordination";
@@ -9675,18 +9676,30 @@ export default function Home() {
                 // The first Strict Mode pass can be cancelled after doing the
                 // work but before its state updates. Do not strand the
                 // synchronous fence in the second pass.
-                foregroundSyncBarrierRef.current = false;
-                setAutoTrackBlocked(false);
-                foregroundPushPendingRef.current = false;
+                releaseCancelledForegroundRecovery({
+                  discardQueuedWrite: () => {
+                    foregroundPushPendingRef.current = false;
+                  },
+                  releaseFence: () => {
+                    foregroundSyncBarrierRef.current = false;
+                    setAutoTrackBlocked(false);
+                  },
+                });
               }
             } else if (cancelled) {
               // A cancelled first Strict Mode pass has no live owner that can
               // surface its failure or service a retry button. Release only
               // that pass's fence; a real mounted recovery failure remains
               // fenced and retryable through the visible notice above.
-              foregroundSyncBarrierRef.current = false;
-              setAutoTrackBlocked(false);
-              foregroundPushPendingRef.current = false;
+              releaseCancelledForegroundRecovery({
+                discardQueuedWrite: () => {
+                  foregroundPushPendingRef.current = false;
+                },
+                releaseFence: () => {
+                  foregroundSyncBarrierRef.current = false;
+                  setAutoTrackBlocked(false);
+                },
+              });
             }
           }
         }

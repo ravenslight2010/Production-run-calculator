@@ -15,6 +15,7 @@ import { createForegroundSyncWakeGuard } from "./foregroundSyncWakeGuard";
 import {
   coordinateForegroundAdoption,
   createForegroundSyncTodayRequest,
+  releaseCancelledForegroundRecovery,
   releaseForegroundRecovery,
   useHomeSyncCoordination,
 } from "./hooks/useHomeSyncCoordination";
@@ -228,6 +229,29 @@ describe("foreground wake sync barrier", () => {
     expect(replay).toHaveBeenCalledTimes(1);
   });
 
+  it("releases a cancelled completed recovery without replaying its queued write", () => {
+    let fenced = true;
+    let queued = true;
+    const order: string[] = [];
+    const replay = vi.fn();
+
+    releaseCancelledForegroundRecovery({
+      discardQueuedWrite: () => {
+        order.push("discard");
+        queued = false;
+      },
+      releaseFence: () => {
+        order.push("release");
+        fenced = false;
+      },
+    });
+
+    expect(order).toEqual(["discard", "release"]);
+    expect(fenced).toBe(false);
+    expect(queued).toBe(false);
+    expect(replay).not.toHaveBeenCalled();
+  });
+
   it("keeps recovery fenced after a failed pull", () => {
     expect(homeSource).toContain("syncPushGenerationRef.current += 1");
     expect(homeSource).toContain("controller.abort()");
@@ -245,6 +269,7 @@ describe("foreground wake sync barrier", () => {
     )?.[0] ?? "";
     expect(catchBlock).toContain("return false");
     expect(catchBlock).not.toContain("reconciled = true");
+    expect(homeSource).toContain("releaseCancelledForegroundRecovery");
   });
 
   it("rejects malformed unchanged recovery responses and fences superseded responses", () => {

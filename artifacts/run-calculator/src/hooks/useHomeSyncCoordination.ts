@@ -136,6 +136,10 @@ export function releaseForegroundRecovery({
   if (takeQueuedWrite()) replayQueuedWrite();
 }
 
+type CancelledForegroundReleaseOptions = {
+  releaseFence: () => void;
+  discardQueuedWrite: () => void;
+};
 /** Only a reset marker newer than local durable state may interrupt baseline adoption. */
 export function initialResetRequiresReload(messageEpoch: number, storedEpoch: number): boolean {
   return messageEpoch > storedEpoch;
@@ -321,4 +325,17 @@ export function useHomeSyncCoordination() {
     requestBaselinePush,
     writeToday,
   ]);
+}
+
+/**
+ * A cancelled recovery has no mounted owner that can safely replay work.
+ * Discard its queued write before releasing the fence so the next owner cannot
+ * observe and publish a stale pre-wake mutation.
+ */
+export function releaseCancelledForegroundRecovery({
+  releaseFence,
+  discardQueuedWrite,
+}: CancelledForegroundReleaseOptions): void {
+  discardQueuedWrite();
+  releaseFence();
 }
