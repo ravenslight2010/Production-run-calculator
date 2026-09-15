@@ -1,6 +1,33 @@
 import type { Client } from "pg";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const pgClients = vi.hoisted(() => [] as Array<{
+  connect: ReturnType<typeof vi.fn>;
+  query: ReturnType<typeof vi.fn>;
+  end: ReturnType<typeof vi.fn>;
+}>);
+const pgMockState = vi.hoisted(() => ({
+  nextQueryError: undefined as Error | undefined,
+}));
+
+vi.mock("pg", () => ({
+  Client: vi.fn(function MockClient() {
+    const query = pgMockState.nextQueryError
+      ? vi.fn().mockRejectedValueOnce(pgMockState.nextQueryError)
+      : vi.fn().mockResolvedValue({ rows: [] });
+    pgMockState.nextQueryError = undefined;
+    const client = {
+      connect: vi.fn().mockResolvedValue(undefined),
+      query,
+      end: vi.fn().mockResolvedValue(undefined),
+    };
+    pgClients.push(client);
+    return client;
+  }),
+}));
+
 import {
+  AuthorizedBrowserFixtures,
   authorizeFixtureAccount,
   cleanupBrandProfiles,
   cleanupCheeseRecipes,
@@ -11,6 +38,32 @@ import {
   cleanupTestUsers,
 } from "../e2e/isolation";
 
+const LIVE_FIXTURE_LOCK_BINDS = [0x4532_4546, 0x4c49_5645];
+
+function mockedPlaywright() {
+  const request = {
+    dispose: vi.fn().mockResolvedValue(undefined),
+  };
+  return {
+    playwright: {
+      request: {
+        newContext: vi.fn().mockResolvedValue(request),
+      },
+    },
+    request,
+  };
+}
+
+beforeEach(() => {
+  pgClients.length = 0;
+  pgMockState.nextQueryError = undefined;
+  vi.clearAllMocks();
+  vi.stubEnv("DATABASE_URL", "postgresql://postgres@127.0.0.1/browser_e2e");
+  vi.stubEnv("NODE_ENV", "test");
+  vi.stubEnv("APP_ENV", "");
+  vi.stubEnv("REPLIT_DEPLOYMENT", "");
+});
+
 function mockedClient() {
   const query = vi.fn().mockResolvedValue({ rows: [] });
   return {
@@ -18,6 +71,57 @@ function mockedClient() {
     query,
   };
 }
+
+describe("AuthorizedBrowserFixtures live fixture lock", () => {
+  it("closes the lock client when lock acquisition fails", async () => {
+    const { playwright, request } = mockedPlaywright();
+    const lockError = new Error("fixture lock unavailable");
+    pgMockState.nextQueryError = lockError;
+
+    await expect(
+      AuthorizedBrowserFixtures.create(
+        playwright,
+        "http://api.test",
+        "signup-code",
+      ),
+    ).rejects.toBe(lockError);
+
+    expect(pgClients[0].query).toHaveBeenCalledWith(
+      "SELECT pg_advisory_lock($1, $2)",
+      LIVE_FIXTURE_LOCK_BINDS,
+    );
+    expect(pgClients[0].end).toHaveBeenCalledOnce();
+    expect(request.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("unlocks with the matching binds before closing during disposal", async () => {
+    const { playwright, request } = mockedPlaywright();
+    const fixtures = await AuthorizedBrowserFixtures.create(
+      playwright,
+      "http://api.test",
+      "signup-code",
+    );
+    const lockClient = pgClients[0];
+
+    await fixtures.cleanup();
+
+    expect(lockClient.query).toHaveBeenNthCalledWith(
+      1,
+      "SELECT pg_advisory_lock($1, $2)",
+      LIVE_FIXTURE_LOCK_BINDS,
+    );
+    expect(lockClient.query).toHaveBeenNthCalledWith(
+      2,
+      "SELECT pg_advisory_unlock($1, $2)",
+      LIVE_FIXTURE_LOCK_BINDS,
+    );
+    expect(lockClient.query.mock.invocationCallOrder[1]).toBeLessThan(
+      lockClient.end.mock.invocationCallOrder[0],
+    );
+    expect(lockClient.end).toHaveBeenCalledOnce();
+    expect(request.dispose).toHaveBeenCalledOnce();
+  });
+});
 
 describe("cleanupTestUsers", () => {
   it("keeps SQL-shaped usernames out of the query text", async () => {
