@@ -411,6 +411,60 @@ test.beforeAll(async () => {
 
 async function seedPendingRun(page: Page): Promise<string> {
   const runId = uniqueTestId("a11y_run");
+  const date = new Date().toISOString().slice(0, 10);
+  const now = Date.now();
+  const db = new Client({ connectionString: process.env.DATABASE_URL });
+  try {
+    await db.connect();
+    await db.query(
+      "DELETE FROM daily_sync WHERE date = $1 AND scope = 'live'",
+      [date],
+    );
+  } finally {
+    await db.end().catch(() => {});
+  }
+  const stoppages = [
+    {
+      id: `${runId}-active`,
+      reason: "Conveyor check",
+      startedAt: now - 60_000,
+      type: "stop",
+    },
+    {
+      id: `${runId}-manual`,
+      reason: "Manual cleanup",
+      startedAt: now - 180_000,
+      endedAt: now - 120_000,
+      type: "manual",
+    },
+    {
+      id: `${runId}-paused`,
+      reason: "Ingredient refill",
+      startedAt: now - 360_000,
+      type: "pause",
+    },
+    {
+      id: `${runId}-completed`,
+      reason: "Safety reset",
+      startedAt: now - 600_000,
+      endedAt: now - 450_000,
+      type: "stop",
+    },
+  ];
+  const payload = {
+    dayState: {
+      date,
+      runs: [{
+        id: runId,
+        brand: "Accessibility",
+        flavor: "Smoke",
+        seeded: false,
+        stoppages,
+      }],
+      currentIndex: 0,
+      resetAt: 0,
+    },
+  };
   await page.evaluate(() => {
     const keys = Array.from({ length: localStorage.length }, (_, index) =>
       localStorage.key(index),
@@ -420,7 +474,7 @@ async function seedPendingRun(page: Page): Promise<string> {
     }
     localStorage.removeItem("run-calc-day");
   });
-  await page.addInitScript((id: string) => {
+  await page.addInitScript((seed: { payload: typeof payload; runId: string }) => {
     // Init scripts run before every navigation, including reloads triggered by
     // authenticated startup (for example, a sandbox refresh). Keep the seed
     // idempotent so a startup reload cannot strand this journey on the blank
@@ -430,21 +484,28 @@ async function seedPendingRun(page: Page): Promise<string> {
       const day = raw ? JSON.parse(raw) as {
         runs?: Array<{ id?: string; brand?: string; flavor?: string; startedAt?: string; endedAt?: string }>;
       } : {};
-      if (day.runs?.some((run) => run.id === id)) return;
+      if (day.runs?.some((run) => run.id === seed.runId)) return;
       if (day.runs?.some((run) => run.brand || run.flavor || run.startedAt || run.endedAt)) return;
     } catch {
       // Replace malformed fixture state below.
     }
-    localStorage.setItem(
-      "run-calc-day",
-      JSON.stringify({
-        date: new Date().toISOString().slice(0, 10),
-        runs: [{ id, brand: "Accessibility", flavor: "Smoke", seeded: false }],
-        currentIndex: 0,
-        resetAt: 0,
-      }),
-    );
-  }, runId);
+    localStorage.setItem("run-calc-day", JSON.stringify(seed.payload.dayState));
+  }, { payload, runId });
+  await page.route("**/api/sync/today**", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: {
+        "X-Sync-Canonical-Revision": "1",
+        "X-Sync-Server-Time": String(now),
+      },
+      body: JSON.stringify(payload),
+    });
+  });
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
   await expect
@@ -572,6 +633,23 @@ test.describe("accessibility smoke", () => {
   test("authenticated staff workflows expose accessible controls and dialogs", async ({ page }) => {
     await signUp(page);
     await seedPendingRun(page);
+    await page.getByRole("button", { name: "More" }).click();
+    await page.getByRole("menuitem", { name: "Stoppages", exact: true }).click();
+    const stoppageLog = page.getByTestId("stoppage-log");
+    await expect(stoppageLog).toBeVisible();
+    await expect(stoppageLog).toContainText("4 events");
+    await expect(stoppageLog.getByText("Stop", { exact: true }).first()).toBeVisible();
+    await expect(stoppageLog.getByText("Manual", { exact: true })).toBeVisible();
+    await expect(stoppageLog.getByText("Pause", { exact: true })).toBeVisible();
+    const stoppageContrast = await new AxeBuilder({ page })
+      .include('[data-testid="stoppage-log"]')
+      .withRules(["color-contrast"])
+      .analyze();
+    expect(
+      stoppageContrast.violations,
+      "Rendered stoppage log color contrast audit",
+    ).toEqual([]);
+    await page.getByTestId("tab-run").click();
     await scan(page, "live run", ["button-name", "color-contrast", "heading-order"]);
     await assertTargets(page, "live run");
     await assertKeyboardTraversal(page, "live run");

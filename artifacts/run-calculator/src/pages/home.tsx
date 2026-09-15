@@ -23868,7 +23868,10 @@ const LiveStoppagesTabContent = memo(function LiveStoppagesTabContent() {
                   const stopOnlyMs = allStops.filter((s: any) => s.endedAt && s.type !== "pause").reduce((acc: any, s: any) => acc + (s.endedAt! - s.startedAt), 0);
                   const noReasonCount = allStops.filter((s: any) => !s.reason.trim()).length;
                   return (
-                    <div className="mb-5 rounded-lg border border-border/50 bg-card/40 overflow-hidden">
+                    <div
+                      data-testid="stoppage-log"
+                      className="mb-5 rounded-lg border border-border/50 bg-card/40 overflow-hidden"
+                    >
                       <div className="flex items-center justify-between px-4 py-3 border-b border-border/30">
                         <div className="flex items-center gap-2">
                           <OctagonX className="w-4 h-4 text-orange-400 shrink-0" />
