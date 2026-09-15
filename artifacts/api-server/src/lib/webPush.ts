@@ -423,15 +423,16 @@ registerServerJob("scheduled-evaluation", {
       || typeof input.scheduledFor !== "number" || !Number.isFinite(input.scheduledFor)) {
       throw new Error("scheduled-evaluation requires a date and scheduledFor timestamp");
     }
+    const date = input.date;
     if (await context.isCancellationRequested()) throw new Error("Cancelled");
     await context.reportProgress(10, "Evaluating scheduled production alerts");
     // Evaluate at execution time rather than the enqueue timestamp so a queued
     // job cannot emit an alert before its canonical milestone is actually due.
-    const result = await runWebPushAlerts(Date.now(), {
+    const result = await context.commit(() => runWebPushAlerts(Date.now(), {
       scope: context.job.scope as Scope,
-      date: input.date,
+      date,
       signal: context.signal,
-    });
+    }));
     if (await context.isCancellationRequested()) throw new Error("Cancelled");
     await context.reportProgress(100, "Scheduled production alerts evaluated");
     return result;

@@ -778,6 +778,95 @@ describe("background operation PostgreSQL reconnection", () => {
     });
   });
 
+  it("blocks a protected effect when cancellation commits first", async () => {
+    let markHandlerReady!: () => void;
+    let releaseHandler!: () => void;
+    const handlerReady = new Promise<void>((resolve) => { markHandlerReady = resolve; });
+    const handlerRelease = new Promise<void>((resolve) => { releaseHandler = resolve; });
+    let protectedEffects = 0;
+    registerServerJob("protected-commit-cancel-test", {
+      capability: "review-incidents",
+      handler: async (context) => {
+        markHandlerReady();
+        await handlerRelease;
+        await context.commit(async () => {
+          protectedEffects += 1;
+          return undefined;
+        });
+        return { protectedEffects };
+      },
+    });
+    const { job } = await enqueueServerJob({
+      scope: SCOPE,
+      actorId: "protected-commit-cancel-actor",
+      type: "protected-commit-cancel-test",
+      idempotencyKey: "protected-commit-cancel",
+      input: {},
+    });
+    const workerRun = new ServerJobWorker("protected-commit-cancel-worker").runOnce();
+    await handlerReady;
+    expect(await requestServerJobCancellation(job.id, SCOPE, job.actorId)).toMatchObject({
+      id: job.id,
+      status: "running",
+      cancelRequested: true,
+    });
+    releaseHandler();
+    await expect(workerRun).resolves.toBe(true);
+    expect(protectedEffects).toBe(0);
+    expect((await db.select().from(serverJobsTable))[0]).toMatchObject({
+      id: job.id,
+      status: "cancelled",
+      result: null,
+    });
+  });
+
+  it("runs a protected effect exactly once when it wins the cancellation race", async () => {
+    let markCommitEntered!: () => void;
+    let releaseCommit!: () => void;
+    const commitEntered = new Promise<void>((resolve) => { markCommitEntered = resolve; });
+    const commitRelease = new Promise<void>((resolve) => { releaseCommit = resolve; });
+    let protectedEffects = 0;
+    registerServerJob("protected-commit-race-test", {
+      capability: "review-incidents",
+      handler: async (context) => {
+        await context.commit(async () => {
+          markCommitEntered();
+          await commitRelease;
+          protectedEffects += 1;
+          return undefined;
+        });
+        return { protectedEffects };
+      },
+    });
+    const { job } = await enqueueServerJob({
+      scope: SCOPE,
+      actorId: "protected-commit-race-actor",
+      type: "protected-commit-race-test",
+      idempotencyKey: "protected-commit-race",
+      input: {},
+    });
+    const workerRun = new ServerJobWorker("protected-commit-race-worker").runOnce();
+    await commitEntered;
+    const cancellation = requestServerJobCancellation(job.id, SCOPE, job.actorId);
+    releaseCommit();
+    await expect(workerRun).resolves.toBe(true);
+    const cancelled = await cancellation;
+    expect(cancelled === undefined || (
+      cancelled.id === job.id &&
+      cancelled.status === "running" &&
+      cancelled.cancelRequested === true
+    )).toBe(true);
+    expect(protectedEffects).toBe(1);
+    const [finalJob] = await db.select().from(serverJobsTable);
+    expect(finalJob.id).toBe(job.id);
+    expect(["cancelled", "succeeded"]).toContain(finalJob.status);
+    if (finalJob.status === "cancelled") {
+      expect(finalJob.result).toBeNull();
+    } else {
+      expect(finalJob.result).toEqual({ protectedEffects: 1 });
+    }
+  });
+
   it("recovers expired final lease terminalization with one logical attempt", async () => {
     const [job] = await db.insert(serverJobsTable).values({
       scope: SCOPE,
