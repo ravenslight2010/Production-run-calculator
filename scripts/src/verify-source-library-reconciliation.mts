@@ -510,6 +510,195 @@ export type VerificationOutput = {
   failures: Array<{ check: string; count: number }>;
 };
 
+export const SOURCE_LIBRARY_EVIDENCE_KEYS = [
+  "verifier",
+  "environment",
+  "revision",
+  "capturedAt",
+  "evidenceId",
+  "healId",
+  "repairBoundary",
+  "report",
+  "marker",
+  "pools",
+  "aliases",
+  "profiles",
+  "pendingRuns",
+  "protectedHistory",
+  "stubs",
+  "idempotencyFingerprint",
+  "ok",
+  "failures",
+] as const;
+
+const SOURCE_LIBRARY_EVIDENCE_MAX_COUNT = 1_000_000;
+
+function boundedEvidenceString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= 128;
+}
+
+function boundedEvidenceCount(value: unknown): value is number {
+  return (
+    isFiniteNumber(value) &&
+    Number.isInteger(value) &&
+    value >= 0 &&
+    value <= SOURCE_LIBRARY_EVIDENCE_MAX_COUNT
+  );
+}
+
+function assertBoundedSummary(
+  value: unknown,
+  keys: readonly string[],
+  name: string,
+): asserts value is Record<string, unknown> {
+  if (!isRecord(value) || !hasExactKeys(value, keys)) {
+    throw new Error(
+      `Source-library reconciliation evidence does not match the bounded allowlist (${name}).`,
+    );
+  }
+  for (const key of keys) {
+    if (!boundedEvidenceCount(value[key])) {
+      throw new Error(
+        `Source-library reconciliation evidence has an invalid bounded count (${name}.${key}).`,
+      );
+    }
+  }
+}
+
+/**
+ * Enforce the exact shape retained as source-library release evidence.
+ *
+ * This is intentionally stricter than checking a few expected fields. It is
+ * the privacy boundary between production source rows and retained evidence:
+ * new row-shaped fields must be rejected until they are explicitly reviewed
+ * and added to this summary-only contract.
+ */
+export function assertBoundedSourceLibraryReconciliationEvidence(
+  value: unknown,
+): asserts value is VerificationOutput {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, SOURCE_LIBRARY_EVIDENCE_KEYS) ||
+    value.verifier !== "source-library-reconciliation" ||
+    (value.environment !== "development" && value.environment !== "release") ||
+    !boundedEvidenceString(value.revision) ||
+    !boundedEvidenceString(value.capturedAt) ||
+    !/^[a-f0-9]{64}$/u.test(String(value.evidenceId ?? "")) ||
+    !boundedEvidenceString(value.healId) ||
+    !isRecord(value.repairBoundary) ||
+    !hasExactKeys(value.repairBoundary, ["fromDate"]) ||
+    typeof value.repairBoundary.fromDate !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}$/u.test(value.repairBoundary.fromDate) ||
+    !isRecord(value.report) ||
+    !hasExactKeys(value.report, [
+      "sha256",
+      "formatVersion",
+      "automaticProposals",
+      "stubs",
+    ]) ||
+    !/^[a-f0-9]{64}$/u.test(String(value.report.sha256 ?? "")) ||
+    value.report.formatVersion !== 1 ||
+    !boundedEvidenceCount(value.report.automaticProposals) ||
+    !boundedEvidenceCount(value.report.stubs) ||
+    typeof value.ok !== "boolean" ||
+    !isRecord(value.marker) ||
+    !hasExactKeys(value.marker, [
+      "present",
+      "resultValid",
+      "resultWithinBounds",
+      "resultCounts",
+      "appliedAtPresent",
+    ]) ||
+    typeof value.marker.present !== "boolean" ||
+    typeof value.marker.resultValid !== "boolean" ||
+    typeof value.marker.resultWithinBounds !== "boolean" ||
+    typeof value.marker.appliedAtPresent !== "boolean" ||
+    !isRecord(value.marker.resultCounts) ||
+    !hasExactKeys(value.marker.resultCounts, [
+      "replacements",
+      "aliasesInserted",
+      "repointedProfiles",
+      "repointedRuns",
+      "deletedStubs",
+    ]) ||
+    !isRecord(value.protectedHistory) ||
+    !hasExactKeys(value.protectedHistory, ["references"]) ||
+    !boundedEvidenceCount(value.protectedHistory.references) ||
+    !isRecord(value.idempotencyFingerprint) ||
+    !hasExactKeys(value.idempotencyFingerprint, ["algorithm", "value"]) ||
+    value.idempotencyFingerprint.algorithm !== "sha256" ||
+    !/^[a-f0-9]{64}$/u.test(String(value.idempotencyFingerprint.value ?? "")) ||
+    !Array.isArray(value.failures) ||
+    value.failures.length > 20
+  ) {
+    throw new Error(
+      "Source-library reconciliation evidence does not match the bounded allowlist.",
+    );
+  }
+
+  assertBoundedSummary(value.pools, [
+    "expected",
+    "exactMatches",
+    "guardedRenames",
+    "missing",
+    "mismatches",
+  ], "pools");
+  assertBoundedSummary(value.aliases, [
+    "expected",
+    "exactMatches",
+    "missing",
+    "mismatches",
+  ], "aliases");
+  assertBoundedSummary(value.profiles, [
+    "inspected",
+    "canonical",
+    "stale",
+    "nonCanonical",
+  ], "profiles");
+  assertBoundedSummary(value.pendingRuns, [
+    "inspected",
+    "canonical",
+    "stale",
+    "nonCanonical",
+  ], "pendingRuns");
+  assertBoundedSummary(value.stubs, [
+    "expected",
+    "canonicalExact",
+    "canonicalMissing",
+    "canonicalMismatches",
+    "deletedExpected",
+    "remainingProtected",
+    "unexpectedlyDeleted",
+    "unexpectedlyRemaining",
+  ], "stubs");
+  for (const key of [
+    "replacements",
+    "aliasesInserted",
+    "repointedProfiles",
+    "repointedRuns",
+    "deletedStubs",
+  ]) {
+    if (!boundedEvidenceCount(value.marker.resultCounts[key])) {
+      throw new Error(
+        `Source-library reconciliation evidence has an invalid bounded count (marker.resultCounts.${key}).`,
+      );
+    }
+  }
+  for (const failure of value.failures) {
+    if (
+      !isRecord(failure) ||
+      !hasExactKeys(failure, ["check", "count"]) ||
+      typeof failure.check !== "string" ||
+      !/^[A-Za-z0-9_-]{1,80}$/u.test(failure.check) ||
+      !boundedEvidenceCount(failure.count)
+    ) {
+      throw new Error(
+        "Source-library reconciliation evidence contains an invalid failure summary.",
+      );
+    }
+  }
+}
+
 export type SourceLibraryPreflightOutput = {
   verifier: "source-library-reconciliation-preflight";
   environment: SourceLibraryEvidenceEnvironment;
@@ -1152,6 +1341,9 @@ async function main() {
           environment,
           revision,
         );
+    if (!preflightOnly) {
+      assertBoundedSourceLibraryReconciliationEvidence(output);
+    }
     await client.query("ROLLBACK");
     await writeOutput(outputPath, output);
     process.stdout.write(`${JSON.stringify(output)}\n`);

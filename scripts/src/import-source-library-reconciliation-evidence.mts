@@ -3,6 +3,9 @@ import { lstat, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateSourceLibraryReconciliationEvidence } from "./release-check.mts";
+import {
+  assertBoundedSourceLibraryReconciliationEvidence,
+} from "./verify-source-library-reconciliation.mts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const MAX_AGE_MS = 24 * 60 * 60 * 1_000;
@@ -70,6 +73,15 @@ export async function importSourceLibraryReconciliationEvidence(
     readInput(options.input === "-" ? "-" : input),
     readFile(report),
   ]);
+  let parsedEvidence: unknown;
+  try {
+    parsedEvidence = JSON.parse(new TextDecoder().decode(evidenceBytes));
+  } catch {
+    throw new Error(
+      "Source-library reconciliation evidence is not valid JSON.",
+    );
+  }
+  assertBoundedSourceLibraryReconciliationEvidence(parsedEvidence);
   validateSourceLibraryReconciliationEvidence(evidenceBytes, {
     expectedEnvironment: "release",
     expectedRevision: revision,

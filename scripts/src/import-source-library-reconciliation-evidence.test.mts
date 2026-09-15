@@ -25,7 +25,46 @@ function evidence(reportSha256: string, overrides: Record<string, unknown> = {})
     capturedAt,
     healId: DEFAULT_HEAL_ID,
     repairBoundary: { fromDate: DEFAULT_FROM_DATE },
-    report: { sha256: reportSha256 },
+    report: {
+      sha256: reportSha256,
+      formatVersion: 1,
+      automaticProposals: 68,
+      stubs: 3,
+    },
+    marker: {
+      present: true,
+      resultValid: true,
+      resultWithinBounds: true,
+      resultCounts: {
+        replacements: 0,
+        aliasesInserted: 0,
+        repointedProfiles: 0,
+        repointedRuns: 0,
+        deletedStubs: 0,
+      },
+      appliedAtPresent: true,
+    },
+    pools: {
+      expected: 0,
+      exactMatches: 0,
+      guardedRenames: 0,
+      missing: 0,
+      mismatches: 0,
+    },
+    aliases: { expected: 0, exactMatches: 0, missing: 0, mismatches: 0 },
+    profiles: { inspected: 0, canonical: 0, stale: 0, nonCanonical: 0 },
+    pendingRuns: { inspected: 0, canonical: 0, stale: 0, nonCanonical: 0 },
+    protectedHistory: { references: 0 },
+    stubs: {
+      expected: 0,
+      canonicalExact: 0,
+      canonicalMissing: 0,
+      canonicalMismatches: 0,
+      deletedExpected: 0,
+      remainingProtected: 0,
+      unexpectedlyDeleted: 0,
+      unexpectedlyRemaining: 0,
+    },
     idempotencyFingerprint: {
       algorithm: "sha256",
       value: "b".repeat(64),
@@ -144,6 +183,34 @@ try {
       now,
     });
     assert.deepEqual(await readFile(stdinInput), await readFile(input));
+
+    const expandedStdinOutput = path.join(directory, "expanded-stdin-output.json");
+    const expandedInput = evidence(reportSha256, {
+      sourceRows: [{
+        recipeName: "Basha Garlic Recipe",
+        ingredient: "Pepperoni Ingredient",
+      }],
+    });
+    Object.defineProperty(process, "stdin", {
+      configurable: true,
+      value: (async function* () {
+        yield JSON.stringify(expandedInput);
+      })(),
+    });
+    await assert.rejects(
+      importSourceLibraryReconciliationEvidence({
+        input: "-",
+        output: expandedStdinOutput,
+        report,
+        healId: DEFAULT_HEAL_ID,
+        fromDate: DEFAULT_FROM_DATE,
+        revision,
+        now,
+      }),
+      /bounded allowlist/,
+      "stdin imports must reject expanded source-row payloads",
+    );
+    await assert.rejects(readFile(expandedStdinOutput), /ENOENT/);
   } finally {
     Object.defineProperty(process, "stdin", {
       configurable: true,

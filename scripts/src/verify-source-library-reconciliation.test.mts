@@ -10,6 +10,7 @@ import {
   preflightSourceLibraryReconciliation,
   resolveSourceLibraryRevision,
   assertProductionSourceLibraryCapture,
+  assertBoundedSourceLibraryReconciliationEvidence,
   stable,
   verifySourceLibraryReconciliation,
 } from "./verify-source-library-reconciliation.mts";
@@ -250,6 +251,23 @@ assert.equal(output.stubs.deletedExpected, 1);
 assert.equal(output.stubs.remainingProtected, 2);
 assert.equal(output.stubs.unexpectedlyRemaining, 0);
 assert.doesNotMatch(JSON.stringify(output), /basha|pepperoni|bbq chicken/i);
+assert.doesNotMatch(
+  JSON.stringify(output),
+  /Basha Garlic Recipe|Pepperoni Ingredient|sourceRows/i,
+  "captured evidence must not retain representative source-row details",
+);
+assert.throws(
+  () =>
+    assertBoundedSourceLibraryReconciliationEvidence({
+      ...output,
+      sourceRows: [{
+        recipeName: "Basha Garlic Recipe",
+        ingredient: "Pepperoni Ingredient",
+      }],
+    }),
+  /bounded allowlist/,
+  "source-row payloads must be rejected by the evidence contract",
+);
 assert.match(output.idempotencyFingerprint.value, /^[a-f0-9]{64}$/);
 assert.ok(queries.length > 0);
 
