@@ -26,6 +26,10 @@ const SCREEN_RULES: Record<string, readonly string[]> = {
  * Contrast audit finding log for the dark operational theme:
  * - Stoppage Pause label (`text-blue-400/70`) failed on `bg-blue-950/20`.
  * - Inactive Pause icon (`text-blue-400/50`) failed on the surrounding card.
+ * - Stoppage Manual label (`text-violet-400/70`) failed on the surrounding card.
+ * - Inactive Stoppage icon (`text-orange-400/50`) failed on the surrounding card.
+ * - Active Stoppage label (`text-orange-400/70`) passed on `bg-orange-950/20`;
+ *   keep its existing opacity because that combination is not failing.
  * - Surplus Mix count/name/amount labels passed on `bg-sky-950/30`; keep their
  *   existing opacity because those combinations are not failing.
  */
@@ -41,6 +45,24 @@ const OPERATIONAL_CONTRAST_FIXTURES = [
     wrapperClass: "bg-card/40",
     textClass: "text-blue-400",
     text: "Pause icon",
+  },
+  {
+    id: "stoppage-manual-label",
+    wrapperClass: "bg-card/40",
+    textClass: "text-violet-300",
+    text: "Manual",
+  },
+  {
+    id: "stoppage-active-label",
+    wrapperClass: "bg-orange-950/20",
+    textClass: "text-orange-400/70",
+    text: "Stop",
+  },
+  {
+    id: "stoppage-inactive-icon",
+    wrapperClass: "bg-card/40",
+    textClass: "text-orange-400",
+    text: "Stop icon",
   },
   {
     id: "surplus-count",
@@ -467,7 +489,7 @@ test.describe("accessibility smoke", () => {
     await assertZoomedUsable(page, "sign-in");
   });
 
-  test("reduced-opacity blue labels pass contrast on operational backgrounds", async ({ page }) => {
+  test("stoppage and surplus labels pass contrast on operational backgrounds", async ({ page }) => {
     await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
     await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
     await page.evaluate((fixtures) => {
@@ -487,7 +509,7 @@ test.describe("accessibility smoke", () => {
       .include("#operational-contrast-audit")
       .withRules(["color-contrast"])
       .analyze();
-    expect(results.violations, "Operational blue/sky label contrast audit").toEqual([]);
+    expect(results.violations, "Operational stoppage and surplus label contrast audit").toEqual([]);
   });
 
   test("authenticated staff workflows expose accessible controls and dialogs", async ({ page }) => {
