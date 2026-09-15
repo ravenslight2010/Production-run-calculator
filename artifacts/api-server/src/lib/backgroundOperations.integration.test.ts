@@ -38,6 +38,7 @@ let runDailyRollover: typeof import("../routes/sync")["runDailyRollover"];
 let runWebPushAlerts: typeof import("./webPush")["runWebPushAlerts"];
 let enqueueScheduledWebPushAlerts: typeof import("./webPush")["enqueueScheduledWebPushAlerts"];
 let ServerJobWorker: typeof import("./serverJobs")["ServerJobWorker"];
+let requestServerJobCancellation: typeof import("./serverJobs")["requestServerJobCancellation"];
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const SCOPE = "live" as const;
@@ -107,6 +108,7 @@ beforeAll(async () => {
   runWebPushAlerts = webPushMod.runWebPushAlerts;
   enqueueScheduledWebPushAlerts = webPushMod.enqueueScheduledWebPushAlerts;
   ServerJobWorker = jobsMod.ServerJobWorker;
+  requestServerJobCancellation = jobsMod.requestServerJobCancellation;
 
   killer = new pg.Client({ connectionString: testUrlString });
   killer.on("error", () => {});
@@ -125,6 +127,30 @@ beforeAll(async () => {
     RETURNS trigger LANGUAGE plpgsql AS $$
     BEGIN
       IF OLD.status = 'queued' AND NEW.status = 'running' THEN
+        PERFORM pg_sleep(10);
+      END IF;
+      RETURN NEW;
+    END;
+    $$;
+  `);
+  await killer.query(`
+    CREATE OR REPLACE FUNCTION background_ops_sleep_job_cancellation()
+    RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      IF OLD.status = 'queued' AND NEW.status = 'cancelled' THEN
+        PERFORM pg_sleep(10);
+      END IF;
+      RETURN NEW;
+    END;
+    $$;
+  `);
+  await killer.query(`
+    CREATE OR REPLACE FUNCTION background_ops_sleep_job_lease_terminalization()
+    RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      IF OLD.status = 'running'
+        AND NEW.status = 'failed'
+        AND NEW.error_code = 'attempts_exhausted' THEN
         PERFORM pg_sleep(10);
       END IF;
       RETURN NEW;
@@ -168,6 +194,8 @@ beforeEach(async () => {
   `);
   await killer.query("DROP TRIGGER IF EXISTS background_ops_data_reset_sleep ON data_reset");
   await killer.query("DROP TRIGGER IF EXISTS background_ops_job_claim_sleep ON server_jobs");
+  await killer.query("DROP TRIGGER IF EXISTS background_ops_job_cancellation_sleep ON server_jobs");
+  await killer.query("DROP TRIGGER IF EXISTS background_ops_job_lease_terminalization_sleep ON server_jobs");
 });
 
 async function terminateSleepingBackend(
@@ -594,6 +622,125 @@ describe("background operation PostgreSQL reconnection", () => {
     expect(job).toMatchObject({ status: "succeeded", attempt: 1 });
     expect(await db.select().from(serverJobAttemptsTable)).toHaveLength(1);
     expect(await db.select().from(scheduledAlertRecordsTable)).toHaveLength(1);
+  });
+
+  it("recovers queued job cancellation without running scheduled evaluation", async () => {
+    const now = Date.now();
+    const endedAt = now - 120_000;
+    await db.insert(dailySyncTable).values({
+      date: ALERT_DATE,
+      scope: SCOPE,
+      data: {
+        dayState: {
+          date: ALERT_DATE,
+          runs: [{ id: "cancelled-alert-run", startedAt: now - 300_000, endedAt }],
+        },
+        runValues: { "cancelled-alert-run": { freezerTime: 1 } },
+      },
+    });
+    await runWebPushAlerts(endedAt + 60_000 - 1, { scope: SCOPE, date: ALERT_DATE });
+    expect(await enqueueScheduledWebPushAlerts(now)).toEqual({ examined: 1, enqueued: 1 });
+    const [queuedJob] = await db.select().from(serverJobsTable);
+
+    await killer.query(`
+      CREATE TRIGGER background_ops_job_cancellation_sleep
+      BEFORE UPDATE ON server_jobs
+      FOR EACH ROW EXECUTE FUNCTION background_ops_sleep_job_cancellation()
+    `);
+    let retryPid: number | undefined;
+    const cancellationOperation = runBackgroundOperation(
+      "server-job-run",
+      () => preserveTransientDatabaseCause(() =>
+        requestServerJobCancellation(queuedJob.id, SCOPE, queuedJob.actorId)),
+      { delay: async () => { retryPid = await freshBackendPid(); } },
+    );
+    const terminatedPid = await terminateSleepingBackend(
+      "server job cancellation",
+      "background_ops_job_cancellation_sleep",
+      "server_jobs",
+    );
+    const cancelled = await cancellationOperation;
+    const recoveredPid = await pooledBackendPid();
+
+    expect(cancelled).toMatchObject({
+      id: queuedJob.id,
+      status: "cancelled",
+      cancelRequested: true,
+    });
+    expect(retryPid).toBeTypeOf("number");
+    expect(retryPid).not.toBe(terminatedPid);
+    expect(recoveredPid).not.toBe(terminatedPid);
+
+    expect(await new ServerJobWorker("cancelled-job-worker").runOnce()).toBe(false);
+    const [job] = await db.select().from(serverJobsTable);
+    expect(job).toMatchObject({ status: "cancelled", attempt: 0 });
+    expect(await db.select().from(serverJobAttemptsTable)).toHaveLength(0);
+    expect(await db.select().from(scheduledAlertRecordsTable)).toHaveLength(0);
+  });
+
+  it("recovers expired final lease terminalization with one logical attempt", async () => {
+    const [job] = await db.insert(serverJobsTable).values({
+      scope: SCOPE,
+      actorId: "lease-expiry-actor",
+      type: "scheduled-evaluation",
+      idempotencyKey: "lease-expiry-final-attempt",
+      input: { scope: SCOPE, date: ALERT_DATE },
+      status: "running",
+      attempt: 1,
+      maxAttempts: 1,
+      leaseToken: "00000000-0000-4000-8000-000000000001",
+      leaseExpiresAt: new Date(Date.now() - 60_000),
+      startedAt: new Date(Date.now() - 120_000),
+      expiresAt: new Date(Date.now() + 60_000),
+    }).returning();
+    await db.insert(serverJobAttemptsTable).values({
+      jobId: job.id,
+      attempt: 1,
+      workerId: "expired-worker",
+    });
+
+    await killer.query(`
+      CREATE TRIGGER background_ops_job_lease_terminalization_sleep
+      BEFORE UPDATE ON server_jobs
+      FOR EACH ROW EXECUTE FUNCTION background_ops_sleep_job_lease_terminalization()
+    `);
+    let retryPid: number | undefined;
+    const recoveryOperation = runBackgroundOperation(
+      "server-job-run",
+      () => preserveTransientDatabaseCause(() =>
+        new ServerJobWorker("lease-recovery-worker").runOnce()),
+      { delay: async () => { retryPid = await freshBackendPid(); } },
+    );
+    const terminatedPid = await terminateSleepingBackend(
+      "expired lease terminalization",
+      "background_ops_job_lease_terminalization_sleep",
+      "server_jobs",
+    );
+    const ran = await recoveryOperation;
+    const recoveredPid = await pooledBackendPid();
+
+    expect(ran).toBe(false);
+    expect(retryPid).toBeTypeOf("number");
+    expect(retryPid).not.toBe(terminatedPid);
+    expect(recoveredPid).not.toBe(terminatedPid);
+
+    const [terminalJob] = await db.select().from(serverJobsTable);
+    expect(terminalJob).toMatchObject({
+      id: job.id,
+      status: "failed",
+      attempt: 1,
+      errorCode: "attempts_exhausted",
+    });
+    const attempts = await db.select().from(serverJobAttemptsTable);
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]).toMatchObject({
+      jobId: job.id,
+      attempt: 1,
+      workerId: "expired-worker",
+      outcome: "failed",
+      errorCode: "attempts_exhausted",
+    });
+    expect(await db.select().from(scheduledAlertRecordsTable)).toHaveLength(0);
   });
 
   it("keeps concurrent shared failure retention capped and visible after local state loss", async () => {
