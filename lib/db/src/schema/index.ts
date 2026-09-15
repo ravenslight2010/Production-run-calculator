@@ -56,6 +56,7 @@ export * from "./actionItems";
 export * from "./masterDataHealth";
 export * from "./aiResultCache";
 export * from "./cacheMaintenance";
+export * from "./backgroundOperations";
 export * from "./fieldChecks";
 export * from "./webPush";
 export * from "./serverJobs";

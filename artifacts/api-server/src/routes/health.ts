@@ -51,9 +51,11 @@ async function readiness(req: Request, res: Response): Promise<void> {
     checks.dependencies = aiConfigured
       ? { status: "ok" }
       : { status: "error", detail: "ai_provider_not_configured" };
-    checks.backgroundWorkers = backgroundOperationsDegraded()
+    const backgroundOperationDiagnostics = await getBackgroundOperationDiagnostics();
+    checks.backgroundWorkers = backgroundOperationsDegraded(backgroundOperationDiagnostics)
       ? { status: "error", detail: "sustained_background_worker_failures" }
       : { status: "ok" };
+    res.locals.backgroundOperationDiagnostics = backgroundOperationDiagnostics;
   }
 
   const allHealthy =
@@ -66,7 +68,7 @@ async function readiness(req: Request, res: Response): Promise<void> {
     startup.phase === "ready"
       ? {
         cacheMaintenance: await getCacheMaintenanceDiagnostics(),
-        backgroundOperations: getBackgroundOperationDiagnostics(),
+        backgroundOperations: res.locals.backgroundOperationDiagnostics,
       }
       : undefined;
   logger.info(

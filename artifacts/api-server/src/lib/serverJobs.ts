@@ -225,7 +225,7 @@ export class ServerJobWorker {
       await this.finish(claimed.job, claimed.leaseToken, cancelled ? "cancelled" : retry ? "queued" : "failed",
         undefined, timedOut ? "execution_timeout" : "handler_failed", safeMessage(error));
       if (isTransientDatabaseConnectionError(error)) {
-        recordBackgroundOperationFailure("server-job-run", error);
+        await recordBackgroundOperationFailure("server-job-run", error);
       }
     } finally {
       clearInterval(heartbeat);

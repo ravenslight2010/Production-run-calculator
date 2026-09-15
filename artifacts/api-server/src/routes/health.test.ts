@@ -65,7 +65,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await clearCacheMaintenanceDiagnosticsForTests();
-  clearBackgroundOperationDiagnosticsForTests();
+  await clearBackgroundOperationDiagnosticsForTests();
   resetStartupHealthForTests();
   mocks.execute.mockClear();
   mocks.info.mockClear();
