@@ -202,6 +202,20 @@ recursive diff:
 bash docs/evidence/reproduce-typescript-7-comparison.sh /tmp/typescript-7-comparison-evidence
 ```
 
+The reproduction derives declaration totals and package categories in its `summary.json`,
+then fails if the retained JSON or the counts below do not match. The advisory release lane
+runs the same check against its freshly generated disposable declaration manifests, so
+contract growth cannot leave both retained artifacts consistently stale. A secondary
+retained-artifact consistency check can run without repeating the compiler comparison:
+
+```bash
+bash docs/evidence/reproduce-typescript-7-comparison.sh --check-retained-summary
+```
+
+This consistency check reads declaration counts and categories only. It deliberately does
+not compare elapsed times, which remain single-machine observations rather than stable
+benchmark claims.
+
 The original full 13,723-line diff is not committed because it duplicates generated
 output. The retained script deterministically regenerates the evidence structure and all
 declaration contents; diff headers contain temporary paths and timestamps, so the compact

@@ -583,6 +583,24 @@ async function main(): Promise<void> {
   };
   await mkdir(dirname(evidencePath), { recursive: true });
   await writeFile(evidencePath, `${JSON.stringify(report, null, 2)}\n`);
+  const retainedEvidenceCheck = spawnSync(
+    "bash",
+    [
+      resolve(rootDir, "docs/evidence/reproduce-typescript-7-comparison.sh"),
+      "--check-retained-summary",
+      evidencePath,
+    ],
+    {
+      cwd: rootDir,
+      encoding: "utf8",
+    },
+  );
+  if (retainedEvidenceCheck.status !== 0) {
+    throw new Error(
+      "TypeScript 7 retained migration evidence check failed.\n" +
+        retainedEvidenceCheck.stderr.trim(),
+    );
+  }
   console.log(
     `${report.status} TypeScript 7 comparison retained at ${relative(rootDir, evidencePath)} (${promotionAttempt ? "promotion attempt" : "advisory only"}).`,
   );

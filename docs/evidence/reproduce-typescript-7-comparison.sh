@@ -6,6 +6,134 @@ set -euo pipefail
 
 REPO="$(git rev-parse --show-toplevel)"
 REPO="$(realpath -e "$REPO")"
+
+check_documented_declaration_counts() {
+  local summary_path="$1"
+  node - \
+    "$summary_path" \
+    "$REPO/docs/evidence/typescript-7-comparison-2026-09-15.json" \
+    "$REPO/docs/typescript-7-migration-research.md" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+
+const summaryPath = process.argv[2];
+const retainedSummaryPath = process.argv[3];
+const documentPath = process.argv[4];
+const summary = JSON.parse(fs.readFileSync(summaryPath, "utf8"));
+const retainedSummary = JSON.parse(fs.readFileSync(retainedSummaryPath, "utf8"));
+const document = fs.readFileSync(documentPath, "utf8");
+const categoryCount = (paths, segment) =>
+  paths.filter((file) => file.includes(`lib/${segment}/`)).length;
+const declarations =
+  Array.isArray(summary.declarations?.baseline) &&
+  Array.isArray(summary.declarations?.candidate) &&
+  Array.isArray(summary.declarations?.changedPaths)
+    ? {
+        baselineFileCount: summary.declarations.baseline.length,
+        candidateFileCount: summary.declarations.candidate.length,
+        textuallyChangedFileCount: summary.declarations.changedPaths.length,
+        changedFilesByPackage: {
+          "api-client-react": categoryCount(
+            summary.declarations.changedPaths,
+            "api-client-react",
+          ),
+          "api-zod": categoryCount(summary.declarations.changedPaths, "api-zod"),
+          db: categoryCount(summary.declarations.changedPaths, "db"),
+          other:
+            summary.declarations.changedPaths.length -
+            categoryCount(summary.declarations.changedPaths, "api-client-react") -
+            categoryCount(summary.declarations.changedPaths, "api-zod") -
+            categoryCount(summary.declarations.changedPaths, "db"),
+        },
+      }
+    : summary.declarations;
+
+if (!declarations || !declarations.changedFilesByPackage) {
+  throw new Error(`Declaration totals are missing from ${summaryPath}`);
+}
+
+const expected = {
+  baselineFileCount: declarations.baselineFileCount,
+  candidateFileCount: declarations.candidateFileCount,
+  textuallyChangedFileCount: declarations.textuallyChangedFileCount,
+  apiClientReact: declarations.changedFilesByPackage["api-client-react"],
+  apiZod: declarations.changedFilesByPackage["api-zod"],
+  db: declarations.changedFilesByPackage.db,
+  other: declarations.changedFilesByPackage.other,
+};
+for (const [name, value] of Object.entries(expected)) {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`Invalid declaration total ${name}=${JSON.stringify(value)} in ${summaryPath}`);
+  }
+}
+
+const categoryTotal =
+  expected.apiClientReact + expected.apiZod + expected.db + expected.other;
+if (categoryTotal !== expected.textuallyChangedFileCount) {
+  throw new Error(
+    `Declaration categories total ${categoryTotal}, but textuallyChangedFileCount is ` +
+      `${expected.textuallyChangedFileCount} in ${summaryPath}`,
+  );
+}
+
+if (path.resolve(summaryPath) !== path.resolve(retainedSummaryPath)) {
+  const retained = retainedSummary.declarations;
+  const retainedExpected = {
+    baselineFileCount: retained?.baselineFileCount,
+    candidateFileCount: retained?.candidateFileCount,
+    textuallyChangedFileCount: retained?.textuallyChangedFileCount,
+    apiClientReact: retained?.changedFilesByPackage?.["api-client-react"],
+    apiZod: retained?.changedFilesByPackage?.["api-zod"],
+    db: retained?.changedFilesByPackage?.db,
+    other: retained?.changedFilesByPackage?.other,
+  };
+  const stale = Object.keys(expected).filter(
+    (name) => expected[name] !== retainedExpected[name],
+  );
+  if (stale.length > 0) {
+    throw new Error(
+      `Retained TypeScript migration summary ${retainedSummaryPath} is stale relative to ` +
+        `${summaryPath}.\nMismatched declaration totals:\n` +
+        stale
+          .map(
+            (name) =>
+              `  ${name}: retained=${JSON.stringify(retainedExpected[name])}, ` +
+              `current=${JSON.stringify(expected[name])}`,
+          )
+          .join("\n"),
+    );
+  }
+}
+
+const requiredLines = [
+  `| Declaration file count | ${expected.baselineFileCount} | ${expected.candidateFileCount} |`,
+  `| Declaration files with textual differences | baseline | ${expected.textuallyChangedFileCount} |`,
+  `- ${expected.apiClientReact} \`api-client-react\` generated declarations,`,
+  `- ${expected.apiZod} \`api-zod\` generated declarations, and`,
+  `- ${expected.db} database schema declarations.`,
+];
+if (expected.other !== 0) {
+  requiredLines.push(`- ${expected.other} other declarations.`);
+}
+
+const missing = requiredLines.filter((line) => !document.includes(line));
+if (missing.length > 0) {
+  throw new Error(
+    `TypeScript migration evidence in ${documentPath} does not match ${summaryPath}.\n` +
+      `Expected documentation lines:\n${missing.map((line) => `  ${line}`).join("\n")}`,
+  );
+}
+
+console.log(`TypeScript migration declaration counts match ${summaryPath}`);
+NODE
+}
+
+if [[ "${1:-}" == "--check-retained-summary" ]]; then
+  SUMMARY_PATH="${2:-$REPO/docs/evidence/typescript-7-comparison-2026-09-15.json}"
+  check_documented_declaration_counts "$(realpath -e "$SUMMARY_PATH")"
+  exit 0
+fi
+
 OUT="${1:-/tmp/typescript-7-comparison-evidence}"
 TEMP_ROOT="$(realpath -e "${TMPDIR:-/tmp}")"
 OUT="$(realpath -m "$OUT")"
@@ -283,6 +411,8 @@ const summary = {
 
 fs.writeFileSync(path.join(output, "summary.json"), `${JSON.stringify(summary, null, 2)}\n`);
 NODE
+
+check_documented_declaration_counts "$OUT/summary.json"
 
 printf 'Comparison evidence written to %s\n' "$OUT"
 exit "$contract_comparison_status"
