@@ -17,6 +17,7 @@ import {
   RELEASE_CHECK_DEFAULT_CONCURRENCY,
   IMPORT_CORPUS_EVALUATION_EVIDENCE,
   SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
+  TYPESCRIPT_7_COMPARISON_EVIDENCE,
   SOURCE_LIBRARY_RECONCILIATION_FIXTURE_STEP,
   SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL,
   SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_STEP,
@@ -221,6 +222,74 @@ async function fixture(
                 ),
                 "utf8",
               )
+          : file === TYPESCRIPT_7_COMPARISON_EVIDENCE
+            ? `${JSON.stringify((() => {
+                const checks = [
+                  "build",
+                  "scripts",
+                  "api-server",
+                  "run-calculator",
+                  "mockup-sandbox",
+                  "ai-evaluation",
+                  "corpus-harness",
+                ];
+                const command = (name: string) => ({
+                  name,
+                  exitCode: 0,
+                  elapsedMs: 1,
+                  peakRssKiB: 10,
+                  diagnostics: [],
+                });
+                return {
+                schemaVersion: 1,
+                sourceRevision: "current-revision",
+                status: "PASS",
+                authoritativeCompiler: "Version 6.0.3",
+                candidateCompiler: "Version 7.0.2",
+                authoritativeOutputsChanged: false,
+                runner: {
+                  platform: process.platform,
+                  arch: process.arch,
+                  supported: true,
+                  supportedRunners: [{
+                    platform: process.platform,
+                    arch: process.arch,
+                  }],
+                },
+                commands: [{
+                  ...command("frozen-install"),
+                },
+                command("typescript-6-build"),
+                command("typescript-6-clean"),
+                command("typescript-7-build"),
+                ...checks.slice(1).flatMap((check) => [
+                  command(`typescript-6-${check}`),
+                  command(`typescript-7-${check}`),
+                ])],
+                performanceComparison: checks.map((check) => ({
+                  check,
+                  elapsedMs: { baseline: 1, candidate: 1, delta: 0, ratio: 1 },
+                  peakRssKiB: { baseline: 10, candidate: 10, delta: 0, ratio: 1 },
+                })),
+                diagnosticsEqual: true,
+                declarations: {
+                  baseline: [{
+                    path: "lib/example/dist/index.d.ts",
+                    sha256: "d".repeat(64),
+                  }],
+                  candidate: [{
+                    path: "lib/example/dist/index.d.ts",
+                    sha256: "d".repeat(64),
+                  }],
+                  changedPaths: [],
+                },
+                containment: {
+                  beforeStatusSha256: "c".repeat(64),
+                  afterStatusSha256: "c".repeat(64),
+                },
+                acceptanceGatesMet: true,
+                advisory: true,
+              };})())}\n`
           : "fixture evidence\n",
     );
   }

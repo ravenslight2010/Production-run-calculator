@@ -34,6 +34,10 @@ import {
   REPORT_KEY_ROTATION_PREFLIGHT_VERIFIER,
   REPORT_KEY_ROTATION_SCAN_LIMIT,
 } from "./report-key-rotation-preflight.mts";
+import {
+  diagnosticsEqualForPairs,
+  releaseRevisionGitArgs,
+} from "./typescript-7-evidence.mts";
 
 export type ReleaseStep = {
   label: string;
@@ -347,6 +351,251 @@ export const SOURCE_LIBRARY_RECONCILIATION_EVIDENCE =
   "source-library-reconciliation.json";
 export const IMPORT_CORPUS_EVALUATION_EVIDENCE =
   "ai-evaluations/deterministic-import-corpus.json";
+export const TYPESCRIPT_7_COMPARISON_EVIDENCE =
+  "typescript-7-comparison.json";
+export const TYPESCRIPT_7_SUPPORTED_RUNNERS = [
+  { platform: "linux", arch: "x64" },
+] as const;
+
+export function validateTypescript7ComparisonEvidence(
+  bytes: Buffer,
+  expectedRevision: string,
+): void {
+  let value: unknown;
+  try {
+    value = JSON.parse(bytes.toString("utf8"));
+  } catch {
+    throw new Error("TypeScript 7 comparison evidence must be valid JSON");
+  }
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("TypeScript 7 comparison evidence must be an object");
+  }
+  const report = value as Record<string, unknown>;
+  const runner = report.runner as Record<string, unknown> | undefined;
+  const declarations = report.declarations as
+    | Record<string, unknown>
+    | undefined;
+  const containment = report.containment as
+    | Record<string, unknown>
+    | undefined;
+  const performanceChecks = [
+    "build",
+    "scripts",
+    "api-server",
+    "run-calculator",
+    "mockup-sandbox",
+    "ai-evaluation",
+    "corpus-harness",
+  ];
+  const expectedPerformanceChecks = new Set(performanceChecks);
+  const expectedCommands = new Set([
+    "frozen-install",
+    "typescript-6-build",
+    "typescript-6-clean",
+    "typescript-7-build",
+    "typescript-6-scripts",
+    "typescript-7-scripts",
+    "typescript-6-api-server",
+    "typescript-7-api-server",
+    "typescript-6-run-calculator",
+    "typescript-7-run-calculator",
+    "typescript-6-mockup-sandbox",
+    "typescript-7-mockup-sandbox",
+    "typescript-6-ai-evaluation",
+    "typescript-7-ai-evaluation",
+    "typescript-6-corpus-harness",
+    "typescript-7-corpus-harness",
+  ]);
+  if (
+    report.schemaVersion !== 1 ||
+    report.sourceRevision !== expectedRevision ||
+    report.authoritativeCompiler !== "Version 6.0.3" ||
+    report.candidateCompiler !== "Version 7.0.2" ||
+    report.advisory !== true ||
+    report.authoritativeOutputsChanged !== false ||
+    typeof report.diagnosticsEqual !== "boolean" ||
+    !Array.isArray(report.commands) ||
+    report.commands.length !== expectedCommands.size ||
+    !Array.isArray(report.performanceComparison) ||
+    report.performanceComparison.length !== 7 ||
+    runner?.platform !== process.platform ||
+    runner?.arch !== process.arch ||
+    runner?.supported !== true ||
+    !TYPESCRIPT_7_SUPPORTED_RUNNERS.some(
+      (item) =>
+        item.platform === process.platform && item.arch === process.arch,
+    ) ||
+    containment?.beforeStatusSha256 !== containment?.afterStatusSha256 ||
+    !/^[a-f0-9]{64}$/.test(
+      String(containment?.beforeStatusSha256 ?? ""),
+    ) ||
+    !Array.isArray(declarations?.baseline) ||
+    !Array.isArray(declarations?.candidate) ||
+    !Array.isArray(declarations?.changedPaths)
+  ) {
+    throw new Error(
+      "TypeScript 7 comparison evidence is stale, incomplete, or from an unsupported runner",
+    );
+  }
+  for (const command of report.commands) {
+    const item = command as Record<string, unknown>;
+    if (
+      typeof item.name !== "string" ||
+      typeof item.exitCode !== "number" ||
+      typeof item.elapsedMs !== "number" ||
+      typeof item.peakRssKiB !== "number" ||
+      item.peakRssKiB <= 0 ||
+      !Array.isArray(item.diagnostics) ||
+      item.diagnostics.some((diagnostic) => typeof diagnostic !== "string")
+    ) {
+      throw new Error(
+        "TypeScript 7 comparison command evidence is malformed",
+      );
+    }
+    if (!expectedCommands.delete(item.name)) {
+      throw new Error(
+        "TypeScript 7 comparison command evidence is duplicated or unexpected",
+      );
+    }
+  }
+  if (expectedCommands.size !== 0) {
+    throw new Error("TypeScript 7 comparison command evidence is incomplete");
+  }
+  const commandsByName = new Map(
+    report.commands.map((command) => {
+      const item = command as Record<string, unknown>;
+      return [item.name as string, item] as const;
+    }),
+  );
+  for (const comparison of report.performanceComparison) {
+    const item = comparison as Record<string, unknown>;
+    const elapsed = item.elapsedMs as Record<string, unknown> | undefined;
+    const memory = item.peakRssKiB as Record<string, unknown> | undefined;
+    if (
+      typeof item.check !== "string" ||
+      typeof elapsed?.baseline !== "number" ||
+      typeof elapsed?.candidate !== "number" ||
+      typeof elapsed?.delta !== "number" ||
+      (typeof elapsed?.ratio !== "number" && elapsed?.ratio !== null) ||
+      typeof memory?.baseline !== "number" ||
+      typeof memory?.candidate !== "number" ||
+      typeof memory?.delta !== "number" ||
+      (typeof memory?.ratio !== "number" && memory?.ratio !== null)
+    ) {
+      throw new Error(
+        "TypeScript 7 timing or peak-memory comparison is malformed",
+      );
+    }
+    if (!expectedPerformanceChecks.delete(item.check)) {
+      throw new Error(
+        "TypeScript 7 performance comparison is duplicated or unexpected",
+      );
+    }
+    const baseline = commandsByName.get(`typescript-6-${item.check}`);
+    const candidate = commandsByName.get(`typescript-7-${item.check}`);
+    if (
+      elapsed.baseline !== baseline?.elapsedMs ||
+      elapsed.candidate !== candidate?.elapsedMs ||
+      elapsed.delta !==
+        (candidate?.elapsedMs as number) - (baseline?.elapsedMs as number) ||
+      elapsed.ratio !==
+        ((baseline?.elapsedMs as number) === 0
+          ? null
+          : (candidate?.elapsedMs as number) /
+            (baseline?.elapsedMs as number)) ||
+      memory.baseline !== baseline?.peakRssKiB ||
+      memory.candidate !== candidate?.peakRssKiB ||
+      memory.delta !==
+        (candidate?.peakRssKiB as number) -
+          (baseline?.peakRssKiB as number) ||
+      memory.ratio !==
+        ((baseline?.peakRssKiB as number) === 0
+          ? null
+          : (candidate?.peakRssKiB as number) /
+            (baseline?.peakRssKiB as number))
+    ) {
+      throw new Error(
+        "TypeScript 7 timing or peak-memory comparison does not match command evidence",
+      );
+    }
+  }
+  if (expectedPerformanceChecks.size !== 0) {
+    throw new Error("TypeScript 7 performance comparison is incomplete");
+  }
+
+  const readManifest = (
+    value: unknown,
+    label: string,
+    allowEmpty = false,
+  ) => {
+    const manifest = value as Array<Record<string, unknown>>;
+    if (!allowEmpty && manifest.length === 0) {
+      throw new Error(`TypeScript ${label} declaration manifest is empty`);
+    }
+    const byPath = new Map<string, string>();
+    for (const entry of manifest) {
+      if (
+        typeof entry.path !== "string" ||
+        !entry.path.endsWith(".d.ts") ||
+        typeof entry.sha256 !== "string" ||
+        !/^[a-f0-9]{64}$/.test(entry.sha256) ||
+        byPath.has(entry.path)
+      ) {
+        throw new Error(
+          `TypeScript ${label} declaration manifest is malformed`,
+        );
+      }
+      byPath.set(entry.path, entry.sha256);
+    }
+    return byPath;
+  };
+  const baselineManifest = readManifest(declarations.baseline, "6");
+  const candidateBuild = commandsByName.get("typescript-7-build");
+  const candidateManifest = readManifest(
+    declarations.candidate,
+    "7",
+    candidateBuild?.exitCode !== 0,
+  );
+  const expectedChangedPaths = [
+    ...new Set([...baselineManifest.keys(), ...candidateManifest.keys()]),
+  ]
+    .filter(
+      (path) => baselineManifest.get(path) !== candidateManifest.get(path),
+    )
+    .sort();
+  const changedPaths = declarations.changedPaths as unknown[];
+  if (
+    changedPaths.some((path) => typeof path !== "string") ||
+    JSON.stringify(changedPaths) !== JSON.stringify(expectedChangedPaths)
+  ) {
+    throw new Error(
+      "TypeScript declaration difference paths do not match the retained manifests",
+    );
+  }
+  const diagnosticsEqual = diagnosticsEqualForPairs(
+    report.commands as Array<{ name: string; diagnostics: string[] }>,
+    performanceChecks,
+  );
+  if (report.diagnosticsEqual !== diagnosticsEqual) {
+    throw new Error(
+      "TypeScript diagnostic comparison does not match command evidence",
+    );
+  }
+  const acceptanceGatesMet =
+    report.commands.every(
+      (command) => (command as Record<string, unknown>).exitCode === 0,
+    ) &&
+    diagnosticsEqual &&
+    expectedChangedPaths.length === 0;
+  if (
+    report.acceptanceGatesMet !== acceptanceGatesMet ||
+    report.status !== (acceptanceGatesMet ? "PASS" : "ADVISORY_DRIFT")
+  ) {
+    throw new Error(
+      "TypeScript 7 advisory status is inconsistent with retained comparisons",
+    );
+  }
+}
 const IMPORT_CORPUS_EVALUATION_SOURCE = resolve(
   rootDir,
   "lib/corpus-harness/snapshots/evaluation-manifest.json",
@@ -366,6 +615,7 @@ export const RELEASE_EVIDENCE_ALLOWLIST = [
   "browser-smoke/webkit-result.json",
   SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
   IMPORT_CORPUS_EVALUATION_EVIDENCE,
+  TYPESCRIPT_7_COMPARISON_EVIDENCE,
   "release-check.log",
   "release-check-state.json",
 ] as const;
@@ -832,6 +1082,26 @@ const steps: ReleaseStep[] = [
     stage: "consumer-typechecks",
   },
   {
+    label: "TypeScript 7 advisory comparison",
+    args: ["--filter", "@workspace/scripts", "run", "check:typescript-7"],
+    env: {
+      TYPESCRIPT_7_EVIDENCE_PATH: resolve(
+        rootDir,
+        releaseEvidenceDir,
+        TYPESCRIPT_7_COMPARISON_EVIDENCE,
+      ),
+    },
+    stage: "typescript-7-advisory",
+    dependsOn: [
+      "shared library typechecks",
+      "API server typecheck",
+      "run calculator typecheck",
+      "mockup sandbox typecheck",
+      "scripts typecheck",
+    ],
+    concurrencyLimit: 1,
+  },
+  {
     label: "recovery evidence audit",
     args: ["run", "audit:recovery"],
     stage: "prerequisites",
@@ -1042,6 +1312,13 @@ const RELEASE_STAGE_DEPENDENCIES: Readonly<Record<string, readonly string[]>> =
       ...(sourceLibraryPreflightEnabled
         ? [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL]
         : []),
+    ],
+    "typescript-7-advisory": [
+      "shared library typechecks",
+      "API server typecheck",
+      "run calculator typecheck",
+      "mockup sandbox typecheck",
+      "scripts typecheck",
     ],
     "clean-start": sourceLibraryPreflightEnabled
       ? [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL]
@@ -1349,6 +1626,7 @@ export async function verifyReleaseEvidence(
   const requiredEvidence = [
     REPORT_KEY_ROTATION_PREFLIGHT_EVIDENCE,
     IMPORT_CORPUS_EVALUATION_EVIDENCE,
+    TYPESCRIPT_7_COMPARISON_EVIDENCE,
     ...RELEASE_EVIDENCE_ALLOWLIST.filter((file) =>
       file.startsWith("clean-start/"),
     ),
@@ -1405,6 +1683,10 @@ export async function verifyReleaseEvidence(
   validateReleaseAiEvaluationEvidence(
     await readFile(resolve(evidenceRoot, IMPORT_CORPUS_EVALUATION_EVIDENCE)),
     await importCorpusEvaluationRequirements(),
+  );
+  validateTypescript7ComparisonEvidence(
+    await readFile(resolve(evidenceRoot, TYPESCRIPT_7_COMPARISON_EVIDENCE)),
+    revision,
   );
   if (requiresSourceLibraryEvidence) {
     const sourceLibraryEvidence = await readFile(
@@ -2630,6 +2912,14 @@ async function writeReleaseReport(
   }
   try {
     await access(
+      resolve(rootDir, releaseEvidenceDir, TYPESCRIPT_7_COMPARISON_EVIDENCE),
+    );
+    availableEvidenceFiles.add(TYPESCRIPT_7_COMPARISON_EVIDENCE);
+  } catch {
+    // The retained evidence verifier reports the missing comparison artifact.
+  }
+  try {
+    await access(
       resolve(
         rootDir,
         releaseEvidenceDir,
@@ -2821,17 +3111,7 @@ async function currentRevision(): Promise<string> {
   return new Promise((resolveRevision, reject) => {
     execFile(
       "git",
-      [
-        "log",
-        "-1",
-        "--format=%H",
-        "--",
-        ".",
-        ":(exclude)release-evidence",
-        ":(exclude)release-evidence/**",
-        ":(exclude)release-evidence-full",
-        ":(exclude)release-evidence-full/**",
-      ],
+      [...releaseRevisionGitArgs],
       { cwd: rootDir },
       (error, stdout) =>
         error ? reject(error) : resolveRevision(stdout.trim()),

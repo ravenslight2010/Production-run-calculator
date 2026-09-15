@@ -247,7 +247,7 @@ remain authoritative.
 
 ### Stage 1 — add a non-gating parallel native lane
 
-In a later implementation task:
+The release check now implements this stage as an advisory comparison:
 
 1. Add TypeScript 7 under a distinct alias and invoke its binary by an explicit package
    path so pnpm binary linking cannot silently select TypeScript 6.
@@ -261,6 +261,13 @@ In a later implementation task:
    check after the TypeScript 6 checks.
 5. Store normalized diagnostics, declaration manifests/diffs, and timing summaries from
    the disposable tree.
+
+Every standard and full release check retains
+`typescript-7-comparison.json`. Candidate diagnostic or declaration drift is reported as
+`ADVISORY_DRIFT` and does not change the TypeScript 6 release decision. Containment failures
+(including a changed authoritative working tree or missing evidence) still fail closed.
+The alias is resolved from the frozen pnpm lockfile, and the evidence records whether the
+current platform/architecture is in the supported runner list.
 
 **Rollback:** delete the disposable tree and remove the alias and parallel command. The
 lane must prove `git status --short` is unchanged before and after it, so no TypeScript 7
