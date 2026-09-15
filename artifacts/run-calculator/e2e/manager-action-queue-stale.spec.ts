@@ -645,7 +645,7 @@ test("opens an incident queue item in the matching incident review surface", asy
   expect(browserErrors).toEqual([]);
 });
 
-test("keeps a direct sync diagnostics link focused after reload", async ({ page }, testInfo: TestInfo) => {
+test("opens a direct sync diagnostics link focused on direct entry", async ({ page }, testInfo: TestInfo) => {
   const username = uniqueTestId("e2e_manager_sync_reload");
   testUsernames.add(username);
   const browserErrors: string[] = [];

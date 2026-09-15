@@ -98,6 +98,7 @@
 - [Sync snapshot identity](sync-snapshot-identity.md) + [HTTP failure handling](sync-http-failure-handling.md) + [partial sync](partial-sync-contract.md) + [SSE cleanup](sse-disconnect-registration.md) — stable hashes, non-OK is never acknowledgment, partial writes recover safely, and disconnects clean up before awaits.
 - [Formula import safety](formula-import-safety.md) + [Retained workbook layouts](source-workbook-layouts.md) — compare native units with provenance; varied Excel tables need explicit, fail-closed parser guards.
 - [Release gate budgets](release-check-shard-budget.md) — size time and process use for serialized gates; keep reports revision-bound and explicit about blocked dependents.
+- [Browser release case contract](browser-release-case-contract.md) — three physical-device-only Chromium cases sit outside the 159-case release evidence contract; encode that exclusion explicitly.
 - [Container image release evidence](container-image-release-evidence.md) — image tags alone are insufficient; retain each pushed digest plus a pull-by-digest OCI revision-label check.
 - [Source reconciliation evidence boundary](source-reconciliation-evidence-boundary.md) — production repair proof cannot be inferred from a mixed development fixture; bind verification to the matching database.
 - [Source-audit reports and CLI paths](large-source-audit-captures.md) + [source-audit-report-versions.md] + [source-audit-cli-paths.md] — keep hashed captures shard-safe, dispatch supported read versions, and resolve inputs from the script repository.
