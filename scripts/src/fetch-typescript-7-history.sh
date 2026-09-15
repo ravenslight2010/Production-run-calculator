@@ -27,8 +27,10 @@ while IFS=$'\t' read -r run_id; do
   [[ -n "$entries" ]] || continue
   grep -Eq '(^/|(^|/)\.\.(/|$))' <<<"$entries" && continue
   unzip -q "$zip" -d "$dir" || continue
-  report="$(find "$dir" -type f -name typescript-7-comparison.json -print -quit)"
-  [[ -n "$report" ]] || continue
+  reports=()
+  mapfile -d '' -t reports < <(find "$dir" -type f -name typescript-7-comparison.json -print0)
+  [[ "${#reports[@]}" -eq 1 ]] || continue
+  report="${reports[0]}"
   jq -e '.schemaVersion == 3 and (.sourceRevision | strings) and (.runner.image | strings | length > 0 and length <= 80) and (.runner.hardwareClass | strings | test("^[a-f0-9]{64}$")) and (.performanceComparison | arrays | length == 14)' "$report" >/dev/null || continue
   revision="$(jq -r '.sourceRevision' "$report")"
   if jq -e --arg revision "$revision" 'any(.sourceRevision == $revision)' "$history" >/dev/null; then
