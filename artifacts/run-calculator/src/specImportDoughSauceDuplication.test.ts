@@ -269,6 +269,7 @@ function importAgainstPool(
   kind: "dough" | "sauce",
 ): {
   linkedName: string;
+  linkedProfileName: string | undefined;
   added: number;
   poolNames: string[];
   suggestions: SpecImportLinkSuggestion[];
@@ -281,7 +282,17 @@ function importAgainstPool(
   if (!existingRecipe) throw new Error("bad fixture existing recipe");
 
   const parsed: ParsedSpecImport = {
-    profiles: [],
+    profiles: [
+      {
+        brand: BRAND,
+        flavor: "Cheese",
+        applicators: [],
+        pepperonis: [],
+        ...(kind === "dough"
+          ? { doughName: importedName }
+          : { sauceName: importedName }),
+      },
+    ],
     recipes: [
       { kind, name: importedName, brand: BRAND, flavor: "Cheese", rows: DUMMY_ROWS },
     ],
@@ -291,6 +302,8 @@ function importAgainstPool(
     suggestions,
   });
   const linkedName = linked.recipes[0].name;
+  const linkedProfileName =
+    kind === "dough" ? linked.profiles[0]?.doughName : linked.profiles[0]?.sauceName;
 
   const draft = namedRecipeFromDraft({
     name: linkedName,
@@ -301,7 +314,13 @@ function importAgainstPool(
     [existingRecipe],
     draft ? [draft] : [],
   );
-  return { linkedName, added, poolNames: merged.map((r) => r.name), suggestions };
+  return {
+    linkedName,
+    linkedProfileName,
+    added,
+    poolNames: merged.map((r) => r.name),
+    suggestions,
+  };
 }
 
 describe("spec-import dough/sauce loose-key dedup boundary — collapse vs keep", () => {
@@ -325,12 +344,13 @@ describe("spec-import dough/sauce loose-key dedup boundary — collapse vs keep"
   it.each(collapseCases)(
     "collapses %j ← %j (%s): links to saved name, adds no duplicate",
     (existingName, importedName, kind) => {
-      const { linkedName, added, poolNames, suggestions } = importAgainstPool(
+      const { linkedName, linkedProfileName, added, poolNames, suggestions } = importAgainstPool(
         existingName,
         importedName,
         kind,
       );
       expect(linkedName).toBe(existingName);
+      expect(linkedProfileName).toBe(existingName);
       expect(added).toBe(0);
       expect(poolNames).toEqual([existingName]);
       expect(suggestions).toEqual([]);
@@ -410,49 +430,31 @@ describe("spec-import dough/sauce loose-key dedup boundary — collapse vs keep"
   });
 
   // ---- "Applicator - " prefix boundary.
-  // cleanSpecCheeseRecipeName strips this label for CHEESE recipes, but the
-  // dough/sauce link pass keys on specImportNameMatchKey with NO applicator
-  // strip. So a stray "Applicator - " prefix on a dough/sauce name is treated as
-  // a distinguishing token and FORKS a parallel entry — a known gap, pinned here
-  // so a future change that closes it (or regresses it) is caught deliberately.
-  it("stripApplicatorLabel WOULD normalize the prefix, but the dough/sauce key does not", () => {
-    // The pure strip helper collapses the label to the bare name...
+  // The raw loose-key helper remains context-free, while the dough/sauce link
+  // boundary strips this workbook row label before matching.
+  it("keeps the generic loose key unchanged while the link boundary normalizes the prefix", () => {
     expect(stripApplicatorLabel("Applicator - House Dough")).toBe("House Dough");
-    // ...yet the loose match key used by the dough/sauce link pass keeps
-    // "applicator" as a token, so the keys differ and no snap happens.
     expect(specImportNameMatchKey("Applicator - House Dough")).not.toBe(
       specImportNameMatchKey("House Dough"),
     );
   });
 
-  // Sauce: the stray "applicator" token makes the token sets UNEQUAL, so the
-  // sauce family matcher (set equality) does not snap — forks a parallel
-  // entry. Dough: the prefixed name's tokens are a SUPERSET of the base
-  // family's distinctive tokens, so the dough family matcher folds it onto
-  // the base recipe — the gap pinned above is closed for dough.
-  it("does NOT collapse the applicator prefix for sauce: forks a parallel entry", () => {
-    const { linkedName, added, poolNames } = importAgainstPool(
-      "House Marinara",
-      "Applicator - House Marinara",
-      "sauce",
-    );
-    expect(linkedName).toBe("Applicator - House Marinara");
-    expect(added).toBe(1);
-    expect(poolNames).toEqual(["House Marinara", "Applicator - House Marinara"]);
-  });
-
-  it("SUGGESTS collapsing the applicator prefix for dough via the family matcher", () => {
-    const { linkedName, suggestions } = importAgainstPool(
-      "House Dough",
-      "Applicator - House Dough",
-      "dough",
-    );
-    expect(linkedName).toBe("Applicator - House Dough");
-    expect(suggestions).toContainEqual({
-      kind: "dough",
-      importedName: "Applicator - House Dough",
-      existingName: "House Dough",
-    });
-  });
+  it.each([
+    ["House Dough", "Applicator - House Dough", "dough"],
+    ["House Marinara", "Applicator - House Marinara", "sauce"],
+  ] as const)(
+    "collapses applicator-labeled %s import onto the canonical pool name (%s)",
+    (existingName, importedName, kind) => {
+      const { linkedName, added, poolNames, suggestions } = importAgainstPool(
+        existingName,
+        importedName,
+        kind,
+      );
+      expect(linkedName).toBe(existingName);
+      expect(added).toBe(0);
+      expect(poolNames).toEqual([existingName]);
+      expect(suggestions).toEqual([]);
+    },
+  );
 });
 
