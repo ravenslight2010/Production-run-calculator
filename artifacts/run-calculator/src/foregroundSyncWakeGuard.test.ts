@@ -19,6 +19,10 @@ import {
   releaseForegroundRecovery,
   useHomeSyncCoordination,
 } from "./hooks/useHomeSyncCoordination";
+import { consumeForegroundRecoveryResponse } from "./foregroundRecoveryResponse";
+import { syncPayloadSnapshotId } from "./syncWriteResponse";
+import type { SyncPayload } from "./types";
+import { todayStr } from "./utils";
 import { VisibleTabScheduler } from "./visibleTabScheduler";
 
 const HOME_FILE = path.join(__dirname, "pages", "home.tsx");
@@ -73,6 +77,116 @@ describe("foreground wake sync barrier", () => {
       }
     } finally {
       unmount();
+    }
+  });
+
+  it("adopts the facility-local day after waking across midnight, never yesterday's state", async () => {
+    vi.useFakeTimers();
+    let hidden = false;
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      get: () => hidden,
+    });
+    vi.setSystemTime(new Date("2026-09-14T23:59:59Z"));
+
+    const yesterday = "2026-09-14";
+    const today = "2026-09-15";
+    const yesterdayPayload = {
+      syncVersion: 1,
+      completeness: "complete",
+      dayState: {
+        date: yesterday,
+        currentIndex: 0,
+        runs: [{ id: "yesterday-run", brand: "Yesterday", flavor: "Run" }],
+      },
+      runValues: { "yesterday-run": { casesNeeded: 7 } },
+    } as unknown as SyncPayload;
+    const todayPayload = {
+      syncVersion: 1,
+      completeness: "complete",
+      dayState: {
+        date: today,
+        currentIndex: 0,
+        runs: [{ id: "today-run", brand: "Today", flavor: "Run" }],
+      },
+      runValues: { "today-run": { casesNeeded: 11 } },
+    } as unknown as SyncPayload;
+    const responseFor = async (payload: SyncPayload) => {
+      const snapshotId = await syncPayloadSnapshotId(payload, { stripReadModel: true });
+      return new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: {
+          "X-Sync-Response": "complete",
+          "X-Sync-Snapshot": snapshotId,
+        },
+      });
+    };
+    const fetchRecovery = vi.fn(async (url: string) => {
+      const requestedDate = new URL(url, "https://factory.test").searchParams.get("today");
+      return responseFor(requestedDate === today ? todayPayload : yesterdayPayload);
+    });
+    const adoptedDates: string[] = [];
+    let recoveryPromise!: Promise<boolean>;
+    const recover = () => {
+      recoveryPromise = (async () => {
+        const clientDate = todayStr();
+        const request = createForegroundSyncTodayRequest("snapshot-a", clientDate);
+        const response = await fetchRecovery(request.url);
+        const recovery = await consumeForegroundRecoveryResponse({
+          response,
+          expectedDate: clientDate,
+          requestedSnapshotId: "snapshot-a",
+          isCurrent: () => true,
+          adoptUnchanged: vi.fn(),
+          adoptCanonical: (payload) => {
+            coordinateForegroundAdoption({
+              payload,
+              prepareLifecycle: () => ({ value: payload.dayState, adopted: false }),
+              persistLifecycle: vi.fn(),
+              applyGeneralMerge: (canonicalPayload) => {
+                adoptedDates.push(canonicalPayload.dayState.date);
+              },
+              reconcileProfiles: async () => ({}),
+              applyProfiles: vi.fn(),
+              fetchFactory: async () => ({}),
+              applyFactory: vi.fn(),
+              isCurrent: () => true,
+            });
+          },
+        });
+        return recovery.accepted;
+      })();
+      return recoveryPromise;
+    };
+    const { result, unmount } = renderHook(() => useHomeSyncCoordination());
+    const scheduler = new VisibleTabScheduler();
+    const registration = result.current.registerForegroundRecovery(scheduler, recover);
+
+    try {
+      scheduler.start();
+      hidden = true;
+      document.dispatchEvent(new Event("visibilitychange"));
+      vi.setSystemTime(new Date("2026-09-15T00:00:02Z"));
+      await act(async () => {
+        hidden = false;
+        document.dispatchEvent(new Event("visibilitychange"));
+        await recoveryPromise;
+      });
+
+      expect(fetchRecovery).toHaveBeenCalledWith(
+        "/api/sync/today?today=2026-09-15&snapshot=snapshot-a",
+      );
+      expect(adoptedDates).toEqual([today]);
+      expect(adoptedDates).not.toContain(yesterday);
+      expect(homeSource).toContain("const clientDate = todayStr();");
+      expect(homeSource).toContain("expectedDate: clientDate");
+      expect(homeSource).toContain("localDate: clientDate");
+    } finally {
+      registration.dispose();
+      scheduler.stop();
+      unmount();
+      hidden = false;
+      vi.useRealTimers();
     }
   });
 

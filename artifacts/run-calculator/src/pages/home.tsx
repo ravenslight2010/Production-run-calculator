@@ -9497,7 +9497,11 @@ export default function Home() {
           }
 
           const snapshot = syncSnapshotIdRef.current;
-          const syncTodayRequest = createForegroundSyncTodayRequest(snapshot);
+          // Capture the facility-local production date once for this recovery
+          // transaction. A device can wake at local midnight, and the request
+          // plus its adoption guard must agree on the same day.
+          const clientDate = todayStr();
+          const syncTodayRequest = createForegroundSyncTodayRequest(snapshot, clientDate);
           const res = await fetchWithTimeout(
             syncTodayRequest.url,
             syncTodayRequest.init,
@@ -9505,7 +9509,7 @@ export default function Home() {
           );
           const recovery = await consumeForegroundRecoveryResponse({
             response: res,
-            expectedDate: todayStr(),
+            expectedDate: clientDate,
             requestedSnapshotId: snapshot,
             isCurrent: isCurrentRecovery,
             adoptUnchanged: (body) => {
@@ -9544,7 +9548,7 @@ export default function Home() {
             };
             const acceptsRemoteLifecycle = shouldAcceptSyncDaySnapshot({
               remoteDate: payload.dayState.date,
-              localDate: todayStr(),
+              localDate: clientDate,
               remoteResetAt: payload.dayState.resetAt ?? 0,
               localResetAt: durableLocalDay.resetAt ?? 0,
             });
