@@ -20,3 +20,9 @@ For recipe snapshot tests, do not treat an exact live remaining-quantity value a
 **Why:** A fast seeded line can consume enough demand during navigation and reload to make a correct frozen recipe appear to have changed.
 
 **How to apply:** Use a slow deterministic line fixture, pause progress, or assert the frozen recipe inputs separately; keep pending-run quantity assertions exact.
+
+For fresh isolated databases, seed an explicit complete empty today document before mounting Home when the browser will immediately send partial sync deltas.
+
+**Why:** The server treats a partial payload without an existing canonical row as a fallback, not as the initial daily document, so Start Run state can remain local-only and browser evidence fails before the recovery journey.
+
+**How to apply:** Use the authorized fixture API to create the empty complete row, then let the real Home bootstrap and write path run normally; do not bypass the sync protocol with direct browser storage.

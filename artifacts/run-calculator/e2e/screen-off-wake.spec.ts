@@ -585,6 +585,19 @@ async function setupAndStartRun(
     password: "TestPass123!",
     capabilities,
   });
+  const seedDate = new Date().toISOString().slice(0, 10);
+  await authorizedFixtures.seedTodaySync({
+    token: account.token,
+    senderId: `fixture:${username}`,
+    date: seedDate,
+    payload: {
+      dayState: { date: seedDate, runs: [], currentIndex: 0 },
+      runValues: {},
+      runValuesUpdatedAt: {},
+      syncVersion: 1,
+      completeness: "complete",
+    },
+  });
   await page.context().addCookies([{
     name: "rc_auth",
     value: account.token,
@@ -1733,13 +1746,19 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
           traysOnLine: stillFenced.traysOnLine,
           batchesReady: stillFenced.batchesReady,
         }, "failed recovery must not apply hidden-time Packaging or Dough progress")
-          .toEqual(staleOperational);
+          .toEqual({
+            skidsCompleted: canonicalAfterAdvance.values.skidsCompleted,
+            casesOnCurrentSkid: canonicalAfterAdvance.values.casesOnCurrentSkid,
+            traysOnLine: canonicalAfterAdvance.values.traysOnLine,
+            batchesReady: canonicalAfterAdvance.values.batchesReady,
+          });
         expect(observedClaims, "offline recovery emitted automatic claims").toEqual([]);
 
         let failFirstOnlinePull = true;
+        let holdOnlineRecovery = true;
         await sleepingPage.route("**/api/sync/today**", async (route) => {
-          if (route.request().method() === "GET" && failFirstOnlinePull) {
-            failFirstOnlinePull = false;
+          if (route.request().method() === "GET" && holdOnlineRecovery) {
+            if (failFirstOnlinePull) failFirstOnlinePull = false;
             await route.abort("connectionfailed");
             return;
           }
@@ -1757,6 +1776,8 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
           .toBe(failedAck);
         expect(observedClaims, "failed online recovery emitted automatic claims").toEqual([]);
 
+        holdOnlineRecovery = false;
+        await sleepingPage.unroute("**/api/sync/today**");
         await sleepingPage.getByTestId("button-retry-foreground-recovery").click();
         await expect(sleepingStatus)
           .toContainText("Production state synchronized.", { timeout: 15_000 });
@@ -2609,6 +2630,140 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         expect(await readCaseTotal(peerPage)).toBe(authoritativeCases);
       } finally {
         await peer.close();
+      }
+    },
+  );
+
+  test(
+    "cancels a wake recovery without replaying a pre-wake write",
+    async ({ page, browser }: { page: Page; browser: Browser }, testInfo) => {
+      test.slow();
+      const safeBaseMs = await setupAndStartRun(
+        page,
+        "10",
+        DEFAULT_MANAGER_CAPABILITIES,
+      );
+      const peer = await browser.newContext({
+        storageState: await page.context().storageState(),
+        viewport: { width: 390, height: 844 },
+        isMobile: true,
+      });
+      const sleepingPage = await peer.newPage();
+      const observedClaims: string[] = [];
+      const recordClaim = (request: Request) => {
+        if (
+          request.method() !== "POST"
+          || !new URL(request.url()).pathname.endsWith("/api/sync/auto-track/claim")
+        ) return;
+        const body = request.postDataJSON() as { claim?: { channel?: string } };
+        if (body.claim?.channel) observedClaims.push(body.claim.channel);
+      };
+      let recoveryStarted = false;
+      let releaseRecovery: (() => void) | undefined;
+      const recoveryHeld = new Promise<void>((resolve) => {
+        releaseRecovery = resolve;
+      });
+
+      try {
+        await sleepingPage.goto("/", { waitUntil: "domcontentloaded" });
+        await sleepingPage.getByTestId("tab-run")
+          .waitFor({ state: "visible", timeout: 20_000 });
+        await sleepingPage.getByRole("button", { name: /stop.?run/i }).first()
+          .waitFor({ state: "visible", timeout: 15_000 });
+        await installHiddenMock(sleepingPage);
+        const stale = await readLiveRunSnapshot(sleepingPage);
+        const staleOperational = {
+          skidsCompleted: stale.values.skidsCompleted,
+          casesOnCurrentSkid: stale.values.casesOnCurrentSkid,
+          traysOnLine: stale.values.traysOnLine,
+          batchesReady: stale.values.batchesReady,
+        };
+        sleepingPage.on("request", recordClaim);
+        await sleepingPage.route("**/api/sync/events**", (route) => route.abort());
+        await simulateScreenOff(sleepingPage);
+        await peer.setOffline(true);
+
+        // Leave a real queued edit behind the wake fence. A cancelled owner
+        // must discard it instead of replaying the pre-wake snapshot later.
+        await sleepingPage.locator('[data-testid="input-cycleSpeed"]').evaluate((el) => {
+          const input = el as HTMLInputElement;
+          const setter = Object.getOwnPropertyDescriptor(
+            HTMLInputElement.prototype,
+            "value",
+          )?.set;
+          setter?.call(input, "31");
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+        await sleepingPage.waitForTimeout(900);
+
+        await sleepingPage.route("**/api/sync/reset-epoch", async (route) => {
+          if (route.request().method() !== "GET" || recoveryStarted) {
+            await route.continue();
+            return;
+          }
+          recoveryStarted = true;
+          await recoveryHeld;
+          await route.abort("aborted").catch(() => {});
+        });
+        await peer.setOffline(false);
+        await sleepingPage.evaluate(() => window.dispatchEvent(new Event("online")));
+        await simulateWake(sleepingPage);
+        const recoveringStatus = sleepingPage.getByTestId("foreground-recovery-status");
+        await expect(recoveringStatus)
+          .toContainText("Still recovering: checking the current production state", {
+            timeout: 10_000,
+          });
+        expect(recoveryStarted, "wake recovery did not reach the held canonical pull").toBe(true);
+
+        // Navigation unmounts the real Home effect while its pull is pending.
+        // Release the route afterward so the cancelled request cannot linger.
+        await sleepingPage.goto("about:blank", { waitUntil: "domcontentloaded" });
+        releaseRecovery?.();
+        await sleepingPage.unroute("**/api/sync/reset-epoch");
+        await sleepingPage.goto("/", { waitUntil: "domcontentloaded" });
+        await sleepingPage.getByTestId("tab-run")
+          .waitFor({ state: "visible", timeout: 20_000 });
+        await sleepingPage.getByRole("button", { name: /stop.?run/i }).first()
+          .waitFor({ state: "visible", timeout: 15_000 });
+
+        // The new mounted Home has no stranded foreground fence, and the
+        // cancelled owner's queued write never becomes an auto-track claim.
+        await expect.poll(async () => {
+          const snapshot = await readLiveRunSnapshot(sleepingPage);
+          return {
+            skidsCompleted: snapshot.values.skidsCompleted,
+            casesOnCurrentSkid: snapshot.values.casesOnCurrentSkid,
+            traysOnLine: snapshot.values.traysOnLine,
+            batchesReady: snapshot.values.batchesReady,
+          };
+        }, {
+          timeout: 15_000,
+          message: "cancelled recovery replayed hidden-time operational progress",
+        }).toEqual(staleOperational);
+        expect(observedClaims, "cancelled recovery replayed a queued auto-track write").toEqual([]);
+
+        const status = sleepingPage.getByTestId("foreground-recovery-status");
+        if (await status.count()) {
+          await expect(status).not.toHaveAttribute(
+            "data-foreground-recovery-state",
+            "recovering",
+          );
+        }
+        await testInfo.attach("cancelled-wake-recovery-summary.json", {
+          body: JSON.stringify({
+            result: "pass",
+            device: "phone-sleeping",
+            cancelledRecoveryVisible: true,
+            trackingFenceClearedAfterRemount: true,
+            preWakeWriteReplayed: false,
+            autoTrackClaims: 0,
+          }, null, 2),
+          contentType: "application/json",
+        });
+      } finally {
+        releaseRecovery?.();
+        await peer.close().catch(() => {});
       }
     },
   );

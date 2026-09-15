@@ -23,7 +23,7 @@ export default defineConfig({
   webServer: releaseBrowserWebServers(),
   testDir: "./e2e",
   testMatch: "screen-off-wake.spec.ts",
-  grep: /two live sessions converge through visible retry after an offline wake/,
+  grep: /(?:two live sessions converge through visible retry after an offline wake|cancels a wake recovery without replaying a pre-wake write)/,
   globalSetup: "./e2e/global-setup.ts",
   timeout: 60_000,
   globalTimeout: 180_000,
