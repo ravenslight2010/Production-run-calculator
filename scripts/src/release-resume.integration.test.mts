@@ -540,6 +540,10 @@ async function runStoppedSummaryScenario(): Promise<void> {
   for (const checkpointText of [
     "not a release checkpoint\n",
     "Root blockers: [untrusted payload](https://example.test)\n",
+    "Root blockers: fixture gate one\u0001 raw root blocker payload\n" +
+      "Blocked gates: fixture gate two\n",
+    "Root blockers: fixture gate one\n" +
+      "Blocked gates: fixture gate two\u0002 raw blocked gate payload\n",
   ]) {
     const evidenceDir = await mkdtemp(
       join(tmpdir(), "release-summary-malformed-checkpoint-"),
@@ -566,8 +570,13 @@ async function runStoppedSummaryScenario(): Promise<void> {
       );
       assert.doesNotMatch(
         summary,
-        /untrusted payload|https:\/\/example\.test/,
+        /untrusted payload|https:\/\/example\.test|raw root blocker payload|raw blocked gate payload/,
         "malformed checkpoint text must not be copied into the job summary",
+      );
+      assert.equal(
+        summary.includes("\u0001") || summary.includes("\u0002"),
+        false,
+        "malformed checkpoint text must not copy control characters into the job summary",
       );
     } finally {
       await rm(evidenceDir, { recursive: true, force: true });

@@ -49,7 +49,7 @@ fi
 checkpoint_blocker_summary=""
 checkpoint_blocker_summary_available=0
 if checkpoint_blocker_summary="$(
-  awk '
+  LC_ALL=C awk '
     function trim(value) {
       sub(/^[[:space:]]+/, "", value)
       sub(/[[:space:]]+$/, "", value)
