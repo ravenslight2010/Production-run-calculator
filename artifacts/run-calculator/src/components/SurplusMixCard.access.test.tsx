@@ -43,6 +43,17 @@ describe("SurplusMixCard accessibility", () => {
     );
   });
 
+  it("hides the card when loading mixes fails", async () => {
+    fetchMixes.mockRejectedValue(new Error("mix request failed"));
+
+    render(<SurplusMixCard />);
+
+    await waitFor(() => expect(fetchMixes).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(screen.queryByTestId("surplus-mix-card")).to.equal(null),
+    );
+  });
+
   it("uses the approved high-contrast treatment for brand and flavor metadata", async () => {
     fetchMixes.mockResolvedValue([surplusMix]);
 
