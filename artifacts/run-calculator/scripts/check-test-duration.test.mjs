@@ -1,5 +1,10 @@
+import { spawn } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
+import { availableParallelism, tmpdir } from "node:os";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   DEFAULT_CALCULATOR_TEST_BUDGET_MS,
@@ -13,6 +18,29 @@ import {
   formatCalculatorTestSummary,
   summarizeVitestJson,
 } from "./check-test-duration.mjs";
+
+const durationCheckScript = fileURLToPath(
+  new URL("./check-test-duration.mjs", import.meta.url),
+);
+
+function runProcess(command, args, options) {
+  return new Promise((resolveProcess, rejectProcess) => {
+    const child = spawn(command, args, options);
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout?.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr?.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.once("error", rejectProcess);
+    child.once("close", (code, signal) => {
+      resolveProcess({ code, signal, stdout, stderr });
+    });
+  });
+}
 
 test("summarizes Vitest files and tests without counting the root suite", () => {
   const summary = summarizeVitestJson({
@@ -55,6 +83,54 @@ test("formats the bounded validation summary", () => {
       "(2635 passed, 0 failed), elapsed 89.3s (budget 150.0s). " +
       "Detected runner capacity: 8 available CPU workers; configured worker ceiling: 4.",
   );
+});
+
+test("executable validation reports detected capacity and worker ceiling", async (t) => {
+  const availableWorkers = availableParallelism();
+  if (availableWorkers < MIN_CALCULATOR_TEST_WORKERS) {
+    t.skip(
+      `runner exposes ${availableWorkers} CPU workers; executable prerequisite requires ${MIN_CALCULATOR_TEST_WORKERS}`,
+    );
+  }
+
+  const temporaryDirectory = await mkdtemp(
+    join(tmpdir(), "calculator-duration-test-"),
+  );
+  const fakePnpmPath = join(temporaryDirectory, "pnpm");
+
+  try {
+    await writeFile(
+      fakePnpmPath,
+      `#!/bin/sh
+for argument
+do
+  case "$argument" in
+    --outputFile=*) output_file="\${argument#*=}" ;;
+  esac
+done
+printf '%s\\n' '{"numTotalTests":1,"numPassedTests":1,"numFailedTests":0,"testResults":[{"name":"stub.test.ts","status":"passed"}]}' > "$output_file"
+`,
+    );
+    await chmod(fakePnpmPath, 0o755);
+
+    const result = await runProcess(process.execPath, [durationCheckScript], {
+      env: {
+        ...process.env,
+        PATH: `${temporaryDirectory}:${process.env.PATH ?? ""}`,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(
+      result.stdout,
+      new RegExp(
+        `Detected runner capacity: ${availableWorkers} available CPU workers; configured worker ceiling: ${CALCULATOR_TEST_WORKER_CEILING}\\.`,
+      ),
+    );
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  }
 });
 
 test("uses the configured worker ceiling in the shared capacity line", () => {
