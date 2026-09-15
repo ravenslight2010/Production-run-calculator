@@ -53,6 +53,20 @@ Run the repeatable editor smoke before any TypeScript 7 promotion:
 pnpm run check:editor-typescript
 ```
 
+An intentional promotion attempt must use:
+
+```bash
+pnpm run release:check:typescript-7-promotion
+```
+
+That release mode replaces the advisory comparison step with a fail-closed promotion gate.
+The gate invokes `pnpm run check:editor-typescript` and records the selected editor SDK
+path, resolved SDK version, and smoke outcome in
+`release-evidence-typescript-7-promotion/typescript-7-comparison.json`. A failed diagnostic
+or definition-navigation assertion makes the promotion command fail. Promotion checkpoints
+resume with the same promotion command and always rerun the live editor proof. Standard and
+full release checks continue to run the TypeScript 7 comparison as advisory only.
+
 Run the command from an open Replit editor session. The smoke fails unless the configured SDK
 resolves to TypeScript 6.0.3 and a live editor language-server child uses that exact
 `tsserver.js`. It then starts the same SDK in a disposable strict TypeScript project, confirms

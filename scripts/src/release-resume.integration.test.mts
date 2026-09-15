@@ -93,6 +93,64 @@ async function runReleaseCheck(
   });
 }
 
+async function runTypescriptPromotionResumeScenario(): Promise<void> {
+  const evidenceDir = await mkdtemp(
+    join(tmpdir(), "release-promotion-resume-"),
+  );
+  const marker = join(evidenceDir, "editor-proof-runs");
+  const promotionPass: FixtureStep = {
+    label: "TypeScript 7 promotion gate",
+    command: "bash",
+    args: ["-c", `echo pass >> ${JSON.stringify(marker)}`],
+  };
+  const laterFailure: FixtureStep = {
+    label: "later gate",
+    command: "bash",
+    args: ["-c", "exit 1"],
+    stage: "later",
+  };
+  try {
+    const initial = await runReleaseCheck(
+      evidenceDir,
+      [promotionPass, laterFailure],
+      ["--typescript-7-promotion"],
+    );
+    assert.equal(initial.code, 1, initial.output);
+
+    const promotionFail = {
+      ...promotionPass,
+      args: ["-c", `echo fail >> ${JSON.stringify(marker)}; exit 1`],
+    };
+    const resumed = await runReleaseCheck(
+      evidenceDir,
+      [promotionFail, laterFailure],
+      ["--typescript-7-promotion", "--resume"],
+    );
+    assert.equal(resumed.code, 1, resumed.output);
+    assert.match(resumed.output, /FAIL TypeScript 7 promotion gate/);
+    assert.equal(
+      (await readFile(marker, "utf8")).trim().split("\n").length,
+      2,
+      "promotion resume must rerun the live editor proof",
+    );
+    const checkpoint = JSON.parse(
+      await readFile(join(evidenceDir, "release-check-state.json"), "utf8"),
+    ) as { mode?: unknown };
+    assert.equal(checkpoint.mode, "typescript-7-promotion");
+    const report = await readFile(
+      join(evidenceDir, "release-check-checkpoint.md"),
+      "utf8",
+    );
+    assert.match(report, /^Mode: typescript-7-promotion$/m);
+    assert.match(
+      report,
+      /pnpm run release:check:typescript-7-promotion -- --resume/,
+    );
+  } finally {
+    await rm(evidenceDir, { recursive: true, force: true });
+  }
+}
+
 function runStoppedSummary(
   evidenceDir: string,
   summaryPath: string,
@@ -2160,7 +2218,9 @@ async function runDamagedCheckpointScenarios(): Promise<void> {
   console.log("Release resume damaged-checkpoint scenarios passed.");
 }
 
-if (process.env.RELEASE_STOPPED_SUMMARY_ONLY === "1") {
+if (process.env.RELEASE_PROMOTION_RESUME_ONLY === "1") {
+  await runTypescriptPromotionResumeScenario();
+} else if (process.env.RELEASE_STOPPED_SUMMARY_ONLY === "1") {
   await runStoppedArtifactLinkVerificationScenario();
   await runStoppedSummaryScenario();
 } else {
@@ -2172,6 +2232,7 @@ if (process.env.RELEASE_STOPPED_SUMMARY_ONLY === "1") {
   await runApiShardConcurrencyScenario();
   await runParallelResumeScenario();
   await runFullModeScenario();
+  await runTypescriptPromotionResumeScenario();
   await runStaleCheckpointScenarios();
   await runTamperedSourceLibraryPreflightCheckpointScenario();
   await runDamagedCheckpointScenarios();

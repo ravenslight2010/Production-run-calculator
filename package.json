@@ -26,6 +26,7 @@
     "test:gemini": "python3 scripts/test_gemini_skill_trigger_benchmark.py && python3 scripts/test_gemini_failure_alert.py",
     "release:check": "pnpm --filter @workspace/scripts exec tsx ./src/release-check.mts",
     "release:check:full": "pnpm --filter @workspace/scripts exec tsx ./src/release-check.mts --full",
+    "release:check:typescript-7-promotion": "pnpm --filter @workspace/scripts exec tsx ./src/release-check.mts --typescript-7-promotion",
     "typecheck:libs": "node ./node_modules/typescript/bin/tsc --build",
     "typecheck": "pnpm run check:shell-inventory && pnpm run check:typescript-api-v6 && pnpm run audit:recovery && pnpm run check:api-generated && pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
   },

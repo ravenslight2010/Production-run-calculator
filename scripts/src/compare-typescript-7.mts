@@ -25,6 +25,14 @@ type CommandEvidence = {
   diagnostics: string[];
 };
 
+type EditorServiceEvidence = {
+  command: "pnpm run check:editor-typescript";
+  sdkPath: string | null;
+  sdkVersion: string | null;
+  outcome: "PASS" | "FAIL";
+  exitCode: number;
+};
+
 export const TYPESCRIPT_7_RESOURCE_BUDGETS = {
   maxElapsedRatio: 1.25,
   maxPeakRssRatio: 1.25,
@@ -48,6 +56,27 @@ const comparedChecks = [
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(scriptDir, "../..");
 const supportedRunners = [{ platform: "linux", arch: "x64" }] as const;
+const promotionAttempt = process.env.TYPESCRIPT_7_PROMOTION === "1";
+
+export function editorServiceEvidenceFromResult(result: {
+  status: number | null;
+  stdout?: string | Buffer | null;
+  stderr?: string | Buffer | null;
+}): EditorServiceEvidence {
+  const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+  return {
+    command: "pnpm run check:editor-typescript",
+    sdkPath:
+      output.match(/workspace service process\(es\).*?SDK\s+([^,\s]+)/)?.[0]
+        ? "node_modules/typescript/lib"
+        : null,
+    sdkVersion:
+      output.match(/workspace service process\(es\), SDK\s+([^,\s]+)/)?.[1] ??
+      null,
+    outcome: result.status === 0 ? "PASS" : "FAIL",
+    exitCode: result.status ?? 1,
+  };
+}
 
 export function typescript7ResourceRegressions(
   value: unknown,
@@ -274,6 +303,7 @@ async function main(): Promise<void> {
   const checkout = resolve(temporaryRoot, "repository");
   const commands: CommandEvidence[] = [];
   let report: Record<string, unknown>;
+  let editorService: EditorServiceEvidence | null = null;
 
   try {
     await mkdir(checkout);
@@ -480,10 +510,29 @@ async function main(): Promise<void> {
       diagnosticsEqual &&
       changedDeclarations.length === 0;
 
+    if (promotionAttempt) {
+      const editorResult = spawnSync("pnpm", ["run", "check:editor-typescript"], {
+        cwd: rootDir,
+        encoding: "utf8",
+      });
+      editorService = editorServiceEvidenceFromResult(editorResult);
+      if (editorResult.stdout) process.stdout.write(editorResult.stdout);
+      if (editorResult.stderr) process.stderr.write(editorResult.stderr);
+    }
+    const promotionGatesMet =
+      !promotionAttempt ||
+      (editorService?.outcome === "PASS" &&
+        promotionAssessment.eligible === true);
+
     report = {
       schemaVersion: 2,
       sourceRevision: sourceRevision(),
-      status: advisoryPassed ? "PASS" : "ADVISORY_DRIFT",
+      status:
+        advisoryPassed && promotionGatesMet
+          ? "PASS"
+          : promotionAttempt
+            ? "PROMOTION_BLOCKED"
+            : "ADVISORY_DRIFT",
       authoritativeCompiler: version(ts6),
       candidateCompiler: version(ts7),
       runner: {
@@ -502,14 +551,16 @@ async function main(): Promise<void> {
         revisionSamples,
       },
       promotionAssessment,
+      promotionAttempt,
+      editorService,
       diagnosticsEqual,
       declarations: {
         baseline: baselineDeclarations,
         candidate: candidateDeclarations,
         changedPaths: changedDeclarations,
       },
-      acceptanceGatesMet: advisoryPassed,
-      advisory: true,
+      acceptanceGatesMet: advisoryPassed && promotionGatesMet,
+      advisory: !promotionAttempt,
     };
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true });
@@ -533,8 +584,17 @@ async function main(): Promise<void> {
   await mkdir(dirname(evidencePath), { recursive: true });
   await writeFile(evidencePath, `${JSON.stringify(report, null, 2)}\n`);
   console.log(
-    `${report.status} TypeScript 7 comparison retained at ${relative(rootDir, evidencePath)} (advisory only).`,
+    `${report.status} TypeScript 7 comparison retained at ${relative(rootDir, evidencePath)} (${promotionAttempt ? "promotion attempt" : "advisory only"}).`,
   );
+  if (
+    promotionAttempt &&
+    (report.acceptanceGatesMet !== true ||
+      (report.editorService as EditorServiceEvidence | null)?.outcome !== "PASS")
+  ) {
+    throw new Error(
+      "TypeScript 7 promotion blocked: editor TypeScript service proof or compiler acceptance gate failed.",
+    );
+  }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) await main();

@@ -210,17 +210,17 @@ describe("browser fixture cleanup queries", () => {
   it("binds profile keys and scopes without changing query text", async () => {
     const { db, query } = mockedClient();
     const keys = ["profile'); DROP TABLE brand_profiles; --"];
-    const scope = "live'; SELECT pg_sleep(10); --";
+    const scope = "live' OR scope <> 'live";
 
-    await cleanupDailySync(db, dates, scope);
+    await cleanupBrandProfiles(db, keys, scope);
 
     expect(query).toHaveBeenCalledWith(
-      "DELETE FROM daily_sync WHERE date = ANY($1::text[]) AND scope = $2",
-      [dates, scope],
+      "DELETE FROM brand_profiles WHERE key = ANY($1::text[]) AND scope = $2",
+      [keys, scope],
     );
   });
 
-  it("binds cheese recipe IDs without changing query text", async () => {
+  it("binds sync dates and scopes without changing query text", async () => {
     const { db, query } = mockedClient();
     const dates = ["2026-09-15'); DELETE FROM daily_sync; --"];
     const scope = "live'; SELECT pg_sleep(10); --";
@@ -235,29 +235,32 @@ describe("browser fixture cleanup queries", () => {
 
   it("binds cheese recipe IDs without changing query text", async () => {
     const { db, query } = mockedClient();
-    const ids = ["mix-id'); DROP TABLE mixes; --"];
+    const ids = ["cheese-id'); DROP TABLE cheese_recipes; --"];
 
-    await cleanupMixes(db, ids);
+    await cleanupCheeseRecipes(db, ids);
 
     expect(query).toHaveBeenCalledWith(
-      "DELETE FROM mixes WHERE id = ANY($1::text[]) AND scope = $2",
-      [ids, "live"],
+      "DELETE FROM cheese_recipes WHERE id = ANY($1::text[])",
+      [ids],
     );
   });
 
-  it("binds role names without changing query text", async () => {
-    const { db, query } = mockedClient();
-    const ids = ["mix-id'); DROP TABLE mixes; --"];
+  it.each(["dough", "sauce"] as const)(
+    "binds %s recipe IDs without changing query text",
+    async (kind) => {
+      const { db, query } = mockedClient();
+      const ids = [`${kind}-id'); DROP TABLE ${kind}_recipes; --`];
 
-    await cleanupMixes(db, ids);
+      await cleanupNamedRecipes(db, kind, ids);
 
-    expect(query).toHaveBeenCalledWith(
-      "DELETE FROM mixes WHERE id = ANY($1::text[]) AND scope = $2",
-      [ids, "live"],
-    );
-  });
+      expect(query).toHaveBeenCalledWith(
+        `DELETE FROM ${kind}_recipes WHERE id = ANY($1::text[]) AND scope = $2`,
+        [ids, "live"],
+      );
+    },
+  );
 
-  it("binds role names without changing query text", async () => {
+  it("rejects named recipe kinds outside the table allowlist", async () => {
     const { db, query } = mockedClient();
     const invalidKind = "dough; DROP TABLE users; --" as "dough";
 
@@ -283,16 +286,39 @@ describe("browser fixture cleanup queries", () => {
     const { db, query } = mockedClient();
     const roleNames = ["manager'); DROP TABLE roles; --"];
 
+    await cleanupFixtureRoles(db, roleNames);
+
+    expect(query).toHaveBeenCalledWith(
+      "DELETE FROM roles WHERE name = ANY($1::text[])",
+      [roleNames],
+    );
+  });
+});
+
+describe("browser fixture SQL source guard", () => {
+  it("accepts literal SQL and explicitly allowlisted table identifiers", () => {
+    const source = readFileSync(
+      resolve(process.cwd(), "e2e/isolation.ts"),
+      "utf8",
+    );
+    const result = directSqlSourceViolations(source);
+
+    expect(result.queries).toBeGreaterThan(0);
+    expect(result.allowedIdentifiers).toContain("table");
+    expect(result.violations).toEqual([]);
+  });
+
+  it("rejects setup values interpolated into SQL", () => {
     const unsafeSource = [
       "async function setup(db: { query(sql: string): Promise<void> }) {",
       "  const username = \"fixture\";",
       "  await db.query(`DELETE FROM users WHERE username = '${username}'`);",
       "}",
     ].join("\n");
+    const result = directSqlSourceViolations(unsafeSource);
 
     expect(result.queries).toBeGreaterThan(0);
-    expect(result.allowedIdentifiers).toContain("table");
-    expect(result.violations).toEqual([]);
+    expect(result.violations).toHaveLength(1);
   });
 });
 
@@ -392,7 +418,3 @@ function allowlistedSqlIdentifiers(source: string): Set<string> {
 
   return allowedVariables;
 }
-
-    const source = readFileSync(resolve(process.cwd(), "e2e/isolation.ts"), "utf8");
-
-    const result = directSqlSourceViolations(source);

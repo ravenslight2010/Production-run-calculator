@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import test from "node:test";
 import {
   declarationManifest,
+  editorServiceEvidenceFromResult,
   normalizeDiagnostics,
   selectTypescript7HistoricalReports,
   typescript7ResourceRegressions,
@@ -25,6 +26,30 @@ test("normalizes diagnostic paths and ordering", () => {
       "a.ts(1,1): error TS1: first",
       "z.ts(2,3): error TS2: second",
     ],
+  );
+});
+
+test("promotion evidence records the editor SDK and smoke outcome", () => {
+  assert.deepEqual(
+    editorServiceEvidenceFromResult({
+      status: 0,
+      stdout:
+        "Editor TypeScript service smoke passed: 1 live workspace service process(es), SDK 6.0.3, diagnostics TS2322, definition navigation.\n",
+    }),
+    {
+      command: "pnpm run check:editor-typescript",
+      sdkPath: "node_modules/typescript/lib",
+      sdkVersion: "6.0.3",
+      outcome: "PASS",
+      exitCode: 0,
+    },
+  );
+  assert.equal(
+    editorServiceEvidenceFromResult({
+      status: 1,
+      stderr: "Expected diagnostic TS2322",
+    }).outcome,
+    "FAIL",
   );
 });
 
@@ -168,6 +193,46 @@ test("retained comparison evidence is revision-bound and advisory", () => {
       Buffer.from(JSON.stringify(evidence)),
       "a".repeat(40),
     ),
+  );
+  assert.doesNotThrow(() =>
+    validateTypescript7ComparisonEvidence(
+      Buffer.from(
+        JSON.stringify({
+          ...evidence,
+          promotionAttempt: true,
+          advisory: false,
+          editorService: {
+            command: "pnpm run check:editor-typescript",
+            sdkPath: "node_modules/typescript/lib",
+            sdkVersion: "6.0.3",
+            outcome: "PASS",
+            exitCode: 0,
+          },
+        }),
+      ),
+      "a".repeat(40),
+    ),
+  );
+  assert.throws(
+    () =>
+      validateTypescript7ComparisonEvidence(
+        Buffer.from(
+          JSON.stringify({
+            ...evidence,
+            promotionAttempt: true,
+            advisory: false,
+            editorService: {
+              command: "pnpm run check:editor-typescript",
+              sdkPath: "node_modules/typescript/lib",
+              sdkVersion: "6.0.3",
+              outcome: "FAIL",
+              exitCode: 1,
+            },
+          }),
+        ),
+        "a".repeat(40),
+      ),
+    /stale, incomplete/,
   );
   assert.throws(
     () =>

@@ -128,7 +128,7 @@ export type ReleaseTiming = {
 
 export type ReleaseEvidenceOptions = {
   currentRevision?: string;
-  expectedMode?: "standard" | "full";
+  expectedMode?: ReleaseMode;
   expectedLabels?: readonly string[];
   allowIncompleteCheckpoint?: boolean;
   expectedSourceLibraryEnvironment?: SourceLibraryEvidenceEnvironment;
@@ -246,6 +246,15 @@ const STATEFUL_RELEASE_LOCK_DIR =
   "/tmp/run-calculator-release-stateful-gates.lock";
 const STATEFUL_RELEASE_LOCK_STALE_MS = 60 * 60_000;
 const fullRun = process.argv.includes("--full");
+const typescript7Promotion = process.argv.includes(
+  "--typescript-7-promotion",
+);
+export type ReleaseMode = "standard" | "full" | "typescript-7-promotion";
+const releaseMode: ReleaseMode = typescript7Promotion
+  ? "typescript-7-promotion"
+  : fullRun
+    ? "full"
+    : "standard";
 
 async function statefulReleaseLockOwnerAlive(): Promise<boolean | undefined> {
   const owner = await readFile(
@@ -321,19 +330,23 @@ function cliOptionValue(option: string): string | undefined {
 }
 
 const evidenceDirArgument = cliOptionValue("--evidence-dir");
-export function defaultReleaseEvidenceDir(mode: "standard" | "full"): string {
-  return mode === "full" ? "release-evidence-full" : "release-evidence";
+export function defaultReleaseEvidenceDir(mode: ReleaseMode): string {
+  if (mode === "full") return "release-evidence-full";
+  if (mode === "typescript-7-promotion") {
+    return "release-evidence-typescript-7-promotion";
+  }
+  return "release-evidence";
 }
 
 export function resolveReleaseEvidenceDir(
-  mode: "standard" | "full",
+  mode: ReleaseMode,
   configuredDir = process.env.RELEASE_EVIDENCE_DIR,
 ): string {
   return configuredDir ?? defaultReleaseEvidenceDir(mode);
 }
 
 const releaseEvidenceDir = resolveReleaseEvidenceDir(
-  fullRun ? "full" : "standard",
+  releaseMode,
   evidenceDirArgument ?? process.env.RELEASE_EVIDENCE_DIR,
 );
 const cleanStartEvidenceDir = `${releaseEvidenceDir}/clean-start`;
@@ -378,6 +391,19 @@ export function validateTypescript7ComparisonEvidence(
   const containment = report.containment as
     | Record<string, unknown>
     | undefined;
+  const editorService = report.editorService as
+    | Record<string, unknown>
+    | null
+    | undefined;
+  const validPromotionEditorProof =
+    report.promotionAttempt === true &&
+    report.advisory === false &&
+    editorService?.command === "pnpm run check:editor-typescript" &&
+    editorService.sdkPath === "node_modules/typescript/lib" &&
+    typeof editorService.sdkVersion === "string" &&
+    /^\d+\.\d+\.\d+$/.test(editorService.sdkVersion) &&
+    editorService.outcome === "PASS" &&
+    editorService.exitCode === 0;
   const performanceChecks = [
     "build",
     "scripts",
@@ -407,7 +433,7 @@ export function validateTypescript7ComparisonEvidence(
     report.sourceRevision !== expectedRevision ||
     report.authoritativeCompiler !== "Version 6.0.3" ||
     report.candidateCompiler !== "Version 7.0.2" ||
-    report.advisory !== true ||
+    (report.advisory !== true && !validPromotionEditorProof) ||
     report.authoritativeOutputsChanged !== false ||
     typeof report.diagnosticsEqual !== "boolean" ||
     !Array.isArray(report.commands) ||
@@ -1177,8 +1203,17 @@ const steps: ReleaseStep[] = [
     stage: "consumer-typechecks",
   },
   {
-    label: "TypeScript 7 advisory comparison",
-    args: ["--filter", "@workspace/scripts", "run", "check:typescript-7"],
+    label: typescript7Promotion
+      ? "TypeScript 7 promotion gate"
+      : "TypeScript 7 advisory comparison",
+    args: [
+      "--filter",
+      "@workspace/scripts",
+      "run",
+      typescript7Promotion
+        ? "check:typescript-7:promotion"
+        : "check:typescript-7",
+    ],
     env: {
       TYPESCRIPT_7_EVIDENCE_PATH: resolve(
         rootDir,
@@ -1186,7 +1221,9 @@ const steps: ReleaseStep[] = [
         TYPESCRIPT_7_COMPARISON_EVIDENCE,
       ),
     },
-    stage: "typescript-7-advisory",
+    stage: typescript7Promotion
+      ? "typescript-7-promotion"
+      : "typescript-7-advisory",
     dependsOn: [
       "shared library typechecks",
       "API server typecheck",
@@ -1344,10 +1381,24 @@ if (fullRun) {
   });
 }
 
-export function releaseGateLabelsForMode(mode: "standard" | "full"): string[] {
+export function releaseGateLabelsForMode(mode: ReleaseMode): string[] {
   const labels = steps
     .filter((step) => mode === "full" || step.label !== FULL_BROWSER_GATE_LABEL)
-    .map((step) => step.label);
+    .map((step) => {
+      if (
+        mode === "typescript-7-promotion" &&
+        step.label === "TypeScript 7 advisory comparison"
+      ) {
+        return "TypeScript 7 promotion gate";
+      }
+      if (
+        mode !== "typescript-7-promotion" &&
+        step.label === "TypeScript 7 promotion gate"
+      ) {
+        return "TypeScript 7 advisory comparison";
+      }
+      return step.label;
+    });
   // A verifier can be pointed at a full evidence directory without starting
   // this process with --full. Derive the contract from the report's mode, not
   // from the command that happened to launch verification.
@@ -1409,6 +1460,13 @@ const RELEASE_STAGE_DEPENDENCIES: Readonly<Record<string, readonly string[]>> =
         : []),
     ],
     "typescript-7-advisory": [
+      "shared library typechecks",
+      "API server typecheck",
+      "run calculator typecheck",
+      "mockup sandbox typecheck",
+      "scripts typecheck",
+    ],
+    "typescript-7-promotion": [
       "shared library typechecks",
       "API server typecheck",
       "run calculator typecheck",
@@ -1567,6 +1625,9 @@ function printHelp(): void {
     "  pnpm run release:check:full  Standard gates plus full browser E2E",
   );
   console.log(
+    "  pnpm run release:check:typescript-7-promotion  Fail-closed TypeScript 7 promotion gates, including editor service proof",
+  );
+  console.log(
     "  pnpm run release:check -- --verify-evidence  Verify retained evidence files",
   );
   console.log(
@@ -1688,13 +1749,12 @@ export async function verifyReleaseEvidence(
       ].join(" "),
     );
   }
-  const reportMode = report.match(/^Mode:\s*(standard|full)\s*$/m)?.[1] as
-    | "standard"
-    | "full"
-    | undefined;
+  const reportMode = report.match(
+    /^Mode:\s*(standard|full|typescript-7-promotion)\s*$/m,
+  )?.[1] as ReleaseMode | undefined;
   if (reportMode === undefined) {
     throw new Error(
-      "Release report mode is missing or invalid; regenerate the report or point the verifier at a retained standard/full evidence directory.",
+      "Release report mode is missing or invalid; regenerate the report or point the verifier at a retained standard, full, or TypeScript promotion evidence directory.",
     );
   }
   if (
@@ -1704,7 +1764,7 @@ export async function verifyReleaseEvidence(
     throw new Error(
       [
         `Evidence directory contains a ${reportMode} report, but ${options.expectedMode} verification was requested.`,
-        `Use ${reportMode === "full" ? "--full" : "standard mode"} for this directory, or point the verifier at a ${options.expectedMode} evidence directory.`,
+        `Use the ${reportMode} command for this directory, or point the verifier at a ${options.expectedMode} evidence directory.`,
       ].join(" "),
     );
   }
@@ -2370,17 +2430,16 @@ export function validateReleaseReport(
   report: string,
   options: {
     currentRevision: string;
-    expectedMode?: "standard" | "full";
+    expectedMode?: ReleaseMode;
     expectedLabels?: readonly string[];
     expectedSourceLibraryEnvironment?: SourceLibraryEvidenceEnvironment;
     expectedSourceLibraryRevision?: string;
   },
 ): void {
   const revision = report.match(/^Revision:\s*(\S+)\s*$/m)?.[1];
-  const mode = report.match(/^Mode:\s*(standard|full)\s*$/m)?.[1] as
-    | "standard"
-    | "full"
-    | undefined;
+  const mode = report.match(
+    /^Mode:\s*(standard|full|typescript-7-promotion)\s*$/m,
+  )?.[1] as ReleaseMode | undefined;
   const decision = report.match(/^Decision:\s*(GO|NO-GO)\s*$/m)?.[1];
   if (!revision || revision !== options.currentRevision) {
     throw new Error(
@@ -2395,7 +2454,7 @@ export function validateReleaseReport(
     }
     throw new Error(
       `Release report mode is missing or inconsistent (expected ${
-        options.expectedMode ?? "standard or full"
+        options.expectedMode ?? "standard, full, or typescript-7-promotion"
       }).`,
     );
   }
@@ -2704,7 +2763,7 @@ export function parseSourceLibraryPreflightDiagnostic(
 
 export function formatReleaseReport(
   results: ReleaseStepResult[],
-  mode: "standard" | "full" = fullRun ? "full" : "standard",
+  mode: ReleaseMode = releaseMode,
   availableEvidenceFiles: ReadonlySet<string> = new Set(),
   metadata: {
     revision?: string;
@@ -2933,11 +2992,15 @@ export function formatReleaseReport(
           `Resume: ${
             mode === "full"
               ? "pnpm run release:check:full -- --resume"
+              : mode === "typescript-7-promotion"
+                ? "pnpm run release:check:typescript-7-promotion -- --resume"
               : "pnpm run release:check -- --resume"
           }`,
           `Regenerate: ${
             mode === "full"
               ? "pnpm run release:check:full"
+              : mode === "typescript-7-promotion"
+                ? "pnpm run release:check:typescript-7-promotion"
               : "pnpm run release:check"
           }`,
           "Retained report: release-check-report.md (left unchanged by this checkpoint).",
@@ -3066,7 +3129,7 @@ async function writeReleaseReport(
     reportPath,
     formatReleaseReport(
       results,
-      fullRun ? "full" : "standard",
+      releaseMode,
       availableEvidenceFiles,
       {
         ...metadata,
@@ -3098,7 +3161,7 @@ async function writeReleaseReport(
 type ReleaseCheckpoint = {
   revision: string;
   sourceLibraryRevision?: string;
-  mode: "standard" | "full";
+  mode: ReleaseMode;
   results: Array<ReleaseStepResult & { passed: boolean }>;
   timing?: ReleaseTiming;
 };
@@ -3162,7 +3225,7 @@ async function readCheckpoint(
     if (
       checkpoint.revision !== revision ||
       checkpoint.sourceLibraryRevision !== sourceLibraryRevision ||
-      checkpoint.mode !== (fullRun ? "full" : "standard") ||
+      checkpoint.mode !== releaseMode ||
       !Array.isArray(checkpoint.results)
     ) {
       throw new Error(STALE_CHECKPOINT_MESSAGE);
@@ -3261,7 +3324,8 @@ async function main(): Promise<void> {
         : revision;
       await verifyReleaseEvidence(undefined, {
         currentRevision: revision,
-        expectedMode: fullRun ? "full" : undefined,
+        expectedMode:
+          releaseMode === "standard" ? undefined : releaseMode,
         expectedSourceLibraryRevision: sourceLibraryRevision,
       });
       process.exit(0);
@@ -3275,7 +3339,7 @@ async function main(): Promise<void> {
     }
   }
   await assertApiIntegrationTestShardInventory();
-  console.log(`Release check started (${fullRun ? "full" : "standard"} mode).`);
+  console.log(`Release check started (${releaseMode} mode).`);
   let revision: string;
   try {
     revision = await currentRevision();
@@ -3338,6 +3402,11 @@ async function main(): Promise<void> {
       (current, result) => upsertReleaseResult(current, result),
       [],
     );
+    if (typescript7Promotion) {
+      results = results.filter(
+        (result) => result.label !== "TypeScript 7 promotion gate",
+      );
+    }
     stageTimings = checkpoint.timing?.stages
       ? [...checkpoint.timing.stages]
       : [];
@@ -3359,7 +3428,7 @@ async function main(): Promise<void> {
     await writeFile(
       logPath,
       `Release check ${new Date().toISOString()} revision ${revision} mode ${
-        fullRun ? "full" : "standard"
+        releaseMode
       }\n`,
       "utf8",
     );
@@ -3371,7 +3440,7 @@ async function main(): Promise<void> {
       writeCheckpoint(checkpointPath, {
         revision,
         sourceLibraryRevision,
-        mode: fullRun ? "full" : "standard",
+        mode: releaseMode,
         results,
         timing: {
           totalElapsedMs: stageTimings.reduce(
@@ -3685,7 +3754,7 @@ async function main(): Promise<void> {
         revision,
         sourceLibraryRevision,
         decision: releaseDecision,
-        expectedLabels: releaseGateLabelsForMode(fullRun ? "full" : "standard"),
+        expectedLabels: releaseGateLabelsForMode(releaseMode),
         timing: {
           totalElapsedMs: stageTimings.reduce(
             (total, stage) => total + stage.elapsedMs,
@@ -3696,7 +3765,7 @@ async function main(): Promise<void> {
       });
       await verifyReleaseEvidence(resolve(rootDir, releaseEvidenceDir), {
         currentRevision: revision,
-        expectedMode: fullRun ? "full" : "standard",
+        expectedMode: releaseMode,
         expectedSourceLibraryRevision: sourceLibraryRevision,
         allowIncompleteCheckpoint: true,
       });
@@ -3732,7 +3801,7 @@ async function main(): Promise<void> {
       revision,
       sourceLibraryRevision,
       decision: "NO-GO",
-      expectedLabels: releaseGateLabelsForMode(fullRun ? "full" : "standard"),
+      expectedLabels: releaseGateLabelsForMode(releaseMode),
       reportKind: "checkpoint",
       timing: {
         totalElapsedMs: stageTimings.reduce(
@@ -3747,14 +3816,20 @@ async function main(): Promise<void> {
     );
     console.log(
       `Resume: ${
-        fullRun
+        releaseMode === "full"
           ? "pnpm run release:check:full -- --resume"
+          : releaseMode === "typescript-7-promotion"
+            ? "pnpm run release:check:typescript-7-promotion -- --resume"
           : "pnpm run release:check -- --resume"
       }`,
     );
     console.log(
       `Regenerate: ${
-        fullRun ? "pnpm run release:check:full" : "pnpm run release:check"
+        releaseMode === "full"
+          ? "pnpm run release:check:full"
+          : releaseMode === "typescript-7-promotion"
+            ? "pnpm run release:check:typescript-7-promotion"
+            : "pnpm run release:check"
       }`,
     );
   } catch (error) {
