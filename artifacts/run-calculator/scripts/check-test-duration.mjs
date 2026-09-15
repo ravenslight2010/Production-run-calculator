@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 export const DEFAULT_CALCULATOR_TEST_BUDGET_MS = 150_000;
 export const MIN_CALCULATOR_TEST_WORKERS = 4;
+export const CALCULATOR_TEST_WORKER_CEILING = 4;
 
 function positiveInteger(value, fallback) {
   const parsed = Number(value);
@@ -18,6 +19,16 @@ export function calculatorTestBudgetMs(
   return positiveInteger(
     environment.CALCULATOR_TEST_BUDGET_MS,
     DEFAULT_CALCULATOR_TEST_BUDGET_MS,
+  );
+}
+
+export function formatCalculatorTestCapacity(
+  availableWorkers,
+  workerCeiling = CALCULATOR_TEST_WORKER_CEILING,
+) {
+  return (
+    `Detected runner capacity: ${availableWorkers} available CPU workers; ` +
+    `configured worker ceiling: ${workerCeiling}.`
   );
 }
 
@@ -34,7 +45,7 @@ export function calculatorTestResourceError(
 
   return [
     `Calculator test suite requires at least ${minimumWorkers} available CPU workers.`,
-    `Detected ${availableWorkers}.`,
+    formatCalculatorTestCapacity(availableWorkers),
     "The standard validation lane is not supported on smaller runners because",
     "the measured two-worker suite exceeded its 150.0s budget (179.3s).",
     `Use a runner with at least ${minimumWorkers} available CPU workers or run targeted checks instead.`,
@@ -62,6 +73,8 @@ export function formatCalculatorTestSummary(
   summary,
   elapsedMs,
   budgetMs,
+  availableWorkers,
+  workerCeiling = CALCULATOR_TEST_WORKER_CEILING,
 ) {
   const elapsedSeconds = (elapsedMs / 1000).toFixed(1);
   const budgetSeconds = (budgetMs / 1000).toFixed(1);
@@ -69,12 +82,14 @@ export function formatCalculatorTestSummary(
     `Calculator test suite: ${summary.files} files (${summary.passedFiles} passed, ${summary.failedFiles} failed),`,
     `${summary.tests} tests (${summary.passedTests} passed, ${summary.failedTests} failed),`,
     `elapsed ${elapsedSeconds}s (budget ${budgetSeconds}s).`,
+    formatCalculatorTestCapacity(availableWorkers, workerCeiling),
   ].join(" ");
 }
 
 async function runCalculatorTests() {
   const budgetMs = calculatorTestBudgetMs();
-  const resourceError = calculatorTestResourceError(availableParallelism());
+  const availableWorkers = availableParallelism();
+  const resourceError = calculatorTestResourceError(availableWorkers);
   if (resourceError) {
     console.error(resourceError);
     return 1;
@@ -125,12 +140,20 @@ async function runCalculatorTests() {
     }
 
     if (summary) {
-      console.log(formatCalculatorTestSummary(summary, elapsedMs, budgetMs));
+      console.log(
+        formatCalculatorTestSummary(
+          summary,
+          elapsedMs,
+          budgetMs,
+          availableWorkers,
+        ),
+      );
     } else {
       console.error(
         `Calculator test suite elapsed ${(
           elapsedMs / 1000
-        ).toFixed(1)}s (budget ${(budgetMs / 1000).toFixed(1)}s).`,
+        ).toFixed(1)}s (budget ${(budgetMs / 1000).toFixed(1)}s). ` +
+          formatCalculatorTestCapacity(availableWorkers),
       );
     }
 

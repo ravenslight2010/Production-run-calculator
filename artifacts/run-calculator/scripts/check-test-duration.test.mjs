@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 
 import {
   DEFAULT_CALCULATOR_TEST_BUDGET_MS,
+  CALCULATOR_TEST_WORKER_CEILING,
   MIN_CALCULATOR_TEST_WORKERS,
   calculatorTestBudgetMs,
   calculatorTestResourceError,
+  formatCalculatorTestCapacity,
   formatCalculatorTestSummary,
   summarizeVitestJson,
 } from "./check-test-duration.mjs";
@@ -45,9 +47,22 @@ test("formats the bounded validation summary", () => {
       },
       89_290,
       150_000,
+      8,
     ),
     "Calculator test suite: 282 files (282 passed, 0 failed), 2635 tests " +
-      "(2635 passed, 0 failed), elapsed 89.3s (budget 150.0s).",
+      "(2635 passed, 0 failed), elapsed 89.3s (budget 150.0s). " +
+      "Detected runner capacity: 8 available CPU workers; configured worker ceiling: 4.",
+  );
+});
+
+test("uses the configured worker ceiling in the shared capacity line", () => {
+  assert.equal(
+    formatCalculatorTestCapacity(4),
+    "Detected runner capacity: 4 available CPU workers; configured worker ceiling: 4.",
+  );
+  assert.equal(
+    CALCULATOR_TEST_WORKER_CEILING,
+    4,
   );
 });
 
@@ -75,6 +90,10 @@ test("reports the resource prerequisite below the supported boundary", () => {
   assert.match(
     calculatorTestResourceError(MIN_CALCULATOR_TEST_WORKERS - 1),
     /requires at least 4 available CPU workers/i,
+  );
+  assert.match(
+    calculatorTestResourceError(MIN_CALCULATOR_TEST_WORKERS - 1),
+    /Detected runner capacity: 3 available CPU workers; configured worker ceiling: 4\./i,
   );
   assert.match(
     calculatorTestResourceError(MIN_CALCULATOR_TEST_WORKERS - 1),

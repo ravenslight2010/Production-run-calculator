@@ -29,8 +29,11 @@ Runners below the prerequisite fail before starting Vitest with a clear
 resource error rather than producing a misleading duration failure.
 
 Run `pnpm --filter @workspace/run-calculator run test:budget` for the normal
-assertions plus a summary of the file count, test count, and elapsed time. The
-guard runs the same suite once and fails with the measured overage when the
+assertions plus a summary of the file count, test count, elapsed time, and
+runner capacity. The summary reports `available CPU workers`, detected from the
+runner at startup, and the configured `worker ceiling` used by Vitest. A
+resource-prerequisite failure reports those same fields before Vitest starts.
+The guard runs the same suite once and fails with the measured overage when the
 budget is exceeded. The standard include pattern remains
 `src/**/*.test.{ts,tsx}`, including the mounted foreground-recovery and
 foreground wake-guard regression tests.
