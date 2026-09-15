@@ -1,0 +1,84 @@
+name: Retain task 2203 TypeScript evidence
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  retain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Download exact CI evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REF_NAME}" = "task-2203-retain-evidence"
+          mkdir -p /tmp/ts7-evidence
+          gh run download 35025590499 \
+            --name release-evidence-standard-35025590499 \
+            --dir /tmp/ts7-evidence/69b
+          gh run download 35025590315 \
+            --name release-evidence-standard-35025590315 \
+            --dir /tmp/ts7-evidence/27d
+          gh run download 35025590360 \
+            --name release-evidence-standard-35025590360 \
+            --dir /tmp/ts7-evidence/08e
+      - name: Verify and retain comparison reports
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require("node:fs");
+          const path = require("node:path");
+          const samples = [
+            ["69b", "69b52dee6878e73bb182aa185ee7d7d0387b664c"],
+            ["27d", "27dcd1a87facdd8b17d2801ccf4ee6fd8251c2d6"],
+            ["08e", "08ec2e4d338935aee3511ac8ce0b1aedbfec239d"],
+          ];
+          const output = "docs/evidence/typescript-7";
+          fs.mkdirSync(output, { recursive: true });
+          for (const [short, revision] of samples) {
+            const source = `/tmp/ts7-evidence/${short}/typescript-7-comparison.json`;
+            const report = JSON.parse(fs.readFileSync(source, "utf8"));
+            if (
+              report.schemaVersion !== 3 ||
+              report.sourceRevision !== revision ||
+              report.runner?.platform !== "linux" ||
+              report.runner?.arch !== "x64" ||
+              report.runner?.supported !== true ||
+              !Array.isArray(report.performanceComparison) ||
+              report.performanceComparison.length !== 14
+            ) {
+              throw new Error(`Invalid TypeScript 7 CI report for ${revision}`);
+            }
+            const modes = new Set(report.performanceComparison.map((item) => item.mode));
+            if (
+              !modes.has("cold") ||
+              !modes.has("warm") ||
+              report.performanceComparison.some(
+                (item) =>
+                  !Number.isFinite(item.elapsedMs?.candidate) ||
+                  !Number.isFinite(item.elapsedMs?.ratio) ||
+                  !Number.isFinite(item.peakRssKiB?.candidate) ||
+                  !Number.isFinite(item.peakRssKiB?.ratio),
+              )
+            ) {
+              throw new Error(`Incomplete TypeScript 7 CI measurements for ${revision}`);
+            }
+            fs.copyFileSync(source, path.join(output, `${revision}.json`));
+          }
+          NODE
+      - name: Commit retained reports
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/evidence/typescript-7
+          git commit -m "Retain TypeScript 7 CI resource evidence"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
