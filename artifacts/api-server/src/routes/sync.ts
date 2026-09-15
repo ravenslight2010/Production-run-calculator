@@ -212,6 +212,28 @@ function clientToday(req: Request): string {
   return typeof t === "string" && isValidDate(t) ? t : facilityDate();
 }
 
+function completeSyncData(data: unknown): unknown {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return data;
+  const record = data as Record<string, unknown>;
+  if (
+    !record.dayState
+    || typeof record.dayState !== "object"
+    || Array.isArray(record.dayState)
+    || !record.runValues
+    || typeof record.runValues !== "object"
+    || Array.isArray(record.runValues)
+  ) return data;
+  const {
+    baseSnapshotId: _baseSnapshotId,
+    ...complete
+  } = record;
+  return {
+    ...complete,
+    syncVersion: 1,
+    completeness: "complete",
+  };
+}
+
 const MAX_COMMAND_ACTION_BYTES = 64 * 1024;
 
 type CommandContext = {
@@ -401,6 +423,7 @@ function broadcast(
   date: string,
   meta: { canonicalRevision?: number; serverTime?: number } = {},
 ): void {
+  data = completeSyncData(data);
   const liveState = computeServerLiveState(
     data,
     meta.serverTime ?? Date.now(),
@@ -409,6 +432,7 @@ function broadcast(
   const msg = `data: ${JSON.stringify({
     data,
     senderId,
+    completeness: "complete",
     canonicalRevision: meta.canonicalRevision ?? liveState.calculationRevision,
     ...liveState,
   })}\n\n`;
@@ -1016,20 +1040,21 @@ async function upsertProtected(
           .from(dailySyncTable)
           .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)))
           .for("update");
-        existingData = existing?.data;
+        const canonicalExisting = completeSyncData(existing?.data);
+        existingData = canonicalExisting;
         // A partial payload is a delta over the exact locked snapshot. Inherit
         // omitted cold sections (such as history) from that snapshot before the
         // normal per-run/LWW protection runs.
-        const payloadForMerge = isPartialSyncPayload(payload) && existing?.data
-          ? { ...(existing.data as Record<string, unknown>), ...(payload as Record<string, unknown>) }
+        const payloadForMerge = isPartialSyncPayload(payload) && canonicalExisting
+          ? { ...(canonicalExisting as Record<string, unknown>), ...(payload as Record<string, unknown>) }
           : payload;
         // Validate partial deltas while the canonical row lock is held.
         // Otherwise another writer could change the row between validation and
         // merge, making the client's base snapshot unsafe.
         if (isPartialSyncPayload(payload)) {
-          const currentSnapshotId = existing?.data === undefined
+          const currentSnapshotId = canonicalExisting === undefined
             ? undefined
-            : syncSnapshotId(existing.data);
+            : syncSnapshotId(canonicalExisting);
           if (
             !isValidPartialSyncContract(payload) ||
             typeof currentSnapshotId !== "string" ||
@@ -1038,7 +1063,7 @@ async function upsertProtected(
             // Do not apply a delta with a missing, malformed, or stale
             // dependency. Return the complete authoritative snapshot instead.
             return {
-              data: existing?.data ?? null,
+              data: canonicalExisting ?? null,
               wrote: false,
               partialFallback: true,
               retries: attempt,
@@ -1052,9 +1077,9 @@ async function upsertProtected(
         // hold a newer local marker before it receives this row, but that marker
         // must never erase other operators' scheduled or live runs.
         const serverOwnedPayload = capPackagingManualOverrideUntil(payloadForMerge, serverTime);
-        const m = capMergedResult(protectRunValues(serverOwnedPayload, existing?.data, {
+        const m = completeSyncData(capMergedResult(protectRunValues(serverOwnedPayload, canonicalExisting, {
           allowRunListReplacement: date > clientTodayDate,
-        }));
+        }))) as Record<string, any>;
         canonicalizePepNames(m);
         applyResetBoundary(m, existing?.data, date === clientTodayDate);
         if (existing) {
@@ -1104,12 +1129,13 @@ router.get("/sync/today", async (req: Request, res: Response): Promise<void> => 
   // A missing live row is an empty baseline, not a null payload. Returning the
   // same shape as a populated row keeps reset/wake recovery within the client
   // sync contract and gives it a stable snapshot identity.
-  const data = row?.data ?? emptySyncData(clientToday(req));
+  const data = completeSyncData(row?.data ?? emptySyncData(clientToday(req)));
   const canonicalRevision = row?.canonicalRevision ?? 0;
   const serverTime = Date.now();
   res.setHeader("X-Sync-Canonical-Revision", String(canonicalRevision));
   res.setHeader("X-Sync-Server-Time", String(serverTime));
   if (unchangedResponse(res, data, requestedSnapshot(req))) return;
+  res.setHeader("X-Sync-Response", "complete");
   if (data) res.setHeader("X-Sync-Snapshot", syncSnapshotId(data));
   const liveState = computeServerLiveState(data, serverTime, canonicalRevision);
   if (!liveState.operationalProjection) {
@@ -1764,25 +1790,18 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
   // Always send a first frame, including when no row exists. The web client uses
   // this acknowledgement as its sync baseline and must not upload local state
   // before it has either applied the row or learned that the row is absent.
-  const data = row?.data ?? null;
-  const snapshotId = data ? syncSnapshotId(data) : undefined;
+  const data = completeSyncData(row?.data ?? emptySyncData(watchDate));
+  const snapshotId = syncSnapshotId(data);
   const requested = requestedSnapshot(req);
   const initialServerTime = Date.now();
-  const liveState = data
-    ? computeServerLiveState(data, initialServerTime, row?.canonicalRevision ?? 0)
-    : {
-        serverCalc: null,
-        autoTrackSchedule: null,
-        operationalProjection: null,
-        serverTime: initialServerTime,
-        calculationRevision: row?.canonicalRevision ?? 0,
-      };
+  const liveState = computeServerLiveState(data, initialServerTime, row?.canonicalRevision ?? 0);
   res.write(`data: ${JSON.stringify({
     ...(requested && requested === snapshotId
       ? { unchanged: true, snapshotId }
       : { data, snapshotId }),
     senderId: null,
     initial: true,
+    completeness: "complete",
     canonicalRevision: row?.canonicalRevision ?? 0,
     ...(initialResetState.epoch > 0
       ? { [initialResetState.rollover ? "rollover" : "reset"]: true, resetEpoch: initialResetState.epoch }

@@ -287,7 +287,14 @@ import {
   savePackagingProgress,
 } from "../packagingProgress";
 import { isolatePendingRunPackagingProgress } from "../runProgressIsolation";
-import { consumeSyncWriteResponse } from "../syncWriteResponse";
+import {
+  consumeSyncWriteResponse,
+  isCanonicalRecoverySyncPayload,
+  isUnchangedSyncResponse,
+  isValidSyncSnapshotId,
+  readCurrentRecoveryJson,
+  syncPayloadMatchesSnapshot,
+} from "../syncWriteResponse";
 import {
   canonicalProfileKey,
   flushProfileQueueStrict,
@@ -9191,15 +9198,16 @@ export default function Home() {
       onOpen: () => {
       setSyncConnected(true);
       recordSyncEvent("connected", "Live sync connection opened");
-      // Queue the reconnect recovery push. It is released only after the stream's
-      // first frame has established a baseline, so a new/stale device cannot
-      // upload its local day before applying today's shared row.
-      schedulePush(dayStateRef.current, 1000, "recovery");
+      // The coordination hook routes stream drops through the foreground
+      // recovery owner. Do not start a second reconnect push here; the initial
+      // frame below either releases the baseline queue or remains fenced by
+      // the foreground adoption barrier.
     },
-    onMessage: (e: MessageEvent) => {
+    onMessage: async (e: MessageEvent) => {
       try {
         const msg = JSON.parse(e.data as string) as {
           data?: SyncPayload | null;
+          completeness?: "complete";
           unchanged?: boolean;
           snapshotId?: string;
           reset?: boolean;
@@ -9212,12 +9220,48 @@ export default function Home() {
           summaryStats?: Record<string, unknown>;
           runLines?: Record<string, unknown>;
           serverTime?: number;
+          heartbeat?: boolean;
+          calcOnly?: boolean;
           canonicalRevision?: number;
           masterDataChanged?: boolean;
           configurationInvalidated?: boolean;
           family?: "master-data" | "profiles" | "factory-data" | "die-types" | "supervisor-pin" | "name-links" | "merged-away";
           senderId?: string | null;
         };
+        // Once an HTTP recovery owner is active it is the sole adoption owner.
+        // Ignore stream frames until that owner either succeeds or remains
+        // visibly retryable; this prevents two valid transports from applying
+        // competing baselines in opposite orders.
+        if (foregroundSyncBarrierRef.current) return false;
+        if (msg.unchanged) {
+          if (
+            msg.completeness !== "complete"
+            || !isUnchangedSyncResponse(msg)
+            || msg.snapshotId !== syncSnapshotIdRef.current
+          ) return false;
+        } else if (msg.data) {
+          if (
+            !isCanonicalRecoverySyncPayload(msg.data, todayStr(), msg.completeness)
+            || !isValidSyncSnapshotId(msg.snapshotId)
+            || !await syncPayloadMatchesSnapshot(msg.data, msg.snapshotId)
+          ) return false;
+          if (foregroundSyncBarrierRef.current) return false;
+        } else if (msg.initial) {
+          return false;
+        } else if (
+          msg.operationalProjection
+          || msg.serverCalc
+          || msg.autoTrackSchedule
+          || msg.summaryStats
+          || msg.runLines
+          || msg.heartbeat
+          || msg.calcOnly
+        ) {
+          if (
+            !isValidSyncSnapshotId(msg.snapshotId)
+            || msg.snapshotId !== syncSnapshotIdRef.current
+          ) return false;
+        }
         adoptOperationalRevision(msg.canonicalRevision);
         if (typeof msg.serverTime === "number" && Number.isFinite(msg.serverTime)) {
           const offset = msg.serverTime - Date.now();
@@ -9280,11 +9324,19 @@ export default function Home() {
           // only initial baseline and must continue through normal data handling.
         }
         if (msg.unchanged) {
-          if (typeof msg.snapshotId === "string") {
+          // A malformed unchanged frame is not a baseline. In particular,
+          // accepting `{ unchanged: true }` would release the writer while
+          // retaining a stale local snapshot after reconnect.
+          if (!isUnchangedSyncResponse(msg)) return false;
+          if (isValidSyncSnapshotId(msg.snapshotId)) {
             syncSnapshotIdRef.current = msg.snapshotId;
           }
           if (msg.initial) recordSyncEvent("ack", "Server baseline unchanged", "unchanged");
         } else if (msg.data) {
+          if (
+            msg.snapshotId !== undefined
+            && !isValidSyncSnapshotId(msg.snapshotId)
+          ) return false;
           if (msg.data.operationalProjection) {
             adoptOperationalProjection(msg.data.operationalProjection, msg.snapshotId);
           }
@@ -9297,7 +9349,7 @@ export default function Home() {
               detail: msg.data.doughTimerControls,
             }));
           }
-          if (typeof msg.snapshotId === "string") syncSnapshotIdRef.current = msg.snapshotId;
+          if (isValidSyncSnapshotId(msg.snapshotId)) syncSnapshotIdRef.current = msg.snapshotId;
           canonicalRunValuesUpdatedAtRef.current = { ...(msg.data.runValuesUpdatedAt ?? {}) };
           recordSyncEvent(msg.initial ? "ack" : "peer", msg.initial ? "Server baseline received" : "Peer update received");
           applySyncCallbackRef.current(msg.data, {
@@ -9340,7 +9392,15 @@ export default function Home() {
     onInitialBaseline: (shouldPush) => {
       // applySyncCallbackRef clears its sync-apply suppression in a frame.
       // The manager opens this gate only after Home has merged the baseline.
-      if (shouldPush) requestAnimationFrame(() => schedulePush(dayStateRef.current, 0));
+      if (shouldPush) requestAnimationFrame(() => {
+        if (foregroundSyncBarrierRef.current) {
+          // SSE reconnect and foreground recovery share one owner. Keep the
+          // queued write behind the HTTP adoption rather than racing it.
+          foregroundPushPendingRef.current = true;
+          return;
+        }
+        schedulePush(dayStateRef.current, 0);
+      });
     },
     onClose: () => {},
     });
@@ -9367,6 +9427,8 @@ export default function Home() {
     const foregroundRegistration = registerForegroundRecovery(visibleTabScheduler, async (): Promise<boolean> => {
       const recoveryOwner = synchronizationStateMachineRef.current.beginWake();
       foregroundRecoveryOwnerRef.current = recoveryOwner;
+      const isCurrentRecovery = () =>
+        !cancelled && foregroundRecoveryOwnerRef.current === recoveryOwner;
       foregroundSyncBarrierRef.current = true;
       const queuedStop = foregroundStopIntentRef.current;
       showForegroundRecoveryNotice(
@@ -9407,8 +9469,15 @@ export default function Home() {
             { cache: "no-store" },
             10_000,
           );
+          // A newer wake/reconnect owner may have superseded this response
+          // while the browser was asleep or the network was stalled. Obsolete
+          // responses must not update any canonical refs or release the fence.
+          if (!isCurrentRecovery()) return false;
           if (epochRes.ok) {
-            const epochBody = await epochRes.json().catch(() => null) as { epoch?: number; rollover?: boolean } | null;
+            const parsedEpoch = await readCurrentRecoveryJson(epochRes, isCurrentRecovery)
+              .catch(() => ({ current: isCurrentRecovery(), body: null }));
+            if (!parsedEpoch.current) return false;
+            const epochBody = parsedEpoch.body as { epoch?: number; rollover?: boolean } | null;
             if (typeof epochBody?.epoch === "number" && epochBody.epoch > getStoredResetEpoch()) {
               const generation = synchronizationStateMachineRef.current.beginReset(epochBody.epoch);
               const adopted = epochBody.rollover
@@ -9422,36 +9491,63 @@ export default function Home() {
             }
           }
 
-           const snapshot = syncSnapshotIdRef.current;
-           const syncTodayUrl = `/api/sync/today?today=${todayStr()}`;
-            const res = await fetchWithTimeout(
-              snapshot ? `${syncTodayUrl}&snapshot=${snapshot}` : syncTodayUrl,
-              { cache: "no-store" },
-              10_000,
-            );
+          const snapshot = syncSnapshotIdRef.current;
+          const syncTodayUrl = `/api/sync/today?today=${todayStr()}`;
+          const res = await fetchWithTimeout(
+            snapshot ? `${syncTodayUrl}&snapshot=${snapshot}` : syncTodayUrl,
+            { cache: "no-store" },
+            10_000,
+          );
+          if (!isCurrentRecovery()) return false;
           if (!res.ok) throw new Error(`foreground sync GET failed: ${res.status}`);
-           const body = await res.json() as SyncPayload | { unchanged?: boolean; snapshotId?: string; canonicalRevision?: number } | null;
-           adoptOperationalRevision(body && "canonicalRevision" in body ? body.canonicalRevision : undefined);
-           if (body && "unchanged" in body && body.unchanged === true) {
-             if (typeof body.snapshotId === "string") syncSnapshotIdRef.current = body.snapshotId;
-             pushAcknowledgedRef.current = true;
-             reconciled = true;
-             return true;
-           }
-           const payload = body as SyncPayload | null;
-           const responseSnapshot = res.headers.get("X-Sync-Snapshot");
-           if (responseSnapshot) syncSnapshotIdRef.current = responseSnapshot;
-           if (payload) {
-             canonicalRunValuesUpdatedAtRef.current = { ...(payload.runValuesUpdatedAt ?? {}) };
-             if (payload.operationalProjection) {
-               adoptOperationalProjection(
-                 payload.operationalProjection,
-                 responseSnapshot ?? syncSnapshotIdRef.current,
-               );
-             }
-           }
+          const parsedRecovery = await readCurrentRecoveryJson(res, isCurrentRecovery);
+          if (!parsedRecovery.current) return false;
+          const body = parsedRecovery.body as SyncPayload | {
+            unchanged?: boolean;
+            snapshotId?: string;
+            canonicalRevision?: number;
+          } | null;
+          if (body && typeof body === "object" && "unchanged" in body && body.unchanged === true) {
+            if (!isUnchangedSyncResponse(body)) {
+              throw new Error("foreground sync GET returned a malformed unchanged response");
+            }
+            const unchangedSnapshot = body.snapshotId;
+            if (!isValidSyncSnapshotId(unchangedSnapshot)) {
+              throw new Error("foreground sync GET returned an invalid snapshot identity");
+            }
+            if (unchangedSnapshot !== snapshot) {
+              throw new Error("foreground sync GET unchanged identity does not match its request");
+            }
+            adoptOperationalRevision(body.canonicalRevision);
+            syncSnapshotIdRef.current = unchangedSnapshot;
+            pushAcknowledgedRef.current = true;
+            reconciled = true;
+            return true;
+          }
+          const responseCompleteness = res.headers.get("X-Sync-Response");
+          if (!isCanonicalRecoverySyncPayload(body, todayStr(), responseCompleteness)) {
+            throw new Error("foreground sync GET returned a malformed canonical response");
+          }
+          const responseSnapshot = res.headers.get("X-Sync-Snapshot");
+          if (!isValidSyncSnapshotId(responseSnapshot)) {
+            throw new Error("foreground sync GET returned an invalid snapshot identity");
+          }
+          const payload = body;
+          if (!await syncPayloadMatchesSnapshot(payload, responseSnapshot, { stripReadModel: true })) {
+            throw new Error("foreground sync GET snapshot does not match its canonical payload");
+          }
+          if (!isCurrentRecovery()) return false;
+          adoptOperationalRevision(payload.canonicalRevision);
+          syncSnapshotIdRef.current = responseSnapshot;
+          if (payload.operationalProjection) {
+            adoptOperationalProjection(
+              payload.operationalProjection,
+              responseSnapshot,
+            );
+          }
           // A missing row is a valid empty baseline, but do not erase local
           // offline work here. The normal stamped push path will seed it.
+          if (!isCurrentRecovery()) return false;
           if (payload) {
             // Preserve ordinary screen-off catch-up when the live row is
             // unchanged. Re-baselining every successful wake would erase the
@@ -9484,6 +9580,7 @@ export default function Home() {
               setDayState(lifecycleAdoption.dayState);
               lastSyncSigRef.current = "";
             }
+            if (!isCurrentRecovery()) return false;
             applySyncCallbackRef.current(payload);
           }
            // A successful canonical pull supersedes the canceled pre-wake push.
@@ -9499,7 +9596,7 @@ export default function Home() {
            void (async () => {
              try {
                const profileResult = await reconcileProfilesFromServerDetailed();
-               if (profileResult.changed) {
+              if (isCurrentRecovery() && profileResult.changed) {
                  setDieTypes(healDieTypesFromProfiles());
                  applyProfileReconcileRef.current(profileResult);
                }
@@ -9509,6 +9606,7 @@ export default function Home() {
              }
              try {
                const factoryData = await fetchFactoryData();
+              if (!isCurrentRecovery()) return;
                hydrateFromServer(factoryData);
                refreshFactoryDataConsumers();
                await flushFactoryQueue();
@@ -9518,7 +9616,8 @@ export default function Home() {
                // foreground/reconnect attempt will retry it.
              }
            })();
-          reconciled = true;
+         if (!isCurrentRecovery()) return false;
+         reconciled = true;
           return true;
          } catch {
             // Failed pulls are not successful reconciliation. Keep the barrier

@@ -25,7 +25,7 @@ type SseConnection = {
    * Returns true only after an initial frame has established Home's canonical
    * baseline. Reset/rollover frames and failed handlers must return false.
    */
-  onMessage: (event: MessageEvent) => boolean;
+  onMessage: (event: MessageEvent) => boolean | Promise<boolean>;
   onError: () => void;
   onInitialBaseline: (shouldPush: boolean) => void;
   onClose: () => void;
@@ -72,6 +72,11 @@ export function useHomeSyncCoordination() {
   const foregroundRecoveryRetryRef = useRef<(() => Promise<boolean>) | null>(null);
   const foregroundRecoveryNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const foregroundRecoveryOwnerRef = useRef(0);
+  // SSE reconnects and browser foreground signals share the same recovery
+  // owner. Keep a pending reconnect signal so an early EventSource error
+  // cannot be lost before Home has registered its recovery callback.
+  const foregroundRecoveryRequestRef = useRef<(() => Promise<boolean>) | null>(null);
+  const foregroundRecoveryRequestPendingRef = useRef(false);
   const syncPushGenerationRef = useRef(0);
   const syncPushAbortControllersRef = useRef<Set<AbortController>>(new Set());
   const syncRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -94,23 +99,29 @@ export function useHomeSyncCoordination() {
       ? `/api/sync/events?clientId=${connection.clientId}&today=${todayStr()}&snapshot=${snapshot}`
       : `/api/sync/events?clientId=${connection.clientId}&today=${todayStr()}`;
     const source = new EventSource(url);
+    let messageChain = Promise.resolve();
     source.onopen = connection.onOpen;
     source.onmessage = (event) => {
-      const baselineAccepted = connection.onMessage(event);
-      try {
-        if (
-          baselineAccepted &&
-          (JSON.parse(event.data as string) as { initial?: boolean }).initial
-        ) {
-          connection.onInitialBaseline(syncBaselineGateRef.current.completeInitialSnapshot());
+      messageChain = messageChain.then(async () => {
+        const baselineAccepted = await connection.onMessage(event);
+        try {
+          if (
+            baselineAccepted &&
+            (JSON.parse(event.data as string) as { initial?: boolean }).initial
+          ) {
+            connection.onInitialBaseline(syncBaselineGateRef.current.completeInitialSnapshot());
+          }
+        } catch {
+          // Home's callback preserves its existing malformed-frame tolerance.
         }
-      } catch {
-        // Home's callback preserves its existing malformed-frame tolerance.
-      }
+      });
     };
     source.onerror = () => {
       syncBaselineGateRef.current.beginConnection();
       connection.onError();
+      const request = foregroundRecoveryRequestRef.current;
+      if (request) void request();
+      else foregroundRecoveryRequestPendingRef.current = true;
     };
     return () => {
       source.close();
@@ -152,6 +163,11 @@ export function useHomeSyncCoordination() {
     recover: () => Promise<boolean>,
   ) => {
     const reconcile = createForegroundSyncWakeGuard(recover);
+    foregroundRecoveryRequestRef.current = reconcile;
+    if (foregroundRecoveryRequestPendingRef.current) {
+      foregroundRecoveryRequestPendingRef.current = false;
+      void reconcile();
+    }
     const onOnline = () => {
       // `online` is the recovery signal when a failed pull was left pending
       // by a browser transport. Do not discard it because the page still
@@ -169,6 +185,9 @@ export function useHomeSyncCoordination() {
     return {
       reconcile,
       dispose: () => {
+        if (foregroundRecoveryRequestRef.current === reconcile) {
+          foregroundRecoveryRequestRef.current = null;
+        }
         window.removeEventListener("online", onOnline);
         unregister();
       },

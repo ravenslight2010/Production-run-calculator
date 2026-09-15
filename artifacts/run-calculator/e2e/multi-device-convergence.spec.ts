@@ -189,9 +189,32 @@ test.describe("multi-device convergence", () => {
           { timeout: 5_000, message: "offline device changed before wake" },
         ).toBe(40);
 
+        // Make the first foreground recovery pull fail after reconnecting.
+        // The retry must adopt A's newer canonical value before B can publish
+        // its cached snapshot, and a later refresh must keep that convergence.
+        let allowRecoveryPull = false;
+        const blockRecoveryPulls = async (route: import("@playwright/test").Route) => {
+          if (!allowRecoveryPull && route.request().method() === "GET") {
+            session.mark("device-b", "failed foreground recovery pull");
+            await route.abort("failed");
+            return;
+          }
+          await route.continue();
+        };
+        await session.page("device-b").route("**/api/sync/today**", blockRecoveryPulls);
+        await session.page("device-b").route("**/api/sync/events**", blockRecoveryPulls);
         await session.setOffline("device-b", false);
         session.mark("device-b", "wake/reconnect requested");
         await session.page("device-b").goto("/", { waitUntil: "domcontentloaded" });
+        await session.page("device-b").evaluate(() => {
+          window.dispatchEvent(new Event("focus"));
+        });
+        await expect(session.page("device-b").getByTestId("foreground-recovery-status"))
+          .toContainText("Couldn't confirm", { timeout: 15_000 });
+        allowRecoveryPull = true;
+        await session.page("device-b").unroute("**/api/sync/today**", blockRecoveryPulls);
+        await session.page("device-b").unroute("**/api/sync/events**", blockRecoveryPulls);
+        await session.page("device-b").getByTestId("button-retry-foreground-recovery").click();
         await expect.poll(
           () => session.localRunValue("device-b", runId, "casesNeeded"),
           { timeout: 15_000, message: "device-b did not adopt after reconnect" },

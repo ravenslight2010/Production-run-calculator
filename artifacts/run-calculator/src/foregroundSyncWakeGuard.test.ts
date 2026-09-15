@@ -179,6 +179,15 @@ describe("foreground wake sync barrier", () => {
     expect(catchBlock).not.toContain("reconciled = true");
   });
 
+  it("rejects malformed unchanged recovery responses and fences superseded responses", () => {
+    expect(homeSource).toContain("malformed unchanged response");
+    expect(homeSource).toContain("malformed canonical response");
+    expect(homeSource).toContain("const isCurrentRecovery = ()");
+    expect(homeSource).toContain("if (!isCurrentRecovery()) return false;");
+    expect(homeSource).toContain("isUnchangedSyncResponse(body)");
+    expect(syncManagerSource).toContain("foregroundRecoveryRequestRef");
+  });
+
   it("prevents the first released clock tick from writing the hidden-time delta", () => {
     expect(hookSource).toContain("autoTrackBlocked");
     expect(hookSource).toContain("autoTrackBlockedRef?.current");

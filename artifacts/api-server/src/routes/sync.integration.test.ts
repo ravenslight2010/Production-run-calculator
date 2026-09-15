@@ -1334,6 +1334,8 @@ describe("/sync/today — client-local-date keying", () => {
       headers: authHeaders(),
     });
     expect(res.status).toBe(200);
+    expect(res.headers.get("X-Sync-Response")).toBe("complete");
+    expect(res.headers.get("X-Sync-Snapshot")).toMatch(/^[a-f0-9]{64}$/);
     const data = (await res.json()) as { dayState?: { runs?: Array<{ id: string }> } } | null;
     expect(data?.dayState?.runs?.[0]?.id).toBe("run-2030-03-11");
   });
@@ -1344,7 +1346,11 @@ describe("/sync/today — client-local-date keying", () => {
       headers: authHeaders(),
     });
     expect(res.status).toBe(200);
+    expect(res.headers.get("X-Sync-Response")).toBe("complete");
+    expect(res.headers.get("X-Sync-Snapshot")).toMatch(/^[a-f0-9]{64}$/);
     expect(await res.json()).toEqual({
+      syncVersion: 1,
+      completeness: "complete",
       dayState: { date, runs: [] },
       runValues: {},
       runValuesUpdatedAt: {},
@@ -1529,6 +1535,8 @@ describe("/sync partial payload contract", () => {
     });
     expect(partial.status).toBe(200);
     const partialBody = await partial.json() as { data: typeof complete; snapshotId: string };
+    expect(partialBody.data.completeness).toBe("complete");
+    expect((partialBody.data as Record<string, unknown>).baseSnapshotId).toBeUndefined();
     expect(partialBody.data.runValues["partial-r1"].casesNeeded).toBe(18);
     expect(partialBody.data.runValues["partial-r2"].doughRecipeName).toBe("Large");
     expect(partialBody.data.runValues["partial-r2"].doughRecipe).toEqual([{ ingredient: "Flour", lbs: 10 }]);

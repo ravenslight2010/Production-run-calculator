@@ -37,7 +37,7 @@ describe("useHomeSyncCoordination", () => {
     expect(initialResetRequiresReload(6, 7)).toBe(false);
   });
 
-  it("opens the baseline only after Home acknowledges canonical adoption", () => {
+  it("opens the baseline only after Home acknowledges canonical adoption", async () => {
     const { result } = renderHook(() => useHomeSyncCoordination());
     const onInitialBaseline = vi.fn();
     const onMessage = vi.fn<(event: MessageEvent) => boolean>()
@@ -61,16 +61,88 @@ describe("useHomeSyncCoordination", () => {
     expect(source.url).toContain("clientId=client-a");
     expect(source.url).toContain("snapshot=snapshot-a");
 
-    act(() => source.emit({ initial: true, reset: true, resetEpoch: 2, data: { stale: true } }));
+    await act(async () => {
+      source.emit({ initial: true, reset: true, resetEpoch: 2, data: { stale: true } });
+      await Promise.resolve();
+    });
     expect(onInitialBaseline).not.toHaveBeenCalled();
     expect(result.current.requestBaselinePush()).toBe(false);
 
-    act(() => source.emit({ initial: true, data: { adopted: true } }));
+    await act(async () => {
+      source.emit({ initial: true, data: { adopted: true } });
+      await Promise.resolve();
+    });
     expect(onInitialBaseline).toHaveBeenCalledTimes(1);
     expect(onInitialBaseline).toHaveBeenCalledWith(true);
 
     act(() => disconnect());
     expect(source.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes an SSE drop through the foreground recovery owner", async () => {
+    const { result } = renderHook(() => useHomeSyncCoordination());
+    const recover = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
+    const register = vi.fn((_task: {
+      id: string;
+      runOnForeground: boolean;
+      order: number;
+      run: () => Promise<boolean>;
+    }) => vi.fn());
+    let disconnect!: () => void;
+    act(() => {
+      disconnect = result.current.connectSse({
+        clientId: "client-a",
+        getSnapshot: () => "",
+        onOpen: vi.fn(),
+        onMessage: vi.fn(() => true),
+        onError: vi.fn(),
+        onInitialBaseline: vi.fn(),
+        onClose: vi.fn(),
+      });
+    });
+    let recovery!: { dispose: () => void };
+    act(() => {
+      recovery = result.current.registerForegroundRecovery(
+        { register },
+        recover,
+      );
+    });
+
+    act(() => MockEventSource.instances[0]!.onerror?.());
+    expect(recover).toHaveBeenCalledTimes(1);
+    expect(register).toHaveBeenCalledWith(expect.objectContaining({
+      id: "foreground-reconcile",
+      runOnForeground: true,
+    }));
+
+    act(() => {
+      recovery.dispose();
+      disconnect();
+    });
+  });
+
+  it("does not lose an early SSE drop before recovery registration", () => {
+    const { result } = renderHook(() => useHomeSyncCoordination());
+    const recover = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
+    const register = vi.fn(() => vi.fn());
+    act(() => {
+      result.current.connectSse({
+        clientId: "client-a",
+        getSnapshot: () => "",
+        onOpen: vi.fn(),
+        onMessage: vi.fn(() => true),
+        onError: vi.fn(),
+        onInitialBaseline: vi.fn(),
+        onClose: vi.fn(),
+      });
+      MockEventSource.instances[0]!.onerror?.();
+    });
+
+    act(() => {
+      result.current.registerForegroundRecovery({ register }, recover);
+    });
+
+    expect(recover).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the imperative manager operations stable across state renders", () => {
