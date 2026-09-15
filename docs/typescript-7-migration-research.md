@@ -38,6 +38,28 @@ Microsoft explicitly recommends running TypeScript 7 side-by-side with the
 This repository should first add a non-gating TypeScript 7 lane while retaining 6.0.3 as
 the authoritative compiler and API package.
 
+### Editor language-service gate
+
+The checked-in editor configuration names `node_modules/typescript/lib` as the workspace SDK,
+which resolves to the authoritative `typescript@6.0.3` workspace package. In an open Replit
+editor session, the promotion smoke additionally verifies that the live
+`typescript-language-server` process actually launched its `tsserver` child from that exact
+workspace path. The separately named `typescript-native` TypeScript 7 CLI alias is not an
+editor SDK.
+
+Run the repeatable editor smoke before any TypeScript 7 promotion:
+
+```bash
+pnpm run check:editor-typescript
+```
+
+Run the command from an open Replit editor session. The smoke fails unless the configured SDK
+resolves to TypeScript 6.0.3 and a live editor language-server child uses that exact
+`tsserver.js`. It then starts the same SDK in a disposable strict TypeScript project, confirms
+an expected semantic diagnostic, and confirms go-to-definition navigation into a second
+source file. This check is a promotion prerequisite, not evidence that the advisory
+TypeScript 7 CLI is ready to become the editor service.
+
 ## Repository compiler coupling
 
 ### Compiler commands and project modes
@@ -349,7 +371,9 @@ regression restores the previous `package.json` and lockfile together.
 10. Representative cold and warm timings are repeated in CI with peak memory captured;
     parallel worker settings stay within release budgets.
 11. The editor explicitly selects the intended language service and completes a
-    diagnostics/navigation smoke test.
+    diagnostics/navigation smoke test with `pnpm run check:editor-typescript`. This must pass
+    before TypeScript 7 is promoted from the advisory CLI alias or selected as the editor
+    language service.
 12. Reverting `package.json` and `pnpm-lock.yaml` restores the prior release checks without
     generated-file cleanup.
 

@@ -54,6 +54,7 @@
     "check:skill-catalog": "tsx ./src/skill-catalog.mts",
     "check:release-evidence": "tsx ./src/release-check.mts --verify-evidence",
     "check:typescript-7": "tsx ./src/compare-typescript-7.mts",
+    "check:editor-typescript": "node ./src/check-editor-typescript-service.mjs",
     "check:clean-start": "tsx ./src/verify-clean-start.mts",
     "check:startup-failures": "tsx ./src/verify-startup-failures.mts",
     "check:render-image": "tsx ./src/verify-render-image.mts",
