@@ -277,7 +277,8 @@ async function fixture(
                   approvedForPromotion: false,
                 },
                 trend: {
-                  historyLimit: 5, distinctRevisionCount: 1,
+                  historyLimit: 5, incompatibleRunnerClassSamples: 0,
+                  distinctRevisionCount: 1,
                   regressedRevisions: [],
                   revisionSamples: [{ sourceRevision: "current-revision", performanceComparison: [] }],
                 },

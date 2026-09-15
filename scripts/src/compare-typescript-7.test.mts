@@ -4,10 +4,12 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
 import {
+  analyzeTypescript7HistoricalReports,
   declarationManifest,
   editorServiceEvidenceFromResult,
   normalizeDiagnostics,
   selectTypescript7HistoricalReports,
+  typescript7TrendHistorySummary,
   typescript7RunnerFingerprint,
   typescript7ResourceRegressions,
 } from "./compare-typescript-7.mts";
@@ -192,6 +194,7 @@ test("retained comparison evidence is revision-bound and advisory", () => {
     },
     trend: {
       historyLimit: 5,
+      incompatibleRunnerClassSamples: 0,
       distinctRevisionCount: 1,
       regressedRevisions: [],
       revisionSamples: [{ sourceRevision: "a".repeat(40), performanceComparison: [] }],
@@ -221,6 +224,22 @@ test("retained comparison evidence is revision-bound and advisory", () => {
       Buffer.from(JSON.stringify(evidence)),
       "a".repeat(40),
     ),
+  );
+  assert.throws(
+    () =>
+      validateTypescript7ComparisonEvidence(
+        Buffer.from(
+          JSON.stringify({
+            ...evidence,
+            trend: {
+              ...evidence.trend,
+              incompatibleRunnerClassSamples: 6,
+            },
+          }),
+        ),
+        "a".repeat(40),
+      ),
+    /resource-budget evidence is stale or malformed/,
   );
   assert.doesNotThrow(() =>
     validateTypescript7ComparisonEvidence(
@@ -464,17 +483,69 @@ test("history rejects a different runner class without weakening advisory eviden
       peakRssKiB: { baseline: 10, candidate: 10, delta: 0, ratio: 1 },
     })),
   );
+  const history = [
+    {
+      schemaVersion: 3,
+      sourceRevision: "b".repeat(40),
+      runner: { hardwareClass: "e".repeat(64) },
+      performanceComparison: measurements,
+    },
+  ];
   const selected = selectTypescript7HistoricalReports(
-    [
-      {
-        schemaVersion: 3,
-        sourceRevision: "b".repeat(40),
-        runner: { hardwareClass: "e".repeat(64) },
-        performanceComparison: measurements,
-      },
-    ],
+    history,
     "a".repeat(40),
     "f".repeat(64),
   );
   assert.deepEqual(selected, []);
+  assert.deepEqual(
+    analyzeTypescript7HistoricalReports(
+      history,
+      "a".repeat(40),
+      "f".repeat(64),
+    ),
+    { reports: [], incompatibleRunnerClassSamples: 1 },
+  );
+});
+
+test("history bounds incompatible runner-class counts without retaining hardware details", () => {
+  const measurements = ["cold", "warm"].flatMap((mode) =>
+    ["build", "scripts", "api-server", "run-calculator", "mockup-sandbox", "ai-evaluation", "corpus-harness"].map((check) => ({
+      check,
+      mode,
+      elapsedMs: { baseline: 10, candidate: 10, delta: 0, ratio: 1 },
+      peakRssKiB: { baseline: 10, candidate: 10, delta: 0, ratio: 1 },
+    })),
+  );
+  const history = Array.from({ length: 8 }, (_, index) => ({
+    schemaVersion: 3,
+    sourceRevision: (index + 1).toString(16).repeat(40),
+    runner: {
+      hardwareClass: "e".repeat(64),
+      cpuModel: `sensitive-model-${index}`,
+    },
+    performanceComparison: measurements,
+  }));
+  assert.deepEqual(
+    analyzeTypescript7HistoricalReports(
+      history,
+      "a".repeat(40),
+      "f".repeat(64),
+    ),
+    { reports: [], incompatibleRunnerClassSamples: 5 },
+  );
+});
+
+test("trend output distinguishes runner-class resets from missing history", () => {
+  assert.match(
+    typescript7TrendHistorySummary(1, 2),
+    /history reset for this runner class: 2 incompatible prior sample\(s\) excluded/,
+  );
+  assert.equal(
+    typescript7TrendHistorySummary(1, 0),
+    "TypeScript 7 trend history is missing: no valid prior samples were available.",
+  );
+  assert.match(
+    typescript7TrendHistorySummary(3, 1),
+    /includes 2 compatible prior revision\(s\); 1 incompatible runner-class sample\(s\) excluded/,
+  );
 });

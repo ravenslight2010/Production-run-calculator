@@ -486,6 +486,10 @@ export function validateTypescript7ComparisonEvidence(
     resourceBudgets.maxCandidatePeakRssKiB !== 1_048_576 ||
     JSON.stringify(resourceBudgets.requiredModes) !==
       JSON.stringify(["cold", "warm"]) ||
+    trend?.historyLimit !== 5 ||
+    !Number.isInteger(trend.incompatibleRunnerClassSamples) ||
+    Number(trend.incompatibleRunnerClassSamples) < 0 ||
+    Number(trend.incompatibleRunnerClassSamples) > 5 ||
     typeof trend?.distinctRevisionCount !== "number" ||
     !Array.isArray(trend.regressedRevisions) ||
     !Array.isArray(trend.revisionSamples) ||

@@ -163,8 +163,24 @@ export function selectTypescript7HistoricalReports(
   currentRevision: string,
   currentHardwareClass: string,
 ): Array<Record<string, unknown>> {
+  return analyzeTypescript7HistoricalReports(
+    history,
+    currentRevision,
+    currentHardwareClass,
+  ).reports;
+}
+
+export function analyzeTypescript7HistoricalReports(
+  history: readonly unknown[],
+  currentRevision: string,
+  currentHardwareClass: string,
+): {
+  reports: Array<Record<string, unknown>>;
+  incompatibleRunnerClassSamples: number;
+} {
   const revisions = new Set([currentRevision]);
-  const selected: Array<Record<string, unknown>> = [];
+  const reports: Array<Record<string, unknown>> = [];
+  let incompatibleRunnerClassSamples = 0;
   for (const item of history) {
     if (
       item === null ||
@@ -181,16 +197,36 @@ export function selectTypescript7HistoricalReports(
       typeof revision !== "string" ||
       !/^[a-f0-9]{40}$/.test(revision) ||
       revisions.has(revision) ||
-      runner?.hardwareClass !== currentHardwareClass ||
       typescript7ResourceRegressions(report.performanceComparison) === null
     ) {
       continue;
     }
+    if (runner?.hardwareClass !== currentHardwareClass) {
+      incompatibleRunnerClassSamples = Math.min(
+        TYPESCRIPT_7_HISTORY_LIMIT,
+        incompatibleRunnerClassSamples + 1,
+      );
+      continue;
+    }
     revisions.add(revision);
-    selected.push(report);
-    if (selected.length >= TYPESCRIPT_7_HISTORY_LIMIT) break;
+    reports.push(report);
+    if (reports.length >= TYPESCRIPT_7_HISTORY_LIMIT) break;
   }
-  return selected;
+  return { reports, incompatibleRunnerClassSamples };
+}
+
+export function typescript7TrendHistorySummary(
+  distinctRevisionCount: number,
+  incompatibleRunnerClassSamples: number,
+): string {
+  const priorRevisionCount = distinctRevisionCount - 1;
+  if (priorRevisionCount === 0 && incompatibleRunnerClassSamples > 0) {
+    return `TypeScript 7 trend history reset for this runner class: ${incompatibleRunnerClassSamples} incompatible prior sample(s) excluded (count capped at ${TYPESCRIPT_7_HISTORY_LIMIT}).`;
+  }
+  if (priorRevisionCount === 0) {
+    return "TypeScript 7 trend history is missing: no valid prior samples were available.";
+  }
+  return `TypeScript 7 trend history includes ${priorRevisionCount} compatible prior revision(s); ${incompatibleRunnerClassSamples} incompatible runner-class sample(s) excluded (count capped at ${TYPESCRIPT_7_HISTORY_LIMIT}).`;
 }
 
 export function normalizeDiagnostics(
@@ -504,11 +540,12 @@ async function main(): Promise<void> {
         console.warn(`Ignoring unreadable TypeScript 7 history: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
-    const historicalRevisions = selectTypescript7HistoricalReports(
+    const historyAnalysis = analyzeTypescript7HistoricalReports(
       historicalReports,
       sourceRevision(),
       runnerFingerprint.hardwareClass,
     );
+    const historicalRevisions = historyAnalysis.reports;
     const revisionSamples = [
       ...historicalRevisions.map((item) => ({
         sourceRevision: item.sourceRevision,
@@ -588,6 +625,8 @@ async function main(): Promise<void> {
       resourceBudgets: TYPESCRIPT_7_RESOURCE_BUDGETS,
       trend: {
         historyLimit: TYPESCRIPT_7_HISTORY_LIMIT,
+        incompatibleRunnerClassSamples:
+          historyAnalysis.incompatibleRunnerClassSamples,
         distinctRevisionCount,
         regressedRevisions,
         revisionSamples,
@@ -645,6 +684,13 @@ async function main(): Promise<void> {
   }
   console.log(
     `${report.status} TypeScript 7 comparison retained at ${relative(rootDir, evidencePath)} (${promotionAttempt ? "promotion attempt" : "advisory only"}).`,
+  );
+  const trend = report.trend as Record<string, unknown>;
+  console.log(
+    typescript7TrendHistorySummary(
+      Number(trend.distinctRevisionCount),
+      Number(trend.incompatibleRunnerClassSamples),
+    ),
   );
   if (
     promotionAttempt &&
