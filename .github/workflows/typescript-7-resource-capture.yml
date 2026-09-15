@@ -1,0 +1,66 @@
+name: TypeScript 7 resource capture
+
+on:
+  push:
+    branches:
+      - task-2203-capture-*
+    paths-ignore:
+      - release-evidence/**
+
+permissions:
+  contents: write
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
+        with:
+          run_install: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "24"
+      - run: pnpm install --frozen-lockfile
+      - name: Capture resource evidence
+        env:
+          TYPESCRIPT_7_RUNNER_IMAGE: ubuntu-latest-X64
+        run: pnpm --filter @workspace/scripts exec tsx ./src/compare-typescript-7.mts
+      - name: Validate complete comparison measurements
+        env:
+          EXPECTED_REVISION: ${{ github.sha }}
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+          const report = JSON.parse(
+            fs.readFileSync("release-evidence/typescript-7-comparison.json", "utf8"),
+          );
+          if (
+            report.schemaVersion !== 3 ||
+            report.sourceRevision !== process.env.EXPECTED_REVISION ||
+            report.runner?.platform !== "linux" ||
+            report.runner?.arch !== "x64" ||
+            report.runner?.supported !== true ||
+            !Array.isArray(report.performanceComparison) ||
+            report.performanceComparison.length !== 14 ||
+            report.performanceComparison.some(
+              (item) =>
+                !["cold", "warm"].includes(item.mode) ||
+                !Number.isFinite(item.elapsedMs?.candidate) ||
+                !Number.isFinite(item.elapsedMs?.ratio) ||
+                !Number.isFinite(item.peakRssKiB?.candidate) ||
+                !Number.isFinite(item.peakRssKiB?.ratio),
+            )
+          ) {
+            throw new Error("TypeScript 7 resource evidence is incomplete");
+          }
+          NODE
+      - name: Retain exact report on the evidence branch
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f release-evidence/typescript-7-comparison.json
+          git commit -m "Retain TypeScript 7 resource capture"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
