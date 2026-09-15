@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import webpush from "web-push";
+import { runBackgroundOperation } from "./backgroundOperations";
 import { and, eq, gt, isNull, lt, or } from "drizzle-orm";
 import {
   db, usersTable, webPushDeliveriesTable, webPushSubscriptionsTable, webPushAlertArmsTable,
@@ -439,14 +440,25 @@ registerServerJob("scheduled-evaluation", {
 
 export type WebPushAlertScheduler = { stop(): void };
 
-export function startWebPushAlertScheduler(): WebPushAlertScheduler {
+export function startWebPushAlertScheduler(options: {
+  now?: () => number;
+  enqueue?: typeof enqueueScheduledWebPushAlerts;
+} = {}): WebPushAlertScheduler {
   const interval = Math.max(30_000, Number(process.env.WEB_PUSH_ALERT_INTERVAL_MS) || DEFAULT_ALERT_INTERVAL_MS);
+  const now = options.now ?? Date.now;
+  const enqueue = options.enqueue ?? enqueueScheduledWebPushAlerts;
   let stopped = false;
   let scheduling = false;
   const execute = () => {
     if (stopped || scheduling) return;
     scheduling = true;
-    void enqueueScheduledWebPushAlerts(Date.now(), interval)
+    // Freeze the bucket input across the retry. A partial first insert near a
+    // bucket boundary must converge on the same idempotency keys.
+    const scheduledAt = now();
+    void runBackgroundOperation(
+      "web-push-schedule",
+      () => enqueue(scheduledAt, interval),
+    )
       .catch(() => logger.error({ event: "web_push_alert_scheduler", outcome: "failed" }, "Web push alert scheduling failed"))
       .finally(() => { scheduling = false; });
   };

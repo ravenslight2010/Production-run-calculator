@@ -9,6 +9,11 @@ import {
 import type { Capability } from "./roles";
 import type { Scope } from "./requestScope";
 import { pruneServerJobArtifacts } from "./serverJobArtifactCache";
+import {
+  isTransientDatabaseConnectionError,
+  recordBackgroundOperationFailure,
+  runBackgroundOperation,
+} from "./backgroundOperations";
 
 export const SERVER_JOB_STATUSES = ["queued", "running", "succeeded", "failed", "cancelled"] as const;
 export type ServerJobStatus = (typeof SERVER_JOB_STATUSES)[number];
@@ -219,6 +224,9 @@ export class ServerJobWorker {
       const retry = !cancelled && !timedOut && claimed.job.attempt < claimed.job.maxAttempts;
       await this.finish(claimed.job, claimed.leaseToken, cancelled ? "cancelled" : retry ? "queued" : "failed",
         undefined, timedOut ? "execution_timeout" : "handler_failed", safeMessage(error));
+      if (isTransientDatabaseConnectionError(error)) {
+        recordBackgroundOperationFailure("server-job-run", error);
+      }
     } finally {
       clearInterval(heartbeat);
     }
@@ -324,11 +332,12 @@ export function startServerJobWorkerLoop(options: ServerJobLoopOptions = {}): Se
     const now = Date.now();
     if (now - lastPruneAt >= pruneIntervalMs) {
       lastPruneAt = now;
-      void prune().catch((error) => options.onError?.(error, "prune"));
+      void runBackgroundOperation("server-job-prune", prune)
+        .catch((error) => options.onError?.(error, "prune"));
     }
     while (active < concurrency) {
       active++;
-      void worker.runOnce()
+      void runBackgroundOperation("server-job-run", () => worker.runOnce())
         .catch((error) => options.onError?.(error, "run"))
         .finally(() => { active--; });
     }

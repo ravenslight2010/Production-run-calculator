@@ -5,6 +5,10 @@ import { HealthCheckResponse } from "@workspace/api-zod";
 import { logger } from "../lib/logger";
 import { getCacheMaintenanceDiagnostics } from "../lib/observability";
 import { getStartupHealth } from "../lib/startupHealth";
+import {
+  backgroundOperationsDegraded,
+  getBackgroundOperationDiagnostics,
+} from "../lib/backgroundOperations";
 
 const router: IRouter = Router();
 
@@ -22,6 +26,7 @@ async function readiness(req: Request, res: Response): Promise<void> {
     startup: { status: startup.phase === "ready" ? "ok" : "error" },
     database: { status: "pending" },
     dependencies: { status: "pending" },
+    backgroundWorkers: { status: "pending" },
   };
 
   if (startup.phase !== "ready") {
@@ -46,6 +51,9 @@ async function readiness(req: Request, res: Response): Promise<void> {
     checks.dependencies = aiConfigured
       ? { status: "ok" }
       : { status: "error", detail: "ai_provider_not_configured" };
+    checks.backgroundWorkers = backgroundOperationsDegraded()
+      ? { status: "error", detail: "sustained_background_worker_failures" }
+      : { status: "ok" };
   }
 
   const allHealthy =
@@ -56,7 +64,10 @@ async function readiness(req: Request, res: Response): Promise<void> {
   );
   const diagnostics =
     startup.phase === "ready"
-      ? { cacheMaintenance: await getCacheMaintenanceDiagnostics() }
+      ? {
+        cacheMaintenance: await getCacheMaintenanceDiagnostics(),
+        backgroundOperations: getBackgroundOperationDiagnostics(),
+      }
       : undefined;
   logger.info(
     {

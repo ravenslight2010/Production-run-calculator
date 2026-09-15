@@ -61,6 +61,7 @@ import {
 import { applyOperationalIntent, parseOperationalIntent } from "../lib/operationalIntents";
 import { consumeRunInTransaction, consumeSauceBarrelInTransaction } from "./inventory";
 import { logger } from "../lib/logger";
+import { runBackgroundOperation } from "../lib/backgroundOperations";
 import {
   SYNC_SNAPSHOT_ID_RE,
   buildSyncWriteEnvelope,
@@ -2475,7 +2476,10 @@ export function startDailyRolloverScheduler(
     running = true;
     try {
       for (const scope of scopes) {
-        await runWithScope(scope, () => runDailyRollover(scope));
+        await runBackgroundOperation(
+          "daily-rollover",
+          () => runWithScope(scope, () => runDailyRollover(scope)),
+        );
       }
     } catch (err) {
       logger.error({ err, event: "daily_rollover", outcome: "degraded" }, "Daily rollover pass failed");
