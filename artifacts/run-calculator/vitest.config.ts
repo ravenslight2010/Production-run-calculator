@@ -13,10 +13,11 @@ export default defineConfig({
     environment: "jsdom",
     globals: false,
     include: ["src/**/*.test.{ts,tsx}"],
-    // Validation runs alongside several dev workflows. Run test files one at a
-    // time to avoid concurrent fork-worker startup starvation, and give
-    // hooks/tests generous timeouts so the suite is reliable under load.
-    fileParallelism: false,
+    // Keep file-level parallelism enabled so the full suite stays within the
+    // validation budget, while bounding fork startup to avoid competing with
+    // the other validation workflows.
+    fileParallelism: true,
+    maxWorkers: 4,
     hookTimeout: 60000,
     testTimeout: 30000,
   },
