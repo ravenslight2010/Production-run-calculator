@@ -575,6 +575,72 @@ async function runStoppedSummaryScenario(): Promise<void> {
   }
 
   for (const mode of ["standard", "full"] as const) {
+    for (const duplicateScenario of [
+      {
+        name: "root-blockers",
+        checkpoint: [
+          "# Release Check Checkpoint — INCOMPLETE / NO-GO",
+          "",
+          "Root blockers: first root blocker (FAIL)",
+          "  Root blockers: duplicate root blocker (FAIL)  ",
+          "Blocked gates: dependent gate (blocked by first root blocker)",
+          "",
+        ].join("\n"),
+        payloads: ["first root blocker", "duplicate root blocker"],
+      },
+      {
+        name: "blocked-gates",
+        checkpoint: [
+          "# Release Check Checkpoint — INCOMPLETE / NO-GO",
+          "",
+          "Root blockers: root blocker (FAIL)",
+          "Blocked gates: first dependent gate (blocked by root blocker)",
+          "\tBlocked gates: duplicate dependent gate (blocked by root blocker)\t",
+          "",
+        ].join("\n"),
+        payloads: ["first dependent gate", "duplicate dependent gate"],
+      },
+    ] as const) {
+      const evidenceDir = await mkdtemp(
+        join(
+          tmpdir(),
+          `release-summary-${mode}-duplicate-${duplicateScenario.name}-`,
+        ),
+      );
+      const summaryPath = join(evidenceDir, "step-summary.md");
+      try {
+        await writeFile(
+          join(evidenceDir, "release-check-checkpoint.md"),
+          duplicateScenario.checkpoint,
+          "utf8",
+        );
+        const result = await runStoppedSummary(
+          evidenceDir,
+          summaryPath,
+          mode,
+          "",
+        );
+        assert.equal(result.code, 0, result.output);
+        const summary = await readFile(summaryPath, "utf8");
+        assert.match(
+          summary,
+          /Blocker summary unresolved: checkpoint text is missing or malformed\./,
+          `${mode}/${duplicateScenario.name} duplicate metadata must remain unresolved`,
+        );
+        for (const payload of duplicateScenario.payloads) {
+          assert.doesNotMatch(
+            summary,
+            new RegExp(escapeRegExp(payload)),
+            `${mode}/${duplicateScenario.name} must not copy duplicate blocker payloads`,
+          );
+        }
+      } finally {
+        await rm(evidenceDir, { recursive: true, force: true });
+      }
+    }
+  }
+
+  for (const mode of ["standard", "full"] as const) {
     const successfulEvidenceDir = await mkdtemp(
       join(tmpdir(), `release-summary-${mode}-success-without-checkpoint-`),
     );
