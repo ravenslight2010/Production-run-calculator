@@ -17,12 +17,14 @@ const report = formatFullBrowserReport(
   [
     {
       file: slowFile,
+      title: "Slow case",
       durationMs: 100_000,
       completed: true,
       status: "passed",
     },
     {
       file: quietFile,
+      title: "Quiet case",
       durationMs: 125_000,
       completed: true,
       status: "passed",
@@ -87,6 +89,7 @@ assert.equal(DURATION_REGRESSION_MIN_INCREASE_PERCENT, 25);
 
 const completeCases = Array.from({ length: 159 }, () => ({
   file: slowFile,
+  title: "Passing case",
   durationMs: 1_000,
   completed: true,
   status: "passed" as const,
@@ -145,6 +148,7 @@ const comparisonReport = formatFullBrowserReport(
   [
     {
       file: slowFile,
+      title: "Slow case",
       durationMs: 100_000,
       completed: true,
       status: "passed",
@@ -165,6 +169,7 @@ assert.match(
     [
       {
         file: slowFile,
+        title: "Slow case",
         durationMs: 100_000,
         completed: true,
         status: "passed",
@@ -175,6 +180,47 @@ assert.match(
     "current-revision",
   ),
   /Baseline: unavailable/,
+);
+
+const caseStatusReport = formatFullBrowserReport(
+  [
+    {
+      file: quietFile,
+      title: "Skipped case",
+      durationMs: 10,
+      completed: true,
+      status: "skipped",
+    },
+    {
+      file: slowFile,
+      title: "Failed case",
+      durationMs: 20,
+      completed: true,
+      status: "failed",
+    },
+    {
+      file: slowFile,
+      title: "Timed out case",
+      durationMs: 30,
+      completed: true,
+      status: "timedout",
+    },
+  ],
+  "failed",
+  60,
+  "current-revision",
+);
+assert.match(
+  caseStatusReport,
+  /## Failed and timed-out cases[\s\S]*### `artifacts\/run-calculator\/e2e\/slow\.spec\.ts`[\s\S]*- \*\*FAILED\*\* `Failed case`[\s\S]*- \*\*TIMEDOUT\*\* `Timed out case`/,
+);
+assert.match(
+  caseStatusReport,
+  /## Skipped cases[\s\S]*### `artifacts\/run-calculator\/e2e\/quiet\.spec\.ts`[\s\S]*- \*\*SKIPPED\*\* `Skipped case`/,
+);
+assert.ok(
+  caseStatusReport.indexOf("## Skipped cases") >
+    caseStatusReport.indexOf("## Failed and timed-out cases"),
 );
 
 console.log(
