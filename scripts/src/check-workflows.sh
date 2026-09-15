@@ -13,6 +13,7 @@ department_navigation_workflow="$workflow_dir/department-navigation.yml"
 release_concurrency_calibration_workflow="$workflow_dir/release-concurrency-calibration.yml"
 stable_branch_protection_workflow="$workflow_dir/stable-branch-protection.yml"
 workflow_lint_workflow="$workflow_dir/workflow-lint.yml"
+promotion_workflow="$workflow_dir/promote-production.yml"
 
 mapfile -t workflow_files < <(
   find "$workflow_dir" -type f \( -name '*.yml' -o -name '*.yaml' \) -print | sort
@@ -334,6 +335,7 @@ check_workflow_timeouts \
   "Release concurrency calibration" "$release_concurrency_calibration_workflow"
 check_workflow_timeouts "Stable branch protection" "$stable_branch_protection_workflow"
 check_workflow_timeouts "Workflow lint" "$workflow_lint_workflow"
+check_workflow_timeouts "Production promotion" "$promotion_workflow"
 
 check_immutable_workflow_dependencies() {
   local workflow_path="$1"

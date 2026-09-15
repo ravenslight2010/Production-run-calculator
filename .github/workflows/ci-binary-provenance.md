@@ -58,3 +58,15 @@ revision, and bounded pass/fail fields to
 `release-evidence-container-images.txt`. The file is retained as
 `release-evidence-container-images-${{ github.run_id }}` for 14 days; registry
 credentials are never written to the report.
+
+Production image promotion is a separate manual workflow protected by the
+`production` environment. The operator supplies the trusted publisher run ID,
+reviewed revision, and publisher artifact digest. The workflow verifies that
+the source run was a successful push of `main` through `ci.yml`, downloads only
+that run-scoped artifact, compares GitHub's artifact digest, and validates all
+three image records before producing a handoff. It also requires the exact
+publisher job to have succeeded and hashes the downloaded archive bytes before
+extracting its single bounded evidence file. The handoff contains only
+`repository@sha256:digest` references for the API, migration, and web images.
+It does not deploy, rebuild, accept tags, or receive registry/deployment
+credentials.

@@ -13,6 +13,7 @@ DEPARTMENT_NAVIGATION_WORKFLOW="${SCRIPT_DIR}/../../.github/workflows/department
 RELEASE_CONCURRENCY_CALIBRATION_WORKFLOW="${SCRIPT_DIR}/../../.github/workflows/release-concurrency-calibration.yml"
 STABLE_BRANCH_PROTECTION_WORKFLOW="${SCRIPT_DIR}/../../.github/workflows/stable-branch-protection.yml"
 WORKFLOW_LINT_WORKFLOW="${SCRIPT_DIR}/../../.github/workflows/workflow-lint.yml"
+PROMOTION_WORKFLOW="${SCRIPT_DIR}/../../.github/workflows/promote-production.yml"
 TEST_ROOT=$(mktemp -d)
 FAKE_ACTIONLINT="${TEST_ROOT}/fake-actionlint"
 FAKE_ACTIONLINT_MARKER="${TEST_ROOT}/actionlint-called"
@@ -181,6 +182,26 @@ concurrency:
 
 jobs:
   fixture-workflow-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo ok
+EOF
+  cat > "${workspace}/.github/workflows/promote-production.yml" <<'EOF'
+name: Prepare production image promotion
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fixture-promotion-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  fixture-promotion:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -413,6 +434,43 @@ test_stable_branch_protection_workflow_contract() {
     return 1
   fi
   echo "PASS: preserves stable branch protection drift-monitoring contract"
+}
+
+test_production_promotion_workflow_contract() {
+  local workflow_content
+  workflow_content=$(<"$PROMOTION_WORKFLOW")
+  assert_contains "$workflow_content" "  workflow_dispatch:"
+  assert_contains "$workflow_content" "      publisher_run_id:"
+  assert_contains "$workflow_content" "      revision:"
+  assert_contains "$workflow_content" "      artifact_digest:"
+  assert_contains "$workflow_content" "    environment: production"
+  assert_contains "$workflow_content" "      actions: read"
+  assert_contains "$workflow_content" "      contents: read"
+  assert_contains "$workflow_content" "  group: production-image-promotion"
+  assert_contains "$workflow_content" "  cancel-in-progress: false"
+  assert_contains "$workflow_content" \
+    "          ref: \${{ github.event.repository.default_branch }}"
+  assert_contains "$workflow_content" \
+    'select(.name == "Publish Docker images" and .conclusion == "success")'
+  assert_contains "$workflow_content" \
+    "          gh api \"repos/\$REPOSITORY/actions/artifacts/\$ARTIFACT_ID/zip\" >\"\$ARTIFACT_ARCHIVE\""
+  assert_contains "$workflow_content" \
+    "            sha256sum --check --strict --status"
+  assert_contains "$workflow_content" \
+    '              if len(members) != 1 or members[0].filename != expected_name:'
+  assert_contains "$workflow_content" \
+    "        run: bash scripts/src/verify-container-promotion.sh"
+  if grep -Eq '^[[:space:]]+(pull_request|pull_request_target|push|workflow_run):' \
+    "$PROMOTION_WORKFLOW"; then
+    printf 'Production promotion must remain manual-only.\n' >&2
+    return 1
+  fi
+  if grep -Eq 'packages:[[:space:]]+write|contents:[[:space:]]+write' \
+    "$PROMOTION_WORKFLOW"; then
+    printf 'Production promotion verification must remain read-only.\n' >&2
+    return 1
+  fi
+  echo "PASS: preserves digest-bound production promotion trust boundary"
 }
 
 test_rejects_floating_workflow_dependencies() {
@@ -1348,6 +1406,7 @@ test_ci_runs_routine_scripts_tests
 test_schema_safe_rollback_ci_contract
 test_release_workflow_preserves_stopped_summary_contract
 test_stable_branch_protection_workflow_contract
+test_production_promotion_workflow_contract
 test_stable_branch_protection_alert_fixture
 test_rejects_floating_workflow_dependencies
 test_rejects_mutable_service_images

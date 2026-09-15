@@ -3,6 +3,8 @@
 set -euo pipefail
 
 expected_revision="${EXPECTED_REVISION:-}"
+producer_run_id="${PRODUCER_WORKFLOW_RUN_ID:-}"
+producer_workflow="${PRODUCER_WORKFLOW:-}"
 report_path="${PROVENANCE_REPORT:-}"
 
 if [[ -z "$report_path" ]]; then
@@ -23,6 +25,16 @@ if [[ ! "$expected_revision" =~ ^[0-9a-f]{40}$ ]]; then
   exit 1
 fi
 
+if [[ ! "$producer_run_id" =~ ^[1-9][0-9]*$ ]]; then
+  echo "Published container provenance verification failed: PRODUCER_WORKFLOW_RUN_ID must be a positive integer." >&2
+  exit 1
+fi
+
+if [[ "$producer_workflow" != ".github/workflows/ci.yml" ]]; then
+  echo "Published container provenance verification failed: PRODUCER_WORKFLOW must identify .github/workflows/ci.yml." >&2
+  exit 1
+fi
+
 image_names=(
   "${API_IMAGE:-}"
   "${API_MIGRATE_IMAGE:-}"
@@ -40,8 +52,10 @@ image_labels=(
 )
 
 {
-  printf 'schema_version=1\n'
+  printf 'schema_version=2\n'
   printf 'expected_revision=%s\n' "$expected_revision"
+  printf 'producer_workflow=%s\n' "$producer_workflow"
+  printf 'producer_workflow_run_id=%s\n' "$producer_run_id"
   printf 'image_count=%s\n' "${#image_names[@]}"
 } >"$temporary_report"
 

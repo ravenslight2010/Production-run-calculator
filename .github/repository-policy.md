@@ -50,6 +50,13 @@ implicit `setup-node` caches; any future cache must include
 `${{ github.run_id }}` so reruns and untrusted pull requests cannot collide
 with a retained result.
 
+The manual production-promotion handoff is protected by the `production`
+environment and has read-only repository and Actions permissions. It consumes
+only a named artifact from a caller-selected successful `main` CI run, verifies
+the artifact digest and revision, and emits digest-qualified image references.
+It has no deployment or package credentials; a later deployment integration
+must consume that handoff without substituting tags or rebuilding from source.
+
 Write permissions are exceptions, not defaults. The current approved
 exceptions are:
 

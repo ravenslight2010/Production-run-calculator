@@ -299,6 +299,8 @@ jobs:
         if: always()
         env:
           EXPECTED_REVISION: ${{ github.sha }}
+          PRODUCER_WORKFLOW_RUN_ID: ${{ github.run_id }}
+          PRODUCER_WORKFLOW: .github/workflows/ci.yml
           API_IMAGE: ghcr.io/${{ github.repository_owner }}/runcalc-api
           API_MIGRATE_IMAGE: ghcr.io/${{ github.repository_owner }}/runcalc-api-migrate
           WEB_IMAGE: ghcr.io/${{ github.repository_owner }}/runcalc-web

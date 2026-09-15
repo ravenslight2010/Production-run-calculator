@@ -7,4 +7,6 @@ Published image evidence must bind each immutable registry digest to the exact r
 
 **Why:** Tags can be moved or misapplied, while a later audit needs to distinguish the pushed image bytes from the source revision that was reviewed.
 
-**How to apply:** For every trusted image publisher, capture the build-push digest, pull the image by `image@digest`, verify the pulled RepoDigest and `org.opencontainers.image.revision`, and retain only bounded metadata without credentials.
+Promotion must additionally bind the retained evidence to the trusted publisher workflow run and artifact digest. The privileged boundary may emit or consume only repository-plus-digest references; tags and source rebuilds are not equivalent.
+
+**How to apply:** For every trusted image publisher, capture the build-push digest, pull the image by `image@digest`, verify the pulled RepoDigest and `org.opencontainers.image.revision`, and retain only bounded metadata without credentials. Before promotion, verify the successful publisher job, workflow/run/revision, downloaded artifact bytes, expected repositories, and all required component digests.

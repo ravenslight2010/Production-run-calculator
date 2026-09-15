@@ -1,0 +1,129 @@
+name: Prepare production image promotion
+
+on:
+  workflow_dispatch:
+    inputs:
+      publisher_run_id:
+        description: Trusted main-branch CI run that published the images
+        required: true
+        type: string
+      revision:
+        description: Reviewed lowercase 40-character commit SHA
+        required: true
+        type: string
+      artifact_digest:
+        description: sha256 digest reported by the publisher artifact upload
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-image-promotion
+  cancel-in-progress: false
+
+jobs:
+  verify-promotion:
+    name: Verify immutable production image handoff
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout protected promotion verifier
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Verify publisher run and artifact metadata
+        id: publisher
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_REVISION: ${{ inputs.revision }}
+          EXPECTED_RUN_ID: ${{ inputs.publisher_run_id }}
+          EXPECTED_ARTIFACT_DIGEST: ${{ inputs.artifact_digest }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          [[ "$EXPECTED_REVISION" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          [[ "$EXPECTED_RUN_ID" =~ ^[1-9][0-9]*$ ]] || exit 1
+          [[ "$EXPECTED_ARTIFACT_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
+
+          run_json="$(gh api "repos/$REPOSITORY/actions/runs/$EXPECTED_RUN_ID")"
+          jq -e \
+            --arg revision "$EXPECTED_REVISION" \
+            '.event == "push" and .head_branch == "main" and .head_sha == $revision and
+             .conclusion == "success" and .path == ".github/workflows/ci.yml"' \
+            <<<"$run_json" >/dev/null
+
+          jobs_json="$(gh api --paginate "repos/$REPOSITORY/actions/runs/$EXPECTED_RUN_ID/jobs?filter=latest&per_page=100")"
+          publisher_job_count="$(jq '[.jobs[] | select(.name == "Publish Docker images" and .conclusion == "success")] | length' <<<"$jobs_json")"
+          [[ "$publisher_job_count" == "1" ]] || exit 1
+
+          artifacts_json="$(gh api "repos/$REPOSITORY/actions/runs/$EXPECTED_RUN_ID/artifacts")"
+          artifact_name="release-evidence-container-images-$EXPECTED_RUN_ID"
+          artifact_count="$(jq --arg name "$artifact_name" '[.artifacts[] | select(.name == $name and .expired == false)] | length' <<<"$artifacts_json")"
+          [[ "$artifact_count" == "1" ]] || exit 1
+          observed_digest="$(jq -r --arg name "$artifact_name" '.artifacts[] | select(.name == $name and .expired == false) | .digest' <<<"$artifacts_json")"
+          [[ "$observed_digest" == "$EXPECTED_ARTIFACT_DIGEST" ]] || exit 1
+          artifact_id="$(jq -r --arg name "$artifact_name" '.artifacts[] | select(.name == $name and .expired == false) | .id' <<<"$artifacts_json")"
+          [[ "$artifact_id" =~ ^[1-9][0-9]*$ ]] || exit 1
+          printf 'observed_digest=%s\n' "$observed_digest" >>"$GITHUB_OUTPUT"
+          printf 'artifact_id=%s\n' "$artifact_id" >>"$GITHUB_OUTPUT"
+
+      - name: Download publisher evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          ARTIFACT_ID: ${{ steps.publisher.outputs.artifact_id }}
+          EXPECTED_ARTIFACT_DIGEST: ${{ inputs.artifact_digest }}
+          ARTIFACT_ARCHIVE: ${{ runner.temp }}/publisher-evidence.zip
+          EVIDENCE_DIR: ${{ runner.temp }}/publisher-evidence
+        run: |
+          gh api "repos/$REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip" >"$ARTIFACT_ARCHIVE"
+          printf '%s  %s\n' "${EXPECTED_ARTIFACT_DIGEST#sha256:}" "$ARTIFACT_ARCHIVE" |
+            sha256sum --check --strict --status
+          python3 - "$ARTIFACT_ARCHIVE" "$EVIDENCE_DIR" <<'PY'
+          import pathlib
+          import stat
+          import sys
+          import zipfile
+
+          archive = pathlib.Path(sys.argv[1])
+          target = pathlib.Path(sys.argv[2])
+          expected_name = "release-evidence-container-images.txt"
+          with zipfile.ZipFile(archive) as zipped:
+              members = zipped.infolist()
+              if len(members) != 1 or members[0].filename != expected_name:
+                  raise SystemExit("promotion artifact must contain exactly the expected evidence file")
+              mode = members[0].external_attr >> 16
+              if stat.S_ISLNK(mode) or members[0].file_size > 65536:
+                  raise SystemExit("promotion evidence member is unsafe")
+              target.mkdir(parents=True, exist_ok=True)
+              (target / expected_name).write_bytes(zipped.read(members[0]))
+          PY
+
+      - name: Verify and prepare digest-bound handoff
+        env:
+          PROMOTION_EVIDENCE: ${{ runner.temp }}/publisher-evidence/release-evidence-container-images.txt
+          PROMOTION_OUTPUT: ${{ runner.temp }}/production-image-handoff.txt
+          EXPECTED_REVISION: ${{ inputs.revision }}
+          EXPECTED_WORKFLOW_RUN_ID: ${{ inputs.publisher_run_id }}
+          EXPECTED_WORKFLOW: .github/workflows/ci.yml
+          EXPECTED_ARTIFACT_DIGEST: ${{ inputs.artifact_digest }}
+          OBSERVED_ARTIFACT_DIGEST: ${{ steps.publisher.outputs.observed_digest }}
+          API_IMAGE: ghcr.io/${{ github.repository_owner }}/runcalc-api
+          API_MIGRATE_IMAGE: ghcr.io/${{ github.repository_owner }}/runcalc-api-migrate
+          WEB_IMAGE: ghcr.io/${{ github.repository_owner }}/runcalc-web
+        run: bash scripts/src/verify-container-promotion.sh
+
+      - name: Retain approved immutable image handoff
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: production-image-handoff-${{ github.run_id }}
+          path: ${{ runner.temp }}/production-image-handoff.txt
+          if-no-files-found: error
+          retention-days: 14

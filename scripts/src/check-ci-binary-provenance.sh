@@ -97,6 +97,52 @@ check_published_container_contract() {
   fi
 }
 
+check_container_promotion_contract() {
+  local promotion_workflow="$workflow_dir/promote-production.yml"
+  local workflow_content
+
+  if [[ ! -f "$promotion_workflow" ]]; then
+    echo "::error file=$promotion_workflow::Digest-bound production promotion workflow is missing." >&2
+    failures=$((failures + 1))
+    return
+  fi
+
+  workflow_content="$(<"$promotion_workflow")"
+  for required_text in \
+    "workflow_dispatch:" \
+    "publisher_run_id:" \
+    "revision:" \
+    "artifact_digest:" \
+    "environment: production" \
+    "actions: read" \
+    "contents: read" \
+    'group: production-image-promotion' \
+    'cancel-in-progress: false' \
+    "publisher_job_count=\"\$(jq" \
+    'select(.name == "Publish Docker images" and .conclusion == "success")' \
+    "gh api \"repos/\$REPOSITORY/actions/artifacts/\$ARTIFACT_ID/zip\"" \
+    'sha256sum --check --strict --status' \
+    'len(members) != 1' \
+    "bash scripts/src/verify-container-promotion.sh"; do
+    if ! grep -Fq "$required_text" <<<"$workflow_content"; then
+      echo "::error file=$promotion_workflow::Production promotion is missing required digest-bound contract: $required_text" >&2
+      failures=$((failures + 1))
+    fi
+  done
+
+  if grep -Eq '^[[:space:]]+(pull_request|pull_request_target|push|workflow_run):' \
+    "$promotion_workflow"; then
+    echo "::error file=$promotion_workflow::Production promotion must remain manual-only." >&2
+    failures=$((failures + 1))
+  fi
+
+  if grep -Eq 'packages:[[:space:]]+write|contents:[[:space:]]+write' \
+    "$promotion_workflow"; then
+    echo "::error file=$promotion_workflow::Promotion verification must not gain package or repository write authority." >&2
+    failures=$((failures + 1))
+  fi
+}
+
 for workflow in "${workflow_files[@]}"; do
   # These patterns deliberately cover both the current release-download form
   # and common future forms. Package-manager installs and health/webhook curls
@@ -167,6 +213,7 @@ for workflow in "${workflow_files[@]}"; do
 done
 
 check_published_container_contract
+check_container_promotion_contract
 
 if (( failures > 0 )); then
   echo "CI binary/container provenance check failed with $failures issue(s)." >&2

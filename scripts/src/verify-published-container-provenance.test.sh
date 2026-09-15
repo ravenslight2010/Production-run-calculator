@@ -33,6 +33,8 @@ chmod +x "$FAKE_DOCKER"
 
 export PATH="${TEST_ROOT}:$PATH"
 export EXPECTED_REVISION=0123456789abcdef0123456789abcdef01234567
+export PRODUCER_WORKFLOW_RUN_ID=123456
+export PRODUCER_WORKFLOW=.github/workflows/ci.yml
 export PROVENANCE_REPORT="$REPORT"
 export API_IMAGE=ghcr.io/example/runcalc-api
 export API_MIGRATE_IMAGE=ghcr.io/example/runcalc-api-migrate
@@ -48,6 +50,8 @@ if ! PATH="${TEST_ROOT}:$PATH" \
 fi
 
 grep -Fq 'overall_status=pass' "$REPORT"
+grep -Fq 'schema_version=2' "$REPORT"
+grep -Fq 'producer_workflow_run_id=123456' "$REPORT"
 grep -Fq 'image_1_digest_verified=true' "$REPORT"
 grep -Fq 'image_3_revision_verified=true' "$REPORT"
 
