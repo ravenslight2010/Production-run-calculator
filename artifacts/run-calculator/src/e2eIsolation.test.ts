@@ -87,14 +87,16 @@ function directDatabaseQueries(source: string): Array<{
     ts.ScriptKind.TS,
   );
   const queries: Array<{ sql: ts.Expression | undefined; line: number }> = [];
-  const clientIdentifiers = postgresClientIdentifiers(sourceFile);
+  const { bindingsByScope, postgresClientBindings } = postgresClientBindingsFor(sourceFile);
 
   function visit(node: ts.Node): void {
     if (
       ts.isCallExpression(node)
       && ts.isPropertyAccessExpression(node.expression)
       && ts.isIdentifier(node.expression.expression)
-      && clientIdentifiers.has(node.expression.expression.text)
+      && postgresClientBindings.has(
+        resolveLexicalBinding(node.expression.expression, bindingsByScope),
+      )
       && node.expression.name.text === "query"
     ) {
       queries.push({
@@ -109,10 +111,29 @@ function directDatabaseQueries(source: string): Array<{
   return queries;
 }
 
-function postgresClientIdentifiers(sourceFile: ts.SourceFile): Set<string> {
+type LexicalBindings = Map<ts.Node, Map<string, ts.Declaration>>;
+
+function resolveLexicalBinding(
+  identifier: ts.Identifier,
+  bindingsByScope: LexicalBindings,
+): ts.Declaration | undefined {
+  for (let node: ts.Node | undefined = identifier; node; node = node.parent) {
+    const binding = bindingsByScope.get(node)?.get(identifier.text);
+    if (binding) {
+      return binding;
+    }
+  }
+  return undefined;
+}
+
+function postgresClientBindingsFor(sourceFile: ts.SourceFile): {
+  bindingsByScope: LexicalBindings;
+  postgresClientBindings: Set<ts.Declaration>;
+} {
   const clientTypeNames = new Set<string>();
   const clientConstructorNames = new Set<string>();
-  const clientIdentifiers = new Set<string>();
+  const bindingsByScope: LexicalBindings = new Map();
+  const postgresClientBindings = new Set<ts.Declaration>();
 
   for (const statement of sourceFile.statements) {
     if (
@@ -142,13 +163,56 @@ function postgresClientIdentifiers(sourceFile: ts.SourceFile): Set<string> {
     );
   }
 
+  function bindingScope(declaration: ts.Declaration): ts.Node {
+    if (
+      ts.isVariableDeclaration(declaration)
+      && ts.isVariableDeclarationList(declaration.parent)
+      && (declaration.parent.flags & ts.NodeFlags.BlockScoped) === 0
+    ) {
+      for (
+        let node: ts.Node | undefined = declaration.parent.parent.parent;
+        node;
+        node = node.parent
+      ) {
+        if (ts.isFunctionLike(node) || ts.isSourceFile(node)) {
+          return node;
+        }
+      }
+    }
+
+    for (let node: ts.Node | undefined = declaration.parent; node; node = node.parent) {
+      if (
+        ts.isBlock(node)
+        || ts.isSourceFile(node)
+        || ts.isFunctionLike(node)
+        || ts.isCatchClause(node)
+      ) {
+        return node;
+      }
+    }
+    return sourceFile;
+  }
+
+  function recordBinding(declaration: ts.Declaration, name: ts.Identifier): void {
+    const scope = bindingScope(declaration);
+    const bindings = bindingsByScope.get(scope) ?? new Map<string, ts.Declaration>();
+    bindings.set(name.text, declaration);
+    bindingsByScope.set(scope, bindings);
+  }
+
   function visit(node: ts.Node): void {
+    if (
+      (ts.isParameter(node) || ts.isVariableDeclaration(node))
+      && ts.isIdentifier(node.name)
+    ) {
+      recordBinding(node, node.name);
+    }
     if (
       ts.isParameter(node)
       && ts.isIdentifier(node.name)
       && isClientType(node.type)
     ) {
-      clientIdentifiers.add(node.name.text);
+      postgresClientBindings.add(node);
     }
     if (
       ts.isVariableDeclaration(node)
@@ -158,13 +222,13 @@ function postgresClientIdentifiers(sourceFile: ts.SourceFile): Set<string> {
       && ts.isIdentifier(node.initializer.expression)
       && clientConstructorNames.has(node.initializer.expression.text)
     ) {
-      clientIdentifiers.add(node.name.text);
+      postgresClientBindings.add(node);
     }
     ts.forEachChild(node, visit);
   }
   visit(sourceFile);
 
-  return clientIdentifiers;
+  return { bindingsByScope, postgresClientBindings };
 }
 
 describe("AuthorizedBrowserFixtures live fixture lock", () => {
@@ -410,6 +474,23 @@ describe("browser fixture SQL source guard", () => {
     expect(result.queries).toBe(1);
     expect(result.allowedIdentifiers).toContain("table");
     expect(result.violations).toEqual([]);
+  });
+
+  it("ignores non-PostgreSQL query objects that shadow Client bindings", () => {
+    const source = [
+      'import type { Client as PgClient } from "pg";',
+      "async function cleanup(connection: PgClient) {",
+      "  const username = \"fixture\";",
+      "  await connection.query(`DELETE FROM users WHERE username = '${username}'`);",
+      "  async function inspect(connection: { query(sql: string): Promise<void> }) {",
+      "    await connection.query(`LOG ${username}`);",
+      "  }",
+      "}",
+    ].join("\n");
+    const result = directSqlSourceViolations(source);
+
+    expect(result.queries).toBe(1);
+    expect(result.violations).toHaveLength(1);
   });
 });
 
