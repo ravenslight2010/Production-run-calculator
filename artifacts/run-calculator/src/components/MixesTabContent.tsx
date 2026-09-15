@@ -10,6 +10,8 @@ import { loadProfile, loadRunValues } from "../storage";
 import { DEFAULT_VALUES, type FormValues } from "../types";
 import { saveMixes } from "@/mixes";
 import { MixAlreadyMadeInput } from "./MixAlreadyMadeInput";
+import { MixSurplusStrip } from "./MixSurplusStrip";
+import { fetchMixSurplusLedger, type MixSurplusLedger } from "../mixSurplusClient";
 import { PrepMixMissingAmountsWarning } from "./PrepMixMissingAmountsWarning";
 
 // Memo'd Mix Plan panel extracted from home.tsx (refactor step 4b). Reads the
@@ -30,6 +32,11 @@ export default memo(function MixesTabContent() {
   useEffect(() => {
     void refreshMixPlanSnapshot(ctx.mixMakeDay);
   }, [ctx.mixMakeDay, mixesSignature]);
+
+  const [mixSurplusLedger, setMixSurplusLedger] = useState<MixSurplusLedger | null>(null);
+  useEffect(() => {
+    fetchMixSurplusLedger().then(setMixSurplusLedger).catch(() => {});
+  }, []);
   // Pre-blended mixes made ahead for a product. Pick a make-day; for every
   // scheduled run within a matching mix's days-early window, show per-product
   // cards with cases/pizzas, batches to make, total lbs, and a "Pull For Mix"
@@ -243,6 +250,8 @@ export default memo(function MixesTabContent() {
                                               onSaveAcknowledged={ctx.acknowledgeMixAlreadyMadeSave}
                                             />
                                           ) : null;
+
+                                        <MixSurplusStrip mixId={m.mixId} ledger={mixSurplusLedger} makeDay={ctx.mixMakeDay} canManage={ctx.canManageInventory} onLedgerChanged={setMixSurplusLedger} />
                                         })()}
                                         {m.notes && (
                                           <div className="text-[11px] text-emerald-400/70 italic mb-1.5">{m.notes}</div>
@@ -361,6 +370,7 @@ export default memo(function MixesTabContent() {
                                         ) : null;
                                       })()}
                                       <PrepMixMissingAmountsWarning entry={m} />
+                                      <MixSurplusStrip mixId={m.mixId} ledger={mixSurplusLedger} makeDay={ctx.mixMakeDay} canManage={ctx.canManageInventory} onLedgerChanged={setMixSurplusLedger} />
                                       {m.components.length > 0 && (
                                         <div className="space-y-1 pt-1 border-t border-violet-800/30">
                                           <p className="text-[11px] uppercase tracking-wider text-violet-400/70 font-semibold pt-1">Pull For Prep</p>
