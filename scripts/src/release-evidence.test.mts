@@ -29,6 +29,7 @@ import {
   PRODUCTION_AUDIT_WARNING_MS,
   PRODUCTION_DEPENDENCY_AUDIT_STEP,
   defaultReleaseEvidenceDir,
+  formatTypescript7TrendHistorySummary,
   formatReleaseReport,
   parseBrowserDurationRegressions,
   parseSourceLibraryPreflightDiagnostic,
@@ -1063,6 +1064,82 @@ async function run(): Promise<void> {
       expectedMode: "standard",
       expectedLabels: validLabels,
     }),
+  );
+  const missingHistory = {
+    state: "missing" as const,
+    distinctRevisionCount: 1,
+    incompatibleRunnerClassSamples: 0,
+  };
+  const resetHistory = {
+    state: "reset" as const,
+    distinctRevisionCount: 1,
+    incompatibleRunnerClassSamples: 2,
+  };
+  const retainedHistory = {
+    state: "retained" as const,
+    distinctRevisionCount: 3,
+    incompatibleRunnerClassSamples: 1,
+  };
+  assert.equal(
+    formatTypescript7TrendHistorySummary(resetHistory),
+    "TypeScript 7 trend history reset for this runner class: 2 incompatible prior sample(s) excluded (count capped at 5).",
+  );
+  assert.equal(
+    formatTypescript7TrendHistorySummary(missingHistory),
+    "TypeScript 7 trend history is missing: no valid prior samples were available.",
+  );
+  assert.equal(
+    formatTypescript7TrendHistorySummary(retainedHistory),
+    "TypeScript 7 trend history includes 2 compatible prior revision(s); 1 incompatible runner-class sample(s) excluded (count capped at 5).",
+  );
+  const retainedHistoryReport = formatReleaseReport(
+    validLabels.map((label) => ({
+      label,
+      status: "PASS" as const,
+      elapsedMs: 100,
+    })),
+    "standard",
+    new Set(),
+    {
+      revision: "current-revision",
+      environment: "disposable release test",
+      decision: "GO",
+      typescript7TrendHistory: retainedHistory,
+    },
+  );
+  assert.match(
+    retainedHistoryReport,
+    /^TypeScript 7 trend history includes 2 compatible prior revision\(s\); 1 incompatible runner-class sample\(s\) excluded \(count capped at 5\)\.$/m,
+  );
+  assert.doesNotMatch(
+    retainedHistoryReport,
+    /test-image|sensitive-model|[a-f0-9]{64}/,
+    "the retained summary must contain only bounded counts, not runner identifiers",
+  );
+  assert.doesNotThrow(() =>
+    validateReleaseReport(retainedHistoryReport, {
+      currentRevision: "current-revision",
+      expectedMode: "standard",
+      expectedLabels: validLabels,
+      expectedTypescript7TrendHistory: retainedHistory,
+    }),
+  );
+  assert.throws(
+    () =>
+      validateReleaseReport(
+        retainedHistoryReport.replace(
+          "TypeScript 7 trend history includes 2 compatible prior revision(s); 1 incompatible runner-class sample(s) excluded (count capped at 5).",
+          "TypeScript 7 trend history is missing: no valid prior samples were available.",
+        ),
+        {
+          currentRevision: "current-revision",
+          expectedMode: "standard",
+          expectedLabels: validLabels,
+          expectedTypescript7TrendHistory: retainedHistory,
+        },
+      ),
+    /disagrees with the retained comparison evidence/,
+    "summary validation must fail closed when Markdown disagrees with JSON evidence",
   );
   assert.throws(
     () =>

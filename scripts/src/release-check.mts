@@ -366,14 +366,34 @@ export const IMPORT_CORPUS_EVALUATION_EVIDENCE =
   "ai-evaluations/deterministic-import-corpus.json";
 export const TYPESCRIPT_7_COMPARISON_EVIDENCE =
   "typescript-7-comparison.json";
+export const TYPESCRIPT_7_HISTORY_LIMIT = 5;
 export const TYPESCRIPT_7_SUPPORTED_RUNNERS = [
   { platform: "linux", arch: "x64" },
 ] as const;
 
+export type Typescript7TrendHistorySummary = {
+  state: "reset" | "missing" | "retained";
+  distinctRevisionCount: number;
+  incompatibleRunnerClassSamples: number;
+};
+
+export function formatTypescript7TrendHistorySummary(
+  summary: Typescript7TrendHistorySummary,
+): string {
+  const compatiblePriorRevisions = summary.distinctRevisionCount - 1;
+  if (compatiblePriorRevisions > 0) {
+    return `TypeScript 7 trend history includes ${compatiblePriorRevisions} compatible prior revision(s); ${summary.incompatibleRunnerClassSamples} incompatible runner-class sample(s) excluded (count capped at ${TYPESCRIPT_7_HISTORY_LIMIT}).`;
+  }
+  if (summary.incompatibleRunnerClassSamples > 0) {
+    return `TypeScript 7 trend history reset for this runner class: ${summary.incompatibleRunnerClassSamples} incompatible prior sample(s) excluded (count capped at ${TYPESCRIPT_7_HISTORY_LIMIT}).`;
+  }
+  return "TypeScript 7 trend history is missing: no valid prior samples were available.";
+}
+
 export function validateTypescript7ComparisonEvidence(
   bytes: Buffer,
   expectedRevision: string,
-): void {
+): Typescript7TrendHistorySummary {
   let value: unknown;
   try {
     value = JSON.parse(bytes.toString("utf8"));
@@ -486,10 +506,10 @@ export function validateTypescript7ComparisonEvidence(
     resourceBudgets.maxCandidatePeakRssKiB !== 1_048_576 ||
     JSON.stringify(resourceBudgets.requiredModes) !==
       JSON.stringify(["cold", "warm"]) ||
-    trend?.historyLimit !== 5 ||
+    trend?.historyLimit !== TYPESCRIPT_7_HISTORY_LIMIT ||
     !Number.isInteger(trend.incompatibleRunnerClassSamples) ||
     Number(trend.incompatibleRunnerClassSamples) < 0 ||
-    Number(trend.incompatibleRunnerClassSamples) > 5 ||
+    Number(trend.incompatibleRunnerClassSamples) > TYPESCRIPT_7_HISTORY_LIMIT ||
     typeof trend?.distinctRevisionCount !== "number" ||
     !Array.isArray(trend.regressedRevisions) ||
     !Array.isArray(trend.revisionSamples) ||
@@ -731,6 +751,20 @@ export function validateTypescript7ComparisonEvidence(
       "TypeScript 7 advisory status is inconsistent with retained comparisons",
     );
   }
+  const distinctRevisionCount = Number(trend.distinctRevisionCount);
+  const incompatibleRunnerClassSamples = Number(
+    trend.incompatibleRunnerClassSamples,
+  );
+  return {
+    state:
+      distinctRevisionCount > 1
+        ? "retained"
+        : incompatibleRunnerClassSamples > 0
+          ? "reset"
+          : "missing",
+    distinctRevisionCount,
+    incompatibleRunnerClassSamples,
+  };
 }
 const IMPORT_CORPUS_EVALUATION_SOURCE = resolve(
   rootDir,
@@ -1843,20 +1877,21 @@ export async function verifyReleaseEvidence(
     options.expectedSourceLibraryEnvironment ?? sourceLibraryEnvironment;
   const expectedSourceLibraryRevision =
     options.expectedSourceLibraryRevision ?? revision;
+  const typescript7TrendHistory = validateTypescript7ComparisonEvidence(
+    await readFile(resolve(evidenceRoot, TYPESCRIPT_7_COMPARISON_EVIDENCE)),
+    revision,
+  );
   validateReleaseReport(report, {
     currentRevision: revision,
     expectedMode: options.expectedMode,
     expectedLabels: options.expectedLabels,
     expectedSourceLibraryEnvironment,
     expectedSourceLibraryRevision,
+    expectedTypescript7TrendHistory: typescript7TrendHistory,
   });
   validateReleaseAiEvaluationEvidence(
     await readFile(resolve(evidenceRoot, IMPORT_CORPUS_EVALUATION_EVIDENCE)),
     await importCorpusEvaluationRequirements(),
-  );
-  validateTypescript7ComparisonEvidence(
-    await readFile(resolve(evidenceRoot, TYPESCRIPT_7_COMPARISON_EVIDENCE)),
-    revision,
   );
   if (requiresSourceLibraryEvidence) {
     const sourceLibraryEvidence = await readFile(
@@ -2449,6 +2484,7 @@ export function validateReleaseReport(
     expectedLabels?: readonly string[];
     expectedSourceLibraryEnvironment?: SourceLibraryEvidenceEnvironment;
     expectedSourceLibraryRevision?: string;
+    expectedTypescript7TrendHistory?: Typescript7TrendHistorySummary;
   },
 ): void {
   const revision = report.match(/^Revision:\s*(\S+)\s*$/m)?.[1];
@@ -2475,6 +2511,22 @@ export function validateReleaseReport(
   }
   if (!decision) {
     throw new Error("Release report is malformed: missing GO/NO-GO decision.");
+  }
+  if (options.expectedTypescript7TrendHistory !== undefined) {
+    const summaries = [
+      ...report.matchAll(/^TypeScript 7 trend history.*$/gm),
+    ];
+    const expectedSummary = formatTypescript7TrendHistorySummary(
+      options.expectedTypescript7TrendHistory,
+    );
+    if (
+      summaries.length !== 1 ||
+      summaries[0]?.[0]?.trim() !== expectedSummary
+    ) {
+      throw new Error(
+        "Release report TypeScript trend history disagrees with the retained comparison evidence.",
+      );
+    }
   }
 
   const gateSection = report.split("## Gate results\n\n")[1]?.split("\n## ")[0];
@@ -2789,6 +2841,7 @@ export function formatReleaseReport(
     decision?: "GO" | "NO-GO";
     browserDurationRegressions?: readonly BrowserDurationRegression[];
     sourceLibraryPreflight?: SourceLibraryPreflightDiagnostic;
+    typescript7TrendHistory?: Typescript7TrendHistorySummary;
     expectedLabels?: readonly string[];
     timing?: ReleaseTiming;
     reportKind?: "retained" | "checkpoint";
@@ -2891,6 +2944,12 @@ export function formatReleaseReport(
       : sourceLibraryPreflight.failures
           .map((failure) => `${failure.check} (${failure.count})`)
           .join("; ");
+  const typescript7TrendHistory =
+    metadata.typescript7TrendHistory ?? {
+      state: "missing" as const,
+      distinctRevisionCount: 1,
+      incompatibleRunnerClassSamples: 0,
+    };
   const lines = [
     isCheckpoint
       ? "# Release Check Checkpoint — INCOMPLETE / NO-GO"
@@ -2916,6 +2975,7 @@ export function formatReleaseReport(
     }`,
     "Commands: listed in the gate results table below",
     `Evidence paths: ${releaseEvidenceDir}/ and retained files linked below`,
+    formatTypescript7TrendHistorySummary(typescript7TrendHistory),
     "",
     "## Gate results",
     "",
@@ -3083,11 +3143,19 @@ async function writeReleaseReport(
   if (metadata.reportKind !== "checkpoint") {
     availableEvidenceFiles.add(IMPORT_CORPUS_EVALUATION_EVIDENCE);
   }
+  let typescript7TrendHistory: Typescript7TrendHistorySummary | undefined;
   try {
-    await access(
-      resolve(rootDir, releaseEvidenceDir, TYPESCRIPT_7_COMPARISON_EVIDENCE),
+    const comparisonPath = resolve(
+      rootDir,
+      releaseEvidenceDir,
+      TYPESCRIPT_7_COMPARISON_EVIDENCE,
     );
+    await access(comparisonPath);
     availableEvidenceFiles.add(TYPESCRIPT_7_COMPARISON_EVIDENCE);
+    typescript7TrendHistory = validateTypescript7ComparisonEvidence(
+      await readFile(comparisonPath),
+      metadata.revision,
+    );
   } catch {
     // The retained evidence verifier reports the missing comparison artifact.
   }
@@ -3165,6 +3233,7 @@ async function writeReleaseReport(
             result.label === SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL,
         )?.sourceLibraryPreflight,
         browserDurationRegressions,
+        typescript7TrendHistory,
         timing: metadata.timing,
       },
     ),
