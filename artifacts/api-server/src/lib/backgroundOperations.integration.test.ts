@@ -38,6 +38,8 @@ let runDailyRollover: typeof import("../routes/sync")["runDailyRollover"];
 let runWebPushAlerts: typeof import("./webPush")["runWebPushAlerts"];
 let enqueueScheduledWebPushAlerts: typeof import("./webPush")["enqueueScheduledWebPushAlerts"];
 let ServerJobWorker: typeof import("./serverJobs")["ServerJobWorker"];
+let enqueueServerJob: typeof import("./serverJobs")["enqueueServerJob"];
+let registerServerJob: typeof import("./serverJobs")["registerServerJob"];
 let requestServerJobCancellation: typeof import("./serverJobs")["requestServerJobCancellation"];
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
@@ -108,6 +110,8 @@ beforeAll(async () => {
   runWebPushAlerts = webPushMod.runWebPushAlerts;
   enqueueScheduledWebPushAlerts = webPushMod.enqueueScheduledWebPushAlerts;
   ServerJobWorker = jobsMod.ServerJobWorker;
+  enqueueServerJob = jobsMod.enqueueServerJob;
+  registerServerJob = jobsMod.registerServerJob;
   requestServerJobCancellation = jobsMod.requestServerJobCancellation;
 
   killer = new pg.Client({ connectionString: testUrlString });
@@ -676,6 +680,66 @@ describe("background operation PostgreSQL reconnection", () => {
     expect(job).toMatchObject({ status: "cancelled", attempt: 0 });
     expect(await db.select().from(serverJobAttemptsTable)).toHaveLength(0);
     expect(await db.select().from(scheduledAlertRecordsTable)).toHaveLength(0);
+  });
+
+  it("keeps one cancelled outcome when a running handler ignores shutdown", async () => {
+    let markHandlerStarted!: () => void;
+    let releaseHandler!: () => void;
+    const handlerStarted = new Promise<void>((resolve) => { markHandlerStarted = resolve; });
+    const handlerRelease = new Promise<void>((resolve) => { releaseHandler = resolve; });
+    let alreadyEnteredSideEffects = 0;
+    registerServerJob("noncooperative-cancellation-test", {
+      capability: "review-incidents",
+      handler: async () => {
+        markHandlerStarted();
+        await handlerRelease;
+        // Cancellation cannot undo arbitrary work after handler code has begun.
+        // Protected scheduled handlers must check the supplied cancellation APIs
+        // before committing their own external or durable side effects.
+        alreadyEnteredSideEffects += 1;
+        return { shouldNotBecomeDurable: true };
+      },
+    });
+    const { job: queuedJob } = await enqueueServerJob({
+      scope: SCOPE,
+      actorId: "running-cancellation-actor",
+      type: "noncooperative-cancellation-test",
+      idempotencyKey: "running-cancellation",
+      input: {},
+    });
+
+    const workerRun = new ServerJobWorker("running-cancellation-worker").runOnce();
+    await handlerStarted;
+    const cancellation = await requestServerJobCancellation(queuedJob.id, SCOPE, queuedJob.actorId);
+    expect(cancellation).toMatchObject({
+      id: queuedJob.id,
+      status: "running",
+      cancelRequested: true,
+    });
+
+    releaseHandler();
+    await expect(workerRun).resolves.toBe(true);
+
+    // The lifecycle prevents a late handler result from becoming a successful
+    // durable outcome, but cooperative checks are the side-effect boundary.
+    expect(alreadyEnteredSideEffects).toBe(1);
+    const [job] = await db.select().from(serverJobsTable);
+    expect(job).toMatchObject({
+      id: queuedJob.id,
+      status: "cancelled",
+      cancelRequested: true,
+      attempt: 1,
+      result: null,
+    });
+    const attempts = await db.select().from(serverJobAttemptsTable);
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]).toMatchObject({
+      jobId: queuedJob.id,
+      attempt: 1,
+      workerId: "running-cancellation-worker",
+      outcome: "cancelled",
+      errorCode: null,
+    });
   });
 
   it("recovers expired final lease terminalization with one logical attempt", async () => {
