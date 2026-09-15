@@ -152,3 +152,4 @@
 - [Approved ingredient identities](approved-ingredient-identities.md) — owner-approved Chicken, Bacon, Cilantro, and Goat Cheese targets; keep ambiguous Spinach variants separate.
 - [Background DB recovery](background-db-recovery.md) — retry connection resets only for idempotent/lease-protected passes; sustained failures, not one reset, degrade readiness.
 - [Protected job effects](protected-job-effects.md) — cancellation-safe effects need a serialized commit boundary; long boundaries must renew the worker lease.
+- [Revision trend attribution](revision-trend-attribution.md) — classify each historical revision from its own measurements; inherited aggregate failures poison later trend samples.

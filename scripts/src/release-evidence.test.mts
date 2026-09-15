@@ -241,7 +241,7 @@ async function fixture(
                   diagnostics: [],
                 });
                 return {
-                schemaVersion: 1,
+                schemaVersion: 2,
                 sourceRevision: "current-revision",
                 status: "PASS",
                 authoritativeCompiler: "Version 6.0.3",
@@ -256,21 +256,32 @@ async function fixture(
                     arch: process.arch,
                   }],
                 },
-                commands: [{
-                  ...command("frozen-install"),
-                },
-                command("typescript-6-build"),
-                command("typescript-6-clean"),
-                command("typescript-7-build"),
-                ...checks.slice(1).flatMap((check) => [
-                  command(`typescript-6-${check}`),
-                  command(`typescript-7-${check}`),
-                ])],
-                performanceComparison: checks.map((check) => ({
-                  check,
+                commands: [command("frozen-install"), command("typescript-6-clean"),
+                  ...["cold", "warm"].flatMap((mode) => checks.flatMap((check) => [
+                    command(`typescript-6-${check}-${mode}`),
+                    command(`typescript-7-${check}-${mode}`),
+                  ]))],
+                performanceComparison: ["cold", "warm"].flatMap((mode) => checks.map((check) => ({
+                  check, mode,
                   elapsedMs: { baseline: 1, candidate: 1, delta: 0, ratio: 1 },
                   peakRssKiB: { baseline: 10, candidate: 10, delta: 0, ratio: 1 },
-                })),
+                }))),
+                resourceBudgets: {
+                  maxElapsedRatio: 1.25, maxPeakRssRatio: 1.25,
+                  maxCandidateElapsedMs: 60000, maxCandidatePeakRssKiB: 1048576,
+                  minimumRevisions: 3, requiredModes: ["cold", "warm"],
+                  approvedForPromotion: false,
+                },
+                trend: {
+                  historyLimit: 5, distinctRevisionCount: 1,
+                  regressedRevisions: [],
+                  revisionSamples: [{ sourceRevision: "current-revision", performanceComparison: [] }],
+                },
+                promotionAssessment: {
+                  eligible: false, thresholdApprovalRequired: true,
+                  repeatedEvidenceMet: false, resourceBudgetsMet: true,
+                  resourceRegressions: [],
+                },
                 diagnosticsEqual: true,
                 declarations: {
                   baseline: [{

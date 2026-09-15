@@ -6,6 +6,8 @@ import test from "node:test";
 import {
   declarationManifest,
   normalizeDiagnostics,
+  selectTypescript7HistoricalReports,
+  typescript7ResourceRegressions,
 } from "./compare-typescript-7.mts";
 import { validateTypescript7ComparisonEvidence } from "./release-check.mts";
 import {
@@ -96,7 +98,7 @@ test("retained comparison evidence is revision-bound and advisory", () => {
     diagnostics: [],
   });
   const evidence = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     sourceRevision: "a".repeat(40),
     status: "PASS",
     authoritativeCompiler: "Version 6.0.3",
@@ -110,19 +112,44 @@ test("retained comparison evidence is revision-bound and advisory", () => {
     },
     commands: [
       command("frozen-install"),
-      command("typescript-6-build"),
       command("typescript-6-clean"),
-      command("typescript-7-build"),
-      ...checks.slice(1).flatMap((check) => [
-        command(`typescript-6-${check}`),
-        command(`typescript-7-${check}`),
-      ]),
+      ...["cold", "warm"].flatMap((mode) =>
+        checks.flatMap((check) => [
+          command(`typescript-6-${check}-${mode}`),
+          command(`typescript-7-${check}-${mode}`),
+        ]),
+      ),
     ],
-    performanceComparison: checks.map((check) => ({
-      check,
-      elapsedMs: { baseline: 1, candidate: 1, delta: 0, ratio: 1 },
-      peakRssKiB: { baseline: 10, candidate: 10, delta: 0, ratio: 1 },
-    })),
+    performanceComparison: ["cold", "warm"].flatMap((mode) =>
+      checks.map((check) => ({
+        check,
+        mode,
+        elapsedMs: { baseline: 1, candidate: 1, delta: 0, ratio: 1 },
+        peakRssKiB: { baseline: 10, candidate: 10, delta: 0, ratio: 1 },
+      })),
+    ),
+    resourceBudgets: {
+      maxElapsedRatio: 1.25,
+      maxPeakRssRatio: 1.25,
+      maxCandidateElapsedMs: 60_000,
+      maxCandidatePeakRssKiB: 1_048_576,
+      minimumRevisions: 3,
+      requiredModes: ["cold", "warm"],
+      approvedForPromotion: false,
+    },
+    trend: {
+      historyLimit: 5,
+      distinctRevisionCount: 1,
+      regressedRevisions: [],
+      revisionSamples: [{ sourceRevision: "a".repeat(40), performanceComparison: [] }],
+    },
+    promotionAssessment: {
+      eligible: false,
+      thresholdApprovalRequired: true,
+      repeatedEvidenceMet: false,
+      resourceBudgetsMet: true,
+      resourceRegressions: [],
+    },
     diagnosticsEqual: true,
     declarations: {
       baseline: [{ path: "lib/example/dist/index.d.ts", sha256: "d".repeat(64) }],
@@ -159,7 +186,7 @@ test("retained comparison evidence is revision-bound and advisory", () => {
           diagnosticsEqual: false,
           acceptanceGatesMet: false,
           commands: evidence.commands.map((command) =>
-            command.name === "typescript-7-build"
+            command.name === "typescript-7-build-cold"
               ? { ...command, diagnostics: ["a.ts(1,1): error TS1: drift"] }
               : command,
           ),
@@ -176,7 +203,7 @@ test("retained comparison evidence is revision-bound and advisory", () => {
           JSON.stringify({
             ...evidence,
             commands: evidence.commands.map((command) =>
-              command.name === "typescript-7-build"
+              command.name === "typescript-7-build-cold"
                 ? { ...command, diagnostics: ["a.ts(1,1): error TS1: drift"] }
                 : command,
             ),
@@ -187,6 +214,47 @@ test("retained comparison evidence is revision-bound and advisory", () => {
     /diagnostic comparison/,
     "a false diagnostic-equality summary must fail closed",
   );
+  const regressedComparison = evidence.performanceComparison.map(
+    (comparison, index) =>
+      index === 0
+        ? {
+            ...comparison,
+            elapsedMs: {
+              baseline: 1,
+              candidate: 2,
+              delta: 1,
+              ratio: 2,
+            },
+          }
+        : comparison,
+  );
+  assert.doesNotThrow(
+    () =>
+      validateTypescript7ComparisonEvidence(
+        Buffer.from(
+          JSON.stringify({
+            ...evidence,
+            performanceComparison: regressedComparison,
+            commands: evidence.commands.map((command) =>
+              command.name === "typescript-7-build-cold"
+                ? { ...command, elapsedMs: 2 }
+                : command,
+            ),
+            promotionAssessment: {
+              ...evidence.promotionAssessment,
+              resourceBudgetsMet: false,
+              resourceRegressions: ["cold:build:elapsed"],
+            },
+            trend: {
+              ...evidence.trend,
+              regressedRevisions: ["a".repeat(40)],
+            },
+          }),
+        ),
+        "a".repeat(40),
+      ),
+    "resource regressions must be retained without making advisory evidence invalid",
+  );
   const declarationPath = "lib/example/dist/index.d.ts";
   assert.doesNotThrow(() =>
     validateTypescript7ComparisonEvidence(
@@ -196,7 +264,7 @@ test("retained comparison evidence is revision-bound and advisory", () => {
           status: "ADVISORY_DRIFT",
           acceptanceGatesMet: false,
           commands: evidence.commands.map((command) =>
-            command.name === "typescript-7-build"
+            command.name === "typescript-7-build-cold"
               ? { ...command, exitCode: 1 }
               : command,
           ),
@@ -210,5 +278,82 @@ test("retained comparison evidence is revision-bound and advisory", () => {
       "a".repeat(40),
     ),
     "a failed candidate build with no declarations must remain advisory",
+  );
+});
+
+test("history deduplicates revisions and evaluates each sample independently", () => {
+  const checks = [
+    "build",
+    "scripts",
+    "api-server",
+    "run-calculator",
+    "mockup-sandbox",
+    "ai-evaluation",
+    "corpus-harness",
+  ];
+  const measurements = (elapsedRatio = 1) =>
+    ["cold", "warm"].flatMap((mode) =>
+      checks.map((check) => ({
+        check,
+        mode,
+        elapsedMs: {
+          baseline: 10,
+          candidate: 10 * elapsedRatio,
+          delta: 10 * elapsedRatio - 10,
+          ratio: elapsedRatio,
+        },
+        peakRssKiB: {
+          baseline: 10,
+          candidate: 10,
+          delta: 0,
+          ratio: 1,
+        },
+      })),
+    );
+  const breachedRevision = "b".repeat(40);
+  const cleanRevision = "c".repeat(40);
+  const history = [
+    {
+      schemaVersion: 2,
+      sourceRevision: breachedRevision,
+      performanceComparison: measurements(2),
+      promotionAssessment: { resourceBudgetsMet: false },
+    },
+    {
+      schemaVersion: 2,
+      sourceRevision: cleanRevision,
+      performanceComparison: measurements(),
+      promotionAssessment: {
+        resourceBudgetsMet: false,
+        resourceRegressions: ["inherited-from-history"],
+      },
+    },
+    {
+      schemaVersion: 2,
+      sourceRevision: cleanRevision,
+      performanceComparison: measurements(),
+    },
+  ];
+  const selected = selectTypescript7HistoricalReports(
+    history,
+    "a".repeat(40),
+  );
+  assert.deepEqual(
+    selected.map((report) => report.sourceRevision),
+    [breachedRevision, cleanRevision],
+  );
+  assert.deepEqual(
+    typescript7ResourceRegressions(selected[0]?.performanceComparison),
+    ["cold:build:elapsed", "cold:scripts:elapsed", "cold:api-server:elapsed",
+      "cold:run-calculator:elapsed", "cold:mockup-sandbox:elapsed",
+      "cold:ai-evaluation:elapsed", "cold:corpus-harness:elapsed",
+      "warm:build:elapsed", "warm:scripts:elapsed", "warm:api-server:elapsed",
+      "warm:run-calculator:elapsed", "warm:mockup-sandbox:elapsed",
+      "warm:ai-evaluation:elapsed", "warm:corpus-harness:elapsed"],
+  );
+  assert.deepEqual(
+    typescript7ResourceRegressions(selected[1]?.performanceComparison),
+    [],
+    "a clean revision must not inherit an older aggregate regression",
   );
 });

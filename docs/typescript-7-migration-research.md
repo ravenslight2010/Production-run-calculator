@@ -242,9 +242,15 @@ The two builds typechecked successfully, but this research does not claim that a
 files are semantically identical. A production switch must either prove semantic
 equivalence and accept a reviewed baseline update, or wait for output compatibility.
 
-The timings are representative only. They were one warm-environment run per command and
-included different native/JavaScript compiler startup and caching behavior. They support a
-pilot but not a guaranteed speedup percentage.
+The original timings are representative only. The advisory release lane now captures one
+cold and one warm measurement for every TypeScript 6/7 comparison check and aggregates up
+to five prior successful, revision-bound CI artifacts. Promotion requires at least three
+distinct revisions. The provisional process budgets are a candidate elapsed-time ratio of
+at most 1.25, candidate peak-RSS ratio of at most 1.25, 60 seconds per candidate check, and
+1,048,576 KiB peak RSS per candidate process tree. These thresholds are intentionally
+marked unapproved: violations are reported as advisory regressions, and promotion remains
+ineligible if any retained revision breaches them or until maintainers explicitly approve
+the thresholds in code and documentation.
 
 ## Ecosystem readiness
 
@@ -306,7 +312,8 @@ Proceed only when:
   semantic-equivalence rule and an approved baseline update.
 - CI proves the native binary installs on every supported runner architecture.
 - Repeated measurements show the selected `--checkers`/`--builders` settings stay within
-  release memory/process budgets.
+  the documented cold/warm release memory/process budgets for at least three revisions,
+  and those thresholds have been explicitly approved.
 
 **Rollback:** return the native lane to advisory status; TypeScript 6 remains authoritative.
 

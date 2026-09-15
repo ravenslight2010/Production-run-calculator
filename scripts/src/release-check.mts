@@ -387,27 +387,23 @@ export function validateTypescript7ComparisonEvidence(
     "ai-evaluation",
     "corpus-harness",
   ];
-  const expectedPerformanceChecks = new Set(performanceChecks);
+  const expectedPerformanceChecks = new Set(
+    ["cold", "warm"].flatMap((mode) =>
+      performanceChecks.map((check) => `${mode}:${check}`),
+    ),
+  );
   const expectedCommands = new Set([
     "frozen-install",
-    "typescript-6-build",
     "typescript-6-clean",
-    "typescript-7-build",
-    "typescript-6-scripts",
-    "typescript-7-scripts",
-    "typescript-6-api-server",
-    "typescript-7-api-server",
-    "typescript-6-run-calculator",
-    "typescript-7-run-calculator",
-    "typescript-6-mockup-sandbox",
-    "typescript-7-mockup-sandbox",
-    "typescript-6-ai-evaluation",
-    "typescript-7-ai-evaluation",
-    "typescript-6-corpus-harness",
-    "typescript-7-corpus-harness",
+    ...["cold", "warm"].flatMap((mode) =>
+      performanceChecks.flatMap((check) => [
+        `typescript-6-${check}-${mode}`,
+        `typescript-7-${check}-${mode}`,
+      ]),
+    ),
   ]);
   if (
-    report.schemaVersion !== 1 ||
+    report.schemaVersion !== 2 ||
     report.sourceRevision !== expectedRevision ||
     report.authoritativeCompiler !== "Version 6.0.3" ||
     report.candidateCompiler !== "Version 7.0.2" ||
@@ -417,7 +413,7 @@ export function validateTypescript7ComparisonEvidence(
     !Array.isArray(report.commands) ||
     report.commands.length !== expectedCommands.size ||
     !Array.isArray(report.performanceComparison) ||
-    report.performanceComparison.length !== 7 ||
+    report.performanceComparison.length !== 14 ||
     runner?.platform !== process.platform ||
     runner?.arch !== process.arch ||
     runner?.supported !== true ||
@@ -435,6 +431,36 @@ export function validateTypescript7ComparisonEvidence(
   ) {
     throw new Error(
       "TypeScript 7 comparison evidence is stale, incomplete, or from an unsupported runner",
+    );
+  }
+  const resourceBudgets = report.resourceBudgets as
+    | Record<string, unknown>
+    | undefined;
+  const trend = report.trend as Record<string, unknown> | undefined;
+  const promotion = report.promotionAssessment as
+    | Record<string, unknown>
+    | undefined;
+  if (
+    resourceBudgets?.approvedForPromotion !== false ||
+    resourceBudgets.minimumRevisions !== 3 ||
+    resourceBudgets.maxElapsedRatio !== 1.25 ||
+    resourceBudgets.maxPeakRssRatio !== 1.25 ||
+    resourceBudgets.maxCandidateElapsedMs !== 60_000 ||
+    resourceBudgets.maxCandidatePeakRssKiB !== 1_048_576 ||
+    JSON.stringify(resourceBudgets.requiredModes) !==
+      JSON.stringify(["cold", "warm"]) ||
+    typeof trend?.distinctRevisionCount !== "number" ||
+    !Array.isArray(trend.regressedRevisions) ||
+    !Array.isArray(trend.revisionSamples) ||
+    trend.revisionSamples.length < 1 ||
+    promotion?.eligible !== false ||
+    promotion.thresholdApprovalRequired !== true ||
+    typeof promotion.repeatedEvidenceMet !== "boolean" ||
+    typeof promotion.resourceBudgetsMet !== "boolean" ||
+    !Array.isArray(promotion.resourceRegressions)
+  ) {
+    throw new Error(
+      "TypeScript 7 resource-budget evidence is stale or malformed",
     );
   }
   for (const command of report.commands) {
@@ -473,6 +499,7 @@ export function validateTypescript7ComparisonEvidence(
     const memory = item.peakRssKiB as Record<string, unknown> | undefined;
     if (
       typeof item.check !== "string" ||
+      (item.mode !== "cold" && item.mode !== "warm") ||
       typeof elapsed?.baseline !== "number" ||
       typeof elapsed?.candidate !== "number" ||
       typeof elapsed?.delta !== "number" ||
@@ -486,13 +513,17 @@ export function validateTypescript7ComparisonEvidence(
         "TypeScript 7 timing or peak-memory comparison is malformed",
       );
     }
-    if (!expectedPerformanceChecks.delete(item.check)) {
+    if (!expectedPerformanceChecks.delete(`${item.mode}:${item.check}`)) {
       throw new Error(
         "TypeScript 7 performance comparison is duplicated or unexpected",
       );
     }
-    const baseline = commandsByName.get(`typescript-6-${item.check}`);
-    const candidate = commandsByName.get(`typescript-7-${item.check}`);
+    const baseline = commandsByName.get(
+      `typescript-6-${item.check}-${item.mode}`,
+    );
+    const candidate = commandsByName.get(
+      `typescript-7-${item.check}-${item.mode}`,
+    );
     if (
       elapsed.baseline !== baseline?.elapsedMs ||
       elapsed.candidate !== candidate?.elapsedMs ||
@@ -522,6 +553,63 @@ export function validateTypescript7ComparisonEvidence(
   if (expectedPerformanceChecks.size !== 0) {
     throw new Error("TypeScript 7 performance comparison is incomplete");
   }
+  const expectedResourceRegressions = (
+    report.performanceComparison as Array<Record<string, unknown>>
+  ).flatMap((item) => {
+    const elapsed = item.elapsedMs as Record<string, number | null>;
+    const memory = item.peakRssKiB as Record<string, number | null>;
+    const failures: string[] = [];
+    if (
+      elapsed.ratio === null ||
+      elapsed.ratio > 1.25 ||
+      (elapsed.candidate as number) > 60_000
+    ) {
+      failures.push(`${item.mode}:${item.check}:elapsed`);
+    }
+    if (
+      memory.ratio === null ||
+      memory.ratio > 1.25 ||
+      memory.candidate === null ||
+      memory.candidate > 1_048_576
+    ) {
+      failures.push(`${item.mode}:${item.check}:peak-rss`);
+    }
+    return failures;
+  });
+  const revisionSamples = trend.revisionSamples as Array<
+    Record<string, unknown>
+  >;
+  const revisions = revisionSamples.map((sample) => sample.sourceRevision);
+  const distinctRevisions = new Set(revisions);
+  const regressedRevisions = trend.regressedRevisions as unknown[];
+  if (
+    revisionSamples.length > 6 ||
+    revisions.some((revision, index) => {
+      if (typeof revision !== "string") return true;
+      const isCurrent = index === revisions.length - 1;
+      return isCurrent
+        ? revision !== expectedRevision
+        : !/^[a-f0-9]{40}$/.test(revision);
+    }) ||
+    distinctRevisions.size !== revisionSamples.length ||
+    revisions.at(-1) !== expectedRevision ||
+    trend.distinctRevisionCount !== distinctRevisions.size ||
+    regressedRevisions.some(
+      (revision) =>
+        typeof revision !== "string" || !distinctRevisions.has(revision),
+    ) ||
+    promotion.repeatedEvidenceMet !== (distinctRevisions.size >= 3) ||
+    promotion.resourceBudgetsMet !==
+      (regressedRevisions.length === 0) ||
+    (expectedResourceRegressions.length > 0) !==
+      regressedRevisions.includes(expectedRevision) ||
+    JSON.stringify(promotion.resourceRegressions) !==
+      JSON.stringify(expectedResourceRegressions)
+  ) {
+    throw new Error(
+      "TypeScript 7 revision trend or resource assessment does not match measurements",
+    );
+  }
 
   const readManifest = (
     value: unknown,
@@ -550,7 +638,7 @@ export function validateTypescript7ComparisonEvidence(
     return byPath;
   };
   const baselineManifest = readManifest(declarations.baseline, "6");
-  const candidateBuild = commandsByName.get("typescript-7-build");
+  const candidateBuild = commandsByName.get("typescript-7-build-cold");
   const candidateManifest = readManifest(
     declarations.candidate,
     "7",
@@ -572,9 +660,16 @@ export function validateTypescript7ComparisonEvidence(
       "TypeScript declaration difference paths do not match the retained manifests",
     );
   }
-  const diagnosticsEqual = diagnosticsEqualForPairs(
-    report.commands as Array<{ name: string; diagnostics: string[] }>,
-    performanceChecks,
+  const diagnosticsEqual = ["cold", "warm"].every((mode) =>
+    diagnosticsEqualForPairs(
+      (report.commands as Array<{ name: string; diagnostics: string[] }>).map(
+        (command) => ({
+          ...command,
+          name: command.name.replace(`-${mode}`, ""),
+        }),
+      ),
+      performanceChecks,
+    ),
   );
   if (report.diagnosticsEqual !== diagnosticsEqual) {
     throw new Error(

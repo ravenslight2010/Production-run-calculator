@@ -25,6 +25,17 @@ type CommandEvidence = {
   diagnostics: string[];
 };
 
+export const TYPESCRIPT_7_RESOURCE_BUDGETS = {
+  maxElapsedRatio: 1.25,
+  maxPeakRssRatio: 1.25,
+  maxCandidateElapsedMs: 60_000,
+  maxCandidatePeakRssKiB: 1_048_576,
+  minimumRevisions: 3,
+  requiredModes: ["cold", "warm"] as const,
+  approvedForPromotion: false,
+} as const;
+export const TYPESCRIPT_7_HISTORY_LIMIT = 5;
+
 const comparedChecks = [
   "build",
   "scripts",
@@ -37,6 +48,82 @@ const comparedChecks = [
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(scriptDir, "../..");
 const supportedRunners = [{ platform: "linux", arch: "x64" }] as const;
+
+export function typescript7ResourceRegressions(
+  value: unknown,
+): string[] | null {
+  if (!Array.isArray(value) || value.length !== 14) return null;
+  const expected = new Set(
+    TYPESCRIPT_7_RESOURCE_BUDGETS.requiredModes.flatMap((mode) =>
+      comparedChecks.map((check) => `${mode}:${check}`),
+    ),
+  );
+  const failures: string[] = [];
+  for (const entry of value) {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      return null;
+    }
+    const item = entry as Record<string, unknown>;
+    const key = `${item.mode}:${item.check}`;
+    const elapsed = item.elapsedMs as Record<string, unknown> | undefined;
+    const memory = item.peakRssKiB as Record<string, unknown> | undefined;
+    if (
+      !expected.delete(key) ||
+      typeof elapsed?.candidate !== "number" ||
+      typeof elapsed.ratio !== "number" ||
+      typeof memory?.candidate !== "number" ||
+      typeof memory.ratio !== "number"
+    ) {
+      return null;
+    }
+    if (
+      elapsed.ratio > TYPESCRIPT_7_RESOURCE_BUDGETS.maxElapsedRatio ||
+      elapsed.candidate > TYPESCRIPT_7_RESOURCE_BUDGETS.maxCandidateElapsedMs
+    ) {
+      failures.push(`${key}:elapsed`);
+    }
+    if (
+      memory.ratio > TYPESCRIPT_7_RESOURCE_BUDGETS.maxPeakRssRatio ||
+      memory.candidate >
+        TYPESCRIPT_7_RESOURCE_BUDGETS.maxCandidatePeakRssKiB
+    ) {
+      failures.push(`${key}:peak-rss`);
+    }
+  }
+  return expected.size === 0 ? failures : null;
+}
+
+export function selectTypescript7HistoricalReports(
+  history: readonly unknown[],
+  currentRevision: string,
+): Array<Record<string, unknown>> {
+  const revisions = new Set([currentRevision]);
+  const selected: Array<Record<string, unknown>> = [];
+  for (const item of history) {
+    if (
+      item === null ||
+      typeof item !== "object" ||
+      Array.isArray(item) ||
+      (item as Record<string, unknown>).schemaVersion !== 2
+    ) {
+      continue;
+    }
+    const report = item as Record<string, unknown>;
+    const revision = report.sourceRevision;
+    if (
+      typeof revision !== "string" ||
+      !/^[a-f0-9]{40}$/.test(revision) ||
+      revisions.has(revision) ||
+      typescript7ResourceRegressions(report.performanceComparison) === null
+    ) {
+      continue;
+    }
+    revisions.add(revision);
+    selected.push(report);
+    if (selected.length >= TYPESCRIPT_7_HISTORY_LIMIT) break;
+  }
+  return selected;
+}
 
 export function normalizeDiagnostics(
   output: string,
@@ -233,7 +320,7 @@ async function main(): Promise<void> {
     );
 
     const buildArgs = ["--build", "--force", "--pretty", "false"];
-    commands.push(await run("typescript-6-build", process.execPath, [ts6, ...buildArgs], checkout));
+    commands.push(await run("typescript-6-build-cold", process.execPath, [ts6, ...buildArgs], checkout));
     const baselineDeclarations = await declarationManifest(checkout);
     const clean = await run(
       "typescript-6-clean",
@@ -247,7 +334,7 @@ async function main(): Promise<void> {
         "TypeScript 6 clean did not remove disposable declaration outputs.",
       );
     }
-    commands.push(await run("typescript-7-build", process.execPath, [ts7, ...buildArgs], checkout));
+    commands.push(await run("typescript-7-build-cold", process.execPath, [ts7, ...buildArgs], checkout));
     const candidateDeclarations = await declarationManifest(checkout);
 
     const projects = [
@@ -258,11 +345,19 @@ async function main(): Promise<void> {
       ["ai-evaluation", "lib/ai-evaluation/tsconfig.json"],
       ["corpus-harness", "lib/corpus-harness/tsconfig.json"],
     ] as const;
-    for (const [name, project] of projects) {
-      commands.push(
-        await run(`typescript-6-${name}`, process.execPath, [ts6, "-p", project, "--noEmit", "--pretty", "false"], checkout),
-        await run(`typescript-7-${name}`, process.execPath, [ts7, "-p", project, "--noEmit", "--pretty", "false"], checkout),
-      );
+    for (const mode of TYPESCRIPT_7_RESOURCE_BUDGETS.requiredModes) {
+      if (mode === "warm") {
+        commands.push(
+          await run("typescript-6-build-warm", process.execPath, [ts6, ...buildArgs], checkout),
+          await run("typescript-7-build-warm", process.execPath, [ts7, ...buildArgs], checkout),
+        );
+      }
+      for (const [name, project] of projects) {
+        commands.push(
+          await run(`typescript-6-${name}-${mode}`, process.execPath, [ts6, "-p", project, "--noEmit", "--pretty", "false"], checkout),
+          await run(`typescript-7-${name}-${mode}`, process.execPath, [ts7, "-p", project, "--noEmit", "--pretty", "false"], checkout),
+        );
+      }
     }
 
     const baselineByPath = new Map(
@@ -278,22 +373,29 @@ async function main(): Promise<void> {
     const changedDeclarations = declarationPaths.filter(
       (path) => baselineByPath.get(path) !== candidateByPath.get(path),
     );
-    const diagnosticsEqual = diagnosticsEqualForPairs(
-      commands,
-      comparedChecks,
+    const diagnosticsEqual = TYPESCRIPT_7_RESOURCE_BUDGETS.requiredModes.every(
+      (mode) =>
+        diagnosticsEqualForPairs(
+          commands.map((command) => ({
+            ...command,
+            name: command.name.replace(`-${mode}`, ""),
+          })),
+          comparedChecks,
+        ),
     );
-    const performanceComparison = comparedChecks.map((check) => {
+    const performanceComparison = TYPESCRIPT_7_RESOURCE_BUDGETS.requiredModes.flatMap((mode) => comparedChecks.map((check) => {
       const baseline = commands.find(
-        (command) => command.name === `typescript-6-${check}`,
+        (command) => command.name === `typescript-6-${check}-${mode}`,
       );
       const candidate = commands.find(
-        (command) => command.name === `typescript-7-${check}`,
+        (command) => command.name === `typescript-7-${check}-${mode}`,
       );
       if (!baseline || !candidate) {
         throw new Error(`Missing TypeScript 6/7 measurement pair for ${check}.`);
       }
       return {
         check,
+        mode,
         elapsedMs: {
           baseline: baseline.elapsedMs,
           candidate: candidate.elapsedMs,
@@ -318,7 +420,56 @@ async function main(): Promise<void> {
               : candidate.peakRssKiB / baseline.peakRssKiB,
         },
       };
-    });
+    }));
+    const resourceRegressions =
+      typescript7ResourceRegressions(performanceComparison) ??
+      ["current:malformed-resource-measurements"];
+    const historyPath = process.env.TYPESCRIPT_7_HISTORY_JSON;
+    let historicalReports: unknown[] = [];
+    if (historyPath) {
+      try {
+        const parsed: unknown = JSON.parse(await readFile(historyPath, "utf8"));
+        if (Array.isArray(parsed)) historicalReports = parsed;
+      } catch (error) {
+        console.warn(`Ignoring unreadable TypeScript 7 history: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    const historicalRevisions = selectTypescript7HistoricalReports(
+      historicalReports,
+      sourceRevision(),
+    );
+    const revisionSamples = [
+      ...historicalRevisions.map((item) => ({
+        sourceRevision: item.sourceRevision,
+        performanceComparison: item.performanceComparison,
+      })),
+      {
+        sourceRevision: sourceRevision(),
+        performanceComparison,
+      },
+    ];
+    const distinctRevisionCount = new Set(
+      revisionSamples.map((sample) => sample.sourceRevision),
+    ).size;
+    const regressedRevisions = [
+      ...historicalRevisions
+        .filter(
+          (item) =>
+            (typescript7ResourceRegressions(item.performanceComparison)?.length ??
+              0) > 0,
+        )
+        .map((item) => item.sourceRevision as string),
+      ...(resourceRegressions.length > 0 ? [sourceRevision()] : []),
+    ];
+    const promotionAssessment = {
+      eligible: false,
+      thresholdApprovalRequired:
+        !TYPESCRIPT_7_RESOURCE_BUDGETS.approvedForPromotion,
+      repeatedEvidenceMet:
+        distinctRevisionCount >= TYPESCRIPT_7_RESOURCE_BUDGETS.minimumRevisions,
+      resourceBudgetsMet: regressedRevisions.length === 0,
+      resourceRegressions,
+    };
     const advisoryPassed =
       platformSupported &&
       commands.every((command) => command.exitCode === 0) &&
@@ -330,7 +481,7 @@ async function main(): Promise<void> {
       changedDeclarations.length === 0;
 
     report = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       sourceRevision: sourceRevision(),
       status: advisoryPassed ? "PASS" : "ADVISORY_DRIFT",
       authoritativeCompiler: version(ts6),
@@ -343,6 +494,14 @@ async function main(): Promise<void> {
       },
       commands,
       performanceComparison,
+      resourceBudgets: TYPESCRIPT_7_RESOURCE_BUDGETS,
+      trend: {
+        historyLimit: TYPESCRIPT_7_HISTORY_LIMIT,
+        distinctRevisionCount,
+        regressedRevisions,
+        revisionSamples,
+      },
+      promotionAssessment,
       diagnosticsEqual,
       declarations: {
         baseline: baselineDeclarations,
