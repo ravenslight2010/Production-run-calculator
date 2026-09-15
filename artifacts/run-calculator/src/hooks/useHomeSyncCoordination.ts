@@ -25,7 +25,7 @@ type SseConnection = {
    * Returns true only after an initial frame has established Home's canonical
    * baseline. Reset/rollover frames and failed handlers must return false.
    */
-  onMessage: (event: MessageEvent) => boolean | Promise<boolean>;
+  onMessage: (event: MessageEvent, clientDate: string) => boolean | Promise<boolean>;
   onError: () => void;
   onInitialBaseline: (shouldPush: boolean) => void;
   onClose: () => void;
@@ -184,38 +184,71 @@ export function useHomeSyncCoordination() {
   } | null>(null);
 
   const connectSse = useCallback((connection: SseConnection) => {
-    syncBaselineGateRef.current.beginConnection();
-    const snapshot = connection.getSnapshot();
-    const url = snapshot
-      ? `/api/sync/events?clientId=${connection.clientId}&today=${todayStr()}&snapshot=${snapshot}`
-      : `/api/sync/events?clientId=${connection.clientId}&today=${todayStr()}`;
-    const source = new EventSource(url);
+    let closed = false;
+    let streamDate = todayStr();
+    let source: EventSource | null = null;
     let messageChain = Promise.resolve();
-    source.onopen = connection.onOpen;
-    source.onmessage = (event) => {
-      messageChain = messageChain.then(async () => {
-        const baselineAccepted = await connection.onMessage(event);
-        try {
-          if (
-            baselineAccepted &&
-            (JSON.parse(event.data as string) as { initial?: boolean }).initial
-          ) {
-            connection.onInitialBaseline(syncBaselineGateRef.current.completeInitialSnapshot());
-          }
-        } catch {
-          // Home's callback preserves its existing malformed-frame tolerance.
-        }
-      });
-    };
-    source.onerror = () => {
+
+    const open = (clientDate: string) => {
+      if (closed) return;
+      streamDate = clientDate;
       syncBaselineGateRef.current.beginConnection();
-      connection.onError();
-      const request = foregroundRecoveryRequestRef.current;
-      if (request) void request();
-      else foregroundRecoveryRequestPendingRef.current = true;
+      const snapshot = connection.getSnapshot();
+      const url = snapshot
+        ? `/api/sync/events?clientId=${connection.clientId}&today=${clientDate}&snapshot=${snapshot}`
+        : `/api/sync/events?clientId=${connection.clientId}&today=${clientDate}`;
+      const nextSource = new EventSource(url);
+      source = nextSource;
+      nextSource.onopen = () => {
+        if (closed || source !== nextSource || streamDate !== todayStr()) return;
+        connection.onOpen();
+      };
+      nextSource.onmessage = (event) => {
+        // EventSource can deliver a queued callback after close(). Do not let
+        // that old-date frame enter Home while the new stream is connecting.
+        if (closed || source !== nextSource || clientDate !== todayStr()) return;
+        messageChain = messageChain.then(async () => {
+          if (closed || source !== nextSource || clientDate !== todayStr()) return;
+          const baselineAccepted = await connection.onMessage(event, clientDate);
+          if (closed || source !== nextSource || clientDate !== todayStr()) return;
+          try {
+            if (
+              baselineAccepted &&
+              (JSON.parse(event.data as string) as { initial?: boolean }).initial
+            ) {
+              connection.onInitialBaseline(syncBaselineGateRef.current.completeInitialSnapshot());
+            }
+          } catch {
+            // Home's callback preserves its existing malformed-frame tolerance.
+          }
+        });
+      };
+      nextSource.onerror = () => {
+        if (closed || source !== nextSource) return;
+        syncBaselineGateRef.current.beginConnection();
+        connection.onError();
+        const request = foregroundRecoveryRequestRef.current;
+        if (request) void request();
+        else foregroundRecoveryRequestPendingRef.current = true;
+      };
     };
+
+    const reconnectForDateChange = () => {
+      const nextDate = todayStr();
+      if (closed || nextDate === streamDate) return;
+      const previousSource = source;
+      source = null;
+      previousSource?.close();
+      open(nextDate);
+    };
+
+    open(streamDate);
+    const dateCheck = setInterval(reconnectForDateChange, 60_000);
     return () => {
-      source.close();
+      closed = true;
+      clearInterval(dateCheck);
+      source?.close();
+      source = null;
       connection.onClose();
     };
   }, []);

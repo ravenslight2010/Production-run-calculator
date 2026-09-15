@@ -9208,8 +9208,12 @@ export default function Home() {
       // frame below either releases the baseline queue or remains fenced by
       // the foreground adoption barrier.
     },
-    onMessage: async (e: MessageEvent) => {
+    onMessage: async (e: MessageEvent, streamDate: string) => {
       try {
+        // The coordination hook fences late callbacks from a closed stream,
+        // but keep the date boundary here too so a frame cannot cross
+        // midnight while its async snapshot check is in flight.
+        if (streamDate !== todayStr()) return false;
         const msg = JSON.parse(e.data as string) as {
           data?: SyncPayload | null;
           completeness?: "complete";
@@ -9250,6 +9254,7 @@ export default function Home() {
             || !isValidSyncSnapshotId(msg.snapshotId)
             || !await syncPayloadMatchesSnapshot(msg.data, msg.snapshotId)
           ) return false;
+          if (streamDate !== todayStr()) return false;
           if (foregroundSyncBarrierRef.current) return false;
         } else if (msg.initial) {
           return false;

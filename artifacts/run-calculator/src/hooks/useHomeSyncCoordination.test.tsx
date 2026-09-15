@@ -79,6 +79,63 @@ describe("useHomeSyncCoordination", () => {
     expect(source.close).toHaveBeenCalledTimes(1);
   });
 
+  it("reconnects with the new local date and ignores late frames from yesterday", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-14T23:59:59Z"));
+    const { result, unmount } = renderHook(() => useHomeSyncCoordination());
+    const onMessage = vi.fn<(event: MessageEvent, clientDate: string) => boolean>()
+      .mockReturnValue(true);
+
+    let disconnect!: () => void;
+    act(() => {
+      disconnect = result.current.connectSse({
+        clientId: "client-a",
+        getSnapshot: () => "",
+        onOpen: vi.fn(),
+        onMessage,
+        onError: vi.fn(),
+        onInitialBaseline: vi.fn(),
+        onClose: vi.fn(),
+      });
+    });
+
+    const yesterdaySource = MockEventSource.instances[0]!;
+    expect(yesterdaySource.url).toContain("today=2026-09-14");
+
+    vi.setSystemTime(new Date("2026-09-15T00:00:01Z"));
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+      await Promise.resolve();
+    });
+
+    const todaySource = MockEventSource.instances[1]!;
+    expect(yesterdaySource.close).toHaveBeenCalledTimes(1);
+    expect(todaySource.url).toContain("today=2026-09-15");
+
+    await act(async () => {
+      yesterdaySource.emit({ initial: true });
+      await Promise.resolve();
+    });
+    expect(onMessage).not.toHaveBeenCalled();
+
+    await act(async () => {
+      todaySource.emit({ initial: true });
+      await Promise.resolve();
+    });
+    expect(onMessage).toHaveBeenCalledWith(
+      expect.anything(),
+      "2026-09-15",
+    );
+
+    act(() => {
+      disconnect();
+      unmount();
+    });
+    vi.advanceTimersByTime(120_000);
+    expect(MockEventSource.instances).toHaveLength(2);
+    vi.useRealTimers();
+  });
+
   it("routes an SSE drop through the foreground recovery owner", async () => {
     const { result } = renderHook(() => useHomeSyncCoordination());
     const recover = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
