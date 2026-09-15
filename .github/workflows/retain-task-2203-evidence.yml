@@ -43,10 +43,25 @@ jobs:
             ["27d", "27dcd1a87facdd8b17d2801ccf4ee6fd8251c2d6"],
             ["08e", "08ec2e4d338935aee3511ac8ce0b1aedbfec239d"],
           ];
+          function findReport(directory) {
+            for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+              const candidate = path.join(directory, entry.name);
+              if (entry.isDirectory()) {
+                const nested = findReport(candidate);
+                if (nested) return nested;
+              } else if (entry.name === "typescript-7-comparison.json") {
+                return candidate;
+              }
+            }
+            return null;
+          }
           const output = "docs/evidence/typescript-7";
           fs.mkdirSync(output, { recursive: true });
           for (const [short, revision] of samples) {
-            const source = `/tmp/ts7-evidence/${short}/typescript-7-comparison.json`;
+            const source = findReport(`/tmp/ts7-evidence/${short}`);
+            if (!source) {
+              throw new Error(`Missing TypeScript 7 CI report for ${revision}`);
+            }
             const report = JSON.parse(fs.readFileSync(source, "utf8"));
             if (
               report.schemaVersion !== 3 ||
