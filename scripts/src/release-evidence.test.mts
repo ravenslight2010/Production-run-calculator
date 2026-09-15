@@ -30,6 +30,7 @@ import {
   defaultReleaseEvidenceDir,
   formatReleaseReport,
   parseBrowserDurationRegressions,
+  parseSourceLibraryPreflightDiagnostic,
   releaseConcurrencyLimit,
   releaseGateLabelsForMode,
   releaseStepDependencies,
@@ -499,6 +500,104 @@ async function run(): Promise<void> {
     SOURCE_LIBRARY_RECONCILIATION_FIXTURE_STEP.args.includes("--preflight"),
     false,
     "disposable CI must retain the focused fixture verifier instead",
+  );
+  const approvedPreflight = parseSourceLibraryPreflightDiagnostic(
+    `${JSON.stringify({
+      verifier: "source-library-reconciliation-preflight",
+      database: "approved-matching",
+      expected: { poolRows: 68, aliases: 25 },
+      observed: {
+        poolRows: 68,
+        aliasesExact: 25,
+        aliasesMissing: 0,
+        aliasesMismatched: 0,
+        markerPresent: true,
+        markerValid: true,
+      },
+      failures: [],
+      ok: true,
+      components: [{ ingredient: "must not be retained" }],
+      aliases: [{ old: "must not be retained" }],
+    })}\n`,
+  );
+  assert.deepEqual(approvedPreflight, {
+    database: "approved-matching",
+    expected: { poolRows: 68, aliases: 25 },
+    observed: {
+      poolRows: 68,
+      aliasesExact: 25,
+      aliasesMissing: 0,
+      aliasesMismatched: 0,
+      markerPresent: true,
+      markerValid: true,
+    },
+    failures: [],
+    ok: true,
+  });
+  assert.doesNotMatch(
+    JSON.stringify(approvedPreflight),
+    /ingredient|must not be retained/,
+    "release diagnostics must not retain recipe payloads or alias identities",
+  );
+  const partialPreflight = parseSourceLibraryPreflightDiagnostic(
+    `${JSON.stringify({
+      verifier: "source-library-reconciliation-preflight",
+      database: "partial-fixture",
+      expected: { poolRows: 68, aliases: 25 },
+      observed: {
+        poolRows: 21,
+        aliasesExact: 25,
+        aliasesMissing: 0,
+        aliasesMismatched: 0,
+        markerPresent: true,
+        markerValid: true,
+      },
+      failures: [{ check: "databaseShape", count: 47 }],
+      ok: false,
+    })}\n`,
+  );
+  assert.equal(partialPreflight.database, "partial-fixture");
+  assert.deepEqual(partialPreflight.failures, [
+    { check: "databaseShape", count: 47 },
+  ]);
+  const unverifiedPreflight = parseSourceLibraryPreflightDiagnostic(
+    "verifier failed before producing JSON",
+  );
+  assert.equal(unverifiedPreflight.database, "unverified");
+  assert.deepEqual(unverifiedPreflight.failures, [
+    { check: "output", count: 1 },
+  ]);
+  const preflightReport = formatReleaseReport(
+    [
+      {
+        label: SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL,
+        status: "PASS",
+        elapsedMs: 100,
+      },
+    ],
+    "standard",
+    new Set(),
+    {
+      revision: "current-revision",
+      environment: "disposable release test",
+      decision: "NO-GO",
+      sourceLibraryPreflight: approvedPreflight,
+      expectedLabels: [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL],
+    },
+  );
+  assert.match(
+    preflightReport,
+    /## Source-library preflight diagnostics[\s\S]*Database shape: approved-matching/,
+  );
+  assert.match(preflightReport, /Expected pool rows: 68; observed: 68/);
+  assert.match(
+    preflightReport,
+    /Diagnostic only: full source-library reconciliation verification remains required for retained evidence\./,
+  );
+  assert.doesNotMatch(
+    preflightReport,
+    /must not be retained|ingredient/,
+    "release reports must not copy preflight payload fields",
   );
   assert.ok(
     releaseGateLabelsForMode("standard").includes(

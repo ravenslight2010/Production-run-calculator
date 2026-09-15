@@ -24,7 +24,9 @@ import {
   DEFAULT_REPORT,
   computeSourceLibraryEvidenceId,
   parseSourceLibraryEvidenceEnvironment,
+  summarizeSourceLibraryPreflight,
   type SourceLibraryEvidenceEnvironment,
+  type SourceLibraryPreflightDiagnostic,
 } from "./verify-source-library-reconciliation.mts";
 import {
   REPORT_KEY_ROTATION_PREFLIGHT_VERIFIER,
@@ -105,6 +107,7 @@ export type ReleaseStepResult = {
   status: StepStatus;
   elapsedMs: number;
   blockedBy?: readonly string[];
+  sourceLibraryPreflight?: SourceLibraryPreflightDiagnostic;
 };
 
 export type ReleaseStageTiming = {
@@ -2275,6 +2278,47 @@ export function runStep(
   });
 }
 
+const unverifiedSourceLibraryPreflight = (
+  check: string,
+): SourceLibraryPreflightDiagnostic => ({
+  database: "unverified",
+  expected: { poolRows: 0, aliases: 0 },
+  observed: {
+    poolRows: 0,
+    aliasesExact: 0,
+    aliasesMissing: 0,
+    aliasesMismatched: 0,
+    markerPresent: false,
+    markerValid: false,
+  },
+  failures: [{ check, count: 1 }],
+  ok: false,
+});
+
+/**
+ * Extract only the bounded preflight summary from a verifier step's output.
+ * The raw subprocess output remains in the transient release log only; the
+ * checkpoint and report receive this sanitized diagnostic.
+ */
+export function parseSourceLibraryPreflightDiagnostic(
+  output: string | undefined,
+): SourceLibraryPreflightDiagnostic {
+  if (output !== undefined) {
+    for (const line of output.trim().split(/\r?\n/u).reverse()) {
+      if (!line.trim().startsWith("{")) continue;
+      try {
+        const summary = summarizeSourceLibraryPreflight(JSON.parse(line));
+        if (summary !== undefined) return summary;
+      } catch {
+        // Continue looking for the verifier's final JSON line.
+      }
+    }
+  }
+  return unverifiedSourceLibraryPreflight(
+    output === undefined || output.trim() === "" ? "not-run" : "output",
+  );
+}
+
 export function formatReleaseReport(
   results: ReleaseStepResult[],
   mode: "standard" | "full" = fullRun ? "full" : "standard",
@@ -2287,6 +2331,7 @@ export function formatReleaseReport(
     deployedRevision?: string;
     decision?: "GO" | "NO-GO";
     browserDurationRegressions?: readonly BrowserDurationRegression[];
+    sourceLibraryPreflight?: SourceLibraryPreflightDiagnostic;
     expectedLabels?: readonly string[];
     timing?: ReleaseTiming;
     reportKind?: "retained" | "checkpoint";
@@ -2374,6 +2419,21 @@ export function formatReleaseReport(
           ),
           "",
         ];
+  const sourceLibraryPreflight =
+    metadata.sourceLibraryPreflight ??
+    unverifiedSourceLibraryPreflight("not-run");
+  const preflightMarker =
+    sourceLibraryPreflight.observed.markerPresent
+      ? sourceLibraryPreflight.observed.markerValid
+        ? "present and valid"
+        : "present but invalid"
+      : "not present";
+  const preflightFailures =
+    sourceLibraryPreflight.failures.length === 0
+      ? "none"
+      : sourceLibraryPreflight.failures
+          .map((failure) => `${failure.check} (${failure.count})`)
+          .join("; ");
   const lines = [
     isCheckpoint
       ? "# Release Check Checkpoint — INCOMPLETE / NO-GO"
@@ -2414,6 +2474,15 @@ export function formatReleaseReport(
     "## Timing",
     "",
     ...timingLines,
+    "## Source-library preflight diagnostics",
+    "",
+    `Database shape: ${sourceLibraryPreflight.database}`,
+    `Expected pool rows: ${sourceLibraryPreflight.expected.poolRows}; observed: ${sourceLibraryPreflight.observed.poolRows}`,
+    `Expected aliases: ${sourceLibraryPreflight.expected.aliases}; exact: ${sourceLibraryPreflight.observed.aliasesExact}; missing: ${sourceLibraryPreflight.observed.aliasesMissing}; mismatched: ${sourceLibraryPreflight.observed.aliasesMismatched}`,
+    `Heal marker: ${preflightMarker}`,
+    `Failure names: ${preflightFailures}`,
+    "Diagnostic only: full source-library reconciliation verification remains required for retained evidence.",
+    "",
     "## Preview evidence",
     "",
     cleanStartResult === undefined || cleanStartResult.status === "NOT REACHED"
@@ -2622,6 +2691,10 @@ async function writeReleaseReport(
           (sourceLibraryEnvironment === "release"
             ? metadata.sourceLibraryRevision
             : undefined),
+        sourceLibraryPreflight: results.find(
+          (result) =>
+            result.label === SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL,
+        )?.sourceLibraryPreflight,
         browserDurationRegressions,
         timing: metadata.timing,
       },
@@ -3092,6 +3165,12 @@ async function main(): Promise<void> {
                 passed: exitCode === 0,
                 status,
                 elapsedMs,
+                ...(step.label === SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL
+                  ? {
+                      sourceLibraryPreflight:
+                        parseSourceLibraryPreflightDiagnostic(output),
+                    }
+                  : {}),
               };
             } catch (error) {
               console.error(
@@ -3104,6 +3183,12 @@ async function main(): Promise<void> {
                 passed: false,
                 status: "INFRASTRUCTURE ERROR",
                 elapsedMs: 0,
+                ...(step.label === SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL
+                  ? {
+                      sourceLibraryPreflight:
+                        unverifiedSourceLibraryPreflight("output"),
+                    }
+                  : {}),
               };
               stageLogs.set(step.label, "");
             }

@@ -536,6 +536,93 @@ export type SourceLibraryPreflightOutput = {
   ok: boolean;
 };
 
+export type SourceLibraryPreflightDiagnostic = {
+  database: SourceLibraryPreflightOutput["database"];
+  expected: SourceLibraryPreflightOutput["expected"];
+  observed: SourceLibraryPreflightOutput["observed"];
+  failures: Array<{ check: string; count: number }>;
+  ok: boolean;
+};
+
+const PREFLIGHT_DIAGNOSTIC_MAX_COUNT = 1_000_000;
+const PREFLIGHT_DIAGNOSTIC_MAX_FAILURES = 20;
+
+function boundedPreflightDiagnosticCount(value: unknown): value is number {
+  return (
+    isFiniteNumber(value) &&
+    Number.isInteger(value) &&
+    value >= 0 &&
+    value <= PREFLIGHT_DIAGNOSTIC_MAX_COUNT
+  );
+}
+
+/**
+ * Reduce preflight output to operator-safe diagnostics.
+ *
+ * Release checkpoints may outlive the process that produced them, so they
+ * must not retain the verifier's JSON payload. Keep only the database-shape
+ * classification, bounded counts, marker state, and bounded failure names.
+ */
+export function summarizeSourceLibraryPreflight(
+  value: unknown,
+): SourceLibraryPreflightDiagnostic | undefined {
+  if (
+    !isRecord(value) ||
+    value.verifier !== "source-library-reconciliation-preflight" ||
+    (value.database !== "approved-matching" &&
+      value.database !== "partial-fixture" &&
+      value.database !== "unverified") ||
+    !isRecord(value.expected) ||
+    !isRecord(value.observed) ||
+    !Array.isArray(value.failures) ||
+    typeof value.ok !== "boolean" ||
+    !boundedPreflightDiagnosticCount(value.expected.poolRows) ||
+    !boundedPreflightDiagnosticCount(value.expected.aliases) ||
+    !boundedPreflightDiagnosticCount(value.observed.poolRows) ||
+    !boundedPreflightDiagnosticCount(value.observed.aliasesExact) ||
+    !boundedPreflightDiagnosticCount(value.observed.aliasesMissing) ||
+    !boundedPreflightDiagnosticCount(value.observed.aliasesMismatched) ||
+    typeof value.observed.markerPresent !== "boolean" ||
+    typeof value.observed.markerValid !== "boolean"
+  ) {
+    return undefined;
+  }
+
+  const failures = value.failures
+    .slice(0, PREFLIGHT_DIAGNOSTIC_MAX_FAILURES)
+    .flatMap((failure) => {
+      if (
+        !isRecord(failure) ||
+        typeof failure.check !== "string" ||
+        !/^[A-Za-z0-9_-]{1,80}$/u.test(failure.check) ||
+        !boundedPreflightDiagnosticCount(failure.count)
+      ) {
+        return [];
+      }
+      return [{ check: failure.check, count: failure.count }];
+    });
+
+  if (failures.length !== value.failures.length) return undefined;
+
+  return {
+    database: value.database,
+    expected: {
+      poolRows: value.expected.poolRows,
+      aliases: value.expected.aliases,
+    },
+    observed: {
+      poolRows: value.observed.poolRows,
+      aliasesExact: value.observed.aliasesExact,
+      aliasesMissing: value.observed.aliasesMissing,
+      aliasesMismatched: value.observed.aliasesMismatched,
+      markerPresent: value.observed.markerPresent,
+      markerValid: value.observed.markerValid,
+    },
+    failures,
+    ok: value.ok,
+  };
+}
+
 async function selectPoolIds(
   query: ReadOnlyQuery,
   table: RecipeTable,
