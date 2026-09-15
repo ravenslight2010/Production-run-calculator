@@ -32,7 +32,7 @@
 // See also: §6 of .agents/skills/sync-invariant-check/SKILL.md
 import fs from "fs";
 import path from "path";
-import ts from "typescript";
+import ts from "@workspace/typescript-api-v6";
 import { describe, expect, it } from "vitest";
 import {
   FACTORY_SPEED_ADJUSTMENT_BASELINE,

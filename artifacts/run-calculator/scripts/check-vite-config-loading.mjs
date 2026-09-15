@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import ts from "typescript";
+import ts from "@workspace/typescript-api-v6";
 import { loadConfigFromFile } from "vite";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));

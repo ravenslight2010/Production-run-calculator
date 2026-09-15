@@ -264,10 +264,25 @@ Do not start until Microsoft publishes a stable TypeScript 7 API and migration g
 Classify each of the seven consumers against that API. Consumers without a stable
 replacement must stay in a TypeScript 6-isolated package or process.
 
+The programmatic consumers import `@workspace/typescript-api-v6`, not `typescript`
+directly. That boundary resolves the exact alias `typescript-api-v6@npm:typescript@6.0.3`
+and asserts both the runtime API version and resolved package metadata. This keeps source
+parsing, traversal, diagnostics, and transpilation on the repository's validated 6.0.3 API
+without constraining which separately named binary supplies the TypeScript 7 CLI.
+
+Run `pnpm run check:typescript-api-v6` to verify the JavaScript API boundary and reject new
+direct `typescript` imports; the normal typecheck runs this gate. Assert the TypeScript 7
+CLI's separately selected binary and version in its own migration gate; do not infer either
+compiler from the other's package resolution.
+
 The official `@typescript/typescript6` compatibility package is currently 6.0.2, while this
-repository uses 6.0.3. Do not silently downgrade the API consumers. Either wait for a
-matching compatibility release, explicitly validate the patch difference, or retain
-6.0.3 under the `typescript` name while TypeScript 7 remains aliased.
+repository uses 6.0.3. Do not silently downgrade the API consumers. A downgrade requires
+explicit compatibility evidence covering all seven consumers and an intentional update to
+the boundary's version assertion.
+
+Remove this boundary only after Microsoft publishes a stable TypeScript 7 JavaScript API
+and migration guidance, every consumer has been migrated to that API, and the retention,
+browser syntax, Vite import, and four AST-based safeguards pass against it.
 
 ### Stage 4 — switch the root compiler
 

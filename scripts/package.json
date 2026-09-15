@@ -60,6 +60,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@workspace/typescript-api-v6": "workspace:*",
     "@workspace/db": "workspace:*",
     "@workspace/spec-export": "workspace:*",
     "@workspace/spec-import": "workspace:*",

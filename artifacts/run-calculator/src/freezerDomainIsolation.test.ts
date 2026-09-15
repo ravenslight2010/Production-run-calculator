@@ -4,7 +4,7 @@ import type { UseFormReturn } from "react-hook-form";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import ts from "typescript";
+import ts from "@workspace/typescript-api-v6";
 import {
   saveFreezerPullItems,
   type FreezerPullItem,

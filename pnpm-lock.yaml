@@ -729,6 +729,9 @@ importers:
       '@workspace/api-client-react':
         specifier: workspace:*
         version: link:../../lib/api-client-react
+      '@workspace/typescript-api-v6':
+        specifier: workspace:*
+        version: link:../../lib/typescript-api-v6
       axe-core:
         specifier: ^4.13.0
         version: 4.13.0
@@ -1244,6 +1247,12 @@ importers:
         specifier: 5.0.0
         version: 5.0.0(@types/node@25.9.6)(jsdom@30.0.1)(vite@8.3.0(@types/node@26.5.1)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.0))
 
+  lib/typescript-api-v6:
+    dependencies:
+      typescript-api-v6:
+        specifier: npm:typescript@6.0.3
+        version: typescript@6.0.3
+
   scripts:
     dependencies:
       '@workspace/ai-evaluation':
@@ -1276,6 +1285,9 @@ importers:
       '@workspace/spec-reconcile':
         specifier: workspace:*
         version: link:../lib/spec-reconcile
+      '@workspace/typescript-api-v6':
+        specifier: workspace:*
+        version: link:../lib/typescript-api-v6
       xlsx:
         specifier: npm:@e965/xlsx@^0.20.3
         version: '@e965/xlsx@0.20.3'

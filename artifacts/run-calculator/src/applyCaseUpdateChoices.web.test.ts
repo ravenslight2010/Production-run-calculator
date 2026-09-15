@@ -19,7 +19,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import ts from "typescript";
+import ts from "@workspace/typescript-api-v6";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const HOME_FILE = path.join(here, "pages", "home.tsx");

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import ts from "typescript";
+import ts from "@workspace/typescript-api-v6";
 
 const SOURCE_EXTENSION = /\.(?:ts|mts)$/;
 const TEST_SOURCE = /\.(?:test|spec)\.(?:ts|mts)$/;
