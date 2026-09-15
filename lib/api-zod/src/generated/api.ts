@@ -2463,6 +2463,303 @@ export const ReplaceFreezerSurplusAllocationResponse = zod.object({
 
 
 /**
+ * Returns scoped mix surplus lots (dated over-production of prep mixes), explicit make-day allocations, and a per-mix balance rollup (remaining lbs > 0) used by the Mixes tab's "freezer stock" reminder. Lots are ledger/audit rows only — using surplus never re-deducts inventory.
+ * @summary List dated prep-mix surplus ledger and freezer balances
+ */
+export const listMixSurplusResponseLotsItemAmountMadeMin = 0;
+
+export const listMixSurplusResponseLotsItemAmountUsedMin = 0;
+
+export const listMixSurplusResponseLotsItemAmountRemainingMin = 0;
+
+export const listMixSurplusResponseAllocationsItemAmountMin = 0;
+
+export const listMixSurplusResponseBalancesItemLbsMin = 0;
+
+
+
+export const ListMixSurplusResponse = zod.object({
+  "lots": zod.array(zod.object({
+  "id": zod.string(),
+  "mixId": zod.string(),
+  "name": zod.string(),
+  "brand": zod.string().optional(),
+  "flavor": zod.string().optional(),
+  "isPrep": zod.boolean().optional(),
+  "productionDate": zod.coerce.date(),
+  "location": zod.string(),
+  "amountMade": zod.number().min(listMixSurplusResponseLotsItemAmountMadeMin),
+  "amountUsed": zod.number().min(listMixSurplusResponseLotsItemAmountUsedMin),
+  "amountRemaining": zod.number().min(listMixSurplusResponseLotsItemAmountRemainingMin)
+})),
+  "allocations": zod.array(zod.object({
+  "id": zod.string(),
+  "lotId": zod.string(),
+  "mixId": zod.string(),
+  "runId": zod.string().optional(),
+  "runDate": zod.coerce.date(),
+  "brand": zod.string().optional(),
+  "flavor": zod.string().optional(),
+  "isPrep": zod.boolean().optional(),
+  "amount": zod.number().min(listMixSurplusResponseAllocationsItemAmountMin)
+})),
+  "balances": zod.array(zod.object({
+  "mixId": zod.string(),
+  "name": zod.string(),
+  "lbs": zod.number().min(listMixSurplusResponseBalancesItemLbsMin),
+  "productionDates": zod.array(zod.coerce.date())
+}))
+})
+
+
+/**
+ * Manager-confirmed record of surplus mix (pounds already made beyond a day's fresh need) as freezer stock. Creates a dated lot with remaining equal to the entered amount. Ledger action only — no inventory writes.
+ * @summary Record a confirmed prep-mix surplus lot
+ */
+export const recordMixSurplusBodyMixIdMax = 120;
+
+export const recordMixSurplusBodyAmountMadeExclusiveMin = 0.1;
+
+
+
+export const RecordMixSurplusBody = zod.object({
+  "mixId": zod.string().min(1).max(recordMixSurplusBodyMixIdMax),
+  "productionDate": zod.coerce.date(),
+  "amountMade": zod.number().gt(recordMixSurplusBodyAmountMadeExclusiveMin)
+})
+
+export const recordMixSurplusResponseLotsItemAmountMadeMin = 0;
+
+export const recordMixSurplusResponseLotsItemAmountUsedMin = 0;
+
+export const recordMixSurplusResponseLotsItemAmountRemainingMin = 0;
+
+export const recordMixSurplusResponseAllocationsItemAmountMin = 0;
+
+export const recordMixSurplusResponseBalancesItemLbsMin = 0;
+
+export const recordMixSurplusResponseCreatedLotOneAmountMadeMin = 0;
+
+export const recordMixSurplusResponseCreatedLotOneAmountUsedMin = 0;
+
+export const recordMixSurplusResponseCreatedLotOneAmountRemainingMin = 0;
+
+
+
+export const RecordMixSurplusResponse = zod.object({
+  "lots": zod.array(zod.object({
+  "id": zod.string(),
+  "mixId": zod.string(),
+  "name": zod.string(),
+  "brand": zod.string().optional(),
+  "flavor": zod.string().optional(),
+  "isPrep": zod.boolean().optional(),
+  "productionDate": zod.coerce.date(),
+  "location": zod.string(),
+  "amountMade": zod.number().min(recordMixSurplusResponseLotsItemAmountMadeMin),
+  "amountUsed": zod.number().min(recordMixSurplusResponseLotsItemAmountUsedMin),
+  "amountRemaining": zod.number().min(recordMixSurplusResponseLotsItemAmountRemainingMin)
+})),
+  "allocations": zod.array(zod.object({
+  "id": zod.string(),
+  "lotId": zod.string(),
+  "mixId": zod.string(),
+  "runId": zod.string().optional(),
+  "runDate": zod.coerce.date(),
+  "brand": zod.string().optional(),
+  "flavor": zod.string().optional(),
+  "isPrep": zod.boolean().optional(),
+  "amount": zod.number().min(recordMixSurplusResponseAllocationsItemAmountMin)
+})),
+  "balances": zod.array(zod.object({
+  "mixId": zod.string(),
+  "name": zod.string(),
+  "lbs": zod.number().min(recordMixSurplusResponseBalancesItemLbsMin),
+  "productionDates": zod.array(zod.coerce.date())
+})),
+  "createdLot": zod.object({
+  "id": zod.string(),
+  "mixId": zod.string(),
+  "name": zod.string(),
+  "brand": zod.string().optional(),
+  "flavor": zod.string().optional(),
+  "isPrep": zod.boolean().optional(),
+  "productionDate": zod.coerce.date(),
+  "location": zod.string(),
+  "amountMade": zod.number().min(recordMixSurplusResponseCreatedLotOneAmountMadeMin),
+  "amountUsed": zod.number().min(recordMixSurplusResponseCreatedLotOneAmountUsedMin),
+  "amountRemaining": zod.number().min(recordMixSurplusResponseCreatedLotOneAmountRemainingMin)
+}).nullish()
+})
+
+
+/**
+ * Replaces the surplus allocations for a make-day. Confirming ("Use on next run") decrements each lot's remaining balance and records the dated allocation; reducing/omitting an allocation returns that amount to the lot (un-reserved, still in the freezer). Voiding a lot entirely is DELETE /mix-surplus/lots/{id}. Ledger action only — never writes inventory.
+ * @summary Apply or release mix surplus for a make-day
+ */
+export const ReplaceMixSurplusAllocationsParams = zod.object({
+  "runDate": zod.date()
+})
+
+export const replaceMixSurplusAllocationsBodyAllocationsItemLotIdMax = 120;
+
+export const replaceMixSurplusAllocationsBodyAllocationsItemAmountMin = 0;
+
+export const replaceMixSurplusAllocationsBodyAllocationsMax = 500;
+
+
+
+export const ReplaceMixSurplusAllocationsBody = zod.object({
+  "runDate": zod.coerce.date(),
+  "allocations": zod.array(zod.object({
+  "lotId": zod.string().min(1).max(replaceMixSurplusAllocationsBodyAllocationsItemLotIdMax),
+  "amount": zod.number().min(replaceMixSurplusAllocationsBodyAllocationsItemAmountMin)
+})).max(replaceMixSurplusAllocationsBodyAllocationsMax)
+})
+
+export const replaceMixSurplusAllocationsResponseLotsItemAmountMadeMin = 0;
+
+export const replaceMixSurplusAllocationsResponseLotsItemAmountUsedMin = 0;
+
+export const replaceMixSurplusAllocationsResponseLotsItemAmountRemainingMin = 0;
+
+export const replaceMixSurplusAllocationsResponseAllocationsItemAmountMin = 0;
+
+export const replaceMixSurplusAllocationsResponseBalancesItemLbsMin = 0;
+
+export const replaceMixSurplusAllocationsResponseCreatedLotOneAmountMadeMin = 0;
+
+export const replaceMixSurplusAllocationsResponseCreatedLotOneAmountUsedMin = 0;
+
+export const replaceMixSurplusAllocationsResponseCreatedLotOneAmountRemainingMin = 0;
+
+
+
+export const ReplaceMixSurplusAllocationsResponse = zod.object({
+  "lots": zod.array(zod.object({
+  "id": zod.string(),
+  "mixId": zod.string(),
+  "name": zod.string(),
+  "brand": zod.string().optional(),
+  "flavor": zod.string().optional(),
+  "isPrep": zod.boolean().optional(),
+  "productionDate": zod.coerce.date(),
+  "location": zod.string(),
+  "amountMade": zod.number().min(replaceMixSurplusAllocationsResponseLotsItemAmountMadeMin),
+  "amountUsed": zod.number().min(replaceMixSurplusAllocationsResponseLotsItemAmountUsedMin),
+  "amountRemaining": zod.number().min(replaceMixSurplusAllocationsResponseLotsItemAmountRemainingMin)
+})),
+  "allocations": zod.array(zod.object({
+  "id": zod.string(),
+  "lotId": zod.string(),
+  "mixId": zod.string(),
+  "runId": zod.string().optional(),
+  "runDate": zod.coerce.date(),
+  "brand": zod.string().optional(),
+  "flavor": zod.string().optional(),
+  "isPrep": zod.boolean().optional(),
+  "amount": zod.number().min(replaceMixSurplusAllocationsResponseAllocationsItemAmountMin)
+})),
+  "balances": zod.array(zod.object({
+  "mixId": zod.string(),
+  "name": zod.string(),
+  "lbs": zod.number().min(replaceMixSurplusAllocationsResponseBalancesItemLbsMin),
+  "productionDates": zod.array(zod.coerce.date())
+})),
+  "createdLot": zod.object({
+  "id": zod.string(),
+  "mixId": zod.string(),
+  "name": zod.string(),
+  "brand": zod.string().optional(),
+  "flavor": zod.string().optional(),
+  "isPrep": zod.boolean().optional(),
+  "productionDate": zod.coerce.date(),
+  "location": zod.string(),
+  "amountMade": zod.number().min(replaceMixSurplusAllocationsResponseCreatedLotOneAmountMadeMin),
+  "amountUsed": zod.number().min(replaceMixSurplusAllocationsResponseCreatedLotOneAmountUsedMin),
+  "amountRemaining": zod.number().min(replaceMixSurplusAllocationsResponseCreatedLotOneAmountRemainingMin)
+}).nullish()
+})
+
+
+/**
+ * Manager override: voids a surplus lot entirely — its remaining balance is set to 0, its allocation rows are removed, and the mix row's amountAlreadyMade is decremented by the voided amount so the plan reducer stops counting disposed surplus (ledger == scalar invariant). Ledger action only — never writes inventory.
+ * @summary Void a mix surplus lot (release it from use)
+ */
+export const voidMixSurplusLotPathIdMax = 120;
+
+
+
+export const VoidMixSurplusLotParams = zod.object({
+  "id": zod.coerce.string().min(1).max(voidMixSurplusLotPathIdMax)
+})
+
+export const voidMixSurplusLotResponseLotsItemAmountMadeMin = 0;
+
+export const voidMixSurplusLotResponseLotsItemAmountUsedMin = 0;
+
+export const voidMixSurplusLotResponseLotsItemAmountRemainingMin = 0;
+
+export const voidMixSurplusLotResponseAllocationsItemAmountMin = 0;
+
+export const voidMixSurplusLotResponseBalancesItemLbsMin = 0;
+
+export const voidMixSurplusLotResponseCreatedLotOneAmountMadeMin = 0;
+
+export const voidMixSurplusLotResponseCreatedLotOneAmountUsedMin = 0;
+
+export const voidMixSurplusLotResponseCreatedLotOneAmountRemainingMin = 0;
+
+
+
+export const VoidMixSurplusLotResponse = zod.object({
+  "lots": zod.array(zod.object({
+  "id": zod.string(),
+  "mixId": zod.string(),
+  "name": zod.string(),
+  "brand": zod.string().optional(),
+  "flavor": zod.string().optional(),
+  "isPrep": zod.boolean().optional(),
+  "productionDate": zod.coerce.date(),
+  "location": zod.string(),
+  "amountMade": zod.number().min(voidMixSurplusLotResponseLotsItemAmountMadeMin),
+  "amountUsed": zod.number().min(voidMixSurplusLotResponseLotsItemAmountUsedMin),
+  "amountRemaining": zod.number().min(voidMixSurplusLotResponseLotsItemAmountRemainingMin)
+})),
+  "allocations": zod.array(zod.object({
+  "id": zod.string(),
+  "lotId": zod.string(),
+  "mixId": zod.string(),
+  "runId": zod.string().optional(),
+  "runDate": zod.coerce.date(),
+  "brand": zod.string().optional(),
+  "flavor": zod.string().optional(),
+  "isPrep": zod.boolean().optional(),
+  "amount": zod.number().min(voidMixSurplusLotResponseAllocationsItemAmountMin)
+})),
+  "balances": zod.array(zod.object({
+  "mixId": zod.string(),
+  "name": zod.string(),
+  "lbs": zod.number().min(voidMixSurplusLotResponseBalancesItemLbsMin),
+  "productionDates": zod.array(zod.coerce.date())
+})),
+  "createdLot": zod.object({
+  "id": zod.string(),
+  "mixId": zod.string(),
+  "name": zod.string(),
+  "brand": zod.string().optional(),
+  "flavor": zod.string().optional(),
+  "isPrep": zod.boolean().optional(),
+  "productionDate": zod.coerce.date(),
+  "location": zod.string(),
+  "amountMade": zod.number().min(voidMixSurplusLotResponseCreatedLotOneAmountMadeMin),
+  "amountUsed": zod.number().min(voidMixSurplusLotResponseCreatedLotOneAmountUsedMin),
+  "amountRemaining": zod.number().min(voidMixSurplusLotResponseCreatedLotOneAmountRemainingMin)
+}).nullish()
+})
+
+
+/**
  * Returns every stored per-die line-setting default (crusts per cycle, cycle speed, speed adjustment, freezer time, extra case buffer). Factory-wide master-data (not part of the per-day sync payload). Reading is available to any signed-in user so the run form / setup editor can pre-fill line settings; editing is manager-only. Dies with no stored entry fall back to the app's built-in defaults.
  * @summary List manager-set per-die line-setting defaults
  */

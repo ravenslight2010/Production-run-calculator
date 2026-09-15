@@ -1930,6 +1930,116 @@ paths:
         "409":
           description: Run has started or the requested lot balance changed
 
+
+  /mix-surplus:
+    get:
+      operationId: listMixSurplus
+      tags: [mixSurplus]
+      summary: List dated prep-mix surplus ledger and freezer balances
+      description: >-
+        Returns scoped mix surplus lots (dated over-production of prep mixes),
+        explicit make-day allocations, and a per-mix balance rollup
+        (remaining lbs > 0) used by the Mixes tab's "freezer stock" reminder.
+        Lots are ledger/audit rows only — using surplus never re-deducts
+        inventory.
+      responses:
+        "200":
+          description: Current scoped mix surplus ledger
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MixSurplusLedger"
+    post:
+      operationId: recordMixSurplus
+      tags: [mixSurplus]
+      summary: Record a confirmed prep-mix surplus lot
+      description: >-
+        Manager-confirmed record of surplus mix (pounds already made beyond a
+        day's fresh need) as freezer stock. Creates a dated lot with remaining
+        equal to the entered amount. Ledger action only — no inventory writes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecordMixSurplusInput"
+      responses:
+        "201":
+          description: The created lot and current ledger
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MixSurplusMutationResponse"
+        "400":
+          description: Invalid mix or non-positive amount
+
+  /mix-surplus/allocations/{runDate}:
+    put:
+      operationId: replaceMixSurplusAllocations
+      tags: [mixSurplus]
+      summary: Apply or release mix surplus for a make-day
+      description: >-
+        Replaces the surplus allocations for a make-day. Confirming ("Use on
+        next run") decrements each lot's remaining balance and records the
+        dated allocation; reducing/omitting an allocation returns that amount
+        to the lot (un-reserved, still in the freezer). Voiding a lot entirely
+        is DELETE /mix-surplus/lots/{id}. Ledger action only — never writes
+        inventory.
+      parameters:
+        - name: runDate
+          in: path
+          required: true
+          schema:
+            type: string
+            format: date
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplaceMixSurplusAllocationInput"
+      responses:
+        "200":
+          description: Updated allocations and current ledger
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MixSurplusMutationResponse"
+        "400":
+          description: Invalid make-day, lot, or nonzero allocation
+        "409":
+          description: The requested lot balance changed
+
+
+  /mix-surplus/lots/{id}:
+    delete:
+      operationId: voidMixSurplusLot
+      tags: [mixSurplus]
+      summary: Void a mix surplus lot (release it from use)
+      description: >-
+        Manager override: voids a surplus lot entirely — its remaining balance
+        is set to 0, its allocation rows are removed, and the mix row's
+        amountAlreadyMade is decremented by the voided amount so the plan
+        reducer stops counting disposed surplus (ledger == scalar invariant).
+        Ledger action only — never writes inventory.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 120
+      responses:
+        "200":
+          description: Voided lot and current ledger
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MixSurplusMutationResponse"
+        "404":
+          description: Lot not found or already voided
+
   /die-line-defaults:
     get:
       operationId: listDieLineDefaults
@@ -8716,6 +8826,196 @@ components:
           nullable: true
           allOf:
             - $ref: "#/components/schemas/FreezerSurplusLot"
+
+
+    MixSurplusLot:
+      type: object
+      required:
+        - id
+        - mixId
+        - name
+        - productionDate
+        - amountMade
+        - amountUsed
+        - amountRemaining
+        - location
+      properties:
+        id:
+          type: string
+        mixId:
+          type: string
+        name:
+          type: string
+        brand:
+          type: string
+        flavor:
+          type: string
+        isPrep:
+          type: boolean
+        productionDate:
+          type: string
+          format: date
+        location:
+          type: string
+        amountMade:
+          type: number
+          format: float
+          minimum: 0
+        amountUsed:
+          type: number
+          format: float
+          minimum: 0
+        amountRemaining:
+          type: number
+          format: float
+          minimum: 0
+
+    MixSurplusAllocation:
+      type: object
+      required:
+        - id
+        - lotId
+        - mixId
+        - runDate
+        - amount
+      properties:
+        id:
+          type: string
+        lotId:
+          type: string
+        mixId:
+          type: string
+        runId:
+          type: string
+        runDate:
+          type: string
+          format: date
+        brand:
+          type: string
+        flavor:
+          type: string
+        isPrep:
+          type: boolean
+        amount:
+          type: number
+          format: float
+          minimum: 0
+
+    MixSurplusBalance:
+      type: object
+      required:
+        - mixId
+        - name
+        - lbs
+        - productionDates
+      properties:
+        mixId:
+          type: string
+        name:
+          type: string
+        lbs:
+          type: number
+          format: float
+          minimum: 0
+        productionDates:
+          type: array
+          items:
+            type: string
+            format: date
+
+    MixSurplusLedger:
+      type: object
+      required:
+        - lots
+        - allocations
+        - balances
+      properties:
+        lots:
+          type: array
+          items:
+            $ref: "#/components/schemas/MixSurplusLot"
+        allocations:
+          type: array
+          items:
+            $ref: "#/components/schemas/MixSurplusAllocation"
+        balances:
+          type: array
+          items:
+            $ref: "#/components/schemas/MixSurplusBalance"
+
+    RecordMixSurplusInput:
+      type: object
+      required:
+        - mixId
+        - productionDate
+        - amountMade
+      properties:
+        mixId:
+          type: string
+          minLength: 1
+          maxLength: 120
+        productionDate:
+          type: string
+          format: date
+        amountMade:
+          type: number
+          format: float
+          minimum: 0.1
+          exclusiveMinimum: true
+
+    MixSurplusAllocationSelection:
+      type: object
+      required:
+        - lotId
+        - amount
+      properties:
+        lotId:
+          type: string
+          minLength: 1
+          maxLength: 120
+        amount:
+          type: number
+          format: float
+          minimum: 0
+
+    ReplaceMixSurplusAllocationInput:
+      type: object
+      required:
+        - runDate
+        - allocations
+      properties:
+        runDate:
+          type: string
+          format: date
+        allocations:
+          type: array
+          maxItems: 500
+          items:
+            $ref: "#/components/schemas/MixSurplusAllocationSelection"
+
+    MixSurplusMutationResponse:
+      type: object
+      required:
+        - lots
+        - allocations
+        - balances
+      properties:
+        lots:
+          type: array
+          items:
+            $ref: "#/components/schemas/MixSurplusLot"
+        allocations:
+          type: array
+          items:
+            $ref: "#/components/schemas/MixSurplusAllocation"
+        balances:
+          type: array
+          items:
+            $ref: "#/components/schemas/MixSurplusBalance"
+        createdLot:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/MixSurplusLot"
 
     DieTypeList:
       type: object
