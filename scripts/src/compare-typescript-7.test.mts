@@ -12,6 +12,7 @@ import {
   typescript7TrendHistorySummary,
   typescript7RunnerFingerprint,
   typescript7ResourceRegressions,
+  validateTypescript7ResourceApprovalEvidence,
 } from "./compare-typescript-7.mts";
 import { validateTypescript7ComparisonEvidence } from "./release-check.mts";
 import {
@@ -106,6 +107,39 @@ test("declaration manifests retain paths and content hashes", async () => {
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("retained resource approval evidence is compact and integrity-checked", async () => {
+  const path = resolve(
+    import.meta.dirname,
+    "../../docs/typescript-7-resource-approval-evidence.json",
+  );
+  const bytes = await import("node:fs/promises").then(({ readFile }) =>
+    readFile(path),
+  );
+  assert.doesNotThrow(() =>
+    validateTypescript7ResourceApprovalEvidence(bytes),
+  );
+
+  const tampered = JSON.parse(bytes.toString("utf8"));
+  tampered.samples[0].coldMaxima.candidateElapsedMs += 1;
+  assert.throws(
+    () =>
+      validateTypescript7ResourceApprovalEvidence(
+        Buffer.from(JSON.stringify(tampered)),
+      ),
+    /integrity check failed/,
+  );
+
+  const expanded = JSON.parse(bytes.toString("utf8"));
+  expanded.samples[0].commands = ["unnecessary retained command output"];
+  assert.throws(
+    () =>
+      validateTypescript7ResourceApprovalEvidence(
+        Buffer.from(JSON.stringify(expanded)),
+      ),
+    /invalid sample/,
+  );
 });
 
 test("runner fingerprints retain only bounded non-sensitive labels", () => {

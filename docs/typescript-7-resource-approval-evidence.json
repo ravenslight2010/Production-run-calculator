@@ -107,5 +107,10 @@
         "peakRssRatio": 1.0405013419119309
       }
     }
-  ]
+  ],
+  "integrity": {
+    "algorithm": "sha256",
+    "scope": "record-excluding-integrity",
+    "sha256": "9c65b54481949460e5f6cfc4e1ca34b264939edee0f13902617d6f5b37d35466"
+  }
 }

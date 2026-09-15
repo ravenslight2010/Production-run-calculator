@@ -33,6 +33,11 @@ type EditorServiceEvidence = {
   exitCode: number;
 };
 
+const RESOURCE_APPROVAL_EVIDENCE_PATH =
+  "docs/typescript-7-resource-approval-evidence.json";
+const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
+const REVISION_PATTERN = /^[a-f0-9]{40}$/u;
+
 export const TYPESCRIPT_7_RESOURCE_BUDGETS = {
   maxElapsedRatio: 1.25,
   maxPeakRssRatio: 1.25,
@@ -43,6 +48,170 @@ export const TYPESCRIPT_7_RESOURCE_BUDGETS = {
   approvedForPromotion: true,
 } as const;
 export const TYPESCRIPT_7_HISTORY_LIMIT = 5;
+
+function exactKeys(
+  value: Record<string, unknown>,
+  expected: readonly string[],
+): boolean {
+  const actual = Object.keys(value).sort();
+  return (
+    actual.length === expected.length &&
+    expected.slice().sort().every((key, index) => actual[index] === key)
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isPositiveFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function resourceApprovalDigest(value: Record<string, unknown>): string {
+  const { integrity: _integrity, ...payload } = value;
+  return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+export function validateTypescript7ResourceApprovalEvidence(
+  bytes: Buffer,
+): void {
+  let value: unknown;
+  try {
+    value = JSON.parse(bytes.toString("utf8"));
+  } catch {
+    throw new Error("TypeScript 7 resource approval evidence is not valid JSON.");
+  }
+  if (
+    !isRecord(value) ||
+    !exactKeys(value, [
+      "schemaVersion",
+      "reviewedAt",
+      "captureWorkflow",
+      "approvedBudgets",
+      "samples",
+      "integrity",
+    ]) ||
+    value.schemaVersion !== 1 ||
+    typeof value.reviewedAt !== "string" ||
+    value.captureWorkflow !== "TypeScript 7 resource capture" ||
+    !isRecord(value.approvedBudgets) ||
+    !Array.isArray(value.samples) ||
+    !isRecord(value.integrity)
+  ) {
+    throw new Error("TypeScript 7 resource approval evidence has an invalid schema.");
+  }
+  if (
+    !exactKeys(value.approvedBudgets, [
+      "maxElapsedRatio",
+      "maxPeakRssRatio",
+      "maxCandidateElapsedMs",
+      "maxCandidatePeakRssKiB",
+      "minimumRevisions",
+      "requiredModes",
+    ]) ||
+    !isPositiveFiniteNumber(value.approvedBudgets.maxElapsedRatio) ||
+    !isPositiveFiniteNumber(value.approvedBudgets.maxPeakRssRatio) ||
+    !isPositiveFiniteNumber(value.approvedBudgets.maxCandidateElapsedMs) ||
+    !isPositiveFiniteNumber(value.approvedBudgets.maxCandidatePeakRssKiB) ||
+    !Number.isSafeInteger(value.approvedBudgets.minimumRevisions) ||
+    !Array.isArray(value.approvedBudgets.requiredModes) ||
+    value.approvedBudgets.requiredModes.join(",") !== "cold,warm" ||
+    value.samples.length < Number(value.approvedBudgets.minimumRevisions)
+  ) {
+    throw new Error("TypeScript 7 resource approval evidence has invalid budgets.");
+  }
+  const revisions = new Set<string>();
+  for (const sample of value.samples) {
+    if (
+      !isRecord(sample) ||
+      !exactKeys(sample, [
+        "sourceRevision",
+        "workflowRunId",
+        "workflowRunUrl",
+        "workflowConclusion",
+        "evidenceCommit",
+        "reportPath",
+        "reportSha256",
+        "reportSchemaVersion",
+        "reportStatus",
+        "runner",
+        "measurementRows",
+        "coldMaxima",
+        "warmMaxima",
+      ]) ||
+      typeof sample.sourceRevision !== "string" ||
+      !REVISION_PATTERN.test(sample.sourceRevision) ||
+      revisions.has(sample.sourceRevision) ||
+      typeof sample.evidenceCommit !== "string" ||
+      !REVISION_PATTERN.test(sample.evidenceCommit) ||
+      typeof sample.reportSha256 !== "string" ||
+      !SHA256_PATTERN.test(sample.reportSha256) ||
+      sample.reportPath !== "release-evidence/typescript-7-comparison.json" ||
+      sample.reportSchemaVersion !== 3 ||
+      sample.reportStatus !== "ADVISORY_DRIFT" ||
+      sample.workflowConclusion !== "success" ||
+      !Number.isSafeInteger(sample.workflowRunId) ||
+      typeof sample.workflowRunUrl !== "string" ||
+      !/^https:\/\/github\.com\/[^/]+\/[^/]+\/actions\/runs\/\d+$/u.test(
+        sample.workflowRunUrl,
+      ) ||
+      !isRecord(sample.runner) ||
+      !isRecord(sample.measurementRows) ||
+      !isRecord(sample.coldMaxima) ||
+      !isRecord(sample.warmMaxima) ||
+      !exactKeys(sample.runner, [
+        "platform",
+        "arch",
+        "image",
+        "hardwareClass",
+        "logicalCpuCount",
+        "memoryGiB",
+      ]) ||
+      sample.runner.platform !== "linux" ||
+      sample.runner.arch !== "x64" ||
+      typeof sample.runner.image !== "string" ||
+      typeof sample.runner.hardwareClass !== "string" ||
+      !SHA256_PATTERN.test(sample.runner.hardwareClass) ||
+      !Number.isSafeInteger(sample.runner.logicalCpuCount) ||
+      !Number.isSafeInteger(sample.runner.memoryGiB) ||
+      !exactKeys(sample.measurementRows, ["cold", "warm"]) ||
+      sample.measurementRows.cold !== comparedChecks.length ||
+      sample.measurementRows.warm !== comparedChecks.length
+    ) {
+      throw new Error("TypeScript 7 resource approval evidence has an invalid sample.");
+    }
+    for (const maxima of [sample.coldMaxima, sample.warmMaxima]) {
+      if (
+        !exactKeys(maxima, [
+          "candidateElapsedMs",
+          "elapsedRatio",
+          "candidatePeakRssKiB",
+          "peakRssRatio",
+        ]) ||
+        !isPositiveFiniteNumber(maxima.candidateElapsedMs) ||
+        !isPositiveFiniteNumber(maxima.elapsedRatio) ||
+        !isPositiveFiniteNumber(maxima.candidatePeakRssKiB) ||
+        !isPositiveFiniteNumber(maxima.peakRssRatio)
+      ) {
+        throw new Error(
+          "TypeScript 7 resource approval evidence has invalid resource maxima.",
+        );
+      }
+    }
+    revisions.add(sample.sourceRevision);
+  }
+  if (
+    !exactKeys(value.integrity, ["algorithm", "scope", "sha256"]) ||
+    value.integrity.algorithm !== "sha256" ||
+    value.integrity.scope !== "record-excluding-integrity" ||
+    typeof value.integrity.sha256 !== "string" ||
+    !SHA256_PATTERN.test(value.integrity.sha256) ||
+    value.integrity.sha256 !== resourceApprovalDigest(value)
+  ) {
+    throw new Error("TypeScript 7 resource approval evidence integrity check failed.");
+  }
+}
 
 const comparedChecks = [
   "build",
@@ -369,6 +538,9 @@ function sourceRevision(): string {
 }
 
 async function main(): Promise<void> {
+  validateTypescript7ResourceApprovalEvidence(
+    await readFile(resolve(rootDir, RESOURCE_APPROVAL_EVIDENCE_PATH)),
+  );
   const evidencePath = resolve(
     process.env.TYPESCRIPT_7_EVIDENCE_PATH ??
       resolve(rootDir, "release-evidence/typescript-7-comparison.json"),

@@ -311,7 +311,11 @@ On 2026-09-15, maintainers reviewed three distinct schema-v3, revision-bound mea
 sets from successful GitHub Actions resource-capture jobs. All three used the supported
 Linux x64 `ubuntu24@20260907.300.1` image with 4 logical CPUs and 16 GiB of memory. The
 exact reports are cryptographically referenced, and their resource summaries are retained,
-in `docs/typescript-7-resource-approval-evidence.json`.
+in [`docs/typescript-7-resource-approval-evidence.json`](typescript-7-resource-approval-evidence.json).
+The comparison command verifies that file's exact compact schema and SHA-256 integrity
+envelope before doing any compiler work. The schema permits only provenance, runner details,
+approved budgets, and cold/warm maxima; it rejects command output, source payloads, and other
+artifact contents.
 
 | Source revision | Highest cold candidate time | Highest warm candidate time | Highest elapsed ratio | Highest cold candidate RSS | Highest warm candidate RSS | Highest RSS ratio |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
