@@ -49,6 +49,82 @@ type ForegroundScheduler = {
   }) => () => void;
 };
 
+type ForegroundAdoptionOptions<TPayload, TLifecycle, TProfile, TFactory> = {
+  payload: TPayload;
+  prepareLifecycle: () => { value: TLifecycle; adopted: boolean };
+  persistLifecycle: (value: TLifecycle) => void;
+  applyGeneralMerge: (payload: TPayload) => void;
+  reconcileProfiles: () => Promise<TProfile>;
+  applyProfiles: (result: TProfile) => void;
+  fetchFactory: () => Promise<TFactory>;
+  applyFactory: (result: TFactory) => Promise<void> | void;
+  isCurrent: () => boolean;
+};
+
+/**
+ * Coordinates the canonical wake adoption transaction. Lifecycle state must be
+ * durable before the general merge can observe it; independent master-data
+ * refreshes begin afterward and retain their profile-before-factory ordering.
+ */
+export function coordinateForegroundAdoption<TPayload, TLifecycle, TProfile, TFactory>({
+  payload,
+  prepareLifecycle,
+  persistLifecycle,
+  applyGeneralMerge,
+  reconcileProfiles,
+  applyProfiles,
+  fetchFactory,
+  applyFactory,
+  isCurrent,
+}: ForegroundAdoptionOptions<TPayload, TLifecycle, TProfile, TFactory>): {
+  lifecycleAdopted: boolean;
+  masterDataRefresh: Promise<void>;
+} {
+  const lifecycle = prepareLifecycle();
+  if (lifecycle.adopted) persistLifecycle(lifecycle.value);
+  if (!isCurrent()) {
+    return { lifecycleAdopted: lifecycle.adopted, masterDataRefresh: Promise.resolve() };
+  }
+  applyGeneralMerge(payload);
+
+  const masterDataRefresh = (async () => {
+    try {
+      const profileResult = await reconcileProfiles();
+      if (isCurrent()) applyProfiles(profileResult);
+    } catch {
+      // Profile recovery is independent; retain local data and continue.
+    }
+    try {
+      const factoryResult = await fetchFactory();
+      if (!isCurrent()) return;
+      await applyFactory(factoryResult);
+    } catch {
+      // Factory recovery is independent; retain local data and queued writes.
+    }
+  })();
+
+  return { lifecycleAdopted: lifecycle.adopted, masterDataRefresh };
+}
+
+type ForegroundReleaseOptions = {
+  releaseFence: () => void;
+  acknowledgeRelease: () => void;
+  takeQueuedWrite: () => boolean;
+  replayQueuedWrite: () => void;
+};
+
+/** Releases the wake fence before any queued write is allowed to replay. */
+export function releaseForegroundRecovery({
+  releaseFence,
+  acknowledgeRelease,
+  takeQueuedWrite,
+  replayQueuedWrite,
+}: ForegroundReleaseOptions): void {
+  releaseFence();
+  acknowledgeRelease();
+  if (takeQueuedWrite()) replayQueuedWrite();
+}
+
 /** Only a reset marker newer than local durable state may interrupt baseline adoption. */
 export function initialResetRequiresReload(messageEpoch: number, storedEpoch: number): boolean {
   return messageEpoch > storedEpoch;

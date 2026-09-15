@@ -8,7 +8,9 @@ import {
 } from "../hooks/useHomeFormLifecycle";
 import { useRunLifecycleManager } from "../hooks/useRunLifecycleManager";
 import {
+  coordinateForegroundAdoption,
   initialResetRequiresReload,
+  releaseForegroundRecovery,
   useHomeSyncCoordination,
 } from "../hooks/useHomeSyncCoordination";
 import { consumeForegroundRecoveryResponse } from "../foregroundRecoveryResponse";
@@ -9544,59 +9546,49 @@ export default function Home() {
               remoteResetAt: payload.dayState.resetAt ?? 0,
               localResetAt: durableLocalDay.resetAt ?? 0,
             });
-            const lifecycleAdoption = acceptsRemoteLifecycle
-              ? adoptStrictlyNewerRemoteLifecycles(
-                  durableLocalDay,
-                  payload.dayState.runs,
-                )
-              : { dayState: durableLocalDay, adoptedRunIds: [] };
-            if (lifecycleAdoption.adoptedRunIds.length > 0) {
-              setAutoTrackRebaseAfterBlock(true);
-              // Persist and publish the winning lifecycle synchronously before
-              // the general inbound merge and before recovery pushes are
-              // released. Lifecycle handlers read dayStateRef, so this also
-              // fences a late tap against the old running copy.
-              saveDayState(lifecycleAdoption.dayState, { stampMeta: false });
-              dayStateRef.current = lifecycleAdoption.dayState;
-              setDayState(lifecycleAdoption.dayState);
-              lastSyncSigRef.current = "";
-            }
-            if (!isCurrentRecovery()) return false;
-            applySyncCallbackRef.current(payload);
+            coordinateForegroundAdoption({
+              payload,
+              prepareLifecycle: () => {
+                const lifecycleAdoption = acceptsRemoteLifecycle
+                  ? adoptStrictlyNewerRemoteLifecycles(
+                      durableLocalDay,
+                      payload.dayState.runs,
+                    )
+                  : { dayState: durableLocalDay, adoptedRunIds: [] };
+                return {
+                  value: lifecycleAdoption.dayState,
+                  adopted: lifecycleAdoption.adoptedRunIds.length > 0,
+                };
+              },
+              persistLifecycle: (adoptedDayState) => {
+                setAutoTrackRebaseAfterBlock(true);
+                saveDayState(adoptedDayState, { stampMeta: false });
+                dayStateRef.current = adoptedDayState;
+                setDayState(adoptedDayState);
+                lastSyncSigRef.current = "";
+              },
+              applyGeneralMerge: (canonicalPayload) => {
+                applySyncCallbackRef.current(canonicalPayload);
+              },
+              reconcileProfiles: reconcileProfilesFromServerDetailed,
+              applyProfiles: (profileResult) => {
+                if (!profileResult.changed) return;
+                setDieTypes(healDieTypesFromProfiles());
+                applyProfileReconcileRef.current(profileResult);
+              },
+              fetchFactory: fetchFactoryData,
+              applyFactory: async (factoryData) => {
+                hydrateFromServer(factoryData);
+                refreshFactoryDataConsumers();
+                await flushFactoryQueue();
+              },
+              isCurrent: isCurrentRecovery,
+            });
           }
            // A successful canonical pull supersedes the canceled pre-wake push.
            // Keep the pending flag so any local delta is replayed after release,
            // but let automatic claims use the canonical baseline immediately.
            pushAcknowledgedRef.current = true;
-           // The live row is the authority that must land first. Profile and
-           // factory pools are intentionally outside that payload, so begin
-           // hydrating them only after the day-state LWW merge is safely applied.
-           // They must not hold the live auto-track barrier: a large or slow
-           // master-data response would otherwise leave a due production tick
-           // blocked after a sleeping device wakes.
-           void (async () => {
-             try {
-               const profileResult = await reconcileProfilesFromServerDetailed();
-              if (isCurrentRecovery() && profileResult.changed) {
-                 setDieTypes(healDieTypesFromProfiles());
-                 applyProfileReconcileRef.current(profileResult);
-               }
-             } catch {
-               // Profile data is independent of the live row. A failed pull
-               // leaves the local cache intact and the next wake retries it.
-             }
-             try {
-               const factoryData = await fetchFactoryData();
-              if (!isCurrentRecovery()) return;
-               hydrateFromServer(factoryData);
-               refreshFactoryDataConsumers();
-               await flushFactoryQueue();
-             } catch {
-               // Factory data is independent of the live row. A failed factory
-               // pull leaves the local cache and durable queue intact; the next
-               // foreground/reconnect attempt will retry it.
-             }
-           })();
          if (!isCurrentRecovery()) return false;
          reconciled = true;
           return true;
@@ -9657,27 +9649,32 @@ export default function Home() {
                } else {
                   showForegroundRecoveryNotice("outcome", "Production state synchronized.");
                }
-             foregroundSyncBarrierRef.current = false;
-             // No-op if this wake did not adopt lifecycle state. If it did,
-             // the hook sees the true→false transition and re-baselines safely.
              if (!cancelled) {
-               setForegroundSyncAcknowledgement((value) => value + 1);
-               setAutoTrackBlocked(false);
-               const shouldPush = foregroundPushPendingRef.current;
-               foregroundPushPendingRef.current = false;
-               if (shouldPush) {
-                 // The canceled pre-wake write must be replayed before an
-                 // automatic claim can use the pulled baseline. Keep the
-                 // claim queue behind that replay's acknowledgment.
-                 pushAcknowledgedRef.current = false;
-                 requestAnimationFrame(() => {
-                   if (!cancelled) schedulePush(dayStateRef.current, 0);
-                 });
-               }
+                releaseForegroundRecovery({
+                  releaseFence: () => {
+                    foregroundSyncBarrierRef.current = false;
+                    setAutoTrackBlocked(false);
+                  },
+                  acknowledgeRelease: () => {
+                    setForegroundSyncAcknowledgement((value) => value + 1);
+                  },
+                  takeQueuedWrite: () => {
+                    const shouldPush = foregroundPushPendingRef.current;
+                    foregroundPushPendingRef.current = false;
+                    return shouldPush;
+                  },
+                  replayQueuedWrite: () => {
+                    pushAcknowledgedRef.current = false;
+                    requestAnimationFrame(() => {
+                      if (!cancelled) schedulePush(dayStateRef.current, 0);
+                    });
+                  },
+                });
               } else {
                 // The first Strict Mode pass can be cancelled after doing the
                 // work but before its state updates. Do not strand the
                 // synchronous fence in the second pass.
+                foregroundSyncBarrierRef.current = false;
                 setAutoTrackBlocked(false);
                 foregroundPushPendingRef.current = false;
               }
