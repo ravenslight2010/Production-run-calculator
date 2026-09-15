@@ -95,6 +95,7 @@
 - [Master-data health ownership](master-data-health-ownership.md) — legacy setup rows and purchased crusts stay protected as owned review warnings, not automatic launch blockers.
 - [Master-data audit boundary](master-data-audit-boundary.md) — scans are bounded/read-only; ambiguous refs stay review-only and unavailable immutable history is an explicit coverage gap.
 - [Browser and release evidence](visual-regression-baselines.md) + [release-browser-evidence.md] + [a11y-coverage-gate.md] + [a11y-dialog-browser-fixtures.md] — isolated, masked browser evidence needs explicit review.
+- [Stoppage light-theme contrast](stoppage-light-theme-contrast.md) — custom orange-700 is too light for pale stop surfaces; use orange-800 in light mode and retain orange-400 in dark mode.
 - [Sync snapshot identity](sync-snapshot-identity.md) + [HTTP failure handling](sync-http-failure-handling.md) + [partial sync](partial-sync-contract.md) + [SSE cleanup](sse-disconnect-registration.md) — stable hashes, non-OK is never acknowledgment, partial writes recover safely, and disconnects clean up before awaits.
 - [Formula import safety](formula-import-safety.md) + [Retained workbook layouts](source-workbook-layouts.md) — compare native units with provenance; varied Excel tables need explicit, fail-closed parser guards.
 - [Release gate budgets](release-check-shard-budget.md) — size time and process use for serialized gates; keep reports revision-bound and explicit about blocked dependents.

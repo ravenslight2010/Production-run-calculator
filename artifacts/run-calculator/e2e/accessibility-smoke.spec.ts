@@ -23,60 +23,99 @@ const SCREEN_RULES: Record<string, readonly string[]> = {
 };
 
 /*
- * Contrast audit finding log for the dark operational theme:
+ * Contrast audit finding log for the operational themes:
  * - Stoppage Pause label (`text-blue-400/70`) failed on `bg-blue-950/20`.
  * - Inactive Pause icon (`text-blue-400/50`) failed on the surrounding card.
  * - Stoppage Manual label (`text-violet-400/70`) failed on the surrounding card.
  * - Inactive Stoppage icon (`text-orange-400/50`) failed on the surrounding card.
  * - Active Stoppage label (`text-orange-400/70`) passed on `bg-orange-950/20`;
  *   keep its existing opacity because that combination is not failing.
+ * - Light-theme manual and completed-stop labels use darker violet/orange
+ *   foregrounds on the light card surface; the active-stop row uses a light
+ *   orange background with the same darker orange foreground.
  * - Surplus Mix count/name/amount labels passed on `bg-sky-950/30`; keep their
  *   existing opacity because those combinations are not failing.
  */
 const OPERATIONAL_CONTRAST_FIXTURES = [
   {
+    theme: "dark",
     id: "stoppage-pause-label",
     wrapperClass: "bg-blue-950/20",
     textClass: "text-[10px] font-semibold uppercase tracking-wider text-blue-400",
     text: "Pause",
   },
   {
+    theme: "dark",
     id: "stoppage-inactive-pause-icon",
     wrapperClass: "bg-card/40",
     textClass: "text-blue-400",
     text: "Pause icon",
   },
   {
+    theme: "dark",
     id: "stoppage-manual-label",
     wrapperClass: "bg-card/40",
     textClass: "text-violet-300",
     text: "Manual",
   },
   {
+    theme: "dark",
     id: "stoppage-active-label",
     wrapperClass: "bg-orange-950/20",
     textClass: "text-orange-400/70",
     text: "Stop",
   },
   {
+    theme: "dark",
     id: "stoppage-inactive-icon",
     wrapperClass: "bg-card/40",
     textClass: "text-orange-400",
     text: "Stop icon",
   },
   {
+    theme: "light",
+    id: "stoppage-manual-label",
+    wrapperClass: "bg-violet-50/70",
+    textClass: "text-violet-700",
+    text: "Manual",
+  },
+  {
+    theme: "light",
+    id: "stoppage-active-label",
+    wrapperClass: "bg-orange-100/70",
+    textClass: "text-orange-800",
+    text: "Stop",
+  },
+  {
+    theme: "light",
+    id: "stoppage-completed-label",
+    wrapperClass: "bg-orange-50/70",
+    textClass: "text-orange-800",
+    text: "Stop",
+  },
+  {
+    theme: "light",
+    id: "stoppage-inactive-icon",
+    wrapperClass: "bg-card/40",
+    textClass: "text-orange-800",
+    text: "Stop icon",
+  },
+  {
+    theme: "dark",
     id: "surplus-count",
     wrapperClass: "bg-sky-950/30",
     textClass: "text-xs text-sky-400/80",
     text: "(2 mixes)",
   },
   {
+    theme: "dark",
     id: "surplus-name",
     wrapperClass: "bg-sky-950/30",
     textClass: "text-sky-200/90",
     text: "Mix name",
   },
   {
+    theme: "dark",
     id: "surplus-amount-label",
     wrapperClass: "bg-sky-950/30",
     textClass: "text-[11px] text-sky-300/80",
@@ -493,23 +532,41 @@ test.describe("accessibility smoke", () => {
     await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
     await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
     await page.evaluate((fixtures) => {
-      document.documentElement.classList.add("dark");
       const root = document.createElement("main");
       root.id = "operational-contrast-audit";
       root.innerHTML = fixtures
         .map(
           (fixture) =>
-            `<section id="${fixture.id}" class="${fixture.wrapperClass}" style="padding: 12px; margin: 4px"><span class="${fixture.textClass}">${fixture.text}</span></section>`,
+            `<section id="${fixture.theme}-${fixture.id}" data-theme="${fixture.theme}" class="${fixture.wrapperClass}" style="padding: 12px; margin: 4px"><span class="${fixture.textClass}">${fixture.text}</span></section>`,
         )
         .join("");
       document.body.append(root);
     }, OPERATIONAL_CONTRAST_FIXTURES);
 
-    const results = await new AxeBuilder({ page })
-      .include("#operational-contrast-audit")
-      .withRules(["color-contrast"])
-      .analyze();
-    expect(results.violations, "Operational stoppage and surplus label contrast audit").toEqual([]);
+    const violations: string[] = [];
+    for (const theme of ["dark", "light"] as const) {
+      await page.evaluate((activeTheme) => {
+        const root = document.querySelector<HTMLElement>("#operational-contrast-audit");
+        if (!root) throw new Error("Operational contrast audit fixture was not mounted");
+        document.documentElement.classList.toggle("dark", activeTheme === "dark");
+        for (const section of root.querySelectorAll<HTMLElement>("[data-theme]")) {
+          section.hidden = section.dataset.theme !== activeTheme;
+        }
+      }, theme);
+      const results = await new AxeBuilder({ page })
+        .include("#operational-contrast-audit")
+        .withRules(["color-contrast"])
+        .analyze();
+      violations.push(
+        ...results.violations.map((violation) => {
+          const nodes = violation.nodes
+            .map((node) => `${node.target.join(", ")}: ${node.failureSummary}`)
+            .join(" | ");
+          return `${theme}: ${violation.id}: ${nodes}`;
+        }),
+      );
+    }
+    expect(violations, "Operational stoppage and surplus label contrast audit").toEqual([]);
   });
 
   test("authenticated staff workflows expose accessible controls and dialogs", async ({ page }) => {
