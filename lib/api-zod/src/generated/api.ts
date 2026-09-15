@@ -5386,6 +5386,23 @@ export const ListManagerActionQueueResponse = zod.object({
 
 
 /**
+ * @summary List sustained background-operation failures visible to managers
+ */
+export const getBackgroundOperationDiagnosticsResponseWarningsMax = 4;
+
+
+
+
+export const GetBackgroundOperationDiagnosticsResponse = zod.object({
+  "warnings": zod.array(zod.object({
+  "operation": zod.enum(['daily-rollover', 'server-job-run', 'server-job-prune', 'web-push-schedule']),
+  "lastFailureAt": zod.coerce.date()
+})).max(getBackgroundOperationDiagnosticsResponseWarningsMax),
+  "windowMs": zod.int().min(1)
+})
+
+
+/**
  * @summary Update a manager action item with optimistic version checking
  */
 export const UpdateManagerActionItemParams = zod.object({

@@ -4918,6 +4918,28 @@ export interface ManagerActionItem {
   version: number;
 }
 
+export type BackgroundOperationDiagnosticsWarningsItemOperation = typeof BackgroundOperationDiagnosticsWarningsItemOperation[keyof typeof BackgroundOperationDiagnosticsWarningsItemOperation];
+
+
+export const BackgroundOperationDiagnosticsWarningsItemOperation = {
+  'daily-rollover': 'daily-rollover',
+  'server-job-run': 'server-job-run',
+  'server-job-prune': 'server-job-prune',
+  'web-push-schedule': 'web-push-schedule',
+} as const;
+
+export type BackgroundOperationDiagnosticsWarningsItem = {
+  operation: BackgroundOperationDiagnosticsWarningsItemOperation;
+  lastFailureAt: string;
+};
+
+export interface BackgroundOperationDiagnostics {
+  /** @maxItems 4 */
+  warnings: BackgroundOperationDiagnosticsWarningsItem[];
+  /** @minimum 1 */
+  windowMs: number;
+}
+
 export type ManagerActionQueueCounts = {[key: string]: number};
 
 export interface ManagerActionQueue {

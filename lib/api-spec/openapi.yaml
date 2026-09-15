@@ -3997,6 +3997,20 @@ paths:
                 $ref: "#/components/schemas/ManagerActionQueue"
         "403": { description: Manager capability required }
 
+  /background-operations/diagnostics:
+    get:
+      operationId: getBackgroundOperationDiagnostics
+      tags: [audit]
+      summary: List sustained background-operation failures visible to managers
+      responses:
+        "200":
+          description: Bounded sanitized background-operation warnings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BackgroundOperationDiagnostics"
+        "403": { description: Manager capability required }
+
   /manager-action-queue/{id}:
     patch:
       operationId: updateManagerActionItem
@@ -10884,6 +10898,29 @@ components:
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
         version: { type: integer }
+
+    BackgroundOperationDiagnostics:
+      type: object
+      additionalProperties: false
+      required: [warnings, windowMs]
+      properties:
+        warnings:
+          type: array
+          maxItems: 4
+          items:
+            type: object
+            additionalProperties: false
+            required: [operation, lastFailureAt]
+            properties:
+              operation:
+                type: string
+                enum: [daily-rollover, server-job-run, server-job-prune, web-push-schedule]
+              lastFailureAt:
+                type: string
+                format: date-time
+        windowMs:
+          type: integer
+          minimum: 1
 
     ManagerActionQueue:
       type: object

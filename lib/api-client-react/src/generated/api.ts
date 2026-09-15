@@ -42,6 +42,7 @@ import type {
   AuthResponse,
   AutoTrackClaimRequest,
   AutoTrackClaimResponse,
+  BackgroundOperationDiagnostics,
   BrandProfileList,
   ChangePasswordCredentials,
   CheckUsernameAvailableParams,
@@ -15702,6 +15703,107 @@ export function useListManagerActionQueue<TData = Awaited<ReturnType<typeof list
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getListManagerActionQueueQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetBackgroundOperationDiagnosticsUrl = () => {
+
+
+
+
+  return `/api/background-operations/diagnostics`
+}
+
+/**
+ * @summary List sustained background-operation failures visible to managers
+ */
+export const getBackgroundOperationDiagnostics = async ( options?: Parameters<typeof customFetch>[1]): Promise<BackgroundOperationDiagnostics> => {
+
+  return customFetch<BackgroundOperationDiagnostics>(getGetBackgroundOperationDiagnosticsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetBackgroundOperationDiagnosticsQueryKey = () => {
+    return [
+    `/api/background-operations/diagnostics`
+    ] as const;
+    }
+
+
+export const getGetBackgroundOperationDiagnosticsQueryOptions = <TData = Awaited<ReturnType<typeof getBackgroundOperationDiagnostics>>, TError = ErrorType<void>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getBackgroundOperationDiagnostics>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetBackgroundOperationDiagnosticsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getBackgroundOperationDiagnostics>>> = ({ signal }) => getBackgroundOperationDiagnostics({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getBackgroundOperationDiagnostics>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetBackgroundOperationDiagnosticsQueryResult = NonNullable<Awaited<ReturnType<typeof getBackgroundOperationDiagnostics>>>
+export type GetBackgroundOperationDiagnosticsQueryError = ErrorType<void>
+
+
+export function useGetBackgroundOperationDiagnostics<TData = Awaited<ReturnType<typeof getBackgroundOperationDiagnostics>>, TError = ErrorType<void>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getBackgroundOperationDiagnostics>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getBackgroundOperationDiagnostics>>,
+          TError,
+          Awaited<ReturnType<typeof getBackgroundOperationDiagnostics>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetBackgroundOperationDiagnostics<TData = Awaited<ReturnType<typeof getBackgroundOperationDiagnostics>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getBackgroundOperationDiagnostics>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getBackgroundOperationDiagnostics>>,
+          TError,
+          Awaited<ReturnType<typeof getBackgroundOperationDiagnostics>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetBackgroundOperationDiagnostics<TData = Awaited<ReturnType<typeof getBackgroundOperationDiagnostics>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getBackgroundOperationDiagnostics>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List sustained background-operation failures visible to managers
+ */
+
+export function useGetBackgroundOperationDiagnostics<TData = Awaited<ReturnType<typeof getBackgroundOperationDiagnostics>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getBackgroundOperationDiagnostics>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetBackgroundOperationDiagnosticsQueryOptions(options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 

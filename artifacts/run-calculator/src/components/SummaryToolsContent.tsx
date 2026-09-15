@@ -9,6 +9,7 @@ import { buildDaySummaryInput, buildWeekSummaryInput } from "../aiSummary";
 import { loadRunValues } from "../storage";
 import { todayStr } from "../utils";
 import CanonicalRunViewCard from "./CanonicalRunViewCard";
+import BackgroundOperationWarning from "./BackgroundOperationWarning";
 
 // Memo'd manager "Operations desk" tools header extracted from home.tsx
 // (refactor step 5). Renders nothing for non-managers. Subscribes to the
@@ -31,6 +32,7 @@ export default memo(function SummaryToolsContent() {
                         <p className="text-xs text-muted-foreground">Manager follow-up and shift context</p>
                       </div>
                     </div>
+                    <BackgroundOperationWarning />
                     <div className="mb-3" data-testid="summary-priority-actions">
                       <ManagerActionQueue onNavigate={(item) => {
                         const destination = actionQueueDestination(item);
