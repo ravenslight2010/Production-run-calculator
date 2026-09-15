@@ -21,10 +21,12 @@ through the privacy-safe `calculator-performance` event:
 The full calculator Vitest suite has a 150-second wall-clock validation budget.
 The standard validation lane requires at least four available CPU workers and
 uses a validated ceiling of four Vitest workers. This is an explicit resource
-policy, not an assumption about the current runner: a measured four-worker run
-of the 2,690-test suite completed in 82.4 seconds, while a measured two-worker
-run of the 2,682-test suite took 179.3 seconds and therefore cannot meet this
-budget.
+policy, not an assumption about the current runner. A fresh lower-boundary run
+on 2026-09-15 covered 289 files and 2,692 tests in 112.9 seconds, with eight
+available CPU workers and four configured Vitest workers. It remains within the
+150-second budget, so four workers remains the supported prerequisite. The
+earlier measured two-worker run of the 2,682-test suite took 179.3 seconds and
+therefore cannot meet this budget.
 Runners below the prerequisite fail before starting Vitest with a clear
 resource error rather than producing a misleading duration failure.
 
@@ -33,8 +35,12 @@ assertions plus a summary of the file count, test count, elapsed time, and
 runner capacity. The summary reports `available CPU workers`, detected from the
 runner at startup, and the configured `worker ceiling` used by Vitest. A
 resource-prerequisite failure reports those same fields before Vitest starts.
-The guard runs the same suite once and fails with the measured overage when the
-budget is exceeded. The standard include pattern remains
+The guard runs the same suite once with four configured workers and fails with
+the measured overage when the budget is exceeded. Use
+`pnpm --filter @workspace/run-calculator run test:budget:lower` when explicitly
+rechecking the supported lower-worker boundary. Both commands report the
+available CPU-worker capacity and configured Vitest workers alongside the test
+count, elapsed time, and budget. The standard include pattern remains
 `src/**/*.test.{ts,tsx}`, including the mounted foreground-recovery and
 foreground wake-guard regression tests.
 

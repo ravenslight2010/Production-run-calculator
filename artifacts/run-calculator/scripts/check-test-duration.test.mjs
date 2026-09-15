@@ -4,9 +4,11 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_CALCULATOR_TEST_BUDGET_MS,
   CALCULATOR_TEST_WORKER_CEILING,
+  DEFAULT_CALCULATOR_TEST_WORKERS,
   MIN_CALCULATOR_TEST_WORKERS,
   calculatorTestBudgetMs,
   calculatorTestResourceError,
+  calculatorTestWorkers,
   formatCalculatorTestCapacity,
   formatCalculatorTestSummary,
   summarizeVitestJson,
@@ -60,10 +62,7 @@ test("uses the configured worker ceiling in the shared capacity line", () => {
     formatCalculatorTestCapacity(4),
     "Detected runner capacity: 4 available CPU workers; configured worker ceiling: 4.",
   );
-  assert.equal(
-    CALCULATOR_TEST_WORKER_CEILING,
-    4,
-  );
+  assert.equal(CALCULATOR_TEST_WORKER_CEILING, 4);
 });
 
 test("uses the default budget and accepts a positive override", () => {
@@ -75,6 +74,15 @@ test("uses the default budget and accepts a positive override", () => {
   assert.equal(
     calculatorTestBudgetMs({ CALCULATOR_TEST_BUDGET_MS: "not-a-duration" }),
     DEFAULT_CALCULATOR_TEST_BUDGET_MS,
+  );
+});
+
+test("uses four workers by default and accepts a positive override", () => {
+  assert.equal(calculatorTestWorkers({}), DEFAULT_CALCULATOR_TEST_WORKERS);
+  assert.equal(calculatorTestWorkers({ CALCULATOR_TEST_WORKERS: "6" }), 6);
+  assert.equal(
+    calculatorTestWorkers({ CALCULATOR_TEST_WORKERS: "not-a-worker-count" }),
+    DEFAULT_CALCULATOR_TEST_WORKERS,
   );
 });
 

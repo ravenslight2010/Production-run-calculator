@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 export const DEFAULT_CALCULATOR_TEST_BUDGET_MS = 150_000;
 export const MIN_CALCULATOR_TEST_WORKERS = 4;
 export const CALCULATOR_TEST_WORKER_CEILING = 4;
+export const DEFAULT_CALCULATOR_TEST_WORKERS = CALCULATOR_TEST_WORKER_CEILING;
 
 function positiveInteger(value, fallback) {
   const parsed = Number(value);
@@ -19,6 +20,15 @@ export function calculatorTestBudgetMs(
   return positiveInteger(
     environment.CALCULATOR_TEST_BUDGET_MS,
     DEFAULT_CALCULATOR_TEST_BUDGET_MS,
+  );
+}
+
+export function calculatorTestWorkers(
+  environment = process.env,
+) {
+  return positiveInteger(
+    environment.CALCULATOR_TEST_WORKERS,
+    DEFAULT_CALCULATOR_TEST_WORKERS,
   );
 }
 
@@ -88,6 +98,7 @@ export function formatCalculatorTestSummary(
 
 async function runCalculatorTests() {
   const budgetMs = calculatorTestBudgetMs();
+  const configuredWorkers = calculatorTestWorkers();
   const availableWorkers = availableParallelism();
   const resourceError = calculatorTestResourceError(availableWorkers);
   if (resourceError) {
@@ -113,6 +124,7 @@ async function runCalculatorTests() {
           "run",
           "--reporter=default",
           "--reporter=json",
+          `--maxWorkers=${configuredWorkers}`,
           `--outputFile=${reportPath}`,
         ],
         { stdio: "inherit" },
@@ -146,6 +158,7 @@ async function runCalculatorTests() {
           elapsedMs,
           budgetMs,
           availableWorkers,
+          configuredWorkers,
         ),
       );
     } else {
@@ -153,7 +166,7 @@ async function runCalculatorTests() {
         `Calculator test suite elapsed ${(
           elapsedMs / 1000
         ).toFixed(1)}s (budget ${(budgetMs / 1000).toFixed(1)}s). ` +
-          formatCalculatorTestCapacity(availableWorkers),
+          formatCalculatorTestCapacity(availableWorkers, configuredWorkers),
       );
     }
 
