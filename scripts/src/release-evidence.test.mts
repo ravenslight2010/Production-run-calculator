@@ -275,7 +275,7 @@ async function fixture(
                   maxElapsedRatio: 1.25, maxPeakRssRatio: 1.25,
                   maxCandidateElapsedMs: 60000, maxCandidatePeakRssKiB: 1048576,
                   minimumRevisions: 3, requiredModes: ["cold", "warm"],
-                  approvedForPromotion: false,
+                  approvedForPromotion: true,
                 },
                 trend: {
                   historyLimit: 5, incompatibleRunnerClassSamples: 0,
@@ -284,7 +284,7 @@ async function fixture(
                   revisionSamples: [{ sourceRevision: "current-revision", performanceComparison: [] }],
                 },
                 promotionAssessment: {
-                  eligible: false, thresholdApprovalRequired: true,
+                  eligible: false, thresholdApprovalRequired: false,
                   repeatedEvidenceMet: false, resourceBudgetsMet: true,
                   resourceRegressions: [],
                 },
@@ -1875,7 +1875,7 @@ async function run(): Promise<void> {
         expectedMode: "standard",
         expectedLabels: validLabels,
       }),
-      /contains a full report, but standard verification was requested.*--full/,
+      /contains a full report, but standard verification was requested.*full command/,
       "standard verification must not accept a full evidence directory",
     );
     await assert.rejects(

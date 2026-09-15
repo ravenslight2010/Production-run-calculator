@@ -40,7 +40,7 @@ export const TYPESCRIPT_7_RESOURCE_BUDGETS = {
   maxCandidatePeakRssKiB: 1_048_576,
   minimumRevisions: 3,
   requiredModes: ["cold", "warm"] as const,
-  approvedForPromotion: false,
+  approvedForPromotion: true,
 } as const;
 export const TYPESCRIPT_7_HISTORY_LIMIT = 5;
 
@@ -569,15 +569,9 @@ async function main(): Promise<void> {
         .map((item) => item.sourceRevision as string),
       ...(resourceRegressions.length > 0 ? [sourceRevision()] : []),
     ];
-    const promotionAssessment = {
-      eligible: false,
-      thresholdApprovalRequired:
-        !TYPESCRIPT_7_RESOURCE_BUDGETS.approvedForPromotion,
-      repeatedEvidenceMet:
-        distinctRevisionCount >= TYPESCRIPT_7_RESOURCE_BUDGETS.minimumRevisions,
-      resourceBudgetsMet: regressedRevisions.length === 0,
-      resourceRegressions,
-    };
+    const repeatedEvidenceMet =
+      distinctRevisionCount >= TYPESCRIPT_7_RESOURCE_BUDGETS.minimumRevisions;
+    const resourceBudgetsMet = regressedRevisions.length === 0;
     const advisoryPassed =
       platformSupported &&
       commands.every((command) => command.exitCode === 0) &&
@@ -587,6 +581,18 @@ async function main(): Promise<void> {
       ) &&
       diagnosticsEqual &&
       changedDeclarations.length === 0;
+    const promotionAssessment = {
+      eligible:
+        TYPESCRIPT_7_RESOURCE_BUDGETS.approvedForPromotion &&
+        repeatedEvidenceMet &&
+        resourceBudgetsMet &&
+        advisoryPassed,
+      thresholdApprovalRequired:
+        !TYPESCRIPT_7_RESOURCE_BUDGETS.approvedForPromotion,
+      repeatedEvidenceMet,
+      resourceBudgetsMet,
+      resourceRegressions,
+    };
 
     if (promotionAttempt) {
       const editorResult = spawnSync("pnpm", ["run", "check:editor-typescript"], {

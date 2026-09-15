@@ -510,7 +510,7 @@ export function validateTypescript7ComparisonEvidence(
     | Record<string, unknown>
     | undefined;
   if (
-    resourceBudgets?.approvedForPromotion !== false ||
+    resourceBudgets?.approvedForPromotion !== true ||
     resourceBudgets.minimumRevisions !== 3 ||
     resourceBudgets.maxElapsedRatio !== 1.25 ||
     resourceBudgets.maxPeakRssRatio !== 1.25 ||
@@ -526,8 +526,8 @@ export function validateTypescript7ComparisonEvidence(
     !Array.isArray(trend.regressedRevisions) ||
     !Array.isArray(trend.revisionSamples) ||
     trend.revisionSamples.length < 1 ||
-    promotion?.eligible !== false ||
-    promotion.thresholdApprovalRequired !== true ||
+    typeof promotion?.eligible !== "boolean" ||
+    promotion.thresholdApprovalRequired !== false ||
     typeof promotion.repeatedEvidenceMet !== "boolean" ||
     typeof promotion.resourceBudgetsMet !== "boolean" ||
     !Array.isArray(promotion.resourceRegressions)
@@ -674,6 +674,10 @@ export function validateTypescript7ComparisonEvidence(
     promotion.repeatedEvidenceMet !== (distinctRevisions.size >= 3) ||
     promotion.resourceBudgetsMet !==
       (regressedRevisions.length === 0) ||
+    promotion.eligible !==
+      (distinctRevisions.size >= 3 &&
+        regressedRevisions.length === 0 &&
+        report.acceptanceGatesMet === true) ||
     (expectedResourceRegressions.length > 0) !==
       regressedRevisions.includes(expectedRevision) ||
     JSON.stringify(promotion.resourceRegressions) !==

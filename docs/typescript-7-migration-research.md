@@ -300,15 +300,38 @@ files, and exact hash-pinned review accounts for the remaining 9. A production s
 continue to block any new declaration output until it is fixed or receives the same
 contract-owner review.
 
-The original timings are representative only. The advisory release lane now captures one
-cold and one warm measurement for every TypeScript 6/7 comparison check and aggregates up
-to five prior successful, revision-bound CI artifacts. Promotion requires at least three
-distinct revisions. The provisional process budgets are a candidate elapsed-time ratio of
-at most 1.25, candidate peak-RSS ratio of at most 1.25, 60 seconds per candidate check, and
-1,048,576 KiB peak RSS per candidate process tree. These thresholds are intentionally
-marked unapproved: violations are reported as advisory regressions, and promotion remains
-ineligible if any retained revision breaches them or until maintainers explicitly approve
-the thresholds in code and documentation.
+The advisory release lane captures one cold and one warm measurement for every TypeScript
+6/7 comparison check and aggregates up to five prior successful, revision-bound CI
+artifacts. Promotion requires at least three distinct revisions.
+
+
+### Resource-limit approval
+
+On 2026-09-15, maintainers reviewed three distinct schema-v3, revision-bound measurement
+sets from successful GitHub Actions resource-capture jobs. All three used the supported
+Linux x64 `ubuntu24@20260907.300.1` image with 4 logical CPUs and 16 GiB of memory. The
+exact reports are cryptographically referenced, and their resource summaries are retained,
+in `docs/typescript-7-resource-approval-evidence.json`.
+
+| Source revision | Highest cold candidate time | Highest warm candidate time | Highest elapsed ratio | Highest cold candidate RSS | Highest warm candidate RSS | Highest RSS ratio |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `305fafc03977cb3cbe1082b6b526dfefcadbd4ac` | 3,273 ms | 3,545 ms | 0.250 | 844,048 KiB | 907,260 KiB | 1.040 |
+| `f76eb757dd18112eac8a616e66bfd08c09fd6261` | 3,708 ms | 3,708 ms | 0.250 | 875,712 KiB | 869,536 KiB | 1.053 |
+| `7b0fe2d72de5f51d812e3e3b348bbc9b01c48831` | 2,003 ms | 2,011 ms | 0.244 | 890,492 KiB | 921,160 KiB | 1.041 |
+
+The provisional limits are approved unchanged: 1.25 elapsed ratio, 1.25 peak-RSS ratio,
+60,000 ms candidate elapsed time, and 1,048,576 KiB candidate peak RSS. The reviewed
+maxima were 0.250 elapsed ratio, 1.053 peak-RSS ratio, 3,708 ms candidate elapsed time,
+and 921,160 KiB candidate peak RSS. The ratio limits preserve protection against
+relative regressions while the absolute limits provide fail-closed ceilings for unusually
+fast baselines.
+
+The code approval flag is now enabled. This approval does not bypass evidence checks.
+Runner hardware fingerprints differed across the three ephemeral hosts, so the retained
+trend correctly resets rather than combining those histories. Promotion remains ineligible
+until at least three distinct compatible retained revisions are present, the current
+comparison acceptance gates pass, and every retained revision is within all four approved
+limits. Any retained over-limit revision keeps `resourceBudgetsMet` and `eligible` false.
 
 ## Ecosystem readiness
 

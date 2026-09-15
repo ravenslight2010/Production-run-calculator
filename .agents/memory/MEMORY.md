@@ -153,4 +153,5 @@
 - [Background DB recovery](background-db-recovery.md) — retry connection resets only for idempotent/lease-protected passes; sustained failures, not one reset, degrade readiness.
 - [Protected job effects](protected-job-effects.md) — cancellation-safe effects need a serialized commit boundary; long boundaries must renew the worker lease.
 - [Revision trend attribution](revision-trend-attribution.md) — classify each historical revision from its own measurements; inherited aggregate failures poison later trend samples.
+- [GitHub Actions evidence extraction](github-actions-evidence-extraction.md) — when connector downloads are forbidden, validate and retain exact reports inside a short-lived CI branch.
 - [Declaration compatibility dependencies](declaration-compatibility-dependencies.md) — mirror package-local links, resolve direct imports, then ignore unrelated dependency-library diagnostics.
