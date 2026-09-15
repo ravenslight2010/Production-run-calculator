@@ -222,6 +222,23 @@ test("retained comparison evidence is revision-bound and advisory", () => {
       "a".repeat(40),
     ),
   );
+  const eligibleEvidence = {
+    ...evidence,
+    trend: {
+      ...evidence.trend,
+      distinctRevisionCount: 3,
+      revisionSamples: [
+        { sourceRevision: "b".repeat(40), performanceComparison: [] },
+        { sourceRevision: "c".repeat(40), performanceComparison: [] },
+        { sourceRevision: "a".repeat(40), performanceComparison: [] },
+      ],
+    },
+    promotionAssessment: {
+      ...evidence.promotionAssessment,
+      eligible: true,
+      repeatedEvidenceMet: true,
+    },
+  };
   assert.doesNotThrow(() =>
     validateTypescript7ComparisonEvidence(
       Buffer.from(
@@ -262,24 +279,6 @@ test("retained comparison evidence is revision-bound and advisory", () => {
       ),
     /stale, incomplete/,
   );
-
-  const eligibleEvidence = {
-    ...evidence,
-    trend: {
-      ...evidence.trend,
-      distinctRevisionCount: 3,
-      revisionSamples: [
-        { sourceRevision: "b".repeat(40), performanceComparison: [] },
-        { sourceRevision: "c".repeat(40), performanceComparison: [] },
-        { sourceRevision: "a".repeat(40), performanceComparison: [] },
-      ],
-    },
-    promotionAssessment: {
-      ...evidence.promotionAssessment,
-      eligible: true,
-      repeatedEvidenceMet: true,
-    },
-  };
   assert.doesNotThrow(() =>
     validateTypescript7ComparisonEvidence(
       Buffer.from(JSON.stringify(eligibleEvidence)),
