@@ -1,0 +1,240 @@
+// Route-level regression coverage for user-requested server jobs.
+//
+// The first request deliberately loses its database connection after the
+// idempotent insert has committed and before the HTTP confirmation is sent.
+// The retry must therefore recover by reading the committed row rather than
+// creating a second job.
+//
+// This suite creates and drops its own PostgreSQL database. It never points the
+// application pool at the configured database until after the throwaway schema
+// has been created, and it uses only synthetic users and job input.
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+import type { AddressInfo } from "node:net";
+import type { Server } from "node:http";
+import express, { type Express, type Response as ExpressResponse } from "express";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { and, eq, sql } from "drizzle-orm";
+import pg from "pg";
+import { signToken } from "../lib/auth";
+
+type DbModule = typeof import("@workspace/db");
+
+let db: DbModule["db"];
+let pool: DbModule["pool"];
+let serverJobsTable: DbModule["serverJobsTable"];
+let usersTable: DbModule["usersTable"];
+let userRolesTable: DbModule["userRolesTable"];
+let rolesTable: DbModule["rolesTable"];
+let seedRoles: () => Promise<void>;
+let clearUserValidityCache: () => void;
+
+let adminPool: pg.Pool;
+let killer: pg.Client;
+let testDbName: string;
+let originalDatabaseUrl: string | undefined;
+let originalPoolMax: string | undefined;
+let server: Server;
+let baseUrl: string;
+let confirmationLoss: Promise<number> | undefined;
+
+const ACTOR = "route-job-actor";
+const IDEMPOTENCY_KEY = "route-job-confirmation-lost";
+const JOB_BODY = {
+  type: "workbook-parse",
+  idempotencyKey: IDEMPOTENCY_KEY,
+  input: { workbookText: "synthetic disposable route fixture" },
+};
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
+
+beforeAll(async () => {
+  originalDatabaseUrl = process.env.DATABASE_URL;
+  if (!originalDatabaseUrl) throw new Error("DATABASE_URL must be set to run integration tests");
+
+  adminPool = new pg.Pool({ connectionString: originalDatabaseUrl });
+  adminPool.on("error", () => {});
+  testDbName = `helium_server_jobs_route_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+  await adminPool.query(`CREATE DATABASE "${testDbName}"`);
+
+  const testUrl = new URL(originalDatabaseUrl);
+  testUrl.pathname = `/${testDbName}`;
+  const testUrlString = testUrl.toString();
+  const push = spawnSync("pnpm", ["--filter", "@workspace/db", "run", "push-force"], {
+    cwd: repoRoot,
+    env: { ...process.env, DATABASE_URL: testUrlString },
+    encoding: "utf8",
+  });
+  if (push.status !== 0) {
+    throw new Error(`drizzle push failed:\n${push.stdout}\n${push.stderr}`);
+  }
+
+  // A single application connection makes the backend used by the route the
+  // same backend checked out by loseCommittedReply after the insert completes.
+  originalPoolMax = process.env.DATABASE_POOL_MAX;
+  process.env.DATABASE_POOL_MAX = "1";
+  process.env.DATABASE_URL = testUrlString;
+
+  const dbMod = await import("@workspace/db");
+  const routerMod = await import("./index");
+  const rolesMod = await import("../lib/roles");
+  const userValidityMod = await import("../lib/userValidity");
+  db = dbMod.db;
+  pool = dbMod.pool;
+  serverJobsTable = dbMod.serverJobsTable;
+  usersTable = dbMod.usersTable;
+  userRolesTable = dbMod.userRolesTable;
+  rolesTable = dbMod.rolesTable;
+  seedRoles = rolesMod.seedRoles;
+  clearUserValidityCache = userValidityMod.clearUserValidityCache;
+
+  killer = new pg.Client({ connectionString: testUrlString });
+  killer.on("error", () => {});
+  await killer.connect();
+
+  const app: Express = express();
+  app.use(express.json({ limit: "10mb" }));
+
+  // The real API router is mounted below a small response fault injector. The
+  // injector waits until the route calls res.json (the insert has already
+  // returned and auto-committed), terminates the just-released DB backend, and
+  // destroys the HTTP response so the client experiences a lost confirmation.
+  let loseFirstConfirmation = true;
+  app.use((req, res, next) => {
+    if (req.method !== "POST" || req.url !== "/api/server-jobs" || !loseFirstConfirmation) {
+      next();
+      return;
+    }
+    res.json = ((body: unknown) => {
+      loseFirstConfirmation = false;
+      confirmationLoss = loseCommittedReply();
+      void confirmationLoss.then(
+        () => res.destroy(),
+        () => res.destroy(),
+      );
+      return res;
+    }) as ExpressResponse["json"];
+    next();
+  });
+  app.use((req, _res, next) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+    next();
+  });
+  app.use("/api", routerMod.default);
+
+  await new Promise<void>((resolve) => {
+    server = app.listen(0, () => resolve());
+  });
+  baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+}, 180_000);
+
+afterAll(async () => {
+  if (server) {
+    server.closeAllConnections?.();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+  if (pool) await pool.end();
+  if (killer) await killer.end().catch(() => {});
+  if (adminPool) {
+    if (testDbName) {
+      await adminPool.query(`DROP DATABASE IF EXISTS "${testDbName}" WITH (FORCE)`);
+    }
+    await adminPool.end();
+  }
+  process.env.DATABASE_URL = originalDatabaseUrl;
+  if (originalPoolMax === undefined) delete process.env.DATABASE_POOL_MAX;
+  else process.env.DATABASE_POOL_MAX = originalPoolMax;
+}, 60_000);
+
+beforeEach(async () => {
+  clearUserValidityCache();
+  await db.execute(sql`
+    TRUNCATE ${serverJobsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable}
+    RESTART IDENTITY CASCADE
+  `);
+  await seedRoles();
+  await db.insert(usersTable).values({
+    id: ACTOR,
+    username: "route-job-actor",
+    passwordHash: "synthetic-test-password-hash",
+  });
+  await db.insert(userRolesTable).values({ userId: ACTOR, role: "manager" });
+});
+
+async function loseCommittedReply(): Promise<number> {
+  const result = await pool.query<{ pid: number }>("select pg_backend_pid()::int as pid");
+  const pid = result.rows[0]!.pid;
+  const clients = (pool as pg.Pool & { _clients?: pg.Client[] })._clients ?? [];
+  clients.find((client) => (client as pg.Client & { processID?: number }).processID === pid)
+    ?.on("error", () => {});
+
+  await killer.query("select pg_terminate_backend($1)", [pid]);
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const present = await killer.query<{ pid: number }>(
+      "select pid::int from pg_stat_activity where pid = $1",
+      [pid],
+    );
+    if (present.rows.length === 0) return pid;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out terminating committed route backend ${pid}`);
+}
+
+function headers(): Record<string, string> {
+  return {
+    "content-type": "application/json",
+    authorization: `Bearer ${signToken(ACTOR)}`,
+  };
+}
+
+async function submitJob(): Promise<globalThis.Response> {
+  return fetch(`${baseUrl}/api/server-jobs`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify(JOB_BODY),
+  });
+}
+
+describe("server job route idempotency", () => {
+  it("replays one committed user job when its creation confirmation is lost", async () => {
+    const firstRequest = submitJob();
+    await expect(firstRequest).rejects.toThrow();
+
+    // The response injector only destroys the socket after the database backend
+    // has been terminated. Awaiting it proves the fault happened after commit,
+    // not before the insert.
+    const loss = confirmationLoss;
+    expect(loss).toBeDefined();
+    await loss;
+
+    const retry = await submitJob();
+    expect(retry.status).toBe(200);
+    const retryBody = (await retry.json()) as {
+      id: string;
+      status: string;
+      idempotentReplay: boolean;
+    };
+    expect(retryBody).toMatchObject({
+      status: "queued",
+      idempotentReplay: true,
+    });
+
+    const jobs = await db.select().from(serverJobsTable).where(and(
+      eq(serverJobsTable.scope, "live"),
+      eq(serverJobsTable.actorId, ACTOR),
+      eq(serverJobsTable.idempotencyKey, IDEMPOTENCY_KEY),
+    ));
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]).toMatchObject({
+      id: retryBody.id,
+      scope: "live",
+      actorId: ACTOR,
+      type: "workbook-parse",
+      idempotencyKey: IDEMPOTENCY_KEY,
+      status: "queued",
+    });
+  });
+});
