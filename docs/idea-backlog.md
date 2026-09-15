@@ -6,7 +6,7 @@ Master list of improvement ideas for the Production Run Calculator. Each idea in
 
 ## 1. Mix Plan & Prep Mix Inventory
 
-**Status**: Planning  
+**Status**: Done (mix surplus ledger shipped; daily deduction already existed)  
 **Priority**: High — same root issue as overproduction inventory gap
 
 ### Summary

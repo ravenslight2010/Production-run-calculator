@@ -500,3 +500,26 @@ Running log of fixes made by Codex. Read before modifying code to avoid re-apply
 **Why it was needed**: closes the migration program with a documented end state and prevents future agents from re-opening "move X to server" for surfaces that must stay client-side.
 
 **Verification**: regression suites re-run (live-calc 25/25; api-server sync.liveCalcTick 20/20; run-calculator focused + slice-7 sets green; both typechecks clean).
+
+## Mix surplus ledger (Approach A)
+
+**Date**: 2026-09-15
+**Branch**: `feat/mix-surplus-ledger`
+**Files changed**:
+- `lib/db/src/schema/mixSurplus.ts` (new) — `mix_surplus_lots` + `mix_surplus_allocations` tables.
+- `lib/inventory-math/src/index.ts` + `mixSurplus.test.ts` — pure `buildMixSurplusRecording` helper (5 tests).
+- `artifacts/api-server/src/routes/inventory.ts` — day-start records surplus lots + corrects B2 fresh basis (`Math.max(0, actualMade)` when entered).
+- `lib/api-spec/openapi.yaml` — `GET/POST /mix-surplus`, `PUT /mix-surplus/allocations/:runDate`, `DELETE /mix-surplus/lots/:id`; generated clients.
+- `artifacts/api-server/src/routes/mixSurplus.ts` (new) — ledger + allocation + void routes.
+- `artifacts/run-calculator/src/mixSurplusClient.ts` + test — defensive parse + fetch wrappers (9 tests).
+- `artifacts/run-calculator/src/components/MixSurplusStrip.tsx` + test — Mixes-tab freezer-stock strip with Use/Release (6 tests).
+- `artifacts/run-calculator/src/components/MixesTabContent.tsx` — mounts the strip under each mix card (no ctx changes).
+- Backlog §1 → Done; `codex-fixes.md` entry; spec + plan committed.
+
+**What was wrong / missing**: Mix plan carried overproduction as a silent scalar (`amountAlreadyMade`) with no dated ledger, no per-run allocation, and no "X lbs in the freezer" reminder — so QC/traceability was blind to where the carry came from and managers couldn't confirm/override it.
+
+**What the fix was**: Two-table surplus ledger mirrors the proven freezer-surplus pattern: (1) day-start consumption records a lot at the source (the same moment ingredients were deducted) when `actualMade > remaining`, extending same-date lots instead of duplicating; (2) `GET /mix-surplus` returns per-mix balances for the in-tab reminder; (3) `PUT /mix-surplus/allocations/:runDate` records "Use on next run" confirmations; (4) `DELETE /mix-surplus/lots/:id` (void/Release) decrements the mix's `amountAlreadyMade` so the scalar reducer stays in sync with the ledger. Plan math is unchanged; the ledger is its traceable image — surplus use never re-deducts inventory. Also corrected the B2 fresh basis (`Math.max(0, actualMade)` instead of `Math.max(totalLbs, actualMade)`) so under-production deducts only what was made.
+
+**Why it was needed**: completes Mix Plan backlog §1 (backlog items 2–5), enables QC traceability, and keeps the daily-reset-safe invariant (separate relational tables; client day-state reset doesn't touch them).
+
+**Verification**: inventory-math 79/79; run-calculator focused suites (mixSurplusClient 9/9, MixSurplusStrip 6/6, MixAlreadyMadeInput 4/4, LiveTabMemo.snappy + suite7 84/84); api-server sync.liveCalcTick 20/20 + protectRunValues 110/110; both typechecks clean. Integration test added (CI-only, needs `DATABASE_URL`). Behavioral note: B2 basis fix changes consumption only when "Made today" is entered (rare in production); blank entries unchanged.
