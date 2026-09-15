@@ -22,6 +22,46 @@ const SCREEN_RULES: Record<string, readonly string[]> = {
   "reported issues field checks": ["button-name", "color-contrast", "heading-order"],
 };
 
+/*
+ * Contrast audit finding log for the dark operational theme:
+ * - Stoppage Pause label (`text-blue-400/70`) failed on `bg-blue-950/20`.
+ * - Inactive Pause icon (`text-blue-400/50`) failed on the surrounding card.
+ * - Surplus Mix count/name/amount labels passed on `bg-sky-950/30`; keep their
+ *   existing opacity because those combinations are not failing.
+ */
+const OPERATIONAL_CONTRAST_FIXTURES = [
+  {
+    id: "stoppage-pause-label",
+    wrapperClass: "bg-blue-950/20",
+    textClass: "text-[10px] font-semibold uppercase tracking-wider text-blue-400",
+    text: "Pause",
+  },
+  {
+    id: "stoppage-inactive-pause-icon",
+    wrapperClass: "bg-card/40",
+    textClass: "text-blue-400",
+    text: "Pause icon",
+  },
+  {
+    id: "surplus-count",
+    wrapperClass: "bg-sky-950/30",
+    textClass: "text-xs text-sky-400/80",
+    text: "(2 mixes)",
+  },
+  {
+    id: "surplus-name",
+    wrapperClass: "bg-sky-950/30",
+    textClass: "text-sky-200/90",
+    text: "Mix name",
+  },
+  {
+    id: "surplus-amount-label",
+    wrapperClass: "bg-sky-950/30",
+    textClass: "text-[11px] text-sky-300/80",
+    text: "lbs on hand",
+  },
+] as const;
+
 function signupCode(): string {
   if (!process.env.STAFF_SIGNUP_CODE) {
     throw new Error("STAFF_SIGNUP_CODE must be configured for accessibility smoke tests.");
@@ -425,6 +465,29 @@ test.describe("accessibility smoke", () => {
     await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
     await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
     await assertZoomedUsable(page, "sign-in");
+  });
+
+  test("reduced-opacity blue labels pass contrast on operational backgrounds", async ({ page }) => {
+    await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
+    await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
+    await page.evaluate((fixtures) => {
+      document.documentElement.classList.add("dark");
+      const root = document.createElement("main");
+      root.id = "operational-contrast-audit";
+      root.innerHTML = fixtures
+        .map(
+          (fixture) =>
+            `<section id="${fixture.id}" class="${fixture.wrapperClass}" style="padding: 12px; margin: 4px"><span class="${fixture.textClass}">${fixture.text}</span></section>`,
+        )
+        .join("");
+      document.body.append(root);
+    }, OPERATIONAL_CONTRAST_FIXTURES);
+
+    const results = await new AxeBuilder({ page })
+      .include("#operational-contrast-audit")
+      .withRules(["color-contrast"])
+      .analyze();
+    expect(results.violations, "Operational blue/sky label contrast audit").toEqual([]);
   });
 
   test("authenticated staff workflows expose accessible controls and dialogs", async ({ page }) => {
