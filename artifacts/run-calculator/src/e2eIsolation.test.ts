@@ -87,13 +87,14 @@ function directDatabaseQueries(source: string): Array<{
     ts.ScriptKind.TS,
   );
   const queries: Array<{ sql: ts.Expression | undefined; line: number }> = [];
+  const clientIdentifiers = postgresClientIdentifiers(sourceFile);
 
   function visit(node: ts.Node): void {
     if (
       ts.isCallExpression(node)
       && ts.isPropertyAccessExpression(node.expression)
       && ts.isIdentifier(node.expression.expression)
-      && node.expression.expression.text === "db"
+      && clientIdentifiers.has(node.expression.expression.text)
       && node.expression.name.text === "query"
     ) {
       queries.push({
@@ -106,6 +107,64 @@ function directDatabaseQueries(source: string): Array<{
 
   visit(sourceFile);
   return queries;
+}
+
+function postgresClientIdentifiers(sourceFile: ts.SourceFile): Set<string> {
+  const clientTypeNames = new Set<string>();
+  const clientConstructorNames = new Set<string>();
+  const clientIdentifiers = new Set<string>();
+
+  for (const statement of sourceFile.statements) {
+    if (
+      ts.isImportDeclaration(statement)
+      && ts.isStringLiteral(statement.moduleSpecifier)
+      && statement.moduleSpecifier.text === "pg"
+      && statement.importClause?.namedBindings
+      && ts.isNamedImports(statement.importClause.namedBindings)
+    ) {
+      for (const element of statement.importClause.namedBindings.elements) {
+        if ((element.propertyName ?? element.name).text === "Client") {
+          clientTypeNames.add(element.name.text);
+          if (!statement.importClause.isTypeOnly && !element.isTypeOnly) {
+            clientConstructorNames.add(element.name.text);
+          }
+        }
+      }
+    }
+  }
+
+  function isClientType(type: ts.TypeNode | undefined): boolean {
+    return Boolean(
+      type
+      && ts.isTypeReferenceNode(type)
+      && ts.isIdentifier(type.typeName)
+      && clientTypeNames.has(type.typeName.text),
+    );
+  }
+
+  function visit(node: ts.Node): void {
+    if (
+      ts.isParameter(node)
+      && ts.isIdentifier(node.name)
+      && isClientType(node.type)
+    ) {
+      clientIdentifiers.add(node.name.text);
+    }
+    if (
+      ts.isVariableDeclaration(node)
+      && ts.isIdentifier(node.name)
+      && node.initializer
+      && ts.isNewExpression(node.initializer)
+      && ts.isIdentifier(node.initializer.expression)
+      && clientConstructorNames.has(node.initializer.expression.text)
+    ) {
+      clientIdentifiers.add(node.name.text);
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(sourceFile);
+
+  return clientIdentifiers;
 }
 
 describe("AuthorizedBrowserFixtures live fixture lock", () => {
@@ -310,15 +369,47 @@ describe("browser fixture SQL source guard", () => {
 
   it("rejects setup values interpolated into SQL", () => {
     const unsafeSource = [
-      "async function setup(db: { query(sql: string): Promise<void> }) {",
+      'import type { Client } from "pg";',
+      "async function setup(connection: Client) {",
       "  const username = \"fixture\";",
-      "  await db.query(`DELETE FROM users WHERE username = '${username}'`);",
+      "  await connection.query(`DELETE FROM users WHERE username = '${username}'`);",
       "}",
     ].join("\n");
     const result = directSqlSourceViolations(unsafeSource);
 
     expect(result.queries).toBeGreaterThan(0);
     expect(result.violations).toHaveLength(1);
+  });
+
+  it("rejects interpolation on a locally constructed renamed Client", () => {
+    const unsafeSource = [
+      'import { Client as PgClient } from "pg";',
+      "async function setup() {",
+      "  const connection = new PgClient();",
+      "  const username = \"fixture\";",
+      "  await connection.query(`DELETE FROM users WHERE username = '${username}'`);",
+      "}",
+    ].join("\n");
+    const result = directSqlSourceViolations(unsafeSource);
+
+    expect(result.queries).toBe(1);
+    expect(result.violations).toHaveLength(1);
+  });
+
+  it("supports allowlisted identifiers on renamed Client parameters", () => {
+    const safeSource = [
+      'import type { Client as PgClient } from "pg";',
+      "async function cleanup(connection: PgClient, kind: \"dough\") {",
+      "  const RECIPE_SQL_IDENTIFIER_ALLOWLIST = { dough: \"dough_recipes\" } as const;",
+      "  const table = RECIPE_SQL_IDENTIFIER_ALLOWLIST[kind];",
+      "  await connection.query(`DELETE FROM ${table} WHERE id = $1`, [\"fixture-id\"]);",
+      "}",
+    ].join("\n");
+    const result = directSqlSourceViolations(safeSource);
+
+    expect(result.queries).toBe(1);
+    expect(result.allowedIdentifiers).toContain("table");
+    expect(result.violations).toEqual([]);
   });
 });
 
