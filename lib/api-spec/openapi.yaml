@@ -2040,9 +2040,10 @@ paths:
       description: >-
         Replaces the surplus allocations for a make-day. Confirming ("Use on
         next run") decrements each lot's remaining balance and records the
-        dated allocation; zeroed amounts release/void them and decrement the
-        mix's amountAlreadyMade so the plan reducer stays in sync with the
-        ledger. Ledger action only — never writes inventory.
+        dated allocation; reducing/omitting an allocation returns that amount
+        to the lot (un-reserved, still in the freezer). Voiding a lot entirely
+        is DELETE /mix-surplus/lots/{id}. Ledger action only — never writes
+        inventory.
       parameters:
         - name: runDate
           in: path
@@ -2067,6 +2068,36 @@ paths:
           description: Invalid make-day, lot, or nonzero allocation
         "409":
           description: The requested lot balance changed
+
+
+  /mix-surplus/lots/{id}:
+    delete:
+      operationId: voidMixSurplusLot
+      tags: [mixSurplus]
+      summary: Void a mix surplus lot (release it from use)
+      description: >-
+        Manager override: voids a surplus lot entirely — its remaining balance
+        is set to 0, its allocation rows are removed, and the mix row's
+        amountAlreadyMade is decremented by the voided amount so the plan
+        reducer stops counting disposed surplus (ledger == scalar invariant).
+        Ledger action only — never writes inventory.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 120
+      responses:
+        "200":
+          description: Voided lot and current ledger
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MixSurplusMutationResponse"
+        "404":
+          description: Lot not found or already voided
 
   /die-line-defaults:
     get:

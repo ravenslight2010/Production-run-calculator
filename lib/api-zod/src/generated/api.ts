@@ -2594,7 +2594,7 @@ export const RecordMixSurplusResponse = zod.object({
 
 
 /**
- * Replaces the surplus allocations for a make-day. Confirming ("Use on next run") decrements each lot's remaining balance and records the dated allocation; zeroed amounts release/void them and decrement the mix's amountAlreadyMade so the plan reducer stays in sync with the ledger. Ledger action only — never writes inventory.
+ * Replaces the surplus allocations for a make-day. Confirming ("Use on next run") decrements each lot's remaining balance and records the dated allocation; reducing/omitting an allocation returns that amount to the lot (un-reserved, still in the freezer). Voiding a lot entirely is DELETE /mix-surplus/lots/{id}. Ledger action only — never writes inventory.
  * @summary Apply or release mix surplus for a make-day
  */
 export const ReplaceMixSurplusAllocationsParams = zod.object({
@@ -2678,6 +2678,83 @@ export const ReplaceMixSurplusAllocationsResponse = zod.object({
   "amountMade": zod.number().min(replaceMixSurplusAllocationsResponseCreatedLotOneAmountMadeMin),
   "amountUsed": zod.number().min(replaceMixSurplusAllocationsResponseCreatedLotOneAmountUsedMin),
   "amountRemaining": zod.number().min(replaceMixSurplusAllocationsResponseCreatedLotOneAmountRemainingMin)
+}).nullish()
+})
+
+
+/**
+ * Manager override: voids a surplus lot entirely — its remaining balance is set to 0, its allocation rows are removed, and the mix row's amountAlreadyMade is decremented by the voided amount so the plan reducer stops counting disposed surplus (ledger == scalar invariant). Ledger action only — never writes inventory.
+ * @summary Void a mix surplus lot (release it from use)
+ */
+export const voidMixSurplusLotPathIdMax = 120;
+
+
+
+export const VoidMixSurplusLotParams = zod.object({
+  "id": zod.coerce.string().min(1).max(voidMixSurplusLotPathIdMax)
+})
+
+export const voidMixSurplusLotResponseLotsItemAmountMadeMin = 0;
+
+export const voidMixSurplusLotResponseLotsItemAmountUsedMin = 0;
+
+export const voidMixSurplusLotResponseLotsItemAmountRemainingMin = 0;
+
+export const voidMixSurplusLotResponseAllocationsItemAmountMin = 0;
+
+export const voidMixSurplusLotResponseBalancesItemLbsMin = 0;
+
+export const voidMixSurplusLotResponseCreatedLotOneAmountMadeMin = 0;
+
+export const voidMixSurplusLotResponseCreatedLotOneAmountUsedMin = 0;
+
+export const voidMixSurplusLotResponseCreatedLotOneAmountRemainingMin = 0;
+
+
+
+export const VoidMixSurplusLotResponse = zod.object({
+  "lots": zod.array(zod.object({
+  "id": zod.string(),
+  "mixId": zod.string(),
+  "name": zod.string(),
+  "brand": zod.string().optional(),
+  "flavor": zod.string().optional(),
+  "isPrep": zod.boolean().optional(),
+  "productionDate": zod.coerce.date(),
+  "location": zod.string(),
+  "amountMade": zod.number().min(voidMixSurplusLotResponseLotsItemAmountMadeMin),
+  "amountUsed": zod.number().min(voidMixSurplusLotResponseLotsItemAmountUsedMin),
+  "amountRemaining": zod.number().min(voidMixSurplusLotResponseLotsItemAmountRemainingMin)
+})),
+  "allocations": zod.array(zod.object({
+  "id": zod.string(),
+  "lotId": zod.string(),
+  "mixId": zod.string(),
+  "runId": zod.string().optional(),
+  "runDate": zod.coerce.date(),
+  "brand": zod.string().optional(),
+  "flavor": zod.string().optional(),
+  "isPrep": zod.boolean().optional(),
+  "amount": zod.number().min(voidMixSurplusLotResponseAllocationsItemAmountMin)
+})),
+  "balances": zod.array(zod.object({
+  "mixId": zod.string(),
+  "name": zod.string(),
+  "lbs": zod.number().min(voidMixSurplusLotResponseBalancesItemLbsMin),
+  "productionDates": zod.array(zod.coerce.date())
+})),
+  "createdLot": zod.object({
+  "id": zod.string(),
+  "mixId": zod.string(),
+  "name": zod.string(),
+  "brand": zod.string().optional(),
+  "flavor": zod.string().optional(),
+  "isPrep": zod.boolean().optional(),
+  "productionDate": zod.coerce.date(),
+  "location": zod.string(),
+  "amountMade": zod.number().min(voidMixSurplusLotResponseCreatedLotOneAmountMadeMin),
+  "amountUsed": zod.number().min(voidMixSurplusLotResponseCreatedLotOneAmountUsedMin),
+  "amountRemaining": zod.number().min(voidMixSurplusLotResponseCreatedLotOneAmountRemainingMin)
 }).nullish()
 })
 

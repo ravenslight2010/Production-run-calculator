@@ -7490,7 +7490,7 @@ export const getReplaceMixSurplusAllocationsUrl = (runDate: string,) => {
 }
 
 /**
- * Replaces the surplus allocations for a make-day. Confirming ("Use on next run") decrements each lot's remaining balance and records the dated allocation; zeroed amounts release/void them and decrement the mix's amountAlreadyMade so the plan reducer stays in sync with the ledger. Ledger action only — never writes inventory.
+ * Replaces the surplus allocations for a make-day. Confirming ("Use on next run") decrements each lot's remaining balance and records the dated allocation; reducing/omitting an allocation returns that amount to the lot (un-reserved, still in the freezer). Voiding a lot entirely is DELETE /mix-surplus/lots/{id}. Ledger action only — never writes inventory.
  * @summary Apply or release mix surplus for a make-day
  */
 export const replaceMixSurplusAllocations = async (runDate: string,
@@ -7569,6 +7569,81 @@ export const useReplaceMixSurplusAllocations = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getReplaceMixSurplusAllocationsMutationOptions(options), queryClient);
+    }
+
+export const getVoidMixSurplusLotUrl = (id: string,) => {
+
+
+
+
+  return `/api/mix-surplus/lots/${id}`
+}
+
+/**
+ * Manager override: voids a surplus lot entirely — its remaining balance is set to 0, its allocation rows are removed, and the mix row's amountAlreadyMade is decremented by the voided amount so the plan reducer stops counting disposed surplus (ledger == scalar invariant). Ledger action only — never writes inventory.
+ * @summary Void a mix surplus lot (release it from use)
+ */
+export const voidMixSurplusLot = async (id: string, options?: Parameters<typeof customFetch>[1]): Promise<MixSurplusMutationResponse> => {
+
+  return customFetch<MixSurplusMutationResponse>(getVoidMixSurplusLotUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getVoidMixSurplusLotMutationKey = () => ['voidMixSurplusLot'] as const;
+
+export const getVoidMixSurplusLotMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof voidMixSurplusLot>>, TError,VoidMixSurplusLotMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof voidMixSurplusLot>>, TError,VoidMixSurplusLotMutationVariables, TContext> => {
+
+const mutationKey = getVoidMixSurplusLotMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof voidMixSurplusLot>>, VoidMixSurplusLotMutationVariables> = (props) => {
+          const {id} = props ?? {};
+
+          return  voidMixSurplusLot(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type VoidMixSurplusLotMutationResult = NonNullable<Awaited<ReturnType<typeof voidMixSurplusLot>>>
+
+    export type VoidMixSurplusLotMutationError = ErrorType<void>
+    export type VoidMixSurplusLotMutationVariables = {id: string}
+
+    /**
+ * @summary Void a mix surplus lot (release it from use)
+ */
+export const useVoidMixSurplusLot = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof voidMixSurplusLot>>, TError,VoidMixSurplusLotMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof voidMixSurplusLot>>,
+        TError,
+        VoidMixSurplusLotMutationVariables,
+        TContext
+      > => {
+      return useMutation(getVoidMixSurplusLotMutationOptions(options), queryClient);
     }
 
 export const getListDieLineDefaultsUrl = () => {
