@@ -1118,6 +1118,35 @@ async function runSourceLibraryPreflightFanoutScenario(): Promise<void> {
       "checkpoint report must identify the source preflight as the common blocker",
     );
 
+    const stoppedSummaryPath = join(evidenceDir, "step-summary.md");
+    const stoppedSummaryResult = await runStoppedSummary(
+      evidenceDir,
+      stoppedSummaryPath,
+      "full",
+      "",
+    );
+    assert.equal(stoppedSummaryResult.code, 0, stoppedSummaryResult.output);
+    const stoppedSummary = await readFile(stoppedSummaryPath, "utf8");
+    assert.match(
+      stoppedSummary,
+      /^Root blockers: source-library reconciliation database preflight \(FAIL\)$/m,
+      "stopped summary must identify the source preflight as the root blocker",
+    );
+    assert.match(
+      stoppedSummary,
+      /^Blocked gates: API integration tests \(release shard 2\/7\) \(blocked by source-library reconciliation database preflight\); run calculator tests \(blocked by source-library reconciliation database preflight\); browser smoke tests \(blocked by source-library reconciliation database preflight\)$/m,
+      "stopped summary must preserve every API, release-test, and browser dependent gate",
+    );
+    assert.ok(
+      stoppedSummary.length <= 4096,
+      "stopped summary blocker text must remain bounded",
+    );
+    assert.doesNotMatch(
+      stoppedSummary,
+      /--preflight|partial fixture|release-check-state\.json|DATABASE_URL|postgres/i,
+      "stopped summary must not expose command payloads or database fixture details",
+    );
+
     const executionLog = await readFile(
       join(evidenceDir, "release-check.log"),
       "utf8",
