@@ -11,7 +11,7 @@ import type {
   TestResult,
 } from "@playwright/test/reporter";
 
-const EXPECTED_CASES = 159;
+export const EXPECTED_CASES = 159;
 const repositoryRoot = fileURLToPath(
   new URL("../../../", import.meta.url),
 );
@@ -489,7 +489,13 @@ export default class ReleaseDurationReporter implements Reporter {
 
   onBegin(_config: FullConfig, suite: Suite): void {
     this.startedAt = Date.now();
-    for (const testCase of suite.allTests()) {
+    const allTests = suite.allTests();
+    if (allTests.length !== EXPECTED_CASES) {
+      throw new Error(
+        `Full browser release lane discovered ${allTests.length} cases; expected exactly ${EXPECTED_CASES}. Update the release filter or contract before running evidence.`,
+      );
+    }
+    for (const testCase of allTests) {
       this.cases.set(testCase.id, {
         file: testCase.location.file,
         title: testCase.titlePath().join(" › "),

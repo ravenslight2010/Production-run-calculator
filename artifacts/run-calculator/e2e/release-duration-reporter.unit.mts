@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import {
   DURATION_REGRESSION_MIN_INCREASE_MS,
   DURATION_REGRESSION_MIN_INCREASE_PERCENT,
+  EXPECTED_CASES,
   canRetainFullBrowserReport,
   findDurationRegressions,
   formatFullBrowserReport,
@@ -87,7 +88,7 @@ assert.equal(
 );
 assert.equal(DURATION_REGRESSION_MIN_INCREASE_PERCENT, 25);
 
-const completeCases = Array.from({ length: 159 }, () => ({
+const completeCases = Array.from({ length: EXPECTED_CASES }, () => ({
   file: slowFile,
   title: "Passing case",
   durationMs: 1_000,
@@ -103,6 +104,10 @@ const validBaselineReport = formatFullBrowserReport(
 const validBaseline = parseCompleteFullBrowserBaseline(validBaselineReport);
 assert.deepEqual(validBaseline, new Map([["artifacts/run-calculator/e2e/slow.spec.ts", 159_000]]));
 assert.equal(canRetainFullBrowserReport(completeCases, "passed"), true);
+assert.equal(
+  canRetainFullBrowserReport(completeCases.slice(0, -1), "passed"),
+  false,
+);
 
 const incompleteCases = completeCases.map((testCase) => ({
   ...testCase,
