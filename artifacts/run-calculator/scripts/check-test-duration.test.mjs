@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 
 import {
   DEFAULT_CALCULATOR_TEST_BUDGET_MS,
+  MIN_CALCULATOR_TEST_WORKERS,
   calculatorTestBudgetMs,
+  calculatorTestResourceError,
   formatCalculatorTestSummary,
   summarizeVitestJson,
 } from "./check-test-duration.mjs";
@@ -58,5 +60,24 @@ test("uses the default budget and accepts a positive override", () => {
   assert.equal(
     calculatorTestBudgetMs({ CALCULATOR_TEST_BUDGET_MS: "not-a-duration" }),
     DEFAULT_CALCULATOR_TEST_BUDGET_MS,
+  );
+});
+
+test("accepts the supported lower-worker boundary", () => {
+  assert.equal(
+    calculatorTestResourceError(MIN_CALCULATOR_TEST_WORKERS),
+    null,
+  );
+  assert.equal(calculatorTestResourceError(8), null);
+});
+
+test("reports the resource prerequisite below the supported boundary", () => {
+  assert.match(
+    calculatorTestResourceError(MIN_CALCULATOR_TEST_WORKERS - 1),
+    /requires at least 4 available CPU workers/i,
+  );
+  assert.match(
+    calculatorTestResourceError(MIN_CALCULATOR_TEST_WORKERS - 1),
+    /two-worker suite exceeded its 150\.0s budget \(179\.3s\)/i,
   );
 });

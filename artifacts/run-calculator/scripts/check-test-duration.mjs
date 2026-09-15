@@ -1,10 +1,11 @@
 import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { availableParallelism, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const DEFAULT_CALCULATOR_TEST_BUDGET_MS = 150_000;
+export const MIN_CALCULATOR_TEST_WORKERS = 4;
 
 function positiveInteger(value, fallback) {
   const parsed = Number(value);
@@ -18,6 +19,26 @@ export function calculatorTestBudgetMs(
     environment.CALCULATOR_TEST_BUDGET_MS,
     DEFAULT_CALCULATOR_TEST_BUDGET_MS,
   );
+}
+
+export function calculatorTestResourceError(
+  availableWorkers,
+  minimumWorkers = MIN_CALCULATOR_TEST_WORKERS,
+) {
+  if (
+    Number.isInteger(availableWorkers) &&
+    availableWorkers >= minimumWorkers
+  ) {
+    return null;
+  }
+
+  return [
+    `Calculator test suite requires at least ${minimumWorkers} available CPU workers.`,
+    `Detected ${availableWorkers}.`,
+    "The standard validation lane is not supported on smaller runners because",
+    "the measured two-worker suite exceeded its 150.0s budget (179.3s).",
+    `Use a runner with at least ${minimumWorkers} available CPU workers or run targeted checks instead.`,
+  ].join(" ");
 }
 
 export function summarizeVitestJson(report) {
@@ -53,6 +74,12 @@ export function formatCalculatorTestSummary(
 
 async function runCalculatorTests() {
   const budgetMs = calculatorTestBudgetMs();
+  const resourceError = calculatorTestResourceError(availableParallelism());
+  if (resourceError) {
+    console.error(resourceError);
+    return 1;
+  }
+
   const temporaryDirectory = await mkdtemp(
     join(tmpdir(), "calculator-vitest-"),
   );

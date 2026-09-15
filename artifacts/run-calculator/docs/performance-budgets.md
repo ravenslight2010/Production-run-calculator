@@ -19,10 +19,21 @@ through the privacy-safe `calculator-performance` event:
 | Workbook export | 10,000 ms |
 
 The full calculator Vitest suite has a 150-second wall-clock validation budget.
+The standard validation lane requires at least four available CPU workers and
+uses a validated ceiling of four Vitest workers. This is an explicit resource
+policy, not an assumption about the current runner: a measured four-worker run
+of the 2,690-test suite completed in 82.4 seconds, while a measured two-worker
+run of the 2,682-test suite took 179.3 seconds and therefore cannot meet this
+budget.
+Runners below the prerequisite fail before starting Vitest with a clear
+resource error rather than producing a misleading duration failure.
+
 Run `pnpm --filter @workspace/run-calculator run test:budget` for the normal
 assertions plus a summary of the file count, test count, and elapsed time. The
 guard runs the same suite once and fails with the measured overage when the
-budget is exceeded.
+budget is exceeded. The standard include pattern remains
+`src/**/*.test.{ts,tsx}`, including the mounted foreground-recovery and
+foreground wake-guard regression tests.
 
 The timing records contain only an operation name, duration, and kind. The
 in-memory diagnostic ring retains the latest 40 records and never stores
