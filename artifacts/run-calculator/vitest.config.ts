@@ -17,11 +17,11 @@ export default defineConfig({
     // fork pool without changing Vitest's per-file environment isolation.
     pool: "threads",
     isolate: true,
-    // Keep file-level parallelism enabled so the full suite stays within the
-    // validation budget, while bounding worker startup to avoid competing with
-    // the other validation workflows.
+    // Keep file-level parallelism enabled and use the available CPU workers so
+    // the full suite stays within the validation budget without serializing
+    // independent jsdom transforms.
     fileParallelism: true,
-    maxWorkers: 4,
+    maxWorkers: 8,
     hookTimeout: 60000,
     testTimeout: 30000,
   },
