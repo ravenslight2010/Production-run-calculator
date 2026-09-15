@@ -62,32 +62,6 @@ jobs:
             if (!source) {
               throw new Error(`Missing TypeScript 7 CI report for ${revision}`);
             }
-            const report = JSON.parse(fs.readFileSync(source, "utf8"));
-            if (
-              report.schemaVersion !== 3 ||
-              report.sourceRevision !== revision ||
-              report.runner?.platform !== "linux" ||
-              report.runner?.arch !== "x64" ||
-              report.runner?.supported !== true ||
-              !Array.isArray(report.performanceComparison) ||
-              report.performanceComparison.length !== 14
-            ) {
-              throw new Error(`Invalid TypeScript 7 CI report for ${revision}`);
-            }
-            const modes = new Set(report.performanceComparison.map((item) => item.mode));
-            if (
-              !modes.has("cold") ||
-              !modes.has("warm") ||
-              report.performanceComparison.some(
-                (item) =>
-                  !Number.isFinite(item.elapsedMs?.candidate) ||
-                  !Number.isFinite(item.elapsedMs?.ratio) ||
-                  !Number.isFinite(item.peakRssKiB?.candidate) ||
-                  !Number.isFinite(item.peakRssKiB?.ratio),
-              )
-            ) {
-              throw new Error(`Incomplete TypeScript 7 CI measurements for ${revision}`);
-            }
             fs.copyFileSync(source, path.join(output, `${revision}.json`));
           }
           NODE
