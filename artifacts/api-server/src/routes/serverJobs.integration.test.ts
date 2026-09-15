@@ -38,6 +38,7 @@ let originalPoolMax: string | undefined;
 let server: Server;
 let baseUrl: string;
 let confirmationLoss: Promise<number> | undefined;
+let loseFirstConfirmation = false;
 
 const ACTOR = "route-job-actor";
 const IDEMPOTENCY_KEY = "route-job-confirmation-lost";
@@ -100,7 +101,6 @@ beforeAll(async () => {
   // injector waits until the route calls res.json (the insert has already
   // returned and auto-committed), terminates the just-released DB backend, and
   // destroys the HTTP response so the client experiences a lost confirmation.
-  let loseFirstConfirmation = true;
   app.use((req, res, next) => {
     if (req.method !== "POST" || req.url !== "/api/server-jobs" || !loseFirstConfirmation) {
       next();
@@ -149,6 +149,8 @@ afterAll(async () => {
 }, 60_000);
 
 beforeEach(async () => {
+  loseFirstConfirmation = false;
+  confirmationLoss = undefined;
   clearUserValidityCache();
   await db.execute(sql`
     TRUNCATE ${serverJobsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable}
@@ -200,6 +202,7 @@ async function submitJob(): Promise<globalThis.Response> {
 
 describe("server job route idempotency", () => {
   it("replays one committed user job when its creation confirmation is lost", async () => {
+    loseFirstConfirmation = true;
     const firstRequest = submitJob();
     await expect(firstRequest).rejects.toThrow();
 
@@ -236,5 +239,34 @@ describe("server job route idempotency", () => {
       idempotencyKey: IDEMPOTENCY_KEY,
       status: "queued",
     });
+  });
+
+  it("returns one canonical job when identical submissions arrive concurrently", async () => {
+    const responses = await Promise.all(
+      Array.from({ length: 12 }, () => submitJob()),
+    );
+
+    expect(responses.every((candidate) => candidate.status === 200 || candidate.status === 202)).toBe(true);
+    const responseBodies = await Promise.all(responses.map(async (candidate) => (
+      await candidate.json() as {
+        id: string;
+        status: string;
+        idempotentReplay: boolean;
+      }
+    )));
+    const responseIds = responseBodies.map((body) => body.id);
+    expect(responseIds).toHaveLength(12);
+    expect(new Set(responseIds)).toHaveLength(1);
+    expect(responseIds[0]).toEqual(expect.any(String));
+    expect(responseBodies.every((body) => body.status === "queued")).toBe(true);
+
+    const jobs = await db.select().from(serverJobsTable).where(and(
+      eq(serverJobsTable.scope, "live"),
+      eq(serverJobsTable.actorId, ACTOR),
+      eq(serverJobsTable.idempotencyKey, IDEMPOTENCY_KEY),
+    ));
+    expect(jobs).toHaveLength(1);
+    expect(responseBodies.every((body) => body.id === jobs[0]!.id)).toBe(true);
+    expect(responseBodies.filter((body) => body.idempotentReplay)).toHaveLength(11);
   });
 });
