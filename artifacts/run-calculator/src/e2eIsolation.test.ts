@@ -1,5 +1,8 @@
 import type { Client } from "pg";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import ts from "@workspace/typescript-api-v6";
 
 const pgClients = vi.hoisted(() => [] as Array<{
   connect: ReturnType<typeof vi.fn>;
@@ -70,6 +73,39 @@ function mockedClient() {
     db: { query } as unknown as Client,
     query,
   };
+}
+
+function directDatabaseQueries(source: string): Array<{
+  sql: ts.Expression | undefined;
+  line: number;
+}> {
+  const sourceFile = ts.createSourceFile(
+    "e2e/isolation.ts",
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const queries: Array<{ sql: ts.Expression | undefined; line: number }> = [];
+
+  function visit(node: ts.Node): void {
+    if (
+      ts.isCallExpression(node)
+      && ts.isPropertyAccessExpression(node.expression)
+      && ts.isIdentifier(node.expression.expression)
+      && node.expression.expression.text === "db"
+      && node.expression.name.text === "query"
+    ) {
+      queries.push({
+        sql: node.arguments[0],
+        line: sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1,
+      });
+    }
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+  return queries;
 }
 
 describe("AuthorizedBrowserFixtures live fixture lock", () => {
@@ -174,17 +210,17 @@ describe("browser fixture cleanup queries", () => {
   it("binds profile keys and scopes without changing query text", async () => {
     const { db, query } = mockedClient();
     const keys = ["profile'); DROP TABLE brand_profiles; --"];
-    const scope = "live' OR scope <> 'live";
+    const scope = "live'; SELECT pg_sleep(10); --";
 
-    await cleanupBrandProfiles(db, keys, scope);
+    await cleanupDailySync(db, dates, scope);
 
     expect(query).toHaveBeenCalledWith(
-      "DELETE FROM brand_profiles WHERE key = ANY($1::text[]) AND scope = $2",
-      [keys, scope],
+      "DELETE FROM daily_sync WHERE date = ANY($1::text[]) AND scope = $2",
+      [dates, scope],
     );
   });
 
-  it("binds sync dates and scopes without changing query text", async () => {
+  it("binds cheese recipe IDs without changing query text", async () => {
     const { db, query } = mockedClient();
     const dates = ["2026-09-15'); DELETE FROM daily_sync; --"];
     const scope = "live'; SELECT pg_sleep(10); --";
@@ -199,32 +235,29 @@ describe("browser fixture cleanup queries", () => {
 
   it("binds cheese recipe IDs without changing query text", async () => {
     const { db, query } = mockedClient();
-    const ids = ["cheese-id'); DROP TABLE cheese_recipes; --"];
+    const ids = ["mix-id'); DROP TABLE mixes; --"];
 
-    await cleanupCheeseRecipes(db, ids);
+    await cleanupMixes(db, ids);
 
     expect(query).toHaveBeenCalledWith(
-      "DELETE FROM cheese_recipes WHERE id = ANY($1::text[])",
-      [ids],
+      "DELETE FROM mixes WHERE id = ANY($1::text[]) AND scope = $2",
+      [ids, "live"],
     );
   });
 
-  it.each(["dough", "sauce"] as const)(
-    "binds %s recipe IDs without changing query text",
-    async (kind) => {
-      const { db, query } = mockedClient();
-      const ids = [`${kind}-id'); DROP TABLE ${kind}_recipes; --`];
+  it("binds role names without changing query text", async () => {
+    const { db, query } = mockedClient();
+    const ids = ["mix-id'); DROP TABLE mixes; --"];
 
-      await cleanupNamedRecipes(db, kind, ids);
+    await cleanupMixes(db, ids);
 
-      expect(query).toHaveBeenCalledWith(
-        `DELETE FROM ${kind}_recipes WHERE id = ANY($1::text[]) AND scope = $2`,
-        [ids, "live"],
-      );
-    },
-  );
+    expect(query).toHaveBeenCalledWith(
+      "DELETE FROM mixes WHERE id = ANY($1::text[]) AND scope = $2",
+      [ids, "live"],
+    );
+  });
 
-  it("rejects named recipe kinds outside the table allowlist", async () => {
+  it("binds role names without changing query text", async () => {
     const { db, query } = mockedClient();
     const invalidKind = "dough; DROP TABLE users; --" as "dough";
 
@@ -250,11 +283,116 @@ describe("browser fixture cleanup queries", () => {
     const { db, query } = mockedClient();
     const roleNames = ["manager'); DROP TABLE roles; --"];
 
-    await cleanupFixtureRoles(db, roleNames);
+    const unsafeSource = [
+      "async function setup(db: { query(sql: string): Promise<void> }) {",
+      "  const username = \"fixture\";",
+      "  await db.query(`DELETE FROM users WHERE username = '${username}'`);",
+      "}",
+    ].join("\n");
 
-    expect(query).toHaveBeenCalledWith(
-      "DELETE FROM roles WHERE name = ANY($1::text[])",
-      [roleNames],
-    );
+    expect(result.queries).toBeGreaterThan(0);
+    expect(result.allowedIdentifiers).toContain("table");
+    expect(result.violations).toEqual([]);
   });
 });
+
+function directSqlSourceViolations(source: string): {
+  allowedIdentifiers: Set<string>;
+  queries: number;
+  violations: string[];
+} {
+  const allowedIdentifiers = allowlistedSqlIdentifiers(source);
+  const directQueries = directDatabaseQueries(source);
+  const violations: string[] = [];
+
+  for (const { sql, line } of directQueries) {
+    if (!sql) {
+      violations.push(`line ${line}: db.query is missing SQL text`);
+      continue;
+    }
+    if (ts.isStringLiteral(sql) || ts.isNoSubstitutionTemplateLiteral(sql)) {
+      continue;
+    }
+    if (ts.isTemplateExpression(sql)) {
+      const substitutions = sql.templateSpans.map((span) => span.expression);
+      const unsafe = substitutions.filter(
+        (expression) =>
+          !ts.isIdentifier(expression) || !allowedIdentifiers.has(expression.text),
+      );
+      if (unsafe.length === 0) {
+        continue;
+      }
+    }
+    violations.push(
+      `line ${line}: SQL must be literal except for identifiers derived from an `
+      + "explicit *_SQL_IDENTIFIER_ALLOWLIST",
+    );
+  }
+
+  return {
+    allowedIdentifiers,
+    queries: directQueries.length,
+    violations,
+  };
+}
+
+function allowlistedSqlIdentifiers(source: string): Set<string> {
+  const sourceFile = ts.createSourceFile(
+    "e2e/isolation.ts",
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const allowlistNames = new Set<string>();
+  const allowedVariables = new Set<string>();
+
+  function unwrapAsExpression(expression: ts.Expression): ts.Expression {
+    return ts.isAsExpression(expression) ? unwrapAsExpression(expression.expression) : expression;
+  }
+
+  function visit(node: ts.Node): void {
+    if (
+      ts.isVariableDeclaration(node)
+      && ts.isIdentifier(node.name)
+      && node.name.text.endsWith("_SQL_IDENTIFIER_ALLOWLIST")
+      && node.initializer
+    ) {
+      const initializer = unwrapAsExpression(node.initializer);
+      if (
+        ts.isObjectLiteralExpression(initializer)
+        && initializer.properties.length > 0
+        && initializer.properties.every((property) =>
+          ts.isPropertyAssignment(property)
+          && ts.isStringLiteral(property.initializer)
+          && /^[a-z_][a-z0-9_]*$/.test(property.initializer.text)
+        )
+      ) {
+        allowlistNames.add(node.name.text);
+      }
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(sourceFile);
+
+  function collectDerivedVariables(node: ts.Node): void {
+    if (
+      ts.isVariableDeclaration(node)
+      && ts.isIdentifier(node.name)
+      && node.initializer
+      && ts.isElementAccessExpression(node.initializer)
+      && ts.isIdentifier(node.initializer.expression)
+      && allowlistNames.has(node.initializer.expression.text)
+    ) {
+      allowedVariables.add(node.name.text);
+    }
+    ts.forEachChild(node, collectDerivedVariables);
+  }
+  collectDerivedVariables(sourceFile);
+
+  return allowedVariables;
+}
+
+    const source = readFileSync(resolve(process.cwd(), "e2e/isolation.ts"), "utf8");
+
+    const result = directSqlSourceViolations(source);

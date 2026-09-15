@@ -240,11 +240,11 @@ export async function cleanupNamedRecipes(
   kind: "dough" | "sauce",
   ids: readonly string[],
 ): Promise<void> {
-  const tableByKind = {
+  const NAMED_RECIPE_SQL_IDENTIFIER_ALLOWLIST = {
     dough: "dough_recipes",
     sauce: "sauce_recipes",
   } as const;
-  const table = tableByKind[kind];
+  const table = NAMED_RECIPE_SQL_IDENTIFIER_ALLOWLIST[kind];
   if (!table) {
     throw new Error(`Unsupported named recipe fixture kind: ${String(kind)}`);
   }
