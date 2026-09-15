@@ -5,10 +5,28 @@ set -euo pipefail
 # into the authoritative workspace.
 
 REPO="$(git rev-parse --show-toplevel)"
+REPO="$(realpath -e "$REPO")"
 OUT="${1:-/tmp/typescript-7-comparison-evidence}"
+TEMP_ROOT="$(realpath -e "${TMPDIR:-/tmp}")"
+OUT="$(realpath -m "$OUT")"
+case "$OUT/" in
+  "$REPO/"*)
+    printf 'Evidence output must not be inside the repository: %s\n' "$OUT" >&2
+    exit 2
+    ;;
+esac
+case "$OUT/" in
+  "$TEMP_ROOT/"?*/) ;;
+  *)
+    printf 'Evidence output must be a child of disposable temp root %s: %s\n' \
+      "$TEMP_ROOT" "$OUT" >&2
+    exit 2
+    ;;
+esac
 WORK="$(mktemp -d /tmp/typescript-7-comparison.XXXXXX)"
 COPY="$WORK/repository"
 TOOLS="$WORK/tools"
+CONTRACT_REPORT="$OUT/declaration-contract-report"
 
 cleanup() {
   rm -rf "$WORK"
@@ -84,7 +102,9 @@ capture_declarations() {
   while IFS= read -r -d '' file; do
     mkdir -p "$destination/$(dirname "$file")"
     cp "$file" "$destination/$file"
-  done < <(find lib -path '*/dist/*.d.ts' -type f -print0 | sort -z)
+  done < <(find lib -type f \
+    \( -path '*/dist/*.d.ts' -o -path '*/dist/*.d.mts' -o -path '*/dist/*.d.cts' \) \
+    -print0 | sort -z)
 }
 
 run_no_emit_matrix() {
@@ -133,6 +153,18 @@ diff -ruN \
   >"$OUT/declarations.diff"
 printf '%s\n' "$?" >"$OUT/declarations.diff-exit-code"
 set -e
+
+set +e
+"$REPO/scripts/node_modules/.bin/tsx" "$REPO/scripts/src/compare-declaration-contracts.mts" \
+  "$OUT/typescript-6-declarations" \
+  "$OUT/typescript-7-declarations" \
+  "$CONTRACT_REPORT" \
+  >"$OUT/declaration-contract-comparison.stdout" \
+  2>"$OUT/declaration-contract-comparison.stderr"
+contract_comparison_status=$?
+set -e
+printf '%s\n' "$contract_comparison_status" \
+  >"$OUT/declaration-contract-comparison.exit-code"
 
 for compiler in "$TS6" "$TS7"; do
   "$compiler" --build --force --pretty false \
@@ -199,6 +231,9 @@ const summary = {
         categoryCount("api-zod") -
         categoryCount("db"),
     },
+    contractComparison: JSON.parse(
+      fs.readFileSync(path.join(output, "declaration-contract-report", "declaration-contracts.json"), "utf8"),
+    ),
   },
   elapsedSeconds: elapsed,
 };
@@ -207,3 +242,4 @@ fs.writeFileSync(path.join(output, "summary.json"), `${JSON.stringify(summary, n
 NODE
 
 printf 'Comparison evidence written to %s\n' "$OUT"
+exit "$contract_comparison_status"

@@ -168,6 +168,29 @@ output. The retained script deterministically regenerates the evidence structure
 declaration contents; diff headers contain temporary paths and timestamps, so the compact
 record intentionally does not claim that the raw diff itself is byte-stable.
 
+The reproduction now also runs the fail-closed declaration contract comparator. It compares
+clean trees by relative path, reports `api-client-react`, `api-zod`, `db`, and other
+declarations independently, and writes JSON plus Markdown review reports. Quote-delimiter
+changes in string literal tokens are classified as formatting-only. Every other changed,
+added, or removed declaration is semantic drift and blocks the run unless an optional
+approval file pins the exact baseline and candidate SHA-256 values with a review reason.
+Both declaration trees and the report directory must be outside the repository; the
+comparator refuses authoritative workspace paths.
+
+For an already-captured pair of disposable trees:
+
+```bash
+pnpm --filter @workspace/scripts run check:declaration-contracts -- \
+  /tmp/baseline-declarations \
+  /tmp/candidate-declarations \
+  /tmp/declaration-contract-report
+```
+
+An approval file has schema version 1 and an `approvals` array. Each entry contains `path`,
+`baselineSha256`, `candidateSha256`, and `reason`. A hash is `null` only when that side is
+absent for an approved addition or removal. Approvals are therefore invalidated by any
+later output change rather than becoming a broad path allowlist.
+
 ### Results
 
 | Check | TypeScript 6.0.3 | TypeScript 7.0.2 |
