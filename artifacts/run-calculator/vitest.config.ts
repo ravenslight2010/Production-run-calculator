@@ -13,8 +13,12 @@ export default defineConfig({
     environment: "jsdom",
     globals: false,
     include: ["src/**/*.test.{ts,tsx}"],
+    // Worker threads avoid the child-process startup overhead of the default
+    // fork pool without changing Vitest's per-file environment isolation.
+    pool: "threads",
+    isolate: true,
     // Keep file-level parallelism enabled so the full suite stays within the
-    // validation budget, while bounding fork startup to avoid competing with
+    // validation budget, while bounding worker startup to avoid competing with
     // the other validation workflows.
     fileParallelism: true,
     maxWorkers: 4,
