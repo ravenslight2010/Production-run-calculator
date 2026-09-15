@@ -53,7 +53,6 @@ vi.mock("../pages/home", () => ({
   DoughRecipeCard: () => null,
   FrontlineRecipeCard: () => null,
   TypeDropdown: () => null,
-  NumField: () => null,
 }));
 
 import SetupProfileEditor from "./SetupProfileEditor";
@@ -117,6 +116,23 @@ afterEach(() => {
 });
 
 describe("SetupProfileEditor capability gate", () => {
+  it("keeps a missing case pack saveable as a clearly labeled draft", async () => {
+    mocks.loadProfile.mockReturnValue(null);
+    mocks.saveProfileAndWaitForServer.mockResolvedValue("saved");
+    const user = userEvent.setup();
+
+    render(<SetupProfileEditor {...editorProps(true)} />);
+
+    expect(screen.getByTestId("setup-profile-case-pack-readiness").textContent).toMatch(
+      /not ready for case-based runs/i,
+    );
+    expect(screen.getByText(/you can still save this setup as a draft/i)).toBeTruthy();
+    expect(document.getElementById("setup-profile-pizzas-per-case")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Save Setup" }));
+    expect(mocks.saveProfileAndWaitForServer).toHaveBeenCalled();
+  });
+
   it("replaces Save Setup with a read-only explanation without manage-profiles", () => {
     mocks.loadProfile.mockReturnValue(null);
 

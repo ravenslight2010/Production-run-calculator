@@ -51,6 +51,7 @@ import { AppSlotMathBadge } from "./AppSlotMathBadge";
 import { matchDoughballVariant, normalizeDoughballVariants, type DoughballVariant } from "@workspace/named-recipes";
 import { getProfileCacheVersion, subscribeProfileCache } from "../profileCache";
 import { NumField } from "./NumField";
+import { caseBasedProductionNeedsAvailable } from "@workspace/inventory-math";
 
 type ApplicatorNum = 1 | 2 | 3 | 4;
 
@@ -345,6 +346,10 @@ export default function SetupProfileEditor({
     defaultValues: DEFAULT_VALUES,
   });
   const v = form.watch();
+  const caseBasedDraftReady = caseBasedProductionNeedsAvailable({
+    casesNeeded: 1,
+    pizzasPerCase: v.pizzasPerCase,
+  });
   const { fields: doughFields, append: appendDough, remove: removeDough, replace: replaceDough } = useFieldArray({ control: form.control, name: "doughRecipe" });
   const { fields: frontlineFields, append: appendFrontline, remove: removeFrontline, replace: replaceFrontline } = useFieldArray({ control: form.control, name: "frontlineRecipe" });
   const { fields: cheese1Fields, append: appendCheese1, remove: removeCheese1, replace: replaceCheese1 } = useFieldArray({ control: form.control, name: "app1CheeseRecipe" });
@@ -1057,8 +1062,23 @@ export default function SetupProfileEditor({
                       <NumField control={form.control} name="freezerTime" label="Freeze Tunnel Time (min)" />
                     </div>
                     <Separator className="opacity-30" />
+                    {!caseBasedDraftReady && (
+                      <div
+                        className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2"
+                        data-testid="setup-profile-case-pack-readiness"
+                      >
+                        <p className="text-sm font-semibold text-amber-600 dark:text-amber-400">
+                          Draft setup — not ready for case-based runs
+                        </p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          Enter a positive Pizzas Per Case value below before scheduling or starting runs that request cases. You can still save this setup as a draft.
+                        </p>
+                      </div>
+                    )}
                     <div className="grid grid-cols-2 gap-3">
-                      <NumField control={form.control} name="pizzasPerCase" label="Pizzas Per Case" step="1" />
+                      <div id="setup-profile-pizzas-per-case">
+                        <NumField control={form.control} name="pizzasPerCase" label="Pizzas Per Case" step="1" />
+                      </div>
                       <NumField control={form.control} name="casesPerSkid" label="Cases Per Skid" step="1" />
                     </div>
                     <div className="grid grid-cols-2 gap-3">

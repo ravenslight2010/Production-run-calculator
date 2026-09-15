@@ -9,6 +9,9 @@
   "scripts": {
     "test": "vitest run"
   },
+  "dependencies": {
+    "@workspace/inventory-math": "workspace:*"
+  },
   "devDependencies": {
     "vitest": "5.0.0"
   }

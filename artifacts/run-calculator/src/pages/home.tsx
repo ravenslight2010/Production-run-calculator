@@ -469,6 +469,10 @@ import { buildDaySummaryInput, buildWeekSummaryInput } from "../aiSummary";
 import { buildAnomalyInput } from "../aiAnomaly";
 import { buildScheduleInput } from "../aiSchedule";
 import { BehindPaceAlertBanner } from "../components/BehindPaceAlertBanner";
+import {
+  findFirstUnreadyScheduledRun,
+  getStartRunReadiness,
+} from "../startRunReadiness";
 import { computeCasesInFreezer } from "@workspace/inventory-math";
 import {
   computeRunConsumptionLines,
@@ -7379,6 +7383,27 @@ export default function Home() {
   }
   async function saveScheduledDay() {
     if (!scheduleEditorDate) return;
+    setScheduleError(null);
+    const unreadyRun = findFirstUnreadyScheduledRun(scheduleEditorRuns, (run) => {
+      const stored = scheduleEditorRunValues[run.id];
+      const profile = run.brand ? loadProfile(run.brand, run.flavor) : null;
+      const base: FormValues = stored ?? profile ?? DEFAULT_VALUES;
+      return backfillFromProfile(
+        { ...base, casesNeeded: run.casesNeeded },
+        run.brand,
+        run.flavor,
+      );
+    });
+    if (unreadyRun) {
+      const label = [unreadyRun.brand, unreadyRun.flavor].filter(Boolean).join(" — ")
+        || "this run";
+      setScheduleAdvancedRunId(unreadyRun.id);
+      setScheduleView("advanced");
+      setScheduleError(
+        `${label} requests cases but has no Pizzas Per Case value. Enter it below before saving the schedule.`,
+      );
+      return;
+    }
     setScheduleSaving(true);
     // TODAY: apply the edits through the LIVE day-state path, never a raw PUT.
     // A raw PUT for today loses silently: it carries no runValuesUpdatedAt
@@ -7386,7 +7411,6 @@ export default function Home() {
     // run tombstones (the additive union resurrects removed runs), and it never
     // touches this tab's in-memory day — so the next push (e.g. Start Run)
     // visibly "reverts" everything to the original schedule.
-    setScheduleError(null);
     if (scheduleEditorDate === todayStr()) {
       try {
         const now = Date.now();
@@ -18517,7 +18541,11 @@ export default function Home() {
                         ] as [keyof FormValues, string][]).map(([field, label]) => (
                           <div key={field}>
                             <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">{label}</label>
-                            <input type="number" min="0"
+                            <input
+                              id={field === "pizzasPerCase" ? "schedule-pizzas-per-case" : undefined}
+                              data-testid={field === "pizzasPerCase" ? "schedule-pizzas-per-case" : undefined}
+                              autoFocus={field === "pizzasPerCase" && Boolean(scheduleError)}
+                              type="number" min="0"
                               value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[field] as number) || ""}
                               onChange={e => updateAdvancedField(scheduleAdvancedRunId!, field, Number(e.target.value) || 0)}
                               placeholder="0"
@@ -18729,6 +18757,11 @@ export default function Home() {
                     </section>
                   </div>
                   <div className="px-5 py-4 border-t border-border/40">
+                    {scheduleError && (
+                      <p className="text-xs text-destructive mb-3 text-center" role="alert">
+                        {scheduleError}
+                      </p>
+                    )}
                     <button type="button" onClick={() => setScheduleView("editor")} className="w-full py-2 px-4 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors">
                       Done — Back to Run List
                     </button>
@@ -19337,7 +19370,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
     currentRun, customAllergens, dayState, dieLineDefaultOverrides, dieTypes,
     doughSubTab, endRun, endStop, flavorInput, flavorScrollKeep, form,
     initialFinishTimestampRef, isSupervisor, lastEndedRun, lastRunRecall,
-    logStop, nextRunDieType, pauseRun, removeBlankRuns, removeBrand,
+    logStop, nextRunDieType, openSetupEditor, pauseRun, removeBlankRuns, removeBrand,
     removeFlavor, removeRun, pauseDecisionRunId, pendingForegroundStopRunId, resumeRun, ruleViolations,
     runStatus, setBrandInput, setConfirmDeleteBrand, setConfirmDeleteFlavor,
     setConfirmRemoveBlanks, setConfirmRemoveRun, setDayState, setDoughSubTab,
@@ -19373,6 +19406,17 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
   // of the check — blank placeholder runs have no meaningful order and should
   // not trigger a false-positive warning.
   function handleStartRun() {
+    const readiness = getStartRunReadiness(v);
+    if (!readiness.ready) {
+      toast({
+        title: "Run not ready — Pizzas Per Case is missing",
+        description:
+          "Enter a positive Pizzas Per Case value in this product's setup before starting a run that requests cases.",
+        variant: "destructive",
+      });
+      openSetupEditor(currentRun?.brand || undefined, currentRun?.flavor || undefined);
+      return;
+    }
     const firstPendingIdx = dayState.runs.findIndex(
       (r: RunMeta) => !r.startedAt && (r.brand || r.flavor),
     );
@@ -20155,10 +20199,11 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                       if (!(Number(v.speedAdjustment) > 0)) missing.push("Speed Adjustment");
                     }
                   }
-                  if (!(Number(v.pizzasPerCase) > 0)) missing.push("Pizzas Per Case");
+                   const summary = computeSummaryStats(v);
+                   if (!summary.productionNeedsAvailable) missing.push("Pizzas Per Case");
                   const freezerMissing = !(Number(ve.freezerTime) > 0);
                   if (missing.length === 0 && !freezerMissing) return null;
-                  const frontlineNeedsBlocked = !computeSummaryStats(v).productionNeedsAvailable;
+                   const frontlineNeedsBlocked = !summary.productionNeedsAvailable;
                   const headline = frontlineNeedsBlocked
                     ? "Frontline quantities can't be calculated — Pizzas Per Case is not set"
                     : missing.length > 0
