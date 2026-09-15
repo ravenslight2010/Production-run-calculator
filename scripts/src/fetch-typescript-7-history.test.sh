@@ -70,7 +70,8 @@ make_zip "$FIXTURES/103.zip" "$FIXTURES/malformed-fingerprint.json"
 make_zip "$FIXTURES/104.zip" "$FIXTURES/empty-runner-image.json"
 make_zip "$FIXTURES/105.zip" "$FIXTURES/duplicate.json"
 make_zip "$FIXTURES/106.zip" "$FIXTURES/unsafe.json" "../typescript-7-comparison.json"
-make_zip "$FIXTURES/107.zip" "$FIXTURES/valid-two.json"
+printf 'PK\003\004truncated-zip' >"$FIXTURES/107.zip"
+make_zip "$FIXTURES/108.zip" "$FIXTURES/valid-two.json"
 
 cat >"$BIN/gh" <<'EOF'
 #!/usr/bin/env bash
@@ -79,7 +80,7 @@ set -euo pipefail
 endpoint="${2:?expected gh api endpoint}"
 case "$endpoint" in
   */actions/workflows/release-check.yml/runs\?*)
-    printf '%s\n' 101 102 103 104 105 106 107 999
+    printf '%s\n' 101 102 103 104 105 106 107 108 999
     ;;
   */actions/runs/*/artifacts\?*)
     run_id="${endpoint#*/actions/runs/}"
