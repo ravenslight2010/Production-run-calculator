@@ -1,7 +1,9 @@
 name: Retain task 2203 TypeScript evidence
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - task-2203-retain-evidence
 
 permissions:
   actions: read
