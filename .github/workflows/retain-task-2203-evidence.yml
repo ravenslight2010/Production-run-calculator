@@ -23,15 +23,15 @@ jobs:
           set -euo pipefail
           test "${GITHUB_REF_NAME}" = "task-2203-retain-evidence"
           mkdir -p /tmp/ts7-evidence
-          gh run download 35025590499 \
-            --name release-evidence-standard-35025590499 \
-            --dir /tmp/ts7-evidence/69b
-          gh run download 35025590315 \
-            --name release-evidence-standard-35025590315 \
-            --dir /tmp/ts7-evidence/27d
-          gh run download 35025590360 \
-            --name release-evidence-standard-35025590360 \
-            --dir /tmp/ts7-evidence/08e
+          gh run download 35028811387 \
+            --name release-evidence-standard-35028811387 \
+            --dir /tmp/ts7-evidence/325
+          gh run download 35028811374 \
+            --name release-evidence-standard-35028811374 \
+            --dir /tmp/ts7-evidence/cff
+          gh run download 35028830404 \
+            --name release-evidence-standard-35028830404 \
+            --dir /tmp/ts7-evidence/5e6
       - name: Verify and retain comparison reports
         run: |
           set -euo pipefail
@@ -39,9 +39,9 @@ jobs:
           const fs = require("node:fs");
           const path = require("node:path");
           const samples = [
-            ["69b", "69b52dee6878e73bb182aa185ee7d7d0387b664c"],
-            ["27d", "27dcd1a87facdd8b17d2801ccf4ee6fd8251c2d6"],
-            ["08e", "08ec2e4d338935aee3511ac8ce0b1aedbfec239d"],
+            ["325", "325bef36d92e3dc9ae9876a8887a02b1ebc1f937"],
+            ["cff", "cff5f2f9732252260278af136bfcfaa176efabe1"],
+            ["5e6", "5e61e314a7d33204136a57118f37016064204a90"],
           ];
           function findReport(directory) {
             for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
