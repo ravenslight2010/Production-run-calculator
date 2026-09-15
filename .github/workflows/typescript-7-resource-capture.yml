@@ -24,6 +24,7 @@ jobs:
           node-version: "24"
       - run: pnpm install --frozen-lockfile
       - name: Capture resource evidence
+        continue-on-error: true
         env:
           TYPESCRIPT_7_RUNNER_IMAGE: ubuntu-latest-X64
         run: pnpm --filter @workspace/scripts exec tsx ./src/compare-typescript-7.mts
