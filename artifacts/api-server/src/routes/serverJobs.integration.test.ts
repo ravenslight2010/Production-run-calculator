@@ -8,11 +8,12 @@
 // This suite creates and drops its own PostgreSQL database. It never points the
 // application pool at the configured database until after the throwaway schema
 // has been created, and it uses only synthetic users and job input.
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync, type ChildProcessByStdio } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
+import type { Readable } from "node:stream";
 import express, { type Express, type Response as ExpressResponse } from "express";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
@@ -29,6 +30,7 @@ let userRolesTable: DbModule["userRolesTable"];
 let rolesTable: DbModule["rolesTable"];
 let seedRoles: () => Promise<void>;
 let clearUserValidityCache: () => void;
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 
 let adminPool: pg.Pool;
 let killer: pg.Client;
@@ -37,8 +39,11 @@ let originalDatabaseUrl: string | undefined;
 let originalPoolMax: string | undefined;
 let server: Server;
 let baseUrl: string;
+const apiProcessEntrypoint = path.resolve(repoRoot, "scripts/node_modules/.bin/tsx");
+const apiProcessFixture = fileURLToPath(new URL("./serverJobs.process.fixture.ts", import.meta.url));
 let confirmationLoss: Promise<number> | undefined;
 let loseFirstConfirmation = false;
+type IsolatedApiProcess = ChildProcessByStdio<null, Readable, Readable>;
 
 const ACTOR = "route-job-actor";
 const IDEMPOTENCY_KEY = "route-job-confirmation-lost";
@@ -47,8 +52,6 @@ const JOB_BODY = {
   idempotencyKey: IDEMPOTENCY_KEY,
   input: { workbookText: "synthetic disposable route fixture" },
 };
-
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 
 beforeAll(async () => {
   originalDatabaseUrl = process.env.DATABASE_URL;
@@ -165,6 +168,7 @@ beforeEach(async () => {
   await db.insert(userRolesTable).values({ userId: ACTOR, role: "manager" });
 });
 
+
 async function loseCommittedReply(): Promise<number> {
   const result = await pool.query<{ pid: number }>("select pg_backend_pid()::int as pid");
   const pid = result.rows[0]!.pid;
@@ -193,10 +197,73 @@ function headers(): Record<string, string> {
 }
 
 async function submitJob(): Promise<globalThis.Response> {
-  return fetch(`${baseUrl}/api/server-jobs`, {
+  return submitJobAt(baseUrl);
+}
+
+async function submitJobAt(url: string): Promise<globalThis.Response> {
+  return fetch(`${url}/api/server-jobs`, {
     method: "POST",
     headers: headers(),
     body: JSON.stringify(JOB_BODY),
+  });
+}
+
+async function startIsolatedApiProcess(): Promise<{
+  child: IsolatedApiProcess;
+  url: string;
+}> {
+  const child = spawn(apiProcessEntrypoint, [apiProcessFixture], {
+    cwd: repoRoot,
+    env: { ...process.env, DATABASE_POOL_MAX: "2" },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  return new Promise((resolve, reject) => {
+    let output = "";
+    let settled = false;
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
+    child.stdout.on("data", (chunk: Buffer | string) => {
+      output += chunk.toString();
+      for (const line of output.split("\n").slice(0, -1)) {
+        try {
+          const message = JSON.parse(line) as { port?: number };
+          if (Number.isInteger(message.port) && message.port! > 0) {
+            settled = true;
+            resolve({ child, url: `http://127.0.0.1:${message.port}` });
+            return;
+          }
+        } catch {
+          // Startup diagnostics are allowed; only the JSON ready marker matters.
+        }
+      }
+      output = output.slice(output.lastIndexOf("\n") + 1);
+    });
+    child.stderr.on("data", () => {});
+    child.once("error", (error) => fail(error));
+    child.once("exit", (code, signal) => {
+      if (!settled) {
+        fail(new Error(`Isolated API process exited before ready (${code ?? signal})`));
+      }
+    });
+  });
+}
+
+async function stopIsolatedApiProcess(child: IsolatedApiProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  await new Promise<void>((resolve) => {
+    const timeout = setTimeout(() => {
+      child.kill("SIGKILL");
+      resolve();
+    }, 5_000);
+    child.once("exit", () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+    child.kill("SIGTERM");
   });
 }
 
@@ -268,5 +335,40 @@ describe("server job route idempotency", () => {
     expect(jobs).toHaveLength(1);
     expect(responseBodies.every((body) => body.id === jobs[0]!.id)).toBe(true);
     expect(responseBodies.filter((body) => body.idempotentReplay)).toHaveLength(11);
+  });
+
+  it("returns one canonical job across isolated API processes", async () => {
+    const instances = await Promise.all([
+      startIsolatedApiProcess(),
+      startIsolatedApiProcess(),
+    ]);
+
+    try {
+      const responses = await Promise.all(
+        instances.map(({ url }) => submitJobAt(url)),
+      );
+
+      expect(responses.every((candidate) => candidate.status === 200 || candidate.status === 202)).toBe(true);
+      const responseBodies = await Promise.all(responses.map(async (candidate) => (
+        await candidate.json() as {
+          id: string;
+          status: string;
+          idempotentReplay: boolean;
+        }
+      )));
+      expect(new Set(responseBodies.map((body) => body.id))).toHaveLength(1);
+      expect(responseBodies.every((body) => body.status === "queued")).toBe(true);
+
+      const jobs = await db.select().from(serverJobsTable).where(and(
+        eq(serverJobsTable.scope, "live"),
+        eq(serverJobsTable.actorId, ACTOR),
+        eq(serverJobsTable.idempotencyKey, IDEMPOTENCY_KEY),
+      ));
+      expect(jobs).toHaveLength(1);
+      expect(responseBodies.every((body) => body.id === jobs[0]!.id)).toBe(true);
+      expect(responseBodies.filter((body) => body.idempotentReplay)).toHaveLength(1);
+    } finally {
+      await Promise.all(instances.map(({ child }) => stopIsolatedApiProcess(child)));
+    }
   });
 });
