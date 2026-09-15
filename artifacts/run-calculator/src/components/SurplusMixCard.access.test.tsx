@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import type { Mix } from "@workspace/mixes";
 
 const { fetchMixes } = vi.hoisted(() => ({
@@ -41,6 +41,25 @@ describe("SurplusMixCard accessibility", () => {
     expect(screen.getByTestId("surplus-mix-mix-1").textContent).to.contain(
       "4 lbs on hand",
     );
+  });
+
+  it("lists multiple mixes from largest freezer stock to smallest", async () => {
+    fetchMixes.mockResolvedValue([
+      { ...surplusMix, id: "mix-2", name: "Small mix", amountAlreadyMade: 3 },
+      { ...surplusMix, id: "mix-3", name: "Large mix", amountAlreadyMade: 12 },
+      { ...surplusMix, id: "mix-4", name: "Middle mix", amountAlreadyMade: 7 },
+    ]);
+
+    render(<SurplusMixCard />);
+
+    const card = await waitFor(() => screen.getByTestId("surplus-mix-card"));
+    const rows = within(card).getAllByTestId(/^surplus-mix-mix-/);
+
+    expect(rows.map((row) => row.getAttribute("data-testid"))).toEqual([
+      "surplus-mix-mix-3",
+      "surplus-mix-mix-4",
+      "surplus-mix-mix-2",
+    ]);
   });
 
   it("hides the card when loading mixes fails", async () => {
