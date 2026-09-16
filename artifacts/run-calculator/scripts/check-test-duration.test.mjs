@@ -2,7 +2,15 @@ import { spawn } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { availableParallelism, tmpdir } from "node:os";
-import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -317,6 +325,60 @@ exit 23
     const reportPath = (await readFile(cleanupMarkerPath, "utf8")).trim();
     assert.ok(reportPath, "stub runner should record the requested report path");
     await assert.rejects(stat(dirname(reportPath)), /ENOENT/);
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test("reports Vitest start failures, falls back to elapsed time, and cleans up", async (t) => {
+  const availableWorkers = availableParallelism();
+  if (availableWorkers < MIN_CALCULATOR_TEST_WORKERS) {
+    t.skip(
+      `runner exposes ${availableWorkers} CPU workers; executable prerequisite requires ${MIN_CALCULATOR_TEST_WORKERS}`,
+    );
+  }
+
+  const temporaryDirectory = await mkdtemp(
+    join(tmpdir(), "calculator-duration-spawn-error-test-"),
+  );
+  const configuredWorkers = 7;
+
+  try {
+    const result = await runProcess(process.execPath, [durationCheckScript], {
+      env: {
+        ...process.env,
+        CALCULATOR_TEST_WORKERS: String(configuredWorkers),
+        PATH: temporaryDirectory,
+        TMPDIR: temporaryDirectory,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    assert.equal(result.code, 1, result.stdout);
+    assert.equal(result.signal, null);
+    assert.match(
+      result.stderr,
+      /Calculator test duration guard could not read Vitest's JSON summary/,
+    );
+    assert.match(
+      result.stderr,
+      /Calculator test suite elapsed \d+\.\d+s \(budget 150\.0s\)\./,
+    );
+    assert.match(
+      result.stderr,
+      /Calculator test duration guard could not start Vitest: spawn pnpm ENOENT/,
+    );
+    assert.match(
+      result.stderr,
+      new RegExp(
+        `Detected runner capacity: ${availableWorkers} available CPU workers; configured worker ceiling: ${configuredWorkers}\\.`,
+      ),
+    );
+    assert.deepEqual(
+      await readdir(temporaryDirectory),
+      [],
+      "duration guard should remove its temporary report directory after a spawn failure",
+    );
   } finally {
     await rm(temporaryDirectory, { recursive: true, force: true });
   }
