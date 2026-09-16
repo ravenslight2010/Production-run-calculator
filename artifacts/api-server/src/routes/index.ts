@@ -249,6 +249,7 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
     "POST /inventory/count-observations/:id/apply", "POST /inventory/adjust", "POST /inventory/locations",
     "PATCH /inventory/locations/:id", "DELETE /inventory/locations/:id", "POST /inventory/transfer",
     "POST /inventory/merge", "PUT /inventory/settings", "POST /inventory/consume-day-start",
+    "POST /mix-surplus", "PUT /mix-surplus/allocations/:runDate", "DELETE /mix-surplus/lots/:id",
   ]),
   ...writes("capability-gated", "scoped", "allowed", "use-ai-tools", [
     "POST /inventory/identify-photo", "POST /inventory/quality-photo", "POST /inventory/production-sheet-photo",
@@ -293,6 +294,10 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
   ...writes("capability-gated", "scoped", "allowed", "review-incidents", ["POST /reports/operational"]),
   {
     method: "POST", path: "/field-checks/hardware-confirmations", ownership: "manager-only",
+    scope: "scoped", sandbox: "allowed", capabilities: ["review-incidents"], capabilityMatch: "all", managerRole: true,
+  },
+  {
+    method: "POST", path: "/applicator-batch-evidence/finalize", ownership: "manager-only",
     scope: "scoped", sandbox: "allowed", capabilities: ["review-incidents"], capabilityMatch: "all", managerRole: true,
   },
   ...writes("floor-operational", "scoped", "allowed", undefined, ["POST /run-templates", "DELETE /run-templates", "POST /sandbox/reset"]),

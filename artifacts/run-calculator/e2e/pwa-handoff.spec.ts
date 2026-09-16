@@ -271,7 +271,7 @@ test.describe("PWA update handoff", () => {
     const server = await startVersionedServer({
       old: fixture.oldDir,
       new: fixture.newDir,
-    });
+    }, fixture.staleHomeChunk);
 
     try {
       await page.addInitScript(() => {
@@ -327,7 +327,7 @@ test.describe("PWA update handoff", () => {
 
       server.publish("new");
       await page.evaluate(async () => {
-        const registration = await navigator.serviceWorker.getRegistration();
+        const registration = await navigator.serviceWorker.ready;
         if (!registration) throw new Error("Expected a service-worker registration");
         await registration.update();
       });
@@ -350,16 +350,18 @@ test.describe("PWA update handoff", () => {
       await expect
         .poll(() =>
           page.evaluate(async () => {
-            const registration = await navigator.serviceWorker.getRegistration();
-            return Boolean(registration?.active && !registration.waiting);
-          }),
-        )
-        .toBe(true);
+        const registration = await navigator.serviceWorker.ready;
+        return registration.active?.state === "activated";
+      });
+      await page.goto("about:blank");
+      await page.goto(server.baseUrl, { waitUntil: "networkidle" });
+      await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "old");
+      await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
+      await expect(page.getByTestId("button-start-run")).toBeVisible();
 
-      // Count the automatic handoff's update check. It must still use the same
-      // worker recovery path as Reload now.
+      server.publish("new");
       await page.evaluate(async () => {
-        const registration = await navigator.serviceWorker.getRegistration();
+        const registration = await navigator.serviceWorker.ready;
         if (!registration) throw new Error("Expected an active service worker");
 
         const update = registration.update.bind(registration);
@@ -403,7 +405,7 @@ test.describe("PWA update handoff", () => {
     const server = await startVersionedServer({
       old: fixture.oldDir,
       new: fixture.newDir,
-    });
+    }, fixture.staleHomeChunk);
 
     try {
       await page.goto(server.baseUrl, { waitUntil: "networkidle" });
@@ -419,7 +421,7 @@ test.describe("PWA update handoff", () => {
 
       server.publish("new");
       await page.evaluate(async () => {
-        const registration = await navigator.serviceWorker.getRegistration();
+        const registration = await navigator.serviceWorker.ready;
         if (!registration) throw new Error("Expected a service-worker registration");
         await registration.update();
       });

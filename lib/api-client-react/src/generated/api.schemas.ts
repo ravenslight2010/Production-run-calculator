@@ -3472,6 +3472,87 @@ export interface FreezerSurplusMutationResponse {
   createdLot?: FreezerSurplusLot | null;
 }
 
+export interface MixSurplusLot {
+  id: string;
+  mixId: string;
+  name: string;
+  brand?: string;
+  flavor?: string;
+  isPrep?: boolean;
+  productionDate: string;
+  location: string;
+  /** @minimum 0 */
+  amountMade: number;
+  /** @minimum 0 */
+  amountUsed: number;
+  /** @minimum 0 */
+  amountRemaining: number;
+}
+
+export interface MixSurplusAllocation {
+  id: string;
+  lotId: string;
+  mixId: string;
+  runId?: string;
+  runDate: string;
+  brand?: string;
+  flavor?: string;
+  isPrep?: boolean;
+  /** @minimum 0 */
+  amount: number;
+}
+
+export interface MixSurplusBalance {
+  mixId: string;
+  name: string;
+  /** @minimum 0 */
+  lbs: number;
+  productionDates: string[];
+}
+
+export interface MixSurplusLedger {
+  lots: MixSurplusLot[];
+  allocations: MixSurplusAllocation[];
+  balances: MixSurplusBalance[];
+}
+
+export interface RecordMixSurplusInput {
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  mixId: string;
+  productionDate: string;
+  /**
+     * @minimum 0.1
+     * @exclusiveMinimum
+     */
+  amountMade: number;
+}
+
+export interface MixSurplusAllocationSelection {
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  lotId: string;
+  /** @minimum 0 */
+  amount: number;
+}
+
+export interface ReplaceMixSurplusAllocationInput {
+  runDate: string;
+  /** @maxItems 500 */
+  allocations: MixSurplusAllocationSelection[];
+}
+
+export interface MixSurplusMutationResponse {
+  lots: MixSurplusLot[];
+  allocations: MixSurplusAllocation[];
+  balances: MixSurplusBalance[];
+  createdLot?: MixSurplusLot | null;
+}
+
 /**
  * The full factory-wide die-type master list (display names).
  */

@@ -1,4 +1,5 @@
 import { Router, type IRouter, type Request, type RequestHandler, type Response } from "express";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { and, desc, eq, gt, isNull, or, type SQL } from "drizzle-orm";
 import {
@@ -14,6 +15,7 @@ import {
   ingredientsTable,
   qualityChecksTable,
   dailySyncTable,
+  mixSurplusLotsTable,
   type InventoryLot,
   type InventoryLocation,
 } from "@workspace/db";
@@ -92,6 +94,7 @@ import {
 import {
   computeMixComponentConsumptionLines,
   computeDailySupplyConsumptionLines,
+  buildMixSurplusRecording,
 } from "@workspace/inventory-math";
 import { mixesTable } from "@workspace/db";
 
@@ -2272,8 +2275,14 @@ router.post(
               // is carried forward as amountAlreadyMade for the next run.
               const dbMix = mixById.get(entry.mixId);
               const actualMade = Number(dbMix?.amountActualMade) || 0;
+              // Feature B2 fresh basis: an entered "made today" amount is what
+              // was actually produced, so ingredients are consumed for exactly
+              // that much (under-production deducts less, over-production
+              // deducts more). Blank/0 keeps the plan's fresh need (assume
+              // needed convention). Previously max(totalLbs, actualMade)
+              // over-deducted when the entered amount was below the plan.
               const freshLbs = actualMade > 0
-                ? Math.max(entry.totalLbs, actualMade)
+                ? Math.max(0, actualMade)
                 : entry.remainingLbs;
               const mixLines = computeMixComponentConsumptionLines(
                 entry.components,
@@ -2307,6 +2316,69 @@ router.post(
               .update(mixesTable)
               .set({ amountAlreadyMade: upd.amountAlreadyMade, updatedAt: new Date() })
               .where(eq(mixesTable.id, upd.id));
+          }
+        }
+
+        // ── Mix surplus ledger: record over-production lots at the source ────
+        // The scalar carry above is the plan reducer; this ledger row is its
+        // dated, auditable image (amount made + amount remaining in lbs).
+        // Same-date over-production for the same mix extends the existing lot
+        // instead of duplicating. Ingredients were consumed above; a lot row
+        // is a ledger action only — never a second draw-down.
+        const actualMadeByMixId: Record<string, number> = {};
+        for (const r of mixRows) actualMadeByMixId[r.id] = Number(r.amountActualMade) || 0;
+        const surplusRecording = buildMixSurplusRecording(plan, actualMadeByMixId);
+        if (surplusRecording.length > 0) {
+          const existingLots = await db
+            .select()
+            .from(mixSurplusLotsTable)
+            .where(
+              and(
+                eq(mixSurplusLotsTable.scope, scope),
+                or(
+                  ...surplusRecording.map((r) =>
+                    and(
+                      eq(mixSurplusLotsTable.mixId, r.mixId),
+                      eq(mixSurplusLotsTable.productionDate, dateStr),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          const lotByKey = new Map(
+            existingLots.map((lot) => [`${lot.mixId}|${lot.productionDate}`, lot]),
+          );
+          const now = new Date();
+          for (const row of surplusRecording) {
+            const key = `${row.mixId}|${dateStr}`;
+            const existing = lotByKey.get(key);
+            if (existing) {
+              await db
+                .update(mixSurplusLotsTable)
+                .set({
+                  amountMade: Math.round((existing.amountMade + row.amountMade) * 100) / 100,
+                  amountRemaining: Math.round((existing.amountRemaining + row.amountRemaining) * 100) / 100,
+                  updatedAt: now,
+                })
+                .where(eq(mixSurplusLotsTable.id, existing.id));
+            } else {
+              await db.insert(mixSurplusLotsTable).values({
+                id: randomUUID(),
+                scope,
+                mixId: row.mixId,
+                name: row.name,
+                brand: row.brand,
+                flavor: row.flavor,
+                isPrep: row.isPrep,
+                productionDate: dateStr,
+                amountMade: row.amountMade,
+                amountUsed: 0,
+                amountRemaining: row.amountRemaining,
+                location: "freezer",
+                createdAt: now,
+                updatedAt: now,
+              });
+            }
           }
         }
       }

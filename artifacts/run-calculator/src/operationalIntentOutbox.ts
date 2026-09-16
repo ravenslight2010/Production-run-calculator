@@ -421,7 +421,6 @@ function temporary(item: OperationalIntent, failure: OperationalIntentFailure, g
   scheduleNextFlush();
 }
 type FlushLock = { owner: string; key: string };
-
 function lockKey(identity = activeOwner): string { return `${LOCK_KEY}:${identity ?? "signed-out"}`; }
 function acquireLock(): FlushLock | undefined {
   const now = Date.now();

@@ -1213,6 +1213,46 @@ async function run(): Promise<void> {
     "stale WebKit evidence must not be accepted",
   );
   assert.doesNotThrow(() =>
+    validateWebKitBrowserEvidence(
+      Buffer.from(
+        JSON.stringify({
+          schemaVersion: 1,
+          browser: "webkit",
+          revision: "current-revision",
+          environment: "disposable release test",
+          result: "passed",
+          cases: [
+            {
+              file: "release-webkit-smoke.spec.ts",
+              title: "auth smoke",
+              status: "passed",
+              durationMs: 100,
+            },
+          ],
+        }),
+      ),
+      { currentRevision: "current-revision", requirePass: true },
+    ),
+  );
+  assert.throws(
+    () =>
+      validateWebKitBrowserEvidence(
+        Buffer.from(
+          JSON.stringify({
+            schemaVersion: 1,
+            browser: "webkit",
+            revision: "old-revision",
+            environment: "disposable release test",
+            result: "passed",
+            cases: [],
+          }),
+        ),
+        { currentRevision: "current-revision" },
+      ),
+    /revision is stale/,
+    "stale WebKit evidence must not be accepted",
+  );
+  assert.doesNotThrow(() =>
     validateSourceLibraryReconciliationEvidence(
       Buffer.from(
         JSON.stringify({

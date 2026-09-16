@@ -35,6 +35,7 @@ export * from "./aiConversationTurns";
 export * from "./productionRules";
 export * from "./freezerPullItems";
 export * from "./freezerSurplus";
+export * from "./mixSurplus";
 export * from "./mixes";
 export * from "./cheeseRecipes";
 export * from "./doughRecipes";
