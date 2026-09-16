@@ -195,6 +195,61 @@ exit ${runnerExitCode}
   }
 });
 
+test("executable validation preserves a failing runner result when it exceeds its duration budget", async (t) => {
+  const availableWorkers = availableParallelism();
+  if (availableWorkers < MIN_CALCULATOR_TEST_WORKERS) {
+    t.skip(
+      `runner exposes ${availableWorkers} CPU workers; executable prerequisite requires ${MIN_CALCULATOR_TEST_WORKERS}`,
+    );
+  }
+
+  const temporaryDirectory = await mkdtemp(
+    join(tmpdir(), "calculator-duration-failed-overrun-test-"),
+  );
+  const fakePnpmPath = join(temporaryDirectory, "pnpm");
+  const runnerExitCode = 23;
+  const budgetMs = 10;
+
+  try {
+    await writeFile(
+      fakePnpmPath,
+      `#!/bin/sh
+for argument
+do
+  case "$argument" in
+    --outputFile=*) output_file="\${argument#*=}" ;;
+  esac
+done
+printf '%s\\n' '{"numTotalTests":2,"numPassedTests":1,"numFailedTests":1,"testResults":[{"name":"stub.test.ts","status":"failed"}]}' > "$output_file"
+sleep 0.15
+exit ${runnerExitCode}
+`,
+    );
+    await chmod(fakePnpmPath, 0o755);
+
+    const result = await runProcess(process.execPath, [durationCheckScript], {
+      env: {
+        ...process.env,
+        CALCULATOR_TEST_BUDGET_MS: String(budgetMs),
+        PATH: `${temporaryDirectory}:${process.env.PATH ?? ""}`,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    assert.equal(result.code, runnerExitCode, result.stderr);
+    assert.match(
+      result.stdout,
+      /Calculator test suite: 1 files \(0 passed, 1 failed\), 2 tests \(1 passed, 1 failed\), elapsed \d+\.\d+s \(budget 0\.0s\)\./,
+    );
+    assert.match(
+      result.stderr,
+      /Calculator test suite exceeded its 0\.0s validation budget by \d+\.\d+s\./,
+    );
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
 test("executable validation fails a passing runner that exceeds its duration budget and cleans up", async (t) => {
   const availableWorkers = availableParallelism();
   if (availableWorkers < MIN_CALCULATOR_TEST_WORKERS) {
