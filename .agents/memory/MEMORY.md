@@ -156,3 +156,4 @@
 - [GitHub Actions evidence extraction](github-actions-evidence-extraction.md) — when connector downloads are forbidden, validate and retain exact reports inside a short-lived CI branch.
 - [Declaration compatibility dependencies](declaration-compatibility-dependencies.md) — mirror package-local links, resolve direct imports, then ignore unrelated dependency-library diagnostics.
 - [TypeScript 7 audit boundaries](typescript7-audit-boundaries.md) — comparison manifests must agree on declaration extensions and build all referenced libraries before no-emit checks.
+- [CI-pinned evidence refresh](ci-pinned-evidence.md) — retained evaluation manifests must move with the pinned Node runtime and lockfile hash.
