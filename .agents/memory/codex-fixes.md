@@ -1261,3 +1261,18 @@ In that state the sauce/applicator effects `return`/`continue` BEFORE the local 
 **Verification**: api-server typecheck green. Full DB-backed validation happens in CI (no local Postgres — kernel lacks SysV IPC, `shmget`/`mount` ENOSYS). Note for the void-decrement decision: the test (and its `// 20 - 15` comment) is the authoritative contract; re-verify against the day-start consistent world (`scalar ≈ sum(lot remaining)`) during QC planning if semantics are revisited.
 
 **Addendum (same round) — corpus-harness manifest**: `Unit tests (web + libs)` also failed on main with `lib/corpus-harness/src/corpus.test.ts` ("binds deterministic evidence to the retained source corpus", present since `83789b44`): the checked-in `snapshots/evaluation-manifest.json` recorded `dependencies.node 24.13.0` (Replit) and the pre-merge `pnpm-lock.yaml` SHA. Regenerated with `pnpm --filter @workspace/corpus-harness run snapshots` on Node 24.20.0 (the CI pin) → only the two provenance fields changed (`node` → 24.20.0, `pnpmLockSha256` → `a7dc10ec…`); corpus/evidence hashes unchanged. Same class of fix as the round-3 reviewer-benchmark refresh. Local `vitest run` times out (5s) in this sandbox because the builder re-hashes the 51 real workbooks over slow overlayfs — CI is the authority and passes.
+## Replit merge round 2 — CI reconciliation (2026-09-16)
+
+**Date**: 2026-09-16
+**Branch**: merge/replit-sync-2026-09-16b -> main (`290dd1f5` + `c6a76179`)
+**Files changed**: (resolutions/regressions from Replit's 34-commit workstream)
+- `.agents/memory/MEMORY.md` — merged ours + Replit's TypeScript 7 audit boundaries entry.
+- `docs/second-pass-reviewer-benchmark-2026-09-05.json` + `lib/corpus-harness/snapshots/evaluation-manifest.json` — regenerated on Node 24.20.0 after Replit's lockfile gained 3 dependency entries (`pnpmLockSha256` `a7dc10ec…` -> `40a1ce55…`).
+- `artifacts/api-server/src/lib/startupGate.ts` — kept OUR richer 503 diagnostics (`stage`, `durationMs`, `correlationId`); Replit removed them but their own `startupGate.test.ts` still asserts them, and they aid Render debug.
+- `artifacts/api-server/src/lib/dataHeals.ts` — Replit removed the `source-library-reconciliation-2026-08-26-v2` repair definition and the `speed-adjustment-baseline-v1` fingerprint contract/manifest entry but LEFT both ids in `AUTOMATIC_DATA_HEAL_IDS` -> startup `data_heals` stage threw `Missing focused repair definition for source-library-reconciliation-2026-08-26-v2` and rollback rehearsal went 503. Removed both ids from the released catalog and dropped the now-unused `speedAdjustmentBaseline` module/import.
+- `.github/workflows/release-check.yml` — Replit's merge duplicated the step-level `env:` block in two release-gate steps; actionlint 1.7.12 flagged duplicate keys. Removed the duplicates.
+- Kept Replit's intentional unmounting of `applicatorBatchEvidenceRouter` + `backgroundOperationDiagnosticsRouter`, sync write-envelope simplification (no `canonicalRevision`/`serverTime` in outbound type), the new POST /sync/operational-intents idempotency ledger, and the TS7 codegen-bridge CI jobs.
+
+**Why it was needed**: 4 CI checks failed on the first merged run (Typecheck, Unit tests, API Postgres, rollback rehearsal) — every failure traced to Replit-integration artifacts (evidence staleness, catalog/ID mismatch, workflow syntax), not to our app behavior.
+
+**Verification**: root typecheck + api-server typecheck green; workflow lint (actionlint 1.7.12) passes all 8 files; local api-server units 586/586 (DB tests skip). Full CI authority: run 35138904564 -> fixed in follow-up run.
