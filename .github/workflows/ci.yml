@@ -13,6 +13,49 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  verify-typescript-7-approval:
+    name: Verify changed TypeScript 7 approval evidence
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Check whether approval evidence changed
+        id: changed
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if git diff --quiet "$BASE_SHA" -- docs/typescript-7-resource-approval-evidence.json; then
+            echo "value=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: ${{ steps.changed.outputs.value == 'true' }}
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+      - if: ${{ steps.changed.outputs.value == 'true' }}
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Install dependencies
+        if: ${{ steps.changed.outputs.value == 'true' }}
+        run: pnpm install --frozen-lockfile
+      - name: Reject unverifiable fork approval changes
+        if: ${{ steps.changed.outputs.value == 'true' && github.event.pull_request.head.repo.full_name != github.repository }}
+        run: |
+          echo "TypeScript 7 approval evidence changes must be verified from a branch in the base repository." >&2
+          exit 1
+      - name: Download and verify selected CI reports
+        if: ${{ steps.changed.outputs.value == 'true' && github.event.pull_request.head.repo.full_name == github.repository }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/src/verify-typescript-7-resource-approval.sh
+
   typecheck:
     name: Typecheck
     runs-on: ubuntu-latest
