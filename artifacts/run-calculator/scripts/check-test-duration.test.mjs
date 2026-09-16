@@ -133,6 +133,60 @@ printf '%s\\n' '{"numTotalTests":1,"numPassedTests":1,"numFailedTests":0,"testRe
   }
 });
 
+test("executable validation preserves a failing runner result and report details", async (t) => {
+  const availableWorkers = availableParallelism();
+  if (availableWorkers < MIN_CALCULATOR_TEST_WORKERS) {
+    t.skip(
+      `runner exposes ${availableWorkers} CPU workers; executable prerequisite requires ${MIN_CALCULATOR_TEST_WORKERS}`,
+    );
+  }
+
+  const temporaryDirectory = await mkdtemp(
+    join(tmpdir(), "calculator-duration-test-"),
+  );
+  const fakePnpmPath = join(temporaryDirectory, "pnpm");
+  const runnerExitCode = 23;
+
+  try {
+    await writeFile(
+      fakePnpmPath,
+      `#!/bin/sh
+for argument
+do
+  case "$argument" in
+    --outputFile=*) output_file="\${argument#*=}" ;;
+  esac
+done
+printf '%s\n' '{"numTotalTests":2,"numPassedTests":1,"numFailedTests":1,"testResults":[{"name":"stub.test.ts","status":"failed"}]}' > "$output_file"
+exit ${runnerExitCode}
+`,
+    );
+    await chmod(fakePnpmPath, 0o755);
+
+    const result = await runProcess(process.execPath, [durationCheckScript], {
+      env: {
+        ...process.env,
+        PATH: `${temporaryDirectory}:${process.env.PATH ?? ""}`,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    assert.equal(result.code, runnerExitCode, result.stderr);
+    assert.match(
+      result.stdout,
+      /Calculator test suite: 1 files \(0 passed, 1 failed\), 2 tests \(1 passed, 1 failed\), elapsed \d+\.\d+s \(budget 150\.0s\)\./,
+    );
+    assert.match(
+      result.stdout,
+      new RegExp(
+        `Detected runner capacity: ${availableWorkers} available CPU workers; configured worker ceiling: ${CALCULATOR_TEST_WORKER_CEILING}\\.`,
+      ),
+    );
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
 test("uses the configured worker ceiling in the shared capacity line", () => {
   assert.equal(
     formatCalculatorTestCapacity(4),
