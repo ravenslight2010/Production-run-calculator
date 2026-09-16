@@ -549,3 +549,26 @@ Running log of fixes made by Codex. Read before modifying code to avoid re-apply
 - run-calculator regressions: mixSurplusClient 9/9, MixSurplusStrip 6/6, MixAlreadyMadeInput 4/4, LiveTabMemo.snappy + suite7 84/84, warehouse set 14/14, sync set 30/30; inventory-math mixSurplus 5/5.
 - Local Postgres is not possible in this sandbox (kernel lacks SysV IPC — `shmget`/`mount` return ENOSYS), so DB-backed integration tests are left to CI, consistent with AGENTS.md.
 - Note for future ARM/Apple-Silicon work: the merged lockfile only declares x64 optional binaries for `lightningcss`, `esbuild`, `@tailwindcss/oxide` (Replit generates it on x64). CI and Render are x64 so this is fine, but ARM machines need the arm64 sibling packages installed manually (done locally in `node_modules/.pnpm` only, not committed). If we want durable ARM support, Replit should add `supportedArchitectures` to `pnpm-workspace.yaml` and regenerate the lockfile.
+
+## Merge CI failures — follow-up fixes (2026-09-16, round 2)
+
+**Date**: 2026-09-16
+**Branch**: `fix/ci-reconcile-2026-09-16` (merged to main after `merge/replit-sync-2026-09-16`)
+**Files changed**:
+- `artifacts/run-calculator/src/components/SurplusMixCard.tsx` — metadata class `text-sky-400/70` → `text-sky-300` (Replit's approved high-contrast treatment; their new `SurplusMixCard.access.test.tsx` enforces it).
+- `artifacts/api-server/src/lib/sourceLibraryReconciliationPlan.generated.ts` — regenerated (`audit:source-heal-plan`); deflate payload changed only because zlib version differs from the one Replit generated with (same plan SHA `c9a6295b…`, same decompressed JSON). Node/Ubuntu-24.04 zlib in CI now matches.
+- `.github/workflows/release-check.yml` — moved `TYPESCRIPT_7_RUNNER_IMAGE: ${{ runner.os }}-${{ runner.arch }}` from job-level `env:` to the two release-gate steps' `env:` (the `runner` context is invalid at job level; GitHub rejects the file and actionlint 1.7.12 flags it).
+
+**What was wrong** (all surfaced by CI after the merge landed):
+1. `Unit tests (web + libs)` failed 1/2708: the merge resolved `SurplusMixCard.tsx` with our color variant, but Replit's accessibility test requires `text-sky-300` on the frozen-lbs metadata span.
+2. `Typecheck` failed inside `scripts` `test:source-heal-plan`: the committed generated plan blob was produced by Replit with a different zlib, so `--check` flagged it stale.
+3. `Validate workflow syntax and expressions` failed: actionlint rejects `runner` context in `jobs.<job_id>.env`; GitHub also refused to even start the `release-check.yml` run ("workflow file issue").
+4. Earlier round (already pushed with `merge/replit-sync-2026-09-16`): restored Replit's authz-inventory entries and deduped `SetupProfileEditor.tsx` imports.
+
+**Why it was needed**: main's branch protection requires 6 CI checks; the merged tree was not CI-green until these were fixed.
+
+**Verification**:
+- `SurplusMixCard.access.test.tsx` 6/6 passes.
+- `pnpm --filter @workspace/scripts run check:workflows` (actionlint 1.7.12, same as CI) passes all 8 workflow files.
+- `generate-source-library-heal-plan.mts --check` passes (blob current on Node 24).
+- Full root typecheck green; api-server unit suite 840 tests with only the known DB-environment dependent test failing (CI-only).

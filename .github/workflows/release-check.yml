@@ -76,6 +76,9 @@ jobs:
 
       - name: Run release gates once and retain standard evidence
         run: pnpm run release:check
+        env:
+          TYPESCRIPT_7_RUNNER_IMAGE: ${{ runner.os }}-${{ runner.arch }}
+
 
       - name: Verify release evidence allowlist
         if: always()
@@ -175,6 +178,9 @@ jobs:
 
       - name: Run release gates once and retain full evidence
         run: pnpm run release:check:full
+        env:
+          TYPESCRIPT_7_RUNNER_IMAGE: ${{ runner.os }}-${{ runner.arch }}
+
 
       - name: Verify full release evidence allowlist
         if: always()
