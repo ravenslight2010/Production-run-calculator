@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
@@ -14,6 +14,7 @@ import {
   typescript7RunnerFingerprint,
   typescript7ResourceRegressions,
   validateTypescript7ResourceApprovalEvidence,
+  TYPESCRIPT_7_DECLARATION_EXTENSIONS,
 } from "./compare-typescript-7.mts";
 import { validateTypescript7ComparisonEvidence } from "./release-check.mts";
 import {
@@ -176,13 +177,57 @@ test("declaration manifests retain paths and content hashes", async () => {
   try {
     await mkdir(resolve(root, "lib/example/dist"), { recursive: true });
     await writeFile(resolve(root, "lib/example/dist/index.d.ts"), "export {};\n");
+    await writeFile(resolve(root, "lib/example/dist/module.d.mts"), "export {};\n");
+    await writeFile(resolve(root, "lib/example/dist/legacy.d.cts"), "export {};\n");
+    await writeFile(resolve(root, "lib/example/dist/index.d.ts.map"), "{}\n");
+    await writeFile(resolve(root, "lib/example/source.d.ts"), "export {};\n");
     const manifest = await declarationManifest(root);
-    assert.equal(manifest.length, 1);
-    assert.equal(manifest[0]?.path, "lib/example/dist/index.d.ts");
-    assert.match(manifest[0]?.sha256 ?? "", /^[a-f0-9]{64}$/);
+    assert.deepEqual(
+      manifest.map((entry) => entry.path),
+      [
+        "lib/example/dist/index.d.ts",
+        "lib/example/dist/legacy.d.cts",
+        "lib/example/dist/module.d.mts",
+      ],
+    );
+    assert.ok(
+      TYPESCRIPT_7_DECLARATION_EXTENSIONS.every((extension) =>
+        manifest.some((entry) => entry.path.endsWith(extension)),
+      ),
+    );
+    for (const entry of manifest) {
+      assert.match(entry.sha256, /^[a-f0-9]{64}$/);
+    }
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("disposable reproduction shares declaration and prerequisite boundaries", async () => {
+  const reproduction = await readFile(
+    resolve(
+      import.meta.dirname,
+      "../../docs/evidence/reproduce-typescript-7-comparison.sh",
+    ),
+    "utf8",
+  );
+  for (const extension of TYPESCRIPT_7_DECLARATION_EXTENSIONS) {
+    assert.ok(
+      reproduction.includes(`-name '*${extension}'`),
+      `reproduction must include the ${extension} declaration extension`,
+    );
+  }
+  const recipeBuild = reproduction.indexOf(
+    "lib/recipe-guide-import/tsconfig.json",
+  );
+  const runCalculator = reproduction.indexOf(
+    'run_timed "$label-run-calculator"',
+  );
+  assert.ok(recipeBuild >= 0, "reproduction must build recipe-guide-import");
+  assert.ok(
+    recipeBuild < runCalculator,
+    "recipe-guide-import must be built before run-calculator is checked",
+  );
 });
 
 test("retained resource approval evidence is compact and integrity-checked", async () => {

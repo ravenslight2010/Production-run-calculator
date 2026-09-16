@@ -52,6 +52,11 @@ const RESOURCE_APPROVAL_EVIDENCE_PATH =
   "docs/typescript-7-resource-approval-evidence.json";
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const REVISION_PATTERN = /^[a-f0-9]{40}$/u;
+export const TYPESCRIPT_7_DECLARATION_EXTENSIONS = [
+  ".d.ts",
+  ".d.mts",
+  ".d.cts",
+] as const;
 
 function exactKeys(
   value: Record<string, unknown>,
@@ -401,7 +406,13 @@ async function filesUnder(directory: string): Promise<string[]> {
 export async function declarationManifest(checkout: string) {
   const lib = resolve(checkout, "lib");
   const files = (await filesUnder(lib))
-    .filter((path) => path.endsWith(".d.ts") && path.includes("/dist/"))
+    .filter(
+      (path) =>
+        path.includes("/dist/") &&
+        TYPESCRIPT_7_DECLARATION_EXTENSIONS.some((extension) =>
+          path.endsWith(extension),
+        ),
+    )
     .sort();
   return Promise.all(
     files.map(async (path) => ({
@@ -591,6 +602,7 @@ async function main(): Promise<void> {
     commands.push(await run("typescript-7-build-cold", process.execPath, [ts7, ...buildArgs], checkout));
     const candidateDeclarations = await declarationManifest(checkout);
 
+    const preparedCompilers = new Set<6 | 7>();
     for (const mode of TYPESCRIPT_7_RESOURCE_BUDGETS.requiredModes) {
       if (mode === "warm") {
         commands.push(
@@ -599,6 +611,28 @@ async function main(): Promise<void> {
         );
       }
       for (const measurement of typescript7ProjectMeasurementCommands(mode)) {
+        if (!preparedCompilers.has(measurement.compiler)) {
+          const compiler = measurement.compiler === 6 ? ts6 : ts7;
+          const prerequisiteBuild = await run(
+            `typescript-${measurement.compiler}-recipe-guide-import`,
+            process.execPath,
+            [
+              compiler,
+              "--build",
+              "--force",
+              "--pretty",
+              "false",
+              "lib/recipe-guide-import/tsconfig.json",
+            ],
+            checkout,
+          );
+          if (prerequisiteBuild.exitCode !== 0) {
+            throw new Error(
+              `TypeScript ${measurement.compiler} recipe-guide-import prerequisite build failed.`,
+            );
+          }
+          preparedCompilers.add(measurement.compiler);
+        }
         const compiler = measurement.compiler === 6 ? ts6 : ts7;
         commands.push(
           await run(measurement.name, process.execPath, [compiler, "-p", measurement.tsconfig, "--noEmit", "--pretty", "false"], checkout),

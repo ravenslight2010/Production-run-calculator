@@ -245,8 +245,8 @@ capture_declarations() {
   while IFS= read -r -d '' file; do
     mkdir -p "$destination/$(dirname "$file")"
     cp "$file" "$destination/$file"
-  done < <(find lib -type f \
-    \( -path '*/dist/*.d.ts' -o -path '*/dist/*.d.mts' -o -path '*/dist/*.d.cts' \) \
+  done < <(find lib -type f -path '*/dist/*' \
+    \( -name '*.d.ts' -o -name '*.d.mts' -o -name '*.d.cts' \) \
     -print0 | sort -z)
 }
 
@@ -266,6 +266,10 @@ run_no_emit_matrix() {
   local label="$1"
   local compiler="$2"
 
+  "$compiler" --build --force --pretty false \
+    lib/inventory-math/tsconfig.json \
+    lib/spec-import/tsconfig.json \
+    lib/recipe-guide-import/tsconfig.json
   run_timed "$label-scripts" \
     "$compiler" -p scripts/tsconfig.json --noEmit --pretty false
   run_timed "$label-api-server" \
@@ -352,13 +356,6 @@ NODE
 fi
 printf '%s\n' "$contract_comparison_status" \
   >"$OUT/declaration-contract-comparison.exit-code"
-
-for compiler in "$TS6" "$TS7"; do
-  "$compiler" --build --force --pretty false \
-    lib/inventory-math/tsconfig.json \
-    lib/spec-import/tsconfig.json \
-    lib/recipe-guide-import/tsconfig.json
-done
 
 run_no_emit_matrix typescript-6 "$TS6"
 run_no_emit_matrix typescript-7 "$TS7"
