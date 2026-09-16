@@ -9,6 +9,7 @@ import {
   editorServiceEvidenceFromResult,
   normalizeDiagnostics,
   selectTypescript7HistoricalReports,
+  typescript7ProjectMeasurementCommands,
   typescript7TrendHistorySummary,
   typescript7RunnerFingerprint,
   typescript7ResourceRegressions,
@@ -20,7 +21,10 @@ import {
   releaseRevisionGitArgs,
 } from "./typescript-7-evidence.mts";
 import {
+  TYPESCRIPT_7_MEASURED_PROJECTS,
   TYPESCRIPT_7_RESOURCE_BUDGETS,
+  typescript7ExpectedMeasurementCommandNames,
+  typescript7MeasuredCheckNames,
   typescript7ResourceBudgetsEqual,
 } from "./typescript-7-resource-contract.mts";
 
@@ -129,6 +133,30 @@ test("shared resource contract drives comparison and validation thresholds", () 
   assert.equal(
     typescript7ResourceBudgetsEqual(revisedContract, revisedContract),
     true,
+  );
+});
+
+test("measured project revisions update producer and validator coverage together", () => {
+  const revisedProjects = [
+    ...TYPESCRIPT_7_MEASURED_PROJECTS,
+    { name: "new-consumer", tsconfig: "lib/new-consumer/tsconfig.json" },
+  ];
+
+  assert.ok(
+    typescript7MeasuredCheckNames(revisedProjects).includes("new-consumer"),
+    "release validation must require the revised check",
+  );
+  assert.ok(
+    typescript7ProjectMeasurementCommands("warm", revisedProjects).some(
+      (command) => command.name === "typescript-7-new-consumer-warm",
+    ),
+    "producer command coverage must include the revised project",
+  );
+  assert.ok(
+    typescript7ExpectedMeasurementCommandNames(revisedProjects).includes(
+      "typescript-7-new-consumer-warm",
+    ),
+    "release validation must require the producer's revised command",
   );
 });
 

@@ -41,6 +41,8 @@ import {
 import {
   TYPESCRIPT_7_RESOURCE_BUDGETS,
   classifyTypescript7ResourceRegressions,
+  typescript7ExpectedMeasurementCommandNames,
+  typescript7MeasuredCheckNames,
   typescript7ResourceBudgetsEqual,
 } from "./typescript-7-resource-contract.mts";
 
@@ -441,15 +443,7 @@ export function validateTypescript7ComparisonEvidence(
     /^\d+\.\d+\.\d+$/.test(editorService.sdkVersion) &&
     editorService.outcome === "PASS" &&
     editorService.exitCode === 0;
-  const performanceChecks = [
-    "build",
-    "scripts",
-    "api-server",
-    "run-calculator",
-    "mockup-sandbox",
-    "ai-evaluation",
-    "corpus-harness",
-  ];
+  const performanceChecks = typescript7MeasuredCheckNames();
   const expectedPerformanceChecks = new Set(
     TYPESCRIPT_7_RESOURCE_BUDGETS.requiredModes.flatMap((mode) =>
       performanceChecks.map((check) => `${mode}:${check}`),
@@ -458,12 +452,7 @@ export function validateTypescript7ComparisonEvidence(
   const expectedCommands = new Set([
     "frozen-install",
     "typescript-6-clean",
-    ...TYPESCRIPT_7_RESOURCE_BUDGETS.requiredModes.flatMap((mode) =>
-      performanceChecks.flatMap((check) => [
-        `typescript-6-${check}-${mode}`,
-        `typescript-7-${check}-${mode}`,
-      ]),
-    ),
+    ...typescript7ExpectedMeasurementCommandNames(),
   ]);
   if (
     report.schemaVersion !== 3 ||

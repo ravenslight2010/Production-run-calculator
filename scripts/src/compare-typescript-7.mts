@@ -17,8 +17,11 @@ import {
   releaseRevisionGitArgs,
 } from "./typescript-7-evidence.mts";
 import {
+  TYPESCRIPT_7_MEASURED_PROJECTS,
   TYPESCRIPT_7_RESOURCE_BUDGETS,
   classifyTypescript7ResourceRegressions,
+  typescript7MeasuredCheckNames,
+  type Typescript7MeasuredProject,
   type Typescript7ResourceBudgets,
 } from "./typescript-7-resource-contract.mts";
 
@@ -211,15 +214,7 @@ export function validateTypescript7ResourceApprovalEvidence(
   }
 }
 
-const comparedChecks = [
-  "build",
-  "scripts",
-  "api-server",
-  "run-calculator",
-  "mockup-sandbox",
-  "ai-evaluation",
-  "corpus-harness",
-] as const;
+const comparedChecks = typescript7MeasuredCheckNames();
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(scriptDir, "../..");
 const supportedRunners = [{ platform: "linux", arch: "x64" }] as const;
@@ -374,6 +369,16 @@ export function normalizeDiagnostics(
     .map((line) => line.trim().replaceAll(normalizedRoot, ""))
     .filter((line) => /\berror TS\d+:/.test(line))
     .sort();
+}
+
+export function typescript7ProjectMeasurementCommands(
+  mode: string,
+  projects: readonly Typescript7MeasuredProject[] = TYPESCRIPT_7_MEASURED_PROJECTS,
+): Array<{ name: string; tsconfig: string; compiler: 6 | 7 }> {
+  return projects.flatMap(({ name, tsconfig }) => [
+    { name: `typescript-6-${name}-${mode}`, tsconfig, compiler: 6 },
+    { name: `typescript-7-${name}-${mode}`, tsconfig, compiler: 7 },
+  ]);
 }
 
 async function filesUnder(directory: string): Promise<string[]> {
@@ -579,14 +584,6 @@ async function main(): Promise<void> {
     commands.push(await run("typescript-7-build-cold", process.execPath, [ts7, ...buildArgs], checkout));
     const candidateDeclarations = await declarationManifest(checkout);
 
-    const projects = [
-      ["scripts", "scripts/tsconfig.json"],
-      ["api-server", "artifacts/api-server/tsconfig.json"],
-      ["run-calculator", "artifacts/run-calculator/tsconfig.json"],
-      ["mockup-sandbox", "artifacts/mockup-sandbox/tsconfig.json"],
-      ["ai-evaluation", "lib/ai-evaluation/tsconfig.json"],
-      ["corpus-harness", "lib/corpus-harness/tsconfig.json"],
-    ] as const;
     for (const mode of TYPESCRIPT_7_RESOURCE_BUDGETS.requiredModes) {
       if (mode === "warm") {
         commands.push(
@@ -594,10 +591,10 @@ async function main(): Promise<void> {
           await run("typescript-7-build-warm", process.execPath, [ts7, ...buildArgs], checkout),
         );
       }
-      for (const [name, project] of projects) {
+      for (const measurement of typescript7ProjectMeasurementCommands(mode)) {
+        const compiler = measurement.compiler === 6 ? ts6 : ts7;
         commands.push(
-          await run(`typescript-6-${name}-${mode}`, process.execPath, [ts6, "-p", project, "--noEmit", "--pretty", "false"], checkout),
-          await run(`typescript-7-${name}-${mode}`, process.execPath, [ts7, "-p", project, "--noEmit", "--pretty", "false"], checkout),
+          await run(measurement.name, process.execPath, [compiler, "-p", measurement.tsconfig, "--noEmit", "--pretty", "false"], checkout),
         );
       }
     }
