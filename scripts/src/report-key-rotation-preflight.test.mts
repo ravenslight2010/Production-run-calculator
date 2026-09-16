@@ -3,6 +3,11 @@ import {
   evaluateReportKeyRotationPreflight,
   parseReportSigningKeyring,
 } from "./report-key-rotation-preflight.mts";
+import {
+  RELEASE_PREFLIGHT_DB_ATTEMPTS,
+  RELEASE_PREFLIGHT_RETRY_DELAYS_MS,
+  runReleasePreflightDatabaseRetry,
+} from "./release-preflight-db-retry.mts";
 
 const current = "current";
 const previous = "previous";
@@ -14,7 +19,7 @@ const keyringJson = JSON.stringify({
   },
 });
 
-function run(): void {
+async function run(): Promise<void> {
   const keyring = parseReportSigningKeyring(keyringJson);
   assert.deepEqual(keyring, {
     activeKeyId: current,
@@ -80,6 +85,36 @@ function run(): void {
   const diagnostics = JSON.stringify(missing);
   assert.ok(!diagnostics.includes("c".repeat(32)));
   assert.ok(!diagnostics.includes("p".repeat(32)));
+
+  let attempts = 0;
+  const waits: number[] = [];
+  const recovered = await runReleasePreflightDatabaseRetry(
+    async () => {
+      attempts += 1;
+      if (attempts < RELEASE_PREFLIGHT_DB_ATTEMPTS) {
+        throw { code: "57P03" };
+      }
+      return "recovered";
+    },
+    { sleep: async (milliseconds) => {
+      waits.push(milliseconds);
+    } },
+  );
+  assert.equal(recovered, "recovered");
+  assert.equal(attempts, RELEASE_PREFLIGHT_DB_ATTEMPTS);
+  assert.deepEqual(waits, [...RELEASE_PREFLIGHT_RETRY_DELAYS_MS]);
+
+  attempts = 0;
+  await assert.rejects(
+    runReleasePreflightDatabaseRetry(async () => {
+      attempts += 1;
+      throw { code: "23505" };
+    }, { sleep: async () => {
+      throw new Error("non-retryable errors must not sleep");
+    } }),
+    { code: "23505" },
+  );
+  assert.equal(attempts, 1);
 }
 
-run();
+await run();

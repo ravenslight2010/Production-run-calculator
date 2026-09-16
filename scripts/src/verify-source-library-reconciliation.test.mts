@@ -12,9 +12,15 @@ import {
   assertProductionSourceLibraryCapture,
   assertBoundedSourceLibraryReconciliationEvidence,
   isRetryableSourceLibraryDatabaseError,
+  SOURCE_LIBRARY_PREFLIGHT_DB_ATTEMPTS,
   stable,
   verifySourceLibraryReconciliation,
 } from "./verify-source-library-reconciliation.mts";
+import {
+  RELEASE_PREFLIGHT_DB_ATTEMPTS,
+  RELEASE_PREFLIGHT_RETRY_DELAYS_MS,
+  runReleasePreflightDatabaseRetry,
+} from "./release-preflight-db-retry.mts";
 
 const reportPath = path.resolve(process.cwd(), "..", "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json");
 const reportBytes = fs.readFileSync(reportPath);
@@ -67,6 +73,39 @@ assert.equal(
 );
 assert.equal(isRetryableSourceLibraryDatabaseError({ code: "23505" }), false);
 assert.equal(isRetryableSourceLibraryDatabaseError(new Error("query failed")), false);
+assert.equal(SOURCE_LIBRARY_PREFLIGHT_DB_ATTEMPTS, RELEASE_PREFLIGHT_DB_ATTEMPTS);
+{
+  let attempts = 0;
+  const waits: number[] = [];
+  const result = await runReleasePreflightDatabaseRetry(
+    async () => {
+      attempts += 1;
+      if (attempts < RELEASE_PREFLIGHT_DB_ATTEMPTS) {
+        throw { code: "ETIMEDOUT" };
+      }
+      return "recovered";
+    },
+    { sleep: async (milliseconds) => {
+      waits.push(milliseconds);
+    } },
+  );
+  assert.equal(result, "recovered");
+  assert.equal(attempts, RELEASE_PREFLIGHT_DB_ATTEMPTS);
+  assert.deepEqual(waits, [...RELEASE_PREFLIGHT_RETRY_DELAYS_MS]);
+}
+{
+  let attempts = 0;
+  await assert.rejects(
+    runReleasePreflightDatabaseRetry(async () => {
+      attempts += 1;
+      throw { code: "23505" };
+    }, { sleep: async () => {
+      throw new Error("non-retryable errors must not sleep");
+    } }),
+    { code: "23505" },
+  );
+  assert.equal(attempts, 1);
+}
 assert.doesNotThrow(() =>
   assertProductionSourceLibraryCapture({
     environmentArgument: "release",

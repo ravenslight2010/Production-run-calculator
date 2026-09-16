@@ -2,11 +2,11 @@ import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { runReleasePreflightDatabaseRetry } from "./release-preflight-db-retry.mts";
 
 export const REPORT_KEY_ROTATION_SCAN_LIMIT = 100;
 export const REPORT_KEY_ROTATION_PREFLIGHT_VERIFIER =
   "report-key-rotation-preflight";
-const REPORT_KEY_ROTATION_DB_ATTEMPTS = 3;
 
 export type ReportSigningKeyring = {
   activeKeyId: string;
@@ -171,23 +171,14 @@ export async function runReportKeyRotationPreflight(
   }
   const { pool } = await import("@workspace/db");
   try {
-    let lastError: unknown;
-    for (let attempt = 1; attempt <= REPORT_KEY_ROTATION_DB_ATTEMPTS; attempt += 1) {
-      try {
-        const stored = await readStoredProofKeyIds(pool);
-        return evaluateReportKeyRotationPreflight({
-          keyring,
-          storedKeyIds: stored.keyIds,
-          truncated: stored.truncated,
-        });
-      } catch (error) {
-        lastError = error;
-        if (attempt < REPORT_KEY_ROTATION_DB_ATTEMPTS) {
-          await new Promise((resolve) => setTimeout(resolve, attempt * 250));
-        }
-      }
-    }
-    throw lastError;
+    return await runReleasePreflightDatabaseRetry(async () => {
+      const stored = await readStoredProofKeyIds(pool);
+      return evaluateReportKeyRotationPreflight({
+        keyring,
+        storedKeyIds: stored.keyIds,
+        truncated: stored.truncated,
+      });
+    });
   } finally {
     await pool.end();
   }
