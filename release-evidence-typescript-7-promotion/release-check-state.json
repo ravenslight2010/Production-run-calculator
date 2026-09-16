@@ -1,32 +1,36 @@
 {
-  "revision": "bad9032b64f4581c05d5a19f4fe9bd8d670f062c",
-  "sourceLibraryRevision": "bad9032b64f4581c05d5a19f4fe9bd8d670f062c",
+  "revision": "86882b30563fe938a5f7ef256ffa4ce3ed075cf7",
+  "sourceLibraryRevision": "86882b30563fe938a5f7ef256ffa4ce3ed075cf7",
   "mode": "typescript-7-promotion",
   "results": [
     {
       "label": "source-library reconciliation database preflight",
       "passed": false,
       "status": "FAIL",
-      "elapsedMs": 7604,
+      "elapsedMs": 12020,
       "sourceLibraryPreflight": {
         "contractVersion": 1,
-        "database": "unverified",
+        "database": "partial-fixture",
         "expected": {
-          "poolRows": 0,
-          "aliases": 0
+          "poolRows": 68,
+          "aliases": 25
         },
         "observed": {
-          "poolRows": 0,
-          "aliasesExact": 0,
-          "aliasesMissing": 0,
+          "poolRows": 3,
+          "aliasesExact": 3,
+          "aliasesMissing": 22,
           "aliasesMismatched": 0,
-          "markerPresent": false,
-          "markerValid": false
+          "markerPresent": true,
+          "markerValid": true
         },
         "failures": [
           {
-            "check": "output",
-            "count": 1
+            "check": "databaseShape",
+            "count": 65
+          },
+          {
+            "check": "aliases",
+            "count": 22
           }
         ],
         "ok": false
@@ -34,15 +38,15 @@
     },
     {
       "label": "operational report signing-key rotation preflight",
-      "passed": false,
-      "status": "FAIL",
-      "elapsedMs": 4982
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 1426
     },
     {
       "label": "blocking release security audit (high severity; registry required)",
       "passed": true,
       "status": "PASS",
-      "elapsedMs": 1393
+      "elapsedMs": 1122
     },
     {
       "label": "source-library reconciliation verification",
@@ -57,19 +61,19 @@
       "label": "shell lint inventory",
       "passed": true,
       "status": "PASS",
-      "elapsedMs": 841
+      "elapsedMs": 643
     },
     {
       "label": "generated API client freshness",
       "passed": true,
       "status": "PASS",
-      "elapsedMs": 20720
+      "elapsedMs": 9855
     },
     {
       "label": "shared library typechecks",
       "passed": true,
       "status": "PASS",
-      "elapsedMs": 1800
+      "elapsedMs": 548
     },
     {
       "label": "API server typecheck",
@@ -123,7 +127,7 @@
       "label": "recovery evidence audit",
       "passed": true,
       "status": "PASS",
-      "elapsedMs": 2014
+      "elapsedMs": 1136
     },
     {
       "label": "clean-start smoke",
@@ -347,19 +351,19 @@
     }
   ],
   "timing": {
-    "totalElapsedMs": 30141,
+    "totalElapsedMs": 22437,
     "stages": [
       {
         "stage": "source-library-preflight",
-        "elapsedMs": 7609
+        "elapsedMs": 12022
       },
       {
         "stage": "prerequisites",
-        "elapsedMs": 20731
+        "elapsedMs": 9866
       },
       {
         "stage": "shared-output",
-        "elapsedMs": 1801
+        "elapsedMs": 549
       },
       {
         "stage": "consumer-typechecks",
@@ -403,5 +407,5 @@
       }
     ]
   },
-  "updatedAt": "2026-09-16T01:08:13.580Z"
+  "updatedAt": "2026-09-16T01:15:04.654Z"
 }
