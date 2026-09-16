@@ -187,6 +187,76 @@ exit ${runnerExitCode}
   }
 });
 
+test("forces an over-budget result and cleans up the report directory", async (t) => {
+  const availableWorkers = availableParallelism();
+  if (availableWorkers < MIN_CALCULATOR_TEST_WORKERS) {
+    t.skip(
+      `runner exposes ${availableWorkers} CPU workers; executable prerequisite requires ${MIN_CALCULATOR_TEST_WORKERS}`,
+    );
+  }
+
+  const temporaryDirectory = await mkdtemp(
+    join(tmpdir(), "calculator-duration-overrun-test-"),
+  );
+  const fakePnpmPath = join(temporaryDirectory, "pnpm");
+  const cleanupMarkerPath = join(temporaryDirectory, "report-path");
+  const budgetMs = 10;
+
+  try {
+    await writeFile(
+      fakePnpmPath,
+      `#!/bin/sh
+for argument
+do
+  case "$argument" in
+    --outputFile=*) output_file="\${argument#*=}" ;;
+  esac
+done
+printf '%s\\n' '{"numTotalTests":1,"numPassedTests":1,"numFailedTests":0,"testResults":[{"name":"stub.test.ts","status":"passed"}]}' > "$output_file"
+printf '%s\\n' "$output_file" > "$CLEANUP_MARKER"
+sleep 0.15
+`,
+    );
+    await chmod(fakePnpmPath, 0o755);
+
+    const result = await runProcess(process.execPath, [durationCheckScript], {
+      env: {
+        ...process.env,
+        CALCULATOR_TEST_BUDGET_MS: String(budgetMs),
+        CLEANUP_MARKER: cleanupMarkerPath,
+        PATH: `${temporaryDirectory}:${process.env.PATH ?? ""}`,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    assert.notEqual(result.code, 0, result.stdout);
+
+    const elapsedMatch = result.stdout.match(
+      /Calculator test suite: .* elapsed ([0-9]+\.[0-9])s \(budget 0\.0s\)\./,
+    );
+    assert.ok(elapsedMatch, result.stdout);
+    const elapsedSeconds = Number(elapsedMatch[1]);
+    assert.ok(elapsedSeconds > 0, result.stdout);
+
+    const overrunMatch = result.stderr.match(
+      /Calculator test suite exceeded its 0\.0s validation budget by ([0-9]+\.[0-9])s\./,
+    );
+    assert.ok(overrunMatch, result.stderr);
+    const overrunSeconds = Number(overrunMatch[1]);
+    assert.ok(overrunSeconds > 0, result.stderr);
+    assert.ok(
+      Math.abs(elapsedSeconds - overrunSeconds) <= 0.1,
+      `elapsed ${elapsedSeconds}s should include the ${overrunSeconds}s overrun`,
+    );
+
+    const reportPath = (await readFile(cleanupMarkerPath, "utf8")).trim();
+    assert.ok(reportPath, "stub runner should record the requested report path");
+    await assert.rejects(stat(dirname(reportPath)), /ENOENT/);
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
 test("reports missing Vitest output, cleans up, and preserves runner capacity", async (t) => {
   const availableWorkers = availableParallelism();
   if (availableWorkers < MIN_CALCULATOR_TEST_WORKERS) {
