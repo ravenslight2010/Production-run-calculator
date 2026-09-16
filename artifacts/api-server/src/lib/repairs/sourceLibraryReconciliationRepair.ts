@@ -12,6 +12,7 @@ import {
   loadSourceLibraryReconciliationPlan,
   SOURCE_LIBRARY_RECONCILIATION_FROM_DATE,
   SOURCE_LIBRARY_RECONCILIATION_HEAL_ID,
+  SOURCE_LIBRARY_RECONCILIATION_RERUN_HEAL_ID,
 } from "../sourceLibraryReconciliationHeal";
 import type { RepairDefinition, RepairTransaction } from "../repairRegistry";
 
@@ -249,4 +250,15 @@ export const sourceLibraryReconciliationRepair: RepairDefinition<RepairTransacti
   },
   validateResult: (result) => ["replacements", "aliasesInserted", "repointedProfiles", "repointedRuns", "deletedStubs"]
     .every((key) => Number.isInteger(result[key]) && Number(result[key]) >= 0),
+});
+
+/**
+ * Replays the same independently reviewed reconciliation plan under the fresh
+ * v2 marker. The distinct definition keeps the released startup catalog
+ * complete without duplicating or broadening the mutation logic.
+ */
+export const sourceLibraryReconciliationRerunRepair: RepairDefinition<RepairTransaction> = Object.freeze({
+  ...sourceLibraryReconciliationRepair,
+  id: SOURCE_LIBRARY_RECONCILIATION_RERUN_HEAL_ID,
+  dependencies: [SOURCE_LIBRARY_RECONCILIATION_HEAL_ID],
 });

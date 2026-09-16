@@ -61,4 +61,6 @@ export const RELEASED_AUTOMATIC_REPAIR_FINGERPRINTS: Readonly<Record<string, str
   "fresh-device-run-contamination-v1": "9d9b8ab9f247c4fa36d66716426a9e48ef7a4835b7200782c0780700e815833c",
   "incident-resolved-workflow-reconciliation-v1": "7029d74ba987dee8a579dcfd70a56cf246085fec11eea77542721e4a665d5676",
   "source-library-reconciliation-2026-08-26-v1": "c50e15136b8b5a42733ff9761c00d189887ccfd54aa4568352cafe0cd4a7fc13",
+  "source-library-reconciliation-2026-08-26-v2": "e016e3e92c621193bbe1fb79e1e615eadeca5eff1aed588e2a9dad6e28afe318",
+  "speed-adjustment-baseline-v1": "b953e8ae40fde2a7db3accb73258b58ba325279bcc6037e9781e70adecf3d7e2",
 });
