@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "approvals": [
+    {
+      "path": "lib/api-client-react/dist/generated/api.d.ts",
+      "baselineSha256": "cbe083cdf33242f12ed958adde737e2ebcf05049dac2073298a8fbf777899f67",
+      "candidateSha256": "6b07ed89a33ad92b49581bfa9e332779fef0bf9e8d73daea3b25065ac325ebd5",
+      "reason": "Reviewed: TypeScript 7 changes only equivalent string-literal delimiters in generated query and mutation key tuple types; the complete module is bidirectionally assignable under both compilers."
+    },
+    {
+      "path": "lib/api-zod/dist/generated/api.d.ts",
+      "baselineSha256": "2abb21d4de5408817c6e7b041187393dce68e4281a34685abafd5a5d21e6abea",
+      "candidateSha256": "9480239ec819437bf9c16aaa39da31282e6c45a9c4c4194b2c407d00daf9fedf",
+      "reason": "Reviewed: TypeScript 7 emits equivalent direct Zod namespace members instead of the z namespace alias and reorders object members; the complete module is bidirectionally assignable under both compilers."
+    },
+    {
+      "path": "lib/db/dist/schema/deniedMerges.d.ts",
+      "baselineSha256": "0ad24894e7b735d49d088148b661ffc5280ca64853ee5a4d781745c0686ada83",
+      "candidateSha256": "96ee7a4159bbfa438eea29ecca427ad59db243f1851710ebc83680892a20e4dc",
+      "reason": "Reviewed: TypeScript 7 changes a quote delimiter and declaration member order only; the module is bidirectionally assignable under both compilers."
+    },
+    {
+      "path": "lib/db/dist/schema/duplicateReviewGroups.d.ts",
+      "baselineSha256": "208a1959504e7df7d5a186b67b02f01faef71510f5c73a84517659307603a9dd",
+      "candidateSha256": "040b154b9f2ae037fcad5f756aff3ec96626797b73efa0e8d5e0ce53b6d96c6e",
+      "reason": "Reviewed: TypeScript 7 changes a quote delimiter and reorders equivalent Zod object members; the module is bidirectionally assignable under both compilers."
+    },
+    {
+      "path": "lib/db/dist/schema/facilityKnowledge.d.ts",
+      "baselineSha256": "c361b656d752d13b30c956c22e751b94ba92b856566aace2620eaaf38f267c8c",
+      "candidateSha256": "ad0ee21f32e4569f744504c73b1aabfc57fcfb875b3aa9f0c16c16a3f65e61ec",
+      "reason": "Reviewed: TypeScript 7 changes a quote delimiter and reorders equivalent Zod object members; the module is bidirectionally assignable under both compilers."
+    },
+    {
+      "path": "lib/db/dist/schema/mergeAliases.d.ts",
+      "baselineSha256": "a230eee16985df3a361b003279a8526496a4ada7c230af0e712956b833f056de",
+      "candidateSha256": "93f8f8ba72fc0012734f46a3e9ef50fc72dce7e65a2d367ab73a35804b886a98",
+      "reason": "Reviewed: TypeScript 7 changes a quote delimiter and declaration member order only; the module is bidirectionally assignable under both compilers."
+    },
+    {
+      "path": "lib/db/dist/schema/photoAliases.d.ts",
+      "baselineSha256": "cc8d990598375b17e16a7e1182fc73475b150ed48bba8f292675b95777b0dad6",
+      "candidateSha256": "e844b6543806a2fd11763e8db107afd9fcc15fdeae9bebc6aed4e314c0c2dc41",
+      "reason": "Reviewed: TypeScript 7 changes a quote delimiter and declaration member order only; the module is bidirectionally assignable under both compilers."
+    },
+    {
+      "path": "lib/db/dist/schema/specImportAliases.d.ts",
+      "baselineSha256": "9f30ff379b73da5b491d16a8eeaca3cbb7ae0ebdbb80747b241ceef84bbca902",
+      "candidateSha256": "72a73739bf56928acbf88ca64e52ced2106437d2c4539cf71e67e65a809ed5f7",
+      "reason": "Reviewed: TypeScript 7 changes a quote delimiter and reorders equivalent Zod object members; the module is bidirectionally assignable under both compilers."
+    },
+    {
+      "path": "lib/db/dist/schema/syncConflictLog.d.ts",
+      "baselineSha256": "01421e49994217026dd0a3a9c7b195ce26c1d26cedfb75f079dd94eb0b0b1c88",
+      "candidateSha256": "492b3bb87e1e216297ce4fc00dbcc1be816fa9201a350620f156f9a50662fddb",
+      "reason": "Reviewed: TypeScript 7 changes a quote delimiter and reorders equivalent Zod object members; the module is bidirectionally assignable under both compilers."
+    }
+  ]
+}

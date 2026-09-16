@@ -24,6 +24,8 @@ import {
   type AutoTrackEventClaim,
   type AutoTrackEventResult,
 } from "../hooks/useAutoTrack";
+import { suggestedDoughStaging } from "@workspace/live-calc";
+import { loadRunValues, saveRunValues, markRunValuesUpdated } from "../storage";
 import { detectStallFromDelta } from "@workspace/downtime-trends";
 import type { NotificationPrefs } from "../notificationPrefs";
 import { getSauceBarrelEntry } from "../sauceBarrelStore";
@@ -624,6 +626,40 @@ export function LiveRunProvider({
     setSpeedNudge(null);
     setSpeedNudgeStatus(null);
   }, []);
+
+  // Pre-seed the next pending run's dough counters when this run's press is
+  // done. Keep this alongside the server-authoritative calculation display so
+  // the preparation handoff remains available without replacing the receipt.
+  const nextRunSeededRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (screenMode !== null || !autoTrackProgress) return;
+    if (runStatus !== "running" || !calc.pressDone) return;
+    const nextRun = dayState.runs[dayState.currentIndex + 1];
+    if (!nextRun || nextRun.startedAt) return;
+    if ((nextRun.subTab ?? "dough") === "crusts") return;
+    const key = `${currentRunId}->${nextRun.id}`;
+    if (nextRunSeededRef.current.has(key)) return;
+    const nv = { ...DEFAULT_VALUES, ...loadRunValues(nextRun.id) };
+    if ((Number(nv.traysOnLine) || 0) > 0 || (Number(nv.batchesReady) || 0) > 0) {
+      nextRunSeededRef.current.add(key);
+      return;
+    }
+    const totalPizzas = (Number(nv.casesNeeded) || 0) * (Number(nv.pizzasPerCase) || 0);
+    if (totalPizzas <= 0) return;
+    const perTray = Number(nv.doughballsPerTray) || 0;
+    const recipeLbs = (nv.doughRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
+    const yieldPerBatch =
+      recipeLbs > 0 && Number(nv.targetDoughballWeight) > 0
+        ? (recipeLbs * 16) / Number(nv.targetDoughballWeight)
+        : Number(nv.doughBatchYield) || 0;
+    const traysNeeded = perTray > 0 ? totalPizzas / perTray : 0;
+    const batchesNeeded = yieldPerBatch > 0 ? totalPizzas / yieldPerBatch : 0;
+    const seed = suggestedDoughStaging(traysNeeded, batchesNeeded);
+    if (seed.trays === null && seed.batches === null) return;
+    nextRunSeededRef.current.add(key);
+    saveRunValues(nextRun.id, { ...nv, traysOnLine: seed.trays ?? 0, batchesReady: seed.batches ?? 0 });
+    markRunValuesUpdated(nextRun.id, Date.now());
+  }, [runStatus, calc.pressDone, autoTrackProgress, screenMode, dayState.runs, dayState.currentIndex, currentRunId]);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const value = useMemo<LiveRunContextValue>(

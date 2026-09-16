@@ -13,10 +13,16 @@ export default defineConfig({
     environment: "jsdom",
     globals: false,
     include: ["src/**/*.test.{ts,tsx}"],
-    // Validation runs alongside several dev workflows. Run test files one at a
-    // time to avoid concurrent fork-worker startup starvation, and give
-    // hooks/tests generous timeouts so the suite is reliable under load.
-    fileParallelism: false,
+    // Worker threads avoid the child-process startup overhead of the default
+    // fork pool without changing Vitest's per-file environment isolation.
+    pool: "threads",
+    isolate: true,
+    // Keep file-level parallelism enabled and use the validated four-worker
+    // ceiling. The budget wrapper rejects runners with fewer than four
+    // available workers; the two-worker suite is outside the 150-second
+    // validation budget.
+    fileParallelism: true,
+    maxWorkers: 4,
     hookTimeout: 60000,
     testTimeout: 30000,
   },

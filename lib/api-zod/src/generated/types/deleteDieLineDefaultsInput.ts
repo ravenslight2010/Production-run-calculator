@@ -5,8 +5,11 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { DeleteDieLineDefaultsInputRevisions } from './deleteDieLineDefaultsInputRevisions';
 
 export interface DeleteDieLineDefaultsInput {
   /** Die names whose stored defaults should be removed */
   names: string[];
+  /** Loaded updatedAt revisions keyed by die name. Required for each name that currently has a stored override. */
+  revisions?: DeleteDieLineDefaultsInputRevisions;
 }

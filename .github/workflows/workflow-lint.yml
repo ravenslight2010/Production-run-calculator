@@ -5,7 +5,10 @@ on:
     branches:
       - main
     paths:
+      - .github/**
+      - .github/dependabot.yml
       - .github/workflows/**
+      - .github/repository-policy.md
       - package.json
       - pnpm-lock.yaml
       - scripts/package.json
@@ -13,19 +16,17 @@ on:
       - scripts/src/check-workflows.sh
       - scripts/src/check-workflows.test.sh
   pull_request:
-    paths:
-      - .github/workflows/**
-      - package.json
-      - pnpm-lock.yaml
-      - scripts/package.json
-      - scripts/src/check-ci-binary-provenance.sh
-      - scripts/src/check-workflows.sh
-      - scripts/src/check-workflows.test.sh
+    # Pull requests always run this guard because it validates the complete
+    # workflow and CI policy surface, including newly added workflow files.
   workflow_dispatch:
 
 permissions:
   contents: read
   attestations: read
+
+concurrency:
+  group: workflow-lint-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   lint:
@@ -38,10 +39,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
         with:
           run_install: false
 

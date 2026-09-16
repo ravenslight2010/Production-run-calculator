@@ -43,6 +43,12 @@ on:
         required: false
         default: ''
 
+concurrency:
+  group: nightly-large-spec
+  cancel-in-progress: false
+
+permissions:
+  contents: read
 jobs:
   gemini-live-benchmark:
     name: Live Gemini skill-trigger benchmark
@@ -61,7 +67,9 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Verify repeated-failure alert policy
         run: python3 scripts/test_gemini_failure_alert.py
@@ -70,14 +78,14 @@ jobs:
         id: gemini-benchmark
         run: |
           python3 scripts/gemini_skill_trigger_benchmark.py \
-            --fail-on-provider-error \
+            --live-provider \
             --results gemini-live-results.json \
             --report gemini-live-report.md \
             --queue gemini-live-review-queue.json
 
       - name: Upload Gemini benchmark artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: gemini-live-benchmark-${{ github.run_id }}
           path: |
@@ -116,18 +124,19 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
         with:
           run_install: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
-          cache: 'pnpm'
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -163,9 +172,9 @@ jobs:
 
       - name: Upload API server log on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: api-server-log
+          name: api-server-log-${{ github.run_id }}
           path: /tmp/api-server.log
           retention-days: 7
 

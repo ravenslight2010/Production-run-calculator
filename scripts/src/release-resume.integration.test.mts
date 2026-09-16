@@ -93,6 +93,64 @@ async function runReleaseCheck(
   });
 }
 
+async function runTypescriptPromotionResumeScenario(): Promise<void> {
+  const evidenceDir = await mkdtemp(
+    join(tmpdir(), "release-promotion-resume-"),
+  );
+  const marker = join(evidenceDir, "editor-proof-runs");
+  const promotionPass: FixtureStep = {
+    label: "TypeScript 7 promotion gate",
+    command: "bash",
+    args: ["-c", `echo pass >> ${JSON.stringify(marker)}`],
+  };
+  const laterFailure: FixtureStep = {
+    label: "later gate",
+    command: "bash",
+    args: ["-c", "exit 1"],
+    stage: "later",
+  };
+  try {
+    const initial = await runReleaseCheck(
+      evidenceDir,
+      [promotionPass, laterFailure],
+      ["--typescript-7-promotion"],
+    );
+    assert.equal(initial.code, 1, initial.output);
+
+    const promotionFail = {
+      ...promotionPass,
+      args: ["-c", `echo fail >> ${JSON.stringify(marker)}; exit 1`],
+    };
+    const resumed = await runReleaseCheck(
+      evidenceDir,
+      [promotionFail, laterFailure],
+      ["--typescript-7-promotion", "--resume"],
+    );
+    assert.equal(resumed.code, 1, resumed.output);
+    assert.match(resumed.output, /FAIL TypeScript 7 promotion gate/);
+    assert.equal(
+      (await readFile(marker, "utf8")).trim().split("\n").length,
+      2,
+      "promotion resume must rerun the live editor proof",
+    );
+    const checkpoint = JSON.parse(
+      await readFile(join(evidenceDir, "release-check-state.json"), "utf8"),
+    ) as { mode?: unknown };
+    assert.equal(checkpoint.mode, "typescript-7-promotion");
+    const report = await readFile(
+      join(evidenceDir, "release-check-checkpoint.md"),
+      "utf8",
+    );
+    assert.match(report, /^Mode: typescript-7-promotion$/m);
+    assert.match(
+      report,
+      /pnpm run release:check:typescript-7-promotion -- --resume/,
+    );
+  } finally {
+    await rm(evidenceDir, { recursive: true, force: true });
+  }
+}
+
 function runStoppedSummary(
   evidenceDir: string,
   summaryPath: string,
@@ -540,6 +598,10 @@ async function runStoppedSummaryScenario(): Promise<void> {
   for (const checkpointText of [
     "not a release checkpoint\n",
     "Root blockers: [untrusted payload](https://example.test)\n",
+    "Root blockers: fixture gate one\u0001 raw root blocker payload\n" +
+      "Blocked gates: fixture gate two\n",
+    "Root blockers: fixture gate one\n" +
+      "Blocked gates: fixture gate two\u0002 raw blocked gate payload\n",
   ]) {
     const evidenceDir = await mkdtemp(
       join(tmpdir(), "release-summary-malformed-checkpoint-"),
@@ -566,11 +628,82 @@ async function runStoppedSummaryScenario(): Promise<void> {
       );
       assert.doesNotMatch(
         summary,
-        /untrusted payload|https:\/\/example\.test/,
+        /untrusted payload|https:\/\/example\.test|raw root blocker payload|raw blocked gate payload/,
         "malformed checkpoint text must not be copied into the job summary",
+      );
+      assert.equal(
+        summary.includes("\u0001") || summary.includes("\u0002"),
+        false,
+        "malformed checkpoint text must not copy control characters into the job summary",
       );
     } finally {
       await rm(evidenceDir, { recursive: true, force: true });
+    }
+  }
+
+  for (const mode of ["standard", "full"] as const) {
+    for (const duplicateScenario of [
+      {
+        name: "root-blockers",
+        checkpoint: [
+          "# Release Check Checkpoint — INCOMPLETE / NO-GO",
+          "",
+          "Root blockers: first root blocker (FAIL)",
+          "  Root blockers: duplicate root blocker (FAIL)  ",
+          "Blocked gates: dependent gate (blocked by first root blocker)",
+          "",
+        ].join("\n"),
+        payloads: ["first root blocker", "duplicate root blocker"],
+      },
+      {
+        name: "blocked-gates",
+        checkpoint: [
+          "# Release Check Checkpoint — INCOMPLETE / NO-GO",
+          "",
+          "Root blockers: root blocker (FAIL)",
+          "Blocked gates: first dependent gate (blocked by root blocker)",
+          "\tBlocked gates: duplicate dependent gate (blocked by root blocker)\t",
+          "",
+        ].join("\n"),
+        payloads: ["first dependent gate", "duplicate dependent gate"],
+      },
+    ] as const) {
+      const evidenceDir = await mkdtemp(
+        join(
+          tmpdir(),
+          `release-summary-${mode}-duplicate-${duplicateScenario.name}-`,
+        ),
+      );
+      const summaryPath = join(evidenceDir, "step-summary.md");
+      try {
+        await writeFile(
+          join(evidenceDir, "release-check-checkpoint.md"),
+          duplicateScenario.checkpoint,
+          "utf8",
+        );
+        const result = await runStoppedSummary(
+          evidenceDir,
+          summaryPath,
+          mode,
+          "",
+        );
+        assert.equal(result.code, 0, result.output);
+        const summary = await readFile(summaryPath, "utf8");
+        assert.match(
+          summary,
+          /Blocker summary unresolved: checkpoint text is missing or malformed\./,
+          `${mode}/${duplicateScenario.name} duplicate metadata must remain unresolved`,
+        );
+        for (const payload of duplicateScenario.payloads) {
+          assert.doesNotMatch(
+            summary,
+            new RegExp(escapeRegExp(payload)),
+            `${mode}/${duplicateScenario.name} must not copy duplicate blocker payloads`,
+          );
+        }
+      } finally {
+        await rm(evidenceDir, { recursive: true, force: true });
+      }
     }
   }
 
@@ -919,6 +1052,255 @@ async function runIndependentFailureFanoutScenario(): Promise<void> {
 
   console.log(
     "Release independent failure fan-out scenario passed (safe continuation and explicit blocking).",
+  );
+}
+
+async function runSourceLibraryPreflightFanoutScenario(): Promise<void> {
+  const evidenceDir = await mkdtemp(
+    join(tmpdir(), "release-resume-source-preflight-"),
+  );
+  const markerDir = await mkdtemp(
+    join(tmpdir(), "release-resume-source-preflight-marker-"),
+  );
+  const apiMarker = join(markerDir, "api");
+  const releaseTestMarker = join(markerDir, "release-test");
+  const browserMarker = join(markerDir, "browser");
+  const sourcePreflightLabel =
+    "source-library reconciliation database preflight";
+  const unsafePreflightOutput = JSON.stringify({
+    verifier: "source-library-reconciliation-preflight",
+    environment: "development",
+    revision: "development-unbound",
+    capturedAt: "2026-09-08T12:00:00.000Z",
+    healId: "source-library-reconciliation-2026-08-26-v2",
+    report: {
+      sha256: "a".repeat(64),
+      formatVersion: 1,
+      automaticProposals: 68,
+      stubs: 3,
+    },
+    database: "partial-fixture",
+    expected: { poolRows: 68, aliases: 25 },
+    observed: {
+      poolRows: 21,
+      aliasesExact: 25,
+      aliasesMissing: 0,
+      aliasesMismatched: 0,
+      markerPresent: true,
+      markerValid: true,
+    },
+    failures: [{ check: "databaseShape", count: 47 }],
+    ok: false,
+    components: [{ ingredient: "must not reach checkpoint state" }],
+  });
+  const preflightScript = [
+    `console.log(${JSON.stringify(unsafePreflightOutput)});`,
+    "console.error('source-library preflight rejected partial fixture');",
+    "process.exit(1);",
+  ].join("");
+  const expensiveGateScript = [
+    "const fs = require('node:fs');",
+    "fs.writeFileSync(process.env.RELEASE_FANOUT_MARKER, 'started\\n');",
+    "console.log(`EXPENSIVE_GATE_STARTED ${process.env.RELEASE_FANOUT_KIND}`);",
+  ].join("");
+  const steps: FixtureStep[] = [
+    {
+      label: sourcePreflightLabel,
+      command: process.execPath,
+      args: [
+        "-e",
+        preflightScript,
+        "--",
+        "--preflight",
+      ],
+      stage: "source-library-preflight",
+      dependsOn: [],
+    },
+    {
+      label: "API integration tests (release shard 2/7)",
+      command: process.execPath,
+      args: ["-e", expensiveGateScript, "api-release-shard"],
+      env: {
+        RELEASE_FANOUT_MARKER: apiMarker,
+        RELEASE_FANOUT_KIND: "api-release-shard",
+      },
+      group: "api-test-shards",
+      stage: "release-tests",
+      dependsOn: [sourcePreflightLabel],
+    },
+    {
+      label: "run calculator tests",
+      command: process.execPath,
+      args: ["-e", expensiveGateScript, "release-test-suite"],
+      env: {
+        RELEASE_FANOUT_MARKER: releaseTestMarker,
+        RELEASE_FANOUT_KIND: "release-test-suite",
+      },
+      stage: "release-tests",
+      dependsOn: [sourcePreflightLabel],
+    },
+    {
+      label: "browser smoke tests",
+      command: process.execPath,
+      args: ["-e", expensiveGateScript, "browser-smoke"],
+      env: {
+        RELEASE_FANOUT_MARKER: browserMarker,
+        RELEASE_FANOUT_KIND: "browser-smoke",
+      },
+      stage: "browser-smoke",
+      concurrencyLimit: 1,
+      dependsOn: [sourcePreflightLabel],
+    },
+  ];
+
+  try {
+    const result = await runReleaseCheck(evidenceDir, steps);
+    assert.equal(result.code, 1, result.output);
+    assert.match(
+      result.output,
+      /FAIL source-library reconciliation database preflight/,
+      "the partial source-library fixture must fail at the preflight boundary",
+    );
+    for (const marker of [apiMarker, releaseTestMarker, browserMarker]) {
+      await assert.rejects(
+        readFile(marker, "utf8"),
+        "a source-library preflight failure must not start dependent gates",
+      );
+    }
+
+    const checkpoint = JSON.parse(
+      await readFile(join(evidenceDir, "release-check-state.json"), "utf8"),
+    ) as {
+      results: Array<{
+        label: string;
+        passed: boolean;
+        status: string;
+        blockedBy?: string[];
+        sourceLibraryPreflight?: Record<string, unknown>;
+      }>;
+    };
+    assert.deepEqual(
+      checkpoint.results.map(({ label, passed, status, blockedBy }) => [
+        label,
+        passed,
+        status,
+        blockedBy,
+      ]),
+      [
+        [sourcePreflightLabel, false, "FAIL", undefined],
+        [
+          "API integration tests (release shard 2/7)",
+          false,
+          "BLOCKED",
+          [sourcePreflightLabel],
+        ],
+        ["run calculator tests", false, "BLOCKED", [sourcePreflightLabel]],
+        ["browser smoke tests", false, "BLOCKED", [sourcePreflightLabel]],
+      ],
+      "the checkpoint must preserve the failed preflight and every blocked dependent gate",
+    );
+    const retainedPreflight = checkpoint.results[0]?.sourceLibraryPreflight;
+    assert.deepEqual(
+      retainedPreflight,
+      {
+        contractVersion: 1,
+        database: "unverified",
+        expected: { poolRows: 0, aliases: 0 },
+        observed: {
+          poolRows: 0,
+          aliasesExact: 0,
+          aliasesMissing: 0,
+          aliasesMismatched: 0,
+          markerPresent: false,
+          markerValid: false,
+        },
+        failures: [{ check: "output", count: 1 }],
+        ok: false,
+      },
+      "checkpoint state must retain only the versioned bounded diagnostic",
+    );
+    assert.doesNotMatch(
+      JSON.stringify(retainedPreflight),
+      /ingredient|components|source-library-reconciliation-2026-08-26-v2/i,
+      "recipe/source payloads must not cross the checkpoint contract boundary",
+    );
+
+    const checkpointReport = await readFile(
+      join(evidenceDir, "release-check-checkpoint.md"),
+      "utf8",
+    );
+    for (const label of [
+      sourcePreflightLabel,
+      "API integration tests (release shard 2/7)",
+      "run calculator tests",
+      "browser smoke tests",
+    ]) {
+      assert.match(
+        checkpointReport,
+        new RegExp(
+          `\\| ${escapeRegExp(label)} \\| ${
+            label === sourcePreflightLabel ? "FAIL" : "BLOCKED"
+          } \\|`,
+        ),
+        `checkpoint report must record ${label}`,
+      );
+    }
+    assert.match(
+      checkpointReport,
+      /Blocked gates: API integration tests \(release shard 2\/7\) \(blocked by source-library reconciliation database preflight\); run calculator tests \(blocked by source-library reconciliation database preflight\); browser smoke tests \(blocked by source-library reconciliation database preflight\)/,
+      "checkpoint report must identify the source preflight as the common blocker",
+    );
+
+    const stoppedSummaryPath = join(evidenceDir, "step-summary.md");
+    const stoppedSummaryResult = await runStoppedSummary(
+      evidenceDir,
+      stoppedSummaryPath,
+      "full",
+      "",
+    );
+    assert.equal(stoppedSummaryResult.code, 0, stoppedSummaryResult.output);
+    const stoppedSummary = await readFile(stoppedSummaryPath, "utf8");
+    assert.match(
+      stoppedSummary,
+      /^Root blockers: source-library reconciliation database preflight \(FAIL\)$/m,
+      "stopped summary must identify the source preflight as the root blocker",
+    );
+    assert.match(
+      stoppedSummary,
+      /^Blocked gates: API integration tests \(release shard 2\/7\) \(blocked by source-library reconciliation database preflight\); run calculator tests \(blocked by source-library reconciliation database preflight\); browser smoke tests \(blocked by source-library reconciliation database preflight\)$/m,
+      "stopped summary must preserve every API, release-test, and browser dependent gate",
+    );
+    assert.ok(
+      stoppedSummary.length <= 4096,
+      "stopped summary blocker text must remain bounded",
+    );
+    assert.doesNotMatch(
+      stoppedSummary,
+      /--preflight|partial fixture|release-check-state\.json|DATABASE_URL|postgres/i,
+      "stopped summary must not expose command payloads or database fixture details",
+    );
+
+    const executionLog = await readFile(
+      join(evidenceDir, "release-check.log"),
+      "utf8",
+    );
+    assert.match(
+      executionLog,
+      /source-library preflight rejected partial fixture/,
+      "the execution log must retain the failing partial-fixture preflight output",
+    );
+    assert.doesNotMatch(
+      executionLog,
+      /EXPENSIVE_GATE_STARTED (api-release-shard|release-test-suite|browser-smoke)/,
+      "the execution log must prove no expensive dependent command started",
+    );
+  } finally {
+    await rm(evidenceDir, { recursive: true, force: true });
+    await rm(markerDir, { recursive: true, force: true });
+  }
+
+  console.log(
+    "Source-library preflight fan-out scenario passed (partial fixture blocks API, release-test, and browser gates).",
   );
 }
 
@@ -1705,6 +2087,97 @@ async function runStaleCheckpointScenarios(): Promise<void> {
   );
 }
 
+async function runTamperedSourceLibraryPreflightCheckpointScenario(): Promise<void> {
+  const evidenceDir = await mkdtemp(
+    join(tmpdir(), "release-resume-tampered-source-preflight-"),
+  );
+  const markerDir = await mkdtemp(
+    join(tmpdir(), "release-resume-tampered-source-preflight-marker-"),
+  );
+  const marker = join(markerDir, "gate-started");
+  const revision = await getCurrentRevision();
+  const sourcePreflightLabel =
+    "source-library reconciliation database preflight";
+  const steps: FixtureStep[] = [
+    {
+      label: "fixture gate must not start",
+      command: process.execPath,
+      args: [
+        "-e",
+        `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'started\\n');`,
+      ],
+    },
+  ];
+
+  try {
+    await writeFile(
+      join(evidenceDir, "release-check-state.json"),
+      `${JSON.stringify(
+        {
+          revision,
+          sourceLibraryRevision: revision,
+          mode: "standard",
+          results: [
+            {
+              label: sourcePreflightLabel,
+              passed: false,
+              status: "FAIL",
+              elapsedMs: 1,
+              sourceLibraryPreflight: {
+                contractVersion: 1,
+                database: "partial-fixture",
+                expected: { poolRows: 68, aliases: 25 },
+                observed: {
+                  poolRows: 21,
+                  aliasesExact: 25,
+                  aliasesMissing: 0,
+                  aliasesMismatched: 0,
+                  markerPresent: true,
+                  markerValid: true,
+                },
+                failures: [{ check: "databaseShape", count: 47 }],
+                ok: false,
+                components: [{ ingredient: "must not reach a resumed gate" }],
+              },
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const rejected = await runReleaseCheck(evidenceDir, steps, ["--resume"]);
+    assert.equal(rejected.code, 1, rejected.output);
+    assert.match(
+      rejected.output,
+      /Release checkpoint is malformed or unreadable\. Rerun without --resume to create a fresh checkpoint\./,
+      "a tampered source-preflight diagnostic must be rejected as a damaged checkpoint",
+    );
+    assert.doesNotMatch(
+      rejected.output,
+      /must not reach a resumed gate|uncaught|at readCheckpoint|Cannot resume release check:/i,
+      "tampered checkpoint rejection must not expose diagnostic payloads or parser details",
+    );
+    await assert.rejects(
+      readFile(marker, "utf8"),
+      "a tampered source-preflight diagnostic must be rejected before any fixture gate starts",
+    );
+    await assert.rejects(
+      readFile(join(evidenceDir, "release-check-report.md"), "utf8"),
+      "a rejected checkpoint must not create retained release evidence",
+    );
+  } finally {
+    await rm(evidenceDir, { recursive: true, force: true });
+    await rm(markerDir, { recursive: true, force: true });
+  }
+
+  console.log(
+    "Release resume tampered source-preflight scenario passed (damaged checkpoint rejected before gates or retained evidence).",
+  );
+}
+
 async function runDamagedCheckpointScenarios(): Promise<void> {
   for (const scenario of ["truncated", "unreadable"]) {
     const evidenceDir = await mkdtemp(
@@ -1745,7 +2218,9 @@ async function runDamagedCheckpointScenarios(): Promise<void> {
   console.log("Release resume damaged-checkpoint scenarios passed.");
 }
 
-if (process.env.RELEASE_STOPPED_SUMMARY_ONLY === "1") {
+if (process.env.RELEASE_PROMOTION_RESUME_ONLY === "1") {
+  await runTypescriptPromotionResumeScenario();
+} else if (process.env.RELEASE_STOPPED_SUMMARY_ONLY === "1") {
   await runStoppedArtifactLinkVerificationScenario();
   await runStoppedSummaryScenario();
 } else {
@@ -1753,9 +2228,12 @@ if (process.env.RELEASE_STOPPED_SUMMARY_ONLY === "1") {
   await runOnboardingGuardStopScenario();
   await runParallelStageScenario();
   await runIndependentFailureFanoutScenario();
+  await runSourceLibraryPreflightFanoutScenario();
   await runApiShardConcurrencyScenario();
   await runParallelResumeScenario();
   await runFullModeScenario();
+  await runTypescriptPromotionResumeScenario();
   await runStaleCheckpointScenarios();
+  await runTamperedSourceLibraryPreflightCheckpointScenario();
   await runDamagedCheckpointScenarios();
 }

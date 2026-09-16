@@ -135,7 +135,8 @@ registerServerJob("export-package", {
       : format === "print" ? Buffer.from(canonicalReportPrintHtml(snapshot))
         : Buffer.from(canonicalReportXlsx(snapshot));
     if (await context.isCancellationRequested()) throw new Error("Cancelled");
-    const artifact = await writeServerJobArtifact(context.job.id, format as CanonicalReportExportFormat, bytes);
+    const artifact = await context.commit(() =>
+      writeServerJobArtifact(context.job.id, format as CanonicalReportExportFormat, bytes));
     await context.reportProgress(90, "Canonical artifact retained for download");
     return {
       canonicalSnapshotId: snapshotId,

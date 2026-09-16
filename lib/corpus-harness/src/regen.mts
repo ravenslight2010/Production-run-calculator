@@ -4,7 +4,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { SNAPSHOT_BUILDERS } from "./index.js";
+import { buildCorpusEvaluationManifest, SNAPSHOT_BUILDERS } from "./index.js";
 
 const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "snapshots");
 fs.mkdirSync(dir, { recursive: true });
@@ -13,3 +13,6 @@ for (const [name, build] of Object.entries(SNAPSHOT_BUILDERS)) {
   fs.writeFileSync(file, JSON.stringify(build(), null, 2) + "\n");
   console.log("wrote", file);
 }
+const manifestFile = path.join(dir, "evaluation-manifest.json");
+fs.writeFileSync(manifestFile, JSON.stringify(buildCorpusEvaluationManifest(), null, 2) + "\n");
+console.log("wrote", manifestFile);

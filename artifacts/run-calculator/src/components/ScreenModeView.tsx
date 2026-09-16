@@ -688,4 +688,3 @@ export default function ScreenModeView() {
 
   return null;
 }
-

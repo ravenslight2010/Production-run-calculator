@@ -20,6 +20,11 @@ import {
   markStartupFailed,
   resetStartupHealthForTests,
 } from "../lib/startupHealth";
+import {
+  BACKGROUND_OPERATION_FAILURE_THRESHOLD,
+  clearBackgroundOperationDiagnosticsForTests,
+  runBackgroundOperation,
+} from "../lib/backgroundOperations";
 
 const mocks = vi.hoisted(() => ({
   execute: vi.fn(async () => []),
@@ -60,6 +65,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await clearCacheMaintenanceDiagnosticsForTests();
+  await clearBackgroundOperationDiagnosticsForTests();
   resetStartupHealthForTests();
   mocks.execute.mockClear();
   mocks.info.mockClear();
@@ -106,6 +112,37 @@ describe("GET /healthz cache maintenance diagnostics", () => {
     expect(JSON.stringify(body.diagnostics)).not.toMatch(
       /prompt|result|cache.?key/i,
     );
+  });
+});
+
+describe("GET /healthz background operation diagnostics", () => {
+  it("returns 503 after sustained failures and recovers after a successful pass", async () => {
+    for (let i = 0; i < BACKGROUND_OPERATION_FAILURE_THRESHOLD; i += 1) {
+      await expect(runBackgroundOperation("daily-rollover", async () => {
+        throw Object.assign(new Error("connection refused"), { code: "ECONNREFUSED" });
+      }, { delay: async () => {} })).rejects.toBeTruthy();
+    }
+
+    let response = await fetch(`${baseUrl}/readyz`);
+    let body = (await response.json()) as {
+      checks: Record<string, string>;
+      diagnostics: { backgroundOperations: Record<string, { status: string; recentFailureCount: number }> };
+    };
+    expect(response.status).toBe(503);
+    expect(body.checks.backgroundWorkers).toBe("error");
+    expect(body.diagnostics.backgroundOperations["daily-rollover"]).toMatchObject({
+      status: "warning",
+      recentFailureCount: BACKGROUND_OPERATION_FAILURE_THRESHOLD,
+    });
+
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now() + 5 * 60 * 1000 + 1);
+    await runBackgroundOperation("daily-rollover", async () => "ok");
+    response = await fetch(`${baseUrl}/readyz`);
+    body = await response.json() as typeof body;
+    expect(response.status).toBe(200);
+    expect(body.checks.backgroundWorkers).toBe("ok");
+    vi.useRealTimers();
   });
 });
 

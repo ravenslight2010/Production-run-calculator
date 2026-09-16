@@ -1,5 +1,5 @@
 import { computeAppSlotInfo, getAutoTrackTiming } from "./autoTrackEngine";
-import type { Calc, CalcFormValues, CalcStoppage } from "./index";
+import type { Calc, CalcFormValues, CalcStoppage, ServerCalcResult } from "./index";
 
 export const AUTO_TRACK_SCHEDULE_CHANNELS = [
   "case", "tray-consume", "tray-produce", "batch-consume", "batch-produce", "hopper",
@@ -129,11 +129,12 @@ export function computeAutoTrackSchedule(input: AutoTrackScheduleInput): AutoTra
         recipe: input.v[`${slot}CheeseRecipe`],
         batchLbs: input.v[`${slot}BatchLbs`],
         ozPerPizza: input.v[`${slot}OzPerPizza`],
-        required: input.calc[`${slot}Batches`],
+        casesNeeded: number(input.v.casesNeeded),
+        pizzasPerCase: number(input.v.pizzasPerCase),
         ppm: input.calc.ppm,
       });
       const made = Math.max(0, number(input.progress?.[`${slot}BatchesMade`]));
-      if (!info.validForClaim || made >= Math.ceil(input.calc[`${slot}Batches`])) continue;
+      if (!info.validForClaim || made >= Math.ceil(info.required)) continue;
       const dueAt = Math.max(0, number(input.progress?.[`${slot}BatchAnchorNetSec`])) + info.cadence;
       const channel = `${slot}-batch` as AutoTrackScheduleChannel;
       const state = input.coordination?.[channel];
@@ -154,4 +155,36 @@ export function computeAutoTrackSchedule(input: AutoTrackScheduleInput): AutoTra
     atMs: input.nowMs,
     entries,
   };
+}
+
+export function buildAutoTrackScheduleFromPayload(
+  payload: unknown,
+  calcResult: ServerCalcResult | null,
+  nowMs = Date.now(),
+): AutoTrackSchedule | null {
+  const p = (payload ?? {}) as {
+    dayState?: { runs?: Array<Record<string, unknown>>; currentIndex?: number };
+    runValues?: Record<string, Record<string, unknown>>;
+    autoTrackCoordination?: { runs?: Record<string, Record<string, unknown>> };
+  };
+  if (!p.dayState?.runs || p.dayState.runs.length === 0 || !calcResult) return null;
+  const run = p.dayState.runs[p.dayState.currentIndex ?? 0];
+  if (!run?.id || typeof run.id !== "string") return null;
+  const runId = run.id;
+  const rawValues = p.runValues?.[runId];
+  if (!rawValues || typeof rawValues !== "object") return null;
+  const coordinationForRun = p.autoTrackCoordination?.runs?.[runId];
+  return computeAutoTrackSchedule({
+    runId,
+    metaUpdatedAt: typeof run.metaUpdatedAt === "number" ? run.metaUpdatedAt : undefined,
+    startedAt: typeof run.startedAt === "number" ? run.startedAt : undefined,
+    pausedAt: typeof run.pausedAt === "number" ? run.pausedAt : undefined,
+    endedAt: typeof run.endedAt === "number" ? run.endedAt : undefined,
+    stoppages: Array.isArray(run.stoppages) ? run.stoppages : undefined,
+    v: rawValues as unknown as AutoTrackScheduleInput["v"],
+    calc: calcResult.calc,
+    progress: rawValues,
+    coordination: coordinationForRun as AutoTrackScheduleInput["coordination"],
+    nowMs,
+  });
 }

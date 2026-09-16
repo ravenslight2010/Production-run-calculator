@@ -3,12 +3,15 @@
 
 This is deliberately separate from run_eval.py: Gemini classification is not
 Claude tool-selection evidence. Provider failures remain failures and are
-never converted into do-not-trigger decisions.
+never converted into do-not-trigger decisions. Live provider access is
+explicitly opt-in; ordinary test and evaluation commands must inject a fake
+adapter instead.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -24,9 +27,26 @@ from typing import Any, Callable, Iterable
 DECISIONS = {"trigger", "do_not_trigger", "uncertain"}
 DEFAULT_MODEL = "gemini-2.5-flash"
 DEFAULT_CONFIDENCE = 0.75
+MINIMUM_ACCURACY = 0.8
+MINIMUM_COVERAGE = 0.8
 MAX_RATIONALE_CHARS = 500
 MAX_MANUAL_REASON_CHARS = 1000
 DEFAULT_MANUAL_DECISIONS = Path("gemini-skill-trigger-manual-decisions.json")
+CHECKED_IN_ARTIFACTS = (
+    Path("gemini-skill-trigger-benchmark.json"),
+    Path("gemini-skill-trigger-review-queue.json"),
+)
+PRIVATE_ARTIFACT_FIELDS = {
+    "query",
+    "rationale",
+    "provider_payload",
+    "provider_response",
+    "raw_provider_payload",
+    "credential",
+    "conversation",
+    "prompt",
+    "response",
+}
 
 
 class ProviderUnavailable(RuntimeError):
@@ -238,9 +258,8 @@ def review_queue(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
         {
             "id": r["id"],
             "skill": r["skill"],
-            "query": r["query"],
             "expected": r["expected"],
-            "gemini": {k: r[k] for k in ("decision", "confidence", "rationale") if k in r},
+            "gemini": {k: r[k] for k in ("decision", "confidence") if k in r},
             "error": r.get("error"),
             "reason": r["status"],
             "manual_decision": None,
@@ -275,6 +294,70 @@ def write_report(path: Path, result: dict[str, Any]) -> None:
     path.write_text("\n".join(lines) + "\n")
 
 
+def retained_results(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Project evaluation records onto the metadata safe to retain on disk."""
+    retained_keys = (
+        "id",
+        "skill",
+        "expected",
+        "attempts",
+        "decision",
+        "confidence",
+        "status",
+        "error",
+    )
+    return [{key: record[key] for key in retained_keys if key in record} for record in records]
+
+
+def private_artifact_fields(value: Any, path: str = "$") -> list[str]:
+    """Return deterministic JSON paths for private fields retained in an artifact."""
+    findings: list[str] = []
+    if isinstance(value, dict):
+        for key in sorted(value):
+            child_path = f"{path}.{key}"
+            if key.lower() in PRIVATE_ARTIFACT_FIELDS:
+                findings.append(child_path)
+            findings.extend(private_artifact_fields(value[key], child_path))
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            findings.extend(private_artifact_fields(item, f"{path}[{index}]"))
+    return findings
+
+
+def check_checked_in_artifacts(root: Path) -> None:
+    failures: list[str] = []
+    for relative_path in CHECKED_IN_ARTIFACTS:
+        path = root / relative_path
+        value = _read_json_object(path)
+        failures.extend(
+            f"{relative_path}:{field_path}"
+            for field_path in private_artifact_fields(value)
+        )
+    if failures:
+        raise SystemExit(
+            "Private fields are forbidden in checked-in Gemini benchmark artifacts:\n"
+            + "\n".join(failures)
+        )
+
+
+def write_benchmark_artifacts(
+    results_path: Path,
+    queue_path: Path,
+    report_path: Path,
+    result: dict[str, Any],
+    records: Iterable[dict[str, Any]],
+) -> None:
+    records = list(records)
+    retained_result = {**result, "results": retained_results(records)}
+    results_path.write_text(json.dumps(retained_result, indent=2) + "\n")
+    queue_path.write_text(json.dumps({
+        "provider": "gemini",
+        "manual_decisions_excluded_from_metrics": True,
+        "cases": review_queue(records),
+    }, indent=2) + "\n")
+    write_report(report_path, retained_result)
+
+
 PROVIDER_FAILURE_STATUSES = {
     "provider_unavailable",
     "provider_failure",
@@ -285,7 +368,102 @@ PROVIDER_FAILURE_STATUSES = {
 def provider_failure_cases(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     return [record for record in records if record["status"] in PROVIDER_FAILURE_STATUSES]
 
-
+def evaluation_manifest(
+    corpus_bytes: bytes,
+    corpus: dict[str, Any],
+    records: list[dict[str, Any]],
+    model: str,
+    confidence_threshold: float,
+    retries: int,
+) -> dict[str, Any]:
+    corpus_hash = hashlib.sha256(corpus_bytes).hexdigest()
+    result_metrics = metrics(records)
+    total_cases = sum(len(skill["evals"]) for skill in corpus["skills"])
+    lockfile_hash = hashlib.sha256(
+        (Path(__file__).resolve().parents[1] / "pnpm-lock.yaml").read_bytes()
+    ).hexdigest()
+    failures = provider_failure_cases(records)
+    if records and all(record["status"] == "provider_unavailable" for record in records):
+        state = "unavailable"
+        reason = "provider configuration was unavailable"
+    elif failures:
+        state = "failed"
+        reason = "one or more provider calls or structured outputs failed"
+    elif (
+        result_metrics["evaluated"] < 1
+        or total_cases == 0
+        or result_metrics["evaluated"] / total_cases < MINIMUM_COVERAGE
+        or result_metrics["accuracy"] is None
+        or result_metrics["accuracy"] < MINIMUM_ACCURACY
+    ):
+        state = "failed" if total_cases > 0 else "unavailable"
+        reason = (
+            "quality or coverage thresholds failed"
+            if total_cases > 0
+            else "corpus contained no evaluation cases"
+        )
+    else:
+        state = "passed"
+        reason = None
+    return {
+        "manifestVersion": 1,
+        "evaluation": {"id": "gemini-skill-trigger", "kind": "provider-backed"},
+        "corpus": {
+            "sha256": corpus_hash,
+            "cases": total_cases,
+            "sourceAuthority": "held-out-reviewed-skill-trigger-corpus",
+        },
+        "thresholds": {
+            "minimumConfidence": confidence_threshold,
+            "maximumProviderFailureRate": 0,
+            "minimumEvaluatedCases": 1,
+            "minimumCoverage": MINIMUM_COVERAGE,
+            "minimumAccuracy": MINIMUM_ACCURACY,
+        },
+        "dependencies": {
+            "python": ".".join(map(str, sys.version_info[:3])),
+            "pnpmLockSha256": lockfile_hash,
+            "benchmarkReporter": "1",
+        },
+        "provider": {
+            "identityState": "identified",
+            "name": "gemini",
+            "model": model,
+        },
+        "performance": {
+            "inputTokens": {"state": "unavailable", "reason": "provider adapter does not retain token counts"},
+            "outputTokens": {"state": "unavailable", "reason": "provider adapter does not retain token counts"},
+            "cost": {"state": "unavailable", "reason": "provider adapter does not retain measured cost"},
+            "latencyP95": {"state": "unavailable", "reason": "provider adapter does not retain per-case latency"},
+        },
+        "execution": {
+            "retries": max(
+                (max(0, int(record.get("attempts", 1)) - 1) for record in records),
+                default=0,
+            ),
+            "seed": None,
+        },
+        "privacy": {
+            "mode": "metadata-only",
+            "rawProviderPayloadsRetained": False,
+            "retainedEvaluationContent": "none",
+        },
+        "outcome": {"state": state, "reason": reason},
+        "provenance": {
+            "sourceSha256": corpus_hash,
+            "evidence": {
+                "state": "hashed",
+                "sha256": hashlib.sha256(
+                    json.dumps(records, sort_keys=True, separators=(",", ":")).encode()
+                ).hexdigest(),
+            },
+            "evidenceType": "held-out-corpus-byte-hash",
+            "evaluator": {
+                "state": "hashed",
+                "sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+            },
+        },
+    }
 def _read_json_object(path: Path) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text())
@@ -378,8 +556,18 @@ def _number(value: Any) -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("command", nargs="?", choices=("benchmark", "review"), default="benchmark")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Run the provider-backed Gemini skill-trigger check. This command is "
+            "not CI evidence and requires an explicit live-provider opt-in."
+        )
+    )
+    parser.add_argument(
+        "command",
+        nargs="?",
+        choices=("benchmark", "review", "check-artifacts"),
+        default="benchmark",
+    )
     parser.add_argument(
         "review_action_positional",
         nargs="?",
@@ -394,9 +582,12 @@ def main() -> None:
     parser.add_argument("--confidence-threshold", type=float, default=DEFAULT_CONFIDENCE)
     parser.add_argument("--retries", type=int, default=2)
     parser.add_argument(
-        "--fail-on-provider-error",
+        "--live-provider",
         action="store_true",
-        help="exit non-zero after writing artifacts when Gemini has provider or structured-output failures",
+        help=(
+            "allow real Gemini network access; never use this flag in routine CI "
+            "or deterministic evaluation"
+        ),
     )
     parser.add_argument(
         "--decisions",
@@ -409,6 +600,10 @@ def main() -> None:
     parser.add_argument("--decision", choices=("trigger", "do_not_trigger"))
     parser.add_argument("--reason", help="reason for a manual decision")
     args = parser.parse_args()
+    if args.command == "check-artifacts":
+        check_checked_in_artifacts(Path.cwd())
+        print("Checked-in Gemini benchmark artifacts retain metadata only.")
+        return
     if args.command == "review":
         review_action = args.review_action or args.review_action_positional
         if not review_action:
@@ -422,30 +617,43 @@ def main() -> None:
         args.review_action = review_action
         _review_command(args)
         return
-    corpus = json.loads(args.corpus.read_text())
+    if not args.live_provider:
+        parser.error(
+            "benchmark is offline by default; pass --live-provider only for an "
+            "intentional provider-backed check (not CI evidence)"
+        )
+    corpus_bytes = args.corpus.read_bytes()
+    corpus = json.loads(corpus_bytes)
     adapter = GeminiAdapter(model=args.model)
     records = evaluate(corpus, adapter, args.confidence_threshold, args.retries)
     result = {
         "provider": "gemini",
         "model": args.model,
+        "execution_mode": "live_provider_opt_in",
+        "ci_evidence": False,
         "run_at": datetime.now(timezone.utc).isoformat(),
         "claude_evidence": "unavailable and intentionally unchanged",
         "metrics": metrics(records),
         "results": records,
+        "evaluationManifest": evaluation_manifest(
+            corpus_bytes,
+            corpus,
+            records,
+            args.model,
+            args.confidence_threshold,
+            args.retries,
+        ),
     }
-    args.results.write_text(json.dumps(result, indent=2) + "\n")
-    args.queue.write_text(json.dumps({"provider": "gemini", "manual_decisions_excluded_from_metrics": True, "cases": review_queue(records)}, indent=2) + "\n")
-    write_report(args.report, result)
+    write_benchmark_artifacts(args.results, args.queue, args.report, result, records)
     print(json.dumps({"provider": "gemini", "evaluated": result["metrics"]["evaluated"], "excluded": result["metrics"]["excluded"]}, indent=2))
-    if args.fail_on_provider_error:
-        failures = provider_failure_cases(records)
-        if failures:
-            print(
-                "Gemini provider health check failed for: "
-                + ", ".join(f"{record['id']} ({record['status']})" for record in failures),
-                file=sys.stderr,
-            )
-            raise SystemExit(1)
+    failures = provider_failure_cases(records)
+    if failures:
+        print(
+            "Gemini provider health check failed for: "
+            + ", ".join(f"{record['id']} ({record['status']})" for record in failures),
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

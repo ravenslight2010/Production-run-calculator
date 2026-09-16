@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { isConfirmedProductionRuntime } from "./production-runtime.mts";
 
 export type IsolationEnvironment = Record<string, string | undefined>;
 
@@ -22,7 +23,7 @@ export function assertDisposableBrowserDatabase(
     environment.APP_ENV,
   ];
   if (
-    environment.REPLIT_DEPLOYMENT === "1"
+    isConfirmedProductionRuntime(environment)
     || productionMarkers.some((value) =>
       value ? PRODUCTION_ENVIRONMENT.test(value) : false
     )

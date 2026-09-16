@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-09-15",
+  "sourceRevision": "4a42e35e4632f32472b9580fb2ac0a2edde30e93",
+  "environment": {
+    "os": "Linux",
+    "architecture": "x86_64",
+    "node": "24.13.0",
+    "pnpm": "11.5.2",
+    "reportedProcessors": 8,
+    "cpu": "Intel Xeon Platinum 8581C CPU @ 2.30GHz",
+    "reportedMemoryKiB": 16400840
+  },
+  "compilers": {
+    "baseline": "6.0.3",
+    "candidate": "7.0.2",
+    "candidateInstall": "npm install --prefix /tmp/ts7-tools --ignore-scripts --no-audit --no-fund typescript@7.0.2"
+  },
+  "isolation": {
+    "workspaceDependenciesLinked": true,
+    "trackedDependenciesChanged": false,
+    "trackedOutputsChanged": false,
+    "candidateBuildLocation": "disposable copy outside the repository"
+  },
+  "results": [
+    {
+      "name": "forced shared-library project build",
+      "baselineExitCode": 0,
+      "candidateExitCode": 0,
+      "baselineDiagnostics": 0,
+      "candidateDiagnostics": 0,
+      "baselineElapsedSeconds": 11.823900536,
+      "candidateElapsedSeconds": 2.971633912
+    },
+    {
+      "name": "scripts no-emit typecheck",
+      "baselineExitCode": 0,
+      "candidateExitCode": 0,
+      "baselineDiagnostics": 0,
+      "candidateDiagnostics": 0,
+      "baselineElapsedSeconds": 3.308303731,
+      "candidateElapsedSeconds": 0.691740511
+    },
+    {
+      "name": "API server no-emit typecheck",
+      "baselineExitCode": 0,
+      "candidateExitCode": 0,
+      "baselineDiagnostics": 0,
+      "candidateDiagnostics": 0,
+      "baselineElapsedSeconds": 8.966194877,
+      "candidateElapsedSeconds": 1.626317947
+    },
+    {
+      "name": "run calculator no-emit typecheck",
+      "baselineExitCode": 0,
+      "candidateExitCode": 0,
+      "baselineDiagnostics": 0,
+      "candidateDiagnostics": 0,
+      "baselineElapsedSeconds": 43.998542298,
+      "candidateElapsedSeconds": 2.71020647
+    },
+    {
+      "name": "mockup sandbox no-emit typecheck",
+      "baselineExitCode": 0,
+      "candidateExitCode": 0,
+      "baselineDiagnostics": 0,
+      "candidateDiagnostics": 0,
+      "baselineElapsedSeconds": 4.161071909,
+      "candidateElapsedSeconds": 0.774877066
+    },
+    {
+      "name": "AI evaluation no-emit typecheck",
+      "baselineExitCode": 0,
+      "candidateExitCode": 0,
+      "baselineDiagnostics": 0,
+      "candidateDiagnostics": 0,
+      "baselineElapsedSeconds": 0.40247368,
+      "candidateElapsedSeconds": 0.095015435
+    },
+    {
+      "name": "corpus harness no-emit typecheck",
+      "baselineExitCode": 0,
+      "candidateExitCode": 0,
+      "baselineDiagnostics": 0,
+      "candidateDiagnostics": 0,
+      "baselineElapsedSeconds": 0.798821585,
+      "candidateElapsedSeconds": 0.160881908
+    },
+    {
+      "name": "generated API client and Zod forced build",
+      "baselineExitCode": 0,
+      "candidateExitCode": 0,
+      "baselineDiagnostics": 0,
+      "candidateDiagnostics": 0
+    }
+  ],
+  "declarations": {
+    "baselineFileCount": 719,
+    "candidateFileCount": 719,
+    "textuallyChangedFileCount": 204,
+    "removedLineCount": 2664,
+    "addedLineCount": 2664,
+    "fullDiffLineCount": 13723,
+    "changedFilesByPackage": {
+      "api-client-react": 2,
+      "api-zod": 142,
+      "db": 60,
+      "other": 0
+    }
+  },
+  "supportingChecks": {
+    "apiSpecGeneratedCheck": "pass",
+    "apiZodTests": "pass",
+    "viteConfigLoading": "pass",
+    "evaluationReportRetention": "pass",
+    "directCompilerApiTestFiles": 4,
+    "directCompilerApiTestsPassed": 29
+  }
+}

@@ -10,6 +10,7 @@
     "types": ["node"]
   },
   "references": [
+    { "path": "../ai-evaluation" },
     { "path": "../cheese-import" },
     { "path": "../premix-import" },
     { "path": "../shipping-import" },

@@ -4,7 +4,7 @@ import type { UseFormReturn } from "react-hook-form";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import ts from "typescript";
+import ts from "@workspace/typescript-api-v6";
 import {
   saveFreezerPullItems,
   type FreezerPullItem,
@@ -176,7 +176,22 @@ describe("freeze tunnel and warehouse freezer domain isolation", () => {
   });
 
   it("ended-run tunnel drain updates packaging without touching freezer-pull items or surplus lots", () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const path = String(input);
+      if (path === "/api/freezer-pull-items" && init?.method === "POST") {
+        return jsonResponse({ items: pullItems });
+      }
+      if (path === "/api/freezer-surplus" && init?.method === "POST") {
+        return jsonResponse(confirmedLedger);
+      }
+      if (
+        path === "/api/freezer-surplus/allocations/future-run"
+        && init?.method === "PUT"
+      ) {
+        return jsonResponse(allocatedLedger);
+      }
+      throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${path}`);
+    });
     const earlyPhases = computeLinePhases({
       ...phaseArgs,
       nowMs: ENDED_AT + 3 * 60_000,

@@ -19,6 +19,9 @@ if (Number.isNaN(port) || port <= 0) {
 // BASE_PATH affects the `base` option which IS relevant during builds.
 // Default to "/" (the production root) when not explicitly provided.
 const basePath = process.env.BASE_PATH ?? "/";
+const suppressPreviewReload =
+  process.env.REPL_ID !== undefined ||
+  process.env.CLEAN_START_REPLIT_PREVIEW === "1";
 const webBuildId =
   process.env.VITE_APP_VERSION?.trim() ||
   process.env.REPLIT_DEPLOYMENT_ID?.trim() ||
@@ -31,7 +34,7 @@ const webBuildId =
 // full-reloading the page and aborting whatever the user was doing (e.g. a
 // spec/Excel import that takes longer than the drop interval). We can't keep the
 // socket alive (that's the proxy's behavior) and `server.hmr: false` does NOT
-// remove the client's reconnect-reload in Vite 7, so we patch the served client
+// remove the client's reconnect-reload in Vite 8, so we patch the served client
 // to turn its `location.reload()` calls into no-ops. HMR module updates still
 // apply while the socket is up; only the disruptive full-page reloads are gone.
 function suppressViteClientReload(): Plugin {
@@ -108,7 +111,7 @@ export default defineConfig({
     "import.meta.env.VITE_APP_VERSION": JSON.stringify(webBuildId),
   },
   plugins: [
-    ...(process.env.REPL_ID ? [suppressViteClientReload()] : []),
+    ...(suppressPreviewReload ? [suppressViteClientReload()] : []),
     react(),
     tailwindcss({ optimize: false }),
     runtimeErrorOverlay(),

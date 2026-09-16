@@ -20,9 +20,33 @@ const {
   freezerCandidates,
   pendingFreezerArms,
   scheduledEvaluationIdempotencyKey,
+  startWebPushAlertScheduler,
 } = await import("./webPush");
 
 describe("server web-push alert candidates", () => {
+  it("keeps one scheduling timestamp across a transient connection retry", async () => {
+    vi.useFakeTimers();
+    const now = vi.fn()
+      .mockReturnValueOnce(59_999)
+      .mockReturnValueOnce(60_001);
+    const enqueue = vi.fn()
+      .mockRejectedValueOnce(Object.assign(new Error("connection terminated"), { code: "57P01" }))
+      .mockResolvedValueOnce({ examined: 1, enqueued: 0 });
+    const scheduler = startWebPushAlertScheduler({ now, enqueue });
+
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(100);
+    } finally {
+      scheduler.stop();
+      vi.useRealTimers();
+    }
+
+    expect(now).toHaveBeenCalledTimes(1);
+    expect(enqueue).toHaveBeenCalledTimes(2);
+    expect(enqueue.mock.calls.map(([scheduledAt]) => scheduledAt)).toEqual([59_999, 59_999]);
+  });
+
   it("does not emit live timing alerts while paused or ended", () => {
     mocks.calc.mockReturnValue({ runId: "run-a", calc: { ppm: 20, adjustedTimeSec: 300, pressDone: false, timePerBatchSec: 1, pressCasesLeft: 1 } });
     const base = { dayState: { currentIndex: 0, runs: [{ id: "run-a", startedAt: 1, pausedAt: 2 }] }, runValues: { "run-a": { freezerTime: 0 } } };

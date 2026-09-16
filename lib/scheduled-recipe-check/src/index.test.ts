@@ -37,7 +37,10 @@ describe("profileHasRecipeData", () => {
 });
 
 describe("findScheduledRecipeIssues", () => {
-  const withData: ProfileLike = { doughRecipe: [{ ingredient: "Flour", lbs: 1 }] };
+  const withData: ProfileLike = {
+    doughRecipe: [{ ingredient: "Flour", lbs: 1 }],
+    pizzasPerCase: 12,
+  };
 
   it("flags missing vs incomplete distinctly", () => {
     const runs: ScheduledRunRef[] = [
@@ -99,6 +102,25 @@ describe("findScheduledRecipeIssues", () => {
   it("returns nothing when every profile has real data", () => {
     const runs: ScheduledRunRef[] = [
       { date: "2026-06-25", brand: "Acme", flavor: "Cheese", casesNeeded: 5 },
+    ];
+    expect(findScheduledRecipeIssues(runs, () => withData)).toEqual([]);
+  });
+
+  it("flags case-based runs whose otherwise complete profile has no positive case pack", () => {
+    const runs: ScheduledRunRef[] = [
+      { date: "2026-06-25", brand: "Acme", flavor: "Cheese", casesNeeded: 5 },
+    ];
+    expect(findScheduledRecipeIssues(runs, () => ({ ...withData, pizzasPerCase: 0 }))).toEqual([
+      expect.objectContaining({ brand: "Acme", reason: "missing-case-pack", totalCases: 5 }),
+    ]);
+    expect(
+      findScheduledRecipeIssues(runs, () => withData),
+    ).toEqual([]);
+  });
+
+  it("does not require a case pack when the scheduled run does not request cases", () => {
+    const runs: ScheduledRunRef[] = [
+      { date: "2026-06-25", brand: "Acme", flavor: "Cheese", casesNeeded: 0 },
     ];
     expect(findScheduledRecipeIssues(runs, () => withData)).toEqual([]);
   });

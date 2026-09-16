@@ -1,4 +1,5 @@
 import { pgTable, text, doublePrecision, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { FACTORY_SPEED_ADJUSTMENT_BASELINE } from "@workspace/factory-constants";
 
 // Manager-editable per-die line-setting defaults. Picking a die on the run
 // form / setup editor pre-fills line settings (crusts per cycle, cycle speed,
@@ -19,7 +20,7 @@ export const dieLineDefaultsTable = pgTable(
     name: text("name").notNull(),
     crustsPerCycle: doublePrecision("crusts_per_cycle").notNull().default(0),
     cycleSpeed: doublePrecision("cycle_speed").notNull().default(0),
-    speedAdjustment: doublePrecision("speed_adjustment").notNull().default(1),
+    speedAdjustment: doublePrecision("speed_adjustment").notNull().default(FACTORY_SPEED_ADJUSTMENT_BASELINE),
     freezerTime: doublePrecision("freezer_time").notNull().default(0),
     casesPerLayer: doublePrecision("cases_per_layer").notNull().default(0),
     preTunnelMin: doublePrecision("pre_tunnel_min"),

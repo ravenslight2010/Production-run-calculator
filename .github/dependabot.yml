@@ -15,3 +15,11 @@ updates:
       - dependency-name: "@expo/*"
       - dependency-name: "expo-*"
       - dependency-name: "react-native"
+
+  # Keep pinned GitHub Actions current without changing their immutable SHA
+  # pins manually. The workflow comments retain the human-readable release.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10

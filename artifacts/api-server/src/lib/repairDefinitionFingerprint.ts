@@ -4,6 +4,7 @@ import { CRB_INGREDIENT_HEAL_CONTRACT } from "./crbIngredientHeal";
 import { liveProfileRecipeLinkRepairContract } from "./repairs/liveProfileRecipeLinkRepair";
 import { CRB_INGREDIENT_REPAIR_ID } from "./repairs/crbIngredientRepair";
 import { LEGACY_REPAIR_SOURCE_CONTRACTS } from "./repairs/legacyRepairSourceContracts";
+import { speedAdjustmentBaselineRepairContract } from "./repairs/speedAdjustmentBaselineRepair";
 
 export type RepairFingerprintSource = Readonly<Record<string, unknown>>;
 
@@ -13,6 +14,7 @@ Readonly<Record<string, RepairFingerprintSource>> = Object.freeze({
   ...LEGACY_REPAIR_SOURCE_CONTRACTS,
   [liveProfileRecipeLinkRepairContract.id]: liveProfileRecipeLinkRepairContract,
   [CRB_INGREDIENT_REPAIR_ID]: CRB_INGREDIENT_HEAL_CONTRACT,
+  [speedAdjustmentBaselineRepairContract.id]: speedAdjustmentBaselineRepairContract,
 });
 
 type FingerprintedRepairDefinition = Omit<RepairDefinition, "execute" | "validateResult">;

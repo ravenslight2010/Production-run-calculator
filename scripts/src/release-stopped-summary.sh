@@ -49,24 +49,31 @@ fi
 checkpoint_blocker_summary=""
 checkpoint_blocker_summary_available=0
 if checkpoint_blocker_summary="$(
-  awk '
+  LC_ALL=C awk '
+    function trim(value) {
+      sub(/^[[:space:]]+/, "", value)
+      sub(/[[:space:]]+$/, "", value)
+      return value
+    }
     BEGIN {
       max_line_length = 2048
       invalid = 0
     }
-    /^Root blockers: / {
-      if (root != "" || length($0) > max_line_length || $0 !~ /^Root blockers: (none|[[:alnum:]][[:alnum:] .,;()\/:+-]*)$/) {
+    /^[[:space:]]*Root blockers:/ {
+      line = trim($0)
+      if (root != "" || length($0) > max_line_length || line !~ /^Root blockers: (none|[[:alnum:]][[:alnum:] .,;()\/:+-]*)$/) {
         invalid = 1
       } else {
-        root = $0
+        root = line
       }
       next
     }
-    /^Blocked gates: / {
-      if (blocked != "" || length($0) > max_line_length || $0 !~ /^Blocked gates: (none|[[:alnum:]][[:alnum:] .,;()\/:+-]*)$/) {
+    /^[[:space:]]*Blocked gates:/ {
+      line = trim($0)
+      if (blocked != "" || length($0) > max_line_length || line !~ /^Blocked gates: (none|[[:alnum:]][[:alnum:] .,;()\/:+-]*)$/) {
         invalid = 1
       } else {
-        blocked = $0
+        blocked = line
       }
       next
     }

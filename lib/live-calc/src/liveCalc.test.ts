@@ -24,7 +24,7 @@ describe("shared live calculation boundary", () => {
       mode: "dough",
       crustsPerCycle: 4,
       cycleSpeed: 20,
-    })).toBe(80);
+    })).toBe(73.6);
   });
 
   it("preserves the one-second client cadence floor", () => {
@@ -76,6 +76,32 @@ describe("shared live calculation boundary", () => {
       freezerTime: 0,
       elapsedBatchSec: 60,
     })).toMatchObject({ expectedCases: 12, expectedCasesRaw: 60, skids: 1, casesOnSkid: 2 });
+  });
+
+  it("keeps the Frontline auto-track cap tied to total run production", () => {
+    const base = {
+      runId: "frontline-cap",
+      startedAt: 1_000,
+      nowMs: 61_000,
+      v: {
+        casesNeeded: 100, pizzasPerCase: 10, freezerTime: 0,
+        app1Type: "Mozzarella", app1CheeseRecipe: [], app1BatchLbs: 25, app1OzPerPizza: 4,
+        app2Type: "", app2CheeseRecipe: [], app2BatchLbs: 0, app2OzPerPizza: 0,
+        app3Type: "", app3CheeseRecipe: [], app3BatchLbs: 0, app3OzPerPizza: 0,
+        app4Type: "", app4CheeseRecipe: [], app4BatchLbs: 0, app4OzPerPizza: 0,
+      } as never,
+      calc: {
+        pressDone: false, sauceDepletionSec: 0, ppm: 100, perTray: 0, perBatch: 0,
+        // Remaining-work calculations may already be below the cumulative made
+        // count while two skids of configured production still remain.
+        app1Batches: 1, app2Batches: 0, app3Batches: 0, app4Batches: 0,
+      } as never,
+    };
+    const schedule = computeAutoTrackSchedule({
+      ...base,
+      progress: { app1BatchesMade: 3, app1BatchAnchorNetSec: 0 },
+    });
+    expect(schedule.entries.find((entry) => entry.channel === "app1-batch")).toBeDefined();
   });
 
   it("requires matching private server ownership before a wall schedule is canonical", () => {

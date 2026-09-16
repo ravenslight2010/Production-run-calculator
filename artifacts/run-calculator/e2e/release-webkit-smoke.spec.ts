@@ -16,6 +16,11 @@ import {
 } from "./isolation";
 import { dismissOnboardingIfPresent, signUpAndHandleOnboarding } from "./onboarding";
 
+// This smoke intentionally injects a transport failure with page.route().
+// WebKit otherwise lets the app service worker answer the request before the
+// route handler, making the failure injection nondeterministic.
+test.use({ serviceWorkers: "block" });
+
 const PASSWORD = "TestPass123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 const testUsernames = new Set<string>();
@@ -59,6 +64,59 @@ async function promoteToManager(username: string): Promise<void> {
   } finally {
     await db.end().catch(() => {});
   }
+}
+
+async function seedCanonicalReportSnapshot(): Promise<string> {
+  const db = new Client({
+    connectionString: requireIsolatedTestDatabase("seed WebKit report fixture"),
+  });
+  const runId = uniqueTestId("webkit_report_run");
+  const date = today();
+  const snapshot = {
+    dayState: {
+      date,
+      resetAt: 0,
+      runs: [{
+        id: runId,
+        brand: "WebKit",
+        flavor: "Report Preview",
+        startedAt: 1_000,
+      }],
+    },
+    runValues: {
+      [runId]: {
+        pizzasPerCase: 10,
+        casesPerSkid: 20,
+        casesNeeded: 100,
+        crustsPerCycle: 4,
+        cycleSpeed: 10,
+        speedAdjustment: 1,
+        freezerTime: 10,
+        tempFreezerTime: 30,
+        tempCrustsPerCycle: 5,
+        tempCycleSpeed: 12,
+      },
+    },
+    packagingProgress: {
+      [runId]: {
+        skidsCompleted: 0,
+        casesOnCurrentSkid: 0,
+      },
+    },
+  };
+  try {
+    await db.connect();
+    await db.query(
+      `INSERT INTO daily_sync (scope, date, data)
+       VALUES ('live', $1, $2::jsonb)
+       ON CONFLICT (date, scope)
+       DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()`,
+      [date, JSON.stringify(snapshot)],
+    );
+  } finally {
+    await db.end().catch(() => {});
+  }
+  return runId;
 }
 
 async function seedPendingRun(page: Page): Promise<string> {
@@ -128,6 +186,7 @@ test.beforeEach(async () => {
   try {
     await db.connect();
     await db.query("DELETE FROM daily_sync WHERE date = $1", [today()]);
+    await db.query("DELETE FROM completed_run_history WHERE date = $1", [today()]);
   } finally {
     await db.end().catch(() => {});
   }
@@ -140,6 +199,7 @@ test.afterAll(async () => {
     await db.connect();
     await cleanupTestUsers(db, testUsernames);
     await db.query("DELETE FROM daily_sync WHERE date = $1", [today()]);
+    await db.query("DELETE FROM completed_run_history WHERE date = $1", [today()]);
   } finally {
     await db.end().catch(() => {});
   }
@@ -223,6 +283,13 @@ test("manager can preview an authoritative operational report", async ({ page })
   testUsernames.add(username);
   await signUp(page, username);
   await promoteToManager(username);
+  await page.route("**/api/sync/today*", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.continue();
+    } else {
+      await route.abort();
+    }
+  });
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
 
@@ -231,6 +298,15 @@ test("manager can preview an authoritative operational report", async ({ page })
   await page.getByTestId("summary-report-details").locator("summary").click();
   const report = page.getByTestId("operational-report");
   await expect(report).toBeVisible();
+  // Operational reports intentionally use the server's canonical daily_sync
+  // snapshot. Seed it after browser hydration and report rendering so a
+  // background local-state sync cannot replace the disposable fixture.
+  const reportRunId = await seedCanonicalReportSnapshot();
+  const operationalView = await page.request.get(
+    `/api/reports/operational-view?date=${today()}&runId=${encodeURIComponent(reportRunId)}`,
+  );
+  const operationalViewBody = await operationalView.text();
+  expect(operationalView.status(), operationalViewBody).toBe(200);
 
   const response = page.waitForResponse(
     (candidate) =>
@@ -238,7 +314,12 @@ test("manager can preview an authoritative operational report", async ({ page })
       candidate.request().method() === "POST",
   );
   await report.getByRole("button", { name: "Preview report", exact: true }).click();
-  expect((await response).status()).toBe(200);
+  const previewResponse = await response;
+  const previewBody = await previewResponse.text();
+  expect(
+    previewResponse.status(),
+    `${previewResponse.request().postData() ?? "missing request body"}: ${previewBody}`,
+  ).toBe(200);
   await expect(report.getByText("CONFIRMED CANONICAL REPORT", { exact: true })).toBeVisible();
   await expect(report.getByText("Report ready. Statistics are authoritative and deterministic.", { exact: true })).toBeVisible();
 });

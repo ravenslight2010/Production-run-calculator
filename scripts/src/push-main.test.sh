@@ -61,9 +61,11 @@ make_repo() {
 
 run_push() {
   local repo="$1"
+  local local_push_url
   shift
+  local_push_url=$(git -C "$repo" remote get-url origin 2>/dev/null || true)
   set +e
-  PUSH_OUTPUT=$(cd "$repo" && PATH="${FAKE_BIN}:$PATH" "$@" 2>&1)
+  PUSH_OUTPUT=$(cd "$repo" && PATH="${FAKE_BIN}:$PATH" GIT_URL="$local_push_url" "$@" 2>&1)
   PUSH_STATUS=$?
   set -e
 }
@@ -103,6 +105,14 @@ assert_commit_count() {
     printf 'Expected %s commits, got %s\n' "$expected" "$actual" >&2
     return 1
   }
+}
+
+assert_no_persistent_push_url() {
+  local repo="$1"
+  if git -C "$repo" config --get-all remote.origin.pushurl >/dev/null 2>&1; then
+    printf 'The guarded helper must not persist remote.origin.pushurl.\n' >&2
+    return 1
+  fi
 }
 
 test_requires_message_and_staged_changes() {
@@ -154,6 +164,30 @@ test_rejects_missing_origin() {
   assert_commit_count "$repo" 1
 }
 
+test_requires_workspace_push_secret() {
+  local repo
+  repo=$(make_repo missing-secret)
+  printf 'change without secure push secret\n' >> "${repo}/tracked.txt"
+  git -C "$repo" add tracked.txt
+  run_push "$repo" env -u GIT_URL bash push-main.sh --message "missing secret"
+  assert_status 1
+  assert_contains "$PUSH_OUTPUT" "workspace GIT_URL secret is not configured"
+  assert_commit_count "$repo" 1
+}
+
+test_rejects_credential_bearing_fetch_url() {
+  local repo
+  repo=$(make_repo credential-bearing-fetch)
+  git -C "$repo" remote set-url origin "https://user:fetch-secret@example.invalid/repo.git"
+  printf 'change with credential-bearing fetch URL\n' >> "${repo}/tracked.txt"
+  git -C "$repo" add tracked.txt
+  run_push "$repo" bash push-main.sh --message "reject credential-bearing fetch"
+  assert_status 1
+  assert_contains "$PUSH_OUTPUT" "origin fetch URL must not embed credentials"
+  assert_not_contains "$PUSH_OUTPUT" "fetch-secret"
+  assert_commit_count "$repo" 1
+}
+
 test_validation_failure_does_not_commit_or_push() {
   local repo="${TEST_ROOT}/validation"
   repo=$(make_repo validation)
@@ -202,6 +236,7 @@ test_success_commits_and_targets_origin_main() {
   [[ "$(git --git-dir="${repo}/.git" rev-parse refs/remotes/origin/main)" == "$(git -C "$repo" rev-parse main)" ]]
   [[ "$(git --git-dir="${TEST_ROOT}/success.git" rev-parse refs/heads/main)" == "$(git -C "$repo" rev-parse main)" ]]
   [[ "$(cat "$validation_log")" == $'workflow\ntypecheck' ]]
+  assert_no_persistent_push_url "$repo"
 }
 
 configure_ssh_signing() {
@@ -302,6 +337,8 @@ EOF
 test_requires_message_and_staged_changes
 test_rejects_branch_and_unstaged_work
 test_rejects_missing_origin
+test_requires_workspace_push_secret
+test_rejects_credential_bearing_fetch_url
 test_workflow_validation_failure_does_not_commit_or_push
 test_validation_failure_does_not_commit_or_push
 test_success_commits_and_targets_origin_main

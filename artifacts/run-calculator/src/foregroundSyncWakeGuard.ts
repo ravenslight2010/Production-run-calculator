@@ -7,14 +7,44 @@ export function createForegroundSyncWakeGuard(
   reconcile: () => Promise<boolean>,
 ): () => Promise<boolean> {
   let inFlight: Promise<boolean> | null = null;
-  return () => {
-    if (inFlight) return inFlight;
-    const work = reconcile();
+  let queuedWake = false;
+
+  const start = (): Promise<boolean> => {
+    const work = (async () => {
+      try {
+        let firstError: unknown;
+        let succeeded = false;
+        try {
+          succeeded = await reconcile();
+        } catch (error) {
+          firstError = error;
+        }
+        if (!succeeded && queuedWake) {
+          // Keep the bounded retry inside this wake burst's shared promise. That
+          // gives focus/visibility/online one completion owner instead of
+          // detaching a second reconciliation that can release the barrier after
+          // callers already observed the first attempt settle.
+          queuedWake = false;
+          return await reconcile();
+        }
+        if (firstError !== undefined) throw firstError;
+        return succeeded;
+      } finally {
+        // A running reconciliation is never replaced: overlapping wakes only
+        // set queuedWake and return this same promise.
+        inFlight = null;
+        queuedWake = false;
+      }
+    })();
     inFlight = work;
-    const clearInFlight = () => {
-      if (inFlight === work) inFlight = null;
-    };
-    void work.then(clearInFlight, clearInFlight);
     return work;
+  };
+
+  return () => {
+    if (inFlight) {
+      queuedWake = true;
+      return inFlight;
+    }
+    return start();
   };
 }

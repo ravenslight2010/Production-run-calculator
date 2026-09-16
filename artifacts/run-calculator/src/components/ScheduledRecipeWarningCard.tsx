@@ -40,8 +40,8 @@ export default function ScheduledRecipeWarningCard({
       </CardHeader>
       <CardContent className="px-4 pb-4 space-y-1.5">
         <p className="text-[11px] text-rose-300/70 leading-snug mb-1">
-          These scheduled runs have no saved recipe, so their reorder demand falls
-          back to defaults. Set up each profile to make the projections accurate.
+          These scheduled runs are not production-ready. Complete each setup before
+          scheduling it for the floor so demand projections remain accurate.
         </p>
         {issues.map((it) => (
           <button
@@ -55,12 +55,16 @@ export default function ScheduledRecipeWarningCard({
               {it.brand}
               {it.flavor ? ` — ${it.flavor}` : ""}
               <span className="ml-1.5 text-[11px] text-rose-400/70">
-                {it.reason === "missing" ? "no profile" : "no recipe rows"} ·{" "}
+                {it.reason === "missing"
+                  ? "no profile"
+                  : it.reason === "incomplete"
+                    ? "no recipe rows"
+                    : "Pizzas Per Case missing"} ·{" "}
                 {it.totalCases} case{it.totalCases !== 1 ? "s" : ""}
               </span>
             </span>
             <span className="font-medium whitespace-nowrap text-rose-200 flex items-center gap-1">
-              Set up <ArrowRight className="w-3.5 h-3.5" />
+              {it.reason === "missing-case-pack" ? "Set case pack" : "Set up"} <ArrowRight className="w-3.5 h-3.5" />
             </span>
           </button>
         ))}

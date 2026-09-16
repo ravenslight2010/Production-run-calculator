@@ -51,6 +51,7 @@ describe("historical automatic repair registration", () => {
       "incident-resolved-workflow-reconciliation-v1",
       "source-library-reconciliation-2026-08-26-v1",
       "source-library-reconciliation-2026-08-26-v2",
+      "speed-adjustment-baseline-v1",
     ]);
     expect(repairs.every((repair) => repair.mode === "automatic" && !repair.managerAllowed)).toBe(true);
     expect(repairs.every((repair) =>

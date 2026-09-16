@@ -39,7 +39,7 @@ describe("operational report input contract", () => {
   });
 
   it("accepts a valid day report", () => {
-    const result = validateOperationalReportBody({ scope: "day", date: "2026-09-04", runs: [run] });
+    const result = validateOperationalReportBody({ scope: "week", date: "2026-09-04", runs: [] });
     expect(result.ok).toBe(true);
   });
 

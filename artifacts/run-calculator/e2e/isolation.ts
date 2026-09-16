@@ -197,8 +197,102 @@ export async function cleanupTestUsers(
   usernames: Iterable<string>,
 ): Promise<void> {
   for (const username of usernames) {
+    // The SQL text is constant and pg sends username separately as bind $1.
+    // nosemgrep: javascript.express.db.pg-express.pg-express
     await db.query("DELETE FROM users WHERE username = $1", [username]);
   }
+}
+
+export async function cleanupBrandProfiles(
+  db: Client,
+  keys: readonly string[],
+  scope: string,
+): Promise<void> {
+  await db.query(
+    "DELETE FROM brand_profiles WHERE key = ANY($1::text[]) AND scope = $2",
+    [keys, scope],
+  );
+}
+
+export async function cleanupDailySync(
+  db: Client,
+  dates: readonly string[],
+  scope: string,
+): Promise<void> {
+  await db.query(
+    "DELETE FROM daily_sync WHERE date = ANY($1::text[]) AND scope = $2",
+    [dates, scope],
+  );
+}
+
+export async function cleanupCheeseRecipes(
+  db: Client,
+  ids: readonly string[],
+): Promise<void> {
+  await db.query(
+    "DELETE FROM cheese_recipes WHERE id = ANY($1::text[])",
+    [ids],
+  );
+}
+
+export async function cleanupNamedRecipes(
+  db: Client,
+  kind: "dough" | "sauce",
+  ids: readonly string[],
+): Promise<void> {
+  const NAMED_RECIPE_SQL_IDENTIFIER_ALLOWLIST = {
+    dough: "dough_recipes",
+    sauce: "sauce_recipes",
+  } as const;
+  const table = NAMED_RECIPE_SQL_IDENTIFIER_ALLOWLIST[kind];
+  if (!table) {
+    throw new Error(`Unsupported named recipe fixture kind: ${String(kind)}`);
+  }
+  await db.query(
+    `DELETE FROM ${table} WHERE id = ANY($1::text[]) AND scope = $2`,
+    [ids, "live"],
+  );
+}
+
+export async function cleanupMixes(
+  db: Client,
+  ids: readonly string[],
+): Promise<void> {
+  await db.query(
+    "DELETE FROM mixes WHERE id = ANY($1::text[]) AND scope = $2",
+    [ids, "live"],
+  );
+}
+
+export async function cleanupFixtureRoles(
+  db: Client,
+  roleNames: readonly string[],
+): Promise<void> {
+  await db.query("DELETE FROM roles WHERE name = ANY($1::text[])", [roleNames]);
+}
+
+export async function authorizeFixtureAccount(
+  db: Client,
+  roleName: string,
+  userId: string,
+  capabilities: readonly E2ECapability[],
+  onboardingSeen: boolean,
+): Promise<void> {
+  await db.query(
+    `INSERT INTO roles (name, capabilities, builtin)
+     VALUES ($1, $2::jsonb, false)`,
+    [roleName, JSON.stringify([...capabilities])],
+  );
+  await db.query(
+    `INSERT INTO user_roles (user_id, role)
+     VALUES ($1, $2)
+     ON CONFLICT (user_id) DO UPDATE SET role = $2, updated_at = NOW()`,
+    [userId, roleName],
+  );
+  await db.query("UPDATE users SET onboarding_seen = $2 WHERE id = $1", [
+    userId,
+    onboardingSeen,
+  ]);
 }
 
 async function responseFailure(response: APIResponse): Promise<string> {
@@ -332,21 +426,13 @@ export class AuthorizedBrowserFixtures {
     this.roleNames.add(roleName);
 
     await this.withDatabase("authorize browser fixture account", async (db) => {
-      await db.query(
-        `INSERT INTO roles (name, capabilities, builtin)
-         VALUES ($1, $2::jsonb, false)`,
-        [roleName, JSON.stringify([...options.capabilities])],
-      );
-      await db.query(
-        `INSERT INTO user_roles (user_id, role)
-         VALUES ($1, $2)
-         ON CONFLICT (user_id) DO UPDATE SET role = $2, updated_at = NOW()`,
-        [auth.user.userId, roleName],
-      );
-      await db.query("UPDATE users SET onboarding_seen = $2 WHERE id = $1", [
+      await authorizeFixtureAccount(
+        db,
+        roleName,
         auth.user.userId,
+        options.capabilities,
         options.onboardingSeen ?? true,
-      ]);
+      );
     });
 
     return {
@@ -529,10 +615,7 @@ export class AuthorizedBrowserFixtures {
     const selected = [...keys];
     if (selected.length === 0) return;
     await this.withDatabase("remove browser fixture profiles", async (db) => {
-      await db.query(
-        "DELETE FROM brand_profiles WHERE key = ANY($1::text[]) AND scope = $2",
-        [selected, scope],
-      );
+      await cleanupBrandProfiles(db, selected, scope);
     });
     selected.forEach((key) => this.profileKeys.delete(key));
   }
@@ -544,10 +627,7 @@ export class AuthorizedBrowserFixtures {
     const selected = [...dates];
     if (selected.length === 0) return;
     await this.withDatabase("remove browser fixture sync snapshots", async (db) => {
-      await db.query(
-        "DELETE FROM daily_sync WHERE date = ANY($1::text[]) AND scope = $2",
-        [selected, scope],
-      );
+      await cleanupDailySync(db, selected, scope);
     });
     selected.forEach((date) => this.syncDates.delete(date));
   }
@@ -556,10 +636,7 @@ export class AuthorizedBrowserFixtures {
     const selected = [...ids];
     if (selected.length === 0) return;
     await this.withDatabase("remove browser fixture cheese recipes", async (db) => {
-      await db.query(
-        "DELETE FROM cheese_recipes WHERE id = ANY($1::text[])",
-        [selected],
-      );
+      await cleanupCheeseRecipes(db, selected);
     });
     selected.forEach((id) => this.cheeseRecipeIds.delete(id));
   }
@@ -571,10 +648,7 @@ export class AuthorizedBrowserFixtures {
     const selected = [...ids];
     if (selected.length === 0) return;
     await this.withDatabase(`remove browser fixture ${kind} recipes`, async (db) => {
-      await db.query(
-        `DELETE FROM ${kind}_recipes WHERE id = ANY($1::text[]) AND scope = $2`,
-        [selected, "live"],
-      );
+      await cleanupNamedRecipes(db, kind, selected);
     });
     (kind === "dough" ? this.doughRecipeIds : this.sauceRecipeIds).forEach((id) => {
       if (selected.includes(id)) {
@@ -599,10 +673,7 @@ export class AuthorizedBrowserFixtures {
     const selected = [...ids];
     if (selected.length === 0) return;
     await this.withDatabase("remove browser fixture mixes", async (db) => {
-      await db.query(
-        "DELETE FROM mixes WHERE id = ANY($1::text[]) AND scope = $2",
-        [selected, "live"],
-      );
+      await cleanupMixes(db, selected);
     });
     selected.forEach((id) => this.mixIds.delete(id));
   }
@@ -624,9 +695,7 @@ export class AuthorizedBrowserFixtures {
     await this.withDatabase("cleanup authorized browser fixtures", async (db) => {
       await cleanupTestUsers(db, this.usernames);
       if (this.roleNames.size > 0) {
-        await db.query("DELETE FROM roles WHERE name = ANY($1::text[])", [
-          [...this.roleNames],
-        ]);
+        await cleanupFixtureRoles(db, [...this.roleNames]);
       }
     }).catch((error) => errors.push(error));
     await this.releaseLiveFixtureLock().catch((error) => errors.push(error));

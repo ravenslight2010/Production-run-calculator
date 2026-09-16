@@ -9,7 +9,7 @@ import {
 const BLANK = {
   crustsPerCycle: 0,
   cycleSpeed: 0,
-  speedAdjustment: 1.0,
+  speedAdjustment: 0.92,
   freezerTime: 0,
   casesPerLayer: 0,
   preTunnelMin: 0,
@@ -22,7 +22,7 @@ describe("dieLineDefaultsFor", () => {
       expect(dieLineDefaultsFor(name)).toEqual({
         crustsPerCycle: 6,
         cycleSpeed: 8,
-        speedAdjustment: 0.85,
+        speedAdjustment: 0.92,
         freezerTime: 22,
         casesPerLayer: 6,
         preTunnelMin: 3.5,
@@ -33,13 +33,13 @@ describe("dieLineDefaultsFor", () => {
 
   it('matches 12" variants', () => {
     for (const name of ['12"', "12in", '12" dies']) {
-      expect(dieLineDefaultsFor(name)).toMatchObject({ crustsPerCycle: 5, freezerTime: 15, speedAdjustment: 1 });
+      expect(dieLineDefaultsFor(name)).toMatchObject({ crustsPerCycle: 5, freezerTime: 15, speedAdjustment: 0.92 });
     }
   });
 
   it('matches 11" and Argus variants to the same group', () => {
     for (const name of ['11"', "11in", "Argus Dies", "argus", '11" Dies']) {
-      expect(dieLineDefaultsFor(name)).toMatchObject({ crustsPerCycle: 5, freezerTime: 16, speedAdjustment: 1 });
+      expect(dieLineDefaultsFor(name)).toMatchObject({ crustsPerCycle: 5, freezerTime: 16, speedAdjustment: 0.92 });
     }
   });
 
@@ -62,7 +62,6 @@ describe("resolveDieLineDefaults", () => {
     expect(resolveDieLineDefaults('7"', BLANK)).toEqual({
       crustsPerCycle: 6,
       cycleSpeed: 8,
-      speedAdjustment: 0.85,
       freezerTime: 22,
       casesPerLayer: 6,
       preTunnelMin: 3.5,
@@ -75,20 +74,19 @@ describe("resolveDieLineDefaults", () => {
     const filled = resolveDieLineDefaults('7"', cur);
     expect(filled).not.toHaveProperty("cycleSpeed");
     expect(filled).not.toHaveProperty("freezerTime");
-    expect(filled).toMatchObject({ crustsPerCycle: 6, speedAdjustment: 0.85, casesPerLayer: 6 });
+    expect(filled).toMatchObject({ crustsPerCycle: 6, casesPerLayer: 6 });
   });
 
-  it("treats speedAdjustment 1.0 as untouched (fills 0.85 for 7in)", () => {
-    expect(resolveDieLineDefaults("7in", { ...BLANK, speedAdjustment: 1.0 })).toMatchObject({
-      speedAdjustment: 0.85,
-    });
+  it("treats speedAdjustment 0.92 as the untouched 7in baseline", () => {
+    expect(resolveDieLineDefaults("7in", { ...BLANK, speedAdjustment: 0.92 }))
+      .not.toHaveProperty("speedAdjustment");
     // but a hand-set 0.9 stays
     expect(resolveDieLineDefaults("7in", { ...BLANK, speedAdjustment: 0.9 })).not.toHaveProperty(
       "speedAdjustment",
     );
   });
 
-  it("omits fields already equal to the target (12in speedAdjustment 1 == untouched 1)", () => {
+  it("omits fields already equal to the target (12in speedAdjustment 0.92 is untouched)", () => {
     const filled = resolveDieLineDefaults('12"', BLANK);
     expect(filled).not.toHaveProperty("speedAdjustment");
     expect(filled).toMatchObject({ crustsPerCycle: 5, cycleSpeed: 8, freezerTime: 15, casesPerLayer: 6 });
@@ -191,7 +189,6 @@ describe("resolveDieLineDefaultsOnSwitch", () => {
   const SEVEN_FILLED = {
     crustsPerCycle: 6,
     cycleSpeed: 8,
-    speedAdjustment: 0.85,
     freezerTime: 22,
     casesPerLayer: 6,
     preTunnelMin: 3.5,
@@ -205,7 +202,8 @@ describe("resolveDieLineDefaultsOnSwitch", () => {
   it("A→B switch replaces A's auto-filled values with B's", () => {
     // Form currently holds 7" auto-fill; switching to 12" must replace them.
     const fills = resolveDieLineDefaultsOnSwitch('12"', SEVEN_FILLED);
-    expect(fills).toMatchObject({ crustsPerCycle: 5, freezerTime: 15, speedAdjustment: 1 });
+    expect(fills).toMatchObject({ crustsPerCycle: 5, freezerTime: 15 });
+    expect(fills).not.toHaveProperty("speedAdjustment");
     // cycleSpeed/casesPerLayer are already 8/6 == 12"'s defaults — no-op omitted
     expect(fills).not.toHaveProperty("cycleSpeed");
     expect(fills).not.toHaveProperty("casesPerLayer");
@@ -218,7 +216,8 @@ describe("resolveDieLineDefaultsOnSwitch", () => {
     const fills = resolveDieLineDefaultsOnSwitch('12"', cur);
     expect(fills).not.toHaveProperty("cycleSpeed");
     expect(fills).not.toHaveProperty("freezerTime");
-    expect(fills).toMatchObject({ crustsPerCycle: 5, speedAdjustment: 1 });
+    expect(fills).toMatchObject({ crustsPerCycle: 5 });
+    expect(fills).not.toHaveProperty("speedAdjustment");
   });
 
   it("reselecting the same die re-applies its defaults over stale values", () => {
@@ -234,7 +233,7 @@ describe("resolveDieLineDefaultsOnSwitch", () => {
     const overrides = { mystic: OVERRIDE };
     // Form holds Mystic's override fill; switching to 7" replaces it.
     const fills = resolveDieLineDefaultsOnSwitch('7"', OVERRIDE, overrides);
-    expect(fills).toEqual(SEVEN_FILLED);
+    expect(fills).toEqual({ ...SEVEN_FILLED, speedAdjustment: 0.92 });
     // Switching TO the override die from 7"'s fill applies the override.
     // The override has no tunnel fields — tunnel values are recognized auto-fill
     // (3.5 / 3.0 from 7") so they get reset to 0 (generic 2.5 fallback applies).
@@ -249,7 +248,7 @@ describe("resolveDieLineDefaultsOnSwitch", () => {
     expect(from7).toMatchObject({ preTunnelMin: 0, postTunnelMin: 0 });
 
     // After using 12": preTunnelMin=2.0, postTunnelMin=2.0
-    const twelve_filled = { ...BLANK, crustsPerCycle: 5, cycleSpeed: 8, speedAdjustment: 1, freezerTime: 15, preTunnelMin: 2.0, postTunnelMin: 2.0 };
+    const twelve_filled = { ...BLANK, crustsPerCycle: 5, cycleSpeed: 8, speedAdjustment: 0.92, freezerTime: 15, preTunnelMin: 2.0, postTunnelMin: 2.0 };
     const from12 = resolveDieLineDefaultsOnSwitch("11in", twelve_filled);
     expect(from12).toMatchObject({ preTunnelMin: 0, postTunnelMin: 0 });
 
@@ -281,7 +280,7 @@ describe("resolveCrustLineDefaults", () => {
   it("fills all crust defaults on an untouched form", () => {
     const fills = resolveCrustLineDefaults({
       approxLineSpeed: 0,
-      speedAdjustment: 1.0,
+      speedAdjustment: 0.92,
       freezerTime: 0,
       casesPerLayer: 0,
     });
@@ -289,7 +288,7 @@ describe("resolveCrustLineDefaults", () => {
       approxLineSpeed: 40,
       freezerTime: 9.2,
       casesPerLayer: 2,
-      // speedAdjustment already 1 (untouched) — no-op fill omitted
+      // speedAdjustment already 0.92 (untouched) — no-op fill omitted
     });
   });
 

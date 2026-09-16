@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { FACTORY_SPEED_ADJUSTMENT_BASELINE } from "@workspace/factory-constants";
 import { computeEffectiveLineSpeed } from "./lineSpeed";
 import { getAutoTrackTiming } from "./hooks/useAutoTrack";
 
@@ -25,7 +26,8 @@ describe("computeEffectiveLineSpeed", () => {
     expect(computeEffectiveLineSpeed({ ...base, crustsPerCycle: 0 })).toBe(0);
     expect(computeEffectiveLineSpeed({ ...base, cycleSpeed: 0 })).toBe(0);
     expect(computeEffectiveLineSpeed({ ...base, speedAdjustment: 0 })).toBe(0);
-    expect(computeEffectiveLineSpeed({ ...base, speedAdjustment: undefined })).toBe(80);
+    expect(computeEffectiveLineSpeed({ ...base, speedAdjustment: undefined }))
+      .toBeCloseTo(80 * FACTORY_SPEED_ADJUSTMENT_BASELINE);
     expect(computeEffectiveLineSpeed({ ...base, cycleSpeed: Number.NaN })).toBe(0);
   });
 });

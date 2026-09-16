@@ -9,6 +9,8 @@
 // (marking each source). The UI commits confirmed values through the existing
 // update paths; there is no auto-apply.
 
+import { FACTORY_SPEED_ADJUSTMENT_BASELINE } from "@workspace/factory-constants";
+
 export type FieldCategory =
   | "identity"
   | "line"
@@ -52,7 +54,7 @@ export const DOCUMENTED_DEFAULTS: Record<string, number> = {
   casesNeeded: 384,
   crustsPerCycle: 5,
   cycleSpeed: 7.8,
-  speedAdjustment: 1.0,
+  speedAdjustment: FACTORY_SPEED_ADJUSTMENT_BASELINE,
   freezerTime: 15,
   pizzasPerCase: 12,
   casesPerSkid: 48,

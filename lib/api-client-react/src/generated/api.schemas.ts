@@ -25,6 +25,96 @@ export interface CompletedHistoryList {
   history: CompletedHistoryRecord[];
 }
 
+export interface ApplicatorBatchFinalization {
+  /**
+     * @minLength 1
+     * @maxLength 300
+     * @pattern ^[A-Za-z0-9:_-]+$
+     */
+  operationId: string;
+  /** Valid calendar date (not only YYYY-MM-DD syntax) */
+  date: string;
+  /**
+     * @minLength 1
+     * @maxLength 500
+     */
+  runId: string;
+  /**
+     * @minimum 1
+     * @maximum 4
+     */
+  slot: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  finalTotal: number;
+  /**
+     * @minLength 1
+     * @maxLength 300
+     * @pattern ^[A-Za-z0-9:_-]+$
+     */
+  correctionOf?: string;
+}
+
+export type ApplicatorBatchEvidenceSource = typeof ApplicatorBatchEvidenceSource[keyof typeof ApplicatorBatchEvidenceSource];
+
+
+export const ApplicatorBatchEvidenceSource = {
+  'automatic-observation': 'automatic-observation',
+  'manager-finalization': 'manager-finalization',
+  'manager-correction': 'manager-correction',
+} as const;
+
+export type ApplicatorBatchEvidenceHashContract = typeof ApplicatorBatchEvidenceHashContract[keyof typeof ApplicatorBatchEvidenceHashContract];
+
+
+export const ApplicatorBatchEvidenceHashContract = {
+  'canonical-json-v1': 'canonical-json-v1',
+} as const;
+
+export interface ApplicatorBatchEvidence {
+  id: string;
+  operationId: string;
+  date: string;
+  runId: string;
+  /**
+     * @minimum 1
+     * @maximum 4
+     */
+  slot: number;
+  source: ApplicatorBatchEvidenceSource;
+  /** @minimum 0 */
+  observedTotal?: number;
+  /** @minimum 0 */
+  confirmedTotal?: number;
+  correctionOf?: string;
+  /** @pattern ^[a-f0-9]{64}$ */
+  evidenceHash: string;
+  hashContract: ApplicatorBatchEvidenceHashContract;
+  createdAt: string;
+}
+
+export interface ApplicatorBatchEvidenceMutationResult {
+  acknowledged: true;
+  duplicate: boolean;
+  operationId: string;
+  /** @pattern ^[a-f0-9]{64}$ */
+  evidenceHash: string;
+  canonical: ApplicatorBatchEvidence;
+}
+
+export interface ApplicatorBatchEvidenceConflict {
+  error: string;
+  canonical?: ApplicatorBatchEvidence;
+}
+
+export interface ApplicatorBatchEvidenceList {
+  evidence: ApplicatorBatchEvidence[];
+  /** Opaque cursor for the next page; absent when complete. */
+  nextCursor?: string;
+}
+
 /**
  * Whether the response is deterministic-only, AI-enriched, or missing AI narration
  */
@@ -3476,6 +3566,8 @@ export interface DieTypeList {
 export interface DieLineDefaultsEntry {
   /** Die-type display name (matched case-insensitively) */
   name: string;
+  /** Server-issued optimistic-concurrency revision; required when updating an existing row */
+  updatedAt?: string;
   crustsPerCycle: number;
   cycleSpeed: number;
   speedAdjustment: number;
@@ -3496,9 +3588,16 @@ export interface SaveDieLineDefaultsInput {
   entries: DieLineDefaultsEntry[];
 }
 
+/**
+ * Loaded updatedAt revisions keyed by die name. Required for each name that currently has a stored override.
+ */
+export type DeleteDieLineDefaultsInputRevisions = {[key: string]: string};
+
 export interface DeleteDieLineDefaultsInput {
   /** Die names whose stored defaults should be removed */
   names: string[];
+  /** Loaded updatedAt revisions keyed by die name. Required for each name that currently has a stored override. */
+  revisions?: DeleteDieLineDefaultsInputRevisions;
 }
 
 export type RunSuggestionType = typeof RunSuggestionType[keyof typeof RunSuggestionType];
@@ -4900,6 +4999,28 @@ export interface ManagerActionItem {
   version: number;
 }
 
+export type BackgroundOperationDiagnosticsWarningsItemOperation = typeof BackgroundOperationDiagnosticsWarningsItemOperation[keyof typeof BackgroundOperationDiagnosticsWarningsItemOperation];
+
+
+export const BackgroundOperationDiagnosticsWarningsItemOperation = {
+  'daily-rollover': 'daily-rollover',
+  'server-job-run': 'server-job-run',
+  'server-job-prune': 'server-job-prune',
+  'web-push-schedule': 'web-push-schedule',
+} as const;
+
+export type BackgroundOperationDiagnosticsWarningsItem = {
+  operation: BackgroundOperationDiagnosticsWarningsItemOperation;
+  lastFailureAt: string;
+};
+
+export interface BackgroundOperationDiagnostics {
+  /** @maxItems 4 */
+  warnings: BackgroundOperationDiagnosticsWarningsItem[];
+  /** @minimum 1 */
+  windowMs: number;
+}
+
 export type ManagerActionQueueCounts = {[key: string]: number};
 
 export interface ManagerActionQueue {
@@ -5164,6 +5285,25 @@ export type UpdateManagerActionItem200 = {
 export type ListCompletedHistoryParams = {
 from?: string;
 to?: string;
+};
+
+export type ListApplicatorBatchEvidenceParams = {
+from?: string;
+to?: string;
+/**
+ * @maxLength 500
+ */
+runId?: string;
+/**
+ * @maxLength 4096
+ * @pattern ^[A-Za-z0-9_-]+$
+ */
+cursor?: string;
+/**
+ * @minimum 1
+ * @maximum 500
+ */
+limit?: number;
 };
 
 export type GetSyncTodayParams = {

@@ -1,3 +1,5 @@
+import { caseBasedProductionNeedsAvailable } from "@workspace/inventory-math";
+
 // Shared, pure detection of scheduled runs whose saved brand/flavor profile is
 // missing entirely or carries no real recipe data.
 //
@@ -58,7 +60,7 @@ export type ScheduledRunRef = {
 // Why a scheduled run's profile can't drive trustworthy demand.
 // - "missing": no profile saved for that brand+flavor at all.
 // - "incomplete": a profile exists but has no real recipe data.
-export type ScheduledRecipeReason = "missing" | "incomplete";
+export type ScheduledRecipeReason = "missing" | "incomplete" | "missing-case-pack";
 
 export type ScheduledRecipeIssue = {
   brand: string;
@@ -171,7 +173,16 @@ export function findScheduledRecipeIssues(
     const flavor = (run.flavor ?? "").trim();
     const profile = resolveProfile(brand, flavor);
     const reason: ScheduledRecipeReason | null =
-      profile == null ? "missing" : profileHasRecipeData(profile) ? null : "incomplete";
+      profile == null
+        ? "missing"
+        : !profileHasRecipeData(profile)
+          ? "incomplete"
+          : !caseBasedProductionNeedsAvailable({
+              casesNeeded: Number(run.casesNeeded) || 0,
+              pizzasPerCase: Number(profile["pizzasPerCase"]) || 0,
+            })
+            ? "missing-case-pack"
+            : null;
     if (reason === null) continue;
     const key = `${brand}\u0000${flavor}`;
     let entry = byKey.get(key);
@@ -188,7 +199,17 @@ export function findScheduledRecipeIssues(
   for (const e of out) e.dates.sort();
   out.sort(
     (a, b) =>
-      (a.reason === b.reason ? 0 : a.reason === "missing" ? -1 : 1) ||
+      (
+        a.reason === b.reason
+          ? 0
+          : a.reason === "missing"
+            ? -1
+            : b.reason === "missing"
+              ? 1
+              : a.reason === "incomplete"
+                ? -1
+                : 1
+      ) ||
       a.brand.localeCompare(b.brand) ||
       a.flavor.localeCompare(b.flavor),
   );

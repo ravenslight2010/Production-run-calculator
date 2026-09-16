@@ -22,6 +22,107 @@ const SCREEN_RULES: Record<string, readonly string[]> = {
   "reported issues field checks": ["button-name", "color-contrast", "heading-order"],
 };
 
+/*
+ * Contrast audit finding log for the operational themes:
+ * - Stoppage Pause label (`text-blue-400/70`) failed on `bg-blue-950/20`.
+ * - Inactive Pause icon (`text-blue-400/50`) failed on the surrounding card.
+ * - Stoppage Manual label (`text-violet-400/70`) failed on the surrounding card.
+ * - Inactive Stoppage icon (`text-orange-400/50`) failed on the surrounding card.
+ * - Active Stoppage label (`text-orange-400/70`) passed on `bg-orange-950/20`;
+ *   keep its existing opacity because that combination is not failing.
+ * - Light-theme manual and completed-stop labels use darker violet/orange
+ *   foregrounds on the light card surface; the active-stop row uses a light
+ *   orange background with the same darker orange foreground.
+ * - Surplus Mix count/name/amount labels passed on `bg-sky-950/30`; keep their
+ *   existing opacity because those combinations are not failing.
+ */
+const OPERATIONAL_CONTRAST_FIXTURES = [
+  {
+    theme: "dark",
+    id: "stoppage-pause-label",
+    wrapperClass: "bg-blue-950/20",
+    textClass: "text-[10px] font-semibold uppercase tracking-wider text-blue-400",
+    text: "Pause",
+  },
+  {
+    theme: "dark",
+    id: "stoppage-inactive-pause-icon",
+    wrapperClass: "bg-card/40",
+    textClass: "text-blue-400",
+    text: "Pause icon",
+  },
+  {
+    theme: "dark",
+    id: "stoppage-manual-label",
+    wrapperClass: "bg-card/40",
+    textClass: "text-violet-300",
+    text: "Manual",
+  },
+  {
+    theme: "dark",
+    id: "stoppage-active-label",
+    wrapperClass: "bg-orange-950/20",
+    textClass: "text-orange-400/70",
+    text: "Stop",
+  },
+  {
+    theme: "dark",
+    id: "stoppage-inactive-icon",
+    wrapperClass: "bg-card/40",
+    textClass: "text-orange-400",
+    text: "Stop icon",
+  },
+  {
+    theme: "light",
+    id: "stoppage-manual-label",
+    wrapperClass: "bg-violet-50/70",
+    textClass: "text-violet-700",
+    text: "Manual",
+  },
+  {
+    theme: "light",
+    id: "stoppage-active-label",
+    wrapperClass: "bg-orange-100/70",
+    textClass: "text-orange-800",
+    text: "Stop",
+  },
+  {
+    theme: "light",
+    id: "stoppage-completed-label",
+    wrapperClass: "bg-orange-50/70",
+    textClass: "text-orange-800",
+    text: "Stop",
+  },
+  {
+    theme: "light",
+    id: "stoppage-inactive-icon",
+    wrapperClass: "bg-card/40",
+    textClass: "text-orange-800",
+    text: "Stop icon",
+  },
+  {
+    theme: "dark",
+    id: "surplus-count",
+    wrapperClass: "bg-sky-950/30",
+    textClass: "text-xs text-sky-400/80",
+    text: "(2 mixes)",
+  },
+  {
+    theme: "dark",
+    id: "surplus-name",
+    wrapperClass: "bg-sky-950/30",
+    textClass: "text-sky-200/90",
+    text: "Mix name",
+  },
+  {
+    theme: "dark",
+    id: "surplus-amount-label",
+    wrapperClass: "bg-sky-950/30",
+    textClass: "text-[11px] text-sky-300/80",
+    text: "lbs on hand",
+  },
+] as const;
+
 function signupCode(): string {
   if (!process.env.STAFF_SIGNUP_CODE) {
     throw new Error("STAFF_SIGNUP_CODE must be configured for accessibility smoke tests.");
@@ -33,6 +134,7 @@ async function scan(
   page: Page,
   screen: string,
   additionalDisabledRules: string[] = [],
+  include?: string,
 ): Promise<void> {
   const documentedRules = new Set([
     ...DOCUMENT_SHELL_RULES,
@@ -49,11 +151,12 @@ async function scan(
     undocumentedRules,
     `Accessibility scan on ${screen} used an undocumented rule suppression`,
   ).toEqual([]);
-  const results = await new AxeBuilder({ page })
+  let builder = new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "best-practice"])
     .exclude("#replit-dev-banner")
-    .disableRules(additionalDisabledRules)
-    .analyze();
+    .disableRules(additionalDisabledRules);
+  if (include) builder = builder.include(include);
+  const results = await builder.analyze();
   const details = results.violations.map((violation) => {
     const nodes = violation.nodes
       .map((node) => `${node.target.join(", ")}: ${node.failureSummary}`)
@@ -282,10 +385,11 @@ async function signUp(page: Page, role: "manager" | "supervisor" = "manager"): P
       }
       await currentPage.waitForTimeout(500);
       await currentPage.keyboard.press("Escape");
-      if (role !== "manager") {
-        await currentPage.reload({ waitUntil: "domcontentloaded" });
-        await currentPage.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
-      }
+      // Role and capability changes happen after the initial app hydration.
+      // Reload every fixture so the browser exercises the role that was just
+      // persisted instead of retaining the pre-seed operator snapshot.
+      await currentPage.reload({ waitUntil: "domcontentloaded" });
+      await currentPage.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
     },
   });
 }
@@ -307,6 +411,60 @@ test.beforeAll(async () => {
 
 async function seedPendingRun(page: Page): Promise<string> {
   const runId = uniqueTestId("a11y_run");
+  const date = new Date().toISOString().slice(0, 10);
+  const now = Date.now();
+  const db = new Client({ connectionString: process.env.DATABASE_URL });
+  try {
+    await db.connect();
+    await db.query(
+      "DELETE FROM daily_sync WHERE date = $1 AND scope = 'live'",
+      [date],
+    );
+  } finally {
+    await db.end().catch(() => {});
+  }
+  const stoppages = [
+    {
+      id: `${runId}-active`,
+      reason: "Conveyor check",
+      startedAt: now - 60_000,
+      type: "stop",
+    },
+    {
+      id: `${runId}-manual`,
+      reason: "Manual cleanup",
+      startedAt: now - 180_000,
+      endedAt: now - 120_000,
+      type: "manual",
+    },
+    {
+      id: `${runId}-paused`,
+      reason: "Ingredient refill",
+      startedAt: now - 360_000,
+      type: "pause",
+    },
+    {
+      id: `${runId}-completed`,
+      reason: "Safety reset",
+      startedAt: now - 600_000,
+      endedAt: now - 450_000,
+      type: "stop",
+    },
+  ];
+  const payload = {
+    dayState: {
+      date,
+      runs: [{
+        id: runId,
+        brand: "Accessibility",
+        flavor: "Smoke",
+        seeded: false,
+        stoppages,
+      }],
+      currentIndex: 0,
+      resetAt: 0,
+    },
+  };
   await page.evaluate(() => {
     const keys = Array.from({ length: localStorage.length }, (_, index) =>
       localStorage.key(index),
@@ -316,7 +474,7 @@ async function seedPendingRun(page: Page): Promise<string> {
     }
     localStorage.removeItem("run-calc-day");
   });
-  await page.addInitScript((id: string) => {
+  await page.addInitScript((seed: { payload: typeof payload; runId: string }) => {
     // Init scripts run before every navigation, including reloads triggered by
     // authenticated startup (for example, a sandbox refresh). Keep the seed
     // idempotent so a startup reload cannot strand this journey on the blank
@@ -326,21 +484,28 @@ async function seedPendingRun(page: Page): Promise<string> {
       const day = raw ? JSON.parse(raw) as {
         runs?: Array<{ id?: string; brand?: string; flavor?: string; startedAt?: string; endedAt?: string }>;
       } : {};
-      if (day.runs?.some((run) => run.id === id)) return;
+      if (day.runs?.some((run) => run.id === seed.runId)) return;
       if (day.runs?.some((run) => run.brand || run.flavor || run.startedAt || run.endedAt)) return;
     } catch {
       // Replace malformed fixture state below.
     }
-    localStorage.setItem(
-      "run-calc-day",
-      JSON.stringify({
-        date: new Date().toISOString().slice(0, 10),
-        runs: [{ id, brand: "Accessibility", flavor: "Smoke", seeded: false }],
-        currentIndex: 0,
-        resetAt: 0,
-      }),
-    );
-  }, runId);
+    localStorage.setItem("run-calc-day", JSON.stringify(seed.payload.dayState));
+  }, { payload, runId });
+  await page.route("**/api/sync/today**", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: {
+        "X-Sync-Canonical-Revision": "1",
+        "X-Sync-Server-Time": String(now),
+      },
+      body: JSON.stringify(payload),
+    });
+  });
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
   await expect
@@ -424,9 +589,67 @@ test.describe("accessibility smoke", () => {
     await assertZoomedUsable(page, "sign-in");
   });
 
+  test("stoppage and surplus labels pass contrast on operational backgrounds", async ({ page }) => {
+    await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
+    await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
+    await page.evaluate((fixtures) => {
+      const root = document.createElement("main");
+      root.id = "operational-contrast-audit";
+      root.innerHTML = fixtures
+        .map(
+          (fixture) =>
+            `<section id="${fixture.theme}-${fixture.id}" data-theme="${fixture.theme}" class="${fixture.wrapperClass}" style="padding: 12px; margin: 4px"><span class="${fixture.textClass}">${fixture.text}</span></section>`,
+        )
+        .join("");
+      document.body.append(root);
+    }, OPERATIONAL_CONTRAST_FIXTURES);
+
+    const violations: string[] = [];
+    for (const theme of ["dark", "light"] as const) {
+      await page.evaluate((activeTheme) => {
+        const root = document.querySelector<HTMLElement>("#operational-contrast-audit");
+        if (!root) throw new Error("Operational contrast audit fixture was not mounted");
+        document.documentElement.classList.toggle("dark", activeTheme === "dark");
+        for (const section of root.querySelectorAll<HTMLElement>("[data-theme]")) {
+          section.hidden = section.dataset.theme !== activeTheme;
+        }
+      }, theme);
+      const results = await new AxeBuilder({ page })
+        .include("#operational-contrast-audit")
+        .withRules(["color-contrast"])
+        .analyze();
+      violations.push(
+        ...results.violations.map((violation) => {
+          const nodes = violation.nodes
+            .map((node) => `${node.target.join(", ")}: ${node.failureSummary}`)
+            .join(" | ");
+          return `${theme}: ${violation.id}: ${nodes}`;
+        }),
+      );
+    }
+    expect(violations, "Operational stoppage and surplus label contrast audit").toEqual([]);
+  });
+
   test("authenticated staff workflows expose accessible controls and dialogs", async ({ page }) => {
     await signUp(page);
     await seedPendingRun(page);
+    await page.getByRole("button", { name: "More" }).click();
+    await page.getByRole("menuitem", { name: "Stoppages", exact: true }).click();
+    const stoppageLog = page.getByTestId("stoppage-log");
+    await expect(stoppageLog).toBeVisible();
+    await expect(stoppageLog).toContainText("4 events");
+    await expect(stoppageLog.getByText("Stop", { exact: true }).first()).toBeVisible();
+    await expect(stoppageLog.getByText("Manual", { exact: true })).toBeVisible();
+    await expect(stoppageLog.getByText("Pause", { exact: true })).toBeVisible();
+    const stoppageContrast = await new AxeBuilder({ page })
+      .include('[data-testid="stoppage-log"]')
+      .withRules(["color-contrast"])
+      .analyze();
+    expect(
+      stoppageContrast.violations,
+      "Rendered stoppage log color contrast audit",
+    ).toEqual([]);
+    await page.getByTestId("tab-run").click();
     await scan(page, "live run", ["button-name", "color-contrast", "heading-order"]);
     await assertTargets(page, "live run");
     await assertKeyboardTraversal(page, "live run");
@@ -565,6 +788,36 @@ test.describe("accessibility smoke", () => {
     ).toBeGreaterThanOrEqual(3);
     await scan(page, "reported issues field checks", ["button-name", "color-contrast", "heading-order"]);
     await assertKeyboardTraversal(page, "reported issues field checks", 8);
+  });
+
+  test("schedule calendar is labeled, keyboard operable, and free of obvious violations", async ({
+    page,
+  }) => {
+    await signUp(page);
+    await page.getByRole("button", { name: "More" }).click();
+    await page.getByRole("menuitem", { name: "Schedule", exact: true }).click();
+    const scheduledDaysDialog = page.getByRole("dialog", { name: "Scheduled Days" });
+    await expect(scheduledDaysDialog).toBeVisible();
+    await scheduledDaysDialog.getByRole("button", { name: "Schedule New Day" }).click();
+    const scheduleEditor = page.getByRole("dialog", { name: /Plan for/ });
+    await assertDialogContract(page, scheduleEditor, "schedule editor");
+    const scheduleDateTrigger = scheduleEditor.getByRole("button", {
+      name: "Choose production date",
+    });
+    await expect(scheduleDateTrigger).toBeVisible();
+    await scheduleDateTrigger.focus();
+    await page.keyboard.press("Enter");
+    const scheduleCalendar = page.locator('[data-slot="calendar"]');
+    await expect(scheduleCalendar.getByRole("grid")).toBeVisible();
+    await scan(page, "schedule calendar", [], '[data-slot="calendar"]');
+    const selectedDay = scheduleCalendar.locator('button[data-selected-single="true"]');
+    await expect(selectedDay).toBeVisible();
+    await selectedDay.focus();
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("Enter");
+    await expect(scheduleCalendar).toBeHidden();
+    await scheduleEditor.getByRole("button", { name: "Close schedule editor" }).click();
+    await expect(scheduleEditor).toBeHidden();
   });
 
   test("supervisors can review field checks without physical-device attestation controls", async ({ page }) => {

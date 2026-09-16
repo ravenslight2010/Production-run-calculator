@@ -104,7 +104,7 @@ isValidation = true
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "pnpm --filter @workspace/run-calculator run test"
+args = "pnpm --filter @workspace/run-calculator run test:budget"
 
 [[workflows.workflow]]
 name = "test:rules"

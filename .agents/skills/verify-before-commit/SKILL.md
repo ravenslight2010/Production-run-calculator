@@ -21,4 +21,8 @@ Run before every commit, push, or "ready" claim so "works on my (ARM) machine, b
 
 7. **Rely on CI for the real test gate** — unit+API tests and Docker build only run correctly on the x64 CI runners and need Postgres. After pushing, watch the `ci.yml` workflow (Typecheck, Unit tests, API tests, Web+API Build, Docker, Security) until green. If the same blocking CI condition recurs for three consecutive turns, report it as blocked.
 
-8. **Only then commit/push** — commit with a clear message covering what and why. Push via `git push "https://x-access-token:${TOKEN}@github.com/ravenslight2010/Production-run-calculator.git" main`, then sync the tracking ref with `git update-ref refs/remotes/origin/main <SHA>`.
+8. **Only then commit/push** — commit with a clear message covering what and why.
+   For the legacy guarded helper, configure the workspace `GIT_URL` secret and
+   run `pnpm run push:main -- --message "Describe the change"`; it keeps the
+   fetch URL credential-free and injects the secret only for the push
+   subprocess. Never put a token in a remote URL, command, or repository file.

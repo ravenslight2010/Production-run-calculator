@@ -10,6 +10,7 @@ import {
   computeLinePhases,
   type LinePhases,
 } from "./linePhases";
+import { FACTORY_TIMING_DEFAULTS } from "@workspace/factory-constants";
 
 /** Versioned, complete snapshot accepted by the operational read model. */
 export interface OperationalSyncSnapshotV1 extends ServerCalcSyncPayload {
@@ -188,7 +189,9 @@ export function deriveOperationalRunView(
   const phase = computeLinePhases({
     elapsedBatchSec: elapsed, pausedAt: run.pausedAt, lastResumeWallMs: latestClosedPause?.endedAt ?? 0,
     lastPauseStartWallMs: latestClosedPause?.startedAt ?? 0, pauseStopsTunnel: latestPause?.stopTunnel,
-    lastPauseStopsTunnel: latestClosedPause?.stopTunnel, preTunnelMin: 2.5, postTunnelMin: 2.5,
+    lastPauseStopsTunnel: latestClosedPause?.stopTunnel,
+    preTunnelMin: FACTORY_TIMING_DEFAULTS.preTunnelMin,
+    postTunnelMin: FACTORY_TIMING_DEFAULTS.postTunnelMin,
     freezerTime: Number(effective.freezerTime) || 0, nowMs, endedAt: run.endedAt,
     runStatus: status,
   });

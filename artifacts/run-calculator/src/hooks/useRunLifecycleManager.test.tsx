@@ -45,13 +45,35 @@ function setup(state: DayState) {
 }
 
 describe("useRunLifecycleManager", () => {
-  it("does not mutate when a foreground barrier blocks Start", () => {
-    const { deps, spies } = setup(day([run("a")]));
-    deps.foregroundSyncBarrierRef.current = true;
-    const { result } = renderHook(() => useRunLifecycleManager(deps));
-    act(() => result.current.startRun());
-    expect(spies.queue).not.toHaveBeenCalled();
-    expect(spies.save).not.toHaveBeenCalled();
+  it("does not mutate while the foreground barrier blocks lifecycle commands", () => {
+    const scenarios = [
+      {
+        state: day([run("a")]),
+        invoke: (manager: ReturnType<typeof useRunLifecycleManager>) => manager.startRun(),
+      },
+      {
+        state: day([run("a", { startedAt: 10 })]),
+        invoke: (manager: ReturnType<typeof useRunLifecycleManager>) => manager.pauseRun(),
+      },
+      {
+        state: day([run("a", { startedAt: 10, pausedAt: 20 })]),
+        invoke: (manager: ReturnType<typeof useRunLifecycleManager>) => manager.resumeRun(),
+      },
+      {
+        state: day([run("a", { startedAt: 10 })]),
+        invoke: (manager: ReturnType<typeof useRunLifecycleManager>) => manager.endRun(),
+      },
+    ];
+
+    for (const scenario of scenarios) {
+      const { deps, spies } = setup(scenario.state);
+      deps.foregroundSyncBarrierRef.current = true;
+      const hook = renderHook(() => useRunLifecycleManager(deps));
+      act(() => scenario.invoke(hook.result.current));
+      expect(spies.queue).not.toHaveBeenCalled();
+      expect(spies.save).not.toHaveBeenCalled();
+      hook.unmount();
+    }
   });
 
   it("blocks every lifecycle command while form ownership is handing off", () => {

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 
 # Validate explicitly staged changes, commit them, and push directly to
-# origin/main. This script intentionally does not stage files or rewrite the
-# configured remote, so callers remain in control of both the change set and
-# authentication.
+# origin/main. Fetches use the credential-free origin URL. The authenticated
+# push URL is supplied by the workspace GIT_URL secret for one subprocess only;
+# it is never written to Git configuration.
 
 set -euo pipefail
 
@@ -14,8 +14,8 @@ Usage: pnpm run push:main -- --message "Commit message"
 Requires:
   - the current branch to be main
   - explicitly staged changes and no unstaged worktree changes
-  - a configured origin remote
-  - credentials that can push origin/main
+  - a configured origin remote with a credential-free fetch URL
+  - the workspace GIT_URL secret, containing the authenticated push URL
   - when push.main.requireSigned=true, a working Git commit-signing setup
 
 The command runs `pnpm run check:workflows` and `pnpm run typecheck` before
@@ -86,6 +86,15 @@ remote_url=$(git remote get-url origin 2>/dev/null) \
   || fail "the origin remote is not configured"
 [[ -n "$remote_url" ]] \
   || fail "the origin remote is empty"
+if [[ "$remote_url" =~ ^https?://[^/@[:space:]]+@ ]]; then
+  fail "the origin fetch URL must not embed credentials; remove them and retry"
+fi
+
+push_url=${GIT_URL:-}
+[[ -n "$push_url" ]] \
+  || fail "the workspace GIT_URL secret is not configured; no push was attempted"
+[[ "$push_url" != *$'\n'* && "$push_url" != *$'\r'* ]] \
+  || fail "the workspace GIT_URL secret contains invalid line breaks; no push was attempted"
 
 require_signed_commit=0
 signing_policy=$(git config --get push.main.requireSigned 2>/dev/null || true)
@@ -170,10 +179,19 @@ if [[ "$require_signed_commit" -eq 1 ]]; then
 fi
 
 push_output=''
-if ! push_output=$(git push --porcelain origin HEAD:main 2>&1); then
+# Inject the authenticated URL through Git's process-local configuration. This
+# keeps both fetch metadata and the repository's persistent config
+# credential-free while avoiding the secret in the subprocess argument list.
+if ! push_output=$( \
+  GIT_CONFIG_COUNT=1 \
+  GIT_CONFIG_KEY_0=remote.origin.pushurl \
+  GIT_CONFIG_VALUE_0="$push_url" \
+  GIT_TERMINAL_PROMPT=0 \
+  git push --porcelain origin HEAD:main 2>&1
+); then
   print_git_output "$push_output"
   if grep -Eqi "authentication failed|could not read username|permission denied|access denied|unauthori[sz]ed|403|401" <<< "$push_output"; then
-    fail "authentication failed while pushing origin/main; configure GitHub credentials for origin and retry (the commit remains local)"
+    fail "authentication failed while pushing origin/main; rotate the credential and update the workspace GIT_URL secret before retrying (the commit remains local)"
   fi
   fail "push to origin/main was rejected or failed; inspect the message above (the commit remains local)"
 fi

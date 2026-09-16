@@ -8,6 +8,7 @@
     "./linePhases": "./src/linePhases.ts"
   },
   "dependencies": {
+    "@workspace/factory-constants": "workspace:*",
     "@workspace/inventory-math": "workspace:*"
   },
   "scripts": {

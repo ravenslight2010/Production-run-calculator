@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 1,
+  "reviewedAt": "2026-09-15",
+  "captureWorkflow": "TypeScript 7 resource capture",
+  "approvedBudgets": {
+    "maxElapsedRatio": 1.25,
+    "maxPeakRssRatio": 1.25,
+    "maxCandidateElapsedMs": 60000,
+    "maxCandidatePeakRssKiB": 1048576,
+    "minimumRevisions": 3,
+    "requiredModes": ["cold", "warm"]
+  },
+  "samples": [
+    {
+      "sourceRevision": "305fafc03977cb3cbe1082b6b526dfefcadbd4ac",
+      "workflowRunId": 35031618230,
+      "workflowRunUrl": "https://github.com/ravenslight2010/Production-run-calculator/actions/runs/35031618230",
+      "workflowConclusion": "success",
+      "evidenceCommit": "82f0d8f49fadbd18b927095cdf2cf047cbf84de0",
+      "reportPath": "release-evidence/typescript-7-comparison.json",
+      "reportSha256": "de86778d4467ae863b583b4bd9c49447fc6aa335812847cd628a87b4309bceef",
+      "reportSchemaVersion": 3,
+      "reportStatus": "ADVISORY_DRIFT",
+      "runner": {
+        "platform": "linux",
+        "arch": "x64",
+        "image": "ubuntu24@20260907.300.1",
+        "hardwareClass": "4257db730634e718580e808052576a3c85b7139e4d5613aa13cae9cab629cad5",
+        "logicalCpuCount": 4,
+        "memoryGiB": 16
+      },
+      "measurementRows": {"cold": 7, "warm": 7},
+      "coldMaxima": {
+        "candidateElapsedMs": 3273,
+        "elapsedRatio": 0.2479690827352315,
+        "candidatePeakRssKiB": 844048,
+        "peakRssRatio": 0.9682292049041921
+      },
+      "warmMaxima": {
+        "candidateElapsedMs": 3545,
+        "elapsedRatio": 0.2495727886727968,
+        "candidatePeakRssKiB": 907260,
+        "peakRssRatio": 1.0402067434693278
+      }
+    },
+    {
+      "sourceRevision": "f76eb757dd18112eac8a616e66bfd08c09fd6261",
+      "workflowRunId": 35031621480,
+      "workflowRunUrl": "https://github.com/ravenslight2010/Production-run-calculator/actions/runs/35031621480",
+      "workflowConclusion": "success",
+      "evidenceCommit": "306bf9794827e8a4d100890022b332073a5d5ee4",
+      "reportPath": "release-evidence/typescript-7-comparison.json",
+      "reportSha256": "186588aa4d04de8ad10cca5c56f82304a1723d27a123fc1b83ae07b787230251",
+      "reportSchemaVersion": 3,
+      "reportStatus": "ADVISORY_DRIFT",
+      "runner": {
+        "platform": "linux",
+        "arch": "x64",
+        "image": "ubuntu24@20260907.300.1",
+        "hardwareClass": "6ea4b7af976f0edc0e08388f53729df6aa6c065da39a442538dcf71f34c3d6d6",
+        "logicalCpuCount": 4,
+        "memoryGiB": 16
+      },
+      "measurementRows": {"cold": 7, "warm": 7},
+      "coldMaxima": {
+        "candidateElapsedMs": 3708,
+        "elapsedRatio": 0.25005417118093176,
+        "candidatePeakRssKiB": 875712,
+        "peakRssRatio": 1.0028675871041035
+      },
+      "warmMaxima": {
+        "candidateElapsedMs": 3708,
+        "elapsedRatio": 0.2458557588805167,
+        "candidatePeakRssKiB": 869536,
+        "peakRssRatio": 1.052941575363035
+      }
+    },
+    {
+      "sourceRevision": "7b0fe2d72de5f51d812e3e3b348bbc9b01c48831",
+      "workflowRunId": 35031624563,
+      "workflowRunUrl": "https://github.com/ravenslight2010/Production-run-calculator/actions/runs/35031624563",
+      "workflowConclusion": "success",
+      "evidenceCommit": "47fc4905c95a9224de4d5876beec9d51888235c1",
+      "reportPath": "release-evidence/typescript-7-comparison.json",
+      "reportSha256": "4bb33c260f4d49fb00390a2b707fb0959a7c6cdcd960088f172a6c769bc2f6b6",
+      "reportSchemaVersion": 3,
+      "reportStatus": "ADVISORY_DRIFT",
+      "runner": {
+        "platform": "linux",
+        "arch": "x64",
+        "image": "ubuntu24@20260907.300.1",
+        "hardwareClass": "93cc4f1f24cfe17719b4d629a398b67d66d1774225ad5d45006eb19f9895e5b8",
+        "logicalCpuCount": 4,
+        "memoryGiB": 16
+      },
+      "measurementRows": {"cold": 7, "warm": 7},
+      "coldMaxima": {
+        "candidateElapsedMs": 2003,
+        "elapsedRatio": 0.23498305084745763,
+        "candidatePeakRssKiB": 890492,
+        "peakRssRatio": 1.022350704458201
+      },
+      "warmMaxima": {
+        "candidateElapsedMs": 2011,
+        "elapsedRatio": 0.24411764705882352,
+        "candidatePeakRssKiB": 921160,
+        "peakRssRatio": 1.0405013419119309
+      }
+    }
+  ],
+  "integrity": {
+    "algorithm": "sha256",
+    "scope": "record-excluding-integrity",
+    "sha256": "9c65b54481949460e5f6cfc4e1ca34b264939edee0f13902617d6f5b37d35466"
+  }
+}
