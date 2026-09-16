@@ -1,6 +1,6 @@
 # TypeScript 7 Migration Research
 
-**Assessment date:** 2026-09-15  
+**Assessment date:** 2026-09-16
 **Current compiler:** TypeScript 6.0.3  
 **Compared compiler:** TypeScript 7.0.2  
 **Recommendation:** **Pilot TypeScript 7 in parallel; do not replace TypeScript 6 yet.**
@@ -23,7 +23,7 @@ The production toolchain should not switch yet for three reasons:
 
 1. TypeScript 7.0 deliberately has no stable programmatic API. Its root `typescript` export
    exposes version information, not the TypeScript 6 parser/traversal/transpile API used by
-   seven repository files.
+   nine repository files.
 2. The current TypeDoc 0.28.20 peer range ends at TypeScript 6.0.x. TypeDoc is pulled in by
    Orval, so replacing the root compiler would make the resolved code-generation toolchain
    unsupported even though Orval itself does not declare a TypeScript peer.
@@ -141,17 +141,30 @@ acceptable production migration path.
 | Consumer | TypeScript 6 API use | TypeScript 7 disposition |
 | --- | --- | --- |
 | `scripts/src/check-evaluation-report-retention.mts` | Parse source, AST node types and guards, traversal | Keep on TypeScript 6 compatibility API. Later evaluate a stable TypeScript 7 AST/parser API. |
+| `scripts/src/compare-declaration-contracts.mts` | Scanner, source-file parsing, declaration AST inspection, import preprocessing | Keep on TypeScript 6 compatibility API. The declaration comparison is itself a migration safeguard, so it must not move to an unstable parser while it is the evidence source. |
 | `artifacts/run-calculator/e2e/validate-browser-spec-syntax.ts` | Parse diagnostics, diagnostic flattening, filesystem read | Keep on TypeScript 6. A CLI/subprocess syntax check is a possible later isolation strategy. |
 | `artifacts/run-calculator/src/freezerDomainIsolation.test.ts` | TSX parse and AST traversal | Keep test tooling on TypeScript 6 until a stable native AST API exists. |
 | `artifacts/run-calculator/src/blankRunValueSync.test.ts` | Parse and evaluate AST literals | Keep test tooling on TypeScript 6 until a stable native AST API exists. |
 | `artifacts/run-calculator/src/runValueStampGuard.test.ts` | TSX parse and AST traversal | Keep test tooling on TypeScript 6 until a stable native AST API exists. |
 | `artifacts/run-calculator/src/applyCaseUpdateChoices.web.test.ts` | TSX parse/traversal and `transpileModule` | Keep on TypeScript 6. `transpileModule` has no stable TypeScript 7.0 root equivalent. |
+| `artifacts/run-calculator/src/e2eIsolation.test.ts` | TS parsing, AST traversal, call-expression and lexical-binding inspection | Keep test tooling on TypeScript 6 until a stable native AST API exists; this guard protects browser fixture database isolation. |
 | `artifacts/run-calculator/scripts/check-vite-config-loading.mjs` | `preProcessFile` for import discovery | Keep on TypeScript 6 for the pilot. The import scanner can later be replaced or isolated; it is not safe to assume the native unstable AST is compatible. |
 
-The current direct-consumer smoke covers the retention checker, Vite config loading, and
-all five AST-based client test files behind the TypeScript 6 boundary.
+The current direct-consumer smoke covers the retention checker, declaration-contract
+comparison, browser syntax validation, Vite config loading, and all five AST-based client
+test files behind the TypeScript 6 boundary.
 
 ## Official TypeScript 7 compatibility findings
+
+The exact TypeScript 7 version assessed here is **7.0.2**, the latest stable TypeScript 7
+release in Microsoft's release metadata as of 2026-09-16. Its package root exports only
+version metadata; the parser, AST, scanner, visitor, and related programmatic surfaces are
+under `typescript/unstable/*`. TypeScript 7.1.0 is still a beta, and Microsoft's 7.1
+iteration plan lists 2026-11-10 as the planned stable release date. Therefore no stable
+TypeScript 7 programmatic API version is supported yet, and the nine consumers remain on
+the exact TypeScript 6.0.3 boundary below. The official compiler API wiki also warns that
+its current examples describe TypeScript 6 and earlier and that TypeScript 7.1 will have a
+different API.
 
 Microsoft describes TypeScript 7.0 as command-line compatible with TypeScript 6.0 when
 TypeScript 6 uses stable type ordering and does not suppress deprecations. The repository
@@ -525,11 +538,13 @@ Repository evidence:
 - `scripts/package.json`
 - `scripts/tsconfig.json`
 - `scripts/src/check-evaluation-report-retention.mts`
+- `scripts/src/compare-declaration-contracts.mts`
 - `artifacts/api-server/package.json`
 - `artifacts/run-calculator/package.json`
 - `artifacts/run-calculator/tsconfig.json`
 - `artifacts/run-calculator/scripts/check-vite-config-loading.mjs`
 - `artifacts/run-calculator/e2e/validate-browser-spec-syntax.ts`
+- `artifacts/run-calculator/src/e2eIsolation.test.ts`
 - the five AST-based tests listed in the direct-consumer table
 - `docs/evidence/typescript-7-comparison-2026-09-15.json`
 - `docs/evidence/reproduce-typescript-7-comparison.sh`
@@ -539,6 +554,13 @@ Official and package evidence:
 - [Announcing TypeScript 7.0](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/)
   — native compiler release, compatibility conditions, removed options, side-by-side
   TypeScript 6 package, API status, parallel build controls, and editor limitations.
+- [TypeScript releases](https://github.com/microsoft/TypeScript/releases)
+  — 7.0.2 is the latest stable TypeScript 7 release at this reassessment.
+- [TypeScript 7.1 iteration plan](https://github.com/microsoft/TypeScript/issues/63703)
+  — 7.1 is still in beta, with stable release planned for 2026-11-10.
+- [Using the Compiler API](https://github.com/microsoft/TypeScript/wiki/Using-the-Compiler-API)
+  — official warning that the current API documentation describes TypeScript 6 and earlier
+  and that TypeScript 7.1 will have a different API.
 - [TypeScript 7 staging repository](https://github.com/microsoft/typescript-go)
   and [compatibility changes](https://github.com/microsoft/typescript-go/blob/main/CHANGES.md)
   — native implementation and tracked TypeScript 6/7 behavior differences.
@@ -742,9 +764,15 @@ The remaining task-ready gaps are:
 ## External compatibility evidence and recheck boundary
 
 - Microsoft's [TypeScript 7 announcement](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/)
-  documents side-by-side TypeScript 6 compatibility and the transition package. It also states
-  that the stable programmatic API is planned for a later release, so this audit does not
-  treat TypeScript 7.0's unstable entry points as a migration target.
+  documents side-by-side TypeScript 6 compatibility and the transition package. The
+  [official release list](https://github.com/microsoft/TypeScript/releases) still identifies
+  7.0.2 as the latest stable TypeScript 7 release, while the
+  [7.1 iteration plan](https://github.com/microsoft/TypeScript/issues/63703) still marks
+  7.1 as beta with a planned 2026-11-10 stable release. The
+  [compiler API guide](https://github.com/microsoft/TypeScript/wiki/Using-the-Compiler-API)
+  warns that its current API describes TypeScript 6 and earlier and that TypeScript 7.1
+  will have a different API. No stable TypeScript 7 programmatic API is available at this
+  reassessment, so the nine consumers remain on TypeScript 6.0.3.
 - The resolved `typedoc@0.28.20` package metadata in `pnpm-lock.yaml` declares a peer range
   ending at `6.0.x`. TypeDoc's [TypeScript 7 support issue](https://github.com/TypeStrong/typedoc/issues/3098)
   explains that the API rewrite requires TypeDoc-specific work; the issue status must be
@@ -782,7 +810,7 @@ The following checks were run while preparing this audit:
   count/prose consistency; it does not make that artifact current.
 - `pnpm --filter @workspace/scripts exec tsx --test ./src/compare-typescript-7.test.mts ./src/compare-declaration-contracts.test.mts`
   passed all 18 focused comparison/contract tests.
-- `pnpm run check:typescript-api-v6` passed all eight boundary tests and reported zero direct
+- `pnpm run check:typescript-api-v6` passed all 12 boundary tests and reported zero direct
   import bypasses.
 - `pnpm run check:editor-typescript` failed as expected in this non-editor process because no
   live language server was available. This remains B5.
