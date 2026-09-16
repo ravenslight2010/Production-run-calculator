@@ -32,21 +32,29 @@ describe("shared live calculation boundary", () => {
 
   it("fails closed on buffer-only Sauce and Frontline quantities without pizzas per case", () => {
     const result = computeServerCalc({
-      dayState: { runs: [{ id: "run-override", startedAt: 1000 }], currentIndex: 0 },
+      dayState: {
+        runs: [{ id: "invalid", brand: "A", flavor: "B" }] as unknown as CalcRunMeta[],
+        currentIndex: 0,
+      },
       runValues: {
-        "run-override": {
-          pizzasPerCase: 10,
-          casesPerSkid: 20,
-          casesNeeded: 100,
-          crustsPerCycle: 4,
-          cycleSpeed: 10,
+        invalid: {
+          casesNeeded: 240,
+          pizzasPerCase: 0,
+          casesPerLayer: 10,
+          crustsPerCycle: 1,
+          cycleSpeed: 100,
           speedAdjustment: 1,
-          tempCrustsPerCycle: 5,
-          tempCycleSpeed: 12,
-          tempFreezerTime: 30,
+          sauceOzPerPizza: 3,
+          sauceBarrelLbs: 55,
+          app1Type: "Cheese",
+          app1OzPerPizza: 2.9,
+          app1CheeseRecipe: [{ ingredient: "A", lbs: 55.6 }],
+          pep1Type: "Pepperoni",
+          pep1OzPerPizza: 1,
+          pep1Sticks: 10,
         },
       },
-    }, [], 2000);
+    }, ["Pepperoni"], 1000);
     expect(result?.calc).toMatchObject({
       sauceBatches: 0,
       sauceDepletionSec: 0,
@@ -97,19 +105,8 @@ describe("shared live calculation boundary", () => {
     });
 
     const schedule = computeAutoTrackSchedule({
-      runId: "run-1", startedAt: 1000, metaUpdatedAt: 2000, nowMs: 5000,
-      v: {
-        pizzasPerCase: 12, freezerTime: 30,
-        app1Type: "", app1CheeseRecipe: [], app1BatchLbs: 0, app1OzPerPizza: 0,
-        app2Type: "", app2CheeseRecipe: [], app2BatchLbs: 0, app2OzPerPizza: 0,
-        app3Type: "", app3CheeseRecipe: [], app3BatchLbs: 0, app3OzPerPizza: 0,
-        app4Type: "", app4CheeseRecipe: [], app4BatchLbs: 0, app4OzPerPizza: 0,
-      } as never,
-      calc: {
-        pressDone: false, sauceDepletionSec: 0, ppm: 60, perTray: 0, perBatch: 0,
-        app1Batches: 0, app2Batches: 0, app3Batches: 0, app4Batches: 0,
-      } as never,
-      coordination: { case: { generation: "run-1:1000", nextDueAt: 4000, sequence: 3 } },
+      ...input,
+      serverWallOwnership: { case: 3 },
     });
     expect(schedule.entries).toContainEqual({
       channel: "case",
@@ -209,38 +206,6 @@ describe("shared live calculation boundary", () => {
     };
     const request = { snapshot: base as never, date: "2026-09-06", runId: "run-1", nowMs: 100_000, snapshotMetadata: { snapshotId: "s1", capturedAt: 1_000, resetAt: 10 } };
     const view = deriveOperationalRunView(request);
-    const base = {
-      syncVersion: 1 as const, completeness: "complete" as const,
-      dayState: { date: "2026-09-06", resetAt: 10, currentIndex: 0, substitutions: [{ action: "replace" }], runs: [{ id: "run-1", startedAt: 1_000 }] },
-      runValues: { "run-1": { pizzasPerCase: 10, casesPerSkid: 20, casesNeeded: 100, crustsPerCycle: 4, cycleSpeed: 10, speedAdjustment: 1, freezerTime: 10, tempCycleSpeed: 12 } },
-    };
-    const schedule = computeAutoTrackSchedule({
-      runId: "run-1", startedAt: 1000, metaUpdatedAt: 2000, nowMs: 5000,
-      v: {
-        pizzasPerCase: 12, freezerTime: 30,
-        app1Type: "", app1CheeseRecipe: [], app1BatchLbs: 0, app1OzPerPizza: 0,
-        app2Type: "", app2CheeseRecipe: [], app2BatchLbs: 0, app2OzPerPizza: 0,
-        app3Type: "", app3CheeseRecipe: [], app3BatchLbs: 0, app3OzPerPizza: 0,
-        app4Type: "", app4CheeseRecipe: [], app4BatchLbs: 0, app4OzPerPizza: 0,
-      } as never,
-      calc: {
-        pressDone: false, sauceDepletionSec: 0, ppm: 60, perTray: 0, perBatch: 0,
-        app1Batches: 0, app2Batches: 0, app3Batches: 0, app4Batches: 0,
-      } as never,
-      coordination: { case: { generation: "run-1:1000", nextDueAt: 4000, sequence: 3 } },
-    });
-    const args = (run: Record<string, unknown>, nowMs: number) => ({
-      snapshot: snapshot(run) as never, date: "2026-09-06", runId: "run-1", nowMs,
-      snapshotMetadata: { snapshotId: "s1", capturedAt: 1_000, resetAt: 10 },
-    });
-    const args = (run: Record<string, unknown>, nowMs: number) => ({
-      snapshot: snapshot(run) as never, date: "2026-09-06", runId: "run-1", nowMs,
-      snapshotMetadata: { snapshotId: "s1", capturedAt: 1_000, resetAt: 10 },
-    });
-    const args = (run: Record<string, unknown>, nowMs: number) => ({
-      snapshot: snapshot(run) as never, date: "2026-09-06", runId: "run-1", nowMs,
-      snapshotMetadata: { snapshotId: "s1", capturedAt: 1_000, resetAt: 10 },
-    });
     expect(view.freshness.status).toBe("stale");
     expect(view.formulaProvenance).toMatchObject({
       policy: "operational-run-view",

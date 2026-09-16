@@ -5,10 +5,12 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { ReviewVerdict } from './reviewVerdict';
 
 export interface MatchImportBrandMatch {
   /** The imported brand name (echoes an unmatchedBrands entry) */
   candidate: string;
   /** The saved brand it best matches (always one of brands) */
   match: string;
+  review?: ReviewVerdict;
 }

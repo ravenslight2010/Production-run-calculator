@@ -202,9 +202,6 @@ importers:
       '@workspace/db':
         specifier: workspace:*
         version: link:../../lib/db
-      '@workspace/factory-constants':
-        specifier: workspace:*
-        version: link:../../lib/factory-constants
       '@workspace/freezer-pull':
         specifier: workspace:*
         version: link:../../lib/freezer-pull
@@ -521,9 +518,6 @@ importers:
       '@workspace/downtime-trends':
         specifier: workspace:*
         version: link:../../lib/downtime-trends
-      '@workspace/factory-constants':
-        specifier: workspace:*
-        version: link:../../lib/factory-constants
       '@workspace/fill-missing':
         specifier: workspace:*
         version: link:../../lib/fill-missing
@@ -732,9 +726,6 @@ importers:
       '@workspace/api-client-react':
         specifier: workspace:*
         version: link:../../lib/api-client-react
-      '@workspace/typescript-api-v6':
-        specifier: workspace:*
-        version: link:../../lib/typescript-api-v6
       axe-core:
         specifier: ^4.13.0
         version: 4.13.0
@@ -1057,9 +1048,6 @@ importers:
 
   lib/live-calc:
     dependencies:
-      '@workspace/factory-constants':
-        specifier: workspace:*
-        version: link:../factory-constants
       '@workspace/inventory-math':
         specifier: workspace:*
         version: link:../inventory-math

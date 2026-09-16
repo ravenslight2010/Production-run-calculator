@@ -25,6 +25,96 @@ export interface CompletedHistoryList {
   history: CompletedHistoryRecord[];
 }
 
+export interface ApplicatorBatchFinalization {
+  /**
+     * @minLength 1
+     * @maxLength 300
+     * @pattern ^[A-Za-z0-9:_-]+$
+     */
+  operationId: string;
+  /** Valid calendar date (not only YYYY-MM-DD syntax) */
+  date: string;
+  /**
+     * @minLength 1
+     * @maxLength 500
+     */
+  runId: string;
+  /**
+     * @minimum 1
+     * @maximum 4
+     */
+  slot: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  finalTotal: number;
+  /**
+     * @minLength 1
+     * @maxLength 300
+     * @pattern ^[A-Za-z0-9:_-]+$
+     */
+  correctionOf?: string;
+}
+
+export type ApplicatorBatchEvidenceSource = typeof ApplicatorBatchEvidenceSource[keyof typeof ApplicatorBatchEvidenceSource];
+
+
+export const ApplicatorBatchEvidenceSource = {
+  'automatic-observation': 'automatic-observation',
+  'manager-finalization': 'manager-finalization',
+  'manager-correction': 'manager-correction',
+} as const;
+
+export type ApplicatorBatchEvidenceHashContract = typeof ApplicatorBatchEvidenceHashContract[keyof typeof ApplicatorBatchEvidenceHashContract];
+
+
+export const ApplicatorBatchEvidenceHashContract = {
+  'canonical-json-v1': 'canonical-json-v1',
+} as const;
+
+export interface ApplicatorBatchEvidence {
+  id: string;
+  operationId: string;
+  date: string;
+  runId: string;
+  /**
+     * @minimum 1
+     * @maximum 4
+     */
+  slot: number;
+  source: ApplicatorBatchEvidenceSource;
+  /** @minimum 0 */
+  observedTotal?: number;
+  /** @minimum 0 */
+  confirmedTotal?: number;
+  correctionOf?: string;
+  /** @pattern ^[a-f0-9]{64}$ */
+  evidenceHash: string;
+  hashContract: ApplicatorBatchEvidenceHashContract;
+  createdAt: string;
+}
+
+export interface ApplicatorBatchEvidenceMutationResult {
+  acknowledged: true;
+  duplicate: boolean;
+  operationId: string;
+  /** @pattern ^[a-f0-9]{64}$ */
+  evidenceHash: string;
+  canonical: ApplicatorBatchEvidence;
+}
+
+export interface ApplicatorBatchEvidenceConflict {
+  error: string;
+  canonical?: ApplicatorBatchEvidence;
+}
+
+export interface ApplicatorBatchEvidenceList {
+  evidence: ApplicatorBatchEvidence[];
+  /** Opaque cursor for the next page; absent when complete. */
+  nextCursor?: string;
+}
+
 /**
  * Whether the response is deterministic-only, AI-enriched, or missing AI narration
  */
@@ -2323,6 +2413,112 @@ export interface ScheduleOptimizeResponse {
   generatedAt: number;
 }
 
+export type FillMissingFieldCategory = typeof FillMissingFieldCategory[keyof typeof FillMissingFieldCategory];
+
+
+export const FillMissingFieldCategory = {
+  identity: 'identity',
+  line: 'line',
+  packaging: 'packaging',
+  sauce: 'sauce',
+  applicator: 'applicator',
+  pepperoni: 'pepperoni',
+  dough: 'dough',
+} as const;
+
+export type FillMissingFieldKind = typeof FillMissingFieldKind[keyof typeof FillMissingFieldKind];
+
+
+export const FillMissingFieldKind = {
+  number: 'number',
+  text: 'text',
+  select: 'select',
+} as const;
+
+/**
+ * One still-blank run-setup field the model should suggest a value for.
+ */
+export interface FillMissingField {
+  /** Stable field key (matches the run-settings field name) */
+  key: string;
+  /** Human-readable field label */
+  label: string;
+  category: FillMissingFieldCategory;
+  kind: FillMissingFieldKind;
+  /** Allowed values when kind is "select" */
+  options?: string[];
+}
+
+/**
+ * A field already filled in, given to the model for grounding.
+ */
+export interface FillMissingContextItem {
+  key: string;
+  label: string;
+  value: string;
+}
+
+export interface FillMissingInput {
+  brand: string;
+  flavor: string;
+  /** Die/size of the run, if known */
+  dieType?: string;
+  /** Fields already known, for grounding the suggestions */
+  context?: FillMissingContextItem[];
+  /** The blank fields needing a suggested value */
+  fields: FillMissingField[];
+}
+
+/**
+ * ok = looks fine, warn = double-check, reject = likely wrong/unsafe
+ */
+export type ReviewVerdictStatus = typeof ReviewVerdictStatus[keyof typeof ReviewVerdictStatus];
+
+
+export const ReviewVerdictStatus = {
+  ok: 'ok',
+  warn: 'warn',
+  reject: 'reject',
+} as const;
+
+/**
+ * A reviewer-AI "second set of eyes" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).
+ */
+export interface ReviewVerdict {
+  /** ok = looks fine, warn = double-check, reject = likely wrong/unsafe */
+  status: ReviewVerdictStatus;
+  /** Short reason for a warn/reject verdict */
+  reason?: string;
+}
+
+export interface FillMissingSuggestion {
+  /** The field key this suggestion is for (echoes a requested key) */
+  key: string;
+  /** Suggested value, as a string (numbers/selects coerced client-side) */
+  value: string;
+  /** Short plain-language reason for the suggested value */
+  rationale: string;
+  review?: ReviewVerdict;
+}
+
+export type FillMissingResultDecision = typeof FillMissingResultDecision[keyof typeof FillMissingResultDecision];
+
+
+export const FillMissingResultDecision = {
+  suggestion: 'suggestion',
+} as const;
+
+export interface FillMissingResult {
+  suggestions: FillMissingSuggestion[];
+  generatedAt: number;
+  /** Optional message when no suggestions could be made */
+  note?: string;
+  decision: FillMissingResultDecision;
+  aiGenerated?: boolean;
+  aiStatus?: AiStatus;
+  modelStatus?: AiModelStatus;
+}
+
 /**
  * An imported flavor (under a resolved saved brand) needing a match.
  */
@@ -2393,6 +2589,7 @@ export interface MatchImportBrandMatch {
   candidate: string;
   /** The saved brand it best matches (always one of brands) */
   match: string;
+  review?: ReviewVerdict;
 }
 
 export interface MatchImportFlavorMatch {
@@ -2402,6 +2599,7 @@ export interface MatchImportFlavorMatch {
   candidate: string;
   /** The saved flavor it best matches (always within that brand) */
   match: string;
+  review?: ReviewVerdict;
 }
 
 /**
@@ -3476,6 +3674,8 @@ export interface DieTypeList {
 export interface DieLineDefaultsEntry {
   /** Die-type display name (matched case-insensitively) */
   name: string;
+  /** Server-issued optimistic-concurrency revision; required when updating an existing row */
+  updatedAt?: string;
   crustsPerCycle: number;
   cycleSpeed: number;
   speedAdjustment: number;
@@ -3496,9 +3696,16 @@ export interface SaveDieLineDefaultsInput {
   entries: DieLineDefaultsEntry[];
 }
 
+/**
+ * Loaded updatedAt revisions keyed by die name. Required for each name that currently has a stored override.
+ */
+export type DeleteDieLineDefaultsInputRevisions = {[key: string]: string};
+
 export interface DeleteDieLineDefaultsInput {
   /** Die names whose stored defaults should be removed */
   names: string[];
+  /** Loaded updatedAt revisions keyed by die name. Required for each name that currently has a stored override. */
+  revisions?: DeleteDieLineDefaultsInputRevisions;
 }
 
 export type RunSuggestionType = typeof RunSuggestionType[keyof typeof RunSuggestionType];
@@ -4003,6 +4210,46 @@ export interface MarkCycleCountCountedInput {
   today?: string;
 }
 
+export interface SuggestMergesInput {
+  /** The full pool of mergeable ingredient/die names to cluster */
+  names: string[];
+  /** Learned merge aliases to ground the suggestions */
+  aliases?: MergeAlias[];
+  category?: MergeSuggestCategory;
+  /** When category is "flavor", the single brand `names` was scoped to — used only to tailor the AI prompt's wording. */
+  brand?: string;
+}
+
+export interface MergeSuggestion {
+  /** The recommended canonical name to keep */
+  target: string;
+  /** The duplicate names to merge into the target */
+  sources: string[];
+  /** Optional short rationale for the suggested grouping */
+  reason?: string;
+  review?: ReviewVerdict;
+}
+
+export type SuggestMergesResultDecision = typeof SuggestMergesResultDecision[keyof typeof SuggestMergesResultDecision];
+
+
+export const SuggestMergesResultDecision = {
+  suggestion: 'suggestion',
+} as const;
+
+export interface SuggestMergesResult {
+  suggestions: MergeSuggestion[];
+  /** Epoch ms when the suggestions were generated */
+  generatedAt: number;
+  /** True when the AI supplied merge suggestions; false for unavailable responses */
+  aiGenerated: boolean;
+  aiStatus: AiStatus;
+  /** Optional brief overall comment from the model */
+  note?: string;
+  decision: SuggestMergesResultDecision;
+  modelStatus?: AiModelStatus;
+}
+
 /**
  * Which name-space the mapping lives in
  */
@@ -4132,6 +4379,7 @@ export interface SpecImportProfile {
   sauceBarrelLbs?: number;
   applicators: SpecImportApplicator[];
   pepperonis: SpecImportPepperoni[];
+  review?: ReviewVerdict;
 }
 
 export interface SpecImportRecipeRow {
@@ -4167,6 +4415,7 @@ export interface SpecImportRecipe {
   doughballsPerTray?: number;
   app?: number;
   rows: SpecImportRecipeRow[];
+  review?: ReviewVerdict;
 }
 
 export type ParseSpecSheetResultDecision = typeof ParseSpecSheetResultDecision[keyof typeof ParseSpecSheetResultDecision];
@@ -4203,6 +4452,7 @@ export interface MatchImportNameMatch {
   candidate: string;
   /** The saved name it best matches (always one of the known list) */
   match: string;
+  review?: ReviewVerdict;
 }
 
 /**
@@ -4224,6 +4474,7 @@ export interface MatchImportIngredientMatch {
   candidate: string;
   /** The saved ingredient it best matches (within that kind's pool) */
   match: string;
+  review?: ReviewVerdict;
 }
 
 export type MatchImportResultDecision = typeof MatchImportResultDecision[keyof typeof MatchImportResultDecision];
@@ -4273,6 +4524,7 @@ export interface MatchPremixMatch {
   brand: string;
   /** The saved flavor under that brand, or empty when none fits */
   flavor: string;
+  review?: ReviewVerdict;
 }
 
 export type MatchPremixResultDecision = typeof MatchPremixResultDecision[keyof typeof MatchPremixResultDecision];
@@ -4900,6 +5152,28 @@ export interface ManagerActionItem {
   version: number;
 }
 
+export type BackgroundOperationDiagnosticsWarningsItemOperation = typeof BackgroundOperationDiagnosticsWarningsItemOperation[keyof typeof BackgroundOperationDiagnosticsWarningsItemOperation];
+
+
+export const BackgroundOperationDiagnosticsWarningsItemOperation = {
+  'daily-rollover': 'daily-rollover',
+  'server-job-run': 'server-job-run',
+  'server-job-prune': 'server-job-prune',
+  'web-push-schedule': 'web-push-schedule',
+} as const;
+
+export type BackgroundOperationDiagnosticsWarningsItem = {
+  operation: BackgroundOperationDiagnosticsWarningsItemOperation;
+  lastFailureAt: string;
+};
+
+export interface BackgroundOperationDiagnostics {
+  /** @maxItems 4 */
+  warnings: BackgroundOperationDiagnosticsWarningsItem[];
+  /** @minimum 1 */
+  windowMs: number;
+}
+
 export type ManagerActionQueueCounts = {[key: string]: number};
 
 export interface ManagerActionQueue {
@@ -5164,6 +5438,25 @@ export type UpdateManagerActionItem200 = {
 export type ListCompletedHistoryParams = {
 from?: string;
 to?: string;
+};
+
+export type ListApplicatorBatchEvidenceParams = {
+from?: string;
+to?: string;
+/**
+ * @maxLength 500
+ */
+runId?: string;
+/**
+ * @maxLength 4096
+ * @pattern ^[A-Za-z0-9_-]+$
+ */
+cursor?: string;
+/**
+ * @minimum 1
+ * @maximum 500
+ */
+limit?: number;
 };
 
 export type GetSyncTodayParams = {

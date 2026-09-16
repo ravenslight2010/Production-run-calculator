@@ -2124,8 +2124,10 @@ paths:
       summary: Create or update per-die line-setting defaults (manager only)
       description: >-
         Upserts a batch of per-die line-setting defaults keyed by die name
-        (case-insensitive). Malformed entries are dropped. Manager role
-        required.
+        (case-insensitive). Existing rows require a current or newer updatedAt
+        revision; stale or revision-less updates are rejected atomically.
+        Revision-less entries remain compatible for first-time creation.
+        Malformed entries are dropped. Manager role required.
       requestBody:
         required: true
         content:
@@ -2143,14 +2145,18 @@ paths:
           description: Invalid input
         "403":
           description: Manager role required
+        "409":
+          description: One or more existing die-default revisions are stale or missing
     delete:
       operationId: deleteDieLineDefaults
       tags: [dieLineDefaults]
       summary: Delete per-die line-setting defaults by die name (manager only)
       description: >-
         Removes stored per-die defaults by die name (case-insensitive), so
-        those dies fall back to the app's built-in defaults. Manager role
-        required.
+        those dies fall back to the app's built-in defaults. Existing rows
+        require a current or newer revision in the revisions map; stale or
+        revision-less resets are rejected atomically. Revision-less names
+        remain compatible when no stored row exists. Manager role required.
       requestBody:
         required: true
         content:
@@ -2168,6 +2174,8 @@ paths:
           description: Invalid input
         "403":
           description: Manager role required
+        "409":
+          description: One or more existing die-default revisions are stale or missing
 
   /run-suggestions:
     get:
@@ -2496,6 +2504,10 @@ paths:
           description: Invalid input
         "403":
           description: Manager role required
+        "409":
+          description: >-
+            The request contains a missing or stale revision for an existing
+            row. The response includes rejectedIds and the authoritative items.
     delete:
       operationId: deleteMixes
       tags: [mixes]
@@ -2662,6 +2674,10 @@ paths:
           description: Invalid input
         "403":
           description: Manager role required
+        "409":
+          description: >-
+            The request contains a missing or stale revision for an existing
+            row. The response includes rejectedIds and the authoritative items.
     delete:
       operationId: deleteCheeseRecipes
       tags: [cheeseRecipes]
@@ -2855,10 +2871,9 @@ paths:
         capability (rejected with 403 otherwise): profiles are
         manager-configured setup data, and the only allowed write paths are
         explicit manager actions (Setup Profile editor, AI recommendation
-        acceptance) and spec imports/reimports. Requests containing any
-        forced item additionally require the `use-ai-tools` capability (the
-        same gate as the spec-import parse flow) and are rejected with 403
-        otherwise, before any write.
+        acceptance) and spec imports/reimports. Requests containing forced
+        items are also restricted to the `manage-profiles` capability and are
+        rejected with 403 otherwise, before any write.
       requestBody:
         required: true
         content:
@@ -3786,11 +3801,12 @@ paths:
     post:
       operationId: saveIngredientBatchWeights
       tags: [ingredientBatchWeights]
-      summary: Save learned ingredient batch weights (case-insensitive upsert)
+      summary: Save or clear learned ingredient batch weights (case-insensitive)
       description: >-
         Persists a batch of entered batch weights, keyed case-insensitively on
-        ingredient name. Existing entries are updated; new ones are inserted.
-        Available to any signed-in user.
+        ingredient name. Existing positive entries are updated; new positive
+        entries are inserted. An entry with lbs set to zero removes the learned
+        value and stops future auto-fill. Available to any signed-in user.
       requestBody:
         required: true
         content:
@@ -4148,6 +4164,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ManagerActionQueue"
+        "403": { description: Manager capability required }
+
+  /background-operations/diagnostics:
+    get:
+      operationId: getBackgroundOperationDiagnostics
+      tags: [audit]
+      summary: List sustained background-operation failures visible to managers
+      responses:
+        "200":
+          description: Bounded sanitized background-operation warnings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BackgroundOperationDiagnostics"
         "403": { description: Manager capability required }
 
   /manager-action-queue/{id}:
@@ -4514,6 +4544,66 @@ paths:
         "400": { description: Invalid or oversized snapshot }
         "409": { description: Different immutable completion already exists }
 
+  /applicator-batch-evidence:
+    get:
+      operationId: listApplicatorBatchEvidence
+      tags: [sync]
+      summary: List append-only applicator batch observations and manager attestations
+      parameters:
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+        - name: runId
+          in: query
+          schema: { type: string, maxLength: 500 }
+        - name: cursor
+          in: query
+          schema: { type: string, maxLength: 4096, pattern: "^[A-Za-z0-9_-]+$" }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 500, default: 500 }
+      responses:
+        "200":
+          description: Historical applicator evidence for the authenticated scope
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApplicatorBatchEvidenceList" }
+  /applicator-batch-evidence/finalize:
+    post:
+      operationId: finalizeApplicatorBatchTotal
+      tags: [sync]
+      summary: Append an immutable manager-confirmed physical applicator total
+      description: >-
+        Attests a slot only for an existing immutable completed run in this
+        authenticated scope. Corrections append a new manager record and
+        reference the latest finalization.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ApplicatorBatchFinalization" }
+      responses:
+        "200":
+          description: Existing finalization acknowledged idempotently
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApplicatorBatchEvidenceMutationResult" }
+        "201":
+          description: Finalization persisted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApplicatorBatchEvidenceMutationResult" }
+        "400": { description: Invalid finalization or no completed run in this scope }
+        "403": { description: Manager role required }
+        "409":
+          description: Different immutable finalization or stale correction
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApplicatorBatchEvidenceConflict" }
+
   /sync/today:
     get:
       operationId: getSyncToday
@@ -4561,6 +4651,12 @@ paths:
                   snapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
                   stale: { type: boolean }
                   epoch: { type: integer }
+                  canonicalRevision: { type: integer, minimum: 0 }
+                  serverTime: { type: integer, minimum: 0 }
+                  operationalProjection:
+                    oneOf:
+                      - $ref: "#/components/schemas/OperationalProjection"
+                      - { type: "null" }
 
   /sync/auto-track/claim:
     post:
@@ -4590,6 +4686,63 @@ paths:
           description: Invalid or out-of-bounds event
         "500":
           description: Safe automatic tracking failure
+
+  /sync/operational-intents:
+    post:
+      operationId: submitOperationalIntent
+      tags: [sync]
+      summary: Apply one server-authoritative production command
+      parameters:
+        - $ref: "#/components/parameters/ClientToday"
+        - name: epoch
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OperationalIntentRequest"
+      responses:
+        "200":
+          description: Durable command receipt and canonical materialized result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationalIntentResponse"
+        "400":
+          description: Invalid, stale, or oversized command
+        "500":
+          description: Command could not be committed
+
+  /sync/operational-intents/cursor:
+    get:
+      operationId: listOperationalIntentReceipts
+      tags: [sync]
+      summary: Read durable command receipts after a scoped cursor
+      parameters:
+        - name: after
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0 }
+      responses:
+        "200":
+          description: Ordered command receipt page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [cursor, hasMore, mutations]
+                properties:
+                  cursor: { type: integer, minimum: 0 }
+                  hasMore: { type: boolean }
+                  mutations:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/OperationalIntentReceipt"
+        "400":
+          description: Invalid cursor
 
 components:
   parameters:
@@ -4627,6 +4780,61 @@ components:
         history:
           type: array
           items: { $ref: "#/components/schemas/CompletedHistoryRecord" }
+    ApplicatorBatchFinalization:
+      type: object
+      required: [operationId, date, runId, slot, finalTotal]
+      properties:
+        operationId: { type: string, minLength: 1, maxLength: 300, pattern: "^[A-Za-z0-9:_-]+$" }
+        date: { type: string, format: date, description: Valid calendar date (not only YYYY-MM-DD syntax) }
+        runId: { type: string, minLength: 1, maxLength: 500 }
+        slot: { type: integer, minimum: 1, maximum: 4 }
+        finalTotal: { type: integer, minimum: 0, maximum: 1000000 }
+        correctionOf: { type: string, minLength: 1, maxLength: 300, pattern: "^[A-Za-z0-9:_-]+$" }
+    ApplicatorBatchEvidenceMutationResult:
+      type: object
+      required: [acknowledged, duplicate, operationId, evidenceHash, canonical]
+      properties:
+        acknowledged: { type: boolean, const: true }
+        duplicate: { type: boolean }
+        operationId: { type: string }
+        evidenceHash: { type: string, pattern: "^[a-f0-9]{64}$" }
+        canonical:
+          $ref: "#/components/schemas/ApplicatorBatchEvidence"
+    ApplicatorBatchEvidenceConflict:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+        canonical:
+          $ref: "#/components/schemas/ApplicatorBatchEvidence"
+    ApplicatorBatchEvidence:
+      type: object
+      required: [id, operationId, date, runId, slot, source, evidenceHash, hashContract, createdAt]
+      properties:
+        id: { type: string }
+        operationId: { type: string }
+        date: { type: string, format: date }
+        runId: { type: string }
+        slot: { type: integer, minimum: 1, maximum: 4 }
+        source:
+          type: string
+          enum: [automatic-observation, manager-finalization, manager-correction]
+        observedTotal: { type: integer, minimum: 0 }
+        confirmedTotal: { type: integer, minimum: 0 }
+        correctionOf: { type: string }
+        evidenceHash: { type: string, pattern: "^[a-f0-9]{64}$" }
+        hashContract: { type: string, enum: [canonical-json-v1] }
+        createdAt: { type: string, format: date-time }
+    ApplicatorBatchEvidenceList:
+      type: object
+      required: [evidence]
+      properties:
+        evidence:
+          type: array
+          items: { $ref: "#/components/schemas/ApplicatorBatchEvidence" }
+        nextCursor:
+          type: string
+          description: Opaque cursor for the next page; absent when complete.
     AiStatus:
       type: string
       enum: [deterministic, enriched, unavailable]
@@ -4713,7 +4921,7 @@ components:
         updatedAt: { type: number }
     AutoTrackClaimResponse:
       type: object
-      required: [ok, outcome, state, values, data, snapshotId]
+      required: [ok, outcome, state, values, data, snapshotId, canonicalRevision, serverTime]
       properties:
         ok: { type: boolean }
         outcome:
@@ -4725,6 +4933,82 @@ components:
           additionalProperties: true
         data: { $ref: "#/components/schemas/SyncPayload" }
         snapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
+        duplicate: { type: boolean }
+        canonicalRevision: { type: integer, minimum: 0 }
+        serverTime: { type: integer, minimum: 0 }
+
+    OperationalIntent:
+      type: object
+      required: [version, id, date, runId, observedGeneration, resetEpoch, effectiveAt, action]
+      properties:
+        version: { type: integer, enum: [1] }
+        id: { type: string, minLength: 1, maxLength: 160 }
+        date: { type: string, format: date }
+        runId: { type: string, minLength: 1, maxLength: 160 }
+        observedGeneration: { type: string, minLength: 1, maxLength: 160 }
+        resetEpoch: { type: integer, minimum: 0 }
+        effectiveAt: { type: number }
+        baseRevision: { type: integer, minimum: 0 }
+        action:
+          type: string
+          enum: [pause, resume, lifecycle, correction]
+        lifecycle:
+          type: string
+          enum: [start, end]
+        values:
+          type: object
+          additionalProperties: { type: number, minimum: 0, maximum: 1000000 }
+        inventoryLines:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            required: [itemKey, qty]
+            properties:
+              itemKey: { type: string, minLength: 1, maxLength: 300 }
+              qty: { type: number, exclusiveMinimum: 0, maximum: 1000000 }
+    OperationalIntentRequest:
+      type: object
+      required: [intent]
+      properties:
+        senderId: { type: string, maxLength: 160 }
+        deviceId: { type: string, maxLength: 160 }
+        baseRevision: { type: integer, minimum: 0 }
+        intent: { $ref: "#/components/schemas/OperationalIntent" }
+    OperationalIntentResponse:
+      type: object
+      required: [ok, outcome, duplicate, cursor, canonicalRevision, serverTime, data, snapshotId]
+      properties:
+        ok: { type: boolean }
+        outcome:
+          type: string
+          enum: [accepted, superseded, rebased, conflicted, review-required]
+        duplicate: { type: boolean }
+        cursor: { type: integer, minimum: 1 }
+        canonicalRevision: { type: integer, minimum: 0 }
+        serverTime: { type: integer, minimum: 0 }
+        data: { $ref: "#/components/schemas/SyncPayload" }
+        snapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
+    OperationalIntentReceipt:
+      type: object
+      required: [cursor, date, outcome, createdAt]
+      properties:
+        cursor: { type: integer, minimum: 1 }
+        date: { type: string, format: date }
+        outcome:
+          type: string
+          enum: [accepted, superseded, rebased, conflicted, review-required, stale, duplicate]
+        canonicalRevision: { type: integer, minimum: 0 }
+        baseRevision: { type: integer, minimum: 0 }
+        commandType: { type: string }
+        actorId: { type: string }
+        deviceId: { type: string }
+        serverReceivedAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        snapshot:
+          oneOf:
+            - $ref: "#/components/schemas/SyncPayload"
+            - type: "null"
 
     HealthStatus:
       type: object
@@ -4742,6 +5026,104 @@ components:
         dayState: { type: object, additionalProperties: true }
         runValues: { type: object, additionalProperties: true }
       additionalProperties: true
+
+    OperationalProjection:
+      type: object
+      description: Server-owned live operational read model returned beside the canonical sync snapshot.
+      required:
+        - version
+        - runId
+        - lifecycleGeneration
+        - serverTimeMs
+        - capturedAtServerMs
+        - calculationRevision
+        - effectiveElapsedSec
+        - timers
+        - counters
+        - facts
+        - calc
+        - due
+      properties:
+        version: { type: integer, enum: [1] }
+        runId: { type: string }
+        lifecycleGeneration: { type: string }
+        serverTimeMs: { type: number }
+        capturedAtServerMs: { type: number }
+        calculationRevision: { type: integer, minimum: 0 }
+        effectiveElapsedSec: { type: number }
+        timers:
+          type: object
+          required: [nextBatchInSec, pressRemainingSec, freezerElapsedSec, freezerRemainingSec]
+          properties:
+            nextBatchInSec: { type: number }
+            pressRemainingSec: { type: number }
+            freezerElapsedSec: { type: number }
+            freezerRemainingSec: { type: number }
+        counters:
+          type: object
+          required:
+            - casesCompleted
+            - casesInFreezer
+            - casesOnLine
+            - casesLeftToRun
+            - pressCasesLeft
+            - traysOnLine
+            - batchesReady
+            - sauceBarrelsMade
+            - app1BatchesMade
+            - app2BatchesMade
+            - app3BatchesMade
+            - app4BatchesMade
+          properties:
+            casesCompleted: { type: number }
+            casesInFreezer: { type: number }
+            casesOnLine: { type: number }
+            casesLeftToRun: { type: number }
+            pressCasesLeft: { type: number }
+            traysOnLine: { type: number }
+            batchesReady: { type: number }
+            sauceBarrelsMade: { type: number }
+            app1BatchesMade: { type: number }
+            app2BatchesMade: { type: number }
+            app3BatchesMade: { type: number }
+            app4BatchesMade: { type: number }
+        facts:
+          type: object
+          required: [runStatus, pressDone, paceStatus, paceDelta]
+          properties:
+            runStatus: { type: string, enum: [pending, running, paused, ended] }
+            pressDone: { type: boolean }
+            paceStatus:
+              oneOf:
+                - { type: string, enum: [on-pace, ahead, behind] }
+                - { type: "null" }
+            paceDelta: { type: number }
+        calc: { type: object, additionalProperties: true }
+        due:
+          $ref: "#/components/schemas/OperationalProjectionSchedule"
+
+    OperationalProjectionSchedule:
+      type: object
+      required: [runId, generation, atMs, entries]
+      properties:
+        runId: { type: string }
+        generation: { type: string }
+        atMs: { type: number }
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/OperationalProjectionScheduleEntry"
+
+    OperationalProjectionScheduleEntry:
+      type: object
+      required: [channel, dueAt, dueNow, nextDueAt, canonical]
+      properties:
+        channel: { type: string }
+        dueAt: { type: number }
+        dueNow: { type: boolean }
+        nextDueAt: { type: number }
+        canonical: { type: boolean }
+        sequence: { type: number }
 
     SyncUnchangedResponse:
       type: object
@@ -8993,6 +9375,10 @@ components:
         name:
           type: string
           description: Die-type display name (matched case-insensitively)
+        updatedAt:
+          type: string
+          format: date-time
+          description: Server-issued optimistic-concurrency revision; required when updating an existing row
         crustsPerCycle:
           type: number
         cycleSpeed:
@@ -9047,6 +9433,14 @@ components:
           description: Die names whose stored defaults should be removed
           items:
             type: string
+        revisions:
+          type: object
+          description: >-
+            Loaded updatedAt revisions keyed by die name. Required for each
+            name that currently has a stored override.
+          additionalProperties:
+            type: string
+            format: date-time
 
     RunSuggestion:
       type: object
@@ -9379,6 +9773,10 @@ components:
         id:
           type: string
           description: Stable client-generated id
+        updatedAt:
+          type: string
+          format: date-time
+          description: Server persistence revision; required for updates to existing rows
         name:
           type: string
           description: Display name of the mix
@@ -9585,6 +9983,10 @@ components:
         id:
           type: string
           description: Stable client-generated id
+        updatedAt:
+          type: string
+          format: date-time
+          description: Server persistence revision; required for updates to existing rows
         name:
           type: string
           description: Display name of the cheese recipe
@@ -9681,6 +10083,10 @@ components:
         id:
           type: string
           description: Stable client-generated id
+        updatedAt:
+          type: string
+          format: date-time
+          description: Server persistence revision; required when updating an existing row
         name:
           type: string
           description: Display name of the recipe
@@ -11068,6 +11474,29 @@ components:
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
         version: { type: integer }
+
+    BackgroundOperationDiagnostics:
+      type: object
+      additionalProperties: false
+      required: [warnings, windowMs]
+      properties:
+        warnings:
+          type: array
+          maxItems: 4
+          items:
+            type: object
+            additionalProperties: false
+            required: [operation, lastFailureAt]
+            properties:
+              operation:
+                type: string
+                enum: [daily-rollover, server-job-run, server-job-prune, web-push-schedule]
+              lastFailureAt:
+                type: string
+                format: date-time
+        windowMs:
+          type: integer
+          minimum: 1
 
     ManagerActionQueue:
       type: object

@@ -1731,6 +1731,47 @@ export const OperationsScheduleOrderingResponse = zod.object({
 
 
 /**
+ * Given a run's known brand/flavor/context and a list of still-blank scalar fields, returns a suggested value plus a short rationale for each. Read-only — never writes anything; the client decides what (if anything) to commit. Used by the "Fill in missing data" setup assistant for fields that have no known profile/spec/default source.
+ * @summary Suggest values for blank run-setup fields (AI); read-only
+ */
+export const AiFillMissingBody = zod.object({
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "dieType": zod.string().optional().describe('Die/size of the run, if known'),
+  "context": zod.array(zod.object({
+  "key": zod.string(),
+  "label": zod.string(),
+  "value": zod.string()
+}).describe('A field already filled in, given to the model for grounding.')).optional().describe('Fields already known, for grounding the suggestions'),
+  "fields": zod.array(zod.object({
+  "key": zod.string().describe('Stable field key (matches the run-settings field name)'),
+  "label": zod.string().describe('Human-readable field label'),
+  "category": zod.enum(['identity', 'line', 'packaging', 'sauce', 'applicator', 'pepperoni', 'dough']),
+  "kind": zod.enum(['number', 'text', 'select']),
+  "options": zod.array(zod.string()).optional().describe('Allowed values when kind is "select"')
+}).describe('One still-blank run-setup field the model should suggest a value for.')).describe('The blank fields needing a suggested value')
+})
+
+export const AiFillMissingResponse = zod.object({
+  "suggestions": zod.array(zod.object({
+  "key": zod.string().describe('The field key this suggestion is for (echoes a requested key)'),
+  "value": zod.string().describe('Suggested value, as a string (numbers/selects coerced client-side)'),
+  "rationale": zod.string().describe('Short plain-language reason for the suggested value'),
+  "review": zod.object({
+  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong/unsafe'),
+  "reason": zod.string().optional().describe('Short reason for a warn/reject verdict')
+}).optional().describe('A reviewer-AI "second set of eyes" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
+})),
+  "generatedAt": zod.number(),
+  "note": zod.string().optional().describe('Optional message when no suggestions could be made'),
+  "decision": zod.enum(['suggestion']),
+  "aiGenerated": zod.boolean().optional(),
+  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).optional().describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration'),
+  "modelStatus": zod.enum(['completed', 'provider-unavailable', 'rate-limited', 'malformed']).optional().describe('Optional provider outcome detail for an advisory response')
+})
+
+
+/**
  * Given the saved brands and their flavors plus a list of imported brand/flavor names that did NOT exactly match, returns the best saved match for each (only when confident). Read-only — never writes anything; the client uses the matches as pre-selected suggestions in the Excel import dialog and the user can still override. Falls back silently to the client's fuzzy matching when unavailable.
  * @summary Match imported brand/flavor names to saved ones (AI); read-only
  */
@@ -1756,25 +1797,45 @@ export const AiMatchImportBody = zod.object({
 export const AiMatchImportResponse = zod.object({
   "brandMatches": zod.array(zod.object({
   "candidate": zod.string().describe('The imported brand name (echoes an unmatchedBrands entry)'),
-  "match": zod.string().describe('The saved brand it best matches (always one of brands)')
+  "match": zod.string().describe('The saved brand it best matches (always one of brands)'),
+  "review": zod.object({
+  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong/unsafe'),
+  "reason": zod.string().optional().describe('Short reason for a warn/reject verdict')
+}).optional().describe('A reviewer-AI "second set of eyes" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
 })),
   "flavorMatches": zod.array(zod.object({
   "brand": zod.string().describe('The saved brand the flavor belongs to'),
   "candidate": zod.string().describe('The imported flavor name (echoes an unmatchedFlavors entry)'),
-  "match": zod.string().describe('The saved flavor it best matches (always within that brand)')
+  "match": zod.string().describe('The saved flavor it best matches (always within that brand)'),
+  "review": zod.object({
+  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong/unsafe'),
+  "reason": zod.string().optional().describe('Short reason for a warn/reject verdict')
+}).optional().describe('A reviewer-AI "second set of eyes" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
 })),
   "ingredientMatches": zod.array(zod.object({
   "kind": zod.enum(['dough', 'sauce', 'cheese']).describe('The recipe kind whose ingredient pool the match belongs to'),
   "candidate": zod.string().describe('The imported ingredient name (echoes an unmatchedIngredients entry)'),
-  "match": zod.string().describe('The saved ingredient it best matches (within that kind\'s pool)')
+  "match": zod.string().describe('The saved ingredient it best matches (within that kind\'s pool)'),
+  "review": zod.object({
+  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong/unsafe'),
+  "reason": zod.string().optional().describe('Short reason for a warn/reject verdict')
+}).optional().describe('A reviewer-AI "second set of eyes" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
 })).optional().describe('Confident matches for imported recipe ingredient names. Optional.'),
   "appTypeMatches": zod.array(zod.object({
   "candidate": zod.string().describe('The imported name (echoes an unmatched entry)'),
-  "match": zod.string().describe('The saved name it best matches (always one of the known list)')
+  "match": zod.string().describe('The saved name it best matches (always one of the known list)'),
+  "review": zod.object({
+  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong/unsafe'),
+  "reason": zod.string().optional().describe('Short reason for a warn/reject verdict')
+}).optional().describe('A reviewer-AI "second set of eyes" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
 })).optional().describe('Confident matches for imported applicator/topping type names. Optional.'),
   "pepTypeMatches": zod.array(zod.object({
   "candidate": zod.string().describe('The imported name (echoes an unmatched entry)'),
-  "match": zod.string().describe('The saved name it best matches (always one of the known list)')
+  "match": zod.string().describe('The saved name it best matches (always one of the known list)'),
+  "review": zod.object({
+  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong/unsafe'),
+  "reason": zod.string().optional().describe('Short reason for a warn/reject verdict')
+}).optional().describe('A reviewer-AI "second set of eyes" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
 })).optional().describe('Confident matches for imported pepperoni type names. Optional.'),
   "generatedAt": zod.number(),
   "aiGenerated": zod.boolean().describe('True when the AI supplied matching suggestions; false for deterministic-only or unavailable responses'),
@@ -1799,7 +1860,11 @@ export const AiMatchPremixResponse = zod.object({
   "matches": zod.array(zod.object({
   "name": zod.string().describe('The imported premix name (echoes an unmatchedNames entry)'),
   "brand": zod.string().describe('The saved brand it best matches (always one of brands)'),
-  "flavor": zod.string().describe('The saved flavor under that brand, or empty when none fits')
+  "flavor": zod.string().describe('The saved flavor under that brand, or empty when none fits'),
+  "review": zod.object({
+  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong/unsafe'),
+  "reason": zod.string().optional().describe('Short reason for a warn/reject verdict')
+}).optional().describe('A reviewer-AI "second set of eyes" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
 })),
   "generatedAt": zod.number(),
   "aiGenerated": zod.boolean().describe('True when the AI supplied matching suggestions; false for deterministic-only or unavailable responses'),
@@ -1869,7 +1934,11 @@ export const AiParseSpecSheetResponse = zod.object({
   "sticks": zod.number(),
   "ozPerPizza": zod.number(),
   "batchLbs": zod.number().optional().describe('Batch size in lbs one made pepperoni batch weighs, when the sheet states it. Optional.')
-}))
+})),
+  "review": zod.object({
+  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong/unsafe'),
+  "reason": zod.string().optional().describe('Short reason for a warn/reject verdict')
+}).optional().describe('A reviewer-AI "second set of eyes" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
 })),
   "recipes": zod.array(zod.object({
   "kind": zod.enum(['dough', 'sauce', 'cheese']),
@@ -1887,7 +1956,11 @@ export const AiParseSpecSheetResponse = zod.object({
   "rows": zod.array(zod.object({
   "ingredient": zod.string(),
   "lbs": zod.number()
-}))
+})),
+  "review": zod.object({
+  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong/unsafe'),
+  "reason": zod.string().optional().describe('Short reason for a warn/reject verdict')
+}).optional().describe('A reviewer-AI "second set of eyes" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
 })),
   "note": zod.string().optional(),
   "warnings": zod.array(zod.object({
@@ -1899,6 +1972,39 @@ export const AiParseSpecSheetResponse = zod.object({
   "decision": zod.enum(['suggestion']),
   "aiGenerated": zod.boolean().optional(),
   "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).optional().describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration'),
+  "modelStatus": zod.enum(['completed', 'provider-unavailable', 'rate-limited', 'malformed']).optional().describe('Optional provider outcome detail for an advisory response')
+})
+
+
+/**
+ * Given the app's full pool of mergeable ingredient/die names (plus any learned merge aliases), returns groups of likely duplicates, each with a recommended canonical name to keep. Read-only — never writes anything; the user reviews the suggestions and applies merges through the existing merge path. Falls back silently to remembered (alias-derived) suggestions when unavailable.
+ * @summary Suggest groups of duplicate ingredient names to merge (AI)
+ */
+export const AiSuggestMergesBody = zod.object({
+  "names": zod.array(zod.string()).describe('The full pool of mergeable ingredient/die names to cluster'),
+  "aliases": zod.array(zod.object({
+  "externalName": zod.string().describe('The name that was merged away (matched case-insensitively)'),
+  "canonicalName": zod.string().describe('The canonical name it was folded into')
+}).describe('A learned mapping from a merged-away name to the kept name.')).optional().describe('Learned merge aliases to ground the suggestions'),
+  "category": zod.enum(['ingredient', 'mixes', 'dough', 'sauce', 'cheese', 'brand', 'flavor']).optional().describe('Which merge tab a suggestion/alias/denial belongs to, so pools never leak across tabs. Defaults to "ingredient" for backward compatibility.'),
+  "brand": zod.string().optional().describe('When category is "flavor", the single brand `names` was scoped to — used only to tailor the AI prompt\'s wording.')
+})
+
+export const AiSuggestMergesResponse = zod.object({
+  "suggestions": zod.array(zod.object({
+  "target": zod.string().describe('The recommended canonical name to keep'),
+  "sources": zod.array(zod.string()).describe('The duplicate names to merge into the target'),
+  "reason": zod.string().optional().describe('Optional short rationale for the suggested grouping'),
+  "review": zod.object({
+  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong/unsafe'),
+  "reason": zod.string().optional().describe('Short reason for a warn/reject verdict')
+}).optional().describe('A reviewer-AI "second set of eyes" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
+})),
+  "generatedAt": zod.number().describe('Epoch ms when the suggestions were generated'),
+  "aiGenerated": zod.boolean().describe('True when the AI supplied merge suggestions; false for unavailable responses'),
+  "aiStatus": zod.enum(['deterministic', 'enriched', 'unavailable']).describe('Whether the response is deterministic-only, AI-enriched, or missing AI narration'),
+  "note": zod.string().optional().describe('Optional brief overall comment from the model'),
+  "decision": zod.enum(['suggestion']),
   "modelStatus": zod.enum(['completed', 'provider-unavailable', 'rate-limited', 'malformed']).optional().describe('Optional provider outcome detail for an advisory response')
 })
 
@@ -2766,6 +2872,7 @@ export const VoidMixSurplusLotResponse = zod.object({
 export const ListDieLineDefaultsResponse = zod.object({
   "entries": zod.array(zod.object({
   "name": zod.string().describe('Die-type display name (matched case-insensitively)'),
+  "updatedAt": zod.coerce.date().optional().describe('Server-issued optimistic-concurrency revision; required when updating an existing row'),
   "crustsPerCycle": zod.number(),
   "cycleSpeed": zod.number(),
   "speedAdjustment": zod.number(),
@@ -2778,12 +2885,13 @@ export const ListDieLineDefaultsResponse = zod.object({
 
 
 /**
- * Upserts a batch of per-die line-setting defaults keyed by die name (case-insensitive). Malformed entries are dropped. Manager role required.
+ * Upserts a batch of per-die line-setting defaults keyed by die name (case-insensitive). Existing rows require a current or newer updatedAt revision; stale or revision-less updates are rejected atomically. Revision-less entries remain compatible for first-time creation. Malformed entries are dropped. Manager role required.
  * @summary Create or update per-die line-setting defaults (manager only)
  */
 export const SaveDieLineDefaultsBody = zod.object({
   "entries": zod.array(zod.object({
   "name": zod.string().describe('Die-type display name (matched case-insensitively)'),
+  "updatedAt": zod.coerce.date().optional().describe('Server-issued optimistic-concurrency revision; required when updating an existing row'),
   "crustsPerCycle": zod.number(),
   "cycleSpeed": zod.number(),
   "speedAdjustment": zod.number(),
@@ -2797,6 +2905,7 @@ export const SaveDieLineDefaultsBody = zod.object({
 export const SaveDieLineDefaultsResponse = zod.object({
   "entries": zod.array(zod.object({
   "name": zod.string().describe('Die-type display name (matched case-insensitively)'),
+  "updatedAt": zod.coerce.date().optional().describe('Server-issued optimistic-concurrency revision; required when updating an existing row'),
   "crustsPerCycle": zod.number(),
   "cycleSpeed": zod.number(),
   "speedAdjustment": zod.number(),
@@ -2809,16 +2918,18 @@ export const SaveDieLineDefaultsResponse = zod.object({
 
 
 /**
- * Removes stored per-die defaults by die name (case-insensitive), so those dies fall back to the app's built-in defaults. Manager role required.
+ * Removes stored per-die defaults by die name (case-insensitive), so those dies fall back to the app's built-in defaults. Existing rows require a current or newer revision in the revisions map; stale or revision-less resets are rejected atomically. Revision-less names remain compatible when no stored row exists. Manager role required.
  * @summary Delete per-die line-setting defaults by die name (manager only)
  */
 export const DeleteDieLineDefaultsBody = zod.object({
-  "names": zod.array(zod.string()).describe('Die names whose stored defaults should be removed')
+  "names": zod.array(zod.string()).describe('Die names whose stored defaults should be removed'),
+  "revisions": zod.record(zod.string(), zod.coerce.date()).optional().describe('Loaded updatedAt revisions keyed by die name. Required for each name that currently has a stored override.')
 })
 
 export const DeleteDieLineDefaultsResponse = zod.object({
   "entries": zod.array(zod.object({
   "name": zod.string().describe('Die-type display name (matched case-insensitively)'),
+  "updatedAt": zod.coerce.date().optional().describe('Server-issued optimistic-concurrency revision; required when updating an existing row'),
   "crustsPerCycle": zod.number(),
   "cycleSpeed": zod.number(),
   "speedAdjustment": zod.number(),
@@ -5678,6 +5789,23 @@ export const ListManagerActionQueueResponse = zod.object({
 
 
 /**
+ * @summary List sustained background-operation failures visible to managers
+ */
+export const getBackgroundOperationDiagnosticsResponseWarningsMax = 4;
+
+
+
+
+export const GetBackgroundOperationDiagnosticsResponse = zod.object({
+  "warnings": zod.array(zod.object({
+  "operation": zod.enum(['daily-rollover', 'server-job-run', 'server-job-prune', 'web-push-schedule']),
+  "lastFailureAt": zod.coerce.date()
+})).max(getBackgroundOperationDiagnosticsResponseWarningsMax),
+  "windowMs": zod.int().min(1)
+})
+
+
+/**
  * @summary Update a manager action item with optimistic version checking
  */
 export const UpdateManagerActionItemParams = zod.object({
@@ -6085,6 +6213,118 @@ export const FinalizeCompletedRunBody = zod.object({
 })
 
 export const FinalizeCompletedRunResponse = zod.unknown()
+
+
+/**
+ * @summary List append-only applicator batch observations and manager attestations
+ */
+export const listApplicatorBatchEvidenceQueryRunIdMax = 500;
+
+export const listApplicatorBatchEvidenceQueryCursorMax = 4096;
+
+
+export const listApplicatorBatchEvidenceQueryCursorRegExp = new RegExp('^[A-Za-z0-9_-]+$');
+export const listApplicatorBatchEvidenceQueryLimitDefault = 500;
+export const listApplicatorBatchEvidenceQueryLimitMax = 500;
+
+
+
+export const ListApplicatorBatchEvidenceQueryParams = zod.object({
+  "from": zod.date().optional(),
+  "to": zod.date().optional(),
+  "runId": zod.coerce.string().max(listApplicatorBatchEvidenceQueryRunIdMax).optional(),
+  "cursor": zod.coerce.string().max(listApplicatorBatchEvidenceQueryCursorMax).regex(listApplicatorBatchEvidenceQueryCursorRegExp).optional(),
+  "limit": zod.coerce.number().int().min(1).max(listApplicatorBatchEvidenceQueryLimitMax).default(listApplicatorBatchEvidenceQueryLimitDefault)
+})
+
+export const listApplicatorBatchEvidenceResponseEvidenceItemSlotMax = 4;
+
+export const listApplicatorBatchEvidenceResponseEvidenceItemObservedTotalMin = 0;
+
+export const listApplicatorBatchEvidenceResponseEvidenceItemConfirmedTotalMin = 0;
+
+export const listApplicatorBatchEvidenceResponseEvidenceItemEvidenceHashRegExp = new RegExp('^[a-f0-9]{64}$');
+
+
+export const ListApplicatorBatchEvidenceResponse = zod.object({
+  "evidence": zod.array(zod.object({
+  "id": zod.string(),
+  "operationId": zod.string(),
+  "date": zod.coerce.date(),
+  "runId": zod.string(),
+  "slot": zod.int().min(1).max(listApplicatorBatchEvidenceResponseEvidenceItemSlotMax),
+  "source": zod.enum(['automatic-observation', 'manager-finalization', 'manager-correction']),
+  "observedTotal": zod.int().min(listApplicatorBatchEvidenceResponseEvidenceItemObservedTotalMin).optional(),
+  "confirmedTotal": zod.int().min(listApplicatorBatchEvidenceResponseEvidenceItemConfirmedTotalMin).optional(),
+  "correctionOf": zod.string().optional(),
+  "evidenceHash": zod.string().regex(listApplicatorBatchEvidenceResponseEvidenceItemEvidenceHashRegExp),
+  "hashContract": zod.enum(['canonical-json-v1']),
+  "createdAt": zod.coerce.date()
+})),
+  "nextCursor": zod.string().optional().describe('Opaque cursor for the next page; absent when complete.')
+})
+
+
+/**
+ * Attests a slot only for an existing immutable completed run in this authenticated scope. Corrections append a new manager record and reference the latest finalization.
+ * @summary Append an immutable manager-confirmed physical applicator total
+ */
+export const finalizeApplicatorBatchTotalBodyOperationIdMax = 300;
+
+
+export const finalizeApplicatorBatchTotalBodyOperationIdRegExp = new RegExp('^[A-Za-z0-9:_-]+$');
+export const finalizeApplicatorBatchTotalBodyRunIdMax = 500;
+
+export const finalizeApplicatorBatchTotalBodySlotMax = 4;
+
+export const finalizeApplicatorBatchTotalBodyFinalTotalMin = 0;
+export const finalizeApplicatorBatchTotalBodyFinalTotalMax = 1000000;
+
+export const finalizeApplicatorBatchTotalBodyCorrectionOfMax = 300;
+
+
+export const finalizeApplicatorBatchTotalBodyCorrectionOfRegExp = new RegExp('^[A-Za-z0-9:_-]+$');
+
+
+export const FinalizeApplicatorBatchTotalBody = zod.object({
+  "operationId": zod.string().min(1).max(finalizeApplicatorBatchTotalBodyOperationIdMax).regex(finalizeApplicatorBatchTotalBodyOperationIdRegExp),
+  "date": zod.coerce.date().describe('Valid calendar date (not only YYYY-MM-DD syntax)'),
+  "runId": zod.string().min(1).max(finalizeApplicatorBatchTotalBodyRunIdMax),
+  "slot": zod.int().min(1).max(finalizeApplicatorBatchTotalBodySlotMax),
+  "finalTotal": zod.int().min(finalizeApplicatorBatchTotalBodyFinalTotalMin).max(finalizeApplicatorBatchTotalBodyFinalTotalMax),
+  "correctionOf": zod.string().min(1).max(finalizeApplicatorBatchTotalBodyCorrectionOfMax).regex(finalizeApplicatorBatchTotalBodyCorrectionOfRegExp).optional()
+})
+
+export const finalizeApplicatorBatchTotalResponseEvidenceHashRegExp = new RegExp('^[a-f0-9]{64}$');
+export const finalizeApplicatorBatchTotalResponseCanonicalSlotMax = 4;
+
+export const finalizeApplicatorBatchTotalResponseCanonicalObservedTotalMin = 0;
+
+export const finalizeApplicatorBatchTotalResponseCanonicalConfirmedTotalMin = 0;
+
+export const finalizeApplicatorBatchTotalResponseCanonicalEvidenceHashRegExp = new RegExp('^[a-f0-9]{64}$');
+
+
+export const FinalizeApplicatorBatchTotalResponse = zod.object({
+  "acknowledged": zod.literal(true),
+  "duplicate": zod.boolean(),
+  "operationId": zod.string(),
+  "evidenceHash": zod.string().regex(finalizeApplicatorBatchTotalResponseEvidenceHashRegExp),
+  "canonical": zod.object({
+  "id": zod.string(),
+  "operationId": zod.string(),
+  "date": zod.coerce.date(),
+  "runId": zod.string(),
+  "slot": zod.int().min(1).max(finalizeApplicatorBatchTotalResponseCanonicalSlotMax),
+  "source": zod.enum(['automatic-observation', 'manager-finalization', 'manager-correction']),
+  "observedTotal": zod.int().min(finalizeApplicatorBatchTotalResponseCanonicalObservedTotalMin).optional(),
+  "confirmedTotal": zod.int().min(finalizeApplicatorBatchTotalResponseCanonicalConfirmedTotalMin).optional(),
+  "correctionOf": zod.string().optional(),
+  "evidenceHash": zod.string().regex(finalizeApplicatorBatchTotalResponseCanonicalEvidenceHashRegExp),
+  "hashContract": zod.enum(['canonical-json-v1']),
+  "createdAt": zod.coerce.date()
+})
+})
 
 
 /**

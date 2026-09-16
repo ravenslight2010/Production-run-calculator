@@ -25,7 +25,6 @@
   "dependencies": {
     "@google/genai": "^2.22.0",
     "@workspace/ai-memory": "workspace:*",
-    "@workspace/ai-review": "workspace:*",
     "@workspace/anomaly": "workspace:*",
     "@workspace/api-zod": "workspace:*",
     "@workspace/cheese-recipes": "workspace:*",

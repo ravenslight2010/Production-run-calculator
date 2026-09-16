@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { ReviewVerdict } from './reviewVerdict';
 import type { SpecImportApplicator } from './specImportApplicator';
 import type { SpecImportPepperoni } from './specImportPepperoni';
 
@@ -33,4 +34,5 @@ export interface SpecImportProfile {
   sauceBarrelLbs?: number;
   applicators: SpecImportApplicator[];
   pepperonis: SpecImportPepperoni[];
+  review?: ReviewVerdict;
 }
