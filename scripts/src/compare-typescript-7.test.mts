@@ -894,6 +894,30 @@ test("revised history limit bounds producer selection", () => {
   );
 });
 
+test("history limit contract rejects invalid producer and release settings", () => {
+  for (const invalidHistoryLimit of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(
+      () =>
+        selectTypescript7HistoricalReports(
+          [],
+          "a".repeat(40),
+          "f".repeat(64),
+          invalidHistoryLimit,
+        ),
+      /TypeScript 7 history limit must be a positive safe integer/,
+    );
+    assert.throws(
+      () =>
+        validateTypescript7ComparisonEvidence(
+          Buffer.from("{}"),
+          "a".repeat(40),
+          invalidHistoryLimit,
+        ),
+      /TypeScript 7 history limit must be a positive safe integer/,
+    );
+  }
+});
+
 test("trend output distinguishes runner-class resets from missing history", () => {
   assert.match(
     typescript7TrendHistorySummary(1, 2),

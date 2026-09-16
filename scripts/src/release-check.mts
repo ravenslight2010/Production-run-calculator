@@ -38,7 +38,10 @@ import {
   diagnosticsEqualForPairs,
   releaseRevisionGitArgs,
 } from "./typescript-7-evidence.mts";
-import { TYPESCRIPT_7_HISTORY_LIMIT } from "./typescript-7-trend-contract.mts";
+import {
+  TYPESCRIPT_7_HISTORY_LIMIT,
+  validateTypescript7HistoryLimit,
+} from "./typescript-7-trend-contract.mts";
 import {
   TYPESCRIPT_7_RESOURCE_BUDGETS,
   classifyTypescript7ResourceRegressions,
@@ -415,6 +418,7 @@ export function validateTypescript7ComparisonEvidence(
   expectedRevision: string,
   historyLimit: number = TYPESCRIPT_7_HISTORY_LIMIT,
 ): Typescript7TrendHistorySummary {
+  validateTypescript7HistoryLimit(historyLimit);
   let value: unknown;
   try {
     value = JSON.parse(bytes.toString("utf8"));

@@ -24,7 +24,10 @@ import {
   type Typescript7MeasuredProject,
   type Typescript7ResourceBudgets,
 } from "./typescript-7-resource-contract.mts";
-import { TYPESCRIPT_7_HISTORY_LIMIT } from "./typescript-7-trend-contract.mts";
+import {
+  TYPESCRIPT_7_HISTORY_LIMIT,
+  validateTypescript7HistoryLimit,
+} from "./typescript-7-trend-contract.mts";
 
 export { TYPESCRIPT_7_RESOURCE_BUDGETS } from "./typescript-7-resource-contract.mts";
 export { TYPESCRIPT_7_HISTORY_LIMIT } from "./typescript-7-trend-contract.mts";
@@ -310,6 +313,7 @@ export function analyzeTypescript7HistoricalReports(
   reports: Array<Record<string, unknown>>;
   incompatibleRunnerClassSamples: number;
 } {
+  validateTypescript7HistoryLimit(historyLimit);
   const revisions = new Set([currentRevision]);
   const reports: Array<Record<string, unknown>> = [];
   let incompatibleRunnerClassSamples = 0;
