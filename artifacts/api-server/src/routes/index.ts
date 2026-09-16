@@ -109,7 +109,7 @@ export const readAuthorizationInventory: readonly ReadAuthorization[] = [
   ...reads(["manage-staff"], "all", "scoped", [
     "/sync/conflict-stats", "/manager-action-queue",
     "/profile-data/health-check", "/profile-data/health-workspace",
-    "/ai-memory/health-check",
+    "/ai-memory/health-check", "/background-operations/diagnostics",
   ]),
   ...reads(["manage-inventory"], "all", "scoped", [
     "/duplicate-reviews",
@@ -287,6 +287,10 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
   ...writes("capability-gated", "scoped", "allowed", "review-incidents", ["POST /reports/operational"]),
   {
     method: "POST", path: "/field-checks/hardware-confirmations", ownership: "manager-only",
+    scope: "scoped", sandbox: "allowed", capabilities: ["review-incidents"], capabilityMatch: "all", managerRole: true,
+  },
+  {
+    method: "POST", path: "/applicator-batch-evidence/finalize", ownership: "manager-only",
     scope: "scoped", sandbox: "allowed", capabilities: ["review-incidents"], capabilityMatch: "all", managerRole: true,
   },
   ...writes("floor-operational", "scoped", "allowed", undefined, ["POST /run-templates", "DELETE /run-templates", "POST /sandbox/reset"]),
