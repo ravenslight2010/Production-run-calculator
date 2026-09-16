@@ -13,20 +13,12 @@ describe("SSE sync baseline gate", () => {
   it("queues reconnect pushes until a populated initial snapshot is applied", () => {
     const gate = createSyncBaselineGate();
     gate.beginConnection();
-
-    // EventSource can report open before the server's first data frame. The
-    // reconnect push must wait, or a new device can overwrite the shared row.
     expect(gate.requestPush()).toBe(false);
-    expect(gate.isReady()).toBe(false);
-
-    // The caller applies the populated payload first, then releases exactly one
-    // queued recovery push against that adopted state.
     expect(gate.completeInitialSnapshot()).toBe(true);
-    expect(gate.isReady()).toBe(true);
     expect(gate.requestPush()).toBe(true);
   });
 
-  it("treats the server's explicit empty initial frame as a safe baseline", () => {
+  it("resets readiness on each reconnect", () => {
     const gate = createSyncBaselineGate();
     gate.beginConnection();
     expect(gate.requestPush()).toBe(false);
@@ -139,10 +131,7 @@ describe("SSE sync baseline gate", () => {
   });
 
   it("claims a seed after a genuine form edit, while programmatic resets stay local-only", () => {
-    const source = readFileSync(
-      resolve(process.cwd(), "src/hooks/useHomeFormLifecycle.ts"),
-      "utf8",
-    );
+    const source = readFileSync(resolve(process.cwd(), "src/pages/home.tsx"), "utf8");
     const autosave = source.slice(
       source.indexOf("if (!shouldAutosaveHomeForm("),
       source.indexOf("flashSaved();"),

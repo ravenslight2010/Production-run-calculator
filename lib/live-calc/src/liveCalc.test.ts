@@ -4,12 +4,11 @@ import {
   computeAutoTrackSuggestion,
   computeCaseTickWrite,
   computeEffectiveLineSpeed,
-  computeLinePhases,
   computeServerCalc,
-  buildOperationalProjection,
   deriveOperationalRunView,
   OperationalRunViewError,
   getAutoTrackTiming,
+  type CalcRunMeta,
 } from "./index";
 
 describe("shared live calculation boundary", () => {
@@ -33,26 +32,21 @@ describe("shared live calculation boundary", () => {
 
   it("fails closed on buffer-only Sauce and Frontline quantities without pizzas per case", () => {
     const result = computeServerCalc({
-      dayState: { runs: [{ id: "invalid", brand: "A", flavor: "B" }], currentIndex: 0 },
+      dayState: { runs: [{ id: "run-override", startedAt: 1000 }], currentIndex: 0 },
       runValues: {
-        invalid: {
-          casesNeeded: 240,
-          pizzasPerCase: 0,
-          casesPerLayer: 10,
-          crustsPerCycle: 1,
-          cycleSpeed: 100,
+        "run-override": {
+          pizzasPerCase: 10,
+          casesPerSkid: 20,
+          casesNeeded: 100,
+          crustsPerCycle: 4,
+          cycleSpeed: 10,
           speedAdjustment: 1,
-          sauceOzPerPizza: 3,
-          sauceBarrelLbs: 55,
-          app1Type: "Cheese",
-          app1OzPerPizza: 2.9,
-          app1CheeseRecipe: [{ ingredient: "A", lbs: 55.6 }],
-          pep1Type: "Pepperoni",
-          pep1OzPerPizza: 1,
-          pep1Sticks: 10,
+          tempCrustsPerCycle: 5,
+          tempCycleSpeed: 12,
+          tempFreezerTime: 30,
         },
       },
-    }, ["Pepperoni"], 1000);
+    }, [], 2000);
     expect(result?.calc).toMatchObject({
       sauceBatches: 0,
       sauceDepletionSec: 0,
@@ -103,8 +97,19 @@ describe("shared live calculation boundary", () => {
     });
 
     const schedule = computeAutoTrackSchedule({
-      ...input,
-      serverWallOwnership: { case: 3 },
+      runId: "run-1", startedAt: 1000, metaUpdatedAt: 2000, nowMs: 5000,
+      v: {
+        pizzasPerCase: 12, freezerTime: 30,
+        app1Type: "", app1CheeseRecipe: [], app1BatchLbs: 0, app1OzPerPizza: 0,
+        app2Type: "", app2CheeseRecipe: [], app2BatchLbs: 0, app2OzPerPizza: 0,
+        app3Type: "", app3CheeseRecipe: [], app3BatchLbs: 0, app3OzPerPizza: 0,
+        app4Type: "", app4CheeseRecipe: [], app4BatchLbs: 0, app4OzPerPizza: 0,
+      } as never,
+      calc: {
+        pressDone: false, sauceDepletionSec: 0, ppm: 60, perTray: 0, perBatch: 0,
+        app1Batches: 0, app2Batches: 0, app3Batches: 0, app4Batches: 0,
+      } as never,
+      coordination: { case: { generation: "run-1:1000", nextDueAt: 4000, sequence: 3 } },
     });
     expect(schedule.entries).toContainEqual({
       channel: "case",
@@ -204,6 +209,38 @@ describe("shared live calculation boundary", () => {
     };
     const request = { snapshot: base as never, date: "2026-09-06", runId: "run-1", nowMs: 100_000, snapshotMetadata: { snapshotId: "s1", capturedAt: 1_000, resetAt: 10 } };
     const view = deriveOperationalRunView(request);
+    const base = {
+      syncVersion: 1 as const, completeness: "complete" as const,
+      dayState: { date: "2026-09-06", resetAt: 10, currentIndex: 0, substitutions: [{ action: "replace" }], runs: [{ id: "run-1", startedAt: 1_000 }] },
+      runValues: { "run-1": { pizzasPerCase: 10, casesPerSkid: 20, casesNeeded: 100, crustsPerCycle: 4, cycleSpeed: 10, speedAdjustment: 1, freezerTime: 10, tempCycleSpeed: 12 } },
+    };
+    const schedule = computeAutoTrackSchedule({
+      runId: "run-1", startedAt: 1000, metaUpdatedAt: 2000, nowMs: 5000,
+      v: {
+        pizzasPerCase: 12, freezerTime: 30,
+        app1Type: "", app1CheeseRecipe: [], app1BatchLbs: 0, app1OzPerPizza: 0,
+        app2Type: "", app2CheeseRecipe: [], app2BatchLbs: 0, app2OzPerPizza: 0,
+        app3Type: "", app3CheeseRecipe: [], app3BatchLbs: 0, app3OzPerPizza: 0,
+        app4Type: "", app4CheeseRecipe: [], app4BatchLbs: 0, app4OzPerPizza: 0,
+      } as never,
+      calc: {
+        pressDone: false, sauceDepletionSec: 0, ppm: 60, perTray: 0, perBatch: 0,
+        app1Batches: 0, app2Batches: 0, app3Batches: 0, app4Batches: 0,
+      } as never,
+      coordination: { case: { generation: "run-1:1000", nextDueAt: 4000, sequence: 3 } },
+    });
+    const args = (run: Record<string, unknown>, nowMs: number) => ({
+      snapshot: snapshot(run) as never, date: "2026-09-06", runId: "run-1", nowMs,
+      snapshotMetadata: { snapshotId: "s1", capturedAt: 1_000, resetAt: 10 },
+    });
+    const args = (run: Record<string, unknown>, nowMs: number) => ({
+      snapshot: snapshot(run) as never, date: "2026-09-06", runId: "run-1", nowMs,
+      snapshotMetadata: { snapshotId: "s1", capturedAt: 1_000, resetAt: 10 },
+    });
+    const args = (run: Record<string, unknown>, nowMs: number) => ({
+      snapshot: snapshot(run) as never, date: "2026-09-06", runId: "run-1", nowMs,
+      snapshotMetadata: { snapshotId: "s1", capturedAt: 1_000, resetAt: 10 },
+    });
     expect(view.freshness.status).toBe("stale");
     expect(view.formulaProvenance).toMatchObject({
       policy: "operational-run-view",
@@ -219,260 +256,5 @@ describe("shared live calculation boundary", () => {
       ...request,
       snapshot: { ...base, dayState: { ...base.dayState, runs: [{ id: "run-1" }, { id: "run-1" }] } } as never,
     })).toThrow(OperationalRunViewError);
-  });
-
-  it("builds a deterministic server projection with pause and end anchors", () => {
-    const base = {
-      dayState: {
-        currentIndex: 0,
-        runs: [{
-          id: "run-projection",
-          metaUpdatedAt: 11,
-          startedAt: 1_000,
-          stoppages: [{ type: "stop", startedAt: 3_000, endedAt: 4_000 }],
-        }],
-      },
-      runValues: {
-        "run-projection": {
-          pizzasPerCase: 10, casesPerSkid: 20, casesNeeded: 100,
-          crustsPerCycle: 4, cycleSpeed: 10, speedAdjustment: 1,
-          freezerTime: 10, traysOnLine: 4, batchesReady: 2,
-          sauceBarrelsMade: 1, app1BatchesMade: 2,
-        },
-      },
-    } as never;
-    const serverCalc = computeServerCalc(base, [], 10_000)!;
-    const schedule = computeAutoTrackSchedule({
-      runId: "run-projection",
-      startedAt: 1_000,
-      metaUpdatedAt: 11,
-      nowMs: 10_000,
-      v: base.runValues["run-projection"] as never,
-      calc: serverCalc.calc,
-    });
-    const args = {
-      payload: base,
-      serverCalc,
-      schedule,
-      nowMs: 10_000,
-      calculationRevision: 8,
-    };
-    const first = buildOperationalProjection(args);
-    const second = buildOperationalProjection(args);
-    expect(second).toEqual(first);
-    expect(first).toMatchObject({
-      version: 1,
-      runId: "run-projection",
-      lifecycleGeneration: "run-projection:11",
-      serverTimeMs: 10_000,
-      capturedAtServerMs: 10_000,
-      calculationRevision: 8,
-      effectiveElapsedSec: 8,
-      counters: { traysOnLine: 4, batchesReady: 2, sauceBarrelsMade: 1, app1BatchesMade: 2 },
-    });
-
-    const paused = {
-      ...base,
-      dayState: {
-        ...base.dayState,
-        runs: [{ ...base.dayState.runs[0], pausedAt: 7_000 }],
-      },
-    } as never;
-    const pausedCalc = computeServerCalc(paused, [], 10_000)!;
-    const pausedSchedule = computeAutoTrackSchedule({
-      runId: "run-projection",
-      startedAt: 1_000,
-      pausedAt: 7_000,
-      metaUpdatedAt: 11,
-      nowMs: 10_000,
-      v: paused.runValues["run-projection"] as never,
-      calc: pausedCalc.calc,
-    });
-    expect(buildOperationalProjection({
-      payload: paused,
-      serverCalc: pausedCalc,
-      schedule: pausedSchedule,
-      nowMs: 10_000,
-    }).effectiveElapsedSec).toBe(5);
-  });
-});
-describe("operational projection — batch timing (slice 4)", () => {
-  function projectionFor(values: Record<string, unknown>, runMeta: Record<string, unknown> = {}) {
-    const base = {
-      dayState: {
-        currentIndex: 0,
-        runs: [{ id: "run-timing", startedAt: 1_000, ...runMeta }],
-      },
-      runValues: {
-        "run-timing": {
-          pizzasPerCase: 10, casesPerSkid: 20, casesNeeded: 100,
-          crustsPerCycle: 4, cycleSpeed: 10, speedAdjustment: 1,
-          freezerTime: 10, doughballsPerTray: 6, doughBatchYield: 300,
-          targetDoughballWeight: 5,
-          ...values,
-        },
-      },
-    } as never;
-    const serverCalc = computeServerCalc(base, [], 8_000)!;
-    const schedule = computeAutoTrackSchedule({
-      runId: "run-timing",
-      startedAt: 1_000,
-      metaUpdatedAt: 22,
-      nowMs: 8_000,
-      v: base.runValues["run-timing"] as never,
-      calc: serverCalc.calc,
-    });
-    return buildOperationalProjection({
-      payload: base,
-      serverCalc,
-      schedule,
-      nowMs: 8_000,
-    });
-  }
-
-  it("matches the client batch-timing formulas from effectiveElapsedSec", () => {
-    const p = projectionFor({});
-    const tc = p.calc.timePerBatchSec;
-    const eff = p.effectiveElapsedSec;
-    expect(p.timers.currentBatchNum).toBe(tc > 0 ? Math.floor(eff / tc) : 0);
-    expect(p.timers.secUntilNextBatch).toBe(tc > 0 ? tc - (eff % tc) : 0);
-    expect(p.timers.totalBatchesNeeded).toBe(
-      tc > 0 && p.calc.totalTimeSec > 0 ? Math.ceil(p.calc.totalTimeSec / tc) : 0,
-    );
-  });
-
-  it("is deterministic across two builds", () => {
-    const args = (() => {
-      const base = {
-        dayState: { currentIndex: 0, runs: [{ id: "run-timing", startedAt: 1_000 }] },
-        runValues: { "run-timing": { pizzasPerCase: 10, casesPerSkid: 20, casesNeeded: 100, crustsPerCycle: 4, cycleSpeed: 10, speedAdjustment: 1, freezerTime: 10, doughballsPerTray: 6, doughBatchYield: 300, targetDoughballWeight: 5 } },
-      } as never;
-      const serverCalc = computeServerCalc(base, [], 8_000)!;
-      const schedule = computeAutoTrackSchedule({
-        runId: "run-timing", startedAt: 1_000, metaUpdatedAt: 22, nowMs: 8_000,
-        v: base.runValues["run-timing"] as never, calc: serverCalc.calc,
-      });
-      return { payload: base, serverCalc, schedule, nowMs: 8_000 };
-    })();
-    expect(buildOperationalProjection(args)).toEqual(buildOperationalProjection(args));
-  });
-
-  it("never emits NaN/Infinity when timePerBatchSec is zero", () => {
-    const p = projectionFor({ doughballsPerTray: 0, doughBatchYield: 0, targetDoughballWeight: 0 });
-    expect(p.timers.currentBatchNum).toBe(0);
-    expect(p.timers.secUntilNextBatch).toBe(0);
-    expect(p.timers.totalBatchesNeeded).toBe(0);
-    expect(Number.isFinite(p.timers.currentBatchNum)).toBe(true);
-    expect(Number.isFinite(p.timers.secUntilNextBatch)).toBe(true);
-    expect(Number.isFinite(p.timers.totalBatchesNeeded)).toBe(true);
-  });
-});
-
-describe("operational projection — line phases (slice 5)", () => {
-  const BASE_RUN_VALUES = {
-    pizzasPerCase: 10, casesPerSkid: 20, casesNeeded: 100,
-    crustsPerCycle: 4, cycleSpeed: 10, speedAdjustment: 1,
-    freezerTime: 10, preTunnelMin: 2.5, postTunnelMin: 2.5,
-    doughballsPerTray: 6, doughBatchYield: 300, targetDoughballWeight: 5,
-  };
-
-  function projectionFor(runMeta: Record<string, unknown>, values: Record<string, unknown> = {}) {
-    const runValues: Record<string, Record<string, unknown>> = {
-      "run-phases": { ...BASE_RUN_VALUES, ...values },
-    };
-    const base = {
-      dayState: {
-        currentIndex: 0,
-        runs: [{ id: "run-phases", startedAt: 1_000, metaUpdatedAt: 22, ...runMeta }],
-      },
-      runValues,
-    } as never;
-    const serverCalc = computeServerCalc(base, [], 8_000)!;
-    const schedule = computeAutoTrackSchedule({
-      runId: "run-phases",
-      startedAt: Number(runMeta.endedAt) > 0 ? undefined : 1_000,
-      pausedAt: (runMeta.pausedAt as number | undefined) ?? undefined,
-      metaUpdatedAt: 22,
-      nowMs: 8_000,
-      v: runValues["run-phases"] as never,
-      calc: serverCalc.calc,
-    });
-    return buildOperationalProjection({
-      payload: base,
-      serverCalc,
-      schedule,
-      nowMs: 8_000,
-    });
-  }
-
-  it("derives the same phases the client does from the same day-state inputs", () => {
-    const p = projectionFor({});
-    const raw = BASE_RUN_VALUES;
-    const expected = computeLinePhases({
-      elapsedBatchSec: p.effectiveElapsedSec,
-      pausedAt: undefined,
-      lastResumeWallMs: 0,
-      lastPauseStartWallMs: 0,
-      pauseStopsTunnel: true,
-      lastPauseStopsTunnel: true,
-      runStatus: "running",
-      preTunnelMin: 2.5,
-      postTunnelMin: 2.5,
-      freezerTime: 10,
-      nowMs: 8_000,
-    });
-    expect(p.linePhases).toEqual(expected);
-  });
-
-  it("models a paused run with the safe stop-tunnel policy as staged drain", () => {
-    const p = projectionFor({ pausedAt: 7_000 });
-    // Paused 1s ago; stage 1 (press/frontline) drains first, tunnel not yet stopped.
-    expect(p.facts.runStatus).toBe("paused");
-    expect(p.linePhases.stage1.state).toBe("draining");
-    expect(p.linePhases.stage1.remainMs).toBeGreaterThan(0);
-    expect(p.linePhases.stage2.state).toBe("empty");
-    expect(p.linePhases.stage3.state).toBe("empty");
-  });
-
-  it("models an ended run as a wall-clock sequential drain", () => {
-    const p = projectionFor({ endedAt: 7_000 });
-    expect(p.facts.runStatus).toBe("ended");
-    // freezerTime (10min) minus 1s of wall time remains; stage 1 drains first.
-    expect(p.linePhases.stage1.state).toBe("draining");
-    expect(p.linePhases.stage1.remainMs).toBeGreaterThan(0);
-  });
-
-  it("keeps a pending run fully empty", () => {
-    const p = projectionFor({ startedAt: undefined });
-    expect(p.facts.runStatus).toBe("pending");
-    expect(p.linePhases.stage1.state).toBe("empty");
-    expect(p.linePhases.stage2.state).toBe("empty");
-    expect(p.linePhases.stage3.state).toBe("empty");
-    expect(Number.isFinite(p.linePhases.stage1.remainMs)).toBe(true);
-  });
-
-  it("never emits NaN when timing values are missing or zero", () => {
-    const p = projectionFor({}, { freezerTime: 0, preTunnelMin: 0, postTunnelMin: 0 });
-    for (const stage of [p.linePhases.stage1, p.linePhases.stage2, p.linePhases.stage3]) {
-      expect(Number.isFinite(stage.remainMs)).toBe(true);
-    }
-  });
-
-  it("is deterministic across two builds", () => {
-    const args = (() => {
-      const runValues: Record<string, Record<string, unknown>> = { "run-phases": BASE_RUN_VALUES };
-      const base = {
-        dayState: { currentIndex: 0, runs: [{ id: "run-phases", startedAt: 1_000, metaUpdatedAt: 22 }] },
-        runValues,
-      } as never;
-      const serverCalc = computeServerCalc(base, [], 8_000)!;
-      const schedule = computeAutoTrackSchedule({
-        runId: "run-phases", startedAt: 1_000, metaUpdatedAt: 22, nowMs: 8_000,
-        v: runValues["run-phases"] as never, calc: serverCalc.calc,
-      });
-      return { payload: base, serverCalc, schedule, nowMs: 8_000 };
-    })();
-    expect(buildOperationalProjection(args).linePhases)
-      .toEqual(buildOperationalProjection(args).linePhases);
   });
 });

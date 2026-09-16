@@ -56,15 +56,12 @@ describe("master-data bootstrap loading", () => {
   });
 
   it("shares one request across all startup collection consumers", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({
-        ingredients: [{ id: "i1", name: "Flour", categories: ["dough"], enabled: true }],
-        doughRecipes: [{ id: "d1", name: "Dough", components: [], enabled: true }],
-        sauceRecipes: [{ id: "s1", name: "Sauce", components: [], enabled: true }],
-        cheeseRecipes: [{ id: "c1", name: "Cheese", components: [], enabled: true }],
-        mixes: [{ id: "m1", name: "Mix", components: [], enabled: true }],
-      })),
-    );
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers({ etag: 'W/"master-data-old-session"' }),
+      json,
+    } as unknown as Response);
 
     const [first, second, third] = await Promise.all([
       fetchMasterDataBootstrap(),
@@ -79,11 +76,12 @@ describe("master-data bootstrap loading", () => {
   });
 
   it("allows a later startup attempt after a failed request", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch")
-      .mockRejectedValueOnce(new Error("offline"))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        ingredients: [], doughRecipes: [], sauceRecipes: [], cheeseRecipes: [], mixes: [],
-      })));
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers({ etag: 'W/"master-data-old-session"' }),
+      json,
+    } as unknown as Response);
 
     await expect(fetchMasterDataBootstrap()).rejects.toThrow("offline");
     await expect(fetchMasterDataBootstrap()).resolves.toMatchObject({ ingredients: [] });
@@ -92,7 +90,7 @@ describe("master-data bootstrap loading", () => {
 
   it("reuses the server representation with its validator and sends it on the next refresh", async () => {
     const etag = '"master-data-test"';
-    const responseHeaders = new Headers({ etag });
+    const responseHeaders = new Headers({ etag: 'W/"master-data-old-session"' });
     const first = {
       ok: true,
       status: 200,
@@ -104,9 +102,12 @@ describe("master-data bootstrap loading", () => {
       status: 304,
       headers: responseHeaders,
     } as unknown as Response;
-    const fetchSpy = vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(first)
-      .mockResolvedValueOnce(unchanged);
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers({ etag: 'W/"master-data-old-session"' }),
+      json,
+    } as unknown as Response);
 
     const initial = await fetchMasterDataBootstrap();
     const unchangedResult = await fetchMasterDataBootstrap();
@@ -126,17 +127,13 @@ describe("master-data bootstrap loading", () => {
     vi.spyOn(Math, "random").mockReturnValue(0);
     const body = JSON.stringify(bootstrapBody);
     const responseBytes: number[] = [];
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
-      responseBytes.push(new TextEncoder().encode(body).byteLength);
-      return {
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(bootstrapBody),
-      } as unknown as Response;
-    });
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false, gcTime: Infinity } },
-    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers({ etag: 'W/"master-data-old-session"' }),
+      json,
+    } as unknown as Response);
+    const queryClient = new QueryClient();
 
     render(createElement(
       QueryClientProvider,
@@ -208,13 +205,7 @@ describe("master-data bootstrap loading", () => {
 
   it("updates the canonical cache when a manager mutation returns a normalized slice", () => {
     const queryClient = new QueryClient();
-    queryClient.setQueryData(MASTER_DATA_QUERY_KEY, {
-      ingredients: [],
-      doughRecipes: [],
-      sauceRecipes: [],
-      cheeseRecipes: [],
-      mixes: [],
-    });
+    queryClient.setQueryData(MASTER_DATA_QUERY_KEY, bootstrapBody);
     const savedMix = { id: "m2", name: "New Mix", components: [], enabled: true };
 
     setMasterDataSlice(queryClient, "mixes", [savedMix]);
@@ -224,7 +215,7 @@ describe("master-data bootstrap loading", () => {
   });
 
   it("keeps a manager cache update as the 304 snapshot", async () => {
-    const responseHeaders = new Headers({ etag: '"master-data-manager"' });
+    const responseHeaders = new Headers({ etag: 'W/"master-data-old-session"' });
     vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
       status: 200,
@@ -250,18 +241,16 @@ describe("master-data bootstrap loading", () => {
   });
 
   it("invalidates the canonical bootstrap after a foreign master-data nudge", async () => {
-    const responseHeaders = new Headers({ etag: '"master-data-before-edit"' });
+    const responseHeaders = new Headers({ etag: 'W/"master-data-old-session"' });
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
       ok: true,
       status: 200,
-      headers: responseHeaders,
-      json: () => Promise.resolve(bootstrapBody),
+      headers: new Headers({ etag: 'W/"master-data-old-session"' }),
+      json,
     } as unknown as Response);
     await fetchMasterDataBootstrap();
 
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
+    const queryClient = new QueryClient();
     queryClient.setQueryData(MASTER_DATA_QUERY_KEY, bootstrapBody);
 
     expect(shouldRefreshMasterData("foreign-client", "local-client")).toBe(true);
@@ -293,8 +282,8 @@ describe("master-data bootstrap loading", () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
       ok: true,
       status: 200,
-      headers: responseHeaders,
-      json: () => Promise.resolve(bootstrapBody),
+      headers: new Headers({ etag: 'W/"master-data-old-session"' }),
+      json,
     } as unknown as Response);
     await fetchMasterDataBootstrap();
 

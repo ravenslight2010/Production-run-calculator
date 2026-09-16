@@ -10,6 +10,13 @@ on:
         default: false
         type: boolean
 
+permissions:
+  contents: read
+
+concurrency:
+  group: release-check-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release-check-standard:
     name: Release gates and retained standard evidence
@@ -21,7 +28,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16
+        image: postgres:16@sha256:f1c3376c26f2609ab9f29f71f824103fe2fcd8ee0346485cb6122a4f93df6f94
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -52,18 +59,19 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
         with:
           run_install: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
-          cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -71,14 +79,19 @@ jobs:
       - name: Remove stale evidence
         run: rm -rf release-evidence && mkdir -p release-evidence
 
+      - name: Collect prior TypeScript 7 comparison evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/src/fetch-typescript-7-history.sh
+
       - name: Apply schema to disposable database
         run: pnpm --filter @workspace/db run push-force
 
       - name: Run release gates once and retain standard evidence
-        run: pnpm run release:check
+        id: run-standard-release-check
         env:
           TYPESCRIPT_7_RUNNER_IMAGE: ${{ runner.os }}-${{ runner.arch }}
-
+        run: pnpm run release:check
 
       - name: Verify release evidence allowlist
         if: always()
@@ -87,7 +100,7 @@ jobs:
       - name: Upload standard release evidence
         if: always()
         id: upload-standard-release-evidence
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-evidence-standard-${{ github.run_id }}
           path: release-evidence
@@ -106,6 +119,7 @@ jobs:
           RELEASE_EVENT_NAME: ${{ github.event_name }}
           RELEASE_BASE_REPOSITORY: ${{ github.repository }}
           RELEASE_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          RELEASE_CHECK_OUTCOME: ${{ steps.run-standard-release-check.outcome }}
           RELEASE_MODE: standard
           VERIFY_CHECKPOINT_ARTIFACT_LINK: "1"
           RESUME_COMMAND: pnpm run release:check -- --resume
@@ -124,7 +138,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16
+        image: postgres:16@sha256:f1c3376c26f2609ab9f29f71f824103fe2fcd8ee0346485cb6122a4f93df6f94
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -154,18 +168,19 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
         with:
           run_install: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
-          cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -173,14 +188,19 @@ jobs:
       - name: Remove stale full evidence
         run: rm -rf release-evidence-full && mkdir -p release-evidence-full
 
+      - name: Collect prior TypeScript 7 comparison evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/src/fetch-typescript-7-history.sh
+
       - name: Apply schema to disposable database
         run: pnpm --filter @workspace/db run push-force
 
       - name: Run release gates once and retain full evidence
-        run: pnpm run release:check:full
+        id: run-full-release-check
         env:
           TYPESCRIPT_7_RUNNER_IMAGE: ${{ runner.os }}-${{ runner.arch }}
-
+        run: pnpm run release:check:full
 
       - name: Verify full release evidence allowlist
         if: always()
@@ -189,7 +209,7 @@ jobs:
       - name: Upload full release evidence
         if: always()
         id: upload-full-release-evidence
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-evidence-full-${{ github.run_id }}
           path: release-evidence-full
@@ -208,6 +228,7 @@ jobs:
           RELEASE_EVENT_NAME: ${{ github.event_name }}
           RELEASE_BASE_REPOSITORY: ${{ github.repository }}
           RELEASE_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          RELEASE_CHECK_OUTCOME: ${{ steps.run-full-release-check.outcome }}
           RELEASE_MODE: full
           VERIFY_CHECKPOINT_ARTIFACT_LINK: "1"
           RESUME_COMMAND: pnpm run release:check:full -- --resume

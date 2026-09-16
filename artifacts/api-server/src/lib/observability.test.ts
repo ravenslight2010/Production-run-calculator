@@ -228,7 +228,7 @@ describe("observability", () => {
     const log = { info, warn };
     const fields = { scope: "live" as const, operation: "prune" as const, waitDurationMs: 12, outcome: "error" as const };
 
-    for (let i = 0; i < CACHE_MAINTENANCE_FAILURE_THRESHOLD; i += 1) {
+    for (let i = 0; i < CACHE_MAINTENANCE_FAILURE_MAX_EVENTS * 2; i += 1) {
       await recordCacheMaintenance(fields, log);
     }
 

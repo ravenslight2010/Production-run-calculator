@@ -21,7 +21,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("./inventoryShared", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./inventoryShared")>();
+  const actual = await importOriginal<typeof import("./masterData")>();
   return {
     ...actual,
     fetchMe: mocks.fetchMe,

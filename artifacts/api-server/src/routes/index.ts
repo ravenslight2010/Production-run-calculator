@@ -219,6 +219,10 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
     "POST /operations-insights/recap", "POST /ai/summary",
     "POST /operations-insights/anomalies", "POST /ai/anomalies",
   ]),
+  {
+    method: "POST", path: "/applicator-batch-evidence/finalize", ownership: "manager-only",
+    scope: "scoped", sandbox: "allowed", capabilities: ["review-incidents"], capabilityMatch: "all", managerRole: true,
+  },
   ...writes("capability-gated", "scoped", "allowed", "use-ai-tools", ["POST /run-suggestions/update"]),
   ...writes("capability-gated", "scoped", "allowed", "manage-profiles", [
     "PATCH /brand-profiles/:key/clear-slot", "POST /brand-profiles", "DELETE /brand-profiles",

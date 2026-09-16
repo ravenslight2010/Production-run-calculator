@@ -96,15 +96,28 @@ test.describe("Home navigation persistence", () => {
     testUsernames.add(username);
     await signUp(page, username);
 
-    await page.getByTestId("tab-dough").click();
-    await expectSelected(page, "dough");
-    await expect(page).toHaveURL(/\/$/);
+    await page.goto("/?screen=warehouse", { waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("warehouse-screen-heading")).toBeVisible({
+      timeout: 25_000,
+    });
+    await expect(page.getByTestId("warehouse-screen-heading")).toContainText(
+      "Warehouse",
+    );
+    await expect(page.getByText("Warehouse", { exact: true })).toBeVisible();
+    await expectNoLegacyDepartmentLabels(page);
 
-    await reloadThroughSettlingSession(page);
-    await expectSelected(page, "dough");
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("warehouse-screen-heading")).toBeVisible({
+      timeout: 25_000,
+    });
+    await expect(page.getByTestId("warehouse-screen-heading")).toContainText(
+      "Warehouse",
+    );
+    await expect(page.getByText("Warehouse", { exact: true })).toBeVisible();
+    await expectNoLegacyDepartmentLabels(page);
   });
 
-  test("unwinds tab history on browser back before leaving the app", async ({
+  test("keeps the Inventory label after its supported menu path and reload", async ({
     page,
   }) => {
     const username = uid();
@@ -136,19 +149,28 @@ test.describe("Home navigation persistence", () => {
     testUsernames.add(username);
     await signUp(page, username);
 
-    await page.evaluate((key) => {
-      localStorage.setItem(key, "not-a-home-tab");
-    }, ACTIVE_TAB_KEY);
-    await page.reload({ waitUntil: "domcontentloaded" });
-    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    await page.goto("/?screen=warehouse", { waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("warehouse-screen-heading")).toBeVisible({
+      timeout: 25_000,
+    });
+    await expect(page.getByTestId("warehouse-screen-heading")).toContainText(
+      "Warehouse",
+    );
+    await expect(page.getByText("Warehouse", { exact: true })).toBeVisible();
+    await expectNoLegacyDepartmentLabels(page);
 
-    await expectSelected(page, "run");
-    await expect
-      .poll(() => page.evaluate((key) => localStorage.getItem(key), ACTIVE_TAB_KEY))
-      .toBe("run");
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("warehouse-screen-heading")).toBeVisible({
+      timeout: 25_000,
+    });
+    await expect(page.getByTestId("warehouse-screen-heading")).toContainText(
+      "Warehouse",
+    );
+    await expect(page.getByText("Warehouse", { exact: true })).toBeVisible();
+    await expectNoLegacyDepartmentLabels(page);
   });
 
-  test("keeps the Warehouse label on its direct screen after hydration and reload", async ({
+  test("keeps the Inventory label after its supported menu path and reload", async ({
     page,
   }) => {
     const username = uid();

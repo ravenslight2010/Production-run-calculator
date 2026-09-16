@@ -160,17 +160,17 @@ test.beforeEach(async () => {
   const db = new Client({ connectionString: process.env.DATABASE_URL });
   try {
     await db.connect();
-    // The card resumes the newest open draft, so each viewport starts from a
-    // clean upload state even if an earlier project stopped mid-journey.
-    await db.query("DELETE FROM inventory_observations WHERE status = 'draft'");
     await removeFixture(db);
+    await cleanupTestUsers(db, testUsernames);
   } finally {
     await db.end().catch(() => {});
   }
 });
 
-test.afterAll(async () => {
-  if (!process.env.DATABASE_URL) return;
+test("completes the manager photo-count review on desktop and phone", async ({
+  page,
+  request,
+}, testInfo) => {
   const db = new Client({ connectionString: process.env.DATABASE_URL });
   try {
     await db.connect();

@@ -215,6 +215,8 @@ async function cleanupInventory(db: Client): Promise<void> {
   }
 }
 
+  const username = uniqueTestId("warehouse_tablet_manager");
+
 test.beforeAll(async () => {
   await requireIsolatedTestDatabase("warehouse coverage browser check");
 });
@@ -246,8 +248,8 @@ test("shows capped offsite transfer guidance and hides it when onsite stock cove
   page,
   request,
 }, testInfo) => {
-  const username = uniqueTestId("warehouse_manager");
-  const runId = uniqueTestId("warehouse_run");
+  const username = uniqueTestId("warehouse_tablet_manager");
+  const runId = uniqueTestId("warehouse_tablet_run");
   testUsernames.add(username);
   const browserErrors: string[] = [];
   page.on("pageerror", (error) => browserErrors.push(error.message));
@@ -319,7 +321,7 @@ test("explains restricted inventory actions to non-managers", async ({
   page,
   request,
 }, testInfo) => {
-  const username = uniqueTestId("warehouse_staff");
+  const username = uniqueTestId("warehouse_tablet_manager");
   testUsernames.add(username);
   const browserErrors: string[] = [];
   page.on("pageerror", (error) => browserErrors.push(error.message));
@@ -410,8 +412,8 @@ test("keeps capped offsite transfer guidance readable on a phone", async ({
 }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
 
-  const username = uniqueTestId("warehouse_phone_manager");
-  const runId = uniqueTestId("warehouse_phone_run");
+  const username = uniqueTestId("warehouse_tablet_manager");
+  const runId = uniqueTestId("warehouse_tablet_run");
   testUsernames.add(username);
   const browserErrors: string[] = [];
   page.on("pageerror", (error) => browserErrors.push(error.message));
@@ -434,16 +436,11 @@ test("keeps capped offsite transfer guidance readable on a phone", async ({
     const row = coverage
       .getByText(fixture.ingredientName, { exact: true })
       .locator("xpath=../..");
-    const guidance = row.getByText(
-      `Can cover 9 lbs from 9 lbs from ${fixture.locationName}.`,
-      { exact: true },
-    );
+    const guidance = row.getByText(guidanceText, { exact: true });
 
     await expect(row).toContainText("Short");
     await expect(guidance).toBeVisible();
-    await expect(guidance).toHaveText(
-      `Can cover 9 lbs from 9 lbs from ${fixture.locationName}.`,
-    );
+    await expect(guidance).toHaveText(guidanceText);
 
     const layout = await guidance.evaluate((element) => ({
       clientWidth: element.clientWidth,

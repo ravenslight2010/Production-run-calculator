@@ -61,6 +61,7 @@ import {
 import { applyOperationalIntent, parseOperationalIntent } from "../lib/operationalIntents";
 import { consumeRunInTransaction, consumeSauceBarrelInTransaction } from "./inventory";
 import { logger } from "../lib/logger";
+import { runBackgroundOperation } from "../lib/backgroundOperations";
 import {
   SYNC_SNAPSHOT_ID_RE,
   buildSyncWriteEnvelope,
@@ -89,6 +90,7 @@ import {
 import { applySubstitutions, computeRunConsumptionLines } from "@workspace/inventory-math";
 import { dateInTimeZone, facilityDate, facilityTimeZone } from "../lib/facilityTime";
 import { buildSyncHealthReport } from "../lib/syncHealth";
+import { appendAutomaticApplicatorEvidence } from "./applicatorBatchEvidence";
 export { dateInTimeZone, facilityTimeZone } from "../lib/facilityTime";
 export { detectConflicts } from "../lib/syncConflict";
 export { syncSnapshotId } from "../lib/syncContract";
@@ -106,6 +108,37 @@ type SseClient = {
   lastCalcEmitMs: number;
 };
 const clients = new Set<SseClient>();
+
+// Manual packaging corrections temporarily pause automatic case claims. The
+// deadline is server-owned: accepting a client-clock timestamp here would let
+// a skewed or malicious device suppress automatic tracking indefinitely.
+const MAX_PACKAGING_MANUAL_OVERRIDE_MS = 60_000;
+function capPackagingManualOverrideUntil(payload: unknown, serverTime: number): unknown {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+  const root = payload as Record<string, unknown>;
+  const rawProgress = root.packagingProgress;
+  if (!rawProgress || typeof rawProgress !== "object" || Array.isArray(rawProgress)) return payload;
+
+  const maxUntil = serverTime + MAX_PACKAGING_MANUAL_OVERRIDE_MS;
+  let changed = false;
+  const packagingProgress: Record<string, unknown> = {};
+  for (const [runId, rawEntry] of Object.entries(rawProgress as Record<string, unknown>)) {
+    if (!rawEntry || typeof rawEntry !== "object" || Array.isArray(rawEntry)) {
+      packagingProgress[runId] = rawEntry;
+      continue;
+    }
+    const entry = rawEntry as Record<string, unknown>;
+    const manualOverrideUntil = entry.manualOverrideUntil;
+    if (typeof manualOverrideUntil === "number" && Number.isFinite(manualOverrideUntil) && manualOverrideUntil > maxUntil) {
+      packagingProgress[runId] = { ...entry, manualOverrideUntil: maxUntil };
+      changed = true;
+    } else {
+      packagingProgress[runId] = rawEntry;
+    }
+  }
+  return changed ? { ...root, packagingProgress } : payload;
+}
+
 function requestedSnapshot(req: Request): string | undefined {
   const value = req.query.snapshot;
   return typeof value === "string" && SYNC_SNAPSHOT_ID_RE.test(value) ? value : undefined;
@@ -177,6 +210,28 @@ function isValidDate(s: string): boolean {
 function clientToday(req: Request): string {
   const t = req.query.today;
   return typeof t === "string" && isValidDate(t) ? t : facilityDate();
+}
+
+function completeSyncData(data: unknown): unknown {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return data;
+  const record = data as Record<string, unknown>;
+  if (
+    !record.dayState
+    || typeof record.dayState !== "object"
+    || Array.isArray(record.dayState)
+    || !record.runValues
+    || typeof record.runValues !== "object"
+    || Array.isArray(record.runValues)
+  ) return data;
+  const {
+    baseSnapshotId: _baseSnapshotId,
+    ...complete
+  } = record;
+  return {
+    ...complete,
+    syncVersion: 1,
+    completeness: "complete",
+  };
 }
 
 const MAX_COMMAND_ACTION_BYTES = 64 * 1024;
@@ -368,6 +423,7 @@ function broadcast(
   date: string,
   meta: { canonicalRevision?: number; serverTime?: number } = {},
 ): void {
+  data = completeSyncData(data);
   const liveState = computeServerLiveState(
     data,
     meta.serverTime ?? Date.now(),
@@ -376,6 +432,7 @@ function broadcast(
   const msg = `data: ${JSON.stringify({
     data,
     senderId,
+    completeness: "complete",
     canonicalRevision: meta.canonicalRevision ?? liveState.calculationRevision,
     ...liveState,
   })}\n\n`;
@@ -983,20 +1040,21 @@ async function upsertProtected(
           .from(dailySyncTable)
           .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)))
           .for("update");
-        existingData = existing?.data;
+        const canonicalExisting = completeSyncData(existing?.data);
+        existingData = canonicalExisting;
         // A partial payload is a delta over the exact locked snapshot. Inherit
         // omitted cold sections (such as history) from that snapshot before the
         // normal per-run/LWW protection runs.
-        const payloadForMerge = isPartialSyncPayload(payload) && existing?.data
-          ? { ...(existing.data as Record<string, unknown>), ...(payload as Record<string, unknown>) }
+        const payloadForMerge = isPartialSyncPayload(payload) && canonicalExisting
+          ? { ...(canonicalExisting as Record<string, unknown>), ...(payload as Record<string, unknown>) }
           : payload;
         // Validate partial deltas while the canonical row lock is held.
         // Otherwise another writer could change the row between validation and
         // merge, making the client's base snapshot unsafe.
         if (isPartialSyncPayload(payload)) {
-          const currentSnapshotId = existing?.data === undefined
+          const currentSnapshotId = canonicalExisting === undefined
             ? undefined
-            : syncSnapshotId(existing.data);
+            : syncSnapshotId(canonicalExisting);
           if (
             !isValidPartialSyncContract(payload) ||
             typeof currentSnapshotId !== "string" ||
@@ -1005,7 +1063,7 @@ async function upsertProtected(
             // Do not apply a delta with a missing, malformed, or stale
             // dependency. Return the complete authoritative snapshot instead.
             return {
-              data: existing?.data ?? null,
+              data: canonicalExisting ?? null,
               wrote: false,
               partialFallback: true,
               retries: attempt,
@@ -1018,9 +1076,10 @@ async function upsertProtected(
         // Today's row must always be additive/tombstone-driven: a new device can
         // hold a newer local marker before it receives this row, but that marker
         // must never erase other operators' scheduled or live runs.
-        const m = capMergedResult(protectRunValues(payloadForMerge, existing?.data, {
+        const serverOwnedPayload = capPackagingManualOverrideUntil(payloadForMerge, serverTime);
+        const m = completeSyncData(capMergedResult(protectRunValues(serverOwnedPayload, canonicalExisting, {
           allowRunListReplacement: date > clientTodayDate,
-        }));
+        }))) as Record<string, any>;
         canonicalizePepNames(m);
         applyResetBoundary(m, existing?.data, date === clientTodayDate);
         if (existing) {
@@ -1070,12 +1129,13 @@ router.get("/sync/today", async (req: Request, res: Response): Promise<void> => 
   // A missing live row is an empty baseline, not a null payload. Returning the
   // same shape as a populated row keeps reset/wake recovery within the client
   // sync contract and gives it a stable snapshot identity.
-  const data = row?.data ?? emptySyncData(clientToday(req));
+  const data = completeSyncData(row?.data ?? emptySyncData(clientToday(req)));
   const canonicalRevision = row?.canonicalRevision ?? 0;
   const serverTime = Date.now();
   res.setHeader("X-Sync-Canonical-Revision", String(canonicalRevision));
   res.setHeader("X-Sync-Server-Time", String(serverTime));
   if (unchangedResponse(res, data, requestedSnapshot(req))) return;
+  res.setHeader("X-Sync-Response", "complete");
   if (data) res.setHeader("X-Sync-Snapshot", syncSnapshotId(data));
   const liveState = computeServerLiveState(data, serverTime, canonicalRevision);
   if (!liveState.operationalProjection) {
@@ -1157,8 +1217,6 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
   const responseBody = buildSyncWriteEnvelope(merged, {
     requestedSnapshotId: requestedId,
     partialFallback: result.partialFallback,
-    canonicalRevision: result.canonicalRevision,
-    serverTime: result.serverTime,
   });
   res.setHeader("X-Sync-Response-Bytes", String(Buffer.byteLength(JSON.stringify(responseBody))));
   const liveState = merged
@@ -1467,6 +1525,211 @@ router.get("/sync/operational-intents/cursor", async (req: Request, res: Respons
   }
 });
 
+// Offline operational commands are not snapshots. Their stable ID is retained
+// with a bounded outcome trail so retries after a timeout/restart return the
+// original answer instead of applying a second pause or correction.
+router.post("/sync/operational-intents", async (req: Request, res: Response): Promise<void> => {
+  const now = Date.now();
+  const intent = parseOperationalIntent(req.body?.intent, now);
+  if (!intent || intent.date !== clientToday(req)) {
+    res.status(400).json({ error: "Invalid operational intent or production date" }); return;
+  }
+  const scope = currentScope();
+  try {
+    let result: (ReturnType<typeof applyOperationalIntent> & { cursor?: number }) | undefined;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        result = await db.transaction(async (tx) => {
+          // Fence reset and intent under one transaction. A reset that wins
+          // this lock makes the command review-required; it cannot resurrect
+          // state between a preflight epoch read and the document write.
+          await tx.insert(dataResetTable).values({ scope, epoch: 0, resetAt: new Date() })
+            .onConflictDoNothing();
+          const [reset] = await tx.select().from(dataResetTable)
+            .where(eq(dataResetTable.scope, scope)).for("update");
+          const [existing] = await tx.select().from(dailySyncTable)
+            .where(and(eq(dailySyncTable.date, intent.date), eq(dailySyncTable.scope, scope))).for("update");
+          const [seen] = await tx.select().from(operationalIntentLedgerTable)
+            .where(and(eq(operationalIntentLedgerTable.scope, scope), eq(operationalIntentLedgerTable.date, intent.date), eq(operationalIntentLedgerTable.intentId, intent.id)))
+            .for("update");
+          // A duplicate must return the snapshot produced by its original
+          // transaction, rather than whichever later command currently owns
+          // the daily document. This is the idempotency boundary clients use
+          // after a timeout or a process restart.
+          if (seen) return {
+            data: seen.snapshot ?? existing?.data ?? emptySyncData(intent.date),
+            outcome: seen.outcome as any,
+            duplicate: true,
+            cursor: seen.sequence,
+          };
+          if ((reset?.epoch ?? 0) !== intent.resetEpoch) {
+            const [receipt] = await tx.insert(operationalIntentLedgerTable).values({
+              scope, date: intent.date, intentId: intent.id, outcome: "review-required",
+              snapshot: (existing?.data ?? emptySyncData(intent.date)) as any,
+            }).returning({ sequence: operationalIntentLedgerTable.sequence });
+            return {
+              data: existing?.data ?? emptySyncData(intent.date),
+              outcome: "review-required" as const,
+              duplicate: false,
+              cursor: receipt!.sequence,
+            };
+          }
+          const applied = applyOperationalIntent(existing?.data ?? emptySyncData(intent.date), intent, now);
+          applied.data.dayState = { ...applied.data.dayState, date: intent.date };
+          if (
+            applied.outcome === "accepted" &&
+            intent.action === "lifecycle" &&
+            intent.lifecycle === "end"
+          ) {
+            const [legacyCompletion] = await tx.select().from(completedRunHistoryTable).where(and(
+              eq(completedRunHistoryTable.scope, scope),
+              eq(completedRunHistoryTable.date, intent.date),
+              eq(completedRunHistoryTable.runId, intent.runId),
+            )).for("update");
+            const lockedRun = (existing?.data as any)?.dayState?.runs?.find(
+              (run: any) => run?.id === intent.runId,
+            );
+            const legacySnapshotRun = (legacyCompletion?.snapshot as any)?.dayState?.runs?.filter(
+              (run: any) => run?.id === intent.runId,
+            );
+            const legacyAgeMs = legacyCompletion
+              ? now - legacyCompletion.createdAt.getTime()
+              : Number.POSITIVE_INFINITY;
+            const compatibleLegacyCompletion = !!legacyCompletion
+              && legacyCompletion.operationId === `completed:${intent.date}:${intent.runId}`
+              && legacyAgeMs >= 0
+              && legacyAgeMs <= 10 * 60_000
+              && Array.isArray(legacySnapshotRun)
+              && legacySnapshotRun.length === 1
+              && Number(legacySnapshotRun[0].startedAt) === Number(lockedRun?.startedAt)
+              && Number(legacySnapshotRun[0].endedAt) === legacyCompletion.completedAt.getTime()
+              && legacyCompletion.completedAt.getTime() >= Number(lockedRun?.startedAt)
+              && Math.abs(legacyCompletion.completedAt.getTime() - intent.effectiveAt) <= 10 * 60_000;
+            // During the bounded migration window, an older client may have
+            // uploaded immutable history just before its canonical End intent.
+            // Only that exact, recently server-observed, fact-compatible record
+            // may bridge the migration; arbitrary history never controls a run.
+            if (compatibleLegacyCompletion) {
+              applied.data.dayState = {
+                ...applied.data.dayState,
+                runs: (applied.data.dayState.runs as Array<Record<string, unknown>>).map((run) =>
+                  run.id === intent.runId
+                    ? { ...run, endedAt: legacyCompletion!.completedAt.getTime() }
+                    : run
+                ),
+              };
+            } else if (legacyCompletion) {
+              applied.data = (existing?.data ?? emptySyncData(intent.date)) as Record<string, any>;
+              applied.outcome = "review-required";
+            }
+            if (applied.outcome === "accepted") {
+              const snapshot = JSON.parse(JSON.stringify(applied.data, (_key, value) => value)) as Record<string, unknown>;
+              const stable = (value: unknown): unknown => {
+                if (Array.isArray(value)) return value.map(stable);
+                if (value && typeof value === "object") {
+                  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+                    .sort(([a], [b]) => a.localeCompare(b))
+                    .map(([key, child]) => [key, stable(child)]));
+                }
+                return value;
+              };
+              const canonicalSnapshot = stable(snapshot) as Record<string, unknown>;
+              const snapshotHash = createHash("sha256").update(JSON.stringify(canonicalSnapshot)).digest("hex");
+              const canonicalRun = (applied.data.dayState?.runs as Array<Record<string, unknown>>)
+                .find((run) => run.id === intent.runId);
+              const completedAt = Number(canonicalRun?.endedAt);
+              if (!compatibleLegacyCompletion) {
+                await tx.insert(completedRunHistoryTable).values({
+                  id: randomUUID(),
+                  scope,
+                  operationId: intent.id,
+                  runId: intent.runId,
+                  date: intent.date,
+                  completedAt: new Date(completedAt),
+                  snapshot: canonicalSnapshot,
+                  snapshotHash,
+                  actorId: req.userId ?? "unknown",
+                });
+              }
+              await consumeRunInTransaction(tx, intent.runId, intent.inventoryLines ?? []);
+            }
+          }
+          if (existing) await tx.update(dailySyncTable).set({ data: applied.data as any, updatedAt: new Date() })
+            .where(and(eq(dailySyncTable.date, intent.date), eq(dailySyncTable.scope, scope)));
+          else await tx.insert(dailySyncTable).values({ date: intent.date, scope, data: applied.data as any, updatedAt: new Date() });
+          const [receipt] = await tx.insert(operationalIntentLedgerTable).values({
+            scope, date: intent.date, intentId: intent.id, outcome: applied.outcome,
+            snapshot: applied.data as any,
+          }).returning({ sequence: operationalIntentLedgerTable.sequence });
+          return { ...applied, cursor: receipt!.sequence };
+        });
+        break;
+      } catch (error) {
+        if (isUniqueViolation(error) && attempt < 3) continue;
+        throw error;
+      }
+    }
+    if (!result) throw new Error("Operational intent did not complete");
+    if (!result.duplicate) broadcast(result.data, typeof req.body?.senderId === "string" ? req.body.senderId.slice(0, 160) : "", scope, intent.date);
+    res.json({ ok: true, outcome: result.outcome, duplicate: result.duplicate, cursor: result.cursor, data: result.data, snapshotId: syncSnapshotId(result.data) });
+  } catch (error) {
+    req.log.error({ err: error, event: "operational_intent" }, "Operational intent reconciliation failed");
+    res.status(500).json({ error: "Operational intent could not sync. Please retry." });
+  }
+});
+
+// Compact accepted command history for clients that have a cursor. The payload
+// is intentionally materialized snapshots, not executable operations: replay
+// cannot re-consume inventory or re-run a lifecycle transition. The existing
+// POST endpoint remains synchronous for older clients.
+router.get("/sync/operational-intents/cursor", async (req: Request, res: Response): Promise<void> => {
+  const raw = req.query.after;
+  const after = raw === undefined ? 0 : Number(raw);
+  if (!Number.isSafeInteger(after) || after < 0) {
+    res.status(400).json({ error: "Invalid mutation cursor" });
+    return;
+  }
+  const scope = currentScope();
+  try {
+    const rows = await db.select({
+      cursor: operationalIntentLedgerTable.sequence,
+      date: operationalIntentLedgerTable.date,
+      outcome: operationalIntentLedgerTable.outcome,
+      snapshot: operationalIntentLedgerTable.snapshot,
+      createdAt: operationalIntentLedgerTable.createdAt,
+    }).from(operationalIntentLedgerTable)
+      .where(and(eq(operationalIntentLedgerTable.scope, scope), gt(operationalIntentLedgerTable.sequence, after)))
+      .orderBy(asc(operationalIntentLedgerTable.sequence))
+      .limit(100);
+    // Cursor recovery must be monotonic across pages. Never mix a compacted
+    // receipt's current materialization with a later retained historical
+    // snapshot: every adoptable receipt in this page points at the current
+    // scoped materialization for its date.
+    const dates = [...new Set(rows.map((row) => row.date))];
+    const materialized = dates.length
+      ? await db.select({ date: dailySyncTable.date, data: dailySyncTable.data }).from(dailySyncTable)
+        .where(and(eq(dailySyncTable.scope, scope), inArray(dailySyncTable.date, dates)))
+      : [];
+    const byDate = new Map(materialized.map((row) => [row.date, row.data]));
+    res.json({
+      cursor: rows.length ? rows[rows.length - 1]!.cursor : after,
+      hasMore: rows.length === 100,
+      mutations: rows.map(({ snapshot: _historical, ...row }) => {
+        const adoptable = ["accepted", "superseded", "rebased"].includes(row.outcome);
+        const snapshot = adoptable ? byDate.get(row.date) ?? emptySyncData(row.date) : null;
+        return {
+          ...row,
+          snapshot,
+          materializedSnapshotId: snapshot ? syncSnapshotId(snapshot) : null,
+        };
+      }),
+    });
+  } catch (error) {
+    req.log.error({ err: error, event: "operational_intent_cursor" }, "Mutation cursor read failed");
+    res.status(500).json({ error: "Mutation cursor could not sync" });
+  }
+});
+
 router.post("/sync/auto-track/claim", async (req: Request, res: Response): Promise<void> => {
   const startedAt = Date.now();
   const claim = parseAutoTrackClaim(req.body?.claim, startedAt);
@@ -1593,6 +1856,19 @@ router.post("/sync/auto-track/claim", async (req: Request, res: Response): Promi
             };
           }
           const applied = applyAutoTrackClaim(existing?.data ?? emptySyncData(date), claim);
+          if (applied.outcome === "accepted" && /^app[1-4]-batch$/.test(claim.channel)) {
+            const mutation = claim.mutations.find((candidate) => /^app[1-4]BatchesMade$/.test(candidate.field));
+            if (mutation) {
+              await appendAutomaticApplicatorEvidence(tx, {
+                scope,
+                date,
+                runId: claim.runId,
+                slot: Number(claim.channel[3]),
+                observedTotal: mutation.to,
+                eventId: claim.eventId,
+              });
+            }
+          }
           if (applied.outcome === "accepted") {
              if (applied.inventoryConsumption?.kind === "sauce-barrel") {
                const consumption = applied.inventoryConsumption;
@@ -1693,10 +1969,10 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
   let heartbeat: NodeJS.Timeout | undefined;
   let calcTick: NodeJS.Timeout | undefined;
 
-  // Register this before any awaited work. A browser can abort its wake
-  // reconciliation while the initial row lookup is in flight; registering
-  // afterward would add a disconnected response to `clients` permanently.
-  req.once("close", () => {
+  // Register this before any awaited work. The event stream lives on the
+  // response; the incoming request can finish normally while that response
+  // remains open, so request-close must not remove a healthy SSE client.
+  res.once("close", () => {
     closed = true;
     if (client) clients.delete(client);
     if (heartbeat) clearInterval(heartbeat);
@@ -1717,25 +1993,18 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
   // Always send a first frame, including when no row exists. The web client uses
   // this acknowledgement as its sync baseline and must not upload local state
   // before it has either applied the row or learned that the row is absent.
-  const data = row?.data ?? null;
-  const snapshotId = data ? syncSnapshotId(data) : undefined;
+  const data = completeSyncData(row?.data ?? emptySyncData(watchDate));
+  const snapshotId = syncSnapshotId(data);
   const requested = requestedSnapshot(req);
   const initialServerTime = Date.now();
-  const liveState = data
-    ? computeServerLiveState(data, initialServerTime, row?.canonicalRevision ?? 0)
-    : {
-        serverCalc: null,
-        autoTrackSchedule: null,
-        operationalProjection: null,
-        serverTime: initialServerTime,
-        calculationRevision: row?.canonicalRevision ?? 0,
-      };
+  const liveState = computeServerLiveState(data, initialServerTime, row?.canonicalRevision ?? 0);
   res.write(`data: ${JSON.stringify({
     ...(requested && requested === snapshotId
       ? { unchanged: true, snapshotId }
       : { data, snapshotId }),
     senderId: null,
     initial: true,
+    completeness: "complete",
     canonicalRevision: row?.canonicalRevision ?? 0,
     ...(initialResetState.epoch > 0
       ? { [initialResetState.rollover ? "rollover" : "reset"]: true, resetEpoch: initialResetState.epoch }
@@ -1824,6 +2093,81 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
       client.res.write(`data: ${JSON.stringify({ ...setupTick.frame, ...live })}\n\n`);
     } catch {}
   }, liveCalcTickMs);
+});
+
+router.post("/sync/e2e/auto-track-tick", async (req: Request, res: Response): Promise<void> => {
+  if (
+    process.env.E2E_TEST_DB !== "1"
+    || process.env.E2E_APPROVED_DESTRUCTIVE_MODE !== "1"
+  ) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  const nowMs = Number(req.body?.nowMs);
+  if (!Number.isFinite(nowMs) || nowMs <= 0) {
+    res.status(400).json({ error: "A valid nowMs is required" });
+    return;
+  }
+  const scope = currentScope();
+  const date = clientToday(req);
+  if (req.body?.rearm === true) {
+    await db.transaction(async (tx) => {
+      const [locked] = await tx.select().from(dailySyncTable).where(and(
+        eq(dailySyncTable.scope, scope),
+        eq(dailySyncTable.date, date),
+      )).for("update");
+      if (!locked) return;
+      const data = locked.data as Record<string, any>;
+      const run = data.dayState?.runs?.[data.dayState?.currentIndex ?? 0];
+      if (!run?.id || !run.startedAt || run.pausedAt || run.endedAt) return;
+      const serverState = data.autoTrackServerState && typeof data.autoTrackServerState === "object"
+        ? data.autoTrackServerState as Record<string, any>
+        : {};
+      const wallClockBookkeeping = { ...(serverState.wallClockBookkeeping ?? {}) };
+      delete wallClockBookkeeping[run.id];
+      await tx.update(dailySyncTable).set({
+        data: {
+          ...data,
+          autoTrackServerState: {
+            ...serverState,
+            version: 1,
+            wallClockBookkeeping,
+          },
+        },
+        canonicalRevision: (locked.canonicalRevision ?? 0) + 1,
+      }).where(and(
+        eq(dailySyncTable.scope, scope),
+        eq(dailySyncTable.date, date),
+      ));
+    });
+  }
+  const summary = await runAutoTrackServerTicks({ nowMs, scope, date });
+  // A deterministic E2E clock step is also an authoritative projection frame.
+  // Production heartbeats publish this frame even when no counter cadence is
+  // due; without it, a test step inside the freezer-fill window would leave the
+  // browser displaying the projection captured at the previous server beat.
+  // Keep this fixture scoped exactly like the normal SSE path.
+  const [row] = await db.select().from(dailySyncTable).where(and(
+    eq(dailySyncTable.scope, scope),
+    eq(dailySyncTable.date, date),
+  ));
+  if (row) {
+    broadcast(row.data, "server:e2e-clock", scope, date, {
+      canonicalRevision: row.canonicalRevision ?? 0,
+      serverTime: nowMs,
+    });
+  }
+  const authoritative = row
+    ? computeServerLiveState(row.data, nowMs, row.canonicalRevision ?? 0)
+    : null;
+  res.json({
+    ...summary,
+    canonicalRevision: row?.canonicalRevision ?? 0,
+    serverTime: nowMs,
+    projected: !!row,
+    autoTrackSchedule: authoritative?.autoTrackSchedule ?? null,
+    operationalProjection: authoritative?.operationalProjection ?? null,
+  });
 });
 
 // ── Scheduled (future) days ──────────────────────────────────────────────────
@@ -1977,8 +2321,6 @@ router.put(
   const responseBody = buildSyncWriteEnvelope(merged, {
     requestedSnapshotId: requestedId,
     partialFallback: result.partialFallback,
-    canonicalRevision: result.canonicalRevision,
-    serverTime: result.serverTime,
   });
   res.setHeader("X-Sync-Response-Bytes", String(Buffer.byteLength(JSON.stringify(responseBody))));
     res.json(responseBody);
@@ -2151,13 +2493,20 @@ export type ServerTickSummary = {
 /** Executes automatic claims under the same locked, idempotent path as the
  * public claim route. A beat writes wall-clock bookkeeping even without an
  * accepted claim, which prevents a restart from replaying elapsed time. */
-export async function runAutoTrackServerTicks(opts: { nowMs?: number; maxClaims?: number } = {}): Promise<ServerTickSummary> {
+export async function runAutoTrackServerTicks(opts: {
+  nowMs?: number;
+  maxClaims?: number;
+  scope?: Scope;
+  date?: string;
+} = {}): Promise<ServerTickSummary> {
   const nowMs = opts.nowMs ?? Date.now();
   const maxClaims = Math.max(1, opts.maxClaims ?? SERVER_TICK_MAX_CLAIMS);
   const rows = await db.select().from(dailySyncTable).where(and(
     gte(dailySyncTable.date, serverTickStartDate(nowMs)),
     // Client-local dates may be one calendar day ahead of server UTC.
     lte(dailySyncTable.date, new Date(nowMs + 24 * 60 * 60 * 1000).toISOString().slice(0, 10)),
+    ...(opts.scope ? [eq(dailySyncTable.scope, opts.scope)] : []),
+    ...(opts.date ? [eq(dailySyncTable.date, opts.date)] : []),
   ));
   let builtClaims = 0;
   let accepted = 0;
@@ -2240,6 +2589,28 @@ export async function runAutoTrackServerTicks(opts: { nowMs?: number; maxClaims?
           if (applied.inventoryConsumption?.kind === "sauce-barrel") {
             const consumption = applied.inventoryConsumption;
             await consumeSauceBarrelInTransaction(tx, consumption.runId, consumption.barrelIndex, consumption.itemKey, consumption.qty, true, consumption.eventId);
+          }
+          data = applied.data;
+          acceptedHere++;
+          if (/^app[1-4]-batch$/.test(claim.channel)) {
+            const mutation = claim.mutations.find((candidate) => /^app[1-4]BatchesMade$/.test(candidate.field));
+            if (mutation) {
+              // Keep the server-owned progress and its independently verifiable
+              // observation in this same transaction. The event id is stable
+              // across tick retries, and the helper's scoped operation key
+              // makes a replay idempotent.
+              await appendAutomaticApplicatorEvidence(tx, {
+                scope,
+                date: row.date,
+                runId: claim.runId,
+                slot: Number(claim.channel[3]),
+                observedTotal: mutation.to,
+                eventId: claim.eventId,
+              });
+            }
+            acceptedNet.push(claim);
+          } else if (claim.channel === "sauce-barrel") {
+            acceptedNet.push(claim);
           }
           data = applied.data;
           acceptedHere++;
@@ -2328,7 +2699,10 @@ export function startDailyRolloverScheduler(
     running = true;
     try {
       for (const scope of scopes) {
-        await runWithScope(scope, () => runDailyRollover(scope));
+        await runBackgroundOperation(
+          "daily-rollover",
+          () => runWithScope(scope, () => runDailyRollover(scope)),
+        );
       }
     } catch (err) {
       logger.error({ err, event: "daily_rollover", outcome: "degraded" }, "Daily rollover pass failed");

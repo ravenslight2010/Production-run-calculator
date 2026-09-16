@@ -2628,6 +2628,167 @@ describe("/sync/events — facility-wide master-data broadcasts", () => {
   });
 });
 
+describe("GET /sync/events — auto-track schedule heartbeat (step 6c)", () => {
+  // A real client sync payload carries the run's complete FormValues. Keep
+  // this fixture realistic so the server can compute a non-empty schedule.
+  const heartbeatFullValues = {
+    casesNeeded: 240,
+    crustsPerCycle: 12,
+    cycleSpeed: 600,
+    speedAdjustment: 1,
+    approxLineSpeed: 450,
+    freezerTime: 3.5,
+    pizzasPerCase: 12,
+    casesPerSkid: 48,
+    casesPerLayer: 12,
+    doughballsPerTray: 36,
+    crustsPerStack: 6,
+    doughBatchYield: 150,
+    crustsPerCase: 12,
+    skidsCompleted: 0,
+    casesOnCurrentSkid: 0,
+    traysOnLine: 0,
+    batchesReady: 0,
+    mixerLowSec: 330,
+    mixerHighSec: 180,
+    hopperSec: 70,
+    carryOverDone: false,
+    sauceOzPerPizza: 2,
+    sauceBarrelLbs: 50,
+    sauceBarrelsMade: 0,
+    sauceBarrelAnchorNetSec: 0,
+    sauceBarrelCorrectionGeneration: 0,
+    app1OzPerPizza: 2.5,
+    app1BatchLbs: 100,
+    app1BatchesMade: 0,
+    app1BatchAnchorNetSec: 0,
+    app1BatchCorrectionGeneration: 0,
+    app2OzPerPizza: 0,
+    app2BatchLbs: 0,
+    app2BatchesMade: 0,
+    app2BatchAnchorNetSec: 0,
+    app2BatchCorrectionGeneration: 0,
+    app3OzPerPizza: 0,
+    app3BatchLbs: 0,
+    app3BatchesMade: 0,
+    app3BatchAnchorNetSec: 0,
+    app3BatchCorrectionGeneration: 0,
+    app4OzPerPizza: 0,
+    app4BatchLbs: 0,
+    app4BatchesMade: 0,
+    app4BatchAnchorNetSec: 0,
+    app4BatchCorrectionGeneration: 0,
+    pep1Sticks: 0,
+    pep1OzPerPizza: 0,
+    pep1BatchLbs: 0,
+    pep2Sticks: 0,
+    pep2OzPerPizza: 0,
+    pep2BatchLbs: 0,
+    pep1Combined: true,
+    pep1TypeB: "",
+    pep2TypeB: "",
+    pep1SticksB: 0,
+    pep1OzPerPizzaB: 0,
+    pep1BatchLbsB: 0,
+    pep2SticksB: 0,
+    pep2OzPerPizzaB: 0,
+    pep2BatchLbsB: 0,
+    app1Type: "app",
+    app2Type: "",
+    app3Type: "",
+    app4Type: "",
+    pep1Type: "",
+    pep2Type: "",
+    dieType: "Round 12",
+    allergen: "none",
+    doughRecipeName: "",
+    targetDoughballWeight: 8,
+    doughRecipe: [],
+    app1CheeseRecipeName: "",
+    app1CheeseRecipe: [],
+    app2CheeseRecipeName: "",
+    app2CheeseRecipe: [],
+    app3CheeseRecipeName: "",
+    app3CheeseRecipe: [],
+    app4CheeseRecipeName: "",
+    app4CheeseRecipe: [],
+    frontlineRecipeName: "",
+    frontlineRecipe: [],
+  };
+
+  it("pushes one schedule frame, then comment-only heartbeats while unchanged", async () => {
+    const date = "2030-04-03";
+    process.env.AUTO_TRACK_HEARTBEAT_MS = "100";
+    try {
+      await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
+        method: "PUT",
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({
+          senderId: "heartbeat-writer",
+          payload: {
+            dayState: {
+              runs: [{
+                id: "heartbeat-run",
+                brand: "Acme",
+                flavor: "Pep",
+                subTab: "crusts",
+                startedAt: Date.now() - 60_000,
+                metaUpdatedAt: 1,
+              }],
+              resetAt: 1,
+            },
+            runValues: { "heartbeat-run": heartbeatFullValues },
+            runValuesUpdatedAt: { "heartbeat-run": 1 },
+          },
+        }),
+      });
+
+      const ctrl = new AbortController();
+      const res = await fetch(
+        `${baseUrl}/api/sync/events?clientId=heartbeat-watcher&today=${date}`,
+        { headers: authHeaders(), signal: ctrl.signal },
+      );
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      let scheduleFrames = 0;
+      let commentBeats = 0;
+      let heartbeatRunId: string | undefined;
+      const deadline = Date.now() + 5_000;
+      try {
+        while (Date.now() < deadline && (scheduleFrames < 1 || commentBeats < 2)) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const frames = buf.split("\n\n");
+          buf = frames.pop() ?? "";
+          for (const frame of frames) {
+            if (frame.includes(": heartbeat")) commentBeats++;
+            const line = frame.split("\n").find((entry) => entry.startsWith("data: "));
+            if (!line) continue;
+            const parsed = JSON.parse(line.slice("data: ".length)) as {
+              heartbeat?: boolean;
+              autoTrackSchedule?: { runId?: string } | null;
+            };
+            if (parsed.heartbeat === true && parsed.autoTrackSchedule) {
+              scheduleFrames++;
+              heartbeatRunId = parsed.autoTrackSchedule.runId;
+            }
+          }
+        }
+      } finally {
+        await reader.cancel().catch(() => {});
+        ctrl.abort();
+      }
+      expect(scheduleFrames).toBe(1);
+      expect(commentBeats).toBeGreaterThanOrEqual(2);
+      expect(heartbeatRunId).toBe("heartbeat-run");
+    } finally {
+      delete process.env.AUTO_TRACK_HEARTBEAT_MS;
+    }
+  }, 15_000);
+});
+
 describe("/sync — conflict logging to sync_conflict_logs", () => {
   // Each protective merge outcome must write a row to sync_conflict_logs so
   // managers can detect whether offline-first merges are converging or
