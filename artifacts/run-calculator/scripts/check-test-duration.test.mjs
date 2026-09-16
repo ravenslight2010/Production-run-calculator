@@ -195,7 +195,7 @@ exit ${runnerExitCode}
   }
 });
 
-test("forces an over-budget result and cleans up the report directory", async (t) => {
+test("executable validation fails a passing runner that exceeds its duration budget and cleans up", async (t) => {
   const availableWorkers = availableParallelism();
   if (availableWorkers < MIN_CALCULATOR_TEST_WORKERS) {
     t.skip(
@@ -255,6 +255,17 @@ sleep 0.15
     assert.ok(
       Math.abs(elapsedSeconds - overrunSeconds) <= 0.1,
       `elapsed ${elapsedSeconds}s should include the ${overrunSeconds}s overrun`,
+    );
+
+    assert.match(
+      result.stdout,
+      /Calculator test suite: 1 files \(1 passed, 0 failed\), 1 tests \(1 passed, 0 failed\), elapsed \d+\.\d+s \(budget 0\.0s\)\./,
+    );
+    assert.match(
+      result.stdout,
+      new RegExp(
+        `Detected runner capacity: ${availableWorkers} available CPU workers; configured worker ceiling: ${CALCULATOR_TEST_WORKER_CEILING}\\.`,
+      ),
     );
 
     const reportPath = (await readFile(cleanupMarkerPath, "utf8")).trim();
