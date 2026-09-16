@@ -136,25 +136,58 @@ router.post("/mix-surplus", requireCapability("manage-inventory"), async (req: R
     const amountMade = round2(Math.max(0, parsed.data.amountMade));
     const now = new Date();
     const result = await db.transaction(async (tx) => {
-      const [row] = await tx
-        .insert(mixSurplusLotsTable)
-        .values({
-          id: randomUUID(),
-          scope,
-          mixId: mixRow.id,
-          name: mixRow.name,
-          brand: mixRow.brand,
-          flavor: mixRow.flavor,
-          isPrep: mixRow.isPrep,
-          productionDate: rawProductionDate as string,
-          amountMade,
-          amountUsed: 0,
-          amountRemaining: amountMade,
-          location: "freezer",
-          createdAt: now,
-          updatedAt: now,
-        })
-        .returning();
+      // Same-date surplus for the same mix extends the existing dated lot
+      // instead of duplicating (mirrors the day-start recording in
+      // inventory.ts) so one mix + production date stays one lot.
+      const [existing] = await tx
+        .select()
+        .from(mixSurplusLotsTable)
+        .where(
+          and(
+            eq(mixSurplusLotsTable.scope, scope),
+            eq(mixSurplusLotsTable.mixId, mixRow.id),
+            eq(mixSurplusLotsTable.productionDate, rawProductionDate as string),
+          ),
+        )
+        .for("update")
+        .limit(1);
+      let row: MixSurplusLotRow | undefined;
+      if (existing) {
+        [row] = await tx
+          .update(mixSurplusLotsTable)
+          .set({
+            amountMade: round2(existing.amountMade + amountMade),
+            amountRemaining: round2(existing.amountRemaining + amountMade),
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(mixSurplusLotsTable.id, existing.id),
+              eq(mixSurplusLotsTable.scope, scope),
+            ),
+          )
+          .returning();
+      } else {
+        [row] = await tx
+          .insert(mixSurplusLotsTable)
+          .values({
+            id: randomUUID(),
+            scope,
+            mixId: mixRow.id,
+            name: mixRow.name,
+            brand: mixRow.brand,
+            flavor: mixRow.flavor,
+            isPrep: mixRow.isPrep,
+            productionDate: rawProductionDate as string,
+            amountMade,
+            amountUsed: 0,
+            amountRemaining: amountMade,
+            location: "freezer",
+            createdAt: now,
+            updatedAt: now,
+          })
+          .returning();
+      }
       if (!row) throw new Error("Mix surplus lot insert returned no row");
       return { row, ledger: await listLedger(tx) };
     });
@@ -174,7 +207,9 @@ router.put(
   requireCapability("manage-inventory"),
   async (req: Request, res: Response) => {
     const rawRunDate = req.params.runDate;
-    const path = ReplaceMixSurplusAllocationsParams.safeParse({ runDate: rawRunDate });
+    const path = ReplaceMixSurplusAllocationsParams.safeParse({
+      runDate: new Date(`${rawRunDate}T00:00:00Z`),
+    });
     const parsed = ReplaceMixSurplusAllocationsBody.safeParse(req.body);
     if (!path.success || !parsed.success || !isValidSurplusDate(rawRunDate)) {
       res.status(400).json({ error: "Invalid allocation. Enter a make-day and lot amounts." });
@@ -312,7 +347,9 @@ router.delete(
         if (!lot || lot.amountRemaining <= 0) {
           throw new MixSurplusRequestError("Surplus lot not found or already voided.", 404);
         }
-        const voided = lot.amountRemaining;
+        // Amount committed via allocations is what the scalar reducer has applied
+        // to the plan; voiding releases those pounds.
+        const voided = lot.amountUsed;
         await tx
           .delete(mixSurplusAllocationsTable)
           .where(
