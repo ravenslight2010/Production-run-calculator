@@ -1071,3 +1071,28 @@ In that state the sauce/applicator effects `return`/`continue` BEFORE the local 
 **Why it was needed**: completes Mix Plan backlog §1 (backlog items 2–5), enables QC traceability, and keeps the daily-reset-safe invariant (separate relational tables; client day-state reset doesn't touch them).
 
 **Verification**: inventory-math 79/79; run-calculator focused suites (mixSurplusClient 9/9, MixSurplusStrip 6/6, MixAlreadyMadeInput 4/4, LiveTabMemo.snappy + suite7 84/84); api-server sync.liveCalcTick 20/20 + protectRunValues 110/110; both typechecks clean. Integration test added (CI-only, needs `DATABASE_URL`). Behavioral note: B2 basis fix changes consumption only when "Made today" is entered (rare in production); blank entries unchanged.
+## Replit workstream merge — reconciliation fixes (2026-09-16)
+
+**Date**: 2026-09-16
+**Branch**: `merge/replit-sync-2026-09-16`
+**Files changed**:
+- `artifacts/run-calculator/src/components/SetupProfileEditor.tsx` — removed two duplicate import lines (`Resolver`, `NumField`) left by the 3-way merge.
+- `artifacts/api-server/src/routes/index.ts` — restored two authorization-inventory entries Replit added to their copy of this file (lost when the conflict was resolved with `ours`):
+  - read inventory: `GET /background-operations/diagnostics` (`manage-staff`, scoped)
+  - mutation inventory: `POST /applicator-batch-evidence/finalize` (`manager-only`, `review-incidents`, `managerRole: true`)
+- `pnpm-lock.yaml` / `pnpm-workspace.yaml` — intentionally NOT changed; Replit's x64-generated lockfile kept so CI/Render (x64) stay green.
+
+**What was wrong**:
+- The 3-way merge of Replit's workstream versus our `main` produced 21 conflicts. `routes/index.ts` was resolved `ours`, which silently dropped Replit's two new inventory entries (their route code was merged, their inventory wasn't). CI's `registration.test.ts` and `applicatorBatchEvidence.test.ts` would have failed.
+- `SetupProfileEditor.tsx` had doubled import statements from both sides of the merge → `error TS2300: Duplicate identifier`.
+
+**What the fix was**: Re-added the exact Replit inventory entries (verified byte-for-byte against `origin/Replit`), removed the duplicate imports. Kept BOTH mix-surplus implementations (our ledger via `listMixSurplus`/`recordMixSurplus` endpoints + Replit's read-only `SurplusMixCard`) — no behavioral conflict.
+
+**Why it was needed**: The whole point of the merge is to land Replit's workstream with CI green. Those two tests enforce that every protected route is declared in the authorization inventory, so the merge was not complete without them.
+
+**Verification**:
+- Full root typecheck (`CI=true pnpm run typecheck`) passes on Node 24 (repo now requires `>=24`; vite 8 `native` config loader + TypeScript 7 tooling need it).
+- api-server unit suite (excluding `*.integration.test.ts`): 837/840 pass; 2 failures were the inventory gaps above (now fixed, both files re-run green); the remaining 1 failure (`backgroundOperations.test.ts` "retains sustained degradation") requires a real Postgres for the shared-persistence layer — CI-only, passes there.
+- run-calculator regressions: mixSurplusClient 9/9, MixSurplusStrip 6/6, MixAlreadyMadeInput 4/4, LiveTabMemo.snappy + suite7 84/84, warehouse set 14/14, sync set 30/30; inventory-math mixSurplus 5/5.
+- Local Postgres is not possible in this sandbox (kernel lacks SysV IPC — `shmget`/`mount` return ENOSYS), so DB-backed integration tests are left to CI, consistent with AGENTS.md.
+- Note for future ARM/Apple-Silicon work: the merged lockfile only declares x64 optional binaries for `lightningcss`, `esbuild`, `@tailwindcss/oxide` (Replit generates it on x64). CI and Render are x64 so this is fine, but ARM machines need the arm64 sibling packages installed manually (done locally in `node_modules/.pnpm` only, not committed). If we want durable ARM support, Replit should add `supportedArchitectures` to `pnpm-workspace.yaml` and regenerate the lockfile.

@@ -3,7 +3,6 @@ import { useAccessibleDialog } from "./useAccessibleDialog";
 import { useForm, useFieldArray } from "react-hook-form";
 import type { Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import type { Resolver } from "react-hook-form";
 import {
   formSchema,
   type FormValues,
@@ -52,7 +51,6 @@ import { ChevronDown, Settings, Package, Save, X, Sparkles, Check, AlertTriangle
 import { AppSlotMathBadge } from "./AppSlotMathBadge";
 import { matchDoughballVariant, normalizeDoughballVariants, type DoughballVariant } from "@workspace/named-recipes";
 import { getProfileCacheVersion, subscribeProfileCache } from "../profileCache";
-import { NumField } from "./NumField";
 import { caseBasedProductionNeedsAvailable } from "@workspace/inventory-math";
 
 type ApplicatorNum = 1 | 2 | 3 | 4;
