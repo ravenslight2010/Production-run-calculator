@@ -1134,3 +1134,19 @@ In that state the sauce/applicator effects `return`/`continue` BEFORE the local 
 **Why it was needed**: 6 required checks must pass on main; the merged Replit evidence/lockfile pairing was stale and no-workflow enabled LFS.
 
 **Verification**: workflow lint (actionlint 1.7.12) passes; `test:zip-assets` 22/22; `second-pass-reviewer-benchmark.test.mts` passes on Node 24.20.0; `skill-catalog` checks green. Note: `push-main.test.sh` cannot run in this container (git push to local bare repos fails with "bad pack" — overlayfs/object-hardlink issue, ENOSYS-class environment limitation); it passes on GitHub runners.
+## Merge CI failures — mixSurplus integration tests (2026-09-16, round 4)
+
+**Date**: 2026-09-16
+**Branch**: `fix/mix-surplus-ci-2026-09-16`
+**Files changed**:
+- `artifacts/api-server/src/routes/mixSurplus.ts` — three fixes for the checked-in `mixSurplus.integration.test.ts` (CI-only; these tests could never run locally — no Postgres in sandbox):
+  1. **POST /mix-surplus same-date extension**: the handler was a plain insert, so a second POST for the same mix + production date created a duplicate lot. Now it looks up the existing lot `(mixId, productionDate, scope)` inside the transaction (`.for("update")`) and extends `amountMade`/`amountRemaining` by the new amount, mirroring the day-start recording in `inventory.ts` — one mix + production date stays one lot.
+  2. **PUT /mix-surplus/allocations/:runDate 400**: `ReplaceMixSurplusAllocationsParams` is generated as strict `zod.date()` (path params are not coerced like body fields), but the route passed the raw string `req.params.runDate` → `safeParse` always failed → 400. The route now passes `new Date(\`${rawRunDate}T00:00:00Z\`)` (same conversion as `toApiLot`); `isValidSurplusDate` still guards the raw string.
+  3. **DELETE /mix-surplus/lots/:id scalar sync**: void decremented `mixes.amountAlreadyMade` by `lot.amountRemaining`; the integration test's contract is that voiding releases the pounds committed via allocations (`amountUsed`) — scalar `20 − 15 allocated = 5`, not `20 − 25 = 0`. Changed `const voided = lot.amountUsed`.
+- `.agents/memory/codex-fixes.md` — this entry.
+
+**What was wrong**: the feature route landed before its integration test was ever able to run (DB-backed tests are CI-only in this repo), so three route behaviors contradicted the test contract: no same-date lot extension on manual POST, an always-failing path-param parse (string vs `zod.date()`), and a void scalar decrement that used remaining rather than allocated pounds.
+
+**Why it was needed**: main's branch protection requires CI green; run `35055244176` had exactly these 2 failures (`extends an existing same-date lot…`, `allocations decrement…`) in the otherwise-passing Postgres suite.
+
+**Verification**: api-server typecheck green. Full DB-backed validation happens in CI (no local Postgres — kernel lacks SysV IPC, `shmget`/`mount` ENOSYS). Note for the void-decrement decision: the test (and its `// 20 - 15` comment) is the authoritative contract; re-verify against the day-start consistent world (`scalar ≈ sum(lot remaining)`) during QC planning if semantics are revisited.
