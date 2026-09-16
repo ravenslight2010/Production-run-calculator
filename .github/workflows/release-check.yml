@@ -92,8 +92,6 @@ jobs:
         env:
           TYPESCRIPT_7_RUNNER_IMAGE: ${{ runner.os }}-${{ runner.arch }}
         run: pnpm run release:check
-        env:
-          TYPESCRIPT_7_RUNNER_IMAGE: ${{ runner.os }}-${{ runner.arch }}
 
 
       - name: Verify release evidence allowlist
@@ -204,8 +202,6 @@ jobs:
         env:
           TYPESCRIPT_7_RUNNER_IMAGE: ${{ runner.os }}-${{ runner.arch }}
         run: pnpm run release:check:full
-        env:
-          TYPESCRIPT_7_RUNNER_IMAGE: ${{ runner.os }}-${{ runner.arch }}
 
 
       - name: Verify full release evidence allowlist
