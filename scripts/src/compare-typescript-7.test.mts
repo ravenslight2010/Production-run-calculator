@@ -28,6 +28,7 @@ import {
   typescript7ResourceBudgetsEqual,
 } from "./typescript-7-resource-contract.mts";
 import { generateTypescript7ResourceApprovalEvidence } from "./generate-typescript-7-resource-approval.mts";
+import { TYPESCRIPT_7_HISTORY_LIMIT } from "./typescript-7-trend-contract.mts";
 
 test("normalizes diagnostic paths and ordering", () => {
   assert.deepEqual(
@@ -459,7 +460,7 @@ test("retained comparison evidence is revision-bound and advisory", () => {
       approvedForPromotion: true,
     },
     trend: {
-      historyLimit: 5,
+      historyLimit: TYPESCRIPT_7_HISTORY_LIMIT,
       incompatibleRunnerClassSamples: 0,
       distinctRevisionCount: 1,
       regressedRevisions: [],
@@ -490,6 +491,30 @@ test("retained comparison evidence is revision-bound and advisory", () => {
       Buffer.from(JSON.stringify(evidence)),
       "a".repeat(40),
     ),
+  );
+  const revisedHistoryLimit = 2;
+  const revisedHistoryEvidence = {
+    ...evidence,
+    trend: {
+      ...evidence.trend,
+      historyLimit: revisedHistoryLimit,
+      incompatibleRunnerClassSamples: revisedHistoryLimit,
+    },
+  };
+  assert.doesNotThrow(() =>
+    validateTypescript7ComparisonEvidence(
+      Buffer.from(JSON.stringify(revisedHistoryEvidence)),
+      "a".repeat(40),
+      revisedHistoryLimit,
+    ),
+  );
+  assert.throws(
+    () =>
+      validateTypescript7ComparisonEvidence(
+        Buffer.from(JSON.stringify(revisedHistoryEvidence)),
+        "a".repeat(40),
+      ),
+    /resource-budget evidence is stale or malformed/,
   );
   assert.throws(
     () =>
@@ -838,6 +863,34 @@ test("history bounds incompatible runner-class counts without retaining hardware
       "f".repeat(64),
     ),
     { reports: [], incompatibleRunnerClassSamples: 5 },
+  );
+});
+
+test("revised history limit bounds producer selection", () => {
+  const revisedHistoryLimit = 2;
+  const measurements = ["cold", "warm"].flatMap((mode) =>
+    ["build", "scripts", "api-server", "run-calculator", "mockup-sandbox", "ai-evaluation", "corpus-harness"].map((check) => ({
+      check,
+      mode,
+      elapsedMs: { baseline: 10, candidate: 10, delta: 0, ratio: 1 },
+      peakRssKiB: { baseline: 10, candidate: 10, delta: 0, ratio: 1 },
+    })),
+  );
+  const history = Array.from({ length: 4 }, (_, index) => ({
+    schemaVersion: 3,
+    sourceRevision: (index + 1).toString(16).repeat(40),
+    runner: { hardwareClass: "f".repeat(64) },
+    performanceComparison: measurements,
+  }));
+
+  assert.equal(
+    selectTypescript7HistoricalReports(
+      history,
+      "a".repeat(40),
+      "f".repeat(64),
+      revisedHistoryLimit,
+    ).length,
+    revisedHistoryLimit,
   );
 });
 

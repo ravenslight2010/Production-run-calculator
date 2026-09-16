@@ -38,6 +38,7 @@ import {
   diagnosticsEqualForPairs,
   releaseRevisionGitArgs,
 } from "./typescript-7-evidence.mts";
+import { TYPESCRIPT_7_HISTORY_LIMIT } from "./typescript-7-trend-contract.mts";
 import {
   TYPESCRIPT_7_RESOURCE_BUDGETS,
   classifyTypescript7ResourceRegressions,
@@ -385,7 +386,7 @@ export const IMPORT_CORPUS_EVALUATION_EVIDENCE =
   "ai-evaluations/deterministic-import-corpus.json";
 export const TYPESCRIPT_7_COMPARISON_EVIDENCE =
   "typescript-7-comparison.json";
-export const TYPESCRIPT_7_HISTORY_LIMIT = 5;
+export { TYPESCRIPT_7_HISTORY_LIMIT } from "./typescript-7-trend-contract.mts";
 export const TYPESCRIPT_7_SUPPORTED_RUNNERS = [
   { platform: "linux", arch: "x64" },
 ] as const;
@@ -412,6 +413,7 @@ export function formatTypescript7TrendHistorySummary(
 export function validateTypescript7ComparisonEvidence(
   bytes: Buffer,
   expectedRevision: string,
+  historyLimit: number = TYPESCRIPT_7_HISTORY_LIMIT,
 ): Typescript7TrendHistorySummary {
   let value: unknown;
   try {
@@ -507,10 +509,11 @@ export function validateTypescript7ComparisonEvidence(
     | undefined;
   if (
     !typescript7ResourceBudgetsEqual(resourceBudgets) ||
-    trend?.historyLimit !== TYPESCRIPT_7_HISTORY_LIMIT ||
+    trend === undefined ||
+    trend.historyLimit !== historyLimit ||
     !Number.isInteger(trend.incompatibleRunnerClassSamples) ||
     Number(trend.incompatibleRunnerClassSamples) < 0 ||
-    Number(trend.incompatibleRunnerClassSamples) > TYPESCRIPT_7_HISTORY_LIMIT ||
+    Number(trend.incompatibleRunnerClassSamples) > historyLimit ||
     typeof trend?.distinctRevisionCount !== "number" ||
     !Array.isArray(trend.regressedRevisions) ||
     !Array.isArray(trend.revisionSamples) ||

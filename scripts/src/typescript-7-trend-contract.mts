@@ -1,0 +1,1 @@
+export const TYPESCRIPT_7_HISTORY_LIMIT = 5;

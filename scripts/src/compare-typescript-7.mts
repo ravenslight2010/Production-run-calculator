@@ -24,8 +24,10 @@ import {
   type Typescript7MeasuredProject,
   type Typescript7ResourceBudgets,
 } from "./typescript-7-resource-contract.mts";
+import { TYPESCRIPT_7_HISTORY_LIMIT } from "./typescript-7-trend-contract.mts";
 
 export { TYPESCRIPT_7_RESOURCE_BUDGETS } from "./typescript-7-resource-contract.mts";
+export { TYPESCRIPT_7_HISTORY_LIMIT } from "./typescript-7-trend-contract.mts";
 
 type CommandEvidence = {
   name: string;
@@ -47,8 +49,6 @@ const RESOURCE_APPROVAL_EVIDENCE_PATH =
   "docs/typescript-7-resource-approval-evidence.json";
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const REVISION_PATTERN = /^[a-f0-9]{40}$/u;
-
-export const TYPESCRIPT_7_HISTORY_LIMIT = 5;
 
 function exactKeys(
   value: Record<string, unknown>,
@@ -291,11 +291,13 @@ export function selectTypescript7HistoricalReports(
   history: readonly unknown[],
   currentRevision: string,
   currentHardwareClass: string,
+  historyLimit: number = TYPESCRIPT_7_HISTORY_LIMIT,
 ): Array<Record<string, unknown>> {
   return analyzeTypescript7HistoricalReports(
     history,
     currentRevision,
     currentHardwareClass,
+    historyLimit,
   ).reports;
 }
 
@@ -303,6 +305,7 @@ export function analyzeTypescript7HistoricalReports(
   history: readonly unknown[],
   currentRevision: string,
   currentHardwareClass: string,
+  historyLimit: number = TYPESCRIPT_7_HISTORY_LIMIT,
 ): {
   reports: Array<Record<string, unknown>>;
   incompatibleRunnerClassSamples: number;
@@ -332,14 +335,14 @@ export function analyzeTypescript7HistoricalReports(
     }
     if (runner?.hardwareClass !== currentHardwareClass) {
       incompatibleRunnerClassSamples = Math.min(
-        TYPESCRIPT_7_HISTORY_LIMIT,
+        historyLimit,
         incompatibleRunnerClassSamples + 1,
       );
       continue;
     }
     revisions.add(revision);
     reports.push(report);
-    if (reports.length >= TYPESCRIPT_7_HISTORY_LIMIT) break;
+    if (reports.length >= historyLimit) break;
   }
   return { reports, incompatibleRunnerClassSamples };
 }
