@@ -351,6 +351,35 @@ limits. Any retained over-limit revision keeps `resourceBudgetsMet` and `eligibl
 
 There is no ESLint or `@typescript-eslint` installation in this workspace.
 
+### Code generation and documentation compatibility gate
+
+**Audit date:** 2026-09-16
+**Decision:** **Do not claim native TypeScript 7 support for TypeDoc yet.**
+
+The latest published versions remain TypeDoc 0.28.20, `typedoc-plugin-markdown`
+4.13.0, `typedoc-plugin-coverage` 4.0.3, and Orval 8.33.0. TypeDoc still declares
+only TypeScript 5.x and 6.0.x peers; both plugins declare a TypeDoc 0.28.x peer,
+and Orval 8.33.0 still resolves this dependency family. No published TypeDoc or
+plugin release provides a TypeScript 7 peer path, so the repository does not
+silence the peer warning or add an override.
+
+The supported bridge for a future root compiler switch is explicit and local to
+`@workspace/api-spec`:
+
+- the API-spec package pins `typescript@6.0.3` as TypeDoc's peer compiler;
+- TypeDoc and both plugins remain resolved through Orval's locked dependency graph;
+- `pnpm --filter @workspace/api-spec run check:toolchain` loads both plugins and
+  runs a disposable TypeDoc smoke with the pinned TypeScript 6 compiler;
+- `pnpm install --frozen-lockfile --strict-peer-dependencies` remains the
+  peer-clean installation gate.
+
+This bridge lets a disposable root TypeScript 7 compiler run generated API
+declaration checks without pretending that TypeDoc itself supports TypeScript 7.
+The root `typescript` package therefore remains TypeScript 6.0.3 until TypeDoc
+and its plugin family publish an explicit TypeScript 7-compatible release path.
+When that happens, rerun the smoke, Orval generation, generated API checks, and
+declaration contract comparison before removing the local compatibility pin.
+
 ## Staged and reversible upgrade sequence
 
 ### Stage 0 — retain the current authority
