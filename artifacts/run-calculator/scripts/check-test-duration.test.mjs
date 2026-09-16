@@ -2,8 +2,8 @@ import { spawn } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { availableParallelism, tmpdir } from "node:os";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -182,6 +182,71 @@ exit ${runnerExitCode}
         `Detected runner capacity: ${availableWorkers} available CPU workers; configured worker ceiling: ${CALCULATOR_TEST_WORKER_CEILING}\\.`,
       ),
     );
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test("reports missing Vitest output, cleans up, and preserves runner capacity", async (t) => {
+  const availableWorkers = availableParallelism();
+  if (availableWorkers < MIN_CALCULATOR_TEST_WORKERS) {
+    t.skip(
+      `runner exposes ${availableWorkers} CPU workers; executable prerequisite requires ${MIN_CALCULATOR_TEST_WORKERS}`,
+    );
+  }
+
+  const temporaryDirectory = await mkdtemp(
+    join(tmpdir(), "calculator-duration-missing-report-test-"),
+  );
+  const fakePnpmPath = join(temporaryDirectory, "pnpm");
+  const cleanupMarkerPath = join(temporaryDirectory, "report-path");
+  const configuredWorkers = 6;
+
+  try {
+    await writeFile(
+      fakePnpmPath,
+      `#!/bin/sh
+for argument
+do
+  case "$argument" in
+    --outputFile=*) output_file="\${argument#*=}" ;;
+  esac
+done
+printf '%s\\n' "$output_file" > "$CLEANUP_MARKER"
+exit 23
+`,
+    );
+    await chmod(fakePnpmPath, 0o755);
+
+    const result = await runProcess(process.execPath, [durationCheckScript], {
+      env: {
+        ...process.env,
+        CALCULATOR_TEST_WORKERS: String(configuredWorkers),
+        CLEANUP_MARKER: cleanupMarkerPath,
+        PATH: `${temporaryDirectory}:${process.env.PATH ?? ""}`,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    assert.notEqual(result.code, 0, result.stdout);
+    assert.match(
+      result.stderr,
+      /Calculator test duration guard could not read Vitest's JSON summary/,
+    );
+    assert.match(
+      result.stderr,
+      /Calculator test suite elapsed \d+\.\d+s \(budget 150\.0s\)\./,
+    );
+    assert.match(
+      result.stderr,
+      new RegExp(
+        `Detected runner capacity: ${availableWorkers} available CPU workers; configured worker ceiling: ${configuredWorkers}\\.`,
+      ),
+    );
+
+    const reportPath = (await readFile(cleanupMarkerPath, "utf8")).trim();
+    assert.ok(reportPath, "stub runner should record the requested report path");
+    await assert.rejects(stat(dirname(reportPath)), /ENOENT/);
   } finally {
     await rm(temporaryDirectory, { recursive: true, force: true });
   }
