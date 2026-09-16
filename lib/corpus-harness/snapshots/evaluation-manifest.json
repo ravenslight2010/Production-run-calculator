@@ -15,8 +15,8 @@
     "maximumGridSanityIssues": 0
   },
   "dependencies": {
-    "node": "24.13.0",
-    "pnpmLockSha256": "ec8eb4e16273f68a4e72e3cbc20b13c868f1c3a1b270197d6ca803b76abaaf14",
+    "node": "24.20.0",
+    "pnpmLockSha256": "a7dc10ec42da8971de7633ccfdf80dba798c88315609a2ad14d1b8cca374b780",
     "xlsx": "npm:@e965/xlsx@^0.20.3",
     "vitest": "^4.1.9"
   },
