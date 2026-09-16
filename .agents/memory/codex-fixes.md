@@ -1158,3 +1158,121 @@ In that state the sauce/applicator effects `return`/`continue` BEFORE the local 
 2. With copy method, `tsc` runs but TS 7.0.2 fails to resolve packages through pnpm's symlinked `node_modules` in the default path (`TS2307 Cannot find module 'vitest'`), while `--traceResolution` (sync path) and `--preserveSymlinks` both succeed => a TS 7.0.2 module-resolution bug on this host (latest stable is 7.0.2; no patch yet).
 
 **What the fix was**: reverted to `typescript: ~5.9.3`. Defer TS 7 until a patched 7.0.x/7.1 release; do not ship `preserveSymlinks` as a workaround (it changes module-identity semantics across the 46-project monorepo). TS 5.9.3 fully validated: `typecheck:libs`, all artifact typechecks, vitest suites.
+## Mix surplus ledger (Approach A)
+
+**Date**: 2026-09-15
+**Branch**: `feat/mix-surplus-ledger`
+**Files changed**:
+- `lib/db/src/schema/mixSurplus.ts` (new) — `mix_surplus_lots` + `mix_surplus_allocations` tables.
+- `lib/inventory-math/src/index.ts` + `mixSurplus.test.ts` — pure `buildMixSurplusRecording` helper (5 tests).
+- `artifacts/api-server/src/routes/inventory.ts` — day-start records surplus lots + corrects B2 fresh basis (`Math.max(0, actualMade)` when entered).
+- `lib/api-spec/openapi.yaml` — `GET/POST /mix-surplus`, `PUT /mix-surplus/allocations/:runDate`, `DELETE /mix-surplus/lots/:id`; generated clients.
+- `artifacts/api-server/src/routes/mixSurplus.ts` (new) — ledger + allocation + void routes.
+- `artifacts/run-calculator/src/mixSurplusClient.ts` + test — defensive parse + fetch wrappers (9 tests).
+- `artifacts/run-calculator/src/components/MixSurplusStrip.tsx` + test — Mixes-tab freezer-stock strip with Use/Release (6 tests).
+- `artifacts/run-calculator/src/components/MixesTabContent.tsx` — mounts the strip under each mix card (no ctx changes).
+- Backlog §1 → Done; `codex-fixes.md` entry; spec + plan committed.
+
+**What was wrong / missing**: Mix plan carried overproduction as a silent scalar (`amountAlreadyMade`) with no dated ledger, no per-run allocation, and no "X lbs in the freezer" reminder — so QC/traceability was blind to where the carry came from and managers couldn't confirm/override it.
+
+**What the fix was**: Two-table surplus ledger mirrors the proven freezer-surplus pattern: (1) day-start consumption records a lot at the source (the same moment ingredients were deducted) when `actualMade > remaining`, extending same-date lots instead of duplicating; (2) `GET /mix-surplus` returns per-mix balances for the in-tab reminder; (3) `PUT /mix-surplus/allocations/:runDate` records "Use on next run" confirmations; (4) `DELETE /mix-surplus/lots/:id` (void/Release) decrements the mix's `amountAlreadyMade` so the scalar reducer stays in sync with the ledger. Plan math is unchanged; the ledger is its traceable image — surplus use never re-deducts inventory. Also corrected the B2 fresh basis (`Math.max(0, actualMade)` instead of `Math.max(totalLbs, actualMade)`) so under-production deducts only what was made.
+
+**Why it was needed**: completes Mix Plan backlog §1 (backlog items 2–5), enables QC traceability, and keeps the daily-reset-safe invariant (separate relational tables; client day-state reset doesn't touch them).
+
+**Verification**: inventory-math 79/79; run-calculator focused suites (mixSurplusClient 9/9, MixSurplusStrip 6/6, MixAlreadyMadeInput 4/4, LiveTabMemo.snappy + suite7 84/84); api-server sync.liveCalcTick 20/20 + protectRunValues 110/110; both typechecks clean. Integration test added (CI-only, needs `DATABASE_URL`). Behavioral note: B2 basis fix changes consumption only when "Made today" is entered (rare in production); blank entries unchanged.
+## Replit workstream merge — reconciliation fixes (2026-09-16)
+
+**Date**: 2026-09-16
+**Branch**: `merge/replit-sync-2026-09-16`
+**Files changed**:
+- `artifacts/run-calculator/src/components/SetupProfileEditor.tsx` — removed two duplicate import lines (`Resolver`, `NumField`) left by the 3-way merge.
+- `artifacts/api-server/src/routes/index.ts` — restored two authorization-inventory entries Replit added to their copy of this file (lost when the conflict was resolved with `ours`):
+  - read inventory: `GET /background-operations/diagnostics` (`manage-staff`, scoped)
+  - mutation inventory: `POST /applicator-batch-evidence/finalize` (`manager-only`, `review-incidents`, `managerRole: true`)
+- `pnpm-lock.yaml` / `pnpm-workspace.yaml` — intentionally NOT changed; Replit's x64-generated lockfile kept so CI/Render (x64) stay green.
+
+**What was wrong**:
+- The 3-way merge of Replit's workstream versus our `main` produced 21 conflicts. `routes/index.ts` was resolved `ours`, which silently dropped Replit's two new inventory entries (their route code was merged, their inventory wasn't). CI's `registration.test.ts` and `applicatorBatchEvidence.test.ts` would have failed.
+- `SetupProfileEditor.tsx` had doubled import statements from both sides of the merge → `error TS2300: Duplicate identifier`.
+
+**What the fix was**: Re-added the exact Replit inventory entries (verified byte-for-byte against `origin/Replit`), removed the duplicate imports. Kept BOTH mix-surplus implementations (our ledger via `listMixSurplus`/`recordMixSurplus` endpoints + Replit's read-only `SurplusMixCard`) — no behavioral conflict.
+
+**Why it was needed**: The whole point of the merge is to land Replit's workstream with CI green. Those two tests enforce that every protected route is declared in the authorization inventory, so the merge was not complete without them.
+
+**Verification**:
+- Full root typecheck (`CI=true pnpm run typecheck`) passes on Node 24 (repo now requires `>=24`; vite 8 `native` config loader + TypeScript 7 tooling need it).
+- api-server unit suite (excluding `*.integration.test.ts`): 837/840 pass; 2 failures were the inventory gaps above (now fixed, both files re-run green); the remaining 1 failure (`backgroundOperations.test.ts` "retains sustained degradation") requires a real Postgres for the shared-persistence layer — CI-only, passes there.
+- run-calculator regressions: mixSurplusClient 9/9, MixSurplusStrip 6/6, MixAlreadyMadeInput 4/4, LiveTabMemo.snappy + suite7 84/84, warehouse set 14/14, sync set 30/30; inventory-math mixSurplus 5/5.
+- Local Postgres is not possible in this sandbox (kernel lacks SysV IPC — `shmget`/`mount` return ENOSYS), so DB-backed integration tests are left to CI, consistent with AGENTS.md.
+- Note for future ARM/Apple-Silicon work: the merged lockfile only declares x64 optional binaries for `lightningcss`, `esbuild`, `@tailwindcss/oxide` (Replit generates it on x64). CI and Render are x64 so this is fine, but ARM machines need the arm64 sibling packages installed manually (done locally in `node_modules/.pnpm` only, not committed). If we want durable ARM support, Replit should add `supportedArchitectures` to `pnpm-workspace.yaml` and regenerate the lockfile.
+## Merge CI failures — follow-up fixes (2026-09-16, round 2)
+
+**Date**: 2026-09-16
+**Branch**: `fix/ci-reconcile-2026-09-16` (merged to main after `merge/replit-sync-2026-09-16`)
+**Files changed**:
+- `artifacts/run-calculator/src/components/SurplusMixCard.tsx` — metadata class `text-sky-400/70` → `text-sky-300` (Replit's approved high-contrast treatment; their new `SurplusMixCard.access.test.tsx` enforces it).
+- `artifacts/api-server/src/lib/sourceLibraryReconciliationPlan.generated.ts` — regenerated (`audit:source-heal-plan`); deflate payload changed only because zlib version differs from the one Replit generated with (same plan SHA `c9a6295b…`, same decompressed JSON). Node/Ubuntu-24.04 zlib in CI now matches.
+- `.github/workflows/release-check.yml` — moved `TYPESCRIPT_7_RUNNER_IMAGE: ${{ runner.os }}-${{ runner.arch }}` from job-level `env:` to the two release-gate steps' `env:` (the `runner` context is invalid at job level; GitHub rejects the file and actionlint 1.7.12 flags it).
+
+**What was wrong** (all surfaced by CI after the merge landed):
+1. `Unit tests (web + libs)` failed 1/2708: the merge resolved `SurplusMixCard.tsx` with our color variant, but Replit's accessibility test requires `text-sky-300` on the frozen-lbs metadata span.
+2. `Typecheck` failed inside `scripts` `test:source-heal-plan`: the committed generated plan blob was produced by Replit with a different zlib, so `--check` flagged it stale.
+3. `Validate workflow syntax and expressions` failed: actionlint rejects `runner` context in `jobs.<job_id>.env`; GitHub also refused to even start the `release-check.yml` run ("workflow file issue").
+4. Earlier round (already pushed with `merge/replit-sync-2026-09-16`): restored Replit's authz-inventory entries and deduped `SetupProfileEditor.tsx` imports.
+
+**Why it was needed**: main's branch protection requires 6 CI checks; the merged tree was not CI-green until these were fixed.
+
+**Verification**:
+- `SurplusMixCard.access.test.tsx` 6/6 passes.
+- `pnpm --filter @workspace/scripts run check:workflows` (actionlint 1.7.12, same as CI) passes all 8 workflow files.
+- `generate-source-library-heal-plan.mts --check` passes (blob current on Node 24).
+- Full root typecheck green; api-server unit suite 840 tests with only the known DB-environment dependent test failing (CI-only).
+## Merge CI failures — round 3 (2026-09-16)
+
+**Date**: 2026-09-16
+**Branch**: `fix/ci-reconcile-r3-2026-09-16`
+**Files changed**:
+- `docs/second-pass-reviewer-benchmark-2026-09-05.json` — regenerated (via `tsx src/second-pass-reviewer-benchmark.mts <target>` on Node 24.20.0): `dependencies.node` 24.13.0→24.20.0 and `dependencies.pnpmLockSha256` → hash of the merged lockfile. Same sourceHash (`1d8a2a3d…`), same failed-review conclusion (retain:false) — provenance fields only.
+- `.github/workflows/ci.yml` — pinned all `node-version: 24` → `24.20.0` and added `lfs: true` to the typecheck job's `actions/checkout`.
+
+**What was wrong**:
+1. `scripts` `test:second-pass-reviewer` pins `process.versions.node` + `sha256(pnpm-lock.yaml)` in retained evidence. The merge changed the lockfile and CI runs Node 24.20.0 (not Replit's 24.13.0), so the snapshot check failed. The evidence is inherently node-patch-sensitive; pinning CI to the same patch makes it deterministic.
+2. `scripts` `test:zip-assets` failed: three large archives under `attached_assets/` are Git LFS objects (91MB/134MB). This sandbox had no git-lfs and CI's checkout didn't set `lfs: true`, so the files were 133-byte pointers and the symlink-inventory test failed on them. GitHub already hosts the LFS objects (verified with `git lfs pull`).
+3. Also re-validated the subtests CI hadn't reached: `benchmark-report-privacy` (vitest `*.privacy.test.ts`) 4/4, `check:skill-catalog` 26/0, skill quick-validate 4/4 — all pass on Node 24.20.0.
+
+**Why it was needed**: 6 required checks must pass on main; the merged Replit evidence/lockfile pairing was stale and no-workflow enabled LFS.
+
+**Verification**: workflow lint (actionlint 1.7.12) passes; `test:zip-assets` 22/22; `second-pass-reviewer-benchmark.test.mts` passes on Node 24.20.0; `skill-catalog` checks green. Note: `push-main.test.sh` cannot run in this container (git push to local bare repos fails with "bad pack" — overlayfs/object-hardlink issue, ENOSYS-class environment limitation); it passes on GitHub runners.
+## Merge CI failures — mixSurplus integration tests (2026-09-16, round 4)
+
+**Date**: 2026-09-16
+**Branch**: `fix/mix-surplus-ci-2026-09-16`
+**Files changed**:
+- `artifacts/api-server/src/routes/mixSurplus.ts` — three fixes for the checked-in `mixSurplus.integration.test.ts` (CI-only; these tests could never run locally — no Postgres in sandbox):
+  1. **POST /mix-surplus same-date extension**: the handler was a plain insert, so a second POST for the same mix + production date created a duplicate lot. Now it looks up the existing lot `(mixId, productionDate, scope)` inside the transaction (`.for("update")`) and extends `amountMade`/`amountRemaining` by the new amount, mirroring the day-start recording in `inventory.ts` — one mix + production date stays one lot.
+  2. **PUT /mix-surplus/allocations/:runDate 400**: `ReplaceMixSurplusAllocationsParams` is generated as strict `zod.date()` (path params are not coerced like body fields), but the route passed the raw string `req.params.runDate` → `safeParse` always failed → 400. The route now passes `new Date(\`${rawRunDate}T00:00:00Z\`)` (same conversion as `toApiLot`); `isValidSurplusDate` still guards the raw string.
+  3. **DELETE /mix-surplus/lots/:id scalar sync**: void decremented `mixes.amountAlreadyMade` by `lot.amountRemaining`; the integration test's contract is that voiding releases the pounds committed via allocations (`amountUsed`) — scalar `20 − 15 allocated = 5`, not `20 − 25 = 0`. Changed `const voided = lot.amountUsed`.
+- `.agents/memory/codex-fixes.md` — this entry.
+
+**What was wrong**: the feature route landed before its integration test was ever able to run (DB-backed tests are CI-only in this repo), so three route behaviors contradicted the test contract: no same-date lot extension on manual POST, an always-failing path-param parse (string vs `zod.date()`), and a void scalar decrement that used remaining rather than allocated pounds.
+
+**Why it was needed**: main's branch protection requires CI green; run `35055244176` had exactly these 2 failures (`extends an existing same-date lot…`, `allocations decrement…`) in the otherwise-passing Postgres suite.
+
+**Verification**: api-server typecheck green. Full DB-backed validation happens in CI (no local Postgres — kernel lacks SysV IPC, `shmget`/`mount` ENOSYS). Note for the void-decrement decision: the test (and its `// 20 - 15` comment) is the authoritative contract; re-verify against the day-start consistent world (`scalar ≈ sum(lot remaining)`) during QC planning if semantics are revisited.
+
+**Addendum (same round) — corpus-harness manifest**: `Unit tests (web + libs)` also failed on main with `lib/corpus-harness/src/corpus.test.ts` ("binds deterministic evidence to the retained source corpus", present since `83789b44`): the checked-in `snapshots/evaluation-manifest.json` recorded `dependencies.node 24.13.0` (Replit) and the pre-merge `pnpm-lock.yaml` SHA. Regenerated with `pnpm --filter @workspace/corpus-harness run snapshots` on Node 24.20.0 (the CI pin) → only the two provenance fields changed (`node` → 24.20.0, `pnpmLockSha256` → `a7dc10ec…`); corpus/evidence hashes unchanged. Same class of fix as the round-3 reviewer-benchmark refresh. Local `vitest run` times out (5s) in this sandbox because the builder re-hashes the 51 real workbooks over slow overlayfs — CI is the authority and passes.
+## Replit merge round 2 — CI reconciliation (2026-09-16)
+
+**Date**: 2026-09-16
+**Branch**: merge/replit-sync-2026-09-16b -> main (`290dd1f5` + `c6a76179`)
+**Files changed**: (resolutions/regressions from Replit's 34-commit workstream)
+- `.agents/memory/MEMORY.md` — merged ours + Replit's TypeScript 7 audit boundaries entry.
+- `docs/second-pass-reviewer-benchmark-2026-09-05.json` + `lib/corpus-harness/snapshots/evaluation-manifest.json` — regenerated on Node 24.20.0 after Replit's lockfile gained 3 dependency entries (`pnpmLockSha256` `a7dc10ec…` -> `40a1ce55…`).
+- `artifacts/api-server/src/lib/startupGate.ts` — kept OUR richer 503 diagnostics (`stage`, `durationMs`, `correlationId`); Replit removed them but their own `startupGate.test.ts` still asserts them, and they aid Render debug.
+- `artifacts/api-server/src/lib/dataHeals.ts` — Replit removed the `source-library-reconciliation-2026-08-26-v2` repair definition and the `speed-adjustment-baseline-v1` fingerprint contract/manifest entry but LEFT both ids in `AUTOMATIC_DATA_HEAL_IDS` -> startup `data_heals` stage threw `Missing focused repair definition for source-library-reconciliation-2026-08-26-v2` and rollback rehearsal went 503. Removed both ids from the released catalog and dropped the now-unused `speedAdjustmentBaseline` module/import.
+- `.github/workflows/release-check.yml` — Replit's merge duplicated the step-level `env:` block in two release-gate steps; actionlint 1.7.12 flagged duplicate keys. Removed the duplicates.
+- Kept Replit's intentional unmounting of `applicatorBatchEvidenceRouter` + `backgroundOperationDiagnosticsRouter`, sync write-envelope simplification (no `canonicalRevision`/`serverTime` in outbound type), the new POST /sync/operational-intents idempotency ledger, and the TS7 codegen-bridge CI jobs.
+
+**Why it was needed**: 4 CI checks failed on the first merged run (Typecheck, Unit tests, API Postgres, rollback rehearsal) — every failure traced to Replit-integration artifacts (evidence staleness, catalog/ID mismatch, workflow syntax), not to our app behavior.
+
+**Verification**: root typecheck + api-server typecheck green; workflow lint (actionlint 1.7.12) passes all 8 files; local api-server units 586/586 (DB tests skip). Full CI authority: run 35138904564 -> fixed in follow-up run.
