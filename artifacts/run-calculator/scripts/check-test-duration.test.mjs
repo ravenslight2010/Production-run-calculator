@@ -141,6 +141,75 @@ printf '%s\\n' '{"numTotalTests":1,"numPassedTests":1,"numFailedTests":0,"testRe
   }
 });
 
+test("executable validation exits before starting the runner on low capacity", async () => {
+  const temporaryDirectory = await mkdtemp(
+    join(tmpdir(), "calculator-duration-low-capacity-test-"),
+  );
+  const isolatedScriptPath = join(
+    temporaryDirectory,
+    "check-test-duration-low-capacity.mjs",
+  );
+  const fakePnpmPath = join(temporaryDirectory, "pnpm");
+  const invocationMarkerPath = join(temporaryDirectory, "runner-invoked");
+  const reportDirectory = join(temporaryDirectory, "vitest-tmp");
+  const source = await readFile(durationCheckScript, "utf8");
+  const isolatedSource = source.replace(
+    'import { availableParallelism, tmpdir } from "node:os";',
+    'import { tmpdir } from "node:os";\n\nconst availableParallelism = () => 2;',
+  );
+
+  try {
+    assert.notEqual(
+      isolatedSource,
+      source,
+      "the executable fixture should replace the capacity probe",
+    );
+    await writeFile(isolatedScriptPath, isolatedSource);
+    await writeFile(
+      fakePnpmPath,
+      `#!/bin/sh
+printf '%s\\n' invoked > "$RUNNER_INVOCATION_MARKER"
+exit 99
+`,
+    );
+    await chmod(fakePnpmPath, 0o755);
+
+    const result = await runProcess(
+      process.execPath,
+      [isolatedScriptPath],
+      {
+        env: {
+          ...process.env,
+          PATH: `${temporaryDirectory}:${process.env.PATH ?? ""}`,
+          RUNNER_INVOCATION_MARKER: invocationMarkerPath,
+          TMPDIR: reportDirectory,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+
+    assert.equal(result.code, 1, result.stderr);
+    assert.equal(result.signal, null);
+    assert.equal(result.stdout, "");
+    assert.match(
+      result.stderr,
+      new RegExp(
+        `Calculator test suite requires at least ${MIN_CALCULATOR_TEST_WORKERS} available CPU workers\\.`,
+      ),
+    );
+    assert.match(
+      result.stderr,
+      new RegExp(
+        `Detected runner capacity: 2 available CPU workers; configured worker ceiling: ${CALCULATOR_TEST_WORKER_CEILING}\\.`,
+      ),
+    );
+    await assert.rejects(stat(invocationMarkerPath), /ENOENT/);
+    await assert.rejects(stat(reportDirectory), /ENOENT/);
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
 test("executable validation preserves a failing runner result and report details", async (t) => {
   const availableWorkers = availableParallelism();
   if (availableWorkers < MIN_CALCULATOR_TEST_WORKERS) {
