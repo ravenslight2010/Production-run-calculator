@@ -48,6 +48,7 @@
 - [One-time heals and placeholders](one-time-data-heals.md) + [data reset](one-time-data-purge.md) + [seeded-placeholder-runs.md] — use marker/epoch guards; seeded blank runs stay local-only and clients must never hold zero runs.
 - [Master-data merge and rename aliases](merge-server-master-data-repoint.md) + [brand-rename-aliases.md] — re-point server pools and learn import aliases so later imports do not resurrect old names.
 - [API JSON error handler](api-json-error-handler.md) — API needs a terminal middleware returning JSON `{error}` on throws/413/parse-fail, else clients see HTML and the real reason is lost.
+- [API route composition](api-route-composition.md) — authorization inventories can stay green when a merge drops the actual router mount; verify assembled HTTP reachability too.
 - [Import units, sources, and dedup](spec-import-batch-vs-perpizza.md) + [import-source-file-semantics.md] + [import-order-dedup-keys.md] — preserve native units and order spec→dough/sauce→cheese/premix; dedup uses kind-specific keys.
 - [Near-dup name matcher](name-match-near-dup.md) — shared layered matcher for importer link passes; only loose-key equality may auto-rename, reorder/typo/family-fold are declinable suggestions (prod cross-link incident).
 - [Stick pep types](stick-pep-types.md) — spec importer stick applicator = pepperoni AND cheese sticks (both are `pepperonis` pep types, not cheese recipes); recognized in BOTH the parse prompt and STICK_PEP_NAME_RE/isStickPepOnlyCheeseRecipe.
