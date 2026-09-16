@@ -380,6 +380,22 @@ and its plugin family publish an explicit TypeScript 7-compatible release path.
 When that happens, rerun the smoke, Orval generation, generated API checks, and
 declaration contract comparison before removing the local compatibility pin.
 
+The bridge now has a dedicated CI regression lane:
+
+```bash
+pnpm run check:typescript-7-codegen-bridge
+```
+
+The check copies the current source into a temporary checkout, installs that
+checkout with both `--frozen-lockfile` and `--strict-peer-dependencies`, and
+asserts TypeScript 7.0.2 for the root candidate binary separately from
+TypeScript 6.0.3 for the API-spec package. It then runs the TypeDoc/plugin smoke,
+the Orval freshness check, and the TypeScript 7 generated API declaration build.
+All generated files and build metadata stay in the temporary checkout. The check
+also compares the authoritative workspace status before and after cleanup and
+fails if the lane changes it. The CI job has a hard timeout and does not alter
+the authoritative TypeScript 6 compiler or promote TypeScript 7.
+
 ## Staged and reversible upgrade sequence
 
 ### Stage 0 — retain the current authority
