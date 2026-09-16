@@ -276,6 +276,59 @@ sleep 0.15
   }
 });
 
+test("executable validation fails when the runner terminates by signal", async (t) => {
+  const availableWorkers = availableParallelism();
+  if (availableWorkers < MIN_CALCULATOR_TEST_WORKERS) {
+    t.skip(
+      `runner exposes ${availableWorkers} CPU workers; executable prerequisite requires ${MIN_CALCULATOR_TEST_WORKERS}`,
+    );
+  }
+
+  const temporaryDirectory = await mkdtemp(
+    join(tmpdir(), "calculator-duration-signal-test-"),
+  );
+  const fakePnpmPath = join(temporaryDirectory, "pnpm");
+
+  try {
+    await writeFile(
+      fakePnpmPath,
+      `#!/bin/sh
+for argument
+do
+  case "$argument" in
+    --outputFile=*) output_file="\${argument#*=}" ;;
+  esac
+done
+printf '%s\n' '{"numTotalTests":1,"numPassedTests":1,"numFailedTests":0,"testResults":[{"name":"stub.test.ts","status":"passed"}]}' > "$output_file"
+kill -TERM "$$"
+`,
+    );
+    await chmod(fakePnpmPath, 0o755);
+
+    const result = await runProcess(process.execPath, [durationCheckScript], {
+      env: {
+        ...process.env,
+        PATH: `${temporaryDirectory}:${process.env.PATH ?? ""}`,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    assert.equal(result.code, 1, result.stderr);
+    assert.match(
+      result.stdout,
+      /Calculator test suite: 1 files \(1 passed, 0 failed\), 1 tests \(1 passed, 0 failed\), elapsed \d+\.\d+s \(budget 150\.0s\)\./,
+    );
+    assert.match(
+      result.stdout,
+      new RegExp(
+        `Detected runner capacity: ${availableWorkers} available CPU workers; configured worker ceiling: ${CALCULATOR_TEST_WORKER_CEILING}\\.`,
+      ),
+    );
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
 test("reports missing Vitest output, cleans up, and preserves runner capacity", async (t) => {
   const availableWorkers = availableParallelism();
   if (availableWorkers < MIN_CALCULATOR_TEST_WORKERS) {
