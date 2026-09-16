@@ -106,26 +106,8 @@ type SseClient = {
   lastData: unknown;
   lastCanonicalRevision: number;
   lastCalcEmitMs: number;
-  lastHeartbeatScheduleKey?: string | null;
 };
 const clients = new Set<SseClient>();
-
-function heartbeatScheduleKey(
-  schedule: AutoTrackSchedule | null,
-  canonicalRevision: number,
-): string | null {
-  if (!schedule) return null;
-  return JSON.stringify({
-    canonicalRevision,
-    runId: schedule.runId,
-    generation: schedule.generation,
-    entries: schedule.entries.map(({ channel, canonical, sequence }) => ({
-      channel,
-      canonical,
-      sequence,
-    })),
-  });
-}
 
 // Manual packaging corrections temporarily pause automatic case claims. The
 // deadline is server-owned: accepting a client-clock timestamp here would let
@@ -2062,12 +2044,7 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
         const live = fresh?.data
           ? computeServerLiveState(fresh.data, heartbeatServerTime, fresh.canonicalRevision ?? 0)
           : null;
-        const scheduleKey = heartbeatScheduleKey(
-          live?.autoTrackSchedule ?? null,
-          fresh?.canonicalRevision ?? 0,
-        );
-        if (live && scheduleKey !== client?.lastHeartbeatScheduleKey) {
-          if (client) client.lastHeartbeatScheduleKey = scheduleKey;
+        if (live?.autoTrackSchedule) {
           res.write(`data: ${JSON.stringify({
             ...live,
             canonicalRevision: fresh?.canonicalRevision ?? 0,
