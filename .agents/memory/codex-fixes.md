@@ -572,3 +572,20 @@ Running log of fixes made by Codex. Read before modifying code to avoid re-apply
 - `pnpm --filter @workspace/scripts run check:workflows` (actionlint 1.7.12, same as CI) passes all 8 workflow files.
 - `generate-source-library-heal-plan.mts --check` passes (blob current on Node 24).
 - Full root typecheck green; api-server unit suite 840 tests with only the known DB-environment dependent test failing (CI-only).
+
+## Merge CI failures — round 3 (2026-09-16)
+
+**Date**: 2026-09-16
+**Branch**: `fix/ci-reconcile-r3-2026-09-16`
+**Files changed**:
+- `docs/second-pass-reviewer-benchmark-2026-09-05.json` — regenerated (via `tsx src/second-pass-reviewer-benchmark.mts <target>` on Node 24.20.0): `dependencies.node` 24.13.0→24.20.0 and `dependencies.pnpmLockSha256` → hash of the merged lockfile. Same sourceHash (`1d8a2a3d…`), same failed-review conclusion (retain:false) — provenance fields only.
+- `.github/workflows/ci.yml` — pinned all `node-version: 24` → `24.20.0` and added `lfs: true` to the typecheck job's `actions/checkout`.
+
+**What was wrong**:
+1. `scripts` `test:second-pass-reviewer` pins `process.versions.node` + `sha256(pnpm-lock.yaml)` in retained evidence. The merge changed the lockfile and CI runs Node 24.20.0 (not Replit's 24.13.0), so the snapshot check failed. The evidence is inherently node-patch-sensitive; pinning CI to the same patch makes it deterministic.
+2. `scripts` `test:zip-assets` failed: three large archives under `attached_assets/` are Git LFS objects (91MB/134MB). This sandbox had no git-lfs and CI's checkout didn't set `lfs: true`, so the files were 133-byte pointers and the symlink-inventory test failed on them. GitHub already hosts the LFS objects (verified with `git lfs pull`).
+3. Also re-validated the subtests CI hadn't reached: `benchmark-report-privacy` (vitest `*.privacy.test.ts`) 4/4, `check:skill-catalog` 26/0, skill quick-validate 4/4 — all pass on Node 24.20.0.
+
+**Why it was needed**: 6 required checks must pass on main; the merged Replit evidence/lockfile pairing was stale and no-workflow enabled LFS.
+
+**Verification**: workflow lint (actionlint 1.7.12) passes; `test:zip-assets` 22/22; `second-pass-reviewer-benchmark.test.mts` passes on Node 24.20.0; `skill-catalog` checks green. Note: `push-main.test.sh` cannot run in this container (git push to local bare repos fails with "bad pack" — overlayfs/object-hardlink issue, ENOSYS-class environment limitation); it passes on GitHub runners.
