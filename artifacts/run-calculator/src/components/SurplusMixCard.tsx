@@ -53,7 +53,7 @@ export default function SurplusMixCard() {
           >
             <span className="text-sky-200/90 truncate">
               {m.name}
-              <span className="ml-1.5 text-[11px] text-sky-400/70">
+              <span className="ml-1.5 text-[11px] text-sky-300">
                 {m.brand}
                 {m.flavor ? ` — ${m.flavor}` : ""}
               </span>
