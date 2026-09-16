@@ -1,13 +1,13 @@
 # Release Check Checkpoint — INCOMPLETE / NO-GO
 
-Generated: 2026-09-16T00:00:02.377Z
-Revision: eaced278b5f50d72623e737c61c4d4d2e99fc436
+Generated: 2026-09-16T01:08:13.584Z
+Revision: bad9032b64f4581c05d5a19f4fe9bd8d670f062c
 Mode: typescript-7-promotion
 Report status: INCOMPLETE CHECKPOINT
 Retained evidence: NOT UPDATED
 Environment: local release validation
 Source-library evidence environment: development
-Source-library evidence revision: eaced278b5f50d72623e737c61c4d4d2e99fc436
+Source-library evidence revision: bad9032b64f4581c05d5a19f4fe9bd8d670f062c
 Deployed revision: not applicable
 Commands: listed in the gate results table below
 Evidence paths: release-evidence-typescript-7-promotion/ and retained files linked below
@@ -17,13 +17,13 @@ TypeScript 7 trend history is missing: no valid prior samples were available.
 
 | Gate | Result | Elapsed | Command |
 | --- | --- | ---: | --- |
-| source-library reconciliation database preflight | FAIL | 6s | `pnpm --filter @workspace/scripts exec tsx ./src/verify-source-library-reconciliation.mts --report /home/runner/workspace/attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json --heal-id source-library-reconciliation-2026-08-26-v2 --from-date 2026-08-26 --environment development --preflight` |
+| source-library reconciliation database preflight | FAIL | 8s | `pnpm --filter @workspace/scripts exec tsx ./src/verify-source-library-reconciliation.mts --report /home/runner/workspace/attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json --heal-id source-library-reconciliation-2026-08-26-v2 --from-date 2026-08-26 --environment development --preflight` |
 | operational report signing-key rotation preflight | FAIL | 5s | `pnpm --filter @workspace/scripts run audit:report-key-rotation` |
 | blocking release security audit (high severity; registry required) | PASS | 1s | `pnpm run audit:prod:release` |
 | source-library reconciliation verification | BLOCKED | 0s | `pnpm --filter @workspace/scripts exec tsx ./src/verify-source-library-reconciliation.mts --report /home/runner/workspace/attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json --heal-id source-library-reconciliation-2026-08-26-v2 --from-date 2026-08-26 --environment development --output /home/runner/workspace/release-evidence-typescript-7-promotion/.source-library-reconciliation.json.pending` |
 | shell lint inventory | PASS | 1s | `pnpm run check:shell-inventory` |
-| generated API client freshness | PASS | 18s | `pnpm run check:api-generated` |
-| shared library typechecks | PASS | 1s | `pnpm run typecheck:libs` |
+| generated API client freshness | PASS | 21s | `pnpm run check:api-generated` |
+| shared library typechecks | PASS | 2s | `pnpm run typecheck:libs` |
 | API server typecheck | BLOCKED | 0s | `pnpm --filter @workspace/api-server run typecheck` |
 | run calculator typecheck | BLOCKED | 0s | `pnpm --filter @workspace/run-calculator run typecheck` |
 | mockup sandbox typecheck | BLOCKED | 0s | `pnpm --filter @workspace/mockup-sandbox run typecheck` |
@@ -57,13 +57,13 @@ TypeScript 7 trend history is missing: no valid prior samples were available.
 
 ## Timing
 
-Total wall-clock: 25s
+Total wall-clock: 30s
 
 | Stage | Wall-clock |
 | --- | ---: |
-| source-library-preflight | 6s |
-| prerequisites | 18s |
-| shared-output | 1s |
+| source-library-preflight | 8s |
+| prerequisites | 21s |
+| shared-output | 2s |
 | consumer-typechecks | 0s |
 | typescript-7-promotion | 0s |
 | clean-start | 0s |

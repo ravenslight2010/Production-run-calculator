@@ -1,13 +1,13 @@
 {
-  "revision": "eaced278b5f50d72623e737c61c4d4d2e99fc436",
-  "sourceLibraryRevision": "eaced278b5f50d72623e737c61c4d4d2e99fc436",
+  "revision": "bad9032b64f4581c05d5a19f4fe9bd8d670f062c",
+  "sourceLibraryRevision": "bad9032b64f4581c05d5a19f4fe9bd8d670f062c",
   "mode": "typescript-7-promotion",
   "results": [
     {
       "label": "source-library reconciliation database preflight",
       "passed": false,
       "status": "FAIL",
-      "elapsedMs": 5837,
+      "elapsedMs": 7604,
       "sourceLibraryPreflight": {
         "contractVersion": 1,
         "database": "unverified",
@@ -36,13 +36,13 @@
       "label": "operational report signing-key rotation preflight",
       "passed": false,
       "status": "FAIL",
-      "elapsedMs": 5007
+      "elapsedMs": 4982
     },
     {
       "label": "blocking release security audit (high severity; registry required)",
       "passed": true,
       "status": "PASS",
-      "elapsedMs": 1380
+      "elapsedMs": 1393
     },
     {
       "label": "source-library reconciliation verification",
@@ -57,19 +57,19 @@
       "label": "shell lint inventory",
       "passed": true,
       "status": "PASS",
-      "elapsedMs": 843
+      "elapsedMs": 841
     },
     {
       "label": "generated API client freshness",
       "passed": true,
       "status": "PASS",
-      "elapsedMs": 17729
+      "elapsedMs": 20720
     },
     {
       "label": "shared library typechecks",
       "passed": true,
       "status": "PASS",
-      "elapsedMs": 1109
+      "elapsedMs": 1800
     },
     {
       "label": "API server typecheck",
@@ -123,7 +123,7 @@
       "label": "recovery evidence audit",
       "passed": true,
       "status": "PASS",
-      "elapsedMs": 1862
+      "elapsedMs": 2014
     },
     {
       "label": "clean-start smoke",
@@ -347,19 +347,19 @@
     }
   ],
   "timing": {
-    "totalElapsedMs": 24691,
+    "totalElapsedMs": 30141,
     "stages": [
       {
         "stage": "source-library-preflight",
-        "elapsedMs": 5840
+        "elapsedMs": 7609
       },
       {
         "stage": "prerequisites",
-        "elapsedMs": 17740
+        "elapsedMs": 20731
       },
       {
         "stage": "shared-output",
-        "elapsedMs": 1111
+        "elapsedMs": 1801
       },
       {
         "stage": "consumer-typechecks",
@@ -403,5 +403,5 @@
       }
     ]
   },
-  "updatedAt": "2026-09-16T00:00:02.373Z"
+  "updatedAt": "2026-09-16T01:08:13.580Z"
 }

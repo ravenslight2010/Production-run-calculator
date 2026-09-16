@@ -1,7 +1,7 @@
 {
   "verifier": "report-key-rotation-preflight",
   "environment": "development",
-  "revision": "eaced278b5f50d72623e737c61c4d4d2e99fc436",
+  "revision": "bad9032b64f4581c05d5a19f4fe9bd8d670f062c",
   "status": "blocked",
   "canRotate": false,
   "failure": "audit-unavailable",
