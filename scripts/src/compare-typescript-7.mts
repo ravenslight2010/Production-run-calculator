@@ -28,9 +28,15 @@ import {
   TYPESCRIPT_7_HISTORY_LIMIT,
   validateTypescript7HistoryLimit,
 } from "./typescript-7-trend-contract.mts";
+import {
+  approvedTypescript7Runner,
+  TYPESCRIPT_7_SUPPORTED_RUNNERS,
+  typescript7NativePackagesFromLockfile,
+} from "./typescript-7-native-contract.mts";
 
 export { TYPESCRIPT_7_RESOURCE_BUDGETS } from "./typescript-7-resource-contract.mts";
 export { TYPESCRIPT_7_HISTORY_LIMIT } from "./typescript-7-trend-contract.mts";
+export { TYPESCRIPT_7_SUPPORTED_RUNNERS } from "./typescript-7-native-contract.mts";
 
 type CommandEvidence = {
   name: string;
@@ -225,7 +231,6 @@ export function validateTypescript7ResourceApprovalEvidence(
 const comparedChecks = typescript7MeasuredCheckNames();
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(scriptDir, "../..");
-const supportedRunners = [{ platform: "linux", arch: "x64" }] as const;
 const promotionAttempt = process.env.TYPESCRIPT_7_PROMOTION === "1";
 
 export function editorServiceEvidenceFromResult(result: {
@@ -539,6 +544,30 @@ async function main(): Promise<void> {
   const commands: CommandEvidence[] = [];
   let report: Record<string, unknown>;
   let editorService: EditorServiceEvidence | null = null;
+  const rootPackage = JSON.parse(
+    await readFile(resolve(rootDir, "package.json"), "utf8"),
+  ) as {
+    devDependencies?: Record<string, string>;
+  };
+  const candidateSpecifier = rootPackage.devDependencies?.["typescript-native"];
+  const candidateVersion = candidateSpecifier?.match(
+    /^npm:typescript@(\d+\.\d+\.\d+)$/u,
+  )?.[1];
+  if (!candidateVersion) {
+    throw new Error(
+      "The typescript-native dependency must be an exact npm:typescript@x.y.z alias.",
+    );
+  }
+  const nativePackages = typescript7NativePackagesFromLockfile(
+    await readFile(resolve(rootDir, "pnpm-lock.yaml"), "utf8"),
+    candidateVersion,
+  );
+  const runner = approvedTypescript7Runner(process.platform, process.arch);
+  if (!nativePackages.includes(runner.nativePackage)) {
+    throw new Error(
+      `The approved runner native package ${runner.nativePackage} is missing from pnpm-lock.yaml.`,
+    );
+  }
 
   try {
     await mkdir(checkout);
@@ -574,15 +603,55 @@ async function main(): Promise<void> {
 
     const ts6 = resolve(checkout, "node_modules/typescript/bin/tsc");
     const ts7 = resolve(checkout, "node_modules/typescript-native/bin/tsc");
-    const version = (compiler: string) =>
-      spawnSync(process.execPath, [compiler, "--version"], {
+    const nativePackageJson = spawnSync(
+      process.execPath,
+      [
+        "-e",
+        [
+          "const path = require('node:path');",
+          "const fs = require('node:fs');",
+          "const packageJson = require.resolve(process.argv[1] + '/package.json');",
+          "const metadata = JSON.parse(fs.readFileSync(packageJson, 'utf8'));",
+          "const binary = path.join(path.dirname(packageJson), 'lib', process.platform === 'win32' ? 'tsc.exe' : 'tsc');",
+          "if (metadata.version !== process.argv[2]) throw new Error(`native package version ${metadata.version} does not match ${process.argv[2]}`);",
+          "if (!Array.isArray(metadata.os) || !metadata.os.includes(process.platform)) throw new Error(`native package OS does not match ${process.platform}`);",
+          "if (!Array.isArray(metadata.cpu) || !metadata.cpu.includes(process.arch)) throw new Error(`native package CPU does not match ${process.arch}`);",
+          "if (!fs.statSync(binary).isFile()) throw new Error(`native compiler binary is missing: ${binary}`);",
+          "process.stdout.write(JSON.stringify({ packageJson, binary, version: metadata.version }));",
+        ].join(""),
+        runner.nativePackage,
+        candidateVersion,
+      ],
+      {
         cwd: checkout,
         encoding: "utf8",
-      }).stdout.trim();
-    const platformSupported = supportedRunners.some(
-      (runner) =>
-        runner.platform === process.platform && runner.arch === process.arch,
+      },
     );
+    if (nativePackageJson.status !== 0) {
+      throw new Error(
+        `TypeScript 7 native package probe failed: ${nativePackageJson.stderr.trim()}`,
+      );
+    }
+    const nativeMetadata = JSON.parse(nativePackageJson.stdout) as {
+      packageJson: string;
+      binary: string;
+      version: string;
+    };
+    const version = (compiler: string, expected: string) => {
+      const result = spawnSync(process.execPath, [compiler, "--version"], {
+        cwd: checkout,
+        encoding: "utf8",
+      });
+      const actual = result.stdout.trim();
+      if (result.status !== 0 || actual !== `Version ${expected}`) {
+        throw new Error(
+          `Expected ${compiler} to report Version ${expected}; received ${actual || "<no version>"}.`,
+        );
+      }
+      return actual;
+    };
+    const authoritativeVersion = version(ts6, "6.0.3");
+    const candidateCompilerVersion = version(ts7, candidateVersion);
 
     const buildArgs = ["--build", "--force", "--pretty", "false"];
     commands.push(await run("typescript-6-build-cold", process.execPath, [ts6, ...buildArgs], checkout));
@@ -748,7 +817,6 @@ async function main(): Promise<void> {
       distinctRevisionCount >= TYPESCRIPT_7_RESOURCE_BUDGETS.minimumRevisions;
     const resourceBudgetsMet = regressedRevisions.length === 0;
     const advisoryPassed =
-      platformSupported &&
       commands.every((command) => command.exitCode === 0) &&
       commands.every(
         (command) =>
@@ -792,13 +860,17 @@ async function main(): Promise<void> {
           : promotionAttempt
             ? "PROMOTION_BLOCKED"
             : "ADVISORY_DRIFT",
-      authoritativeCompiler: version(ts6),
-      candidateCompiler: version(ts7),
+      authoritativeCompiler: authoritativeVersion,
+      candidateCompiler: candidateCompilerVersion,
       runner: {
         platform: process.platform,
         arch: process.arch,
-        supported: platformSupported,
-        supportedRunners,
+        supported: true,
+        supportedRunners: TYPESCRIPT_7_SUPPORTED_RUNNERS,
+        nativePackage: runner.nativePackage,
+        nativePackageVersion: nativeMetadata.version,
+        nativeBinary: `node_modules/${runner.nativePackage}/lib/tsc`,
+        nativePackages,
         ...runnerFingerprint,
       },
       commands,

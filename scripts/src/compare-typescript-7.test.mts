@@ -15,7 +15,12 @@ import {
   typescript7ResourceRegressions,
   validateTypescript7ResourceApprovalEvidence,
   TYPESCRIPT_7_DECLARATION_EXTENSIONS,
+  TYPESCRIPT_7_SUPPORTED_RUNNERS,
 } from "./compare-typescript-7.mts";
+import {
+  approvedTypescript7Runner,
+  typescript7NativePackagesFromLockfile,
+} from "./typescript-7-native-contract.mts";
 import { validateTypescript7ComparisonEvidence } from "./release-check.mts";
 import {
   diagnosticsEqualForPairs,
@@ -41,6 +46,23 @@ test("normalizes diagnostic paths and ordering", () => {
       "a.ts(1,1): error TS1: first",
       "z.ts(2,3): error TS2: second",
     ],
+  );
+});
+
+test("lockfile native inventory is complete and unsupported runners fail closed", async () => {
+  const lockfile = await readFile(
+    resolve(import.meta.dirname, "../../pnpm-lock.yaml"),
+    "utf8",
+  );
+  const packages = typescript7NativePackagesFromLockfile(lockfile, "7.0.2");
+  assert.equal(packages.length, 20);
+  assert.ok(packages.includes("@typescript/typescript-linux-x64"));
+  assert.deepEqual(approvedTypescript7Runner("linux", "x64"), {
+    ...TYPESCRIPT_7_SUPPORTED_RUNNERS[0],
+  });
+  assert.throws(
+    () => approvedTypescript7Runner("linux", "arm64"),
+    /refusing to use a fallback binary/,
   );
 });
 
@@ -277,7 +299,11 @@ test("resource approval generator derives compact deterministic samples", () => 
     candidateCompiler: "Version 7.0.2",
     runner: {
       platform: process.platform, arch: process.arch, supported: true,
-      supportedRunners: [{ platform: process.platform, arch: process.arch }],
+      supportedRunners: TYPESCRIPT_7_SUPPORTED_RUNNERS,
+      nativePackage: "@typescript/typescript-linux-x64",
+      nativePackageVersion: "7.0.2",
+      nativeBinary: "node_modules/@typescript/typescript-linux-x64/lib/tsc",
+      nativePackages: ["@typescript/typescript-linux-x64"],
       image: "test-image", hardwareClass: "f".repeat(64),
       logicalCpuCount: 4, memoryGiB: 16,
     },
@@ -471,7 +497,11 @@ test("retained comparison evidence is revision-bound and advisory", () => {
       platform: process.platform,
       arch: process.arch,
       supported: true,
-      supportedRunners: [{ platform: process.platform, arch: process.arch }],
+      supportedRunners: TYPESCRIPT_7_SUPPORTED_RUNNERS,
+      nativePackage: "@typescript/typescript-linux-x64",
+      nativePackageVersion: "7.0.2",
+      nativeBinary: "node_modules/@typescript/typescript-linux-x64/lib/tsc",
+      nativePackages: ["@typescript/typescript-linux-x64"],
       image: "test-image",
       hardwareClass: "f".repeat(64),
       logicalCpuCount: 4,

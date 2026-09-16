@@ -63,7 +63,8 @@ function assertStrictSchemaV3(report: Record<string, unknown>): void {
     record(report.runner, "runner"),
     [
       "platform", "arch", "supported", "supportedRunners", "image",
-      "hardwareClass", "logicalCpuCount", "memoryGiB",
+      "nativePackage", "nativePackageVersion", "nativeBinary",
+      "nativePackages", "hardwareClass", "logicalCpuCount", "memoryGiB",
     ],
     "runner",
   );

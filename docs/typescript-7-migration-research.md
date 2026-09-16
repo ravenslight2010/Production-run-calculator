@@ -187,6 +187,51 @@ Node 24 environment. A later lockfile change must retain the required platform p
 CI and deployment installations; dependency-pruning policy must not remove all native
 optional packages.
 
+### Approved native runner matrix
+
+The release workflows currently approve one runner architecture for the TypeScript 7
+candidate:
+
+| Platform | Architecture | Native package | Release jobs |
+| --- | --- | --- | --- |
+| Linux | x64 | `@typescript/typescript-linux-x64@7.0.2` | CI codegen bridge; standard release check; full release check |
+
+The lockfile currently enumerates these 20 TypeScript 7 optional native packages, all at
+`7.0.2`:
+
+```text
+@typescript/typescript-aix-ppc64
+@typescript/typescript-darwin-arm64
+@typescript/typescript-darwin-x64
+@typescript/typescript-freebsd-arm64
+@typescript/typescript-freebsd-x64
+@typescript/typescript-linux-arm
+@typescript/typescript-linux-arm64
+@typescript/typescript-linux-loong64
+@typescript/typescript-linux-mips64el
+@typescript/typescript-linux-ppc64
+@typescript/typescript-linux-riscv64
+@typescript/typescript-linux-s390x
+@typescript/typescript-linux-x64
+@typescript/typescript-netbsd-arm64
+@typescript/typescript-netbsd-x64
+@typescript/typescript-openbsd-arm64
+@typescript/typescript-openbsd-x64
+@typescript/typescript-sunos-x64
+@typescript/typescript-win32-arm64
+@typescript/typescript-win32-x64
+```
+
+The comparison harness validates that the package records and the
+`typescript@7.0.2` optional-dependency snapshot contain the same complete set. In its
+disposable frozen install it then resolves the native package for the current approved
+runner, verifies the native executable exists and has the candidate version, and separately
+asserts `Version 6.0.3` for the authoritative compiler and `Version 7.0.2` for the candidate.
+An unapproved platform/architecture fails before any TypeScript 7 build instead of allowing
+the wrapper to silently fall back to an incorrect or missing binary. The retained comparison
+report records the approved matrix, selected native package, native package version, binary
+path, and complete lockfile package inventory under its runner evidence.
+
 ## Isolated comparison
 
 ### Method
@@ -805,6 +850,9 @@ The following checks were run while preparing this audit:
 - The isolated full reproduction completed successfully at the assessed revision and produced
   the declaration-contract result recorded above. Its output remains under `/tmp` and is not
   release evidence.
+- The comparison harness's native runner contract enumerated all 20 TypeScript 7 optional
+  packages, selected `@typescript/typescript-linux-x64@7.0.2`, rejected a simulated Linux
+  arm64 runner, and passed its focused contract tests.
 - `bash docs/evidence/reproduce-typescript-7-comparison.sh --check-retained-summary` passed
   against the historical retained summary. This validates the historical artifact's internal
   count/prose consistency; it does not make that artifact current.
