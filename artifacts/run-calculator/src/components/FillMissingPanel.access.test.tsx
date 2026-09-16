@@ -22,6 +22,10 @@ vi.mock("../fillMissing", () => ({
   detectMissingFields: mocks.detectMissingFields,
   buildProposals: mocks.buildProposals,
   makeWebLookup: mocks.makeWebLookup,
+  aiCandidates: () => [],
+  buildFillMissingInput: vi.fn(),
+  requestFillMissing: vi.fn(),
+  fillMissingErrorMessage: (error: unknown) => String(error),
 }));
 
 import FillMissingPanel from "./FillMissingPanel";
@@ -52,6 +56,7 @@ function renderPanel(canManageProfiles: boolean, onCommit = vi.fn()) {
       getRecord={() => ({})}
       brand="Northstar"
       flavor="Pepperoni"
+      dieType="12 inch"
       canEdit
       onCommit={onCommit}
     />,

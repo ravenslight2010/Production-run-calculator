@@ -27,10 +27,9 @@ describe("sync contract", () => {
     const snapshotId = syncSnapshotId(data);
     expect(isValidPartialSyncContract({ syncVersion: 1, baseSnapshotId: snapshotId })).toBe(true);
     expect(isValidPartialSyncContract({ syncVersion: 2, baseSnapshotId: snapshotId })).toBe(false);
-    const unchanged = buildSyncWriteEnvelope(data, { requestedSnapshotId: snapshotId });
-    expect(unchanged).toMatchObject({ ok: true, unchanged: true, snapshotId });
-    expect(unchanged.serverTime).toBeTypeOf("number");
+    expect(buildSyncWriteEnvelope(data, { requestedSnapshotId: snapshotId }))
+      .toEqual({ ok: true, unchanged: true, snapshotId });
     expect(buildSyncWriteEnvelope(data, { partialFallback: true }))
-      .toMatchObject({ ok: true, data, snapshotId, partialFallback: true });
+      .toEqual({ ok: true, data, snapshotId, partialFallback: true });
   });
 });

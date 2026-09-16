@@ -2,7 +2,6 @@ import { Router, type IRouter } from "express";
 import runsRouter from "../runs";
 import syncRouter from "../sync";
 import completedHistoryRouter from "../completedHistory";
-import applicatorBatchEvidenceRouter from "../applicatorBatchEvidence";
 
 /**
  * Live production state and run lifecycle.
@@ -15,6 +14,5 @@ const router: IRouter = Router();
 router.use(runsRouter);
 router.use(syncRouter);
 router.use(completedHistoryRouter);
-router.use(applicatorBatchEvidenceRouter);
 
 export default router;

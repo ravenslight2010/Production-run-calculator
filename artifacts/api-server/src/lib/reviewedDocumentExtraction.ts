@@ -102,8 +102,9 @@ export type ReviewedDocumentExtractionResult<T> =
   | { ok: false; data: T; error: string; metadata: AiStatusMetadata };
 
 /**
- * Extract a canonical document without performing writes. The sanitizer is
- * mandatory and always runs before the result leaves this boundary. Handlers can pass any
+ * Extract a canonical, reviewable document without performing writes. The
+ * sanitizer is mandatory and always runs before the optional reviewer, so a
+ * reviewer never sees untrusted model shape. Handlers can pass any
  * already-grounded prompt and provider closure; no memory/DB policy is hidden
  * in this foundation.
  */
@@ -115,6 +116,7 @@ export async function extractReviewedDocument<TSource extends ReviewedDocumentSo
   prompt: GroundedDocumentPrompt;
   call: (modelInput: ReviewedDocumentModelInput) => Promise<string>;
   sanitize: (raw: unknown, source: TSource) => TCanonical;
+  review?: (canonical: TCanonical) => Promise<TCanonical> | TCanonical;
   empty: () => TCanonical;
 }): Promise<ReviewedDocumentExtractionResult<TCanonical>> {
   const validationError = input.adapter.validate(input.source);
@@ -145,7 +147,7 @@ export async function extractReviewedDocument<TSource extends ReviewedDocumentSo
   const sanitized = input.sanitize(result.raw, input.source);
   return {
     ok: true,
-    data: sanitized,
+    data: input.review ? await input.review(sanitized) : sanitized,
     metadata: enrichedSuggestionMetadata(),
   };
 }

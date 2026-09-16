@@ -2,8 +2,6 @@ export type OperationalSnapshotReceipt = {
   runId: string;
   snapshotId: string;
   capturedAt: number;
-  canonicalRevision?: number;
-  serverTime?: number;
 };
 
 export type OperationalDisplayState = "confirmed" | "provisional" | "offline";
@@ -13,7 +11,6 @@ export type OperationalDisplayState = "confirmed" | "provisional" | "offline";
  * intervals by default. Older receipts fall back to local computeCalc.
  */
 export const LIVE_CALC_STALE_MS = 10_000;
-
 /**
  * A response is usable only for the request that is still current and for a
  * snapshot that is not older than the one already adopted.
@@ -66,4 +63,3 @@ export function shouldUseServerCalc(args: {
   return Number.isFinite(args.receipt.capturedAt)
     && args.nowMs - args.receipt.capturedAt <= windowMs;
 }
-

@@ -426,7 +426,7 @@ test("shows a stale update error, then refreshes and safely retries", async ({ b
     await first.getByLabel("Filter action category").selectOption("report");
     await second.getByLabel("Filter action category").selectOption("report");
 
-    const title = `Stale queue item ${staleWriteDedupKey}`;
+  const title = `Review completed sync merge #${resolvedSyncConflictFixtureId}`;
     await expect(first.getByText(title, { exact: true })).toBeVisible();
     await expect(second.getByText(title, { exact: true })).toBeVisible();
     await first.getByLabel("Filter action status").selectOption("all");
@@ -626,7 +626,7 @@ test("opens an incident queue item in the matching incident review surface", asy
   // not merely the hash that the source link wrote.
   await expect(page).toHaveURL(new RegExp(`#incidents/${incidentFixtureId}$`));
   await expect(page.getByText("Reported issues", { exact: true })).toBeVisible();
-  const selectedIncident = page
+  const selectedIncident = directPage
     .getByText(`Unique incident review ${incidentFixtureId}`, { exact: true })
     .first();
   await expect(selectedIncident).toBeVisible();
@@ -637,20 +637,21 @@ test("opens an incident queue item in the matching incident review surface", asy
     selectedIncidentCard.getByRole("button", { name: "Mark reviewed", exact: true }),
   ).toBeVisible();
 
-  await page.reload({ waitUntil: "domcontentloaded" });
-  await expect(page).toHaveURL(new RegExp(`#incidents/${incidentFixtureId}$`));
-  await expect(page.getByText("Reported issues", { exact: true })).toBeVisible();
+  await directPage.reload({ waitUntil: "domcontentloaded" });
+  await expect(directPage).toHaveURL(new RegExp(`#incidents/${incidentFixtureId}$`));
+  await expect(directPage.getByText("Reported issues", { exact: true })).toBeVisible();
   await expect(selectedIncident).toBeVisible();
   await expect(selectedIncidentCard).toContainText("Queue fixture manager (manager)");
   await expect(selectedIncidentCard.getByText("Diagnostic reference:", { exact: true })).toBeVisible();
   await expect(
     selectedIncidentCard.getByRole("button", { name: "Mark reviewed", exact: true }),
   ).toBeVisible();
-  await page.screenshot({ path: testInfo.outputPath("incident-direct-link-reload.png"), fullPage: true });
+  await directPage.screenshot({ path: testInfo.outputPath("incident-direct-link-reload.png"), fullPage: true });
+  await directPage.close();
   expect(browserErrors).toEqual([]);
 });
 
-test("opens a direct sync diagnostics link focused on direct entry", async ({ page }, testInfo: TestInfo) => {
+test("keeps a direct sync diagnostics link focused after reload", async ({ page }, testInfo: TestInfo) => {
   const username = uniqueTestId("e2e_manager_sync_reload");
   testUsernames.add(username);
   const browserErrors: string[] = [];

@@ -8,7 +8,7 @@ import {
 const silentLog = { info() {}, warn() {}, error() {} };
 
 describe("extractReviewedDocument", () => {
-  it("uses the workbook adapter and sanitizes before returning canonical metadata", async () => {
+  it("uses the workbook adapter, sanitizes before review, and returns canonical suggestion metadata", async () => {
     const order: string[] = [];
     const result = await extractReviewedDocument({
       label: "test-workbook",
@@ -24,12 +24,16 @@ describe("extractReviewedDocument", () => {
         order.push("sanitize");
         return (raw as { rows: string[] }).rows.slice(0, 1);
       },
+      review: (rows) => {
+        order.push("review");
+        return [...rows, "reviewed"];
+      },
       empty: () => [],
     });
 
     expect(result).toEqual({
       ok: true,
-      data: ["accepted"],
+      data: ["accepted", "reviewed"],
       metadata: {
         aiGenerated: true,
         aiStatus: "enriched",
@@ -37,7 +41,7 @@ describe("extractReviewedDocument", () => {
         decision: "suggestion",
       },
     });
-    expect(order).toEqual(["sanitize"]);
+    expect(order).toEqual(["sanitize", "review"]);
   });
 
   it("validates spec-image inputs before a provider call", async () => {

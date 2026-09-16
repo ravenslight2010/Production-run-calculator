@@ -17,12 +17,26 @@ import {
   releaseRevisionGitArgs,
 } from "./typescript-7-evidence.mts";
 import {
+  TYPESCRIPT_7_MEASURED_PROJECTS,
   TYPESCRIPT_7_RESOURCE_BUDGETS,
   classifyTypescript7ResourceRegressions,
+  typescript7MeasuredCheckNames,
+  type Typescript7MeasuredProject,
   type Typescript7ResourceBudgets,
 } from "./typescript-7-resource-contract.mts";
+import {
+  TYPESCRIPT_7_HISTORY_LIMIT,
+  validateTypescript7HistoryLimit,
+} from "./typescript-7-trend-contract.mts";
+import {
+  approvedTypescript7Runner,
+  TYPESCRIPT_7_SUPPORTED_RUNNERS,
+  typescript7NativePackagesFromLockfile,
+} from "./typescript-7-native-contract.mts";
 
 export { TYPESCRIPT_7_RESOURCE_BUDGETS } from "./typescript-7-resource-contract.mts";
+export { TYPESCRIPT_7_HISTORY_LIMIT } from "./typescript-7-trend-contract.mts";
+export { TYPESCRIPT_7_SUPPORTED_RUNNERS } from "./typescript-7-native-contract.mts";
 
 type CommandEvidence = {
   name: string;
@@ -44,8 +58,11 @@ const RESOURCE_APPROVAL_EVIDENCE_PATH =
   "docs/typescript-7-resource-approval-evidence.json";
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const REVISION_PATTERN = /^[a-f0-9]{40}$/u;
-
-export const TYPESCRIPT_7_HISTORY_LIMIT = 5;
+export const TYPESCRIPT_7_DECLARATION_EXTENSIONS = [
+  ".d.ts",
+  ".d.mts",
+  ".d.cts",
+] as const;
 
 function exactKeys(
   value: Record<string, unknown>,
@@ -211,18 +228,9 @@ export function validateTypescript7ResourceApprovalEvidence(
   }
 }
 
-const comparedChecks = [
-  "build",
-  "scripts",
-  "api-server",
-  "run-calculator",
-  "mockup-sandbox",
-  "ai-evaluation",
-  "corpus-harness",
-] as const;
+const comparedChecks = typescript7MeasuredCheckNames();
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(scriptDir, "../..");
-const supportedRunners = [{ platform: "linux", arch: "x64" }] as const;
 const promotionAttempt = process.env.TYPESCRIPT_7_PROMOTION === "1";
 
 export function editorServiceEvidenceFromResult(result: {
@@ -296,11 +304,13 @@ export function selectTypescript7HistoricalReports(
   history: readonly unknown[],
   currentRevision: string,
   currentHardwareClass: string,
+  historyLimit: number = TYPESCRIPT_7_HISTORY_LIMIT,
 ): Array<Record<string, unknown>> {
   return analyzeTypescript7HistoricalReports(
     history,
     currentRevision,
     currentHardwareClass,
+    historyLimit,
   ).reports;
 }
 
@@ -308,10 +318,12 @@ export function analyzeTypescript7HistoricalReports(
   history: readonly unknown[],
   currentRevision: string,
   currentHardwareClass: string,
+  historyLimit: number = TYPESCRIPT_7_HISTORY_LIMIT,
 ): {
   reports: Array<Record<string, unknown>>;
   incompatibleRunnerClassSamples: number;
 } {
+  validateTypescript7HistoryLimit(historyLimit);
   const revisions = new Set([currentRevision]);
   const reports: Array<Record<string, unknown>> = [];
   let incompatibleRunnerClassSamples = 0;
@@ -337,14 +349,14 @@ export function analyzeTypescript7HistoricalReports(
     }
     if (runner?.hardwareClass !== currentHardwareClass) {
       incompatibleRunnerClassSamples = Math.min(
-        TYPESCRIPT_7_HISTORY_LIMIT,
+        historyLimit,
         incompatibleRunnerClassSamples + 1,
       );
       continue;
     }
     revisions.add(revision);
     reports.push(report);
-    if (reports.length >= TYPESCRIPT_7_HISTORY_LIMIT) break;
+    if (reports.length >= historyLimit) break;
   }
   return { reports, incompatibleRunnerClassSamples };
 }
@@ -376,6 +388,16 @@ export function normalizeDiagnostics(
     .sort();
 }
 
+export function typescript7ProjectMeasurementCommands(
+  mode: string,
+  projects: readonly Typescript7MeasuredProject[] = TYPESCRIPT_7_MEASURED_PROJECTS,
+): Array<{ name: string; tsconfig: string; compiler: 6 | 7 }> {
+  return projects.flatMap(({ name, tsconfig }) => [
+    { name: `typescript-6-${name}-${mode}`, tsconfig, compiler: 6 },
+    { name: `typescript-7-${name}-${mode}`, tsconfig, compiler: 7 },
+  ]);
+}
+
 async function filesUnder(directory: string): Promise<string[]> {
   const files: string[] = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -389,7 +411,13 @@ async function filesUnder(directory: string): Promise<string[]> {
 export async function declarationManifest(checkout: string) {
   const lib = resolve(checkout, "lib");
   const files = (await filesUnder(lib))
-    .filter((path) => path.endsWith(".d.ts") && path.includes("/dist/"))
+    .filter(
+      (path) =>
+        path.includes("/dist/") &&
+        TYPESCRIPT_7_DECLARATION_EXTENSIONS.some((extension) =>
+          path.endsWith(extension),
+        ),
+    )
     .sort();
   return Promise.all(
     files.map(async (path) => ({
@@ -516,6 +544,30 @@ async function main(): Promise<void> {
   const commands: CommandEvidence[] = [];
   let report: Record<string, unknown>;
   let editorService: EditorServiceEvidence | null = null;
+  const rootPackage = JSON.parse(
+    await readFile(resolve(rootDir, "package.json"), "utf8"),
+  ) as {
+    devDependencies?: Record<string, string>;
+  };
+  const candidateSpecifier = rootPackage.devDependencies?.["typescript-native"];
+  const candidateVersion = candidateSpecifier?.match(
+    /^npm:typescript@(\d+\.\d+\.\d+)$/u,
+  )?.[1];
+  if (!candidateVersion) {
+    throw new Error(
+      "The typescript-native dependency must be an exact npm:typescript@x.y.z alias.",
+    );
+  }
+  const nativePackages = typescript7NativePackagesFromLockfile(
+    await readFile(resolve(rootDir, "pnpm-lock.yaml"), "utf8"),
+    candidateVersion,
+  );
+  const runner = approvedTypescript7Runner(process.platform, process.arch);
+  if (!nativePackages.includes(runner.nativePackage)) {
+    throw new Error(
+      `The approved runner native package ${runner.nativePackage} is missing from pnpm-lock.yaml.`,
+    );
+  }
 
   try {
     await mkdir(checkout);
@@ -551,15 +603,55 @@ async function main(): Promise<void> {
 
     const ts6 = resolve(checkout, "node_modules/typescript/bin/tsc");
     const ts7 = resolve(checkout, "node_modules/typescript-native/bin/tsc");
-    const version = (compiler: string) =>
-      spawnSync(process.execPath, [compiler, "--version"], {
+    const nativePackageJson = spawnSync(
+      process.execPath,
+      [
+        "-e",
+        [
+          "const path = require('node:path');",
+          "const fs = require('node:fs');",
+          "const packageJson = require.resolve(process.argv[1] + '/package.json');",
+          "const metadata = JSON.parse(fs.readFileSync(packageJson, 'utf8'));",
+          "const binary = path.join(path.dirname(packageJson), 'lib', process.platform === 'win32' ? 'tsc.exe' : 'tsc');",
+          "if (metadata.version !== process.argv[2]) throw new Error(`native package version ${metadata.version} does not match ${process.argv[2]}`);",
+          "if (!Array.isArray(metadata.os) || !metadata.os.includes(process.platform)) throw new Error(`native package OS does not match ${process.platform}`);",
+          "if (!Array.isArray(metadata.cpu) || !metadata.cpu.includes(process.arch)) throw new Error(`native package CPU does not match ${process.arch}`);",
+          "if (!fs.statSync(binary).isFile()) throw new Error(`native compiler binary is missing: ${binary}`);",
+          "process.stdout.write(JSON.stringify({ packageJson, binary, version: metadata.version }));",
+        ].join(""),
+        runner.nativePackage,
+        candidateVersion,
+      ],
+      {
         cwd: checkout,
         encoding: "utf8",
-      }).stdout.trim();
-    const platformSupported = supportedRunners.some(
-      (runner) =>
-        runner.platform === process.platform && runner.arch === process.arch,
+      },
     );
+    if (nativePackageJson.status !== 0) {
+      throw new Error(
+        `TypeScript 7 native package probe failed: ${nativePackageJson.stderr.trim()}`,
+      );
+    }
+    const nativeMetadata = JSON.parse(nativePackageJson.stdout) as {
+      packageJson: string;
+      binary: string;
+      version: string;
+    };
+    const version = (compiler: string, expected: string) => {
+      const result = spawnSync(process.execPath, [compiler, "--version"], {
+        cwd: checkout,
+        encoding: "utf8",
+      });
+      const actual = result.stdout.trim();
+      if (result.status !== 0 || actual !== `Version ${expected}`) {
+        throw new Error(
+          `Expected ${compiler} to report Version ${expected}; received ${actual || "<no version>"}.`,
+        );
+      }
+      return actual;
+    };
+    const authoritativeVersion = version(ts6, "6.0.3");
+    const candidateCompilerVersion = version(ts7, candidateVersion);
 
     const buildArgs = ["--build", "--force", "--pretty", "false"];
     commands.push(await run("typescript-6-build-cold", process.execPath, [ts6, ...buildArgs], checkout));
@@ -579,14 +671,7 @@ async function main(): Promise<void> {
     commands.push(await run("typescript-7-build-cold", process.execPath, [ts7, ...buildArgs], checkout));
     const candidateDeclarations = await declarationManifest(checkout);
 
-    const projects = [
-      ["scripts", "scripts/tsconfig.json"],
-      ["api-server", "artifacts/api-server/tsconfig.json"],
-      ["run-calculator", "artifacts/run-calculator/tsconfig.json"],
-      ["mockup-sandbox", "artifacts/mockup-sandbox/tsconfig.json"],
-      ["ai-evaluation", "lib/ai-evaluation/tsconfig.json"],
-      ["corpus-harness", "lib/corpus-harness/tsconfig.json"],
-    ] as const;
+    const preparedCompilers = new Set<6 | 7>();
     for (const mode of TYPESCRIPT_7_RESOURCE_BUDGETS.requiredModes) {
       if (mode === "warm") {
         commands.push(
@@ -594,10 +679,32 @@ async function main(): Promise<void> {
           await run("typescript-7-build-warm", process.execPath, [ts7, ...buildArgs], checkout),
         );
       }
-      for (const [name, project] of projects) {
+      for (const measurement of typescript7ProjectMeasurementCommands(mode)) {
+        if (!preparedCompilers.has(measurement.compiler)) {
+          const compiler = measurement.compiler === 6 ? ts6 : ts7;
+          const prerequisiteBuild = await run(
+            `typescript-${measurement.compiler}-recipe-guide-import`,
+            process.execPath,
+            [
+              compiler,
+              "--build",
+              "--force",
+              "--pretty",
+              "false",
+              "lib/recipe-guide-import/tsconfig.json",
+            ],
+            checkout,
+          );
+          if (prerequisiteBuild.exitCode !== 0) {
+            throw new Error(
+              `TypeScript ${measurement.compiler} recipe-guide-import prerequisite build failed.`,
+            );
+          }
+          preparedCompilers.add(measurement.compiler);
+        }
+        const compiler = measurement.compiler === 6 ? ts6 : ts7;
         commands.push(
-          await run(`typescript-6-${name}-${mode}`, process.execPath, [ts6, "-p", project, "--noEmit", "--pretty", "false"], checkout),
-          await run(`typescript-7-${name}-${mode}`, process.execPath, [ts7, "-p", project, "--noEmit", "--pretty", "false"], checkout),
+          await run(measurement.name, process.execPath, [compiler, "-p", measurement.tsconfig, "--noEmit", "--pretty", "false"], checkout),
         );
       }
     }
@@ -710,7 +817,6 @@ async function main(): Promise<void> {
       distinctRevisionCount >= TYPESCRIPT_7_RESOURCE_BUDGETS.minimumRevisions;
     const resourceBudgetsMet = regressedRevisions.length === 0;
     const advisoryPassed =
-      platformSupported &&
       commands.every((command) => command.exitCode === 0) &&
       commands.every(
         (command) =>
@@ -754,13 +860,17 @@ async function main(): Promise<void> {
           : promotionAttempt
             ? "PROMOTION_BLOCKED"
             : "ADVISORY_DRIFT",
-      authoritativeCompiler: version(ts6),
-      candidateCompiler: version(ts7),
+      authoritativeCompiler: authoritativeVersion,
+      candidateCompiler: candidateCompilerVersion,
       runner: {
         platform: process.platform,
         arch: process.arch,
-        supported: platformSupported,
-        supportedRunners,
+        supported: true,
+        supportedRunners: TYPESCRIPT_7_SUPPORTED_RUNNERS,
+        nativePackage: runner.nativePackage,
+        nativePackageVersion: nativeMetadata.version,
+        nativeBinary: `node_modules/${runner.nativePackage}/lib/tsc`,
+        nativePackages,
         ...runnerFingerprint,
       },
       commands,

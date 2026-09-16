@@ -8,6 +8,44 @@ export const TYPESCRIPT_7_RESOURCE_BUDGETS = {
   approvedForPromotion: true,
 } as const;
 
+export const TYPESCRIPT_7_MEASURED_PROJECTS = [
+  { name: "scripts", tsconfig: "scripts/tsconfig.json" },
+  { name: "api-server", tsconfig: "artifacts/api-server/tsconfig.json" },
+  {
+    name: "run-calculator",
+    tsconfig: "artifacts/run-calculator/tsconfig.json",
+  },
+  {
+    name: "mockup-sandbox",
+    tsconfig: "artifacts/mockup-sandbox/tsconfig.json",
+  },
+  { name: "ai-evaluation", tsconfig: "lib/ai-evaluation/tsconfig.json" },
+  { name: "corpus-harness", tsconfig: "lib/corpus-harness/tsconfig.json" },
+] as const;
+
+export type Typescript7MeasuredProject = {
+  name: string;
+  tsconfig: string;
+};
+
+export function typescript7MeasuredCheckNames(
+  projects: readonly Typescript7MeasuredProject[] = TYPESCRIPT_7_MEASURED_PROJECTS,
+): string[] {
+  return ["build", ...projects.map((project) => project.name)];
+}
+
+export function typescript7ExpectedMeasurementCommandNames(
+  projects: readonly Typescript7MeasuredProject[] = TYPESCRIPT_7_MEASURED_PROJECTS,
+  modes: readonly string[] = TYPESCRIPT_7_RESOURCE_BUDGETS.requiredModes,
+): string[] {
+  return modes.flatMap((mode) =>
+    typescript7MeasuredCheckNames(projects).flatMap((check) => [
+      `typescript-6-${check}-${mode}`,
+      `typescript-7-${check}-${mode}`,
+    ]),
+  );
+}
+
 export type Typescript7ResourceBudgets = {
   maxElapsedRatio: number;
   maxPeakRssRatio: number;

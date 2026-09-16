@@ -89,6 +89,8 @@ jobs:
 
       - name: Run release gates once and retain standard evidence
         id: run-standard-release-check
+        env:
+          TYPESCRIPT_7_RUNNER_IMAGE: ${{ runner.os }}-${{ runner.arch }}
         run: pnpm run release:check
         env:
           TYPESCRIPT_7_RUNNER_IMAGE: ${{ runner.os }}-${{ runner.arch }}
@@ -199,6 +201,8 @@ jobs:
 
       - name: Run release gates once and retain full evidence
         id: run-full-release-check
+        env:
+          TYPESCRIPT_7_RUNNER_IMAGE: ${{ runner.os }}-${{ runner.arch }}
         run: pnpm run release:check:full
         env:
           TYPESCRIPT_7_RUNNER_IMAGE: ${{ runner.os }}-${{ runner.arch }}

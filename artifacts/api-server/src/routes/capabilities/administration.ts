@@ -6,7 +6,6 @@ import profileDataHealthRouter from "../profileDataHealth";
 import supervisorPinRouter from "../supervisorPin";
 import sandboxRouter from "../sandbox";
 import auditLogsRouter from "../auditLogs";
-import backgroundOperationDiagnosticsRouter from "../backgroundOperationDiagnostics";
 
 /** Staff access, diagnostics, audit, and controlled administrative operations. */
 const router: IRouter = Router();
@@ -18,6 +17,5 @@ router.use(profileDataHealthRouter);
 router.use(supervisorPinRouter);
 router.use(sandboxRouter);
 router.use(auditLogsRouter);
-router.use(backgroundOperationDiagnosticsRouter);
 
 export default router;

@@ -43,43 +43,22 @@ export function isValidPartialSyncContract(payload: Record<string, unknown>): bo
 }
 
 export type SyncWriteEnvelope<T> =
-  | { ok: true; stale: true; epoch: number; canonicalRevision?: number; serverTime: number }
-  | { ok: true; unchanged: true; snapshotId: string; canonicalRevision?: number; serverTime: number }
-  | {
-    ok: true;
-    data: T;
-    snapshotId?: string;
-    partialFallback?: true;
-    canonicalRevision?: number;
-    serverTime: number;
-  };
+  | { ok: true; stale: true; epoch: number }
+  | { ok: true; unchanged: true; snapshotId: string }
+  | { ok: true; data: T; snapshotId?: string; partialFallback?: true };
 
 export function buildSyncWriteEnvelope<T>(
   data: T,
-  options: {
-    requestedSnapshotId?: unknown;
-    partialFallback?: boolean;
-    canonicalRevision?: number;
-    serverTime?: number;
-  },
+  options: { requestedSnapshotId?: unknown; partialFallback?: boolean },
 ): SyncWriteEnvelope<T> {
   const snapshotId = data === null || data === undefined ? undefined : syncSnapshotId(data);
-  const serverTime = options.serverTime ?? Date.now();
   if (!options.partialFallback && snapshotId && options.requestedSnapshotId === snapshotId) {
-    return {
-      ok: true,
-      unchanged: true,
-      snapshotId,
-      canonicalRevision: options.canonicalRevision,
-      serverTime,
-    };
+    return { ok: true, unchanged: true, snapshotId };
   }
   return {
     ok: true,
     data,
     ...(snapshotId ? { snapshotId } : {}),
     ...(options.partialFallback ? { partialFallback: true as const } : {}),
-    canonicalRevision: options.canonicalRevision,
-    serverTime,
   };
 }
