@@ -1,0 +1,407 @@
+{
+  "revision": "eaced278b5f50d72623e737c61c4d4d2e99fc436",
+  "sourceLibraryRevision": "eaced278b5f50d72623e737c61c4d4d2e99fc436",
+  "mode": "typescript-7-promotion",
+  "results": [
+    {
+      "label": "source-library reconciliation database preflight",
+      "passed": false,
+      "status": "FAIL",
+      "elapsedMs": 5837,
+      "sourceLibraryPreflight": {
+        "contractVersion": 1,
+        "database": "unverified",
+        "expected": {
+          "poolRows": 0,
+          "aliases": 0
+        },
+        "observed": {
+          "poolRows": 0,
+          "aliasesExact": 0,
+          "aliasesMissing": 0,
+          "aliasesMismatched": 0,
+          "markerPresent": false,
+          "markerValid": false
+        },
+        "failures": [
+          {
+            "check": "output",
+            "count": 1
+          }
+        ],
+        "ok": false
+      }
+    },
+    {
+      "label": "operational report signing-key rotation preflight",
+      "passed": false,
+      "status": "FAIL",
+      "elapsedMs": 5007
+    },
+    {
+      "label": "blocking release security audit (high severity; registry required)",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 1380
+    },
+    {
+      "label": "source-library reconciliation verification",
+      "passed": false,
+      "status": "BLOCKED",
+      "blockedBy": [
+        "source-library reconciliation database preflight"
+      ],
+      "elapsedMs": 0
+    },
+    {
+      "label": "shell lint inventory",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 843
+    },
+    {
+      "label": "generated API client freshness",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 17729
+    },
+    {
+      "label": "shared library typechecks",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 1109
+    },
+    {
+      "label": "API server typecheck",
+      "passed": false,
+      "status": "BLOCKED",
+      "blockedBy": [
+        "source-library reconciliation database preflight"
+      ],
+      "elapsedMs": 0
+    },
+    {
+      "label": "run calculator typecheck",
+      "passed": false,
+      "status": "BLOCKED",
+      "blockedBy": [
+        "source-library reconciliation database preflight"
+      ],
+      "elapsedMs": 0
+    },
+    {
+      "label": "mockup sandbox typecheck",
+      "passed": false,
+      "status": "BLOCKED",
+      "blockedBy": [
+        "source-library reconciliation database preflight"
+      ],
+      "elapsedMs": 0
+    },
+    {
+      "label": "scripts typecheck",
+      "passed": false,
+      "status": "BLOCKED",
+      "blockedBy": [
+        "source-library reconciliation database preflight"
+      ],
+      "elapsedMs": 0
+    },
+    {
+      "label": "TypeScript 7 promotion gate",
+      "passed": false,
+      "status": "BLOCKED",
+      "blockedBy": [
+        "API server typecheck",
+        "run calculator typecheck",
+        "mockup sandbox typecheck",
+        "scripts typecheck"
+      ],
+      "elapsedMs": 0
+    },
+    {
+      "label": "recovery evidence audit",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 1862
+    },
+    {
+      "label": "clean-start smoke",
+      "passed": false,
+      "status": "BLOCKED",
+      "blockedBy": [
+        "source-library reconciliation database preflight"
+      ],
+      "elapsedMs": 0
+    },
+    {
+      "label": "Render image smoke",
+      "passed": false,
+      "status": "BLOCKED",
+      "blockedBy": [
+        "source-library reconciliation database preflight"
+      ],
+      "elapsedMs": 0
+    },
+    {
+      "label": "API unit tests (release shard 1/7)",
+      "passed": false,
+      "status": "BLOCKED",
+      "blockedBy": [
+        "source-library reconciliation database preflight"
+      ],
+      "elapsedMs": 0
+    },
+    {
+      "label": "API integration tests (release shard 2/7)",
+      "passed": false,
+      "status": "BLOCKED",
+      "blockedBy": [
+        "source-library reconciliation database preflight"
+      ],
+      "elapsedMs": 0
+    },
+    {
+      "label": "API integration tests (release shard 3/7)",
+      "passed": false,
+      "status": "BLOCKED",
+      "blockedBy": [
+        "source-library reconciliation database preflight"
+      ],
+      "elapsedMs": 0
+    },
+    {
+      "label": "API integration tests (release shard 4/7)",
+      "passed": false,
+      "status": "BLOCKED",
+      "blockedBy": [
+        "source-library reconciliation database preflight"
+      ],
+      "elapsedMs": 0
+    },
+    {
+      "label": "API role/capability tests (release shard 5/7)",
+      "passed": false,
+      "status": "BLOCKED",
+      "blockedBy": [
+        "source-library reconciliation database preflight"
+      ],
+      "elapsedMs": 0
+    },
+    {
+      "label": "API sync tests (release shard 6/7)",
+      "passed": false,
+      "status": "BLOCKED",
+      "blockedBy": [
+        "source-library reconciliation database preflight"
+      ],
+      "elapsedMs": 0
+    },
+    {
+      "label": "API sync SSE tests (release shard 7/7)",
+      "passed": false,
+      "status": "BLOCKED",
+      "blockedBy": [
+        "source-library reconciliation database preflight"
+      ],
+      "elapsedMs": 0
+    },
+    {
+      "label": "run calculator tests",
+      "passed": false,
+      "status": "BLOCKED",
+      "blockedBy": [
+        "source-library reconciliation database preflight"
+      ],
+      "elapsedMs": 0
+    },
+    {
+      "label": "production rules tests",
+      "passed": false,
+      "status": "BLOCKED",
+      "blockedBy": [
+        "source-library reconciliation database preflight"
+      ],
+      "elapsedMs": 0
+    },
+    {
+      "label": "inventory math tests",
+      "passed": false,
+      "status": "BLOCKED",
+      "blockedBy": [
+        "source-library reconciliation database preflight"
+      ],
+      "elapsedMs": 0
+    },
+    {
+      "label": "spec reconcile tests",
+      "passed": false,
+      "status": "BLOCKED",
+      "blockedBy": [
+        "source-library reconciliation database preflight"
+      ],
+      "elapsedMs": 0
+    },
+    {
+      "label": "spec import tests",
+      "passed": false,
+      "status": "BLOCKED",
+      "blockedBy": [
+        "source-library reconciliation database preflight"
+      ],
+      "elapsedMs": 0
+    },
+    {
+      "label": "scheduled recipe check tests",
+      "passed": false,
+      "status": "BLOCKED",
+      "blockedBy": [
+        "source-library reconciliation database preflight"
+      ],
+      "elapsedMs": 0
+    },
+    {
+      "label": "spec export tests",
+      "passed": false,
+      "status": "BLOCKED",
+      "blockedBy": [
+        "source-library reconciliation database preflight"
+      ],
+      "elapsedMs": 0
+    },
+    {
+      "label": "corpus tests",
+      "passed": false,
+      "status": "BLOCKED",
+      "blockedBy": [
+        "source-library reconciliation database preflight"
+      ],
+      "elapsedMs": 0
+    },
+    {
+      "label": "model-bump check",
+      "passed": false,
+      "status": "BLOCKED",
+      "blockedBy": [
+        "source-library reconciliation database preflight"
+      ],
+      "elapsedMs": 0
+    },
+    {
+      "label": "operational evidence check",
+      "passed": false,
+      "status": "BLOCKED",
+      "blockedBy": [
+        "source-library reconciliation database preflight"
+      ],
+      "elapsedMs": 0
+    },
+    {
+      "label": "onboarding bypass guard",
+      "passed": false,
+      "status": "BLOCKED",
+      "blockedBy": [
+        "source-library reconciliation database preflight"
+      ],
+      "elapsedMs": 0
+    },
+    {
+      "label": "browser smoke tests",
+      "passed": false,
+      "status": "BLOCKED",
+      "blockedBy": [
+        "source-library reconciliation database preflight",
+        "onboarding bypass guard"
+      ],
+      "elapsedMs": 0
+    },
+    {
+      "label": "browser calendar tests",
+      "passed": false,
+      "status": "BLOCKED",
+      "blockedBy": [
+        "source-library reconciliation database preflight",
+        "onboarding bypass guard"
+      ],
+      "elapsedMs": 0
+    },
+    {
+      "label": "browser accessibility tests",
+      "passed": false,
+      "status": "BLOCKED",
+      "blockedBy": [
+        "source-library reconciliation database preflight",
+        "onboarding bypass guard"
+      ],
+      "elapsedMs": 0
+    },
+    {
+      "label": "browser WebKit smoke",
+      "passed": false,
+      "status": "BLOCKED",
+      "blockedBy": [
+        "source-library reconciliation database preflight",
+        "onboarding bypass guard"
+      ],
+      "elapsedMs": 0
+    }
+  ],
+  "timing": {
+    "totalElapsedMs": 24691,
+    "stages": [
+      {
+        "stage": "source-library-preflight",
+        "elapsedMs": 5840
+      },
+      {
+        "stage": "prerequisites",
+        "elapsedMs": 17740
+      },
+      {
+        "stage": "shared-output",
+        "elapsedMs": 1111
+      },
+      {
+        "stage": "consumer-typechecks",
+        "elapsedMs": 0
+      },
+      {
+        "stage": "typescript-7-promotion",
+        "elapsedMs": 0
+      },
+      {
+        "stage": "clean-start",
+        "elapsedMs": 0
+      },
+      {
+        "stage": "container-smoke",
+        "elapsedMs": 0
+      },
+      {
+        "stage": "release-tests",
+        "elapsedMs": 0
+      },
+      {
+        "stage": "browser-guard",
+        "elapsedMs": 0
+      },
+      {
+        "stage": "browser-smoke",
+        "elapsedMs": 0
+      },
+      {
+        "stage": "browser-calendar",
+        "elapsedMs": 0
+      },
+      {
+        "stage": "browser-accessibility",
+        "elapsedMs": 0
+      },
+      {
+        "stage": "browser-webkit",
+        "elapsedMs": 0
+      }
+    ]
+  },
+  "updatedAt": "2026-09-16T00:00:02.373Z"
+}
