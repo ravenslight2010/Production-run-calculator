@@ -148,8 +148,8 @@ acceptable production migration path.
 | `artifacts/run-calculator/src/applyCaseUpdateChoices.web.test.ts` | TSX parse/traversal and `transpileModule` | Keep on TypeScript 6. `transpileModule` has no stable TypeScript 7.0 root equivalent. |
 | `artifacts/run-calculator/scripts/check-vite-config-loading.mjs` | `preProcessFile` for import discovery | Keep on TypeScript 6 for the pilot. The import scanner can later be replaced or isolated; it is not safe to assume the native unstable AST is compatible. |
 
-The current direct-consumer smoke covered the retention checker, Vite config loading, and
-all four AST-based client test files: 29 tests passed.
+The current direct-consumer smoke covers the retention checker, Vite config loading, and
+all five AST-based client test files behind the TypeScript 6 boundary.
 
 ## Official TypeScript 7 compatibility findings
 
@@ -434,7 +434,7 @@ Proceed only when:
 ### Stage 3 — separate or migrate programmatic consumers
 
 Do not start until Microsoft publishes a stable TypeScript 7 API and migration guidance.
-Classify each of the seven consumers against that API. Consumers without a stable
+Classify each of the nine consumers against that API. Consumers without a stable
 replacement must stay in a TypeScript 6-isolated package or process.
 
 The programmatic consumers import `@workspace/typescript-api-v6`, not `typescript`
@@ -450,12 +450,12 @@ compiler from the other's package resolution.
 
 The official `@typescript/typescript6` compatibility package is currently 6.0.2, while this
 repository uses 6.0.3. Do not silently downgrade the API consumers. A downgrade requires
-explicit compatibility evidence covering all seven consumers and an intentional update to
+explicit compatibility evidence covering all nine consumers and an intentional update to
 the boundary's version assertion.
 
 Remove this boundary only after Microsoft publishes a stable TypeScript 7 JavaScript API
 and migration guidance, every consumer has been migrated to that API, and the retention,
-browser syntax, Vite import, and four AST-based safeguards pass against it.
+browser syntax, Vite import, and five AST-based safeguards pass against it.
 
 ### Stage 4 — switch the root compiler
 
@@ -463,7 +463,7 @@ Replace the root compiler only after:
 
 - TypeDoc broadens its peer range to TypeScript 7 and Orval's resolved TypeDoc/plugin graph
   installs without overrides or ignored peer failures.
-- All seven direct consumers have stable replacements or an explicitly maintained
+- All nine direct consumers have stable replacements or an explicitly maintained
   TypeScript 6 isolation boundary.
 - The full standard release check passes with the new lockfile.
 - Clean-install, generated-file, declaration, Vite config-loader, unit-test, and editor
@@ -485,7 +485,7 @@ regression restores the previous `package.json` and lockfile together.
 6. All emitted declaration paths and contents are compared from clean temporary outputs.
 7. `check:api-generated`, API Zod tests, Orval generation/check mode, and generated
    declaration builds pass.
-8. The retention checker, browser-spec syntax validator, Vite config loader, and four
+8. The retention checker, browser-spec syntax validator, Vite config loader, and five
    AST-based tests pass through the intended TypeScript 6 isolation boundary.
 9. Vite build, Vitest, tsx scripts, Drizzle schema tooling, and TypeDoc/Orval smoke checks
    pass without hidden TypeScript peer overrides.
@@ -514,7 +514,7 @@ Repository evidence:
 - `artifacts/run-calculator/tsconfig.json`
 - `artifacts/run-calculator/scripts/check-vite-config-loading.mjs`
 - `artifacts/run-calculator/e2e/validate-browser-spec-syntax.ts`
-- the four AST-based tests listed in the direct-consumer table
+- the five AST-based tests listed in the direct-consumer table
 - `docs/evidence/typescript-7-comparison-2026-09-15.json`
 - `docs/evidence/reproduce-typescript-7-comparison.sh`
 
