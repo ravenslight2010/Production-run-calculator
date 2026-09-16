@@ -3,6 +3,9 @@ import { lstat, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateSourceLibraryReconciliationEvidence } from "./release-check.mts";
+import {
+  assertBoundedSourceLibraryReconciliationEvidence,
+} from "./verify-source-library-reconciliation.mts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const MAX_AGE_MS = 24 * 60 * 60 * 1_000;
@@ -24,6 +27,22 @@ function argument(name: string, fallback?: string): string {
     throw new Error(`Missing value for ${name}`);
   }
   return value;
+}
+
+async function readInput(input: string): Promise<Buffer> {
+  if (input !== "-") {
+    const stats = await lstat(input);
+    if (!stats.isFile() || stats.isSymbolicLink()) {
+      throw new Error("Imported source-library evidence must be a regular file.");
+    }
+    return readFile(input);
+  }
+
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
 }
 
 export async function importSourceLibraryReconciliationEvidence(
@@ -50,14 +69,19 @@ export async function importSourceLibraryReconciliationEvidence(
     );
   }
 
-  const stats = await lstat(input);
-  if (!stats.isFile() || stats.isSymbolicLink()) {
-    throw new Error("Imported source-library evidence must be a regular file.");
-  }
   const [evidenceBytes, reportBytes] = await Promise.all([
-    readFile(input),
+    readInput(options.input === "-" ? "-" : input),
     readFile(report),
   ]);
+  let parsedEvidence: unknown;
+  try {
+    parsedEvidence = JSON.parse(new TextDecoder().decode(evidenceBytes));
+  } catch {
+    throw new Error(
+      "Source-library reconciliation evidence is not valid JSON.",
+    );
+  }
+  assertBoundedSourceLibraryReconciliationEvidence(parsedEvidence);
   validateSourceLibraryReconciliationEvidence(evidenceBytes, {
     expectedEnvironment: "release",
     expectedRevision: revision,

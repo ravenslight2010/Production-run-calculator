@@ -80,3 +80,28 @@ current NO-GO.
 **How to apply:** Treat a stopped assessment as a checkpoint, not as the final
 report; preserve real failures and never fill omitted gate rows with assumed
 passes.
+
+WebKit network-fault smoke tests that use `page.route()` must block service
+workers for the test context; otherwise the service worker can answer the
+request before Playwright's route handler and the failure observer waits
+indefinitely.
+
+**Why:** WebKit served the sync request successfully from the app service
+worker, so the intended abort never ran and the reconnect assertion timed out.
+
+**How to apply:** Set `serviceWorkers: "block"` only on transport-fault smoke
+fixtures; keep normal browser coverage free to exercise the service worker.
+
+When replaying preserved work onto a materially newer live branch, an empty
+cherry-pick is evidence that the behavior is already present, not a reason to
+force an empty commit. Keep the current implementation, document the overlap,
+and port only the non-empty reviewed delta. Retained browser reports remain
+immutable evidence for their recorded revision.
+
+**Why:** Historical branches can contain superseded copies of release and
+runtime work. Replaying them wholesale can overwrite newer safeguards or make
+older evidence appear current.
+
+**How to apply:** Compare each selected commit against live main, skip empty
+replays, preserve current-main behavior on conflicts, and bind every new or
+retained report to the exact revision that produced it.

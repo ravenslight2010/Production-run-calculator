@@ -9,6 +9,11 @@ import {
 import type { Capability } from "./roles";
 import type { Scope } from "./requestScope";
 import { pruneServerJobArtifacts } from "./serverJobArtifactCache";
+import {
+  isTransientDatabaseConnectionError,
+  recordBackgroundOperationFailure,
+  runBackgroundOperation,
+} from "./backgroundOperations";
 
 export const SERVER_JOB_STATUSES = ["queued", "running", "succeeded", "failed", "cancelled"] as const;
 export type ServerJobStatus = (typeof SERVER_JOB_STATUSES)[number];
@@ -109,7 +114,23 @@ export type ServerJobContext = {
   signal: AbortSignal;
   reportProgress(progress: number, message?: string): Promise<void>;
   isCancellationRequested(): Promise<boolean>;
+  /**
+   * Serialize a protected durable or external effect with cancellation.
+   *
+   * The running job row is locked for the duration of the callback. A
+   * cancellation already committed wins and the callback is not entered; a
+   * cancellation racing after this boundary has acquired the lock waits until
+   * the protected effect has committed.
+   */
+  commit<T>(effect: () => Promise<T>): Promise<T>;
 };
+
+export class ServerJobCancellationError extends Error {
+  constructor() {
+    super("Job cancelled before protected commit");
+    this.name = "ServerJobCancellationError";
+  }
+}
 
 export class ServerJobWorker {
   constructor(readonly workerId = `in-process-${randomUUID()}`, readonly leaseMs = LEASE_MS) {}
@@ -170,7 +191,7 @@ export class ServerJobWorker {
     const controller = new AbortController();
     let heartbeatBusy = false;
     const heartbeat = setInterval(() => {
-      if (heartbeatBusy) return;
+      if (heartbeatBusy || commitActive) return;
       heartbeatBusy = true;
       void this.renewLease(claimed.job.id, claimed.leaseToken)
         .catch(() => controller.abort())
@@ -179,6 +200,7 @@ export class ServerJobWorker {
     // used by deterministic multi-worker tests.
     }, Math.max(25, Math.floor(this.leaseMs / 3)));
     heartbeat.unref();
+    let commitActive = false;
     let timedOut = false;
     try {
       const definition = getServerJobDefinition(claimed.job.type);
@@ -205,6 +227,12 @@ export class ServerJobWorker {
           if (!row || row.cancelRequested) controller.abort();
           return !row || row.cancelRequested;
         },
+        commit: <T>(effect: () => Promise<T>) =>
+          this.commit(claimed.job.id, claimed.leaseToken, effect, controller, this.leaseMs, () => {
+            commitActive = true;
+          }, () => {
+            commitActive = false;
+          }),
         }),
         deadline,
       ]).finally(() => { if (timeout) clearTimeout(timeout); });
@@ -219,10 +247,61 @@ export class ServerJobWorker {
       const retry = !cancelled && !timedOut && claimed.job.attempt < claimed.job.maxAttempts;
       await this.finish(claimed.job, claimed.leaseToken, cancelled ? "cancelled" : retry ? "queued" : "failed",
         undefined, timedOut ? "execution_timeout" : "handler_failed", safeMessage(error));
+      if (isTransientDatabaseConnectionError(error)) {
+        await recordBackgroundOperationFailure("server-job-run", error);
+      }
     } finally {
       clearInterval(heartbeat);
     }
     return true;
+  }
+
+  private async commit<T>(
+    id: string,
+    leaseToken: string,
+    effect: () => Promise<T>,
+    controller: AbortController,
+    leaseMs: number,
+    onStart: () => void,
+    onFinish: () => void,
+  ): Promise<T> {
+    let started = false;
+    try {
+      return await db.transaction(async (tx) => {
+        const row = (await tx.select().from(serverJobsTable).where(and(
+          eq(serverJobsTable.id, id),
+          eq(serverJobsTable.status, "running"),
+          eq(serverJobsTable.leaseToken, leaseToken),
+        )).for("update").limit(1))[0];
+        if (!row) throw new Error("Job lease is no longer owned");
+        if (row.cancelRequested) {
+          controller.abort();
+          throw new ServerJobCancellationError();
+        }
+        onStart();
+        started = true;
+        let heartbeatBusy = false;
+        const heartbeat = setInterval(() => {
+          if (heartbeatBusy) return;
+          heartbeatBusy = true;
+          void tx.update(serverJobsTable).set({
+            leaseExpiresAt: new Date(Date.now() + leaseMs),
+          }).where(and(
+            eq(serverJobsTable.id, id),
+            eq(serverJobsTable.status, "running"),
+            eq(serverJobsTable.leaseToken, leaseToken),
+          )).then(() => undefined).catch(() => controller.abort()).finally(() => { heartbeatBusy = false; });
+        }, Math.max(25, Math.floor(leaseMs / 3)));
+        heartbeat.unref();
+        try {
+          return await effect();
+        } finally {
+          clearInterval(heartbeat);
+        }
+      });
+    } finally {
+      if (started) onFinish();
+    }
   }
 
   private async owned(id: string, leaseToken: string): Promise<ServerJobRow | undefined> {
@@ -324,11 +403,12 @@ export function startServerJobWorkerLoop(options: ServerJobLoopOptions = {}): Se
     const now = Date.now();
     if (now - lastPruneAt >= pruneIntervalMs) {
       lastPruneAt = now;
-      void prune().catch((error) => options.onError?.(error, "prune"));
+      void runBackgroundOperation("server-job-prune", prune)
+        .catch((error) => options.onError?.(error, "prune"));
     }
     while (active < concurrency) {
       active++;
-      void worker.runOnce()
+      void runBackgroundOperation("server-job-run", () => worker.runOnce())
         .catch((error) => options.onError?.(error, "run"))
         .finally(() => { active--; });
     }

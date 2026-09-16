@@ -1847,15 +1847,21 @@ export function linkSpecImportNamedRecipesToExisting(
     autoLinkedRenames?: Array<{ importedName: string; existingName: string }>;
   },
 ): ParsedSpecImport {
+  // Workbook row labels sometimes leak into the recipe-name cell as
+  // "Applicator - <recipe>". Treat that label as presentation noise only at
+  // this deterministic dough/sauce link boundary; all other meaningful tokens
+  // continue through the existing conservative matcher unchanged.
+  const recipeNameMatchKey = (name: string): string =>
+    specImportNameMatchKey(stripApplicatorLabel(name));
   const match = buildNearDupNameMatcherDetailed(existingNames, {
-    keyOf: specImportNameMatchKey,
+    keyOf: recipeNameMatchKey,
   });
   const poolRowsByKey = new Map<
     string,
     ReadonlyArray<{ ingredient?: string | null }>
   >();
   for (const er of opts?.existingRecipes ?? []) {
-    const key = specImportNameMatchKey(er.name ?? "");
+    const key = recipeNameMatchKey(er.name ?? "");
     const rows = er.rows ?? [];
     const exactName = (er.name ?? "").trim().toLowerCase();
     if (exactName && !poolRowsByKey.has(exactName)) poolRowsByKey.set(exactName, rows);
@@ -1866,7 +1872,7 @@ export function linkSpecImportNamedRecipesToExisting(
   // import ("CRB recipe") and vice versa, so cleanup never breaks dedupe.
   const byCleanKey = new Map<string, string>();
   for (const ex of existingNames) {
-    const key = specImportNameMatchKey(cleanSpecNamedRecipeName(kind, ex));
+    const key = recipeNameMatchKey(cleanSpecNamedRecipeName(kind, ex));
     if (key && !byCleanKey.has(key)) byCleanKey.set(key, ex);
   }
   // EXACT matches only (loose key, or cleaned-key supplement): only these may
@@ -1876,7 +1882,7 @@ export function linkSpecImportNamedRecipesToExisting(
   const matchCleaned = (nm: string): string | null => {
     const direct = match(nm);
     if (direct?.layer === 1) return direct.name;
-    const key = specImportNameMatchKey(cleanSpecNamedRecipeName(kind, nm));
+    const key = recipeNameMatchKey(cleanSpecNamedRecipeName(kind, nm));
     return (key && byCleanKey.get(key)) || null;
   };
   const suggested = new Set<string>();
@@ -1911,7 +1917,7 @@ export function linkSpecImportNamedRecipesToExisting(
       const nearHit = match(name);
       const nearDupCand = nearHit && nearHit.layer > 1 ? nearHit.name : null;
       const formulaOk = (cand: string) =>
-        !specImportDoughFormulasConflict(r.rows, poolRowsByKey.get(specImportNameMatchKey(cand)));
+        !specImportDoughFormulasConflict(r.rows, poolRowsByKey.get(recipeNameMatchKey(cand)));
 
       if (nearDupCand && nearDupCand !== name) {
         if (formulaOk(nearDupCand) && opts?.autoApplyNearExact) {
@@ -1924,7 +1930,7 @@ export function linkSpecImportNamedRecipesToExisting(
           if (opts.autoLinkedRenames) {
             opts.autoLinkedRenames.push({ importedName: name, existingName: nearDupCand });
           }
-          const key = specImportNameMatchKey(name);
+          const key = recipeNameMatchKey(name);
           if (key) nearExactApplied.set(key, nearDupCand);
           if (kind === "dough" && !r.variantLabel) {
             return { ...r, name: nearDupCand, variantLabel: name };
@@ -1947,7 +1953,7 @@ export function linkSpecImportNamedRecipesToExisting(
       if (familyCand && familyCand !== name && formulaOk(familyCand)) {
         const familyRows =
           poolRowsByKey.get(familyCand.trim().toLowerCase()) ??
-          poolRowsByKey.get(specImportNameMatchKey(familyCand)) ??
+          poolRowsByKey.get(recipeNameMatchKey(familyCand)) ??
           [];
         const canAutoApplyCompatibleFamily =
           opts?.autoApplyCompatibleFamily &&
@@ -1991,7 +1997,7 @@ export function linkSpecImportNamedRecipesToExisting(
   const collapsedRenames = new Map<string, string>();
   if (kind === "dough") {
     const existingKeys = new Set(
-      existingNames.map((n) => specImportNameMatchKey(n ?? "")).filter(Boolean),
+      existingNames.map((n) => recipeNameMatchKey(n ?? "")).filter(Boolean),
     );
     const rowSig = (r: (typeof recipes)[number]): string | null => {
       const rows = r.rows ?? [];
@@ -2007,7 +2013,7 @@ export function linkSpecImportNamedRecipesToExisting(
     for (const r of recipes) {
       if (r.kind !== kind) continue;
       const name = (r.name ?? "").trim();
-      if (!name || !existingKeys.has(specImportNameMatchKey(name))) continue;
+      if (!name || !existingKeys.has(recipeNameMatchKey(name))) continue;
       const sig = rowSig(r);
       if (!sig) continue;
       const prior = targetBySig.get(sig);
@@ -2049,12 +2055,12 @@ export function linkSpecImportNamedRecipesToExisting(
       const r = recipes[i]!;
       if (r.kind !== kind) continue;
       const name = (r.name ?? "").trim();
-      if (!name || existingKeys.has(specImportNameMatchKey(name))) continue;
+      if (!name || existingKeys.has(recipeNameMatchKey(name))) continue;
       const sig = rowSig(r);
       const target = sig ? targetBySig.get(sig) : undefined;
       if (!target || target === name) continue;
       changed = true;
-      const key = specImportNameMatchKey(name);
+      const key = recipeNameMatchKey(name);
       if (key && !collapsedRenames.has(key)) collapsedRenames.set(key, target);
       recipes[i] = r.variantLabel
         ? { ...r, name: target }
@@ -2067,18 +2073,18 @@ export function linkSpecImportNamedRecipesToExisting(
   const importedKindKeys = new Set(
     recipes
       .filter((r) => r.kind === kind)
-      .map((r) => specImportNameMatchKey(r.name ?? ""))
+      .map((r) => recipeNameMatchKey(r.name ?? ""))
       .filter(Boolean),
   );
   const matchProfileName = (nm: string): string | null => {
     const full = matchCleaned(nm);
     if (full) return full;
-    const key = specImportNameMatchKey(nm);
+    const key = recipeNameMatchKey(nm);
     const nearApplied = key ? nearExactApplied.get(key) : undefined;
     if (nearApplied) return nearApplied;
-    const collapsed = collapsedRenames.get(key ?? specImportNameMatchKey(nm));
+    const collapsed = collapsedRenames.get(key);
     if (collapsed) return collapsed;
-    if (importedKindKeys.has(specImportNameMatchKey(nm))) return null;
+    if (importedKindKeys.has(recipeNameMatchKey(nm))) return null;
     // Parenthetical candidates snap on EXACT loose-key hits only — a
     // beyond-exact hit here would silently cross-link the profile.
     for (const cand of parentheticalNameCandidates(nm)) {

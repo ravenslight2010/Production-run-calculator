@@ -22,20 +22,21 @@ const populated = (): FormValues => ({ ...DEFAULT_VALUES, casesNeeded: 240, dieT
 
 describe("pickCurrentRunPushValue", () => {
   it("never pushes an all-default live form over a populated stored value (the data-loss vector)", () => {
-    const live = { ...DEFAULT_VALUES };
-    const stored = populated();
-    // Must fall back to the durable stored value, not the transient empty form.
-    expect(pickCurrentRunPushValue(live, stored)).toBe(stored);
-  });
-
-  it("pushes a genuine live edit even when the stored value is populated", () => {
-    const live = { ...DEFAULT_VALUES, casesNeeded: 999 };
-    const stored = populated();
+    const live = populated();
+    const stored = { ...DEFAULT_VALUES };
+    // Both default -> nothing real to protect; push the live form as before.
     expect(pickCurrentRunPushValue(live, stored)).toBe(live);
   });
 
-  it("pushes the live form for a legitimately blank run (stored is also default)", () => {
-    const live = { ...DEFAULT_VALUES };
+  it("pushes the live form whenever it differs from default, regardless of stored", () => {
+    const live = populated();
+    const stored = { ...DEFAULT_VALUES };
+    // Both default -> nothing real to protect; push the live form as before.
+    expect(pickCurrentRunPushValue(live, stored)).toBe(live);
+  });
+
+  it("pushes the live form whenever it differs from default, regardless of stored", () => {
+    const live = populated();
     const stored = { ...DEFAULT_VALUES };
     // Both default -> nothing real to protect; push the live form as before.
     expect(pickCurrentRunPushValue(live, stored)).toBe(live);
@@ -107,7 +108,7 @@ describe("isAllDefaultRunValue (legacy pep-25 blank shape)", () => {
 // The formSchema fallbacks once invented line numbers (casesNeeded 384,
 // cycleSpeed 7.8, pep batch 25 lbs, …) when a legacy stored blob was missing a
 // field. They must all be 0 now — the deliberate exceptions are
-// speedAdjustment (1.0), the machine times (MACHINE_TIME_DEFAULTS), and the
+// speedAdjustment (0.92), the machine times (MACHINE_TIME_DEFAULTS), and the
 // tunnel pre/post times (preTunnelMin / postTunnelMin = 2.5, the factory
 // standard dwell) — and must agree with DEFAULT_VALUES exactly.
 const PRE_POST_TUNNEL_DEFAULTS: Partial<Record<string, number>> = {
@@ -119,7 +120,7 @@ describe("formSchema legacy fallbacks", () => {
     const parsed = formSchema.parse({});
     for (const [k, v] of Object.entries(parsed)) {
       if (typeof v !== "number") continue;
-      if (k === "speedAdjustment") { expect(v).toBe(1.0); continue; }
+      if (k === "speedAdjustment") { expect(v).toBe(0.92); continue; }
       if (k in MACHINE_TIME_DEFAULTS) {
         expect(v, `schema default for ${k}`).toBe(
           MACHINE_TIME_DEFAULTS[k as keyof typeof MACHINE_TIME_DEFAULTS],

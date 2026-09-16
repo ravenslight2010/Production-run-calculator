@@ -1,7 +1,7 @@
 import { basename, dirname, resolve } from "node:path";
 import { readdirSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import ts from "typescript";
+import ts from "@workspace/typescript-api-v6";
 
 const SYNTAX_ERROR_HEADER =
   "Browser spec syntax validation failed before database setup:";

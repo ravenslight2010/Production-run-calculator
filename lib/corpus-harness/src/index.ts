@@ -13,6 +13,10 @@
 // AI-parsed layers are covered by the manual real-AI harnesses instead
 // (scripts: verify-large-spec-import / verify-corpus-spec-import).
 
+import { createHash } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { validateEvaluationManifest, type EvaluationManifest } from "@workspace/ai-evaluation";
 import { parseCheeseWorkbook } from "@workspace/cheese-import";
 import { parsePremixWorkbook } from "@workspace/premix-import";
 import { parseShippingGuide, shippingPatchFromRow } from "@workspace/shipping-import";
@@ -23,11 +27,33 @@ import {
   specImportCheeseRecipeIsMix,
 } from "@workspace/spec-import";
 import { buildNearDupNameMatcher } from "@workspace/name-match";
-import { corpusFiles, corpusFileKey, readGrids, type CorpusKind } from "./corpus.js";
+import { corpusFiles, corpusFileKey, corpusRoot, readGrids, type CorpusKind } from "./corpus.js";
 
 export * from "./corpus.js";
 
 const NO_MIXES: ReadonlySet<string> = new Set();
+
+function hashSourceDirectories(directories: string[]): string {
+  const hash = createHash("sha256");
+  const visit = (directory: string, base: string) => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const file = path.join(directory, entry.name);
+      if (entry.isDirectory()) visit(file, base);
+      else if (entry.isFile()) {
+        hash.update(path.relative(base, file));
+        hash.update("\0");
+        hash.update(fs.readFileSync(file));
+        hash.update("\0");
+      }
+    }
+  };
+  for (const directory of directories.sort()) {
+    hash.update(path.basename(path.dirname(directory)));
+    hash.update("\0");
+    visit(directory, path.dirname(directory));
+  }
+  return hash.digest("hex");
+}
 
 /** Cheese workbook → full deterministic parse (recipes, brands, per-sheet). */
 export function buildCheeseSnapshot() {
@@ -172,3 +198,95 @@ export const SNAPSHOT_BUILDERS = {
   routing: buildRoutingSnapshot,
 } as const;
 export type SnapshotName = keyof typeof SNAPSHOT_BUILDERS;
+
+export function buildCorpusEvaluationManifest(): EvaluationManifest {
+  const files = (["specs", "dough", "sauce", "cheese", "premix", "shipping", "schedule"] as CorpusKind[])
+    .flatMap((kind) => corpusFiles(kind).map((file) => ({ kind, file })))
+    .sort((a, b) => `${a.kind}/${corpusFileKey(a.file)}`.localeCompare(`${b.kind}/${corpusFileKey(b.file)}`));
+  const hash = createHash("sha256");
+  for (const { kind, file } of files) {
+    hash.update(kind);
+    hash.update("\0");
+    hash.update(corpusFileKey(file));
+    hash.update("\0");
+    hash.update(fs.readFileSync(path.join(corpusRoot(), kind, file)));
+    hash.update("\0");
+  }
+  const corpusSha256 = hash.digest("hex");
+  const grids = buildGridsSnapshot() as Record<
+    string,
+    { sanityIssue: string | null; droppedRows: number }[]
+  >;
+  const gridRows = Object.entries(grids).flatMap(([kind, rows]) =>
+    rows.map((row) => ({ kind, ...row })),
+  );
+  const sanityIssues = gridRows.filter((row) => row.sanityIssue !== null).length;
+  const droppedPromptRowsExcludingSchedule = gridRows
+    .filter((row) => row.kind !== "schedule")
+    .reduce((sum, row) => sum + row.droppedRows, 0);
+  const passed =
+    files.length >= 51
+    && sanityIssues === 0
+    && droppedPromptRowsExcludingSchedule === 0;
+  const repositoryRoot = path.dirname(path.dirname(corpusRoot()));
+  const evaluatorSha256 = hashSourceDirectories(
+    ["corpus-harness", "cheese-import", "premix-import", "shipping-import", "spec-import", "name-match"]
+      .map((name) => path.join(repositoryRoot, "lib", name, "src")),
+  );
+  const evidenceSha256 = createHash("sha256");
+  for (const [name, build] of Object.entries(SNAPSHOT_BUILDERS)) {
+    evidenceSha256.update(name);
+    evidenceSha256.update("\0");
+    evidenceSha256.update(JSON.stringify(build()));
+    evidenceSha256.update("\0");
+  }
+  const lockfileSha256 = createHash("sha256")
+    .update(fs.readFileSync(path.join(repositoryRoot, "pnpm-lock.yaml")))
+    .digest("hex");
+  return validateEvaluationManifest({
+    manifestVersion: 1,
+    evaluation: { id: "deterministic-import-corpus", kind: "deterministic" },
+    corpus: {
+      sha256: corpusSha256,
+      cases: files.length,
+      sourceAuthority: "retained-source-workbooks",
+    },
+    thresholds: {
+      minimumCorpusFiles: 51,
+      maximumDroppedPromptRowsExcludingSchedule: 0,
+      maximumGridSanityIssues: 0,
+    },
+    dependencies: {
+      node: process.versions.node,
+      pnpmLockSha256: lockfileSha256,
+      xlsx: "npm:@e965/xlsx@^0.20.3",
+      vitest: "^4.1.9",
+    },
+    provider: { identityState: "not-applicable", name: null, model: null },
+    performance: {
+      inputTokens: { state: "unavailable", reason: "deterministic evaluation does not use tokens" },
+      outputTokens: { state: "unavailable", reason: "deterministic evaluation does not use tokens" },
+      cost: { state: "measured", value: 0, unit: "USD" },
+      latencyP95: { state: "unavailable", reason: "corpus snapshot test does not retain timing evidence" },
+    },
+    execution: { retries: 0, seed: null },
+    privacy: {
+      mode: "metadata-only",
+      rawProviderPayloadsRetained: false,
+      retainedEvaluationContent: "none",
+    },
+    outcome: {
+      state: passed ? "passed" : "failed",
+      reason: passed ? null : "one or more deterministic corpus thresholds failed",
+    },
+    provenance: {
+      sourceSha256: corpusSha256,
+      evidence: { state: "hashed", sha256: evidenceSha256.digest("hex") },
+      evidenceType: "source-workbook-byte-hash",
+      evaluator: {
+        state: "hashed",
+        sha256: evaluatorSha256,
+      },
+    },
+  });
+}

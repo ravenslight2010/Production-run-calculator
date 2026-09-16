@@ -19,4 +19,20 @@ misrepresent a NO-GO as a GO.
 production status, keep local release evidence bound to its matching database
 and environment, and leave retained reports untouched when a development
 source gate fails. Record the exact remaining NO-GO counts instead of resetting
-markers, copying production data, or fabricating evidence.
+markers, copying production data, or fabricating evidence. Fresh disposable CI
+should run focused verifier fixtures and remain explicitly NO-GO; it must not
+query its empty database as a substitute for authoritative production history.
+
+A bounded identity preflight may run before the full verifier to distinguish a
+matching database shape from a partial fixture and prevent expensive release
+gates from starting. It should inspect only live recipe IDs, alias identities,
+and marker shape inside a read-only transaction; the full payload/reference
+verification remains authoritative and must still be fail-closed.
+
+**Why:** Mixed workspace databases can fail the real reconciliation check only
+after release-test and browser stages have already consumed substantial time.
+
+**How to apply:** Make production reconciliation and downstream expensive
+stages explicitly depend on the preflight, but keep disposable CI on its
+focused fixture verifier and do not retain preflight output as production
+evidence.

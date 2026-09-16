@@ -1,0 +1,20 @@
+{
+  "skill_name": "documentation-claim-review",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Check our README claim that the app automatically resets every device at midnight. The implementation has a client timer, but I have no sleeping-device evidence.",
+      "expected_output": "Splits the claim into atomic scope, reports partial verification rather than verified, and identifies sleeping-device or wake-reconciliation evidence as missing."
+    },
+    {
+      "id": 2,
+      "prompt": "The release notes say all production browser tests passed. Verify that from this development screenshot.",
+      "expected_output": "Rejects development screenshot evidence as production and full-suite proof, labels the claim unsupported or needs-human, and requests revision-bound release evidence."
+    },
+    {
+      "id": 3,
+      "prompt": "Fact-check this setup guide and fix every unsupported sentence.",
+      "expected_output": "Performs the factual assessment first, does not silently rewrite claims, and requires or recognizes separate editing authorization before routing wording changes through writing-quality-editor."
+    }
+  ]
+}

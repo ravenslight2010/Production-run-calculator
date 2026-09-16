@@ -13,6 +13,7 @@ department_navigation_workflow="$workflow_dir/department-navigation.yml"
 release_concurrency_calibration_workflow="$workflow_dir/release-concurrency-calibration.yml"
 stable_branch_protection_workflow="$workflow_dir/stable-branch-protection.yml"
 workflow_lint_workflow="$workflow_dir/workflow-lint.yml"
+promotion_workflow="$workflow_dir/promote-production.yml"
 
 mapfile -t workflow_files < <(
   find "$workflow_dir" -type f \( -name '*.yml' -o -name '*.yaml' \) -print | sort
@@ -119,6 +120,134 @@ EOF
   exit 1
 fi
 
+check_workflow_security_contract() {
+  local workflow_path="$1"
+  local failures=0
+  local workflow_label
+  workflow_label="${workflow_path#"$workspace_root"/}"
+
+  if ! grep -Eq '^permissions:[[:space:]]*$' "$workflow_path"; then
+    echo "${workflow_label}: every workflow must declare a top-level permissions block." >&2
+    failures=$((failures + 1))
+  elif ! awk '
+      $0 == "permissions:" { in_permissions = 1; next }
+      in_permissions && $0 ~ /^[^[:space:]]/ { exit }
+      in_permissions && $0 == "  contents: read" { found_contents = 1 }
+      END { exit(found_contents ? 0 : 1) }
+    ' "$workflow_path"; then
+    echo "${workflow_label}: top-level permissions must explicitly grant contents: read." >&2
+    failures=$((failures + 1))
+  fi
+
+  if grep -Eq '^permissions:[[:space:]]+(read-all|write-all)([[:space:]]|$)' \
+    "$workflow_path"; then
+    echo "${workflow_label}: top-level read-all/write-all permissions are not allowed." >&2
+    failures=$((failures + 1))
+  fi
+
+  if ! grep -Eq '^concurrency:[[:space:]]*$' "$workflow_path"; then
+    echo "${workflow_label}: every workflow must declare top-level concurrency." >&2
+    failures=$((failures + 1))
+  else
+    if ! grep -Eq '^  group:[[:space:]]+[^[:space:]]' "$workflow_path"; then
+      echo "${workflow_label}: concurrency must declare a non-empty group." >&2
+      failures=$((failures + 1))
+    fi
+    if ! grep -Eq '^  cancel-in-progress:[[:space:]]+(true|false)[[:space:]]*(#.*)?$' \
+      "$workflow_path"; then
+      echo "${workflow_label}: concurrency must explicitly set cancel-in-progress to true or false." >&2
+      failures=$((failures + 1))
+    fi
+  fi
+
+  while IFS= read -r line; do
+    local line_number="${line%%:*}"
+    local permission="${line#*:}"
+    permission="${permission#"${permission%%[![:space:]]*}"}"
+    if [[ "$permission" =~ ^[A-Za-z0-9_-]+:[[:space:]]+write([[:space:]]|$) ]]; then
+      local start_line=$((line_number - 3))
+      if (( start_line < 1 )); then
+        start_line=1
+      fi
+      if ! sed -n "${start_line},${line_number}p" "$workflow_path" |
+        grep -Fq 'workflow-contract: write-exception'; then
+        echo "${workflow_label}:${line_number}: write permissions require a nearby workflow-contract: write-exception comment." >&2
+        failures=$((failures + 1))
+      fi
+    fi
+  done < <(grep -nE '^[[:space:]]+[A-Za-z0-9_-]+:[[:space:]]+write([[:space:]]|$)' \
+    "$workflow_path" || true)
+
+  while IFS= read -r line; do
+    local line_number="${line%%:*}"
+    local line_text="${line#*:}"
+    local run_id_expression="\${{ github.run_id }}"
+    if [[ "$line_text" =~ ^[[:space:]]+(cache|cache-from|cache-to): ]]; then
+      if [[ "$line_text" != *"$run_id_expression"* ]]; then
+        echo "${workflow_label}:${line_number}: cache scopes must include github.run_id for isolation." >&2
+        failures=$((failures + 1))
+      fi
+    fi
+  done < <(grep -nE '^[[:space:]]+(cache|cache-from|cache-to):' "$workflow_path" || true)
+
+  local artifact_failures
+  artifact_failures="$(
+    awk '
+      function finish_artifact() {
+        if (artifact_step && (artifact_name == "" || artifact_name !~ /\$\{\{ github\.run_id \}\}/)) {
+          print artifact_line ": artifact names must include ${{ github.run_id }} for run isolation."
+          failures++
+        }
+        artifact_step = 0
+        artifact_name = ""
+      }
+
+      /^[[:space:]]+-[[:space:]]+uses:[[:space:]]+actions\/(upload|download)-artifact@/ {
+        finish_artifact()
+        artifact_step = 1
+        artifact_line = NR
+        next
+      }
+
+      artifact_step && /^[[:space:]]+-[[:space:]]+/ {
+        finish_artifact()
+      }
+
+      artifact_step && /^[[:space:]]+name:[[:space:]]*/ {
+        artifact_name = $0
+        sub(/^[[:space:]]+name:[[:space:]]*/, "", artifact_name)
+        sub(/[[:space:]]+#.*/, "", artifact_name)
+      }
+
+      END {
+        finish_artifact()
+        exit(failures ? 1 : 0)
+      }
+    ' "$workflow_path"
+  )" || {
+    while IFS= read -r artifact_failure; do
+      [[ -n "$artifact_failure" ]] || continue
+      echo "${workflow_label}:${artifact_failure}" >&2
+    done <<<"$artifact_failures"
+    failures=$((failures + 1))
+  }
+
+  return "$((failures > 0))"
+}
+
+security_contract_failures=0
+for workflow_file in "${workflow_files[@]}"; do
+  check_workflow_security_contract "$workflow_file" || security_contract_failures=1
+done
+if (( security_contract_failures > 0 )); then
+  cat >&2 <<'EOF'
+Workflow security contract failed. Every workflow needs least-privilege
+permissions, explicit concurrency, run-scoped cache/artifact names, and a
+nearby documented exception for every write capability.
+EOF
+  exit 1
+fi
+
 check_workflow_timeouts() {
   local workflow_label="$1"
   local workflow_path="$2"
@@ -206,6 +335,70 @@ check_workflow_timeouts \
   "Release concurrency calibration" "$release_concurrency_calibration_workflow"
 check_workflow_timeouts "Stable branch protection" "$stable_branch_protection_workflow"
 check_workflow_timeouts "Workflow lint" "$workflow_lint_workflow"
+check_workflow_timeouts "Production promotion" "$promotion_workflow"
+
+check_immutable_workflow_dependencies() {
+  local workflow_path="$1"
+  local failures=0
+  local line_number
+  local line
+  local reference
+
+  while IFS= read -r line; do
+    line_number="${line%%:*}"
+    line="${line#*:}"
+    reference="${line#*uses:}"
+    reference="${reference#"${reference%%[![:space:]]*}"}"
+    if [[ "$reference" =~ ^\./ ]]; then
+      continue
+    fi
+    if [[ ! "$reference" =~ ^[^@[:space:]]+@[0-9a-fA-F]{40}[[:space:]]+#.+$ ]]; then
+      echo "${workflow_path}:${line_number}: third-party actions must use a 40-character immutable SHA and a version comment." >&2
+      failures=$((failures + 1))
+    fi
+  done < <(grep -nE '^[[:space:]]+-[[:space:]]+uses:[[:space:]]+' "$workflow_path" || true)
+
+  if (( failures > 0 )); then
+    return 1
+  fi
+}
+
+check_digest_pinned_service_images() {
+  local workflow_path="$1"
+  local failures=0
+  local line_number
+  local line
+  local image
+
+  while IFS= read -r line; do
+    line_number="${line%%:*}"
+    line="${line#*:}"
+    image="${line#*image:}"
+    image="${image#"${image%%[![:space:]]*}"}"
+    if [[ ! "$image" =~ ^[^[:space:]@]+@sha256:[0-9a-fA-F]{64}[[:space:]]*$ ]]; then
+      echo "${workflow_path}:${line_number}: service images must use an immutable sha256 digest." >&2
+      failures=$((failures + 1))
+    fi
+  done < <(grep -nE '^[[:space:]]+image:[[:space:]]+' "$workflow_path" || true)
+
+  if (( failures > 0 )); then
+    return 1
+  fi
+}
+
+dependency_failures=0
+for workflow_file in "${workflow_files[@]}"; do
+  check_immutable_workflow_dependencies "$workflow_file" || dependency_failures=1
+  check_digest_pinned_service_images "$workflow_file" || dependency_failures=1
+done
+if (( dependency_failures > 0 )); then
+  cat >&2 <<'EOF'
+Workflow dependency pinning failed. Pin every third-party action to its full
+commit SHA with a human-readable release comment, and pin service images by
+sha256 manifest digest.
+EOF
+  exit 1
+fi
 
 if [[ -n "${ACTIONLINT_BIN:-}" ]]; then
   actionlint_bin="$ACTIONLINT_BIN"

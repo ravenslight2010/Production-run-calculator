@@ -16,6 +16,9 @@ The post-merge script runs `pnpm install --frozen-lockfile` then a Drizzle schem
 - When the root requires a newer pnpm than Replit's system binary, the post-merge hook must install Corepack's shim in the workspace-local bin directory and run install with `CI=true`.
   - **Why:** direct pnpm recursively ran `pnpm add pnpm@...` until process limits were exhausted. Corepack avoided recursion, but pnpm 11 still refused to replace a pnpm-10 modules directory without an explicit non-interactive environment.
   - **How to apply:** run `corepack enable --install-directory "$PWD/.config/npm/node_global/bin" pnpm`, then `CI=true pnpm install --frozen-lockfile`. Replit puts that directory before system pnpm, so reconciled workflows and nested scripts also stay pinned. Do not weaken the repository's required version.
+- If frozen install reports a missing peer-resolution entry, regenerate the lockfile with the pinned pnpm using `CI=true pnpm install --no-frozen-lockfile`, then prove `CI=true pnpm install --frozen-lockfile` succeeds before rerunning the hook.
+  - **Why:** a merged workspace can retain a stale importer variant even when declared dependencies and package resolution are otherwise current; the post-merge hook should remain strict rather than silently repairing the lockfile.
+  - **How to apply:** confirm the diff is limited to the expected lockfile resolution, run the frozen install, and only then retry post-merge setup.
 
 ## The `promptColumnsConflicts` stderr is a REAL failure, not noise
 

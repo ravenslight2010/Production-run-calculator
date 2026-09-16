@@ -1,6 +1,10 @@
 {
   "benchmarkVersion": 1,
   "sourceHash": "1d8a2a3ddda96c32959e43fdcd901f3a14308bf12bc4d65ef4e2e3ce12505294",
+  "retention": {
+    "dataClass": "synthetic-and-aggregate-metrics-only",
+    "sanitization": "allowlisted-metrics; raw prompts and source/provider payloads excluded"
+  },
   "acceptanceCriteria": {
     "minimumUniqueMaterialCatchRate": 0.2,
     "maximumFalseWarningRate": 0.05,
@@ -72,8 +76,7 @@
         "noOpVerdicts": 76,
         "latencyMs": 20732,
         "inputTokens": null,
-        "outputTokens": null,
-        "failureClass": "SyntaxError"
+        "outputTokens": null
       },
       "match-import": {
         "cases": 22,
@@ -87,8 +90,7 @@
         "noOpVerdicts": 22,
         "latencyMs": 14851,
         "inputTokens": null,
-        "outputTokens": null,
-        "failureClass": "SyntaxError"
+        "outputTokens": null
       },
       "match-premix": {
         "cases": 78,
@@ -102,8 +104,7 @@
         "noOpVerdicts": 78,
         "latencyMs": 24169,
         "inputTokens": null,
-        "outputTokens": null,
-        "failureClass": "SyntaxError"
+        "outputTokens": null
       },
       "suggest-merges": {
         "cases": 3,
@@ -131,8 +132,7 @@
         "noOpVerdicts": 125,
         "latencyMs": 18479,
         "inputTokens": null,
-        "outputTokens": null,
-        "failureClass": "SyntaxError"
+        "outputTokens": null
       }
     },
     "measuredTokens": false,
@@ -158,5 +158,80 @@
     },
     "reason": "No uniquely caught material errors exist in the labeled retained corpus.",
     "authority": "Deterministic sanitizers, canonicalization, source evidence, and explicit human confirmation remain authoritative."
+  },
+  "evaluationManifest": {
+    "manifestVersion": 1,
+    "evaluation": {
+      "id": "second-pass-reviewer",
+      "kind": "provider-backed"
+    },
+    "corpus": {
+      "sha256": "1d8a2a3ddda96c32959e43fdcd901f3a14308bf12bc4d65ef4e2e3ce12505294",
+      "cases": 304,
+      "sourceAuthority": "deterministic-reconciliation-and-human-review"
+    },
+    "thresholds": {
+      "minimumUniqueMaterialCatchRate": 0.2,
+      "maximumFalseWarningRate": 0.05,
+      "maximumAddedCostRatio": 0.35,
+      "maximumAddedLatencyP95Ms": 1500,
+      "maximumReviewerFailureRate": 0.05,
+      "minimumUniqueMaterialCatches": 5
+    },
+    "dependencies": {
+      "node": "24.13.0",
+      "pnpmLockSha256": "ec8eb4e16273f68a4e72e3cbc20b13c868f1c3a1b270197d6ca803b76abaaf14",
+      "benchmarkReporter": "1",
+      "benchmarkReporterSha256": "b9810c0b72d4dbbd2155f2ba552da6218d630c82ce63fa609835c6811155ec39"
+    },
+    "provider": {
+      "identityState": "identified",
+      "name": "gemini",
+      "model": "gemini-2.5-flash"
+    },
+    "performance": {
+      "inputTokens": {
+        "state": "unavailable",
+        "reason": "provider observations did not retain complete input token counts"
+      },
+      "outputTokens": {
+        "state": "unavailable",
+        "reason": "provider observations did not retain complete output token counts"
+      },
+      "cost": {
+        "state": "unavailable",
+        "reason": "provider observations did not retain measured cost"
+      },
+      "latencyP95": {
+        "state": "measured",
+        "value": 24169,
+        "unit": "ms"
+      }
+    },
+    "execution": {
+      "retries": 0,
+      "seed": null
+    },
+    "privacy": {
+      "mode": "metadata-only",
+      "rawProviderPayloadsRetained": false,
+      "retainedEvaluationContent": "none"
+    },
+    "outcome": {
+      "state": "failed",
+      "reason": "No uniquely caught material errors exist in the labeled retained corpus."
+    },
+    "provenance": {
+      "sourceSha256": "1d8a2a3ddda96c32959e43fdcd901f3a14308bf12bc4d65ef4e2e3ce12505294",
+      "evidence": {
+        "state": "hashed",
+        "sha256": "0e3145c637fa4c0bb561057bdb774d7053f1058da3c10a23417a971316e0ceb8"
+      },
+      "evidenceType": "deterministic-reconciliation-with-provider-observations",
+      "evaluator": {
+        "state": "unavailable",
+        "reason": "retained historical observations predate evaluator source binding"
+      }
+    }
   }
 }

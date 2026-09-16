@@ -1345,6 +1345,33 @@ test.describe("phone layout smoke", () => {
       await scheduleDialog.getByRole("button", { name: "Schedule New Day" }).click();
       await expect(scheduleDialog.getByRole("heading", { name: /Plan for/ })).toBeVisible();
       await expect(scheduleDialog.getByRole("button", { name: "Save Schedule" })).toBeVisible();
+      const scheduleDateTrigger = scheduleDialog.getByTestId("schedule-date-trigger");
+      const initialScheduleDate = await scheduleDateTrigger.getAttribute("data-date-value");
+      expect(initialScheduleDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      await scheduleDateTrigger.click();
+      const scheduleCalendar = page.locator('[data-slot="calendar"]');
+      await expect(scheduleCalendar.getByRole("grid")).toBeVisible();
+      await expect(scheduleCalendar.locator("button[data-day][disabled]").first()).toBeDisabled();
+      await assertOverlayActionHitTargets(
+        scheduleCalendar,
+        `Schedule calendar at ${viewport.width}x${viewport.height}`,
+      );
+      const selectedScheduleDay = scheduleCalendar.locator(
+        'button[data-selected-single="true"]',
+      );
+      await expect(selectedScheduleDay).toBeVisible();
+      await selectedScheduleDay.focus();
+      await page.keyboard.press("ArrowRight");
+      await page.keyboard.press("Enter");
+      await expect(scheduleCalendar).toBeHidden();
+      await expect(scheduleDateTrigger).not.toHaveAttribute(
+        "data-date-value",
+        initialScheduleDate ?? "",
+      );
+      await expect(scheduleDateTrigger).toHaveAttribute(
+        "data-date-value",
+        /^\d{4}-\d{2}-\d{2}$/,
+      );
       await assertReachableDialogAction(
         scheduleDialog.getByRole("button", { name: "Cancel", exact: true }),
         `Schedule editor Cancel at ${viewport.width}x${viewport.height}`,

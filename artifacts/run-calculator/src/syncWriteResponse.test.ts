@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { consumeSyncWriteResponse, isUnchangedSyncResponse } from "./syncWriteResponse";
+import {
+  consumeSyncWriteResponse,
+  isCanonicalRecoverySyncPayload,
+  isUnchangedSyncResponse,
+  readCurrentRecoveryJson,
+  syncPayloadMatchesSnapshot,
+  syncPayloadSnapshotId,
+} from "./syncWriteResponse";
 
 describe("consumeSyncWriteResponse", () => {
   it("immediately self-applies the server canonical payload on a successful write", async () => {
@@ -62,8 +69,107 @@ describe("consumeSyncWriteResponse", () => {
 
   it("does not treat malformed unchanged responses as a successful snapshot", () => {
     expect(isUnchangedSyncResponse({ unchanged: true })).toBe(false);
-    expect(isUnchangedSyncResponse({ unchanged: true, snapshotId: "not-a-hash" })).toBe(true);
+    expect(isUnchangedSyncResponse({ unchanged: true, snapshotId: "not-a-hash" })).toBe(false);
+    expect(isUnchangedSyncResponse({ unchanged: true, snapshotId: "a".repeat(64) })).toBe(true);
+    expect(isUnchangedSyncResponse({
+      unchanged: true,
+      snapshotId: "a".repeat(64),
+      data: { unexpected: true },
+    })).toBe(false);
     expect(isUnchangedSyncResponse(null)).toBe(false);
+  });
+
+  it("accepts only complete, date-matched canonical recovery payloads", () => {
+    const canonical = {
+      syncVersion: 1,
+      completeness: "complete",
+      dayState: {
+        date: "2026-09-15",
+        runs: [{ id: "run-1", brand: "Brand", flavor: "Flavor" }],
+      },
+      runValues: { "run-1": { casesNeeded: 31 } },
+    };
+    expect(isCanonicalRecoverySyncPayload(canonical, "2026-09-15", "complete")).toBe(true);
+    expect(isCanonicalRecoverySyncPayload(
+      { ...canonical, completeness: "partial" },
+      "2026-09-15",
+      "complete",
+    )).toBe(false);
+    expect(isCanonicalRecoverySyncPayload(
+      { ...canonical, dayState: { ...canonical.dayState, date: "2026-09-14" } },
+      "2026-09-15",
+      "complete",
+    )).toBe(false);
+    expect(isCanonicalRecoverySyncPayload(
+      { ...canonical, dayState: { ...canonical.dayState, runs: [{ id: "run-1" }] } },
+      "2026-09-15",
+      "complete",
+    )).toBe(false);
+    expect(isCanonicalRecoverySyncPayload(
+      { ...canonical, runValues: {} },
+      "2026-09-15",
+      "complete",
+    )).toBe(false);
+    expect(isCanonicalRecoverySyncPayload(
+      { dayState: { date: "2026-09-15", runs: [] }, runValues: [] },
+      "2026-09-15",
+      "complete",
+    )).toBe(false);
+    expect(isCanonicalRecoverySyncPayload(canonical, "2026-09-15", undefined)).toBe(false);
+    expect(isCanonicalRecoverySyncPayload(
+      {
+        ...canonical,
+        dayState: {
+          ...canonical.dayState,
+          runs: [
+            canonical.dayState.runs[0],
+            canonical.dayState.runs[0],
+          ],
+        },
+      },
+      "2026-09-15",
+      "complete",
+    )).toBe(false);
+    expect(isCanonicalRecoverySyncPayload(
+      { ...canonical, runValues: { ...canonical.runValues, orphan: {} } },
+      "2026-09-15",
+      "complete",
+    )).toBe(false);
+  });
+
+  it("marks a delayed recovery body obsolete when its owner is superseded during parsing", async () => {
+    let release!: () => void;
+    let current = true;
+    const response = {
+      json: () => new Promise((resolve) => {
+        release = () => resolve({ epoch: 7 });
+      }),
+    } as Response;
+
+    const reading = readCurrentRecoveryJson(response, () => current);
+    current = false;
+    release();
+
+    await expect(reading).resolves.toEqual({
+      current: false,
+      body: { epoch: 7 },
+    });
+  });
+
+  it("verifies a canonical snapshot digest against object-key-independent payload content", async () => {
+    const payload = {
+      dayState: {
+        date: "2026-09-15",
+        runs: [{ id: "run-1", brand: "Brand", flavor: "Flavor" }],
+      },
+      runValues: { "run-1": { casesNeeded: 31 } },
+    } as any;
+    const snapshot = await syncPayloadSnapshotId(payload);
+    expect(await syncPayloadMatchesSnapshot(payload, snapshot)).toBe(true);
+    expect(await syncPayloadMatchesSnapshot({
+      ...payload,
+      runValues: { "run-1": { casesNeeded: 30 } },
+    }, snapshot)).toBe(false);
   });
 
   it("does not apply data from an unsuccessful response", async () => {

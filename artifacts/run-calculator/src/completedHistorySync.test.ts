@@ -6,10 +6,16 @@ import {
   flushCompletedHistoryOutbox,
   loadCompletedHistoryForActiveScope,
   mergeCanonicalCompletedHistory,
+  flushApplicatorEvidenceOutbox,
+  loadApplicatorBatchEvidenceForActiveScope,
+  pendingApplicatorBatchFinalizations,
   pendingCompletedHistoryCount,
+  queueApplicatorBatchFinalization,
+  reconcileApplicatorBatchEvidence,
   queueCompletedRun,
   setCompletedHistoryScope,
   startRunAndQueueCompetingCompletions,
+  unresolvedApplicatorEvidenceConflicts,
 } from "./completedHistorySync";
 
 const run = (id: string, endedAt = 2): RunMeta => ({
@@ -133,5 +139,110 @@ describe("canonical completed history", () => {
     expect(merged[0].runs.find((candidate) => candidate.id === "run-1")?.notes).toBe("server canonical");
     expect(merged[0].runValues["run-1"].casesNeeded).toBe(25);
     expect(merged[0].runs.some((candidate) => candidate.id === "pending")).toBe(true);
+  });
+});
+
+describe("applicator evidence reconciliation", () => {
+  it("keeps latest automatic progress, prefers latest confirmed correction, and exposes provenance", () => {
+    const result = reconcileApplicatorBatchEvidence([
+      {
+        operationId: "auto-1", date: "2026-09-06", runId: "run-1", slot: 1,
+        source: "automatic-observation", observedTotal: 3, evidenceHash: "a", createdAt: "2026-09-06T10:00:00.000Z",
+      },
+      {
+        operationId: "auto-2", date: "2026-09-06", runId: "run-1", slot: 1,
+        source: "automatic-observation", observedTotal: 4, evidenceHash: "b", createdAt: "2026-09-06T11:00:00.000Z",
+      },
+      {
+        operationId: "final-1", date: "2026-09-06", runId: "run-1", slot: 1,
+        source: "manager-finalization", confirmedTotal: 5, evidenceHash: "c", createdAt: "2026-09-06T11:30:00.000Z",
+      },
+      {
+        operationId: "correction-1", date: "2026-09-06", runId: "run-1", slot: 1,
+        source: "manager-correction", confirmedTotal: 6, evidenceHash: "d", createdAt: "2026-09-06T12:00:00.000Z",
+      },
+    ]);
+    expect(result).toEqual([{
+      date: "2026-09-06", runId: "run-1", slot: 1,
+      latestObservedTotal: 4, latestConfirmedTotal: 6, effectiveTotal: 6,
+      provenance: "manager-confirmed", observedEvidenceHash: "b", confirmedEvidenceHash: "d",
+      latestObservedOperationId: "auto-2", latestConfirmedOperationId: "correction-1",
+    }]);
+  });
+
+  it("reports automatic progress as effective until a manager confirms it", () => {
+    expect(reconcileApplicatorBatchEvidence([{
+      operationId: "auto-1", date: "2026-09-06", runId: "run-1", slot: 2,
+      source: "automatic-observation", observedTotal: 2, createdAt: "2026-09-06T10:00:00.000Z",
+    }])).toEqual([{
+      date: "2026-09-06", runId: "run-1", slot: 2,
+      latestObservedTotal: 2, effectiveTotal: 2, provenance: "automatic-observed",
+      latestObservedOperationId: "auto-1",
+    }]);
+  });
+
+  it("retires a canonical 409 conflict and continues with later evidence", async () => {
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        error: "stale correction",
+        canonical: { operationId: "canonical", date: "2026-09-06", runId: "run-1", slot: 1, source: "manager-finalization", confirmedTotal: 3 },
+      }), { status: 409 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ acknowledged: true }), { status: 201 })));
+    setCompletedHistoryScope("live");
+    queueApplicatorBatchFinalization({ operationId: "final-conflict", date: "2026-09-06", runId: "run-1", slot: 1, finalTotal: 4 });
+    queueApplicatorBatchFinalization({ operationId: "final-next", date: "2026-09-06", runId: "run-2", slot: 1, finalTotal: 5 });
+    await flushApplicatorEvidenceOutbox();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(pendingApplicatorBatchFinalizations()).toEqual([]);
+    expect(unresolvedApplicatorEvidenceConflicts()[0]).toMatchObject({
+      operationId: "final-conflict", canonical: { confirmedTotal: 3 },
+    });
+  });
+
+  it("preserves transient evidence submissions for bounded retry", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(new Response("unavailable", { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ acknowledged: true }), { status: 201 })));
+    setCompletedHistoryScope("live");
+    queueApplicatorBatchFinalization({ operationId: "retry-final", date: "2026-09-06", runId: "run-3", slot: 2, finalTotal: 2 });
+    await flushApplicatorEvidenceOutbox();
+    expect(pendingApplicatorBatchFinalizations()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(pendingApplicatorBatchFinalizations()).toEqual([]);
+    vi.useRealTimers();
+  });
+
+  it("merges a 201 canonical row before removing the outbox, enabling correction semantics", async () => {
+    const canonical = {
+      id: "server-evidence-1", operationId: "initial-final", date: "2026-09-06",
+      runId: "run-confirmed", slot: 1 as const, source: "manager-finalization" as const,
+      confirmedTotal: 7, evidenceHash: "a".repeat(64), hashContract: "canonical-json-v1" as const,
+      createdAt: "2026-09-06T12:00:00.000Z",
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        acknowledged: true, duplicate: false, operationId: canonical.operationId,
+        evidenceHash: canonical.evidenceHash, canonical,
+      }), { status: 201 }),
+    ));
+    setCompletedHistoryScope("live");
+    queueApplicatorBatchFinalization({
+      operationId: canonical.operationId, date: canonical.date, runId: canonical.runId, slot: 1, finalTotal: 7,
+    });
+    await flushApplicatorEvidenceOutbox();
+    expect(pendingApplicatorBatchFinalizations()).toEqual([]);
+    const reconciled = reconcileApplicatorBatchEvidence(loadApplicatorBatchEvidenceForActiveScope());
+    expect(reconciled).toEqual([expect.objectContaining({
+      runId: "run-confirmed", latestConfirmedTotal: 7, latestConfirmedOperationId: "initial-final",
+      provenance: "manager-confirmed",
+    })]);
+    queueApplicatorBatchFinalization({
+      operationId: "correction-final", date: canonical.date, runId: canonical.runId, slot: 1,
+      finalTotal: 8, correctionOf: reconciled[0]!.latestConfirmedOperationId,
+    });
+    expect(pendingApplicatorBatchFinalizations()).toEqual([expect.objectContaining({
+      operationId: "correction-final", correctionOf: "initial-final",
+    })]);
   });
 });

@@ -14,6 +14,7 @@ import {
   buildShippingSnapshot,
   buildGridsSnapshot,
   buildRoutingSnapshot,
+  buildCorpusEvaluationManifest,
   corpusFiles,
   readGrids,
 } from "./index.js";
@@ -37,6 +38,16 @@ describe("corpus snapshots (deterministic importers)", () => {
       expect(actual).toEqual(loadSnapshot(name));
     });
   }
+});
+
+describe("corpus evaluation manifest", () => {
+  it("binds deterministic evidence to the retained source corpus", () => {
+    const actual = buildCorpusEvaluationManifest();
+    expect(actual).toEqual(loadSnapshot("evaluation-manifest" as SnapshotName));
+    expect(actual.evaluation.kind).toBe("deterministic");
+    expect(actual.provider).toEqual({ identityState: "not-applicable", name: null, model: null });
+    expect(actual.privacy.rawProviderPayloadsRetained).toBe(false);
+  });
 });
 
 describe("corpus invariants (parse-gap tripwires)", () => {

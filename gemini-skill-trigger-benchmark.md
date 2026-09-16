@@ -25,17 +25,19 @@ repository Actions secrets, then invokes:
 
 ```sh
 python scripts/gemini_skill_trigger_benchmark.py \
-  --fail-on-provider-error \
+  --live-provider \
   --results gemini-live-results.json \
   --report gemini-live-report.md \
   --queue gemini-live-review-queue.json
 ```
 
-The strict flag is intentionally opt-in: the normal benchmark and
-`test:gemini` remain offline-safe. In the scheduled check, missing credentials,
-request failures, and invalid structured output fail the job after all three
-artifacts have been written. The workflow retains those artifacts for 14 days,
-including failed runs, so provider incidents can be reviewed.
+The live-provider flag is intentionally opt-in and the generated result labels
+the run as non-CI evidence. Without that flag, the benchmark exits before
+reading provider configuration or writing result artifacts; `test:gemini`
+remains offline-safe. In the scheduled check, missing credentials, request
+failures, and invalid structured output fail the job after all three artifacts
+have been written. The workflow retains those artifacts for 14 days, including
+failed runs, so provider incidents can be reviewed.
 
 Repeated live failures notify the existing Slack operational channel. The
 workflow checks the Gemini benchmark job in recent runs (rather than the

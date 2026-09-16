@@ -5,6 +5,7 @@ import {
   getProfileCacheGeneration,
   profileCacheGenerationIsCurrent,
   readCachedProfileBlobs,
+  replaceCachedProfiles,
   resetProfileCacheForTests,
   setProfileCacheIdentity,
   subscribeProfileCache,
@@ -42,6 +43,26 @@ describe("profile cache identity", () => {
 
     expect(profileCacheGenerationIsCurrent(oldGeneration)).toBe(false);
     expect(profileCacheGenerationIsCurrent(getProfileCacheGeneration())).toBe(true);
+  });
+
+  it("rejects a stale server snapshot instead of repopulating the active identity", () => {
+    setProfileCacheIdentity({ userId: "manager-a", scope: "live" });
+    writeCachedProfileBlobs(KEY, { dough: '{"lineSpeed":10}' });
+    const oldGeneration = getProfileCacheGeneration();
+
+    setProfileCacheIdentity({ userId: "manager-b", scope: "live" });
+    writeCachedProfileBlobs(KEY, { dough: '{"lineSpeed":20}' });
+
+    expect(
+      replaceCachedProfiles(
+        new Map([[KEY, { dough: '{"lineSpeed":10}', crust: null }]]),
+        oldGeneration,
+      ),
+    ).toBe(false);
+    expect(readCachedProfileBlobs(KEY)).toEqual({
+      dough: '{"lineSpeed":20}',
+      crust: null,
+    });
   });
 
   it("notifies subscribers for writes and deletes", () => {

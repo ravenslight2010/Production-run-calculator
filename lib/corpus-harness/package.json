@@ -9,9 +9,10 @@
   "scripts": {
     "test": "vitest run",
     "snapshots": "tsx ./src/regen.mts",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@workspace/ai-evaluation": "workspace:*",
     "@workspace/cheese-import": "workspace:*",
     "@workspace/name-match": "workspace:*",
     "@workspace/premix-import": "workspace:*",

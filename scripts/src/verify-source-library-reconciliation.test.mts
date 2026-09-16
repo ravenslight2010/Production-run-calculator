@@ -7,7 +7,10 @@ import path from "node:path";
 import {
   ownedFields,
   parseReport,
+  preflightSourceLibraryReconciliation,
   resolveSourceLibraryRevision,
+  assertProductionSourceLibraryCapture,
+  assertBoundedSourceLibraryReconciliationEvidence,
   stable,
   verifySourceLibraryReconciliation,
 } from "./verify-source-library-reconciliation.mts";
@@ -19,6 +22,9 @@ const queries: string[] = [];
 const rootDir = path.resolve(new URL("../../", import.meta.url).pathname);
 const verifierPath = path.resolve(
   new URL("./verify-source-library-reconciliation.mts", import.meta.url).pathname,
+);
+const importerPath = path.resolve(
+  new URL("./import-source-library-reconciliation-evidence.mts", import.meta.url).pathname,
 );
 const tsxPath = path.resolve(rootDir, "scripts/node_modules/tsx/dist/cli.mjs");
 
@@ -52,6 +58,67 @@ assert.throws(
 assert.throws(
   () => resolveSourceLibraryRevision("release", "unknown"),
   /full 40-character Git commit SHA/,
+);
+assert.doesNotThrow(() =>
+  assertProductionSourceLibraryCapture({
+    environmentArgument: "release",
+    configuredRevision: "a".repeat(40),
+    revisionArgumentProvided: true,
+    outputPath: undefined,
+    preflight: false,
+    environment: { DATABASE_URL: "postgresql://production.example/app" },
+  }),
+);
+assert.throws(
+  () =>
+    assertProductionSourceLibraryCapture({
+      environmentArgument: "development",
+      configuredRevision: "a".repeat(40),
+      revisionArgumentProvided: true,
+      outputPath: undefined,
+      preflight: false,
+      environment: { DATABASE_URL: "postgresql://production.example/app" },
+    }),
+  /explicit --environment release/,
+);
+assert.throws(
+  () =>
+    assertProductionSourceLibraryCapture({
+      environmentArgument: "release",
+      configuredRevision: "a".repeat(40),
+      revisionArgumentProvided: true,
+      outputPath: undefined,
+      preflight: false,
+      environment: {
+        DATABASE_URL: "postgresql://production.example/app",
+        SOURCE_LIBRARY_VERIFIER_QUERY_FIXTURE: "/tmp/fixture.json",
+      },
+    }),
+  /refuses SOURCE_LIBRARY_VERIFIER_QUERY_FIXTURE/,
+);
+assert.throws(
+  () =>
+    assertProductionSourceLibraryCapture({
+      environmentArgument: "release",
+      configuredRevision: "a".repeat(40),
+      revisionArgumentProvided: true,
+      outputPath: undefined,
+      preflight: true,
+      environment: { DATABASE_URL: "postgresql://production.example/app" },
+    }),
+  /does not support --preflight/,
+);
+assert.throws(
+  () =>
+    assertProductionSourceLibraryCapture({
+      environmentArgument: "release",
+      configuredRevision: "a".repeat(40),
+      revisionArgumentProvided: false,
+      outputPath: undefined,
+      preflight: false,
+      environment: { DATABASE_URL: "postgresql://production.example/app" },
+    }),
+  /requires --revision on the command line/,
 );
 
 const rowsByTable = new Map<string, Array<Record<string, unknown>>>();
@@ -187,8 +254,68 @@ assert.equal(output.stubs.deletedExpected, 1);
 assert.equal(output.stubs.remainingProtected, 2);
 assert.equal(output.stubs.unexpectedlyRemaining, 0);
 assert.doesNotMatch(JSON.stringify(output), /basha|pepperoni|bbq chicken/i);
+assert.doesNotMatch(
+  JSON.stringify(output),
+  /Basha Garlic Recipe|Pepperoni Ingredient|sourceRows/i,
+  "captured evidence must not retain representative source-row details",
+);
+assert.throws(
+  () =>
+    assertBoundedSourceLibraryReconciliationEvidence({
+      ...output,
+      sourceRows: [{
+        recipeName: "Basha Garlic Recipe",
+        ingredient: "Pepperoni Ingredient",
+      }],
+    }),
+  /bounded allowlist/,
+  "source-row payloads must be rejected by the evidence contract",
+);
 assert.match(output.idempotencyFingerprint.value, /^[a-f0-9]{64}$/);
 assert.ok(queries.length > 0);
+
+const preflight = await preflightSourceLibraryReconciliation(
+  report,
+  reportBytes,
+  "source-library-reconciliation-2026-08-26-v1",
+  query,
+  "development",
+  "development-unbound",
+);
+assert.equal(preflight.ok, true);
+assert.equal(preflight.database, "approved-matching");
+assert.deepEqual(preflight.expected, { poolRows: 68, aliases: 25 });
+assert.deepEqual(preflight.observed, {
+  poolRows: 68,
+  aliasesExact: 25,
+  aliasesMissing: 0,
+  aliasesMismatched: 0,
+  markerPresent: true,
+  markerValid: true,
+});
+assert.deepEqual(preflight.failures, []);
+assert.doesNotMatch(
+  JSON.stringify(preflight),
+  /Replacement \d|Canonical (?:Link|Stub)|Legacy (?:Link|Stub)|components|sourceName/i,
+);
+
+const partialPreflight = await preflightSourceLibraryReconciliation(
+  report,
+  reportBytes,
+  "source-library-reconciliation-2026-08-26-v1",
+  async (text, values) => {
+    if (text.includes("FROM mixes")) return { rows: [] };
+    return query(text, values);
+  },
+  "development",
+  "development-unbound",
+);
+assert.equal(partialPreflight.ok, false);
+assert.equal(partialPreflight.database, "partial-fixture");
+assert.deepEqual(partialPreflight.failures, [{
+  check: "databaseShape",
+  count: report.proposals.filter((proposal) => proposal.table === "mixes").length,
+}]);
 
 const mutableMixRow = rowsByTable.get("mixes")!.find((row) =>
   row.id === (mixWithNotes.before as Record<string, unknown>).id);
@@ -417,12 +544,13 @@ export async function resolve(specifier, context, nextResolve) {
 }
 `;
 
-function runVerifierCli(
+function runScriptCli(
+  scriptPath: string,
   args: readonly string[],
   env: Record<string, string>,
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolveRun, reject) => {
-    const child = spawn(process.execPath, [tsxPath, verifierPath, ...args], {
+    const child = spawn(process.execPath, [tsxPath, scriptPath, ...args], {
       cwd: rootDir,
       env: { ...process.env, ...env },
       stdio: ["ignore", "pipe", "pipe"],
@@ -440,6 +568,13 @@ function runVerifierCli(
       resolveRun({ code: code ?? 1, stdout, stderr }),
     );
   });
+}
+
+function runVerifierCli(
+  args: readonly string[],
+  env: Record<string, string>,
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  return runScriptCli(verifierPath, args, env);
 }
 
 function assertBoundedCliEvidence(value: Record<string, unknown>) {
@@ -580,6 +715,138 @@ try {
       `${scenario} CLI stdout and retained evidence should match`,
     );
   }
+  const preflightFixture = createCliFixture("pass");
+  const preflightReportPath = path.join(cliRoot, "preflight-report.json");
+  const preflightQueriesPath = path.join(cliRoot, "preflight-queries.json");
+  const preflightOutputPath = path.join(cliRoot, "preflight-output.json");
+  await writeFile(preflightReportPath, preflightFixture.reportBytes);
+  await writeFile(
+    preflightQueriesPath,
+    JSON.stringify(preflightFixture.fixture),
+  );
+  const preflightResult = await runVerifierCli(
+    [
+      "--report",
+      preflightReportPath,
+      "--heal-id",
+      "source-library-reconciliation-2026-08-26-v1",
+      "--from-date",
+      "2026-08-26",
+      "--environment",
+      "development",
+      "--preflight",
+      "--output",
+      preflightOutputPath,
+    ],
+    {
+      SOURCE_LIBRARY_VERIFIER_QUERY_FIXTURE: preflightQueriesPath,
+      NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --loader=${loaderPath}`.trim(),
+    },
+  );
+  assert.equal(preflightResult.code, 0, preflightResult.stderr);
+  const preflightOutput = JSON.parse(
+    await readFile(preflightOutputPath, "utf8"),
+  ) as Record<string, unknown>;
+  assert.equal(
+    preflightOutput.verifier,
+    "source-library-reconciliation-preflight",
+  );
+  assert.equal(preflightOutput.database, "approved-matching");
+  assert.equal(preflightOutput.ok, true);
+  assert.equal(
+    JSON.stringify(preflightOutput),
+    preflightResult.stdout.trim(),
+    "preflight stdout and retained diagnostic should match",
+  );
+
+  const partialFixture = createCliFixture("pass");
+  partialFixture.fixture.poolRows.mixes.pop();
+  const partialReportPath = path.join(cliRoot, "partial-report.json");
+  const partialQueriesPath = path.join(cliRoot, "partial-queries.json");
+  const partialOutputPath = path.join(cliRoot, "partial-output.json");
+  await writeFile(partialReportPath, partialFixture.reportBytes);
+  await writeFile(partialQueriesPath, JSON.stringify(partialFixture.fixture));
+  const partialResult = await runVerifierCli(
+    [
+      "--report",
+      partialReportPath,
+      "--heal-id",
+      "source-library-reconciliation-2026-08-26-v1",
+      "--from-date",
+      "2026-08-26",
+      "--environment",
+      "development",
+      "--preflight",
+      "--output",
+      partialOutputPath,
+    ],
+    {
+      SOURCE_LIBRARY_VERIFIER_QUERY_FIXTURE: partialQueriesPath,
+      NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --loader=${loaderPath}`.trim(),
+    },
+  );
+  assert.equal(partialResult.code, 1);
+  const partialOutput = JSON.parse(
+    await readFile(partialOutputPath, "utf8"),
+  ) as Record<string, unknown>;
+  assert.equal(partialOutput.database, "partial-fixture");
+  assert.equal(partialOutput.ok, false);
+
+  const failedCaptureOutputPath = path.join(cliRoot, "failed-production-capture.json");
+  const failedImportOutputPath = path.join(cliRoot, "failed-production-import.json");
+  const failedCaptureResult = await runVerifierCli(
+    [
+      "--report",
+      reportPath,
+      "--heal-id",
+      "source-library-reconciliation-2026-08-26-v1",
+      "--from-date",
+      "2026-08-26",
+      "--capture-production",
+      "--environment",
+      "release",
+      "--revision",
+      "a".repeat(40),
+      "--output",
+      failedCaptureOutputPath,
+    ],
+    { DATABASE_URL: "" },
+  );
+  assert.equal(failedCaptureResult.code, 1);
+  assert.match(
+    failedCaptureResult.stdout,
+    /requires DATABASE_URL for the read-only production database/,
+  );
+  assert.equal(
+    fs.existsSync(failedCaptureOutputPath),
+    false,
+    "a failed production capture must not create an evidence file",
+  );
+
+  const failedImportResult = await runScriptCli(
+    importerPath,
+    [
+      "--input",
+      failedCaptureOutputPath,
+      "--output",
+      failedImportOutputPath,
+      "--report",
+      reportPath,
+      "--heal-id",
+      "source-library-reconciliation-2026-08-26-v1",
+      "--from-date",
+      "2026-08-26",
+      "--revision",
+      "a".repeat(40),
+    ],
+    {},
+  );
+  assert.equal(failedImportResult.code, 1);
+  assert.equal(
+    fs.existsSync(failedImportOutputPath),
+    false,
+    "the importer must not create retained evidence when capture input is absent",
+  );
 } finally {
   await rm(cliRoot, { recursive: true, force: true });
 }

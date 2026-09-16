@@ -25,7 +25,7 @@ type SseConnection = {
    * Returns true only after an initial frame has established Home's canonical
    * baseline. Reset/rollover frames and failed handlers must return false.
    */
-  onMessage: (event: MessageEvent) => boolean;
+  onMessage: (event: MessageEvent, clientDate: string) => boolean | Promise<boolean>;
   onError: () => void;
   onInitialBaseline: (shouldPush: boolean) => void;
   onClose: () => void;
@@ -49,6 +49,97 @@ type ForegroundScheduler = {
   }) => () => void;
 };
 
+export function createForegroundSyncTodayRequest(
+  snapshot: string | undefined,
+  clientDate: string = todayStr(),
+): { url: string; init: RequestInit } {
+  const syncTodayUrl = `/api/sync/today?today=${clientDate}`;
+  return {
+    url: snapshot ? `${syncTodayUrl}&snapshot=${snapshot}` : syncTodayUrl,
+    init: { cache: "no-store" },
+  };
+}
+
+type ForegroundAdoptionOptions<TPayload, TLifecycle, TProfile, TFactory> = {
+  payload: TPayload;
+  prepareLifecycle: () => { value: TLifecycle; adopted: boolean };
+  persistLifecycle: (value: TLifecycle) => void;
+  applyGeneralMerge: (payload: TPayload) => void;
+  reconcileProfiles: () => Promise<TProfile>;
+  applyProfiles: (result: TProfile) => void;
+  fetchFactory: () => Promise<TFactory>;
+  applyFactory: (result: TFactory) => Promise<void> | void;
+  isCurrent: () => boolean;
+};
+
+/**
+ * Coordinates the canonical wake adoption transaction. Lifecycle state must be
+ * durable before the general merge can observe it; independent master-data
+ * refreshes begin afterward and retain their profile-before-factory ordering.
+ */
+export function coordinateForegroundAdoption<TPayload, TLifecycle, TProfile, TFactory>({
+  payload,
+  prepareLifecycle,
+  persistLifecycle,
+  applyGeneralMerge,
+  reconcileProfiles,
+  applyProfiles,
+  fetchFactory,
+  applyFactory,
+  isCurrent,
+}: ForegroundAdoptionOptions<TPayload, TLifecycle, TProfile, TFactory>): {
+  lifecycleAdopted: boolean;
+  masterDataRefresh: Promise<void>;
+} {
+  const lifecycle = prepareLifecycle();
+  if (lifecycle.adopted) persistLifecycle(lifecycle.value);
+  if (!isCurrent()) {
+    return { lifecycleAdopted: lifecycle.adopted, masterDataRefresh: Promise.resolve() };
+  }
+  applyGeneralMerge(payload);
+
+  const masterDataRefresh = (async () => {
+    try {
+      const profileResult = await reconcileProfiles();
+      if (isCurrent()) applyProfiles(profileResult);
+    } catch {
+      // Profile recovery is independent; retain local data and continue.
+    }
+    try {
+      const factoryResult = await fetchFactory();
+      if (!isCurrent()) return;
+      await applyFactory(factoryResult);
+    } catch {
+      // Factory recovery is independent; retain local data and queued writes.
+    }
+  })();
+
+  return { lifecycleAdopted: lifecycle.adopted, masterDataRefresh };
+}
+
+type ForegroundReleaseOptions = {
+  releaseFence: () => void;
+  acknowledgeRelease: () => void;
+  takeQueuedWrite: () => boolean;
+  replayQueuedWrite: () => void;
+};
+
+/** Releases the wake fence before any queued write is allowed to replay. */
+export function releaseForegroundRecovery({
+  releaseFence,
+  acknowledgeRelease,
+  takeQueuedWrite,
+  replayQueuedWrite,
+}: ForegroundReleaseOptions): void {
+  releaseFence();
+  acknowledgeRelease();
+  if (takeQueuedWrite()) replayQueuedWrite();
+}
+
+type CancelledForegroundReleaseOptions = {
+  releaseFence: () => void;
+  discardQueuedWrite: () => void;
+};
 /** Only a reset marker newer than local durable state may interrupt baseline adoption. */
 export function initialResetRequiresReload(messageEpoch: number, storedEpoch: number): boolean {
   return messageEpoch > storedEpoch;
@@ -72,6 +163,11 @@ export function useHomeSyncCoordination() {
   const foregroundRecoveryRetryRef = useRef<(() => Promise<boolean>) | null>(null);
   const foregroundRecoveryNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const foregroundRecoveryOwnerRef = useRef(0);
+  // SSE reconnects and browser foreground signals share the same recovery
+  // owner. Keep a pending reconnect signal so an early EventSource error
+  // cannot be lost before Home has registered its recovery callback.
+  const foregroundRecoveryRequestRef = useRef<(() => Promise<boolean>) | null>(null);
+  const foregroundRecoveryRequestPendingRef = useRef(false);
   const syncPushGenerationRef = useRef(0);
   const syncPushAbortControllersRef = useRef<Set<AbortController>>(new Set());
   const syncRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -88,32 +184,71 @@ export function useHomeSyncCoordination() {
   } | null>(null);
 
   const connectSse = useCallback((connection: SseConnection) => {
-    syncBaselineGateRef.current.beginConnection();
-    const snapshot = connection.getSnapshot();
-    const url = snapshot
-      ? `/api/sync/events?clientId=${connection.clientId}&today=${todayStr()}&snapshot=${snapshot}`
-      : `/api/sync/events?clientId=${connection.clientId}&today=${todayStr()}`;
-    const source = new EventSource(url);
-    source.onopen = connection.onOpen;
-    source.onmessage = (event) => {
-      const baselineAccepted = connection.onMessage(event);
-      try {
-        if (
-          baselineAccepted &&
-          (JSON.parse(event.data as string) as { initial?: boolean }).initial
-        ) {
-          connection.onInitialBaseline(syncBaselineGateRef.current.completeInitialSnapshot());
-        }
-      } catch {
-        // Home's callback preserves its existing malformed-frame tolerance.
-      }
-    };
-    source.onerror = () => {
+    let closed = false;
+    let streamDate = todayStr();
+    let source: EventSource | null = null;
+    let messageChain = Promise.resolve();
+
+    const open = (clientDate: string) => {
+      if (closed) return;
+      streamDate = clientDate;
       syncBaselineGateRef.current.beginConnection();
-      connection.onError();
+      const snapshot = connection.getSnapshot();
+      const url = snapshot
+        ? `/api/sync/events?clientId=${connection.clientId}&today=${clientDate}&snapshot=${snapshot}`
+        : `/api/sync/events?clientId=${connection.clientId}&today=${clientDate}`;
+      const nextSource = new EventSource(url);
+      source = nextSource;
+      nextSource.onopen = () => {
+        if (closed || source !== nextSource || streamDate !== todayStr()) return;
+        connection.onOpen();
+      };
+      nextSource.onmessage = (event) => {
+        // EventSource can deliver a queued callback after close(). Do not let
+        // that old-date frame enter Home while the new stream is connecting.
+        if (closed || source !== nextSource || clientDate !== todayStr()) return;
+        messageChain = messageChain.then(async () => {
+          if (closed || source !== nextSource || clientDate !== todayStr()) return;
+          const baselineAccepted = await connection.onMessage(event, clientDate);
+          if (closed || source !== nextSource || clientDate !== todayStr()) return;
+          try {
+            if (
+              baselineAccepted &&
+              (JSON.parse(event.data as string) as { initial?: boolean }).initial
+            ) {
+              connection.onInitialBaseline(syncBaselineGateRef.current.completeInitialSnapshot());
+            }
+          } catch {
+            // Home's callback preserves its existing malformed-frame tolerance.
+          }
+        });
+      };
+      nextSource.onerror = () => {
+        if (closed || source !== nextSource) return;
+        syncBaselineGateRef.current.beginConnection();
+        connection.onError();
+        const request = foregroundRecoveryRequestRef.current;
+        if (request) void request();
+        else foregroundRecoveryRequestPendingRef.current = true;
+      };
     };
+
+    const reconnectForDateChange = () => {
+      const nextDate = todayStr();
+      if (closed || nextDate === streamDate) return;
+      const previousSource = source;
+      source = null;
+      previousSource?.close();
+      open(nextDate);
+    };
+
+    open(streamDate);
+    const dateCheck = setInterval(reconnectForDateChange, 60_000);
     return () => {
-      source.close();
+      closed = true;
+      clearInterval(dateCheck);
+      source?.close();
+      source = null;
       connection.onClose();
     };
   }, []);
@@ -152,8 +287,17 @@ export function useHomeSyncCoordination() {
     recover: () => Promise<boolean>,
   ) => {
     const reconcile = createForegroundSyncWakeGuard(recover);
+    foregroundRecoveryRequestRef.current = reconcile;
+    if (foregroundRecoveryRequestPendingRef.current) {
+      foregroundRecoveryRequestPendingRef.current = false;
+      void reconcile();
+    }
     const onOnline = () => {
-      if (!document.hidden) void reconcile();
+      // `online` is the recovery signal when a failed pull was left pending
+      // by a browser transport. Do not discard it because the page still
+      // reports hidden: WebKit can deliver the reconnect event before it
+      // updates visibility, and the wake guard keeps the retry bounded.
+      void reconcile();
     };
     window.addEventListener("online", onOnline);
     const unregister = scheduler.register({
@@ -165,6 +309,9 @@ export function useHomeSyncCoordination() {
     return {
       reconcile,
       dispose: () => {
+        if (foregroundRecoveryRequestRef.current === reconcile) {
+          foregroundRecoveryRequestRef.current = null;
+        }
         window.removeEventListener("online", onOnline);
         unregister();
       },
@@ -211,4 +358,17 @@ export function useHomeSyncCoordination() {
     requestBaselinePush,
     writeToday,
   ]);
+}
+
+/**
+ * A cancelled recovery has no mounted owner that can safely replay work.
+ * Discard its queued write before releasing the fence so the next owner cannot
+ * observe and publish a stale pre-wake mutation.
+ */
+export function releaseCancelledForegroundRecovery({
+  releaseFence,
+  discardQueuedWrite,
+}: CancelledForegroundReleaseOptions): void {
+  discardQueuedWrite();
+  releaseFence();
 }

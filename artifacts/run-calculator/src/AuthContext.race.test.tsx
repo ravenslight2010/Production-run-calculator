@@ -12,6 +12,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, useSyncExternalStore } from "react";
 import type { StaffMember } from "./inventoryShared";
 import {
+  getProfileCacheGeneration,
   readCachedProfileBlobs,
   resetProfileCacheForTests,
   subscribeProfileCache,
@@ -118,6 +119,9 @@ function OpenProfileProbe() {
       <button type="button" onClick={() => void signIn("manager", "password")}>
         Sign in
       </button>
+      <button type="button" onClick={() => void signIn("second-manager", "password")}>
+        Sign in as second manager
+      </button>
       <button type="button" onClick={() => void signOut()}>
         Sign out
       </button>
@@ -148,6 +152,7 @@ afterEach(() => {
   mocks.setAuthRequestEpoch.mockReset();
   mocks.resetMasterDataTransportCache.mockReset();
   resetProfileCacheForTests();
+  localStorage.clear();
 });
 
 describe("AuthProvider session transition", () => {
@@ -175,6 +180,33 @@ describe("AuthProvider session transition", () => {
       expect(screen.getByTestId("identity").textContent).toBe("manager-1"),
     );
     expect(mocks.fetchMe).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not let a cold probe for the prior account overwrite a switched account", async () => {
+    const initialProbe = deferred<StaffMember>();
+    const probeReturned = deferred<void>();
+    mocks.fetchMe.mockImplementationOnce(async () => {
+      const user = await initialProbe.promise;
+      probeReturned.resolve();
+      return user;
+    });
+    mocks.signInRequest.mockResolvedValue({ token: "ignored", user: secondManager });
+
+    renderAuth();
+    await waitFor(() => expect(mocks.fetchMe).toHaveBeenCalledTimes(1));
+
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await screen.findByText("manager-2");
+    writeCachedProfileBlobs(PROFILE_KEY, { dough: '{"lineSpeed":20}' });
+    const secondManagerGeneration = getProfileCacheGeneration();
+
+    initialProbe.resolve(manager);
+    await probeReturned.promise;
+    await waitFor(() =>
+      expect(getProfileCacheGeneration()).toBe(secondManagerGeneration),
+    );
+    expect(screen.getByTestId("identity").textContent).not.toBe("manager-1");
+    expect(readCachedProfileBlobs(PROFILE_KEY).dough).toBe('{"lineSpeed":20}');
   });
 
   it("retries a transient startup probe and reaches the authenticated shell", async () => {
@@ -238,6 +270,8 @@ describe("AuthProvider session transition", () => {
       expect(screen.getByTestId("profile-owner").textContent).toBe("manager-1"),
     );
 
+    qc.setQueryData(["inventory", "manager-1"], { rows: ["prior-account"] });
+    qc.setQueryData(["profile-data-health"], { account: "manager-1" });
     writeCachedProfileBlobs(PROFILE_KEY, { dough: '{"lineSpeed":10}' });
     await waitFor(() =>
       expect(screen.getByTestId("profile-value").textContent).toBe('{"lineSpeed":10}'),
@@ -248,11 +282,51 @@ describe("AuthProvider session transition", () => {
       expect(screen.getByTestId("profile-owner").textContent).toBe("signed-out"),
     );
     expect(screen.getByTestId("profile-value").textContent).toBe("empty");
+    expect(qc.getQueryData(["inventory", "manager-1"])).toBeUndefined();
+    expect(qc.getQueryData(["profile-data-health"])).toBeUndefined();
+    expect(qc.getQueryData(["me"])).toBeNull();
 
-    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Sign in as second manager" }),
+    );
     await waitFor(() =>
       expect(screen.getByTestId("profile-owner").textContent).toBe("manager-2"),
     );
     expect(screen.getByTestId("profile-value").textContent).toBe("empty");
+    expect(qc.getQueryData(["inventory", "manager-1"])).toBeUndefined();
+    expect(qc.getQueryData(["profile-data-health"])).toBeUndefined();
+    expect(qc.getQueryData(["me"])).toEqual(secondManager);
+  });
+
+  it("replaces scoped query and profile state on a direct account switch", async () => {
+    mocks.fetchMe.mockResolvedValue(null);
+    mocks.signInRequest
+      .mockResolvedValueOnce({ token: "ignored", user: manager })
+      .mockResolvedValueOnce({ token: "ignored", user: secondManager });
+
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={qc}>
+        <AuthProvider>
+          <OpenProfileProbe />
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await screen.findByText("manager-1");
+    qc.setQueryData(["saved-spec-imports"], [{ label: "manager-1-import" }]);
+    writeCachedProfileBlobs(PROFILE_KEY, { dough: '{"lineSpeed":10}' });
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Sign in as second manager" }),
+    );
+    await screen.findByText("manager-2");
+
+    expect(qc.getQueryData(["saved-spec-imports"])).toBeUndefined();
+    expect(screen.getByTestId("profile-value").textContent).toBe("empty");
+    expect(qc.getQueryData(["me"])).toEqual(secondManager);
   });
 });

@@ -11,7 +11,7 @@ import type {
   TestResult,
 } from "@playwright/test/reporter";
 
-const EXPECTED_CASES = 159;
+export const EXPECTED_CASES = 159;
 const repositoryRoot = fileURLToPath(
   new URL("../../../", import.meta.url),
 );
@@ -24,6 +24,7 @@ const defaultReportPath = fileURLToPath(
 
 type CaseRecord = {
   file: string;
+  title: string;
   durationMs: number;
   completed: boolean;
   status: TestResult["status"] | "not-run";
@@ -131,6 +132,80 @@ function summarizeCases(cases: Iterable<CaseRecord>): FileSummary[] {
   return [...byFile.values()].sort((left, right) =>
     left.file.localeCompare(right.file),
   );
+}
+
+function caseStatusLabel(status: CaseRecord["status"]): string {
+  switch (status) {
+    case "failed":
+      return "FAILED";
+    case "timedout":
+      return "TIMEDOUT";
+    case "interrupted":
+      return "INTERRUPTED";
+    case "skipped":
+      return "SKIPPED";
+    default:
+      return status.toUpperCase();
+  }
+}
+
+function markdownCaseTitle(title: string): string {
+  return `\`${title.replaceAll("`", "\\`").replace(/\s+/gu, " ").trim()}\``;
+}
+
+function formatCaseStatusSections(cases: readonly CaseRecord[]): string[] {
+  const failures = cases.filter(
+    (testCase) =>
+      testCase.completed &&
+      testCase.status !== "passed" &&
+      testCase.status !== "skipped" &&
+      testCase.status !== "not-run",
+  );
+  const skipped = cases.filter((testCase) => testCase.status === "skipped");
+
+  function formatSection(
+    heading: string,
+    sectionCases: readonly CaseRecord[],
+  ): string[] {
+    const byFile = new Map<string, CaseRecord[]>();
+    for (const testCase of sectionCases) {
+      const fileCases = byFile.get(testCase.file) ?? [];
+      fileCases.push(testCase);
+      byFile.set(testCase.file, fileCases);
+    }
+
+    const lines = [`## ${heading}`, ""];
+    if (byFile.size === 0) {
+      lines.push("None.", "");
+      return lines;
+    }
+
+    for (const [file, fileCases] of [...byFile.entries()].sort(
+      ([left], [right]) => left.localeCompare(right),
+    )) {
+      lines.push(`### \`${relativeFilePath(file)}\``, "");
+      for (const testCase of fileCases.sort(
+        (left, right) =>
+          left.title.localeCompare(right.title) ||
+          caseStatusLabel(left.status).localeCompare(
+            caseStatusLabel(right.status),
+          ),
+      )) {
+        lines.push(
+          `- **${caseStatusLabel(testCase.status)}** ${markdownCaseTitle(
+            testCase.title,
+          )}`,
+        );
+      }
+      lines.push("");
+    }
+    return lines;
+  }
+
+  return [
+    ...formatSection("Failed and timed-out cases", failures),
+    ...formatSection("Skipped cases", skipped),
+  ];
 }
 
 export function parsePerFileDurations(
@@ -334,7 +409,8 @@ export function formatFullBrowserReport(
   revision: string,
   baseline?: ReadonlyMap<string, number>,
 ): string {
-  const summaries = summarizeCases(cases);
+  const caseRecords = [...cases];
+  const summaries = summarizeCases(caseRecords);
   const currentDurations = summaries.map((summary) => ({
     file: relativeFilePath(summary.file),
     durationMs: summary.durationMs,
@@ -399,6 +475,7 @@ export function formatFullBrowserReport(
         )}ms |`,
     ),
     "",
+    ...formatCaseStatusSections(caseRecords),
     ...formatHistoricalComparison(currentDurations, baseline),
     "Per-file durations are the sum of Playwright test-result durations. The",
     "suite remains serial (`workers: 1`) and retains all enumerated cases.",
@@ -412,9 +489,16 @@ export default class ReleaseDurationReporter implements Reporter {
 
   onBegin(_config: FullConfig, suite: Suite): void {
     this.startedAt = Date.now();
-    for (const testCase of suite.allTests()) {
+    const allTests = suite.allTests();
+    if (allTests.length !== EXPECTED_CASES) {
+      throw new Error(
+        `Full browser release lane discovered ${allTests.length} cases; expected exactly ${EXPECTED_CASES}. Update the release filter or contract before running evidence.`,
+      );
+    }
+    for (const testCase of allTests) {
       this.cases.set(testCase.id, {
         file: testCase.location.file,
+        title: testCase.titlePath().join(" › "),
         durationMs: 0,
         completed: false,
         status: "not-run",
@@ -425,6 +509,7 @@ export default class ReleaseDurationReporter implements Reporter {
   onTestEnd(testCase: TestCase, result: TestResult): void {
     const existing = this.cases.get(testCase.id) ?? {
       file: testCase.location.file,
+      title: testCase.titlePath().join(" › "),
       durationMs: 0,
       completed: false,
       status: "not-run" as const,

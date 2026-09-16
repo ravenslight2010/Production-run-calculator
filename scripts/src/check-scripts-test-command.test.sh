@@ -9,6 +9,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PACKAGE_JSON="${SCRIPT_DIR}/../package.json"
 EXPECTED_VALIDATOR='python3 -S ../.agents/skills/skill-creator/scripts/test_quick_validate.py'
 EXPECTED_SKILL_CATALOG_CHECK='pnpm run check:skill-catalog'
+EXPECTED_EVALUATION_REPORT_CHECK='pnpm run test:evaluation-report-retention'
 
 if [[ ! -f "$PACKAGE_JSON" ]]; then
   printf 'Could not find scripts package manifest: %s\n' "$PACKAGE_JSON" >&2
@@ -56,4 +57,15 @@ EOF
   exit 1
 fi
 
-printf 'PASS: scripts test command retains live skill catalog and quick validator checks.\n'
+if [[ "$TEST_COMMAND" != *"$EXPECTED_EVALUATION_REPORT_CHECK"* ]]; then
+  cat >&2 <<EOF
+scripts/package.json#test must run the evaluation report retention check:
+  ${EXPECTED_EVALUATION_REPORT_CHECK}
+
+The standard scripts test command must prevent new evaluation artifact writers
+from bypassing allowlisted projections and synthetic privacy coverage.
+EOF
+  exit 1
+fi
+
+printf 'PASS: scripts test command retains evaluation privacy, live skill catalog, and quick validator checks.\n'

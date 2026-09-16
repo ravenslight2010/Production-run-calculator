@@ -8,9 +8,14 @@ import {
 } from "../hooks/useHomeFormLifecycle";
 import { useRunLifecycleManager } from "../hooks/useRunLifecycleManager";
 import {
+  coordinateForegroundAdoption,
+  createForegroundSyncTodayRequest,
   initialResetRequiresReload,
+  releaseCancelledForegroundRecovery,
+  releaseForegroundRecovery,
   useHomeSyncCoordination,
 } from "../hooks/useHomeSyncCoordination";
+import { consumeForegroundRecoveryResponse } from "../foregroundRecoveryResponse";
 import { closeTopmostImportDialog, useHomeImportDialogs } from "../hooks/useHomeImportDialogs";
 import {
   applyTemporaryOverrides,
@@ -31,6 +36,7 @@ import MixesTabContent from "../components/MixesTabContent";
 import SetupContent from "../components/SetupContent";
 import SummaryToolsContent from "../components/SummaryToolsContent";
 import ScreenModeView from "../components/ScreenModeView";
+import { ForegroundRecoveryStatus } from "../components/ForegroundRecoveryStatus";
 import { VisibleTabScheduler } from "../visibleTabScheduler";
 import { incrementFloorCaseCount } from "../floorPackagingCorrection";
 import {
@@ -50,7 +56,8 @@ import CompactRunStrip from "../components/CompactRunStrip";
 import { ManualOverrideBanner, manualOverrideBannerShow } from "../components/ManualOverrideBanner";
 import { MixAlreadyMadeInput } from "../components/MixAlreadyMadeInput";
 import { PrepMixMissingAmountsWarning } from "../components/PrepMixMissingAmountsWarning";
-import { useForm, useFieldArray, type Resolver } from "react-hook-form";
+import { useForm, useFieldArray } from "react-hook-form";
+import type { Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   formSchema,
@@ -137,6 +144,8 @@ import {
   todayStr,
   writeDayResetAt,
   runLabel,
+  shouldSignOutAfterRollover,
+  shouldPublishFreshRolloverState,
 } from "../utils";
 import { normalizeScheduledDays, type ScheduledDay } from "../scheduledDays";
 import { fetchWithTimeout } from "../fetchWithTimeout";
@@ -203,6 +212,7 @@ import {
   applyMixCheeseOverlapDedupeIfNeeded,
   purgeOrphanedProfilesIfNeeded,
   applyProfileCleanupIfNeeded,
+  archiveDayToHistory,
   deleteProfilesForBrand,
   deleteProfileEntry,
   applyIngredientMerge,
@@ -282,7 +292,14 @@ import {
   savePackagingProgress,
 } from "../packagingProgress";
 import { isolatePendingRunPackagingProgress } from "../runProgressIsolation";
-import { consumeSyncWriteResponse } from "../syncWriteResponse";
+import {
+  consumeSyncWriteResponse,
+  isCanonicalRecoverySyncPayload,
+  isUnchangedSyncResponse,
+  isValidSyncSnapshotId,
+  readCurrentRecoveryJson,
+  syncPayloadMatchesSnapshot,
+} from "../syncWriteResponse";
 import {
   canonicalProfileKey,
   flushProfileQueueStrict,
@@ -312,7 +329,12 @@ import {
   runTemplatesQueryKey,
   RUN_TEMPLATES_QUERY_KEY,
 } from "../hooks/useRunTemplates";
-import { resolveDieLineDefaultsOnSwitch, resolveCrustLineDefaults, dieLineDefaultsFor } from "../dieDefaults";
+import {
+  resolveDieLineDefaultsOnSwitch,
+  resolveCrustLineDefaults,
+  dieDefaultsKey,
+  dieLineDefaultsFor,
+} from "../dieDefaults";
 import { saveDieLineDefaults } from "../dieLineDefaultsServer";
 import { DIE_LINE_DEFAULTS_QUERY_KEY } from "../hooks/useDieLineDefaults";
 import RunInsightsCard from "../components/RunInsightsCard";
@@ -358,6 +380,7 @@ import ManagerAttentionDialog, {
   managerAttentionCount,
   type ManagerAttentionItem,
 } from "../components/ManagerAttentionDialog";
+import ApplicatorEvidenceReview from "../components/ApplicatorEvidenceReview";
 import { RecipeShareButtons } from "../components/RecipeShareButtons";
 import AlertSettingsDialog from "../components/AlertSettingsDialog";
 import { SetupRecipesRoleGate } from "../components/SetupRecipesRoleGate";
@@ -458,9 +481,14 @@ import { buildDaySummaryInput, buildWeekSummaryInput } from "../aiSummary";
 import { buildAnomalyInput } from "../aiAnomaly";
 import { buildScheduleInput } from "../aiSchedule";
 import { BehindPaceAlertBanner } from "../components/BehindPaceAlertBanner";
+import {
+  findFirstUnreadyScheduledRun,
+  getStartRunReadiness,
+} from "../startRunReadiness";
 import { computeCasesInFreezer } from "@workspace/inventory-math";
 import {
   computeRunConsumptionLines,
+  consumeRun,
   consumeSauceBarrel,
   deriveCandidateItems,
   scoreNameMatch,
@@ -725,6 +753,8 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
 import SetupProfileEditor from "@/components/SetupProfileEditor";
@@ -5009,7 +5039,10 @@ export default function Home() {
   );
   // Manager-set per-die line-setting overrides (server master-data); the run
   // form's die pre-fill resolves through these first, then the built-in map.
-  const { overrides: dieLineDefaultOverrides } = useDieLineDefaults();
+  const {
+    entries: dieLineDefaultEntries,
+    overrides: dieLineDefaultOverrides,
+  } = useDieLineDefaults();
 
   // Push every locally-saved dough / sauce recipe preset up into the server pool
   // (match-by-name, no clobber) so they become factory-wide master-data like
@@ -7235,6 +7268,7 @@ export default function Home() {
   const [expandedScheduleDay, setExpandedScheduleDay] = useState<string | null>(null);
   const [scheduleView, setScheduleView] = useState<"list" | "editor" | "advanced">("list");
   const [scheduleEditorDate, setScheduleEditorDate] = useState("");
+  const [scheduleCalendarOpen, setScheduleCalendarOpen] = useState(false);
   // True when the editor was opened on the LIVE day (Today card): the date is
   // locked so today's live run ids can't be copied onto another date's row.
   const [scheduleEditorIsLiveDay, setScheduleEditorIsLiveDay] = useState(false);
@@ -7309,6 +7343,7 @@ export default function Home() {
   const scheduleEditorLoadedRunIdsRef = useRef<Set<string>>(new Set());
   async function openScheduleEditor(date?: string) {
     setScheduleAdvancedRunId(null);
+    setScheduleCalendarOpen(false);
     // TODAY is the live day — seed the editor from the in-memory day state (the
     // freshest copy this tab has, including in-flight form edits), NOT the
     // server row. Saving routes back through the live day-state path below.
@@ -7360,6 +7395,27 @@ export default function Home() {
   }
   async function saveScheduledDay() {
     if (!scheduleEditorDate) return;
+    setScheduleError(null);
+    const unreadyRun = findFirstUnreadyScheduledRun(scheduleEditorRuns, (run) => {
+      const stored = scheduleEditorRunValues[run.id];
+      const profile = run.brand ? loadProfile(run.brand, run.flavor) : null;
+      const base: FormValues = stored ?? profile ?? DEFAULT_VALUES;
+      return backfillFromProfile(
+        { ...base, casesNeeded: run.casesNeeded },
+        run.brand,
+        run.flavor,
+      );
+    });
+    if (unreadyRun) {
+      const label = [unreadyRun.brand, unreadyRun.flavor].filter(Boolean).join(" — ")
+        || "this run";
+      setScheduleAdvancedRunId(unreadyRun.id);
+      setScheduleView("advanced");
+      setScheduleError(
+        `${label} requests cases but has no Pizzas Per Case value. Enter it below before saving the schedule.`,
+      );
+      return;
+    }
     setScheduleSaving(true);
     // TODAY: apply the edits through the LIVE day-state path, never a raw PUT.
     // A raw PUT for today loses silently: it carries no runValuesUpdatedAt
@@ -7367,7 +7423,6 @@ export default function Home() {
     // run tombstones (the additive union resurrects removed runs), and it never
     // touches this tab's in-memory day — so the next push (e.g. Start Run)
     // visibly "reverts" everything to the original schedule.
-    setScheduleError(null);
     if (scheduleEditorDate === todayStr()) {
       try {
         const now = Date.now();
@@ -9148,15 +9203,20 @@ export default function Home() {
       onOpen: () => {
       setSyncConnected(true);
       recordSyncEvent("connected", "Live sync connection opened");
-      // Queue the reconnect recovery push. It is released only after the stream's
-      // first frame has established a baseline, so a new/stale device cannot
-      // upload its local day before applying today's shared row.
-      schedulePush(dayStateRef.current, 1000, "recovery");
+      // The coordination hook routes stream drops through the foreground
+      // recovery owner. Do not start a second reconnect push here; the initial
+      // frame below either releases the baseline queue or remains fenced by
+      // the foreground adoption barrier.
     },
-    onMessage: (e: MessageEvent) => {
+    onMessage: async (e: MessageEvent, streamDate: string) => {
       try {
+        // The coordination hook fences late callbacks from a closed stream,
+        // but keep the date boundary here too so a frame cannot cross
+        // midnight while its async snapshot check is in flight.
+        if (streamDate !== todayStr()) return false;
         const msg = JSON.parse(e.data as string) as {
           data?: SyncPayload | null;
+          completeness?: "complete";
           unchanged?: boolean;
           snapshotId?: string;
           reset?: boolean;
@@ -9169,12 +9229,49 @@ export default function Home() {
           summaryStats?: Record<string, unknown>;
           runLines?: Record<string, unknown>;
           serverTime?: number;
+          heartbeat?: boolean;
+          calcOnly?: boolean;
           canonicalRevision?: number;
           masterDataChanged?: boolean;
           configurationInvalidated?: boolean;
           family?: "master-data" | "profiles" | "factory-data" | "die-types" | "supervisor-pin" | "name-links" | "merged-away";
           senderId?: string | null;
         };
+        // Once an HTTP recovery owner is active it is the sole adoption owner.
+        // Ignore stream frames until that owner either succeeds or remains
+        // visibly retryable; this prevents two valid transports from applying
+        // competing baselines in opposite orders.
+        if (foregroundSyncBarrierRef.current) return false;
+        if (msg.unchanged) {
+          if (
+            msg.completeness !== "complete"
+            || !isUnchangedSyncResponse(msg)
+            || msg.snapshotId !== syncSnapshotIdRef.current
+          ) return false;
+        } else if (msg.data) {
+          if (
+            !isCanonicalRecoverySyncPayload(msg.data, todayStr(), msg.completeness)
+            || !isValidSyncSnapshotId(msg.snapshotId)
+            || !await syncPayloadMatchesSnapshot(msg.data, msg.snapshotId)
+          ) return false;
+          if (streamDate !== todayStr()) return false;
+          if (foregroundSyncBarrierRef.current) return false;
+        } else if (msg.initial) {
+          return false;
+        } else if (
+          msg.operationalProjection
+          || msg.serverCalc
+          || msg.autoTrackSchedule
+          || msg.summaryStats
+          || msg.runLines
+          || msg.heartbeat
+          || msg.calcOnly
+        ) {
+          if (
+            !isValidSyncSnapshotId(msg.snapshotId)
+            || msg.snapshotId !== syncSnapshotIdRef.current
+          ) return false;
+        }
         adoptOperationalRevision(msg.canonicalRevision);
         if (typeof msg.serverTime === "number" && Number.isFinite(msg.serverTime)) {
           const offset = msg.serverTime - Date.now();
@@ -9237,11 +9334,19 @@ export default function Home() {
           // only initial baseline and must continue through normal data handling.
         }
         if (msg.unchanged) {
-          if (typeof msg.snapshotId === "string") {
+          // A malformed unchanged frame is not a baseline. In particular,
+          // accepting `{ unchanged: true }` would release the writer while
+          // retaining a stale local snapshot after reconnect.
+          if (!isUnchangedSyncResponse(msg)) return false;
+          if (isValidSyncSnapshotId(msg.snapshotId)) {
             syncSnapshotIdRef.current = msg.snapshotId;
           }
           if (msg.initial) recordSyncEvent("ack", "Server baseline unchanged", "unchanged");
         } else if (msg.data) {
+          if (
+            msg.snapshotId !== undefined
+            && !isValidSyncSnapshotId(msg.snapshotId)
+          ) return false;
           if (msg.data.operationalProjection) {
             adoptOperationalProjection(msg.data.operationalProjection, msg.snapshotId);
           }
@@ -9254,7 +9359,7 @@ export default function Home() {
               detail: msg.data.doughTimerControls,
             }));
           }
-          if (typeof msg.snapshotId === "string") syncSnapshotIdRef.current = msg.snapshotId;
+          if (isValidSyncSnapshotId(msg.snapshotId)) syncSnapshotIdRef.current = msg.snapshotId;
           canonicalRunValuesUpdatedAtRef.current = { ...(msg.data.runValuesUpdatedAt ?? {}) };
           recordSyncEvent(msg.initial ? "ack" : "peer", msg.initial ? "Server baseline received" : "Peer update received");
           applySyncCallbackRef.current(msg.data, {
@@ -9297,7 +9402,15 @@ export default function Home() {
     onInitialBaseline: (shouldPush) => {
       // applySyncCallbackRef clears its sync-apply suppression in a frame.
       // The manager opens this gate only after Home has merged the baseline.
-      if (shouldPush) requestAnimationFrame(() => schedulePush(dayStateRef.current, 0));
+      if (shouldPush) requestAnimationFrame(() => {
+        if (foregroundSyncBarrierRef.current) {
+          // SSE reconnect and foreground recovery share one owner. Keep the
+          // queued write behind the HTTP adoption rather than racing it.
+          foregroundPushPendingRef.current = true;
+          return;
+        }
+        schedulePush(dayStateRef.current, 0);
+      });
     },
     onClose: () => {},
     });
@@ -9324,6 +9437,8 @@ export default function Home() {
     const foregroundRegistration = registerForegroundRecovery(visibleTabScheduler, async (): Promise<boolean> => {
       const recoveryOwner = synchronizationStateMachineRef.current.beginWake();
       foregroundRecoveryOwnerRef.current = recoveryOwner;
+      const isCurrentRecovery = () =>
+        !cancelled && foregroundRecoveryOwnerRef.current === recoveryOwner;
       foregroundSyncBarrierRef.current = true;
       const queuedStop = foregroundStopIntentRef.current;
       showForegroundRecoveryNotice(
@@ -9359,9 +9474,20 @@ export default function Home() {
           // Check the reset epoch first because a device can miss the SSE reset
           // frame while asleep. The ordinary reset wipe remains the single
           // authority for clearing pre-reset local state.
-          const epochRes = await fetch("/api/sync/reset-epoch", { cache: "no-store" });
+          const epochRes = await fetchWithTimeout(
+            "/api/sync/reset-epoch",
+            { cache: "no-store" },
+            10_000,
+          );
+          // A newer wake/reconnect owner may have superseded this response
+          // while the browser was asleep or the network was stalled. Obsolete
+          // responses must not update any canonical refs or release the fence.
+          if (!isCurrentRecovery()) return false;
           if (epochRes.ok) {
-            const epochBody = await epochRes.json().catch(() => null) as { epoch?: number; rollover?: boolean } | null;
+            const parsedEpoch = await readCurrentRecoveryJson(epochRes, isCurrentRecovery)
+              .catch(() => ({ current: isCurrentRecovery(), body: null }));
+            if (!parsedEpoch.current) return false;
+            const epochBody = parsedEpoch.body as { epoch?: number; rollover?: boolean } | null;
             if (typeof epochBody?.epoch === "number" && epochBody.epoch > getStoredResetEpoch()) {
               const generation = synchronizationStateMachineRef.current.beginReset(epochBody.epoch);
               const adopted = epochBody.rollover
@@ -9375,32 +9501,47 @@ export default function Home() {
             }
           }
 
-           const snapshot = syncSnapshotIdRef.current;
-           const syncTodayUrl = `/api/sync/today?today=${todayStr()}`;
-           const res = await fetch(snapshot ? `${syncTodayUrl}&snapshot=${snapshot}` : syncTodayUrl, { cache: "no-store" });
-          if (!res.ok) throw new Error(`foreground sync GET failed: ${res.status}`);
-           const body = await res.json() as SyncPayload | { unchanged?: boolean; snapshotId?: string; canonicalRevision?: number } | null;
-           adoptOperationalRevision(body && "canonicalRevision" in body ? body.canonicalRevision : undefined);
-           if (body && "unchanged" in body && body.unchanged === true) {
-             if (typeof body.snapshotId === "string") syncSnapshotIdRef.current = body.snapshotId;
-             pushAcknowledgedRef.current = true;
-             reconciled = true;
-             return true;
-           }
-           const payload = body as SyncPayload | null;
-           const responseSnapshot = res.headers.get("X-Sync-Snapshot");
-           if (responseSnapshot) syncSnapshotIdRef.current = responseSnapshot;
-           if (payload) {
-             canonicalRunValuesUpdatedAtRef.current = { ...(payload.runValuesUpdatedAt ?? {}) };
-             if (payload.operationalProjection) {
-               adoptOperationalProjection(
-                 payload.operationalProjection,
-                 responseSnapshot ?? syncSnapshotIdRef.current,
-               );
-             }
-           }
+          const snapshot = syncSnapshotIdRef.current;
+          // Capture the facility-local production date once for this recovery
+          // transaction. A device can wake at local midnight, and the request
+          // plus its adoption guard must agree on the same day.
+          const clientDate = todayStr();
+          const syncTodayRequest = createForegroundSyncTodayRequest(snapshot, clientDate);
+          const res = await fetchWithTimeout(
+            syncTodayRequest.url,
+            syncTodayRequest.init,
+            10_000,
+          );
+          const recovery = await consumeForegroundRecoveryResponse({
+            response: res,
+            expectedDate: clientDate,
+            requestedSnapshotId: snapshot,
+            isCurrent: isCurrentRecovery,
+            adoptUnchanged: (body) => {
+              adoptOperationalRevision(body.canonicalRevision);
+              syncSnapshotIdRef.current = body.snapshotId;
+              pushAcknowledgedRef.current = true;
+            },
+            adoptCanonical: (payload, responseSnapshot) => {
+              adoptOperationalRevision(payload.canonicalRevision);
+              syncSnapshotIdRef.current = responseSnapshot;
+              if (payload.operationalProjection) {
+                adoptOperationalProjection(
+                  payload.operationalProjection,
+                  responseSnapshot,
+                );
+              }
+            },
+          });
+          if (!recovery.accepted) return false;
+          if (recovery.kind === "unchanged") {
+            reconciled = true;
+            return true;
+          }
+          const payload = recovery.payload;
           // A missing row is a valid empty baseline, but do not erase local
           // offline work here. The normal stamped push path will seed it.
+          if (!isCurrentRecovery()) return false;
           if (payload) {
             // Preserve ordinary screen-off catch-up when the live row is
             // unchanged. Re-baselining every successful wake would erase the
@@ -9412,62 +9553,55 @@ export default function Home() {
             };
             const acceptsRemoteLifecycle = shouldAcceptSyncDaySnapshot({
               remoteDate: payload.dayState.date,
-              localDate: todayStr(),
+              localDate: clientDate,
               remoteResetAt: payload.dayState.resetAt ?? 0,
               localResetAt: durableLocalDay.resetAt ?? 0,
             });
-            const lifecycleAdoption = acceptsRemoteLifecycle
-              ? adoptStrictlyNewerRemoteLifecycles(
-                  durableLocalDay,
-                  payload.dayState.runs,
-                )
-              : { dayState: durableLocalDay, adoptedRunIds: [] };
-            if (lifecycleAdoption.adoptedRunIds.length > 0) {
-              setAutoTrackRebaseAfterBlock(true);
-              // Persist and publish the winning lifecycle synchronously before
-              // the general inbound merge and before recovery pushes are
-              // released. Lifecycle handlers read dayStateRef, so this also
-              // fences a late tap against the old running copy.
-              saveDayState(lifecycleAdoption.dayState, { stampMeta: false });
-              dayStateRef.current = lifecycleAdoption.dayState;
-              setDayState(lifecycleAdoption.dayState);
-              lastSyncSigRef.current = "";
-            }
-            applySyncCallbackRef.current(payload);
+            coordinateForegroundAdoption({
+              payload,
+              prepareLifecycle: () => {
+                const lifecycleAdoption = acceptsRemoteLifecycle
+                  ? adoptStrictlyNewerRemoteLifecycles(
+                      durableLocalDay,
+                      payload.dayState.runs,
+                    )
+                  : { dayState: durableLocalDay, adoptedRunIds: [] };
+                return {
+                  value: lifecycleAdoption.dayState,
+                  adopted: lifecycleAdoption.adoptedRunIds.length > 0,
+                };
+              },
+              persistLifecycle: (adoptedDayState) => {
+                setAutoTrackRebaseAfterBlock(true);
+                saveDayState(adoptedDayState, { stampMeta: false });
+                dayStateRef.current = adoptedDayState;
+                setDayState(adoptedDayState);
+                lastSyncSigRef.current = "";
+              },
+              applyGeneralMerge: (canonicalPayload) => {
+                applySyncCallbackRef.current(canonicalPayload);
+              },
+              reconcileProfiles: reconcileProfilesFromServerDetailed,
+              applyProfiles: (profileResult) => {
+                if (!profileResult.changed) return;
+                setDieTypes(healDieTypesFromProfiles());
+                applyProfileReconcileRef.current(profileResult);
+              },
+              fetchFactory: fetchFactoryData,
+              applyFactory: async (factoryData) => {
+                hydrateFromServer(factoryData);
+                refreshFactoryDataConsumers();
+                await flushFactoryQueue();
+              },
+              isCurrent: isCurrentRecovery,
+            });
           }
            // A successful canonical pull supersedes the canceled pre-wake push.
            // Keep the pending flag so any local delta is replayed after release,
            // but let automatic claims use the canonical baseline immediately.
            pushAcknowledgedRef.current = true;
-           // The live row is the authority that must land first. Profile and
-           // factory pools are intentionally outside that payload, so begin
-           // hydrating them only after the day-state LWW merge is safely applied.
-           // They must not hold the live auto-track barrier: a large or slow
-           // master-data response would otherwise leave a due production tick
-           // blocked after a sleeping device wakes.
-           void (async () => {
-             try {
-               const profileResult = await reconcileProfilesFromServerDetailed();
-               if (profileResult.changed) {
-                 setDieTypes(healDieTypesFromProfiles());
-                 applyProfileReconcileRef.current(profileResult);
-               }
-             } catch {
-               // Profile data is independent of the live row. A failed pull
-               // leaves the local cache intact and the next wake retries it.
-             }
-             try {
-               const factoryData = await fetchFactoryData();
-               hydrateFromServer(factoryData);
-               refreshFactoryDataConsumers();
-               await flushFactoryQueue();
-             } catch {
-               // Factory data is independent of the live row. A failed factory
-               // pull leaves the local cache and durable queue intact; the next
-               // foreground/reconnect attempt will retry it.
-             }
-           })();
-          reconciled = true;
+         if (!isCurrentRecovery()) return false;
+         reconciled = true;
           return true;
          } catch {
             // Failed pulls are not successful reconciliation. Keep the barrier
@@ -9526,38 +9660,55 @@ export default function Home() {
                } else {
                   showForegroundRecoveryNotice("outcome", "Production state synchronized.");
                }
-             foregroundSyncBarrierRef.current = false;
-             // No-op if this wake did not adopt lifecycle state. If it did,
-             // the hook sees the true→false transition and re-baselines safely.
              if (!cancelled) {
-               setForegroundSyncAcknowledgement((value) => value + 1);
-               setAutoTrackBlocked(false);
-               const shouldPush = foregroundPushPendingRef.current;
-               foregroundPushPendingRef.current = false;
-               if (shouldPush) {
-                 // The canceled pre-wake write must be replayed before an
-                 // automatic claim can use the pulled baseline. Keep the
-                 // claim queue behind that replay's acknowledgment.
-                 pushAcknowledgedRef.current = false;
-                 requestAnimationFrame(() => {
-                   if (!cancelled) schedulePush(dayStateRef.current, 0);
-                 });
-               }
+                releaseForegroundRecovery({
+                  releaseFence: () => {
+                    foregroundSyncBarrierRef.current = false;
+                    setAutoTrackBlocked(false);
+                  },
+                  acknowledgeRelease: () => {
+                    setForegroundSyncAcknowledgement((value) => value + 1);
+                  },
+                  takeQueuedWrite: () => {
+                    const shouldPush = foregroundPushPendingRef.current;
+                    foregroundPushPendingRef.current = false;
+                    return shouldPush;
+                  },
+                  replayQueuedWrite: () => {
+                    pushAcknowledgedRef.current = false;
+                    requestAnimationFrame(() => {
+                      if (!cancelled) schedulePush(dayStateRef.current, 0);
+                    });
+                  },
+                });
               } else {
                 // The first Strict Mode pass can be cancelled after doing the
                 // work but before its state updates. Do not strand the
                 // synchronous fence in the second pass.
-                setAutoTrackBlocked(false);
-                foregroundPushPendingRef.current = false;
+                releaseCancelledForegroundRecovery({
+                  discardQueuedWrite: () => {
+                    foregroundPushPendingRef.current = false;
+                  },
+                  releaseFence: () => {
+                    foregroundSyncBarrierRef.current = false;
+                    setAutoTrackBlocked(false);
+                  },
+                });
               }
             } else if (cancelled) {
               // A cancelled first Strict Mode pass has no live owner that can
               // surface its failure or service a retry button. Release only
               // that pass's fence; a real mounted recovery failure remains
               // fenced and retryable through the visible notice above.
-              foregroundSyncBarrierRef.current = false;
-              setAutoTrackBlocked(false);
-              foregroundPushPendingRef.current = false;
+              releaseCancelledForegroundRecovery({
+                discardQueuedWrite: () => {
+                  foregroundPushPendingRef.current = false;
+                },
+                releaseFence: () => {
+                  foregroundSyncBarrierRef.current = false;
+                  setAutoTrackBlocked(false);
+                },
+              });
             }
           }
         }
@@ -9718,6 +9869,163 @@ export default function Home() {
     }
     if (changed) saveCheeseRecipePresets(presets);
   }, [v.app1CheeseRecipeName, v.app1CheeseRecipe, v.app2CheeseRecipeName, v.app2CheeseRecipe, v.app3CheeseRecipeName, v.app3CheeseRecipe, v.app4CheeseRecipeName, v.app4CheeseRecipe]);
+
+  // Detect day change while the tab is open (visibility change + periodic check)
+  useEffect(() => {
+    async function checkDateRollover() {
+      // A Home mount immediately after sign-in is already today's
+      // re-authentication. Consume this marker before the async rollover work
+      // so a duplicate interval/timer check cannot make the same session skip
+      // a later rollover.
+      const shouldSignOut = shouldSignOutAfterRollover(consumeFreshSession());
+      const stored = (() => {
+        try { return JSON.parse(localStorage.getItem(DAY_KEY) ?? "{}") as { date?: string }; } catch { return {}; }
+      })();
+      if (stored.date && stored.date !== todayStr()) {
+        // Auto-end any active run before archiving yesterday
+        const prevDs = (() => { try { return JSON.parse(localStorage.getItem(DAY_KEY) ?? "null") as DayState | null; } catch { return null; } })();
+        if (prevDs && stored.date) {
+          // Auto-deduct inventory for every run being closed by the rollover, the
+          // same as an explicit endRun. consume is idempotent per runId, so runs
+          // already deducted via endRun won't double-count.
+          for (const r of prevDs.runs) {
+            if (r.startedAt && !r.endedAt) {
+              const vals = r.id === currentRunIdRef.current ? form.getValues() : loadRunValues(r.id);
+              void consumeRun(r.id, computeRunConsumptionLines(vals)).catch(() => setWriteError("Couldn't record a finished run's inventory use on the server — stock counts may be out of sync. Check your connection."));
+            }
+          }
+          const finalDs: DayState = {
+            ...prevDs,
+            runs: prevDs.runs.map(r =>
+              r.startedAt && !r.endedAt ? { ...r, endedAt: Date.now(), pausedAt: undefined } : r
+            ),
+          };
+          archiveDayToHistory(finalDs, stored.date);
+        }
+        const newDate = todayStr();
+        // Try to load any pre-scheduled data for the new day.
+        // IMPORTANT: only push a fresh empty state when the server CONFIRMED
+        // there are no scheduled runs (GET succeeded with an empty row). If the
+        // GET itself fails (network error, transient 5xx), do NOT push — an
+        // empty push with a newer resetAt would wholesale-adopt over any
+        // previously saved scheduled runs (protectRunValues escape hatch). The
+        // session boundary (resetBoundaryAt) will be established on the next
+        // successful push once the connection recovers.
+        let serverConfirmedNoRuns = false;
+        // Retry once after a short delay when the initial fetch fails.
+        // On Render free-tier the service spins down after inactivity; a
+        // cold-start GET can time out while the server is still waking.
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            const res = await fetch(`/api/sync/${newDate}`);
+            if (res.ok) {
+              const payload = await res.json() as SyncPayload | null;
+              if (payload?.dayState?.runs?.length) {
+              // Apply the saved line-type (dough/crusts) preference to each run
+              // that has no subTab set — so brands always scheduled as "crusts"
+              // start in the right mode without a manual toggle every morning.
+              const runsWithSubTab = payload.dayState.runs.map((r: RunMeta) => {
+                if (r.subTab) return r;
+                const pref = loadProfileSubTab(r.brand ?? "", r.flavor ?? "");
+                return pref ? { ...r, subTab: pref } : r;
+              });
+              const ds: DayState = { runs: runsWithSubTab, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now(), substitutions: [], substitutionLog: [], stagedItems: {} };
+              clearActiveSubstitutions();
+              // Scheduled run values are a snapshot from scheduling time; blank
+              // sauce fields backfill from the CURRENT profile (mobile parity —
+              // its pull-up spreads the live profile).
+              const metaById = new Map(ds.runs.map(r => [r.id, r]));
+              const pulledVals: Record<string, FormValues> = {};
+              for (const [id, vals] of Object.entries(payload.runValues ?? {})) {
+                const meta = metaById.get(id);
+                pulledVals[id] = backfillFromProfile(mergeRunDefaults(vals as FormValues), meta?.brand, meta?.flavor);
+                saveRunValues(id, pulledVals[id]);
+              }
+              // Adopt the scheduled row's per-run value stamps: these values are
+              // server-sourced, not a local edit (stamping them with local time
+              // would fake one), but saving them completely unstamped would lose
+              // the per-run LWW merge to any peer that pushes a stamped copy.
+              {
+                const upd = loadRunValuesUpdated();
+                const remoteUpd = payload.runValuesUpdatedAt ?? {};
+                for (const id of Object.keys(pulledVals)) if (remoteUpd[id]) upd[id] = remoteUpd[id];
+                saveRunValuesUpdated(upd);
+              }
+              { const dm = loadDeletedItems(); if (dm["runs"]) { delete dm["runs"]; saveDeletedItems(dm); } }
+              saveDayState(ds);
+              setDayState(ds);
+              if (ds.runToTime) setRunToTime(ds.runToTime);
+              const firstId = ds.runs[0]?.id;
+              const firstVals = (firstId && pulledVals[firstId]) || DEFAULT_VALUES;
+              lastFormRunIdRef.current = firstId ?? "";
+              form.reset(firstVals);
+              resetFieldArrays(firstVals);
+              schedulePush(ds, 0);
+              fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(normalizeScheduledDays(d))).catch(() => {});
+              // A restored session must sign out after rollover so a hard
+              // refresh cannot bypass the daily re-authentication boundary.
+              // A session just established by sign-in has already
+              // re-authenticated for this production day.
+              if (shouldSignOut) void signOut();
+              return;
+            }
+            serverConfirmedNoRuns = true;
+          }
+          } catch {}
+          // Brief pause before retry to allow a cold-starting server to
+          // finish waking; skip on the final attempt.
+          if (attempt === 0 && !serverConfirmedNoRuns) {
+            await new Promise<void>((resolve) => setTimeout(resolve, 5_000));
+          }
+        }
+        // Fallback: fresh empty state. Only push to the server if the GET
+        // confirmed there are no scheduled runs — otherwise we'd risk wiping
+        // them via the wholesale-adopt escape hatch (see comment above).
+        const fresh = { ...freshDayState(), resetAt: Date.now() };
+        clearActiveSubstitutions();
+        { const dm = loadDeletedItems(); if (dm["runs"]) { delete dm["runs"]; saveDeletedItems(dm); } }
+        saveDayState(fresh);
+        setDayState(fresh);
+        setRunToTime("19:15");
+        lastFormRunIdRef.current = "";
+        form.reset(DEFAULT_VALUES);
+        resetFieldArrays(DEFAULT_VALUES);
+        if (shouldPublishFreshRolloverState(serverConfirmedNoRuns)) schedulePush(fresh, 0);
+        // See note above: restored sessions sign out after the daily reset,
+        // while the current sign-in transition is already re-authenticated.
+        if (shouldSignOut) void signOut();
+      }
+    }
+    // Run once on mount too. loadDayState() only resets the in-memory view when
+    // the stored date is stale; it does NOT archive, stamp resetAt, push the new
+    // boundary, or sign out. Without this immediate call, the rollover (and its
+    // signOut) only fires up to 60s later via the interval — by which
+    // time another device's pushed resetAt may have already 401-bounced us to
+    // login, so the user sees the logout but never the reset. Mobile already
+    // rolls over on its mount effect; this brings web to parity.
+    void checkDateRollover();
+    const interval = setInterval(checkDateRollover, 60_000);
+    document.addEventListener("visibilitychange", checkDateRollover);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", checkDateRollover);
+    };
+  }, []);
+
+  // Re-push on tab-foreground restore so a run-start (or any action) that
+  // fired while the tab was backgrounded or the screen was off doesn't stay
+  // unsynced. The browser can cancel an in-flight fetch when a tab is hidden,
+  // and setTimeout-based retries are throttled to ≥1 min on mobile — so the
+  // tab returning to the foreground is the reliable recovery point.
+  useEffect(() => {
+    function onVisibility() {
+      if (document.visibilityState === "visible") {
+        schedulePush(dayStateRef.current, 300);
+      }
+    }
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
 
   // The server's PUT epoch guard fails CLOSED once the scope has ever been
   // reset: any sync write that doesn't carry a current `?epoch=` is answered
@@ -12055,9 +12363,12 @@ export default function Home() {
       // Only update the die default when a complete existing base is
       // available — an unknown/custom die must never get an all-zero
       // override minted for it (buildTunnelDieDefaultEntry returns null).
+      const storedDieEntry = dieLineDefaultEntries.find(
+        (candidate) => dieDefaultsKey(candidate.name) === dieDefaultsKey(s.dieType),
+      );
       const entry = buildTunnelDieDefaultEntry(
         s.dieType,
-        dieLineDefaultsFor(s.dieType, dieLineDefaultOverrides),
+        storedDieEntry ?? dieLineDefaultsFor(s.dieType, dieLineDefaultOverrides),
         s.recommendedValue,
       );
       if (entry) {
@@ -12127,7 +12438,9 @@ export default function Home() {
     const dieEntry = s.dieType
       ? buildTunnelDieDefaultEntry(
           s.dieType,
-          dieLineDefaultsFor(s.dieType, dieLineDefaultOverrides),
+          dieLineDefaultEntries.find(
+            (candidate) => dieDefaultsKey(candidate.name) === dieDefaultsKey(s.dieType),
+          ) ?? dieLineDefaultsFor(s.dieType, dieLineDefaultOverrides),
           s.recommendedValue,
         )
       : null;
@@ -16927,45 +17240,12 @@ export default function Home() {
               </div>
             )}
             {foregroundRecoveryNotice && (
-              <div
-                className={`print:hidden mb-3 flex items-start gap-2 rounded-md border px-3 py-2 text-sm ${
-                  foregroundRecoveryNotice.kind === "failed"
-                    ? "border-red-500/40 bg-red-500/10 text-red-200"
-                    : foregroundRecoveryNotice.kind === "outcome"
-                      ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
-                      : "border-amber-500/40 bg-amber-500/10 text-amber-100"
-                }`}
-                role="status"
-                aria-live="polite"
-                aria-atomic="true"
-                data-testid="foreground-recovery-status"
-                data-foreground-sync-ack={foregroundSyncAcknowledgement}
-                data-foreground-recovery-state={foregroundRecoveryNotice.kind}
-              >
-                {foregroundRecoveryNotice.kind === "outcome"
-                  ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-                  : <RefreshCw className="mt-0.5 h-4 w-4 shrink-0" />}
-                <span className="min-w-0 flex-1">{foregroundRecoveryNotice.message}</span>
-                {foregroundRecoveryNotice.kind === "failed" && (
-                  <button
-                    type="button"
-                    onClick={() => { void foregroundRecoveryRetryRef.current?.(); }}
-                    className="shrink-0 rounded border border-current/40 px-2 py-1 text-xs font-semibold hover:bg-black/10"
-                    data-testid="button-retry-foreground-recovery"
-                  >
-                    Retry recovery
-                  </button>
-                )}
-                {foregroundRecoveryNotice.kind === "outcome" && (
-                  <button
-                    type="button"
-                    onClick={dismissForegroundRecoveryNotice}
-                    className="shrink-0 text-xs font-semibold opacity-80 hover:opacity-100"
-                  >
-                    Dismiss
-                  </button>
-                )}
-              </div>
+              <ForegroundRecoveryStatus
+                notice={foregroundRecoveryNotice}
+                acknowledgement={foregroundSyncAcknowledgement}
+                onRetry={() => { void foregroundRecoveryRetryRef.current?.(); }}
+                onDismiss={dismissForegroundRecoveryNotice}
+              />
             )}
             <HomeStationTabs activeTab={activeTab} onTabChange={(tab) => setActiveTab(tab as HomeTab)}>
               {/* ─── RUN ─── */}
@@ -18135,27 +18415,59 @@ export default function Home() {
               ) : scheduleView === "editor" ? (
                 <>
                   <div className="flex items-center gap-2 px-5 py-4 border-b border-border/40">
-                    <button type="button" onClick={() => setScheduleView("list")} className="text-muted-foreground hover:text-foreground -ml-1 mr-0.5">
+                    <button type="button" aria-label="Back to scheduled days" onClick={() => setScheduleView("list")} className="text-muted-foreground hover:text-foreground -ml-1 mr-0.5">
                       <ChevronLeft className="w-4 h-4" />
                     </button>
                     <CalendarPlus className="w-5 h-5 text-primary shrink-0" />
-                    <h2 className="text-base font-bold flex-1">
+                    <h2 id="scheduled-days-dialog-title" className="text-base font-bold flex-1">
                       {scheduleEditorDate ? `Plan for ${new Date(scheduleEditorDate + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })}` : "Plan Future Day"}
                     </h2>
-                    <button type="button" onClick={() => setShowScheduleDialog(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+                    <button type="button" aria-label="Close schedule editor" onClick={() => setShowScheduleDialog(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
                   </div>
                   <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4 space-y-5 min-h-0">
                     {/* Date picker */}
                     <div>
                       <label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground block mb-1.5">Date</label>
-                      <input
-                        type="date"
-                        value={scheduleEditorDate}
-                        min={todayStr()}
-                        disabled={scheduleEditorIsLiveDay}
-                        onChange={e => setScheduleEditorDate(e.target.value)}
-                        className="w-full h-9 px-3 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors disabled:opacity-60"
-                      />
+                      <Popover open={scheduleCalendarOpen} onOpenChange={setScheduleCalendarOpen}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={scheduleEditorIsLiveDay}
+                            aria-label="Choose production date"
+                            data-testid="schedule-date-trigger"
+                            data-date-value={scheduleEditorDate}
+                            className="w-full h-9 justify-between bg-muted/40 px-3 text-sm font-normal outline-none focus:border-primary/60 disabled:opacity-60"
+                          >
+                            <span>
+                              {scheduleEditorDate
+                                ? new Date(`${scheduleEditorDate}T12:00:00`).toLocaleDateString(undefined, {
+                                    month: "short",
+                                    day: "numeric",
+                                    year: "numeric",
+                                  })
+                                : "Select a date"}
+                            </span>
+                            <CalendarDays className="w-4 h-4 text-muted-foreground" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent align="start" className="w-auto p-0">
+                          <Calendar
+                            mode="single"
+                            selected={scheduleEditorDate ? new Date(`${scheduleEditorDate}T12:00:00`) : undefined}
+                            defaultMonth={scheduleEditorDate ? new Date(`${scheduleEditorDate}T12:00:00`) : new Date()}
+                            disabled={{ before: new Date(`${todayStr()}T12:00:00`) }}
+                            onSelect={date => {
+                              if (!date) return;
+                              const year = date.getFullYear();
+                              const month = String(date.getMonth() + 1).padStart(2, "0");
+                              const day = String(date.getDate()).padStart(2, "0");
+                              setScheduleEditorDate(`${year}-${month}-${day}`);
+                              setScheduleCalendarOpen(false);
+                            }}
+                          />
+                        </PopoverContent>
+                      </Popover>
                       {scheduleEditorIsLiveDay && (
                         <p className="text-[11px] text-muted-foreground mt-1">You're editing today's live plan — changes apply right away.</p>
                       )}
@@ -18299,13 +18611,13 @@ export default function Home() {
                 <>
                   {/* ── Advanced Settings full-form view ──────────────────────── */}
                   <div className="flex items-center gap-2 px-5 py-4 border-b border-border/40">
-                    <button type="button" onClick={() => setScheduleView("editor")} className="text-muted-foreground hover:text-foreground -ml-1 mr-0.5">
+                    <button type="button" aria-label="Back to schedule editor" onClick={() => setScheduleView("editor")} className="text-muted-foreground hover:text-foreground -ml-1 mr-0.5">
                       <ChevronLeft className="w-4 h-4" />
                     </button>
-                    <h2 className="text-base font-bold flex-1 min-w-0 truncate">
+                    <h2 id="scheduled-days-dialog-title" className="text-base font-bold flex-1 min-w-0 truncate">
                       {(() => { const r = scheduleEditorRuns.find(r => r.id === scheduleAdvancedRunId); return r?.brand ? `${r.brand}${r.flavor ? ` / ${r.flavor}` : ""} — Settings` : "Advanced Settings"; })()}
                     </h2>
-                    <button type="button" onClick={() => setShowScheduleDialog(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+                    <button type="button" aria-label="Close advanced schedule settings" onClick={() => setShowScheduleDialog(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
                   </div>
                   <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4 min-h-0 space-y-6">
                     {/* ── Dough & Crust ──────────────────────────────────────── */}
@@ -18329,7 +18641,11 @@ export default function Home() {
                         ] as [keyof FormValues, string][]).map(([field, label]) => (
                           <div key={field}>
                             <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">{label}</label>
-                            <input type="number" min="0"
+                            <input
+                              id={field === "pizzasPerCase" ? "schedule-pizzas-per-case" : undefined}
+                              data-testid={field === "pizzasPerCase" ? "schedule-pizzas-per-case" : undefined}
+                              autoFocus={field === "pizzasPerCase" && Boolean(scheduleError)}
+                              type="number" min="0"
                               value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[field] as number) || ""}
                               onChange={e => updateAdvancedField(scheduleAdvancedRunId!, field, Number(e.target.value) || 0)}
                               placeholder="0"
@@ -18541,6 +18857,11 @@ export default function Home() {
                     </section>
                   </div>
                   <div className="px-5 py-4 border-t border-border/40">
+                    {scheduleError && (
+                      <p className="text-xs text-destructive mb-3 text-center" role="alert">
+                        {scheduleError}
+                      </p>
+                    )}
                     <button type="button" onClick={() => setScheduleView("editor")} className="w-full py-2 px-4 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors">
                       Done — Back to Run List
                     </button>
@@ -19149,7 +19470,7 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
     currentRun, customAllergens, dayState, dieLineDefaultOverrides, dieTypes,
     doughSubTab, endRun, endStop, flavorInput, flavorScrollKeep, form,
     initialFinishTimestampRef, isSupervisor, lastEndedRun, lastRunRecall,
-    logStop, nextRunDieType, pauseRun, removeBlankRuns, removeBrand,
+    logStop, nextRunDieType, openSetupEditor, pauseRun, removeBlankRuns, removeBrand,
     removeFlavor, removeRun, pauseDecisionRunId, pendingForegroundStopRunId, resumeRun, ruleViolations,
     runStatus, setBrandInput, setConfirmDeleteBrand, setConfirmDeleteFlavor,
     setConfirmRemoveBlanks, setConfirmRemoveRun, setDayState, setDoughSubTab,
@@ -19185,6 +19506,17 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
   // of the check — blank placeholder runs have no meaningful order and should
   // not trigger a false-positive warning.
   function handleStartRun() {
+    const readiness = getStartRunReadiness(v);
+    if (!readiness.ready) {
+      toast({
+        title: "Run not ready — Pizzas Per Case is missing",
+        description:
+          "Enter a positive Pizzas Per Case value in this product's setup before starting a run that requests cases.",
+        variant: "destructive",
+      });
+      openSetupEditor(currentRun?.brand || undefined, currentRun?.flavor || undefined);
+      return;
+    }
     const firstPendingIdx = dayState.runs.findIndex(
       (r: RunMeta) => !r.startedAt && (r.brand || r.flavor),
     );
@@ -19967,10 +20299,11 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
                       if (!(Number(v.speedAdjustment) > 0)) missing.push("Speed Adjustment");
                     }
                   }
-                  if (!(Number(v.pizzasPerCase) > 0)) missing.push("Pizzas Per Case");
+                   const summary = computeSummaryStats(v);
+                   if (!summary.productionNeedsAvailable) missing.push("Pizzas Per Case");
                   const freezerMissing = !(Number(ve.freezerTime) > 0);
                   if (missing.length === 0 && !freezerMissing) return null;
-                  const frontlineNeedsBlocked = !computeSummaryStats(v).productionNeedsAvailable;
+                   const frontlineNeedsBlocked = !summary.productionNeedsAvailable;
                   const headline = frontlineNeedsBlocked
                     ? "Frontline quantities can't be calculated — Pizzas Per Case is not set"
                     : missing.length > 0
@@ -23680,7 +24013,10 @@ const LiveStoppagesTabContent = memo(function LiveStoppagesTabContent() {
                   const stopOnlyMs = allStops.filter((s: any) => s.endedAt && s.type !== "pause").reduce((acc: any, s: any) => acc + (s.endedAt! - s.startedAt), 0);
                   const noReasonCount = allStops.filter((s: any) => !s.reason.trim()).length;
                   return (
-                    <div className="mb-5 rounded-lg border border-border/50 bg-card/40 overflow-hidden">
+                    <div
+                      data-testid="stoppage-log"
+                      className="mb-5 rounded-lg border border-border/50 bg-card/40 overflow-hidden"
+                    >
                       <div className="flex items-center justify-between px-4 py-3 border-b border-border/30">
                         <div className="flex items-center gap-2">
                           <OctagonX className="w-4 h-4 text-orange-400 shrink-0" />
@@ -23757,17 +24093,26 @@ const LiveStoppagesTabContent = memo(function LiveStoppagesTabContent() {
                             const dur = stop.endedAt ? (stop.endedAt - stop.startedAt) / 1000 : null;
                             const isActive = !stop.endedAt;
                             const noReason = !stop.reason.trim();
+                            const rowBackground = isActive && !isPause
+                              ? "bg-orange-100/70 dark:bg-orange-950/20"
+                              : !isActive && isManual
+                                ? "bg-violet-50/70 dark:bg-transparent"
+                                : !isActive && !isPause
+                                  ? "bg-orange-50/70 dark:bg-transparent"
+                                  : isActive
+                                    ? "bg-blue-100/70 dark:bg-blue-950/20"
+                                    : "";
                             return (
-                              <div key={stop.id} className={`flex items-start gap-3 px-4 py-2.5 text-sm ${isActive && !isPause ? "bg-orange-950/20" : isActive && isPause ? "bg-blue-950/20" : ""}`}>
+                              <div key={stop.id} className={`flex items-start gap-3 px-4 py-2.5 text-sm ${rowBackground}`}>
                                 <div className="mt-0.5 shrink-0">
                                   {isPause
-                                    ? <PauseCircle className={`w-3.5 h-3.5 ${isActive ? "text-blue-400 animate-pulse" : "text-blue-400/50"}`} />
-                                    : <OctagonX className={`w-3.5 h-3.5 ${isActive ? "text-orange-400 animate-pulse" : "text-orange-400/50"}`} />
+                                    ? <PauseCircle className={`w-3.5 h-3.5 ${isActive ? "text-blue-400 animate-pulse" : "text-blue-400"}`} />
+                                    : <OctagonX className={`w-3.5 h-3.5 ${isActive ? "text-orange-800 dark:text-orange-400 animate-pulse" : "text-orange-800 dark:text-orange-400"}`} />
                                   }
                                 </div>
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-1.5 flex-wrap">
-                                    <span className={`text-[10px] font-semibold uppercase tracking-wider ${isPause ? "text-blue-400/70" : isManual ? "text-violet-400/70" : "text-orange-400/70"}`}>
+                                    <span className={`text-[10px] font-semibold uppercase tracking-wider ${isPause ? "text-blue-400" : isManual ? "text-violet-700 dark:text-violet-300" : "text-orange-800 dark:text-orange-400/70"}`}>
                                       {isPause ? "Pause" : isManual ? "Manual" : "Stop"}
                                     </span>
                                     {noReason ? (
@@ -24558,13 +24903,19 @@ const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                               {expandedHistoryDay === day.date && (
                                 <div className="px-4 pb-4 space-y-3 border-t border-border/20 pt-3">
                                   {day.runs.map((run: any) => (
-                                    <SummaryCard
-                                      key={run.id}
-                                      run={run}
-                                      readOnly
-                                      runVals={day.runValues[run.id] as FormValues | undefined}
-                                      onShowDetail={() => setIngredientDetailRunId(run.id)}
-                                    />
+                                    <div key={run.id} className="space-y-2">
+                                      <SummaryCard
+                                        run={run}
+                                        readOnly
+                                        runVals={day.runValues[run.id] as FormValues | undefined}
+                                        onShowDetail={() => setIngredientDetailRunId(run.id)}
+                                      />
+                                      <ApplicatorEvidenceReview
+                                        day={day}
+                                        run={run}
+                                        values={(day.runValues?.[run.id] ?? DEFAULT_VALUES) as FormValues}
+                                      />
+                                    </div>
                                   ))}
                                 </div>
                               )}

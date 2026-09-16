@@ -13,17 +13,36 @@ import {
 } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
+  validateComparableEvaluationManifest,
+  validateEvaluationManifest,
+  type EvaluationComparabilityRequirements,
+  type EvaluationManifest,
+} from "@workspace/ai-evaluation";
+import {
   DEFAULT_FROM_DATE,
   DEFAULT_HEAL_ID,
   DEFAULT_REPORT,
+  SOURCE_LIBRARY_PREFLIGHT_DIAGNOSTIC_VERSION,
   computeSourceLibraryEvidenceId,
+  parseSourceLibraryPreflightDiagnostic as parseStoredSourceLibraryPreflightDiagnostic,
   parseSourceLibraryEvidenceEnvironment,
+  summarizeSourceLibraryPreflight,
   type SourceLibraryEvidenceEnvironment,
+  type SourceLibraryPreflightDiagnostic,
 } from "./verify-source-library-reconciliation.mts";
 import {
   REPORT_KEY_ROTATION_PREFLIGHT_VERIFIER,
   REPORT_KEY_ROTATION_SCAN_LIMIT,
 } from "./report-key-rotation-preflight.mts";
+import {
+  diagnosticsEqualForPairs,
+  releaseRevisionGitArgs,
+} from "./typescript-7-evidence.mts";
+import {
+  TYPESCRIPT_7_RESOURCE_BUDGETS,
+  classifyTypescript7ResourceRegressions,
+  typescript7ResourceBudgetsEqual,
+} from "./typescript-7-resource-contract.mts";
 
 export type ReleaseStep = {
   label: string;
@@ -99,6 +118,7 @@ export type ReleaseStepResult = {
   status: StepStatus;
   elapsedMs: number;
   blockedBy?: readonly string[];
+  sourceLibraryPreflight?: SourceLibraryPreflightDiagnostic;
 };
 
 export type ReleaseStageTiming = {
@@ -113,12 +133,86 @@ export type ReleaseTiming = {
 
 export type ReleaseEvidenceOptions = {
   currentRevision?: string;
-  expectedMode?: "standard" | "full";
+  expectedMode?: ReleaseMode;
   expectedLabels?: readonly string[];
   allowIncompleteCheckpoint?: boolean;
   expectedSourceLibraryEnvironment?: SourceLibraryEvidenceEnvironment;
   expectedSourceLibraryRevision?: string;
 };
+
+export function validateReleaseAiEvaluationEvidence(
+  evidence: Buffer,
+  requirements: EvaluationComparabilityRequirements,
+): EvaluationManifest {
+  let report: unknown;
+  try {
+    report = JSON.parse(evidence.toString("utf8"));
+  } catch {
+    throw new Error("AI evaluation evidence must be valid JSON");
+  }
+  if (!report || typeof report !== "object" || Array.isArray(report)) {
+    throw new Error("AI evaluation evidence must be an object");
+  }
+  const record = report as Record<string, unknown>;
+  const manifest = "evaluationManifest" in record
+    ? record.evaluationManifest
+    : record;
+  if (
+    !manifest
+    || typeof manifest !== "object"
+    || Array.isArray(manifest)
+    || !("manifestVersion" in manifest)
+  ) {
+    throw new Error(
+      "AI release evidence must contain an explicit shared evaluation manifest",
+    );
+  }
+  return validateComparableEvaluationManifest(manifest, requirements);
+}
+
+async function importCorpusEvaluationRequirements(): Promise<EvaluationComparabilityRequirements> {
+  let canonical: unknown;
+  try {
+    canonical = JSON.parse(
+      await readFile(IMPORT_CORPUS_EVALUATION_SOURCE, "utf8"),
+    );
+  } catch (error) {
+    throw new Error(
+      `Could not read canonical import corpus evaluation manifest: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+  const manifest = validateEvaluationManifest(canonical);
+  if (
+    manifest.evaluation.id !== "deterministic-import-corpus"
+    || manifest.evaluation.kind !== "deterministic"
+  ) {
+    throw new Error(
+      "canonical import corpus evaluation manifest has an unexpected evaluation identity",
+    );
+  }
+  if (
+    manifest.provenance.evidence.state !== "hashed"
+    || manifest.provenance.evaluator.state !== "hashed"
+  ) {
+    throw new Error(
+      "canonical import corpus evaluation manifest requires hashed evidence and evaluator provenance",
+    );
+  }
+  return {
+    evaluationId: "deterministic-import-corpus",
+    kind: "deterministic",
+    source: manifest.corpus,
+    thresholds: manifest.thresholds,
+    dependencies: manifest.dependencies,
+    provider: manifest.provider,
+    evidence: manifest.provenance.evidence,
+    evidenceType: manifest.provenance.evidenceType,
+    evaluator: manifest.provenance.evaluator,
+    requirePassedOutcome: true,
+  };
+}
 
 export type BrowserDurationRegression = {
   file: string;
@@ -157,6 +251,27 @@ const STATEFUL_RELEASE_LOCK_DIR =
   "/tmp/run-calculator-release-stateful-gates.lock";
 const STATEFUL_RELEASE_LOCK_STALE_MS = 60 * 60_000;
 const fullRun = process.argv.includes("--full");
+const typescript7Promotion = process.argv.includes(
+  "--typescript-7-promotion",
+);
+export type ReleaseMode = "standard" | "full" | "typescript-7-promotion";
+
+function releaseEvidenceVerificationCommand(mode: ReleaseMode): string {
+  switch (mode) {
+    case "full":
+      return "pnpm --filter @workspace/scripts exec tsx ./src/release-check.mts --full --verify-evidence";
+    case "typescript-7-promotion":
+      return "pnpm --filter @workspace/scripts exec tsx ./src/release-check.mts --typescript-7-promotion --verify-evidence";
+    case "standard":
+      return "pnpm run release:check -- --verify-evidence";
+  }
+}
+
+const releaseMode: ReleaseMode = typescript7Promotion
+  ? "typescript-7-promotion"
+  : fullRun
+    ? "full"
+    : "standard";
 
 async function statefulReleaseLockOwnerAlive(): Promise<boolean | undefined> {
   const owner = await readFile(
@@ -232,19 +347,23 @@ function cliOptionValue(option: string): string | undefined {
 }
 
 const evidenceDirArgument = cliOptionValue("--evidence-dir");
-export function defaultReleaseEvidenceDir(mode: "standard" | "full"): string {
-  return mode === "full" ? "release-evidence-full" : "release-evidence";
+export function defaultReleaseEvidenceDir(mode: ReleaseMode): string {
+  if (mode === "full") return "release-evidence-full";
+  if (mode === "typescript-7-promotion") {
+    return "release-evidence-typescript-7-promotion";
+  }
+  return "release-evidence";
 }
 
 export function resolveReleaseEvidenceDir(
-  mode: "standard" | "full",
+  mode: ReleaseMode,
   configuredDir = process.env.RELEASE_EVIDENCE_DIR,
 ): string {
   return configuredDir ?? defaultReleaseEvidenceDir(mode);
 }
 
 const releaseEvidenceDir = resolveReleaseEvidenceDir(
-  fullRun ? "full" : "standard",
+  releaseMode,
   evidenceDirArgument ?? process.env.RELEASE_EVIDENCE_DIR,
 );
 const cleanStartEvidenceDir = `${releaseEvidenceDir}/clean-start`;
@@ -260,6 +379,405 @@ const webkitBrowserEvidencePath = resolve(
 );
 export const SOURCE_LIBRARY_RECONCILIATION_EVIDENCE =
   "source-library-reconciliation.json";
+export const IMPORT_CORPUS_EVALUATION_EVIDENCE =
+  "ai-evaluations/deterministic-import-corpus.json";
+export const TYPESCRIPT_7_COMPARISON_EVIDENCE =
+  "typescript-7-comparison.json";
+export const TYPESCRIPT_7_HISTORY_LIMIT = 5;
+export const TYPESCRIPT_7_SUPPORTED_RUNNERS = [
+  { platform: "linux", arch: "x64" },
+] as const;
+
+export type Typescript7TrendHistorySummary = {
+  state: "reset" | "missing" | "retained";
+  distinctRevisionCount: number;
+  incompatibleRunnerClassSamples: number;
+};
+
+export function formatTypescript7TrendHistorySummary(
+  summary: Typescript7TrendHistorySummary,
+): string {
+  const compatiblePriorRevisions = summary.distinctRevisionCount - 1;
+  if (compatiblePriorRevisions > 0) {
+    return `TypeScript 7 trend history includes ${compatiblePriorRevisions} compatible prior revision(s); ${summary.incompatibleRunnerClassSamples} incompatible runner-class sample(s) excluded (count capped at ${TYPESCRIPT_7_HISTORY_LIMIT}).`;
+  }
+  if (summary.incompatibleRunnerClassSamples > 0) {
+    return `TypeScript 7 trend history reset for this runner class: ${summary.incompatibleRunnerClassSamples} incompatible prior sample(s) excluded (count capped at ${TYPESCRIPT_7_HISTORY_LIMIT}).`;
+  }
+  return "TypeScript 7 trend history is missing: no valid prior samples were available.";
+}
+
+export function validateTypescript7ComparisonEvidence(
+  bytes: Buffer,
+  expectedRevision: string,
+): Typescript7TrendHistorySummary {
+  let value: unknown;
+  try {
+    value = JSON.parse(bytes.toString("utf8"));
+  } catch {
+    throw new Error("TypeScript 7 comparison evidence must be valid JSON");
+  }
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("TypeScript 7 comparison evidence must be an object");
+  }
+  const report = value as Record<string, unknown>;
+  const runner = report.runner as Record<string, unknown> | undefined;
+  const declarations = report.declarations as
+    | Record<string, unknown>
+    | undefined;
+  const containment = report.containment as
+    | Record<string, unknown>
+    | undefined;
+  const editorService = report.editorService as
+    | Record<string, unknown>
+    | null
+    | undefined;
+  const validPromotionEditorProof =
+    report.promotionAttempt === true &&
+    report.advisory === false &&
+    editorService?.command === "pnpm run check:editor-typescript" &&
+    editorService.sdkPath === "node_modules/typescript/lib" &&
+    typeof editorService.sdkVersion === "string" &&
+    /^\d+\.\d+\.\d+$/.test(editorService.sdkVersion) &&
+    editorService.outcome === "PASS" &&
+    editorService.exitCode === 0;
+  const performanceChecks = [
+    "build",
+    "scripts",
+    "api-server",
+    "run-calculator",
+    "mockup-sandbox",
+    "ai-evaluation",
+    "corpus-harness",
+  ];
+  const expectedPerformanceChecks = new Set(
+    TYPESCRIPT_7_RESOURCE_BUDGETS.requiredModes.flatMap((mode) =>
+      performanceChecks.map((check) => `${mode}:${check}`),
+    ),
+  );
+  const expectedCommands = new Set([
+    "frozen-install",
+    "typescript-6-clean",
+    ...TYPESCRIPT_7_RESOURCE_BUDGETS.requiredModes.flatMap((mode) =>
+      performanceChecks.flatMap((check) => [
+        `typescript-6-${check}-${mode}`,
+        `typescript-7-${check}-${mode}`,
+      ]),
+    ),
+  ]);
+  if (
+    report.schemaVersion !== 3 ||
+    report.sourceRevision !== expectedRevision ||
+    report.authoritativeCompiler !== "Version 6.0.3" ||
+    report.candidateCompiler !== "Version 7.0.2" ||
+    (report.advisory !== true && !validPromotionEditorProof) ||
+    report.authoritativeOutputsChanged !== false ||
+    typeof report.diagnosticsEqual !== "boolean" ||
+    !Array.isArray(report.commands) ||
+    report.commands.length !== expectedCommands.size ||
+    !Array.isArray(report.performanceComparison) ||
+    report.performanceComparison.length !==
+      TYPESCRIPT_7_RESOURCE_BUDGETS.requiredModes.length *
+        performanceChecks.length ||
+    runner?.platform !== process.platform ||
+    runner?.arch !== process.arch ||
+    runner?.supported !== true ||
+    typeof runner.image !== "string" ||
+    runner.image.length < 1 ||
+    runner.image.length > 80 ||
+    !/^[A-Za-z0-9._@+-]+$/.test(runner.image) ||
+    !/^[a-f0-9]{64}$/.test(String(runner.hardwareClass ?? "")) ||
+    !Number.isInteger(runner.logicalCpuCount) ||
+    Number(runner.logicalCpuCount) < 1 ||
+    Number(runner.logicalCpuCount) > 1024 ||
+    !Number.isInteger(runner.memoryGiB) ||
+    Number(runner.memoryGiB) < 1 ||
+    Number(runner.memoryGiB) > 16_384 ||
+    !TYPESCRIPT_7_SUPPORTED_RUNNERS.some(
+      (item) =>
+        item.platform === process.platform && item.arch === process.arch,
+    ) ||
+    containment?.beforeStatusSha256 !== containment?.afterStatusSha256 ||
+    !/^[a-f0-9]{64}$/.test(
+      String(containment?.beforeStatusSha256 ?? ""),
+    ) ||
+    !Array.isArray(declarations?.baseline) ||
+    !Array.isArray(declarations?.candidate) ||
+    !Array.isArray(declarations?.changedPaths)
+  ) {
+    throw new Error(
+      "TypeScript 7 comparison evidence is stale, incomplete, or from an unsupported runner",
+    );
+  }
+  const resourceBudgets = report.resourceBudgets as
+    | Record<string, unknown>
+    | undefined;
+  const trend = report.trend as Record<string, unknown> | undefined;
+  const promotion = report.promotionAssessment as
+    | Record<string, unknown>
+    | undefined;
+  if (
+    !typescript7ResourceBudgetsEqual(resourceBudgets) ||
+    trend?.historyLimit !== TYPESCRIPT_7_HISTORY_LIMIT ||
+    !Number.isInteger(trend.incompatibleRunnerClassSamples) ||
+    Number(trend.incompatibleRunnerClassSamples) < 0 ||
+    Number(trend.incompatibleRunnerClassSamples) > TYPESCRIPT_7_HISTORY_LIMIT ||
+    typeof trend?.distinctRevisionCount !== "number" ||
+    !Array.isArray(trend.regressedRevisions) ||
+    !Array.isArray(trend.revisionSamples) ||
+    trend.revisionSamples.length < 1 ||
+    typeof promotion?.eligible !== "boolean" ||
+    promotion.thresholdApprovalRequired !==
+      !TYPESCRIPT_7_RESOURCE_BUDGETS.approvedForPromotion ||
+    typeof promotion.repeatedEvidenceMet !== "boolean" ||
+    typeof promotion.resourceBudgetsMet !== "boolean" ||
+    !Array.isArray(promotion.resourceRegressions)
+  ) {
+    throw new Error(
+      "TypeScript 7 resource-budget evidence is stale or malformed",
+    );
+  }
+  for (const command of report.commands) {
+    const item = command as Record<string, unknown>;
+    if (
+      typeof item.name !== "string" ||
+      typeof item.exitCode !== "number" ||
+      typeof item.elapsedMs !== "number" ||
+      typeof item.peakRssKiB !== "number" ||
+      item.peakRssKiB <= 0 ||
+      !Array.isArray(item.diagnostics) ||
+      item.diagnostics.some((diagnostic) => typeof diagnostic !== "string")
+    ) {
+      throw new Error(
+        "TypeScript 7 comparison command evidence is malformed",
+      );
+    }
+    if (!expectedCommands.delete(item.name)) {
+      throw new Error(
+        "TypeScript 7 comparison command evidence is duplicated or unexpected",
+      );
+    }
+  }
+  if (expectedCommands.size !== 0) {
+    throw new Error("TypeScript 7 comparison command evidence is incomplete");
+  }
+  const commandsByName = new Map(
+    report.commands.map((command) => {
+      const item = command as Record<string, unknown>;
+      return [item.name as string, item] as const;
+    }),
+  );
+  for (const comparison of report.performanceComparison) {
+    const item = comparison as Record<string, unknown>;
+    const elapsed = item.elapsedMs as Record<string, unknown> | undefined;
+    const memory = item.peakRssKiB as Record<string, unknown> | undefined;
+    if (
+      typeof item.check !== "string" ||
+      (item.mode !== "cold" && item.mode !== "warm") ||
+      typeof elapsed?.baseline !== "number" ||
+      typeof elapsed?.candidate !== "number" ||
+      typeof elapsed?.delta !== "number" ||
+      (typeof elapsed?.ratio !== "number" && elapsed?.ratio !== null) ||
+      typeof memory?.baseline !== "number" ||
+      typeof memory?.candidate !== "number" ||
+      typeof memory?.delta !== "number" ||
+      (typeof memory?.ratio !== "number" && memory?.ratio !== null)
+    ) {
+      throw new Error(
+        "TypeScript 7 timing or peak-memory comparison is malformed",
+      );
+    }
+    if (!expectedPerformanceChecks.delete(`${item.mode}:${item.check}`)) {
+      throw new Error(
+        "TypeScript 7 performance comparison is duplicated or unexpected",
+      );
+    }
+    const baseline = commandsByName.get(
+      `typescript-6-${item.check}-${item.mode}`,
+    );
+    const candidate = commandsByName.get(
+      `typescript-7-${item.check}-${item.mode}`,
+    );
+    if (
+      elapsed.baseline !== baseline?.elapsedMs ||
+      elapsed.candidate !== candidate?.elapsedMs ||
+      elapsed.delta !==
+        (candidate?.elapsedMs as number) - (baseline?.elapsedMs as number) ||
+      elapsed.ratio !==
+        ((baseline?.elapsedMs as number) === 0
+          ? null
+          : (candidate?.elapsedMs as number) /
+            (baseline?.elapsedMs as number)) ||
+      memory.baseline !== baseline?.peakRssKiB ||
+      memory.candidate !== candidate?.peakRssKiB ||
+      memory.delta !==
+        (candidate?.peakRssKiB as number) -
+          (baseline?.peakRssKiB as number) ||
+      memory.ratio !==
+        ((baseline?.peakRssKiB as number) === 0
+          ? null
+          : (candidate?.peakRssKiB as number) /
+            (baseline?.peakRssKiB as number))
+    ) {
+      throw new Error(
+        "TypeScript 7 timing or peak-memory comparison does not match command evidence",
+      );
+    }
+  }
+  if (expectedPerformanceChecks.size !== 0) {
+    throw new Error("TypeScript 7 performance comparison is incomplete");
+  }
+  const expectedResourceRegressions =
+    classifyTypescript7ResourceRegressions(
+      report.performanceComparison,
+      performanceChecks,
+    );
+  if (expectedResourceRegressions === null) {
+    throw new Error(
+      "TypeScript 7 resource-budget evidence is stale or malformed",
+    );
+  }
+  const revisionSamples = trend.revisionSamples as Array<
+    Record<string, unknown>
+  >;
+  const revisions = revisionSamples.map((sample) => sample.sourceRevision);
+  const distinctRevisions = new Set(revisions);
+  const regressedRevisions = trend.regressedRevisions as unknown[];
+  if (
+    revisionSamples.length > 6 ||
+    revisions.some((revision, index) => {
+      if (typeof revision !== "string") return true;
+      const isCurrent = index === revisions.length - 1;
+      return isCurrent
+        ? revision !== expectedRevision
+        : !/^[a-f0-9]{40}$/.test(revision);
+    }) ||
+    distinctRevisions.size !== revisionSamples.length ||
+    revisions.at(-1) !== expectedRevision ||
+    trend.distinctRevisionCount !== distinctRevisions.size ||
+    regressedRevisions.some(
+      (revision) =>
+        typeof revision !== "string" || !distinctRevisions.has(revision),
+    ) ||
+    promotion.repeatedEvidenceMet !==
+      (distinctRevisions.size >=
+        TYPESCRIPT_7_RESOURCE_BUDGETS.minimumRevisions) ||
+    promotion.resourceBudgetsMet !==
+      (regressedRevisions.length === 0) ||
+    promotion.eligible !==
+      (TYPESCRIPT_7_RESOURCE_BUDGETS.approvedForPromotion &&
+        distinctRevisions.size >=
+          TYPESCRIPT_7_RESOURCE_BUDGETS.minimumRevisions &&
+        regressedRevisions.length === 0 &&
+        report.acceptanceGatesMet === true) ||
+    (expectedResourceRegressions.length > 0) !==
+      regressedRevisions.includes(expectedRevision) ||
+    JSON.stringify(promotion.resourceRegressions) !==
+      JSON.stringify(expectedResourceRegressions)
+  ) {
+    throw new Error(
+      "TypeScript 7 revision trend or resource assessment does not match measurements",
+    );
+  }
+
+  const readManifest = (
+    value: unknown,
+    label: string,
+    allowEmpty = false,
+  ) => {
+    const manifest = value as Array<Record<string, unknown>>;
+    if (!allowEmpty && manifest.length === 0) {
+      throw new Error(`TypeScript ${label} declaration manifest is empty`);
+    }
+    const byPath = new Map<string, string>();
+    for (const entry of manifest) {
+      if (
+        typeof entry.path !== "string" ||
+        !entry.path.endsWith(".d.ts") ||
+        typeof entry.sha256 !== "string" ||
+        !/^[a-f0-9]{64}$/.test(entry.sha256) ||
+        byPath.has(entry.path)
+      ) {
+        throw new Error(
+          `TypeScript ${label} declaration manifest is malformed`,
+        );
+      }
+      byPath.set(entry.path, entry.sha256);
+    }
+    return byPath;
+  };
+  const baselineManifest = readManifest(declarations.baseline, "6");
+  const candidateBuild = commandsByName.get("typescript-7-build-cold");
+  const candidateManifest = readManifest(
+    declarations.candidate,
+    "7",
+    candidateBuild?.exitCode !== 0,
+  );
+  const expectedChangedPaths = [
+    ...new Set([...baselineManifest.keys(), ...candidateManifest.keys()]),
+  ]
+    .filter(
+      (path) => baselineManifest.get(path) !== candidateManifest.get(path),
+    )
+    .sort();
+  const changedPaths = declarations.changedPaths as unknown[];
+  if (
+    changedPaths.some((path) => typeof path !== "string") ||
+    JSON.stringify(changedPaths) !== JSON.stringify(expectedChangedPaths)
+  ) {
+    throw new Error(
+      "TypeScript declaration difference paths do not match the retained manifests",
+    );
+  }
+  const diagnosticsEqual = TYPESCRIPT_7_RESOURCE_BUDGETS.requiredModes.every((mode) =>
+    diagnosticsEqualForPairs(
+      (report.commands as Array<{ name: string; diagnostics: string[] }>).map(
+        (command) => ({
+          ...command,
+          name: command.name.replace(`-${mode}`, ""),
+        }),
+      ),
+      performanceChecks,
+    ),
+  );
+  if (report.diagnosticsEqual !== diagnosticsEqual) {
+    throw new Error(
+      "TypeScript diagnostic comparison does not match command evidence",
+    );
+  }
+  const acceptanceGatesMet =
+    report.commands.every(
+      (command) => (command as Record<string, unknown>).exitCode === 0,
+    ) &&
+    diagnosticsEqual &&
+    expectedChangedPaths.length === 0;
+  if (
+    report.acceptanceGatesMet !== acceptanceGatesMet ||
+    report.status !== (acceptanceGatesMet ? "PASS" : "ADVISORY_DRIFT")
+  ) {
+    throw new Error(
+      "TypeScript 7 advisory status is inconsistent with retained comparisons",
+    );
+  }
+  const distinctRevisionCount = Number(trend.distinctRevisionCount);
+  const incompatibleRunnerClassSamples = Number(
+    trend.incompatibleRunnerClassSamples,
+  );
+  return {
+    state:
+      distinctRevisionCount > 1
+        ? "retained"
+        : incompatibleRunnerClassSamples > 0
+          ? "reset"
+          : "missing",
+    distinctRevisionCount,
+    incompatibleRunnerClassSamples,
+  };
+}
+const IMPORT_CORPUS_EVALUATION_SOURCE = resolve(
+  rootDir,
+  "lib/corpus-harness/snapshots/evaluation-manifest.json",
+);
 const SOURCE_LIBRARY_RECONCILIATION_PENDING_EVIDENCE = `.${SOURCE_LIBRARY_RECONCILIATION_EVIDENCE}.pending`;
 export const RELEASE_EVIDENCE_ALLOWLIST = [
   "release-check-report.md",
@@ -274,6 +792,8 @@ export const RELEASE_EVIDENCE_ALLOWLIST = [
   "browser-full/FINAL-REPORT.md",
   "browser-smoke/webkit-result.json",
   SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
+  IMPORT_CORPUS_EVALUATION_EVIDENCE,
+  TYPESCRIPT_7_COMPARISON_EVIDENCE,
   "release-check.log",
   "release-check-state.json",
 ] as const;
@@ -554,6 +1074,28 @@ export function resolveSourceLibraryReleaseRevision(
   }
   return revision;
 }
+export const SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL =
+  "source-library reconciliation database preflight";
+export const SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_STEP: ReleaseStep = {
+  label: SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL,
+  args: [
+    "--filter",
+    "@workspace/scripts",
+    "exec",
+    "tsx",
+    "./src/verify-source-library-reconciliation.mts",
+    "--report",
+    sourceLibraryReport,
+    "--heal-id",
+    sourceLibraryHealId,
+    "--from-date",
+    sourceLibraryFromDate,
+    "--environment",
+    sourceLibraryEnvironment,
+    "--preflight",
+  ],
+  stage: "source-library-preflight",
+};
 export const SOURCE_LIBRARY_RECONCILIATION_STEP: ReleaseStep = {
   label: "source-library reconciliation verification",
   args: [
@@ -578,6 +1120,7 @@ export const SOURCE_LIBRARY_RECONCILIATION_STEP: ReleaseStep = {
     ),
   ],
   stage: "prerequisites",
+  dependsOn: [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL],
 };
 
 export const SOURCE_LIBRARY_RECONCILIATION_FIXTURE_STEP: ReleaseStep = {
@@ -647,8 +1190,14 @@ const importsProductionSourceLibraryReconciliation =
 const hasProductionSourceLibraryReconciliation =
   requiresProductionSourceLibraryReconciliation ||
   importsProductionSourceLibraryReconciliation;
+const sourceLibraryPreflightEnabled =
+  requiresProductionSourceLibraryReconciliation &&
+  process.env.RELEASE_CHECK_FIXTURE_STEPS === undefined;
 
 const steps: ReleaseStep[] = [
+  ...(sourceLibraryPreflightEnabled
+    ? [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_STEP]
+    : []),
   {
     label: REPORT_KEY_ROTATION_PREFLIGHT_LABEL,
     args: [
@@ -711,6 +1260,37 @@ const steps: ReleaseStep[] = [
     stage: "consumer-typechecks",
   },
   {
+    label: typescript7Promotion
+      ? "TypeScript 7 promotion gate"
+      : "TypeScript 7 advisory comparison",
+    args: [
+      "--filter",
+      "@workspace/scripts",
+      "run",
+      typescript7Promotion
+        ? "check:typescript-7:promotion"
+        : "check:typescript-7",
+    ],
+    env: {
+      TYPESCRIPT_7_EVIDENCE_PATH: resolve(
+        rootDir,
+        releaseEvidenceDir,
+        TYPESCRIPT_7_COMPARISON_EVIDENCE,
+      ),
+    },
+    stage: typescript7Promotion
+      ? "typescript-7-promotion"
+      : "typescript-7-advisory",
+    dependsOn: [
+      "shared library typechecks",
+      "API server typecheck",
+      "run calculator typecheck",
+      "mockup sandbox typecheck",
+      "scripts typecheck",
+    ],
+    concurrencyLimit: 1,
+  },
+  {
     label: "recovery evidence audit",
     args: ["run", "audit:recovery"],
     stage: "prerequisites",
@@ -738,7 +1318,7 @@ const steps: ReleaseStep[] = [
   ...RELEASE_CHECK_API_SHARD_STEPS,
   {
     label: "run calculator tests",
-    args: ["--filter", "@workspace/run-calculator", "run", "test"],
+    args: ["--filter", "@workspace/run-calculator", "run", "test:budget"],
     stage: "release-tests",
   },
   {
@@ -811,6 +1391,17 @@ const steps: ReleaseStep[] = [
     concurrencyLimit: 1,
   },
   {
+    label: "browser calendar tests",
+    args: [
+      "--filter",
+      "@workspace/run-calculator",
+      "run",
+      "test:e2e:calendar",
+    ],
+    stage: "browser-calendar",
+    concurrencyLimit: 1,
+  },
+  {
     label: "browser accessibility tests",
     args: ["--filter", "@workspace/run-calculator", "run", "test:e2e:a11y"],
     env: {
@@ -847,10 +1438,24 @@ if (fullRun) {
   });
 }
 
-export function releaseGateLabelsForMode(mode: "standard" | "full"): string[] {
+export function releaseGateLabelsForMode(mode: ReleaseMode): string[] {
   const labels = steps
     .filter((step) => mode === "full" || step.label !== FULL_BROWSER_GATE_LABEL)
-    .map((step) => step.label);
+    .map((step) => {
+      if (
+        mode === "typescript-7-promotion" &&
+        step.label === "TypeScript 7 advisory comparison"
+      ) {
+        return "TypeScript 7 promotion gate";
+      }
+      if (
+        mode !== "typescript-7-promotion" &&
+        step.label === "TypeScript 7 promotion gate"
+      ) {
+        return "TypeScript 7 advisory comparison";
+      }
+      return step.label;
+    });
   // A verifier can be pointed at a full evidence directory without starting
   // this process with --full. Derive the contract from the report's mode, not
   // from the command that happened to launch verification.
@@ -905,15 +1510,68 @@ const RELEASE_STAGE_DEPENDENCIES: Readonly<Record<string, readonly string[]>> =
   {
     prerequisites: [],
     "shared-output": [],
-    "consumer-typechecks": ["shared library typechecks"],
-    "clean-start": [],
-    "container-smoke": [],
-    "release-tests": [],
-    "browser-guard": [],
-    "browser-smoke": ["onboarding bypass guard"],
-    "browser-accessibility": ["onboarding bypass guard"],
-    "browser-webkit": ["onboarding bypass guard"],
-    "browser-full": ["onboarding bypass guard"],
+    "consumer-typechecks": [
+      "shared library typechecks",
+      ...(sourceLibraryPreflightEnabled
+        ? [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL]
+        : []),
+    ],
+    "typescript-7-advisory": [
+      "shared library typechecks",
+      "API server typecheck",
+      "run calculator typecheck",
+      "mockup sandbox typecheck",
+      "scripts typecheck",
+    ],
+    "typescript-7-promotion": [
+      "shared library typechecks",
+      "API server typecheck",
+      "run calculator typecheck",
+      "mockup sandbox typecheck",
+      "scripts typecheck",
+    ],
+    "clean-start": sourceLibraryPreflightEnabled
+      ? [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL]
+      : [],
+    "container-smoke": sourceLibraryPreflightEnabled
+      ? [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL]
+      : [],
+    "release-tests": sourceLibraryPreflightEnabled
+      ? [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL]
+      : [],
+    "browser-guard": sourceLibraryPreflightEnabled
+      ? [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL]
+      : [],
+    "browser-smoke": [
+      ...(sourceLibraryPreflightEnabled
+        ? [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL]
+        : []),
+      "onboarding bypass guard",
+    ],
+    "browser-calendar": [
+      ...(sourceLibraryPreflightEnabled
+        ? [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL]
+        : []),
+      "onboarding bypass guard",
+    ],
+    "browser-accessibility": [
+      ...(sourceLibraryPreflightEnabled
+        ? [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL]
+        : []),
+      "onboarding bypass guard",
+    ],
+    "browser-webkit": [
+      ...(sourceLibraryPreflightEnabled
+        ? [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL]
+        : []),
+      "onboarding bypass guard",
+    ],
+    "browser-full": [
+      ...(sourceLibraryPreflightEnabled
+        ? [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL]
+        : []),
+      "onboarding bypass guard",
+    ],
   };
 
 assertUniqueReleaseSteps(steps);
@@ -1024,6 +1682,9 @@ function printHelp(): void {
     "  pnpm run release:check:full  Standard gates plus full browser E2E",
   );
   console.log(
+    "  pnpm run release:check:typescript-7-promotion  Fail-closed TypeScript 7 promotion gates, including editor service proof",
+  );
+  console.log(
     "  pnpm run release:check -- --verify-evidence  Verify retained evidence files",
   );
   console.log(
@@ -1034,6 +1695,9 @@ function printHelp(): void {
   );
   console.log(
     "  --source-library-revision <sha>   Exact deployed 40-character SHA for production reconciliation evidence",
+  );
+  console.log(
+    "  pnpm --silent --filter @workspace/scripts exec tsx ./src/verify-source-library-reconciliation.mts --capture-production --environment release --revision <deployed-40-character-sha>  Capture bounded production evidence (read-only)",
   );
   console.log(
     "  pnpm --filter @workspace/scripts run check:release-evidence -- --evidence-dir <directory>  Verify a selected evidence directory (mode is read from its report)",
@@ -1142,13 +1806,12 @@ export async function verifyReleaseEvidence(
       ].join(" "),
     );
   }
-  const reportMode = report.match(/^Mode:\s*(standard|full)\s*$/m)?.[1] as
-    | "standard"
-    | "full"
-    | undefined;
+  const reportMode = report.match(
+    /^Mode:\s*(standard|full|typescript-7-promotion)\s*$/m,
+  )?.[1] as ReleaseMode | undefined;
   if (reportMode === undefined) {
     throw new Error(
-      "Release report mode is missing or invalid; regenerate the report or point the verifier at a retained standard/full evidence directory.",
+      "Release report mode is missing or invalid; regenerate the report or point the verifier at a retained standard, full, or TypeScript promotion evidence directory.",
     );
   }
   if (
@@ -1158,7 +1821,7 @@ export async function verifyReleaseEvidence(
     throw new Error(
       [
         `Evidence directory contains a ${reportMode} report, but ${options.expectedMode} verification was requested.`,
-        `Use ${reportMode === "full" ? "--full" : "standard mode"} for this directory, or point the verifier at a ${options.expectedMode} evidence directory.`,
+        `Verify this directory with \`${releaseEvidenceVerificationCommand(reportMode)}\`, or point the verifier at a ${options.expectedMode} evidence directory.`,
       ].join(" "),
     );
   }
@@ -1174,6 +1837,8 @@ export async function verifyReleaseEvidence(
   const requiresFullBrowserEvidence = evidenceMode === "full";
   const requiredEvidence = [
     REPORT_KEY_ROTATION_PREFLIGHT_EVIDENCE,
+    IMPORT_CORPUS_EVALUATION_EVIDENCE,
+    TYPESCRIPT_7_COMPARISON_EVIDENCE,
     ...RELEASE_EVIDENCE_ALLOWLIST.filter((file) =>
       file.startsWith("clean-start/"),
     ),
@@ -1220,13 +1885,22 @@ export async function verifyReleaseEvidence(
     options.expectedSourceLibraryEnvironment ?? sourceLibraryEnvironment;
   const expectedSourceLibraryRevision =
     options.expectedSourceLibraryRevision ?? revision;
+  const typescript7TrendHistory = validateTypescript7ComparisonEvidence(
+    await readFile(resolve(evidenceRoot, TYPESCRIPT_7_COMPARISON_EVIDENCE)),
+    revision,
+  );
   validateReleaseReport(report, {
     currentRevision: revision,
     expectedMode: options.expectedMode,
     expectedLabels: options.expectedLabels,
     expectedSourceLibraryEnvironment,
     expectedSourceLibraryRevision,
+    expectedTypescript7TrendHistory: typescript7TrendHistory,
   });
+  validateReleaseAiEvaluationEvidence(
+    await readFile(resolve(evidenceRoot, IMPORT_CORPUS_EVALUATION_EVIDENCE)),
+    await importCorpusEvaluationRequirements(),
+  );
   if (requiresSourceLibraryEvidence) {
     const sourceLibraryEvidence = await readFile(
       resolve(evidenceRoot, SOURCE_LIBRARY_RECONCILIATION_EVIDENCE),
@@ -1814,17 +2488,17 @@ export function validateReleaseReport(
   report: string,
   options: {
     currentRevision: string;
-    expectedMode?: "standard" | "full";
+    expectedMode?: ReleaseMode;
     expectedLabels?: readonly string[];
     expectedSourceLibraryEnvironment?: SourceLibraryEvidenceEnvironment;
     expectedSourceLibraryRevision?: string;
+    expectedTypescript7TrendHistory?: Typescript7TrendHistorySummary;
   },
 ): void {
   const revision = report.match(/^Revision:\s*(\S+)\s*$/m)?.[1];
-  const mode = report.match(/^Mode:\s*(standard|full)\s*$/m)?.[1] as
-    | "standard"
-    | "full"
-    | undefined;
+  const mode = report.match(
+    /^Mode:\s*(standard|full|typescript-7-promotion)\s*$/m,
+  )?.[1] as ReleaseMode | undefined;
   const decision = report.match(/^Decision:\s*(GO|NO-GO)\s*$/m)?.[1];
   if (!revision || revision !== options.currentRevision) {
     throw new Error(
@@ -1839,12 +2513,28 @@ export function validateReleaseReport(
     }
     throw new Error(
       `Release report mode is missing or inconsistent (expected ${
-        options.expectedMode ?? "standard or full"
+        options.expectedMode ?? "standard, full, or typescript-7-promotion"
       }).`,
     );
   }
   if (!decision) {
     throw new Error("Release report is malformed: missing GO/NO-GO decision.");
+  }
+  if (options.expectedTypescript7TrendHistory !== undefined) {
+    const summaries = [
+      ...report.matchAll(/^TypeScript 7 trend history.*$/gm),
+    ];
+    const expectedSummary = formatTypescript7TrendHistorySummary(
+      options.expectedTypescript7TrendHistory,
+    );
+    if (
+      summaries.length !== 1 ||
+      summaries[0]?.[0]?.trim() !== expectedSummary
+    ) {
+      throw new Error(
+        "Release report TypeScript trend history disagrees with the retained comparison evidence.",
+      );
+    }
   }
 
   const gateSection = report.split("## Gate results\n\n")[1]?.split("\n## ")[0];
@@ -1908,6 +2598,9 @@ export function validateReleaseReport(
   const sourceLibraryReportRevision = report.match(
     /^Source-library evidence revision:\s*(\S+)\s*$/m,
   )?.[1];
+  const deployedRevision = report.match(
+    /^Deployed revision:\s*(\S+)\s*$/m,
+  )?.[1];
   if (
     options.expectedSourceLibraryEnvironment !== undefined &&
     sourceLibraryReportEnvironment !== options.expectedSourceLibraryEnvironment
@@ -1922,6 +2615,18 @@ export function validateReleaseReport(
   ) {
     throw new Error(
       `Release report source-library evidence revision is missing or stale (expected ${options.expectedSourceLibraryRevision}).`,
+    );
+  }
+  if (
+    options.expectedSourceLibraryEnvironment === "release" &&
+    (!deployedRevision ||
+      !/^[a-f0-9]{40}$/u.test(deployedRevision) ||
+      options.expectedSourceLibraryRevision === undefined ||
+      !/^[a-f0-9]{40}$/u.test(options.expectedSourceLibraryRevision) ||
+      deployedRevision !== options.expectedSourceLibraryRevision)
+  ) {
+    throw new Error(
+      `Release report deployed revision is missing or stale (expected ${options.expectedSourceLibraryRevision ?? "the deployed revision"}).`,
     );
   }
   const exceptions = report.match(/^Accepted exceptions:\s*(.+)$/m)?.[1];
@@ -2089,17 +2794,62 @@ export function runStep(
   });
 }
 
+const unverifiedSourceLibraryPreflight = (
+  check: string,
+): SourceLibraryPreflightDiagnostic => ({
+  contractVersion: SOURCE_LIBRARY_PREFLIGHT_DIAGNOSTIC_VERSION,
+  database: "unverified",
+  expected: { poolRows: 0, aliases: 0 },
+  observed: {
+    poolRows: 0,
+    aliasesExact: 0,
+    aliasesMissing: 0,
+    aliasesMismatched: 0,
+    markerPresent: false,
+    markerValid: false,
+  },
+  failures: [{ check, count: 1 }],
+  ok: false,
+});
+
+/**
+ * Extract only the bounded preflight summary from a verifier step's output.
+ * The raw subprocess output remains in the transient release log only; the
+ * checkpoint and report receive this sanitized diagnostic.
+ */
+export function parseSourceLibraryPreflightDiagnostic(
+  output: string | undefined,
+): SourceLibraryPreflightDiagnostic {
+  if (output !== undefined) {
+    for (const line of output.trim().split(/\r?\n/u).reverse()) {
+      if (!line.trim().startsWith("{")) continue;
+      try {
+        const summary = summarizeSourceLibraryPreflight(JSON.parse(line));
+        if (summary !== undefined) return summary;
+      } catch {
+        // Continue looking for the verifier's final JSON line.
+      }
+    }
+  }
+  return unverifiedSourceLibraryPreflight(
+    output === undefined || output.trim() === "" ? "not-run" : "output",
+  );
+}
+
 export function formatReleaseReport(
   results: ReleaseStepResult[],
-  mode: "standard" | "full" = fullRun ? "full" : "standard",
+  mode: ReleaseMode = releaseMode,
   availableEvidenceFiles: ReadonlySet<string> = new Set(),
   metadata: {
     revision?: string;
     environment?: string;
     sourceLibraryEnvironment?: SourceLibraryEvidenceEnvironment;
     sourceLibraryRevision?: string;
+    deployedRevision?: string;
     decision?: "GO" | "NO-GO";
     browserDurationRegressions?: readonly BrowserDurationRegression[];
+    sourceLibraryPreflight?: SourceLibraryPreflightDiagnostic;
+    typescript7TrendHistory?: Typescript7TrendHistorySummary;
     expectedLabels?: readonly string[];
     timing?: ReleaseTiming;
     reportKind?: "retained" | "checkpoint";
@@ -2187,6 +2937,27 @@ export function formatReleaseReport(
           ),
           "",
         ];
+  const sourceLibraryPreflight =
+    metadata.sourceLibraryPreflight ??
+    unverifiedSourceLibraryPreflight("not-run");
+  const preflightMarker =
+    sourceLibraryPreflight.observed.markerPresent
+      ? sourceLibraryPreflight.observed.markerValid
+        ? "present and valid"
+        : "present but invalid"
+      : "not present";
+  const preflightFailures =
+    sourceLibraryPreflight.failures.length === 0
+      ? "none"
+      : sourceLibraryPreflight.failures
+          .map((failure) => `${failure.check} (${failure.count})`)
+          .join("; ");
+  const typescript7TrendHistory =
+    metadata.typescript7TrendHistory ?? {
+      state: "missing" as const,
+      distinctRevisionCount: 1,
+      incompatibleRunnerClassSamples: 0,
+    };
   const lines = [
     isCheckpoint
       ? "# Release Check Checkpoint — INCOMPLETE / NO-GO"
@@ -2204,8 +2975,15 @@ export function formatReleaseReport(
     `Environment: ${metadata.environment ?? "release validation environment"}`,
     `Source-library evidence environment: ${metadata.sourceLibraryEnvironment ?? sourceLibraryEnvironment}`,
     `Source-library evidence revision: ${metadata.sourceLibraryRevision ?? revision}`,
+    `Deployed revision: ${
+      metadata.deployedRevision ??
+      ((metadata.sourceLibraryEnvironment ?? sourceLibraryEnvironment) === "release"
+        ? metadata.sourceLibraryRevision ?? revision
+        : "not applicable")
+    }`,
     "Commands: listed in the gate results table below",
     `Evidence paths: ${releaseEvidenceDir}/ and retained files linked below`,
+    formatTypescript7TrendHistorySummary(typescript7TrendHistory),
     "",
     "## Gate results",
     "",
@@ -2221,6 +2999,15 @@ export function formatReleaseReport(
     "## Timing",
     "",
     ...timingLines,
+    "## Source-library preflight diagnostics",
+    "",
+    `Database shape: ${sourceLibraryPreflight.database}`,
+    `Expected pool rows: ${sourceLibraryPreflight.expected.poolRows}; observed: ${sourceLibraryPreflight.observed.poolRows}`,
+    `Expected aliases: ${sourceLibraryPreflight.expected.aliases}; exact: ${sourceLibraryPreflight.observed.aliasesExact}; missing: ${sourceLibraryPreflight.observed.aliasesMissing}; mismatched: ${sourceLibraryPreflight.observed.aliasesMismatched}`,
+    `Heal marker: ${preflightMarker}`,
+    `Failure names: ${preflightFailures}`,
+    "Diagnostic only: full source-library reconciliation verification remains required for retained evidence.",
+    "",
     "## Preview evidence",
     "",
     cleanStartResult === undefined || cleanStartResult.status === "NOT REACHED"
@@ -2288,11 +3075,15 @@ export function formatReleaseReport(
           `Resume: ${
             mode === "full"
               ? "pnpm run release:check:full -- --resume"
+              : mode === "typescript-7-promotion"
+                ? "pnpm run release:check:typescript-7-promotion -- --resume"
               : "pnpm run release:check -- --resume"
           }`,
           `Regenerate: ${
             mode === "full"
               ? "pnpm run release:check:full"
+              : mode === "typescript-7-promotion"
+                ? "pnpm run release:check:typescript-7-promotion"
               : "pnpm run release:check"
           }`,
           "Retained report: release-check-report.md (left unchanged by this checkpoint).",
@@ -2310,6 +3101,7 @@ async function writeReleaseReport(
   metadata: {
     revision: string;
     sourceLibraryRevision: string;
+    deployedRevision?: string;
     decision: "GO" | "NO-GO";
     expectedLabels?: readonly string[];
     timing?: ReleaseTiming;
@@ -2322,6 +3114,20 @@ async function writeReleaseReport(
       : "release-check-report.md";
   const reportPath = resolve(rootDir, releaseEvidenceDir, reportFile);
   await mkdir(resolve(rootDir, releaseEvidenceDir), { recursive: true });
+  if (metadata.reportKind !== "checkpoint") {
+    const retainedImportCorpusEvaluationPath = resolve(
+      rootDir,
+      releaseEvidenceDir,
+      IMPORT_CORPUS_EVALUATION_EVIDENCE,
+    );
+    await mkdir(resolve(retainedImportCorpusEvaluationPath, ".."), {
+      recursive: true,
+    });
+    await writeFile(
+      retainedImportCorpusEvaluationPath,
+      await readFile(IMPORT_CORPUS_EVALUATION_SOURCE),
+    );
+  }
   const cleanStartEvidenceFiles = RELEASE_EVIDENCE_ALLOWLIST.filter((file) =>
     file.startsWith("clean-start/"),
   );
@@ -2342,6 +3148,25 @@ async function writeReleaseReport(
         file !== undefined,
     ),
   );
+  if (metadata.reportKind !== "checkpoint") {
+    availableEvidenceFiles.add(IMPORT_CORPUS_EVALUATION_EVIDENCE);
+  }
+  let typescript7TrendHistory: Typescript7TrendHistorySummary | undefined;
+  try {
+    const comparisonPath = resolve(
+      rootDir,
+      releaseEvidenceDir,
+      TYPESCRIPT_7_COMPARISON_EVIDENCE,
+    );
+    await access(comparisonPath);
+    availableEvidenceFiles.add(TYPESCRIPT_7_COMPARISON_EVIDENCE);
+    typescript7TrendHistory = validateTypescript7ComparisonEvidence(
+      await readFile(comparisonPath),
+      metadata.revision,
+    );
+  } catch {
+    // The retained evidence verifier reports the missing comparison artifact.
+  }
   try {
     await access(
       resolve(
@@ -2395,7 +3220,7 @@ async function writeReleaseReport(
     reportPath,
     formatReleaseReport(
       results,
-      fullRun ? "full" : "standard",
+      releaseMode,
       availableEvidenceFiles,
       {
         ...metadata,
@@ -2406,7 +3231,17 @@ async function writeReleaseReport(
           : "local release validation",
         sourceLibraryEnvironment,
         sourceLibraryRevision: metadata.sourceLibraryRevision,
+        deployedRevision:
+          metadata.deployedRevision ??
+          (sourceLibraryEnvironment === "release"
+            ? metadata.sourceLibraryRevision
+            : undefined),
+        sourceLibraryPreflight: results.find(
+          (result) =>
+            result.label === SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL,
+        )?.sourceLibraryPreflight,
         browserDurationRegressions,
+        typescript7TrendHistory,
         timing: metadata.timing,
       },
     ),
@@ -2418,7 +3253,7 @@ async function writeReleaseReport(
 type ReleaseCheckpoint = {
   revision: string;
   sourceLibraryRevision?: string;
-  mode: "standard" | "full";
+  mode: ReleaseMode;
   results: Array<ReleaseStepResult & { passed: boolean }>;
   timing?: ReleaseTiming;
 };
@@ -2482,12 +3317,33 @@ async function readCheckpoint(
     if (
       checkpoint.revision !== revision ||
       checkpoint.sourceLibraryRevision !== sourceLibraryRevision ||
-      checkpoint.mode !== (fullRun ? "full" : "standard") ||
+      checkpoint.mode !== releaseMode ||
       !Array.isArray(checkpoint.results)
     ) {
       throw new Error(STALE_CHECKPOINT_MESSAGE);
     }
-    return checkpoint as ReleaseCheckpoint;
+    const results = checkpoint.results.map((result) => {
+      if (
+        result === null ||
+        typeof result !== "object" ||
+        Array.isArray(result)
+      ) {
+        throw new Error(DAMAGED_CHECKPOINT_MESSAGE);
+      }
+      const candidate = result as Record<string, unknown>;
+      if (!("sourceLibraryPreflight" in candidate)) return result;
+      const diagnostic = parseStoredSourceLibraryPreflightDiagnostic(
+        candidate.sourceLibraryPreflight,
+      );
+      if (
+        candidate.label !== SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL ||
+        diagnostic === undefined
+      ) {
+        throw new Error(DAMAGED_CHECKPOINT_MESSAGE);
+      }
+      return { ...result, sourceLibraryPreflight: diagnostic };
+    });
+    return { ...checkpoint, results } as ReleaseCheckpoint;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     if (
@@ -2505,17 +3361,7 @@ async function currentRevision(): Promise<string> {
   return new Promise((resolveRevision, reject) => {
     execFile(
       "git",
-      [
-        "log",
-        "-1",
-        "--format=%H",
-        "--",
-        ".",
-        ":(exclude)release-evidence",
-        ":(exclude)release-evidence/**",
-        ":(exclude)release-evidence-full",
-        ":(exclude)release-evidence-full/**",
-      ],
+      [...releaseRevisionGitArgs],
       { cwd: rootDir },
       (error, stdout) =>
         error ? reject(error) : resolveRevision(stdout.trim()),
@@ -2570,7 +3416,8 @@ async function main(): Promise<void> {
         : revision;
       await verifyReleaseEvidence(undefined, {
         currentRevision: revision,
-        expectedMode: fullRun ? "full" : undefined,
+        expectedMode:
+          releaseMode === "standard" ? undefined : releaseMode,
         expectedSourceLibraryRevision: sourceLibraryRevision,
       });
       process.exit(0);
@@ -2584,7 +3431,7 @@ async function main(): Promise<void> {
     }
   }
   await assertApiIntegrationTestShardInventory();
-  console.log(`Release check started (${fullRun ? "full" : "standard"} mode).`);
+  console.log(`Release check started (${releaseMode} mode).`);
   let revision: string;
   try {
     revision = await currentRevision();
@@ -2647,6 +3494,11 @@ async function main(): Promise<void> {
       (current, result) => upsertReleaseResult(current, result),
       [],
     );
+    if (typescript7Promotion) {
+      results = results.filter(
+        (result) => result.label !== "TypeScript 7 promotion gate",
+      );
+    }
     stageTimings = checkpoint.timing?.stages
       ? [...checkpoint.timing.stages]
       : [];
@@ -2668,7 +3520,7 @@ async function main(): Promise<void> {
     await writeFile(
       logPath,
       `Release check ${new Date().toISOString()} revision ${revision} mode ${
-        fullRun ? "full" : "standard"
+        releaseMode
       }\n`,
       "utf8",
     );
@@ -2680,7 +3532,7 @@ async function main(): Promise<void> {
       writeCheckpoint(checkpointPath, {
         revision,
         sourceLibraryRevision,
-        mode: fullRun ? "full" : "standard",
+        mode: releaseMode,
         results,
         timing: {
           totalElapsedMs: stageTimings.reduce(
@@ -2832,22 +3684,31 @@ async function main(): Promise<void> {
           console.log(`[${index + 1}/${steps.length}] ${step.label}`);
           let task: Promise<void>;
           task = (async () => {
+            const isSourceLibraryStep =
+              step.label === SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL ||
+              step.label === SOURCE_LIBRARY_RECONCILIATION_STEP.label;
             const effectiveStep =
               step.label === FULL_BROWSER_GATE_LABEL ||
               step.label === REPORT_KEY_ROTATION_PREFLIGHT_LABEL ||
-              step.label === SOURCE_LIBRARY_RECONCILIATION_STEP.label
+              isSourceLibraryStep
                 ? {
                     ...step,
+                    ...(isSourceLibraryStep
+                      ? {
+                          args: [
+                            ...step.args,
+                            "--revision",
+                            sourceLibraryRevision,
+                          ],
+                        }
+                      : {}),
                     env: {
                       ...step.env,
                       ...(step.label === FULL_BROWSER_GATE_LABEL
                         ? { RELEASE_REVISION: revision }
                         : step.label === REPORT_KEY_ROTATION_PREFLIGHT_LABEL
                           ? { REPORT_KEY_ROTATION_PREFLIGHT_REVISION: revision }
-                          : {
-                              SOURCE_LIBRARY_RECONCILIATION_REVISION:
-                                sourceLibraryRevision,
-                            }),
+                          : {}),
                     },
                   }
                 : step;
@@ -2867,6 +3728,12 @@ async function main(): Promise<void> {
                 passed: exitCode === 0,
                 status,
                 elapsedMs,
+                ...(step.label === SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL
+                  ? {
+                      sourceLibraryPreflight:
+                        parseSourceLibraryPreflightDiagnostic(output),
+                    }
+                  : {}),
               };
             } catch (error) {
               console.error(
@@ -2879,6 +3746,12 @@ async function main(): Promise<void> {
                 passed: false,
                 status: "INFRASTRUCTURE ERROR",
                 elapsedMs: 0,
+                ...(step.label === SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL
+                  ? {
+                      sourceLibraryPreflight:
+                        unverifiedSourceLibraryPreflight("output"),
+                    }
+                  : {}),
               };
               stageLogs.set(step.label, "");
             }
@@ -2973,7 +3846,7 @@ async function main(): Promise<void> {
         revision,
         sourceLibraryRevision,
         decision: releaseDecision,
-        expectedLabels: releaseGateLabelsForMode(fullRun ? "full" : "standard"),
+        expectedLabels: releaseGateLabelsForMode(releaseMode),
         timing: {
           totalElapsedMs: stageTimings.reduce(
             (total, stage) => total + stage.elapsedMs,
@@ -2984,7 +3857,7 @@ async function main(): Promise<void> {
       });
       await verifyReleaseEvidence(resolve(rootDir, releaseEvidenceDir), {
         currentRevision: revision,
-        expectedMode: fullRun ? "full" : "standard",
+        expectedMode: releaseMode,
         expectedSourceLibraryRevision: sourceLibraryRevision,
         allowIncompleteCheckpoint: true,
       });
@@ -3020,7 +3893,7 @@ async function main(): Promise<void> {
       revision,
       sourceLibraryRevision,
       decision: "NO-GO",
-      expectedLabels: releaseGateLabelsForMode(fullRun ? "full" : "standard"),
+      expectedLabels: releaseGateLabelsForMode(releaseMode),
       reportKind: "checkpoint",
       timing: {
         totalElapsedMs: stageTimings.reduce(
@@ -3035,14 +3908,20 @@ async function main(): Promise<void> {
     );
     console.log(
       `Resume: ${
-        fullRun
+        releaseMode === "full"
           ? "pnpm run release:check:full -- --resume"
+          : releaseMode === "typescript-7-promotion"
+            ? "pnpm run release:check:typescript-7-promotion -- --resume"
           : "pnpm run release:check -- --resume"
       }`,
     );
     console.log(
       `Regenerate: ${
-        fullRun ? "pnpm run release:check:full" : "pnpm run release:check"
+        releaseMode === "full"
+          ? "pnpm run release:check:full"
+          : releaseMode === "typescript-7-promotion"
+            ? "pnpm run release:check:typescript-7-promotion"
+            : "pnpm run release:check"
       }`,
     );
   } catch (error) {

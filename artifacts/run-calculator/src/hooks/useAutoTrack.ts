@@ -9,6 +9,7 @@ import {
 } from "../autoTrackCoordinationClient";
 import {
   buildCaseClaimMutations,
+  computeAppSlotInfo,
   computeAutoTrackSuggestion,
   computeCaseTickWrite,
   getAutoTrackTiming,
@@ -1326,23 +1327,24 @@ useEffect(() => {
     const formValues = v as FormValues;
     const slots = (["app1", "app2", "app3", "app4"] as const).map((slot) => {
       const recipe = formValues[`${slot}CheeseRecipe` as keyof FormValues] as FormValues["app1CheeseRecipe"];
-      const recipeLbs = (recipe ?? []).reduce((sum, row) => sum + (Number(row.lbs) || 0), 0);
-      const effectiveBatchLbs = recipeLbs > 0 ? recipeLbs : Number(formValues[`${slot}BatchLbs` as keyof FormValues]);
-      const ouncesPerPizza = Number(formValues[`${slot}OzPerPizza` as keyof FormValues]);
-      const required = Number(calc[`${slot}Batches`]);
+      const info = computeAppSlotInfo({
+        type: String(formValues[`${slot}Type` as keyof FormValues] ?? ""),
+        recipe,
+        batchLbs: Number(formValues[`${slot}BatchLbs` as keyof FormValues]) || 0,
+        ozPerPizza: Number(formValues[`${slot}OzPerPizza` as keyof FormValues]) || 0,
+        casesNeeded: Number(v.casesNeeded) || 0,
+        pizzasPerCase: Number(v.pizzasPerCase) || 0,
+        ppm: calc.ppm,
+      });
       return {
         slot,
         channel: `${slot}-batch` as AutoTrackChannel,
         madeField: `${slot}BatchesMade` as keyof FormValues,
         anchorField: `${slot}BatchAnchorNetSec` as keyof FormValues,
         correctionField: `${slot}BatchCorrectionGeneration` as keyof FormValues,
-        valid: !!String(formValues[`${slot}Type` as keyof FormValues]).trim() &&
-          !String(formValues[`${slot}Type` as keyof FormValues]).trim().toLowerCase().includes("mix") &&
-          effectiveBatchLbs > 0 && ouncesPerPizza > 0 && required > 0 && calc.ppm > 0,
-        cadence: effectiveBatchLbs > 0 && ouncesPerPizza > 0 && calc.ppm > 0
-          ? (effectiveBatchLbs * 16 / ouncesPerPizza / calc.ppm) * 60
-          : 0,
-        required,
+        valid: info.validForClaim,
+        cadence: info.cadence,
+        required: info.required,
       };
     });
     for (const slot of slots) {
@@ -1569,9 +1571,10 @@ useEffect(() => {
           if (!traySeededRef.current) {
             traySeededRef.current = true;
             const seed = suggestedDoughStaging(calc.traysNeeded, calc.batchesNeeded).trays;
-            if (v.traysOnLine === 0 && seed !== null) {
+            const current = Math.max(0, Number(form.getValues("traysOnLine")) || 0);
+            if (current === 0 && seed !== null) {
               commitAutomatic("tray-consume", nowMs, trayNextDueMsRef.current, [
-                { field: "traysOnLine", from: Number(form.getValues("traysOnLine")) || 0, to: seed },
+                { field: "traysOnLine", from: current, to: seed },
               ]);
               traySeededThisTick = true;
               traysSeededAmount = seed;
@@ -1590,12 +1593,13 @@ useEffect(() => {
         // traysOnLine is the aggregate across all physical tray sections.
         // Section capacity is advisory in the UI, so production must not stop
         // or rewrite this count at an arbitrary display threshold.
-        const next = Math.max(0, v.traysOnLine + delta);
-        if (next !== v.traysOnLine) {
+        const current = Math.max(0, Number(form.getValues("traysOnLine")) || 0);
+        const next = Math.max(0, current + delta);
+        if (next !== current) {
           commitAutomatic(delta > 0 ? "tray-produce" : "tray-consume", nowMs, delta > 0
             ? trayProdNextDueMsRef.current
             : trayNextDueMsRef.current, [
-            { field: "traysOnLine", from: Number(form.getValues("traysOnLine")) || 0, to: next },
+            { field: "traysOnLine", from: current, to: next },
           ]);
         }
       }
@@ -1648,9 +1652,10 @@ useEffect(() => {
             const seed = remainingBatchesNeeded > 0
               ? Math.min(3, Math.max(1, Math.ceil(Math.min(3, remainingBatchesNeeded))))
               : null;
-            if (v.batchesReady === 0 && seed !== null) {
+            const current = Math.max(0, Number(form.getValues("batchesReady")) || 0);
+            if (current === 0 && seed !== null) {
               commitAutomatic("batch-consume", nowMs, batchNextDueMsRef.current, [
-                { field: "batchesReady", from: Number(form.getValues("batchesReady")) || 0, to: seed },
+                { field: "batchesReady", from: current, to: seed },
               ]);
               batchSeededThisTick = true;
             }
@@ -1670,14 +1675,15 @@ useEffect(() => {
         // Production never pushes past the stepper max (3) — but must never
         // clamp an already-higher value DOWN either. Rounded to 2 decimals so
         // the fractional drain shows cleanly (e.g. 1.75, 1.5).
-        let next = v.batchesReady + delta;
-        if (delta > 0) next = Math.min(next, Math.max(v.batchesReady, 3));
+        const current = Math.max(0, Number(form.getValues("batchesReady")) || 0);
+        let next = current + delta;
+        if (delta > 0) next = Math.min(next, Math.max(current, 3));
         next = Math.max(0, Math.round(next * 100) / 100);
-        if (next !== v.batchesReady) {
+        if (next !== current) {
           commitAutomatic(delta > 0 ? "batch-produce" : "batch-consume", nowMs, delta > 0
             ? batchProdNextDueMsRef.current
             : batchNextDueMsRef.current, [
-            { field: "batchesReady", from: Number(form.getValues("batchesReady")) || 0, to: next },
+            { field: "batchesReady", from: current, to: next },
           ]);
         }
       }

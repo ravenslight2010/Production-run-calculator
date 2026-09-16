@@ -43,10 +43,17 @@ export default defineConfig({
       executablePath: resolveChromiumExecutable(),
     },
   },
-  // The release WebKit lane has its own isolated config and evidence contract.
-  // Keeping it out of the destructive full suite avoids duplicating the
-  // complete browser matrix while still making WebKit a standard release gate.
-  testIgnore: ["release-webkit-smoke.spec.ts"],
+  // WebKit and the desktop/phone calendar matrix have isolated standard-release
+  // configs. Keep them out of the destructive full suite so that suite retains
+  // its existing case/runtime budget instead of duplicating focused coverage.
+  testIgnore: ["calendar.spec.ts", "release-webkit-smoke.spec.ts"],
+  // Physical Android checks run through the dedicated device lane. Keep the
+  // three phone-layout checks and the process-restart-only sync check outside
+  // the 159-case Chromium contract; the suspension recovery check remains in
+  // this lane as the existing skipped compatibility sentinel. Keeping the
+  // exclusion here avoids relying on an operator CLI grep flag.
+  grepInvert:
+    /@real-mobile-browser (?:physical Android Chrome|queued Target Cases edit survives an Android Chrome process restart)/,
   projects: [
     {
       name: "chromium",

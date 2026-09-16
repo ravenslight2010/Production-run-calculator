@@ -25,7 +25,7 @@
 // path (stamp it) rather than exempting it.
 import fs from "fs";
 import path from "path";
-import ts from "typescript";
+import ts from "@workspace/typescript-api-v6";
 import { describe, expect, it } from "vitest";
 
 const HOME_FILE = path.join(__dirname, "pages", "home.tsx");

@@ -1,3 +1,8 @@
+import {
+  FACTORY_SPEED_ADJUSTMENT_BASELINE,
+  FACTORY_TIMING_DEFAULTS,
+} from "@workspace/factory-constants";
+
 // Per-run + run-list protective merge AND payload sanitization for the shared
 // day-state sync row.
 //
@@ -116,8 +121,10 @@ function deepEqualValue(a: unknown, b: unknown): boolean {
 //     batch-lbs fields defaulted to 25. Stored rows / stale clients can still
 //     carry this shape.
 //   - CURRENT_BLANK_RUN_VALUE: today's DEFAULT_VALUES — all quantity fields 0
-//     (only speedAdjustment is 1.0), including the pep "B"-slot and timer
-//     fields added since.
+//     (only speedAdjustment uses the shared factory baseline), including the pep
+//     "B"-slot and timer fields added since.
+// The legacy template's 1.0 is compatibility-only. It must not use the runtime
+// baseline: stale clients can still send that exact historical blank shape.
 // Additionally, a current-shape value whose ONLY difference is all four pep
 // batch fields at 25 (the exact legacy default signature) is blank — mirroring
 // the web's isAllDefaultRunValue. A lone 25 (some but not all four) is treated
@@ -187,12 +194,12 @@ const LEGACY_BLANK_RUN_VALUE: Record<string, unknown> = {
   slipSheets: "no",
 };
 
-// Today's DEFAULT_VALUES shape (all-zero quantities; speedAdjustment 1.0).
+// Today's DEFAULT_VALUES shape (all-zero quantities plus the shared baseline).
 const CURRENT_BLANK_RUN_VALUE: Record<string, unknown> = {
   casesNeeded: 0,
   crustsPerCycle: 0,
   cycleSpeed: 0,
-  speedAdjustment: 1.0,
+  speedAdjustment: FACTORY_SPEED_ADJUSTMENT_BASELINE,
   approxLineSpeed: 0,
   freezerTime: 0,
   pizzasPerCase: 0,
@@ -206,9 +213,9 @@ const CURRENT_BLANK_RUN_VALUE: Record<string, unknown> = {
   casesOnCurrentSkid: 0,
   traysOnLine: 0,
   batchesReady: 0,
-  mixerLowSec: 330,
-  mixerHighSec: 180,
-  hopperSec: 70,
+  mixerLowSec: FACTORY_TIMING_DEFAULTS.mixerLowSec,
+  mixerHighSec: FACTORY_TIMING_DEFAULTS.mixerHighSec,
+  hopperSec: FACTORY_TIMING_DEFAULTS.hopperSec,
   carryOverDone: false,
   sauceOzPerPizza: 0,
   sauceBarrelLbs: 0,
@@ -283,8 +290,8 @@ const CURRENT_BLANK_RUN_VALUE: Record<string, unknown> = {
   skidStacking: "",
   gripSheets: "none",
   slipSheets: "no",
-  preTunnelMin: 2.5,
-  postTunnelMin: 2.5,
+  preTunnelMin: FACTORY_TIMING_DEFAULTS.preTunnelMin,
+  postTunnelMin: FACTORY_TIMING_DEFAULTS.postTunnelMin,
   tempFreezerTime: 0,
   tempCrustsPerCycle: 0,
   tempCycleSpeed: 0,
@@ -299,20 +306,10 @@ const LEGACY_PEP_BATCH_FIELDS = [
   "pep2BatchLbsB",
 ] as const;
 
-// Fields whose default moved from 0 to a non-zero factory-typical value.
-// A blank run may carry EITHER shape depending on when the client saved it —
-// normalize 0 to the current default before comparing.
-// Keep in lockstep with the web's MACHINE_TIME_DEFAULTS and
-// PRE_POST_TUNNEL_DEFAULT_MIN (types.ts).
-const MACHINE_TIME_DEFAULTS: Record<string, number> = {
-  mixerLowSec: 330,
-  mixerHighSec: 180,
-  hopperSec: 70,
-  // Tunnel stage pre/post dwell times (minutes). Default moved from 0 to 2.5;
-  // old stored profiles carry 0 until the one-time boot heal runs.
-  preTunnelMin: 2.5,
-  postTunnelMin: 2.5,
-};
+// Historical blank runs used 0 before these non-zero factory defaults existed.
+// Keep 0 as an explicit compatibility sentinel: normalize it to today's shared
+// runtime value only for blank recognition. It is not a current factory default.
+const HISTORICAL_ZERO_TIMING_SENTINEL = 0;
 
 // True when a run value is an exact all-default/blank template (see above):
 // the current default shape (machine times 0 or default), the old-field-set
@@ -345,8 +342,10 @@ function isBlankRunValue(v: unknown): boolean {
   ]) {
     if (!(field in withMachineDefaults)) withMachineDefaults[field] = 0;
   }
-  for (const [k, def] of Object.entries(MACHINE_TIME_DEFAULTS)) {
-    if (withMachineDefaults[k] === 0) withMachineDefaults[k] = def;
+  for (const [k, def] of Object.entries(FACTORY_TIMING_DEFAULTS)) {
+    if (withMachineDefaults[k] === HISTORICAL_ZERO_TIMING_SENTINEL) {
+      withMachineDefaults[k] = def;
+    }
   }
   if (deepEqualValue(withMachineDefaults, CURRENT_BLANK_RUN_VALUE)) return true;
   if (LEGACY_PEP_BATCH_FIELDS.every((f) => v[f] === 25)) {

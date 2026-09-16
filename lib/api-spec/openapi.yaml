@@ -2065,8 +2065,10 @@ paths:
       summary: Create or update per-die line-setting defaults (manager only)
       description: >-
         Upserts a batch of per-die line-setting defaults keyed by die name
-        (case-insensitive). Malformed entries are dropped. Manager role
-        required.
+        (case-insensitive). Existing rows require a current or newer updatedAt
+        revision; stale or revision-less updates are rejected atomically.
+        Revision-less entries remain compatible for first-time creation.
+        Malformed entries are dropped. Manager role required.
       requestBody:
         required: true
         content:
@@ -2084,14 +2086,18 @@ paths:
           description: Invalid input
         "403":
           description: Manager role required
+        "409":
+          description: One or more existing die-default revisions are stale or missing
     delete:
       operationId: deleteDieLineDefaults
       tags: [dieLineDefaults]
       summary: Delete per-die line-setting defaults by die name (manager only)
       description: >-
         Removes stored per-die defaults by die name (case-insensitive), so
-        those dies fall back to the app's built-in defaults. Manager role
-        required.
+        those dies fall back to the app's built-in defaults. Existing rows
+        require a current or newer revision in the revisions map; stale or
+        revision-less resets are rejected atomically. Revision-less names
+        remain compatible when no stored row exists. Manager role required.
       requestBody:
         required: true
         content:
@@ -2109,6 +2115,8 @@ paths:
           description: Invalid input
         "403":
           description: Manager role required
+        "409":
+          description: One or more existing die-default revisions are stale or missing
 
   /run-suggestions:
     get:
@@ -4099,6 +4107,20 @@ paths:
                 $ref: "#/components/schemas/ManagerActionQueue"
         "403": { description: Manager capability required }
 
+  /background-operations/diagnostics:
+    get:
+      operationId: getBackgroundOperationDiagnostics
+      tags: [audit]
+      summary: List sustained background-operation failures visible to managers
+      responses:
+        "200":
+          description: Bounded sanitized background-operation warnings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BackgroundOperationDiagnostics"
+        "403": { description: Manager capability required }
+
   /manager-action-queue/{id}:
     patch:
       operationId: updateManagerActionItem
@@ -4463,6 +4485,66 @@ paths:
         "400": { description: Invalid or oversized snapshot }
         "409": { description: Different immutable completion already exists }
 
+  /applicator-batch-evidence:
+    get:
+      operationId: listApplicatorBatchEvidence
+      tags: [sync]
+      summary: List append-only applicator batch observations and manager attestations
+      parameters:
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+        - name: runId
+          in: query
+          schema: { type: string, maxLength: 500 }
+        - name: cursor
+          in: query
+          schema: { type: string, maxLength: 4096, pattern: "^[A-Za-z0-9_-]+$" }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 500, default: 500 }
+      responses:
+        "200":
+          description: Historical applicator evidence for the authenticated scope
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApplicatorBatchEvidenceList" }
+  /applicator-batch-evidence/finalize:
+    post:
+      operationId: finalizeApplicatorBatchTotal
+      tags: [sync]
+      summary: Append an immutable manager-confirmed physical applicator total
+      description: >-
+        Attests a slot only for an existing immutable completed run in this
+        authenticated scope. Corrections append a new manager record and
+        reference the latest finalization.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ApplicatorBatchFinalization" }
+      responses:
+        "200":
+          description: Existing finalization acknowledged idempotently
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApplicatorBatchEvidenceMutationResult" }
+        "201":
+          description: Finalization persisted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApplicatorBatchEvidenceMutationResult" }
+        "400": { description: Invalid finalization or no completed run in this scope }
+        "403": { description: Manager role required }
+        "409":
+          description: Different immutable finalization or stale correction
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApplicatorBatchEvidenceConflict" }
+
   /sync/today:
     get:
       operationId: getSyncToday
@@ -4639,6 +4721,61 @@ components:
         history:
           type: array
           items: { $ref: "#/components/schemas/CompletedHistoryRecord" }
+    ApplicatorBatchFinalization:
+      type: object
+      required: [operationId, date, runId, slot, finalTotal]
+      properties:
+        operationId: { type: string, minLength: 1, maxLength: 300, pattern: "^[A-Za-z0-9:_-]+$" }
+        date: { type: string, format: date, description: Valid calendar date (not only YYYY-MM-DD syntax) }
+        runId: { type: string, minLength: 1, maxLength: 500 }
+        slot: { type: integer, minimum: 1, maximum: 4 }
+        finalTotal: { type: integer, minimum: 0, maximum: 1000000 }
+        correctionOf: { type: string, minLength: 1, maxLength: 300, pattern: "^[A-Za-z0-9:_-]+$" }
+    ApplicatorBatchEvidenceMutationResult:
+      type: object
+      required: [acknowledged, duplicate, operationId, evidenceHash, canonical]
+      properties:
+        acknowledged: { type: boolean, const: true }
+        duplicate: { type: boolean }
+        operationId: { type: string }
+        evidenceHash: { type: string, pattern: "^[a-f0-9]{64}$" }
+        canonical:
+          $ref: "#/components/schemas/ApplicatorBatchEvidence"
+    ApplicatorBatchEvidenceConflict:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+        canonical:
+          $ref: "#/components/schemas/ApplicatorBatchEvidence"
+    ApplicatorBatchEvidence:
+      type: object
+      required: [id, operationId, date, runId, slot, source, evidenceHash, hashContract, createdAt]
+      properties:
+        id: { type: string }
+        operationId: { type: string }
+        date: { type: string, format: date }
+        runId: { type: string }
+        slot: { type: integer, minimum: 1, maximum: 4 }
+        source:
+          type: string
+          enum: [automatic-observation, manager-finalization, manager-correction]
+        observedTotal: { type: integer, minimum: 0 }
+        confirmedTotal: { type: integer, minimum: 0 }
+        correctionOf: { type: string }
+        evidenceHash: { type: string, pattern: "^[a-f0-9]{64}$" }
+        hashContract: { type: string, enum: [canonical-json-v1] }
+        createdAt: { type: string, format: date-time }
+    ApplicatorBatchEvidenceList:
+      type: object
+      required: [evidence]
+      properties:
+        evidence:
+          type: array
+          items: { $ref: "#/components/schemas/ApplicatorBatchEvidence" }
+        nextCursor:
+          type: string
+          description: Opaque cursor for the next page; absent when complete.
     AiStatus:
       type: string
       enum: [deterministic, enriched, unavailable]
@@ -9045,6 +9182,10 @@ components:
         name:
           type: string
           description: Die-type display name (matched case-insensitively)
+        updatedAt:
+          type: string
+          format: date-time
+          description: Server-issued optimistic-concurrency revision; required when updating an existing row
         crustsPerCycle:
           type: number
         cycleSpeed:
@@ -9099,6 +9240,14 @@ components:
           description: Die names whose stored defaults should be removed
           items:
             type: string
+        revisions:
+          type: object
+          description: >-
+            Loaded updatedAt revisions keyed by die name. Required for each
+            name that currently has a stored override.
+          additionalProperties:
+            type: string
+            format: date-time
 
     RunSuggestion:
       type: object
@@ -11049,6 +11198,29 @@ components:
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
         version: { type: integer }
+
+    BackgroundOperationDiagnostics:
+      type: object
+      additionalProperties: false
+      required: [warnings, windowMs]
+      properties:
+        warnings:
+          type: array
+          maxItems: 4
+          items:
+            type: object
+            additionalProperties: false
+            required: [operation, lastFailureAt]
+            properties:
+              operation:
+                type: string
+                enum: [daily-rollover, server-job-run, server-job-prune, web-push-schedule]
+              lastFailureAt:
+                type: string
+                format: date-time
+        windowMs:
+          type: integer
+          minimum: 1
 
     ManagerActionQueue:
       type: object

@@ -54,6 +54,13 @@ let inventoryConsumedRunsTable: DbModule["inventoryConsumedRunsTable"];
 let inventorySettingsTable: DbModule["inventorySettingsTable"];
 let brandProfilesTable: DbModule["brandProfilesTable"];
 let mergedAwayTable: DbModule["mergedAwayTable"];
+let cheeseRecipesTable: DbModule["cheeseRecipesTable"];
+let doughRecipesTable: DbModule["doughRecipesTable"];
+let sauceRecipesTable: DbModule["sauceRecipesTable"];
+let importAliasesTable: DbModule["importAliasesTable"];
+let specImportAliasesTable: DbModule["specImportAliasesTable"];
+let facilityKnowledgeTable: DbModule["facilityKnowledgeTable"];
+let savedSpecSheetsTable: DbModule["savedSpecSheetsTable"];
 
 let seedRoles: () => Promise<void>;
 let seedSandboxUser: () => Promise<void>;
@@ -70,6 +77,7 @@ let baseUrl: string;
 
 const LIVE_MANAGER = "sandbox-isolation-live-manager";
 const LIVE_MANAGER_USERNAME = "sandbox-isolation-live-manager";
+const LIVE_OPERATOR = "sandbox-isolation-live-operator";
 let sandboxUserId: string;
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
@@ -124,6 +132,13 @@ beforeAll(async () => {
   inventorySettingsTable = dbMod.inventorySettingsTable;
   brandProfilesTable = dbMod.brandProfilesTable;
   mergedAwayTable = dbMod.mergedAwayTable;
+  cheeseRecipesTable = dbMod.cheeseRecipesTable;
+  doughRecipesTable = dbMod.doughRecipesTable;
+  sauceRecipesTable = dbMod.sauceRecipesTable;
+  importAliasesTable = dbMod.importAliasesTable;
+  specImportAliasesTable = dbMod.specImportAliasesTable;
+  facilityKnowledgeTable = dbMod.facilityKnowledgeTable;
+  savedSpecSheetsTable = dbMod.savedSpecSheetsTable;
   seedRoles = rolesMod.seedRoles;
   seedSandboxUser = sandboxMod.seedSandboxUser;
   SANDBOX_USERNAME = sandboxMod.SANDBOX_USERNAME;
@@ -164,7 +179,15 @@ beforeAll(async () => {
     username: LIVE_MANAGER_USERNAME,
     passwordHash: "x",
   });
-  await db.insert(userRolesTable).values({ userId: LIVE_MANAGER, role: "manager" });
+  await db.insert(usersTable).values({
+    id: LIVE_OPERATOR,
+    username: LIVE_OPERATOR,
+    passwordHash: "x",
+  });
+  await db.insert(userRolesTable).values([
+    { userId: LIVE_MANAGER, role: "manager" },
+    { userId: LIVE_OPERATOR, role: "operator" },
+  ]);
 }, 60_000);
 
 afterAll(async () => {
@@ -190,7 +213,7 @@ beforeEach(async () => {
   // Wipe only the scoped DATA tables; the users / roles / role-catalog rows are
   // seeded once in beforeAll and must survive so the identity caches stay valid.
   await db.execute(
-    sql`TRUNCATE ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${inventorySettingsTable}, ${productionRulesTable}, ${brandProfilesTable}, ${mergedAwayTable}, ${dailySyncTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${inventorySettingsTable}, ${productionRulesTable}, ${brandProfilesTable}, ${mergedAwayTable}, ${dailySyncTable}, ${cheeseRecipesTable}, ${doughRecipesTable}, ${sauceRecipesTable}, ${importAliasesTable}, ${specImportAliasesTable}, ${facilityKnowledgeTable}, ${savedSpecSheetsTable} RESTART IDENTITY CASCADE`,
   );
   // Clear after the disposable fixture is reset. This makes the first request
   // of every case read the boundary for the freshly truncated database rather
@@ -235,11 +258,11 @@ async function getDayState(userId: string): Promise<unknown> {
   return res.json();
 }
 
-async function createItem(userId: string, key: string): Promise<void> {
+async function createItem(userId: string, key: string, name = key): Promise<void> {
   const res = await req(userId, "POST", "/api/inventory/items", {
     key,
     category: "ingredient",
-    name: key,
+    name,
     unit: "lbs",
   });
   expect(res.status).toBe(201);
@@ -253,10 +276,10 @@ async function listItemKeys(userId: string): Promise<string[]> {
   return items.map((i) => i.key).sort();
 }
 
-async function createRule(userId: string, id: string): Promise<void> {
+async function createRule(userId: string, id: string, name = id): Promise<void> {
   const res = await req(userId, "POST", "/api/production-rules", {
     rules: [
-      { id, name: id, type: "required-field", enforcement: "flexible", enabled: true, field: "brand" },
+      { id, name, type: "required-field", enforcement: "flexible", enabled: true, field: "brand" },
     ],
   });
   expect(res.status).toBe(200);
@@ -268,6 +291,18 @@ async function listRuleIds(userId: string): Promise<string[]> {
   expect(res.status).toBe(200);
   const body = (await res.json()) as { rules: ApiRule[] };
   return body.rules.map((r) => r.id).sort();
+}
+
+async function listInventoryBody(userId: string): Promise<unknown[]> {
+  const res = await req(userId, "GET", "/api/inventory");
+  expect(res.status, "inventory read boundary").toBe(200);
+  return (await res.json()) as unknown[];
+}
+
+async function listRuleBody(userId: string): Promise<unknown> {
+  const res = await req(userId, "GET", "/api/production-rules");
+  expect(res.status, "production rules read boundary").toBe(200);
+  return res.json();
 }
 
 async function saveProfile(userId: string, flavor: string, dieType: string): Promise<void> {
@@ -301,6 +336,285 @@ async function listMergedAway(userId: string): Promise<string[]> {
   expect(res.status).toBe(200);
   return ((await res.json()) as { names: string[] }).names;
 }
+
+type NamedRecipeInput = {
+  id: string;
+  name: string;
+  brand?: string;
+  flavors?: string[];
+  doughballWeightOz?: number;
+  doughballsPerTray?: number;
+};
+
+function namedRecipe(input: NamedRecipeInput) {
+  return {
+    id: input.id,
+    name: input.name,
+    notes: "",
+    components: [],
+    enabled: true,
+    brand: input.brand ?? "",
+    flavors: input.flavors ?? [],
+    ...(input.doughballWeightOz === undefined ? {} : { doughballWeightOz: input.doughballWeightOz }),
+    ...(input.doughballsPerTray === undefined ? {} : { doughballsPerTray: input.doughballsPerTray }),
+  };
+}
+
+function cheeseRecipe(id: string, name: string) {
+  return {
+    id,
+    name,
+    brand: "matrix-brand",
+    flavors: ["matrix-flavor"],
+    shredderSetting: "fine",
+    cellulose: "",
+    notes: "",
+    components: [],
+    enabled: true,
+  };
+}
+
+async function saveRecipePool(
+  userId: string,
+  pathName: "/api/dough-recipes" | "/api/sauce-recipes" | "/api/cheese-recipes",
+  item: unknown,
+): Promise<void> {
+  const res = await req(userId, "POST", pathName, { items: [item] });
+  expect(res.status, `recipe pool ${pathName} manager write`).toBe(200);
+}
+
+async function listRecipePool(userId: string, pathName: string): Promise<unknown[]> {
+  const res = await req(userId, "GET", pathName);
+  expect(res.status, `recipe pool ${pathName} read boundary`).toBe(200);
+  return ((await res.json()) as { items: unknown[] }).items;
+}
+
+async function listAliases(userId: string, pathName: "/api/import-aliases" | "/api/spec-import-aliases") {
+  const res = await req(userId, "GET", pathName);
+  expect(res.status, `aliases ${pathName} read boundary`).toBe(200);
+  return ((await res.json()) as { aliases: unknown[] }).aliases;
+}
+
+async function saveAliases(
+  userId: string,
+  pathName: "/api/import-aliases" | "/api/spec-import-aliases",
+  aliases: unknown[],
+): Promise<void> {
+  const res = await req(userId, "POST", pathName, { aliases });
+  expect(res.status, `aliases ${pathName} manager write`).toBe(200);
+}
+
+async function listSpecSheets(userId: string): Promise<Array<{ id: number; label: string; data: unknown }>> {
+  const res = await req(userId, "GET", "/api/spec-sheets");
+  expect(res.status, "saved spec imports read boundary").toBe(200);
+  return (await res.json() as { specSheets: Array<{ id: number; label: string; data: unknown }> }).specSheets;
+}
+
+async function saveSpecSheet(userId: string, label: string, marker: string): Promise<void> {
+  const res = await req(userId, "POST", "/api/spec-sheets", {
+    label,
+    sourceKey: `${marker}.xlsx`,
+    data: { recipes: [{ kind: "dough", name: marker, rows: [] }] },
+  });
+  expect(res.status, "saved spec imports manager write").toBe(200);
+}
+
+async function listFacilityMemory(userId: string): Promise<unknown[]> {
+  const res = await req(userId, "GET", "/api/ai-memory/facility");
+  expect(res.status, "AI facility memory read boundary").toBe(200);
+  return ((await res.json()) as { knowledge: unknown[] }).knowledge;
+}
+
+// ┌──────────────────────── ISOLATION MATRIX ──────────────────────────────┐
+// │ Family                 │ representative HTTP read │ manager-only write │
+// │ setup profiles         │ GET /brand-profiles       │ POST /brand-profiles│
+// │ inventory              │ GET /inventory             │ POST /inventory/items│
+// │ sync day state         │ GET /sync/today            │ PUT /sync/today     │
+// │ recipe pools (3)       │ GET /{dough,sauce,cheese}-recipes              │
+// │ import aliases         │ GET/POST /import-aliases                        │
+// │ spec aliases           │ GET/POST /spec-import-aliases                   │
+// │ AI facility memory     │ GET /ai-memory/facility                         │
+// │ saved spec imports     │ GET/POST /spec-sheets                           │
+// └─────────────────────────────────────────────────────────────────────────┘
+// Every row below is exercised through the actual /api router.  Rows are
+// deliberately given the same identity in both scopes where the endpoint
+// supports upsert, making an accidental unscoped overwrite observable.
+describe("ISOLATION MATRIX — live ↔ sandbox data families", () => {
+  it("keeps every required family read/write isolated and names each boundary", async () => {
+    // The same IDs/keys are intentional: a scope-blind upsert would overwrite
+    // the other actor's marker rather than merely creating a second row.
+    await saveProfile(LIVE_MANAGER, "matrix", "live-profile");
+    await saveProfile(sandboxUserId, "matrix", "sandbox-profile");
+    await createItem(LIVE_MANAGER, "matrix-item", "live-inventory-only");
+    await createItem(sandboxUserId, "matrix-item", "sandbox-inventory-only");
+    await putDayState(LIVE_MANAGER, { dayState: { runs: [], resetAt: 0, shiftNotes: "live-day-matrix" } });
+    await putDayState(sandboxUserId, { dayState: { runs: [], resetAt: 0, shiftNotes: "sandbox-day-matrix" } });
+    await createRule(LIVE_MANAGER, "matrix-rule", "live-rule-only");
+    await createRule(sandboxUserId, "matrix-rule", "sandbox-rule-only");
+
+    for (const [pathName, liveName, sandboxName] of [
+      ["/api/dough-recipes", "live-dough", "sandbox-dough"],
+      ["/api/sauce-recipes", "live-sauce", "sandbox-sauce"],
+    ] as const) {
+      await saveRecipePool(LIVE_MANAGER, pathName, namedRecipe({ id: "matrix-recipe", name: liveName }));
+      await saveRecipePool(sandboxUserId, pathName, namedRecipe({ id: "matrix-recipe", name: sandboxName }));
+    }
+    await saveRecipePool(LIVE_MANAGER, "/api/cheese-recipes", cheeseRecipe("matrix-cheese", "live-cheese"));
+    await saveRecipePool(sandboxUserId, "/api/cheese-recipes", cheeseRecipe("matrix-cheese", "sandbox-cheese"));
+
+    await saveAliases(LIVE_MANAGER, "/api/import-aliases", [{
+      type: "brand", externalName: "Matrix Imported Brand", canonicalName: "Live Brand",
+    }]);
+    await saveAliases(sandboxUserId, "/api/import-aliases", [{
+      type: "brand", externalName: "Matrix Imported Brand", canonicalName: "Sandbox Brand",
+    }]);
+    await saveAliases(LIVE_MANAGER, "/api/spec-import-aliases", [{
+      kind: "brand", externalName: "Matrix Sheet Brand", canonicalName: "Live Sheet Brand",
+    }]);
+    await saveAliases(sandboxUserId, "/api/spec-import-aliases", [{
+      kind: "brand", externalName: "Matrix Sheet Brand", canonicalName: "Sandbox Sheet Brand",
+    }]);
+
+    await saveSpecSheet(LIVE_MANAGER, "live-spec-import", "live-spec-import");
+    await saveSpecSheet(sandboxUserId, "sandbox-spec-import", "sandbox-spec-import");
+
+    // Facility memory is intentionally seeded at the DB seam because the
+    // production HTTP write surface rejects arbitrary client-authored facts.
+    // The real HTTP GET still proves that prompt-grounding memory is scoped.
+    await db.insert(facilityKnowledgeTable).values([
+      {
+        scope: "live",
+        domain: "matrix",
+        key: "shared-key",
+        fact: "live-facility-memory-only",
+        source: "isolation-test",
+      },
+      {
+        scope: "sandbox",
+        domain: "matrix",
+        key: "shared-key",
+        fact: "sandbox-facility-memory-only",
+        source: "isolation-test",
+      },
+    ]);
+
+    const liveDay = await getDayState(LIVE_MANAGER) as Record<string, unknown>;
+    const sandboxDay = await getDayState(sandboxUserId) as Record<string, unknown>;
+    expect((liveDay.dayState as Record<string, unknown>)?.shiftNotes, "sync day state live→live").toBe("live-day-matrix");
+    expect((sandboxDay.dayState as Record<string, unknown>)?.shiftNotes, "sync day state sandbox→sandbox").toBe("sandbox-day-matrix");
+    expect(JSON.stringify(liveDay), "sync day state live cannot infer sandbox").not.toContain("sandbox-day-matrix");
+    expect(JSON.stringify(sandboxDay), "sync day state sandbox cannot infer live").not.toContain("live-day-matrix");
+    expect(await listItemKeys(LIVE_MANAGER), "inventory live→live").toEqual(["matrix-item"]);
+    expect(await listItemKeys(sandboxUserId), "inventory sandbox→sandbox").toEqual(["matrix-item"]);
+    expect(JSON.stringify(await listInventoryBody(LIVE_MANAGER)), "inventory live cannot infer sandbox").toContain("live-inventory-only");
+    expect(JSON.stringify(await listInventoryBody(LIVE_MANAGER)), "inventory live cannot infer sandbox").not.toContain("sandbox-inventory-only");
+    expect(JSON.stringify(await listInventoryBody(sandboxUserId)), "inventory sandbox cannot infer live").toContain("sandbox-inventory-only");
+    expect(JSON.stringify(await listInventoryBody(sandboxUserId)), "inventory sandbox cannot infer live").not.toContain("live-inventory-only");
+    expect(await listRuleIds(LIVE_MANAGER), "production rules live→live").toEqual(["matrix-rule"]);
+    expect(await listRuleIds(sandboxUserId), "production rules sandbox→sandbox").toEqual(["matrix-rule"]);
+    expect(JSON.stringify(await listRuleBody(LIVE_MANAGER)), "production rules live cannot infer sandbox").toContain("live-rule-only");
+    expect(JSON.stringify(await listRuleBody(LIVE_MANAGER)), "production rules live cannot infer sandbox").not.toContain("sandbox-rule-only");
+    expect(JSON.stringify(await listRuleBody(sandboxUserId)), "production rules sandbox cannot infer live").toContain("sandbox-rule-only");
+    expect(JSON.stringify(await listRuleBody(sandboxUserId)), "production rules sandbox cannot infer live").not.toContain("live-rule-only");
+    expect((await listProfileKeys(LIVE_MANAGER)), "setup profiles live→live").toEqual(["acme__matrix"]);
+    expect((await listProfileKeys(sandboxUserId)), "setup profiles sandbox→sandbox").toEqual(["acme__matrix"]);
+    const liveProfileBody = JSON.stringify(await req(LIVE_MANAGER, "GET", "/api/brand-profiles").then((r) => r.json()));
+    const sandboxProfileBody = JSON.stringify(await req(sandboxUserId, "GET", "/api/brand-profiles").then((r) => r.json()));
+    expect(liveProfileBody, "setup profiles live cannot infer sandbox").not.toContain("sandbox-profile");
+    expect(sandboxProfileBody, "setup profiles sandbox cannot infer live").not.toContain("live-profile");
+
+    for (const [pathName, liveName, sandboxName] of [
+      ["/api/dough-recipes", "live-dough", "sandbox-dough"],
+      ["/api/sauce-recipes", "live-sauce", "sandbox-sauce"],
+    ] as const) {
+      const live = JSON.stringify(await listRecipePool(LIVE_MANAGER, pathName));
+      const sandbox = JSON.stringify(await listRecipePool(sandboxUserId, pathName));
+      expect(live, `recipe pool ${pathName} live cannot infer sandbox`).toContain(liveName);
+      expect(live, `recipe pool ${pathName} live cannot infer sandbox`).not.toContain(sandboxName);
+      expect(sandbox, `recipe pool ${pathName} sandbox cannot infer live`).toContain(sandboxName);
+      expect(sandbox, `recipe pool ${pathName} sandbox cannot infer live`).not.toContain(liveName);
+    }
+    const liveCheese = JSON.stringify(await listRecipePool(LIVE_MANAGER, "/api/cheese-recipes"));
+    const sandboxCheese = JSON.stringify(await listRecipePool(sandboxUserId, "/api/cheese-recipes"));
+    expect(liveCheese, "recipe pool cheese live cannot infer sandbox").toContain("live-cheese");
+    expect(liveCheese, "recipe pool cheese live cannot infer sandbox").not.toContain("sandbox-cheese");
+    expect(sandboxCheese, "recipe pool cheese sandbox cannot infer live").toContain("sandbox-cheese");
+    expect(sandboxCheese, "recipe pool cheese sandbox cannot infer live").not.toContain("live-cheese");
+
+    const liveImportAliases = JSON.stringify(await listAliases(LIVE_MANAGER, "/api/import-aliases"));
+    const sandboxImportAliases = JSON.stringify(await listAliases(sandboxUserId, "/api/import-aliases"));
+    expect(liveImportAliases, "import aliases live cannot infer sandbox").toContain("Live Brand");
+    expect(liveImportAliases, "import aliases live cannot infer sandbox").not.toContain("Sandbox Brand");
+    expect(sandboxImportAliases, "import aliases sandbox cannot infer live").toContain("Sandbox Brand");
+    expect(sandboxImportAliases, "import aliases sandbox cannot infer live").not.toContain("Live Brand");
+    const liveSpecAliases = JSON.stringify(await listAliases(LIVE_MANAGER, "/api/spec-import-aliases"));
+    const sandboxSpecAliases = JSON.stringify(await listAliases(sandboxUserId, "/api/spec-import-aliases"));
+    expect(liveSpecAliases, "spec aliases live cannot infer sandbox").toContain("Live Sheet Brand");
+    expect(liveSpecAliases, "spec aliases live cannot infer sandbox").not.toContain("Sandbox Sheet Brand");
+    expect(sandboxSpecAliases, "spec aliases sandbox cannot infer live").toContain("Sandbox Sheet Brand");
+    expect(sandboxSpecAliases, "spec aliases sandbox cannot infer live").not.toContain("Live Sheet Brand");
+
+    const liveSpecs = JSON.stringify(await listSpecSheets(LIVE_MANAGER));
+    const sandboxSpecs = await listSpecSheets(sandboxUserId);
+    expect(liveSpecs, "saved spec imports live cannot infer sandbox").toContain("live-spec-import");
+    expect(liveSpecs, "saved spec imports live cannot infer sandbox").not.toContain("sandbox-spec-import");
+    expect(JSON.stringify(sandboxSpecs), "saved spec imports sandbox cannot infer live").toContain("sandbox-spec-import");
+    expect(JSON.stringify(sandboxSpecs), "saved spec imports sandbox cannot infer live").not.toContain("live-spec-import");
+    const sandboxSpecId = sandboxSpecs[0]?.id;
+    expect(sandboxSpecId, "saved spec imports sandbox row exists before cross-scope delete").toEqual(expect.any(Number));
+    const crossScopeDelete = await req(LIVE_MANAGER, "DELETE", `/api/spec-sheets/${sandboxSpecId}`);
+    expect(crossScopeDelete.status, "saved spec imports live cannot overwrite sandbox via delete").toBe(200);
+    expect(JSON.stringify(await listSpecSheets(sandboxUserId)), "saved spec imports sandbox survives live delete").toContain("sandbox-spec-import");
+
+    const liveMemory = JSON.stringify(await listFacilityMemory(LIVE_MANAGER));
+    const sandboxMemory = JSON.stringify(await listFacilityMemory(sandboxUserId));
+    expect(liveMemory, "AI facility memory live cannot infer sandbox").toContain("live-facility-memory-only");
+    expect(liveMemory, "AI facility memory live cannot infer sandbox").not.toContain("sandbox-facility-memory-only");
+    expect(sandboxMemory, "AI facility memory sandbox cannot infer live").toContain("sandbox-facility-memory-only");
+    expect(sandboxMemory, "AI facility memory sandbox cannot infer live").not.toContain("live-facility-memory-only");
+
+    // Operator reads use the caller's live scope, but representative
+    // manager-only writes are rejected before they can overwrite live data.
+    const operatorReads = [
+      ["/api/brand-profiles", "GET"],
+      ["/api/inventory", "GET"],
+      ["/api/production-rules", "GET"],
+      ["/api/dough-recipes", "GET"],
+      ["/api/sauce-recipes", "GET"],
+      ["/api/cheese-recipes", "GET"],
+      ["/api/import-aliases", "GET"],
+      ["/api/spec-import-aliases", "GET"],
+      ["/api/spec-sheets", "GET"],
+    ] as const;
+    for (const [pathName, method] of operatorReads) {
+      const response = await req(LIVE_OPERATOR, method, pathName);
+      expect(response.status, `operator read ${pathName} stays in live boundary`).toBe(200);
+      const body = await response.text();
+      expect(body, `operator read ${pathName} cannot infer sandbox`).not.toContain("sandbox-");
+    }
+    const operatorWrites: Array<[string, unknown]> = [
+      ["/api/brand-profiles", { items: [{ key: "acme__matrix", brand: "acme", flavor: "matrix", values: { dieType: "operator-overwrite" }, crustValues: {}, updatedAt: 999_999, force: true }] }],
+      ["/api/inventory/items", { key: "operator-item", category: "ingredient", name: "operator-item", unit: "lbs" }],
+      ["/api/production-rules", { rules: [{ id: "operator-rule", name: "operator-rule", type: "required-field", enforcement: "flexible", enabled: true, field: "brand" }] }],
+      ["/api/dough-recipes", { items: [namedRecipe({ id: "matrix-recipe", name: "operator-dough" })] }],
+      ["/api/sauce-recipes", { items: [namedRecipe({ id: "matrix-recipe", name: "operator-sauce" })] }],
+      ["/api/cheese-recipes", { items: [cheeseRecipe("matrix-cheese", "operator-cheese")] }],
+      ["/api/import-aliases", { aliases: [{ type: "brand", externalName: "Matrix Imported Brand", canonicalName: "Operator Brand" }] }],
+      ["/api/spec-import-aliases", { aliases: [{ kind: "brand", externalName: "Matrix Sheet Brand", canonicalName: "Operator Sheet Brand" }] }],
+      ["/api/spec-sheets", { label: "operator-spec-import", data: { recipes: [] } }],
+    ];
+    for (const [pathName, body] of operatorWrites) {
+      const response = await req(LIVE_OPERATOR, "POST", pathName, body);
+      expect(response.status, `operator manager-only write ${pathName} rejected in live boundary`).toBe(403);
+    }
+    const liveProfilesAfterOperator = JSON.stringify(await req(LIVE_MANAGER, "GET", "/api/brand-profiles").then((r) => r.json()));
+    expect(liveProfilesAfterOperator, "operator cannot overwrite setup profiles live").toContain("live-profile");
+    expect(liveProfilesAfterOperator, "operator cannot overwrite setup profiles live").not.toContain("operator-overwrite");
+    expect(JSON.stringify(await listRecipePool(LIVE_MANAGER, "/api/dough-recipes")), "operator cannot overwrite dough live").toContain("live-dough");
+    expect(JSON.stringify(await listAliases(LIVE_MANAGER, "/api/import-aliases")), "operator cannot overwrite import aliases live").not.toContain("Operator Brand");
+    expect(JSON.stringify(await listSpecSheets(LIVE_MANAGER)), "operator cannot overwrite saved specs live").not.toContain("operator-spec-import");
+  }, 30_000);
+});
 
 describe("live ↔ sandbox scope isolation", () => {
   it("day-state, inventory, and production rules never cross between scopes", async () => {

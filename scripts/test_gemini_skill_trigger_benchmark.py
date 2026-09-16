@@ -9,16 +9,27 @@ from tempfile import TemporaryDirectory
 
 from gemini_skill_trigger_benchmark import (
     Classification,
+    check_checked_in_artifacts,
     GeminiAdapter,
     evaluate,
+    evaluation_manifest,
     metrics,
+    private_artifact_fields,
     list_review_cases,
     provider_failure_cases,
     record_manual_decision,
     review_queue,
     validate_classification,
+    write_benchmark_artifacts,
 )
-from skill_trigger_benchmark import MANAGED_FIXTURE_SKILLS, PROMPTS, build
+from skill_trigger_benchmark import (
+    FOCUSED_LEXICAL_REVIEWS,
+    MANAGED_FIXTURE_SKILLS,
+    PROMPTS,
+    build,
+    frontmatter,
+    preflight,
+)
 
 
 def corpus():
@@ -42,13 +53,43 @@ class Fixture:
 
 
 class GeminiBenchmarkTests(unittest.TestCase):
+    def test_folded_skill_descriptions_are_fully_parsed(self):
+        root = Path(__file__).resolve().parents[1]
+        _, description = frontmatter(root / ".agents" / "skills" / "sync-invariant-check" / "SKILL.md")
+        self.assertIn("routes/sync.ts", description)
+        self.assertIn("stale writes", description)
+        self.assertNotEqual(description, ">")
+
+    def test_focused_lexical_reviews_resolve_all_current_flags(self):
+        payload = build()
+        self.assertEqual(
+            {review["skill"] for review in FOCUSED_LEXICAL_REVIEWS},
+            {
+                "customer-import-audit",
+                "db-schema-change",
+                "error-handling",
+                "production-go",
+                "sync-invariant-check",
+                "ad-creative",
+                "deep-research",
+                "design-thinker",
+                "recipe-creator",
+            },
+        )
+        self.assertEqual(
+            [row["name"] for row in preflight(payload) if row["status"] == "review"],
+            [],
+        )
+
     def test_generator_rejects_prompts_for_unavailable_skills(self):
         with patch.dict(PROMPTS, {
             "missing-skill": (["trigger"], ["near miss"]),
         }):
+
             with self.assertRaisesRegex(
                 SystemExit,
                 "Benchmark prompts reference unavailable skills",
+
             ):
                 build()
 
@@ -69,7 +110,6 @@ class GeminiBenchmarkTests(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
-
             payload = json.loads(generated.read_text())
             project_owned = {
                 path.parent.name
@@ -125,7 +165,9 @@ class GeminiBenchmarkTests(unittest.TestCase):
     def test_checked_in_benchmark_only_references_available_skills(self):
         root = Path(__file__).resolve().parents[1]
         available = {
+
             path.parent.name
+
             for skill_root in (
                 root / ".agents" / "skills",
                 root / ".local" / "secondary_skills",
@@ -153,6 +195,33 @@ class GeminiBenchmarkTests(unittest.TestCase):
         queue = json.loads((root / "gemini-skill-trigger-review-queue.json").read_text())
         self.assertTrue(queue["manual_decisions_excluded_from_metrics"])
 
+    def test_checked_in_artifacts_are_sanitized_historical_evidence(self):
+        root = Path(__file__).resolve().parents[1]
+        check_checked_in_artifacts(root)
+        for name in (
+            "gemini-skill-trigger-benchmark.json",
+            "gemini-skill-trigger-review-queue.json",
+        ):
+            payload = json.loads((root / name).read_text())
+            self.assertEqual(payload["execution_mode"], "sanitized_historical_artifact")
+            self.assertFalse(payload["ci_evidence"])
+            self.assertFalse(payload["provenance"]["fresh_provider_run"])
+            self.assertEqual(payload["privacy"]["retainedEvaluationContent"], "none")
+
+    def test_private_artifact_field_check_is_recursive_and_deterministic(self):
+        payload = {
+            "results": [{"rationale": "private", "nested": {"query": "private"}}],
+            "provider_payload": {"body": "private"},
+        }
+        self.assertEqual(
+            private_artifact_fields(payload),
+            [
+                "$.provider_payload",
+                "$.results[0].nested.query",
+                "$.results[0].rationale",
+            ],
+        )
+
     def test_valid_classification_and_validation(self):
         value = validate_classification({"decision": "trigger", "confidence": 0.9, "rationale": "clear"})
         self.assertEqual(value, Classification("trigger", 0.9, "clear"))
@@ -174,6 +243,22 @@ class GeminiBenchmarkTests(unittest.TestCase):
         result = evaluate(corpus(), adapter, retries=0)
         self.assertEqual(result[0]["status"], "invalid_output")
         self.assertEqual(review_queue(result)[0]["reason"], "invalid_output")
+
+    def test_provider_failure_remains_distinct_from_invalid_output(self):
+        adapter = Fixture([RuntimeError("provider connection failed")] * 2)
+        result = evaluate(corpus(), adapter, retries=0)
+        self.assertEqual([row["status"] for row in result], ["provider_failure", "provider_failure"])
+        self.assertTrue(all(row["error"] == "provider_failure" for row in result))
+
+    def test_deterministic_success_uses_only_the_injected_adapter(self):
+        adapter = Fixture([
+            {"decision": "trigger", "confidence": 1, "rationale": "fixture"},
+            {"decision": "do_not_trigger", "confidence": 1, "rationale": "fixture"},
+        ])
+        with patch.object(GeminiAdapter, "classify", side_effect=AssertionError("live adapter used")):
+            result = evaluate(corpus(), adapter, retries=0)
+        self.assertEqual([row["status"] for row in result], ["included", "included"])
+        self.assertEqual(adapter.calls, 2)
 
     def test_transient_failure_retries(self):
         adapter = Fixture([RuntimeError("transient timeout"), {"decision": "trigger", "confidence": 1, "rationale": "clear"}, {"decision": "do_not_trigger", "confidence": 1, "rationale": "clear"}])
@@ -200,6 +285,58 @@ class GeminiBenchmarkTests(unittest.TestCase):
         self.assertEqual(result["confusion"], {"true_positive": 1, "false_positive": 1, "true_negative": 1, "false_negative": 1})
         self.assertEqual(result["accuracy"], 0.5)
         self.assertEqual(result["excluded"], 1)
+
+    def test_manifest_distinguishes_unavailable_and_failed_without_payloads(self):
+        with patch.dict("os.environ", {
+            "AI_INTEGRATIONS_GEMINI_API_KEY": "",
+            "AI_INTEGRATIONS_GEMINI_BASE_URL": "",
+        }, clear=False):
+            unavailable_records = evaluate(
+                corpus(),
+                GeminiAdapter(api_key="", base_url=""),
+                retries=0,
+            )
+        manifest = evaluation_manifest(
+            json.dumps(corpus()).encode(),
+            corpus(),
+            unavailable_records,
+            "fixture-model",
+            0.75,
+            0,
+        )
+        self.assertEqual(manifest["outcome"]["state"], "unavailable")
+        self.assertEqual(manifest["execution"]["retries"], 0)
+        self.assertFalse(manifest["privacy"]["rawProviderPayloadsRetained"])
+        self.assertEqual(manifest["privacy"]["mode"], "metadata-only")
+        self.assertEqual(manifest["privacy"]["retainedEvaluationContent"], "none")
+        self.assertNotIn("results", manifest)
+        failed = [{**unavailable_records[0], "status": "provider_failure"}]
+        self.assertEqual(
+            evaluation_manifest(
+                b"{}",
+                {"skills": []},
+                failed,
+                "fixture-model",
+                0.75,
+                2,
+            )["outcome"]["state"],
+            "failed",
+        )
+        retried = [{
+            "status": "included",
+            "expected": "trigger",
+            "decision": "trigger",
+            "attempts": 2,
+        }]
+        retried_manifest = evaluation_manifest(
+            b"{}",
+            {"skills": [{"evals": [{}]}]},
+            retried,
+            "fixture-model",
+            0.75,
+            2,
+        )
+        self.assertEqual(retried_manifest["execution"]["retries"], 1)
 
     def test_manual_decisions_are_stored_separately_and_removed_from_pending(self):
         with TemporaryDirectory() as directory:
@@ -233,6 +370,72 @@ class GeminiBenchmarkTests(unittest.TestCase):
             record_manual_decision(queue, decisions, "one", "trigger", "reason")
             with self.assertRaises(SystemExit):
                 record_manual_decision(queue, decisions, "one", "trigger", "again")
+
+    def test_all_benchmark_artifacts_exclude_private_model_content(self):
+        private_values = {
+            "RAW_PROMPT_SENTINEL",
+            "PROVIDER_PAYLOAD_SENTINEL",
+            "CREDENTIAL_SENTINEL",
+            "CONVERSATION_TEXT_SENTINEL",
+        }
+        records = [{
+            "id": "synthetic-private-case",
+            "skill": "synthetic-skill",
+            "query": "RAW_PROMPT_SENTINEL CONVERSATION_TEXT_SENTINEL",
+            "expected": "trigger",
+            "attempts": 1,
+            "decision": "do_not_trigger",
+            "confidence": 0.91,
+            "rationale": "PROVIDER_PAYLOAD_SENTINEL",
+            "provider_payload": {"body": "PROVIDER_PAYLOAD_SENTINEL"},
+            "credential": "CREDENTIAL_SENTINEL",
+            "conversation": "CONVERSATION_TEXT_SENTINEL",
+            "status": "disagreement",
+        }]
+        result = {
+            "provider": "gemini",
+            "model": "synthetic-model",
+            "run_at": "2026-09-14T00:00:00+00:00",
+            "metrics": metrics(records),
+            "results": records,
+            "evaluationManifest": {
+                "privacy": {
+                    "mode": "metadata-only",
+                    "rawProviderPayloadsRetained": False,
+                    "retainedEvaluationContent": "none",
+                },
+            },
+        }
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = [
+                root / "results.json",
+                root / "queue.json",
+                root / "report.md",
+            ]
+            write_benchmark_artifacts(*paths, result, records)
+
+            retained = "\n".join(path.read_text() for path in paths)
+            for private_value in private_values:
+                self.assertNotIn(private_value, retained)
+
+            results_payload = json.loads(paths[0].read_text())
+            self.assertEqual(
+                results_payload["results"],
+                [{
+                    "id": "synthetic-private-case",
+                    "skill": "synthetic-skill",
+                    "expected": "trigger",
+                    "attempts": 1,
+                    "decision": "do_not_trigger",
+                    "confidence": 0.91,
+                    "status": "disagreement",
+                }],
+            )
+            queue_payload = json.loads(paths[1].read_text())
+            self.assertEqual(queue_payload["cases"][0]["reason"], "disagreement")
+            self.assertNotIn("query", queue_payload["cases"][0])
+            self.assertNotIn("rationale", queue_payload["cases"][0]["gemini"])
 
     def test_cli_review_workflow_and_benchmark_decisions_isolation(self):
         with TemporaryDirectory() as directory:
@@ -296,6 +499,7 @@ class GeminiBenchmarkTests(unittest.TestCase):
             corpus_path.write_text(json.dumps({"skills": []}))
             benchmark = run_cli(
                 "benchmark",
+                "--live-provider",
                 "--corpus", str(corpus_path),
                 "--results", str(root / "results.json"),
                 "--report", str(root / "report.md"),
@@ -306,7 +510,7 @@ class GeminiBenchmarkTests(unittest.TestCase):
             self.assertIn('"evaluated": 0', benchmark.stdout)
             self.assertEqual(decisions.read_bytes(), decisions_before_benchmark)
 
-    def test_strict_provider_mode_writes_artifacts_then_fails(self):
+    def test_benchmark_refuses_live_access_without_explicit_opt_in(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
             corpus_path = root / "corpus.json"
@@ -319,9 +523,36 @@ class GeminiBenchmarkTests(unittest.TestCase):
                     "benchmark",
                     "--corpus", str(corpus_path),
                     "--results", str(root / "results.json"),
+                ],
+                cwd=root,
+                env={
+                    **os.environ,
+                    "AI_INTEGRATIONS_GEMINI_API_KEY": "must-not-be-used",
+                    "AI_INTEGRATIONS_GEMINI_BASE_URL": "https://must-not-be-used.invalid",
+                },
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("benchmark is offline by default", result.stderr)
+            self.assertFalse((root / "results.json").exists())
+
+    def test_live_provider_mode_writes_artifacts_then_fails_closed(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            corpus_path = root / "corpus.json"
+            corpus_path.write_text(json.dumps(corpus()))
+            script = Path(__file__).with_name("gemini_skill_trigger_benchmark.py").resolve()
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "benchmark",
+                    "--live-provider",
+                    "--corpus", str(corpus_path),
+                    "--results", str(root / "results.json"),
                     "--report", str(root / "report.md"),
                     "--queue", str(root / "queue.json"),
-                    "--fail-on-provider-error",
                 ],
                 cwd=root,
                 env={
@@ -337,6 +568,9 @@ class GeminiBenchmarkTests(unittest.TestCase):
             self.assertTrue((root / "results.json").exists())
             self.assertTrue((root / "report.md").exists())
             self.assertTrue((root / "queue.json").exists())
+            payload = json.loads((root / "results.json").read_text())
+            self.assertEqual(payload["execution_mode"], "live_provider_opt_in")
+            self.assertFalse(payload["ci_evidence"])
 
 
 if __name__ == "__main__":

@@ -239,11 +239,13 @@ describe("auto-track tray/batch up/down tracking", () => {
     // A second production tick after an intervening consume proves 74 is no
     // longer a ceiling: 74 → 73 → 74 is not enough, so manually preserve 74
     // through the consumption tick and let the next production tick add to 75.
+    values.traysOnLine = 75;
     rerender({
       nowTime: new Date(t0 + 36 * 1000),
       elapsedBatchSec: 10 * 60 + 36,
       v: makeV({ traysOnLine: 75, batchesReady: values.batchesReady }),
     });
+    values.traysOnLine = 74;
     rerender({
       nowTime: new Date(t0 + 54 * 1000),
       elapsedBatchSec: 10 * 60 + 54,
@@ -315,6 +317,31 @@ describe("auto-track tray/batch up/down tracking", () => {
     // Net delta is +0.5 (mixer +1, drain -0.5) which would push further over
     // the 3-batch cap — the clamp must hold the value, never slam it to 3.
     expect(values.batchesReady).toBe(9.75);
+  });
+
+  it("uses the adopted form value when render props transiently lag behind", () => {
+    const { form, values } = makeForm({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 0,
+      traysOnLine: 12,
+      batchesReady: 2,
+    });
+    const t0 = 1_700_000_000_000;
+
+    renderHook(() => useAutoTrack({
+      runId: "adoption-lag",
+      runStatus: "running",
+      nowTime: new Date(t0),
+      elapsedBatchSec: 10 * 60,
+      calc: baseCalc,
+      // A form reset/adoption is synchronous, while watch-derived props can
+      // retain the previous zero snapshot for this render.
+      v: makeV({ traysOnLine: 0, batchesReady: 0 }),
+      form,
+    }));
+
+    expect(values.traysOnLine).toBe(11);
+    expect(values.batchesReady).toBe(1.75);
   });
 
   it("drains batches fractionally — 0.25 per quarter-batch tick, visibly", () => {

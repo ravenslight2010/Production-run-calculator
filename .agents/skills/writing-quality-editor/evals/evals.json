@@ -1,0 +1,20 @@
+{
+  "skill_name": "writing-quality-editor",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Polish this release note: “All devices always sync instantly. Validation passed 87/90 tests.” Keep the numbers exact.",
+      "expected_output": "Preserves 87/90, does not strengthen the unsupported universal sync claim, and flags the factual conflict before or alongside revision."
+    },
+    {
+      "id": 2,
+      "prompt": "Review this manager warning and tell me what is unclear, but do not rewrite it.",
+      "expected_output": "Uses Assess mode, explains reader-impacting problems, and does not provide replacement copy or edit a file."
+    },
+    {
+      "id": 3,
+      "prompt": "Rewrite this setup guide for new staff. Keep every command, quoted policy sentence, error code, and safety warning unchanged.",
+      "expected_output": "Improves surrounding structure and explanation while preserving locked technical and quoted content and confirming those invariants."
+    }
+  ]
+}

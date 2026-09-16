@@ -20,6 +20,7 @@ import * as profileStub from "./repairs/profileNameLinkStubPurgeRepair";
 import * as aug19Profile from "./repairs/aug19SavedSpecProfileRepair";
 import * as aug19ProfileV2 from "./repairs/aug19SavedSpecProfileRepairV2";
 import * as sourceReconciliation from "./repairs/sourceLibraryReconciliationRepair";
+import * as speedAdjustmentBaseline from "./repairs/speedAdjustmentBaselineRepair";
 
 export {
   pickMixDuplicateLosers,
@@ -92,13 +93,14 @@ export const AUTOMATIC_DATA_HEAL_IDS = Object.freeze([
   "incident-resolved-workflow-reconciliation-v1",
   "source-library-reconciliation-2026-08-26-v1",
   "source-library-reconciliation-2026-08-26-v2",
+  "speed-adjustment-baseline-v1",
 ] as const);
 
 const modules = [
   liveProfile, crbIngredient, markerHygiene, remainingMarkerHygiene,
   cheeseNormalization, remainingCheeseNormalization, mixDough, doughMerge,
   historicalProfiles, augustImports, remainingAugustImports, profileStub,
-  aug19Profile, aug19ProfileV2, sourceReconciliation,
+  aug19Profile, aug19ProfileV2, sourceReconciliation, speedAdjustmentBaseline,
 ] as const;
 
 function isDefinition(value: unknown): value is RepairDefinition<RepairTransaction> {

@@ -1,0 +1,72 @@
+{
+  "manifestVersion": 1,
+  "evaluation": {
+    "id": "deterministic-import-corpus",
+    "kind": "deterministic"
+  },
+  "corpus": {
+    "sha256": "5a57be7a35fd75b1bcfd42cf59fab51dd6749f4e5cc942e483ebe3ba8f8c8b49",
+    "cases": 51,
+    "sourceAuthority": "retained-source-workbooks"
+  },
+  "thresholds": {
+    "minimumCorpusFiles": 51,
+    "maximumDroppedPromptRowsExcludingSchedule": 0,
+    "maximumGridSanityIssues": 0
+  },
+  "dependencies": {
+    "node": "24.13.0",
+    "pnpmLockSha256": "ec8eb4e16273f68a4e72e3cbc20b13c868f1c3a1b270197d6ca803b76abaaf14",
+    "xlsx": "npm:@e965/xlsx@^0.20.3",
+    "vitest": "^4.1.9"
+  },
+  "provider": {
+    "identityState": "not-applicable",
+    "name": null,
+    "model": null
+  },
+  "performance": {
+    "inputTokens": {
+      "state": "unavailable",
+      "reason": "deterministic evaluation does not use tokens"
+    },
+    "outputTokens": {
+      "state": "unavailable",
+      "reason": "deterministic evaluation does not use tokens"
+    },
+    "cost": {
+      "state": "measured",
+      "value": 0,
+      "unit": "USD"
+    },
+    "latencyP95": {
+      "state": "unavailable",
+      "reason": "corpus snapshot test does not retain timing evidence"
+    }
+  },
+  "execution": {
+    "retries": 0,
+    "seed": null
+  },
+  "privacy": {
+    "mode": "metadata-only",
+    "rawProviderPayloadsRetained": false,
+    "retainedEvaluationContent": "none"
+  },
+  "outcome": {
+    "state": "passed",
+    "reason": null
+  },
+  "provenance": {
+    "sourceSha256": "5a57be7a35fd75b1bcfd42cf59fab51dd6749f4e5cc942e483ebe3ba8f8c8b49",
+    "evidence": {
+      "state": "hashed",
+      "sha256": "59058925624310ec1df7eb18b92a329951b54a333c5ae93c4f14e89fa7198e77"
+    },
+    "evidenceType": "source-workbook-byte-hash",
+    "evaluator": {
+      "state": "hashed",
+      "sha256": "f2e957eb78f8094ffd27f9c6ec6ceb74a7589bc2bb54788dedd23ff462756612"
+    }
+  }
+}

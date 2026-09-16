@@ -2766,6 +2766,7 @@ export const VoidMixSurplusLotResponse = zod.object({
 export const ListDieLineDefaultsResponse = zod.object({
   "entries": zod.array(zod.object({
   "name": zod.string().describe('Die-type display name (matched case-insensitively)'),
+  "updatedAt": zod.coerce.date().optional().describe('Server-issued optimistic-concurrency revision; required when updating an existing row'),
   "crustsPerCycle": zod.number(),
   "cycleSpeed": zod.number(),
   "speedAdjustment": zod.number(),
@@ -2778,12 +2779,13 @@ export const ListDieLineDefaultsResponse = zod.object({
 
 
 /**
- * Upserts a batch of per-die line-setting defaults keyed by die name (case-insensitive). Malformed entries are dropped. Manager role required.
+ * Upserts a batch of per-die line-setting defaults keyed by die name (case-insensitive). Existing rows require a current or newer updatedAt revision; stale or revision-less updates are rejected atomically. Revision-less entries remain compatible for first-time creation. Malformed entries are dropped. Manager role required.
  * @summary Create or update per-die line-setting defaults (manager only)
  */
 export const SaveDieLineDefaultsBody = zod.object({
   "entries": zod.array(zod.object({
   "name": zod.string().describe('Die-type display name (matched case-insensitively)'),
+  "updatedAt": zod.coerce.date().optional().describe('Server-issued optimistic-concurrency revision; required when updating an existing row'),
   "crustsPerCycle": zod.number(),
   "cycleSpeed": zod.number(),
   "speedAdjustment": zod.number(),
@@ -2797,6 +2799,7 @@ export const SaveDieLineDefaultsBody = zod.object({
 export const SaveDieLineDefaultsResponse = zod.object({
   "entries": zod.array(zod.object({
   "name": zod.string().describe('Die-type display name (matched case-insensitively)'),
+  "updatedAt": zod.coerce.date().optional().describe('Server-issued optimistic-concurrency revision; required when updating an existing row'),
   "crustsPerCycle": zod.number(),
   "cycleSpeed": zod.number(),
   "speedAdjustment": zod.number(),
@@ -2809,16 +2812,18 @@ export const SaveDieLineDefaultsResponse = zod.object({
 
 
 /**
- * Removes stored per-die defaults by die name (case-insensitive), so those dies fall back to the app's built-in defaults. Manager role required.
+ * Removes stored per-die defaults by die name (case-insensitive), so those dies fall back to the app's built-in defaults. Existing rows require a current or newer revision in the revisions map; stale or revision-less resets are rejected atomically. Revision-less names remain compatible when no stored row exists. Manager role required.
  * @summary Delete per-die line-setting defaults by die name (manager only)
  */
 export const DeleteDieLineDefaultsBody = zod.object({
-  "names": zod.array(zod.string()).describe('Die names whose stored defaults should be removed')
+  "names": zod.array(zod.string()).describe('Die names whose stored defaults should be removed'),
+  "revisions": zod.record(zod.string(), zod.coerce.date()).optional().describe('Loaded updatedAt revisions keyed by die name. Required for each name that currently has a stored override.')
 })
 
 export const DeleteDieLineDefaultsResponse = zod.object({
   "entries": zod.array(zod.object({
   "name": zod.string().describe('Die-type display name (matched case-insensitively)'),
+  "updatedAt": zod.coerce.date().optional().describe('Server-issued optimistic-concurrency revision; required when updating an existing row'),
   "crustsPerCycle": zod.number(),
   "cycleSpeed": zod.number(),
   "speedAdjustment": zod.number(),
@@ -5678,6 +5683,23 @@ export const ListManagerActionQueueResponse = zod.object({
 
 
 /**
+ * @summary List sustained background-operation failures visible to managers
+ */
+export const getBackgroundOperationDiagnosticsResponseWarningsMax = 4;
+
+
+
+
+export const GetBackgroundOperationDiagnosticsResponse = zod.object({
+  "warnings": zod.array(zod.object({
+  "operation": zod.enum(['daily-rollover', 'server-job-run', 'server-job-prune', 'web-push-schedule']),
+  "lastFailureAt": zod.coerce.date()
+})).max(getBackgroundOperationDiagnosticsResponseWarningsMax),
+  "windowMs": zod.int().min(1)
+})
+
+
+/**
  * @summary Update a manager action item with optimistic version checking
  */
 export const UpdateManagerActionItemParams = zod.object({
@@ -6085,6 +6107,118 @@ export const FinalizeCompletedRunBody = zod.object({
 })
 
 export const FinalizeCompletedRunResponse = zod.unknown()
+
+
+/**
+ * @summary List append-only applicator batch observations and manager attestations
+ */
+export const listApplicatorBatchEvidenceQueryRunIdMax = 500;
+
+export const listApplicatorBatchEvidenceQueryCursorMax = 4096;
+
+
+export const listApplicatorBatchEvidenceQueryCursorRegExp = new RegExp('^[A-Za-z0-9_-]+$');
+export const listApplicatorBatchEvidenceQueryLimitDefault = 500;
+export const listApplicatorBatchEvidenceQueryLimitMax = 500;
+
+
+
+export const ListApplicatorBatchEvidenceQueryParams = zod.object({
+  "from": zod.date().optional(),
+  "to": zod.date().optional(),
+  "runId": zod.coerce.string().max(listApplicatorBatchEvidenceQueryRunIdMax).optional(),
+  "cursor": zod.coerce.string().max(listApplicatorBatchEvidenceQueryCursorMax).regex(listApplicatorBatchEvidenceQueryCursorRegExp).optional(),
+  "limit": zod.coerce.number().int().min(1).max(listApplicatorBatchEvidenceQueryLimitMax).default(listApplicatorBatchEvidenceQueryLimitDefault)
+})
+
+export const listApplicatorBatchEvidenceResponseEvidenceItemSlotMax = 4;
+
+export const listApplicatorBatchEvidenceResponseEvidenceItemObservedTotalMin = 0;
+
+export const listApplicatorBatchEvidenceResponseEvidenceItemConfirmedTotalMin = 0;
+
+export const listApplicatorBatchEvidenceResponseEvidenceItemEvidenceHashRegExp = new RegExp('^[a-f0-9]{64}$');
+
+
+export const ListApplicatorBatchEvidenceResponse = zod.object({
+  "evidence": zod.array(zod.object({
+  "id": zod.string(),
+  "operationId": zod.string(),
+  "date": zod.coerce.date(),
+  "runId": zod.string(),
+  "slot": zod.int().min(1).max(listApplicatorBatchEvidenceResponseEvidenceItemSlotMax),
+  "source": zod.enum(['automatic-observation', 'manager-finalization', 'manager-correction']),
+  "observedTotal": zod.int().min(listApplicatorBatchEvidenceResponseEvidenceItemObservedTotalMin).optional(),
+  "confirmedTotal": zod.int().min(listApplicatorBatchEvidenceResponseEvidenceItemConfirmedTotalMin).optional(),
+  "correctionOf": zod.string().optional(),
+  "evidenceHash": zod.string().regex(listApplicatorBatchEvidenceResponseEvidenceItemEvidenceHashRegExp),
+  "hashContract": zod.enum(['canonical-json-v1']),
+  "createdAt": zod.coerce.date()
+})),
+  "nextCursor": zod.string().optional().describe('Opaque cursor for the next page; absent when complete.')
+})
+
+
+/**
+ * Attests a slot only for an existing immutable completed run in this authenticated scope. Corrections append a new manager record and reference the latest finalization.
+ * @summary Append an immutable manager-confirmed physical applicator total
+ */
+export const finalizeApplicatorBatchTotalBodyOperationIdMax = 300;
+
+
+export const finalizeApplicatorBatchTotalBodyOperationIdRegExp = new RegExp('^[A-Za-z0-9:_-]+$');
+export const finalizeApplicatorBatchTotalBodyRunIdMax = 500;
+
+export const finalizeApplicatorBatchTotalBodySlotMax = 4;
+
+export const finalizeApplicatorBatchTotalBodyFinalTotalMin = 0;
+export const finalizeApplicatorBatchTotalBodyFinalTotalMax = 1000000;
+
+export const finalizeApplicatorBatchTotalBodyCorrectionOfMax = 300;
+
+
+export const finalizeApplicatorBatchTotalBodyCorrectionOfRegExp = new RegExp('^[A-Za-z0-9:_-]+$');
+
+
+export const FinalizeApplicatorBatchTotalBody = zod.object({
+  "operationId": zod.string().min(1).max(finalizeApplicatorBatchTotalBodyOperationIdMax).regex(finalizeApplicatorBatchTotalBodyOperationIdRegExp),
+  "date": zod.coerce.date().describe('Valid calendar date (not only YYYY-MM-DD syntax)'),
+  "runId": zod.string().min(1).max(finalizeApplicatorBatchTotalBodyRunIdMax),
+  "slot": zod.int().min(1).max(finalizeApplicatorBatchTotalBodySlotMax),
+  "finalTotal": zod.int().min(finalizeApplicatorBatchTotalBodyFinalTotalMin).max(finalizeApplicatorBatchTotalBodyFinalTotalMax),
+  "correctionOf": zod.string().min(1).max(finalizeApplicatorBatchTotalBodyCorrectionOfMax).regex(finalizeApplicatorBatchTotalBodyCorrectionOfRegExp).optional()
+})
+
+export const finalizeApplicatorBatchTotalResponseEvidenceHashRegExp = new RegExp('^[a-f0-9]{64}$');
+export const finalizeApplicatorBatchTotalResponseCanonicalSlotMax = 4;
+
+export const finalizeApplicatorBatchTotalResponseCanonicalObservedTotalMin = 0;
+
+export const finalizeApplicatorBatchTotalResponseCanonicalConfirmedTotalMin = 0;
+
+export const finalizeApplicatorBatchTotalResponseCanonicalEvidenceHashRegExp = new RegExp('^[a-f0-9]{64}$');
+
+
+export const FinalizeApplicatorBatchTotalResponse = zod.object({
+  "acknowledged": zod.literal(true),
+  "duplicate": zod.boolean(),
+  "operationId": zod.string(),
+  "evidenceHash": zod.string().regex(finalizeApplicatorBatchTotalResponseEvidenceHashRegExp),
+  "canonical": zod.object({
+  "id": zod.string(),
+  "operationId": zod.string(),
+  "date": zod.coerce.date(),
+  "runId": zod.string(),
+  "slot": zod.int().min(1).max(finalizeApplicatorBatchTotalResponseCanonicalSlotMax),
+  "source": zod.enum(['automatic-observation', 'manager-finalization', 'manager-correction']),
+  "observedTotal": zod.int().min(finalizeApplicatorBatchTotalResponseCanonicalObservedTotalMin).optional(),
+  "confirmedTotal": zod.int().min(finalizeApplicatorBatchTotalResponseCanonicalConfirmedTotalMin).optional(),
+  "correctionOf": zod.string().optional(),
+  "evidenceHash": zod.string().regex(finalizeApplicatorBatchTotalResponseCanonicalEvidenceHashRegExp),
+  "hashContract": zod.enum(['canonical-json-v1']),
+  "createdAt": zod.coerce.date()
+})
+})
 
 
 /**

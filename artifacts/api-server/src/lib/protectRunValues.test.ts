@@ -93,13 +93,13 @@ const BLANK = {
   slipSheets: "no",
 };
 
-// Today's DEFAULT_VALUES shape — all-zero quantities (speedAdjustment 1.0),
+// Today's DEFAULT_VALUES shape — all-zero quantities (speedAdjustment 0.92),
 // including the pep "B"-slot, timer, and label fields added since.
 const CURRENT_BLANK = {
   casesNeeded: 0,
   crustsPerCycle: 0,
   cycleSpeed: 0,
-  speedAdjustment: 1.0,
+  speedAdjustment: 0.92,
   approxLineSpeed: 0,
   freezerTime: 0,
   pizzasPerCase: 0,

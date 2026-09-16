@@ -142,20 +142,37 @@ as `unknown` and is not valid release proof. `REPLIT_GIT_COMMIT` and
 `GIT_COMMIT` remain compatibility fallbacks, but operators should not depend on
 either being supplied automatically by the deployment platform.
 
-Capture production reconciliation evidence with the exact revision returned by
-the deployed operational report:
+Capture and import production reconciliation evidence with the exact revision
+returned by the deployed operational report. Run this from the deployment
+environment that owns the production `DATABASE_URL`; the capture mode refuses
+fixture query input, requires the explicit release environment and deployed
+revision, and runs one PostgreSQL `READ ONLY` transaction. Its stdout contains
+only the bounded verifier result, so it can be piped directly to the importer:
 
 ```bash
-SOURCE_LIBRARY_RECONCILIATION_REVISION=<deployed-40-character-sha> \
-SOURCE_LIBRARY_RECONCILIATION_ENVIRONMENT=release \
-pnpm --filter @workspace/scripts exec tsx \
+pnpm --silent --filter @workspace/scripts exec tsx \
   ./src/verify-source-library-reconciliation.mts \
+  --capture-production \
   --environment release \
+  --revision <deployed-40-character-sha> \
+  --report attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json \
+| pnpm --filter @workspace/scripts exec tsx \
+  ./src/import-source-library-reconciliation-evidence.mts \
+  --input - \
+  --report attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json \
+  --heal-id source-library-reconciliation-2026-08-26-v2 \
+  --from-date 2026-08-26 \
   --revision <deployed-40-character-sha> \
   --output /secure/path/source-library-reconciliation.json
 ```
 
-Import that file into a release run with the same explicit revision:
+If a file handoff is required, add `--output
+/secure/path/source-library-capture.json` to the capture command and pass that
+regular file as `--input` to the importer. Do not export query results,
+database dumps, or development fixtures.
+
+Import the retained bounded file into a release run with the same explicit
+revision:
 
 ```bash
 SOURCE_LIBRARY_RECONCILIATION_REVISION=<deployed-40-character-sha> \
@@ -167,7 +184,13 @@ pnpm run release:check -- \
 
 Release captures and imports reject a missing, malformed, `unknown`, or
 different revision. The production revision must come from the controlled
-deployment/report path; never substitute the current repository `HEAD`.
+deployment/report path; never substitute the current repository `HEAD`. The
+retained release report records both `Source-library evidence revision` and
+`Deployed revision`; for release evidence those values must match the SHA
+returned by the deployed operational report. The release runner passes that SHA
+explicitly to the source verifier's preflight and full verification/import
+steps, so an older release-state file or an omitted preflight value cannot
+silently qualify.
 
 When a job stops before all gates complete, the workflow writes a separate
 NO-GO summary with the uploaded checkpoint-artifact link, the matching resume

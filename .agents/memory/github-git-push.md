@@ -36,6 +36,17 @@ branch-rule bypass.
 read GitHub's commit verification result, and fast-forward `main` only when the
 result is valid. Delete the disposable branch afterward.
 
+GitHub's branch-protection API represents `allow_force_pushes` and
+`allow_deletions` as objects with an `enabled` boolean, while required status
+checks use exact workflow job names and app IDs.
+
+**Why:** A read-only verifier that compares the whole restriction object or
+uses a renamed workflow label can report false drift or fail to match the live
+rule.
+
+**How to apply:** Extract `.enabled` for restriction fields and keep workflow
+job names, policy prose, evidence, and verifier fixtures synchronized.
+
 When a root pnpm command forwards user arguments to a package-level script, account for pnpm's separator forwarding; a direct root wrapper keeps the documented `pnpm run ... -- --message` form unambiguous.
 
 **Why:** Nested `pnpm run` commands can pass the separator through as an extra literal argument, making an otherwise standard documented invocation fail before the script parses its options.
