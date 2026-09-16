@@ -1875,7 +1875,7 @@ async function run(): Promise<void> {
         expectedMode: "standard",
         expectedLabels: validLabels,
       }),
-      /contains a full report, but standard verification was requested.*full command/,
+      /contains a full report, but standard verification was requested\.[\s\S]*pnpm --filter @workspace\/scripts exec tsx \.\/src\/release-check\.mts --full --verify-evidence/,
       "standard verification must not accept a full evidence directory",
     );
     await assert.rejects(
