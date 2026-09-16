@@ -11,6 +11,11 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  isRetryableReleasePreflightDatabaseError,
+  RELEASE_PREFLIGHT_DB_ATTEMPTS,
+  runReleasePreflightDatabaseRetry,
+} from "./release-preflight-db-retry.mts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const DEFAULT_REPORT = "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json";
@@ -1202,6 +1207,50 @@ async function writeOutput(outputPath: string | undefined, output: unknown): Pro
   fs.writeFileSync(outputPath, `${JSON.stringify(output)}\n`, "utf8");
 }
 
+export const SOURCE_LIBRARY_PREFLIGHT_DB_ATTEMPTS = RELEASE_PREFLIGHT_DB_ATTEMPTS;
+export const isRetryableSourceLibraryDatabaseError =
+  isRetryableReleasePreflightDatabaseError;
+
+type ReadOnlyPoolClient = {
+  query: (text: string, values?: readonly unknown[]) => Promise<{
+    rows: Array<Record<string, unknown>>;
+  }>;
+  release: (destroy?: boolean) => void;
+};
+
+type ReadOnlyPool = {
+  connect: () => Promise<ReadOnlyPoolClient>;
+};
+
+async function runSourceLibraryReadOnlyCheck<T>(
+  pool: ReadOnlyPool,
+  retryConnectionFailures: boolean,
+  check: (query: ReadOnlyQuery) => Promise<T>,
+): Promise<T> {
+  return runReleasePreflightDatabaseRetry(async () => {
+    let client: ReadOnlyPoolClient | undefined;
+    let destroyClient = false;
+    try {
+      client = await pool.connect();
+      await client.query("BEGIN TRANSACTION READ ONLY");
+      const query: ReadOnlyQuery = async (text, values) => {
+        const result = await client!.query(text, values);
+        return { rows: result.rows };
+      };
+      const output = await check(query);
+      await client.query("ROLLBACK");
+      return output;
+    } catch (error) {
+      destroyClient =
+        retryConnectionFailures &&
+        isRetryableReleasePreflightDatabaseError(error);
+      throw error;
+    } finally {
+      client?.release(destroyClient);
+    }
+  }, { enabled: retryConnectionFailures });
+}
+
 function dateFromHealId(healId: string) {
   const match = healId.match(/(?:^|-)((?:20)\d{2}-\d{2}-\d{2})(?:-|$)/);
   return match?.[1];
@@ -1316,15 +1365,11 @@ async function main() {
   const reportBytes = fs.readFileSync(reportPath);
   const report = parseReport(JSON.parse(reportBytes.toString("utf8")));
   const { pool } = await import("@workspace/db");
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN TRANSACTION READ ONLY");
-    const query: ReadOnlyQuery = async (text, values) => {
-      const result = await client.query(text, values ? [...values] : undefined);
-      return { rows: result.rows as Array<Record<string, unknown>> };
-    };
-    const output = preflightOnly
-      ? await preflightSourceLibraryReconciliation(
+  const output = await runSourceLibraryReadOnlyCheck<
+    SourceLibraryPreflightOutput | VerificationOutput
+  >(pool, preflightOnly, (query) =>
+    preflightOnly
+      ? preflightSourceLibraryReconciliation(
           report,
           reportBytes,
           healId,
@@ -1332,7 +1377,7 @@ async function main() {
           environment,
           revision,
         )
-      : await verifySourceLibraryReconciliation(
+      : verifySourceLibraryReconciliation(
           report,
           reportBytes,
           healId,
@@ -1340,17 +1385,14 @@ async function main() {
           fromDate,
           environment,
           revision,
-        );
-    if (!preflightOnly) {
-      assertBoundedSourceLibraryReconciliationEvidence(output);
-    }
-    await client.query("ROLLBACK");
-    await writeOutput(outputPath, output);
-    process.stdout.write(`${JSON.stringify(output)}\n`);
-    if (!output.ok) process.exitCode = 1;
-  } finally {
-    client.release();
+        ),
+  );
+  if (!preflightOnly) {
+    assertBoundedSourceLibraryReconciliationEvidence(output);
   }
+  await writeOutput(outputPath, output);
+  process.stdout.write(`${JSON.stringify(output)}\n`);
+  if (!output.ok) process.exitCode = 1;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {

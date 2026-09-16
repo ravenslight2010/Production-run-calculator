@@ -20,6 +20,7 @@ type FixtureStep = {
 
 const rootDir = resolve(new URL("../../", import.meta.url).pathname);
 const releaseCheck = join(rootDir, "scripts", "src", "release-check.mts");
+const tsxPath = resolve(rootDir, "scripts/node_modules/tsx/dist/cli.mjs");
 const stoppedSummaryScript = join(
   rootDir,
   "scripts",
@@ -71,7 +72,7 @@ async function runReleaseCheck(
     "utf8",
   );
   return new Promise((resolveRun, reject) => {
-    const child = spawn("pnpm", ["exec", "tsx", releaseCheck, ...args], {
+    const child = spawn(process.execPath, [tsxPath, releaseCheck, ...args], {
       cwd: rootDir,
       env: {
         ...process.env,

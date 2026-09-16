@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -6,7 +5,6 @@ import { dirname } from "node:path";
 export const REPORT_KEY_ROTATION_SCAN_LIMIT = 100;
 export const REPORT_KEY_ROTATION_PREFLIGHT_VERIFIER =
   "report-key-rotation-preflight";
-const REPORT_KEY_ROTATION_DB_ATTEMPTS = 3;
 
 export type ReportSigningKeyring = {
   activeKeyId: string;
@@ -161,100 +159,57 @@ async function readStoredProofKeyIds(
 export async function runReportKeyRotationPreflight(
   configuredKeyring = process.env.OPERATIONAL_REPORT_SIGNING_KEYS,
 ): Promise<ReportKeyRotationPreflight> {
-  const keyring = parseReportSigningKeyring(configuredKeyring);
-  if (!keyring) {
-    return evaluateReportKeyRotationPreflight({
-      keyring: null,
-      storedKeyIds: [],
-      truncated: false,
-    });
-  }
   const { pool } = await import("@workspace/db");
   try {
-    let lastError: unknown;
-    for (let attempt = 1; attempt <= REPORT_KEY_ROTATION_DB_ATTEMPTS; attempt += 1) {
-      try {
-        const stored = await readStoredProofKeyIds(pool);
-        return evaluateReportKeyRotationPreflight({
-          keyring,
-          storedKeyIds: stored.keyIds,
-          truncated: stored.truncated,
-        });
-      } catch (error) {
-        lastError = error;
-        if (attempt < REPORT_KEY_ROTATION_DB_ATTEMPTS) {
-          await new Promise((resolve) => setTimeout(resolve, attempt * 250));
-        }
-      }
-    }
-    throw lastError;
+    const stored = await readStoredProofKeyIds(pool);
+    return evaluateReportKeyRotationPreflight({
+      keyring: parseReportSigningKeyring(configuredKeyring),
+      storedKeyIds: stored.keyIds,
+      truncated: stored.truncated,
+    });
   } finally {
     await pool.end();
   }
 }
 
-function currentRevision(): string {
-  const configured = process.env.REPORT_KEY_ROTATION_PREFLIGHT_REVISION;
-  const revision = configured ?? execFileSync("git", ["rev-parse", "HEAD"], {
-    encoding: "utf8",
-  }).trim();
-  if (!/^[a-f0-9]{40}$/u.test(revision)) {
-    throw new Error("Invalid report-key preflight revision; expected a full Git commit SHA.");
-  }
-  return revision;
-}
-
-async function writeEvidence(
-  path: string,
-  result: ReportKeyRotationPreflight,
-  revision: string | null,
-): Promise<void> {
+async function writeEvidence(path: string, result: ReportKeyRotationPreflight): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify({
-    verifier: REPORT_KEY_ROTATION_PREFLIGHT_VERIFIER,
+    verifier: "report-key-rotation-preflight",
     environment: process.env.REPORT_KEY_ROTATION_PREFLIGHT_ENVIRONMENT
       ?? process.env.NODE_ENV
       ?? "unknown",
-    revision,
     ...result,
   }, null, 2)}\n`, "utf8");
 }
 
 export async function main(): Promise<void> {
   const outputPath = process.env.REPORT_KEY_ROTATION_PREFLIGHT_OUTPUT;
-  let revision: string | null = null;
   try {
-    revision = currentRevision();
     const result = await runReportKeyRotationPreflight();
-    if (outputPath) await writeEvidence(outputPath, result, revision);
+    if (outputPath) await writeEvidence(outputPath, result);
     console.log(JSON.stringify(result, null, 2));
     if (!result.canRotate) process.exitCode = 1;
   } catch {
     const result = {
-      verifier: REPORT_KEY_ROTATION_PREFLIGHT_VERIFIER,
+      verifier: "report-key-rotation-preflight",
       status: "blocked" as const,
       canRotate: false,
       failure: "audit-unavailable" as const,
       remediation: "The target database could not be audited. Restore database connectivity and rerun this preflight before rotating keys.",
     };
-    if (outputPath) {
-      await writeEvidence(
-        outputPath,
-        {
-          ...result,
-          activeKeyId: null,
-          storedKeyIds: [],
-          missingKeyIds: [],
-          scan: {
-            limit: REPORT_KEY_ROTATION_SCAN_LIMIT,
-            checkedDistinctKeyIds: 0,
-            truncated: false,
-            complete: false,
-          },
-        },
-        revision,
-      );
-    }
+    if (outputPath) await writeEvidence(outputPath, {
+      ...result,
+      activeKeyId: null,
+      storedKeyIds: [],
+      missingKeyIds: [],
+      scan: {
+        limit: REPORT_KEY_ROTATION_SCAN_LIMIT,
+        checkedDistinctKeyIds: 0,
+        truncated: false,
+        complete: false,
+      },
+    });
     console.log(JSON.stringify(result, null, 2));
     process.exitCode = 1;
   }

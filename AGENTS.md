@@ -19,6 +19,15 @@ This repository is worked on by **multiple coding agents** (Codex, Replit Agent,
 2. **Push to a feature branch** and open a PR.
 3. **CI must pass** before merging.
 
+## Task scope and failure closure
+
+- **Use one durable task per objective.** The owning task includes the complete end-to-end outcome: investigation, implementation, integration and persistence effects, regression coverage, final verification, and every repair that is in scope.
+- Before starting, capture the task's scope, affected surfaces, owner, applicable specialist safety checks, and validation matrix. Search the task board for overlap and dependencies; do not duplicate an existing task.
+- Keep discoveries for the same objective in the owning task's progress updates and failure ledger. Fix every in-scope finding before completion; do not create a recursive follow-up task for a symptom, test failure, fixture repair, or sub-outcome.
+- A separate project task is allowed only for a genuinely independent outcome with separate acceptance criteria, an explicitly deferred user outcome, or an out-of-scope safety, security, data-integrity, or release blocker that cannot responsibly remain in the owning task. Non-blocking out-of-scope observations stay documented in the owning task or an existing matching task; they do not become speculative “one more task” work.
+- Long-running task updates must state the current objective, completed work and status, active blockers with evidence and owner, the next validation milestone and prerequisite, and the accountable owner. Preserve unresolved `FAIL`, `BLOCKED`, `NOT REACHED`, and `MISSING` results until they are closed.
+- This planning rule changes neither task automation settings nor the scope, state, or acceptance criteria of existing tasks.
+
 ## Shared knowledge files
 
 - `.agents/memory/codex-fixes.md` — running log of Codex fixes

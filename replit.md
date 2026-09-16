@@ -68,18 +68,20 @@
 
 ## Task generation and automation policy
 
+This section is the project-specific application of the shared task-scope rule in `AGENTS.md`. It is authoritative for planning and closing work, but does not change task automation settings or rewrite, merge, or re-scope existing tasks.
+
 ### Universal task intake
 
-- Generate one durable task per work objective. Include investigation, implementation, integration and persistence impacts, regression coverage, verification, and all in-scope repair work in that task. Do not create a new task for each symptom, test failure, fixture repair, or sub-outcome inside the same objective.
+- Generate one durable task per work objective. The owning task includes investigation, implementation, integration and persistence impacts, regression coverage, final verification, and all in-scope repair work. Do not create a new task for each symptom, test failure, fixture repair, or sub-outcome inside the same objective.
 - Before starting, capture the task's scope, affected surfaces, expected owner, applicable specialist safety checks, and validation matrix. Search the task board for overlap and dependencies; do not duplicate an existing task.
-- Use one task when the work has one objective and shared ownership. Split work only when the outcomes are genuinely independent, have separate acceptance criteria, and cannot responsibly be closed under the same objective.
+- Use one task when the work has one objective and shared ownership. A separate project task is allowed only when it has a genuinely independent outcome with separate acceptance criteria, is an explicitly deferred user outcome, or is an out-of-scope safety, security, data-integrity, or release blocker that cannot responsibly remain in the owning task.
 - Ask a question only for a genuine product decision, missing access or secret, or destructive action. Otherwise follow existing project patterns and choose the smallest safe behavior.
 
 ### Failure closure
 
 - Run every valid check for the changed surface, not only the check most likely to pass. Record all observed results as `PASS`, `FAIL`, `BLOCKED`, `NOT REACHED`, or `MISSING`.
 - Fix every failure within the approved task scope before completion. Do not stop at diagnosis, silently defer an in-scope defect, or report a partial check as a complete check.
-- A genuinely out-of-scope failure must be de-duplicated against the task board and captured as a bounded Draft with an owner, evidence, and next action. Bring it into the current task when it blocks required validation or creates a safety, security, data-integrity, or release risk.
+- A genuinely out-of-scope failure must be de-duplicated against the task board. Keep a non-blocking observation in the owning task's progress or failure ledger unless it meets the separate-task rule above; if it does, capture a bounded Draft with an owner, evidence, and next action. Bring it into the current task when it blocks required validation or creates a safety, security, data-integrity, or release risk.
 - Keep newly discovered in-scope failures in the owning task's failure ledger and close them before completion. A new project task requires a genuinely independent objective, an explicitly deferred user outcome, or an out-of-scope safety, security, data-integrity, or release blocker that cannot responsibly be absorbed.
 - Do not create recursive or speculative “one more task” work. A separate task must have independent acceptance criteria, an owner, and a documented reason it cannot remain in the current objective.
 - Completion evidence must name the changed surface, focused checks, broader affected checks, known failures, data/authorization/sync implications where applicable, and the exact remaining action for anything not completed.
@@ -93,7 +95,7 @@
   - **Next validation milestone:** the next concrete check or decision point, including its prerequisite when one exists; and
   - **Owner:** the person or team accountable for moving the objective to completion.
 - Keep the update current as work progresses: move completed items out of the blocker list, preserve unresolved `FAIL`, `BLOCKED`, `NOT REACHED`, and `MISSING` statuses, and do not describe a partial result as complete.
-- In-scope discoveries stay in the owning task's failure ledger and use the same owner and milestone. Do not create recursive follow-up tasks for them. Create another task only for a genuinely independent objective, a deliberately deferred outcome, or an out-of-scope safety, security, data-integrity, or release blocker that cannot responsibly remain here.
+- In-scope discoveries stay in the owning task's failure ledger and use the same owner and milestone. Do not create recursive follow-up tasks for them. Create another task only for a genuinely independent outcome with separate acceptance criteria, an explicitly deferred user outcome, or an out-of-scope safety, security, data-integrity, or release blocker that cannot responsibly remain here.
 - For release work, list independent evidence work separately from checks that depend on it. Continue every independent check that is valid and safe; mark a dependent check `BLOCKED` or `NOT REACHED`, name the failed prerequisite, and keep it unresolved until its evidence exists. Progress reporting never changes the release gate or turns unresolved evidence into a pass.
 
 ### Safe decomposition and parallel work
@@ -107,7 +109,7 @@
 
 - For production-readiness work, establish the complete release-scope and gate matrix first. Run independent gates as far as safely valid instead of stopping at the first unrelated failure, and keep every result in the owning release objective's blocker ledger.
 - Classify each result as product defect, test or fixture defect, environment/workflow problem, data or reconciliation issue, security/authorization issue, release-evidence problem, or missing evidence. Repair all domains that belong to the release objective under the same durable task using internal work breakdown.
-- Keep production reconciliation, destructive release tests, and live data heals in separate trust lanes with explicit ownership. Create a separate project task only when the work is a genuinely independent objective or cannot safely be absorbed.
+- Keep production reconciliation, destructive release tests, and live data heals in separate trust lanes with explicit ownership. Create a separate project task for one of those lanes only when it is a genuinely independent outcome with separate acceptance criteria, an explicitly deferred user outcome, or an out-of-scope safety, security, data-integrity, or release blocker that cannot safely be absorbed.
 - The owning release task performs the final standard/full evidence rerun from one clean revision, verifies retained evidence, and issues exactly one `GO` or `NO-GO` decision. A GO task cannot finish with unresolved required evidence or blockers.
 
 ### Approval, execution, and reporting

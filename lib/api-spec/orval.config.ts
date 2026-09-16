@@ -3,6 +3,9 @@ import path from "path";
 import { readFile, readdir, writeFile } from "node:fs/promises";
 
 const root = path.resolve(__dirname, "..", "..");
+// TypeDoc is part of Orval's dependency graph. Keep the explicit TypeScript 6
+// compatibility dependency in this package so a future root TypeScript 7
+// switch cannot silently satisfy TypeDoc with an unsupported compiler.
 // The freshness check sets this to a unique temporary directory so Orval
 // never cleans or rewrites the checked-in generated output. Normal generation
 // deliberately keeps using the source directories.

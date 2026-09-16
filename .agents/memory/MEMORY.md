@@ -198,3 +198,4 @@
 - [Browser evidence assertions](browser-evidence-assertions.md) — assert visible labels and container text, not internal IDs or exact nodes with nested controls.
 - [Browser fixture server identifiers](browser-fixture-server-identifiers.md) — persisted recipe rows may gain server-owned IDs; assert business fields unless IDs are the behavior under test.
 - [Production evidence revision binding](production-evidence-revision-binding.md) — operational reports may emit an unknown build revision; release evidence must bind to a controlled deploy revision, not infer it from live data.
+- [TypeScript 7 audit boundaries](typescript7-audit-boundaries.md) — comparison manifests must agree on declaration extensions and build all referenced libraries before no-emit checks.

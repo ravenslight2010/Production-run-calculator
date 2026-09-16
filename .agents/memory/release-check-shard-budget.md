@@ -44,3 +44,9 @@ carry old key evidence into a new release.
 **How to apply:** Retry only bounded read-only acquisition failures, preserve a
 hard blocked result for missing/malformed/truncated key evidence, and validate
 the retained preflight artifact against the exact release revision.
+
+In an isolated workspace, the managed database health check can recover before a shell release process does; rerun the read-only preflights after connectivity returns, but keep a reachable partial fixture as a real reconciliation NO-GO.
+
+**Why:** A transient timeout and an incomplete development fixture are different failures. Treating the latter as restored production evidence would weaken the source-library trust boundary.
+
+**How to apply:** Record both the successful connection/audit and the exact remaining fixture counts in revision-bound checkpoint evidence; never copy production rows into development just to unblock a promotion run.

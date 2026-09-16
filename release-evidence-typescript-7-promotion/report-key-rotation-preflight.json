@@ -1,0 +1,18 @@
+{
+  "verifier": "report-key-rotation-preflight",
+  "environment": "development",
+  "revision": "86882b30563fe938a5f7ef256ffa4ce3ed075cf7",
+  "status": "pass",
+  "canRotate": true,
+  "activeKeyId": "release-2026-09",
+  "storedKeyIds": [],
+  "missingKeyIds": [],
+  "scan": {
+    "limit": 100,
+    "checkedDistinctKeyIds": 0,
+    "truncated": false,
+    "complete": true
+  },
+  "failure": null,
+  "remediation": null
+}

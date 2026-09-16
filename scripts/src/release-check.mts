@@ -39,10 +39,20 @@ import {
   releaseRevisionGitArgs,
 } from "./typescript-7-evidence.mts";
 import {
+  TYPESCRIPT_7_HISTORY_LIMIT,
+  validateTypescript7HistoryLimit,
+} from "./typescript-7-trend-contract.mts";
+import {
   TYPESCRIPT_7_RESOURCE_BUDGETS,
   classifyTypescript7ResourceRegressions,
+  typescript7ExpectedMeasurementCommandNames,
+  typescript7MeasuredCheckNames,
   typescript7ResourceBudgetsEqual,
 } from "./typescript-7-resource-contract.mts";
+import {
+  TYPESCRIPT_7_SUPPORTED_RUNNERS,
+} from "./typescript-7-native-contract.mts";
+export { TYPESCRIPT_7_SUPPORTED_RUNNERS } from "./typescript-7-native-contract.mts";
 
 export type ReleaseStep = {
   label: string;
@@ -383,11 +393,8 @@ export const IMPORT_CORPUS_EVALUATION_EVIDENCE =
   "ai-evaluations/deterministic-import-corpus.json";
 export const TYPESCRIPT_7_COMPARISON_EVIDENCE =
   "typescript-7-comparison.json";
-export const TYPESCRIPT_7_HISTORY_LIMIT = 5;
-export const TYPESCRIPT_7_SUPPORTED_RUNNERS = [
-  { platform: "linux", arch: "x64" },
-] as const;
-
+export { TYPESCRIPT_7_HISTORY_LIMIT } from "./typescript-7-trend-contract.mts";
+const TYPESCRIPT_7_DECLARATION_EXTENSIONS = [".d.ts", ".d.mts", ".d.cts"] as const;
 export type Typescript7TrendHistorySummary = {
   state: "reset" | "missing" | "retained";
   distinctRevisionCount: number;
@@ -410,7 +417,9 @@ export function formatTypescript7TrendHistorySummary(
 export function validateTypescript7ComparisonEvidence(
   bytes: Buffer,
   expectedRevision: string,
+  historyLimit: number = TYPESCRIPT_7_HISTORY_LIMIT,
 ): Typescript7TrendHistorySummary {
+  validateTypescript7HistoryLimit(historyLimit);
   let value: unknown;
   try {
     value = JSON.parse(bytes.toString("utf8"));
@@ -441,15 +450,7 @@ export function validateTypescript7ComparisonEvidence(
     /^\d+\.\d+\.\d+$/.test(editorService.sdkVersion) &&
     editorService.outcome === "PASS" &&
     editorService.exitCode === 0;
-  const performanceChecks = [
-    "build",
-    "scripts",
-    "api-server",
-    "run-calculator",
-    "mockup-sandbox",
-    "ai-evaluation",
-    "corpus-harness",
-  ];
+  const performanceChecks = typescript7MeasuredCheckNames();
   const expectedPerformanceChecks = new Set(
     TYPESCRIPT_7_RESOURCE_BUDGETS.requiredModes.flatMap((mode) =>
       performanceChecks.map((check) => `${mode}:${check}`),
@@ -458,12 +459,7 @@ export function validateTypescript7ComparisonEvidence(
   const expectedCommands = new Set([
     "frozen-install",
     "typescript-6-clean",
-    ...TYPESCRIPT_7_RESOURCE_BUDGETS.requiredModes.flatMap((mode) =>
-      performanceChecks.flatMap((check) => [
-        `typescript-6-${check}-${mode}`,
-        `typescript-7-${check}-${mode}`,
-      ]),
-    ),
+    ...typescript7ExpectedMeasurementCommandNames(),
   ]);
   if (
     report.schemaVersion !== 3 ||
@@ -482,6 +478,20 @@ export function validateTypescript7ComparisonEvidence(
     runner?.platform !== process.platform ||
     runner?.arch !== process.arch ||
     runner?.supported !== true ||
+    runner?.nativePackage !==
+      TYPESCRIPT_7_SUPPORTED_RUNNERS.find(
+        (item) =>
+          item.platform === process.platform && item.arch === process.arch,
+      )?.nativePackage ||
+    runner?.nativePackageVersion !== "7.0.2" ||
+    typeof runner?.nativeBinary !== "string" ||
+    runner.nativeBinary !==
+      `node_modules/${String(runner.nativePackage)}/lib/tsc` ||
+    !Array.isArray(runner?.nativePackages) ||
+    !runner.nativePackages.every((item) => typeof item === "string") ||
+    !runner.nativePackages.includes(String(runner.nativePackage)) ||
+    JSON.stringify(runner?.supportedRunners) !==
+      JSON.stringify(TYPESCRIPT_7_SUPPORTED_RUNNERS) ||
     typeof runner.image !== "string" ||
     runner.image.length < 1 ||
     runner.image.length > 80 ||
@@ -518,10 +528,11 @@ export function validateTypescript7ComparisonEvidence(
     | undefined;
   if (
     !typescript7ResourceBudgetsEqual(resourceBudgets) ||
-    trend?.historyLimit !== TYPESCRIPT_7_HISTORY_LIMIT ||
+    trend === undefined ||
+    trend.historyLimit !== historyLimit ||
     !Number.isInteger(trend.incompatibleRunnerClassSamples) ||
     Number(trend.incompatibleRunnerClassSamples) < 0 ||
-    Number(trend.incompatibleRunnerClassSamples) > TYPESCRIPT_7_HISTORY_LIMIT ||
+    Number(trend.incompatibleRunnerClassSamples) > historyLimit ||
     typeof trend?.distinctRevisionCount !== "number" ||
     !Array.isArray(trend.regressedRevisions) ||
     !Array.isArray(trend.revisionSamples) ||
@@ -691,18 +702,21 @@ export function validateTypescript7ComparisonEvidence(
     }
     const byPath = new Map<string, string>();
     for (const entry of manifest) {
+      const entryPath = entry.path;
       if (
-        typeof entry.path !== "string" ||
-        !entry.path.endsWith(".d.ts") ||
+        typeof entryPath !== "string" ||
+        !TYPESCRIPT_7_DECLARATION_EXTENSIONS.some((extension) =>
+          entryPath.endsWith(extension),
+        ) ||
         typeof entry.sha256 !== "string" ||
         !/^[a-f0-9]{64}$/.test(entry.sha256) ||
-        byPath.has(entry.path)
+        byPath.has(entryPath)
       ) {
         throw new Error(
           `TypeScript ${label} declaration manifest is malformed`,
         );
       }
-      byPath.set(entry.path, entry.sha256);
+      byPath.set(entryPath, entry.sha256);
     }
     return byPath;
   };

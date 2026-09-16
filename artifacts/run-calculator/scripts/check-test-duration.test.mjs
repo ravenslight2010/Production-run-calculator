@@ -2,8 +2,16 @@ import { spawn } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { availableParallelism, tmpdir } from "node:os";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import {
+  chmod,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -127,6 +135,511 @@ printf '%s\\n' '{"numTotalTests":1,"numPassedTests":1,"numFailedTests":0,"testRe
       new RegExp(
         `Detected runner capacity: ${availableWorkers} available CPU workers; configured worker ceiling: ${CALCULATOR_TEST_WORKER_CEILING}\\.`,
       ),
+    );
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test("executable validation exits before starting the runner on low capacity", async () => {
+  const temporaryDirectory = await mkdtemp(
+    join(tmpdir(), "calculator-duration-low-capacity-test-"),
+  );
+  const isolatedScriptPath = join(
+    temporaryDirectory,
+    "check-test-duration-low-capacity.mjs",
+  );
+  const fakePnpmPath = join(temporaryDirectory, "pnpm");
+  const invocationMarkerPath = join(temporaryDirectory, "runner-invoked");
+  const reportDirectory = join(temporaryDirectory, "vitest-tmp");
+  const source = await readFile(durationCheckScript, "utf8");
+  const isolatedSource = source.replace(
+    'import { availableParallelism, tmpdir } from "node:os";',
+    'import { tmpdir } from "node:os";\n\nconst availableParallelism = () => 2;',
+  );
+
+  try {
+    assert.notEqual(
+      isolatedSource,
+      source,
+      "the executable fixture should replace the capacity probe",
+    );
+    await writeFile(isolatedScriptPath, isolatedSource);
+    await writeFile(
+      fakePnpmPath,
+      `#!/bin/sh
+printf '%s\\n' invoked > "$RUNNER_INVOCATION_MARKER"
+exit 99
+`,
+    );
+    await chmod(fakePnpmPath, 0o755);
+
+    const result = await runProcess(
+      process.execPath,
+      [isolatedScriptPath],
+      {
+        env: {
+          ...process.env,
+          PATH: `${temporaryDirectory}:${process.env.PATH ?? ""}`,
+          RUNNER_INVOCATION_MARKER: invocationMarkerPath,
+          TMPDIR: reportDirectory,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+
+    assert.equal(result.code, 1, result.stderr);
+    assert.equal(result.signal, null);
+    assert.equal(result.stdout, "");
+    assert.match(
+      result.stderr,
+      new RegExp(
+        `Calculator test suite requires at least ${MIN_CALCULATOR_TEST_WORKERS} available CPU workers\\.`,
+      ),
+    );
+    assert.match(
+      result.stderr,
+      new RegExp(
+        `Detected runner capacity: 2 available CPU workers; configured worker ceiling: ${CALCULATOR_TEST_WORKER_CEILING}\\.`,
+      ),
+    );
+    await assert.rejects(stat(invocationMarkerPath), /ENOENT/);
+    await assert.rejects(stat(reportDirectory), /ENOENT/);
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test("executable validation preserves a failing runner result and report details", async (t) => {
+  const availableWorkers = availableParallelism();
+  if (availableWorkers < MIN_CALCULATOR_TEST_WORKERS) {
+    t.skip(
+      `runner exposes ${availableWorkers} CPU workers; executable prerequisite requires ${MIN_CALCULATOR_TEST_WORKERS}`,
+    );
+  }
+
+  const temporaryDirectory = await mkdtemp(
+    join(tmpdir(), "calculator-duration-test-"),
+  );
+  const fakePnpmPath = join(temporaryDirectory, "pnpm");
+  const runnerExitCode = 23;
+
+  try {
+    await writeFile(
+      fakePnpmPath,
+      `#!/bin/sh
+for argument
+do
+  case "$argument" in
+    --outputFile=*) output_file="\${argument#*=}" ;;
+  esac
+done
+printf '%s\n' '{"numTotalTests":2,"numPassedTests":1,"numFailedTests":1,"testResults":[{"name":"stub.test.ts","status":"failed"}]}' > "$output_file"
+exit ${runnerExitCode}
+`,
+    );
+    await chmod(fakePnpmPath, 0o755);
+
+    const result = await runProcess(process.execPath, [durationCheckScript], {
+      env: {
+        ...process.env,
+        PATH: `${temporaryDirectory}:${process.env.PATH ?? ""}`,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    assert.equal(result.code, runnerExitCode, result.stderr);
+    assert.match(
+      result.stdout,
+      /Calculator test suite: 1 files \(0 passed, 1 failed\), 2 tests \(1 passed, 1 failed\), elapsed \d+\.\d+s \(budget 150\.0s\)\./,
+    );
+    assert.match(
+      result.stdout,
+      new RegExp(
+        `Detected runner capacity: ${availableWorkers} available CPU workers; configured worker ceiling: ${CALCULATOR_TEST_WORKER_CEILING}\\.`,
+      ),
+    );
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test("executable validation preserves a failing runner result when it exceeds its duration budget", async (t) => {
+  const availableWorkers = availableParallelism();
+  if (availableWorkers < MIN_CALCULATOR_TEST_WORKERS) {
+    t.skip(
+      `runner exposes ${availableWorkers} CPU workers; executable prerequisite requires ${MIN_CALCULATOR_TEST_WORKERS}`,
+    );
+  }
+
+  const temporaryDirectory = await mkdtemp(
+    join(tmpdir(), "calculator-duration-failed-overrun-test-"),
+  );
+  const fakePnpmPath = join(temporaryDirectory, "pnpm");
+  const runnerExitCode = 23;
+  const budgetMs = 10;
+
+  try {
+    await writeFile(
+      fakePnpmPath,
+      `#!/bin/sh
+for argument
+do
+  case "$argument" in
+    --outputFile=*) output_file="\${argument#*=}" ;;
+  esac
+done
+printf '%s\\n' '{"numTotalTests":2,"numPassedTests":1,"numFailedTests":1,"testResults":[{"name":"stub.test.ts","status":"failed"}]}' > "$output_file"
+sleep 0.15
+exit ${runnerExitCode}
+`,
+    );
+    await chmod(fakePnpmPath, 0o755);
+
+    const result = await runProcess(process.execPath, [durationCheckScript], {
+      env: {
+        ...process.env,
+        CALCULATOR_TEST_BUDGET_MS: String(budgetMs),
+        PATH: `${temporaryDirectory}:${process.env.PATH ?? ""}`,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    assert.equal(result.code, runnerExitCode, result.stderr);
+    assert.match(
+      result.stdout,
+      /Calculator test suite: 1 files \(0 passed, 1 failed\), 2 tests \(1 passed, 1 failed\), elapsed \d+\.\d+s \(budget 0\.0s\)\./,
+    );
+    assert.match(
+      result.stderr,
+      /Calculator test suite exceeded its 0\.0s validation budget by \d+\.\d+s\./,
+    );
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test("executable validation fails a passing runner that exceeds its duration budget and cleans up", async (t) => {
+  const availableWorkers = availableParallelism();
+  if (availableWorkers < MIN_CALCULATOR_TEST_WORKERS) {
+    t.skip(
+      `runner exposes ${availableWorkers} CPU workers; executable prerequisite requires ${MIN_CALCULATOR_TEST_WORKERS}`,
+    );
+  }
+
+  const temporaryDirectory = await mkdtemp(
+    join(tmpdir(), "calculator-duration-overrun-test-"),
+  );
+  const fakePnpmPath = join(temporaryDirectory, "pnpm");
+  const cleanupMarkerPath = join(temporaryDirectory, "report-path");
+  const budgetMs = 10;
+
+  try {
+    await writeFile(
+      fakePnpmPath,
+      `#!/bin/sh
+for argument
+do
+  case "$argument" in
+    --outputFile=*) output_file="\${argument#*=}" ;;
+  esac
+done
+printf '%s\\n' '{"numTotalTests":1,"numPassedTests":1,"numFailedTests":0,"testResults":[{"name":"stub.test.ts","status":"passed"}]}' > "$output_file"
+printf '%s\\n' "$output_file" > "$CLEANUP_MARKER"
+sleep 0.15
+`,
+    );
+    await chmod(fakePnpmPath, 0o755);
+
+    const result = await runProcess(process.execPath, [durationCheckScript], {
+      env: {
+        ...process.env,
+        CALCULATOR_TEST_BUDGET_MS: String(budgetMs),
+        CLEANUP_MARKER: cleanupMarkerPath,
+        PATH: `${temporaryDirectory}:${process.env.PATH ?? ""}`,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    assert.notEqual(result.code, 0, result.stdout);
+
+    const elapsedMatch = result.stdout.match(
+      /Calculator test suite: .* elapsed ([0-9]+\.[0-9])s \(budget 0\.0s\)\./,
+    );
+    assert.ok(elapsedMatch, result.stdout);
+    const elapsedSeconds = Number(elapsedMatch[1]);
+    assert.ok(elapsedSeconds > 0, result.stdout);
+
+    const overrunMatch = result.stderr.match(
+      /Calculator test suite exceeded its 0\.0s validation budget by ([0-9]+\.[0-9])s\./,
+    );
+    assert.ok(overrunMatch, result.stderr);
+    const overrunSeconds = Number(overrunMatch[1]);
+    assert.ok(overrunSeconds > 0, result.stderr);
+    assert.ok(
+      Math.abs(elapsedSeconds - overrunSeconds) <= 0.1,
+      `elapsed ${elapsedSeconds}s should include the ${overrunSeconds}s overrun`,
+    );
+
+    assert.match(
+      result.stdout,
+      /Calculator test suite: 1 files \(1 passed, 0 failed\), 1 tests \(1 passed, 0 failed\), elapsed \d+\.\d+s \(budget 0\.0s\)\./,
+    );
+    assert.match(
+      result.stdout,
+      new RegExp(
+        `Detected runner capacity: ${availableWorkers} available CPU workers; configured worker ceiling: ${CALCULATOR_TEST_WORKER_CEILING}\\.`,
+      ),
+    );
+
+    const reportPath = (await readFile(cleanupMarkerPath, "utf8")).trim();
+    assert.ok(reportPath, "stub runner should record the requested report path");
+    await assert.rejects(stat(dirname(reportPath)), /ENOENT/);
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test("executable validation fails when the runner terminates by signal", async (t) => {
+  const availableWorkers = availableParallelism();
+  if (availableWorkers < MIN_CALCULATOR_TEST_WORKERS) {
+    t.skip(
+      `runner exposes ${availableWorkers} CPU workers; executable prerequisite requires ${MIN_CALCULATOR_TEST_WORKERS}`,
+    );
+  }
+
+  const temporaryDirectory = await mkdtemp(
+    join(tmpdir(), "calculator-duration-signal-test-"),
+  );
+  const fakePnpmPath = join(temporaryDirectory, "pnpm");
+
+  try {
+    await writeFile(
+      fakePnpmPath,
+      `#!/bin/sh
+for argument
+do
+  case "$argument" in
+    --outputFile=*) output_file="\${argument#*=}" ;;
+  esac
+done
+printf '%s\n' '{"numTotalTests":1,"numPassedTests":1,"numFailedTests":0,"testResults":[{"name":"stub.test.ts","status":"passed"}]}' > "$output_file"
+kill -TERM "$$"
+`,
+    );
+    await chmod(fakePnpmPath, 0o755);
+
+    const result = await runProcess(process.execPath, [durationCheckScript], {
+      env: {
+        ...process.env,
+        PATH: `${temporaryDirectory}:${process.env.PATH ?? ""}`,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    assert.equal(result.code, 1, result.stderr);
+    assert.match(
+      result.stdout,
+      /Calculator test suite: 1 files \(1 passed, 0 failed\), 1 tests \(1 passed, 0 failed\), elapsed \d+\.\d+s \(budget 150\.0s\)\./,
+    );
+    assert.match(
+      result.stdout,
+      new RegExp(
+        `Detected runner capacity: ${availableWorkers} available CPU workers; configured worker ceiling: ${CALCULATOR_TEST_WORKER_CEILING}\\.`,
+      ),
+    );
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test("reports missing Vitest output, cleans up, and preserves runner capacity", async (t) => {
+  const availableWorkers = availableParallelism();
+  if (availableWorkers < MIN_CALCULATOR_TEST_WORKERS) {
+    t.skip(
+      `runner exposes ${availableWorkers} CPU workers; executable prerequisite requires ${MIN_CALCULATOR_TEST_WORKERS}`,
+    );
+  }
+
+  const temporaryDirectory = await mkdtemp(
+    join(tmpdir(), "calculator-duration-missing-report-test-"),
+  );
+  const fakePnpmPath = join(temporaryDirectory, "pnpm");
+  const cleanupMarkerPath = join(temporaryDirectory, "report-path");
+  const configuredWorkers = 6;
+
+  try {
+    await writeFile(
+      fakePnpmPath,
+      `#!/bin/sh
+for argument
+do
+  case "$argument" in
+    --outputFile=*) output_file="\${argument#*=}" ;;
+  esac
+done
+printf '%s\\n' "$output_file" > "$CLEANUP_MARKER"
+exit 23
+`,
+    );
+    await chmod(fakePnpmPath, 0o755);
+
+    const result = await runProcess(process.execPath, [durationCheckScript], {
+      env: {
+        ...process.env,
+        CALCULATOR_TEST_WORKERS: String(configuredWorkers),
+        CLEANUP_MARKER: cleanupMarkerPath,
+        PATH: `${temporaryDirectory}:${process.env.PATH ?? ""}`,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    assert.notEqual(result.code, 0, result.stdout);
+    assert.match(
+      result.stderr,
+      /Calculator test duration guard could not read Vitest's JSON summary/,
+    );
+    assert.match(
+      result.stderr,
+      /Calculator test suite elapsed \d+\.\d+s \(budget 150\.0s\)\./,
+    );
+    assert.match(
+      result.stderr,
+      new RegExp(
+        `Detected runner capacity: ${availableWorkers} available CPU workers; configured worker ceiling: ${configuredWorkers}\\.`,
+      ),
+    );
+
+    const reportPath = (await readFile(cleanupMarkerPath, "utf8")).trim();
+    assert.ok(reportPath, "stub runner should record the requested report path");
+    await assert.rejects(stat(dirname(reportPath)), /ENOENT/);
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test("keeps the duration overrun visible when Vitest output is missing", async (t) => {
+  const availableWorkers = availableParallelism();
+  if (availableWorkers < MIN_CALCULATOR_TEST_WORKERS) {
+    t.skip(
+      `runner exposes ${availableWorkers} CPU workers; executable prerequisite requires ${MIN_CALCULATOR_TEST_WORKERS}`,
+    );
+  }
+
+  const temporaryDirectory = await mkdtemp(
+    join(tmpdir(), "calculator-duration-missing-report-overrun-test-"),
+  );
+  const fakePnpmPath = join(temporaryDirectory, "pnpm");
+  const cleanupMarkerPath = join(temporaryDirectory, "report-path");
+  const budgetMs = 10;
+
+  try {
+    await writeFile(
+      fakePnpmPath,
+      `#!/bin/sh
+for argument
+do
+  case "$argument" in
+    --outputFile=*) output_file="\${argument#*=}" ;;
+  esac
+done
+printf '%s\\n' "$output_file" > "$CLEANUP_MARKER"
+sleep 0.15
+exit 23
+`,
+    );
+    await chmod(fakePnpmPath, 0o755);
+
+    const result = await runProcess(process.execPath, [durationCheckScript], {
+      env: {
+        ...process.env,
+        CALCULATOR_TEST_BUDGET_MS: String(budgetMs),
+        CLEANUP_MARKER: cleanupMarkerPath,
+        PATH: `${temporaryDirectory}:${process.env.PATH ?? ""}`,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    assert.notEqual(result.code, 0, result.stdout);
+    assert.match(
+      result.stderr,
+      /Calculator test duration guard could not read Vitest's JSON summary/,
+    );
+
+    const elapsedMatch = result.stderr.match(
+      /Calculator test suite elapsed ([0-9]+\.[0-9])s \(budget 0\.0s\)\./,
+    );
+    assert.ok(elapsedMatch, result.stderr);
+    const elapsedSeconds = Number(elapsedMatch[1]);
+    assert.ok(elapsedSeconds > 0, result.stderr);
+
+    const overrunMatch = result.stderr.match(
+      /Calculator test suite exceeded its 0\.0s validation budget by ([0-9]+\.[0-9])s\./,
+    );
+    assert.ok(overrunMatch, result.stderr);
+    const overrunSeconds = Number(overrunMatch[1]);
+    assert.ok(overrunSeconds > 0, result.stderr);
+    assert.ok(
+      Math.abs(elapsedSeconds - overrunSeconds) <= 0.1,
+      `elapsed ${elapsedSeconds}s should include the ${overrunSeconds}s overrun`,
+    );
+
+    const reportPath = (await readFile(cleanupMarkerPath, "utf8")).trim();
+    assert.ok(reportPath, "stub runner should record the requested report path");
+    await assert.rejects(stat(dirname(reportPath)), /ENOENT/);
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test("reports Vitest start failures, falls back to elapsed time, and cleans up", async (t) => {
+  const availableWorkers = availableParallelism();
+  if (availableWorkers < MIN_CALCULATOR_TEST_WORKERS) {
+    t.skip(
+      `runner exposes ${availableWorkers} CPU workers; executable prerequisite requires ${MIN_CALCULATOR_TEST_WORKERS}`,
+    );
+  }
+
+  const temporaryDirectory = await mkdtemp(
+    join(tmpdir(), "calculator-duration-spawn-error-test-"),
+  );
+  const configuredWorkers = 7;
+
+  try {
+    const result = await runProcess(process.execPath, [durationCheckScript], {
+      env: {
+        ...process.env,
+        CALCULATOR_TEST_WORKERS: String(configuredWorkers),
+        PATH: temporaryDirectory,
+        TMPDIR: temporaryDirectory,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    assert.equal(result.code, 1, result.stdout);
+    assert.equal(result.signal, null);
+    assert.match(
+      result.stderr,
+      /Calculator test duration guard could not read Vitest's JSON summary/,
+    );
+    assert.match(
+      result.stderr,
+      /Calculator test suite elapsed \d+\.\d+s \(budget 150\.0s\)\./,
+    );
+    assert.match(
+      result.stderr,
+      /Calculator test duration guard could not start Vitest: spawn pnpm ENOENT/,
+    );
+    assert.match(
+      result.stderr,
+      new RegExp(
+        `Detected runner capacity: ${availableWorkers} available CPU workers; configured worker ceiling: ${configuredWorkers}\\.`,
+      ),
+    );
+    assert.deepEqual(
+      await readdir(temporaryDirectory),
+      [],
+      "duration guard should remove its temporary report directory after a spawn failure",
     );
   } finally {
     await rm(temporaryDirectory, { recursive: true, force: true });

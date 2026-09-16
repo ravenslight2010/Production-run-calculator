@@ -18,6 +18,7 @@ import {
   IMPORT_CORPUS_EVALUATION_EVIDENCE,
   SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
   TYPESCRIPT_7_COMPARISON_EVIDENCE,
+  TYPESCRIPT_7_SUPPORTED_RUNNERS,
   SOURCE_LIBRARY_RECONCILIATION_FIXTURE_STEP,
   SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL,
   SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_STEP,
@@ -252,10 +253,11 @@ async function fixture(
                   platform: process.platform,
                   arch: process.arch,
                   supported: true,
-                  supportedRunners: [{
-                    platform: process.platform,
-                    arch: process.arch,
-                  }],
+                  supportedRunners: TYPESCRIPT_7_SUPPORTED_RUNNERS,
+                  nativePackage: "@typescript/typescript-linux-x64",
+                  nativePackageVersion: "7.0.2",
+                  nativeBinary: "node_modules/@typescript/typescript-linux-x64/lib/tsc",
+                  nativePackages: ["@typescript/typescript-linux-x64"],
                   image: "test-image",
                   hardwareClass: "f".repeat(64),
                   logicalCpuCount: 4,
@@ -1211,6 +1213,46 @@ async function run(): Promise<void> {
     "stale WebKit evidence must not be accepted",
   );
   assert.doesNotThrow(() =>
+    validateWebKitBrowserEvidence(
+      Buffer.from(
+        JSON.stringify({
+          schemaVersion: 1,
+          browser: "webkit",
+          revision: "current-revision",
+          environment: "disposable release test",
+          result: "passed",
+          cases: [
+            {
+              file: "release-webkit-smoke.spec.ts",
+              title: "auth smoke",
+              status: "passed",
+              durationMs: 100,
+            },
+          ],
+        }),
+      ),
+      { currentRevision: "current-revision", requirePass: true },
+    ),
+  );
+  assert.throws(
+    () =>
+      validateWebKitBrowserEvidence(
+        Buffer.from(
+          JSON.stringify({
+            schemaVersion: 1,
+            browser: "webkit",
+            revision: "old-revision",
+            environment: "disposable release test",
+            result: "passed",
+            cases: [],
+          }),
+        ),
+        { currentRevision: "current-revision" },
+      ),
+    /revision is stale/,
+    "stale WebKit evidence must not be accepted",
+  );
+  assert.doesNotThrow(() =>
     validateSourceLibraryReconciliationEvidence(
       Buffer.from(
         JSON.stringify({
@@ -1355,6 +1397,48 @@ async function run(): Promise<void> {
     checkpointReport,
     /Retained report: release-check-report\.md \(left unchanged by this checkpoint\)\./,
   );
+  for (const recoveryCase of [
+    {
+      mode: "full" as const,
+      resume: "pnpm run release:check:full -- --resume",
+      regenerate: "pnpm run release:check:full",
+    },
+    {
+      mode: "typescript-7-promotion" as const,
+      resume: "pnpm run release:check:typescript-7-promotion -- --resume",
+      regenerate: "pnpm run release:check:typescript-7-promotion",
+    },
+  ]) {
+    const modeCheckpointReport = formatReleaseReport(
+      [{ label: "gate one", status: "PASS", elapsedMs: 100 }],
+      recoveryCase.mode,
+      new Set(),
+      {
+        revision: "current-revision",
+        environment: "disposable release test",
+        decision: "NO-GO",
+        expectedLabels: ["gate one", "gate two"],
+        reportKind: "checkpoint",
+      },
+    );
+    assert.ok(
+      modeCheckpointReport.includes(`Resume: ${recoveryCase.resume}`),
+      `${recoveryCase.mode} checkpoints must preserve the matching resume command`,
+    );
+    assert.ok(
+      modeCheckpointReport.includes(`Regenerate: ${recoveryCase.regenerate}`),
+      `${recoveryCase.mode} checkpoints must preserve the matching regeneration command`,
+    );
+    assert.doesNotThrow(
+      () =>
+        validateReleaseReport(modeCheckpointReport, {
+          currentRevision: "current-revision",
+          expectedMode: recoveryCase.mode,
+          expectedLabels: ["gate one", "gate two"],
+        }),
+      `${recoveryCase.mode} checkpoint guidance must retain its revision and mode contract`,
+    );
+  }
   const partialKnownContractReport = formatReleaseReport(
     [
       {
@@ -1875,7 +1959,7 @@ async function run(): Promise<void> {
         expectedMode: "standard",
         expectedLabels: validLabels,
       }),
-      /contains a full report, but standard verification was requested.*full command/,
+      /contains a full report, but standard verification was requested\.[\s\S]*pnpm --filter @workspace\/scripts exec tsx \.\/src\/release-check\.mts --full --verify-evidence/,
       "standard verification must not accept a full evidence directory",
     );
     await assert.rejects(

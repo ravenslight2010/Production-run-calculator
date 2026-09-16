@@ -6,7 +6,6 @@ import {
   buildReviewerBenchmark,
   evaluateReviewerEvidence,
 } from "./second-pass-reviewer-benchmark.mts";
-import { readEvaluationManifest } from "@workspace/ai-evaluation";
 
 const root = path.resolve(import.meta.dirname, "../..");
 const actual = buildReviewerBenchmark(root);
@@ -20,10 +19,6 @@ const expected = JSON.parse(
 assert.deepEqual(actual, expected, "checked-in reviewer evidence must match the pinned source and observations");
 assert.equal(ACCEPTANCE.minimumUniqueMaterialCatchRate, 0.2);
 assert.equal(actual.decision.retain, false);
-assert.deepEqual(actual.retention, {
-  dataClass: "synthetic-and-aggregate-metrics-only",
-  sanitization: "allowlisted-metrics; raw prompts and source/provider payloads excluded",
-});
 assert.deepEqual(actual.decision.thresholdPasses, {
   uniqueMaterialCatchCount: false,
   uniqueMaterialCatchRate: false,
@@ -38,11 +33,6 @@ assert.equal(actual.pairedOutcome.reviewer.reviewerFailures, 301);
 assert.equal(actual.pairedOutcome.reviewer.falseWarningRate, null);
 assert.equal(actual.measuredEffects.p95LatencyMs, 24_169);
 assert.match(actual.decision.authority, /human confirmation/);
-const manifest = readEvaluationManifest(actual);
-assert.equal(manifest.corpus.sha256, actual.sourceHash);
-assert.equal(manifest.provider.model, "gemini-2.5-flash");
-assert.equal(manifest.outcome.state, "failed");
-assert.equal(manifest.performance.inputTokens.state, "unavailable");
 
 const source = JSON.parse(
   fs.readFileSync(

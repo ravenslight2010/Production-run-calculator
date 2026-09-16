@@ -185,7 +185,9 @@ async function runCalculatorTests() {
           1000
         ).toFixed(1)}s.`,
       );
-      exitCode = 1;
+      if (exitCode === 0) {
+        exitCode = 1;
+      }
     }
 
     await rm(temporaryDirectory, { recursive: true, force: true });
