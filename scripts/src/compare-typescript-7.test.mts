@@ -27,6 +27,7 @@ import {
   typescript7MeasuredCheckNames,
   typescript7ResourceBudgetsEqual,
 } from "./typescript-7-resource-contract.mts";
+import { generateTypescript7ResourceApprovalEvidence } from "./generate-typescript-7-resource-approval.mts";
 
 test("normalizes diagnostic paths and ordering", () => {
   assert.deepEqual(
@@ -213,6 +214,163 @@ test("retained resource approval evidence is compact and integrity-checked", asy
         Buffer.from(JSON.stringify(expanded)),
       ),
     /invalid sample/,
+  );
+});
+
+test("resource approval generator derives compact deterministic samples", () => {
+  const checks = ["build", "scripts", "api-server", "run-calculator", "mockup-sandbox", "ai-evaluation", "corpus-harness"];
+  const command = (name: string, elapsedMs = 10, peakRssKiB = 100) => ({
+    name, exitCode: 0, elapsedMs, peakRssKiB, diagnostics: [],
+  });
+  const revision = "a".repeat(40);
+  const report = {
+    schemaVersion: 3,
+    sourceRevision: revision,
+    status: "ADVISORY_DRIFT",
+    authoritativeCompiler: "Version 6.0.3",
+    candidateCompiler: "Version 7.0.2",
+    runner: {
+      platform: process.platform, arch: process.arch, supported: true,
+      supportedRunners: [{ platform: process.platform, arch: process.arch }],
+      image: "test-image", hardwareClass: "f".repeat(64),
+      logicalCpuCount: 4, memoryGiB: 16,
+    },
+    commands: [
+      command("frozen-install"), command("typescript-6-clean"),
+      ...["cold", "warm"].flatMap((mode) => checks.flatMap((check, index) => [
+        command(`typescript-6-${check}-${mode}`, 10, 100),
+        {
+          ...command(`typescript-7-${check}-${mode}`, 10 + index, 100 + index),
+          exitCode: mode === "warm" && check === "corpus-harness" ? 1 : 0,
+        },
+      ])),
+    ],
+    performanceComparison: ["cold", "warm"].flatMap((mode) =>
+      checks.map((check, index) => ({
+        check, mode,
+        elapsedMs: { baseline: 10, candidate: 10 + index, delta: index, ratio: (10 + index) / 10 },
+        peakRssKiB: { baseline: 100, candidate: 100 + index, delta: index, ratio: (100 + index) / 100 },
+      }))),
+    resourceBudgets: {
+      maxElapsedRatio: 1.25, maxPeakRssRatio: 1.25,
+      maxCandidateElapsedMs: 60_000, maxCandidatePeakRssKiB: 1_048_576,
+      minimumRevisions: 3, requiredModes: ["cold", "warm"],
+      approvedForPromotion: true,
+    },
+    trend: {
+      historyLimit: 5, incompatibleRunnerClassSamples: 0,
+      distinctRevisionCount: 1, regressedRevisions: [revision],
+      revisionSamples: [{ sourceRevision: revision, performanceComparison: [] }],
+    },
+    promotionAssessment: {
+      eligible: false, thresholdApprovalRequired: false,
+      repeatedEvidenceMet: false, resourceBudgetsMet: false,
+      resourceRegressions: ["cold:run-calculator:elapsed", "cold:mockup-sandbox:elapsed", "cold:ai-evaluation:elapsed", "cold:corpus-harness:elapsed", "warm:run-calculator:elapsed", "warm:mockup-sandbox:elapsed", "warm:ai-evaluation:elapsed", "warm:corpus-harness:elapsed"],
+    },
+    promotionAttempt: false, editorService: null, diagnosticsEqual: true,
+    declarations: {
+      baseline: [{ path: "lib/example/dist/index.d.ts", sha256: "d".repeat(64) }],
+      candidate: [{ path: "lib/example/dist/index.d.ts", sha256: "d".repeat(64) }],
+      changedPaths: [],
+    },
+    acceptanceGatesMet: false, advisory: true,
+    authoritativeOutputsChanged: false,
+    containment: { beforeStatusSha256: "c".repeat(64), afterStatusSha256: "c".repeat(64) },
+  };
+  const reportBytes = Buffer.from(JSON.stringify(report));
+  const inputs = ["a", "b", "c"].map((character, index) => {
+    const workflowRunId = 123 + index;
+    return {
+      reportBytes: Buffer.from(JSON.stringify({
+        ...report,
+        sourceRevision: character.repeat(40),
+        trend: {
+          ...report.trend,
+          regressedRevisions: [character.repeat(40)],
+          revisionSamples: [{
+            sourceRevision: character.repeat(40),
+            performanceComparison: [],
+          }],
+        },
+      })),
+      provenance: {
+        workflowRunId,
+        workflowRunUrl: `https://github.com/example/project/actions/runs/${workflowRunId}`,
+        workflowConclusion: "success" as const,
+        evidenceCommit: (index + 4).toString(16).repeat(40),
+      },
+    };
+  });
+  const first = generateTypescript7ResourceApprovalEvidence("2026-09-15", inputs);
+  const second = generateTypescript7ResourceApprovalEvidence("2026-09-15", [...inputs].reverse());
+  assert.deepEqual(first, second);
+  assert.doesNotThrow(() => validateTypescript7ResourceApprovalEvidence(first));
+  const generated = JSON.parse(first.toString("utf8"));
+  assert.deepEqual(generated.samples[0].measurementRows, { cold: 7, warm: 7 });
+  assert.equal(generated.samples[0].coldMaxima.candidateElapsedMs, 16);
+  assert.equal(generated.samples[0].coldMaxima.candidatePeakRssKiB, 106);
+  assert.equal(generated.samples[0].commands, undefined);
+  assert.equal(generated.samples[0].sourcePayload, undefined);
+  assert.throws(
+    () => generateTypescript7ResourceApprovalEvidence(
+      "2026-09-15",
+      inputs.slice(0, 2),
+    ),
+    /at least 3 reports/,
+  );
+
+  const withCommandOutput: any = structuredClone(report);
+  withCommandOutput.commands[0].stdout = "must not be accepted";
+  assert.throws(
+    () => generateTypescript7ResourceApprovalEvidence("2026-09-15", [
+      {
+        ...inputs[0]!,
+        reportBytes: Buffer.from(JSON.stringify(withCommandOutput)),
+      },
+      ...inputs.slice(1),
+    ]),
+    /unexpected or missing fields/,
+  );
+  assert.throws(
+    () => generateTypescript7ResourceApprovalEvidence("2026-09-15", [
+      {
+        ...inputs[0]!,
+        reportBytes: Buffer.from(JSON.stringify({
+          ...report,
+          sourcePayload: { secret: true },
+        })),
+      },
+      ...inputs.slice(1),
+    ]),
+    /unexpected or missing fields/,
+  );
+  const passingReport = structuredClone(report);
+  passingReport.status = "PASS";
+  passingReport.acceptanceGatesMet = true;
+  passingReport.commands = passingReport.commands.map((command: any) => ({
+    ...command,
+    exitCode: 0,
+  }));
+  assert.throws(
+    () => generateTypescript7ResourceApprovalEvidence(
+      "2026-09-15",
+      inputs.map((input, index) => ({
+        ...input,
+        reportBytes: Buffer.from(JSON.stringify({
+          ...passingReport,
+          sourceRevision: (index + 10).toString(16).repeat(40),
+          trend: {
+            ...passingReport.trend,
+            regressedRevisions: [(index + 10).toString(16).repeat(40)],
+            revisionSamples: [{
+              sourceRevision: (index + 10).toString(16).repeat(40),
+              performanceComparison: [],
+            }],
+          },
+        })),
+      })),
+    ),
+    /must have ADVISORY_DRIFT status/,
   );
 });
 
