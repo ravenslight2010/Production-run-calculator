@@ -11,6 +11,7 @@ import {
   resolveSourceLibraryRevision,
   assertProductionSourceLibraryCapture,
   assertBoundedSourceLibraryReconciliationEvidence,
+  isRetryableSourceLibraryDatabaseError,
   stable,
   verifySourceLibraryReconciliation,
 } from "./verify-source-library-reconciliation.mts";
@@ -59,6 +60,13 @@ assert.throws(
   () => resolveSourceLibraryRevision("release", "unknown"),
   /full 40-character Git commit SHA/,
 );
+assert.equal(isRetryableSourceLibraryDatabaseError({ code: "ETIMEDOUT" }), true);
+assert.equal(
+  isRetryableSourceLibraryDatabaseError(new Error("timeout exceeded when trying to connect")),
+  true,
+);
+assert.equal(isRetryableSourceLibraryDatabaseError({ code: "23505" }), false);
+assert.equal(isRetryableSourceLibraryDatabaseError(new Error("query failed")), false);
 assert.doesNotThrow(() =>
   assertProductionSourceLibraryCapture({
     environmentArgument: "release",
@@ -528,10 +536,20 @@ const databaseModule = \`
   };
 
   export const pool = {
-    connect: async () => ({
-      query,
-      release() {},
-    }),
+    connect: async () => {
+      const failures = Number(process.env.SOURCE_LIBRARY_VERIFIER_CONNECT_FAILURES ?? "0");
+      const attempt = Number(process.env.SOURCE_LIBRARY_VERIFIER_CONNECT_ATTEMPTS ?? "0");
+      process.env.SOURCE_LIBRARY_VERIFIER_CONNECT_ATTEMPTS = String(attempt + 1);
+      if (attempt < failures) {
+        const error = new Error("timeout exceeded when trying to connect");
+        error.code = "ETIMEDOUT";
+        throw error;
+      }
+      return {
+        query,
+        release() {},
+      };
+    },
   };
 \`;
 const databaseUrl = "data:text/javascript," + encodeURIComponent(databaseModule);
@@ -758,6 +776,75 @@ try {
     preflightResult.stdout.trim(),
     "preflight stdout and retained diagnostic should match",
   );
+
+  const recoveredPreflightOutputPath = path.join(cliRoot, "recovered-preflight-output.json");
+  const recoveredPreflightResult = await runVerifierCli(
+    [
+      "--report",
+      preflightReportPath,
+      "--heal-id",
+      "source-library-reconciliation-2026-08-26-v1",
+      "--from-date",
+      "2026-08-26",
+      "--environment",
+      "development",
+      "--revision",
+      "a".repeat(40),
+      "--preflight",
+      "--output",
+      recoveredPreflightOutputPath,
+    ],
+    {
+      SOURCE_LIBRARY_VERIFIER_QUERY_FIXTURE: preflightQueriesPath,
+      SOURCE_LIBRARY_VERIFIER_CONNECT_FAILURES: "1",
+      NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --loader=${loaderPath}`.trim(),
+    },
+  );
+  assert.equal(recoveredPreflightResult.code, 0, recoveredPreflightResult.stderr);
+  const recoveredPreflightOutput = JSON.parse(
+    await readFile(recoveredPreflightOutputPath, "utf8"),
+  ) as Record<string, unknown>;
+  assert.equal(recoveredPreflightOutput.ok, true);
+  assert.equal(recoveredPreflightOutput.revision, "a".repeat(40));
+  assert.equal(
+    JSON.stringify(recoveredPreflightOutput),
+    recoveredPreflightResult.stdout.trim(),
+    "a recovered preflight must retain the requested release revision",
+  );
+
+  const exhaustedPreflightOutputPath = path.join(cliRoot, "exhausted-preflight-output.json");
+  const exhaustedPreflightResult = await runVerifierCli(
+    [
+      "--report",
+      preflightReportPath,
+      "--heal-id",
+      "source-library-reconciliation-2026-08-26-v1",
+      "--from-date",
+      "2026-08-26",
+      "--environment",
+      "development",
+      "--revision",
+      "b".repeat(40),
+      "--preflight",
+      "--output",
+      exhaustedPreflightOutputPath,
+    ],
+    {
+      SOURCE_LIBRARY_VERIFIER_QUERY_FIXTURE: preflightQueriesPath,
+      SOURCE_LIBRARY_VERIFIER_CONNECT_FAILURES: "3",
+      NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --loader=${loaderPath}`.trim(),
+    },
+  );
+  assert.equal(exhaustedPreflightResult.code, 1);
+  assert.match(exhaustedPreflightResult.stdout, /"revision":"b{40}"/);
+  assert.match(exhaustedPreflightResult.stdout, /timeout exceeded when trying to connect/);
+  assert.equal(fs.existsSync(exhaustedPreflightOutputPath), true);
+  const exhaustedPreflightOutput = JSON.parse(
+    await readFile(exhaustedPreflightOutputPath, "utf8"),
+  ) as Record<string, unknown>;
+  assert.equal(exhaustedPreflightOutput.ok, false);
+  assert.equal(exhaustedPreflightOutput.revision, "b".repeat(40));
+  assert.match(String(exhaustedPreflightOutput.error), /timeout exceeded when trying to connect/);
 
   const partialFixture = createCliFixture("pass");
   partialFixture.fixture.poolRows.mixes.pop();

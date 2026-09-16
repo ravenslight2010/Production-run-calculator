@@ -1202,6 +1202,91 @@ async function writeOutput(outputPath: string | undefined, output: unknown): Pro
   fs.writeFileSync(outputPath, `${JSON.stringify(output)}\n`, "utf8");
 }
 
+export const SOURCE_LIBRARY_PREFLIGHT_DB_ATTEMPTS = 3;
+const SOURCE_LIBRARY_PREFLIGHT_RETRY_DELAYS_MS = [250, 500] as const;
+const RETRYABLE_SOURCE_LIBRARY_DB_CODES = new Set([
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "ETIMEDOUT",
+  "EPIPE",
+  "ENETUNREACH",
+  "EHOSTUNREACH",
+  "57P01",
+  "57P02",
+  "57P03",
+]);
+
+function errorProperty(error: unknown, property: string): unknown {
+  return isRecord(error) ? error[property] : undefined;
+}
+
+export function isRetryableSourceLibraryDatabaseError(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 3 && current !== undefined; depth += 1) {
+    const code = errorProperty(current, "code");
+    if (
+      typeof code === "string" &&
+      (RETRYABLE_SOURCE_LIBRARY_DB_CODES.has(code) || /^08[A-Z0-9]{3}$/u.test(code))
+    ) {
+      return true;
+    }
+    if (
+      errorProperty(current, "message") === "timeout exceeded when trying to connect"
+    ) {
+      return true;
+    }
+    current = errorProperty(current, "cause");
+  }
+  return false;
+}
+
+type ReadOnlyPoolClient = {
+  query: (text: string, values?: readonly unknown[]) => Promise<{
+    rows: Array<Record<string, unknown>>;
+  }>;
+  release: (destroy?: boolean) => void;
+};
+
+type ReadOnlyPool = {
+  connect: () => Promise<ReadOnlyPoolClient>;
+};
+
+async function runSourceLibraryReadOnlyCheck<T>(
+  pool: ReadOnlyPool,
+  retryConnectionFailures: boolean,
+  check: (query: ReadOnlyQuery) => Promise<T>,
+): Promise<T> {
+  const attempts = retryConnectionFailures ? SOURCE_LIBRARY_PREFLIGHT_DB_ATTEMPTS : 1;
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    let client: ReadOnlyPoolClient | undefined;
+    let destroyClient = false;
+    try {
+      client = await pool.connect();
+      await client.query("BEGIN TRANSACTION READ ONLY");
+      const query: ReadOnlyQuery = async (text, values) => {
+        const result = await client!.query(text, values);
+        return { rows: result.rows };
+      };
+      const output = await check(query);
+      await client.query("ROLLBACK");
+      return output;
+    } catch (error) {
+      lastError = error;
+      const retryable = retryConnectionFailures && isRetryableSourceLibraryDatabaseError(error);
+      destroyClient = retryable;
+      if (!retryable || attempt === attempts) throw error;
+    } finally {
+      client?.release(destroyClient);
+    }
+    await new Promise((resolve) => setTimeout(
+      resolve,
+      SOURCE_LIBRARY_PREFLIGHT_RETRY_DELAYS_MS[attempt - 1] ?? 500,
+    ));
+  }
+  throw lastError instanceof Error ? lastError : new Error("Source-library database check failed");
+}
+
 function dateFromHealId(healId: string) {
   const match = healId.match(/(?:^|-)((?:20)\d{2}-\d{2}-\d{2})(?:-|$)/);
   return match?.[1];
@@ -1316,15 +1401,11 @@ async function main() {
   const reportBytes = fs.readFileSync(reportPath);
   const report = parseReport(JSON.parse(reportBytes.toString("utf8")));
   const { pool } = await import("@workspace/db");
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN TRANSACTION READ ONLY");
-    const query: ReadOnlyQuery = async (text, values) => {
-      const result = await client.query(text, values ? [...values] : undefined);
-      return { rows: result.rows as Array<Record<string, unknown>> };
-    };
-    const output = preflightOnly
-      ? await preflightSourceLibraryReconciliation(
+  const output = await runSourceLibraryReadOnlyCheck<
+    SourceLibraryPreflightOutput | VerificationOutput
+  >(pool, preflightOnly, (query) =>
+    preflightOnly
+      ? preflightSourceLibraryReconciliation(
           report,
           reportBytes,
           healId,
@@ -1332,7 +1413,7 @@ async function main() {
           environment,
           revision,
         )
-      : await verifySourceLibraryReconciliation(
+      : verifySourceLibraryReconciliation(
           report,
           reportBytes,
           healId,
@@ -1340,17 +1421,14 @@ async function main() {
           fromDate,
           environment,
           revision,
-        );
-    if (!preflightOnly) {
-      assertBoundedSourceLibraryReconciliationEvidence(output);
-    }
-    await client.query("ROLLBACK");
-    await writeOutput(outputPath, output);
-    process.stdout.write(`${JSON.stringify(output)}\n`);
-    if (!output.ok) process.exitCode = 1;
-  } finally {
-    client.release();
+        ),
+  );
+  if (!preflightOnly) {
+    assertBoundedSourceLibraryReconciliationEvidence(output);
   }
+  await writeOutput(outputPath, output);
+  process.stdout.write(`${JSON.stringify(output)}\n`);
+  if (!output.ok) process.exitCode = 1;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
