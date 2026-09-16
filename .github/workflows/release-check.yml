@@ -93,6 +93,7 @@ jobs:
           TYPESCRIPT_7_RUNNER_IMAGE: ${{ runner.os }}-${{ runner.arch }}
         run: pnpm run release:check
 
+
       - name: Verify release evidence allowlist
         if: always()
         run: pnpm --filter @workspace/scripts run check:release-evidence
@@ -201,6 +202,7 @@ jobs:
         env:
           TYPESCRIPT_7_RUNNER_IMAGE: ${{ runner.os }}-${{ runner.arch }}
         run: pnpm run release:check:full
+
 
       - name: Verify full release evidence allowlist
         if: always()

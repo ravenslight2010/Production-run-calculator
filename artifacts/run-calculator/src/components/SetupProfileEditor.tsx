@@ -49,6 +49,8 @@ import { ChevronDown, Settings, Package, Save, X, Sparkles, Check, AlertTriangle
 import { AppSlotMathBadge } from "./AppSlotMathBadge";
 import { matchDoughballVariant, normalizeDoughballVariants, type DoughballVariant } from "@workspace/named-recipes";
 import type { Resolver } from "react-hook-form";
+import { getProfileCacheVersion, subscribeProfileCache } from "../profileCache";
+import { caseBasedProductionNeedsAvailable } from "@workspace/inventory-math";
 
 type ApplicatorNum = 1 | 2 | 3 | 4;
 
