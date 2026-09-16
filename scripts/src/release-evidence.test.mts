@@ -1355,6 +1355,48 @@ async function run(): Promise<void> {
     checkpointReport,
     /Retained report: release-check-report\.md \(left unchanged by this checkpoint\)\./,
   );
+  for (const recoveryCase of [
+    {
+      mode: "full" as const,
+      resume: "pnpm run release:check:full -- --resume",
+      regenerate: "pnpm run release:check:full",
+    },
+    {
+      mode: "typescript-7-promotion" as const,
+      resume: "pnpm run release:check:typescript-7-promotion -- --resume",
+      regenerate: "pnpm run release:check:typescript-7-promotion",
+    },
+  ]) {
+    const modeCheckpointReport = formatReleaseReport(
+      [{ label: "gate one", status: "PASS", elapsedMs: 100 }],
+      recoveryCase.mode,
+      new Set(),
+      {
+        revision: "current-revision",
+        environment: "disposable release test",
+        decision: "NO-GO",
+        expectedLabels: ["gate one", "gate two"],
+        reportKind: "checkpoint",
+      },
+    );
+    assert.ok(
+      modeCheckpointReport.includes(`Resume: ${recoveryCase.resume}`),
+      `${recoveryCase.mode} checkpoints must preserve the matching resume command`,
+    );
+    assert.ok(
+      modeCheckpointReport.includes(`Regenerate: ${recoveryCase.regenerate}`),
+      `${recoveryCase.mode} checkpoints must preserve the matching regeneration command`,
+    );
+    assert.doesNotThrow(
+      () =>
+        validateReleaseReport(modeCheckpointReport, {
+          currentRevision: "current-revision",
+          expectedMode: recoveryCase.mode,
+          expectedLabels: ["gate one", "gate two"],
+        }),
+      `${recoveryCase.mode} checkpoint guidance must retain its revision and mode contract`,
+    );
+  }
   const partialKnownContractReport = formatReleaseReport(
     [
       {
