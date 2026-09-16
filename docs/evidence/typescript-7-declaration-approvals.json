@@ -3,9 +3,9 @@
   "approvals": [
     {
       "path": "lib/api-client-react/dist/generated/api.d.ts",
-      "baselineSha256": "cbe083cdf33242f12ed958adde737e2ebcf05049dac2073298a8fbf777899f67",
-      "candidateSha256": "6b07ed89a33ad92b49581bfa9e332779fef0bf9e8d73daea3b25065ac325ebd5",
-      "reason": "Reviewed: TypeScript 7 changes only equivalent string-literal delimiters in generated query and mutation key tuple types; the complete module is bidirectionally assignable under both compilers."
+      "baselineSha256": "14f65cd57190841aa81173f44604b51297fbb262ea8931a14cc786b88be0def4",
+      "candidateSha256": "f5a72b56352c1f21e0eea1d4fe7bfa5bd540f1342cda7afe7827b66216cd8c60",
+      "reason": "Reviewed: the generated source removed non-exported AwaitedInput/Awaited helper aliases; TypeScript 7 now differs only in equivalent quote delimiters for generated query and mutation key tuples, with the complete module bidirectionally assignable under TypeScript 6.0.3 and 7.0.2."
     },
     {
       "path": "lib/api-zod/dist/generated/api.d.ts",
