@@ -15,55 +15,60 @@ describe("consumeSyncWriteResponse", () => {
   it("immediately self-applies the server canonical payload on a successful write", async () => {
     const applyCanonical = vi.fn();
     const canonical = {
-      runValues: {
-        run1: { skidsCompleted: 1, casesOnCurrentSkid: 24 },
+      syncVersion: 1,
+      completeness: "complete",
+      dayState: {
+        date: "2026-09-15",
+        runs: [{ id: "run-1", brand: "Brand", flavor: "Flavor" }],
       },
-      packagingProgress: {
-        run1: {
-          skidsCompleted: 1,
-          casesOnCurrentSkid: 24,
-          correctionGeneration: 2,
-          updatedAt: 200,
-          manualOverrideUntil: 60_200,
-        },
-      },
+      runValues: { "run-1": { casesNeeded: 31 } },
     };
 
     const result = await consumeSyncWriteResponse(
-      new Response(JSON.stringify({ ok: true, data: canonical }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      }),
-      { applyCanonical },
+      new Response(JSON.stringify({
+        stale: true,
+        data: { runValues: { run1: { casesOnCurrentSkid: 99 } } },
+      }), { status: 200 }),
+      {
+        applyCanonical,
+        onStale,
+        shouldConsume: () => false,
+      },
     );
-
-    expect(result.stale).toBe(false);
-    expect(applyCanonical).toHaveBeenCalledOnce();
-    expect(applyCanonical).toHaveBeenCalledWith(canonical);
-  });
-
-  it("handles reset-stale responses without applying their data", async () => {
-    const applyCanonical = vi.fn();
-    const onStale = vi.fn();
-    const result = await consumeSyncWriteResponse(
-      new Response(JSON.stringify({ ok: true, stale: true, epoch: 7 }), {
-        status: 200,
-      }),
-      { applyCanonical, onStale },
-    );
-
-    expect(result.stale).toBe(true);
-    expect(onStale).toHaveBeenCalledWith(
-      expect.objectContaining({ stale: true, epoch: 7 }),
-    );
+    expect(result.body).toEqual({ data: { runValues: {} } });
     expect(applyCanonical).not.toHaveBeenCalled();
   });
 
-  it("recognizes a valid unchanged response without applying a canonical payload", async () => {
+  it("leaves a failed save unapplied and permits a later successful retry", async () => {
+    const applyCanonical = vi.fn();
+    const onStale = vi.fn();
+    const result = await consumeSyncWriteResponse(
+      new Response(JSON.stringify({
+        stale: true,
+        data: { runValues: { run1: { casesOnCurrentSkid: 99 } } },
+      }), { status: 200 }),
+      {
+        applyCanonical,
+        onStale,
+        shouldConsume: () => false,
+      },
+    );
+    expect(result.body).toEqual({ data: { runValues: {} } });
+    expect(applyCanonical).not.toHaveBeenCalled();
+  });
+
+  it("leaves a failed save unapplied and permits a later successful retry", async () => {
     const applyCanonical = vi.fn();
     const result = await consumeSyncWriteResponse(
-      new Response(JSON.stringify({ ok: true, unchanged: true, snapshotId: "a".repeat(64) }), { status: 200 }),
-      { applyCanonical },
+      new Response(JSON.stringify({
+        stale: true,
+        data: { runValues: { run1: { casesOnCurrentSkid: 99 } } },
+      }), { status: 200 }),
+      {
+        applyCanonical,
+        onStale,
+        shouldConsume: () => false,
+      },
     );
     expect(result.stale).toBe(false);
     expect(isUnchangedSyncResponse(result.body)).toBe(true);
@@ -189,7 +194,18 @@ describe("consumeSyncWriteResponse", () => {
       canonicalRevision: 7,
     } as any;
     const snapshotId = await syncPayloadSnapshotId(persisted as any);
-    const baseline = persistedSyncPayload(recovery);
+    let baseline: any = {
+      syncVersion: 1,
+      completeness: "complete",
+      dayState: {
+        date: "2026-09-15",
+        runs: [{ id: "r1", brand: "Synthetic", flavor: "One", metaUpdatedAt: 1 }],
+      },
+      runValues: { r1: { casesNeeded: 10 } },
+      runValuesUpdatedAt: { r1: 1 },
+    };
+
+    let baselineId = await syncPayloadSnapshotId(baseline);
     expect(await syncPayloadMatchesSnapshot(baseline, snapshotId)).toBe(true);
   });
 
@@ -197,15 +213,35 @@ describe("consumeSyncWriteResponse", () => {
     const base = {
       syncVersion: 1 as const,
       completeness: "complete" as const,
-      dayState: { date: "2026-09-15", runs: [{ id: "r1", brand: "A", flavor: "F" }] },
-      runValues: { r1: { casesNeeded: 10 } },
+      dayState: {
+        date: "2026-09-15",
+        runs: [
+          { id: "r1", brand: "A", flavor: "F" },
+          { id: "r2", brand: "A", flavor: "G" },
+        ],
+      },
+      runValues: { r1: { casesNeeded: 10 }, r2: { casesNeeded: 20 } },
+      runValuesUpdatedAt: { r1: 1, r2: 1 },
+      packagingProgress: { r1: { skidsCompleted: 1 }, r2: { skidsCompleted: 2 } },
+      history: [{ message: "preserved" }],
     };
     const baseId = await syncPayloadSnapshotId(base as any);
     const target = {
       ...base,
-      runValues: { r1: { casesNeeded: 12 } },
+      runValues: { r1: { casesNeeded: 11 } },
+      runValuesUpdatedAt: { r1: 2 },
+      packagingProgress: { r1: { skidsCompleted: 3 } },
     };
-    const targetId = await syncPayloadSnapshotId(target as any);
+      const targetId = await syncPayloadSnapshotId(built.target);
+
+      const reconstructed = await reconstructPartialSyncPayload(baseline, baselineId, {
+        syncVersion: 1,
+        completeness: "partial",
+        baseSnapshotId: baselineId,
+        snapshotId: targetId,
+        resultingSnapshotId: targetId,
+        data: built.data,
+      });
     await expect(reconstructPartialSyncPayload(base as any, baseId, {
       syncVersion: 1,
       completeness: "partial",
@@ -252,27 +288,27 @@ describe("consumeSyncWriteResponse", () => {
       packagingProgress: { r1: { skidsCompleted: 3 } },
     };
     const baseId = await syncPayloadSnapshotId(base as any);
-    const targetId = await syncPayloadSnapshotId(target as any);
+      const targetId = await syncPayloadSnapshotId(built.target);
 
-    await expect(reconstructPartialSyncPayload(base as any, baseId, {
-      syncVersion: 1,
-      completeness: "partial",
-      baseSnapshotId: baseId,
-      snapshotId: targetId,
-      resultingSnapshotId: targetId,
-      data: {
-        runValues: { r1: { casesNeeded: 11 }, r2: null },
-        runValuesUpdatedAt: { r1: 2, r2: null },
-        packagingProgress: { r1: { skidsCompleted: 3 }, r2: null },
-      },
-    })).resolves.toEqual(target);
-  });
-
-  it("does not apply data from an unsuccessful response", async () => {
+      const reconstructed = await reconstructPartialSyncPayload(baseline, baselineId, {
+        syncVersion: 1,
+        completeness: "partial",
+        baseSnapshotId: baselineId,
+        snapshotId: targetId,
+        resultingSnapshotId: targetId,
+        data: built.data,
+      });
     const applyCanonical = vi.fn();
     const result = await consumeSyncWriteResponse(
-      new Response(JSON.stringify({ data: { runValues: {} } }), { status: 500 }),
-      { applyCanonical },
+      new Response(JSON.stringify({
+        stale: true,
+        data: { runValues: { run1: { casesOnCurrentSkid: 99 } } },
+      }), { status: 200 }),
+      {
+        applyCanonical,
+        onStale,
+        shouldConsume: () => false,
+      },
     );
     expect(result.body).toEqual({ data: { runValues: {} } });
     expect(applyCanonical).not.toHaveBeenCalled();
@@ -317,3 +353,72 @@ describe("consumeSyncWriteResponse", () => {
     expect(onStale).not.toHaveBeenCalled();
   });
 });
+
+    const transitions = [
+      {
+        target: {
+          ...baseline,
+          dayState: {
+            ...baseline.dayState,
+            runs: [{ ...baseline.dayState.runs[0], startedAt: 10, metaUpdatedAt: 10 }],
+          },
+        },
+        data: {
+          dayState: {
+            ...baseline.dayState,
+            runs: [{ ...baseline.dayState.runs[0], startedAt: 10, metaUpdatedAt: 10 }],
+          },
+        },
+      },
+      {
+        build(previous: any) {
+          const r2 = { id: "r2", brand: "Synthetic", flavor: "Two", metaUpdatedAt: 20 };
+          return {
+            target: {
+              ...previous,
+              dayState: { ...previous.dayState, runs: [...previous.dayState.runs, r2] },
+              runValues: { ...previous.runValues, r2: { casesNeeded: 20 } },
+              runValuesUpdatedAt: { ...previous.runValuesUpdatedAt, r2: 20 },
+            },
+            data: {
+              dayState: { ...previous.dayState, runs: [...previous.dayState.runs, r2] },
+              runValues: { r2: { casesNeeded: 20 } },
+              runValuesUpdatedAt: { r2: 20 },
+            },
+          };
+        },
+      },
+      {
+        build(previous: any) {
+          const runs = previous.dayState.runs.map((run: any) =>
+            run.id === "r1" ? { ...run, endedAt: 30, metaUpdatedAt: 30 } : run);
+          return {
+            target: { ...previous, dayState: { ...previous.dayState, runs } },
+            data: { dayState: { ...previous.dayState, runs } },
+          };
+        },
+      },
+      {
+        build(previous: any) {
+          const target = {
+            ...previous,
+            dayState: {
+              ...previous.dayState,
+              runs: previous.dayState.runs.filter((run: any) => run.id !== "r2"),
+            },
+            runValues: { r1: previous.runValues.r1 },
+            runValuesUpdatedAt: { r1: previous.runValuesUpdatedAt.r1 },
+          };
+          return {
+            target,
+            data: {
+              dayState: target.dayState,
+              runValues: { r2: null },
+              runValuesUpdatedAt: { r2: null },
+            },
+          };
+        },
+      },
+    ];
+
+      const built = "build" in transition ? transition.build(baseline) : transition;

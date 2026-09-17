@@ -3043,6 +3043,24 @@ describe("/sync/events — date-scoped broadcasts", () => {
     let partialFrames = 0;
     let partialBytes = 0;
     let equivalentCompleteBytes = 0;
+    type LifecycleKind = "start" | "add" | "end" | "remove";
+    const lifecycleSteps = new Map<number, LifecycleKind>([
+      [8, "start"],
+      [16, "add"],
+      [24, "end"],
+      [32, "remove"],
+    ]);
+    const lifecycleMetrics = Object.fromEntries(
+      [...lifecycleSteps.values()].map((kind) => [
+        kind,
+        { frames: 0, completeFallbacks: 0, actualBytes: 0, equivalentCompleteBytes: 0 },
+      ]),
+    ) as Record<LifecycleKind, {
+      frames: number;
+      completeFallbacks: number;
+      actualBytes: number;
+      equivalentCompleteBytes: number;
+    }>;
 
     const readFrame = async (peer: Peer, predicate: (frame: Record<string, any>) => boolean) => {
       for (;;) {
@@ -3137,8 +3155,9 @@ describe("/sync/events — date-scoped broadcasts", () => {
 
         const senderId = `shift-peer-${["a", "b", "c"][step % 3]}`;
         const changedRun = runs[(step * 7) % runs.length].id;
-        const stamp = Date.now() + 20_000 + step;
-        const nextPayload = {
+        const stamp = 2_000_000_000_000 + step;
+        const lifecycleKind = lifecycleSteps.get(step);
+        let nextPayload: Record<string, any> = {
           ...canonical,
           runValues: {
             ...canonical.runValues,
@@ -3149,6 +3168,59 @@ describe("/sync/events — date-scoped broadcasts", () => {
           },
           runValuesUpdatedAt: { ...canonical.runValuesUpdatedAt, [changedRun]: stamp },
         };
+        if (lifecycleKind === "start") {
+          nextPayload = {
+            ...nextPayload,
+            dayState: {
+              ...nextPayload.dayState,
+              runs: nextPayload.dayState.runs.map((run: Record<string, any>) =>
+                run.id === changedRun ? { ...run, startedAt: stamp, metaUpdatedAt: stamp } : run),
+            },
+          };
+        } else if (lifecycleKind === "add") {
+          const addedRun = {
+            id: "shift-run-added",
+            brand: "Synthetic Brand Added",
+            flavor: "Synthetic Flavor Added",
+            metaUpdatedAt: stamp,
+          };
+          nextPayload = {
+            ...nextPayload,
+            dayState: { ...nextPayload.dayState, runs: [...nextPayload.dayState.runs, addedRun] },
+            runValues: {
+              ...nextPayload.runValues,
+              [addedRun.id]: {
+                casesNeeded: 144,
+                casesOnCurrentSkid: 0,
+                doughRecipe: [{ ingredient: "Synthetic Ingredient Added", lbs: 12 }],
+                notes: "Synthetic lifecycle fixture",
+              },
+            },
+            runValuesUpdatedAt: { ...nextPayload.runValuesUpdatedAt, [addedRun.id]: stamp },
+          };
+        } else if (lifecycleKind === "end") {
+          nextPayload = {
+            ...nextPayload,
+            dayState: {
+              ...nextPayload.dayState,
+              runs: nextPayload.dayState.runs.map((run: Record<string, any>) =>
+                run.id === changedRun ? { ...run, endedAt: stamp, metaUpdatedAt: stamp } : run),
+            },
+          };
+        } else if (lifecycleKind === "remove") {
+          const removedRunId = "shift-run-added";
+          const { [removedRunId]: _removedValue, ...remainingValues } = nextPayload.runValues;
+          const { [removedRunId]: _removedStamp, ...remainingStamps } = nextPayload.runValuesUpdatedAt;
+          nextPayload = {
+            ...nextPayload,
+            dayState: {
+              ...nextPayload.dayState,
+              runs: nextPayload.dayState.runs.filter((run: Record<string, any>) => run.id !== removedRunId),
+            },
+            runValues: remainingValues,
+            runValuesUpdatedAt: remainingStamps,
+          };
+        }
         const write = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
           method: "PUT",
           headers: { ...authHeaders(), "content-type": "application/json" },
@@ -3165,22 +3237,30 @@ describe("/sync/events — date-scoped broadcasts", () => {
             continue;
           }
           const received = await readFrame(peer, (frame) => frame.senderId === senderId);
+          const completeEquivalentBytes = Buffer.byteLength(JSON.stringify({
+            ...received.frame,
+            completeness: "complete",
+            data: canonical,
+            syncVersion: undefined,
+            baseSnapshotId: undefined,
+            resultingSnapshotId: undefined,
+          }));
+          if (lifecycleKind) {
+            const metrics = lifecycleMetrics[lifecycleKind];
+            metrics.frames += 1;
+            metrics.actualBytes += received.bytes;
+            metrics.equivalentCompleteBytes += completeEquivalentBytes;
+          }
           if (received.frame.completeness === "partial") {
             partialFrames += 1;
             partialBytes += received.bytes;
             expect(received.frame).toHaveProperty("operationalProjection");
             const reconstructed = reconstruct(peer, received.frame);
             expect(reconstructed).toEqual(canonical);
-            equivalentCompleteBytes += Buffer.byteLength(JSON.stringify({
-              ...received.frame,
-              completeness: "complete",
-              data: canonical,
-              syncVersion: undefined,
-              baseSnapshotId: undefined,
-              resultingSnapshotId: undefined,
-            }));
+            equivalentCompleteBytes += completeEquivalentBytes;
           } else {
             completeFrames += 1;
+            if (lifecycleKind) lifecycleMetrics[lifecycleKind].completeFallbacks += 1;
             expect(received.frame.data).toEqual(canonical);
             expect(received.frame.snapshotId).toBe(writeBody.snapshotId);
             peer.baseline = received.frame.data;
@@ -3202,10 +3282,18 @@ describe("/sync/events — date-scoped broadcasts", () => {
       partialBytes,
       equivalentCompleteBytes,
       savingsPercent: Number(savingsPercent.toFixed(2)),
+      lifecycleMetrics,
     });
     expect(partialFrames).toBe(96);
     expect(completeFrames).toBeLessThanOrEqual(6);
     expect(partialBytes).toBeLessThan(equivalentCompleteBytes * 0.5);
+    for (const kind of ["start", "add", "end", "remove"] as const) {
+      const metrics = lifecycleMetrics[kind];
+      expect(metrics.frames, `${kind} lifecycle receiver frames`).toBe(2);
+      expect(metrics.completeFallbacks, `${kind} lifecycle complete fallbacks`).toBeLessThanOrEqual(1);
+      expect(metrics.actualBytes, `${kind} lifecycle aggregate wire bytes`)
+        .toBeLessThan(metrics.equivalentCompleteBytes * 0.8);
+    }
   }, 60_000);
 
 describe("/sync/events — facility-wide master-data broadcasts", () => {
