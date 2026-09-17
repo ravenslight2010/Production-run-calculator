@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { and, eq, sql } from "drizzle-orm";
 import { signToken } from "../lib/auth";
+import { syncSnapshotId } from "../lib/syncContract";
 
 // Regression guard for the "scheduled day disappears a day early" bug: the app is
 // driven by the CLIENT's local midnight, but the server runs in UTC in
@@ -2991,6 +2992,221 @@ describe("/sync/events — date-scoped broadcasts", () => {
     expect(Buffer.byteLength(received.raw) * 2)
       .toBeLessThan(Buffer.byteLength(JSON.stringify(equivalentComplete)));
   });
+
+  it("keeps multi-peer delta savings and convergence through a synthetic full shift", async () => {
+    const date = "2030-03-16";
+    const runs = Array.from({ length: 32 }, (_, index) => ({
+      id: `shift-run-${index}`,
+      brand: `Synthetic Brand ${index % 4}`,
+      flavor: `Synthetic Flavor ${index}`,
+      metaUpdatedAt: 10_000 + index,
+    }));
+    const runValues = Object.fromEntries(runs.map((run, index) => [
+      run.id,
+      {
+        casesNeeded: 180 + index,
+        casesOnCurrentSkid: index % 24,
+        doughRecipe: Array.from({ length: 8 }, (_, ingredient) => ({
+          ingredient: `Synthetic Ingredient ${ingredient}`,
+          lbs: ingredient + index + 1,
+        })),
+        notes: `Synthetic full-shift fixture run ${index + 1}`,
+      },
+    ]));
+    let canonical: Record<string, any> = {
+      syncVersion: 1,
+      completeness: "complete",
+      dayState: { date, runs, shiftNotes: "Synthetic full-shift soak fixture" },
+      runValues,
+      runValuesUpdatedAt: Object.fromEntries(runs.map((run, index) => [run.id, 10_000 + index])),
+    };
+    const seed = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "shift-seed", payload: canonical }),
+    });
+    expect(seed.status).toBe(200);
+    const seedBody = await seed.json() as { data: Record<string, any>; snapshotId: string };
+    canonical = seedBody.data;
+
+    type Peer = {
+      id: string;
+      ctrl: AbortController;
+      reader: ReadableStreamDefaultReader<Uint8Array>;
+      decoder: TextDecoder;
+      buffer: string;
+      baseline: Record<string, any>;
+      snapshotId: string;
+    };
+    const peers = new Map<string, Peer>();
+    let completeFrames = 0;
+    let partialFrames = 0;
+    let partialBytes = 0;
+    let equivalentCompleteBytes = 0;
+
+    const readFrame = async (peer: Peer, predicate: (frame: Record<string, any>) => boolean) => {
+      for (;;) {
+        const boundary = peer.buffer.indexOf("\n\n");
+        if (boundary >= 0) {
+          const raw = peer.buffer.slice(0, boundary);
+          peer.buffer = peer.buffer.slice(boundary + 2);
+          const line = raw.split("\n").find((entry) => entry.startsWith("data: "));
+          if (line) {
+            const json = line.slice("data: ".length);
+            const frame = JSON.parse(json) as Record<string, any>;
+            if (predicate(frame)) return { frame, bytes: Buffer.byteLength(json) };
+          }
+          continue;
+        }
+        const { value, done } = await peer.reader.read();
+        if (done) throw new Error(`SSE stream for ${peer.id} ended before the expected frame`);
+        peer.buffer += peer.decoder.decode(value, { stream: true });
+      }
+    };
+
+    const connect = async (id: string) => {
+      const ctrl = new AbortController();
+      const response = await fetch(
+        `${baseUrl}/api/sync/events?clientId=${id}&today=${date}`,
+        { headers: authHeaders(), signal: ctrl.signal },
+      );
+      expect(response.status).toBe(200);
+      const peer: Peer = {
+        id,
+        ctrl,
+        reader: response.body!.getReader(),
+        decoder: new TextDecoder(),
+        buffer: "",
+        baseline: {},
+        snapshotId: "",
+      };
+      const initial = await readFrame(peer, (frame) => frame.initial === true);
+      expect(initial.frame.completeness).toBe("complete");
+      expect(initial.frame.snapshotId).toBe(syncSnapshotId(initial.frame.data));
+      peer.baseline = initial.frame.data;
+      peer.snapshotId = initial.frame.snapshotId;
+      peers.set(id, peer);
+      completeFrames += 1;
+    };
+
+    const disconnect = async (id: string) => {
+      const peer = peers.get(id);
+      if (!peer) return;
+      await peer.reader.cancel();
+      peer.ctrl.abort();
+      peers.delete(id);
+    };
+
+    const reconstruct = (peer: Peer, frame: Record<string, any>) => {
+      expect(frame.baseSnapshotId).toBe(peer.snapshotId);
+      expect(syncSnapshotId(peer.baseline)).toBe(peer.snapshotId);
+      const next = { ...peer.baseline };
+      for (const [section, value] of Object.entries(frame.data as Record<string, unknown>)) {
+        if (section === "runValues" || section === "runValuesUpdatedAt" || section === "packagingProgress") {
+          const merged = { ...(next[section] ?? {}) };
+          for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+            if (child === null) delete merged[key];
+            else merged[key] = child;
+          }
+          next[section] = merged;
+        } else if (value === null) {
+          delete next[section];
+        } else {
+          next[section] = value;
+        }
+      }
+      delete next.baseSnapshotId;
+      delete next.resultingSnapshotId;
+      next.syncVersion = 1;
+      next.completeness = "complete";
+      expect(syncSnapshotId(next)).toBe(frame.snapshotId);
+      peer.baseline = next;
+      peer.snapshotId = frame.snapshotId;
+      return next;
+    };
+
+    await Promise.all(["shift-peer-a", "shift-peer-b", "shift-peer-c"].map(connect));
+
+    try {
+      for (let step = 0; step < 48; step += 1) {
+        if (step > 0 && step % 12 === 0) {
+          const reconnectId = `shift-peer-${["a", "b", "c"][(step / 12 - 1) % 3]}`;
+          await disconnect(reconnectId);
+          await connect(reconnectId);
+        }
+
+        const senderId = `shift-peer-${["a", "b", "c"][step % 3]}`;
+        const changedRun = runs[(step * 7) % runs.length].id;
+        const stamp = Date.now() + 20_000 + step;
+        const nextPayload = {
+          ...canonical,
+          runValues: {
+            ...canonical.runValues,
+            [changedRun]: {
+              ...canonical.runValues[changedRun],
+              casesOnCurrentSkid: (step * 5) % 48,
+            },
+          },
+          runValuesUpdatedAt: { ...canonical.runValuesUpdatedAt, [changedRun]: stamp },
+        };
+        const write = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
+          method: "PUT",
+          headers: { ...authHeaders(), "content-type": "application/json" },
+          body: JSON.stringify({ senderId, payload: nextPayload }),
+        });
+        expect(write.status).toBe(200);
+        const writeBody = await write.json() as { data: Record<string, any>; snapshotId: string };
+        canonical = writeBody.data;
+
+        for (const peer of peers.values()) {
+          if (peer.id === senderId) {
+            peer.baseline = canonical;
+            peer.snapshotId = writeBody.snapshotId;
+            continue;
+          }
+          const received = await readFrame(peer, (frame) => frame.senderId === senderId);
+          if (received.frame.completeness === "partial") {
+            partialFrames += 1;
+            partialBytes += received.bytes;
+            expect(received.frame).toHaveProperty("operationalProjection");
+            const reconstructed = reconstruct(peer, received.frame);
+            expect(reconstructed).toEqual(canonical);
+            equivalentCompleteBytes += Buffer.byteLength(JSON.stringify({
+              ...received.frame,
+              completeness: "complete",
+              data: canonical,
+              syncVersion: undefined,
+              baseSnapshotId: undefined,
+              resultingSnapshotId: undefined,
+            }));
+          } else {
+            completeFrames += 1;
+            expect(received.frame.data).toEqual(canonical);
+            expect(received.frame.snapshotId).toBe(writeBody.snapshotId);
+            peer.baseline = received.frame.data;
+            peer.snapshotId = received.frame.snapshotId;
+          }
+        }
+      }
+    } finally {
+      await Promise.all([...peers.keys()].map(disconnect));
+    }
+
+    const savingsPercent = ((equivalentCompleteBytes - partialBytes) / equivalentCompleteBytes) * 100;
+    console.info("[sync full-shift soak]", {
+      steps: 48,
+      peers: 3,
+      reconnects: 3,
+      partialFrames,
+      completeFrames,
+      partialBytes,
+      equivalentCompleteBytes,
+      savingsPercent: Number(savingsPercent.toFixed(2)),
+    });
+    expect(partialFrames).toBe(96);
+    expect(completeFrames).toBeLessThanOrEqual(6);
+    expect(partialBytes).toBeLessThan(equivalentCompleteBytes * 0.5);
+  }, 60_000);
 
 describe("/sync/events — facility-wide master-data broadcasts", () => {
   type SyncFrame = Record<string, unknown>;
