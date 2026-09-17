@@ -3,19 +3,15 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  discoverRetainedEvaluationPaths as discoverSharedRetainedEvaluationPaths,
+  evaluationManifestFromEvidence,
+  retainedEvaluationDirectories,
+} from "./retained-evaluation-contract.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, "../..");
-const RETAINED_EVIDENCE_DIRECTORIES = [
-  path.join(
-    REPO_ROOT,
-    "lib/corpus-harness/snapshots",
-  ),
-  path.join(
-    REPO_ROOT,
-    "docs",
-  ),
-];
+const RETAINED_EVIDENCE_DIRECTORIES = retainedEvaluationDirectories(REPO_ROOT);
 const EVIDENCE_PATH = path.join(
   REPO_ROOT,
   "docs/second-pass-reviewer-benchmark-2026-09-05.json",
@@ -65,7 +61,7 @@ export function checkRoutineNodeVersion({
 
 export function readRequiredNodeVersion(evidencePath = EVIDENCE_PATH) {
   const evidence = JSON.parse(fs.readFileSync(evidencePath, "utf8"));
-  const manifest = evidence?.evaluationManifest ?? evidence;
+  const manifest = evaluationManifestFromEvidence(evidence);
   const requiredVersion = manifest?.dependencies?.node;
 
   if (typeof requiredVersion !== "string" || requiredVersion.trim() === "") {
@@ -77,73 +73,10 @@ export function readRequiredNodeVersion(evidencePath = EVIDENCE_PATH) {
   return requiredVersion;
 }
 
-function isEvaluationManifestCandidate(evidence) {
-  return (
-    evidence &&
-    typeof evidence === "object" &&
-    !Array.isArray(evidence) &&
-    ("manifestVersion" in evidence || "evaluationManifest" in evidence)
-  );
-}
-
-function isRetainedEvaluationPath(evidencePath) {
-  const fileName = path.basename(evidencePath, path.extname(evidencePath));
-  return /(?:evaluation|benchmark|manifest)/i.test(fileName);
-}
-
-function findJsonFiles(directoryPath) {
-  return fs
-    .readdirSync(directoryPath, { withFileTypes: true })
-    .toSorted((left, right) => left.name.localeCompare(right.name))
-    .flatMap((entry) => {
-      const entryPath = path.join(directoryPath, entry.name);
-      if (entry.isDirectory()) {
-        return findJsonFiles(entryPath);
-      }
-      return entry.isFile() && entry.name.endsWith(".json") ? [entryPath] : [];
-    });
-}
-
 export function discoverRetainedEvaluationPaths(
   evidenceDirectories = RETAINED_EVIDENCE_DIRECTORIES,
 ) {
-  if (
-    !Array.isArray(evidenceDirectories) ||
-    evidenceDirectories.length === 0 ||
-    evidenceDirectories.some(
-      (directoryPath) =>
-        typeof directoryPath !== "string" || directoryPath.trim() === "",
-    )
-  ) {
-    throw new TypeError("evidenceDirectories must be a non-empty array");
-  }
-
-  const discoveredPaths = evidenceDirectories
-    .flatMap((directoryPath) => findJsonFiles(directoryPath))
-    .filter((evidencePath) => {
-      let evidence;
-      try {
-        evidence = JSON.parse(fs.readFileSync(evidencePath, "utf8"));
-      } catch {
-        if (isRetainedEvaluationPath(evidencePath)) {
-          throw new Error(
-            `Malformed retained evaluation JSON: ${evidencePath}`,
-          );
-        }
-        return false;
-      }
-      return isEvaluationManifestCandidate(evidence);
-    });
-
-  if (discoveredPaths.length === 0) {
-    throw new Error(
-      "No retained evaluation manifests were found in the supported evidence locations",
-    );
-  }
-
-  return [...new Set(discoveredPaths)].sort((left, right) =>
-    left.localeCompare(right),
-  );
+  return discoverSharedRetainedEvaluationPaths(evidenceDirectories);
 }
 
 export function readRequiredNodeVersions(

@@ -39,6 +39,7 @@ import {
   releaseStepDependencies,
   runStep,
   resolveReleaseEvidenceDir,
+  discoverReleaseRetainedEvaluationPaths,
   sourceLibraryReconciliationRequired,
   validateFullBrowserReport,
   validateReleaseAiEvaluationEvidence,
@@ -48,6 +49,9 @@ import {
   validateSourceLibraryReconciliationEvidence,
   verifyReleaseEvidence,
 } from "./release-check.mts";
+import {
+  discoverRetainedEvaluationPaths as discoverRoutineRetainedEvaluationPaths,
+} from "./check-routine-node-version.mjs";
 import { parseReportSigningKeyring } from "./report-key-rotation-preflight.mts";
 import {
   computeSourceLibraryEvidenceId,
@@ -316,6 +320,11 @@ async function fixture(
 }
 
 async function run(): Promise<void> {
+  assert.deepEqual(
+    discoverReleaseRetainedEvaluationPaths(),
+    discoverRoutineRetainedEvaluationPaths(),
+    "release verification and routine Node preflight must discover the same retained evaluation files",
+  );
   assert.equal(
     validateReleaseAiEvaluationEvidence(
       Buffer.from(JSON.stringify(aiEvaluationManifest())),

@@ -52,6 +52,12 @@ import {
 import {
   TYPESCRIPT_7_SUPPORTED_RUNNERS,
 } from "./typescript-7-native-contract.mts";
+import {
+  discoverRetainedEvaluationPaths,
+  evaluationManifestFromEvidence,
+  RETAINED_EVALUATION_CANONICAL_RELATIVE_PATH,
+  retainedEvaluationDirectories,
+} from "./retained-evaluation-contract.mjs";
 export { TYPESCRIPT_7_SUPPORTED_RUNNERS } from "./typescript-7-native-contract.mts";
 
 export type ReleaseStep = {
@@ -164,9 +170,7 @@ export function validateReleaseAiEvaluationEvidence(
     throw new Error("AI evaluation evidence must be an object");
   }
   const record = report as Record<string, unknown>;
-  const manifest = "evaluationManifest" in record
-    ? record.evaluationManifest
-    : record;
+  const manifest = evaluationManifestFromEvidence(record);
   if (
     !manifest
     || typeof manifest !== "object"
@@ -181,6 +185,15 @@ export function validateReleaseAiEvaluationEvidence(
 }
 
 async function importCorpusEvaluationRequirements(): Promise<EvaluationComparabilityRequirements> {
+  if (
+    !discoverReleaseRetainedEvaluationPaths().includes(
+      IMPORT_CORPUS_EVALUATION_SOURCE,
+    )
+  ) {
+    throw new Error(
+      "canonical import corpus evaluation manifest is outside the shared retained-evaluation inventory",
+    );
+  }
   let canonical: unknown;
   try {
     canonical = JSON.parse(
@@ -790,8 +803,15 @@ export function validateTypescript7ComparisonEvidence(
 }
 const IMPORT_CORPUS_EVALUATION_SOURCE = resolve(
   rootDir,
-  "lib/corpus-harness/snapshots/evaluation-manifest.json",
+  RETAINED_EVALUATION_CANONICAL_RELATIVE_PATH,
 );
+export function discoverReleaseRetainedEvaluationPaths(
+  projectRoot = rootDir,
+): string[] {
+  return discoverRetainedEvaluationPaths(
+    retainedEvaluationDirectories(projectRoot),
+  );
+}
 const SOURCE_LIBRARY_RECONCILIATION_PENDING_EVIDENCE = `.${SOURCE_LIBRARY_RECONCILIATION_EVIDENCE}.pending`;
 export const RELEASE_EVIDENCE_ALLOWLIST = [
   "release-check-report.md",
