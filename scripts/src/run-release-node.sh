@@ -56,9 +56,17 @@ fallback_marker_dir=$(mktemp -d "${TMPDIR:-/tmp}/run-release-node.XXXXXX")
 fallback_marker="${fallback_marker_dir}/started"
 trap 'rm -rf "$fallback_marker_dir"' EXIT
 
+npx_bin=""
+if ! npx_bin=$(command -v npx 2>/dev/null); then
+  printf \
+    'Release runner could not find npx; cannot make pinned Node package node@%s available via npx; refusing to run release command.\n' \
+    "$required_node_version" >&2
+  exit 127
+fi
+
 # shellcheck disable=SC2016
 if RELEASE_NODE_FALLBACK_MARKER="$fallback_marker" \
-  npx --yes --package="node@${required_node_version}" -- bash -c '
+  "$npx_bin" --yes --package="node@${required_node_version}" -- bash -c '
   set -euo pipefail
 
   : >"$RELEASE_NODE_FALLBACK_MARKER"

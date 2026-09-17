@@ -180,6 +180,23 @@ run_launcher() {
   RUN_OUTPUT=$(cat "$output_path")
 }
 
+path_without_npx() {
+  local path_entry
+  local filtered_path=""
+  local path_entries=()
+
+  IFS=: read -r -a path_entries <<<"$PATH"
+  for path_entry in "${path_entries[@]}"; do
+    [[ -x "${path_entry}/npx" ]] && continue
+    if [[ -n "$filtered_path" ]]; then
+      filtered_path+=":"
+    fi
+    filtered_path+="$path_entry"
+  done
+
+  printf '%s\n' "$filtered_path"
+}
+
 test_matching_node_skips_npx() {
   local workspace
   local log_path
@@ -344,9 +361,38 @@ test_empty_node_selector_fails_before_release_commands() {
   echo "PASS: empty Node selector fails before npx, preflight, or child execution"
 }
 
+test_missing_npx_fails_before_release_commands() {
+  local workspace
+  local log_path
+  workspace=$(make_workspace missing-npx)
+  log_path="${workspace}/events"
+
+  write_node "${workspace}/bin/node" "24.19.0"
+
+  run_launcher "$workspace" "$log_path" \
+    "${workspace}/bin:$(path_without_npx)"
+
+  [[ "$RUN_STATUS" -ne 0 ]] || {
+    printf 'Missing npx unexpectedly succeeded. Output:\n%s\n' \
+      "$RUN_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$RUN_OUTPUT" \
+    "Release runner could not find npx; cannot make pinned Node package node@${REQUIRED_NODE_VERSION} available via npx; refusing to run release command."
+  assert_not_contains "$RUN_OUTPUT" "command not found"
+  if [[ -e "$log_path" ]]; then
+    local events
+    events=$(cat "$log_path")
+    assert_not_contains "$events" "preflight-node="
+    assert_not_contains "$events" "child-node="
+  fi
+  echo "PASS: missing npx reports the tooling boundary before preflight or child execution"
+}
+
 test_matching_node_skips_npx
 test_mismatching_node_uses_npx
 test_wrong_fallback_node_version_fails_before_release_commands
 test_npx_package_resolution_failure_fails_before_release_commands
 test_missing_node_selector_fails_before_release_commands
 test_empty_node_selector_fails_before_release_commands
+test_missing_npx_fails_before_release_commands
