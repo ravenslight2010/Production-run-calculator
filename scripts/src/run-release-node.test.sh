@@ -120,6 +120,37 @@ EOF
   chmod +x "$npx_path"
 }
 
+write_wrong_version_npx() {
+  local npx_path="$1"
+  local wrong_node_bin="$2"
+
+  cat >"$npx_path" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+printf 'npx-invoked\n' >>"\$RUN_LOG"
+
+args=("\$@")
+separator=-1
+for ((index = 0; index < \${#args[@]}; index++)); do
+  if [[ "\${args[index]}" == "--" ]]; then
+    separator="\$index"
+    break
+  fi
+done
+
+if (( separator < 0 )); then
+  printf 'Expected npx arguments to contain --.\n' >&2
+  exit 1
+fi
+
+export PATH="${wrong_node_bin}:\$PATH"
+command_args=("\${args[@]:\$((separator + 1))}")
+exec "\${command_args[@]}"
+EOF
+  chmod +x "$npx_path"
+}
+
 run_launcher() {
   local workspace="$1"
   local log_path="$2"
@@ -184,5 +215,34 @@ test_mismatching_node_uses_npx() {
   echo "PASS: mismatching Node path invokes npx, runs preflight, and preserves pinned Node for the child"
 }
 
+test_wrong_fallback_node_version_fails_before_release_commands() {
+  local workspace
+  local log_path
+  workspace=$(make_workspace wrong-fallback-version)
+  log_path="${workspace}/events"
+
+  write_node "${workspace}/bin/node" "24.19.0"
+  write_node "${workspace}/pinned-bin/node" "24.19.0"
+  write_wrong_version_npx "${workspace}/bin/npx" "${workspace}/pinned-bin"
+
+  run_launcher "$workspace" "$log_path" \
+    "${workspace}/bin:${PATH}"
+
+  [[ "$RUN_STATUS" -ne 0 ]] || {
+    printf 'Wrong fallback Node version unexpectedly succeeded. Output:\n%s\n' \
+      "$RUN_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$RUN_OUTPUT" \
+    "Release runner resolved Node v24.19.0; expected v${REQUIRED_NODE_VERSION}."
+  local events
+  events=$(cat "$log_path")
+  assert_contains "$events" "npx-invoked"
+  assert_not_contains "$events" "preflight-node="
+  assert_not_contains "$events" "child-node="
+  echo "PASS: wrong fallback Node version fails before preflight or child execution"
+}
+
 test_matching_node_skips_npx
 test_mismatching_node_uses_npx
+test_wrong_fallback_node_version_fails_before_release_commands
