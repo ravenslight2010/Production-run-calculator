@@ -38,6 +38,7 @@ import {
   releaseConcurrencyLimit,
   releaseGateLabelsForMode,
   releaseStepDependencies,
+  retainedEvaluationEvidenceInventory,
   runStep,
   resolveReleaseEvidenceDir,
   discoverReleaseRetainedEvaluationPaths,
@@ -178,7 +179,19 @@ async function fixture(
   report = "fixture evidence\n",
 ): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "release-evidence-"));
-  for (const file of files) {
+  const retainedEvaluationFiles = retainedEvaluationEvidenceInventory().map(
+    (entry) => entry.evidencePath,
+  );
+  const fixtureFiles = files.includes(IMPORT_CORPUS_EVALUATION_EVIDENCE)
+    ? [...new Set([...files, ...retainedEvaluationFiles])]
+    : files;
+  const retainedSourceByEvidencePath = new Map(
+    retainedEvaluationEvidenceInventory().map((entry) => [
+      entry.evidencePath,
+      entry.sourcePath,
+    ]),
+  );
+  for (const file of fixtureFiles) {
     if (file === RELEASE_CHECKPOINT_REPORT) continue;
     const path = join(root, file);
     await mkdir(join(path, ".."), { recursive: true });
@@ -229,8 +242,13 @@ async function fixture(
                 ),
                 "utf8",
               )
-          : file === TYPESCRIPT_7_COMPARISON_EVIDENCE
-            ? `${JSON.stringify((() => {
+            : retainedSourceByEvidencePath.has(file)
+              ? await readFile(
+                  retainedSourceByEvidencePath.get(file)!,
+                  "utf8",
+                )
+              : file === TYPESCRIPT_7_COMPARISON_EVIDENCE
+                ? `${JSON.stringify((() => {
                 const checks = [
                   "build",
                   "scripts",
@@ -326,6 +344,33 @@ async function run(): Promise<void> {
     discoverRoutineRetainedEvaluationPaths(),
     "release verification and routine Node preflight must discover the same retained evaluation files",
   );
+  const retainedEvaluationInventory = retainedEvaluationEvidenceInventory();
+  const retainedEvidenceFiles = new Set(
+    retainedEvaluationInventory.map((entry) => entry.evidencePath),
+  );
+  assert.deepEqual(
+    retainedEvaluationInventory.map((entry) => entry.sourceRelativePath),
+    [
+      "docs/second-pass-reviewer-benchmark-2026-09-05.json",
+      "lib/corpus-harness/snapshots/evaluation-manifest.json",
+    ],
+    "release evidence must inventory both root-level and wrapped retained evaluations",
+  );
+  const retainedInventoryReport = formatReleaseReport(
+    [],
+    "standard",
+    retainedEvidenceFiles,
+    { reportKind: "retained" },
+  );
+  for (const entry of retainedEvaluationInventory) {
+    assert.match(
+      retainedInventoryReport,
+      new RegExp(
+        `- \\[${entry.sourceRelativePath.replaceAll("/", "\\/")}\\]\\(${entry.evidencePath.replaceAll("/", "\\/")}\\)`,
+      ),
+      `release report must list retained evaluation ${entry.sourceRelativePath}`,
+    );
+  }
   assert.equal(
     validateReleaseAiEvaluationEvidence(
       Buffer.from(JSON.stringify(aiEvaluationManifest())),
@@ -1078,7 +1123,7 @@ async function run(): Promise<void> {
       elapsedMs: 100,
     })),
     "standard",
-    new Set(),
+    retainedEvidenceFiles,
     {
       revision: "current-revision",
       environment: "disposable release test",
@@ -1714,6 +1759,34 @@ async function run(): Promise<void> {
       }),
       "an allowlisted evidence set should pass",
     );
+    const nonCanonicalRetainedEvaluation =
+      retainedEvaluationInventory.find(
+        (entry) => entry.evidencePath !== IMPORT_CORPUS_EVALUATION_EVIDENCE,
+      );
+    assert.ok(
+      nonCanonicalRetainedEvaluation,
+      "the fixture must contain a second retained evaluation",
+    );
+    await rm(join(root, nonCanonicalRetainedEvaluation.evidencePath));
+    await assert.rejects(
+      verifyReleaseEvidence(root, {
+        currentRevision: "current-revision",
+        expectedMode: "standard",
+        expectedLabels: validLabels,
+      }),
+      new RegExp(
+        `Required release evidence is missing:[\\s\\S]*${nonCanonicalRetainedEvaluation.evidencePath.replaceAll("/", "\\/")}`,
+      ),
+      "verification must fail closed when a discovered retained evaluation is absent from release inventory",
+    );
+    await mkdir(join(root, nonCanonicalRetainedEvaluation.evidencePath, ".."), {
+      recursive: true,
+    });
+    await writeFile(
+      join(root, nonCanonicalRetainedEvaluation.evidencePath),
+      await readFile(nonCanonicalRetainedEvaluation.sourcePath, "utf8"),
+      "utf8",
+    );
     const retainedAiEvidencePath = join(
       root,
       IMPORT_CORPUS_EVALUATION_EVIDENCE,
@@ -1904,7 +1977,7 @@ async function run(): Promise<void> {
         elapsedMs: 100,
       })),
       "full",
-      new Set(),
+      retainedEvidenceFiles,
       {
         revision: "current-revision",
         environment: "disposable release test",
@@ -2015,7 +2088,7 @@ async function run(): Promise<void> {
           elapsedMs: 100,
         })),
         "full",
-        new Set(),
+        retainedEvidenceFiles,
         {
           revision: "stale-revision",
           environment: "disposable release test",

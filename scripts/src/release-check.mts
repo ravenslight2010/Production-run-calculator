@@ -11,7 +11,7 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { resolve } from "node:path";
+import { relative, resolve, sep } from "node:path";
 import {
   validateComparableEvaluationManifest,
   validateEvaluationManifest,
@@ -810,6 +810,44 @@ export function discoverReleaseRetainedEvaluationPaths(
 ): string[] {
   return discoverRetainedEvaluationPaths(
     retainedEvaluationDirectories(projectRoot),
+  );
+}
+export type RetainedEvaluationInventoryEntry = {
+  sourcePath: string;
+  sourceRelativePath: string;
+  evidencePath: string;
+};
+
+export function retainedEvaluationEvidenceInventory(
+  projectRoot = rootDir,
+): RetainedEvaluationInventoryEntry[] {
+  const canonicalSourcePath = resolve(
+    projectRoot,
+    RETAINED_EVALUATION_CANONICAL_RELATIVE_PATH,
+  );
+  return discoverReleaseRetainedEvaluationPaths(projectRoot).map(
+    (sourcePath) => {
+      const sourceRelativePath = relative(projectRoot, sourcePath)
+        .split(sep)
+        .join("/");
+      if (
+        sourceRelativePath === "" ||
+        sourceRelativePath.startsWith("../") ||
+        sourceRelativePath === ".."
+      ) {
+        throw new Error(
+          `Retained evaluation path is outside the project root: ${sourcePath}`,
+        );
+      }
+      return {
+        sourcePath,
+        sourceRelativePath,
+        evidencePath:
+          sourcePath === canonicalSourcePath
+            ? IMPORT_CORPUS_EVALUATION_EVIDENCE
+            : `ai-evaluations/${sourceRelativePath}`,
+      };
+    },
   );
 }
 const SOURCE_LIBRARY_RECONCILIATION_PENDING_EVIDENCE = `.${SOURCE_LIBRARY_RECONCILIATION_EVIDENCE}.pending`;
@@ -1790,7 +1828,14 @@ export async function verifyReleaseEvidence(
   evidenceRoot = resolve(rootDir, releaseEvidenceDir),
   options: ReleaseEvidenceOptions = {},
 ): Promise<void> {
-  const expected = new Set<string>(RELEASE_EVIDENCE_ALLOWLIST);
+  const retainedEvaluationInventory = retainedEvaluationEvidenceInventory();
+  const retainedEvaluationEvidencePaths = retainedEvaluationInventory.map(
+    (entry) => entry.evidencePath,
+  );
+  const expected = new Set<string>([
+    ...RELEASE_EVIDENCE_ALLOWLIST,
+    ...retainedEvaluationEvidencePaths,
+  ]);
   const unexpected: string[] = [];
 
   let files: string[];
@@ -1821,7 +1866,7 @@ export async function verifyReleaseEvidence(
       [
         "Release evidence contains files outside its allowlist:",
         ...unexpected.map((file) => `- ${file}`),
-        `Allowed files: ${RELEASE_EVIDENCE_ALLOWLIST.join(", ")}`,
+        `Allowed files: ${[...expected].join(", ")}`,
       ].join("\n"),
     );
   }
@@ -1882,7 +1927,7 @@ export async function verifyReleaseEvidence(
   const requiresFullBrowserEvidence = evidenceMode === "full";
   const requiredEvidence = [
     REPORT_KEY_ROTATION_PREFLIGHT_EVIDENCE,
-    IMPORT_CORPUS_EVALUATION_EVIDENCE,
+    ...retainedEvaluationEvidencePaths,
     TYPESCRIPT_7_COMPARISON_EVIDENCE,
     ...RELEASE_EVIDENCE_ALLOWLIST.filter((file) =>
       file.startsWith("clean-start/"),
@@ -1905,6 +1950,31 @@ export async function verifyReleaseEvidence(
       `Required release evidence is missing:\n${missingEvidence
         .map((file) => `- ${file}`)
         .join("\n")}`,
+    );
+  }
+  const retainedEvaluationSection = report
+    .split("## Retained evaluations\n\n")[1]
+    ?.split("\n## ")[0];
+  const expectedRetainedEvaluationLines = retainedEvaluationInventory.map(
+    (entry) => `- [${entry.sourceRelativePath}](${entry.evidencePath})`,
+  );
+  const actualRetainedEvaluationLines =
+    retainedEvaluationSection === undefined
+      ? []
+      : retainedEvaluationSection
+          .split("\n")
+          .filter((line) => line.startsWith("- ["));
+  if (
+    retainedEvaluationSection === undefined ||
+    JSON.stringify(actualRetainedEvaluationLines) !==
+      JSON.stringify(expectedRetainedEvaluationLines)
+  ) {
+    throw new Error(
+      [
+        "Release report retained evaluation inventory is incomplete or stale.",
+        "Expected retained evaluation paths:",
+        ...expectedRetainedEvaluationLines.map((line) => `- ${line}`),
+      ].join("\n"),
     );
   }
   const emptyEvidence: string[] = [];
@@ -1942,10 +2012,25 @@ export async function verifyReleaseEvidence(
     expectedSourceLibraryRevision,
     expectedTypescript7TrendHistory: typescript7TrendHistory,
   });
-  validateReleaseAiEvaluationEvidence(
-    await readFile(resolve(evidenceRoot, IMPORT_CORPUS_EVALUATION_EVIDENCE)),
-    await importCorpusEvaluationRequirements(),
-  );
+  for (const entry of retainedEvaluationInventory) {
+    const evidence = await readFile(resolve(evidenceRoot, entry.evidencePath));
+    if (entry.evidencePath === IMPORT_CORPUS_EVALUATION_EVIDENCE) {
+      validateReleaseAiEvaluationEvidence(
+        evidence,
+        await importCorpusEvaluationRequirements(),
+      );
+    } else {
+      const manifest = evaluationManifestFromEvidence(
+        JSON.parse(evidence.toString("utf8")),
+      );
+      if (manifest === undefined) {
+        throw new Error(
+          `Retained evaluation evidence has no supported manifest envelope: ${entry.evidencePath}`,
+        );
+      }
+      validateEvaluationManifest(manifest);
+    }
+  }
   if (requiresSourceLibraryEvidence) {
     const sourceLibraryEvidence = await readFile(
       resolve(evidenceRoot, SOURCE_LIBRARY_RECONCILIATION_EVIDENCE),
@@ -2901,6 +2986,9 @@ export function formatReleaseReport(
   } = {},
 ): string {
   const isCheckpoint = metadata.reportKind === "checkpoint";
+  const retainedEvaluationInventory = isCheckpoint
+    ? []
+    : retainedEvaluationEvidenceInventory();
   const evidenceLink = (file: string, label: string): string =>
     availableEvidenceFiles.has(file)
       ? `- [${label}](${file})`
@@ -3079,6 +3167,14 @@ export function formatReleaseReport(
       "Source-library reconciliation evidence",
     ),
     "",
+    "## Retained evaluations",
+    "",
+    ...(retainedEvaluationInventory.length === 0
+      ? ["- No retained evaluation manifests were discovered."]
+      : retainedEvaluationInventory.map((entry) =>
+          evidenceLink(entry.evidencePath, entry.sourceRelativePath),
+        )),
+    "",
     "## Browser duration review",
     "",
     ...(metadata.browserDurationRegressions === undefined
@@ -3160,18 +3256,17 @@ async function writeReleaseReport(
   const reportPath = resolve(rootDir, releaseEvidenceDir, reportFile);
   await mkdir(resolve(rootDir, releaseEvidenceDir), { recursive: true });
   if (metadata.reportKind !== "checkpoint") {
-    const retainedImportCorpusEvaluationPath = resolve(
-      rootDir,
-      releaseEvidenceDir,
-      IMPORT_CORPUS_EVALUATION_EVIDENCE,
-    );
-    await mkdir(resolve(retainedImportCorpusEvaluationPath, ".."), {
-      recursive: true,
-    });
-    await writeFile(
-      retainedImportCorpusEvaluationPath,
-      await readFile(IMPORT_CORPUS_EVALUATION_SOURCE),
-    );
+    for (const entry of retainedEvaluationEvidenceInventory()) {
+      const retainedEvaluationPath = resolve(
+        rootDir,
+        releaseEvidenceDir,
+        entry.evidencePath,
+      );
+      await mkdir(resolve(retainedEvaluationPath, ".."), {
+        recursive: true,
+      });
+      await writeFile(retainedEvaluationPath, await readFile(entry.sourcePath));
+    }
   }
   const cleanStartEvidenceFiles = RELEASE_EVIDENCE_ALLOWLIST.filter((file) =>
     file.startsWith("clean-start/"),
@@ -3194,7 +3289,9 @@ async function writeReleaseReport(
     ),
   );
   if (metadata.reportKind !== "checkpoint") {
-    availableEvidenceFiles.add(IMPORT_CORPUS_EVALUATION_EVIDENCE);
+    for (const entry of retainedEvaluationEvidenceInventory()) {
+      availableEvidenceFiles.add(entry.evidencePath);
+    }
   }
   let typescript7TrendHistory: Typescript7TrendHistorySummary | undefined;
   try {
