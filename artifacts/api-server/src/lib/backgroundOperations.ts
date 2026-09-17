@@ -1,5 +1,6 @@
 import { and, desc, eq, gte, lt, notInArray, sql } from "drizzle-orm";
 import { backgroundOperationEventsTable, db } from "@workspace/db";
+import { randomUUID } from "node:crypto";
 import { createSharedDiagnosticPersistence } from "./sharedDiagnosticPersistence";
 
 export const BACKGROUND_OPERATION_FAILURE_THRESHOLD = 3;
@@ -9,6 +10,8 @@ export const BACKGROUND_OPERATION_FAILURE_MAX_EVENTS = 100;
 const BACKGROUND_OPERATION_SHARED_TIMEOUT_MS = 1_000;
 const BACKGROUND_OPERATION_SHARED_DB_TIMEOUT_MS =
   BACKGROUND_OPERATION_SHARED_TIMEOUT_MS - 100;
+const PROCESS_INSTANCE_STARTED_AT = Date.now();
+const PROCESS_INSTANCE_ID = randomUUID();
 const sharedBackgroundOperationPersistence = createSharedDiagnosticPersistence({
   callerTimeoutMs: BACKGROUND_OPERATION_SHARED_TIMEOUT_MS,
   databaseTimeoutMs: BACKGROUND_OPERATION_SHARED_DB_TIMEOUT_MS,
@@ -129,17 +132,24 @@ function localBackgroundOperationDiagnostics(
 ): Record<BackgroundOperationName, BackgroundOperationDiagnostic> {
   return Object.fromEntries(operationNames.map((name) => {
     const state = states.get(name) ?? { failureTimes: [] };
-    const recentFailureCount = state.failureTimes.filter(
-      (failureAt) => failureAt >= now - BACKGROUND_OPERATION_FAILURE_WINDOW_MS,
-    ).length;
+    const recentFailureTimes = state.failureTimes.filter(
+      (failureAt) =>
+        failureAt >= now - BACKGROUND_OPERATION_FAILURE_WINDOW_MS &&
+        (state.lastSuccessAt === undefined || failureAt > state.lastSuccessAt),
+    );
+    const recentFailureCount = recentFailureTimes.length;
     return [name, {
       status: recentFailureCount >= BACKGROUND_OPERATION_FAILURE_THRESHOLD ? "warning" : "ok",
       recentFailureCount,
       threshold: BACKGROUND_OPERATION_FAILURE_THRESHOLD,
       windowMs: BACKGROUND_OPERATION_FAILURE_WINDOW_MS,
-      ...(state.lastFailureAt === undefined ? {} : { lastFailureAt: new Date(state.lastFailureAt).toISOString() }),
+      ...(recentFailureCount === 0 || state.lastFailureAt === undefined
+        ? {}
+        : { lastFailureAt: new Date(state.lastFailureAt).toISOString() }),
       ...(state.lastSuccessAt === undefined ? {} : { lastSuccessAt: new Date(state.lastSuccessAt).toISOString() }),
-      ...(state.lastErrorCode === undefined ? {} : { errorCode: state.lastErrorCode }),
+      ...(recentFailureCount === 0 || state.lastErrorCode === undefined
+        ? {}
+        : { errorCode: state.lastErrorCode }),
     }];
   })) as Record<BackgroundOperationName, BackgroundOperationDiagnostic>;
 }
@@ -165,6 +175,7 @@ async function recordSharedFailure(
       );
       await tx.insert(backgroundOperationEventsTable).values({
         operation: name,
+        sourceInstance: PROCESS_INSTANCE_ID,
         errorCode: code,
         occurredAt: new Date(now),
       });
@@ -203,6 +214,7 @@ async function readSharedDiagnostics(
     return tx
       .select({
         operation: backgroundOperationEventsTable.operation,
+        sourceInstance: backgroundOperationEventsTable.sourceInstance,
         occurredAt: backgroundOperationEventsTable.occurredAt,
         errorCode: backgroundOperationEventsTable.errorCode,
       })
@@ -212,10 +224,23 @@ async function readSharedDiagnostics(
       .limit(BACKGROUND_OPERATION_FAILURE_MAX_EVENTS * operationNames.length);
   });
   return Object.fromEntries(operationNames.map((name) => {
-    const operationRows = rows.filter((row) => row.operation === name)
+    const local = states.get(name);
+    // Shared rows survive process replacement so failures remain visible after
+    // a crash. A first local success fences failures from instances that ended
+    // before this one started. It never fences failures from a concurrent peer.
+    // This instance's own failures remain recoverable by its later success.
+    const operationRows = rows.filter((row) =>
+      row.operation === name &&
+      (
+        local?.lastSuccessAt === undefined ||
+        (
+          row.sourceInstance === PROCESS_INSTANCE_ID
+            ? row.occurredAt.getTime() > local.lastSuccessAt
+            : row.occurredAt.getTime() >= PROCESS_INSTANCE_STARTED_AT
+        )
+      ))
       .slice(0, BACKGROUND_OPERATION_FAILURE_MAX_EVENTS);
     const latest = operationRows[0];
-    const local = states.get(name);
     return [name, {
       status: operationRows.length >= BACKGROUND_OPERATION_FAILURE_THRESHOLD ? "warning" : "ok",
       recentFailureCount: operationRows.length,

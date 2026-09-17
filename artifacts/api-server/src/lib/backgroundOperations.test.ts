@@ -71,6 +71,77 @@ describe("background operation connection recovery", () => {
     });
   });
 
+  it("recovers from retained failures after a later successful pass", async () => {
+    const failedAt = Date.parse("2030-01-01T00:00:00.000Z");
+    const recoveredAt = failedAt + 1_000;
+    const failure = Object.assign(new Error("worker unavailable"), { code: "57P03" });
+    for (let attempt = 0; attempt < BACKGROUND_OPERATION_FAILURE_THRESHOLD; attempt += 1) {
+      await expect(runBackgroundOperation(
+        "server-job-run",
+        async () => { throw failure; },
+        { delay: async () => {}, now: () => failedAt },
+      )).rejects.toBe(failure);
+    }
+
+    await clearBackgroundOperationDiagnosticsForTests({ preserveShared: true });
+    await expect(runBackgroundOperation(
+      "server-job-run",
+      async () => "recovered",
+      { now: () => recoveredAt },
+    )).resolves.toBe("recovered");
+
+    expect((await getBackgroundOperationDiagnostics(recoveredAt))["server-job-run"]).toMatchObject({
+      status: "ok",
+      recentFailureCount: 0,
+      lastSuccessAt: new Date(recoveredAt).toISOString(),
+    });
+    expect((await getBackgroundOperationDiagnostics(recoveredAt))["server-job-run"])
+      .not.toHaveProperty("lastFailureAt");
+    expect((await getBackgroundOperationDiagnostics(recoveredAt))["server-job-run"])
+      .not.toHaveProperty("errorCode");
+  });
+
+  it("treats a success at the same timestamp as recovery from that failure", async () => {
+    const now = Date.parse("2030-01-01T00:00:00.000Z");
+    const failure = Object.assign(new Error("worker unavailable"), { code: "57P03" });
+    await expect(runBackgroundOperation(
+      "server-job-run",
+      async () => { throw failure; },
+      { delay: async () => {}, now: () => now },
+    )).rejects.toBe(failure);
+    await runBackgroundOperation("server-job-run", async () => false, { now: () => now });
+
+    expect((await getBackgroundOperationDiagnostics(now))["server-job-run"]).toMatchObject({
+      status: "ok",
+      recentFailureCount: 0,
+    });
+  });
+
+  it("still degrades after enough failures newer than the latest success", async () => {
+    const recoveredAt = Date.parse("2030-01-01T00:00:00.000Z");
+    await runBackgroundOperation(
+      "server-job-run",
+      async () => "healthy",
+      { now: () => recoveredAt },
+    );
+    const failure = Object.assign(new Error("worker unavailable"), { code: "57P03" });
+    for (let attempt = 1; attempt <= BACKGROUND_OPERATION_FAILURE_THRESHOLD; attempt += 1) {
+      await expect(runBackgroundOperation(
+        "server-job-run",
+        async () => { throw failure; },
+        { delay: async () => {}, now: () => recoveredAt + attempt },
+      )).rejects.toBe(failure);
+    }
+
+    expect((await getBackgroundOperationDiagnostics(
+      recoveredAt + BACKGROUND_OPERATION_FAILURE_THRESHOLD,
+    ))["server-job-run"]).toMatchObject({
+      status: "warning",
+      recentFailureCount: BACKGROUND_OPERATION_FAILURE_THRESHOLD,
+      errorCode: "57P03",
+    });
+  });
+
   it("does not retain arbitrary error-code payloads", async () => {
     const unsafe = Object.assign(new Error("failed"), {
       code: "customer@example.com secret payload",

@@ -1026,6 +1026,69 @@ describe("background operation PostgreSQL reconnection", () => {
     });
   });
 
+  it("fences retained shared failures after a successful replacement-process pass", async () => {
+    const recoveredAt = Date.now();
+    // The module (and therefore this process epoch) was initialized less than
+    // a minute ago in this fixture; these rows represent its predecessor.
+    const failedAt = recoveredAt - 60_000;
+    await db.insert(backgroundOperationEventsTable).values(Array.from(
+      { length: BACKGROUND_OPERATION_FAILURE_THRESHOLD },
+      () => ({
+        operation: "server-job-run",
+        sourceInstance: "prior-process",
+        errorCode: "ETIMEDOUT",
+        occurredAt: new Date(failedAt),
+      }),
+    ));
+
+    await clearBackgroundOperationDiagnosticsForTests({ preserveShared: true });
+    expect((await getBackgroundOperationDiagnostics(failedAt))["server-job-run"]).toMatchObject({
+      status: "warning",
+      recentFailureCount: BACKGROUND_OPERATION_FAILURE_THRESHOLD,
+    });
+
+    await runBackgroundOperation(
+      "server-job-run",
+      async () => false,
+      { now: () => recoveredAt },
+    );
+
+    expect((await getBackgroundOperationDiagnostics(recoveredAt))["server-job-run"]).toMatchObject({
+      status: "ok",
+      recentFailureCount: 0,
+      lastSuccessAt: new Date(recoveredAt).toISOString(),
+    });
+    expect(await db.select().from(backgroundOperationEventsTable))
+      .toHaveLength(BACKGROUND_OPERATION_FAILURE_THRESHOLD);
+  });
+
+  it("does not let idle successes mask a concurrently failing peer", async () => {
+    const peerFailureAt = Date.now() + 1_000;
+    await db.insert(backgroundOperationEventsTable).values(Array.from(
+      { length: BACKGROUND_OPERATION_FAILURE_THRESHOLD },
+      () => ({
+        operation: "server-job-run",
+        sourceInstance: "concurrently-failing-peer",
+        errorCode: "ETIMEDOUT",
+        occurredAt: new Date(peerFailureAt),
+      }),
+    ));
+
+    await runBackgroundOperation(
+      "server-job-run",
+      async () => false,
+      { now: () => peerFailureAt + 1_000 },
+    );
+
+    expect((await getBackgroundOperationDiagnostics(
+      peerFailureAt + 1_000,
+    ))["server-job-run"]).toMatchObject({
+      status: "warning",
+      recentFailureCount: BACKGROUND_OPERATION_FAILURE_THRESHOLD,
+      errorCode: "ETIMEDOUT",
+    });
+  });
+
   it("bounds shared lock waits and preserves local degradation when persistence times out", async () => {
     const locker = new pg.Client({ connectionString: process.env.DATABASE_URL });
     await locker.connect();

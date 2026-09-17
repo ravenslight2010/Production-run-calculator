@@ -8,6 +8,7 @@ export const backgroundOperationEventsTable = pgTable(
   {
     id: serial("id").primaryKey(),
     operation: text("operation").notNull(),
+    sourceInstance: text("source_instance").notNull().default("legacy"),
     errorCode: text("error_code").notNull(),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
   },
