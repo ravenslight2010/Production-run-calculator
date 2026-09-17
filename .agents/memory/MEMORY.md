@@ -156,3 +156,4 @@
 - [Release Node pinning](release-node-pinning.md) — pin the Node executable on PATH, not only the pnpm launcher, or child release scripts report the wrong runtime.
 - [Local WebKit Nix launch](webkit-nix-launch.md) — the downloaded WPE wrapper resets LD_LIBRARY_PATH; append Nix libraries at the final MiniBrowser boundary for local smoke runs.
 - [Release finalization retry safety](release-finalization-retry.md) — final report retries must tolerate already-promoted evidence and bind report-key artifacts to the current revision.
+- [Workspace lock refresh pruning](workspace-lock-refresh-pruning.md) — local pnpm refreshes can prune cross-platform optional entries; review lockfile scope after adding workspace packages.

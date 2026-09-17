@@ -1,5 +1,13 @@
 import type { OperationalProjection } from "@workspace/live-calc";
+import {
+  applySyncDeltaData,
+  canonicalSyncValue,
+  isSyncRecord,
+  isValidSyncSnapshotId,
+} from "@workspace/sync-contract";
 import type { SyncPayload } from "./types";
+
+export { isValidSyncSnapshotId };
 
 export interface SyncWriteResponseBody<T> {
   data?: T;
@@ -49,23 +57,6 @@ export async function consumeSyncWriteResponse<T>(
   return { body, stale };
 }
 
-/** Snapshot identities are server-produced SHA-256 digests. */
-export function isValidSyncSnapshotId(value: unknown): value is string {
-  return typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
-}
-
-function canonicalSyncValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonicalSyncValue);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, child]) => [key, canonicalSyncValue(child)]),
-    );
-  }
-  return value;
-}
-
 /** Removes server-owned read models that are transported beside, but not hashed into, the canonical document. */
 export function persistedSyncPayload(payload: SyncPayload): SyncPayload {
   const {
@@ -108,46 +99,17 @@ export async function reconstructPartialSyncPayload(
 ): Promise<SyncPayload | null> {
   if (!base || envelope.syncVersion !== 1 || envelope.completeness !== "partial") return null;
   if (!isValidSyncSnapshotId(baseSnapshotId) || envelope.baseSnapshotId !== baseSnapshotId) return null;
-  if (!isValidSyncSnapshotId(envelope.snapshotId) || !envelope.data
-    || typeof envelope.data !== "object" || Array.isArray(envelope.data)) return null;
+  if (!isValidSyncSnapshotId(envelope.snapshotId) || !isSyncRecord(envelope.data)) return null;
   if (
     !isValidSyncSnapshotId(envelope.resultingSnapshotId)
     || envelope.resultingSnapshotId !== envelope.snapshotId
   ) return null;
   if (!await syncPayloadMatchesSnapshot(base, baseSnapshotId)) return null;
-  const delta = envelope.data as Record<string, unknown>;
-  const merged: Record<string, unknown> = { ...(base as unknown as Record<string, unknown>) };
-  for (const [key, value] of Object.entries(delta)) {
-    if (key === "runValues" || key === "runValuesUpdatedAt" || key === "packagingProgress") {
-      if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-      const section = {
-        ...((base as unknown as Record<string, unknown>)[key] as Record<string, unknown> ?? {}),
-      };
-      for (const [child, childValue] of Object.entries(value as Record<string, unknown>)) {
-        if (childValue === null) delete section[child];
-        else section[child] = childValue;
-      }
-      merged[key] = section;
-    } else if (key === "dayState" && value && typeof value === "object" && !Array.isArray(value)) {
-      // dayState is a replacement section. This preserves removals within the
-      // object without introducing nested patch semantics.
-      merged.dayState = value;
-    } else if (key !== "deletions") {
-      if (value === null) delete merged[key];
-      else merged[key] = value;
-    }
-  }
-  // Deletions are explicit and scoped to map sections; omission never means
-  // deletion. This is compatible with the server's sparse map merge.
-  if (delta.deletions && typeof delta.deletions === "object" && !Array.isArray(delta.deletions)) {
-    for (const [section, ids] of Object.entries(delta.deletions as Record<string, unknown>)) {
-      const target = merged[section];
-      if (!target || typeof target !== "object" || Array.isArray(target) || !Array.isArray(ids)) continue;
-      const copy = { ...(target as Record<string, unknown>) };
-      for (const id of ids) if (typeof id === "string") delete copy[id];
-      merged[section] = copy;
-    }
-  }
+  const merged = applySyncDeltaData(
+    base as unknown as Record<string, unknown>,
+    envelope.data,
+  );
+  if (!merged) return null;
   delete merged.completeness;
   delete merged.baseSnapshotId;
   delete merged.resultingSnapshotId;

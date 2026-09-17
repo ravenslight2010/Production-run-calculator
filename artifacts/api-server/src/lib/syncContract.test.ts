@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { SYNC_DELTA_MAP_SECTIONS } from "@workspace/sync-contract";
 import {
   buildSyncWriteEnvelope,
   buildSyncPeerDelta,
@@ -40,6 +41,11 @@ describe("sync contract", () => {
   });
 
   it("builds sparse keyed deltas with explicit tombstones", () => {
+    expect(SYNC_DELTA_MAP_SECTIONS).toEqual([
+      "runValues",
+      "runValuesUpdatedAt",
+      "packagingProgress",
+    ]);
     const before = {
       dayState: { date: "2026-09-06", runs: [] },
       runValues: { a: { casesNeeded: 1 }, removed: { casesNeeded: 2 } },

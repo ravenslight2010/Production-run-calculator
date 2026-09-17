@@ -1,22 +1,12 @@
 import { createHash } from "node:crypto";
+import {
+  SYNC_SNAPSHOT_ID_RE,
+  buildSyncDeltaData,
+  canonicalSyncJson,
+  isSyncRecord,
+} from "@workspace/sync-contract";
 
-export const SYNC_SNAPSHOT_ID_RE = /^[a-f0-9]{64}$/;
-
-export function canonicalSyncValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonicalSyncValue);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, child]) => [key, canonicalSyncValue(child)]),
-    );
-  }
-  return value;
-}
-
-export function canonicalSyncJson(value: unknown): string {
-  return JSON.stringify(canonicalSyncValue(value));
-}
+export { SYNC_SNAPSHOT_ID_RE, canonicalSyncJson };
 
 /** Stable identity for a canonical sync document (object key order independent). */
 export function syncSnapshotId(data: unknown): string {
@@ -45,10 +35,6 @@ export function isValidPartialSyncContract(payload: Record<string, unknown>): bo
         && SYNC_SNAPSHOT_ID_RE.test(payload.resultingSnapshotId)));
 }
 
-const DELTA_SECTIONS = new Set(["runValues", "runValuesUpdatedAt", "packagingProgress"]);
-const isObject = (value: unknown): value is Record<string, unknown> =>
-  !!value && typeof value === "object" && !Array.isArray(value);
-
 /**
  * Builds the version-one peer delta. `null` is intentional: it is the wire
  * tombstone for both a removed top-level section and a removed keyed entry.
@@ -56,7 +42,7 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
  * back to a complete frame when that dependency is not available.
  */
 export function buildSyncPeerDelta(previous: unknown, next: unknown): Record<string, unknown> | null {
-  if (!isObject(previous) || !isObject(next)) return null;
+  if (!isSyncRecord(previous) || !isSyncRecord(next)) return null;
   const baseSnapshotId = syncSnapshotId(previous);
   const resultingSnapshotId = syncSnapshotId(next);
   if (baseSnapshotId === resultingSnapshotId) return null;
@@ -66,25 +52,7 @@ export function buildSyncPeerDelta(previous: unknown, next: unknown): Record<str
     baseSnapshotId,
     resultingSnapshotId,
   };
-  const keys = new Set([...Object.keys(previous), ...Object.keys(next)]);
-  for (const key of keys) {
-    if (key === "syncVersion" || key === "completeness" || key === "baseSnapshotId" || key === "resultingSnapshotId") continue;
-    const before = previous[key];
-    const after = next[key];
-    if (canonicalSyncJson(before) === canonicalSyncJson(after)) continue;
-    if (DELTA_SECTIONS.has(key) && isObject(before) && isObject(after)) {
-      const sparse: Record<string, unknown> = {};
-      const childKeys = new Set([...Object.keys(before), ...Object.keys(after)]);
-      for (const child of childKeys) {
-        if (canonicalSyncJson(before[child]) !== canonicalSyncJson(after[child])) {
-          sparse[child] = child in after ? after[child] : null;
-        }
-      }
-      delta[key] = sparse;
-    } else {
-      delta[key] = key in next ? after : null;
-    }
-  }
+  Object.assign(delta, buildSyncDeltaData(previous, next));
   return delta;
 }
 

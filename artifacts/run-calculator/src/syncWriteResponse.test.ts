@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { SYNC_DELTA_MAP_SECTIONS } from "@workspace/sync-contract";
 import {
   consumeSyncWriteResponse,
   isCanonicalRecoverySyncPayload,
@@ -224,6 +225,11 @@ describe("consumeSyncWriteResponse", () => {
   });
 
   it("applies sparse peer map tombstones without dropping omitted values", async () => {
+    expect(SYNC_DELTA_MAP_SECTIONS).toEqual([
+      "runValues",
+      "runValuesUpdatedAt",
+      "packagingProgress",
+    ]);
     const base = {
       syncVersion: 1 as const,
       completeness: "complete" as const,

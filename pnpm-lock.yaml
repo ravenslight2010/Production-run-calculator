@@ -250,6 +250,9 @@ importers:
       '@workspace/spec-reconcile':
         specifier: workspace:*
         version: link:../../lib/spec-reconcile
+      '@workspace/sync-contract':
+        specifier: workspace:*
+        version: link:../../lib/sync-contract
       cookie-parser:
         specifier: ^1.4.7
         version: 1.4.7
@@ -596,6 +599,9 @@ importers:
       '@workspace/spec-reconcile':
         specifier: workspace:*
         version: link:../../lib/spec-reconcile
+      '@workspace/sync-contract':
+        specifier: workspace:*
+        version: link:../../lib/sync-contract
     devDependencies:
       '@axe-core/playwright':
         specifier: ^4.13.0
@@ -1248,6 +1254,12 @@ importers:
         version: 5.0.0(@types/node@25.9.6)(jsdom@30.0.1)(vite@8.3.0(@types/node@26.5.1)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.0))
 
   lib/spec-reconcile:
+    devDependencies:
+      vitest:
+        specifier: 5.0.0
+        version: 5.0.0(@types/node@25.9.6)(jsdom@30.0.1)(vite@8.3.0(@types/node@26.5.1)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.0))
+
+  lib/sync-contract:
     devDependencies:
       vitest:
         specifier: 5.0.0
