@@ -68,6 +68,8 @@ import {
   emptySyncData,
   isPartialSyncPayload,
   isValidPartialSyncContract,
+  buildSyncPeerDelta,
+  syncWireBytes,
   syncSnapshotId,
 } from "../lib/syncContract";
 import {
@@ -225,6 +227,7 @@ function completeSyncData(data: unknown): unknown {
   ) return data;
   const {
     baseSnapshotId: _baseSnapshotId,
+    resultingSnapshotId: _resultingSnapshotId,
     ...complete
   } = record;
   return {
@@ -232,6 +235,31 @@ function completeSyncData(data: unknown): unknown {
     syncVersion: 1,
     completeness: "complete",
   };
+}
+
+function materializePartialPayload(
+  payload: Record<string, unknown>,
+  baseline: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...baseline };
+  for (const [key, value] of Object.entries(payload)) {
+    if (key === "syncVersion" || key === "completeness" || key === "baseSnapshotId" || key === "resultingSnapshotId") continue;
+    if (["runValues", "runValuesUpdatedAt", "packagingProgress"].includes(key)
+      && value && typeof value === "object" && !Array.isArray(value)) {
+      const map = { ...((baseline[key] && typeof baseline[key] === "object" && !Array.isArray(baseline[key]))
+        ? baseline[key] as Record<string, unknown> : {}) };
+      for (const [child, childValue] of Object.entries(value as Record<string, unknown>)) {
+        if (childValue === null) delete map[child];
+        else map[child] = childValue;
+      }
+      merged[key] = map;
+    } else if (value === null) {
+      delete merged[key];
+    } else {
+      merged[key] = value;
+    }
+  }
+  return merged;
 }
 
 const MAX_COMMAND_ACTION_BYTES = 64 * 1024;
@@ -429,20 +457,64 @@ function broadcast(
     meta.serverTime ?? Date.now(),
     meta.canonicalRevision ?? 0,
   );
-  const msg = `data: ${JSON.stringify({
-    data,
-    senderId,
-    completeness: "complete",
-    canonicalRevision: meta.canonicalRevision ?? liveState.calculationRevision,
-    ...liveState,
-  })}\n\n`;
   for (const client of clients) {
-    if (client.scope === scope && client.watchDate === date && client.clientId !== senderId) {
-      if (data != null) {
-        client.lastData = data;
-        client.lastCanonicalRevision = meta.canonicalRevision ?? liveState.calculationRevision;
+    if (client.scope === scope && client.watchDate === date) {
+      if (client.clientId === senderId) {
+        // The sender adopts the canonical HTTP response rather than its own
+        // SSE echo, but its connection baseline must advance in lockstep so
+        // the next peer update is generated from the snapshot it now holds.
+        if (data != null) {
+          client.lastData = data;
+          client.lastCanonicalRevision = meta.canonicalRevision ?? liveState.calculationRevision;
+        }
+        continue;
       }
-      try { client.res.write(msg); } catch {}
+      const complete = {
+        data,
+        senderId,
+        scope,
+        date,
+        completeness: "complete" as const,
+        snapshotId: data == null ? undefined : syncSnapshotId(data),
+        canonicalRevision: meta.canonicalRevision ?? liveState.calculationRevision,
+        ...liveState,
+      };
+      const delta = data != null ? buildSyncPeerDelta(client.lastData, data) : null;
+      // A delta must leave enough room for the recipient's exact baseline to
+      // converge. Keep a generous margin for framing/projection fields and
+      // use complete when the baseline is missing or the delta is unsafe.
+      const {
+        syncVersion: deltaSyncVersion,
+        completeness: _deltaCompleteness,
+        baseSnapshotId: deltaBaseSnapshotId,
+        resultingSnapshotId: deltaResultingSnapshotId,
+        ...deltaData
+      } = delta ?? {};
+      const frame = delta && syncWireBytes(delta) < syncWireBytes(complete) * 0.8
+        ? {
+            data: deltaData,
+            senderId,
+            scope,
+            date,
+            completeness: "partial" as const,
+            syncVersion: deltaSyncVersion,
+            snapshotId: deltaResultingSnapshotId,
+            baseSnapshotId: deltaBaseSnapshotId,
+            resultingSnapshotId: deltaResultingSnapshotId,
+            canonicalRevision: meta.canonicalRevision ?? liveState.calculationRevision,
+            ...liveState,
+          }
+        : complete;
+      try {
+        client.res.write(`data: ${JSON.stringify(frame)}\n\n`);
+        // Advance only after the write succeeds. A failed stream must not
+        // poison its baseline and cause the next recipient delta to be
+        // generated against data the peer never received.
+        if (data != null) {
+          client.lastData = data;
+          client.lastCanonicalRevision = meta.canonicalRevision ?? liveState.calculationRevision;
+        }
+      } catch {}
     }
   }
 }
@@ -1046,7 +1118,7 @@ async function upsertProtected(
         // omitted cold sections (such as history) from that snapshot before the
         // normal per-run/LWW protection runs.
         const payloadForMerge = isPartialSyncPayload(payload) && canonicalExisting
-          ? { ...(canonicalExisting as Record<string, unknown>), ...(payload as Record<string, unknown>) }
+          ? materializePartialPayload(payload, canonicalExisting as Record<string, unknown>)
           : payload;
         // Validate partial deltas while the canonical row lock is held.
         // Otherwise another writer could change the row between validation and

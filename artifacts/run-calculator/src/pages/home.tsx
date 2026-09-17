@@ -293,7 +293,9 @@ import {
   isCanonicalRecoverySyncPayload,
   isUnchangedSyncResponse,
   isValidSyncSnapshotId,
+  persistedSyncPayload,
   readCurrentRecoveryJson,
+  reconstructPartialSyncPayload,
   syncPayloadMatchesSnapshot,
 } from "../syncWriteResponse";
 import {
@@ -7815,6 +7817,9 @@ export default function Home() {
   // separate from the local payload signature: only the server can account for
   // protective merges and canonical normalization.
   const syncSnapshotIdRef = useRef<string>("");
+  // Exact server snapshot used as the base for peer partial frames. Never
+  // substitute the locally merged React state here.
+  const adoptedCanonicalSnapshotRef = useRef<SyncPayload | null>(null);
   // Canonical per-run value stamps let hot partial pushes omit unchanged recipe
   // blobs. A complete server response refreshes this baseline.
   const canonicalRunValuesUpdatedAtRef = useRef<Record<string, number>>({});
@@ -8191,6 +8196,7 @@ export default function Home() {
     }
     if (typeof body.snapshotId === "string") syncSnapshotIdRef.current = body.snapshotId;
     if (body.data) {
+      adoptedCanonicalSnapshotRef.current = persistedSyncPayload(body.data);
       publishAutoTrackCoordination(body.data);
       canonicalRunValuesUpdatedAtRef.current = { ...(body.data.runValuesUpdatedAt ?? {}) };
       if (body.outcome === "accepted" || body.outcome === "duplicate") {
@@ -8949,6 +8955,7 @@ export default function Home() {
             peerApplyMs,
             retries: 0,
             converged: true,
+            fallbackOutcome: "none",
           });
         }
         isSyncApplyingRef.current = false;
@@ -9216,9 +9223,12 @@ export default function Home() {
         if (streamDate !== todayStr()) return false;
         const msg = JSON.parse(e.data as string) as {
           data?: SyncPayload | null;
-          completeness?: "complete";
+          completeness?: "complete" | "partial";
+          syncVersion?: number;
+          baseSnapshotId?: string;
           unchanged?: boolean;
           snapshotId?: string;
+          resultingSnapshotId?: string;
           reset?: boolean;
           rollover?: boolean;
           resetEpoch?: number;
@@ -9248,6 +9258,41 @@ export default function Home() {
             || !isUnchangedSyncResponse(msg)
             || msg.snapshotId !== syncSnapshotIdRef.current
           ) return false;
+        } else if (msg.completeness === "partial") {
+          const partialStartedAt = typeof performance === "undefined" ? 0 : performance.now();
+          const reconstructed = await reconstructPartialSyncPayload(
+            adoptedCanonicalSnapshotRef.current,
+            syncSnapshotIdRef.current,
+            msg,
+          );
+          if (!reconstructed) {
+            // A delta with a missing/stale base is not a merge candidate.
+            // Enter the existing authoritative wake barrier; it owns retry,
+            // adoption, and write release ordering.
+            recordSyncEvent("failure", "Partial peer update was unusable; authoritative recovery required", "partial-fallback");
+            recordSyncMeasurement(todayStr(), {
+              path: "partial",
+              direction: "peer",
+              responseBytes: Math.min(new Blob([e.data as string]).size, 10 * 1024 * 1024),
+              requestBytes: 0,
+              latencyMs: 0,
+              mergeMs: 0,
+              peerApplyMs: 0,
+              retries: 0,
+              converged: false,
+              fallbackOutcome: "authoritative-recovery",
+            });
+            foregroundSyncBarrierRef.current = true;
+            void foregroundRecoveryRetryRef.current?.();
+            return false;
+          }
+          syncSnapshotIdRef.current = msg.snapshotId!;
+          adoptedCanonicalSnapshotRef.current = persistedSyncPayload(reconstructed);
+          recordSyncEvent("peer", "Partial peer update reconstructed", "partial");
+          applySyncCallbackRef.current(reconstructed, {
+            peerReceivedAt: partialStartedAt,
+            peerResponseBytes: new Blob([e.data as string]).size,
+          });
         } else if (msg.data) {
           if (
             !isCanonicalRecoverySyncPayload(msg.data, todayStr(), msg.completeness)
@@ -9360,6 +9405,7 @@ export default function Home() {
             }));
           }
           if (isValidSyncSnapshotId(msg.snapshotId)) syncSnapshotIdRef.current = msg.snapshotId;
+          adoptedCanonicalSnapshotRef.current = persistedSyncPayload(msg.data);
           canonicalRunValuesUpdatedAtRef.current = { ...(msg.data.runValuesUpdatedAt ?? {}) };
           recordSyncEvent(msg.initial ? "ack" : "peer", msg.initial ? "Server baseline received" : "Peer update received");
           applySyncCallbackRef.current(msg.data, {
@@ -9535,6 +9581,7 @@ export default function Home() {
             adoptCanonical: (payload, responseSnapshot) => {
               adoptOperationalRevision(payload.canonicalRevision);
               syncSnapshotIdRef.current = responseSnapshot;
+              adoptedCanonicalSnapshotRef.current = persistedSyncPayload(payload);
               if (payload.operationalProjection) {
                 adoptOperationalProjection(
                   payload.operationalProjection,
@@ -9939,6 +9986,14 @@ export default function Home() {
       (result.body as { canonicalRevision?: unknown } | null | undefined)?.canonicalRevision,
     );
     if (typeof snapshot === "string") syncSnapshotIdRef.current = snapshot;
+    if (
+      result.body?.data
+      && typeof result.body.data === "object"
+      && !Array.isArray(result.body.data)
+      && result.body.data.completeness !== "partial"
+    ) {
+      adoptedCanonicalSnapshotRef.current = persistedSyncPayload(result.body.data);
+    }
     const partialFallbackBody = result.body as
       | { partialFallback?: boolean; data?: unknown }
       | null

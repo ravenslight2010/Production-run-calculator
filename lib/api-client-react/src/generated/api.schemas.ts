@@ -444,12 +444,64 @@ export interface HealthStatus {
   status: string;
 }
 
+export type SyncPeerFrameCompleteness = typeof SyncPeerFrameCompleteness[keyof typeof SyncPeerFrameCompleteness];
+
+
+export const SyncPeerFrameCompleteness = {
+  complete: 'complete',
+  partial: 'partial',
+} as const;
+
+export type SyncPeerFrameSyncVersion = typeof SyncPeerFrameSyncVersion[keyof typeof SyncPeerFrameSyncVersion];
+
+
+export const SyncPeerFrameSyncVersion = {
+  NUMBER_1: 1,
+} as const;
+
+export type SyncPeerFrameData = SyncPayload | { [key: string]: unknown } | null;
+
 export type OperationalProjectionVersion = typeof OperationalProjectionVersion[keyof typeof OperationalProjectionVersion];
 
 
 export const OperationalProjectionVersion = {
   NUMBER_1: 1,
 } as const;
+
+export type OperationalProjectionFactsRunStatus = typeof OperationalProjectionFactsRunStatus[keyof typeof OperationalProjectionFactsRunStatus];
+
+
+export const OperationalProjectionFactsRunStatus = {
+  pending: 'pending',
+  running: 'running',
+  paused: 'paused',
+  ended: 'ended',
+} as const;
+
+export type OperationalProjectionFactsPaceStatus = typeof OperationalProjectionFactsPaceStatus[keyof typeof OperationalProjectionFactsPaceStatus] | null;
+
+
+export const OperationalProjectionFactsPaceStatus = {
+  'on-pace': 'on-pace',
+  ahead: 'ahead',
+  behind: 'behind',
+} as const;
+
+export interface OperationalProjectionScheduleEntry {
+  channel: string;
+  dueAt: number;
+  dueNow: boolean;
+  nextDueAt: number;
+  canonical: boolean;
+  sequence?: number;
+}
+
+export interface OperationalProjectionSchedule {
+  runId: string;
+  generation: string;
+  atMs: number;
+  entries: OperationalProjectionScheduleEntry[];
+}
 
 export type OperationalProjectionTimers = {
   nextBatchInSec: number;
@@ -473,25 +525,6 @@ export type OperationalProjectionCounters = {
   app4BatchesMade: number;
 };
 
-export type OperationalProjectionFactsRunStatus = typeof OperationalProjectionFactsRunStatus[keyof typeof OperationalProjectionFactsRunStatus];
-
-
-export const OperationalProjectionFactsRunStatus = {
-  pending: 'pending',
-  running: 'running',
-  paused: 'paused',
-  ended: 'ended',
-} as const;
-
-export type OperationalProjectionFactsPaceStatus = typeof OperationalProjectionFactsPaceStatus[keyof typeof OperationalProjectionFactsPaceStatus] | null;
-
-
-export const OperationalProjectionFactsPaceStatus = {
-  'on-pace': 'on-pace',
-  ahead: 'ahead',
-  behind: 'behind',
-} as const;
-
 export type OperationalProjectionFacts = {
   runStatus: OperationalProjectionFactsRunStatus;
   pressDone: boolean;
@@ -500,22 +533,6 @@ export type OperationalProjectionFacts = {
 };
 
 export type OperationalProjectionCalc = { [key: string]: unknown };
-
-export interface OperationalProjectionScheduleEntry {
-  channel: string;
-  dueAt: number;
-  dueNow: boolean;
-  nextDueAt: number;
-  canonical: boolean;
-  sequence?: number;
-}
-
-export interface OperationalProjectionSchedule {
-  runId: string;
-  generation: string;
-  atMs: number;
-  entries: OperationalProjectionScheduleEntry[];
-}
 
 /**
  * Server-owned live operational read model returned beside the canonical sync snapshot.
@@ -535,6 +552,34 @@ export interface OperationalProjection {
   calc: OperationalProjectionCalc;
   due: OperationalProjectionSchedule;
 }
+
+/**
+ * Complete or snapshot-anchored partial sync event frame.
+ */
+export interface SyncPeerFrame {
+  completeness?: SyncPeerFrameCompleteness;
+  syncVersion?: SyncPeerFrameSyncVersion;
+  data?: SyncPeerFrameData;
+  unchanged?: boolean;
+  initial?: boolean;
+  senderId?: string | null;
+  /** @pattern ^[a-f0-9]{64}$ */
+  snapshotId?: string;
+  /** @pattern ^[a-f0-9]{64}$ */
+  baseSnapshotId?: string;
+  /** @pattern ^[a-f0-9]{64}$ */
+  resultingSnapshotId?: string;
+  /** @minimum 0 */
+  canonicalRevision?: number;
+  /** @minimum 0 */
+  serverTime?: number;
+  reset?: boolean;
+  rollover?: boolean;
+  /** @minimum 0 */
+  resetEpoch?: number;
+  operationalProjection?: OperationalProjection | null;
+  [key: string]: unknown;
+ }
 
 export interface SyncUnchangedResponse {
   unchanged: true;
@@ -5335,6 +5380,15 @@ export type PutSyncToday200 = {
   /** @minimum 0 */
   serverTime?: number;
   operationalProjection?: OperationalProjection | null;
+};
+
+export type StreamSyncEventsParams = {
+today?: ClientTodayParameter;
+clientId: string;
+/**
+ * @pattern ^[a-f0-9]{64}$
+ */
+snapshot?: string;
 };
 
 export type ClaimAutoTrackEventParams = {

@@ -6342,6 +6342,22 @@ export const PutSyncTodayResponse = zod.object({
 
 
 /**
+ * Server-sent events. Initial and recovery frames are complete. A routine peer update may be partial only when it names the receiver's exact canonical base snapshot and the resulting snapshot identity.
+ * @summary Stream date-scoped canonical sync updates
+ */
+export const streamSyncEventsQuerySnapshotRegExp = new RegExp('^[a-f0-9]{64}$');
+
+
+export const StreamSyncEventsQueryParams = zod.object({
+  "today": zod.date().optional(),
+  "clientId": zod.coerce.string(),
+  "snapshot": zod.coerce.string().regex(streamSyncEventsQuerySnapshotRegExp).optional()
+})
+
+export const StreamSyncEventsResponse = zod.unknown()
+
+
+/**
  * @summary Atomically claim one due automatic production event
  */
 export const claimAutoTrackEventQueryEpochMin = 0;

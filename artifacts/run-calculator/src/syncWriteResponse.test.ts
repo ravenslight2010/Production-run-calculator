@@ -3,7 +3,9 @@ import {
   consumeSyncWriteResponse,
   isCanonicalRecoverySyncPayload,
   isUnchangedSyncResponse,
+  persistedSyncPayload,
   readCurrentRecoveryJson,
+  reconstructPartialSyncPayload,
   syncPayloadMatchesSnapshot,
   syncPayloadSnapshotId,
 } from "./syncWriteResponse";
@@ -170,6 +172,94 @@ describe("consumeSyncWriteResponse", () => {
       ...payload,
       runValues: { "run-1": { casesNeeded: 30 } },
     }, snapshot)).toBe(false);
+  });
+
+  it("retains a foreground recovery baseline that matches the persisted snapshot identity", async () => {
+    const persisted = {
+      syncVersion: 1 as const,
+      completeness: "complete" as const,
+      dayState: { date: "2026-09-15", runs: [{ id: "r1", brand: "A", flavor: "F" }] },
+      runValues: { r1: { casesNeeded: 10 } },
+    };
+    const recovery = {
+      ...persisted,
+      operationalProjection: { version: 1, runId: "r1" },
+      serverTime: 123,
+      canonicalRevision: 7,
+    } as any;
+    const snapshotId = await syncPayloadSnapshotId(persisted as any);
+    const baseline = persistedSyncPayload(recovery);
+    expect(await syncPayloadMatchesSnapshot(baseline, snapshotId)).toBe(true);
+  });
+
+  it("reconstructs only a v1 delta based on the exact adopted snapshot", async () => {
+    const base = {
+      syncVersion: 1 as const,
+      completeness: "complete" as const,
+      dayState: { date: "2026-09-15", runs: [{ id: "r1", brand: "A", flavor: "F" }] },
+      runValues: { r1: { casesNeeded: 10 } },
+    };
+    const baseId = await syncPayloadSnapshotId(base as any);
+    const target = {
+      ...base,
+      runValues: { r1: { casesNeeded: 12 } },
+    };
+    const targetId = await syncPayloadSnapshotId(target as any);
+    await expect(reconstructPartialSyncPayload(base as any, baseId, {
+      syncVersion: 1,
+      completeness: "partial",
+      baseSnapshotId: baseId,
+      snapshotId: targetId,
+      resultingSnapshotId: targetId,
+      data: { runValues: { r1: { casesNeeded: 12 } } },
+    })).resolves.toEqual(target);
+    await expect(reconstructPartialSyncPayload(base as any, "b".repeat(64), {
+      syncVersion: 1,
+      completeness: "partial",
+      baseSnapshotId: baseId,
+      snapshotId: targetId,
+      resultingSnapshotId: targetId,
+      data: { runValues: { r1: { casesNeeded: 12 } } },
+    })).resolves.toBeNull();
+  });
+
+  it("applies sparse peer map tombstones without dropping omitted values", async () => {
+    const base = {
+      syncVersion: 1 as const,
+      completeness: "complete" as const,
+      dayState: {
+        date: "2026-09-15",
+        runs: [
+          { id: "r1", brand: "A", flavor: "F" },
+          { id: "r2", brand: "A", flavor: "G" },
+        ],
+      },
+      runValues: { r1: { casesNeeded: 10 }, r2: { casesNeeded: 20 } },
+      runValuesUpdatedAt: { r1: 1, r2: 1 },
+      packagingProgress: { r1: { skidsCompleted: 1 }, r2: { skidsCompleted: 2 } },
+      history: [{ message: "preserved" }],
+    };
+    const target = {
+      ...base,
+      runValues: { r1: { casesNeeded: 11 } },
+      runValuesUpdatedAt: { r1: 2 },
+      packagingProgress: { r1: { skidsCompleted: 3 } },
+    };
+    const baseId = await syncPayloadSnapshotId(base as any);
+    const targetId = await syncPayloadSnapshotId(target as any);
+
+    await expect(reconstructPartialSyncPayload(base as any, baseId, {
+      syncVersion: 1,
+      completeness: "partial",
+      baseSnapshotId: baseId,
+      snapshotId: targetId,
+      resultingSnapshotId: targetId,
+      data: {
+        runValues: { r1: { casesNeeded: 11 }, r2: null },
+        runValuesUpdatedAt: { r1: 2, r2: null },
+        packagingProgress: { r1: { skidsCompleted: 3 }, r2: null },
+      },
+    })).resolves.toEqual(target);
   });
 
   it("does not apply data from an unsuccessful response", async () => {

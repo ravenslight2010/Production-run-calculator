@@ -4599,6 +4599,33 @@ paths:
                       - $ref: "#/components/schemas/OperationalProjection"
                       - { type: "null" }
 
+  /sync/events:
+    get:
+      operationId: streamSyncEvents
+      tags: [sync]
+      summary: Stream date-scoped canonical sync updates
+      description: >-
+        Server-sent events. Initial and recovery frames are complete. A routine
+        peer update may be partial only when it names the receiver's exact
+        canonical base snapshot and the resulting snapshot identity.
+      parameters:
+        - $ref: "#/components/parameters/ClientToday"
+        - name: clientId
+          in: query
+          required: true
+          schema: { type: string }
+        - name: snapshot
+          in: query
+          required: false
+          schema: { type: string, pattern: "^[a-f0-9]{64}$" }
+      responses:
+        "200":
+          description: Server-sent sync event stream
+          content:
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/SyncPeerFrame"
+
   /sync/auto-track/claim:
     post:
       operationId: claimAutoTrackEvent
@@ -4966,6 +4993,37 @@ components:
       properties:
         dayState: { type: object, additionalProperties: true }
         runValues: { type: object, additionalProperties: true }
+      additionalProperties: true
+
+    SyncPeerFrame:
+      type: object
+      description: Complete or snapshot-anchored partial sync event frame.
+      properties:
+        completeness: { type: string, enum: [complete, partial] }
+        syncVersion: { type: integer, enum: [1] }
+        data:
+          oneOf:
+            - $ref: "#/components/schemas/SyncPayload"
+            - { type: object, additionalProperties: true }
+            - { type: "null" }
+        unchanged: { type: boolean }
+        initial: { type: boolean }
+        senderId:
+          oneOf:
+            - { type: string }
+            - { type: "null" }
+        snapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
+        baseSnapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
+        resultingSnapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
+        canonicalRevision: { type: integer, minimum: 0 }
+        serverTime: { type: integer, minimum: 0 }
+        reset: { type: boolean }
+        rollover: { type: boolean }
+        resetEpoch: { type: integer, minimum: 0 }
+        operationalProjection:
+          oneOf:
+            - $ref: "#/components/schemas/OperationalProjection"
+            - { type: "null" }
       additionalProperties: true
 
     OperationalProjection:

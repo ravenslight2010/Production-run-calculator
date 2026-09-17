@@ -228,11 +228,13 @@ import type {
   SpecReconcileResult,
   StaffMember,
   StaffRoleUpdate,
+  StreamSyncEventsParams,
   SubmitOperationalIntentParams,
   SummaryInput,
   SummaryResult,
   SupervisorPin,
   SyncPayload,
+  SyncPeerFrame,
   SyncUnchangedResponse,
   SyncWriteRequest,
   TransferInput,
@@ -18080,6 +18082,115 @@ export const usePutSyncToday = <TError = ErrorType<unknown>,
       > => {
       return useMutation(getPutSyncTodayMutationOptions(options), queryClient);
     }
+
+export const getStreamSyncEventsUrl = (params: StreamSyncEventsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/sync/events?${stringifiedParams}` : `/api/sync/events`
+}
+
+/**
+ * Server-sent events. Initial and recovery frames are complete. A routine peer update may be partial only when it names the receiver's exact canonical base snapshot and the resulting snapshot identity.
+ * @summary Stream date-scoped canonical sync updates
+ */
+export const streamSyncEvents = async (params: StreamSyncEventsParams, options?: Parameters<typeof customFetch>[1]): Promise<SyncPeerFrame> => {
+
+  return customFetch<SyncPeerFrame>(getStreamSyncEventsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getStreamSyncEventsQueryKey = (params?: StreamSyncEventsParams,) => {
+    return [
+    `/api/sync/events`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getStreamSyncEventsQueryOptions = <TData = Awaited<ReturnType<typeof streamSyncEvents>>, TError = ErrorType<unknown>>(params: StreamSyncEventsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof streamSyncEvents>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getStreamSyncEventsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof streamSyncEvents>>> = ({ signal }) => streamSyncEvents(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof streamSyncEvents>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type StreamSyncEventsQueryResult = NonNullable<Awaited<ReturnType<typeof streamSyncEvents>>>
+export type StreamSyncEventsQueryError = ErrorType<unknown>
+
+
+export function useStreamSyncEvents<TData = Awaited<ReturnType<typeof streamSyncEvents>>, TError = ErrorType<unknown>>(
+ params: StreamSyncEventsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof streamSyncEvents>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof streamSyncEvents>>,
+          TError,
+          Awaited<ReturnType<typeof streamSyncEvents>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useStreamSyncEvents<TData = Awaited<ReturnType<typeof streamSyncEvents>>, TError = ErrorType<unknown>>(
+ params: StreamSyncEventsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof streamSyncEvents>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof streamSyncEvents>>,
+          TError,
+          Awaited<ReturnType<typeof streamSyncEvents>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useStreamSyncEvents<TData = Awaited<ReturnType<typeof streamSyncEvents>>, TError = ErrorType<unknown>>(
+ params: StreamSyncEventsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof streamSyncEvents>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Stream date-scoped canonical sync updates
+ */
+
+export function useStreamSyncEvents<TData = Awaited<ReturnType<typeof streamSyncEvents>>, TError = ErrorType<unknown>>(
+ params: StreamSyncEventsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof streamSyncEvents>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getStreamSyncEventsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getClaimAutoTrackEventUrl = (params?: ClaimAutoTrackEventParams,) => {
   const normalizedParams = new URLSearchParams();

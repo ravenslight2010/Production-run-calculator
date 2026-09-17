@@ -2886,6 +2886,112 @@ describe("/sync/events — date-scoped broadcasts", () => {
   });
 });
 
+  it("sends a materially smaller snapshot-anchored frame for a one-run peer update", async () => {
+    const date = "2030-03-15";
+    const runs = Array.from({ length: 32 }, (_, index) => ({
+      id: `peer-delta-${index}`,
+      brand: "Acme",
+      flavor: `Flavor ${index}`,
+      metaUpdatedAt: 1_000 + index,
+    }));
+    const runValues = Object.fromEntries(runs.map((run, index) => [
+      run.id,
+      {
+        casesNeeded: 200 + index,
+        doughRecipe: Array.from({ length: 8 }, (_, ingredient) => ({
+          ingredient: `Ingredient ${ingredient}`,
+          lbs: ingredient + index + 1,
+        })),
+      },
+    ]));
+    const baselinePayload = {
+      dayState: { date, runs },
+      runValues,
+      runValuesUpdatedAt: Object.fromEntries(runs.map((run, index) => [run.id, 1_000 + index])),
+      packagingProgress: Object.fromEntries(runs.map((run, index) => [
+        run.id, { skidsCompleted: index % 3, updatedAt: 1_000 + index },
+      ])),
+    };
+    const seed = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "peer-seed", payload: baselinePayload }),
+    });
+    const seedBody = await seed.json() as { data: Record<string, unknown>; snapshotId: string };
+
+    const ctrl = new AbortController();
+    const stream = await fetch(
+      `${baseUrl}/api/sync/events?clientId=peer-receiver&today=${date}`,
+      { headers: authHeaders(), signal: ctrl.signal },
+    );
+    const reader = stream.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    const readFrame = async (predicate: (frame: Record<string, any>) => boolean) => {
+      for (;;) {
+        const boundary = buffer.indexOf("\n\n");
+        if (boundary >= 0) {
+          const raw = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          const line = raw.split("\n").find((entry) => entry.startsWith("data: "));
+          if (line) {
+            const frame = JSON.parse(line.slice("data: ".length)) as Record<string, any>;
+            if (predicate(frame)) return { frame, raw: line.slice("data: ".length) };
+          }
+          continue;
+        }
+        const { value, done } = await reader.read();
+        if (done) throw new Error("SSE stream ended before the expected frame");
+        buffer += decoder.decode(value, { stream: true });
+      }
+    };
+    const initial = await readFrame((frame) => frame.initial === true);
+    expect(initial.frame.completeness).toBe("complete");
+    expect(initial.frame.snapshotId).toBe(seedBody.snapshotId);
+
+    const changedRunId = runs[17].id;
+    const changedPayload = {
+      ...baselinePayload,
+      runValues: {
+        ...runValues,
+        [changedRunId]: { ...runValues[changedRunId], casesNeeded: 999 },
+      },
+      runValuesUpdatedAt: {
+        ...baselinePayload.runValuesUpdatedAt,
+        [changedRunId]: Date.now() + 1_000,
+      },
+    };
+    const write = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "peer-writer", payload: changedPayload }),
+    });
+    const writeBody = await write.json() as { data: Record<string, unknown>; snapshotId: string };
+    const received = await readFrame((frame) => frame.senderId === "peer-writer");
+    await reader.cancel();
+    ctrl.abort();
+
+    expect(received.frame).toMatchObject({
+      completeness: "partial",
+      syncVersion: 1,
+      baseSnapshotId: seedBody.snapshotId,
+      snapshotId: writeBody.snapshotId,
+      resultingSnapshotId: writeBody.snapshotId,
+    });
+    expect(Object.keys(received.frame.data.runValues)).toEqual([changedRunId]);
+    expect(received.frame.data.runValues[changedRunId].casesNeeded).toBe(999);
+    const equivalentComplete: Record<string, any> = {
+      ...received.frame,
+      completeness: "complete",
+      data: writeBody.data,
+    };
+    delete equivalentComplete.syncVersion;
+    delete equivalentComplete.baseSnapshotId;
+    delete equivalentComplete.resultingSnapshotId;
+    expect(Buffer.byteLength(received.raw) * 2)
+      .toBeLessThan(Buffer.byteLength(JSON.stringify(equivalentComplete)));
+  });
+
 describe("/sync/events — facility-wide master-data broadcasts", () => {
   type SyncFrame = Record<string, unknown>;
 

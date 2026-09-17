@@ -28,6 +28,7 @@ export type SyncDiagnostic = {
 export type SyncMeasurementPath = "complete" | "partial";
 export type SyncMeasurementDirection = "push" | "peer";
 export type SyncMeasurementTrigger = "edit" | "auto-track" | "recovery" | "periodic";
+export type SyncFallbackOutcome = "none" | "authoritative-recovery";
 
 export type SyncDiagnosticMeasurement = {
   path: SyncMeasurementPath;
@@ -45,6 +46,7 @@ export type SyncDiagnosticMeasurement = {
   peerApplyMs?: number;
   retries: number;
   converged: boolean;
+  fallbackOutcome?: SyncFallbackOutcome;
 };
 
 export type SyncMeasurementSummary = {
@@ -61,6 +63,7 @@ export type SyncMeasurementSummary = {
   averagePeerApplyMs?: number;
   retries: number;
   convergedSamples: number;
+  fallbackSamples: number;
 };
 
 export type SyncDiagnosticReport = {
@@ -175,7 +178,9 @@ export function loadSyncMeasurements(date: string): SyncDiagnosticMeasurement[] 
       (item.serverQueueAgeMs === undefined || (Number.isFinite(item.serverQueueAgeMs) && item.serverQueueAgeMs >= 0)) &&
       (item.peerApplyMs === undefined || (Number.isFinite(item.peerApplyMs) && item.peerApplyMs >= 0)) &&
       Number.isInteger(item.retries) && item.retries >= 0 &&
-      typeof item.converged === "boolean",
+      typeof item.converged === "boolean" &&
+      (item.fallbackOutcome === undefined || item.fallbackOutcome === "none" ||
+        item.fallbackOutcome === "authoritative-recovery"),
     ).slice(-MAX_MEASUREMENTS) : null,
   }).read();
 }
@@ -224,6 +229,7 @@ function summarizeMeasurements(
       averagePeerApplyMs: average("peerApplyMs"),
       retries: samples.reduce((total, sample) => total + sample.retries, 0),
       convergedSamples: samples.filter((sample) => sample.converged).length,
+      fallbackSamples: samples.filter((sample) => sample.fallbackOutcome === "authoritative-recovery").length,
     }];
   });
 }

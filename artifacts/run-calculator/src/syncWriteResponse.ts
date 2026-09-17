@@ -11,6 +11,15 @@ export interface SyncWriteResponseBody<T> {
   operationalProjection?: OperationalProjection | null;
 }
 
+export type PartialSyncEnvelope = {
+  syncVersion?: unknown;
+  completeness?: unknown;
+  baseSnapshotId?: unknown;
+  snapshotId?: unknown;
+  resultingSnapshotId?: unknown;
+  data?: unknown;
+};
+
 interface ConsumeSyncWriteResponseOptions<T> {
   applyCanonical?: (data: T) => void | Promise<void>;
   onStale?: (body: SyncWriteResponseBody<T>) => void | Promise<void>;
@@ -57,21 +66,22 @@ function canonicalSyncValue(value: unknown): unknown {
   return value;
 }
 
+/** Removes server-owned read models that are transported beside, but not hashed into, the canonical document. */
+export function persistedSyncPayload(payload: SyncPayload): SyncPayload {
+  const {
+    operationalProjection: _operationalProjection,
+    serverTime: _serverTime,
+    canonicalRevision: _canonicalRevision,
+    ...persisted
+  } = payload;
+  return persisted as SyncPayload;
+}
+
 export async function syncPayloadSnapshotId(
   payload: SyncPayload,
   options: { stripReadModel?: boolean } = {},
 ): Promise<string> {
-  const snapshotDocument = options.stripReadModel
-    ? (() => {
-        const {
-          operationalProjection: _operationalProjection,
-          serverTime: _serverTime,
-          canonicalRevision: _canonicalRevision,
-          ...persisted
-        } = payload;
-        return persisted;
-      })()
-    : payload;
+  const snapshotDocument = options.stripReadModel ? persistedSyncPayload(payload) : payload;
   const encoded = new TextEncoder().encode(JSON.stringify(canonicalSyncValue(snapshotDocument)));
   const digest = await crypto.subtle.digest("SHA-256", encoded);
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -84,6 +94,68 @@ export async function syncPayloadMatchesSnapshot(
 ): Promise<boolean> {
   if (!isValidSyncSnapshotId(snapshotId)) return false;
   return await syncPayloadSnapshotId(payload, options) === snapshotId;
+}
+
+/**
+ * Applies the deliberately narrow peer delta wire format.  A delta is never
+ * merged into whatever happens to be in React state: its base must be the
+ * exact canonical snapshot most recently adopted from the server.
+ */
+export async function reconstructPartialSyncPayload(
+  base: SyncPayload | null | undefined,
+  baseSnapshotId: unknown,
+  envelope: PartialSyncEnvelope,
+): Promise<SyncPayload | null> {
+  if (!base || envelope.syncVersion !== 1 || envelope.completeness !== "partial") return null;
+  if (!isValidSyncSnapshotId(baseSnapshotId) || envelope.baseSnapshotId !== baseSnapshotId) return null;
+  if (!isValidSyncSnapshotId(envelope.snapshotId) || !envelope.data
+    || typeof envelope.data !== "object" || Array.isArray(envelope.data)) return null;
+  if (
+    !isValidSyncSnapshotId(envelope.resultingSnapshotId)
+    || envelope.resultingSnapshotId !== envelope.snapshotId
+  ) return null;
+  if (!await syncPayloadMatchesSnapshot(base, baseSnapshotId)) return null;
+  const delta = envelope.data as Record<string, unknown>;
+  const merged: Record<string, unknown> = { ...(base as unknown as Record<string, unknown>) };
+  for (const [key, value] of Object.entries(delta)) {
+    if (key === "runValues" || key === "runValuesUpdatedAt" || key === "packagingProgress") {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+      const section = {
+        ...((base as unknown as Record<string, unknown>)[key] as Record<string, unknown> ?? {}),
+      };
+      for (const [child, childValue] of Object.entries(value as Record<string, unknown>)) {
+        if (childValue === null) delete section[child];
+        else section[child] = childValue;
+      }
+      merged[key] = section;
+    } else if (key === "dayState" && value && typeof value === "object" && !Array.isArray(value)) {
+      // dayState is a replacement section. This preserves removals within the
+      // object without introducing nested patch semantics.
+      merged.dayState = value;
+    } else if (key !== "deletions") {
+      if (value === null) delete merged[key];
+      else merged[key] = value;
+    }
+  }
+  // Deletions are explicit and scoped to map sections; omission never means
+  // deletion. This is compatible with the server's sparse map merge.
+  if (delta.deletions && typeof delta.deletions === "object" && !Array.isArray(delta.deletions)) {
+    for (const [section, ids] of Object.entries(delta.deletions as Record<string, unknown>)) {
+      const target = merged[section];
+      if (!target || typeof target !== "object" || Array.isArray(target) || !Array.isArray(ids)) continue;
+      const copy = { ...(target as Record<string, unknown>) };
+      for (const id of ids) if (typeof id === "string") delete copy[id];
+      merged[section] = copy;
+    }
+  }
+  delete merged.completeness;
+  delete merged.baseSnapshotId;
+  delete merged.resultingSnapshotId;
+  merged.syncVersion = 1;
+  merged.completeness = "complete";
+  return await syncPayloadMatchesSnapshot(merged as SyncPayload, envelope.snapshotId)
+    ? merged as SyncPayload
+    : null;
 }
 
 export async function readCurrentRecoveryJson(
