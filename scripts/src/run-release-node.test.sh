@@ -286,7 +286,67 @@ test_npx_package_resolution_failure_fails_before_release_commands() {
   echo "PASS: npx package resolution failure reports the fallback boundary before release commands"
 }
 
+test_missing_node_selector_fails_before_release_commands() {
+  local workspace
+  local log_path
+  workspace=$(make_workspace missing-selector)
+  log_path="${workspace}/events"
+
+  rm "${workspace}/.nvmrc"
+  : >"$log_path"
+  write_node "${workspace}/bin/node" "$REQUIRED_NODE_VERSION"
+  write_failing_npx "${workspace}/bin/npx"
+
+  run_launcher "$workspace" "$log_path" \
+    "${workspace}/bin:${PATH}"
+
+  [[ "$RUN_STATUS" -ne 0 ]] || {
+    printf 'Missing Node selector unexpectedly succeeded. Output:\n%s\n' \
+      "$RUN_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$RUN_OUTPUT" \
+    "Release Node selector is missing: ${workspace}/.nvmrc"
+  local events
+  events=$(cat "$log_path")
+  assert_not_contains "$events" "npx-invoked"
+  assert_not_contains "$events" "preflight-node="
+  assert_not_contains "$events" "child-node="
+  echo "PASS: missing Node selector fails before npx, preflight, or child execution"
+}
+
+test_empty_node_selector_fails_before_release_commands() {
+  local workspace
+  local log_path
+  workspace=$(make_workspace empty-selector)
+  log_path="${workspace}/events"
+
+  : >"${workspace}/.nvmrc"
+  : >"$log_path"
+  write_node "${workspace}/bin/node" "$REQUIRED_NODE_VERSION"
+  write_failing_npx "${workspace}/bin/npx"
+
+  run_launcher "$workspace" "$log_path" \
+    "${workspace}/bin:${PATH}"
+
+  [[ "$RUN_STATUS" -ne 0 ]] || {
+    printf 'Empty Node selector unexpectedly succeeded. Output:\n%s\n' \
+      "$RUN_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$RUN_OUTPUT" \
+    "Release Node selector is empty: ${workspace}/.nvmrc"
+  local events
+  events=$(cat "$log_path")
+  assert_not_contains "$events" "npx-invoked"
+  assert_not_contains "$events" "preflight-node="
+  assert_not_contains "$events" "child-node="
+  echo "PASS: empty Node selector fails before npx, preflight, or child execution"
+}
+
 test_matching_node_skips_npx
 test_mismatching_node_uses_npx
 test_wrong_fallback_node_version_fails_before_release_commands
 test_npx_package_resolution_failure_fails_before_release_commands
+test_missing_node_selector_fails_before_release_commands
+test_empty_node_selector_fails_before_release_commands
