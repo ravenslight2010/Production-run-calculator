@@ -134,6 +134,49 @@ test("discovers direct-root and wrapped manifests in supported evidence location
   }
 });
 
+test("fails clearly for malformed retained evidence but ignores malformed documentation JSON", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "routine-node-"));
+  const evidencePath = path.join(directory, "evaluation-manifest.json");
+  const malformedDocumentationPath = path.join(
+    directory,
+    "unrelated-documentation.json",
+  );
+  const sensitivePayload = "private-evaluation-payload";
+  fs.writeFileSync(
+    evidencePath,
+    JSON.stringify({
+      manifestVersion: 1,
+      dependencies: { node: "24.20.0" },
+    }),
+  );
+  fs.writeFileSync(malformedDocumentationPath, '{"documentation":');
+
+  try {
+    assert.deepEqual(discoverRetainedEvaluationPaths([directory]), [
+      evidencePath,
+    ]);
+
+    fs.writeFileSync(
+      evidencePath,
+      `{"evaluationManifest":{"dependencies":{"node":"24.20.0"},"note":"${sensitivePayload}"`,
+    );
+    assert.throws(
+      () => discoverRetainedEvaluationPaths([directory]),
+      (error) => {
+        assert.equal(
+          error.message,
+          `Malformed retained evaluation JSON: ${evidencePath}`,
+        );
+        assert.doesNotMatch(error.message, new RegExp(sensitivePayload));
+        assert.doesNotMatch(error.message, /Unexpected token/);
+        return true;
+      },
+    );
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("fails when a discovered retained manifest lacks runtime metadata", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "routine-node-"));
   const evidencePath = path.join(directory, "new-evaluation.json");

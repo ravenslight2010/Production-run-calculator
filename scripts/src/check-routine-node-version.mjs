@@ -86,6 +86,11 @@ function isEvaluationManifestCandidate(evidence) {
   );
 }
 
+function isRetainedEvaluationPath(evidencePath) {
+  const fileName = path.basename(evidencePath, path.extname(evidencePath));
+  return /(?:evaluation|benchmark|manifest)/i.test(fileName);
+}
+
 function findJsonFiles(directoryPath) {
   return fs
     .readdirSync(directoryPath, { withFileTypes: true })
@@ -120,6 +125,11 @@ export function discoverRetainedEvaluationPaths(
       try {
         evidence = JSON.parse(fs.readFileSync(evidencePath, "utf8"));
       } catch {
+        if (isRetainedEvaluationPath(evidencePath)) {
+          throw new Error(
+            `Malformed retained evaluation JSON: ${evidencePath}`,
+          );
+        }
         return false;
       }
       return isEvaluationManifestCandidate(evidence);
