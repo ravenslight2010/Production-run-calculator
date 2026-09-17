@@ -2322,7 +2322,7 @@ describe("/sync — additive run-list protection (whole-run loss guard)", () => 
     expect(replayed.runValues?.removed).toBeUndefined();
   });
 
-  it("converges two same-baseline lifecycle writers without undoing End or resurrecting Remove", async () => {
+  it("keeps canonical lifecycle changes when a third same-baseline peer reconnects late", async () => {
     const conflictDate = "2030-06-05";
     const activeRun = {
       ...run("active"),
@@ -2427,6 +2427,63 @@ describe("/sync — additive run-list protection (whole-run loss guard)", () => 
     expect(adopted[0].data).toEqual(adopted[1].data);
     expect(adopted[0].data.dayState.runs).toEqual(canonical.dayState.runs);
     expect((adopted[0].data.runValues as Record<string, unknown>)[addedRun.id]).toBeUndefined();
+
+    // Peer C missed the conflict and reconnects with the original baseline.
+    // Its write response is the complete canonical snapshot it must adopt
+    // before releasing any queued stale lifecycle work.
+    const reconnect = await peerPut("lifecycle-peer-c", sharedBaseline);
+    expect(reconnect.status).toBe(200);
+    const reconnectBody = await reconnect.json() as {
+      data: typeof canonical;
+    };
+    expect(reconnectBody.data).toMatchObject({
+      syncVersion: 1,
+      completeness: "complete",
+    });
+    expect(reconnectBody.data.dayState.runs).toEqual(canonical.dayState.runs);
+    expect(reconnectBody.data.dayState.runs[0]).toMatchObject({
+      id: activeRun.id,
+      endedAt: 3_000,
+      metaUpdatedAt: 3_000,
+    });
+    expect((reconnectBody.data.runValues as Record<string, unknown>)[addedRun.id]).toBeUndefined();
+    expect(reconnectBody.data.deletedItems?.runs).toContain(addedRun.id);
+
+    const peerCAdopted = await peerPut("lifecycle-peer-c", reconnectBody.data);
+    expect(peerCAdopted.status).toBe(200);
+
+    // Even if queued pre-reconnect work replays after adoption, it cannot undo
+    // End or resurrect the concurrently removed run. Replay the pre-convergence
+    // branch that actually still carries the added run and an un-ended active
+    // run — the payload the resurrection/undo would require to succeed.
+    const staleReplay = await peerPut("lifecycle-peer-c", peerAStartAndAdd);
+    expect(staleReplay.status).toBe(200);
+    const replayBody = await staleReplay.json() as {
+      data: typeof canonical & { deletedItems?: { runs?: string[] } };
+    };
+    expect(replayBody.data.dayState.runs).toEqual(canonical.dayState.runs);
+    expect(replayBody.data.dayState.runs[0]).toMatchObject({
+      endedAt: 3_000,
+      metaUpdatedAt: 3_000,
+    });
+    expect((replayBody.data.runValues as Record<string, unknown>)[addedRun.id]).toBeUndefined();
+    expect(replayBody.data.deletedItems?.runs).toContain(addedRun.id);
+
+    // The stored row itself must reflect the same rejection, not just the
+    // response body for this one request.
+    const afterStaleReplay = await fetch(`${baseUrl}/api/sync/${conflictDate}`, {
+      headers: authHeaders(),
+    });
+    const storedAfterReplay = await afterStaleReplay.json() as typeof canonical & {
+      deletedItems?: { runs?: string[] };
+    };
+    expect(storedAfterReplay.dayState.runs).toEqual(canonical.dayState.runs);
+    expect(storedAfterReplay.dayState.runs[0]).toMatchObject({
+      endedAt: 3_000,
+      metaUpdatedAt: 3_000,
+    });
+    expect((storedAfterReplay.runValues as Record<string, unknown>)[addedRun.id]).toBeUndefined();
+    expect(storedAfterReplay.deletedItems?.runs).toContain(addedRun.id);
   });
 
   it("preserves a later un-delete decision when a stale scheduled replacement omits its stamps", async () => {

@@ -853,6 +853,25 @@ export function protectRunValues(
   };
   if (outDay) out.dayState = outDay;
 
+  const exData = existing as Record<string, unknown>;
+
+  // Persist RUN tombstones additively. Unlike name-based deletes (protected by
+  // the deletedStamps/undeletedStamps LWW maps above), a run deletion has no
+  // independent stamp — `tombstoned` (incoming ∪ existing ids) is what keeps a
+  // deleted run out of THIS merge's run list. But `out.deletedItems` is
+  // otherwise only what `incoming` happened to carry: a device that never
+  // learned about the deletion (a stale reconnect with a pre-conflict
+  // snapshot) pushes without it, and the tombstone would silently vanish from
+  // the persisted row — leaving a LATER stale replay free to resurrect the
+  // run because tombstonedRunIds(existing) would then come back empty. Carry
+  // every known tombstoned id forward on every push so the record survives
+  // regardless of which device omits it.
+  if (tombstoned.size > 0) {
+    const inDeletedItems = isPlainObject(out.deletedItems) ? out.deletedItems as Record<string, unknown> : {};
+    const exDeletedItems = isPlainObject(exData.deletedItems) ? exData.deletedItems as Record<string, unknown> : {};
+    out.deletedItems = { ...exDeletedItems, ...inDeletedItems, runs: [...tombstoned] };
+  }
+
   // ── Additive union for master-data name registries ────────────────────────
   // These fields are maintained as additive name lists that grow as items are
   // added across devices. A fresh device (no localStorage) pushes empty arrays,
@@ -864,7 +883,6 @@ export function protectRunValues(
   // The client already applies tombstones (deletedItems) on receive, so deleted
   // names are filtered out in the UI even if they persist in the union. The
   // brand→flavor map is merged per-brand with the same union semantics.
-  const exData = existing as Record<string, unknown>;
   // Server-owned auto-track bookkeeping (wall-clock arm-state for fresh-run
   // bootstrap, step 7b). The server writes it inside its tick transactions;
   // ordinary client pushes never carry it (sanitize drops unknown keys), so

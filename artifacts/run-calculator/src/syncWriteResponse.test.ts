@@ -268,7 +268,7 @@ describe("consumeSyncWriteResponse", () => {
     })).resolves.toEqual(target);
   });
 
-  it("converges both peers when a complete fallback follows conflicting lifecycle edits", async () => {
+  it("adopts the complete lifecycle fallback when a third peer reconnects late", async () => {
     const baseline = {
       syncVersion: 1 as const,
       completeness: "complete" as const,
@@ -296,6 +296,7 @@ describe("consumeSyncWriteResponse", () => {
     };
     const peerA = { current: baseline as any };
     const peerB = { current: baseline as any };
+    const peerC = { current: baseline as any };
     const fallbackBody = {
       ok: true,
       partialFallback: true,
@@ -323,6 +324,29 @@ describe("consumeSyncWriteResponse", () => {
     expect(peerA.current.dayState.runs.some(
       (run: { id: string }) => run.id === "concurrent-added",
     )).toBe(false);
+
+    await consumeSyncWriteResponse(
+      new Response(JSON.stringify(fallbackBody), { status: 200 }),
+      { applyCanonical: (data) => { peerC.current = data; } },
+    );
+
+    expect(peerC.current).toEqual(canonical);
+    expect(peerC.current.completeness).toBe("complete");
+    expect(peerC.current.dayState.runs[0]).toMatchObject({
+      endedAt: 3_000,
+      metaUpdatedAt: 3_000,
+    });
+    expect(peerC.current.dayState.runs.some(
+      (run: { id: string }) => run.id === "concurrent-added",
+    )).toBe(false);
+
+    // A stale queued replay receives the same canonical response and cannot
+    // restore the peer's pre-conflict baseline.
+    await consumeSyncWriteResponse(
+      new Response(JSON.stringify(fallbackBody), { status: 200 }),
+      { applyCanonical: (data) => { peerC.current = data; } },
+    );
+    expect(peerC.current).toEqual(canonical);
   });
 
   it("does not apply data from an unsuccessful response", async () => {
