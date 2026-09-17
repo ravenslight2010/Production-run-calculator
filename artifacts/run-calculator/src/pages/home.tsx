@@ -8354,6 +8354,11 @@ export default function Home() {
           autoSuppressUntilRef.current,
           accepted?.manualOverrideUntil ?? 0,
         );
+        // A newly accepted packaging register changes the case counter's
+        // authoritative baseline even when the run lifecycle is unchanged.
+        // Rebase before releasing the sync fence so hidden time cannot be
+        // applied on top of the adopted manual correction.
+        setAutoTrackRebaseAfterBlock(true);
         setAutoTrackBlocked(true);
       }
 
@@ -9448,9 +9453,17 @@ export default function Home() {
           : "Still recovering: checking the current production state…",
       );
       // Raise both the synchronous ref fence and its rendered companion before
-      // the wake clock can publish hidden-time progress. A normal unchanged
-      // pull releases without rebasing, preserving ordinary screen-off catch-up.
-      setAutoTrackRebaseAfterBlock(false);
+      // the wake clock can publish hidden-time progress. Runs without manual
+      // packaging ownership retain ordinary screen-off catch-up. Once a manual
+      // correction exists, every wake adopts/rebases that register before
+      // automatic tracking resumes, even if the server snapshot is unchanged.
+      const activeRunId =
+        dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id;
+      const activePackagingProgress =
+        activeRunId ? loadPackagingProgress()[activeRunId] : undefined;
+      setAutoTrackRebaseAfterBlock(
+        (activePackagingProgress?.correctionGeneration ?? 0) > 0,
+      );
       setAutoTrackBlocked(true);
       syncPushGenerationRef.current += 1;
       if (syncRetryTimerRef.current) {

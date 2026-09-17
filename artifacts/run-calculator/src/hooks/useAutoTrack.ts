@@ -1159,6 +1159,7 @@ useEffect(() => {
     if (autoTrackWakeAcknowledgement !== previousWakeAcknowledgementRef.current) {
       previousWakeAcknowledgementRef.current = autoTrackWakeAcknowledgement;
       wakeRebasePendingRef.current = runStatus === "running" && Boolean(autoTrackSuggestion);
+      wakeRebaseAppliedRef.current = false;
     }
     if (runStatus !== "running") {
       wakeRebasePendingRef.current = false;
@@ -1184,8 +1185,12 @@ useEffect(() => {
       && !autoTrackBlockedRef?.current
     ) {
       if (!rebasedForForegroundSync && !wakeRebaseAppliedRef.current) {
-        rearmCaseTimer(nowTime.getTime());
-        rearmDoughTimers(nowTime.getTime());
+        if (autoTrackRebaseAfterBlock) {
+          rebaseAfterForegroundSync();
+        } else {
+          rearmCaseTimer(nowTime.getTime());
+          rearmDoughTimers(nowTime.getTime());
+        }
         wakeRebaseAppliedRef.current = true;
       }
       wakeRebasePendingRef.current = false;
