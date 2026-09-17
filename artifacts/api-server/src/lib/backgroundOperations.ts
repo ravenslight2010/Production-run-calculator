@@ -64,8 +64,10 @@ export function isTransientDatabaseConnectionError(error: unknown): boolean {
     "08000", "08001", "08003", "08004", "08006", "08007", "08P01",
     "ECONNRESET", "ECONNREFUSED", "EPIPE", "ETIMEDOUT",
   ]).has(code)) return true;
-  const message = String(error instanceof Error ? error.message : error).toLowerCase();
-  return /connection (?:terminated|closed|reset)|terminating connection|server closed the connection unexpectedly/.test(message);
+  const rawMessage = String(error instanceof Error ? error.message : error);
+  const message = rawMessage.toLowerCase();
+  return rawMessage === "timeout exceeded when trying to connect" ||
+    /connection (?:terminated|closed|reset)|terminating connection|server closed the connection unexpectedly/.test(message);
 }
 
 function recordSuccess(name: BackgroundOperationName, now: number): void {

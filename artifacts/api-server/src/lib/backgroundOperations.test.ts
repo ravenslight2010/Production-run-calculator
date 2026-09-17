@@ -16,12 +16,15 @@ describe("background operation connection recovery", () => {
     expect(isTransientDatabaseConnectionError(Object.assign(new Error("terminating connection"), { code: "57P01" }))).toBe(true);
     expect(isTransientDatabaseConnectionError(new Error("Connection terminated unexpectedly"))).toBe(true);
     expect(isTransientDatabaseConnectionError(Object.assign(new Error("reset"), { code: "ECONNRESET" }))).toBe(true);
+    expect(isTransientDatabaseConnectionError(new Error("timeout exceeded when trying to connect"))).toBe(true);
+    expect(isTransientDatabaseConnectionError(new Error("Timeout exceeded when trying to connect"))).toBe(false);
+    expect(isTransientDatabaseConnectionError(new Error("Job execution timed out"))).toBe(false);
     expect(isTransientDatabaseConnectionError(Object.assign(new Error("bad query"), { code: "23505" }))).toBe(false);
   });
 
-  it("retries once on a fresh pool checkout and clears degradation after recovery", async () => {
+  it("retries a bounded pool-acquisition timeout once and clears degradation after recovery", async () => {
     const operation = vi.fn()
-      .mockRejectedValueOnce(Object.assign(new Error("Connection terminated unexpectedly"), { code: "57P01" }))
+      .mockRejectedValueOnce(new Error("timeout exceeded when trying to connect"))
       .mockResolvedValueOnce("recovered");
     const delay = vi.fn(async () => {});
 

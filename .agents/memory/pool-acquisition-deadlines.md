@@ -17,3 +17,15 @@ wait indefinitely and consume more queued capacity.
 prefer the pool's built-in acquisition timeout and leave enough margin for the
 caller to execute its safe fallback. Verify both prompt response and zero
 pending waiters under full checkout contention.
+
+Background operations may retry the exact node-postgres acquisition message
+`timeout exceeded when trying to connect` as a transient failure. Keep this
+allowlist exact; generic execution or provider timeouts must remain final.
+
+**Why:** Production can emit the acquisition timeout without an error code or
+connection wording, so a classifier limited to PostgreSQL/network codes misses
+it and records an avoidable worker failure after only one checkout attempt.
+
+**How to apply:** Reuse the existing bounded one-retry wrapper. Do not broaden
+the match to arbitrary timeout text or lengthen the pool deadline without
+re-proving prompt health fallbacks and zero pending pool waiters.
