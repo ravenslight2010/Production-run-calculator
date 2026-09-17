@@ -6,17 +6,20 @@ import { fileURLToPath } from "node:url";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, "../..");
-const RETAINED_EVIDENCE_PATHS = [
+const RETAINED_EVIDENCE_DIRECTORIES = [
   path.join(
     REPO_ROOT,
-    "lib/corpus-harness/snapshots/evaluation-manifest.json",
+    "lib/corpus-harness/snapshots",
   ),
   path.join(
     REPO_ROOT,
-    "docs/second-pass-reviewer-benchmark-2026-09-05.json",
+    "docs",
   ),
 ];
-const EVIDENCE_PATH = RETAINED_EVIDENCE_PATHS[1];
+const EVIDENCE_PATH = path.join(
+  REPO_ROOT,
+  "docs/second-pass-reviewer-benchmark-2026-09-05.json",
+);
 const NODE_SELECTOR_PATH = path.join(REPO_ROOT, ".nvmrc");
 const CI_WORKFLOW_PATHS = [
   path.join(REPO_ROOT, ".github/workflows/ci.yml"),
@@ -74,8 +77,67 @@ export function readRequiredNodeVersion(evidencePath = EVIDENCE_PATH) {
   return requiredVersion;
 }
 
+function isEvaluationManifestCandidate(evidence) {
+  return (
+    evidence &&
+    typeof evidence === "object" &&
+    !Array.isArray(evidence) &&
+    ("manifestVersion" in evidence || "evaluationManifest" in evidence)
+  );
+}
+
+function findJsonFiles(directoryPath) {
+  return fs
+    .readdirSync(directoryPath, { withFileTypes: true })
+    .toSorted((left, right) => left.name.localeCompare(right.name))
+    .flatMap((entry) => {
+      const entryPath = path.join(directoryPath, entry.name);
+      if (entry.isDirectory()) {
+        return findJsonFiles(entryPath);
+      }
+      return entry.isFile() && entry.name.endsWith(".json") ? [entryPath] : [];
+    });
+}
+
+export function discoverRetainedEvaluationPaths(
+  evidenceDirectories = RETAINED_EVIDENCE_DIRECTORIES,
+) {
+  if (
+    !Array.isArray(evidenceDirectories) ||
+    evidenceDirectories.length === 0 ||
+    evidenceDirectories.some(
+      (directoryPath) =>
+        typeof directoryPath !== "string" || directoryPath.trim() === "",
+    )
+  ) {
+    throw new TypeError("evidenceDirectories must be a non-empty array");
+  }
+
+  const discoveredPaths = evidenceDirectories
+    .flatMap((directoryPath) => findJsonFiles(directoryPath))
+    .filter((evidencePath) => {
+      let evidence;
+      try {
+        evidence = JSON.parse(fs.readFileSync(evidencePath, "utf8"));
+      } catch {
+        return false;
+      }
+      return isEvaluationManifestCandidate(evidence);
+    });
+
+  if (discoveredPaths.length === 0) {
+    throw new Error(
+      "No retained evaluation manifests were found in the supported evidence locations",
+    );
+  }
+
+  return [...new Set(discoveredPaths)].sort((left, right) =>
+    left.localeCompare(right),
+  );
+}
+
 export function readRequiredNodeVersions(
-  evidencePaths = RETAINED_EVIDENCE_PATHS,
+  evidencePaths = discoverRetainedEvaluationPaths(),
 ) {
   if (!Array.isArray(evidencePaths) || evidencePaths.length === 0) {
     throw new TypeError("evidencePaths must be a non-empty array");

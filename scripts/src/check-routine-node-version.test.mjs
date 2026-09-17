@@ -6,6 +6,7 @@ import test from "node:test";
 import {
   checkRepositoryNodeVersionContract,
   checkRoutineNodeVersion,
+  discoverRetainedEvaluationPaths,
   readAllCiNodeVersions,
   readCiNodeVersions,
   readNodeSelectorVersion,
@@ -90,6 +91,64 @@ test("reads every retained evaluation manifest without changing evidence", () =>
     evidencePaths.forEach((evidencePath, index) => {
       assert.equal(fs.readFileSync(evidencePath, "utf8"), contents[index]);
     });
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("discovers direct-root and wrapped manifests in supported evidence locations", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "routine-node-"));
+  const nestedDirectory = path.join(directory, "nested");
+  fs.mkdirSync(nestedDirectory);
+  const paths = [
+    path.join(directory, "direct.json"),
+    path.join(nestedDirectory, "wrapped.json"),
+    path.join(directory, "unrelated.json"),
+  ];
+  fs.writeFileSync(
+    paths[0],
+    JSON.stringify({ manifestVersion: 1, dependencies: { node: "24.20.0" } }),
+  );
+  fs.writeFileSync(
+    paths[1],
+    JSON.stringify({
+      evaluationManifest: {
+        manifestVersion: 1,
+        dependencies: { node: "24.20.0" },
+      },
+    }),
+  );
+  fs.writeFileSync(paths[2], JSON.stringify({ schemaVersion: 1 }));
+
+  try {
+    assert.deepEqual(discoverRetainedEvaluationPaths([directory]), [
+      paths[0],
+      paths[1],
+    ]);
+    assert.deepEqual(readRequiredNodeVersions([paths[0], paths[1]]), [
+      "24.20.0",
+      "24.20.0",
+    ]);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("fails when a discovered retained manifest lacks runtime metadata", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "routine-node-"));
+  const evidencePath = path.join(directory, "new-evaluation.json");
+  fs.writeFileSync(
+    evidencePath,
+    JSON.stringify({ manifestVersion: 1, evaluation: { id: "new" } }),
+  );
+
+  try {
+    const discoveredPaths = discoverRetainedEvaluationPaths([directory]);
+    assert.deepEqual(discoveredPaths, [evidencePath]);
+    assert.throws(
+      () => readRequiredNodeVersions(discoveredPaths),
+      new RegExp(`valid evaluation manifest Node version: ${evidencePath}`),
+    );
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
