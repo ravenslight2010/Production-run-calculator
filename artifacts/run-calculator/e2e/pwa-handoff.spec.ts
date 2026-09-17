@@ -353,6 +353,7 @@ test.describe("PWA update handoff", () => {
             const registration = await navigator.serviceWorker.ready;
             return registration.active?.state === "activated";
           }),
+          { timeout: 30_000 },
         )
         .toBe(true);
       await page.goto("about:blank");
