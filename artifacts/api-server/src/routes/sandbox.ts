@@ -25,7 +25,10 @@ router.post("/sandbox/reset", async (req: Request, res: Response) => {
     res.json({ ok: true });
   } catch (err) {
     req.log.error({ err }, "failed to reset sandbox");
-    res.status(500).json({ error: "Failed to reset sandbox" });
+    res.status(500).json({
+      error:
+        "Sandbox reset failed. No live data was changed. Retry once; if it still fails, restart the isolated API after applying the current database schema.",
+    });
   }
 });
 
