@@ -127,6 +127,41 @@ describe("SSE sync baseline gate", () => {
     expect(coordinationSource).toContain("syncBaselineGateRef.current.completeInitialSnapshot()");
   });
 
+  it("keeps all first-login entry states behind the server-owned baseline", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/pages/home.tsx"), "utf8");
+
+    // A stale prior-day cache is represented in memory by the untouched
+    // automatic seed; a populated server frame must replace it even if its
+    // reset marker is newer on the device.
+    const seeded = { id: "seed", brand: "", flavor: "", seeded: true };
+    expect(shouldAtomicallyAdoptFirstSnapshot({
+      initialSnapshot: true,
+      localRuns: [seeded],
+      hasLocalUserEdit: false,
+    })).toBe(true);
+    expect(shouldAcceptSyncDaySnapshot({
+      remoteDate: "2030-06-01",
+      localDate: "2030-06-01",
+      remoteResetAt: 1000,
+      localResetAt: 2000,
+      initialSnapshot: true,
+    })).toBe(true);
+
+    // A clean reinstall and an intentional administrative empty baseline both
+    // use the same atomic adoption path, but neither may be replaced by a
+    // locally manufactured rollover state before the frame arrives.
+    expect(shouldAtomicallyAdoptFirstSnapshot({
+      initialSnapshot: true,
+      localRuns: [seeded],
+      hasLocalUserEdit: false,
+    })).toBe(true);
+    expect(source).toContain("const isReset = atomicSeedSnapshot || remoteResetAt > localResetAt;");
+    expect(source).toContain("applyRolloverEpoch(msg.resetEpoch)");
+    expect(source).toContain("applyResetWipe(msg.resetEpoch)");
+    expect(source).not.toContain("checkDateRollover");
+    expect(source).not.toContain("/api/sync/${newDate}");
+  });
+
   it("routes bounded configuration invalidations through canonical sources and recovers all families at a baseline", () => {
     const source = readFileSync(resolve(process.cwd(), "src/pages/home.tsx"), "utf8");
     expect(source).toContain('family?: "master-data" | "profiles" | "factory-data" | "die-types" | "supervisor-pin" | "name-links" | "merged-away"');

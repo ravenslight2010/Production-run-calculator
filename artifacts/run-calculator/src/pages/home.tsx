@@ -70,7 +70,6 @@ import {
   type HistoryDay,
   DEFAULT_VALUES,
   PACKAGING_FIELDS,
-  DAY_KEY,
   STOP_REASONS_KEY,
   SUPERVISOR_PIN_KEY,
   DEFAULT_STOP_REASONS,
@@ -144,8 +143,6 @@ import {
   todayStr,
   writeDayResetAt,
   runLabel,
-  shouldSignOutAfterRollover,
-  shouldPublishFreshRolloverState,
 } from "../utils";
 import { normalizeScheduledDays, type ScheduledDay } from "../scheduledDays";
 import { fetchWithTimeout } from "../fetchWithTimeout";
@@ -212,7 +209,6 @@ import {
   applyMixCheeseOverlapDedupeIfNeeded,
   purgeOrphanedProfilesIfNeeded,
   applyProfileCleanupIfNeeded,
-  archiveDayToHistory,
   deleteProfilesForBrand,
   deleteProfileEntry,
   applyIngredientMerge,
@@ -3076,7 +3072,6 @@ export default function Home() {
   const {
     signOut,
     forceSignedOut,
-    consumeFreshSession,
     revalidate,
     me,
     markOnboardingSeen,
@@ -9885,147 +9880,11 @@ export default function Home() {
     if (changed) saveCheeseRecipePresets(presets);
   }, [v.app1CheeseRecipeName, v.app1CheeseRecipe, v.app2CheeseRecipeName, v.app2CheeseRecipe, v.app3CheeseRecipeName, v.app3CheeseRecipe, v.app4CheeseRecipeName, v.app4CheeseRecipe]);
 
-  // Detect day change while the tab is open (visibility change + periodic check)
-  useEffect(() => {
-    async function checkDateRollover() {
-      // A Home mount immediately after sign-in is already today's
-      // re-authentication. Consume this marker before the async rollover work
-      // so a duplicate interval/timer check cannot make the same session skip
-      // a later rollover.
-      const shouldSignOut = shouldSignOutAfterRollover(consumeFreshSession());
-      const stored = (() => {
-        try { return JSON.parse(localStorage.getItem(DAY_KEY) ?? "{}") as { date?: string }; } catch { return {}; }
-      })();
-      if (stored.date && stored.date !== todayStr()) {
-        // Auto-end any active run before archiving yesterday
-        const prevDs = (() => { try { return JSON.parse(localStorage.getItem(DAY_KEY) ?? "null") as DayState | null; } catch { return null; } })();
-        if (prevDs && stored.date) {
-          // Auto-deduct inventory for every run being closed by the rollover, the
-          // same as an explicit endRun. consume is idempotent per runId, so runs
-          // already deducted via endRun won't double-count.
-          for (const r of prevDs.runs) {
-            if (r.startedAt && !r.endedAt) {
-              const vals = r.id === currentRunIdRef.current ? form.getValues() : loadRunValues(r.id);
-              void consumeRun(r.id, computeRunConsumptionLines(vals)).catch(() => setWriteError("Couldn't record a finished run's inventory use on the server — stock counts may be out of sync. Check your connection."));
-            }
-          }
-          const finalDs: DayState = {
-            ...prevDs,
-            runs: prevDs.runs.map(r =>
-              r.startedAt && !r.endedAt ? { ...r, endedAt: Date.now(), pausedAt: undefined } : r
-            ),
-          };
-          archiveDayToHistory(finalDs, stored.date);
-        }
-        const newDate = todayStr();
-        // Try to load any pre-scheduled data for the new day.
-        // IMPORTANT: only push a fresh empty state when the server CONFIRMED
-        // there are no scheduled runs (GET succeeded with an empty row). If the
-        // GET itself fails (network error, transient 5xx), do NOT push — an
-        // empty push with a newer resetAt would wholesale-adopt over any
-        // previously saved scheduled runs (protectRunValues escape hatch). The
-        // session boundary (resetBoundaryAt) will be established on the next
-        // successful push once the connection recovers.
-        let serverConfirmedNoRuns = false;
-        // Retry once after a short delay when the initial fetch fails.
-        // On Render free-tier the service spins down after inactivity; a
-        // cold-start GET can time out while the server is still waking.
-        for (let attempt = 0; attempt < 2; attempt++) {
-          try {
-            const res = await fetch(`/api/sync/${newDate}`);
-            if (res.ok) {
-              const payload = await res.json() as SyncPayload | null;
-              if (payload?.dayState?.runs?.length) {
-              // Apply the saved line-type (dough/crusts) preference to each run
-              // that has no subTab set — so brands always scheduled as "crusts"
-              // start in the right mode without a manual toggle every morning.
-              const runsWithSubTab = payload.dayState.runs.map((r: RunMeta) => {
-                if (r.subTab) return r;
-                const pref = loadProfileSubTab(r.brand ?? "", r.flavor ?? "");
-                return pref ? { ...r, subTab: pref } : r;
-              });
-              const ds: DayState = { runs: runsWithSubTab, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now(), substitutions: [], substitutionLog: [], stagedItems: {} };
-              clearActiveSubstitutions();
-              // Scheduled run values are a snapshot from scheduling time; blank
-              // sauce fields backfill from the CURRENT profile (mobile parity —
-              // its pull-up spreads the live profile).
-              const metaById = new Map(ds.runs.map(r => [r.id, r]));
-              const pulledVals: Record<string, FormValues> = {};
-              for (const [id, vals] of Object.entries(payload.runValues ?? {})) {
-                const meta = metaById.get(id);
-                pulledVals[id] = backfillFromProfile(mergeRunDefaults(vals as FormValues), meta?.brand, meta?.flavor);
-                saveRunValues(id, pulledVals[id]);
-              }
-              // Adopt the scheduled row's per-run value stamps: these values are
-              // server-sourced, not a local edit (stamping them with local time
-              // would fake one), but saving them completely unstamped would lose
-              // the per-run LWW merge to any peer that pushes a stamped copy.
-              {
-                const upd = loadRunValuesUpdated();
-                const remoteUpd = payload.runValuesUpdatedAt ?? {};
-                for (const id of Object.keys(pulledVals)) if (remoteUpd[id]) upd[id] = remoteUpd[id];
-                saveRunValuesUpdated(upd);
-              }
-              { const dm = loadDeletedItems(); if (dm["runs"]) { delete dm["runs"]; saveDeletedItems(dm); } }
-              saveDayState(ds);
-              setDayState(ds);
-              if (ds.runToTime) setRunToTime(ds.runToTime);
-              const firstId = ds.runs[0]?.id;
-              const firstVals = (firstId && pulledVals[firstId]) || DEFAULT_VALUES;
-              lastFormRunIdRef.current = firstId ?? "";
-              form.reset(firstVals);
-              resetFieldArrays(firstVals);
-              schedulePush(ds, 0);
-              fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(normalizeScheduledDays(d))).catch(() => {});
-              // A restored session must sign out after rollover so a hard
-              // refresh cannot bypass the daily re-authentication boundary.
-              // A session just established by sign-in has already
-              // re-authenticated for this production day.
-              if (shouldSignOut) void signOut();
-              return;
-            }
-            serverConfirmedNoRuns = true;
-          }
-          } catch {}
-          // Brief pause before retry to allow a cold-starting server to
-          // finish waking; skip on the final attempt.
-          if (attempt === 0 && !serverConfirmedNoRuns) {
-            await new Promise<void>((resolve) => setTimeout(resolve, 5_000));
-          }
-        }
-        // Fallback: fresh empty state. Only push to the server if the GET
-        // confirmed there are no scheduled runs — otherwise we'd risk wiping
-        // them via the wholesale-adopt escape hatch (see comment above).
-        const fresh = { ...freshDayState(), resetAt: Date.now() };
-        clearActiveSubstitutions();
-        { const dm = loadDeletedItems(); if (dm["runs"]) { delete dm["runs"]; saveDeletedItems(dm); } }
-        saveDayState(fresh);
-        setDayState(fresh);
-        setRunToTime("19:15");
-        lastFormRunIdRef.current = "";
-        form.reset(DEFAULT_VALUES);
-        resetFieldArrays(DEFAULT_VALUES);
-        if (shouldPublishFreshRolloverState(serverConfirmedNoRuns)) schedulePush(fresh, 0);
-        // See note above: restored sessions sign out after the daily reset,
-        // while the current sign-in transition is already re-authenticated.
-        if (shouldSignOut) void signOut();
-      }
-    }
-    // Run once on mount too. loadDayState() only resets the in-memory view when
-    // the stored date is stale; it does NOT archive, stamp resetAt, push the new
-    // boundary, or sign out. Without this immediate call, the rollover (and its
-    // signOut) only fires up to 60s later via the interval — by which
-    // time another device's pushed resetAt may have already 401-bounced us to
-    // login, so the user sees the logout but never the reset. Mobile already
-    // rolls over on its mount effect; this brings web to parity.
-    void checkDateRollover();
-    const interval = setInterval(checkDateRollover, 60_000);
-    document.addEventListener("visibilitychange", checkDateRollover);
-    return () => {
-      clearInterval(interval);
-      document.removeEventListener("visibilitychange", checkDateRollover);
-    };
-  }, []);
+  // Daily rollover is server-owned. The initial SSE frame and the reset-epoch
+  // handshake are the only current-day bootstrap authorities: they adopt the
+  // canonical row before the baseline gate can release any automatic write.
+  // Do not inspect stale local day state, archive it, stamp a reset marker, or
+  // manufacture an empty replacement here.
 
   // Re-push on tab-foreground restore so a run-start (or any action) that
   // fired while the tab was backgrounded or the screen was off doesn't stay
@@ -10166,8 +10025,8 @@ export default function Home() {
     // date it was built on. A push queued just before midnight could otherwise
     // retry after midnight and write yesterday's runs into the new day's
     // /api/sync/today row — the same leak schedulePush guards. If the payload's
-    // build-date is no longer today, drop it (the rollover will push the fresh
-    // day instead).
+    // build-date is no longer today, drop it. The server-owned rollover and
+    // current-day baseline adoption will provide the next writable snapshot.
     if (payload.dayState.date && payload.dayState.date !== todayStr()) {
       const queued = syncPushQueueRef.current.finish({ drainQueued: true });
       setSyncRetryWaiting(false);
@@ -10485,12 +10344,12 @@ export default function Home() {
         return;
       }
       // Never push a stale-dated day into today's sync row. A tab left open
-      // across midnight still holds yesterday's runs until the rollover fires;
+      // across midnight still holds yesterday's runs until the server-owned
+      // baseline is adopted;
       // pushing them to /api/sync/today (the server resolves "today" by its own
-      // clock) would leak yesterday's runs into today's row. The rollover then
-      // fetches that row and "pulls them up" as if they were pre-scheduled, so
-      // the daily reset never clears. Skip until the rollover swaps in the fresh
-      // day. The SSE-onopen reconnect re-push is the main offender here.
+      // clock) would leak yesterday's runs into today's row. Skip until the
+      // canonical current-day baseline swaps in the fresh day. The SSE-onopen
+      // reconnect re-push is the main offender here.
       if (ds.date && ds.date !== todayStr()) {
         syncPushTimingRef.current = null;
         pushAcknowledgedRef.current = true;
