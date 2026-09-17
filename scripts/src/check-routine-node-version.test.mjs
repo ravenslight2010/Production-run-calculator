@@ -11,6 +11,7 @@ import {
   readCiNodeVersions,
   readNodeSelectorVersion,
   readRequiredNodeVersion,
+  readRequiredNodeVersionEntries,
   readRequiredNodeVersions,
 } from "./check-routine-node-version.mjs";
 
@@ -84,6 +85,10 @@ test("reads every retained evaluation manifest without changing evidence", () =>
   });
 
   try {
+    assert.deepEqual(readRequiredNodeVersionEntries(evidencePaths), [
+      { evidencePath: evidencePaths[0], requiredVersion: "24.20.0" },
+      { evidencePath: evidencePaths[1], requiredVersion: "24.20.0" },
+    ]);
     assert.deepEqual(readRequiredNodeVersions(evidencePaths), [
       "24.20.0",
       "24.20.0",
@@ -304,15 +309,28 @@ test("rejects selector or CI pins that drift from retained evidence", () => {
 });
 
 test("rejects retained manifests that disagree with each other", () => {
+  const matchingPath = "/retained/matching-manifest.json";
+  const mismatchedPath = "/retained/mismatched-manifest.json";
+
   assert.throws(
     () =>
       checkRepositoryNodeVersionContract({
-        requiredVersions: ["24.20.0", "24.19.1"],
+        requiredVersionEntries: [
+          { evidencePath: matchingPath, requiredVersion: "24.20.0" },
+          { evidencePath: mismatchedPath, requiredVersion: "24.19.1" },
+        ],
         selectorVersion: "24.20.0",
         ciVersions: ["24.20.0"],
       }),
     (error) => {
       assert.match(error.message, /Retained evidence: 24\.20\.0, 24\.19\.1/);
+      assert.match(
+        error.message,
+        new RegExp(
+          `Mismatched retained manifests:\\n- ${mismatchedPath}: 24\\.19\\.1`,
+        ),
+      );
+      assert.doesNotMatch(error.message, new RegExp(matchingPath));
       assert.match(error.message, /every retained manifest/);
       return true;
     },

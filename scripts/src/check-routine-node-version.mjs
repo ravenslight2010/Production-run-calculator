@@ -99,13 +99,22 @@ export function discoverRetainedEvaluationPaths(
 export function readRequiredNodeVersions(
   evidencePaths = discoverRetainedEvaluationPaths(),
 ) {
+  return readRequiredNodeVersionEntries(evidencePaths).map(
+    ({ requiredVersion }) => requiredVersion,
+  );
+}
+
+export function readRequiredNodeVersionEntries(
+  evidencePaths = discoverRetainedEvaluationPaths(),
+) {
   if (!Array.isArray(evidencePaths) || evidencePaths.length === 0) {
     throw new TypeError("evidencePaths must be a non-empty array");
   }
 
-  return evidencePaths.map((evidencePath) =>
-    readRequiredNodeVersion(evidencePath),
-  );
+  return evidencePaths.map((evidencePath) => ({
+    evidencePath,
+    requiredVersion: readRequiredNodeVersion(evidencePath),
+  }));
 }
 
 export function readNodeSelectorVersion(selectorPath = NODE_SELECTOR_PATH) {
@@ -148,10 +157,33 @@ export function readAllCiNodeVersions(ciWorkflowPaths = CI_WORKFLOW_PATHS) {
 export function checkRepositoryNodeVersionContract({
   requiredVersion,
   requiredVersions,
+  requiredVersionEntries,
   selectorVersion,
   ciVersions,
 }) {
-  const retainedVersions = requiredVersions ?? [requiredVersion];
+  if (
+    requiredVersionEntries !== undefined
+    && (
+      !Array.isArray(requiredVersionEntries)
+      || requiredVersionEntries.length === 0
+      || requiredVersionEntries.some(
+        ({ evidencePath, requiredVersion: entryVersion } = {}) =>
+          typeof evidencePath !== "string"
+          || evidencePath.trim() === ""
+          || typeof entryVersion !== "string"
+          || entryVersion.trim() === "",
+      )
+    )
+  ) {
+    throw new TypeError(
+      "requiredVersionEntries must contain evidence paths and non-empty versions",
+    );
+  }
+
+  const retainedVersions =
+    requiredVersionEntries?.map(({ requiredVersion: entryVersion }) => entryVersion)
+    ?? requiredVersions
+    ?? [requiredVersion];
   if (
     !Array.isArray(retainedVersions) ||
     retainedVersions.length === 0 ||
@@ -169,6 +201,11 @@ export function checkRepositoryNodeVersionContract({
 
   const requiredVersionsSet = new Set(retainedVersions);
   const requiredNodeVersion = retainedVersions[0];
+  const mismatchedRetainedEntries =
+    requiredVersionEntries?.filter(
+      ({ requiredVersion: entryVersion }) =>
+        entryVersion !== requiredNodeVersion,
+    ) ?? [];
   const mismatchedCiVersions = ciVersions.filter(
     (version) => version !== requiredNodeVersion,
   );
@@ -181,6 +218,15 @@ export function checkRepositoryNodeVersionContract({
       [
         "Repository Node version contract is out of sync.",
         `Retained evidence: ${[...requiredVersionsSet].join(", ")}`,
+        ...(mismatchedRetainedEntries.length > 0
+          ? [
+              "Mismatched retained manifests:",
+              ...mismatchedRetainedEntries.map(
+                ({ evidencePath, requiredVersion: entryVersion }) =>
+                  `- ${evidencePath}: ${entryVersion}`,
+              ),
+            ]
+          : []),
         `.nvmrc selector: ${selectorVersion}`,
         `Explicit CI pins: ${[...new Set(ciVersions)].join(", ")}`,
         "Align every retained manifest, the selector, and every explicit CI pin without rewriting retained evidence.",
@@ -192,8 +238,9 @@ export function checkRepositoryNodeVersionContract({
 }
 
 export function main() {
+  const retainedVersionEntries = readRequiredNodeVersionEntries();
   const requiredVersion = checkRepositoryNodeVersionContract({
-    requiredVersions: readRequiredNodeVersions(),
+    requiredVersionEntries: retainedVersionEntries,
     selectorVersion: readNodeSelectorVersion(),
     ciVersions: readAllCiNodeVersions(),
   });
