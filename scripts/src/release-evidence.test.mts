@@ -485,6 +485,40 @@ async function run(): Promise<void> {
   const configuredKeyrings = [...releaseWorkflow.matchAll(
     /OPERATIONAL_REPORT_SIGNING_KEYS:\s*'([^']+)'/g,
   )].map((match) => parseReportSigningKeyring(match[1]));
+  const releaseJobs = [
+    {
+      name: "standard",
+      source: releaseWorkflow.match(
+        /  release-check-standard:[\s\S]*?(?=\n  release-check-full:)/,
+      )?.[0],
+      runner: "pnpm run release:check",
+    },
+    {
+      name: "full",
+      source: releaseWorkflow.match(/  release-check-full:[\s\S]*$/)?.[0],
+      runner: "pnpm run release:check:full",
+    },
+  ];
+  for (const job of releaseJobs) {
+    assert.ok(job.source, `${job.name} release job must be present`);
+    assert.match(
+      job.source!,
+      /node-version:\s*"24\.20\.0"/,
+      `${job.name} release job must use the retained Node.js version`,
+    );
+    assert.match(
+      job.source!,
+      /pnpm --filter @workspace\/run-calculator exec playwright install --with-deps webkit/,
+      `${job.name} release job must install WebKit and Linux dependencies`,
+    );
+    assert.ok(
+      job.source!.indexOf(
+        "pnpm --filter @workspace/run-calculator exec playwright install --with-deps webkit",
+      ) <
+        job.source!.indexOf(job.runner),
+      `${job.name} WebKit dependency installation must precede its release runner`,
+    );
+  }
   assert.equal(
     configuredKeyrings.length,
     2,

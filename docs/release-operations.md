@@ -43,6 +43,12 @@ libraries only need the browser download:
 pnpm --filter @workspace/run-calculator exec playwright install webkit
 ```
 
+For a local runner with a known compatible library set, set
+`PLAYWRIGHT_WEBKIT_LIBRARY_PATH` to a colon-separated list of library
+directories. The TypeScript launcher and the final MiniBrowser wrapper both use
+this value instead of probing Nix; when it is absent, the wrapper keeps the
+Nix-library fallback for the local runtime.
+
 To run the full mode locally:
 
 ```bash
