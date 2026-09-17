@@ -1217,6 +1217,14 @@ export function sourceLibraryReconciliationRequired(
   return false;
 }
 
+export function sourceLibraryReconciliationPreflightEnabled(
+  required: boolean,
+  importsEvidence: boolean,
+  fixtureSteps: string | undefined,
+): boolean {
+  return required && !importsEvidence && fixtureSteps === undefined;
+}
+
 const requiresProductionSourceLibraryReconciliation =
   sourceLibraryReconciliationRequired();
 const importsProductionSourceLibraryReconciliation =
@@ -1225,8 +1233,11 @@ const hasProductionSourceLibraryReconciliation =
   requiresProductionSourceLibraryReconciliation ||
   importsProductionSourceLibraryReconciliation;
 const sourceLibraryPreflightEnabled =
-  requiresProductionSourceLibraryReconciliation &&
-  process.env.RELEASE_CHECK_FIXTURE_STEPS === undefined;
+  sourceLibraryReconciliationPreflightEnabled(
+    requiresProductionSourceLibraryReconciliation,
+    importsProductionSourceLibraryReconciliation,
+    process.env.RELEASE_CHECK_FIXTURE_STEPS,
+  );
 
 const steps: ReleaseStep[] = [
   ...(sourceLibraryPreflightEnabled

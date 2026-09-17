@@ -25,6 +25,7 @@ import {
   SOURCE_LIBRARY_RECONCILIATION_STEP,
   resolveSourceLibraryEvidenceEnvironment,
   resolveSourceLibraryReleaseRevision,
+  sourceLibraryReconciliationPreflightEnabled,
   assertUniqueReleaseSteps,
   PRODUCTION_AUDIT_TIMEOUT_MS,
   PRODUCTION_AUDIT_WARNING_MS,
@@ -453,6 +454,21 @@ async function run(): Promise<void> {
     resolveSourceLibraryEvidenceEnvironment(undefined, false, false),
     "development",
     "a local live verifier must keep its explicit development identity",
+  );
+  assert.equal(
+    sourceLibraryReconciliationPreflightEnabled(true, false, undefined),
+    true,
+    "a live verifier must preflight the database when no retained evidence is imported",
+  );
+  assert.equal(
+    sourceLibraryReconciliationPreflightEnabled(true, true, undefined),
+    false,
+    "imported production evidence must not be blocked by an unrelated local fixture database",
+  );
+  assert.equal(
+    sourceLibraryReconciliationPreflightEnabled(true, false, "[]"),
+    false,
+    "the release resume fixture hook must continue to bypass the database preflight",
   );
   assert.equal(
     resolveSourceLibraryReleaseRevision(

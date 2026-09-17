@@ -32,6 +32,19 @@ export type ReportKeyRotationPreflight = {
   remediation: string | null;
 };
 
+export function buildReportKeyRotationEvidence(
+  result: ReportKeyRotationPreflight,
+  environment: string,
+  revision: string,
+) {
+  return {
+    verifier: "report-key-rotation-preflight",
+    environment,
+    revision,
+    ...result,
+  };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -174,13 +187,21 @@ export async function runReportKeyRotationPreflight(
 
 async function writeEvidence(path: string, result: ReportKeyRotationPreflight): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${JSON.stringify({
-    verifier: "report-key-rotation-preflight",
-    environment: process.env.REPORT_KEY_ROTATION_PREFLIGHT_ENVIRONMENT
-      ?? process.env.NODE_ENV
-      ?? "unknown",
-    ...result,
-  }, null, 2)}\n`, "utf8");
+  await writeFile(
+    path,
+    `${JSON.stringify(
+      buildReportKeyRotationEvidence(
+        result,
+        process.env.REPORT_KEY_ROTATION_PREFLIGHT_ENVIRONMENT
+          ?? process.env.NODE_ENV
+          ?? "unknown",
+        process.env.REPORT_KEY_ROTATION_PREFLIGHT_REVISION?.trim() ?? "unbound",
+      ),
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
 }
 
 export async function main(): Promise<void> {

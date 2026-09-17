@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  buildReportKeyRotationEvidence,
   evaluateReportKeyRotationPreflight,
   parseReportSigningKeyring,
 } from "./report-key-rotation-preflight.mts";
@@ -66,6 +67,17 @@ function run(): void {
   assert.equal(truncated.failure, "audit-truncated");
   assert.equal(truncated.scan.complete, false);
   assert.equal(truncated.canRotate, false);
+
+  assert.deepEqual(
+    buildReportKeyRotationEvidence(healthy, "release", "current-revision"),
+    {
+      verifier: "report-key-rotation-preflight",
+      environment: "release",
+      revision: "current-revision",
+      ...healthy,
+    },
+    "retained key-rotation evidence must carry the release revision",
+  );
 
   const diagnostics = JSON.stringify(missing);
   assert.ok(!diagnostics.includes("c".repeat(32)));
