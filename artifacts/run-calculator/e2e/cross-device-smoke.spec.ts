@@ -57,15 +57,15 @@ async function dismissOnboarding(page: Page): Promise<void> {
   await dismissOnboardingIfPresent(page);
 }
 
-async function seedPendingRun(page: Page): Promise<void> {
-  await page.evaluate(() => {
+async function seedPendingRun(page: Page): Promise<string> {
+  const runId = `smoke-run-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  await page.evaluate((id) => {
     const dayKey = "run-calc-day";
     const day = JSON.parse(localStorage.getItem(dayKey) ?? "{}") as {
       date?: string;
       runs?: Array<Record<string, unknown>>;
       currentIndex?: number;
     };
-    const id = `smoke-run-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const today = new Date().toISOString().slice(0, 10);
     localStorage.setItem(
       dayKey,
@@ -76,11 +76,45 @@ async function seedPendingRun(page: Page): Promise<void> {
         currentIndex: 0,
       }),
     );
-  });
+  }, runId);
   // Home reads the day state during mount, so reload after seeding rather than
   // trying to mutate React state from the fixture.
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  const today = new Date().toISOString().slice(0, 10);
+  const epochResponse = await page.request.get("/api/sync/reset-epoch", {
+    failOnStatusCode: true,
+  });
+  const { epoch = 0 } = (await epochResponse.json()) as { epoch?: number };
+  const seedResponse = await page.request.put(
+    `/api/sync/today?today=${today}&epoch=${epoch}`,
+    {
+      data: {
+        senderId: `cross-device-smoke-${runId}`,
+        payload: {
+          dayState: {
+            date: today,
+            runs: [{ id: runId, brand: "Smoke", flavor: "Lifecycle" }],
+            currentIndex: 0,
+            resetAt: 0,
+          },
+          runValues: {},
+        },
+      },
+      failOnStatusCode: true,
+    },
+  );
+  expect(seedResponse.ok()).toBe(true);
+  // An operational start is evaluated against the canonical daily snapshot.
+  // Confirm that the direct fixture seed reached that snapshot before issuing
+  // the lifecycle command; otherwise a valid start can be evaluated against
+  // an empty server baseline.
+  await expect
+    .poll(async () => (await readCanonicalRun(page, runId))?.id, {
+      timeout: 25_000,
+    })
+    .toBe(runId);
+  return runId;
 }
 
 async function selectedRunId(page: Page): Promise<string> {

@@ -80,7 +80,6 @@
 - [Pool acquisition deadlines](pool-acquisition-deadlines.md) — node-postgres connectionTimeoutMillis cancels saturated checkout waiters; outer Promise.race does not.
 - [Merge target must survive](merge-target-must-survive.md) — pool-name merges must promote a source by rename when the target name has no pool row, or deleting sources destroys the recipe.
 - [Brand-scoped import names](brand-scoped-import-names.md) — cheese/mix import links same-brand or unbranded only, never cross-brand; collisions get a brand prefix; dough/sauce not scoped yet.
-- [Brand rename aliases](brand-rename-aliases.md) — customer renames learn context-free brand spec-import aliases (chain re-point); premix redirect needs the brand-drift fallback, don't restore its early return.
 - [Applicator tolerance columns](applicator-tolerance-columns.md) — ozPerPizza = FIRST numeric cell after the name; trailing 0.2/0.1 cells are tolerances; verify via TARGET WEIGHT sum.
 - [Bare-qualifier pep names](natural-pep-name-poison.md) — pep type = full product name; canonical "Pepperoni Stick - NATURAL"; synced-name poison needs a write-time sync guard, not just a one-time heal.
 - [Spec-wins recipe overwrite](spec-wins-recipe-overwrite.md) — re-import ALWAYS overwrites dough/sauce rows + mix perPizza (no updateExisting opt-in); prune never demotes recipes; cheese per-batch lbs still protected.
@@ -154,6 +153,6 @@
 - [GitHub Actions evidence extraction](github-actions-evidence-extraction.md) — when connector downloads are forbidden, validate and retain exact reports inside a short-lived CI branch.
 - [Declaration compatibility dependencies](declaration-compatibility-dependencies.md) — mirror package-local links, resolve direct imports, then ignore unrelated dependency-library diagnostics.
 - [Secret refresh for shell operations](secret-refresh-shell.md) — newly confirmed workspace secrets may be absent from shell commands until a relevant workflow refreshes the environment.
-- [Release verification](release-check-shard-budget.md) + [revision binding](revision-bound-release-evidence.md) + [full verifier](release-evidence-verifier-mode.md) + [browser contract](release-browser-coverage-contract.md) + [gate dependencies](release-gate-dependencies.md) — release reports must be current, complete, mode-verified, and explicit about blocked dependents.
 - [Production evidence revision binding](production-evidence-revision-binding.md) — operational reports may emit an unknown build revision; release evidence must bind to a controlled deploy revision, not infer it from live data.
 - [CI-pinned evidence refresh](ci-pinned-evidence.md) — retained evaluation manifests must move with the pinned Node runtime and lockfile hash.
+- [Release Node pinning](release-node-pinning.md) — pin the Node executable on PATH, not only the pnpm launcher, or child release scripts report the wrong runtime.

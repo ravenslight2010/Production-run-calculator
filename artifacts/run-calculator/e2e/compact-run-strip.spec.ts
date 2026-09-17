@@ -77,6 +77,9 @@ async function resetTodayRunFixture(page: Page): Promise<void> {
   });
   await page.context().setOffline(true);
   try {
+    const today = new Date().toISOString().slice(0, 10);
+    const runId = `compact-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const seedStamp = Date.now();
     await page.evaluate(() => {
       for (const key of Object.keys(localStorage)) {
         if (key.startsWith("run-calc")) localStorage.removeItem(key);
@@ -84,8 +87,21 @@ async function resetTodayRunFixture(page: Page): Promise<void> {
     });
     await db.connect();
     await db.query(
-      "DELETE FROM daily_sync WHERE date = $1 AND scope = 'live'",
-      [new Date().toISOString().slice(0, 10)],
+      `INSERT INTO daily_sync (date, scope, data, updated_at)
+       VALUES ($1, 'live', $2::jsonb, NOW())
+       ON CONFLICT (date, scope) DO UPDATE
+         SET data = $2::jsonb, updated_at = NOW()`,
+      [today, JSON.stringify({
+        dayState: {
+          runs: [{ id: runId, brand: "", flavor: "", seeded: false, metaUpdatedAt: seedStamp }],
+          currentIndex: 0,
+          currentRunId: runId,
+          date: today,
+          resetAt: 0,
+        },
+        runValues: { [runId]: {} },
+        runValuesUpdatedAt: { [runId]: seedStamp },
+      })],
     );
   } finally {
     await db.end().catch(() => {});
@@ -93,6 +109,24 @@ async function resetTodayRunFixture(page: Page): Promise<void> {
   }
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 20_000 });
+  await page.locator('[title="Sync connected"]').waitFor({
+    state: "visible",
+    timeout: 20_000,
+  });
+}
+
+async function waitForCanonicalStartedRun(page: Page): Promise<void> {
+  const today = new Date().toISOString().slice(0, 10);
+  await expect.poll(async () => {
+    const response = await page.request.get(`/api/sync/today?today=${today}`, {
+      failOnStatusCode: false,
+    });
+    if (!response.ok()) return false;
+    const body = await response.json() as {
+      dayState?: { runs?: Array<{ startedAt?: number; endedAt?: number }> };
+    };
+    return Boolean(body.dayState?.runs?.some((run) => run.startedAt && !run.endedAt));
+  }, { timeout: 20_000 }).toBe(true);
 }
 
 // ── test ─────────────────────────────────────────────────────────────────────
@@ -117,6 +151,7 @@ test.describe("CompactRunStrip — ended-run round-trip", () => {
       // 3. Confirm run is active — STOP RUN button appears
       const stopBtn = page.getByRole("button", { name: /stop.?run/i });
       await stopBtn.waitFor({ state: "visible", timeout: 10_000 });
+      await waitForCanonicalStartedRun(page);
 
       // 4. End the run
       await stopBtn.click();

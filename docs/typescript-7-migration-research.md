@@ -340,15 +340,15 @@ semantic drift.
 | Corpus harness library `--noEmit` | Pass, 0.80s | Pass, 0.16s |
 | Generated API client/Zod forced build | Pass | Pass |
 | Diagnostic count in checks above | 0 | 0 |
-| Declaration file count | 719 | 719 |
-| Declaration files with textual differences | baseline | 204 |
-| Declaration contract comparison | baseline | Pass (195 formatting-only, 9 approved semantic, 0 unexplained) |
+| Declaration file count | 729 | 729 |
+| Declaration files with textual differences | baseline | 205 |
+| Declaration contract comparison | baseline | Pass (196 formatting-only, 9 approved semantic, 0 unexplained) |
 
 The declaration differences break down as:
 
 - 2 `api-client-react` generated declarations,
 - 142 `api-zod` generated declarations, and
-- 60 database schema declarations.
+- 61 database schema declarations.
 
 There were 2,664 removed and 2,664 added diff lines. Inspected database differences were
 double-quote to single-quote changes in string literal types. Generated API declarations
@@ -693,9 +693,9 @@ The lower-level reproduction's current result was:
 | Scripts, API server, run calculator, mockup, AI evaluation, corpus no-emit matrix | Pass | Pass | Full reproduction builds required library references first |
 | Generated API client/Zod forced build | Pass | Pass | No generated-build blocker |
 | Normalized diagnostics | Matching | Matching | No compiler-specific diagnostic drift |
-| Declaration files | 719 | 719 | Includes `.d.ts`, `.d.mts`, and `.d.cts` |
-| Textually changed declarations | — | 204 | 2 API client, 142 API Zod, 60 database |
-| Declaration contract | — | Pass | 195 formatting-only, 9 exact-hash-approved semantic, 0 unexplained |
+| Declaration files | 729 | 729 | Includes `.d.ts`, `.d.mts`, and `.d.cts` |
+| Textually changed declarations | — | 205 | 2 API client, 142 API Zod, 61 database |
+| Declaration contract | — | Pass | 196 formatting-only, 9 exact-hash-approved semantic, 0 unexplained |
 
 The separate `scripts/src/compare-typescript-7.mts` measurement report uses a narrower
 declaration manifest that filters only `.d.ts`. It therefore reports 718 on each side and

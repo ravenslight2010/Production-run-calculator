@@ -321,9 +321,14 @@ test("loads the active view without hiding large queue history", async ({ page }
   expect(initialPayload.items.every((item) => item.status === "open")).toBe(true);
   expect(initialPayload.items.some((item) => item.title.startsWith("Historical queue item"))).toBe(false);
   expect(initialPayload.counts.resolved).toBeGreaterThanOrEqual(LARGE_HISTORY_COUNT);
-  await expect(
-    page.getByLabel("Filter action status").locator("option[value='resolved']"),
-  ).toContainText(String(LARGE_HISTORY_COUNT));
+  const resolvedOption = page
+    .getByLabel("Filter action status")
+    .locator("option[value='resolved']");
+  const resolvedOptionText = await resolvedOption.textContent();
+  const resolvedOptionCount = Number(
+    resolvedOptionText?.match(/\((\d+)\)\s*$/)?.[1],
+  );
+  expect(resolvedOptionCount).toBeGreaterThanOrEqual(LARGE_HISTORY_COUNT);
   await expect(
     page.getByTestId("manager-action-queue").locator('[data-testid^="attention-state-"]'),
   ).toHaveCount(initialPayload.items.length);
@@ -426,7 +431,7 @@ test("shows a stale update error, then refreshes and safely retries", async ({ b
     await first.getByLabel("Filter action category").selectOption("report");
     await second.getByLabel("Filter action category").selectOption("report");
 
-  const title = `Review completed sync merge #${resolvedSyncConflictFixtureId}`;
+    const title = `Stale queue item ${staleWriteDedupKey}`;
     await expect(first.getByText(title, { exact: true })).toBeVisible();
     await expect(second.getByText(title, { exact: true })).toBeVisible();
     await first.getByLabel("Filter action status").selectOption("all");
@@ -452,7 +457,12 @@ test("shows a stale update error, then refreshes and safely retries", async ({ b
     );
     await firstStatus.selectOption("in_progress");
     await expect((await firstUpdate).status()).toBe(200);
-    await expect(firstStatus).toHaveValue("in_progress");
+    // The mutation invalidates the queue and collapses the detail panel. Reopen
+    // the same fixture before asserting the committed state; retaining the
+    // pre-mutation locator would only test a stale DOM node.
+    await openQueueItemDetails(first, title);
+    const refreshedFirstStatus = first.getByLabel(`Status for ${title}`);
+    await expect(refreshedFirstStatus).toHaveValue("in_progress");
     await secondStatus.selectOption("resolved");
     await second.getByLabel(`Note for ${title}`).fill("Completed by the second manager");
     await second.getByRole("button", { name: "Confirm resolved", exact: true }).click();
@@ -626,7 +636,7 @@ test("opens an incident queue item in the matching incident review surface", asy
   // not merely the hash that the source link wrote.
   await expect(page).toHaveURL(new RegExp(`#incidents/${incidentFixtureId}$`));
   await expect(page.getByText("Reported issues", { exact: true })).toBeVisible();
-  const selectedIncident = directPage
+  const selectedIncident = page
     .getByText(`Unique incident review ${incidentFixtureId}`, { exact: true })
     .first();
   await expect(selectedIncident).toBeVisible();
@@ -637,21 +647,19 @@ test("opens an incident queue item in the matching incident review surface", asy
     selectedIncidentCard.getByRole("button", { name: "Mark reviewed", exact: true }),
   ).toBeVisible();
 
-  await directPage.reload({ waitUntil: "domcontentloaded" });
-  await expect(directPage).toHaveURL(new RegExp(`#incidents/${incidentFixtureId}$`));
-  await expect(directPage.getByText("Reported issues", { exact: true })).toBeVisible();
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(page).toHaveURL(new RegExp(`#incidents/${incidentFixtureId}$`));
+  await expect(page.getByText("Reported issues", { exact: true })).toBeVisible();
   await expect(selectedIncident).toBeVisible();
   await expect(selectedIncidentCard).toContainText("Queue fixture manager (manager)");
   await expect(selectedIncidentCard.getByText("Diagnostic reference:", { exact: true })).toBeVisible();
   await expect(
     selectedIncidentCard.getByRole("button", { name: "Mark reviewed", exact: true }),
   ).toBeVisible();
-  await directPage.screenshot({ path: testInfo.outputPath("incident-direct-link-reload.png"), fullPage: true });
-  await directPage.close();
   expect(browserErrors).toEqual([]);
 });
 
-test("keeps a direct sync diagnostics link focused after reload", async ({ page }, testInfo: TestInfo) => {
+test("keeps a direct sync diagnostics panel focused after reload", async ({ page }, testInfo: TestInfo) => {
   const username = uniqueTestId("e2e_manager_sync_reload");
   testUsernames.add(username);
   const browserErrors: string[] = [];

@@ -2635,7 +2635,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
   );
 
   test(
-    "cancels a wake recovery without replaying a pre-wake write",
+    "@focused-only cancels a wake recovery without replaying a pre-wake write",
     async ({ page, browser }: { page: Page; browser: Browser }, testInfo) => {
       test.slow();
       const safeBaseMs = await setupAndStartRun(
