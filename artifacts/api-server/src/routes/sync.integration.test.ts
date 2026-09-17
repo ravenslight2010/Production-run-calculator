@@ -2322,6 +2322,113 @@ describe("/sync — additive run-list protection (whole-run loss guard)", () => 
     expect(replayed.runValues?.removed).toBeUndefined();
   });
 
+  it("converges two same-baseline lifecycle writers without undoing End or resurrecting Remove", async () => {
+    const conflictDate = "2030-06-05";
+    const activeRun = {
+      ...run("active"),
+      metaUpdatedAt: 1_000,
+    };
+    const baseline = {
+      syncVersion: 1,
+      completeness: "complete",
+      dayState: {
+        date: conflictDate,
+        runs: [activeRun],
+        resetAt: 1_000,
+      },
+      runValues: { active: { casesNeeded: 40 } },
+      runValuesUpdatedAt: { active: 1_000 },
+    };
+    const peerPut = (senderId: string, payload: unknown) =>
+      fetch(`${baseUrl}/api/sync/today?today=${conflictDate}`, {
+        method: "PUT",
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({ senderId, payload }),
+      });
+
+    const seeded = await peerPut("lifecycle-seed", baseline);
+    expect(seeded.status).toBe(200);
+    const seededBody = await seeded.json() as { data: typeof baseline };
+    const sharedBaseline = seededBody.data;
+    const addedRun = {
+      ...run("concurrent-added"),
+      metaUpdatedAt: 2_000,
+    };
+
+    const peerAStartAndAdd = {
+      ...sharedBaseline,
+      dayState: {
+        ...sharedBaseline.dayState,
+        runs: [
+          {
+            ...activeRun,
+            startedAt: 2_000,
+            metaUpdatedAt: 2_000,
+          },
+          addedRun,
+        ],
+      },
+      runValues: {
+        ...sharedBaseline.runValues,
+        [addedRun.id]: { casesNeeded: 20 },
+      },
+      runValuesUpdatedAt: {
+        ...sharedBaseline.runValuesUpdatedAt,
+        [addedRun.id]: 2_000,
+      },
+    };
+    const peerBEndAndRemove = {
+      ...sharedBaseline,
+      dayState: {
+        ...sharedBaseline.dayState,
+        runs: [{
+          ...activeRun,
+          startedAt: 2_000,
+          endedAt: 3_000,
+          metaUpdatedAt: 3_000,
+        }],
+      },
+      deletedItems: { runs: [addedRun.id] },
+    };
+
+    const responses = await Promise.all([
+      peerPut("lifecycle-peer-a", peerAStartAndAdd),
+      peerPut("lifecycle-peer-b", peerBEndAndRemove),
+    ]);
+    expect(responses.map((response) => response.status)).toEqual([200, 200]);
+
+    const canonicalResponse = await fetch(`${baseUrl}/api/sync/${conflictDate}`, {
+      headers: authHeaders(),
+    });
+    expect(canonicalResponse.status).toBe(200);
+    const canonical = await canonicalResponse.json() as typeof baseline & {
+      deletedItems?: { runs?: string[] };
+    };
+    expect(canonical.dayState.runs).toEqual([
+      expect.objectContaining({
+        id: activeRun.id,
+        startedAt: 2_000,
+        endedAt: 3_000,
+        metaUpdatedAt: 3_000,
+      }),
+    ]);
+    expect((canonical.runValues as Record<string, unknown>)[addedRun.id]).toBeUndefined();
+    expect(canonical.deletedItems?.runs).toContain(addedRun.id);
+
+    // Both peers adopt the complete canonical snapshot, then publish it back.
+    // The repeat writes prove that neither stale branch can undo End or Remove.
+    const converged = await Promise.all([
+      peerPut("lifecycle-peer-a", canonical),
+      peerPut("lifecycle-peer-b", canonical),
+    ]);
+    expect(converged.map((response) => response.status)).toEqual([200, 200]);
+    const adopted = await Promise.all(converged.map(async (response) =>
+      (await response.json()) as { data: typeof canonical }));
+    expect(adopted[0].data).toEqual(adopted[1].data);
+    expect(adopted[0].data.dayState.runs).toEqual(canonical.dayState.runs);
+    expect((adopted[0].data.runValues as Record<string, unknown>)[addedRun.id]).toBeUndefined();
+  });
+
   it("preserves a later un-delete decision when a stale scheduled replacement omits its stamps", async () => {
     // Delete/un-delete is a factory-data decision, not a disposable schedule
     // field. A stale device can legitimately replace a FUTURE day's run list,
