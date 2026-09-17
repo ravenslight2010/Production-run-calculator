@@ -2486,6 +2486,110 @@ describe("/sync — additive run-list protection (whole-run loss guard)", () => 
     expect(storedAfterReplay.deletedItems?.runs).toContain(addedRun.id);
   });
 
+  it("keeps the newer Resume canonical when same-baseline peers race Pause and Resume in either order", async () => {
+    const scenarios = [
+      { date: "2030-06-06", order: ["pause", "resume"] as const },
+      { date: "2030-06-07", order: ["resume", "pause"] as const },
+    ];
+
+    for (const { date, order } of scenarios) {
+      const activeRun = {
+        ...run(`pause-resume-${date}`),
+        startedAt: 1_000,
+        metaUpdatedAt: 1_000,
+      };
+      const baseline = {
+        syncVersion: 1,
+        completeness: "complete",
+        dayState: {
+          date,
+          runs: [activeRun],
+          resetAt: 1_000,
+        },
+        runValues: { [activeRun.id]: { casesNeeded: 40 } },
+        runValuesUpdatedAt: { [activeRun.id]: 1_000 },
+      };
+      const peerPut = (senderId: string, payload: unknown) =>
+        fetch(`${baseUrl}/api/sync/today?today=${date}`, {
+          method: "PUT",
+          headers: { ...authHeaders(), "content-type": "application/json" },
+          body: JSON.stringify({ senderId, payload }),
+        });
+
+      const seeded = await peerPut(`pause-resume-seed-${date}`, baseline);
+      expect(seeded.status).toBe(200);
+      const sharedBaseline = ((await seeded.json()) as { data: typeof baseline }).data;
+      const pauseId = `pause-${date}`;
+      const paused = {
+        ...sharedBaseline,
+        dayState: {
+          ...sharedBaseline.dayState,
+          runs: [{
+            ...activeRun,
+            pausedAt: 2_000,
+            pausedStoppageId: pauseId,
+            stoppages: [{ id: pauseId, type: "pause", reason: "Break", startedAt: 2_000 }],
+            metaUpdatedAt: 2_000,
+          }],
+        },
+      };
+      const resumed = {
+        ...sharedBaseline,
+        dayState: {
+          ...sharedBaseline.dayState,
+          runs: [{
+            ...activeRun,
+            startedAt: 2_000,
+            stoppages: [{
+              id: pauseId,
+              type: "pause",
+              reason: "Break",
+              startedAt: 2_000,
+              endedAt: 3_000,
+            }],
+            metaUpdatedAt: 3_000,
+          }],
+        },
+      };
+      const payloads = { pause: paused, resume: resumed };
+
+      for (const action of order) {
+        const response = await peerPut(`pause-resume-${action}-${date}`, payloads[action]);
+        expect(response.status).toBe(200);
+      }
+
+      const canonicalResponse = await fetch(`${baseUrl}/api/sync/${date}`, {
+        headers: authHeaders(),
+      });
+      expect(canonicalResponse.status).toBe(200);
+      const canonical = await canonicalResponse.json() as typeof resumed & {
+        dayState: { runs: Array<{ pausedAt?: number; pausedStoppageId?: string }> };
+      };
+      expect(canonical.dayState.runs).toEqual([expect.objectContaining({
+        id: activeRun.id,
+        startedAt: 2_000,
+        metaUpdatedAt: 3_000,
+        stoppages: [expect.objectContaining({
+          id: pauseId,
+          startedAt: 2_000,
+          endedAt: 3_000,
+        })],
+      })]);
+      expect(canonical.dayState.runs[0].pausedAt).toBeUndefined();
+      expect(canonical.dayState.runs[0].pausedStoppageId).toBeUndefined();
+
+      const adopted = await Promise.all([
+        peerPut(`pause-resume-pause-${date}`, canonical),
+        peerPut(`pause-resume-resume-${date}`, canonical),
+      ]);
+      expect(adopted.map((response) => response.status)).toEqual([200, 200]);
+      const peerSnapshots = await Promise.all(adopted.map(async (response) =>
+        ((await response.json()) as { data: typeof canonical }).data));
+      expect(peerSnapshots[0]).toEqual(peerSnapshots[1]);
+      expect(peerSnapshots[0].dayState.runs).toEqual(canonical.dayState.runs);
+    }
+  });
+
   it("preserves a later un-delete decision when a stale scheduled replacement omits its stamps", async () => {
     // Delete/un-delete is a factory-data decision, not a disposable schedule
     // field. A stale device can legitimately replace a FUTURE day's run list,

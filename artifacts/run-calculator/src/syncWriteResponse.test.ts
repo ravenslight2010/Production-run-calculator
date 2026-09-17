@@ -349,6 +349,86 @@ describe("consumeSyncWriteResponse", () => {
     expect(peerC.current).toEqual(canonical);
   });
 
+  it("converges Pause and Resume peers on the newer resumed canonical snapshot", async () => {
+    const pauseId = "pause-1";
+    const baseline = {
+      syncVersion: 1 as const,
+      completeness: "complete" as const,
+      dayState: {
+        date: "2026-09-15",
+        runs: [{
+          id: "active",
+          brand: "Synthetic",
+          flavor: "Active",
+          startedAt: 1_000,
+          metaUpdatedAt: 1_000,
+        }],
+      },
+      runValues: { active: { casesNeeded: 40 } },
+      runValuesUpdatedAt: { active: 1_000 },
+    };
+    const pausedPeer = {
+      current: {
+        ...baseline,
+        dayState: {
+          ...baseline.dayState,
+          runs: [{
+            ...baseline.dayState.runs[0],
+            pausedAt: 2_000,
+            pausedStoppageId: pauseId,
+            stoppages: [{ id: pauseId, type: "pause", startedAt: 2_000 }],
+            metaUpdatedAt: 2_000,
+          }],
+        },
+      } as any,
+    };
+    const resumedPeer = {
+      current: {
+        ...baseline,
+        dayState: {
+          ...baseline.dayState,
+          runs: [{
+            ...baseline.dayState.runs[0],
+            startedAt: 2_000,
+            stoppages: [{
+              id: pauseId,
+              type: "pause",
+              startedAt: 2_000,
+              endedAt: 3_000,
+            }],
+            metaUpdatedAt: 3_000,
+          }],
+        },
+      } as any,
+    };
+    const canonical = resumedPeer.current;
+    const responseBody = { ok: true, partialFallback: true, data: canonical };
+
+    await Promise.all([
+      consumeSyncWriteResponse(
+        new Response(JSON.stringify(responseBody), { status: 200 }),
+        { applyCanonical: (data) => { pausedPeer.current = data; } },
+      ),
+      consumeSyncWriteResponse(
+        new Response(JSON.stringify(responseBody), { status: 200 }),
+        { applyCanonical: (data) => { resumedPeer.current = data; } },
+      ),
+    ]);
+
+    expect(pausedPeer.current).toEqual(resumedPeer.current);
+    expect(pausedPeer.current.dayState.runs[0]).toMatchObject({
+      startedAt: 2_000,
+      metaUpdatedAt: 3_000,
+      stoppages: [expect.objectContaining({
+        id: pauseId,
+        startedAt: 2_000,
+        endedAt: 3_000,
+      })],
+    });
+    expect(pausedPeer.current.dayState.runs[0].pausedAt).toBeUndefined();
+    expect(pausedPeer.current.dayState.runs[0].pausedStoppageId).toBeUndefined();
+  });
+
   it("does not apply data from an unsuccessful response", async () => {
     const applyCanonical = vi.fn();
     const result = await consumeSyncWriteResponse(
