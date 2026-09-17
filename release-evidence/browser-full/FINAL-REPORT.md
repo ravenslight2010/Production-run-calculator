@@ -1,55 +1,59 @@
 # Full Browser Release Run
 
-Generated: 2026-09-17T10:06:44.665Z
-Revision: a28ebd03b0b21e51ba558ce4689b04da7dacddf9
+Generated: 2026-09-17T11:02:40.401Z
+Revision: 35d932f35ef1b97fc92bb66b8c94fc680b455db7
 Result: FAIL
 Expected cases: 159
 Enumerated cases: 159
 Completed cases: 159
-Passed cases: 39
-Skipped cases: 24
-Failed cases: 96
+Passed cases: 30
+Skipped cases: 26
+Failed cases: 103
 Not-run cases: 0
 Coverage: COMPLETE
-Duration: 1751987ms
+Duration: 1206504ms
 
 ## Per-file duration
 
 | File | Cases | Completed | Passed | Skipped | Failed | Not run | Duration |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `artifacts/run-calculator/e2e/accessibility-smoke.spec.ts` | 6 | 6 | 6 | 0 | 0 | 0 | 53611ms |
-| `artifacts/run-calculator/e2e/ai-outage-reviewability.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 8824ms |
-| `artifacts/run-calculator/e2e/compact-run-strip.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 3560ms |
-| `artifacts/run-calculator/e2e/critical-workflows.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 17444ms |
-| `artifacts/run-calculator/e2e/cross-device-smoke.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 12290ms |
-| `artifacts/run-calculator/e2e/department-workflow-navigation.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 26842ms |
-| `artifacts/run-calculator/e2e/die-tunnel-defaults.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 3100ms |
-| `artifacts/run-calculator/e2e/dough-correction-resume.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 1201ms |
-| `artifacts/run-calculator/e2e/freezer-surplus.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 9134ms |
-| `artifacts/run-calculator/e2e/home-navigation-reload.spec.ts` | 5 | 5 | 5 | 0 | 0 | 0 | 13528ms |
-| `artifacts/run-calculator/e2e/live-sauce-dough-phone.spec.ts` | 3 | 3 | 2 | 0 | 1 | 0 | 62745ms |
-| `artifacts/run-calculator/e2e/management-performance.spec.ts` | 4 | 4 | 4 | 0 | 0 | 0 | 14120ms |
-| `artifacts/run-calculator/e2e/manager-action-queue-stale.spec.ts` | 7 | 7 | 1 | 0 | 6 | 0 | 59437ms |
-| `artifacts/run-calculator/e2e/manager-attention.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 10078ms |
-| `artifacts/run-calculator/e2e/mix-plan.spec.ts` | 34 | 34 | 5 | 0 | 29 | 0 | 913938ms |
-| `artifacts/run-calculator/e2e/multi-device-convergence.spec.ts` | 4 | 4 | 1 | 0 | 3 | 0 | 16303ms |
-| `artifacts/run-calculator/e2e/phone-layout.spec.ts` | 21 | 21 | 4 | 16 | 1 | 0 | 11508ms |
-| `artifacts/run-calculator/e2e/photo-count.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 416ms |
-| `artifacts/run-calculator/e2e/photo-spec-import.spec.ts` | 5 | 5 | 0 | 0 | 5 | 0 | 67440ms |
-| `artifacts/run-calculator/e2e/prior-run-drain.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 245ms |
-| `artifacts/run-calculator/e2e/profile-subtab-reload.spec.ts` | 2 | 2 | 0 | 0 | 2 | 0 | 533ms |
-| `artifacts/run-calculator/e2e/pwa-handoff.spec.ts` | 3 | 3 | 1 | 0 | 2 | 0 | 128235ms |
-| `artifacts/run-calculator/e2e/pwa-morning-login.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 206ms |
-| `artifacts/run-calculator/e2e/recipe-refresh-start-freeze.spec.ts` | 13 | 13 | 0 | 2 | 11 | 0 | 2801ms |
-| `artifacts/run-calculator/e2e/run-insights.spec.ts` | 3 | 3 | 0 | 0 | 3 | 0 | 854ms |
-| `artifacts/run-calculator/e2e/screen-off-wake.spec.ts` | 14 | 14 | 0 | 0 | 14 | 0 | 3434ms |
-| `artifacts/run-calculator/e2e/spec-import-unit-provenance.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 239ms |
-| `artifacts/run-calculator/e2e/sync-convergence.spec.ts` | 9 | 9 | 0 | 1 | 8 | 0 | 2452ms |
-| `artifacts/run-calculator/e2e/sync-diagnostics-download.spec.ts` | 3 | 3 | 0 | 0 | 3 | 0 | 762ms |
-| `artifacts/run-calculator/e2e/visual-regression.spec.ts` | 3 | 3 | 0 | 2 | 1 | 0 | 252ms |
+| `artifacts/run-calculator/e2e/accessibility-smoke.spec.ts` | 6 | 6 | 6 | 0 | 0 | 0 | 124141ms |
+| `artifacts/run-calculator/e2e/ai-outage-reviewability.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 10417ms |
+| `artifacts/run-calculator/e2e/compact-run-strip.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 5269ms |
+| `artifacts/run-calculator/e2e/critical-workflows.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 18175ms |
+| `artifacts/run-calculator/e2e/cross-device-smoke.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 12688ms |
+| `artifacts/run-calculator/e2e/department-workflow-navigation.spec.ts` | 2 | 2 | 1 | 0 | 1 | 0 | 14192ms |
+| `artifacts/run-calculator/e2e/die-tunnel-defaults.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 3631ms |
+| `artifacts/run-calculator/e2e/dough-correction-resume.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 10760ms |
+| `artifacts/run-calculator/e2e/freezer-surplus.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 9059ms |
+| `artifacts/run-calculator/e2e/home-navigation-reload.spec.ts` | 5 | 5 | 5 | 0 | 0 | 0 | 13171ms |
+| `artifacts/run-calculator/e2e/live-sauce-dough-phone.spec.ts` | 3 | 3 | 0 | 0 | 3 | 0 | 668ms |
+| `artifacts/run-calculator/e2e/management-performance.spec.ts` | 4 | 4 | 3 | 0 | 1 | 0 | 11368ms |
+| `artifacts/run-calculator/e2e/manager-action-queue-stale.spec.ts` | 7 | 7 | 1 | 0 | 6 | 0 | 58337ms |
+| `artifacts/run-calculator/e2e/manager-attention.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 9364ms |
+| `artifacts/run-calculator/e2e/mix-plan.spec.ts` | 34 | 34 | 3 | 0 | 31 | 0 | 497119ms |
+| `artifacts/run-calculator/e2e/multi-device-convergence.spec.ts` | 4 | 4 | 0 | 0 | 4 | 0 | 3878ms |
+| `artifacts/run-calculator/e2e/phone-layout.spec.ts` | 21 | 21 | 2 | 18 | 1 | 0 | 2226ms |
+| `artifacts/run-calculator/e2e/photo-count.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 255ms |
+| `artifacts/run-calculator/e2e/photo-spec-import.spec.ts` | 5 | 5 | 0 | 0 | 5 | 0 | 6448ms |
+| `artifacts/run-calculator/e2e/prior-run-drain.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 223ms |
+| `artifacts/run-calculator/e2e/profile-subtab-reload.spec.ts` | 2 | 2 | 0 | 0 | 2 | 0 | 471ms |
+| `artifacts/run-calculator/e2e/pwa-handoff.spec.ts` | 3 | 3 | 1 | 0 | 2 | 0 | 128389ms |
+| `artifacts/run-calculator/e2e/pwa-morning-login.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 1194ms |
+| `artifacts/run-calculator/e2e/recipe-refresh-start-freeze.spec.ts` | 13 | 13 | 0 | 2 | 11 | 0 | 2436ms |
+| `artifacts/run-calculator/e2e/run-insights.spec.ts` | 3 | 3 | 0 | 0 | 3 | 0 | 801ms |
+| `artifacts/run-calculator/e2e/screen-off-wake.spec.ts` | 14 | 14 | 0 | 0 | 14 | 0 | 3348ms |
+| `artifacts/run-calculator/e2e/spec-import-unit-provenance.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 1266ms |
+| `artifacts/run-calculator/e2e/sync-convergence.spec.ts` | 9 | 9 | 0 | 1 | 8 | 0 | 10401ms |
+| `artifacts/run-calculator/e2e/sync-diagnostics-download.spec.ts` | 3 | 3 | 0 | 0 | 3 | 0 | 3972ms |
+| `artifacts/run-calculator/e2e/visual-regression.spec.ts` | 3 | 3 | 0 | 2 | 1 | 0 | 1377ms |
 | `artifacts/run-calculator/e2e/warehouse-coverage.spec.ts` | 4 | 4 | 0 | 3 | 1 | 0 | 0ms |
 
 ## Failed and timed-out cases
+
+### `artifacts/run-calculator/e2e/department-workflow-navigation.spec.ts`
+
+- **FAILED** `› chromium › department-workflow-navigation.spec.ts › production, warehouse, QC, and management remain connected after navigation`
 
 ### `artifacts/run-calculator/e2e/dough-correction-resume.spec.ts`
 
@@ -58,6 +62,12 @@ Duration: 1751987ms
 ### `artifacts/run-calculator/e2e/live-sauce-dough-phone.spec.ts`
 
 - **FAILED** `› chromium › live-sauce-dough-phone.spec.ts › Dough and Sauce phone quick checks share line-speed feedback across tab switches`
+- **FAILED** `› chromium › live-sauce-dough-phone.spec.ts › Frontline App tracking survives off-tab work, corrections, pause, and reload`
+- **FAILED** `› chromium › live-sauce-dough-phone.spec.ts › Sauce and Dough live cards work at a phone viewport`
+
+### `artifacts/run-calculator/e2e/management-performance.spec.ts`
+
+- **FAILED** `› chromium › management-performance.spec.ts › keeps role-management controls unavailable to a non-manager on the staff roster`
 
 ### `artifacts/run-calculator/e2e/manager-action-queue-stale.spec.ts`
 
@@ -86,6 +96,7 @@ Duration: 1751987ms
 - **FAILED** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › mix plan collapses to empty when all runs in a shift are ended`
 - **FAILED** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › need 0.00 lbs badge appears on regular mix card when amountAlreadyMade >= totalLbs`
 - **FAILED** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › need X lbs badge on regular mix card shows correct remaining amount`
+- **FAILED** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › prep mix card appears when mix component uses comma-separator qualified name and run uses base name`
 - **FAILED** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › prep mix card appears when mix component uses paren-separator qualified name and run uses base name`
 - **FAILED** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › prep mix card appears when mix component uses slash-separator qualified name and run uses base name`
 - **FAILED** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › prep mix card appears when run ingredient uses comma-separator variant (e.g. 'Herb, Chopped')`
@@ -94,6 +105,7 @@ Duration: 1751987ms
 - **FAILED** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › prep mix card appears when run uses a qualified ingredient name matching the mix component base name`
 - **FAILED** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › prep mix card shows correct per-run breakdown when two brands share an ingredient`
 - **FAILED** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › prep mix card shows correct pull quantities when a run uses its ingredient`
+- **FAILED** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › prep mix with daysEarly=1 appears on the run day and one day early but not two days before`
 - **FAILED** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › Pull For Mix per-component lbs on a regular mix card update live when 'already made' is edited`
 - **FAILED** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › Pull For Prep includes a second run added while Mixes is open`
 - **FAILED** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › Pull For Prep is reduced proportionally when some of the mix is already made`
@@ -107,12 +119,13 @@ Duration: 1751987ms
 ### `artifacts/run-calculator/e2e/multi-device-convergence.spec.ts`
 
 - **FAILED** `› chromium › multi-device-convergence.spec.ts › multi-device convergence › offline peer adopts the active edit after wake and reload`
+- **FAILED** `› chromium › multi-device-convergence.spec.ts › multi-device convergence › offline peer cannot resurrect a deleted run after reconnect and reload`
 - **FAILED** `› chromium › multi-device-convergence.spec.ts › multi-device convergence › reset epoch prevents an offline peer from re-adopting cleared state`
 - **FAILED** `› chromium › multi-device-convergence.spec.ts › multi-device convergence › simultaneous edits converge to one canonical value on both devices`
 
 ### `artifacts/run-calculator/e2e/phone-layout.spec.ts`
 
-- **FAILED** `› chromium › phone-layout.spec.ts › phone layout smoke › tablet manager settings remain reachable at 768x1024`
+- **FAILED** `› chromium › phone-layout.spec.ts › phone layout smoke › tablet calculator stays readable at 768x1024`
 
 ### `artifacts/run-calculator/e2e/photo-count.spec.ts`
 
@@ -124,7 +137,7 @@ Duration: 1751987ms
 - **FAILED** `› chromium › photo-spec-import.spec.ts › applies photographed review edits to the authenticated profile and recipe pools`
 - **FAILED** `› chromium › photo-spec-import.spec.ts › keeps photographed pages editable and canceling review leaves master data unchanged`
 - **FAILED** `› chromium › photo-spec-import.spec.ts › persists every ingredient from a photographed multi-ingredient cheese recipe`
-- **TIMEDOUT** `› chromium › photo-spec-import.spec.ts › persists every ingredient from a photographed multi-ingredient dough recipe`
+- **FAILED** `› chromium › photo-spec-import.spec.ts › persists every ingredient from a photographed multi-ingredient dough recipe`
 
 ### `artifacts/run-calculator/e2e/prior-run-drain.spec.ts`
 
@@ -229,7 +242,9 @@ Duration: 1751987ms
 - **SKIPPED** `› chromium › phone-layout.spec.ts › phone layout smoke › standalone setup editor actions remain reachable at 375x812`
 - **SKIPPED** `› chromium › phone-layout.spec.ts › phone layout smoke › standalone setup editor actions remain reachable at 568x320`
 - **SKIPPED** `› chromium › phone-layout.spec.ts › phone layout smoke › sync details stay fully visible from phone through desktop widths`
+- **SKIPPED** `› chromium › phone-layout.spec.ts › phone layout smoke › tablet calculator stays readable at 1024x768`
 - **SKIPPED** `› chromium › phone-layout.spec.ts › phone layout smoke › tablet manager settings remain reachable at 1024x768`
+- **SKIPPED** `› chromium › phone-layout.spec.ts › phone layout smoke › tablet manager settings remain reachable at 768x1024`
 
 ### `artifacts/run-calculator/e2e/recipe-refresh-start-freeze.spec.ts`
 
