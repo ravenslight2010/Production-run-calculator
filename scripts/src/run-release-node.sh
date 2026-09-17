@@ -52,10 +52,16 @@ fi
 # shell deliberately discovers that binary and prepends its directory to
 # PATH before starting pnpm; wrapping pnpm alone does not control the Node
 # executable used by package scripts.
+fallback_marker_dir=$(mktemp -d "${TMPDIR:-/tmp}/run-release-node.XXXXXX")
+fallback_marker="${fallback_marker_dir}/started"
+trap 'rm -rf "$fallback_marker_dir"' EXIT
+
 # shellcheck disable=SC2016
-exec npx --yes --package="node@${required_node_version}" -- bash -c '
+if RELEASE_NODE_FALLBACK_MARKER="$fallback_marker" \
+  npx --yes --package="node@${required_node_version}" -- bash -c '
   set -euo pipefail
 
+  : >"$RELEASE_NODE_FALLBACK_MARKER"
   node_bin=$(command -v node)
   actual_node_version=$("$node_bin" --version)
   expected_node_version="v${RELEASE_NODE_VERSION}"
@@ -72,4 +78,14 @@ exec npx --yes --package="node@${required_node_version}" -- bash -c '
   "$node_bin" "$RELEASE_REPO_ROOT/scripts/src/check-routine-node-version.mjs"
 
   exec "$@"
-' release-node-runner "$@"
+' release-node-runner "$@"; then
+  exit 0
+else
+  npx_status=$?
+  if [[ ! -e "$fallback_marker" ]]; then
+    printf \
+      'Release runner could not make pinned Node package node@%s available via npx; refusing to run release command.\n' \
+      "$required_node_version" >&2
+  fi
+  exit "$npx_status"
+fi

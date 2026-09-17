@@ -89,6 +89,20 @@ EOF
   chmod +x "$npx_path"
 }
 
+write_resolution_failure_npx() {
+  local npx_path="$1"
+
+  cat >"$npx_path" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+printf 'npx-invoked\n' >>"$RUN_LOG"
+printf 'simulated npx package resolution failure\n' >&2
+exit 1
+EOF
+  chmod +x "$npx_path"
+}
+
 write_pinned_npx() {
   local npx_path="$1"
   local pinned_node_bin="$2"
@@ -235,6 +249,7 @@ test_wrong_fallback_node_version_fails_before_release_commands() {
   }
   assert_contains "$RUN_OUTPUT" \
     "Release runner resolved Node v24.19.0; expected v${REQUIRED_NODE_VERSION}."
+  assert_not_contains "$RUN_OUTPUT" "could not make pinned Node package"
   local events
   events=$(cat "$log_path")
   assert_contains "$events" "npx-invoked"
@@ -243,6 +258,35 @@ test_wrong_fallback_node_version_fails_before_release_commands() {
   echo "PASS: wrong fallback Node version fails before preflight or child execution"
 }
 
+test_npx_package_resolution_failure_fails_before_release_commands() {
+  local workspace
+  local log_path
+  workspace=$(make_workspace package-resolution-failure)
+  log_path="${workspace}/events"
+
+  write_node "${workspace}/bin/node" "24.19.0"
+  write_resolution_failure_npx "${workspace}/bin/npx"
+
+  run_launcher "$workspace" "$log_path" \
+    "${workspace}/bin:${PATH}"
+
+  [[ "$RUN_STATUS" -ne 0 ]] || {
+    printf 'Package resolution failure unexpectedly succeeded. Output:\n%s\n' \
+      "$RUN_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$RUN_OUTPUT" "simulated npx package resolution failure"
+  assert_contains "$RUN_OUTPUT" \
+    "Release runner could not make pinned Node package node@${REQUIRED_NODE_VERSION} available via npx; refusing to run release command."
+  local events
+  events=$(cat "$log_path")
+  assert_contains "$events" "npx-invoked"
+  assert_not_contains "$events" "preflight-node="
+  assert_not_contains "$events" "child-node="
+  echo "PASS: npx package resolution failure reports the fallback boundary before release commands"
+}
+
 test_matching_node_skips_npx
 test_mismatching_node_uses_npx
 test_wrong_fallback_node_version_fails_before_release_commands
+test_npx_package_resolution_failure_fails_before_release_commands
