@@ -73,6 +73,139 @@ describe("server auto-track claim builders", () => {
     expect(buildNetSecondServerClaims(paused, NOW)).toEqual([]);
   });
 
+  it("continues only the case channel while a paused powered tunnel drains", () => {
+    const source = payload({
+      freezerTime: 3,
+      preTunnelMin: 0.5,
+      postTunnelMin: 0.5,
+      skidsCompleted: 1,
+      casesOnCurrentSkid: 0,
+      traysOnLine: 7,
+      batchesReady: 2,
+    });
+    const run = source.dayState.runs[0] as Record<string, unknown>;
+    run.pausedAt = NOW - 20_000;
+    run.metaUpdatedAt = 2;
+    run.stoppages = [{
+      type: "pause",
+      startedAt: run.pausedAt,
+      stopTunnel: false,
+    }];
+    (source as Record<string, unknown>).autoTrackServerState = {
+      wallClockBookkeeping: {
+        [RUN]: {
+          lifecycleGeneration: `${RUN}:1`,
+          caseNextDueMs: NOW - 1,
+          trayConsNextDueMs: NOW - 1,
+          trayProdNextDueMs: NOW - 1,
+          batchConsNextDueMs: NOW - 1,
+          batchProdNextDueMs: NOW - 1,
+          hopperNextDueMs: NOW - 1,
+          lastExpectedCases: 0,
+        },
+      },
+    };
+    (source as Record<string, unknown>).autoTrackCoordination = {
+      runs: {
+        [RUN]: {
+          case: {
+            generation: `${RUN}:1`,
+            sequence: 4,
+            nextDueAt: NOW - 1,
+            acceptedEventId: "browser:case:4",
+          },
+        },
+      },
+    };
+
+    // The lifecycle handoff baselines the pause clock and starts a full cadence.
+    const baseline = buildWallClockServerClaims(source, NOW)!;
+    expect(baseline.claims).toEqual([]);
+    expect(baseline.bookkeeping.caseNextDueMs).toBeGreaterThan(NOW);
+    (source as Record<string, unknown>).autoTrackServerState = {
+      wallClockBookkeeping: { [RUN]: baseline.bookkeeping },
+    };
+
+    const dueAt = baseline.bookkeeping.caseNextDueMs;
+    const due = buildWallClockServerClaims(source, dueAt)!;
+    expect(due.claims.map((claim) => claim.channel)).toEqual(["case"]);
+    expect(due.claims[0]).toMatchObject({
+      generation: `${RUN}:2`,
+      sequence: 1,
+    });
+    expect(due.claims[0]?.mutations).toEqual([
+      { field: "skidsCompleted", from: 1, to: 1 },
+      { field: "casesOnCurrentSkid", from: 0, to: 1 },
+    ]);
+    expect(due.bookkeeping.trayConsNextDueMs).toBe(baseline.bookkeeping.trayConsNextDueMs);
+    expect(due.bookkeeping.batchConsNextDueMs).toBe(baseline.bookkeeping.batchConsNextDueMs);
+    expect(buildNetSecondServerClaims(source, dueAt)).toEqual([]);
+
+    const accepted = applyAutoTrackClaim(source as never, due.claims[0]!, dueAt);
+    expect(accepted.outcome).toBe("accepted");
+    expect((accepted.data.runValues as any)[RUN]).toMatchObject({
+      skidsCompleted: 1,
+      casesOnCurrentSkid: 1,
+    });
+    expect((accepted.data.packagingProgress as any)[RUN]).toMatchObject({
+      skidsCompleted: 1,
+      casesOnCurrentSkid: 1,
+    });
+    const restarted = {
+      ...accepted.data,
+      autoTrackServerState: {
+        wallClockBookkeeping: { [RUN]: due.bookkeeping },
+      },
+    };
+    expect(buildWallClockServerClaims(restarted, dueAt)!.claims).toEqual([]);
+  });
+
+  it("does not replay a paused-drain case across restart or manual suppression", () => {
+    const source = payload({
+      freezerTime: 3,
+      preTunnelMin: 0.5,
+      postTunnelMin: 0.5,
+      casesOnCurrentSkid: 5,
+    });
+    const run = source.dayState.runs[0] as Record<string, unknown>;
+    run.pausedAt = NOW - 20_000;
+    run.metaUpdatedAt = 2;
+    run.stoppages = [{ type: "pause", startedAt: run.pausedAt, stopTunnel: false }];
+    const baseline = buildWallClockServerClaims(source, NOW)!;
+    (source as Record<string, unknown>).autoTrackServerState = {
+      wallClockBookkeeping: { [RUN]: baseline.bookkeeping },
+    };
+    (source as Record<string, unknown>).packagingProgress = {
+      [RUN]: {
+        correctionGeneration: 9,
+        manualOverrideUntil: baseline.bookkeeping.caseNextDueMs + 60_000,
+      },
+    };
+
+    const dueAt = baseline.bookkeeping.caseNextDueMs;
+    const due = buildWallClockServerClaims(source, dueAt)!;
+    expect(due.claims).toHaveLength(1);
+    expect(applyAutoTrackClaim(source as never, due.claims[0]!, dueAt).outcome)
+      .toBe("conflict");
+
+    // Persisted bookkeeping advances despite the rejected claim. A restart at
+    // the same wall time therefore cannot regenerate or double-apply that case.
+    (source as Record<string, unknown>).autoTrackServerState = {
+      wallClockBookkeeping: { [RUN]: due.bookkeeping },
+    };
+    expect(buildWallClockServerClaims(source, dueAt)!.claims).toEqual([]);
+  });
+
+  it("keeps a safely stopped tunnel out of wall-clock claims after its drain clears", () => {
+    const source = payload({ freezerTime: 3, preTunnelMin: 0.5, postTunnelMin: 0.5 });
+    const run = source.dayState.runs[0] as Record<string, unknown>;
+    run.pausedAt = NOW - 3 * 60_000;
+    run.metaUpdatedAt = 2;
+    run.stoppages = [{ type: "pause", startedAt: run.pausedAt, stopTunnel: true }];
+    expect(buildWallClockServerClaims(source, NOW)).toBeNull();
+    expect(buildNetSecondServerClaims(source, NOW)).toEqual([]);
+  });
+
   it("rejects an abandoned old running row even when its date remains selectable", () => {
     const stale = payload();
     (stale.dayState.runs[0] as Record<string, unknown>).startedAt = NOW - 7 * 60 * 60 * 1000;

@@ -3,9 +3,12 @@ import {
   computeAutoTrackElapsedMs,
   computeAutoTrackSchedule,
   computeAutoTrackSuggestion,
+  computeLinePhases,
+  computePackagingDrainElapsedSec,
   computeServerCalc,
   createWallClockBookkeeping,
   getAutoTrackTiming,
+  lineHasPackagingDrain,
   rearmWallClockTimers,
   tickWallClock,
   type AutoTrackSchedule,
@@ -32,6 +35,57 @@ type Payload = {
   doughTimerControls?: Record<string, { generation?: string; pausedAt?: number; resumeAt?: number; updatedAt?: number }>;
 };
 const number = (value: unknown): number => typeof value === "number" && Number.isFinite(value) ? value : 0;
+const DEFAULT_OUTER_STAGE_MIN = 2.5;
+
+function pausedPackagingDrain(
+  run: Record<string, unknown>,
+  values: Record<string, unknown>,
+  nowMs: number,
+): { active: boolean; elapsedSec: number } {
+  const pausedAt = number(run.pausedAt);
+  if (pausedAt <= 0) return { active: false, elapsedSec: 0 };
+  const stoppages = Array.isArray(run.stoppages)
+    ? run.stoppages as Array<Record<string, unknown>>
+    : [];
+  const openPause = stoppages
+    .filter((entry) => entry.type === "pause" && number(entry.endedAt) <= 0)
+    .reduce<Record<string, unknown> | undefined>(
+      (latest, entry) => !latest || number(entry.startedAt) > number(latest.startedAt)
+        ? entry
+        : latest,
+      undefined,
+    );
+  // Legacy/missing pause policy remains fail-safe: the tunnel is stopped.
+  const pauseStopsTunnel = openPause?.stopTunnel !== false;
+  const elapsedBatchSec = computeAutoTrackElapsedMs({
+    startedAt: number(run.startedAt),
+    pausedAt,
+    nowMs,
+    stoppages: stoppages as never,
+  }) / 1000;
+  const args = {
+    elapsedBatchSec,
+    pausedAt,
+    lastResumeWallMs: 0,
+    lastPauseStartWallMs: 0,
+    pauseStopsTunnel,
+    lastPauseStopsTunnel: true,
+    runStatus: "paused",
+    preTunnelMin: number(values.preTunnelMin) > 0
+      ? number(values.preTunnelMin)
+      : DEFAULT_OUTER_STAGE_MIN,
+    postTunnelMin: number(values.postTunnelMin) > 0
+      ? number(values.postTunnelMin)
+      : DEFAULT_OUTER_STAGE_MIN,
+    freezerTime: number(values.freezerTime),
+    nowMs,
+  } as const;
+  return {
+    active: lineHasPackagingDrain(computeLinePhases(args)),
+    elapsedSec: computePackagingDrainElapsedSec(args),
+  };
+}
+
 function buildNetMutations(prefix: string, madeFrom: number, madeTo: number, anchorFrom: number, anchorTo: number, correctionGeneration: number): AutoTrackMutation[] {
   return [
     { field: (prefix === "sauceBarrel" ? "sauceBarrelsMade" : `${prefix}esMade`) as AutoTrackMutation["field"], from: madeFrom, to: madeTo },
@@ -43,7 +97,7 @@ function buildNetMutations(prefix: string, madeFrom: number, madeTo: number, anc
 function schedule(
   payload: Payload,
   nowMs: number,
-  options: { allowEndedDrain?: boolean } = {},
+  options: { allowEndedDrain?: boolean; allowPausedPackagingDrain?: boolean } = {},
 ): { schedule: AutoTrackSchedule; values: Record<string, unknown> } | null {
   const result = computeServerCalc(payload as never, [], nowMs);
   const run = payload.dayState?.runs?.[payload.dayState.currentIndex ?? 0];
@@ -60,10 +114,12 @@ function schedule(
     && endedAt > 0
     && number(values.freezerTime) > 0
     && nowMs < endedAt + number(values.freezerTime) * 60_000;
+  const pausedDrainActive = options.allowPausedPackagingDrain === true
+    && pausedPackagingDrain(run, values, nowMs).active;
   const lifecycleStamp = Math.max(startedAt, number(run.metaUpdatedAt));
   if (
     startedAt <= 0
-    || number(run.pausedAt) > 0
+    || (number(run.pausedAt) > 0 && !pausedDrainActive)
     || (endedAt > 0 && !endedDrainActive)
     || lifecycleStamp <= 0
     || nowMs - lifecycleStamp > WALL_CLOCK_REPLAY_CAP_MS
@@ -125,15 +181,24 @@ export type ServerWallClockBookkeeping = WallClockBookkeeping & {
 };
 export function buildWallClockServerClaims(raw: unknown, nowMs = Date.now()): { runId: string; bookkeeping: ServerWallClockBookkeeping; claims: AutoTrackClaim[] } | null {
   const payload = (raw && typeof raw === "object" ? raw : {}) as Payload;
-  const built = schedule(payload, nowMs, { allowEndedDrain: true });
+  const built = schedule(payload, nowMs, {
+    allowEndedDrain: true,
+    allowPausedPackagingDrain: true,
+  });
   const run = payload.dayState?.runs?.[payload.dayState?.currentIndex ?? 0];
-  if (!built || !run || number(run.startedAt) <= 0 || number(run.pausedAt) > 0) return null;
+  if (!built || !run || number(run.startedAt) <= 0) return null;
   const { schedule: plan, values } = built;
   const endedAt = number(run.endedAt);
   const drainActive = endedAt > 0
     && number(values.freezerTime) > 0
     && nowMs < endedAt + number(values.freezerTime) * 60_000;
-  const runStatus = drainActive ? "ended" : "running";
+  const pausedDrain = pausedPackagingDrain(run, values, nowMs);
+  const packagingDrainActive = pausedDrain.active;
+  const runStatus = drainActive
+    ? "ended"
+    : packagingDrainActive
+      ? "paused"
+      : "running";
   const old = payload.autoTrackServerState?.wallClockBookkeeping?.[plan.runId] ?? {};
   const calc = computeServerCalc(payload as never, [], nowMs)!.calc;
   const timing = getAutoTrackTiming(calc.ppm, number(values.pizzasPerCase), calc.perTray, calc.perBatch, {
@@ -189,10 +254,21 @@ export function buildWallClockServerClaims(raw: unknown, nowMs = Date.now()): { 
     stoppages: Array.isArray(run.stoppages) ? run.stoppages as never : undefined,
   }) / 1000;
   const suggestion = computeAutoTrackSuggestion({
-    runStatus, drainActive, packagingDrainActive: false, packagingDrainElapsedSec: 0,
+    runStatus, drainActive, packagingDrainActive,
+    packagingDrainElapsedSec: pausedDrain.elapsedSec,
     ppm: calc.ppm, casesPerSkid: number(values.casesPerSkid), pizzasPerCase: number(values.pizzasPerCase),
     casesNeeded: number(values.casesNeeded), freezerTime: number(values.freezerTime), elapsedBatchSec: elapsedSec,
   });
+  if (
+    hasPersistedBookkeeping
+    && old.lifecycleGeneration !== plan.generation
+    && packagingDrainActive
+  ) {
+    // A pause starts a distinct, zero-based physical output clock. Baseline it
+    // at the transition and wait one full case cadence so pre-pause time cannot
+    // be replayed as paused Packaging output after reconnect or restart.
+    bookkeeping.lastExpectedCases = suggestion?.expectedCasesRaw ?? -1;
+  }
   // Pre-engine records persisted only the six due refs. When adopting one of
   // those overdue arms, preserve its already-authorized single case beat while
   // establishing the engine's incremental baseline; subsequent beats use the
@@ -232,7 +308,7 @@ export function buildWallClockServerClaims(raw: unknown, nowMs = Date.now()): { 
     bookkeeping = rearmWallClockTimers(bookkeeping, nowMs, timing);
   }
   const tick = tickWallClock({
-    bookkeeping, nowMs, timing, runStatus, drainActive, packagingDrainActive: false,
+    bookkeeping, nowMs, timing, runStatus, drainActive, packagingDrainActive,
     packagingAutoTrackActive: true, caseSuppressed: false, doughSuppressed: false,
     calc: { ppm: calc.ppm, perTray: calc.perTray, perBatch: calc.perBatch, pressDone: calc.pressDone, casesInFreezer: calc.casesInFreezer, traysNeeded: calc.traysNeeded, batchesNeeded: calc.batchesNeeded },
     v: { pizzasPerCase: number(values.pizzasPerCase), casesPerSkid: number(values.casesPerSkid), casesNeeded: number(values.casesNeeded), traysOnLine: number(values.traysOnLine), batchesReady: number(values.batchesReady) },
@@ -252,7 +328,7 @@ export function buildWallClockServerClaims(raw: unknown, nowMs = Date.now()): { 
         // through the normal row lock regardless of whether the browser or
         // server owned the running generation. Competing browser/server claims
         // for the ended generation cannot both be accepted.
-        return drainActive && event.channel === "case";
+        return (drainActive || packagingDrainActive) && event.channel === "case";
       }
       const ownedSequence = number(serverSequences[event.channel]);
       return ownedSequence === 0 || ownedSequence === number(state.sequence);
