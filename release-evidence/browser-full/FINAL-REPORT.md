@@ -1,55 +1,74 @@
 # Full Browser Release Run
 
-Generated: 2026-09-17T18:46:50.051Z
-Revision: b711b440303a8418ded212425036933b8a838359
+Generated: 2026-09-17T20:01:30.781Z
+Revision: ad305d6d0aabeb4d0b0221fbe0c5e07ff229069e
 Result: FAIL
 Expected cases: 159
 Enumerated cases: 159
 Completed cases: 159
-Passed cases: 13
+Passed cases: 5
 Skipped cases: 26
-Failed cases: 120
+Failed cases: 128
 Not-run cases: 0
 Coverage: COMPLETE
-Duration: 716237ms
+Duration: 762510ms
 
 ## Per-file duration
 
 | File | Cases | Completed | Passed | Skipped | Failed | Not run | Duration |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `artifacts/run-calculator/e2e/accessibility-smoke.spec.ts` | 6 | 6 | 6 | 0 | 0 | 0 | 81359ms |
-| `artifacts/run-calculator/e2e/ai-outage-reviewability.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 10903ms |
-| `artifacts/run-calculator/e2e/compact-run-strip.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 5224ms |
-| `artifacts/run-calculator/e2e/critical-workflows.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 23586ms |
-| `artifacts/run-calculator/e2e/cross-device-smoke.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 16142ms |
-| `artifacts/run-calculator/e2e/department-workflow-navigation.spec.ts` | 2 | 2 | 0 | 0 | 2 | 0 | 3203ms |
-| `artifacts/run-calculator/e2e/die-tunnel-defaults.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 1986ms |
-| `artifacts/run-calculator/e2e/dough-correction-resume.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 1473ms |
-| `artifacts/run-calculator/e2e/freezer-surplus.spec.ts` | 2 | 2 | 0 | 0 | 2 | 0 | 633ms |
-| `artifacts/run-calculator/e2e/home-navigation-reload.spec.ts` | 5 | 5 | 0 | 0 | 5 | 0 | 8189ms |
-| `artifacts/run-calculator/e2e/live-sauce-dough-phone.spec.ts` | 3 | 3 | 0 | 0 | 3 | 0 | 725ms |
-| `artifacts/run-calculator/e2e/management-performance.spec.ts` | 4 | 4 | 0 | 0 | 4 | 0 | 11074ms |
-| `artifacts/run-calculator/e2e/manager-action-queue-stale.spec.ts` | 7 | 7 | 0 | 0 | 7 | 0 | 10772ms |
-| `artifacts/run-calculator/e2e/manager-attention.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 353ms |
-| `artifacts/run-calculator/e2e/mix-plan.spec.ts` | 34 | 34 | 0 | 0 | 34 | 0 | 56740ms |
-| `artifacts/run-calculator/e2e/multi-device-convergence.spec.ts` | 4 | 4 | 0 | 0 | 4 | 0 | 4537ms |
-| `artifacts/run-calculator/e2e/phone-layout.spec.ts` | 21 | 21 | 2 | 18 | 1 | 0 | 2618ms |
-| `artifacts/run-calculator/e2e/photo-count.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 328ms |
-| `artifacts/run-calculator/e2e/photo-spec-import.spec.ts` | 5 | 5 | 0 | 0 | 5 | 0 | 7395ms |
-| `artifacts/run-calculator/e2e/prior-run-drain.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 245ms |
-| `artifacts/run-calculator/e2e/profile-subtab-reload.spec.ts` | 2 | 2 | 0 | 0 | 2 | 0 | 607ms |
-| `artifacts/run-calculator/e2e/pwa-handoff.spec.ts` | 3 | 3 | 1 | 0 | 2 | 0 | 128983ms |
-| `artifacts/run-calculator/e2e/pwa-morning-login.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 1291ms |
-| `artifacts/run-calculator/e2e/recipe-refresh-start-freeze.spec.ts` | 13 | 13 | 0 | 2 | 11 | 0 | 2919ms |
-| `artifacts/run-calculator/e2e/run-insights.spec.ts` | 3 | 3 | 0 | 0 | 3 | 0 | 726ms |
-| `artifacts/run-calculator/e2e/screen-off-wake.spec.ts` | 14 | 14 | 0 | 0 | 14 | 0 | 3601ms |
-| `artifacts/run-calculator/e2e/spec-import-unit-provenance.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 1466ms |
-| `artifacts/run-calculator/e2e/sync-convergence.spec.ts` | 9 | 9 | 0 | 1 | 8 | 0 | 11444ms |
-| `artifacts/run-calculator/e2e/sync-diagnostics-download.spec.ts` | 3 | 3 | 0 | 0 | 3 | 0 | 4375ms |
+| `artifacts/run-calculator/e2e/accessibility-smoke.spec.ts` | 6 | 6 | 3 | 0 | 3 | 0 | 89014ms |
+| `artifacts/run-calculator/e2e/ai-outage-reviewability.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 2397ms |
+| `artifacts/run-calculator/e2e/compact-run-strip.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 2379ms |
+| `artifacts/run-calculator/e2e/critical-workflows.spec.ts` | 2 | 2 | 0 | 0 | 2 | 0 | 4594ms |
+| `artifacts/run-calculator/e2e/cross-device-smoke.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 2347ms |
+| `artifacts/run-calculator/e2e/department-workflow-navigation.spec.ts` | 2 | 2 | 0 | 0 | 2 | 0 | 3884ms |
+| `artifacts/run-calculator/e2e/die-tunnel-defaults.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 1757ms |
+| `artifacts/run-calculator/e2e/dough-correction-resume.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 1869ms |
+| `artifacts/run-calculator/e2e/freezer-surplus.spec.ts` | 2 | 2 | 0 | 0 | 2 | 0 | 643ms |
+| `artifacts/run-calculator/e2e/home-navigation-reload.spec.ts` | 5 | 5 | 0 | 0 | 5 | 0 | 7994ms |
+| `artifacts/run-calculator/e2e/live-sauce-dough-phone.spec.ts` | 3 | 3 | 0 | 0 | 3 | 0 | 1017ms |
+| `artifacts/run-calculator/e2e/management-performance.spec.ts` | 4 | 4 | 0 | 0 | 4 | 0 | 10397ms |
+| `artifacts/run-calculator/e2e/manager-action-queue-stale.spec.ts` | 7 | 7 | 0 | 0 | 7 | 0 | 10339ms |
+| `artifacts/run-calculator/e2e/manager-attention.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 323ms |
+| `artifacts/run-calculator/e2e/mix-plan.spec.ts` | 34 | 34 | 0 | 0 | 34 | 0 | 52186ms |
+| `artifacts/run-calculator/e2e/multi-device-convergence.spec.ts` | 4 | 4 | 0 | 0 | 4 | 0 | 4555ms |
+| `artifacts/run-calculator/e2e/phone-layout.spec.ts` | 21 | 21 | 2 | 18 | 1 | 0 | 2696ms |
+| `artifacts/run-calculator/e2e/photo-count.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 333ms |
+| `artifacts/run-calculator/e2e/photo-spec-import.spec.ts` | 5 | 5 | 0 | 0 | 5 | 0 | 7503ms |
+| `artifacts/run-calculator/e2e/prior-run-drain.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 262ms |
+| `artifacts/run-calculator/e2e/profile-subtab-reload.spec.ts` | 2 | 2 | 0 | 0 | 2 | 0 | 581ms |
+| `artifacts/run-calculator/e2e/pwa-handoff.spec.ts` | 3 | 3 | 0 | 0 | 3 | 0 | 131471ms |
+| `artifacts/run-calculator/e2e/pwa-morning-login.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 1487ms |
+| `artifacts/run-calculator/e2e/recipe-refresh-start-freeze.spec.ts` | 13 | 13 | 0 | 2 | 11 | 0 | 3250ms |
+| `artifacts/run-calculator/e2e/run-insights.spec.ts` | 3 | 3 | 0 | 0 | 3 | 0 | 783ms |
+| `artifacts/run-calculator/e2e/screen-off-wake.spec.ts` | 14 | 14 | 0 | 0 | 14 | 0 | 3967ms |
+| `artifacts/run-calculator/e2e/spec-import-unit-provenance.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 1519ms |
+| `artifacts/run-calculator/e2e/sync-convergence.spec.ts` | 9 | 9 | 0 | 1 | 8 | 0 | 12547ms |
+| `artifacts/run-calculator/e2e/sync-diagnostics-download.spec.ts` | 3 | 3 | 0 | 0 | 3 | 0 | 4535ms |
 | `artifacts/run-calculator/e2e/visual-regression.spec.ts` | 3 | 3 | 0 | 2 | 1 | 0 | 1547ms |
 | `artifacts/run-calculator/e2e/warehouse-coverage.spec.ts` | 4 | 4 | 0 | 3 | 1 | 0 | 0ms |
 
 ## Failed and timed-out cases
+
+### `artifacts/run-calculator/e2e/accessibility-smoke.spec.ts`
+
+- **TIMEDOUT** `› chromium › accessibility-smoke.spec.ts › accessibility smoke › authenticated staff workflows expose accessible controls and dialogs`
+- **FAILED** `› chromium › accessibility-smoke.spec.ts › accessibility smoke › schedule calendar is labeled, keyboard operable, and free of obvious violations`
+- **FAILED** `› chromium › accessibility-smoke.spec.ts › accessibility smoke › supervisors can review field checks without physical-device attestation controls`
+
+### `artifacts/run-calculator/e2e/ai-outage-reviewability.spec.ts`
+
+- **FAILED** `› chromium › ai-outage-reviewability.spec.ts › keeps deterministic management workflows reviewable when enrichment is unavailable`
+
+### `artifacts/run-calculator/e2e/compact-run-strip.spec.ts`
+
+- **FAILED** `› chromium › compact-run-strip.spec.ts › CompactRunStrip — ended-run round-trip › strip stays visible with Ended status after Run-tab round-trip, no pause/resume buttons`
+
+### `artifacts/run-calculator/e2e/critical-workflows.spec.ts`
+
+- **FAILED** `› chromium › critical-workflows.spec.ts › completes manager-approved password recovery and fences the old session`
+- **FAILED** `› chromium › critical-workflows.spec.ts › repairs scoped Data Health findings, preserves started runs, and guards undo`
 
 ### `artifacts/run-calculator/e2e/cross-device-smoke.spec.ts`
 
@@ -181,6 +200,7 @@ Duration: 716237ms
 
 - **TIMEDOUT** `› chromium › pwa-handoff.spec.ts › PWA update handoff › auto-reloads when Home was already safe before update discovery`
 - **TIMEDOUT** `› chromium › pwa-handoff.spec.ts › PWA update handoff › preserves unsafe work, then auto-reloads after safe inactivity`
+- **FAILED** `› chromium › pwa-handoff.spec.ts › PWA update handoff › recovers an old HTML-served Home chunk onto the current build once`
 
 ### `artifacts/run-calculator/e2e/pwa-morning-login.spec.ts`
 
