@@ -29,6 +29,25 @@ fi
 export RELEASE_NODE_VERSION="$required_node_version"
 export RELEASE_REPO_ROOT="$REPO_ROOT"
 
+# If the runner already has the selected Node version, use it directly. This
+# avoids an unnecessary npx package download while still putting the selected
+# executable first on PATH for pnpm and its child scripts.
+node_bin=""
+if node_bin=$(command -v node 2>/dev/null); then
+  actual_node_version=$("$node_bin" --version 2>/dev/null || true)
+  expected_node_version="v${required_node_version}"
+  if [[ "$actual_node_version" == "$expected_node_version" ]]; then
+    node_bin_dir=$(dirname "$node_bin")
+    export PATH="${node_bin_dir}:$PATH"
+
+    # Check the selected executable against the retained benchmark manifest,
+    # .nvmrc, and explicit CI pins before any release child can write evidence.
+    "$node_bin" "$RELEASE_REPO_ROOT/scripts/src/check-routine-node-version.mjs"
+
+    exec "$@"
+  fi
+fi
+
 # npx makes the requested Node package available as a binary. The nested
 # shell deliberately discovers that binary and prepends its directory to
 # PATH before starting pnpm; wrapping pnpm alone does not control the Node
