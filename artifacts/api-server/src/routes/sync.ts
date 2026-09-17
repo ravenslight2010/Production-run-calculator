@@ -2044,7 +2044,7 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
         const live = fresh?.data
           ? computeServerLiveState(fresh.data, heartbeatServerTime, fresh.canonicalRevision ?? 0)
           : null;
-        if (live) {
+        if (live?.autoTrackSchedule) {
           res.write(`data: ${JSON.stringify({
             ...live,
             canonicalRevision: fresh?.canonicalRevision ?? 0,

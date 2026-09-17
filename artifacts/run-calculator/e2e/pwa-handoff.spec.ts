@@ -350,9 +350,12 @@ test.describe("PWA update handoff", () => {
       await expect
         .poll(() =>
           page.evaluate(async () => {
-        const registration = await navigator.serviceWorker.ready;
-        return registration.active?.state === "activated";
-      });
+            const registration = await navigator.serviceWorker.ready;
+            return registration.active?.state === "activated";
+          }),
+          { timeout: 30_000 },
+        )
+        .toBe(true);
       await page.goto("about:blank");
       await page.goto(server.baseUrl, { waitUntil: "networkidle" });
       await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "old");

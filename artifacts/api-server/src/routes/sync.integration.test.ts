@@ -3125,7 +3125,7 @@ describe("GET /sync/events — auto-track schedule heartbeat (step 6c)", () => {
     frontlineRecipe: [],
   };
 
-  it("pushes one schedule frame, then comment-only heartbeats while unchanged", async () => {
+  it("refreshes the schedule lease on every heartbeat while live", async () => {
     const date = "2030-04-03";
     process.env.AUTO_TRACK_HEARTBEAT_MS = "100";
     try {
@@ -3165,7 +3165,7 @@ describe("GET /sync/events — auto-track schedule heartbeat (step 6c)", () => {
       let heartbeatRunId: string | undefined;
       const deadline = Date.now() + 5_000;
       try {
-        while (Date.now() < deadline && (scheduleFrames < 1 || commentBeats < 2)) {
+        while (Date.now() < deadline && scheduleFrames < 3) {
           const { value, done } = await reader.read();
           if (done) break;
           buf += decoder.decode(value, { stream: true });
@@ -3189,8 +3189,8 @@ describe("GET /sync/events — auto-track schedule heartbeat (step 6c)", () => {
         await reader.cancel().catch(() => {});
         ctrl.abort();
       }
-      expect(scheduleFrames).toBe(1);
-      expect(commentBeats).toBeGreaterThanOrEqual(2);
+      expect(scheduleFrames).toBeGreaterThanOrEqual(3);
+      expect(commentBeats).toBe(0);
       expect(heartbeatRunId).toBe("heartbeat-run");
     } finally {
       delete process.env.AUTO_TRACK_HEARTBEAT_MS;

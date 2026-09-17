@@ -4,6 +4,14 @@ import { CRB_INGREDIENT_HEAL_CONTRACT } from "./crbIngredientHeal";
 import { liveProfileRecipeLinkRepairContract } from "./repairs/liveProfileRecipeLinkRepair";
 import { CRB_INGREDIENT_REPAIR_ID } from "./repairs/crbIngredientRepair";
 import { LEGACY_REPAIR_SOURCE_CONTRACTS } from "./repairs/legacyRepairSourceContracts";
+import {
+  SOURCE_LIBRARY_RECONCILIATION_FROM_DATE,
+  SOURCE_LIBRARY_RECONCILIATION_HEAL_ID,
+  SOURCE_LIBRARY_RECONCILIATION_PLAN_SHA256,
+  SOURCE_LIBRARY_RECONCILIATION_REPORT_SHA256,
+  SOURCE_LIBRARY_RECONCILIATION_RERUN_HEAL_ID,
+} from "./sourceLibraryReconciliationHeal";
+import { speedAdjustmentBaselineRepairContract } from "./repairs/speedAdjustmentBaselineRepair";
 
 export type RepairFingerprintSource = Readonly<Record<string, unknown>>;
 
@@ -13,6 +21,14 @@ Readonly<Record<string, RepairFingerprintSource>> = Object.freeze({
   ...LEGACY_REPAIR_SOURCE_CONTRACTS,
   [liveProfileRecipeLinkRepairContract.id]: liveProfileRecipeLinkRepairContract,
   [CRB_INGREDIENT_REPAIR_ID]: CRB_INGREDIENT_HEAL_CONTRACT,
+  [SOURCE_LIBRARY_RECONCILIATION_RERUN_HEAL_ID]: Object.freeze({
+    originalHealId: SOURCE_LIBRARY_RECONCILIATION_HEAL_ID,
+    rerunHealId: SOURCE_LIBRARY_RECONCILIATION_RERUN_HEAL_ID,
+    planSha256: SOURCE_LIBRARY_RECONCILIATION_PLAN_SHA256,
+    reportSha256: SOURCE_LIBRARY_RECONCILIATION_REPORT_SHA256,
+    fromDate: SOURCE_LIBRARY_RECONCILIATION_FROM_DATE,
+  }),
+  [speedAdjustmentBaselineRepairContract.id]: speedAdjustmentBaselineRepairContract,
 });
 
 type FingerprintedRepairDefinition = Omit<RepairDefinition, "execute" | "validateResult">;
