@@ -6,7 +6,7 @@ Master list of improvement ideas for the Production Run Calculator. Each idea in
 
 ## 1. Mix Plan & Prep Mix Inventory
 
-**Status**: Planning  
+**Status**: Done (mix surplus ledger shipped; daily deduction already existed)  
 **Priority**: High — same root issue as overproduction inventory gap
 
 ### Summary
@@ -405,29 +405,67 @@ Reduce battery drain and improve performance, especially on mobile devices.
 
 ## 13. Server-Side Migration
 
-**Status**: In progress (Replit working on it)  
+**Status**: Done (slices 1–7 merged; Replit saw the same goal)  
 **Priority**: High
 
 ### Summary
-Move more logic from client to server to improve consistency, reduce battery, and enable cross-device sync.
+Server owns every live, time-varying operational surface the server can compute, streamed over the sync SSE:
+calc → per-run consumption `runLines` + `summaryStats` → batch/finish `timers` → 3-stage `linePhases` → warehouse
+coverage consumption. The client adopts the server projection while confirmed/fresh, and runs the same shared math
+(`@workspace/live-calc`) locally only when offline, stale, or when the server has no counterpart for the surface
+(unsaved form edits, history, prior-run drain). Cross-device consistency is guaranteed by construction; no surface
+dual-owns state.
 
-### What's Moved So Far
-- Auto-track schedule computation (server-owned)
-- Wall-clock bootstrap (server-side timing)
-- Client skip-latch (reduces redundant network ticks)
+### Server-Owned Surfaces (adopted when online)
+- **Live calc** (slice 1) — server 5s calc tick on the sync SSE for any active run; client adopts inside a 10s
+  freshness window; local `computeCalc` fallback on stale/offline/run-switch.
+- **Setup-form calc** (slice 2) — tick emits `setupTick: true` frames for pending selected runs so the Live tab has a
+  fresh server calc on switch, covering the "form calculations (yield, batch needs, dough supply)" item.
+- **Per-run consumption + summary** (slice 3) — server streams `runLines` (ingredient + packaging consumption) and
+  `summaryStats` for every run in the SSE frame; client stores lines in `serverRunLinesRef` and adopts current-run
+  summaryStats (covers the "ingredient math" item).
+- **Batch/finish timing** (slice 4) — `OperationalProjection.timers` carries `currentBatchNum`, `secUntilNextBatch`,
+  `totalBatchesNeeded` computed from the server clock (covers the "run timing calculations" item).
+- **Line phases** (slice 5) — server computes the 3-stage press/tunnel/packaging model in the projection; client
+  adopts with countdown extrapolation and exact-local fallback.
+- **Phase display strips** (slice 6) — the ended-run badge, 3-phase status strip, and line-stage section read
+  `useLiveRun().linePhases`; the client is a thin display for the phase surface.
+- **Warehouse coverage** (slice 7) — Inventory coverage consumes server-streamed per-run `runLines` via
+  `computeWarehouseCoverage(..., serverConsumptionLinesByRunId?)`, replacing local lines when the run id matches.
 
-### What's Left
-- Move form calculations to server (yield, batch needs, dough supply)
-- Move ingredient math to server
-- Move run timing calculations to server
-- Client becomes thin display layer + input collector
+### Intentionally Local Paths (audited, keep client-side)
+These are NOT migration gaps — each has no server counterpart or must reflect unsaved client state:
+- **Setup-form need rows / validation** (`buildNeedRows`, packaging need rows, `productionNeedsAvailable` gate) —
+  write-decisions over unsaved form edits; server calc only covers confirmed/current runs.
+- **Auto-track propose/claim** (`useAutoTrack` suggestion + case-tick write, prior-run freezer-drain advance) —
+  client proposes/claims writes; the server response is canonical (sync-invariant-check §8). The draining run is
+  ended and has no server projection.
+- **Exports** (CSV run rows, shop-list text) — deterministic serialization of saved day-state.
+- **History / AI analysis inputs** (`buildShapedRun` → aiSummary/aiSchedule/aiAnomaly; `statFromRun` → runInsights;
+  historical PPM heuristic) — offline analysis of historical/planned runs the server does not stream calcs for.
+- **Day totals table** — already `runSummaryStatsById.get(run.id) ?? computeSummaryStats(...)` (server-adopted with
+  local fallback).
+
+### End State
+"Client becomes thin display layer + input collector": achieved for every live surface. Local math is the exact same
+shared `@workspace/live-calc`/`inventory-math` code the server runs, so offline mode is pixel-identical, and online
+mode converges to the server in ≤1 tick. Remaining server-migration appetite (if any) is capped by surfaces the
+server genuinely cannot stream (unsaved edits, history, ended-run drain).
+
+### Specs / Plans
+- `docs/superpowers/specs/2026-09-13-server-live-calc-stream-design.md` / `...-slice2-design.md` ... `...-slice6-design.md`
+- `docs/superpowers/specs/2026-09-14-server-live-calc-stream-slice4-design.md` ... `...-slice6-design.md`
+- `docs/superpowers/specs/2026-09-14-server-warehouse-coverage-runlines-design.md`
+- Plans live alongside each spec under `docs/superpowers/plans/`.
 
 ### Code References
-- `lib/live-calc/src/index.ts` — core calculation engine
-- `artifacts/run-calculator/src/liveRunCalc.ts` — client-side calc (to be migrated)
-- `artifacts/api-server/src/routes/run-calc.ts` — server calc endpoint (new)
-
----
+- `lib/live-calc/src/index.ts` — shared calculation engine (client + server)
+- `lib/live-calc/src/operationalProjection.ts` — server projection (calc/timers/linePhases)
+- `artifacts/api-server/src/routes/sync.ts` — SSE stream + live calc tick
+- `artifacts/api-server/src/lib/liveCalcTick.ts` — tick policy helpers
+- `artifacts/run-calculator/src/contexts/LiveRunContext.tsx` — adoption + local fallback
+- `artifacts/run-calculator/src/operationalState.ts` — `shouldUseServerCalc` freshness gate
+- `artifacts/run-calculator/src/inventoryShared.ts` — server-consumption-aware coverage
 
 ## 14. Responsive Design & Visual Quality
 
@@ -513,17 +551,23 @@ More accurate, more automatic, more verifiable, less AI:
 
 ## 16. Sync System Improvements
 
-**Status**: Ideas only  
-**Priority**: Medium
+**Status**: Planning  
+**Full plan**: [docs/sync-system-improvements-plan.md](sync-system-improvements-plan.md)  
+**Priority**: Medium — delta sync addresses a payload-growth risk already documented as
+a recurring production issue in `.agents/memory/sync-body-limit.md`
 
 ### Summary
-Improve cross-device synchronization reliability and reduce conflicts.
+Improve cross-device synchronization reliability and reduce conflicts. Note: several
+items below are already solved in the current implementation (optimistic locking via
+`canonicalRevision`/LWW, offline queue via `syncPushQueue`) — see the full plan for
+what's actually still open (delta sync, per-device sync health, conflict visibility)
+versus what this list originally assumed was unbuilt.
 
 ### Ideas
 - **Conflict resolution UI** — visual diff when two devices edit same thing
-- **Optimistic locking** — prevent stale writes
+- **Optimistic locking** — prevent stale writes — **already implemented** (`canonicalRevision` + `protectRunValues`)
 - **Sync health dashboard** — show sync status per device
-- **Offline queue** — queue changes when offline, sync when back
+- **Offline queue** — queue changes when offline, sync when back — **already implemented** (`syncPushQueue`)
 - **Selective sync** — sync only active run data, not everything
 - **Compression** — reduce sync payload size
 - **Delta sync** — only send changes, not full state
@@ -532,4 +576,37 @@ Improve cross-device synchronization reliability and reduce conflicts.
 - `artifacts/api-server/src/routes/sync.ts` — sync endpoint
 - `artifacts/run-calculator/src/contexts/SyncContext.tsx` — sync context
 - `.agents/memory/sync-convergence-soak.md` — sync stability notes
+- `.agents/memory/sync-body-limit.md` — evidence for why delta sync is the priority
+
+---
+
+## 17. Auto-Track Coordination
+
+**Status**: Research complete — mostly "keep as-is," a few additive improvements  
+**Full plan**: [docs/autotrack-coordination-research.md](autotrack-coordination-research.md)  
+**Priority**: Low-Medium — not broken, but the observability gap means the next subtle
+bug in this class surfaces via a floor complaint instead of a metric, same as every
+prior one documented in `.agents/memory/autotrack-*.md`
+
+### Summary
+Automatic case/skid/tray/batch/barrel counters that advance on their own while a run is
+running — tied into the sync system (shares its payload, its date-keyed storage, and the
+same server-authoritative migration as Section 13). Research confirmed this is already a
+correctly-designed distributed-coordination protocol (fencing tokens via
+generation/sequence, DB-layer idempotency for the real inventory side effect,
+server-authoritative ticking) — not a system needing a redesign.
+
+### Ideas
+- **Claim rejection / stuck-channel observability** — no monitoring today for a channel
+  whose `nextDueAt` is overdue or whose claims keep getting rejected
+- **Property-based testing** — the newly-added property-based testing skill is a strong
+  fit for this state machine's documented history of subtle interaction bugs
+- **Name the fencing-token pattern explicitly in code comments** — cheap insurance
+  against a future "simplification" reintroducing a bug this system already paid to fix
+
+### Code References
+- `artifacts/api-server/src/lib/autoTrackCoordination.ts` — the coordination protocol
+- `artifacts/api-server/src/lib/autoTrackServerTicks.ts` — server tick engine
+- `.agents/memory/cross-channel-auto-track-claims.md` — the core fencing/ownership write-up
+
 

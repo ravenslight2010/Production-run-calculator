@@ -551,17 +551,23 @@ More accurate, more automatic, more verifiable, less AI:
 
 ## 16. Sync System Improvements
 
-**Status**: Ideas only  
-**Priority**: Medium
+**Status**: Planning  
+**Full plan**: [docs/sync-system-improvements-plan.md](sync-system-improvements-plan.md)  
+**Priority**: Medium — delta sync addresses a payload-growth risk already documented as
+a recurring production issue in `.agents/memory/sync-body-limit.md`
 
 ### Summary
-Improve cross-device synchronization reliability and reduce conflicts.
+Improve cross-device synchronization reliability and reduce conflicts. Note: several
+items below are already solved in the current implementation (optimistic locking via
+`canonicalRevision`/LWW, offline queue via `syncPushQueue`) — see the full plan for
+what's actually still open (delta sync, per-device sync health, conflict visibility)
+versus what this list originally assumed was unbuilt.
 
 ### Ideas
 - **Conflict resolution UI** — visual diff when two devices edit same thing
-- **Optimistic locking** — prevent stale writes
+- **Optimistic locking** — prevent stale writes — **already implemented** (`canonicalRevision` + `protectRunValues`)
 - **Sync health dashboard** — show sync status per device
-- **Offline queue** — queue changes when offline, sync when back
+- **Offline queue** — queue changes when offline, sync when back — **already implemented** (`syncPushQueue`)
 - **Selective sync** — sync only active run data, not everything
 - **Compression** — reduce sync payload size
 - **Delta sync** — only send changes, not full state
@@ -570,4 +576,37 @@ Improve cross-device synchronization reliability and reduce conflicts.
 - `artifacts/api-server/src/routes/sync.ts` — sync endpoint
 - `artifacts/run-calculator/src/contexts/SyncContext.tsx` — sync context
 - `.agents/memory/sync-convergence-soak.md` — sync stability notes
+- `.agents/memory/sync-body-limit.md` — evidence for why delta sync is the priority
+
+---
+
+## 17. Auto-Track Coordination
+
+**Status**: Research complete — mostly "keep as-is," a few additive improvements  
+**Full plan**: [docs/autotrack-coordination-research.md](autotrack-coordination-research.md)  
+**Priority**: Low-Medium — not broken, but the observability gap means the next subtle
+bug in this class surfaces via a floor complaint instead of a metric, same as every
+prior one documented in `.agents/memory/autotrack-*.md`
+
+### Summary
+Automatic case/skid/tray/batch/barrel counters that advance on their own while a run is
+running — tied into the sync system (shares its payload, its date-keyed storage, and the
+same server-authoritative migration as Section 13). Research confirmed this is already a
+correctly-designed distributed-coordination protocol (fencing tokens via
+generation/sequence, DB-layer idempotency for the real inventory side effect,
+server-authoritative ticking) — not a system needing a redesign.
+
+### Ideas
+- **Claim rejection / stuck-channel observability** — no monitoring today for a channel
+  whose `nextDueAt` is overdue or whose claims keep getting rejected
+- **Property-based testing** — the newly-added property-based testing skill is a strong
+  fit for this state machine's documented history of subtle interaction bugs
+- **Name the fencing-token pattern explicitly in code comments** — cheap insurance
+  against a future "simplification" reintroducing a bug this system already paid to fix
+
+### Code References
+- `artifacts/api-server/src/lib/autoTrackCoordination.ts` — the coordination protocol
+- `artifacts/api-server/src/lib/autoTrackServerTicks.ts` — server tick engine
+- `.agents/memory/cross-channel-auto-track-claims.md` — the core fencing/ownership write-up
+
 

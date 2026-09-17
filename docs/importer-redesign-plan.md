@@ -121,6 +121,46 @@ After apply, generate a structured verification report:
 
 ---
 
+### 7. Field-Level Correction Overlay (Layer 6 — beyond name matching)
+
+**Gap this closes**: every "learned" store in the system today is **name-keyed only** —
+`specImportAliases`, `mergeAliases`, `mergedAway`, `photoAliases`, `importAliases`,
+`deniedMerges` all resolve brand/flavor/ingredient *identity*, not recurring *value*
+corrections. A supplier whose sheet always lists doughball weight in the wrong column, or
+always uses a nonstandard unit label the parser has to correct by hand, gets the exact
+same manual correction applied by a human on every single reimport — the redesign's own
+cell-level provenance work (Layer 2) makes the correction fully traceable, but doesn't
+make it *stick*.
+
+**Idea**: A persistent, source-keyed correction overlay — the same "teach it once" pattern
+already proven for names, extended to field values. On reimport of a source the overlay
+has seen before, previously-approved field-level corrections apply automatically, exactly
+the way a learned alias auto-resolves a renamed brand today.
+
+**How**:
+- Key the overlay by the same identity the provenance layer already captures: `{ sourceKey
+  (sheet/file identity, matching what savedSpecSheets already uses), cell/field
+  coordinate, correction }` — provenance (Layer 2) is a prerequisite for this, not
+  independent work
+- When a manager corrects a value during review, offer "always apply this correction for
+  this source" (opt-in, not automatic — a one-off typo shouldn't become a standing rule)
+- On subsequent imports from the same source, the overlay applies BEFORE the
+  deterministic/AI parse tiers even run — same priority position as learned name aliases
+  today (Tier 1 of auto-match, per Layer 3)
+- Verification report (Layer 5) records "N values corrected via source overlay" the same
+  way it already would record learned-alias resolutions — auditable, not silent
+
+**Benefit**: A recurring supplier quirk goes from "corrected by hand every reimport,
+forever" to "corrected once, applied automatically thereafter" — directly extending the
+redesign's core premise (learned corrections are Tier 1, not a separate helper) from
+identity to value.
+
+**Sequencing note**: this depends on Layer 2 (cell-level provenance) existing first —
+there's no stable coordinate to key the overlay on until provenance lands. Build after
+Phase 1, likely alongside or just after the auto-verify rule engine in the same phase.
+
+---
+
 ## What This Changes vs. Today
 
 | Aspect | Today | After Redesign |
@@ -133,6 +173,7 @@ After apply, generate a structured verification report:
 | Traceability | Parse → apply → audit | Cell-level provenance → apply → signed report |
 | AI calls per import | N (all fields) | M << N (only ambiguous/unrecognized) |
 | Cost | Full AI per import | ~0 for template files |
+| Recurring source quirks | Corrected by hand every reimport | Corrected once, applied automatically (overlay) |
 
 ---
 
@@ -142,22 +183,23 @@ After apply, generate a structured verification report:
 1. **Cell-level provenance** — extend parsed model + review UI + snapshot
 2. **Auto-verify rule engine** — deterministic cross-field checks per importer
 3. **Verification report** — round-trip diff + reconciliation tables
+4. **Field-level correction overlay** — depends on (1); build alongside (2)
 
 ### Phase 2: Deterministic Parse
-4. **Template download** (from import plan) + canonical template definitions per importer
-5. **Template detection** — structural match against expected format
-6. **Deterministic cell parser** for template files
-7. **Grid heuristics** for semi-structured files
+5. **Template download** (from import plan) + canonical template definitions per importer
+6. **Template detection** — structural match against expected format
+7. **Deterministic cell parser** for template files
+8. **Grid heuristics** for semi-structured files
 
 ### Phase 3: Automation
-8. **Auto-apply tier** — confident items apply without review
-9. **"Apply all verified"** — one-click bulk apply
-10. **Manager "deterministic-only" mode** toggle
+9. **Auto-apply tier** — confident items apply without review
+10. **"Apply all verified"** — one-click bulk apply
+11. **Manager "deterministic-only" mode** toggle
 
 ### Phase 4: AI Reduction
-11. AI only for unrecognized layouts
-12. AI spend display per import
-13. Second-pass review on low-confidence items only
+12. AI only for unrecognized layouts
+13. AI spend display per import
+14. Second-pass review on low-confidence items only
 
 ---
 
@@ -178,14 +220,22 @@ After apply, generate a structured verification report:
 | `lib/cheese-import/src/index.ts` | Cheese parser (deterministic layer already) |
 | `lib/shipping-import/src/index.ts` | Shipping parser (deterministic layer already) |
 | `lib/name-match/src/index.ts` | Near-dup matcher (auto-match confidence) |
+| `lib/db/src/schema/specImportAliases.ts` etc. | Existing name-keyed learned stores — the pattern the overlay extends to field values |
 
 ## New Tables / Fields
 - `import_snapshots`: add `provenance` (cell-level map, JSONB)
 - `import_verification_reports`: report_id, import_id, round_trip_diff (JSONB), corpus_check, signed_hash, created_at
 - `imports`: add `parse_strategy` (`deterministic | heuristic | ai`), `ai_call_count`, `ai_cost_estimate`
+- `import_source_corrections` (new, for Layer 6): source_key, field/cell coordinate
+  (matches the provenance shape from Layer 2), correction value, approved_by, created_at —
+  keyed and applied the same way the existing name-alias tables are, just at field
+  granularity instead of identity granularity
 
 ## New / Changed Endpoints
 - `POST /api/import/detect-format` — returns deterministic | heuristic | ai needed
 - `POST /api/import/parse-deterministic` — template/structured parse (no AI)
 - `GET /api/import/:id/verification-report` — round-trip + corpus evidence
 - `POST /api/ai/parse-spec-sheet` — unchanged, now fallback path
+- `POST /api/import/source-corrections` — approve a field-level correction as a standing
+  overlay rule for a source (Layer 6)
+
