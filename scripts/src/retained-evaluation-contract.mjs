@@ -85,6 +85,23 @@ function isRetainedEvaluationPath(evidencePath) {
   return /(?:evaluation|benchmark|manifest)/i.test(fileName);
 }
 
+function readRetainedEvaluationJson(evidencePath) {
+  let contents;
+  try {
+    contents = fs.readFileSync(evidencePath, "utf8");
+  } catch {
+    throw new Error(
+      `Unable to read retained evaluation evidence: ${evidencePath}`,
+    );
+  }
+
+  try {
+    return JSON.parse(contents);
+  } catch {
+    throw new Error(`Malformed retained evaluation JSON: ${evidencePath}`);
+  }
+}
+
 export function discoverRetainedEvaluationPaths(evidenceDirectories) {
   if (
     !Array.isArray(evidenceDirectories)
@@ -101,15 +118,14 @@ export function discoverRetainedEvaluationPaths(evidenceDirectories) {
     .flatMap((directoryPath) => findJsonFiles(directoryPath))
     .filter((evidencePath) => {
       let evidence;
-      try {
-        evidence = JSON.parse(fs.readFileSync(evidencePath, "utf8"));
-      } catch {
-        if (isRetainedEvaluationPath(evidencePath)) {
-          throw new Error(
-            `Malformed retained evaluation JSON: ${evidencePath}`,
-          );
+      if (isRetainedEvaluationPath(evidencePath)) {
+        evidence = readRetainedEvaluationJson(evidencePath);
+      } else {
+        try {
+          evidence = JSON.parse(fs.readFileSync(evidencePath, "utf8"));
+        } catch {
+          return false;
         }
-        return false;
       }
       return isEvaluationManifestCandidate(evidence);
     });

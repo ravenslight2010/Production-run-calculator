@@ -60,7 +60,7 @@ export function checkRoutineNodeVersion({
 
 
 export function readRequiredNodeVersion(evidencePath = EVIDENCE_PATH) {
-  const evidence = JSON.parse(fs.readFileSync(evidencePath, "utf8"));
+  const evidence = readRetainedEvaluationJson(evidencePath);
   const manifest = evaluationManifestFromEvidence(evidence);
   const requiredVersion = manifest?.dependencies?.node;
 
@@ -71,6 +71,23 @@ export function readRequiredNodeVersion(evidencePath = EVIDENCE_PATH) {
   }
 
   return requiredVersion;
+}
+
+function readRetainedEvaluationJson(evidencePath) {
+  let contents;
+  try {
+    contents = fs.readFileSync(evidencePath, "utf8");
+  } catch {
+    throw new Error(
+      `Unable to read retained evaluation evidence: ${evidencePath}`,
+    );
+  }
+
+  try {
+    return JSON.parse(contents);
+  } catch {
+    throw new Error(`Malformed retained evaluation JSON: ${evidencePath}`);
+  }
 }
 
 export function discoverRetainedEvaluationPaths(

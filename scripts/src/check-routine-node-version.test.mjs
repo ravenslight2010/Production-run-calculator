@@ -177,6 +177,84 @@ test("fails clearly for malformed retained evidence but ignores malformed docume
   }
 });
 
+test("reports retained evidence read failures without exposing filesystem details", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "routine-node-"));
+  const evidencePath = path.join(directory, "evaluation-manifest.json");
+  const originalReadFileSync = fs.readFileSync;
+  const filesystemDetail = "permission denied: secret mount metadata";
+  fs.writeFileSync(evidencePath, "{}");
+  fs.readFileSync = (...arguments_) => {
+    if (arguments_[0] === evidencePath) {
+      const error = new Error(filesystemDetail);
+      error.code = "EACCES";
+      throw error;
+    }
+    return originalReadFileSync(...arguments_);
+  };
+
+  try {
+    assert.throws(
+      () => readRequiredNodeVersion(evidencePath),
+      (error) => {
+        assert.equal(
+          error.message,
+          `Unable to read retained evaluation evidence: ${evidencePath}`,
+        );
+        assert.doesNotMatch(error.message, new RegExp(filesystemDetail));
+        assert.doesNotMatch(error.message, /EACCES/);
+        return true;
+      },
+    );
+    assert.throws(
+      () => discoverRetainedEvaluationPaths([directory]),
+      (error) => {
+        assert.equal(
+          error.message,
+          `Unable to read retained evaluation evidence: ${evidencePath}`,
+        );
+        assert.doesNotMatch(error.message, new RegExp(filesystemDetail));
+        assert.doesNotMatch(error.message, /EACCES/);
+        return true;
+      },
+    );
+  } finally {
+    fs.readFileSync = originalReadFileSync;
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("ignores unreadable documentation JSON during retained evidence discovery", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "routine-node-"));
+  const evidencePath = path.join(directory, "evaluation-manifest.json");
+  const documentationPath = path.join(directory, "unrelated-documentation.json");
+  const originalReadFileSync = fs.readFileSync;
+  fs.writeFileSync(
+    evidencePath,
+    JSON.stringify({
+      manifestVersion: 1,
+      dependencies: { node: "24.20.0" },
+    }),
+  );
+  fs.writeFileSync(documentationPath, JSON.stringify({ documentation: true }));
+  fs.readFileSync = (...arguments_) => {
+    if (arguments_[0] === documentationPath) {
+      const error = new Error("permission denied");
+      error.code = "EACCES";
+      throw error;
+    }
+    return originalReadFileSync(...arguments_);
+  };
+
+  try {
+    assert.deepEqual(discoverRetainedEvaluationPaths([directory]), [
+      evidencePath,
+    ]);
+  } finally {
+    fs.readFileSync = originalReadFileSync;
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("fails when a discovered retained manifest lacks runtime metadata", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "routine-node-"));
   const evidencePath = path.join(directory, "new-evaluation.json");
