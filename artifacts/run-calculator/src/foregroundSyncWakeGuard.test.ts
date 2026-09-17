@@ -401,7 +401,7 @@ describe("foreground wake sync barrier", () => {
     expect(hookSource).toContain("autoTrackBlockedRef?.current");
     expect(homeSource).toContain("setAutoTrackBlocked(true)");
     expect(homeSource).toContain("autoTrackBlockedRef={foregroundSyncBarrierRef}");
-    expect(homeSource).toContain("setAutoTrackRebaseAfterBlock(true)");
+    expect(homeSource).toContain('setAutoTrackWakeRebaseReason("lifecycle-replacement")');
     expect(hookSource).toContain("rebaseAfterForegroundSync");
     expect(hookSource).toContain("lastExpectedCasesRef.current = autoTrackSuggestion?.expectedCasesRaw ?? -1");
     expect(hookSource).toContain("autoTrackBlockedRef?.current");

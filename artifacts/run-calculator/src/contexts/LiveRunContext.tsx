@@ -21,6 +21,7 @@ import { useClock } from "../hooks/useClock";
 import { useNotifications } from "../hooks/useNotifications";
 import {
   useAutoTrack,
+  type AutoTrackWakeRebaseReason,
   type AutoTrackEventClaim,
   type AutoTrackEventResult,
 } from "../hooks/useAutoTrack";
@@ -143,7 +144,7 @@ export interface LiveRunProviderProps {
   ) => boolean;
   autoTrackBlocked?: boolean;
   autoTrackBlockedRef?: React.MutableRefObject<boolean>;
-  autoTrackRebaseAfterBlock?: boolean;
+  autoTrackWakeRebaseReason?: AutoTrackWakeRebaseReason | null;
   autoTrackWakeAcknowledgement?: number;
   claimAutoTrackEvent?: (claim: AutoTrackEventClaim) => Promise<AutoTrackEventResult>;
   onAutoTrackProgressChange?: (enabled: boolean) => void;
@@ -184,7 +185,7 @@ export function LiveRunProvider({
   onPackagingProgressAutoAdvance,
   autoTrackBlocked = false,
   autoTrackBlockedRef,
-  autoTrackRebaseAfterBlock = false,
+  autoTrackWakeRebaseReason = null,
   autoTrackWakeAcknowledgement = 0,
   claimAutoTrackEvent,
   onAutoTrackProgressChange,
@@ -520,7 +521,7 @@ export function LiveRunProvider({
       onPackagingProgressAutoAdvance,
       autoTrackBlocked,
       autoTrackBlockedRef,
-      autoTrackRebaseAfterBlock,
+      autoTrackWakeRebaseReason,
       autoTrackWakeAcknowledgement,
       claimAutoTrackEvent,
       authoritativeServerAutoTrack: true,

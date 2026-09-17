@@ -430,6 +430,7 @@ describe("useAutoTrack — post-screen-wake / long-timeout counter correctness",
       v: { ...BASE_V, traysOnLine: store.traysOnLine, batchesReady: store.batchesReady },
       form,
       autoTrackBlocked,
+      autoTrackWakeRebaseReason: "authoritative-peer-packaging",
     });
 
     const { rerender } = renderHook(
@@ -528,7 +529,7 @@ describe("useAutoTrack — post-screen-wake / long-timeout counter correctness",
         runStatus: "ended",
         endedAt: wakeMs - 1_000,
         autoTrackBlocked: true,
-        autoTrackRebaseAfterBlock: true,
+        autoTrackWakeRebaseReason: "lifecycle-replacement",
       }));
     });
 
@@ -540,7 +541,7 @@ describe("useAutoTrack — post-screen-wake / long-timeout counter correctness",
         runStatus: "ended",
         endedAt: wakeMs - 1_000,
         autoTrackBlocked: false,
-        autoTrackRebaseAfterBlock: true,
+        autoTrackWakeRebaseReason: "lifecycle-replacement",
       }));
     });
     expect(store.skidsCompleted * 10 + store.casesOnCurrentSkid).toBe(beforeWake);
@@ -638,7 +639,7 @@ describe("useAutoTrack — post-screen-wake / long-timeout counter correctness",
     act(() => {
       rerender(props(wakeAt, elapsedAtWake, {
         autoTrackBlocked: false,
-        autoTrackRebaseAfterBlock: true,
+        autoTrackWakeRebaseReason: "manual-packaging-ownership",
         autoTrackWakeAcknowledgement: 1,
       }));
     });
@@ -650,7 +651,7 @@ describe("useAutoTrack — post-screen-wake / long-timeout counter correctness",
       vi.setSystemTime(nextTick);
       rerender(props(nextTick, elapsedAtWake + CASE_PERIOD_MS / 1000 + 1, {
         autoTrackBlocked: false,
-        autoTrackRebaseAfterBlock: true,
+        autoTrackWakeRebaseReason: "manual-packaging-ownership",
         autoTrackWakeAcknowledgement: 1,
       }));
     });
@@ -666,7 +667,7 @@ describe("useAutoTrack — post-screen-wake / long-timeout counter correctness",
     act(() => {
       rerender(props(secondWakeAt, elapsedAtSecondWake, {
         autoTrackBlocked: false,
-        autoTrackRebaseAfterBlock: true,
+        autoTrackWakeRebaseReason: "manual-packaging-ownership",
         autoTrackWakeAcknowledgement: 2,
       }));
     });
@@ -680,7 +681,7 @@ describe("useAutoTrack — post-screen-wake / long-timeout counter correctness",
         elapsedAtSecondWake + CASE_PERIOD_MS / 1000 + 1,
         {
           autoTrackBlocked: false,
-          autoTrackRebaseAfterBlock: true,
+          autoTrackWakeRebaseReason: "manual-packaging-ownership",
           autoTrackWakeAcknowledgement: 2,
         },
       ));

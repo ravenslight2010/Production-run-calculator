@@ -7771,7 +7771,7 @@ export default function Home() {
     syncRetryTimerRef, syncPushQueueRef, connectSse, writeToday, requestBaselinePush,
     registerForegroundRecovery,
     autoTrackBlocked, setAutoTrackBlocked,
-    autoTrackRebaseAfterBlock, setAutoTrackRebaseAfterBlock,
+    autoTrackWakeRebaseReason, setAutoTrackWakeRebaseReason,
     pendingForegroundStopRunId, setPendingForegroundStopRunId,
     foregroundSyncAcknowledgement, setForegroundSyncAcknowledgement,
     foregroundRecoveryNotice, setForegroundRecoveryNotice,
@@ -7956,7 +7956,7 @@ export default function Home() {
       const adoptionGeneration = ++operationalAdoptionGenerationRef.current;
       operationalAdoptionInFlightRef.current += 1;
       setAutoTrackBlocked(true);
-      setAutoTrackRebaseAfterBlock(false);
+      setAutoTrackWakeRebaseReason(null);
       adoptOperationalRevision(intent.canonicalRevision);
       if (intent.serverTime !== undefined) {
         operationalServerTimeOffsetRef.current = intent.serverTime - Date.now();
@@ -8082,7 +8082,7 @@ export default function Home() {
           && !foregroundSyncBarrierRef.current
           && adoptionSucceeded
         ) {
-          setAutoTrackRebaseAfterBlock(true);
+          setAutoTrackWakeRebaseReason("manual-packaging-ownership");
           setAutoTrackBlocked(false);
         }
       }
@@ -8358,7 +8358,7 @@ export default function Home() {
         // authoritative baseline even when the run lifecycle is unchanged.
         // Rebase before releasing the sync fence so hidden time cannot be
         // applied on top of the adopted manual correction.
-        setAutoTrackRebaseAfterBlock(true);
+        setAutoTrackWakeRebaseReason("authoritative-peer-packaging");
         setAutoTrackBlocked(true);
       }
 
@@ -9461,8 +9461,10 @@ export default function Home() {
         dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id;
       const activePackagingProgress =
         activeRunId ? loadPackagingProgress()[activeRunId] : undefined;
-      setAutoTrackRebaseAfterBlock(
-        (activePackagingProgress?.correctionGeneration ?? 0) > 0,
+      setAutoTrackWakeRebaseReason(
+        (activePackagingProgress?.correctionGeneration ?? 0) > 0
+          ? "manual-packaging-ownership"
+          : null,
       );
       setAutoTrackBlocked(true);
       syncPushGenerationRef.current += 1;
@@ -9585,7 +9587,7 @@ export default function Home() {
                 };
               },
               persistLifecycle: (adoptedDayState) => {
-                setAutoTrackRebaseAfterBlock(true);
+                setAutoTrackWakeRebaseReason("lifecycle-replacement");
                 saveDayState(adoptedDayState, { stampMeta: false });
                 dayStateRef.current = adoptedDayState;
                 setDayState(adoptedDayState);
@@ -18916,7 +18918,7 @@ export default function Home() {
         }}
         autoTrackBlocked={autoTrackBlocked}
         autoTrackBlockedRef={foregroundSyncBarrierRef}
-        autoTrackRebaseAfterBlock={autoTrackRebaseAfterBlock}
+        autoTrackWakeRebaseReason={autoTrackWakeRebaseReason}
         autoTrackWakeAcknowledgement={foregroundSyncAcknowledgement}
         claimAutoTrackEvent={claimAutoTrackEvent}
         onAutoTrackProgressChange={(enabled) => {

@@ -127,6 +127,11 @@ export type AutoTrackEventResult = {
   values: Partial<FormValues>;
 };
 
+export type AutoTrackWakeRebaseReason =
+  | "manual-packaging-ownership"
+  | "authoritative-peer-packaging"
+  | "lifecycle-replacement";
+
 interface AutoTrackParams {
   runId: string;
   /** Shared lifecycle stamp; changes on start/pause/resume/end/manual run switch. */
@@ -213,11 +218,10 @@ interface AutoTrackParams {
 
   autoTrackBlockedRef?: React.MutableRefObject<boolean>;
   /**
-   * Only lifecycle adoption requests a bookkeeping rebase on release. An
-   * unchanged foreground pull must retain ordinary screen-off catch-up.
+   * Why foreground release must adopt fresh counter baselines. A null reason
+   * preserves ordinary hidden-time catch-up for an unchanged run.
    */
-
-  autoTrackRebaseAfterBlock?: boolean;
+  autoTrackWakeRebaseReason?: AutoTrackWakeRebaseReason | null;
   /**
    * Monotonic foreground sync acknowledgement. A wake can raise and release
    * the boolean fence before React commits its intermediate blocked render;
@@ -336,9 +340,7 @@ export function useAutoTrack({
   onPackagingProgressAutoAdvance,
   autoTrackBlocked = false,
   autoTrackBlockedRef,
-  // Preserve the established behavior for callers that only provide the
-  // original boolean barrier. Home opts out explicitly for unchanged pulls.
-  autoTrackRebaseAfterBlock = true,
+  autoTrackWakeRebaseReason = null,
   autoTrackWakeAcknowledgement = 0,
   claimAutoTrackEvent,
   authoritativeServerAutoTrack = false,
@@ -1166,7 +1168,7 @@ useEffect(() => {
     }
     let rebasedForForegroundSync = false;
     if (autoTrackBlocked) {
-      if (autoTrackRebaseAfterBlock) {
+      if (autoTrackWakeRebaseReason !== null) {
         foregroundRebaseRequestedRef.current = true;
         resetBookkeeping();
       }
@@ -1185,7 +1187,7 @@ useEffect(() => {
       && !autoTrackBlockedRef?.current
     ) {
       if (!rebasedForForegroundSync && !wakeRebaseAppliedRef.current) {
-        if (autoTrackRebaseAfterBlock) {
+        if (autoTrackWakeRebaseReason !== null) {
           rebaseAfterForegroundSync();
         } else {
           rearmCaseTimer(nowTime.getTime());
@@ -1198,7 +1200,7 @@ useEffect(() => {
     previouslyBlockedRef.current = autoTrackBlocked;
   }, [
     autoTrackBlocked,
-    autoTrackRebaseAfterBlock,
+    autoTrackWakeRebaseReason,
     autoTrackWakeAcknowledgement,
     autoTrackBlockedRef,
     autoTrackSuggestion,

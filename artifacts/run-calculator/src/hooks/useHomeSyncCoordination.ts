@@ -8,6 +8,7 @@ import { fetchWithTimeout } from "../fetchWithTimeout";
 import type { SyncPayload } from "../types";
 import type { SyncMeasurementTrigger } from "../syncDiagnostics";
 import { todayStr } from "../utils";
+import type { AutoTrackWakeRebaseReason } from "./useAutoTrack";
 
 type SyncWork = {
   payload: SyncPayload;
@@ -175,7 +176,8 @@ export function useHomeSyncCoordination() {
     new SingleFlightSyncQueue<SyncWork>(synchronizationStateMachineRef.current),
   );
   const [autoTrackBlocked, setAutoTrackBlocked] = useState(false);
-  const [autoTrackRebaseAfterBlock, setAutoTrackRebaseAfterBlock] = useState(false);
+  const [autoTrackWakeRebaseReason, setAutoTrackWakeRebaseReason] =
+    useState<AutoTrackWakeRebaseReason | null>(null);
   const [pendingForegroundStopRunId, setPendingForegroundStopRunId] = useState<string | null>(null);
   const [foregroundSyncAcknowledgement, setForegroundSyncAcknowledgement] = useState(0);
   const [foregroundRecoveryNotice, setForegroundRecoveryNotice] = useState<{
@@ -339,8 +341,8 @@ export function useHomeSyncCoordination() {
     registerForegroundRecovery,
     autoTrackBlocked,
     setAutoTrackBlocked,
-    autoTrackRebaseAfterBlock,
-    setAutoTrackRebaseAfterBlock,
+    autoTrackWakeRebaseReason,
+    setAutoTrackWakeRebaseReason,
     pendingForegroundStopRunId,
     setPendingForegroundStopRunId,
     foregroundSyncAcknowledgement,
@@ -349,7 +351,7 @@ export function useHomeSyncCoordination() {
     setForegroundRecoveryNotice,
   }), [
     autoTrackBlocked,
-    autoTrackRebaseAfterBlock,
+    autoTrackWakeRebaseReason,
     connectSse,
     foregroundRecoveryNotice,
     foregroundSyncAcknowledgement,

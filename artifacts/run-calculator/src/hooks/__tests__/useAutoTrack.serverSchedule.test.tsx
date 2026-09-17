@@ -83,7 +83,7 @@ describe("useAutoTrack server schedule freshness", () => {
       form,
       machine: { spinSec: 1, hopperSec: 1 },
       autoTrackBlocked: blocked,
-      autoTrackRebaseAfterBlock: false,
+      autoTrackWakeRebaseReason: null,
       claimAutoTrackEvent: claim,
     });
 
@@ -143,7 +143,7 @@ describe("useAutoTrack server schedule freshness", () => {
       },
       form,
       claimAutoTrackEvent: claim,
-      autoTrackRebaseAfterBlock: false,
+      autoTrackWakeRebaseReason: null,
     };
     const hook = renderHook((p: Parameters<typeof useAutoTrack>[0]) => useAutoTrack(p), {
       initialProps: { ...base, nowTime: new Date(T0), autoTrackBlocked: true },
@@ -191,7 +191,7 @@ describe("useAutoTrack server schedule freshness", () => {
       form,
       claimAutoTrackEvent: claim,
       authoritativeServerAutoTrack: true,
-      autoTrackRebaseAfterBlock: false,
+      autoTrackWakeRebaseReason: null,
     };
     const hook = renderHook((p: Props) => useAutoTrack(p), {
       initialProps: { ...base, autoTrackBlocked: true },
