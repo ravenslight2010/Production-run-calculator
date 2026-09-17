@@ -151,9 +151,6 @@
 - [GitHub Actions evidence extraction](github-actions-evidence-extraction.md) — when connector downloads are forbidden, validate and retain exact reports inside a short-lived CI branch.
 - [Declaration compatibility dependencies](declaration-compatibility-dependencies.md) — mirror package-local links, resolve direct imports, then ignore unrelated dependency-library diagnostics.
 - [Secret refresh for shell operations](secret-refresh-shell.md) — newly confirmed workspace secrets may be absent from shell commands until a relevant workflow refreshes the environment.
-- [Production evidence revision binding](production-evidence-revision-binding.md) — operational reports may emit an unknown build revision; release evidence must bind to a controlled deploy revision, not infer it from live data.
-- [CI-pinned evidence refresh](ci-pinned-evidence.md) — retained evaluation manifests must move with the pinned Node runtime and lockfile hash.
-- [Release Node pinning](release-node-pinning.md) — pin the Node executable on PATH, not only the pnpm launcher, or child release scripts report the wrong runtime.
-- [Local WebKit Nix launch](webkit-nix-launch.md) — the downloaded WPE wrapper resets LD_LIBRARY_PATH; append Nix libraries at the final MiniBrowser boundary for local smoke runs.
-- [Release finalization retry safety](release-finalization-retry.md) — final report retries must tolerate already-promoted evidence and bind report-key artifacts to the current revision.
-- [Workspace lock refresh pruning](workspace-lock-refresh-pruning.md) — local pnpm refreshes can prune cross-platform optional entries; review lockfile scope after adding workspace packages.
+- [Release evidence integrity](production-evidence-revision-binding.md) + [CI-pinned evidence](ci-pinned-evidence.md) + [Release Node pinning](release-node-pinning.md) — bind retained evidence to the controlled revision and pinned runtime.
+- [Release execution recovery](webkit-nix-launch.md) + [finalization retry safety](release-finalization-retry.md) — preserve runtime-library and already-promoted-evidence recovery rules.
+- [Workspace lock refresh](workspace-lock-refresh-pruning.md) + [full browser refresh](full-release-browser-refresh.md) — review lockfile scope and do not accept full evidence with an incomplete browser checkpoint.
