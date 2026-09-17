@@ -63,22 +63,73 @@ async function promoteToManager(username: string): Promise<void> {
 
 async function seedPendingRun(page: Page): Promise<string> {
   const runId = uniqueTestId("webkit_run");
-  await page.evaluate((id) => {
-    for (const key of Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))) {
-      if (key?.startsWith("run-calc-run-")) localStorage.removeItem(key);
+  const seedStamp = Date.now();
+  const date = today();
+  await page.context().setOffline(true);
+  try {
+    await page.evaluate(() => {
+      for (const key of Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))) {
+        if (key?.startsWith("run-calc")) localStorage.removeItem(key);
+      }
+    });
+    const db = new Client({
+      connectionString: requireIsolatedTestDatabase("WebKit canonical run fixture"),
+    });
+    try {
+      await db.connect();
+      await db.query(
+        `INSERT INTO daily_sync (date, scope, data, updated_at)
+         VALUES ($1, 'live', $2::jsonb, NOW())
+         ON CONFLICT (date, scope) DO UPDATE
+           SET data = $2::jsonb, updated_at = NOW()`,
+        [date, JSON.stringify({
+          dayState: {
+            runs: [{
+              id: runId,
+              brand: "WebKit",
+              flavor: "Release Smoke",
+              seeded: false,
+              metaUpdatedAt: seedStamp,
+            }],
+            currentIndex: 0,
+            currentRunId: runId,
+            date,
+            resetAt: 0,
+          },
+          runValues: {
+            [runId]: {
+              casesNeeded: 30,
+              pizzasPerCase: 12,
+            },
+          },
+          runValuesUpdatedAt: { [runId]: seedStamp },
+        })],
+      );
+    } finally {
+      await db.end().catch(() => {});
     }
-    localStorage.setItem(
-      "run-calc-day",
-      JSON.stringify({
-        date: new Date().toISOString().slice(0, 10),
-        runs: [{ id, brand: "WebKit", flavor: "Release Smoke", seeded: false }],
-        currentIndex: 0,
-        resetAt: 0,
-      }),
-    );
-  }, runId);
-  await page.reload({ waitUntil: "domcontentloaded" });
+  } finally {
+    await page.context().setOffline(false);
+  }
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await page.reload({ waitUntil: "domcontentloaded" });
+      break;
+    } catch (error) {
+      if (
+        attempt >= 2 ||
+        !String(error).toLowerCase().includes("navigation canceled")
+      ) {
+        throw error;
+      }
+      await page.waitForTimeout(250);
+    }
+  }
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  await page.locator('[title="Sync connected"]').waitFor({
+    state: "visible",
+    timeout: 20_000,
+  });
   return runId;
 }
 
@@ -139,7 +190,11 @@ test("authenticates and preserves current-run start, pause, resume, and reload",
 
   await page.getByRole("button", { name: /pause run/i }).click();
   const stopTunnelNo = page.getByTestId("pause-stop-tunnel-no");
-  if (await stopTunnelNo.isVisible().catch(() => false)) await stopTunnelNo.click();
+  if (await stopTunnelNo.isVisible().catch(() => false)) {
+    // WebKit can remount the optional confirmation while the pause write is
+    // acknowledged. If it disappears, the run is already paused.
+    await stopTunnelNo.click({ timeout: 2_000 }).catch(() => {});
+  }
   await expect(page.getByTestId("resume-run")).toBeVisible();
   await expect.poll(async () => (await selectedRun(page)).pausedAt).toBeTruthy();
 
@@ -191,12 +246,17 @@ test("manager can preview an authoritative operational report", async ({ page })
   const username = uniqueTestId("e2e_webkit_report");
   testUsernames.add(username);
   await signUp(page, username);
+  await seedPendingRun(page);
   await promoteToManager(username);
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
 
   await page.getByTitle("More").click();
   await page.getByRole("menuitem", { name: "Summary", exact: true }).click();
+  await page
+    .getByTestId("summary-report-details")
+    .locator("summary")
+    .click();
   const report = page.getByTestId("operational-report");
   await expect(report).toBeVisible();
 

@@ -26,6 +26,23 @@ execution budget, not a retry or an evidence-validation bypass: all 159
 enumerated cases still need to complete and the retained report must pass the
 same revision-bound evidence verifier.
 
+The GitHub Actions standard and full jobs install WebKit and the Linux runtime
+dependencies required by its browser bundle before running the release gates:
+
+```bash
+pnpm --filter @workspace/run-calculator exec playwright install --with-deps webkit
+```
+
+Keep this step ahead of the release runner. The WebKit smoke depends on runtime
+libraries such as libatomic, libstdc++, libGLESv2, and libx264; a browser
+download without the dependency install can produce an infrastructure failure
+before any smoke case starts. Local runners that already provision the system
+libraries only need the browser download:
+
+```bash
+pnpm --filter @workspace/run-calculator exec playwright install webkit
+```
+
 To run the full mode locally:
 
 ```bash

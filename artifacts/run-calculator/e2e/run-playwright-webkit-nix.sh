@@ -30,6 +30,6 @@ minibrowser_root="${webkit_root}/minibrowser-wpe"
 export WEBKIT_EXEC_PATH="${minibrowser_root}/bin"
 export WEBKIT_INJECTED_BUNDLE_PATH="${minibrowser_root}/lib"
 export WEBKIT_INSPECTOR_RESOURCES_PATH="${minibrowser_root}/share"
-export LD_LIBRARY_PATH="${minibrowser_root}/lib:${minibrowser_root}/sys/lib:${nix_library_path%:}"
+export LD_LIBRARY_PATH="${minibrowser_root}/lib:${minibrowser_root}/sys/lib:${nix_library_path%:}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 exec "${minibrowser_root}/bin/MiniBrowser" "$@"

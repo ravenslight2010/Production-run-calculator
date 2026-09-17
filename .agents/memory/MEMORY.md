@@ -156,3 +156,4 @@
 - [Production evidence revision binding](production-evidence-revision-binding.md) — operational reports may emit an unknown build revision; release evidence must bind to a controlled deploy revision, not infer it from live data.
 - [CI-pinned evidence refresh](ci-pinned-evidence.md) — retained evaluation manifests must move with the pinned Node runtime and lockfile hash.
 - [Release Node pinning](release-node-pinning.md) — pin the Node executable on PATH, not only the pnpm launcher, or child release scripts report the wrong runtime.
+- [Local WebKit Nix launch](webkit-nix-launch.md) — the downloaded WPE wrapper resets LD_LIBRARY_PATH; append Nix libraries at the final MiniBrowser boundary for local smoke runs.

@@ -155,6 +155,11 @@ and phone-sized Chromium contexts.
 Run the bounded WebKit release smoke with an approved disposable database:
 
 ```sh
+# CI runs the equivalent `playwright install --with-deps webkit` step before
+# the release gates. For a local runner, install the WebKit browser first.
+# Replit's Nix runtime libraries are detected by the WebKit config:
+pnpm --filter @workspace/run-calculator exec playwright install webkit
+
 E2E_TEST_DB=1 E2E_APPROVED_DESTRUCTIVE_MODE=1 \
   pnpm --filter @workspace/run-calculator run test:e2e:webkit
 ```
@@ -165,6 +170,12 @@ cross-browser journeys, not a duplicate of every Chromium test. The reporter
 writes `release-evidence/browser-smoke/webkit-result.json` (or the path supplied
 by `PLAYWRIGHT_RELEASE_SMOKE_EVIDENCE_PATH`) with the revision, environment,
 per-test status, and failure classification.
+
+The GitHub Actions release jobs install the WebKit browser and its Linux
+runtime dependencies with Playwright's `--with-deps` option before running any
+release gates. This provisions libraries required by the WebKit bundle,
+including libatomic, libstdc++, libGLESv2, and libx264, without weakening or
+removing the cross-browser coverage.
 
 The smoke config uses the same disposable-database safety guard as the
 destructive browser suite. It runs one test in each project: Desktop Chrome

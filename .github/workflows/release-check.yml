@@ -76,6 +76,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install WebKit and Linux runtime dependencies
+        run: pnpm --filter @workspace/run-calculator exec playwright install --with-deps webkit
+
       - name: Remove stale evidence
         run: rm -rf release-evidence && mkdir -p release-evidence
 
@@ -185,6 +188,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Install WebKit and Linux runtime dependencies
+        run: pnpm --filter @workspace/run-calculator exec playwright install --with-deps webkit
 
       - name: Remove stale full evidence
         run: rm -rf release-evidence-full && mkdir -p release-evidence-full
