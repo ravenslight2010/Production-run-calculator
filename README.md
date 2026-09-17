@@ -88,7 +88,20 @@ image identities, and an unchanged normalized schema fingerprint.
 
 ## Local development
 
-Prerequisites: Node.js 24, pnpm, a PostgreSQL 16 database.
+Prerequisites: Node.js 24.20.0, pnpm, a PostgreSQL 16 database.
+
+The exact local Node patch is declared in `.nvmrc` and must stay aligned with
+the explicit CI pin and retained validation evidence. Activate it before
+installing dependencies or running validation:
+
+```bash
+nvm install
+nvm use
+```
+
+Compatible version managers such as `fnm` can also read `.nvmrc` (for example,
+`fnm use --install`). Selecting the declared runtime does not regenerate or
+modify retained evidence.
 
 ```bash
 pnpm install
