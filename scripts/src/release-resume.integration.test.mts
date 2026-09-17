@@ -4,7 +4,11 @@ import { mkdir, readFile, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { releaseGateLabelsForMode } from "./release-check.mts";
+import {
+  promoteSourceLibraryEvidenceAtPaths,
+  releaseGateLabelsForMode,
+} from "./release-check.mts";
+import { computeSourceLibraryEvidenceId } from "./verify-source-library-reconciliation.mts";
 
 type FixtureStep = {
   label: string;
@@ -150,6 +154,101 @@ async function runTypescriptPromotionResumeScenario(): Promise<void> {
   } finally {
     await rm(evidenceDir, { recursive: true, force: true });
   }
+}
+
+async function runSourceLibraryPromotionResumeScenario(): Promise<void> {
+  const evidenceDir = await mkdtemp(
+    join(tmpdir(), "release-source-promotion-resume-"),
+  );
+  const pendingPath = join(
+    evidenceDir,
+    ".source-library-reconciliation.json.pending",
+  );
+  const retainedPath = join(evidenceDir, "source-library-reconciliation.json");
+  const reportPath = join(
+    rootDir,
+    "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json",
+  );
+  const sourceEvidencePath = join(
+    rootDir,
+    "release-evidence/source-library-reconciliation.json",
+  );
+  try {
+    const revision = await getCurrentRevision();
+    const evidence = JSON.parse(
+      await readFile(sourceEvidencePath, "utf8"),
+    ) as Record<string, unknown>;
+    const currentEvidence: Record<string, unknown> = {
+      ...evidence,
+      revision,
+    };
+    currentEvidence.evidenceId = computeSourceLibraryEvidenceId(currentEvidence);
+    await writeFile(
+      pendingPath,
+      `${JSON.stringify(currentEvidence)}\n`,
+      "utf8",
+    );
+
+    await promoteSourceLibraryEvidenceAtPaths({
+      sourceLibraryRevision: revision,
+      pendingPath,
+      retainedPath,
+      reportPath,
+      expectedEnvironment: "release",
+      expectedHealId: "source-library-reconciliation-2026-08-26-v2",
+      expectedFromDate: "2026-08-26",
+    });
+    await assert.rejects(
+      readFile(pendingPath, "utf8"),
+      "promotion must consume the temporary pending artifact",
+    );
+
+    const retainedBytes = await readFile(retainedPath);
+    await promoteSourceLibraryEvidenceAtPaths({
+      sourceLibraryRevision: revision,
+      pendingPath,
+      retainedPath,
+      reportPath,
+      expectedEnvironment: "release",
+      expectedHealId: "source-library-reconciliation-2026-08-26-v2",
+      expectedFromDate: "2026-08-26",
+    });
+    assert.deepEqual(
+      await readFile(retainedPath),
+      retainedBytes,
+      "resume after promotion must reuse the validated retained artifact",
+    );
+
+    const staleEvidence: Record<string, unknown> = {
+      ...currentEvidence,
+      revision: "0".repeat(40),
+    };
+    staleEvidence.evidenceId = computeSourceLibraryEvidenceId(staleEvidence);
+    await writeFile(
+      retainedPath,
+      `${JSON.stringify(staleEvidence)}\n`,
+      "utf8",
+    );
+    await assert.rejects(
+      promoteSourceLibraryEvidenceAtPaths({
+        sourceLibraryRevision: revision,
+        pendingPath,
+        retainedPath,
+        reportPath,
+        expectedEnvironment: "release",
+        expectedHealId: "source-library-reconciliation-2026-08-26-v2",
+        expectedFromDate: "2026-08-26",
+      }),
+      /revision is stale or missing/,
+      "resume must continue enforcing the source-library revision contract",
+    );
+  } finally {
+    await rm(evidenceDir, { recursive: true, force: true });
+  }
+
+  console.log(
+    "Release source-library promotion resume scenario passed (idempotent promotion and revision validation).",
+  );
 }
 
 function runStoppedSummary(
@@ -2219,7 +2318,9 @@ async function runDamagedCheckpointScenarios(): Promise<void> {
   console.log("Release resume damaged-checkpoint scenarios passed.");
 }
 
-if (process.env.RELEASE_PROMOTION_RESUME_ONLY === "1") {
+if (process.env.RELEASE_SOURCE_LIBRARY_PROMOTION_RESUME_ONLY === "1") {
+  await runSourceLibraryPromotionResumeScenario();
+} else if (process.env.RELEASE_PROMOTION_RESUME_ONLY === "1") {
   await runTypescriptPromotionResumeScenario();
 } else if (process.env.RELEASE_STOPPED_SUMMARY_ONLY === "1") {
   await runStoppedArtifactLinkVerificationScenario();
@@ -2228,6 +2329,7 @@ if (process.env.RELEASE_PROMOTION_RESUME_ONLY === "1") {
   await run();
   await runOnboardingGuardStopScenario();
   await runParallelStageScenario();
+  await runSourceLibraryPromotionResumeScenario();
   await runIndependentFailureFanoutScenario();
   await runSourceLibraryPreflightFanoutScenario();
   await runApiShardConcurrencyScenario();

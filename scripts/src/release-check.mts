@@ -3511,32 +3511,60 @@ async function currentRevision(): Promise<string> {
   });
 }
 
-async function promoteSourceLibraryEvidence(
-  sourceLibraryRevision: string,
-): Promise<void> {
-  const pendingPath = resolve(
-    rootDir,
-    releaseEvidenceDir,
-    SOURCE_LIBRARY_RECONCILIATION_PENDING_EVIDENCE,
-  );
-  const retainedPath = resolve(
-    rootDir,
-    releaseEvidenceDir,
-    SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
-  );
-  await rename(pendingPath, retainedPath);
+export async function promoteSourceLibraryEvidenceAtPaths(options: {
+  sourceLibraryRevision: string;
+  pendingPath: string;
+  retainedPath: string;
+  reportPath: string;
+  expectedEnvironment: SourceLibraryEvidenceEnvironment;
+  expectedHealId: string;
+  expectedFromDate: string;
+}): Promise<void> {
+  let evidencePath = options.pendingPath;
+  try {
+    await rename(options.pendingPath, options.retainedPath);
+    evidencePath = options.retainedPath;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    // A prior finalization attempt may already have promoted the artifact
+    // before failing while writing or verifying the retained report. Keep
+    // that promotion resumable, but validate the retained bytes below.
+    evidencePath = options.retainedPath;
+  }
   const [retainedEvidence, reportBytes] = await Promise.all([
-    readFile(retainedPath),
-    readFile(sourceLibraryReport),
+    readFile(evidencePath),
+    readFile(options.reportPath),
   ]);
   validateSourceLibraryReconciliationEvidence(retainedEvidence, {
-    expectedEnvironment: sourceLibraryEnvironment,
-    expectedRevision: sourceLibraryRevision,
-    expectedHealId: sourceLibraryHealId,
-    expectedFromDate: sourceLibraryFromDate,
+    expectedEnvironment: options.expectedEnvironment,
+    expectedRevision: options.sourceLibraryRevision,
+    expectedHealId: options.expectedHealId,
+    expectedFromDate: options.expectedFromDate,
     expectedReportSha256: createHash("sha256")
       .update(reportBytes)
       .digest("hex"),
+  });
+}
+
+async function promoteSourceLibraryEvidence(
+  sourceLibraryRevision: string,
+): Promise<void> {
+  await promoteSourceLibraryEvidenceAtPaths({
+    sourceLibraryRevision,
+    pendingPath: resolve(
+      rootDir,
+      releaseEvidenceDir,
+      SOURCE_LIBRARY_RECONCILIATION_PENDING_EVIDENCE,
+    ),
+    retainedPath: resolve(
+      rootDir,
+      releaseEvidenceDir,
+      SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
+    ),
+    reportPath: sourceLibraryReport,
+    expectedEnvironment: sourceLibraryEnvironment,
+    expectedHealId: sourceLibraryHealId,
+    expectedFromDate: sourceLibraryFromDate,
   });
 }
 
