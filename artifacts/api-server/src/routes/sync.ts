@@ -184,12 +184,17 @@ type ProtectedUpsertResult = {
   staleEpoch?: number;
 };
 
-function unchangedResponse(res: Response, data: unknown, requested: string | undefined): boolean {
+function unchangedResponse(
+  res: Response,
+  data: unknown,
+  requested: string | undefined,
+  extra: Record<string, unknown> = {},
+): boolean {
   const snapshotId = syncSnapshotId(data);
   if (requested !== snapshotId) return false;
   res.setHeader("X-Sync-Snapshot", snapshotId);
   res.setHeader("X-Sync-Response", "unchanged");
-  res.json({ unchanged: true, snapshotId });
+  res.json({ unchanged: true, snapshotId, ...extra });
   return true;
 }
 
@@ -1232,10 +1237,13 @@ router.get("/sync/today", async (req: Request, res: Response): Promise<void> => 
   // "Today" is the CLIENT's local date (see clientToday). The server runs in UTC,
   // so a client behind UTC would otherwise read/write a different calendar row
   // than its scheduled days and rollover use — clobbering a scheduled "tomorrow".
-  const [row] = await db
-    .select()
-    .from(dailySyncTable)
-    .where(and(eq(dailySyncTable.date, clientToday(req)), eq(dailySyncTable.scope, currentScope())));
+  const scope = currentScope();
+  const [rows, resetState] = await Promise.all([
+    db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, clientToday(req)), eq(dailySyncTable.scope, scope))),
+    getResetState(scope),
+  ]);
+  const [row] = rows;
   // A missing live row is an empty baseline, not a null payload. Returning the
   // same shape as a populated row keeps reset/wake recovery within the client
   // sync contract and gives it a stable snapshot identity.
@@ -1244,14 +1252,24 @@ router.get("/sync/today", async (req: Request, res: Response): Promise<void> => 
   const serverTime = Date.now();
   res.setHeader("X-Sync-Canonical-Revision", String(canonicalRevision));
   res.setHeader("X-Sync-Server-Time", String(serverTime));
-  if (unchangedResponse(res, data, requestedSnapshot(req))) return;
+  if (unchangedResponse(res, data, requestedSnapshot(req), {
+    resetEpoch: resetState.epoch,
+    rollover: resetState.rollover,
+    canonicalRevision,
+  })) return;
   res.setHeader("X-Sync-Response", "complete");
   if (data) res.setHeader("X-Sync-Snapshot", syncSnapshotId(data));
   const liveState = computeServerLiveState(data, serverTime, canonicalRevision);
   if (!liveState.operationalProjection) {
     // Preserve the empty-baseline response shape for clients that have no
     // selected run yet. The server-time headers still provide the anchor.
-    res.json(data);
+    res.json({
+      ...(data as Record<string, unknown>),
+      resetEpoch: resetState.epoch,
+      rollover: resetState.rollover,
+      serverTime,
+      canonicalRevision,
+    });
     return;
   }
   res.json({
@@ -1259,6 +1277,8 @@ router.get("/sync/today", async (req: Request, res: Response): Promise<void> => 
     operationalProjection: liveState.operationalProjection,
     serverTime,
     canonicalRevision,
+    resetEpoch: resetState.epoch,
+    rollover: resetState.rollover,
   });
 });
 

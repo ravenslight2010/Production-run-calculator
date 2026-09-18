@@ -63,6 +63,8 @@ export function persistedSyncPayload(payload: SyncPayload): SyncPayload {
     operationalProjection: _operationalProjection,
     serverTime: _serverTime,
     canonicalRevision: _canonicalRevision,
+    resetEpoch: _resetEpoch,
+    rollover: _rollover,
     ...persisted
   } = payload;
   return persisted as SyncPayload;

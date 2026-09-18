@@ -307,7 +307,6 @@ import {
   isUnchangedSyncResponse,
   isValidSyncSnapshotId,
   persistedSyncPayload,
-  readCurrentRecoveryJson,
   reconstructPartialSyncPayload,
   syncPayloadMatchesSnapshot,
 } from "../syncWriteResponse";
@@ -9192,36 +9191,6 @@ export default function Home() {
       return (async () => {
         let reconciled = false;
         try {
-          // Check the reset epoch first because a device can miss the SSE reset
-          // frame while asleep. The ordinary reset wipe remains the single
-          // authority for clearing pre-reset local state.
-          const epochRes = await fetchWithTimeout(
-            "/api/sync/reset-epoch",
-            { cache: "no-store" },
-            10_000,
-          );
-          // A newer wake/reconnect owner may have superseded this response
-          // while the browser was asleep or the network was stalled. Obsolete
-          // responses must not update any canonical refs or release the fence.
-          if (!isCurrentRecovery()) return false;
-          if (epochRes.ok) {
-            const parsedEpoch = await readCurrentRecoveryJson(epochRes, isCurrentRecovery)
-              .catch(() => ({ current: isCurrentRecovery(), body: null }));
-            if (!parsedEpoch.current) return false;
-            const epochBody = parsedEpoch.body as { epoch?: number; rollover?: boolean } | null;
-            if (typeof epochBody?.epoch === "number" && epochBody.epoch > getStoredResetEpoch()) {
-              const generation = synchronizationStateMachineRef.current.beginReset(epochBody.epoch);
-              const adopted = epochBody.rollover
-                ? applyRolloverEpoch(epochBody.epoch)
-                : applyResetWipe(epochBody.epoch);
-              if (adopted) {
-                window.location.reload();
-                return false;
-              }
-              synchronizationStateMachineRef.current.completeReset(generation);
-            }
-          }
-
           const snapshot = syncSnapshotIdRef.current;
           // Capture the facility-local production date once for this recovery
           // transaction. A device can wake at local midnight, and the request
@@ -9237,6 +9206,19 @@ export default function Home() {
             response: res,
             expectedDate: clientDate,
             requestedSnapshotId: snapshot,
+            adoptReset: ({ resetEpoch, rollover }) => {
+              if (resetEpoch <= getStoredResetEpoch()) return false;
+              const generation = synchronizationStateMachineRef.current.beginReset(resetEpoch);
+              const adopted = rollover
+                ? applyRolloverEpoch(resetEpoch)
+                : applyResetWipe(resetEpoch);
+              if (adopted) {
+                window.location.reload();
+                return true;
+              }
+              synchronizationStateMachineRef.current.completeReset(generation);
+              return false;
+            },
             isCurrent: isCurrentRecovery,
             adoptUnchanged: (body) => {
               adoptOperationalRevision(body.canonicalRevision);
@@ -9256,6 +9238,7 @@ export default function Home() {
             },
           });
           if (!recovery.accepted) return false;
+          setIsOnline(true);
           if (recovery.kind === "unchanged") {
             reconciled = true;
             return true;

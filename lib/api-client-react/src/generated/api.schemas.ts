@@ -1005,7 +1005,18 @@ export interface SyncUnchangedResponse {
   unchanged: true;
   /** @pattern ^[a-f0-9]{64}$ */
   snapshotId: string;
+  /** @minimum 0 */
+  resetEpoch: number;
+  rollover: boolean;
+  /** @minimum 0 */
+  canonicalRevision?: number;
 }
+
+export type SyncRecoveryPayload = SyncPayload & {
+  /** @minimum 0 */
+  resetEpoch: number;
+  rollover: boolean;
+};
 
 export interface SyncWriteRequest {
   senderId?: string;

@@ -237,8 +237,8 @@ import type {
   SummaryInput,
   SummaryResult,
   SupervisorPin,
-  SyncPayload,
   SyncPeerFrame,
+  SyncRecoveryPayload,
   SyncUnchangedResponse,
   SyncWriteRequest,
   TransferInput,
@@ -17901,9 +17901,9 @@ export const getGetSyncTodayUrl = (params?: GetSyncTodayParams,) => {
 /**
  * @summary Read the client-local current-day sync snapshot
  */
-export const getSyncToday = async (params?: GetSyncTodayParams, options?: Parameters<typeof customFetch>[1]): Promise<SyncPayload | SyncUnchangedResponse> => {
+export const getSyncToday = async (params?: GetSyncTodayParams, options?: Parameters<typeof customFetch>[1]): Promise<SyncRecoveryPayload | SyncUnchangedResponse> => {
 
-  return customFetch<SyncPayload | SyncUnchangedResponse>(getGetSyncTodayUrl(params),
+  return customFetch<SyncRecoveryPayload | SyncUnchangedResponse>(getGetSyncTodayUrl(params),
   {
     ...options,
     method: 'GET'

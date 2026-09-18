@@ -6232,15 +6232,27 @@ export const GetSyncTodayQueryParams = zod.object({
   "snapshot": zod.coerce.string().regex(getSyncTodayQuerySnapshotRegExp).optional()
 })
 
+export const getSyncTodayResponseOneTwoResetEpochMin = 0;
+
 export const getSyncTodayResponseTwoSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
+export const getSyncTodayResponseTwoResetEpochMin = 0;
+
+export const getSyncTodayResponseTwoCanonicalRevisionMin = 0;
+
 
 
 export const GetSyncTodayResponse = zod.union([zod.object({
   "dayState": zod.record(zod.string(), zod.unknown()),
   "runValues": zod.record(zod.string(), zod.unknown())
-}).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.'),zod.object({
+}).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.').and(zod.object({
+  "resetEpoch": zod.int().min(getSyncTodayResponseOneTwoResetEpochMin),
+  "rollover": zod.boolean()
+})),zod.object({
   "unchanged": zod.literal(true),
-  "snapshotId": zod.string().regex(getSyncTodayResponseTwoSnapshotIdRegExp)
+  "snapshotId": zod.string().regex(getSyncTodayResponseTwoSnapshotIdRegExp),
+  "resetEpoch": zod.int().min(getSyncTodayResponseTwoResetEpochMin),
+  "rollover": zod.boolean(),
+  "canonicalRevision": zod.int().min(getSyncTodayResponseTwoCanonicalRevisionMin).optional()
 })])
 
 

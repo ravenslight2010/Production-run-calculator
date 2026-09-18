@@ -55,6 +55,7 @@ function stateHarness() {
       isCurrent: options.current ?? (() => true),
       adoptUnchanged,
       adoptCanonical,
+      adoptReset: vi.fn(() => false),
     });
     if (result.accepted) {
       state.queuedWrite.pending = false;
@@ -76,7 +77,7 @@ async function canonicalResponse(
   headers: Record<string, string> = {},
 ): Promise<Response> {
   const snapshotId = await syncPayloadSnapshotId(payload, { stripReadModel: true });
-  return new Response(JSON.stringify(payload), {
+  return new Response(JSON.stringify({ ...payload, resetEpoch: 0, rollover: false }), {
     status: 200,
     headers: {
       "X-Sync-Response": "complete",
@@ -157,5 +158,41 @@ describe("foreground recovery response transaction", () => {
     expect(harness.state.runValues).toEqual(payload.runValues);
     expect(harness.state.queuedWrite.pending).toBe(false);
     expect(harness.state.fenceReleased).toBe(true);
+  });
+
+  it("processes a newer reset before canonical adoption and keeps the fence raised", async () => {
+    const harness = stateHarness();
+    const payload = canonicalPayload();
+    const response = await canonicalResponse(payload);
+    const body = await response.json() as Record<string, unknown>;
+    const resetResponse = new Response(JSON.stringify({ ...body, resetEpoch: 7 }), {
+      status: 200,
+      headers: response.headers,
+    });
+    const adoptReset = vi.fn(() => true);
+    const result = await consumeForegroundRecoveryResponse({
+      response: resetResponse,
+      expectedDate: DATE,
+      requestedSnapshotId: harness.state.snapshotId,
+      isCurrent: () => true,
+      adoptUnchanged: harness.adoptUnchanged,
+      adoptCanonical: harness.adoptCanonical,
+      adoptReset,
+    });
+    expect(result).toEqual({ accepted: false, reason: "reset" });
+    expect(adoptReset).toHaveBeenCalledWith({ resetEpoch: 7, rollover: false });
+    expectRejectedStateUnchanged(harness);
+  });
+
+  it("rejects a canonical response without authoritative reset state", async () => {
+    const harness = stateHarness();
+    const payload = canonicalPayload();
+    const snapshotId = await syncPayloadSnapshotId(payload, { stripReadModel: true });
+    const response = new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { "X-Sync-Response": "complete", "X-Sync-Snapshot": snapshotId },
+    });
+    await expect(harness.consume(response)).rejects.toThrow("malformed reset state");
+    expectRejectedStateUnchanged(harness);
   });
 });

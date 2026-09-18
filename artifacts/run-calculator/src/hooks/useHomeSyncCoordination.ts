@@ -46,9 +46,10 @@ type TodayWrite = {
 type ForegroundScheduler = {
   register: (task: {
     id: string;
-    runOnForeground: boolean;
+    cadenceMs?: number;
+    runOnForeground?: boolean;
     order: number;
-    run: () => Promise<boolean>;
+    run: () => boolean | Promise<boolean>;
   }) => () => void;
 };
 
@@ -310,32 +311,47 @@ export function useHomeSyncCoordination() {
     recover: () => Promise<boolean>,
   ) => {
     const reconcile = createForegroundSyncWakeGuard(recover);
-    foregroundRecoveryRequestRef.current = reconcile;
+    let unreconciled = false;
+    const requestRecovery = async (): Promise<boolean> => {
+      unreconciled = true;
+      const recovered = await reconcile();
+      if (recovered) unreconciled = false;
+      return recovered;
+    };
+    foregroundRecoveryRequestRef.current = requestRecovery;
     if (foregroundRecoveryRequestPendingRef.current) {
       foregroundRecoveryRequestPendingRef.current = false;
-      void reconcile();
+      void requestRecovery();
     }
     const onOnline = () => {
       // `online` is the recovery signal when a failed pull was left pending
       // by a browser transport. Do not discard it because the page still
       // reports hidden: WebKit can deliver the reconnect event before it
       // updates visibility, and the wake guard keeps the retry bounded.
-      void reconcile();
+      void requestRecovery();
     };
     window.addEventListener("online", onOnline);
     const unregister = scheduler.register({
       id: "foreground-reconcile",
       runOnForeground: true,
       order: 0,
-      run: reconcile,
+      run: requestRecovery,
+    });
+    const unregisterRetry = scheduler.register({
+      id: "foreground-reconcile-retry",
+      cadenceMs: 5_000,
+      order: 0,
+      run: async () => unreconciled ? requestRecovery() : false,
     });
     return {
-      reconcile,
+      reconcile: requestRecovery,
       dispose: () => {
-        if (foregroundRecoveryRequestRef.current === reconcile) {
+        unreconciled = false;
+        if (foregroundRecoveryRequestRef.current === requestRecovery) {
           foregroundRecoveryRequestRef.current = null;
         }
         window.removeEventListener("online", onOnline);
+        unregisterRetry();
         unregister();
       },
     };

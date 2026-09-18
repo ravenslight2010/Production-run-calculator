@@ -5,14 +5,10 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { SyncPayload } from './syncPayload';
 
-export interface SyncUnchangedResponse {
-  unchanged: true;
-  /** @pattern ^[a-f0-9]{64}$ */
-  snapshotId: string;
+export type SyncRecoveryPayload = SyncPayload & {
   /** @minimum 0 */
   resetEpoch: number;
   rollover: boolean;
-  /** @minimum 0 */
-  canonicalRevision?: number;
-}
+};

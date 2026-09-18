@@ -466,6 +466,9 @@ export type SyncPayload = {
   operationalProjection?: OperationalProjection | null;
   serverTime?: number;
   canonicalRevision?: number;
+  /** Server-owned wake recovery metadata; transported beside the persisted snapshot. */
+  resetEpoch?: number;
+  rollover?: boolean;
   dayState: { runs: RunMeta[]; shiftNotes?: string; runToTime?: string; resetAt?: number; date?: string; substitutions?: IngredientSubstitution[]; substitutionLog?: SubstitutionLogEntry[]; stagedItems?: Record<string, boolean>; prepPhase?: PrepPhase };
   runValues: Record<string, FormValues>;
   // Per-run monotonic edit timestamp (run id -> ms). Lets the apply path reject a

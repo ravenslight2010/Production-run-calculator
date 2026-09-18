@@ -4560,7 +4560,7 @@ paths:
             application/json:
               schema:
                 oneOf:
-                  - $ref: "#/components/schemas/SyncPayload"
+                  - $ref: "#/components/schemas/SyncRecoveryPayload"
                   - $ref: "#/components/schemas/SyncUnchangedResponse"
     put:
       operationId: putSyncToday
@@ -5267,10 +5267,22 @@ components:
 
     SyncUnchangedResponse:
       type: object
-      required: [unchanged, snapshotId]
+      required: [unchanged, snapshotId, resetEpoch, rollover]
       properties:
         unchanged: { type: boolean, const: true }
         snapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
+        resetEpoch: { type: integer, minimum: 0 }
+        rollover: { type: boolean }
+        canonicalRevision: { type: integer, minimum: 0 }
+
+    SyncRecoveryPayload:
+      allOf:
+        - $ref: "#/components/schemas/SyncPayload"
+        - type: object
+          required: [resetEpoch, rollover]
+          properties:
+            resetEpoch: { type: integer, minimum: 0 }
+            rollover: { type: boolean }
 
     SyncWriteRequest:
       type: object

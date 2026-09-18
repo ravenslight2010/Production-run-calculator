@@ -1778,9 +1778,10 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
 
         holdOnlineRecovery = false;
         await sleepingPage.unroute("**/api/sync/today**");
-        await sleepingPage.getByTestId("button-retry-foreground-recovery").click();
+        // Do not click Retry. A visible app must recover on the fixed five-second
+        // cadence even when the browser's online signal was false or premature.
         await expect(sleepingStatus)
-          .toContainText("Production state synchronized.", { timeout: 15_000 });
+          .toContainText("Production state synchronized.", { timeout: 12_000 });
         expect(Number(await sleepingStatus.getAttribute("data-foreground-sync-ack")))
           .toBeGreaterThan(failedAck);
 
@@ -2697,7 +2698,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         });
         await sleepingPage.waitForTimeout(900);
 
-        await sleepingPage.route("**/api/sync/reset-epoch", async (route) => {
+        await sleepingPage.route("**/api/sync/today**", async (route) => {
           if (route.request().method() !== "GET" || recoveryStarted) {
             await route.continue();
             return;
@@ -2720,7 +2721,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         // Release the route afterward so the cancelled request cannot linger.
         await sleepingPage.goto("about:blank", { waitUntil: "domcontentloaded" });
         releaseRecovery?.();
-        await sleepingPage.unroute("**/api/sync/reset-epoch");
+        await sleepingPage.unroute("**/api/sync/today**");
         await sleepingPage.goto("/", { waitUntil: "domcontentloaded" });
         await sleepingPage.getByTestId("tab-run")
           .waitFor({ state: "visible", timeout: 20_000 });

@@ -609,6 +609,7 @@ export * from './syncPeerFrame';
 export * from './syncPeerFrameCompleteness';
 export * from './syncPeerFrameData';
 export * from './syncPeerFrameSyncVersion';
+export * from './syncRecoveryPayload';
 export * from './syncSnapshotParameter';
 export * from './syncUnchangedResponse';
 export * from './syncWriteRequest';

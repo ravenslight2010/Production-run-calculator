@@ -113,7 +113,7 @@ describe("foreground wake sync barrier", () => {
     } as unknown as SyncPayload;
     const responseFor = async (payload: SyncPayload) => {
       const snapshotId = await syncPayloadSnapshotId(payload, { stripReadModel: true });
-      return new Response(JSON.stringify(payload), {
+      return new Response(JSON.stringify({ ...payload, resetEpoch: 0, rollover: false }), {
         status: 200,
         headers: {
           "X-Sync-Response": "complete",
@@ -138,6 +138,7 @@ describe("foreground wake sync barrier", () => {
           requestedSnapshotId: "snapshot-a",
           isCurrent: () => true,
           adoptUnchanged: vi.fn(),
+          adoptReset: vi.fn(() => false),
           adoptCanonical: (payload) => {
             coordinateForegroundAdoption({
               payload,
@@ -248,6 +249,68 @@ describe("foreground wake sync barrier", () => {
     expect(retryPromise).toBeDefined();
     await expect(retryPromise!).resolves.toBe(true);
     expect(pullClientDateRow).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries every five seconds while visible and stops after canonical recovery", async () => {
+    vi.useFakeTimers();
+    let hidden = false;
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      get: () => hidden,
+    });
+    const recover = vi.fn<() => Promise<boolean>>()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    const { result, unmount } = renderHook(() => useHomeSyncCoordination());
+    const scheduler = new VisibleTabScheduler();
+    const registration = result.current.registerForegroundRecovery(scheduler, recover);
+    try {
+      scheduler.start();
+      window.dispatchEvent(new Event("focus"));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(recover).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(recover).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(recover).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(recover).toHaveBeenCalledTimes(3);
+
+      hidden = true;
+      document.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(recover).toHaveBeenCalledTimes(3);
+    } finally {
+      registration.dispose();
+      scheduler.stop();
+      unmount();
+      hidden = false;
+      vi.useRealTimers();
+    }
+  });
+
+  it("cleans up the visible retry timer when recovery registration is disposed", async () => {
+    vi.useFakeTimers();
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      get: () => false,
+    });
+    const recover = vi.fn<() => Promise<boolean>>().mockResolvedValue(false);
+    const { result, unmount } = renderHook(() => useHomeSyncCoordination());
+    const scheduler = new VisibleTabScheduler();
+    const registration = result.current.registerForegroundRecovery(scheduler, recover);
+    scheduler.start();
+    window.dispatchEvent(new Event("focus"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(recover).toHaveBeenCalledTimes(1);
+    registration.dispose();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(recover).toHaveBeenCalledTimes(1);
+    scheduler.stop();
+    unmount();
+    vi.useRealTimers();
   });
 
   it("retries once when online arrives while a client-date pull is failing", async () => {

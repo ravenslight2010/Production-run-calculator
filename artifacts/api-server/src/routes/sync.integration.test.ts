@@ -159,6 +159,41 @@ beforeEach(async () => {
   ]);
 });
 
+describe("GET /sync/today — combined wake recovery", () => {
+  const DATE = "2030-03-10";
+
+  it("returns authoritative reset state on full and unchanged responses", async () => {
+    await db.insert(dataResetTable).values({
+      scope: "live",
+      epoch: 7,
+      resetAt: new Date(`${DATE}T12:00:00.000Z`),
+    });
+    const first = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      headers: authHeaders(),
+    });
+    expect(first.status).toBe(200);
+    const full = await first.json() as {
+      resetEpoch?: number; rollover?: boolean; canonicalRevision?: number;
+    };
+    expect(full).toMatchObject({ resetEpoch: 7, rollover: false, canonicalRevision: 0 });
+    const snapshot = first.headers.get("X-Sync-Snapshot");
+    expect(snapshot).toMatch(/^[a-f0-9]{64}$/);
+
+    const unchanged = await fetch(
+      `${baseUrl}/api/sync/today?today=${DATE}&snapshot=${snapshot}`,
+      { headers: authHeaders() },
+    );
+    expect(unchanged.status).toBe(200);
+    expect(await unchanged.json()).toMatchObject({
+      unchanged: true,
+      snapshotId: snapshot,
+      resetEpoch: 7,
+      rollover: false,
+      canonicalRevision: 0,
+    });
+  });
+});
+
 describe("POST /sync/manual-section — section ownership contract", () => {
   const DATE = "2030-03-10";
   const values = (runId = "manual-run") => ({
@@ -1582,6 +1617,10 @@ describe("/sync/today — client-local-date keying", () => {
       dayState: { date, runs: [] },
       runValues: {},
       runValuesUpdatedAt: {},
+      resetEpoch: 0,
+      rollover: false,
+      canonicalRevision: 0,
+      serverTime: expect.any(Number),
     });
   });
 
