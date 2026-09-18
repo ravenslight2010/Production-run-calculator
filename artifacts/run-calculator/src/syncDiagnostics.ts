@@ -46,6 +46,21 @@ export type WakeRecoveryDiagnostic = {
   outcome: WakeRecoveryOutcome;
 };
 
+function readableWakeRecoveryLabel(value: WakeRecoveryTrigger | WakeRecoveryOutcome): string {
+  return value.replaceAll("-", " ");
+}
+
+function readableWakeRecoveryDuration(durationMs: number): string {
+  if (durationMs < 1_000) return `${durationMs}ms`;
+  const seconds = durationMs / 1_000;
+  return `${seconds < 10 ? seconds.toFixed(1).replace(/\.0$/, "") : Math.round(seconds)}s`;
+}
+
+export function formatWakeRecoveryDiagnostic(diagnostic: WakeRecoveryDiagnostic): string {
+  const attemptLabel = diagnostic.attempts === 1 ? "attempt" : "attempts";
+  return `${diagnostic.attempts} ${attemptLabel} · ${readableWakeRecoveryDuration(diagnostic.durationMs)} · ${readableWakeRecoveryLabel(diagnostic.trigger)} · ${readableWakeRecoveryLabel(diagnostic.outcome)}`;
+}
+
 export type SyncMeasurementPath = "complete" | "partial";
 export type SyncMeasurementDirection = "push" | "peer";
 export type SyncMeasurementTrigger = "edit" | "auto-track" | "recovery" | "periodic";
