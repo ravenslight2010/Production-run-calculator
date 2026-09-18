@@ -1,59 +1,87 @@
 # Full Browser Release Run
 
-Generated: 2026-09-18T12:04:52.216Z
-Revision: c3a48448ae8ac7ea6ff6c5b3d738627b01faf17a
+Generated: 2026-09-18T15:54:02.955Z
+Revision: 2d289764bf6eb8f09a40f1391b9d17535ae64d22
 Result: FAIL
 Expected cases: 160
 Enumerated cases: 160
 Completed cases: 160
-Passed cases: 16
+Passed cases: 6
 Skipped cases: 26
-Failed cases: 118
+Failed cases: 128
 Not-run cases: 0
 Coverage: COMPLETE
-Duration: 745587ms
+Duration: 554503ms
 
 ## Per-file duration
 
 | File | Cases | Completed | Passed | Skipped | Failed | Not run | Duration |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `artifacts/run-calculator/e2e/accessibility-smoke.spec.ts` | 6 | 6 | 6 | 0 | 0 | 0 | 69260ms |
-| `artifacts/run-calculator/e2e/ai-outage-reviewability.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 11201ms |
-| `artifacts/run-calculator/e2e/compact-run-strip.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 5642ms |
-| `artifacts/run-calculator/e2e/critical-workflows.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 19850ms |
-| `artifacts/run-calculator/e2e/cross-device-smoke.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 16478ms |
-| `artifacts/run-calculator/e2e/department-workflow-navigation.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 28433ms |
-| `artifacts/run-calculator/e2e/die-tunnel-defaults.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 3307ms |
-| `artifacts/run-calculator/e2e/dough-correction-resume.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 1937ms |
-| `artifacts/run-calculator/e2e/freezer-surplus.spec.ts` | 2 | 2 | 0 | 0 | 2 | 0 | 1152ms |
-| `artifacts/run-calculator/e2e/home-navigation-reload.spec.ts` | 5 | 5 | 0 | 0 | 5 | 0 | 9161ms |
-| `artifacts/run-calculator/e2e/live-sauce-dough-phone.spec.ts` | 3 | 3 | 0 | 0 | 3 | 0 | 715ms |
-| `artifacts/run-calculator/e2e/management-performance.spec.ts` | 4 | 4 | 0 | 0 | 4 | 0 | 11228ms |
-| `artifacts/run-calculator/e2e/manager-action-queue-stale.spec.ts` | 7 | 7 | 0 | 0 | 7 | 0 | 12136ms |
-| `artifacts/run-calculator/e2e/manager-attention.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 313ms |
-| `artifacts/run-calculator/e2e/mix-plan.spec.ts` | 34 | 34 | 0 | 0 | 34 | 0 | 56241ms |
-| `artifacts/run-calculator/e2e/multi-device-convergence.spec.ts` | 4 | 4 | 0 | 0 | 4 | 0 | 4557ms |
-| `artifacts/run-calculator/e2e/phone-layout.spec.ts` | 21 | 21 | 2 | 18 | 1 | 0 | 2340ms |
-| `artifacts/run-calculator/e2e/photo-count.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 321ms |
-| `artifacts/run-calculator/e2e/photo-spec-import.spec.ts` | 5 | 5 | 0 | 0 | 5 | 0 | 7120ms |
-| `artifacts/run-calculator/e2e/prior-run-drain.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 226ms |
-| `artifacts/run-calculator/e2e/profile-subtab-reload.spec.ts` | 2 | 2 | 0 | 0 | 2 | 0 | 526ms |
-| `artifacts/run-calculator/e2e/pwa-handoff.spec.ts` | 3 | 3 | 1 | 0 | 2 | 0 | 128905ms |
-| `artifacts/run-calculator/e2e/pwa-morning-login.spec.ts` | 2 | 2 | 0 | 0 | 2 | 0 | 4173ms |
-| `artifacts/run-calculator/e2e/recipe-refresh-start-freeze.spec.ts` | 13 | 13 | 0 | 2 | 11 | 0 | 9059ms |
-| `artifacts/run-calculator/e2e/run-insights.spec.ts` | 3 | 3 | 0 | 0 | 3 | 0 | 848ms |
-| `artifacts/run-calculator/e2e/screen-off-wake.spec.ts` | 14 | 14 | 0 | 0 | 14 | 0 | 3920ms |
-| `artifacts/run-calculator/e2e/spec-import-unit-provenance.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 1515ms |
-| `artifacts/run-calculator/e2e/sync-convergence.spec.ts` | 9 | 9 | 0 | 1 | 8 | 0 | 13448ms |
-| `artifacts/run-calculator/e2e/sync-diagnostics-download.spec.ts` | 3 | 3 | 0 | 0 | 3 | 0 | 4591ms |
-| `artifacts/run-calculator/e2e/visual-regression.spec.ts` | 3 | 3 | 0 | 2 | 1 | 0 | 1451ms |
+| `artifacts/run-calculator/e2e/accessibility-smoke.spec.ts` | 6 | 6 | 3 | 0 | 3 | 0 | 20626ms |
+| `artifacts/run-calculator/e2e/ai-outage-reviewability.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 2068ms |
+| `artifacts/run-calculator/e2e/compact-run-strip.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 2449ms |
+| `artifacts/run-calculator/e2e/critical-workflows.spec.ts` | 2 | 2 | 0 | 0 | 2 | 0 | 5587ms |
+| `artifacts/run-calculator/e2e/cross-device-smoke.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 1947ms |
+| `artifacts/run-calculator/e2e/department-workflow-navigation.spec.ts` | 2 | 2 | 0 | 0 | 2 | 0 | 3222ms |
+| `artifacts/run-calculator/e2e/die-tunnel-defaults.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 1706ms |
+| `artifacts/run-calculator/e2e/dough-correction-resume.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 1436ms |
+| `artifacts/run-calculator/e2e/freezer-surplus.spec.ts` | 2 | 2 | 0 | 0 | 2 | 0 | 841ms |
+| `artifacts/run-calculator/e2e/home-navigation-reload.spec.ts` | 5 | 5 | 0 | 0 | 5 | 0 | 8688ms |
+| `artifacts/run-calculator/e2e/live-sauce-dough-phone.spec.ts` | 3 | 3 | 0 | 0 | 3 | 0 | 916ms |
+| `artifacts/run-calculator/e2e/management-performance.spec.ts` | 4 | 4 | 0 | 0 | 4 | 0 | 9978ms |
+| `artifacts/run-calculator/e2e/manager-action-queue-stale.spec.ts` | 7 | 7 | 0 | 0 | 7 | 0 | 10298ms |
+| `artifacts/run-calculator/e2e/manager-attention.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 279ms |
+| `artifacts/run-calculator/e2e/mix-plan.spec.ts` | 34 | 34 | 0 | 0 | 34 | 0 | 45745ms |
+| `artifacts/run-calculator/e2e/multi-device-convergence.spec.ts` | 4 | 4 | 0 | 0 | 4 | 0 | 3715ms |
+| `artifacts/run-calculator/e2e/phone-layout.spec.ts` | 21 | 21 | 2 | 18 | 1 | 0 | 2006ms |
+| `artifacts/run-calculator/e2e/photo-count.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 246ms |
+| `artifacts/run-calculator/e2e/photo-spec-import.spec.ts` | 5 | 5 | 0 | 0 | 5 | 0 | 6247ms |
+| `artifacts/run-calculator/e2e/prior-run-drain.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 217ms |
+| `artifacts/run-calculator/e2e/profile-subtab-reload.spec.ts` | 2 | 2 | 0 | 0 | 2 | 0 | 486ms |
+| `artifacts/run-calculator/e2e/pwa-handoff.spec.ts` | 3 | 3 | 1 | 0 | 2 | 0 | 128392ms |
+| `artifacts/run-calculator/e2e/pwa-morning-login.spec.ts` | 2 | 2 | 0 | 0 | 2 | 0 | 2412ms |
+| `artifacts/run-calculator/e2e/recipe-refresh-start-freeze.spec.ts` | 13 | 13 | 0 | 2 | 11 | 0 | 2524ms |
+| `artifacts/run-calculator/e2e/run-insights.spec.ts` | 3 | 3 | 0 | 0 | 3 | 0 | 687ms |
+| `artifacts/run-calculator/e2e/screen-off-wake.spec.ts` | 14 | 14 | 0 | 0 | 14 | 0 | 3465ms |
+| `artifacts/run-calculator/e2e/spec-import-unit-provenance.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 1236ms |
+| `artifacts/run-calculator/e2e/sync-convergence.spec.ts` | 9 | 9 | 0 | 1 | 8 | 0 | 11187ms |
+| `artifacts/run-calculator/e2e/sync-diagnostics-download.spec.ts` | 3 | 3 | 0 | 0 | 3 | 0 | 3864ms |
+| `artifacts/run-calculator/e2e/visual-regression.spec.ts` | 3 | 3 | 0 | 2 | 1 | 0 | 1277ms |
 | `artifacts/run-calculator/e2e/warehouse-coverage.spec.ts` | 4 | 4 | 0 | 3 | 1 | 0 | 0ms |
 
 ## Failed and timed-out cases
 
+### `artifacts/run-calculator/e2e/accessibility-smoke.spec.ts`
+
+- **FAILED** `› chromium › accessibility-smoke.spec.ts › accessibility smoke › authenticated staff workflows expose accessible controls and dialogs`
+- **FAILED** `› chromium › accessibility-smoke.spec.ts › accessibility smoke › schedule calendar is labeled, keyboard operable, and free of obvious violations`
+- **FAILED** `› chromium › accessibility-smoke.spec.ts › accessibility smoke › supervisors can review field checks without physical-device attestation controls`
+
+### `artifacts/run-calculator/e2e/ai-outage-reviewability.spec.ts`
+
+- **FAILED** `› chromium › ai-outage-reviewability.spec.ts › keeps deterministic management workflows reviewable when enrichment is unavailable`
+
+### `artifacts/run-calculator/e2e/compact-run-strip.spec.ts`
+
+- **FAILED** `› chromium › compact-run-strip.spec.ts › CompactRunStrip — ended-run round-trip › strip stays visible with Ended status after Run-tab round-trip, no pause/resume buttons`
+
+### `artifacts/run-calculator/e2e/critical-workflows.spec.ts`
+
+- **FAILED** `› chromium › critical-workflows.spec.ts › completes manager-approved password recovery and fences the old session`
+- **FAILED** `› chromium › critical-workflows.spec.ts › repairs scoped Data Health findings, preserves started runs, and guards undo`
+
 ### `artifacts/run-calculator/e2e/cross-device-smoke.spec.ts`
 
 - **FAILED** `› chromium › cross-device-smoke.spec.ts › staff lifecycle recovers across desktop and phone layouts`
+
+### `artifacts/run-calculator/e2e/department-workflow-navigation.spec.ts`
+
+- **FAILED** `› chromium › department-workflow-navigation.spec.ts › manager can open the Dough recipe editor without an uncaught page error`
+- **FAILED** `› chromium › department-workflow-navigation.spec.ts › production, warehouse, QC, and management remain connected after navigation`
+
+### `artifacts/run-calculator/e2e/die-tunnel-defaults.spec.ts`
+
+- **FAILED** `› chromium › die-tunnel-defaults.spec.ts › run-form die tunnel defaults › fills 7-inch values, switches to 12-inch values, and preserves typed time`
 
 ### `artifacts/run-calculator/e2e/dough-correction-resume.spec.ts`
 
