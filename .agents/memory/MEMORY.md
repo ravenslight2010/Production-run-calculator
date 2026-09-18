@@ -76,6 +76,7 @@
 - [Same-name pool dups](same-name-pool-dups.md) — name-keyed merge can't see two pool rows with one name; fix by deduping rows (heal), not the merge UI; beware tie-break sign under descending sort.
 - [Dev DB connection exhaustion](dev-db-connection-exhaustion.md) + [detached process reaping](detached-process-reaping.md) — "too many clients" can last hours (retry, else reboot; restart both APIs); setsid/nohup dies with the bash session, >2min runs need a workflow.
 - [Pool acquisition deadlines](pool-acquisition-deadlines.md) — node-postgres connectionTimeoutMillis cancels saturated checkout waiters; outer Promise.race does not.
+- [Background scheduler backoff](background-scheduler-backoff.md) — after bounded retry exhaustion, auxiliary DB schedulers back off independently while readiness stays fail-closed.
 - [Merge target must survive](merge-target-must-survive.md) — pool-name merges must promote a source by rename when the target name has no pool row, or deleting sources destroys the recipe.
 - [Brand-scoped import names](brand-scoped-import-names.md) — cheese/mix import links same-brand or unbranded only, never cross-brand; collisions get a brand prefix; dough/sauce not scoped yet.
 - [Applicator tolerance columns](applicator-tolerance-columns.md) — ozPerPizza = FIRST numeric cell after the name; trailing 0.2/0.1 cells are tolerances; verify via TARGET WEIGHT sum.

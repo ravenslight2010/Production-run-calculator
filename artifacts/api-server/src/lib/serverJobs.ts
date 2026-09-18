@@ -420,7 +420,6 @@ export function startServerJobWorkerLoop(options: ServerJobLoopOptions = {}): Se
       active++;
       void runBackgroundOperation("server-job-run", () => worker.runOnce())
         .then(() => runBackoff.recordSuccess())
-        .catch((error) => options.onError?.(error, "prune"));
         .catch((error) => {
           runBackoff.recordFailure(now());
           options.onError?.(error, "run");
