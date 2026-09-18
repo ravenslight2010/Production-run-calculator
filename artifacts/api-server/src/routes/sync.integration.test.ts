@@ -1643,6 +1643,126 @@ describe("/sync/today — client-local-date keying", () => {
   });
 });
 
+describe("/sync day breaks — canonical round trips and reset fencing", () => {
+  const TODAY = "2030-04-10";
+  const SCHEDULED = "2030-04-11";
+  const canonicalBreaks = [
+    { slot: 1, enabled: true, mode: "at-time", atTime: "08:15", durationMin: 30 },
+    { slot: 2, enabled: true, mode: "after-run", runId: "run-2", durationMin: 30 },
+    { slot: 3, enabled: false, mode: "after-run", durationMin: 30 },
+  ];
+
+  const payloadFor = (date: string, breaks?: unknown) => ({
+    dayState: {
+      date,
+      runs: [
+        { id: "run-1", brand: "Acme", flavor: "Pep" },
+        { id: "run-2", brand: "Acme", flavor: "Cheese" },
+      ],
+      resetAt: 0,
+      ...(breaks === undefined ? {} : { breaks }),
+    },
+    runValues: {},
+  });
+
+  async function putToday(payload: unknown, epoch = 0) {
+    return fetch(`${baseUrl}/api/sync/today?today=${TODAY}&epoch=${epoch}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "break-device", payload }),
+    });
+  }
+
+  async function putScheduled(payload: unknown, date = SCHEDULED, epoch = 0) {
+    return fetch(`${baseUrl}/api/sync/${date}?today=${TODAY}&epoch=${epoch}`, {
+      method: "PUT",
+      headers: { ...managerAuthHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "break-scheduler", payload }),
+    });
+  }
+
+  async function read(date: string) {
+    const response = await fetch(`${baseUrl}/api/sync/${date}?today=${TODAY}`, {
+      headers: authHeaders(),
+    });
+    expect(response.status).toBe(200);
+    return await response.json() as {
+      dayState?: { breaks?: unknown; date?: string };
+      runValues?: Record<string, unknown>;
+    };
+  }
+
+  it("round-trips exactly three fixed 30-minute slots for today and a scheduled day", async () => {
+    const requestedBreaks = [
+      { slot: 99, enabled: true, mode: "at-time", atTime: "08:15", durationMin: 5, ignored: "drop" },
+      { slot: 2, enabled: true, mode: "after-run", runId: "run-2", durationMin: 90 },
+      { slot: 3, enabled: false, mode: "after-run", durationMin: 0 },
+      { slot: 4, enabled: true, mode: "at-time", atTime: "12:00" },
+    ];
+
+    const todayPut = await putToday(payloadFor(TODAY, requestedBreaks));
+    expect(todayPut.status).toBe(200);
+    const todayBody = await todayPut.json() as { data?: { dayState?: { breaks?: unknown } } };
+    expect(todayBody.data?.dayState?.breaks).toEqual(canonicalBreaks);
+    expect((await read(TODAY)).dayState?.breaks).toEqual(canonicalBreaks);
+
+    const scheduledPut = await putScheduled(payloadFor(SCHEDULED, requestedBreaks));
+    expect(scheduledPut.status).toBe(200);
+    const scheduledBody = await scheduledPut.json() as { data?: { dayState?: { breaks?: unknown } } };
+    expect(scheduledBody.data?.dayState?.breaks).toEqual(canonicalBreaks);
+    expect((await read(SCHEDULED)).dayState?.breaks).toEqual(canonicalBreaks);
+  });
+
+  it("canonicalizes malformed slots and accepts legacy payloads that omit breaks", async () => {
+    const malformed = [
+      null,
+      { enabled: true, mode: "invalid", atTime: "25:00", runId: 42, durationMin: 5 },
+      { enabled: true, mode: "at-time", atTime: "09:30", runId: "run-3", durationMin: 1 },
+      { enabled: true, mode: "at-time", atTime: "12:00" },
+    ];
+    const expectedMalformed = [
+      { slot: 1, enabled: false, mode: "after-run", durationMin: 30 },
+      { slot: 2, enabled: true, mode: "after-run", durationMin: 30 },
+      { slot: 3, enabled: true, mode: "at-time", atTime: "09:30", runId: "run-3", durationMin: 30 },
+    ];
+
+    const malformedPut = await putToday(payloadFor(TODAY, malformed));
+    expect(malformedPut.status).toBe(200);
+    expect((await malformedPut.json() as { data?: { dayState?: { breaks?: unknown } } }).data?.dayState?.breaks)
+      .toEqual(expectedMalformed);
+    expect((await read(TODAY)).dayState?.breaks).toEqual(expectedMalformed);
+
+    const legacyDate = "2030-04-12";
+    const legacyPut = await putScheduled(payloadFor(legacyDate), legacyDate);
+    expect(legacyPut.status).toBe(200);
+    const legacyBody = await legacyPut.json() as { data?: { dayState?: Record<string, unknown> } };
+    expect(legacyBody.data?.dayState).not.toHaveProperty("breaks");
+    expect((await read(legacyDate)).dayState).not.toHaveProperty("breaks");
+  });
+
+  it("rejects a stale post-reset write so an old break plan cannot be resurrected", async () => {
+    const currentBreaks = [
+      { slot: 1, enabled: true, mode: "at-time", atTime: "10:00", durationMin: 30 },
+      { slot: 2, enabled: false, mode: "after-run", durationMin: 30 },
+      { slot: 3, enabled: true, mode: "after-run", runId: "run-2", durationMin: 30 },
+    ];
+    const oldBreaks = [
+      { slot: 1, enabled: true, mode: "at-time", atTime: "07:00", durationMin: 30 },
+      { slot: 2, enabled: true, mode: "after-run", runId: "run-1", durationMin: 30 },
+      { slot: 3, enabled: false, mode: "after-run", durationMin: 30 },
+    ];
+
+    const accepted = await putToday(payloadFor(TODAY, currentBreaks));
+    expect(accepted.status).toBe(200);
+    await db.update(dataResetTable).set({ epoch: 1 }).where(eq(dataResetTable.scope, "live"));
+
+    const stale = await putToday(payloadFor(TODAY, oldBreaks), 0);
+    expect(stale.status).toBe(200);
+    expect(await stale.json()).toMatchObject({ ok: true, stale: true, epoch: 1 });
+    expect((await read(TODAY)).dayState?.breaks).toEqual(currentBreaks);
+  });
+});
+
 describe("/sync snapshot conditionals", () => {
   const DATE = "2030-08-22";
   const payload = {
