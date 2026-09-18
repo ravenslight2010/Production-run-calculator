@@ -693,7 +693,6 @@ import {
   Blend,
   ClipboardCheck,
   Users,
-  Truck,
   RefreshCw,
   MapPin,
 } from "lucide-react";
@@ -1655,47 +1654,6 @@ export const LiveRunTabContent = memo(function LiveRunTabContent() {
                   );
                 })()}
 
-                {/* Warehouse switchover staging — measured at the PRESS (cased
-                    product + Freeze tunnel contents count as done): frontline must be
-                    staged 2 skids before the switchover, packaging 1 skid
-                    before. Short runs (< 2 skids total) show it from the start
-                    and tell warehouse to stage 2+ runs ahead. Mirrors the
-                    notifications in useNotifications. */}
-                {!currentRun?.endedAt && runStatus === "running" && (() => {
-                  const cps = Number(v.casesPerSkid) || 0;
-                  const needed = Number(v.casesNeeded) || 0;
-                  if (calc.ppm <= 0 || cps <= 0 || needed <= 0) return null;
-                  const pressLeft = calc.pressCasesLeft;
-                  if (pressLeft <= 0 || pressLeft > 2 * cps) return null;
-                  const shortRun = needed < 2 * cps;
-                  const packagingStage = pressLeft <= cps;
-                  const skidsLeft = pressLeft / cps;
-                  const names = upcomingRunLabels.slice(0, shortRun ? 3 : 1);
-                  const freezerMin = Number(ve.freezerTime) || 0;
-                  return (
-                    <div className="mb-4 rounded-lg border border-violet-500/40 bg-violet-500/10 px-4 py-3 flex items-start gap-2.5" data-testid="banner-warehouse-switchover">
-                      <Truck className="w-4 h-4 shrink-0 mt-0.5 text-violet-400" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-violet-600 dark:text-violet-400">
-                          {shortRun
-                            ? `Warehouse: short run (under 2 skids) — stage frontline + packaging for the next 2+ runs now`
-                            : `Warehouse: ${fmtNum(skidsLeft, 1)} skid${skidsLeft === 1 ? "" : "s"} to switchover — stage ${packagingStage ? "packaging" : "frontline"} for the next run`}
-                        </p>
-                        {!shortRun && packagingStage && (
-                          <p className="text-xs font-semibold text-violet-400/90 mt-0.5" data-testid="text-switchover-packaging-stage">
-                            Under 1 skid left at the press — frontline should already be staged; packaging goes now.
-                          </p>
-                        )}
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          {fmtComma(Math.ceil(pressLeft))} cases left at the press (packing + Freeze tunnel counted done)
-                          {calc.adjustedTimeSec > 0 ? ` — press stops ~${fmtClock(Date.now() + calc.adjustedTimeSec * 1000)}` : ""}
-                          {freezerMin > 0 && calc.adjustedTimeSec > 0 ? `, line clear ~${fmtClock(Date.now() + (calc.adjustedTimeSec + freezerMin * 60) * 1000)}` : ""}.
-                          {names.length > 0 ? ` Next up: ${names.join(", ")}.` : " No upcoming runs scheduled yet."}
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })()}
 
 
                 {/* Die change warning — before run ends */}

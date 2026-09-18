@@ -107,6 +107,12 @@ const ALLOWED_FILES = new Set<string>([
   // this allowlist entry was missed at the time — see .agents/memory/claude-bugs.md.)
   "components/LineMapDashboard.tsx",
 
+  // WarehouseSwitchoverBanner.tsx — the Warehouse tab must show the current
+  // press/skid handoff and its estimated stop/clear times as the live run
+  // progresses, so this focused child intentionally subscribes to the clock
+  // without widening WarehouseTabCtx's memoized dependency list.
+  "components/WarehouseSwitchoverBanner.tsx",
+
   // Extracted live station surfaces intentionally subscribe to the shared
   // per-second production clock for countdowns, cadence, and live counters.
   "components/live-stations/LivePackagingTabContent.tsx",
