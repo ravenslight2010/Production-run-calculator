@@ -266,9 +266,6 @@ import { applyResetWipe, applyRolloverEpoch, getStoredResetEpoch } from "../adap
 import {
   loadRunValues,
   loadRunValuesUpdated,
-  markRunValuesUpdated,
-  saveRunValues,
-  saveRunValuesUpdated,
   subscribeRunValuesWrites,
 } from "../adapters/browserRunPersistence";
 import {
