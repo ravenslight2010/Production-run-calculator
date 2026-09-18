@@ -4,10 +4,15 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { createPackagingControlAdapter } from "./packagingManager";
 
-const homeSource = readFileSync(
-  join(dirname(fileURLToPath(import.meta.url)), "pages/home.tsx"),
+const sourceRoot = dirname(fileURLToPath(import.meta.url));
+const stationSource = [
+  "LivePackagingTabContent.tsx",
+  "LiveSauceTabContent.tsx",
+  "LiveDoughTabContent.tsx",
+].map((file) => readFileSync(
+  join(sourceRoot, "components/live-stations", file),
   "utf8",
-);
+)).join("\n");
 const managerSource = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), "packagingManager.ts"),
   "utf8",
@@ -15,16 +20,16 @@ const managerSource = readFileSync(
 
 describe("Packaging speed feedback quick-check wiring", () => {
   it("routes Packaging, Sauce, and Dough corrections through shared live feedback", () => {
-    expect(homeSource).toContain("detectPackagingSpeedDrift");
+    expect(stationSource).toContain("detectPackagingSpeedDrift");
     expect(
-      homeSource.match(/createPackagingControlAdapter\(/g),
+      stationSource.match(/createPackagingControlAdapter\(/g),
     ).toHaveLength(3);
     expect(managerSource).toContain("reportCorrection");
   });
 
   it("keeps invalid cases-per-skid quick checks out of division paths", () => {
-    expect(homeSource).toContain("const hasCps = v.casesPerSkid > 0;");
-    expect(homeSource).toContain("const cps = hasCps ? v.casesPerSkid : 0;");
+    expect(stationSource).toContain("const hasCps = v.casesPerSkid > 0;");
+    expect(stationSource).toContain("const cps = hasCps ? v.casesPerSkid : 0;");
     expect(managerSource).toContain("if (casesPerSkid <= 0) return;");
   });
 });

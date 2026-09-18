@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, fireEvent } from "@testing-library/react";
 import { useForm, FormProvider } from "react-hook-form";
-import { StepperField } from "./pages/home";
+import { StepperField } from "./components/live-stations/StepperField";
 
 function Harness({ disabled, onSuggest, onManual }: any) {
   const form = useForm({ defaultValues: { skidsCompleted: 1 } });

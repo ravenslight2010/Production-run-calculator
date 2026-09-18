@@ -187,10 +187,17 @@ describe("ManualOverrideBanner — call-site formula guard (Suite 2)", () => {
 // will fail these tests immediately.
 // ---------------------------------------------------------------------------
 describe("ManualOverrideBanner — source-level call-site formula drift guard (Suite 3)", () => {
-  // Resolve home.tsx relative to this test file so the path survives moves.
+  // Resolve the extracted station modules relative to this test file so the
+  // guard follows the live call sites instead of the page composition shell.
   const __filename = fileURLToPath(import.meta.url);
   const __dir = dirname(__filename);
-  const homeSrc = readFileSync(join(__dir, "pages/home.tsx"), "utf-8");
+  const stationSrc = [
+    "LivePackagingTabContent.tsx",
+    "LiveDoughTabContent.tsx",
+  ].map((file) => readFileSync(
+    join(__dir, "components/live-stations", file),
+    "utf-8",
+  )).join("\n");
 
   // Canonical form of the show= attribute at both ManualOverrideBanner call
   // sites.  The second argument is a local variable name that differs between
@@ -211,16 +218,16 @@ describe("ManualOverrideBanner — source-level call-site formula drift guard (S
     return (src.match(re) ?? []).map((s) => s.trim());
   }
 
-  it("home.tsx contains exactly 2 ManualOverrideBanner JSX call sites", () => {
+  it("the live station modules contain exactly 2 ManualOverrideBanner JSX call sites", () => {
     // Count every <ManualOverrideBanner JSX tag.  The component definition
     // itself uses `export function ManualOverrideBanner`, which does NOT match
     // the JSX tag pattern, so every match here is a real call site.
-    const matches = homeSrc.match(/<ManualOverrideBanner/g) ?? [];
+    const matches = stationSrc.match(/<ManualOverrideBanner/g) ?? [];
     expect(matches).toHaveLength(2);
   });
 
   it("every ManualOverrideBanner show= prop exactly matches the canonical three-arg signature", () => {
-    const showProps = extractShowProps(homeSrc);
+    const showProps = extractShowProps(stationSrc);
 
     // There must be exactly 2 show= attributes using the predicate function —
     // one per call site.  A count mismatch means a site was inlined or added.
@@ -259,7 +266,7 @@ describe("ManualOverrideBanner — source-level call-site formula drift guard (S
   it("counter-proof: exactly 2 source lines contain the canonical show= prop", () => {
     // Belt-and-suspenders: confirm the source lines with the show= prop are
     // exactly 2, independently of the extractShowProps helper above.
-    const callSiteLines = homeSrc
+    const callSiteLines = stationSrc
       .split("\n")
       .filter((line) => /show=\{manualOverrideBannerShow\(/.test(line));
     expect(callSiteLines).toHaveLength(2);

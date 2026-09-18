@@ -40,10 +40,6 @@ import { describe, it, expect } from "vitest";
 const ALLOWED_CALLERS = new Set<string>([
   // Live-clock-dependent tab content (re-render every second is intentional)
   "LiveRunTabContent",
-  "LivePackagingTabContent",
-  "LiveSauceTabContent",      // sauce batch stepper uses live casesLeftToRun
-  "LiveFrontlineTabContent",
-  "LiveDoughTabContent",
   "LiveSetupRecipesTabContent",
   "LiveStoppagesTabContent",
   "LiveSummaryTabContent",
@@ -103,6 +99,13 @@ const ALLOWED_FILES = new Set<string>([
   // the feature, not incidental churn. (Re-applied after the Replit merge;
   // this allowlist entry was missed at the time — see .agents/memory/claude-bugs.md.)
   "components/LineMapDashboard.tsx",
+
+  // Extracted live station surfaces intentionally subscribe to the shared
+  // per-second production clock for countdowns, cadence, and live counters.
+  "components/live-stations/LivePackagingTabContent.tsx",
+  "components/live-stations/LiveSauceTabContent.tsx",
+  "components/live-stations/LiveFrontlineTabContent.tsx",
+  "components/live-stations/LiveDoughTabContent.tsx",
 ]);
 
 // ── Helpers ───────────────────────────────────────────────────────────────
