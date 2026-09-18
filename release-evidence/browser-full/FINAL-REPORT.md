@@ -1,52 +1,52 @@
 # Full Browser Release Run
 
-Generated: 2026-09-18T04:45:43.942Z
-Revision: 519394104e08df4f8e4c5271657a6b0d9132977d
+Generated: 2026-09-18T10:24:24.800Z
+Revision: 2bae38ae68e969f24d4c6bfb47456ef87550cf53
 Result: FAIL
 Expected cases: 160
 Enumerated cases: 160
 Completed cases: 160
-Passed cases: 30
+Passed cases: 33
 Skipped cases: 26
-Failed cases: 104
+Failed cases: 101
 Not-run cases: 0
 Coverage: COMPLETE
-Duration: 886510ms
+Duration: 1296640ms
 
 ## Per-file duration
 
 | File | Cases | Completed | Passed | Skipped | Failed | Not run | Duration |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `artifacts/run-calculator/e2e/accessibility-smoke.spec.ts` | 6 | 6 | 6 | 0 | 0 | 0 | 66540ms |
-| `artifacts/run-calculator/e2e/ai-outage-reviewability.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 9936ms |
-| `artifacts/run-calculator/e2e/compact-run-strip.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 5050ms |
-| `artifacts/run-calculator/e2e/critical-workflows.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 17835ms |
-| `artifacts/run-calculator/e2e/cross-device-smoke.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 16218ms |
-| `artifacts/run-calculator/e2e/department-workflow-navigation.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 27300ms |
-| `artifacts/run-calculator/e2e/die-tunnel-defaults.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 2924ms |
-| `artifacts/run-calculator/e2e/dough-correction-resume.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 9327ms |
-| `artifacts/run-calculator/e2e/freezer-surplus.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 9079ms |
-| `artifacts/run-calculator/e2e/home-navigation-reload.spec.ts` | 5 | 5 | 5 | 0 | 0 | 0 | 12886ms |
-| `artifacts/run-calculator/e2e/live-sauce-dough-phone.spec.ts` | 3 | 3 | 1 | 0 | 2 | 0 | 58079ms |
-| `artifacts/run-calculator/e2e/management-performance.spec.ts` | 4 | 4 | 4 | 0 | 0 | 0 | 13537ms |
-| `artifacts/run-calculator/e2e/manager-action-queue-stale.spec.ts` | 7 | 7 | 1 | 0 | 6 | 0 | 56767ms |
-| `artifacts/run-calculator/e2e/manager-attention.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 9179ms |
-| `artifacts/run-calculator/e2e/mix-plan.spec.ts` | 34 | 34 | 1 | 0 | 33 | 0 | 165361ms |
-| `artifacts/run-calculator/e2e/multi-device-convergence.spec.ts` | 4 | 4 | 0 | 0 | 4 | 0 | 7538ms |
-| `artifacts/run-calculator/e2e/phone-layout.spec.ts` | 21 | 21 | 2 | 18 | 1 | 0 | 2153ms |
-| `artifacts/run-calculator/e2e/photo-count.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 442ms |
-| `artifacts/run-calculator/e2e/photo-spec-import.spec.ts` | 5 | 5 | 0 | 0 | 5 | 0 | 6417ms |
-| `artifacts/run-calculator/e2e/prior-run-drain.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 244ms |
-| `artifacts/run-calculator/e2e/profile-subtab-reload.spec.ts` | 2 | 2 | 0 | 0 | 2 | 0 | 455ms |
-| `artifacts/run-calculator/e2e/pwa-handoff.spec.ts` | 3 | 3 | 1 | 0 | 2 | 0 | 128014ms |
-| `artifacts/run-calculator/e2e/pwa-morning-login.spec.ts` | 2 | 2 | 0 | 0 | 2 | 0 | 2295ms |
-| `artifacts/run-calculator/e2e/recipe-refresh-start-freeze.spec.ts` | 13 | 13 | 0 | 2 | 11 | 0 | 2250ms |
-| `artifacts/run-calculator/e2e/run-insights.spec.ts` | 3 | 3 | 0 | 0 | 3 | 0 | 617ms |
-| `artifacts/run-calculator/e2e/screen-off-wake.spec.ts` | 14 | 14 | 0 | 0 | 14 | 0 | 3018ms |
-| `artifacts/run-calculator/e2e/spec-import-unit-provenance.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 1207ms |
-| `artifacts/run-calculator/e2e/sync-convergence.spec.ts` | 9 | 9 | 0 | 1 | 8 | 0 | 10036ms |
-| `artifacts/run-calculator/e2e/sync-diagnostics-download.spec.ts` | 3 | 3 | 0 | 0 | 3 | 0 | 3549ms |
-| `artifacts/run-calculator/e2e/visual-regression.spec.ts` | 3 | 3 | 0 | 2 | 1 | 0 | 1208ms |
+| `artifacts/run-calculator/e2e/accessibility-smoke.spec.ts` | 6 | 6 | 6 | 0 | 0 | 0 | 55763ms |
+| `artifacts/run-calculator/e2e/ai-outage-reviewability.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 9884ms |
+| `artifacts/run-calculator/e2e/compact-run-strip.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 4197ms |
+| `artifacts/run-calculator/e2e/critical-workflows.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 17650ms |
+| `artifacts/run-calculator/e2e/cross-device-smoke.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 16112ms |
+| `artifacts/run-calculator/e2e/department-workflow-navigation.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 27464ms |
+| `artifacts/run-calculator/e2e/die-tunnel-defaults.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 2939ms |
+| `artifacts/run-calculator/e2e/dough-correction-resume.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 9484ms |
+| `artifacts/run-calculator/e2e/freezer-surplus.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 8717ms |
+| `artifacts/run-calculator/e2e/home-navigation-reload.spec.ts` | 5 | 5 | 5 | 0 | 0 | 0 | 12792ms |
+| `artifacts/run-calculator/e2e/live-sauce-dough-phone.spec.ts` | 3 | 3 | 2 | 0 | 1 | 0 | 62968ms |
+| `artifacts/run-calculator/e2e/management-performance.spec.ts` | 4 | 4 | 4 | 0 | 0 | 0 | 13824ms |
+| `artifacts/run-calculator/e2e/manager-action-queue-stale.spec.ts` | 7 | 7 | 1 | 0 | 6 | 0 | 56914ms |
+| `artifacts/run-calculator/e2e/manager-attention.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 22681ms |
+| `artifacts/run-calculator/e2e/mix-plan.spec.ts` | 34 | 34 | 3 | 0 | 31 | 0 | 562669ms |
+| `artifacts/run-calculator/e2e/multi-device-convergence.spec.ts` | 4 | 4 | 0 | 0 | 4 | 0 | 3768ms |
+| `artifacts/run-calculator/e2e/phone-layout.spec.ts` | 21 | 21 | 2 | 18 | 1 | 0 | 2067ms |
+| `artifacts/run-calculator/e2e/photo-count.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 229ms |
+| `artifacts/run-calculator/e2e/photo-spec-import.spec.ts` | 5 | 5 | 0 | 0 | 5 | 0 | 6839ms |
+| `artifacts/run-calculator/e2e/prior-run-drain.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 225ms |
+| `artifacts/run-calculator/e2e/profile-subtab-reload.spec.ts` | 2 | 2 | 0 | 0 | 2 | 0 | 481ms |
+| `artifacts/run-calculator/e2e/pwa-handoff.spec.ts` | 3 | 3 | 1 | 0 | 2 | 0 | 130782ms |
+| `artifacts/run-calculator/e2e/pwa-morning-login.spec.ts` | 2 | 2 | 0 | 0 | 2 | 0 | 3050ms |
+| `artifacts/run-calculator/e2e/recipe-refresh-start-freeze.spec.ts` | 13 | 13 | 0 | 2 | 11 | 0 | 2249ms |
+| `artifacts/run-calculator/e2e/run-insights.spec.ts` | 3 | 3 | 0 | 0 | 3 | 0 | 583ms |
+| `artifacts/run-calculator/e2e/screen-off-wake.spec.ts` | 14 | 14 | 0 | 0 | 14 | 0 | 3222ms |
+| `artifacts/run-calculator/e2e/spec-import-unit-provenance.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 1259ms |
+| `artifacts/run-calculator/e2e/sync-convergence.spec.ts` | 9 | 9 | 0 | 1 | 8 | 0 | 11170ms |
+| `artifacts/run-calculator/e2e/sync-diagnostics-download.spec.ts` | 3 | 3 | 0 | 0 | 3 | 0 | 3631ms |
+| `artifacts/run-calculator/e2e/visual-regression.spec.ts` | 3 | 3 | 0 | 2 | 1 | 0 | 1200ms |
 | `artifacts/run-calculator/e2e/warehouse-coverage.spec.ts` | 4 | 4 | 0 | 3 | 1 | 0 | 0ms |
 
 ## Failed and timed-out cases
@@ -62,7 +62,6 @@ Duration: 886510ms
 ### `artifacts/run-calculator/e2e/live-sauce-dough-phone.spec.ts`
 
 - **FAILED** `› chromium › live-sauce-dough-phone.spec.ts › Dough and Sauce phone quick checks share line-speed feedback across tab switches`
-- **FAILED** `› chromium › live-sauce-dough-phone.spec.ts › Frontline App tracking survives off-tab work, corrections, pause, and reload`
 
 ### `artifacts/run-calculator/e2e/manager-action-queue-stale.spec.ts`
 
@@ -91,7 +90,6 @@ Duration: 886510ms
 - **FAILED** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › mix plan collapses to empty when all runs in a shift are ended`
 - **FAILED** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › need 0.00 lbs badge appears on regular mix card when amountAlreadyMade >= totalLbs`
 - **FAILED** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › need X lbs badge on regular mix card shows correct remaining amount`
-- **FAILED** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › prep mix card appears for a scheduled future-day run that lists its ingredient`
 - **FAILED** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › prep mix card appears when mix component uses comma-separator qualified name and run uses base name`
 - **FAILED** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › prep mix card appears when mix component uses paren-separator qualified name and run uses base name`
 - **FAILED** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › prep mix card appears when mix component uses slash-separator qualified name and run uses base name`
@@ -101,7 +99,6 @@ Duration: 886510ms
 - **FAILED** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › prep mix card appears when run uses a qualified ingredient name matching the mix component base name`
 - **FAILED** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › prep mix card shows correct per-run breakdown when two brands share an ingredient`
 - **FAILED** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › prep mix card shows correct pull quantities when a run uses its ingredient`
-- **FAILED** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › prep mix with daysEarly=0 is absent the day before the run and present on the run day`
 - **FAILED** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › prep mix with daysEarly=1 appears on the run day and one day early but not two days before`
 - **FAILED** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › Pull For Mix per-component lbs on a regular mix card update live when 'already made' is edited`
 - **FAILED** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › Pull For Prep includes a second run added while Mixes is open`
