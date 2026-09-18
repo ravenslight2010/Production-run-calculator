@@ -39,11 +39,6 @@ import { describe, it, expect } from "vitest";
 // Only these function names may call useLiveRun() in home.tsx.
 const ALLOWED_CALLERS = new Set<string>([
   // Live-clock-dependent tab content (re-render every second is intentional)
-  "LiveRunTabContent",
-  "LiveSetupRecipesTabContent",
-  "LiveStoppagesTabContent",
-  "LiveSummaryTabContent",
-
   // Always-mounted inner guard that fires the depletion handoff reset once per
   // run regardless of which tab is open. It must call useLiveRun() to react to
   // nextRunPrepActive; it renders null and never drives per-second UI churn.
@@ -106,6 +101,16 @@ const ALLOWED_FILES = new Set<string>([
   "components/live-stations/LiveSauceTabContent.tsx",
   "components/live-stations/LiveFrontlineTabContent.tsx",
   "components/live-stations/LiveDoughTabContent.tsx",
+  // These four remaining live tabs are focused station boundaries. Their
+  // intentional subscriptions keep the extracted live surfaces independently
+  // testable without making Home the only allowed caller.
+  "components/live-stations/LiveRunTabContent.tsx",
+  "components/live-stations/LiveSetupRecipesTabContent.tsx",
+  "components/live-stations/LiveStoppagesTabContent.tsx",
+  "components/live-stations/LiveSummaryTabContent.tsx",
+  // Shared support retains the pause decision overlay's live countdown while
+  // keeping that helper neutral to the Home composition module.
+  "pages/liveTabsSupport.tsx",
 ]);
 
 // ── Helpers ───────────────────────────────────────────────────────────────
