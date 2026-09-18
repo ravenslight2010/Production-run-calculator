@@ -36,6 +36,8 @@ let dataResetTable: DbModule["dataResetTable"];
 let seedRoles: () => Promise<void>;
 let runDataHeals: () => Promise<void>;
 let runAutoTrackServerTicks: typeof import("./sync")["runAutoTrackServerTicks"];
+let setManualSectionFailureHookForTest: typeof import("./sync")["setManualSectionFailureHookForTest"];
+let setManualSectionBarrierHookForTest: typeof import("./sync")["setManualSectionBarrierHookForTest"];
 
 let adminPool: pg.Pool;
 let testDbName: string;
@@ -93,6 +95,8 @@ beforeAll(async () => {
   seedRoles = (await import("../lib/roles")).seedRoles;
   runDataHeals = (await import("../lib/dataHeals")).runDataHeals;
   runAutoTrackServerTicks = syncMod.runAutoTrackServerTicks;
+  setManualSectionFailureHookForTest = syncMod.setManualSectionFailureHookForTest;
+  setManualSectionBarrierHookForTest = syncMod.setManualSectionBarrierHookForTest;
 
   const app: Express = express();
   app.use(express.json({ limit: "10mb" }));
@@ -153,6 +157,229 @@ beforeEach(async () => {
     dayRow("2030-03-11"),
     dayRow("2030-03-12"),
   ]);
+});
+
+describe("POST /sync/manual-section — section ownership contract", () => {
+  const DATE = "2030-03-10";
+  const values = (runId = "manual-run") => ({
+    dayState: { date: DATE, runs: [{ id: runId, startedAt: 1, metaUpdatedAt: 1 }] },
+    runValues: { [runId]: { skidsCompleted: 1, casesOnCurrentSkid: 2, traysOnLine: 3, batchesReady: 4 } },
+  });
+  const request = (body: Record<string, unknown>, headers = authHeaders()) =>
+    fetch(`${baseUrl}/api/sync/manual-section?today=${DATE}`, {
+      method: "POST", headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify(body),
+    });
+  const edit = (id: string, section = "packaging", runId = "manual-run", extra: Record<string, unknown> = {}) => ({
+    id, date: DATE, runId, section,
+    values: section === "dough" ? { traysOnLine: 5 } : { skidsCompleted: 2 },
+    baseValues: section === "dough"
+      ? { traysOnLine: 3, batchesReady: 4 }
+      : { skidsCompleted: 1, casesOnCurrentSkid: 2 },
+    observedGeneration: `${runId}:1`, baseRevision: 0, resetEpoch: 0, deviceId: id, ...extra,
+  });
+
+  beforeEach(async () => {
+    await db.update(dailySyncTable).set({ data: values(), canonicalRevision: 0 })
+      .where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
+  });
+
+  it("same-section concurrent race has one winner and one 409", async () => {
+    const [a, b] = await Promise.all([request(edit("race-a")), request(edit("race-b"))]);
+    expect([a.status, b.status].sort()).toEqual([200, 409]);
+  });
+
+  it("different sections accept concurrently", async () => {
+    const [a, b] = await Promise.all([request(edit("parallel-a")), request(edit("parallel-b", "dough"))]);
+    expect(a.status).toBe(200); expect(b.status).toBe(200);
+  });
+
+  it("same section on different runs accepts independently", async () => {
+    await db.update(dailySyncTable).set({
+      data: {
+        dayState: { date: DATE, runs: [
+          { id: "manual-run", startedAt: 1, metaUpdatedAt: 1 },
+          { id: "other-run", startedAt: 1, metaUpdatedAt: 1 },
+        ] },
+        runValues: {
+          "manual-run": { skidsCompleted: 1, casesOnCurrentSkid: 2 },
+          "other-run": { skidsCompleted: 4, casesOnCurrentSkid: 5 },
+        },
+      }, canonicalRevision: 0,
+    }).where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
+    const a = edit("run-a", "packaging", "manual-run");
+    const b = { ...edit("run-b", "packaging", "other-run"), baseValues: { skidsCompleted: 4, casesOnCurrentSkid: 5 }, values: { skidsCompleted: 7 } };
+    const responses = await Promise.all([request(a), request(b)]);
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 200]);
+  });
+
+  it("retrying the accepted id is idempotent", async () => {
+    const body = edit("retry-id");
+    const accepted = await request(body);
+    const acceptedPayload = await accepted.json() as { data: unknown };
+    expect(accepted.status).toBe(200);
+    const retry = await request(body);
+    expect(retry.status).toBe(200);
+    expect((await retry.json() as { duplicate?: boolean }).duplicate).toBe(true);
+  });
+
+  it("same accepted id conflicts after reset epoch bump", async () => {
+    const body = edit("post-reset-retry");
+    const accepted = await request(body);
+    const acceptedPayload = await accepted.json() as { data: unknown };
+    expect(accepted.status).toBe(200);
+    await db.update(dailySyncTable).set({
+      data: { dayState: { date: DATE, runs: [{ id: "manual-run", startedAt: 1, metaUpdatedAt: 1 }] }, runValues: { "manual-run": { skidsCompleted: 88, casesOnCurrentSkid: 77 } } },
+    }).where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
+    await db.update(dataResetTable).set({ epoch: 9 }).where(eq(dataResetTable.scope, "live"));
+    const retry = await request(body);
+    expect(retry.status).toBe(409);
+    const payload = await retry.json() as { data?: unknown; outcome?: string };
+    expect(payload.outcome).toBe("conflicted");
+    expect((payload.data as any).runValues["manual-run"].skidsCompleted).toBe(88);
+    expect(payload.data).not.toEqual(acceptedPayload.data);
+  });
+
+  it("rejects stale reset epochs and incomplete baselines", async () => {
+    await db.insert(dataResetTable).values({ scope: "live", epoch: 2, resetAt: new Date() });
+    expect((await request(edit("reset-id"))).status).toBe(409);
+    expect((await request({ ...edit("missing-base"), resetEpoch: 2, baseValues: { skidsCompleted: 1 } })).status).toBe(400);
+  });
+
+  it("isolates scope and date rows", async () => {
+    const sandbox = await request(edit("sandbox-id"), sandboxAuthHeaders());
+    expect(sandbox.status).toBe(409);
+    const otherDate = { ...edit("other-date"), date: "2030-03-11" };
+    expect((await fetch(`${baseUrl}/api/sync/manual-section?today=2030-03-11`, {
+      method: "POST", headers: { ...authHeaders(), "content-type": "application/json" }, body: JSON.stringify(otherDate),
+    })).status).toBe(409);
+  });
+
+  it("streams acquired before canonical data and released after it", async () => {
+    const stream = await fetch(`${baseUrl}/api/sync/events?today=${DATE}&clientId=peer-stream`, { headers: authHeaders() });
+    const reader = stream.body!.getReader();
+    let streamBuffer = "";
+    const readFrame = async (): Promise<any> => {
+      for (;;) {
+        const match = streamBuffer.match(/data: (.+)\n\n/);
+        if (match) {
+          streamBuffer = streamBuffer.slice(match[0].length);
+          return JSON.parse(match[1]);
+        }
+        const chunk = await reader.read();
+        if (chunk.done) throw new Error("stream closed");
+        streamBuffer += new TextDecoder().decode(chunk.value);
+      }
+    };
+    await readFrame(); // initial baseline
+    const pending = readFrame();
+    const response = await request(edit("sse-order"));
+    expect(response.status).toBe(200);
+    const acquired = await pending;
+    expect(acquired.type).toBe("manual-section-lock");
+    expect(acquired.event).toBe("acquired");
+    const frames: any[] = [];
+    while (frames.length < 2) frames.push(await readFrame());
+    const canonicalIndex = frames.findIndex((frame) => frame?.data?.runValues?.["manual-run"]?.skidsCompleted === 2);
+    const releaseIndex = frames.findIndex((frame) => frame.type === "manual-section-lock" && frame.event === "released");
+    expect(canonicalIndex).toBeGreaterThanOrEqual(0);
+    expect(releaseIndex).toBeGreaterThan(canonicalIndex);
+    await reader.cancel();
+  });
+
+  it("releases after a losing 409 conflict", async () => {
+    const stream = await fetch(`${baseUrl}/api/sync/events?today=${DATE}&clientId=peer-conflict`, { headers: authHeaders() });
+    const reader = stream.body!.getReader();
+    let buffer = "";
+    const next = async () => {
+      for (;;) {
+        const match = buffer.match(/data: (.+)\n\n/);
+        if (match) { buffer = buffer.slice(match[0].length); return JSON.parse(match[1]); }
+        const chunk = await reader.read(); if (chunk.done) throw new Error("stream closed");
+        buffer += new TextDecoder().decode(chunk.value);
+      }
+    };
+    await next();
+    await request(edit("winner"));
+    const conflict = await request(edit("loser"));
+    expect(conflict.status).toBe(409);
+    const frames: any[] = [];
+    for (let i = 0; i < 8 && !frames.some((frame) => frame.type === "manual-section-lock" && frame.event === "released" && frame.ownerId === "loser"); i++) frames.push(await next());
+    const acquiredIndex = frames.findIndex((frame) => frame.type === "manual-section-lock" && frame.event === "acquired" && frame.ownerId === "loser");
+    const releasedIndex = frames.findIndex((frame) => frame.type === "manual-section-lock" && frame.event === "released" && frame.ownerId === "loser");
+    expect(acquiredIndex).toBeGreaterThanOrEqual(0);
+    expect(releasedIndex).toBeGreaterThan(acquiredIndex);
+    await reader.cancel();
+  });
+
+  it("releases after a real injected transaction failure", async () => {
+    const stream = await fetch(`${baseUrl}/api/sync/events?today=${DATE}&clientId=peer-failure`, { headers: authHeaders() });
+    const reader = stream.body!.getReader();
+    let buffer = "";
+    const next = async () => {
+      for (;;) {
+        const match = buffer.match(/data: (.+)\n\n/);
+        if (match) { buffer = buffer.slice(match[0].length); return JSON.parse(match[1]); }
+        const chunk = await reader.read(); if (chunk.done) throw new Error("stream closed");
+        buffer += new TextDecoder().decode(chunk.value);
+      }
+    };
+    await next();
+    setManualSectionFailureHookForTest(() => { setManualSectionFailureHookForTest(undefined); throw new Error("forced transaction failure"); });
+    const response = await request(edit("failure-owner"));
+    expect(response.status).toBe(500);
+    const frames: any[] = [];
+    for (let i = 0; i < 4 && !frames.some((frame) => frame.type === "manual-section-lock" && frame.event === "released"); i++) frames.push(await next());
+    expect(frames.some((frame) => frame.type === "manual-section-lock" && frame.event === "released" && frame.ownerId === "failure-owner")).toBe(true);
+    await reader.cancel();
+  });
+
+  it("aborted POST releases only after transaction barrier", async () => {
+    const stream = await fetch(`${baseUrl}/api/sync/events?today=${DATE}&clientId=peer-abort`, { headers: authHeaders() });
+    const reader = stream.body!.getReader();
+    let buffer = "";
+    const next = async (timeoutMs = 5_000) => {
+      const read = async () => {
+      for (;;) {
+        const match = buffer.match(/data: (.+)\n\n/);
+        if (match) { buffer = buffer.slice(match[0].length); return JSON.parse(match[1]); }
+        const chunk = await reader.read(); if (chunk.done) throw new Error("stream closed");
+        buffer += new TextDecoder().decode(chunk.value);
+      }
+      };
+      return Promise.race([read(), new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timed out waiting for SSE frame")), timeoutMs))]);
+    };
+    let entered!: () => void;
+    const enteredPromise = new Promise<void>((resolve) => { entered = resolve; });
+    let release!: () => void;
+    const barrier = new Promise<void>((resolve) => { release = resolve; });
+    setManualSectionBarrierHookForTest(async () => { entered(); await barrier; });
+    const controller = new AbortController();
+    const responsePromise = fetch(`${baseUrl}/api/sync/manual-section?today=${DATE}`, {
+      method: "POST", headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify(edit("abort-owner")), signal: controller.signal,
+    }).catch(() => undefined);
+    try {
+      await Promise.race([
+        enteredPromise,
+        new Promise<void>((resolve) => setTimeout(() => { release(); resolve(); }, 2_000)),
+      ]);
+      controller.abort();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(buffer).not.toContain('"event":"released"');
+      release();
+      await responsePromise;
+      let released: any;
+      for (let i = 0; i < 3; i++) {
+        const frame = await next(2_000);
+        if (frame.event === "released") { released = frame; break; }
+      }
+      expect(released?.event).toBe("released");
+    } finally {
+      release();
+      setManualSectionBarrierHookForTest(undefined);
+      await reader.cancel();
+    }
+  });
 });
 
 function authHeaders(): Record<string, string> {

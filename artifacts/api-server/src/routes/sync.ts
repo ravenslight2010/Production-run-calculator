@@ -93,6 +93,11 @@ import { applySubstitutions, computeRunConsumptionLines } from "@workspace/inven
 import { dateInTimeZone, facilityDate, facilityTimeZone } from "../lib/facilityTime";
 import { buildSyncHealthReport } from "../lib/syncHealth";
 import { appendAutomaticApplicatorEvidence } from "./applicatorBatchEvidence";
+import {
+  MANUAL_SECTION_FIELDS,
+  isManualSection,
+  type ManualSection,
+} from "@workspace/sync-contract";
 export { dateInTimeZone, facilityTimeZone } from "../lib/facilityTime";
 export { detectConflicts } from "../lib/syncConflict";
 export { syncSnapshotId } from "../lib/syncContract";
@@ -110,6 +115,29 @@ type SseClient = {
   lastCalcEmitMs: number;
 };
 const clients = new Set<SseClient>();
+let manualSectionFailureHook: (() => void) | undefined;
+let manualSectionBarrierHook: (() => Promise<void>) | undefined;
+export function setManualSectionFailureHookForTest(hook: (() => void) | undefined): void {
+  manualSectionFailureHook = hook;
+}
+export function setManualSectionBarrierHookForTest(hook: (() => Promise<void>) | undefined): void {
+  manualSectionBarrierHook = hook;
+}
+
+function broadcastManualSectionEvent(
+  event: "acquired" | "released",
+  runId: string,
+  section: ManualSection,
+  ownerId: string,
+  scope: Scope,
+  date: string,
+): void {
+  const frame = { type: "manual-section-lock", event, runId, section, ownerId, scope, date, serverTime: Date.now() };
+  for (const client of clients) {
+    if (client.scope !== scope || client.watchDate !== date || client.clientId === ownerId) continue;
+    try { client.res.write(`data: ${JSON.stringify(frame)}\n\n`); } catch {}
+  }
+}
 
 // Manual packaging corrections temporarily pause automatic case claims. The
 // deadline is server-owned: accepting a client-clock timestamp here would let
@@ -1299,6 +1327,123 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
     operationalProjection: liveState?.operationalProjection ?? null,
     serverTime: result.serverTime,
     canonicalRevision: result.canonicalRevision,
+  });
+});
+
+// Atomic, section-scoped correction. The daily row is the serialization point;
+// the operational ledger makes retries return the original canonical answer.
+router.post("/sync/manual-section", async (req: Request, res: Response): Promise<void> => {
+  let requestAborted = false;
+  req.once("aborted", () => { requestAborted = true; });
+  req.once("close", () => { if (req.aborted) requestAborted = true; });
+  const body = req.body as Record<string, unknown> | undefined;
+  const date = clientToday(req);
+  const scope = currentScope();
+  const id = body?.id;
+  const runId = body?.runId;
+  const section = body?.section;
+  const values = body?.values;
+  const baseRevision = body?.baseRevision;
+  const resetEpoch = body?.resetEpoch;
+  const observedGeneration = body?.observedGeneration;
+  const deviceId = body?.deviceId;
+  const requestedDate = body?.date;
+  if (typeof id !== "string" || id.length < 1 || id.length > 160
+    || !/^[A-Za-z0-9:_-]+$/.test(id)
+    || typeof requestedDate !== "string" || requestedDate !== date
+    || typeof runId !== "string" || !/^[A-Za-z0-9:_-]{1,160}$/.test(runId)
+    || !isManualSection(section)
+    || !values || typeof values !== "object" || Array.isArray(values)
+    || !Number.isSafeInteger(baseRevision) || (baseRevision as number) < 0
+    || !Number.isSafeInteger(resetEpoch) || (resetEpoch as number) < 0
+    || typeof observedGeneration !== "string" || observedGeneration.length < 1 || observedGeneration.length > 160
+    || typeof deviceId !== "string" || !/^[A-Za-z0-9:_-]{1,160}$/.test(deviceId)) {
+    res.status(400).json({ error: "Invalid manual section edit" }); return;
+  }
+  const allowed = new Set<string>(MANUAL_SECTION_FIELDS[section as ManualSection]);
+  const entries = Object.entries(values as Record<string, unknown>);
+  const baseValues = body?.baseValues;
+  if (!baseValues || typeof baseValues !== "object" || Array.isArray(baseValues)) {
+    res.status(400).json({ error: "Section baseline is required" }); return;
+  }
+  if (!entries.length || entries.some(([key, value]) =>
+    !allowed.has(key) || typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1_000_000)) {
+    res.status(400).json({ error: "Values do not match the requested section" }); return;
+  }
+  if (Object.entries(baseValues as Record<string, unknown>).some(([key, value]) =>
+    !allowed.has(key) || (value !== undefined && (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1_000_000)))) {
+    res.status(400).json({ error: "Section baseline does not match the requested section" }); return;
+  }
+  if (MANUAL_SECTION_FIELDS[section as ManualSection].some((field) =>
+    !Object.prototype.hasOwnProperty.call(baseValues, field)
+    || typeof (baseValues as Record<string, unknown>)[field] !== "number")) {
+    res.status(400).json({ error: "Complete section baseline is required" }); return;
+  }
+  const ownerId = String(deviceId ?? req.userId ?? "unknown");
+  broadcastManualSectionEvent("acquired", runId as string, section as ManualSection, ownerId, scope, date);
+  let result: { status: number; data: Record<string, any>; revision: number; duplicate: boolean; serverTime: number };
+  try {
+    result = await db.transaction(async (tx) => {
+    const serverTime = Date.now();
+    manualSectionFailureHook?.();
+    await manualSectionBarrierHook?.();
+    await tx.insert(dataResetTable).values({ scope, epoch: 0, resetAt: new Date() }).onConflictDoNothing();
+    const [reset] = await tx.select().from(dataResetTable).where(eq(dataResetTable.scope, scope)).for("update");
+    const [existing] = await tx.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope))).for("update");
+    const currentRevision = existing?.canonicalRevision ?? 0;
+    const current = (existing?.data ?? emptySyncData(date)) as Record<string, any>;
+    if ((reset?.epoch ?? 0) !== resetEpoch) {
+      return { status: 409, data: current, revision: currentRevision, duplicate: false, serverTime };
+    }
+    const [seen] = await tx.select().from(operationalIntentLedgerTable)
+      .where(and(eq(operationalIntentLedgerTable.scope, scope), eq(operationalIntentLedgerTable.date, date),
+        eq(operationalIntentLedgerTable.intentId, id))).for("update");
+    if (seen) return { status: 200, data: current, revision: currentRevision, duplicate: true, serverTime };
+    const run = (current.dayState?.runs as Array<Record<string, any>> | undefined)?.find((candidate) => candidate.id === runId);
+    if (!run || `${runId}:${String(run.metaUpdatedAt ?? run.startedAt ?? 0)}` !== observedGeneration) {
+      return { status: 409, data: current, revision: currentRevision, duplicate: false, serverTime };
+    }
+    const currentValues = current.runValues?.[runId] ?? {};
+    for (const key of allowed) {
+      const expected = (baseValues as Record<string, unknown>)[key];
+      if (expected !== undefined && Number(currentValues[key] ?? 0) !== expected) {
+        return { status: 409, data: current, revision: currentRevision, duplicate: false, serverTime };
+      }
+    }
+    const next = JSON.parse(JSON.stringify(current)) as Record<string, any>;
+    next.runValues = { ...(next.runValues ?? {}), [runId]: { ...(next.runValues?.[runId] ?? {}), ...values } };
+    next.runValuesUpdatedAt = { ...(next.runValuesUpdatedAt ?? {}), [runId]: Date.now() };
+    const revision = currentRevision + 1;
+    if (existing) {
+      await tx.update(dailySyncTable).set({ data: next, canonicalRevision: revision, updatedAt: new Date() })
+        .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)));
+    } else {
+      await tx.insert(dailySyncTable).values({ scope, date, data: next, canonicalRevision: revision, updatedAt: new Date() });
+    }
+    await tx.insert(operationalIntentLedgerTable).values({
+      scope, date, intentId: id, outcome: "accepted", snapshot: next,
+      commandType: `manual-section:${section}`, actorId: req.userId ?? "unknown",
+      deviceId: (deviceId as string | undefined) ?? "unknown", baseRevision: baseRevision as number,
+      canonicalRevision: revision, actionData: { runId, section, values, baseValues }, serverReceivedAt: new Date(),
+    });
+    return { status: 200, data: next, revision, duplicate: false, serverTime };
+    });
+    if (result.status === 200 && !result.duplicate) {
+      broadcast(result.data, ownerId, scope, date, { canonicalRevision: result.revision, serverTime: result.serverTime });
+    }
+  } finally {
+    broadcastManualSectionEvent("released", runId as string, section as ManualSection, ownerId, scope, date);
+  }
+  if (requestAborted) return;
+  res.status(result.status).json({
+    ok: result.status === 200,
+    outcome: result.status === 200 ? "accepted" : "conflicted",
+    duplicate: result.duplicate,
+    canonicalRevision: result.revision,
+    serverTime: result.serverTime,
+    data: result.data,
+    snapshotId: syncSnapshotId(result.data),
   });
 });
 

@@ -6,6 +6,42 @@ export const SYNC_DELTA_MAP_SECTIONS = [
   "packagingProgress",
 ] as const;
 
+/** Operational fields that must be edited as one atomic peer-visible section. */
+export const MANUAL_SECTION_FIELDS = {
+  packaging: ["skidsCompleted", "casesOnCurrentSkid"],
+  dough: ["traysOnLine", "batchesReady"],
+  sauce: ["sauceBarrelsMade", "sauceBarrelAnchorNetSec", "sauceBarrelCorrectionGeneration"],
+  app1: ["app1BatchesMade", "app1BatchAnchorNetSec", "app1BatchCorrectionGeneration"],
+  app2: ["app2BatchesMade", "app2BatchAnchorNetSec", "app2BatchCorrectionGeneration"],
+  app3: ["app3BatchesMade", "app3BatchAnchorNetSec", "app3BatchCorrectionGeneration"],
+  app4: ["app4BatchesMade", "app4BatchAnchorNetSec", "app4BatchCorrectionGeneration"],
+} as const;
+export type ManualSection = keyof typeof MANUAL_SECTION_FIELDS;
+export type ManualSectionField = (typeof MANUAL_SECTION_FIELDS)[ManualSection][number];
+const MANUAL_SECTION_SET = new Set<string>(Object.keys(MANUAL_SECTION_FIELDS));
+const MANUAL_SECTION_FIELD_SET = new Set<string>(
+  Object.values(MANUAL_SECTION_FIELDS).flat(),
+);
+
+export function manualSectionForField(field: string): ManualSection | undefined {
+  for (const [section, fields] of Object.entries(MANUAL_SECTION_FIELDS)) {
+    if ((fields as readonly string[]).includes(field)) return section as ManualSection;
+  }
+  return undefined;
+}
+
+export function isManualSection(value: unknown): value is ManualSection {
+  return typeof value === "string" && MANUAL_SECTION_SET.has(value);
+}
+
+export function isManualSectionField(value: unknown): value is ManualSectionField {
+  return typeof value === "string" && MANUAL_SECTION_FIELD_SET.has(value);
+}
+
+export function manualSectionKey(runId: string, section: ManualSection): string {
+  return `${runId}:${section}`;
+}
+
 const SYNC_DELTA_METADATA_KEYS = new Set([
   "syncVersion",
   "completeness",

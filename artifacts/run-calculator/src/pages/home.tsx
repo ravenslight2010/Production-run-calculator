@@ -563,7 +563,9 @@ import {
   DOUGH_TIMER_CONTROL_EVENT,
   DOUGH_TIMER_CONTROL_ADOPT_EVENT,
 } from "../autoTrackCoordinationClient";
-import { capturePreEndLifecycle, fencePendingEndSnapshots, fencePendingOperationalValues, flushOperationalIntentOutbox, operationalIntentBlocksLifecycle, queueOperationalIntent, setOperationalIntentCanonicalAdopter, setOperationalIntentIdentity } from "../operationalIntentOutbox";
+import { capturePreEndLifecycle, fenceActiveManualSectionValues, fencePendingEndSnapshots, fencePendingOperationalValues, flushOperationalIntentOutbox, operationalIntentBlocksLifecycle, queueOperationalIntent, setOperationalIntentCanonicalAdopter, setOperationalIntentIdentity, submitManualSection } from "../operationalIntentOutbox";
+import { MANUAL_SECTION_FIELDS, manualSectionForField } from "@workspace/sync-contract";
+import { claimManualSectionLock, getManualSectionLock, releaseManualSectionLock, useManualControlConflict, useManualControlLock } from "../manualSectionLocks";
 import { consumeOperationalMutationCursor } from "../operationalMutationCursor";
 import { useBackButtonTrap } from "../hooks/useBackButtonTrap";
 import { HOME_TABS, useHomeNavigation, type HomeTab } from "../hooks/useHomeNavigation";
@@ -571,7 +573,7 @@ import { useHomeRunIdentity } from "../hooks/useHomeRunIdentity";
 import { useLiveRun, LiveRunProvider } from "../contexts/LiveRunContext";
 import { calcRef } from "../liveRunCalc";
 import { computeEffectiveLineSpeed } from "../lineSpeed";
-import { createPackagingControlAdapter, createPackagingManager } from "../packagingManager";
+import { createPackagingControlAdapter, createPackagingManager, runUnlockedManualSectionAction } from "../packagingManager";
 import {
   type OperationalSnapshotReceipt,
 } from "../operationalState";
@@ -2452,7 +2454,7 @@ function SecondsField({
   );
 }
 
-function StepperField({
+export function StepperField({
   control,
   name,
   label,
@@ -2473,12 +2475,17 @@ function StepperField({
   disabled?: boolean;
   suggestion?: number | null;
   onSuggest?: () => void;
-  onManualChange?: (nextValue: number) => void;
+  onManualChange?: (nextValue: number, previousValue: number) => void;
 }) {
   const repeatRef = useRef<ReturnType<typeof createFrameRepeater> | null>(null);
+  const disabledRef = useRef(!!disabled);
+  disabledRef.current = !!disabled;
   const fieldRef = useRef<any>(null);
   if (!repeatRef.current) repeatRef.current = createFrameRepeater();
   const stopRepeat = useCallback(() => repeatRef.current?.stop(), []);
+  useEffect(() => {
+    if (disabled) stopRepeat();
+  }, [disabled, stopRepeat]);
   useEffect(() => {
     const stopWhenHidden = () => {
       if (document.hidden) stopRepeat();
@@ -2503,19 +2510,21 @@ function StepperField({
         const current = Number(field.value) || 0;
         const atMax = max !== undefined && current >= max;
         const decrement = () => {
+          if (disabledRef.current) return;
           const cur = Number(fieldRef.current?.value) || 0;
           navigator.vibrate?.(8);
           const next = Math.max(min, cur - step);
           fieldRef.current?.onChange(next);
-          onManualChange?.(next);
+          onManualChange?.(next, cur);
         };
         const increment = () => {
+          if (disabledRef.current) return;
           const cur = Number(fieldRef.current?.value) || 0;
           if (max !== undefined && cur >= max) return;
           navigator.vibrate?.(8);
           const next = max !== undefined ? Math.min(max, cur + step) : cur + step;
           fieldRef.current?.onChange(next);
-          onManualChange?.(next);
+          onManualChange?.(next, cur);
         };
         return (
           <FormItem>
@@ -2524,7 +2533,9 @@ function StepperField({
               {suggestion !== null && suggestion !== undefined && suggestion !== current && onSuggest && (
                 <button
                   type="button"
-                  onClick={() => { navigator.vibrate?.(8); onSuggest(); }}
+                   onClick={() => { if (disabledRef.current) return; navigator.vibrate?.(8); onSuggest(); }}
+                  disabled={disabled}
+                  aria-disabled={disabled}
                   className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-primary/10 border border-primary/20 text-primary hover:bg-primary/20 transition-colors shrink-0"
                   title={`Set to expected value: ${suggestion}`}
                 >
@@ -2554,10 +2565,11 @@ function StepperField({
                   inputMode="numeric"
                   {...field}
                   onChange={(e) => {
+                     if (disabledRef.current) return;
                     const val = e.target.value === "" ? "" : Number(e.target.value);
                     const next = max !== undefined && typeof val === "number" ? Math.min(max, val) : val;
                     field.onChange(next);
-                    if (typeof next === "number" && Number.isFinite(next)) onManualChange?.(next);
+                    if (typeof next === "number" && Number.isFinite(next)) onManualChange?.(next, current);
                   }}
                   onFocus={e => e.target.select()}
                   className={`h-12 flex-1 border border-input bg-background/50 text-center font-mono text-2xl font-bold focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-w-0${atMax ? " text-amber-400" : ""}`}
@@ -3176,14 +3188,46 @@ export default function Home() {
   const { currentRun, currentRunId, currentRunIdRef } = useHomeRunIdentity(dayState);
   // Keep operational corrections on explicit operator paths only.  Autosave and
   // automatic ticks deliberately never call this helper.
-  const queueManualCorrection = useCallback((runId: string, values: Record<string, number>) => {
+  const queueManualCorrection = useCallback((runId: string, values: Record<string, number>, baselineOverride?: Record<string, number>) => {
     const run = dayStateRef.current.runs.find((candidate) => candidate.id === runId);
     if (!run) return;
-    queueOperationalIntent({
-      runId, values, effectiveAt: Date.now(), action: "correction",
+    const section = manualSectionForField(Object.keys(values)[0] ?? "");
+    if (!section) return;
+    const owner = currentRunIdRef.current ? `local:${currentRunIdRef.current}` : "local";
+    if (!claimManualSectionLock(runId, section, owner)) return;
+    const allBaseline = (baselineOverride ?? loadRunValues(runId) ?? {}) as unknown as Record<string, number>;
+    const baseline = Object.fromEntries(
+      MANUAL_SECTION_FIELDS[section].map((field) => [field, Number(allBaseline[field] ?? 0)]),
+    );
+    void submitManualSection({
+      runId, section, values, baseValues: baseline,
+      baseRevision: 0,
       observedGeneration: `${runId}:${run.metaUpdatedAt ?? run.startedAt ?? 0}`,
+      onPersistenceFailure: (baseValues) => {
+        const restored = { ...loadRunValues(runId), ...baseValues };
+        const durable = saveRunValues(runId, restored);
+        if (currentRunIdRef.current === runId) {
+          for (const field of MANUAL_SECTION_FIELDS[section]) {
+            form.setValue(field as any, Number(baseValues[field] ?? 0), { shouldDirty: false, shouldTouch: false, shouldValidate: false });
+          }
+          markRunValuesUpdated(runId, Date.now());
+        }
+        setWriteError(durable
+          ? "This correction could not be sent. Your counts were restored; please try again."
+          : "Device storage is unavailable. Your correction remains fenced and will not sync; free storage and try again.");
+        return durable;
+      },
+    }).then((result) => {
+      releaseManualSectionLock(runId, section, owner);
+      if (result === "offline") {
+        // The section command remains the retry boundary; never downgrade an
+        // uncertain online delivery into a competing legacy snapshot intent.
+        window.dispatchEvent(new CustomEvent("calculator-manual-section-pending", { detail: { runId, section } }));
+      }
+      if (result === "persistence-failed") {
+        window.dispatchEvent(new CustomEvent("calculator-manual-section-error", { detail: { runId, section, message: "This correction could not be saved on this device. Your counts were restored; please try again." } }));
+      }
     });
-    void flushOperationalIntentOutbox();
   }, []);
   const packagingManager = useMemo(() => createPackagingManager({
     currentRunIdRef,
@@ -10335,7 +10379,7 @@ export default function Home() {
       completeness: canSendPartial ? "partial" : "complete",
       ...(canSendPartial ? { baseSnapshotId: syncSnapshotIdRef.current } : {}),
       dayState: { runs: fencePendingEndSnapshots(overlayRunMetaStamps(pushRuns)), shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [], substitutionLog: ds.substitutionLog ?? [], stagedItems: ds.stagedItems ?? {}, prepPhase: ds.prepPhase },
-      runValues: fencePendingOperationalValues(runValues),
+      runValues: fenceActiveManualSectionValues(fencePendingOperationalValues(runValues)),
       runValuesUpdatedAt,
       ...(() => {
         try {
@@ -18958,6 +19002,18 @@ function FloorModeView() {
     operationalDisplayState, operationalSnapshotReceipt,
   } = useLiveRun();
   const [confirmComplete, setConfirmComplete] = useState(false);
+  const packagingLock = useManualControlLock(currentRun?.id, "floor-skid-done");
+  const packagingConflict = useManualControlConflict(currentRun?.id, "floor-skid-done");
+  const doughLock = useManualControlLock(currentRun?.id, "dough-trays");
+  const sauceLock = useManualControlLock(currentRun?.id, "sauce-batches");
+  const applicatorLocks = [
+    useManualControlLock(currentRun?.id, "applicator-1-batches"),
+    useManualControlLock(currentRun?.id, "applicator-2-batches"),
+    useManualControlLock(currentRun?.id, "applicator-3-batches"),
+    useManualControlLock(currentRun?.id, "applicator-4-batches"),
+  ];
+  const sectionLockedMessage = (lock: { peer?: boolean } | undefined) =>
+    lock ? (lock.peer ? "This section is being updated on another device." : "Saving this section…") : undefined;
 
         const totalSkids = v.casesNeeded > 0 && v.casesPerSkid > 0 ? Math.ceil(v.casesNeeded / v.casesPerSkid) : 0;
         const floorStatus = runStatus === "ended" ? "paused" : runStatus === "pending" ? "paused" : runStatus;
@@ -19160,17 +19216,22 @@ function FloorModeView() {
               {/* Action buttons */}
               {(runStatus === "running" || runStatus === "paused") && (
                 <div className="grid grid-cols-3 gap-2" aria-label="Case corrections">
+                  {(packagingLock || packagingConflict) && <p role="status" aria-live="polite" className="col-span-3 text-center text-xs text-amber-200">{packagingConflict ?? sectionLockedMessage(packagingLock)}</p>}
                   <button type="button" data-testid="floor-cases-minus" aria-label="Correct cases down by one" onClick={() => {
-                    const nextCases = Math.max(0, v.casesOnCurrentSkid - 1);
-                    persistManualPackagingProgress(currentRun?.id ?? "", v.skidsCompleted, nextCases);
-                    form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
-                  }} className="min-h-12 rounded-xl text-lg font-bold" style={{ background: "rgba(255,255,255,0.08)" }}>−1 case</button>
+                    runUnlockedManualSectionAction(() => !!getManualSectionLock(currentRun?.id ?? "", "packaging")?.peer, () => {
+                      const nextCases = Math.max(0, v.casesOnCurrentSkid - 1);
+                      persistManualPackagingProgress(currentRun?.id ?? "", v.skidsCompleted, nextCases);
+                      form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
+                    });
+                  }} disabled={!!packagingLock} className="min-h-12 rounded-xl text-lg font-bold disabled:cursor-not-allowed disabled:opacity-40" style={{ background: "rgba(255,255,255,0.08)" }}>−1 case</button>
                   <div className="flex items-center justify-center text-center text-xs font-bold tracking-wide" style={{ color: "rgba(255,255,255,0.65)" }}>CORRECT<br />COUNT</div>
                   <button type="button" data-testid="floor-cases-plus" aria-label="Correct cases up by one" onClick={() => {
-                    const nextCases = incrementFloorCaseCount(v.casesOnCurrentSkid, v.casesPerSkid);
-                    persistManualPackagingProgress(currentRun?.id ?? "", v.skidsCompleted, nextCases);
-                    form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
-                  }} disabled={v.casesPerSkid > 0 && v.casesOnCurrentSkid >= v.casesPerSkid} className="min-h-12 rounded-xl text-lg font-bold disabled:cursor-not-allowed disabled:opacity-40" style={{ background: "rgba(255,255,255,0.08)" }}>+1 case</button>
+                    runUnlockedManualSectionAction(() => !!getManualSectionLock(currentRun?.id ?? "", "packaging")?.peer, () => {
+                      const nextCases = incrementFloorCaseCount(v.casesOnCurrentSkid, v.casesPerSkid);
+                      persistManualPackagingProgress(currentRun?.id ?? "", v.skidsCompleted, nextCases);
+                      form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
+                    });
+                  }} disabled={!!packagingLock || (v.casesPerSkid > 0 && v.casesOnCurrentSkid >= v.casesPerSkid)} className="min-h-12 rounded-xl text-lg font-bold disabled:cursor-not-allowed disabled:opacity-40" style={{ background: "rgba(255,255,255,0.08)" }}>+1 case</button>
                 </div>
               )}
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -19219,17 +19280,19 @@ function FloorModeView() {
                   <button
                     type="button"
                     onClick={() => {
-                      navigator.vibrate?.(15);
-                      const nextSkids = v.skidsCompleted + 1;
-                      persistManualPackagingProgress(
-                        currentRun?.id ?? "",
-                        nextSkids,
-                        0,
+                      runUnlockedManualSectionAction(
+                        () => !!getManualSectionLock(currentRun?.id ?? "", "packaging")?.peer,
+                        () => {
+                          navigator.vibrate?.(15);
+                          const nextSkids = v.skidsCompleted + 1;
+                          persistManualPackagingProgress(currentRun?.id ?? "", nextSkids, 0);
+                          form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
+                          form.setValue("casesOnCurrentSkid", 0, { shouldDirty: true });
+                        },
                       );
-                      form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
-                      form.setValue("casesOnCurrentSkid", 0, { shouldDirty: true });
                     }}
                     data-testid="floor-skid-done"
+                    disabled={!!packagingLock}
                     className="min-h-[64px] rounded-2xl font-bold text-base flex items-center justify-center gap-2 transition-colors"
                     style={{ background: accentBar, color: bg }}
                   >
@@ -19390,6 +19453,8 @@ export function PerRunMixSlotBadge({
 
 const LiveRunTabContent = memo(function LiveRunTabContent() {
   const hx = useHomeCtx();
+  const doughLock = useManualControlLock(hx.currentRun?.id, "dough-trays");
+  const packagingLock = useManualControlLock(hx.currentRun?.id, "packaging-skids");
   const {
     ackKey, activeStopId, addBrand, addFlavor, addRun, allergenWarnings,
     autoSuppressUntilRef, blankRunIds, blockingViolations, brandFlavors,
@@ -20906,6 +20971,8 @@ const LiveRunTabContent = memo(function LiveRunTabContent() {
 
 const LivePackagingTabContent = memo(function LivePackagingTabContent() {
   const hx = useHomeTabCtx();
+  const packagingLock = useManualControlLock(hx.currentRun?.id, "packaging-skids");
+  const packagingCasesLock = useManualControlLock(hx.currentRun?.id, "packaging-cases");
   const {
     autoSuppressUntilRef, currentRun, currentRunId, dayState, doughSubTab, form,
     lastEndedRun, packagingManager, persistManualPackagingProgress, runStatus, updateDrainingRunValues, v,
@@ -21231,7 +21298,8 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                               form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
                             },
                             reportCorrection: (deltaCases) => detectPackagingSpeedDrift(deltaCases),
-                            vibrate: (durationMs) => navigator.vibrate?.(durationMs),
+                             vibrate: (durationMs) => navigator.vibrate?.(durationMs),
+                             isLocked: () => !!getManualSectionLock(currentRunId, "packaging")?.peer,
                           });
                           const skidNearlyFull =
                             casesPerSkid > 0 && casesOnSkid > 0 &&
@@ -21275,6 +21343,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                   <button
                                     type="button"
                                     onClick={packagingControls.decrementSkids}
+                                     disabled={!!packagingLock}
                                     className="w-12 h-16 rounded-xl bg-muted/40 text-2xl font-bold text-muted-foreground hover:text-foreground hover:bg-muted active:scale-95 transition-all mb-1 select-none flex items-center justify-center"
                                     data-testid="btn-dec-skidsCompleted"
                                   >
@@ -21289,6 +21358,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                   <button
                                     type="button"
                                     onClick={() => packagingControls.incrementSkids(maxSkids)}
+                                     disabled={!!packagingLock}
                                     className="w-12 h-16 rounded-xl bg-muted/40 text-2xl font-bold text-muted-foreground hover:text-foreground hover:bg-muted active:scale-95 transition-all mb-1 select-none flex items-center justify-center"
                                     data-testid="btn-inc-skidsCompleted"
                                   >
@@ -21310,6 +21380,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                   <button
                                     type="button"
                                     onClick={packagingControls.decrementCases}
+                                     disabled={!!packagingCasesLock}
                                     className="w-14 h-12 rounded-lg bg-muted/40 border border-border/50 text-2xl font-bold text-foreground hover:bg-muted active:scale-95 transition-all shrink-0 select-none flex items-center justify-center"
                                     data-testid="btn-dec-casesOnCurrentSkid"
                                   >
@@ -21329,6 +21400,7 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                   <button
                                     type="button"
                                     onClick={packagingControls.incrementCases}
+                                     disabled={!!packagingCasesLock}
                                     className="w-14 h-12 rounded-lg bg-muted/40 border border-border/50 text-2xl font-bold text-foreground hover:bg-muted active:scale-95 transition-all shrink-0 select-none flex items-center justify-center"
                                     data-testid="btn-inc-casesOnCurrentSkid"
                                   >
@@ -21361,11 +21433,15 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                               {!autoTrackProgress && s && (s.skids !== v.skidsCompleted || s.casesOnSkid !== v.casesOnCurrentSkid) && (
                                 <button
                                   type="button"
+                                  disabled={!!packagingLock}
+                                  title={packagingLock?.peer ? "Packaging is being updated on another device" : undefined}
                                   onClick={() => {
-                                    navigator.vibrate?.(10);
-                                    onManual(s.skids, s.casesOnSkid);
-                                    form.setValue("skidsCompleted", s.skids, { shouldDirty: true });
-                                    form.setValue("casesOnCurrentSkid", s.casesOnSkid, { shouldDirty: true });
+                                     runUnlockedManualSectionAction(() => !!getManualSectionLock(currentRunId, "packaging")?.peer, () => {
+                                       navigator.vibrate?.(10);
+                                       onManual(s.skids, s.casesOnSkid);
+                                       form.setValue("skidsCompleted", s.skids, { shouldDirty: true });
+                                       form.setValue("casesOnCurrentSkid", s.casesOnSkid, { shouldDirty: true });
+                                     });
                                   }}
                                   className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg bg-primary/10 hover:bg-primary/20 border border-primary/20 text-primary text-xs font-semibold transition-colors"
                                 >
@@ -21378,6 +21454,8 @@ const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                                 <button
                                   type="button"
                                   onClick={packagingControls.completeSkid}
+                                   disabled={!!packagingLock}
+                                   title={packagingLock?.peer ? "Packaging is being updated on another device" : undefined}
                                   className="w-full h-16 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-400 text-xl font-black uppercase tracking-widest flex items-center justify-center gap-3 transition-all active:scale-[0.98] shadow-[0_0_20px_rgba(16,185,129,0.15)]"
                                   data-testid="btn-skid-done"
                                 >
@@ -21551,6 +21629,7 @@ function BatchMadeRow({
   testId,
   sub,
   sauceEffBarrel,
+  disabled,
 }: {
   label: string;
   totalBatches: number;
@@ -21561,6 +21640,7 @@ function BatchMadeRow({
   testId?: string;
   sub?: string;
   sauceEffBarrel?: number;
+  disabled?: boolean;
 }) {
   const remaining = Math.max(0, totalBatches - made);
   const done = remaining === 0 && made > 0;
@@ -21585,6 +21665,7 @@ function BatchMadeRow({
             <button
               type="button"
               onClick={onDecrement}
+              disabled={disabled}
               className="h-5 w-5 rounded border border-input bg-muted/40 hover:bg-muted text-xs font-bold text-foreground transition-colors flex items-center justify-center select-none touch-none"
               aria-label="Decrease batches made"
             >−</button>
@@ -21592,6 +21673,7 @@ function BatchMadeRow({
             <button
               type="button"
               onClick={onIncrement}
+              disabled={disabled}
               className="h-5 w-5 rounded border border-input bg-muted/40 hover:bg-muted text-xs font-bold text-foreground transition-colors flex items-center justify-center select-none touch-none"
               aria-label="Increase batches made"
             >+</button>
@@ -21625,6 +21707,8 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
   // elapsedBatchSec is pause-aware: it uses currentRun.pausedAt when paused,
   // so it stops growing during a pause — no wall-clock deltas needed downstream.
   const { calc, nowTime, nextRunPrepActive, elapsedBatchSec, autoTrackProgress, autoTrackSuggestion, fireAutoTrackNow, tickDueRefs, packagingDrainActive, detectPackagingSpeedDrift } = useLiveRun();
+  const packagingLock = useManualControlLock(currentRunId, "packaging-skids");
+  const sauceLock = useManualControlLock(currentRunId, "sauce-batches");
 
   // ── Barrel timer state: backed by module-level store so it survives Radix ──
   // TabsContent unmounts (inactive tabs are unmounted by default).  Lazy
@@ -21666,6 +21750,11 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
     const anchor = Math.max(0, Math.floor(nextAnchor));
     const correctionGeneration = targetCorrectionGeneration
       ?? Math.max(0, Number(form.getValues("sauceBarrelCorrectionGeneration")) || 0) + 1;
+    const baseline = {
+      sauceBarrelsMade: Number(form.getValues("sauceBarrelsMade")) || 0,
+      sauceBarrelAnchorNetSec: Number(form.getValues("sauceBarrelAnchorNetSec")) || 0,
+      sauceBarrelCorrectionGeneration: Number(form.getValues("sauceBarrelCorrectionGeneration")) || 0,
+    };
     form.setValue("sauceBarrelsMade", made, { shouldDirty: true });
     form.setValue("sauceBarrelAnchorNetSec", anchor, { shouldDirty: true });
     form.setValue("sauceBarrelCorrectionGeneration", correctionGeneration, { shouldDirty: true });
@@ -21678,7 +21767,7 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
     queueManualCorrection(currentRunId, {
       sauceBarrelsMade: made, sauceBarrelAnchorNetSec: anchor,
       sauceBarrelCorrectionGeneration: correctionGeneration,
-    });
+    }, baseline);
   }, [currentRunId, form, lastLocalEditRef, queueManualCorrection]);
   const setShowSauceBarrelDue = useCallback(
     (val: boolean) => {
@@ -21902,6 +21991,7 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
               isLive={isLive}
               testId="output-sauce-batches"
               sauceEffBarrel={calc.sauceEffBarrel}
+              disabled={!!sauceLock}
             />
             {/* Sauce barrel countdown TickBar — suppressed during pause,
                 press-done, and next-run prep. When the barrel expires the
@@ -21977,6 +22067,7 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
             form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
           },
           reportCorrection: (deltaCases) => detectPackagingSpeedDrift(deltaCases),
+          isLocked: () => !!getManualSectionLock(currentRunId, "packaging")?.peer,
         });
         const setPackedTotal = (total: number) => packagingControls.setTotal(total);
         const bumpSkids = (d: number) => {
@@ -22008,23 +22099,23 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
               <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
                 <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Skids done</p>
                 <div className="flex items-center justify-center gap-1.5 mt-0.5">
-                  <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal - cps) : bumpSkids(-1)} className={miniBtn} data-testid="btn-dec-packSkids">−</button>
+                  <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal - cps) : bumpSkids(-1)} disabled={!!packagingLock} className={miniBtn} data-testid="btn-dec-packSkids">−</button>
                   <p className="text-xl font-mono font-bold text-foreground tabular-nums">
                     {packedSkids}
                     {skidsTotal !== null && <span className="text-xs text-muted-foreground font-normal">/{skidsTotal}</span>}
                   </p>
-                  <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal + cps) : bumpSkids(1)} className={miniBtn} data-testid="btn-inc-packSkids">+</button>
+                  <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal + cps) : bumpSkids(1)} disabled={!!packagingLock} className={miniBtn} data-testid="btn-inc-packSkids">+</button>
                 </div>
               </div>
               <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
                 <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Cases on skid</p>
                 <div className="flex items-center justify-center gap-1.5 mt-0.5">
-                  <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal - 1) : bumpCases(-1)} className={miniBtn} data-testid="btn-dec-packCases">−</button>
+                  <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal - 1) : bumpCases(-1)} disabled={!!packagingLock} className={miniBtn} data-testid="btn-dec-packCases">−</button>
                   <p className="text-xl font-mono font-bold text-foreground tabular-nums">
                     {packedCasesOnSkid}
                     {hasCps && <span className="text-xs text-muted-foreground font-normal">/{cps}</span>}
                   </p>
-                  <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal + 1) : bumpCases(1)} className={miniBtn} data-testid="btn-inc-packCases">+</button>
+                  <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal + 1) : bumpCases(1)} disabled={!!packagingLock} className={miniBtn} data-testid="btn-inc-packCases">+</button>
                 </div>
               </div>
               <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
@@ -22066,6 +22157,13 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
   const hx = useHomeTabCtx();
   const { v, runStatus, currentRunId, dayState, form, lastLocalEditRef, queueManualCorrection } = hx;
   const { calc, elapsedBatchSec, autoSuppressUntilRef } = useLiveRun();
+  const packagingLock = useManualControlLock(currentRunId, "packaging-skids");
+  const appLocks = {
+    app1: useManualControlLock(currentRunId, "applicator-1-batches"),
+    app2: useManualControlLock(currentRunId, "applicator-2-batches"),
+    app3: useManualControlLock(currentRunId, "applicator-3-batches"),
+    app4: useManualControlLock(currentRunId, "applicator-4-batches"),
+  };
 
   // These are canonical run values, not tab-local state: switching Frontline
   // away, reloading, or adopting another station's progress leaves the made
@@ -22074,6 +22172,11 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
     const madeField = `${slot}BatchesMade` as keyof FormValues;
     const anchorField = `${slot}BatchAnchorNetSec` as keyof FormValues;
     const generationField = `${slot}BatchCorrectionGeneration` as keyof FormValues;
+    const baseline = {
+      [madeField]: Number(form.getValues(madeField)) || 0,
+      [anchorField]: Number(form.getValues(anchorField)) || 0,
+      [generationField]: Number(form.getValues(generationField)) || 0,
+    };
     form.setValue(madeField, Math.max(0, Math.floor(made)) as never, { shouldDirty: true });
     form.setValue(anchorField, Math.max(0, elapsedBatchSec) as never, { shouldDirty: true });
     const correctionGeneration = Math.max(0, Number(form.getValues(generationField)) || 0) + 1;
@@ -22092,7 +22195,7 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
       [madeField]: Math.max(0, Math.floor(made)),
       [anchorField]: Math.max(0, elapsedBatchSec),
       [generationField]: correctionGeneration,
-    });
+    }, baseline);
   }, [autoSuppressUntilRef, currentRunId, elapsedBatchSec, form, lastLocalEditRef, queueManualCorrection]);
 
   const isLive = runStatus === "running" || runStatus === "paused";
@@ -22138,6 +22241,7 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                               onIncrement={() => setManualAppProgress(slot, made + 1)}
                               onDecrement={() => setManualAppProgress(slot, made - 1)}
                               isLive={isLive}
+                              disabled={!!appLocks[slot]}
                               testId={testId}
                               sub={row.recipeName}
                             />
@@ -22239,6 +22343,8 @@ function LiveRunHandoffGuard() {
 }
 
 const LiveDoughTabContent = memo(function LiveDoughTabContent() {
+  const doughLock = useManualControlLock(useHomeCtx().currentRun?.id, "dough-trays");
+  const packagingLock = useManualControlLock(useHomeCtx().currentRun?.id, "dough-quick-check-skids");
   const hx = useHomeTabCtx();
   const {
     autoSuppressUntilRef, currentRunId, dayState, dayStateRef, doughSubTab,
@@ -22592,7 +22698,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                         hopperSec: Math.max(0, Number(v.hopperSec) || 0),
                       },
                     );
-                    const onManual = (values: Record<string, number>) => {
+                    const onManual = (values: Record<string, number>, baseline?: Record<string, number>) => {
                       const now = Date.now();
                       if (timing.trayMs > 0) {
                         doughAutoSuppressUntilRef.current = now + timing.trayMs;
@@ -22605,7 +22711,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                         resumeDoughTimers();
                       }
                       markRunValuesUpdated(currentRunId, now);
-                      queueManualCorrection(currentRunId, values);
+                      queueManualCorrection(currentRunId, values, baseline);
                     };
                     // Stop auto-track TickBars once the press is done — no more
                     // batches are needed for this run at that point.
@@ -22631,8 +22737,11 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                                 ? (doughSubTab === "crusts" ? "Total Stacks Ready · Auto" : "Total Trays on Line · Auto")
                                 : (doughSubTab === "crusts" ? "Total Stacks Ready" : "Total Trays on Line")}
                               suggestion={!trayAutoActive ? suggestedTrays : null}
-                              onSuggest={() => { const next = suggestedTrays ?? v.traysOnLine; markRunValuesUpdated(currentRunId, Date.now()); form.setValue("traysOnLine", next, { shouldDirty: true }); onManual({ traysOnLine: next }); }}
-                              onManualChange={(next) => onManual({ traysOnLine: next })}
+                              disabled={!!doughLock}
+                              onSuggest={() => { const baseline = { traysOnLine: Number(form.getValues("traysOnLine")) || 0, batchesReady: Number(form.getValues("batchesReady")) || 0 }; const next = suggestedTrays ?? v.traysOnLine; markRunValuesUpdated(currentRunId, Date.now()); form.setValue("traysOnLine", next, { shouldDirty: true }); onManual({ traysOnLine: next }, baseline); }}
+                              onManualChange={(next, previous) => {
+                                onManual({ traysOnLine: next }, { traysOnLine: previous, batchesReady: Number(v.batchesReady) || 0 });
+                              }}
                             />
                             {doughSubTab !== "crusts" && (
                               <div className="mt-1.5 space-y-1" data-testid="tray-section-capacity-guide">
@@ -22683,8 +22792,11 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                                 label={batchAutoActive ? "Batches of Dough Ready · Auto" : "Batches of Dough Ready"}
                                 max={3}
                                 suggestion={!batchAutoActive ? suggestedBatches : null}
-                              onSuggest={() => { const next = suggestedBatches ?? v.batchesReady; markRunValuesUpdated(currentRunId, Date.now()); form.setValue("batchesReady", next, { shouldDirty: true }); onManual({ batchesReady: next }); }}
-                              onManualChange={(next) => onManual({ batchesReady: next })}
+                              onSuggest={() => { const baseline = { traysOnLine: Number(form.getValues("traysOnLine")) || 0, batchesReady: Number(form.getValues("batchesReady")) || 0 }; const next = suggestedBatches ?? v.batchesReady; markRunValuesUpdated(currentRunId, Date.now()); form.setValue("batchesReady", next, { shouldDirty: true }); onManual({ batchesReady: next }, baseline); }}
+                              onManualChange={(next, previous) => {
+                                onManual({ batchesReady: next }, { traysOnLine: Number(v.traysOnLine) || 0, batchesReady: previous });
+                              }}
+                              disabled={!!doughLock}
                               />
                               {v.batchesReady >= 3 && (
                                 <p className="text-[11px] text-amber-400 font-semibold flex items-center gap-1 mt-1">
@@ -22743,6 +22855,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                               form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
                             },
                             reportCorrection: (deltaCases) => detectPackagingSpeedDrift(deltaCases),
+                            isLocked: () => !!getManualSectionLock(currentRunId, "packaging")?.peer,
                           });
                           // No upper cap: manual counts can exceed the planned
                           // need (run may over-produce). Auto-track still stops
@@ -22780,23 +22893,23 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                                 <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
                                   <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Skids done</p>
                                   <div className="flex items-center justify-center gap-1.5 mt-0.5">
-                                    <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal - cps) : bumpSkids(-1)} className={miniBtn} data-testid="btn-dec-packSkids">−</button>
+                                    <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal - cps) : bumpSkids(-1)} disabled={!!packagingLock} className={miniBtn} data-testid="btn-dec-packSkids">−</button>
                                     <p className="text-xl font-mono font-bold text-foreground tabular-nums" data-testid="text-pack-skids">
                                       {packedSkids}
                                       {skidsTotal !== null && <span className="text-xs text-muted-foreground font-normal">/{skidsTotal}</span>}
                                     </p>
-                                    <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal + cps) : bumpSkids(1)} className={miniBtn} data-testid="btn-inc-packSkids">+</button>
+                                    <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal + cps) : bumpSkids(1)} disabled={!!packagingLock} className={miniBtn} data-testid="btn-inc-packSkids">+</button>
                                   </div>
                                 </div>
                                 <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
                                   <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Cases on skid</p>
                                   <div className="flex items-center justify-center gap-1.5 mt-0.5">
-                                    <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal - 1) : bumpCases(-1)} className={miniBtn} data-testid="btn-dec-packCases">−</button>
+                                    <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal - 1) : bumpCases(-1)} disabled={!!packagingLock} className={miniBtn} data-testid="btn-dec-packCases">−</button>
                                     <p className="text-xl font-mono font-bold text-foreground tabular-nums" data-testid="text-pack-cases">
                                       {packedCasesOnSkid}
                                       {hasCps && <span className="text-xs text-muted-foreground font-normal">/{cps}</span>}
                                     </p>
-                                    <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal + 1) : bumpCases(1)} className={miniBtn} data-testid="btn-inc-packCases">+</button>
+                                    <button type="button" onClick={() => hasCps ? setPackedTotal(packedTotal + 1) : bumpCases(1)} disabled={!!packagingLock} className={miniBtn} data-testid="btn-inc-packCases">+</button>
                                   </div>
                                 </div>
                                 <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
@@ -22831,6 +22944,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                             suggestion={!autoTrackProgress && s && s.skids !== v.skidsCompleted ? s.skids : null}
                             onSuggest={() => { persistManualPackagingProgress(currentRunId, s!.skids, s!.casesOnSkid); form.setValue("skidsCompleted", s!.skids, { shouldDirty: true }); form.setValue("casesOnCurrentSkid", s!.casesOnSkid, { shouldDirty: true }); }}
                             onManualChange={(nextSkids) => { persistManualPackagingProgress(currentRunId, nextSkids, Number(v.casesOnCurrentSkid) || 0); }}
+                             disabled={!!packagingLock}
                           />
                           <StepperField
                             control={form.control}
@@ -22840,6 +22954,7 @@ const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                             suggestion={!autoTrackProgress && s && s.casesOnSkid !== v.casesOnCurrentSkid ? s.casesOnSkid : null}
                             onSuggest={() => { persistManualPackagingProgress(currentRunId, Number(v.skidsCompleted) || 0, s!.casesOnSkid); form.setValue("casesOnCurrentSkid", s!.casesOnSkid, { shouldDirty: true }); }}
                             onManualChange={(nextCases) => { persistManualPackagingProgress(currentRunId, Number(v.skidsCompleted) || 0, nextCases); }}
+                             disabled={!!packagingLock}
                           />
                         </div>
                         )}

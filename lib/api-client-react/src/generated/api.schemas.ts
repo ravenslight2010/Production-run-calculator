@@ -384,6 +384,378 @@ export interface OperationalIntentRequest {
   intent: OperationalIntent;
 }
 
+export type ManualSectionEditRequestSection = typeof ManualSectionEditRequestSection[keyof typeof ManualSectionEditRequestSection];
+
+
+export const ManualSectionEditRequestSection = {
+  packaging: 'packaging',
+  dough: 'dough',
+  sauce: 'sauce',
+  app1: 'app1',
+  app2: 'app2',
+  app3: 'app3',
+  app4: 'app4',
+} as const;
+
+/**
+ * Only fields belonging to section
+ */
+export type ManualSectionEditRequestValues = {[key: string]: number};
+
+/**
+ * Complete baseline for every field in section
+ */
+export type ManualSectionEditRequestBaseValues = {[key: string]: number};
+
+export interface ManualSectionEditRequestBase {
+  /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
+  id: string;
+  date: string;
+  /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
+  runId: string;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  observedGeneration: string;
+  /** @minimum 0 */
+  baseRevision: number;
+  /** @minimum 0 */
+  resetEpoch: number;
+  /**
+     * @minLength 1
+     * @pattern ^[A-Za-z0-9:_-]{1,160}$
+     */
+  deviceId: string;
+}
+
+export type ManualPackagingEditValues = {
+  skidsCompleted?: number;
+  casesOnCurrentSkid?: number;
+};
+
+export type ManualPackagingEditBaseValues = {
+  skidsCompleted: number;
+  casesOnCurrentSkid: number;
+};
+
+export type ManualPackagingEdit = ManualSectionEditRequestBase & {
+  section?: 'packaging';
+  values?: ManualPackagingEditValues;
+  baseValues?: ManualPackagingEditBaseValues;
+};
+
+export type ManualDoughEditValues = {
+  traysOnLine?: number;
+  batchesReady?: number;
+};
+
+export type ManualDoughEditBaseValues = {
+  traysOnLine: number;
+  batchesReady: number;
+};
+
+export type ManualDoughEdit = ManualSectionEditRequestBase & {
+  section?: 'dough';
+  values?: ManualDoughEditValues;
+  baseValues?: ManualDoughEditBaseValues;
+};
+
+export type ManualSauceEditValues = {
+  sauceBarrelsMade?: number;
+  sauceBarrelAnchorNetSec?: number;
+  sauceBarrelCorrectionGeneration?: number;
+};
+
+export type ManualSauceEditBaseValues = {
+  sauceBarrelsMade: number;
+  sauceBarrelAnchorNetSec: number;
+  sauceBarrelCorrectionGeneration: number;
+};
+
+export type ManualSauceEdit = ManualSectionEditRequestBase & {
+  section?: 'sauce';
+  values?: ManualSauceEditValues;
+  baseValues?: ManualSauceEditBaseValues;
+};
+
+export type ManualApp1EditValues = {
+  app1BatchesMade?: number;
+  app1BatchAnchorNetSec?: number;
+  app1BatchCorrectionGeneration?: number;
+};
+
+export type ManualApp1EditBaseValues = {
+  app1BatchesMade: number;
+  app1BatchAnchorNetSec: number;
+  app1BatchCorrectionGeneration: number;
+};
+
+export type ManualApp1Edit = ManualSectionEditRequestBase & {
+  section?: 'app1';
+  values?: ManualApp1EditValues;
+  baseValues?: ManualApp1EditBaseValues;
+};
+
+export type ManualApp2EditValues = {
+  app2BatchesMade?: number;
+  app2BatchAnchorNetSec?: number;
+  app2BatchCorrectionGeneration?: number;
+};
+
+export type ManualApp2EditBaseValues = {
+  app2BatchesMade: number;
+  app2BatchAnchorNetSec: number;
+  app2BatchCorrectionGeneration: number;
+};
+
+export type ManualApp2Edit = ManualSectionEditRequestBase & {
+  section?: 'app2';
+  values?: ManualApp2EditValues;
+  baseValues?: ManualApp2EditBaseValues;
+};
+
+export type ManualApp3EditValues = {
+  app3BatchesMade?: number;
+  app3BatchAnchorNetSec?: number;
+  app3BatchCorrectionGeneration?: number;
+};
+
+export type ManualApp3EditBaseValues = {
+  app3BatchesMade: number;
+  app3BatchAnchorNetSec: number;
+  app3BatchCorrectionGeneration: number;
+};
+
+export type ManualApp3Edit = ManualSectionEditRequestBase & {
+  section?: 'app3';
+  values?: ManualApp3EditValues;
+  baseValues?: ManualApp3EditBaseValues;
+};
+
+export type ManualApp4EditValues = {
+  app4BatchesMade?: number;
+  app4BatchAnchorNetSec?: number;
+  app4BatchCorrectionGeneration?: number;
+};
+
+export type ManualApp4EditBaseValues = {
+  app4BatchesMade: number;
+  app4BatchAnchorNetSec: number;
+  app4BatchCorrectionGeneration: number;
+};
+
+export type ManualApp4Edit = ManualSectionEditRequestBase & {
+  section?: 'app4';
+  values?: ManualApp4EditValues;
+  baseValues?: ManualApp4EditBaseValues;
+};
+
+export type ManualSectionEditRequest = (ManualPackagingEdit & {
+  /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
+  id: string;
+  date: string;
+  /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
+  runId: string;
+  section: ManualSectionEditRequestSection;
+  /** Only fields belonging to section */
+  values: ManualSectionEditRequestValues;
+  /** Complete baseline for every field in section */
+  baseValues: ManualSectionEditRequestBaseValues;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  observedGeneration: string;
+  /** @minimum 0 */
+  baseRevision: number;
+  /** @minimum 0 */
+  resetEpoch: number;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     * @pattern ^[A-Za-z0-9:_-]{1,160}$
+     */
+  deviceId: string;
+}) | (ManualDoughEdit & {
+  /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
+  id: string;
+  date: string;
+  /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
+  runId: string;
+  section: ManualSectionEditRequestSection;
+  /** Only fields belonging to section */
+  values: ManualSectionEditRequestValues;
+  /** Complete baseline for every field in section */
+  baseValues: ManualSectionEditRequestBaseValues;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  observedGeneration: string;
+  /** @minimum 0 */
+  baseRevision: number;
+  /** @minimum 0 */
+  resetEpoch: number;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     * @pattern ^[A-Za-z0-9:_-]{1,160}$
+     */
+  deviceId: string;
+}) | (ManualSauceEdit & {
+  /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
+  id: string;
+  date: string;
+  /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
+  runId: string;
+  section: ManualSectionEditRequestSection;
+  /** Only fields belonging to section */
+  values: ManualSectionEditRequestValues;
+  /** Complete baseline for every field in section */
+  baseValues: ManualSectionEditRequestBaseValues;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  observedGeneration: string;
+  /** @minimum 0 */
+  baseRevision: number;
+  /** @minimum 0 */
+  resetEpoch: number;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     * @pattern ^[A-Za-z0-9:_-]{1,160}$
+     */
+  deviceId: string;
+}) | (ManualApp1Edit & {
+  /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
+  id: string;
+  date: string;
+  /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
+  runId: string;
+  section: ManualSectionEditRequestSection;
+  /** Only fields belonging to section */
+  values: ManualSectionEditRequestValues;
+  /** Complete baseline for every field in section */
+  baseValues: ManualSectionEditRequestBaseValues;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  observedGeneration: string;
+  /** @minimum 0 */
+  baseRevision: number;
+  /** @minimum 0 */
+  resetEpoch: number;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     * @pattern ^[A-Za-z0-9:_-]{1,160}$
+     */
+  deviceId: string;
+}) | (ManualApp2Edit & {
+  /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
+  id: string;
+  date: string;
+  /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
+  runId: string;
+  section: ManualSectionEditRequestSection;
+  /** Only fields belonging to section */
+  values: ManualSectionEditRequestValues;
+  /** Complete baseline for every field in section */
+  baseValues: ManualSectionEditRequestBaseValues;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  observedGeneration: string;
+  /** @minimum 0 */
+  baseRevision: number;
+  /** @minimum 0 */
+  resetEpoch: number;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     * @pattern ^[A-Za-z0-9:_-]{1,160}$
+     */
+  deviceId: string;
+}) | (ManualApp3Edit & {
+  /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
+  id: string;
+  date: string;
+  /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
+  runId: string;
+  section: ManualSectionEditRequestSection;
+  /** Only fields belonging to section */
+  values: ManualSectionEditRequestValues;
+  /** Complete baseline for every field in section */
+  baseValues: ManualSectionEditRequestBaseValues;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  observedGeneration: string;
+  /** @minimum 0 */
+  baseRevision: number;
+  /** @minimum 0 */
+  resetEpoch: number;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     * @pattern ^[A-Za-z0-9:_-]{1,160}$
+     */
+  deviceId: string;
+}) | (ManualApp4Edit & {
+  /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
+  id: string;
+  date: string;
+  /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
+  runId: string;
+  section: ManualSectionEditRequestSection;
+  /** Only fields belonging to section */
+  values: ManualSectionEditRequestValues;
+  /** Complete baseline for every field in section */
+  baseValues: ManualSectionEditRequestBaseValues;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  observedGeneration: string;
+  /** @minimum 0 */
+  baseRevision: number;
+  /** @minimum 0 */
+  resetEpoch: number;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     * @pattern ^[A-Za-z0-9:_-]{1,160}$
+     */
+  deviceId: string;
+});
+
+export type ManualSectionEditResponseOutcome = typeof ManualSectionEditResponseOutcome[keyof typeof ManualSectionEditResponseOutcome];
+
+
+export const ManualSectionEditResponseOutcome = {
+  accepted: 'accepted',
+  conflicted: 'conflicted',
+} as const;
+
+export interface ManualSectionEditResponse {
+  ok: boolean;
+  outcome: ManualSectionEditResponseOutcome;
+  duplicate: boolean;
+  /** @minimum 0 */
+  canonicalRevision: number;
+  /** @minimum 0 */
+  serverTime: number;
+  data: SyncPayload;
+  /** @pattern ^[a-f0-9]{64}$ */
+  snapshotId: string;
+}
+
 export type OperationalIntentResponseOutcome = typeof OperationalIntentResponseOutcome[keyof typeof OperationalIntentResponseOutcome];
 
 
@@ -580,6 +952,54 @@ export interface SyncPeerFrame {
   operationalProjection?: OperationalProjection | null;
   [key: string]: unknown;
  }
+
+export type ManualSectionLockEventType = typeof ManualSectionLockEventType[keyof typeof ManualSectionLockEventType];
+
+
+export const ManualSectionLockEventType = {
+  'manual-section-lock': 'manual-section-lock',
+} as const;
+
+export type ManualSectionLockEventEvent = typeof ManualSectionLockEventEvent[keyof typeof ManualSectionLockEventEvent];
+
+
+export const ManualSectionLockEventEvent = {
+  acquired: 'acquired',
+  released: 'released',
+} as const;
+
+export type ManualSectionLockEventSection = typeof ManualSectionLockEventSection[keyof typeof ManualSectionLockEventSection];
+
+
+export const ManualSectionLockEventSection = {
+  packaging: 'packaging',
+  dough: 'dough',
+  sauce: 'sauce',
+  app1: 'app1',
+  app2: 'app2',
+  app3: 'app3',
+  app4: 'app4',
+} as const;
+
+export type ManualSectionLockEventScope = typeof ManualSectionLockEventScope[keyof typeof ManualSectionLockEventScope];
+
+
+export const ManualSectionLockEventScope = {
+  live: 'live',
+  sandbox: 'sandbox',
+} as const;
+
+export interface ManualSectionLockEvent {
+  type: ManualSectionLockEventType;
+  event: ManualSectionLockEventEvent;
+  runId: string;
+  section: ManualSectionLockEventSection;
+  ownerId: string;
+  scope: ManualSectionLockEventScope;
+  date: string;
+  /** @minimum 0 */
+  serverTime: number;
+}
 
 export interface SyncUnchangedResponse {
   unchanged: true;
@@ -5397,6 +5817,10 @@ today?: ClientTodayParameter;
  * @minimum 0
  */
 epoch?: number;
+};
+
+export type SubmitManualSectionEditParams = {
+today?: ClientTodayParameter;
 };
 
 export type SubmitOperationalIntentParams = {

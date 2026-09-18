@@ -214,7 +214,7 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
     "POST /completed-history", "POST /field-checks/observations",
     "POST /inventory/restock", "POST /inventory/consume-sauce-barrel", "POST /inventory/consume",
     "POST /inventory/waste-insight", "POST /run-suggestions/observe",
-    "POST /run-suggestions/follow-up", "POST /sync/operational-intents",
+    "POST /run-suggestions/follow-up", "POST /sync/operational-intents", "POST /sync/manual-section",
     "POST /sync/auto-track/claim", "POST /sync/e2e/auto-track-tick", "PUT /sync/today",
     "POST /cycle-count-schedules/:id/mark-counted",
     "POST /operations-insights/spec-reconciliation", "POST /ai/spec-reconcile",

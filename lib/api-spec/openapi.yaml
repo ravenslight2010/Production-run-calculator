@@ -4624,7 +4624,9 @@ paths:
           content:
             text/event-stream:
               schema:
-                $ref: "#/components/schemas/SyncPeerFrame"
+                oneOf:
+                  - $ref: "#/components/schemas/SyncPeerFrame"
+                  - $ref: "#/components/schemas/ManualSectionLockEvent"
 
   /sync/auto-track/claim:
     post:
@@ -4654,6 +4656,33 @@ paths:
           description: Invalid or out-of-bounds event
         "500":
           description: Safe automatic tracking failure
+
+  /sync/manual-section:
+    post:
+      operationId: submitManualSectionEdit
+      tags: [sync]
+      summary: Apply one atomic run-and-section correction
+      parameters:
+        - $ref: "#/components/parameters/ClientToday"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ManualSectionEditRequest"
+      responses:
+        "200":
+          description: Accepted canonical section edit or idempotent retry
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ManualSectionEditResponse" }
+        "400":
+          description: Invalid section, field, identity, or baseline shape
+        "409":
+          description: Another canonical section baseline won the race
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ManualSectionEditResponse" }
 
   /sync/operational-intents:
     post:
@@ -4943,6 +4972,106 @@ components:
         deviceId: { type: string, maxLength: 160 }
         baseRevision: { type: integer, minimum: 0 }
         intent: { $ref: "#/components/schemas/OperationalIntent" }
+    ManualSectionEditRequest:
+      type: object
+      required: [id, date, runId, section, values, baseValues, observedGeneration, baseRevision, resetEpoch, deviceId]
+      properties:
+        id: { type: string, pattern: "^[A-Za-z0-9:_-]{1,160}$" }
+        date: { type: string, format: date }
+        runId: { type: string, pattern: "^[A-Za-z0-9:_-]{1,160}$" }
+        section: { type: string, enum: [packaging, dough, sauce, app1, app2, app3, app4] }
+        values: { type: object, minProperties: 1, additionalProperties: { type: number, minimum: 0, maximum: 1000000 }, description: Only fields belonging to section }
+        baseValues: { type: object, minProperties: 2, additionalProperties: { type: number, minimum: 0, maximum: 1000000 }, description: Complete baseline for every field in section }
+        observedGeneration: { type: string, minLength: 1, maxLength: 160 }
+        baseRevision: { type: integer, minimum: 0 }
+        resetEpoch: { type: integer, minimum: 0 }
+        deviceId: { type: string, minLength: 1, maxLength: 160, pattern: "^[A-Za-z0-9:_-]{1,160}$" }
+      oneOf:
+        - $ref: "#/components/schemas/ManualPackagingEdit"
+        - $ref: "#/components/schemas/ManualDoughEdit"
+        - $ref: "#/components/schemas/ManualSauceEdit"
+        - $ref: "#/components/schemas/ManualApp1Edit"
+        - $ref: "#/components/schemas/ManualApp2Edit"
+        - $ref: "#/components/schemas/ManualApp3Edit"
+        - $ref: "#/components/schemas/ManualApp4Edit"
+    ManualPackagingEdit:
+      allOf:
+        - $ref: "#/components/schemas/ManualSectionEditRequestBase"
+        - type: object
+          properties:
+            section: { const: packaging }
+            values: { type: object, minProperties: 1, maxProperties: 2, additionalProperties: false, properties: { skidsCompleted: { type: number }, casesOnCurrentSkid: { type: number } } }
+            baseValues: { type: object, required: [skidsCompleted, casesOnCurrentSkid], minProperties: 2, maxProperties: 2, additionalProperties: false, properties: { skidsCompleted: { type: number }, casesOnCurrentSkid: { type: number } } }
+    ManualDoughEdit:
+      allOf:
+        - $ref: "#/components/schemas/ManualSectionEditRequestBase"
+        - type: object
+          properties:
+            section: { const: dough }
+            values: { type: object, minProperties: 1, maxProperties: 2, additionalProperties: false, properties: { traysOnLine: { type: number }, batchesReady: { type: number } } }
+            baseValues: { type: object, required: [traysOnLine, batchesReady], minProperties: 2, maxProperties: 2, additionalProperties: false, properties: { traysOnLine: { type: number }, batchesReady: { type: number } } }
+    ManualSauceEdit:
+      allOf:
+        - $ref: "#/components/schemas/ManualSectionEditRequestBase"
+        - type: object
+          properties:
+            section: { const: sauce }
+            values: { type: object, minProperties: 1, maxProperties: 3, additionalProperties: false, properties: { sauceBarrelsMade: { type: number }, sauceBarrelAnchorNetSec: { type: number }, sauceBarrelCorrectionGeneration: { type: number } } }
+            baseValues: { type: object, required: [sauceBarrelsMade, sauceBarrelAnchorNetSec, sauceBarrelCorrectionGeneration], minProperties: 3, maxProperties: 3, additionalProperties: false, properties: { sauceBarrelsMade: { type: number }, sauceBarrelAnchorNetSec: { type: number }, sauceBarrelCorrectionGeneration: { type: number } } }
+    ManualApp1Edit:
+      allOf:
+        - $ref: "#/components/schemas/ManualSectionEditRequestBase"
+        - type: object
+          properties:
+            section: { const: app1 }
+            values: { type: object, minProperties: 1, maxProperties: 3, additionalProperties: false, properties: { app1BatchesMade: { type: number }, app1BatchAnchorNetSec: { type: number }, app1BatchCorrectionGeneration: { type: number } } }
+            baseValues: { type: object, required: [app1BatchesMade, app1BatchAnchorNetSec, app1BatchCorrectionGeneration], minProperties: 3, maxProperties: 3, additionalProperties: false, properties: { app1BatchesMade: { type: number }, app1BatchAnchorNetSec: { type: number }, app1BatchCorrectionGeneration: { type: number } } }
+    ManualApp2Edit:
+      allOf:
+        - $ref: "#/components/schemas/ManualSectionEditRequestBase"
+        - type: object
+          properties:
+            section: { const: app2 }
+            values: { type: object, minProperties: 1, maxProperties: 3, additionalProperties: false, properties: { app2BatchesMade: { type: number }, app2BatchAnchorNetSec: { type: number }, app2BatchCorrectionGeneration: { type: number } } }
+            baseValues: { type: object, required: [app2BatchesMade, app2BatchAnchorNetSec, app2BatchCorrectionGeneration], minProperties: 3, maxProperties: 3, additionalProperties: false, properties: { app2BatchesMade: { type: number }, app2BatchAnchorNetSec: { type: number }, app2BatchCorrectionGeneration: { type: number } } }
+    ManualApp3Edit:
+      allOf:
+        - $ref: "#/components/schemas/ManualSectionEditRequestBase"
+        - type: object
+          properties:
+            section: { const: app3 }
+            values: { type: object, minProperties: 1, maxProperties: 3, additionalProperties: false, properties: { app3BatchesMade: { type: number }, app3BatchAnchorNetSec: { type: number }, app3BatchCorrectionGeneration: { type: number } } }
+            baseValues: { type: object, required: [app3BatchesMade, app3BatchAnchorNetSec, app3BatchCorrectionGeneration], minProperties: 3, maxProperties: 3, additionalProperties: false, properties: { app3BatchesMade: { type: number }, app3BatchAnchorNetSec: { type: number }, app3BatchCorrectionGeneration: { type: number } } }
+    ManualApp4Edit:
+      allOf:
+        - $ref: "#/components/schemas/ManualSectionEditRequestBase"
+        - type: object
+          properties:
+            section: { const: app4 }
+            values: { type: object, minProperties: 1, maxProperties: 3, additionalProperties: false, properties: { app4BatchesMade: { type: number }, app4BatchAnchorNetSec: { type: number }, app4BatchCorrectionGeneration: { type: number } } }
+            baseValues: { type: object, required: [app4BatchesMade, app4BatchAnchorNetSec, app4BatchCorrectionGeneration], minProperties: 3, maxProperties: 3, additionalProperties: false, properties: { app4BatchesMade: { type: number }, app4BatchAnchorNetSec: { type: number }, app4BatchCorrectionGeneration: { type: number } } }
+    ManualSectionEditRequestBase:
+      type: object
+      required: [id, date, runId, observedGeneration, baseRevision, resetEpoch, deviceId]
+      properties:
+        id: { type: string, pattern: "^[A-Za-z0-9:_-]{1,160}$" }
+        date: { type: string, format: date }
+        runId: { type: string, pattern: "^[A-Za-z0-9:_-]{1,160}$" }
+        observedGeneration: { type: string, minLength: 1, maxLength: 160 }
+        baseRevision: { type: integer, minimum: 0 }
+        resetEpoch: { type: integer, minimum: 0 }
+        deviceId: { type: string, minLength: 1, pattern: "^[A-Za-z0-9:_-]{1,160}$" }
+    ManualSectionEditResponse:
+      type: object
+      required: [ok, outcome, duplicate, canonicalRevision, serverTime, data, snapshotId]
+      properties:
+        ok: { type: boolean }
+        outcome: { type: string, enum: [accepted, conflicted] }
+        duplicate: { type: boolean }
+        canonicalRevision: { type: integer, minimum: 0 }
+        serverTime: { type: integer, minimum: 0 }
+        data: { $ref: "#/components/schemas/SyncPayload" }
+        snapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
     OperationalIntentResponse:
       type: object
       required: [ok, outcome, duplicate, cursor, canonicalRevision, serverTime, data, snapshotId]
@@ -5025,6 +5154,18 @@ components:
             - $ref: "#/components/schemas/OperationalProjection"
             - { type: "null" }
       additionalProperties: true
+    ManualSectionLockEvent:
+      type: object
+      required: [type, event, runId, section, ownerId, scope, date, serverTime]
+      properties:
+        type: { type: string, enum: [manual-section-lock] }
+        event: { type: string, enum: [acquired, released] }
+        runId: { type: string }
+        section: { type: string, enum: [packaging, dough, sauce, app1, app2, app3, app4] }
+        ownerId: { type: string }
+        scope: { type: string, enum: [live, sandbox] }
+        date: { type: string, format: date }
+        serverTime: { type: integer, minimum: 0 }
 
     OperationalProjection:
       type: object

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createPackagingManager } from "./packagingManager";
+import { createPackagingManager, createPackagingControlAdapter, runUnlockedManualSectionAction } from "./packagingManager";
 import { DEFAULT_VALUES, type DayState, type FormValues, type RunMeta } from "./types";
 
 function makeManager(valuesByRun: Record<string, FormValues>) {
@@ -38,6 +38,56 @@ function run(id: string, endedAt: number): RunMeta {
 }
 
 describe("packaging manager", () => {
+  it("blocks every packaging adapter mutation while a peer lock is live", () => {
+    const applyProgress = vi.fn();
+    const reportCorrection = vi.fn();
+    const vibrate = vi.fn();
+    let locked = true;
+    const adapter = createPackagingControlAdapter({
+      skidsCompleted: 1, casesOnCurrentSkid: 2, casesPerSkid: 10,
+      applyProgress, reportCorrection, vibrate, isLocked: () => locked,
+    });
+    adapter.apply(2, 3); adapter.setTotal(30); adapter.decrementSkids(); adapter.incrementSkids(); adapter.decrementCases(); adapter.incrementCases(); adapter.completeSkid();
+    expect(applyProgress).not.toHaveBeenCalled();
+    expect(reportCorrection).not.toHaveBeenCalled();
+    expect(vibrate).not.toHaveBeenCalled();
+    locked = false;
+    adapter.completeSkid();
+    expect(applyProgress).toHaveBeenCalledWith(2, 0);
+  });
+  it("runs guarded manual actions only after the peer lock releases", () => {
+    let locked = true;
+    const action = vi.fn();
+    expect(runUnlockedManualSectionAction(() => locked, action)).toBe(false);
+    expect(action).not.toHaveBeenCalled();
+    locked = false;
+    expect(runUnlockedManualSectionAction(() => locked, action)).toBe(true);
+    expect(action).toHaveBeenCalledTimes(1);
+  });
+  it("guards the Floor Skid Done action before vibrate, persistence, and both form writes", () => {
+    let locked = true;
+    const vibrate = vi.fn();
+    const persist = vi.fn();
+    const setValue = vi.fn();
+    const runFloorSkidDone = () => runUnlockedManualSectionAction(
+      () => locked,
+      () => {
+        vibrate(15);
+        persist("floor-run", 3, 0);
+        setValue("skidsCompleted", 3, { shouldDirty: true });
+        setValue("casesOnCurrentSkid", 0, { shouldDirty: true });
+      },
+    );
+    expect(runFloorSkidDone()).toBe(false);
+    expect(vibrate).not.toHaveBeenCalled();
+    expect(persist).not.toHaveBeenCalled();
+    expect(setValue).not.toHaveBeenCalled();
+    locked = false;
+    expect(runFloorSkidDone()).toBe(true);
+    expect(vibrate).toHaveBeenCalledWith(15);
+    expect(persist).toHaveBeenCalledWith("floor-run", 3, 0);
+    expect(setValue).toHaveBeenCalledTimes(2);
+  });
   it("selects the latest eligible draining run after filtering completed runs", () => {
     const now = 1_000_000;
     const older = run("older", now - 4 * 60_000);
@@ -106,6 +156,9 @@ describe("packaging manager", () => {
     expect(dependencies.queueManualCorrection).toHaveBeenCalledWith("current", {
       skidsCompleted: 1,
       casesOnCurrentSkid: 24,
+    }, {
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 0,
     });
     expect(dependencies.autoSuppressUntilRef.current).toBe(2_000);
   });

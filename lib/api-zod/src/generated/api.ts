@@ -6447,6 +6447,280 @@ export const ClaimAutoTrackEventResponse = zod.object({
 
 
 /**
+ * @summary Apply one atomic run-and-section correction
+ */
+export const SubmitManualSectionEditQueryParams = zod.object({
+  "today": zod.date().optional()
+})
+
+export const submitManualSectionEditBodyOneOneIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyOneOneRunIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyOneOneObservedGenerationMax = 160;
+
+export const submitManualSectionEditBodyOneOneBaseRevisionMin = 0;
+
+export const submitManualSectionEditBodyOneOneResetEpochMin = 0;
+
+
+
+export const submitManualSectionEditBodyOneOneDeviceIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyTwoOneIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyTwoOneRunIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyTwoOneObservedGenerationMax = 160;
+
+export const submitManualSectionEditBodyTwoOneBaseRevisionMin = 0;
+
+export const submitManualSectionEditBodyTwoOneResetEpochMin = 0;
+
+
+
+export const submitManualSectionEditBodyTwoOneDeviceIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyThreeOneIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyThreeOneRunIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyThreeOneObservedGenerationMax = 160;
+
+export const submitManualSectionEditBodyThreeOneBaseRevisionMin = 0;
+
+export const submitManualSectionEditBodyThreeOneResetEpochMin = 0;
+
+
+
+export const submitManualSectionEditBodyThreeOneDeviceIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyFourOneIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyFourOneRunIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyFourOneObservedGenerationMax = 160;
+
+export const submitManualSectionEditBodyFourOneBaseRevisionMin = 0;
+
+export const submitManualSectionEditBodyFourOneResetEpochMin = 0;
+
+
+
+export const submitManualSectionEditBodyFourOneDeviceIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyFiveOneIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyFiveOneRunIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyFiveOneObservedGenerationMax = 160;
+
+export const submitManualSectionEditBodyFiveOneBaseRevisionMin = 0;
+
+export const submitManualSectionEditBodyFiveOneResetEpochMin = 0;
+
+
+
+export const submitManualSectionEditBodyFiveOneDeviceIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodySixOneIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodySixOneRunIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodySixOneObservedGenerationMax = 160;
+
+export const submitManualSectionEditBodySixOneBaseRevisionMin = 0;
+
+export const submitManualSectionEditBodySixOneResetEpochMin = 0;
+
+
+
+export const submitManualSectionEditBodySixOneDeviceIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodySevenOneIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodySevenOneRunIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodySevenOneObservedGenerationMax = 160;
+
+export const submitManualSectionEditBodySevenOneBaseRevisionMin = 0;
+
+export const submitManualSectionEditBodySevenOneResetEpochMin = 0;
+
+
+
+export const submitManualSectionEditBodySevenOneDeviceIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyEightIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyEightRunIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyEightValuesMinOne = 0;
+export const submitManualSectionEditBodyEightValuesMaxOne = 1000000;
+
+export const submitManualSectionEditBodyEightBaseValuesMinOne = 0;
+export const submitManualSectionEditBodyEightBaseValuesMaxOne = 1000000;
+
+export const submitManualSectionEditBodyEightObservedGenerationMax = 160;
+
+export const submitManualSectionEditBodyEightBaseRevisionMin = 0;
+
+export const submitManualSectionEditBodyEightResetEpochMin = 0;
+
+export const submitManualSectionEditBodyEightDeviceIdMax = 160;
+
+
+export const submitManualSectionEditBodyEightDeviceIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+
+
+export const SubmitManualSectionEditBody = zod.union([zod.object({
+  "id": zod.string().regex(submitManualSectionEditBodyOneOneIdRegExp),
+  "date": zod.coerce.date(),
+  "runId": zod.string().regex(submitManualSectionEditBodyOneOneRunIdRegExp),
+  "observedGeneration": zod.string().min(1).max(submitManualSectionEditBodyOneOneObservedGenerationMax),
+  "baseRevision": zod.int().min(submitManualSectionEditBodyOneOneBaseRevisionMin),
+  "resetEpoch": zod.int().min(submitManualSectionEditBodyOneOneResetEpochMin),
+  "deviceId": zod.string().min(1).regex(submitManualSectionEditBodyOneOneDeviceIdRegExp)
+}).and(zod.object({
+  "section": zod.literal("packaging").optional(),
+  "values": zod.object({
+  "skidsCompleted": zod.number().optional(),
+  "casesOnCurrentSkid": zod.number().optional()
+}).optional(),
+  "baseValues": zod.object({
+  "skidsCompleted": zod.number(),
+  "casesOnCurrentSkid": zod.number()
+}).optional()
+})),zod.object({
+  "id": zod.string().regex(submitManualSectionEditBodyTwoOneIdRegExp),
+  "date": zod.coerce.date(),
+  "runId": zod.string().regex(submitManualSectionEditBodyTwoOneRunIdRegExp),
+  "observedGeneration": zod.string().min(1).max(submitManualSectionEditBodyTwoOneObservedGenerationMax),
+  "baseRevision": zod.int().min(submitManualSectionEditBodyTwoOneBaseRevisionMin),
+  "resetEpoch": zod.int().min(submitManualSectionEditBodyTwoOneResetEpochMin),
+  "deviceId": zod.string().min(1).regex(submitManualSectionEditBodyTwoOneDeviceIdRegExp)
+}).and(zod.object({
+  "section": zod.literal("dough").optional(),
+  "values": zod.object({
+  "traysOnLine": zod.number().optional(),
+  "batchesReady": zod.number().optional()
+}).optional(),
+  "baseValues": zod.object({
+  "traysOnLine": zod.number(),
+  "batchesReady": zod.number()
+}).optional()
+})),zod.object({
+  "id": zod.string().regex(submitManualSectionEditBodyThreeOneIdRegExp),
+  "date": zod.coerce.date(),
+  "runId": zod.string().regex(submitManualSectionEditBodyThreeOneRunIdRegExp),
+  "observedGeneration": zod.string().min(1).max(submitManualSectionEditBodyThreeOneObservedGenerationMax),
+  "baseRevision": zod.int().min(submitManualSectionEditBodyThreeOneBaseRevisionMin),
+  "resetEpoch": zod.int().min(submitManualSectionEditBodyThreeOneResetEpochMin),
+  "deviceId": zod.string().min(1).regex(submitManualSectionEditBodyThreeOneDeviceIdRegExp)
+}).and(zod.object({
+  "section": zod.literal("sauce").optional(),
+  "values": zod.object({
+  "sauceBarrelsMade": zod.number().optional(),
+  "sauceBarrelAnchorNetSec": zod.number().optional(),
+  "sauceBarrelCorrectionGeneration": zod.number().optional()
+}).optional(),
+  "baseValues": zod.object({
+  "sauceBarrelsMade": zod.number(),
+  "sauceBarrelAnchorNetSec": zod.number(),
+  "sauceBarrelCorrectionGeneration": zod.number()
+}).optional()
+})),zod.object({
+  "id": zod.string().regex(submitManualSectionEditBodyFourOneIdRegExp),
+  "date": zod.coerce.date(),
+  "runId": zod.string().regex(submitManualSectionEditBodyFourOneRunIdRegExp),
+  "observedGeneration": zod.string().min(1).max(submitManualSectionEditBodyFourOneObservedGenerationMax),
+  "baseRevision": zod.int().min(submitManualSectionEditBodyFourOneBaseRevisionMin),
+  "resetEpoch": zod.int().min(submitManualSectionEditBodyFourOneResetEpochMin),
+  "deviceId": zod.string().min(1).regex(submitManualSectionEditBodyFourOneDeviceIdRegExp)
+}).and(zod.object({
+  "section": zod.literal("app1").optional(),
+  "values": zod.object({
+  "app1BatchesMade": zod.number().optional(),
+  "app1BatchAnchorNetSec": zod.number().optional(),
+  "app1BatchCorrectionGeneration": zod.number().optional()
+}).optional(),
+  "baseValues": zod.object({
+  "app1BatchesMade": zod.number(),
+  "app1BatchAnchorNetSec": zod.number(),
+  "app1BatchCorrectionGeneration": zod.number()
+}).optional()
+})),zod.object({
+  "id": zod.string().regex(submitManualSectionEditBodyFiveOneIdRegExp),
+  "date": zod.coerce.date(),
+  "runId": zod.string().regex(submitManualSectionEditBodyFiveOneRunIdRegExp),
+  "observedGeneration": zod.string().min(1).max(submitManualSectionEditBodyFiveOneObservedGenerationMax),
+  "baseRevision": zod.int().min(submitManualSectionEditBodyFiveOneBaseRevisionMin),
+  "resetEpoch": zod.int().min(submitManualSectionEditBodyFiveOneResetEpochMin),
+  "deviceId": zod.string().min(1).regex(submitManualSectionEditBodyFiveOneDeviceIdRegExp)
+}).and(zod.object({
+  "section": zod.literal("app2").optional(),
+  "values": zod.object({
+  "app2BatchesMade": zod.number().optional(),
+  "app2BatchAnchorNetSec": zod.number().optional(),
+  "app2BatchCorrectionGeneration": zod.number().optional()
+}).optional(),
+  "baseValues": zod.object({
+  "app2BatchesMade": zod.number(),
+  "app2BatchAnchorNetSec": zod.number(),
+  "app2BatchCorrectionGeneration": zod.number()
+}).optional()
+})),zod.object({
+  "id": zod.string().regex(submitManualSectionEditBodySixOneIdRegExp),
+  "date": zod.coerce.date(),
+  "runId": zod.string().regex(submitManualSectionEditBodySixOneRunIdRegExp),
+  "observedGeneration": zod.string().min(1).max(submitManualSectionEditBodySixOneObservedGenerationMax),
+  "baseRevision": zod.int().min(submitManualSectionEditBodySixOneBaseRevisionMin),
+  "resetEpoch": zod.int().min(submitManualSectionEditBodySixOneResetEpochMin),
+  "deviceId": zod.string().min(1).regex(submitManualSectionEditBodySixOneDeviceIdRegExp)
+}).and(zod.object({
+  "section": zod.literal("app3").optional(),
+  "values": zod.object({
+  "app3BatchesMade": zod.number().optional(),
+  "app3BatchAnchorNetSec": zod.number().optional(),
+  "app3BatchCorrectionGeneration": zod.number().optional()
+}).optional(),
+  "baseValues": zod.object({
+  "app3BatchesMade": zod.number(),
+  "app3BatchAnchorNetSec": zod.number(),
+  "app3BatchCorrectionGeneration": zod.number()
+}).optional()
+})),zod.object({
+  "id": zod.string().regex(submitManualSectionEditBodySevenOneIdRegExp),
+  "date": zod.coerce.date(),
+  "runId": zod.string().regex(submitManualSectionEditBodySevenOneRunIdRegExp),
+  "observedGeneration": zod.string().min(1).max(submitManualSectionEditBodySevenOneObservedGenerationMax),
+  "baseRevision": zod.int().min(submitManualSectionEditBodySevenOneBaseRevisionMin),
+  "resetEpoch": zod.int().min(submitManualSectionEditBodySevenOneResetEpochMin),
+  "deviceId": zod.string().min(1).regex(submitManualSectionEditBodySevenOneDeviceIdRegExp)
+}).and(zod.object({
+  "section": zod.literal("app4").optional(),
+  "values": zod.object({
+  "app4BatchesMade": zod.number().optional(),
+  "app4BatchAnchorNetSec": zod.number().optional(),
+  "app4BatchCorrectionGeneration": zod.number().optional()
+}).optional(),
+  "baseValues": zod.object({
+  "app4BatchesMade": zod.number(),
+  "app4BatchAnchorNetSec": zod.number(),
+  "app4BatchCorrectionGeneration": zod.number()
+}).optional()
+}))]).and(zod.object({
+  "id": zod.string().regex(submitManualSectionEditBodyEightIdRegExp),
+  "date": zod.coerce.date(),
+  "runId": zod.string().regex(submitManualSectionEditBodyEightRunIdRegExp),
+  "section": zod.enum(['packaging', 'dough', 'sauce', 'app1', 'app2', 'app3', 'app4']),
+  "values": zod.record(zod.string(), zod.number().min(submitManualSectionEditBodyEightValuesMinOne).max(submitManualSectionEditBodyEightValuesMaxOne)).describe('Only fields belonging to section'),
+  "baseValues": zod.record(zod.string(), zod.number().min(submitManualSectionEditBodyEightBaseValuesMinOne).max(submitManualSectionEditBodyEightBaseValuesMaxOne)).describe('Complete baseline for every field in section'),
+  "observedGeneration": zod.string().min(1).max(submitManualSectionEditBodyEightObservedGenerationMax),
+  "baseRevision": zod.int().min(submitManualSectionEditBodyEightBaseRevisionMin),
+  "resetEpoch": zod.int().min(submitManualSectionEditBodyEightResetEpochMin),
+  "deviceId": zod.string().min(1).max(submitManualSectionEditBodyEightDeviceIdMax).regex(submitManualSectionEditBodyEightDeviceIdRegExp)
+}))
+
+export const submitManualSectionEditResponseCanonicalRevisionMin = 0;
+
+export const submitManualSectionEditResponseServerTimeMin = 0;
+
+export const submitManualSectionEditResponseSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
+
+
+export const SubmitManualSectionEditResponse = zod.object({
+  "ok": zod.boolean(),
+  "outcome": zod.enum(['accepted', 'conflicted']),
+  "duplicate": zod.boolean(),
+  "canonicalRevision": zod.int().min(submitManualSectionEditResponseCanonicalRevisionMin),
+  "serverTime": zod.int().min(submitManualSectionEditResponseServerTimeMin),
+  "data": zod.object({
+  "dayState": zod.record(zod.string(), zod.unknown()),
+  "runValues": zod.record(zod.string(), zod.unknown())
+}).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.'),
+  "snapshotId": zod.string().regex(submitManualSectionEditResponseSnapshotIdRegExp)
+})
+
+
+/**
  * @summary Apply one server-authoritative production command
  */
 export const submitOperationalIntentQueryEpochMin = 0;

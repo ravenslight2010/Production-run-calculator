@@ -1,6 +1,8 @@
 /** Durable, per-command browser work queue for operational commands. */
 import { todayStr } from "./utils";
 import { getStoredResetEpoch } from "./adapters/browserResetPersistence";
+import { MANUAL_SECTION_FIELDS, manualSectionForField } from "@workspace/sync-contract";
+import { clearManualSectionLocks, restoreManualSectionValues, setManualSectionConflict } from "./manualSectionLocks";
 
 export const OPERATIONAL_INTENT_OUTBOX_EVENT = "run-calculator:operational-intent-outbox";
 const KEY = "run-calculator:operational-intent-outbox:v1";
@@ -12,12 +14,22 @@ const MAX_TERMINAL = 100;
 const BACKOFF_MAX_MS = 5 * 60_000;
 const RETRY_AFTER_MAX_MS = 24 * 60 * 60_000;
 const DELIVERY_TIMEOUT_MS = 25_000;
+export const MAX_MANUAL_SECTION_RETRY_ATTEMPTS = 6;
 const LOCK_LEASE_MS = 30_000;
 const LOCK_RENEW_MS = 10_000;
 let activeFlush: Promise<void> | undefined;
 let retryTimer: number | undefined;
 let activeOwner: string | undefined;
 let adoptCanonical: ((data: unknown, intent: OperationalIntent, outcome: OperationalIntentState) => void | Promise<void>) | undefined;
+const activeManualSections = new Map<string, { owner: string; runId: string; section: string; values: Record<string, number> }>();
+const manualRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const manualRetryKey = (owner: string, id: string) => `${owner}:${id}`;
+const MANUAL_SECTION_PENDING_KEY = "run-calculator:manual-section-pending:v1";
+export type PendingManualSection = {
+  id: string; runId: string; section: string; date: string; resetEpoch: number;
+  values: Record<string, number>; baseValues: Record<string, number>;
+  observedGeneration: string; baseRevision?: number; owner?: string; deliveryState?: "retry-exhausted";
+};
 type OperationalIntentStorageFailure = "corrupt" | "unavailable" | "write";
 const storageHealth = {
   corruptRecords: 0,
@@ -86,7 +98,19 @@ export function operationalIntentStorageHealth(): OperationalIntentStorageHealth
 }
 
 export function setOperationalIntentIdentity(identity: { scope: "live" | "sandbox"; userId: string } | null): void {
-  activeOwner = identity ? `${identity.scope}:${identity.userId}` : undefined;
+  const nextOwner = identity ? `${identity.scope}:${identity.userId}` : undefined;
+  if (activeOwner !== nextOwner) {
+    for (const timer of manualRetryTimers.values()) clearTimeout(timer);
+    manualRetryTimers.clear();
+    activeManualSections.clear();
+    clearManualSectionLocks();
+  }
+  activeOwner = nextOwner;
+  if (typeof window !== "undefined" && activeOwner && !(setOperationalIntentIdentity as any)._onlineHook) {
+    window.addEventListener("online", () => { void retryPendingManualSections(); });
+    (setOperationalIntentIdentity as any)._onlineHook = true;
+  }
+  if (activeOwner) void retryPendingManualSections();
   scheduleNextFlush();
   if (typeof window !== "undefined") notify();
 }
@@ -336,6 +360,153 @@ export function queueOperationalIntent(input: Omit<OperationalIntent, "version" 
   if (!persistPending(intent)) throw new Error("Offline action could not be saved on this device (storage may be full)");
   notify(); return intent;
 }
+
+/** Sends an online protected correction through the section transaction. */
+export async function submitManualSection(input: {
+  runId: string;
+  section: string;
+  values: Record<string, number>;
+  baseValues: Record<string, number>;
+  observedGeneration: string;
+  baseRevision?: number;
+  date?: string;
+  id?: string;
+  resetEpoch?: number;
+  owner?: string;
+  onPersistenceFailure?: (baseValues: Record<string, number>) => boolean | void | Promise<boolean | void>;
+}): Promise<"accepted" | "conflicted" | "offline" | "persistence-failed" | "identity-mismatch"> {
+  const id = input.id ?? `online:${crypto.randomUUID()}`;
+  const immutableResetEpoch = input.resetEpoch ?? getStoredResetEpoch();
+  const capturedOwner = input.owner ?? activeOwner;
+  if (!capturedOwner || (input.owner && input.owner !== activeOwner)) return "identity-mismatch";
+  const pendingRecord = { ...input, id, date: input.date ?? todayStr(), resetEpoch: immutableResetEpoch, owner: capturedOwner };
+  let keepManualFence = false;
+  const activeToken = `${capturedOwner}:${id}:${input.runId}:${input.section}`;
+  activeManualSections.set(activeToken, { owner: capturedOwner, runId: input.runId, section: input.section, values: input.values });
+  try {
+    if (typeof localStorage === "undefined") throw new Error("storage unavailable");
+    localStorage.setItem(`${MANUAL_SECTION_PENDING_KEY}:${capturedOwner}:${id}`, JSON.stringify(pendingRecord));
+    const ownerPrefix = `${MANUAL_SECTION_PENDING_KEY}:${capturedOwner}:`;
+    for (let index = localStorage.length - 1; index >= 0; index--) {
+      const key = localStorage.key(index);
+      if (!key?.startsWith(ownerPrefix) || key.endsWith(`:${id}`)) continue;
+      try {
+        const prior = JSON.parse(localStorage.getItem(key) ?? "null");
+        if (prior?.deliveryState === "retry-exhausted" && prior.runId === input.runId && prior.section === input.section && prior.id !== id) {
+          localStorage.removeItem(key);
+        }
+      } catch {}
+    }
+  } catch {
+    const restored = await input.onPersistenceFailure?.(input.baseValues);
+    if (restored === false) keepManualFence = true;
+    if (!keepManualFence) activeManualSections.delete(activeToken);
+    return "persistence-failed";
+  }
+  if (typeof navigator !== "undefined" && !navigator.onLine) {
+    activeManualSections.delete(activeToken);
+    scheduleManualRetry(pendingRecord);
+    return "offline";
+  }
+  const controller = new AbortController();
+  const timer = typeof window !== "undefined" ? window.setTimeout(() => controller.abort(), DELIVERY_TIMEOUT_MS) : undefined;
+  try {
+    const response = await fetch(`/api/sync/manual-section?today=${encodeURIComponent(pendingRecord.date)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        id, date: pendingRecord.date, runId: input.runId, section: input.section, values: input.values,
+        baseValues: input.baseValues, observedGeneration: input.observedGeneration,
+        baseRevision: input.baseRevision ?? 0, resetEpoch: immutableResetEpoch,
+        deviceId: getOperationalDeviceId(),
+      }),
+    });
+    if (capturedOwner !== activeOwner) return "identity-mismatch";
+    let body: { data?: unknown; outcome?: string; canonicalRevision?: number; serverTime?: number; snapshotId?: string } = {};
+    try { body = await response.json(); } catch {}
+    if (capturedOwner !== activeOwner) return "identity-mismatch";
+    if (body.data && adoptCanonical) {
+      if (capturedOwner !== activeOwner) return "identity-mismatch";
+      const canonicalServerTime = Number.isFinite(body.serverTime) ? body.serverTime : undefined;
+      const canonicalValues = (body.data as any)?.runValues?.[input.runId] ?? {};
+      const intent = {
+        version: 1 as const, id, date: pendingRecord.date, runId: input.runId, observedGeneration: input.observedGeneration,
+        resetEpoch: immutableResetEpoch, effectiveAt: Date.now(), action: "correction" as const,
+        commandCategory: "correction" as const, deviceId: getOperationalDeviceId(), baseRevision: input.baseRevision ?? 0,
+        occurredAt: Date.now(), values: restoreManualSectionValues(input.section as any, canonicalValues) as Record<string, number>, state: "accepted" as const,
+        ...(Number.isSafeInteger(body.canonicalRevision) ? { canonicalRevision: body.canonicalRevision } : {}),
+        ...(canonicalServerTime !== undefined ? { serverTime: canonicalServerTime, serverTimeOffsetMs: canonicalServerTime - Date.now() } : {}),
+        ...(typeof body.snapshotId === "string" ? { snapshotId: body.snapshotId } : {}),
+      };
+      await adoptCanonical(body.data, intent, body.outcome === "conflicted" ? "conflicted" : "accepted");
+      if (capturedOwner !== activeOwner) return "identity-mismatch";
+    }
+    if (response.status === 409 || body.outcome === "conflicted") {
+      if (capturedOwner !== activeOwner) return "identity-mismatch";
+      const retryKey = manualRetryKey(capturedOwner, id);
+      const retry = manualRetryTimers.get(retryKey); if (retry) clearTimeout(retry);
+      manualRetryTimers.delete(retryKey);
+      setManualSectionConflict(input.runId, input.section as any);
+      if (capturedOwner !== activeOwner) return "identity-mismatch";
+      localStorage.removeItem(`${MANUAL_SECTION_PENDING_KEY}:${capturedOwner}:${id}`);
+      return "conflicted";
+    }
+    if (response.ok) {
+      const retryKey = manualRetryKey(capturedOwner, id);
+      const retry = manualRetryTimers.get(retryKey); if (retry) clearTimeout(retry);
+      manualRetryTimers.delete(retryKey);
+      if (capturedOwner !== activeOwner) return "identity-mismatch";
+      localStorage.removeItem(`${MANUAL_SECTION_PENDING_KEY}:${capturedOwner}:${id}`);
+      return "accepted";
+    }
+    if (capturedOwner !== activeOwner) return "identity-mismatch";
+    scheduleManualRetry(pendingRecord);
+    return "offline";
+  } catch {
+    if (capturedOwner !== activeOwner) return "identity-mismatch";
+    try {
+      if (capturedOwner === activeOwner) localStorage.setItem(`${MANUAL_SECTION_PENDING_KEY}:${capturedOwner}:${id}`, JSON.stringify(pendingRecord));
+    } catch {}
+    if (capturedOwner === activeOwner) scheduleManualRetry(pendingRecord);
+    return "offline";
+  } finally {
+    activeManualSections.delete(activeToken);
+    if (timer !== undefined) window.clearTimeout(timer);
+  }
+}
+function scheduleManualRetry(record: PendingManualSection & { attempts?: number }): void {
+  if (typeof navigator !== "undefined" && !navigator.onLine) return;
+  if (!record.owner || record.owner !== activeOwner) return;
+  const retryKey = manualRetryKey(record.owner, record.id);
+  if (manualRetryTimers.has(retryKey)) return;
+  const attempt = (record.attempts ?? 0) + 1;
+  if (attempt > MAX_MANUAL_SECTION_RETRY_ATTEMPTS) {
+    try {
+      localStorage.setItem(`${MANUAL_SECTION_PENDING_KEY}:${activeOwner ?? "anonymous"}:${record.id}`,
+        JSON.stringify({ ...record, attempts: MAX_MANUAL_SECTION_RETRY_ATTEMPTS, deliveryState: "retry-exhausted" }));
+    } catch {}
+    window.dispatchEvent(new CustomEvent("calculator-manual-section-error", {
+      detail: { runId: record.runId, section: record.section, message: "This correction is still pending on this device. Keep this device online and retry it when storage and connectivity are available." },
+    }));
+    return;
+  }
+  const delay = Math.min(30_000, 500 * (2 ** Math.min(attempt - 1, 6)));
+  manualRetryTimers.set(retryKey, setTimeout(() => {
+    manualRetryTimers.delete(retryKey);
+    void submitManualSection({ ...record, attempts: attempt } as any);
+  }, delay));
+}
+export async function retryPendingManualSections(): Promise<void> {
+  if (typeof localStorage === "undefined") return;
+  const pending: Array<Record<string, any>> = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (!key?.startsWith(`${MANUAL_SECTION_PENDING_KEY}:${activeOwner}:`)) continue;
+    try { pending.push(JSON.parse(localStorage.getItem(key) ?? "null")); } catch {}
+  }
+  for (const item of pending) if (item?.id && item.deliveryState !== "retry-exhausted") await submitManualSection(item as any);
+}
 export function retryOperationalIntent(id: string): boolean {
   const terminalKey = `${TERMINAL_PREFIX}${id}`;
   try {
@@ -377,11 +548,46 @@ export function fencePendingOperationalValues<T extends object>(
     const current = (output as Record<string, Record<string, unknown>>)[intent.runId];
     if (!current) continue;
     const next = { ...current };
-    for (const field of Object.keys(intent.values)) delete next[field];
+    const section = manualSectionForField(Object.keys(intent.values)[0] ?? "");
+    const fields = section ? MANUAL_SECTION_FIELDS[section] : Object.keys(intent.values);
+    for (const field of fields) delete next[field];
     if (Object.keys(next).length === 0) delete (output as Record<string, unknown>)[intent.runId];
     else (output as Record<string, Record<string, unknown>>)[intent.runId] = next;
   }
+  if (typeof localStorage !== "undefined") {
+    for (let index = 0; index < localStorage.length; index++) {
+      const key = localStorage.key(index);
+      if (!key?.startsWith(`${MANUAL_SECTION_PENDING_KEY}:${activeOwner ?? "anonymous"}:`)) continue;
+      try {
+        const pending = JSON.parse(localStorage.getItem(key) ?? "null") as PendingManualSection;
+        const current = (output as Record<string, Record<string, unknown>>)[pending.runId];
+        if (!current) continue;
+        const next = { ...current };
+        const section = manualSectionForField(Object.keys(pending.values)[0] ?? "");
+        for (const field of section ? MANUAL_SECTION_FIELDS[section] : Object.keys(pending.values)) delete next[field];
+        if (Object.keys(next).length) (output as any)[pending.runId] = next;
+        else delete (output as any)[pending.runId];
+      } catch {}
+    }
+  }
   return output;
+}
+export function fenceActiveManualSectionValues<T extends object>(runValues: T): T {
+  const output = { ...runValues } as Record<string, any>;
+  for (const entry of activeManualSections.values()) {
+    if (entry.owner !== activeOwner) continue;
+    const runId = entry.runId;
+    const values = entry.values;
+    const current = output[runId];
+    if (!current) continue;
+    const next = { ...current };
+    const section = manualSectionForField(Object.keys(values)[0] ?? "");
+    const fields = section ? MANUAL_SECTION_FIELDS[section] : Object.keys(values);
+    for (const field of fields) delete next[field];
+    if (Object.keys(next).length) output[runId] = next;
+    else delete output[runId];
+  }
+  return output as T;
 }
 export function fencePendingOperationalSnapshots<T extends { id: string; startedAt?: number; pausedAt?: number; pausedStoppageId?: string; endedAt?: number; stoppages?: unknown[]; metaUpdatedAt?: number }>(runs: T[], intents = readOperationalIntentOutbox()): T[] {
   // Lifecycle commands remain authoritative until their receipt is adopted.

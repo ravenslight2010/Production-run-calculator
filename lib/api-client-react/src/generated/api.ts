@@ -128,6 +128,9 @@ import type {
   ListQualityChecksParams,
   ManagerActionItemUpdate,
   ManagerActionQueue,
+  ManualSectionEditRequest,
+  ManualSectionEditResponse,
+  ManualSectionLockEvent,
   MarkCycleCountCountedInput,
   MatchImportInput,
   MatchImportResult,
@@ -229,6 +232,7 @@ import type {
   StaffMember,
   StaffRoleUpdate,
   StreamSyncEventsParams,
+  SubmitManualSectionEditParams,
   SubmitOperationalIntentParams,
   SummaryInput,
   SummaryResult,
@@ -18102,9 +18106,9 @@ export const getStreamSyncEventsUrl = (params: StreamSyncEventsParams,) => {
  * Server-sent events. Initial and recovery frames are complete. A routine peer update may be partial only when it names the receiver's exact canonical base snapshot and the resulting snapshot identity.
  * @summary Stream date-scoped canonical sync updates
  */
-export const streamSyncEvents = async (params: StreamSyncEventsParams, options?: Parameters<typeof customFetch>[1]): Promise<SyncPeerFrame> => {
+export const streamSyncEvents = async (params: StreamSyncEventsParams, options?: Parameters<typeof customFetch>[1]): Promise<SyncPeerFrame | ManualSectionLockEvent> => {
 
-  return customFetch<SyncPeerFrame>(getStreamSyncEventsUrl(params),
+  return customFetch<SyncPeerFrame | ManualSectionLockEvent>(getStreamSyncEventsUrl(params),
   {
     ...options,
     method: 'GET'
@@ -18286,6 +18290,102 @@ export const useClaimAutoTrackEvent = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getClaimAutoTrackEventMutationOptions(options), queryClient);
+    }
+
+export const getSubmitManualSectionEditUrl = (params?: SubmitManualSectionEditParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/sync/manual-section?${stringifiedParams}` : `/api/sync/manual-section`
+}
+
+/**
+ * @summary Apply one atomic run-and-section correction
+ */
+export const submitManualSectionEdit = async (manualSectionEditRequest: ManualSectionEditRequest,
+    params?: SubmitManualSectionEditParams, options?: Parameters<typeof customFetch>[1]): Promise<ManualSectionEditResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ManualSectionEditResponse>(getSubmitManualSectionEditUrl(params),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(manualSectionEditRequest)
+  }
+);}
+
+
+
+
+
+export const getSubmitManualSectionEditMutationKey = () => ['submitManualSectionEdit'] as const;
+
+export const getSubmitManualSectionEditMutationOptions = <TError = ErrorType<void | ManualSectionEditResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitManualSectionEdit>>, TError,SubmitManualSectionEditMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof submitManualSectionEdit>>, TError,SubmitManualSectionEditMutationVariables, TContext> => {
+
+const mutationKey = getSubmitManualSectionEditMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof submitManualSectionEdit>>, SubmitManualSectionEditMutationVariables> = (props) => {
+          const {data,params} = props ?? {};
+
+          return  submitManualSectionEdit(data,params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SubmitManualSectionEditMutationResult = NonNullable<Awaited<ReturnType<typeof submitManualSectionEdit>>>
+    export type SubmitManualSectionEditMutationBody = BodyType<ManualSectionEditRequest>
+    export type SubmitManualSectionEditMutationError = ErrorType<void | ManualSectionEditResponse>
+    export type SubmitManualSectionEditMutationVariables = {data: BodyType<ManualSectionEditRequest>;params?: SubmitManualSectionEditParams}
+
+    /**
+ * @summary Apply one atomic run-and-section correction
+ */
+export const useSubmitManualSectionEdit = <TError = ErrorType<void | ManualSectionEditResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitManualSectionEdit>>, TError,SubmitManualSectionEditMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof submitManualSectionEdit>>,
+        TError,
+        SubmitManualSectionEditMutationVariables,
+        TContext
+      > => {
+      return useMutation(getSubmitManualSectionEditMutationOptions(options), queryClient);
     }
 
 export const getSubmitOperationalIntentUrl = (params?: SubmitOperationalIntentParams,) => {

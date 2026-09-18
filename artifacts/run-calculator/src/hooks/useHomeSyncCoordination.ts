@@ -9,6 +9,8 @@ import type { SyncPayload } from "../types";
 import type { SyncMeasurementTrigger } from "../syncDiagnostics";
 import { todayStr } from "../utils";
 import type { AutoTrackWakeRebaseReason } from "./useAutoTrack";
+import { claimManualSectionLock, clearManualSectionLocks, releaseManualSectionLock } from "../manualSectionLocks";
+import { isManualSection } from "@workspace/sync-contract";
 
 type SyncWork = {
   payload: SyncPayload;
@@ -211,6 +213,23 @@ export function useHomeSyncCoordination() {
         if (closed || source !== nextSource || clientDate !== todayStr()) return;
         messageChain = messageChain.then(async () => {
           if (closed || source !== nextSource || clientDate !== todayStr()) return;
+          try {
+            const frame = JSON.parse(event.data as string) as {
+              type?: string; event?: "acquired" | "released"; runId?: string;
+              section?: string; ownerId?: string; serverTime?: number; reset?: boolean; rollover?: boolean;
+            };
+            if (frame.reset || frame.rollover) clearManualSectionLocks();
+            if (frame.type === "manual-section-lock" && frame.runId && isManualSection(frame.section)
+              && frame.ownerId && frame.ownerId !== connection.clientId) {
+              if (frame.event === "acquired") claimManualSectionLock(
+                frame.runId, frame.section, frame.ownerId, 35_000, true,
+              );
+              else if (frame.event === "released") releaseManualSectionLock(
+                frame.runId, frame.section, frame.ownerId,
+              );
+              return;
+            }
+          } catch { /* malformed lock frames are ignored */ }
           const baselineAccepted = await connection.onMessage(event, clientDate);
           if (closed || source !== nextSource || clientDate !== todayStr()) return;
           try {
@@ -240,6 +259,7 @@ export function useHomeSyncCoordination() {
       if (closed || nextDate === streamDate) return;
       const previousSource = source;
       source = null;
+      clearManualSectionLocks();
       previousSource?.close();
       open(nextDate);
     };
@@ -252,6 +272,7 @@ export function useHomeSyncCoordination() {
       source?.close();
       source = null;
       connection.onClose();
+      clearManualSectionLocks();
     };
   }, []);
 

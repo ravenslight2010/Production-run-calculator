@@ -5,6 +5,11 @@ import { computeCasesInFreezer } from "@workspace/inventory-math";
 import { computeEffectiveLineSpeed } from "./lineSpeed";
 
 export type PackagingProgressSource = "manual" | "auto";
+export function runUnlockedManualSectionAction(isLocked: () => boolean, action: () => void): boolean {
+  if (isLocked()) return false;
+  action();
+  return true;
+}
 
 export type PackagingControlAdapter = {
   apply(
@@ -32,6 +37,7 @@ type PackagingControlAdapterDependencies = {
   applyProgress(skidsCompleted: number, casesOnCurrentSkid: number): void;
   reportCorrection(deltaCases: number): void;
   vibrate?(durationMs: number): void;
+  isLocked?(): boolean;
 };
 
 /**
@@ -55,6 +61,7 @@ export function createPackagingControlAdapter(
     casesOnCurrentSkid,
     options = {},
   ) => {
+    if (deps.isLocked?.()) return;
     options.vibrationMs && deps.vibrate?.(options.vibrationMs);
     deps.applyProgress(skidsCompleted, casesOnCurrentSkid);
     if (options.reportCorrection !== false) {
@@ -119,7 +126,7 @@ type PackagingManagerDependencies = {
   markRunValuesUpdated(runId: string, now: number): void;
   markLocalEdit(now: number): void;
   schedulePush(dayState: DayState, delayMs: number): void;
-  queueManualCorrection(runId: string, values: Record<string, number>): void;
+  queueManualCorrection(runId: string, values: Record<string, number>, baseline?: Record<string, number>): void;
   recordManualProgress(input: {
     runId: string;
     skidsCompleted: number;
@@ -150,6 +157,7 @@ export function createPackagingManager(deps: PackagingManagerDependencies): Pack
     manualOverrideUntil = Date.now() + deps.autoSuppressMs,
   ) => {
     const now = Date.now();
+    const before = deps.loadRunValues(runId) as unknown as Record<string, number>;
     deps.recordManualProgress({
       runId,
       skidsCompleted,
@@ -162,6 +170,9 @@ export function createPackagingManager(deps: PackagingManagerDependencies): Pack
     deps.queueManualCorrection(runId, {
       skidsCompleted: Math.max(0, skidsCompleted),
       casesOnCurrentSkid: Math.max(0, casesOnCurrentSkid),
+    }, {
+      skidsCompleted: Number(before?.skidsCompleted) || 0,
+      casesOnCurrentSkid: Number(before?.casesOnCurrentSkid) || 0,
     });
     if (runId === deps.currentRunIdRef.current) {
       deps.autoSuppressUntilRef.current = Math.max(
