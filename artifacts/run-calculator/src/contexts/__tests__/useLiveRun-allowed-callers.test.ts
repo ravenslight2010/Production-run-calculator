@@ -6,7 +6,7 @@
 // Staff…) would cause every one of those tabs to re-render once per second,
 // burning CPU and causing unnecessary UI churn.
 //
-// TWO checks live here:
+// THREE checks live here:
 //
 //  1. HOME.TSX ALLOWLIST (per-function)
 //     Scans home.tsx and verifies that every useLiveRun() call is inside a
@@ -19,6 +19,12 @@
 //     Catches the case where a developer extracts a component into a new file
 //     under src/components/ or src/pages/ and accidentally imports and calls
 //     useLiveRun() there — the per-home.tsx scan would miss that entirely.
+//
+//  3. LIVE-STATION MODULE BOUNDARY
+//     Focused modules under components/live-stations/ must not import home.tsx.
+//     Shared page helpers belong in the neutral pages/liveTabsSupport.tsx
+//     boundary instead. This prevents a circular dependency from silently
+//     coupling independently testable live tabs back to the page composition.
 //
 // HOW TO MAINTAIN THE ALLOWLISTS
 // ──────────────────────────────
@@ -115,6 +121,7 @@ const ALLOWED_FILES = new Set<string>([
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 const SRC_DIR = resolve(__dirname, "../../../src");
+const LIVE_STATIONS_DIR = join(SRC_DIR, "components/live-stations");
 
 /** Collect every .ts / .tsx file under a directory, recursively. */
 function collectSourceFiles(dir: string): string[] {
@@ -143,6 +150,22 @@ function isTestFile(absPath: string): boolean {
 // Matches an actual useLiveRun() call (not an import statement or comment).
 const USE_LIVE_RUN_RE = /\buseLiveRun\s*\(\s*\)/;
 const IMPORT_COMMENT_RE = /^\s*(import|\/\/|\/\*|\*)/;
+const MODULE_SPECIFIER_RE =
+  /\b(?:from\s*|import\s*\(\s*|import\s*)["']([^"']+)["']/g;
+
+function normalizeModulePath(importerPath: string, specifier: string): string {
+  return resolve(importerPath, "..", specifier).replace(/\.(tsx?|jsx?)$/, "");
+}
+
+function importsHomeModule(importerPath: string, specifier: string): boolean {
+  const homeModulePath = join(SRC_DIR, "pages/home");
+  if (specifier.startsWith("@/")) {
+    return join(SRC_DIR, specifier.slice(2)).replace(/\.(tsx?|jsx?)$/, "") ===
+      homeModulePath;
+  }
+  return specifier.startsWith(".") &&
+    normalizeModulePath(importerPath, specifier) === homeModulePath;
+}
 
 // ── Scanner ───────────────────────────────────────────────────────────────
 // Uses a simple line-by-line scan rather than an AST parser so it stays
@@ -318,4 +341,39 @@ describe("useLiveRun — no accidental subscriptions across src/", () => {
       }
     },
   );
+});
+
+describe("live-stations — neutral page support boundary", () => {
+  it("does not import pages/home (use pages/liveTabsSupport instead)", () => {
+    const violations: { file: string; specifier: string }[] = [];
+
+    for (const absPath of collectSourceFiles(LIVE_STATIONS_DIR)) {
+      if (isTestFile(absPath)) continue;
+
+      const content = readFileSync(absPath, "utf8");
+      for (const match of content.matchAll(MODULE_SPECIFIER_RE)) {
+        const specifier = match[1];
+        if (importsHomeModule(absPath, specifier)) {
+          violations.push({
+            file: relative(SRC_DIR, absPath).replace(/\\/g, "/"),
+            specifier,
+          });
+        }
+      }
+    }
+
+    if (violations.length > 0) {
+      expect.fail(
+        `Live-station modules must not import pages/home.tsx:\n\n` +
+          violations
+            .map(
+              ({ file, specifier }) =>
+                `  src/${file} imports "${specifier}"`,
+            )
+            .join("\n") +
+          `\n\nMove reusable page helpers to the permitted neutral boundary at\n` +
+          `src/pages/liveTabsSupport.tsx and import them from there instead.`,
+      );
+    }
+  });
 });
