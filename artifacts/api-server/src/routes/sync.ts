@@ -928,7 +928,17 @@ function applyResetBoundary(
   if (!day || typeof day !== "object") return;
   if (isCurrentDay) {
     const resetAt = day.resetAt;
-    if (typeof resetAt === "number" && resetAt > 0) {
+    const previousBoundary = (
+      existingData as { dayState?: { resetBoundaryAt?: unknown } } | null | undefined
+    )?.dayState?.resetBoundaryAt;
+    // A facility-local rollover is a once-per-production-date transition.
+    // Preserve the first server-derived fence on retries and ordinary same-day
+    // writes; otherwise a duplicate/stale rollover payload could move the
+    // boundary forward again and sign out sessions established after the first
+    // rollover.
+    if (typeof previousBoundary === "number" && previousBoundary > 0) {
+      day.resetBoundaryAt = previousBoundary;
+    } else if (typeof resetAt === "number" && resetAt > 0) {
       day.resetBoundaryAt = Math.min(resetAt, Date.now() + MAX_RESET_AT_SKEW_MS);
     } else {
       delete day.resetBoundaryAt;

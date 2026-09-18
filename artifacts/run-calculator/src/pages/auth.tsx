@@ -10,6 +10,7 @@ import {
   forgotPasswordRequest,
   resetPasswordRequest,
   InventoryApiError,
+  type AuthSessionReason,
 } from "@/inventoryShared";
 
 /** @internal – exported only for the regression test suite. */
@@ -98,6 +99,15 @@ function UsernameHint({ status }: { status: UsernameStatus }) {
 }
 
 type Mode = "sign-in" | "sign-up";
+
+/** @internal – exported only for the regression test suite. */
+export function sessionEndingMessage(reason: AuthSessionReason | null | undefined): string | null {
+  if (!reason) return null;
+  if (reason === "daily_reset") {
+    return "Your staff session ended at the daily production rollover. Sign in again to continue.";
+  }
+  return "Your staff session expired. Check your connection and sign in again.";
+}
 
 function messageForError(err: unknown, mode: Mode): string {
   if (err instanceof InventoryApiError) {
@@ -205,7 +215,7 @@ function ConfirmPasswordHint({
 
 function AuthForm({ mode }: { mode: Mode }) {
   const [, setLocation] = useLocation();
-  const { signIn, signUp, signInAsTest } = useAuth();
+  const { signIn, signUp, signInAsTest, sessionEndedReason } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -216,6 +226,7 @@ function AuthForm({ mode }: { mode: Mode }) {
   const logoUrl = `${import.meta.env.BASE_URL}logo.svg`;
   const isSignUp = mode === "sign-up";
   const usernameStatus = useUsernameAvailability(username, isSignUp);
+  const endingMessage = sessionEndingMessage(sessionEndedReason);
 
   async function handleTestLogin() {
     setError(null);
@@ -379,6 +390,14 @@ function AuthForm({ mode }: { mode: Mode }) {
             )}
 
             {error && <p className="text-sm text-destructive">{error}</p>}
+            {endingMessage && (
+              <p
+                role="status"
+                className="rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground"
+              >
+                {endingMessage}
+              </p>
+            )}
 
             <Button
               type="submit"

@@ -1,9 +1,11 @@
 import type { Request, Response, NextFunction } from "express";
+import { randomUUID } from "node:crypto";
 import { SESSION_COOKIE, verifyToken } from "../lib/auth";
 import { getSessionBoundaryMs } from "../lib/sessionBoundary";
 import { getUserSecurityState } from "../lib/userValidity";
 import { isSandboxUser, sandboxAllowed } from "../lib/sandbox";
 import { runWithScope, type Scope } from "../lib/requestScope";
+import { logger } from "../lib/logger";
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -35,6 +37,57 @@ function readToken(req: Request): string | null {
   return null;
 }
 
+type AuthRejectionCategory =
+  | "missing_cookie"
+  | "invalid_token"
+  | "reset_boundary"
+  | "user_missing"
+  | "password_session_invalidated"
+  | "sandbox_forbidden";
+
+// Keep the public contract deliberately small. The internal category is useful
+// in bounded operational diagnostics, but revealing whether a token mapped to a
+// real account (or was revoked by a password change) would turn this endpoint
+// into an account/session oracle.
+type PublicAuthReason = "daily_reset" | "session_expired";
+
+function correlationIdOf(req: Request): string {
+  const candidate = (req as Request & {
+    correlationId?: unknown;
+    id?: unknown;
+  }).correlationId ?? (req as Request & { id?: unknown }).id;
+  return typeof candidate === "string" && candidate.length <= 128 && candidate
+    ? candidate
+    : randomUUID();
+}
+
+function rejectAuth(
+  req: Request,
+  res: Response,
+  category: AuthRejectionCategory,
+): void {
+  const correlationId = correlationIdOf(req);
+  const reason: PublicAuthReason = category === "reset_boundary"
+    ? "daily_reset"
+    : "session_expired";
+  // Do not include the token subject, cookie/header contents, username, or
+  // request payload. The correlation ID is safe to show the operator/support
+  // team and is also returned so a failure can be located in server logs.
+  logger.info({
+    event: "auth_rejection",
+    authReason: category,
+    correlationId,
+    method: req.method,
+    route: req.path,
+  }, "Authenticated request rejected");
+  res.setHeader("X-Correlation-ID", correlationId);
+  res.status(401).json({
+    error: "Unauthorized",
+    reason,
+    correlationId,
+  });
+}
+
 // Rejects any request that does not carry a valid, unexpired session token, or
 // whose token was issued before the latest daily reset (see sessionBoundary).
 export async function requireAuth(
@@ -45,7 +98,7 @@ export async function requireAuth(
   const token = readToken(req);
   const verified = token ? verifyToken(token) : null;
   if (!verified) {
-    res.status(401).json({ error: "Unauthorized" });
+    rejectAuth(req, res, token ? "invalid_token" : "missing_cookie");
     return;
   }
   // Daily-reset fence: a token minted before today's reset boundary is no longer
@@ -64,7 +117,7 @@ export async function requireAuth(
   // never rejected (the ~<1s of slack on a once-a-day boundary is harmless).
   const boundaryMs = await getSessionBoundaryMs();
   if (boundaryMs > 0 && (verified.iat + 1) * 1000 <= boundaryMs) {
-    res.status(401).json({ error: "Unauthorized" });
+    rejectAuth(req, res, "reset_boundary");
     return;
   }
   // Removed-staff fence: tokens are stateless, so a deleted user's still-valid
@@ -80,14 +133,14 @@ export async function requireAuth(
   // also cuts off whoever else was using it.
   const security = await getUserSecurityState(verified.sub);
   if (!security.exists) {
-    res.status(401).json({ error: "Unauthorized" });
+    rejectAuth(req, res, "user_missing");
     return;
   }
   if (
     security.passwordChangedAtMs > 0 &&
     (verified.iat + 1) * 1000 <= security.passwordChangedAtMs
   ) {
-    res.status(401).json({ error: "Unauthorized" });
+    rejectAuth(req, res, "password_session_invalidated");
     return;
   }
   req.userId = verified.sub;
@@ -98,7 +151,7 @@ export async function requireAuth(
   // environment and later presented to a promoted production instance.
   const sandbox = await isSandboxUser(verified.sub);
   if (sandbox && !sandboxAllowed()) {
-    res.status(401).json({ error: "Unauthorized" });
+    rejectAuth(req, res, "sandbox_forbidden");
     return;
   }
   // Route every read/write for the seeded sandbox account into the isolated

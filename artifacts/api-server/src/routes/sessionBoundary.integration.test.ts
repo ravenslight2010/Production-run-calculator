@@ -380,6 +380,26 @@ describe("daily-reset rollover write", () => {
     // side just persisted.
     expect((await meWith(token)).status).toBe(401);
   });
+
+  it("does not advance resetBoundaryAt when the same rollover is submitted twice", async () => {
+    // Keep the test session valid for the retry; the idempotence contract is
+    // about the persisted fence, not about fencing this test's caller.
+    const firstBoundary = Date.now() - 60_000;
+    const token = signToken(USER);
+    const first = await putSync("today", { dayState: { runs: [], resetAt: firstBoundary } }, token);
+    expect(first.status).toBe(200);
+    const persistedFirst = await readBoundaryAt(todayStr());
+
+    // A delayed/duplicate device can retry with a later local timestamp. The
+    // first genuine rollover remains the only fence for this production date.
+    const second = await putSync(
+      "today",
+      { dayState: { runs: [{ id: "stale-retry" }], resetAt: firstBoundary + 120_000 } },
+      token,
+    );
+    expect(second.status).toBe(200);
+    expect(await readBoundaryAt(todayStr())).toBe(persistedFirst);
+  });
 });
 
 // PUT a day-state payload for an explicit date while asserting the CLIENT's local

@@ -411,18 +411,30 @@ export class InventoryApiError extends Error {
   status: number;
   retryAfterSec: number | null;
   serverMessage: string | null;
+  /** Safe, bounded reason supplied by the auth/session middleware. */
+  authSessionReason: AuthSessionReason | null;
   constructor(
     status: number,
     message: string,
     retryAfterSec: number | null,
     serverMessage: string | null,
+    authSessionReason: AuthSessionReason | null = null,
   ) {
     super(message);
     this.name = "InventoryApiError";
     this.status = status;
     this.retryAfterSec = retryAfterSec;
     this.serverMessage = serverMessage;
+    this.authSessionReason = authSessionReason;
   }
+}
+
+// Never surface arbitrary server strings as session diagnostics. The server may
+// add context to the response, but the client only accepts these UI-safe values.
+export type AuthSessionReason = "daily_reset" | "session_expired";
+
+function parseAuthSessionReason(value: unknown): AuthSessionReason | null {
+  return value === "daily_reset" || value === "session_expired" ? value : null;
 }
 
 // ── SSE response reader (for opt-in streaming AI chat) ──────────────────────
@@ -460,18 +472,26 @@ export async function postEventStream<T>(
     body: JSON.stringify(body),
   });
   if (!res.ok || !res.body) {
-    if (res.status === 401) onUnauthorized?.(requestEpoch);
     const retryAfterRaw = res.headers.get("Retry-After");
     const retryAfterSec =
       retryAfterRaw != null && Number.isFinite(Number(retryAfterRaw)) ? Number(retryAfterRaw) : null;
     let serverMessage: string | null = null;
+    let authSessionReason: AuthSessionReason | null = null;
     try {
-      const errBody = (await res.json()) as { error?: unknown };
+      const errBody = (await res.json()) as { error?: unknown; reason?: unknown };
       if (errBody && typeof errBody.error === "string") serverMessage = errBody.error;
+      authSessionReason = parseAuthSessionReason(errBody?.reason);
     } catch {
       // non-JSON / unreadable error body; ignore
     }
-    throw new InventoryApiError(res.status, failMessage, retryAfterSec, serverMessage);
+    if (res.status === 401) onUnauthorized?.(requestEpoch, authSessionReason);
+    throw new InventoryApiError(
+      res.status,
+      failMessage,
+      retryAfterSec,
+      serverMessage,
+      authSessionReason,
+    );
   }
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -524,7 +544,9 @@ export async function postEventStream<T>(
 // AuthContext registers a handler here so any such 401 routes the user back to
 // the login screen. Sign-in/up failures and the signed-out /me probe are not
 // session expiries, so those paths are excluded by the caller below.
-let onUnauthorized: ((requestEpoch: number) => void) | null = null;
+let onUnauthorized: (
+  (requestEpoch: number, reason?: AuthSessionReason | null) => void
+) | null = null;
 let authRequestEpoch = 0;
 
 // AuthProvider advances this whenever ownership of the browser session changes.
@@ -535,7 +557,10 @@ export function setAuthRequestEpoch(epoch: number): void {
 }
 
 export function setUnauthorizedHandler(
-  fn: ((requestEpoch: number) => void) | null,
+  fn: ((
+    requestEpoch: number,
+    reason?: AuthSessionReason | null,
+  ) => void) | null,
 ): void {
   onUnauthorized = fn;
 }
@@ -586,26 +611,29 @@ async function parseApiResponse<T>(
         },
       }));
     }
-    if (res.status === 401 && !isSessionProbePath(path)) {
-      onUnauthorized?.(requestEpoch);
-    }
     const retryAfterRaw = res.headers.get("Retry-After");
     const retryAfterSec =
       retryAfterRaw != null && Number.isFinite(Number(retryAfterRaw))
         ? Number(retryAfterRaw)
         : null;
     let serverMessage: string | null = null;
+    let authSessionReason: AuthSessionReason | null = null;
     try {
-      const body = (await res.json()) as { error?: unknown };
+      const body = (await res.json()) as { error?: unknown; reason?: unknown };
       if (body && typeof body.error === "string") serverMessage = body.error;
+      authSessionReason = parseAuthSessionReason(body?.reason);
     } catch {
       // non-JSON error body; ignore and fall back to the generic message
+    }
+    if (res.status === 401 && !isSessionProbePath(path)) {
+      onUnauthorized?.(requestEpoch, authSessionReason);
     }
     throw new InventoryApiError(
       res.status,
       `Inventory request failed (${res.status}): ${path}`,
       retryAfterSec,
       serverMessage,
+      authSessionReason,
     );
   }
   if (res.status === 204) return null as T;

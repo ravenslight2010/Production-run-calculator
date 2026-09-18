@@ -20,8 +20,8 @@ import {
   setUnauthorizedHandler,
 } from "./inventoryShared";
 
-function failure(status: number, error: string): Response {
-  return new Response(JSON.stringify({ error }), {
+function failure(status: number, error: string, reason?: string): Response {
+  return new Response(JSON.stringify({ error, ...(reason ? { reason } : {}) }), {
     status,
     headers: { "content-type": "application/json" },
   });
@@ -57,5 +57,29 @@ describe("shared API authorization errors", () => {
       serverMessage: "Missing capability: manage-inventory",
     });
     expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
+  it("accepts only the safe daily-reset session reason", async () => {
+    setUnauthorizedHandler(vi.fn());
+    mocks.fetchWithDiagnostics.mockResolvedValue(
+      failure(401, "Unauthorized", "daily_reset"),
+    );
+
+    await expect(fetchInventory()).rejects.toMatchObject({
+      status: 401,
+      authSessionReason: "daily_reset",
+    });
+  });
+
+  it("does not expose arbitrary server reason strings", async () => {
+    setUnauthorizedHandler(vi.fn());
+    mocks.fetchWithDiagnostics.mockResolvedValue(
+      failure(401, "Unauthorized", "user:manager@example.com"),
+    );
+
+    await expect(fetchInventory()).rejects.toMatchObject({
+      status: 401,
+      authSessionReason: null,
+    });
   });
 });

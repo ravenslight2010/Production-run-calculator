@@ -1,5 +1,5 @@
 import { createContext, useContext, type Context } from "react";
-import type { StaffMember } from "./inventoryShared";
+import type { AuthSessionReason, StaffMember } from "./inventoryShared";
 
 // The auth context object + `useAuth` live in this component-free module so the
 // file exporting `AuthProvider` (AuthContext.tsx) contains ONLY a component and
@@ -14,6 +14,9 @@ export type AuthContextValue = {
   isAuthenticated: boolean;
   isLoading: boolean;
   startupError: string | null;
+  // Safe explanation retained when an authenticated request ends the session.
+  // Optional for lightweight test/providers that only need the auth actions.
+  sessionEndedReason?: AuthSessionReason | null;
   retryStartup: () => void;
   signIn: (username: string, password: string) => Promise<void>;
   signUp: (

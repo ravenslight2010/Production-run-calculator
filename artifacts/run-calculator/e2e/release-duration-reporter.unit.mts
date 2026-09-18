@@ -102,7 +102,7 @@ const validBaselineReport = formatFullBrowserReport(
   "prior-revision",
 );
 const validBaseline = parseCompleteFullBrowserBaseline(validBaselineReport);
-assert.deepEqual(validBaseline, new Map([["artifacts/run-calculator/e2e/slow.spec.ts", 159_000]]));
+assert.deepEqual(validBaseline, new Map([["artifacts/run-calculator/e2e/slow.spec.ts", 160_000]]));
 assert.equal(canRetainFullBrowserReport(completeCases, "passed"), true);
 assert.equal(
   canRetainFullBrowserReport(completeCases.slice(0, -1), "passed"),
@@ -133,7 +133,7 @@ assert.deepEqual(
     [
       {
         file: "artifacts/run-calculator/e2e/slow.spec.ts",
-         durationMs: 199_000,
+         durationMs: 200_000,
       },
     ],
     baselineAfterIncompleteRun!,
@@ -141,10 +141,10 @@ assert.deepEqual(
   [
     {
       file: "artifacts/run-calculator/e2e/slow.spec.ts",
-        durationMs: 199_000,
-       baselineDurationMs: 159_000,
+        durationMs: 200_000,
+       baselineDurationMs: 160_000,
        increaseMs: 40_000,
-       increasePercent: (40_000 / 159_000) * 100,
+       increasePercent: (40_000 / 160_000) * 100,
     },
   ],
 );
