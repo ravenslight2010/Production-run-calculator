@@ -7,6 +7,8 @@ export const BACKGROUND_OPERATION_FAILURE_THRESHOLD = 3;
 export const BACKGROUND_OPERATION_RETRY_DELAY_MS = 100;
 export const BACKGROUND_OPERATION_FAILURE_WINDOW_MS = 5 * 60 * 1000;
 export const BACKGROUND_OPERATION_FAILURE_MAX_EVENTS = 100;
+export const BACKGROUND_OPERATION_BACKOFF_BASE_MS = 1_000;
+export const BACKGROUND_OPERATION_BACKOFF_MAX_MS = 30_000;
 const BACKGROUND_OPERATION_SHARED_TIMEOUT_MS = 1_000;
 const BACKGROUND_OPERATION_SHARED_DB_TIMEOUT_MS =
   BACKGROUND_OPERATION_SHARED_TIMEOUT_MS - 100;
@@ -40,6 +42,38 @@ export type BackgroundOperationDiagnostic = {
   lastSuccessAt?: string;
   errorCode?: string;
 };
+
+export type BackgroundOperationBackoff = {
+  isReady(now?: number): boolean;
+  recordSuccess(now?: number): void;
+  recordFailure(now?: number): void;
+};
+
+export function createBackgroundOperationBackoff(options: {
+  baseDelayMs?: number;
+  maxDelayMs?: number;
+} = {}): BackgroundOperationBackoff {
+  const baseDelayMs = Math.max(1, Math.floor(options.baseDelayMs ?? BACKGROUND_OPERATION_BACKOFF_BASE_MS));
+  const maxDelayMs = Math.max(baseDelayMs, Math.floor(options.maxDelayMs ?? BACKGROUND_OPERATION_BACKOFF_MAX_MS));
+  let consecutiveFailures = 0;
+  let retryAt = 0;
+
+  return {
+    isReady(now = Date.now()) {
+      return now >= retryAt;
+    },
+    recordSuccess() {
+      consecutiveFailures = 0;
+      retryAt = 0;
+    },
+    recordFailure(now = Date.now()) {
+      const exponent = Math.min(consecutiveFailures, 30);
+      const delayMs = Math.min(maxDelayMs, baseDelayMs * (2 ** exponent));
+      consecutiveFailures = Math.min(consecutiveFailures + 1, 31);
+      retryAt = now + delayMs;
+    },
+  };
+}
 
 const operationNames: BackgroundOperationName[] = [
   "daily-rollover",

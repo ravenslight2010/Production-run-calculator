@@ -4,6 +4,7 @@ import {
   BACKGROUND_OPERATION_FAILURE_WINDOW_MS,
   backgroundOperationsDegraded,
   clearBackgroundOperationDiagnosticsForTests,
+  createBackgroundOperationBackoff,
   getBackgroundOperationDiagnostics,
   isTransientDatabaseConnectionError,
   runBackgroundOperation,
@@ -11,6 +12,27 @@ import {
 
 describe("background operation connection recovery", () => {
   beforeEach(async () => clearBackgroundOperationDiagnosticsForTests());
+
+  it("backs off repeated scheduler failures and resets after a successful pass", () => {
+    const backoff = createBackgroundOperationBackoff({ baseDelayMs: 100, maxDelayMs: 250 });
+
+    expect(backoff.isReady(0)).toBe(true);
+    backoff.recordFailure(0);
+    expect(backoff.isReady(99)).toBe(false);
+    expect(backoff.isReady(100)).toBe(true);
+    backoff.recordFailure(100);
+    expect(backoff.isReady(299)).toBe(false);
+    expect(backoff.isReady(300)).toBe(true);
+    backoff.recordFailure(300);
+    expect(backoff.isReady(549)).toBe(false);
+    expect(backoff.isReady(550)).toBe(true);
+
+    backoff.recordSuccess(550);
+    expect(backoff.isReady(550)).toBe(true);
+    backoff.recordFailure(550);
+    expect(backoff.isReady(649)).toBe(false);
+    expect(backoff.isReady(650)).toBe(true);
+  });
 
   it("characterizes terminated PostgreSQL and network connections as transient", () => {
     expect(isTransientDatabaseConnectionError(Object.assign(new Error("terminating connection"), { code: "57P01" }))).toBe(true);

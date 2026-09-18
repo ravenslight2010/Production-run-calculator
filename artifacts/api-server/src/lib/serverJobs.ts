@@ -10,6 +10,7 @@ import type { Capability } from "./roles";
 import type { Scope } from "./requestScope";
 import { pruneServerJobArtifacts } from "./serverJobArtifactCache";
 import {
+  createBackgroundOperationBackoff,
   isTransientDatabaseConnectionError,
   recordBackgroundOperationFailure,
   runBackgroundOperation,
@@ -376,6 +377,7 @@ export type ServerJobLoopOptions = {
   concurrency?: number;
   intervalMs?: number;
   pruneIntervalMs?: number;
+  now?: () => number;
   onError?: (error: unknown, operation: "run" | "prune") => void;
 };
 
@@ -395,21 +397,34 @@ export function startServerJobWorkerLoop(options: ServerJobLoopOptions = {}): Se
   const intervalMs = boundedInteger(options.intervalMs ?? Number(process.env.SERVER_JOB_POLL_INTERVAL_MS), 1_000, 100, 60_000);
   const pruneIntervalMs = boundedInteger(options.pruneIntervalMs ?? Number(process.env.SERVER_JOB_PRUNE_INTERVAL_MS), 60 * 60_000, 60_000, 24 * 60 * 60_000);
   const prune = options.prune ?? (() => pruneExpiredServerJobs());
+  const now = options.now ?? Date.now;
+  const runBackoff = createBackgroundOperationBackoff();
+  const pruneBackoff = createBackgroundOperationBackoff();
   let active = 0;
   let stopped = false;
   let lastPruneAt = 0;
   const tick = () => {
     if (stopped) return;
-    const now = Date.now();
-    if (now - lastPruneAt >= pruneIntervalMs) {
-      lastPruneAt = now;
+    const currentTime = now();
+    if (currentTime - lastPruneAt >= pruneIntervalMs && pruneBackoff.isReady(currentTime)) {
+      lastPruneAt = currentTime;
       void runBackgroundOperation("server-job-prune", prune)
-        .catch((error) => options.onError?.(error, "prune"));
+        .then(() => pruneBackoff.recordSuccess())
+        .catch((error) => {
+          pruneBackoff.recordFailure(now());
+          options.onError?.(error, "prune");
+        });
     }
+    if (!runBackoff.isReady(currentTime)) return;
     while (active < concurrency) {
       active++;
       void runBackgroundOperation("server-job-run", () => worker.runOnce())
-        .catch((error) => options.onError?.(error, "run"))
+        .then(() => runBackoff.recordSuccess())
+        .catch((error) => options.onError?.(error, "prune"));
+        .catch((error) => {
+          runBackoff.recordFailure(now());
+          options.onError?.(error, "run");
+        })
         .finally(() => { active--; });
     }
   };
