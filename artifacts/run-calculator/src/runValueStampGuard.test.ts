@@ -31,6 +31,19 @@ import { describe, expect, it } from "vitest";
 const HOME_FILE = path.join(__dirname, "pages", "home.tsx");
 const FORM_LIFECYCLE_FILE = path.join(__dirname, "hooks", "useHomeFormLifecycle.ts");
 const PACKAGING_MANAGER_FILE = path.join(__dirname, "packagingManager.ts");
+const LIVE_STATIONS_DIR = path.join(__dirname, "components", "live-stations");
+const LIVE_TABS_SUPPORT_FILE = path.join(__dirname, "pages", "liveTabsSupport.tsx");
+
+// Extracted live tabs may read a persisted run value for display, but the
+// orchestration layer owns raw run-value writes. In particular, keeping
+// saveRunValues imports out of these modules prevents copied import blocks from
+// being mistaken for new persistence call sites by the broader source guard.
+const RUN_VALUE_WRITERS = new Set(["saveRunValues", "saveRunValuesUpdated"]);
+const RUN_VALUE_READERS = new Set([
+  "loadRunValues",
+  "loadRunValuesUpdated",
+  "subscribeRunValuesWrites",
+]);
 
 type CallSite = {
   line: number;
@@ -102,6 +115,75 @@ function identifierCallsInside(root: ts.Node, name: string): ts.CallExpression[]
   visit(root);
   return out;
 }
+
+type LiveTabPersistenceIssue = {
+  file: string;
+  line: number;
+  kind: "writer-import" | "unused-reader-import";
+  name: string;
+};
+
+function isRunPersistenceModule(specifier: string): boolean {
+  return specifier.endsWith("/storage") || specifier.endsWith("/adapters/browserRunPersistence");
+}
+
+function identifierReferenceCount(sourceFile: ts.SourceFile, name: string): number {
+  let count = 0;
+  const visit = (node: ts.Node) => {
+    // Import declarations are the binding site, not a use of the local name.
+    if (ts.isImportDeclaration(node)) return;
+    if (ts.isIdentifier(node) && node.text === name) count++;
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return count;
+}
+
+function inspectLiveTabPersistenceSource(source: string, file: string): LiveTabPersistenceIssue[] {
+  const sourceFile = ts.createSourceFile(
+    file,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+  const issues: LiveTabPersistenceIssue[] = [];
+
+  for (const statement of sourceFile.statements) {
+    if (!ts.isImportDeclaration(statement)) continue;
+    const moduleSpecifier = statement.moduleSpecifier;
+    if (!ts.isStringLiteral(moduleSpecifier) || !isRunPersistenceModule(moduleSpecifier.text)) continue;
+    if (!statement.importClause?.namedBindings || !ts.isNamedImports(statement.importClause.namedBindings)) continue;
+
+    for (const specifier of statement.importClause.namedBindings.elements) {
+      const importedName = (specifier.propertyName ?? specifier.name).text;
+      const localName = specifier.name.text;
+      const line = sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1;
+      if (RUN_VALUE_WRITERS.has(importedName)) {
+        issues.push({ file: path.relative(__dirname, file), line, kind: "writer-import", name: importedName });
+      } else if (RUN_VALUE_READERS.has(importedName) && identifierReferenceCount(sourceFile, localName) === 0) {
+        issues.push({ file: path.relative(__dirname, file), line, kind: "unused-reader-import", name: importedName });
+      }
+    }
+  }
+
+  return issues;
+}
+
+function inspectLiveTabPersistenceImports(file: string): LiveTabPersistenceIssue[] {
+  return inspectLiveTabPersistenceSource(fs.readFileSync(file, "utf8"), file);
+}
+
+function liveTabSourceFiles(): string[] {
+  const files: string[] = [LIVE_TABS_SUPPORT_FILE];
+  for (const entry of fs.readdirSync(LIVE_STATIONS_DIR, { withFileTypes: true })) {
+    if (!entry.isFile() || !/\.(ts|tsx)$/.test(entry.name) || /\.test\.(ts|tsx)$/.test(entry.name)) continue;
+    files.push(path.join(LIVE_STATIONS_DIR, entry.name));
+  }
+  return files;
+}
+
+const liveTabPersistenceIssues = liveTabSourceFiles().flatMap(inspectLiveTabPersistenceImports);
 
 // Is `name` declared in `fn` as `const name = form.getValues(...)`, unmodified?
 function isDeclaredAsFormSnapshot(fn: ts.Node, name: string): boolean {
@@ -262,6 +344,48 @@ describe("source guard: run-value writes in home.tsx must stamp before they sync
       offenders,
       "saveRunValues used outside guarded orchestration/persistence boundaries — extend this source guard first",
     ).toEqual([]);
+  });
+});
+
+describe("source guard: extracted live tabs do not copy raw run-value persistence", () => {
+  it("rejects run-value writer imports and unused read-only persistence imports", () => {
+    const writerImports = liveTabPersistenceIssues.filter((issue) => issue.kind === "writer-import");
+    const unusedReaderImports = liveTabPersistenceIssues.filter((issue) => issue.kind === "unused-reader-import");
+    const format = (issue: LiveTabPersistenceIssue) =>
+      `  ${issue.file}:${issue.line} — ${issue.name}`;
+
+    expect(
+      writerImports,
+      `Raw run-value writers must stay in guarded orchestration; extracted tabs must receive callbacks instead:\n` +
+        writerImports.map(format).join("\n"),
+    ).toEqual([]);
+    expect(
+      unusedReaderImports,
+      `Read-only persistence imports must be used by the extracted module:\n` +
+        unusedReaderImports.map(format).join("\n"),
+    ).toEqual([]);
+  });
+
+  it("keeps the boundary check live against the extracted source set", () => {
+    expect(liveTabSourceFiles()).toContain(LIVE_TABS_SUPPORT_FILE);
+    expect(liveTabPersistenceIssues).toEqual([]);
+  });
+
+  it("self-tests writer and unused-reader detection", () => {
+    const issues = inspectLiveTabPersistenceSource(
+      `
+        import { saveRunValues, loadRunValues, subscribeRunValuesWrites as subscribe } from "../../adapters/browserRunPersistence";
+        export function readOnly() {
+          return loadRunValues("run-1");
+        }
+      `,
+      path.join(LIVE_STATIONS_DIR, "synthetic.ts"),
+    );
+
+    expect(issues.map(({ kind, name }) => ({ kind, name }))).toEqual([
+      { kind: "writer-import", name: "saveRunValues" },
+      { kind: "unused-reader-import", name: "subscribeRunValuesWrites" },
+    ]);
   });
 });
 

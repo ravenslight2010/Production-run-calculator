@@ -265,8 +265,6 @@ import { COMPLETED_HISTORY_OUTBOX_EVENT, flushCompletedHistoryOutbox, hydrateCom
 import { applyResetWipe, applyRolloverEpoch, getStoredResetEpoch } from "../../adapters/browserResetPersistence";
 import {
   loadRunValues,
-  loadRunValuesUpdated,
-  subscribeRunValuesWrites,
 } from "../../adapters/browserRunPersistence";
 import {
   acceptRemoteRunValueOnSync,

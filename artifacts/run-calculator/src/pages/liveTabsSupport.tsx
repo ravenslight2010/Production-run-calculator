@@ -264,11 +264,6 @@ import {
 import { COMPLETED_HISTORY_OUTBOX_EVENT, flushCompletedHistoryOutbox, hydrateCompletedHistory, loadCompletedHistoryForActiveScope, pendingCompletedHistoryCount, queueCompletedRun, setCompletedHistoryScope, startRunAndQueueCompetingCompletions } from "../completedHistorySync";
 import { applyResetWipe, applyRolloverEpoch, getStoredResetEpoch } from "../adapters/browserResetPersistence";
 import {
-  loadRunValues,
-  loadRunValuesUpdated,
-  subscribeRunValuesWrites,
-} from "../adapters/browserRunPersistence";
-import {
   acceptRemoteRunValueOnSync,
   adoptStrictlyNewerRemoteLifecycles,
   deepEqual,
