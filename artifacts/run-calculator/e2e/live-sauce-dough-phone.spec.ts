@@ -239,6 +239,9 @@ test("Sauce and Dough live cards work at a phone viewport", async ({ page }) => 
   await page.getByTestId("tab-sauce").click();
   const sauceOutput = page.getByTestId("output-sauce-batches");
   await expect(sauceOutput).toBeVisible();
+  await expect(sauceOutput.locator("xpath=..")).toContainText("On line 1");
+  await expect(sauceOutput.locator("xpath=..")).toContainText("ready 1");
+  await expect(sauceOutput.locator("xpath=..")).toContainText("being made 1");
   await expect(page.getByTestId("tickbar-fill")).toBeVisible();
 
   // The intentionally short seeded barrel cadence makes the real alert appear
@@ -249,7 +252,9 @@ test("Sauce and Dough live cards work at a phone viewport", async ({ page }) => 
   await expect(barrelAlert).toBeHidden();
 
   const before = await sauceOutput.textContent();
-  await sauceOutput.locator("xpath=../..").getByRole("button", { name: "Increase batches made" }).click();
+  await sauceOutput.locator("xpath=../..")
+    .getByRole("button", { name: "Increase consumed batches correction" })
+    .click();
   await expect(sauceOutput).not.toHaveText(before ?? "");
   await expect(page.getByTestId("tickbar-fill")).toBeVisible();
 
@@ -318,19 +323,25 @@ test("Frontline App tracking survives off-tab work, corrections, pause, and relo
   await expect(page.getByTestId("output-sauce-batches")).toBeVisible();
   await page.getByTestId("tab-frontline").click();
   const appOutput = page.getByTestId("output-app1-batches");
-  const madeText = appOutput.locator("xpath=..").getByText(/made so far/i);
-  await expect(madeText).toBeVisible();
-  const madeBeforeCorrection = Number.parseInt((await madeText.textContent()) ?? "0", 10);
+  const consumedText = appOutput.locator("xpath=..").getByText(/Total .* consumed/i);
+  await expect(consumedText).toBeVisible();
+  await expect(appOutput.locator("xpath=..")).toContainText("On line");
+  await expect(appOutput.locator("xpath=..")).toContainText("ready");
+  const readConsumed = async () => {
+    const match = ((await consumedText.textContent()) ?? "").match(/consumed\s+([\d.]+)/i);
+    return Number(match?.[1] ?? 0);
+  };
+  const madeBeforeCorrection = await readConsumed();
   expect(madeBeforeCorrection).toBeGreaterThan(0);
 
   await appOutput.locator("xpath=../..")
-    .getByRole("button", { name: "Increase batches made" })
+    .getByRole("button", { name: "Increase consumed batches correction" })
     .click();
-  await expect(madeText).toContainText(`${madeBeforeCorrection + 1} made so far`);
+  await expect.poll(readConsumed).toBe(madeBeforeCorrection + 1);
   // Allow the debounced correction to reach the canonical row before changing
   // lifecycle state or asking the authoritative engine for its next event.
   await page.waitForTimeout(750);
-  await expect(madeText).toContainText(`${madeBeforeCorrection + 1} made so far`);
+  await expect.poll(readConsumed).toBe(madeBeforeCorrection + 1);
 
   await page.getByTestId("tab-run").click();
   await page.getByRole("button", { name: /pause.?run/i }).click();
@@ -344,16 +355,14 @@ test("Frontline App tracking survives off-tab work, corrections, pause, and relo
   await page.waitForTimeout(750);
   await runAuthoritativeAutoTrackTick(page, fixture.startedAt + 65_000, { rearm: true });
   await page.getByTestId("tab-frontline").click();
-  await expect.poll(async () =>
-    Number.parseInt((await madeText.textContent()) ?? "0", 10),
-  { timeout: 8_000 }).toBeGreaterThan(madeBeforeCorrection + 1);
-  const madeAfterTick = Number.parseInt((await madeText.textContent()) ?? "0", 10);
+  await expect.poll(readConsumed, { timeout: 8_000 }).toBeGreaterThan(madeBeforeCorrection + 1);
+  const madeAfterTick = await readConsumed();
 
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-frontline").waitFor({ state: "attached", timeout: 25_000 });
   await page.getByTestId("tab-frontline").click();
-  await expect(page.getByTestId("output-app1-batches").locator("xpath=../..")
-    .getByText(`${madeAfterTick} made so far`))
+  await expect(page.getByTestId("output-app1-batches").locator("xpath=..")
+    .getByText(new RegExp(`consumed ${madeAfterTick}(?:\\.0+)?$`, "i")))
     .toBeVisible();
   await page.getByTestId("tab-packaging").click();
   await expect(page.getByTestId("tab-sauce")).toBeAttached();

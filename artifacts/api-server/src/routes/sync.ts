@@ -2808,7 +2808,6 @@ export async function runAutoTrackServerTicks(opts: {
             await consumeSauceBarrelInTransaction(tx, consumption.runId, consumption.barrelIndex, consumption.itemKey, consumption.qty, true, consumption.eventId);
           }
           data = applied.data;
-          acceptedHere++;
           if (/^app[1-4]-batch$/.test(claim.channel)) {
             const mutation = claim.mutations.find((candidate) => /^app[1-4]BatchesMade$/.test(candidate.field));
             if (mutation) {
@@ -2829,9 +2828,7 @@ export async function runAutoTrackServerTicks(opts: {
           } else if (claim.channel === "sauce-barrel") {
             acceptedNet.push(claim);
           }
-          data = applied.data;
           acceptedHere++;
-          if (/^(sauce-barrel|app[1-4]-batch)$/.test(claim.channel)) acceptedNet.push(claim);
         }
         // A no-event bootstrap arm is safe to persist. Eventful arm-state is
         // committed only after every wall event in that state was accepted;

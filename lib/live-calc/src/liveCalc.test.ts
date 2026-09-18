@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   computeAutoTrackSchedule,
   computeAutoTrackSuggestion,
+  computeAppSlotInfo,
   computeCaseTickWrite,
   computeEffectiveLineSpeed,
   computeServerCalc,
@@ -28,6 +29,16 @@ describe("shared live calculation boundary", () => {
 
   it("preserves the one-second client cadence floor", () => {
     expect(getAutoTrackTiming(1000, 1, 1, 100).caseMs).toBe(1000);
+  });
+
+  it("uses 50 lb operational Frontline batches for missing or oversized weights", () => {
+    const base = {
+      type: "Cheese", recipe: [], ozPerPizza: 4, casesNeeded: 100,
+      pizzasPerCase: 10, ppm: 100,
+    };
+    expect(computeAppSlotInfo({ ...base, batchLbs: 0 }).effectiveBatchLbs).toBe(50);
+    expect(computeAppSlotInfo({ ...base, batchLbs: 70 }).effectiveBatchLbs).toBe(50);
+    expect(computeAppSlotInfo({ ...base, batchLbs: 40 }).effectiveBatchLbs).toBe(40);
   });
 
   it("fails closed on buffer-only Sauce and Frontline quantities without pizzas per case", () => {

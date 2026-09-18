@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeServerCalc } from "@workspace/live-calc";
+import { computeSauceRunRequirement, computeServerCalc } from "@workspace/live-calc";
 import { buildNetSecondServerClaims, buildWallClockServerClaims } from "./autoTrackServerTicks";
 import { applyAutoTrackClaim } from "./autoTrackCoordination";
 
@@ -42,6 +42,47 @@ describe("server auto-track claim builders", () => {
     const claims = buildNetSecondServerClaims(payload(), NOW);
     expect(claims.map((claim) => claim.channel)).toEqual(["sauce-barrel", "app1-batch"]);
     expect(claims.every((claim) => claim.mutations[0]!.to === claim.mutations[0]!.from + 1)).toBe(true);
+  });
+
+  it("uses the cumulative Sauce requirement as the lifetime cap, not the staged cap", () => {
+    const source = payload();
+    const calc = computeServerCalc(source as never, [], NOW)!.calc;
+    const requirement = computeSauceRunRequirement({
+      casesNeeded: 200,
+      pizzasPerCase: 12,
+      ozPerPizza: 2,
+      barrelLbs: calc.sauceEffBarrel,
+    });
+    expect(requirement.totalUnits).toBeGreaterThan(3);
+
+    const atLifetimeCap = payload({
+      sauceBarrelsMade: Math.ceil(requirement.totalUnits),
+    });
+    expect(buildNetSecondServerClaims(atLifetimeCap, NOW)
+      .some((claim) => claim.channel === "sauce-barrel")).toBe(false);
+
+    const belowLifetimeCap = payload({
+      sauceBarrelsMade: Math.ceil(requirement.totalUnits) - 1,
+    });
+    expect(buildNetSecondServerClaims(belowLifetimeCap, NOW)
+      .filter((claim) => claim.channel === "sauce-barrel")).toHaveLength(1);
+  });
+
+  it("uses the shared 50 lb Frontline fallback and continues one batch at a time", () => {
+    const source = payload({
+      app1BatchLbs: 0,
+      app1CheeseRecipe: [],
+      app1BatchesMade: 0,
+    });
+    const first = buildNetSecondServerClaims(source, NOW)
+      .find((claim) => claim.channel === "app1-batch");
+    expect(first?.mutations[0]).toMatchObject({
+      field: "app1BatchesMade",
+      from: 0,
+      to: 1,
+    });
+
+    expect(first?.mutations[1]?.field).toBe("app1BatchAnchorNetSec");
   });
 
   it("restarts net-second sequencing after a pause/resume lifecycle generation", () => {

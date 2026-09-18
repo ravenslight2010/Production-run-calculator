@@ -23,6 +23,7 @@ function props(elapsedBatchSec: number, claimAutoTrackEvent: any, values = {}, o
       pressDone: false,
       casesInFreezer: 0,
       sauceDepletionSec: 10,
+      sauceEffBarrel: 50,
     },
     v: {
       casesPerSkid: 60, pizzasPerCase: 12, casesNeeded: 1000, freezerTime: 20,
@@ -30,6 +31,7 @@ function props(elapsedBatchSec: number, claimAutoTrackEvent: any, values = {}, o
       sauceBarrelsMade: 0,
       sauceBarrelAnchorNetSec: 0,
       sauceBarrelCorrectionGeneration: 0,
+      sauceOzPerPizza: 4,
       ...values,
     } as any,
     form,
@@ -151,6 +153,20 @@ describe("useAutoTrack sauce barrel coordination", () => {
         { field: "sauceBarrelCorrectionGeneration", from: 4, to: 4 },
       ]),
     });
+  });
+
+  it("does not claim beyond the stable full-run Sauce requirement", async () => {
+    const claim = vi.fn();
+    renderHook(() => useAutoTrack(props(100, claim, {
+      casesNeeded: 10,
+      pizzasPerCase: 10,
+      sauceOzPerPizza: 4,
+      sauceBarrelsMade: 2,
+      sauceBarrelAnchorNetSec: 10,
+    })));
+    // (10 × 10 × 4 / 16 + 30) / 50 = 1.1, so two barrels satisfy the run.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(claim).not.toHaveBeenCalled();
   });
 
   it("restarts the Sauce channel sequence after a synchronized correction", async () => {

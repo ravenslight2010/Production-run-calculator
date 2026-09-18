@@ -16,12 +16,13 @@ function form() {
 const calc = {
   ppm: 100, perTray: 50, perBatch: 500, traysNeeded: 1, batchesNeeded: 1,
   pressDone: false, casesInFreezer: 0, app1Batches: 3, app2Batches: 3,
+  sauceEffBarrel: 50,
 };
 
 function values(overrides: Record<string, unknown> = {}) {
   return {
     casesPerSkid: 10, pizzasPerCase: 10, casesNeeded: 100, freezerTime: 0,
-    traysOnLine: 0, batchesReady: 0, sauceBarrelsMade: 0,
+    traysOnLine: 0, batchesReady: 0, sauceBarrelsMade: 0, sauceOzPerPizza: 4,
     sauceBarrelAnchorNetSec: 0, sauceBarrelCorrectionGeneration: 0,
     app1Type: "Mozzarella", app1OzPerPizza: 4, app1BatchLbs: 25, app1CheeseRecipe: [],
     app1BatchesMade: 0, app1BatchAnchorNetSec: 0, app1BatchCorrectionGeneration: 0,
@@ -125,6 +126,46 @@ describe("useAutoTrack applicator batches", () => {
     expect(stored.app1BatchesMade).toBe(1);
     expect(stored.app2BatchesMade).toBeUndefined();
   });
+
+  it.each([0, 75])(
+    "uses the shared 50 lb cadence when the configured Frontline weight is %s lb",
+    async (configuredWeight) => {
+      const { form: fakeForm } = form();
+      const claim = vi.fn(async (event: any) => ({
+        outcome: "accepted" as const,
+        state: {
+          generation: event.generation,
+          sequence: event.sequence,
+          nextDueAt: event.nextDueAt,
+        },
+        values: Object.fromEntries(event.mutations.map((mutation: any) => [mutation.field, mutation.to])),
+      }));
+      const input = (elapsedBatchSec: number) => ({
+        runId: `fallback-${configuredWeight}`,
+        runStatus: "running" as const,
+        nowTime: new Date(1_700_000_000_000),
+        elapsedBatchSec,
+        calc,
+        v: values({ app1BatchLbs: configuredWeight, app1OzPerPizza: 10 }),
+        form: fakeForm,
+        claimAutoTrackEvent: claim,
+      });
+      const { rerender } = renderHook(
+        ({ value }) => useAutoTrack(value),
+        { initialProps: { value: input(47) } },
+      );
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(claim.mock.calls.some(([event]) => event.channel === "app1-batch")).toBe(false);
+
+      rerender({ value: input(48) });
+      await waitFor(() => expect(claim.mock.calls.some(
+        ([event]) => event.channel === "app1-batch",
+      )).toBe(true));
+      const event = claim.mock.calls.map(([candidate]) => candidate)
+        .find((candidate) => candidate.channel === "app1-batch");
+      expect(event.dueAt).toBe(48);
+    },
+  );
 
   it("does not apply an in-flight acknowledgement after a manual correction", async () => {
     const { form: fakeForm, values: stored } = form();

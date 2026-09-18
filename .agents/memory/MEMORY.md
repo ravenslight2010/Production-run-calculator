@@ -155,3 +155,4 @@
 - [Release execution recovery](webkit-nix-launch.md) + [finalization retry safety](release-finalization-retry.md) — preserve runtime-library and already-promoted-evidence recovery rules.
 - [Workspace lock refresh](workspace-lock-refresh-pruning.md) + [full browser refresh](full-release-browser-refresh.md) — review lockfile scope and do not accept full evidence with an incomplete browser checkpoint.
 - [Section-scoped online edits](section-scoped-online-edits.md) — transient peer locks are UX only; correctness uses row serialization, complete baselines, and durable snapshot fencing.
+- [Automatic staged supply](automatic-staged-supply.md) — active Sauce/Frontline caps are pipeline limits, not lifetime production caps; derive stages from canonical cumulative progress.

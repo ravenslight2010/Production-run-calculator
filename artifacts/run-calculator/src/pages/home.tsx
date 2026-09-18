@@ -19,6 +19,10 @@ import { consumeForegroundRecoveryResponse } from "../foregroundRecoveryResponse
 import { closeTopmostImportDialog, useHomeImportDialogs } from "../hooks/useHomeImportDialogs";
 import {
   applyTemporaryOverrides,
+  computeAutomaticFrontlineSupply,
+  computeAutomaticSauceSupply,
+  computeFrontlineRunRequirement,
+  computeSauceRunRequirement,
   type AutoTrackSchedule,
   type Calc,
   type OperationalProjection,
@@ -21628,8 +21632,8 @@ function BatchMadeRow({
   isLive,
   testId,
   sub,
-  sauceEffBarrel,
   disabled,
+  pipeline,
 }: {
   label: string;
   totalBatches: number;
@@ -21639,22 +21643,18 @@ function BatchMadeRow({
   isLive: boolean;
   testId?: string;
   sub?: string;
-  sauceEffBarrel?: number;
   disabled?: boolean;
+  pipeline?: "sauce" | "frontline";
 }) {
-  const remaining = Math.max(0, totalBatches - made);
-  const done = remaining === 0 && made > 0;
-  let valueStr: string;
-  if (sauceEffBarrel !== undefined) {
-    const bd = remaining > 0 ? sauceBarrelBreakdown(remaining, sauceEffBarrel) : null;
-    valueStr = done
-      ? "done ✓"
-      : bd
-        ? `${fmtNum(remaining, 2)} batches · ${bd.batchesPerBarrel}/barrel → ${bd.totalBarrels} barrels`
-        : fmtNum(remaining, 2) + " batches";
-  } else {
-    valueStr = done ? "done ✓" : fmtNum(remaining, 2) + " batches";
-  }
+  const supply = pipeline === "sauce"
+    ? computeAutomaticSauceSupply({ total: totalBatches, consumed: made })
+    : computeAutomaticFrontlineSupply({ total: totalBatches, consumed: made });
+  const remaining = supply.stillToMake;
+  const done = supply.remaining === 0 && made > 0;
+  const unitLabel = pipeline === "sauce" ? "barrels" : "batches";
+  const valueStr = done
+    ? "done ✓"
+    : `${fmtNum(remaining, 2)} ${unitLabel} still to make`;
   const highlight = totalBatches > 0 && !done;
   return (
     <div className={`flex items-start justify-between py-1.5 border-b border-border/40 last:border-0 ${highlight ? "text-primary" : done ? "text-emerald-400" : ""}`}>
@@ -21667,7 +21667,7 @@ function BatchMadeRow({
               onClick={onDecrement}
               disabled={disabled}
               className="h-5 w-5 rounded border border-input bg-muted/40 hover:bg-muted text-xs font-bold text-foreground transition-colors flex items-center justify-center select-none touch-none"
-              aria-label="Decrease batches made"
+              aria-label="Decrease consumed batches correction"
             >−</button>
             <span className="text-xs font-mono w-5 text-center tabular-nums text-muted-foreground select-none">{made}</span>
             <button
@@ -21675,7 +21675,7 @@ function BatchMadeRow({
               onClick={onIncrement}
               disabled={disabled}
               className="h-5 w-5 rounded border border-input bg-muted/40 hover:bg-muted text-xs font-bold text-foreground transition-colors flex items-center justify-center select-none touch-none"
-              aria-label="Increase batches made"
+              aria-label="Increase consumed batches correction"
             >+</button>
           </div>
         )}
@@ -21689,8 +21689,15 @@ function BatchMadeRow({
           {sub && (
             <span className="text-xs text-muted-foreground font-normal leading-tight">{sub}</span>
           )}
-          {made > 0 && (
-            <span className="text-xs text-muted-foreground font-normal leading-tight">{made} made so far</span>
+          <span className="text-xs text-muted-foreground font-normal leading-tight">
+            Total {fmtNum(supply.total, 2)} · consumed {fmtNum(supply.consumed, 2)}
+          </span>
+          {isLive && <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Correction controls</span>}
+          {!done && (
+            <span className="text-xs text-muted-foreground font-normal leading-tight">
+              On line {fmtNum(supply.onLine, 2)} · ready {fmtNum(supply.ready, 2)}
+              {pipeline === "sauce" ? ` · being made ${fmtNum(supply.inProduction, 2)}` : ""}
+            </span>
           )}
         </div>
       </div>
@@ -21866,6 +21873,12 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
   }, [calc.pressDone]);
 
   const isLive = runStatus === "running" || runStatus === "paused";
+  const sauceRequirement = computeSauceRunRequirement({
+    casesNeeded: v.casesNeeded,
+    pizzasPerCase: v.pizzasPerCase,
+    ozPerPizza: v.sauceOzPerPizza,
+    barrelLbs: calc.sauceEffBarrel,
+  });
 
   return (
     <>
@@ -21910,7 +21923,7 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
           </CardContent>
         </Card>
       )}
-      {calc.sauceBatches > 0 && (
+      {sauceRequirement.totalUnits > 0 && (
         <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden mb-4">
           <div className="h-1 bg-primary w-full" />
           <CardHeader className="pb-2 pt-4 px-5">
@@ -21932,7 +21945,7 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
             </p>
             <BatchMadeRow
               label={v.frontlineRecipeName?.trim() || "Sauce"}
-              totalBatches={calc.sauceBatches}
+              totalBatches={sauceRequirement.totalUnits}
               made={sauceMade}
               onIncrement={() => {
                 const barrelIndex = Math.max(0, Number(v.sauceBarrelsMade) || 0) + 1;
@@ -21990,13 +22003,12 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
               }}
               isLive={isLive}
               testId="output-sauce-batches"
-              sauceEffBarrel={calc.sauceEffBarrel}
+              pipeline="sauce"
               disabled={!!sauceLock}
             />
             {/* Sauce barrel countdown TickBar — suppressed during pause,
                 press-done, and next-run prep. When the barrel expires the
-                TickBar is replaced with an actionable prompt so the operator
-                knows to tap + rather than staring at a frozen 0:00. */}
+                pipeline explains that standby supply advances automatically. */}
             {runStatus === "running" && !calc.pressDone && !nextRunPrepActive && calc.sauceDepletionSec > 0 && (() => {
               // Use pause-aware elapsedBatchSec; lastBarrelNetSecRef is also stored
               // in net-elapsed coords so the delta is naturally pause-safe.
@@ -22006,7 +22018,7 @@ const LiveSauceTabContent = memo(function LiveSauceTabContent() {
                 return (
                   <div className="mt-1.5 flex items-center gap-1.5 text-xs text-red-400 font-semibold animate-pulse">
                     <span>🍅</span>
-                    <span>Barrel time up — tap + to start next barrel &amp; reset timer</span>
+                    <span>Barrel exhausted — standby supply is advancing automatically</span>
                   </div>
                 );
               }
@@ -22199,8 +22211,30 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
   }, [autoSuppressUntilRef, currentRunId, elapsedBatchSec, form, lastLocalEditRef, queueManualCorrection]);
 
   const isLive = runStatus === "running" || runStatus === "paused";
+  const appRequirement = (slot: 1 | 2 | 3 | 4) => {
+    const recipeLbs = (v[`app${slot}CheeseRecipe`] ?? [])
+      .reduce((sum: number, row: RecipeRow) => sum + (Number(row.lbs) || 0), 0);
+    return computeFrontlineRunRequirement({
+      casesNeeded: v.casesNeeded,
+      pizzasPerCase: v.pizzasPerCase,
+      ozPerPizza: v[`app${slot}OzPerPizza`],
+      configuredEffectiveWeight: recipeLbs > 0 ? recipeLbs : v[`app${slot}BatchLbs`],
+    });
+  };
+  const app1Requirement = appRequirement(1);
+  const app2Requirement = appRequirement(2);
+  const app3Requirement = appRequirement(3);
+  const app4Requirement = appRequirement(4);
   const frontlineRows = deriveFrontlineNeedRows(v, {
     ...calc,
+    app1Lbs: app1Requirement.totalLbs,
+    app1Batches: app1Requirement.totalUnits,
+    app2Lbs: app2Requirement.totalLbs,
+    app2Batches: app2Requirement.totalUnits,
+    app3Lbs: app3Requirement.totalLbs,
+    app3Batches: app3Requirement.totalUnits,
+    app4Lbs: app4Requirement.totalLbs,
+    app4Batches: app4Requirement.totalUnits,
     sauceLbs: Math.max(0, calc.casesLeftToRun * v.pizzasPerCase + v.casesPerLayer * v.pizzasPerCase)
       * v.sauceOzPerPizza / 16 + 30,
   });
@@ -22244,6 +22278,7 @@ const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
                               disabled={!!appLocks[slot]}
                               testId={testId}
                               sub={row.recipeName}
+                              pipeline="frontline"
                             />
                           );
                         }

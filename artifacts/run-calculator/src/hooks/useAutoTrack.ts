@@ -12,6 +12,7 @@ import {
   computeAppSlotInfo,
   computeAutoTrackSuggestion,
   computeCaseTickWrite,
+  computeSauceRunRequirement,
   getAutoTrackTiming,
   suggestedDoughStaging,
   type AutoTrackTiming,
@@ -45,6 +46,7 @@ interface AutoTrackCalc {
   casesInFreezer: number;
   /** Seconds per sauce barrel; 0/invalid disables the sauce channel. */
   sauceDepletionSec?: number;
+  sauceEffBarrel?: number;
   app1Batches?: number;
   app2Batches?: number;
   app3Batches?: number;
@@ -71,6 +73,7 @@ interface AutoTrackValues {
   traysOnLine: number;
   batchesReady: number;
   sauceBarrelsMade: number;
+  sauceOzPerPizza: number;
   sauceBarrelAnchorNetSec: number;
   sauceBarrelCorrectionGeneration: number;
   app1Type: string; app1OzPerPizza: number; app1BatchLbs: number; app1CheeseRecipe: Array<{ lbs: number }>;
@@ -1255,8 +1258,15 @@ useEffect(() => {
     const dueAtNetSec = sauceNextDueNetSecRef.current > 0
       ? sauceNextDueNetSecRef.current
       : anchor + cadence;
-    if (elapsedBatchSec < dueAtNetSec) return;
     const currentCount = Math.max(0, Number(v.sauceBarrelsMade) || 0);
+    const requirement = computeSauceRunRequirement({
+      casesNeeded: Number(v.casesNeeded) || 0,
+      pizzasPerCase: Number(v.pizzasPerCase) || 0,
+      ozPerPizza: Number(v.sauceOzPerPizza) || 0,
+      barrelLbs: Number(calc.sauceEffBarrel) || 0,
+    });
+    if (currentCount >= Math.ceil(requirement.totalUnits)) return;
+    if (elapsedBatchSec < dueAtNetSec) return;
     const correctionGeneration = Math.max(0, Number(v.sauceBarrelCorrectionGeneration) || 0);
     sauceNextDueNetSecRef.current = dueAtNetSec;
     commitAutomatic("sauce-barrel", dueAtNetSec, dueAtNetSec + cadence, [
@@ -1271,6 +1281,7 @@ useEffect(() => {
     productionNeedsAvailable,
     calc.pressDone,
     calc.sauceDepletionSec,
+    calc.sauceEffBarrel,
     commitAutomatic,
     disabled,
     elapsedBatchSec,
@@ -1282,6 +1293,9 @@ useEffect(() => {
     v.sauceBarrelAnchorNetSec,
     v.sauceBarrelCorrectionGeneration,
     v.sauceBarrelsMade,
+    v.sauceOzPerPizza,
+    v.casesNeeded,
+    v.pizzasPerCase,
   ]);
 
   // Persisted anchors are the authoritative rebase points. In particular, a
@@ -1299,17 +1313,18 @@ useEffect(() => {
     (["app1", "app2", "app3", "app4"] as const).forEach((slot) => {
       const values = v as FormValues;
       const recipe = values[`${slot}CheeseRecipe` as keyof FormValues] as FormValues["app1CheeseRecipe"];
-      const recipeLbs = (recipe ?? []).reduce((sum, row) => sum + (Number(row.lbs) || 0), 0);
-      const batchLbs = recipeLbs > 0
-        ? recipeLbs
-        : Number(values[`${slot}BatchLbs` as keyof FormValues]) || 0;
-      const ounces = Number(values[`${slot}OzPerPizza` as keyof FormValues]) || 0;
-      const cadence = batchLbs > 0 && ounces > 0 && calc.ppm > 0
-        ? (batchLbs * 16 / ounces / calc.ppm) * 60
-        : 0;
+      const info = computeAppSlotInfo({
+        type: String(values[`${slot}Type` as keyof FormValues] ?? ""),
+        recipe,
+        batchLbs: Number(values[`${slot}BatchLbs` as keyof FormValues]) || 0,
+        ozPerPizza: Number(values[`${slot}OzPerPizza` as keyof FormValues]) || 0,
+        casesNeeded: Number(values.casesNeeded) || 0,
+        pizzasPerCase: Number(values.pizzasPerCase) || 0,
+        ppm: calc.ppm,
+      });
       const channel = `${slot}-batch` as AutoTrackChannel;
-      dueRefForChannel(channel).current = cadence > 0
-        ? Math.max(0, Number(values[`${slot}BatchAnchorNetSec` as keyof FormValues]) || 0) + cadence
+      dueRefForChannel(channel).current = info.validForClaim && info.cadence > 0
+        ? Math.max(0, Number(values[`${slot}BatchAnchorNetSec` as keyof FormValues]) || 0) + info.cadence
         : 0;
     });
   }, [calc.ppm, productionNeedsAvailable, v]);

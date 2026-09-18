@@ -1,4 +1,5 @@
 import { computeAppSlotInfo, getAutoTrackTiming } from "./autoTrackEngine";
+import { computeSauceRunRequirement } from "./stagedSupply";
 import { computeWallClockDueRefs } from "./wallClockEngine";
 import type { Calc, CalcFormValues, CalcStoppage, ServerCalcResult } from "./index";
 
@@ -123,7 +124,19 @@ export function computeAutoTrackSchedule(input: AutoTrackScheduleInput): AutoTra
       entries.push({ channel, dueAt, dueNow: input.nowMs >= dueAt, nextDueAt: dueAt + period, canonical: false });
     }
   }
-  if (live && !input.calc.pressDone && input.calc.sauceDepletionSec > 0) {
+  const sauceMade = Math.max(0, number(input.progress?.sauceBarrelsMade));
+  const sauceRequirement = computeSauceRunRequirement({
+    casesNeeded: number(input.v.casesNeeded),
+    pizzasPerCase: number(input.v.pizzasPerCase),
+    ozPerPizza: number(input.v.sauceOzPerPizza),
+    barrelLbs: input.calc.sauceEffBarrel,
+  });
+  if (
+    live
+    && !input.calc.pressDone
+    && input.calc.sauceDepletionSec > 0
+    && sauceMade < Math.ceil(sauceRequirement.totalUnits)
+  ) {
     const dueAt = Math.max(0, number(input.progress?.sauceBarrelAnchorNetSec)) + input.calc.sauceDepletionSec;
     const channel = "sauce-barrel" as const;
     const state = input.coordination?.[channel];
