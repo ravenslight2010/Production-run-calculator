@@ -413,6 +413,19 @@ export type RunMeta = {
   seeded?: boolean;
 };
 
+export type DayBreak = {
+  slot: 1 | 2 | 3;
+  enabled: boolean;
+  mode: "after-run" | "at-time";
+  runId?: string;
+  atTime?: string;
+  durationMin: 30;
+};
+
+export const DAY_BREAK_DURATION_MIN = 30;
+
+export type DayBreaks = [DayBreak, DayBreak, DayBreak];
+
 // Shift prep phase: covers the window before production starts (e.g. 6–7 AM).
 // Synced in day-state so all tablets see live prep progress.
 export type PrepPhase = {
@@ -453,6 +466,9 @@ export type DayState = {
   // Shift prep phase (before production start). Synced so all tablets track
   // the same prep progress. Reset with the daily reset.
   prepPhase?: PrepPhase;
+  // Exactly three optional, fixed-duration break slots. This is day schedule
+  // data, not master data; legacy days may omit it.
+  breaks?: DayBreaks;
 };
 
 export type SyncPayload = {
@@ -469,7 +485,7 @@ export type SyncPayload = {
   /** Server-owned wake recovery metadata; transported beside the persisted snapshot. */
   resetEpoch?: number;
   rollover?: boolean;
-  dayState: { runs: RunMeta[]; shiftNotes?: string; runToTime?: string; resetAt?: number; date?: string; substitutions?: IngredientSubstitution[]; substitutionLog?: SubstitutionLogEntry[]; stagedItems?: Record<string, boolean>; prepPhase?: PrepPhase };
+  dayState: { runs: RunMeta[]; shiftNotes?: string; runToTime?: string; resetAt?: number; date?: string; substitutions?: IngredientSubstitution[]; substitutionLog?: SubstitutionLogEntry[]; stagedItems?: Record<string, boolean>; prepPhase?: PrepPhase; breaks?: DayBreaks };
   runValues: Record<string, FormValues>;
   // Per-run monotonic edit timestamp (run id -> ms). Lets the apply path reject a
   // stale remote that would clobber a fresher local edit (the "click away and my

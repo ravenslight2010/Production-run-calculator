@@ -154,6 +154,7 @@ import {
   runLabel,
 } from "../../utils";
 import { normalizeScheduledDays, type ScheduledDay } from "../../scheduledDays";
+import { calculateDayTimeline, estimatedRunDurationSec } from "../../dayTimeline";
 import { fetchWithTimeout } from "../../fetchWithTimeout";
 import { deriveFrontlineNeedRows } from "../../frontlineRows";
 import {
@@ -795,7 +796,7 @@ export const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
   const {
     copiedSummary, currentRun, dayState, expandedHistoryDay,
     exportCSV, exportExcel, exportHistoryCSV, exportQuickBooks,
-    histBenchmarkPpm, history, isSupervisor, printSummary,
+    histBenchmarkPpm, history, isSupervisor, printSummary, productionStartTime,
     runSummaryStatsById, runValuesById,
     setActiveTab, setCopiedSummary, setDayState, setExpandedHistoryDay,
     switchToRun, updateRunMeta, v,
@@ -803,6 +804,22 @@ export const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
 
   const { isManager } = useMe();
   const { calc, liveFreezerMin } = useLiveRun();
+  const dayTimeline = useMemo(() => calculateDayTimeline({
+    date: dayState.date ?? todayStr(),
+    productionStartTime,
+    runs: dayState.runs.map((run: RunMeta) => ({
+      run,
+      durationSec: estimatedRunDurationSec(runValuesById.get(run.id)),
+    })),
+    breaks: dayState.breaks,
+    currentRunId: currentRun?.startedAt && !currentRun.endedAt ? currentRun.id : undefined,
+    currentRemainingSec: calc.totalTimeSec,
+    nowMs: Date.now(),
+  }), [calc.totalTimeSec, currentRun?.endedAt, currentRun?.id, currentRun?.startedAt, dayState, productionStartTime, runValuesById]);
+  const dayTimelineById = useMemo(
+    () => new Map(dayTimeline.runs.map(item => [item.runId, item])),
+    [dayTimeline.runs],
+  );
   const pendingHistoryUploads = pendingCompletedHistoryCount();
   const [ingredientDetailRunId, setIngredientDetailRunId] = useState<string | null>(null);
   useAutomaticUpdateReloadBlocker(
@@ -811,6 +828,43 @@ export const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
   );
   return (
     <>
+                <div className="mb-4 rounded-xl border border-border/50 bg-card/60 overflow-hidden" data-testid="day-timeline">
+                  <div className="px-5 py-3 border-b border-border/30 flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-bold">Day timeline</div>
+                      <div className="text-xs text-muted-foreground">Estimated schedule; actual run and pause timestamps take precedence.</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Projected finish</div>
+                      <div className="text-sm font-bold tabular-nums">{dayTimeline.projectedFinishMs ? fmtClock(dayTimeline.projectedFinishMs) : "—"}</div>
+                    </div>
+                  </div>
+                  <div className="px-5 py-3 space-y-2">
+                    {dayTimeline.runs.map((item, index) => {
+                      const run = dayState.runs.find((candidate: RunMeta) => candidate.id === item.runId);
+                      if (!run) return null;
+                      return (
+                        <div key={item.runId} className="flex items-center justify-between gap-3 text-xs">
+                          <span className="truncate"><span className="font-semibold">Run {index + 1}</span> · {runLabel(run)}</span>
+                          <span className="shrink-0 tabular-nums text-muted-foreground">
+                            {item.startMs ? fmtClock(item.startMs) : "—"} → {item.finishMs ? fmtClock(item.finishMs) : "—"}
+                            {item.status === "current" && <span className="ml-1 text-primary">(live)</span>}
+                          </span>
+                        </div>
+                      );
+                    })}
+                    {dayTimeline.breaks.filter(item => item.break.enabled).map(item => (
+                      <div key={`break-${item.slot}`} className="flex items-center justify-between gap-3 text-xs text-amber-400">
+                        <span>Break {item.slot} · 30 min</span>
+                        <span className="tabular-nums">
+                          {item.status === "unassigned" ? (item.reason === "missing-run" ? "Unassigned run" : "Needs a valid time")
+                            : item.status === "pending" ? "Pending at pause boundary"
+                            : `${fmtClock(item.startMs!)} → ${fmtClock(item.finishMs!)}`}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
                 {/* Shift notes */}
                 <div className="mb-4">
                   <label className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/70 block mb-1.5">Shift Notes</label>
@@ -905,6 +959,7 @@ export const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                     const vals = runVals ?? runValuesById.get(run.id) ?? DEFAULT_VALUES;
                     const s = runSummaryStatsById.get(run.id) ?? computeSummaryStats(vals);
                     const isFinished = !!run.endedAt;
+                    const timelineItem = dayTimelineById.get(run.id);
                     const actualDurationSec = run.startedAt && run.endedAt
                       ? (run.endedAt - run.startedAt) / 1000
                       : null;
@@ -1011,6 +1066,11 @@ export const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                               <div className="text-[10px] text-muted-foreground">&nbsp;</div>
                             </div>
                           </div>
+                          {!isFinished && !isCurrent && timelineItem?.startMs && timelineItem.finishMs && (
+                            <div className="text-xs text-muted-foreground text-center -mt-1">
+                              Estimated schedule: <span className="font-semibold text-foreground tabular-nums">{fmtClock(timelineItem.startMs)} – {fmtClock(timelineItem.finishMs)}</span>
+                            </div>
+                          )}
 
                           {/* Waste tracking — actual cases + waste lbs (finished or supervisor) */}
                           {(isFinished || isSupervisor) && !readOnly && (

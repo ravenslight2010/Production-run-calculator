@@ -133,12 +133,20 @@ import {
   type IngredientSubstitution,
   type SubstitutionLogEntry,
   type PrepPhase,
+  type DayBreaks,
   withTempOverrides,
   PRE_POST_TUNNEL_DEFAULT_MIN,
   DOUGH_TRAY_SECTION_CAPACITY,
   DOUGH_TRAY_SECTION_COUNT,
   DOUGH_TRAY_ADVISORY_TOTAL,
 } from "../types";
+import {
+  calculateDayTimeline,
+  defaultDayBreaks,
+  estimatedRunDurationSec,
+  isValidLocalTime,
+  normalizeDayBreaks,
+} from "../dayTimeline";
 import {
   fmtElapsed,
   fmtTime,
@@ -6935,6 +6943,7 @@ export default function Home() {
   const [scheduleEditorIsLiveDay, setScheduleEditorIsLiveDay] = useState(false);
   const [scheduleEditorRuns, setScheduleEditorRuns] = useState<{id: string; brand: string; flavor: string; casesNeeded: number}[]>([]);
   const [scheduleEditorRunValues, setScheduleEditorRunValues] = useState<Record<string, FormValues>>({});
+  const [scheduleEditorBreaks, setScheduleEditorBreaks] = useState<DayBreaks>(() => defaultDayBreaks());
   const [scheduleAdvancedRunId, setScheduleAdvancedRunId] = useState<string | null>(null);
   const [scheduleSaving, setScheduleSaving] = useState(false);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
@@ -7016,6 +7025,7 @@ export default function Home() {
         return { id: r.id, brand: r.brand, flavor: r.flavor, casesNeeded: v.casesNeeded ?? 0 };
       });
       setScheduleEditorRunValues(vals);
+      setScheduleEditorBreaks(normalizeDayBreaks(dayState.breaks));
       setScheduleEditorDate(date);
       setScheduleEditorRuns(runs);
       scheduleEditorLoadedRunIdsRef.current = new Set(runs.map(r => r.id));
@@ -7031,6 +7041,7 @@ export default function Home() {
           if (payload?.dayState) {
             const storedVals = (payload.runValues ?? {}) as Record<string, FormValues>;
             setScheduleEditorRunValues(storedVals);
+            setScheduleEditorBreaks(normalizeDayBreaks(payload.dayState.breaks));
             setScheduleEditorDate(date);
             setScheduleEditorRuns(
               payload.dayState.runs.map(r => {
@@ -7048,6 +7059,7 @@ export default function Home() {
     }
     const newId = genId();
     setScheduleEditorRunValues({ [newId]: { ...DEFAULT_VALUES } });
+    setScheduleEditorBreaks(defaultDayBreaks());
     setScheduleEditorDate(todayStr());
     setScheduleEditorRuns([{ id: newId, brand: "", flavor: "", casesNeeded: 0 }]);
     scheduleEditorLoadedRunIdsRef.current = new Set();
@@ -7057,6 +7069,15 @@ export default function Home() {
   async function saveScheduledDay() {
     if (!scheduleEditorDate) return;
     setScheduleError(null);
+    const invalidBreak = scheduleEditorBreaks.find((item) => item.enabled && (
+      item.mode === "after-run"
+        ? !item.runId || !scheduleEditorRuns.some((run) => run.id === item.runId)
+        : !isValidLocalTime(item.atTime)
+    ));
+    if (invalidBreak) {
+      setScheduleError(`Break ${invalidBreak.slot} needs a valid run or local clock time before the schedule can be saved.`);
+      return;
+    }
     const unreadyRun = findFirstUnreadyScheduledRun(scheduleEditorRuns, (run) => {
       const stored = scheduleEditorRunValues[run.id];
       const profile = run.brand ? loadProfile(run.brand, run.flavor) : null;
@@ -7124,7 +7145,7 @@ export default function Home() {
         }
         const prevCurId = dayState.runs[dayState.currentIndex]?.id;
         const newIndex = Math.max(0, newRuns.findIndex(r => r.id === prevCurId));
-        const newDs = { ...dayState, runs: newRuns, currentIndex: newIndex };
+        const newDs = { ...dayState, runs: newRuns, currentIndex: newIndex, breaks: normalizeDayBreaks(scheduleEditorBreaks) };
         setDayState(newDs);
         saveDayState(newDs);
         // Re-load the form if the current run's stored values changed (or the
@@ -7157,7 +7178,7 @@ export default function Home() {
         runValues[r.id] = backfillFromProfile({ ...base, casesNeeded: r.casesNeeded }, r.brand, r.flavor);
       }
       const payload: SyncPayload = {
-        dayState: { runs, date: scheduleEditorDate, resetAt: writeDayResetAt(scheduleEditorDate, todayStr(), undefined, dayStateRef.current.resetAt, Date.now()) },
+        dayState: { runs, date: scheduleEditorDate, resetAt: writeDayResetAt(scheduleEditorDate, todayStr(), undefined, dayStateRef.current.resetAt, Date.now()), breaks: normalizeDayBreaks(scheduleEditorBreaks) },
         runValues,
         brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
         brandFlavors: loadBrandFlavors(),
@@ -8300,6 +8321,11 @@ export default function Home() {
                 ? (remotePrepPhase as PrepPhase)
                 : FRESH_PREP_PHASE)
             : mergePrepPhaseClient(prev.prepPhase, remotePrepPhase);
+          const remoteBreaks = normalizeDayBreaks((payload.dayState as Record<string, unknown>).breaks);
+          const localBreaks = normalizeDayBreaks(prev.breaks);
+          const mergedBreaks: DayBreaks = isReset
+            ? remoteBreaks
+            : (Object.prototype.hasOwnProperty.call(payload.dayState, "breaks") ? remoteBreaks : localBreaks);
           const newDs = {
             ...prev,
             runs: newRuns,
@@ -8311,6 +8337,7 @@ export default function Home() {
             substitutionLog: mergedSubLog,
             stagedItems: mergedStaged,
             prepPhase: mergedPrepPhase,
+            breaks: mergedBreaks,
           };
           // Skip the re-render when nothing actually changed (sync echoes its own
           // pushes ~every 10s); a fresh object every time reset open-menu scroll.
@@ -9982,7 +10009,7 @@ export default function Home() {
       syncVersion: 1,
       completeness: canSendPartial ? "partial" : "complete",
       ...(canSendPartial ? { baseSnapshotId: syncSnapshotIdRef.current } : {}),
-      dayState: { runs: fencePendingEndSnapshots(overlayRunMetaStamps(pushRuns)), shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [], substitutionLog: ds.substitutionLog ?? [], stagedItems: ds.stagedItems ?? {}, prepPhase: ds.prepPhase },
+      dayState: { runs: fencePendingEndSnapshots(overlayRunMetaStamps(pushRuns)), shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [], substitutionLog: ds.substitutionLog ?? [], stagedItems: ds.stagedItems ?? {}, prepPhase: ds.prepPhase, breaks: normalizeDayBreaks(ds.breaks) },
       runValues: fenceActiveManualSectionValues(fencePendingOperationalValues(runValues)),
       runValuesUpdatedAt,
       ...(() => {
@@ -14756,7 +14783,7 @@ export default function Home() {
     pendingResetCount, pep1ShowB, pep2ShowB, pepTypes, performScheduleMove, persistFloorModeEnabled,
     persistNotificationPrefs, persistSubstitutions, phantomNameHealRef, pinChangeMsg, pinError, pinInput,
     premixImportApplying, premixImportError, premixImportGenRef, premixImportInputRef, premixImportLoading, premixImportPrepared,
-    premixImportProgress, printSummary, productionRules, promoteFormRecipeToShared, promotingRecipeKind,
+    premixImportProgress, printSummary, productionStartTime, productionRules, promoteFormRecipeToShared, promotingRecipeKind,
     packagingManager, persistManualPackagingProgress, queueManualCorrection,
     propagateProfileToPendingRuns, propagateSigRef, pushAcknowledgedRef, pushLocalDoughSauceToServer, pushTimerRef, refreshAfterMerge,
     refreshScheduledDays, reloadMasterData, removeBlankRuns, removeBrand, removeCheese1, removeCheese2,
@@ -14860,8 +14887,8 @@ export default function Home() {
     noFacilityPin, pep1ShowB, pep2ShowB, pendingForegroundStopRunId, pendingResetCount, pepTypes,
     pinChangeMsg, pinError, pinInput,
     premixImportApplying, premixImportError, premixImportLoading,
-    premixImportPrepared, premixImportProgress, productionRules,
-    promotingRecipeKind, resolvedPin, pauseDecisionRunId, role, ruleViolations,
+    premixImportPrepared, premixImportProgress, productionStartTime, productionRules,
+    promotingRecipeKind, productionStartTime, resolvedPin, pauseDecisionRunId, role, ruleViolations,
     runStatus, runSummaryStatsById, runToTime, runValuesById, saucePoolDrift, sauceRecipesList, sauceWeightsOpen,
     scheduleAdvancedRunId, scheduleDeleteConfirm, scheduleEditorDate,
     scheduleEditorIsLiveDay, scheduleEditorRunValues, scheduleEditorRuns,
@@ -18048,6 +18075,91 @@ export default function Home() {
                       {scheduleEditorIsLiveDay && (
                         <p className="text-[11px] text-muted-foreground mt-1">You're editing today's live plan — changes apply right away.</p>
                       )}
+                    </div>
+                    {/* Fixed standard breaks. Operators can see the saved plan,
+                        while managers and authorized supervisors can edit it. */}
+                    <div className="rounded-lg border border-border/50 bg-muted/20 p-3 space-y-3" data-testid="schedule-breaks">
+                      <div>
+                        <label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Standard breaks</label>
+                        <p className="text-[11px] text-muted-foreground mt-1">Each planned break is fixed at 30 minutes. A clock-time break never pauses production automatically.</p>
+                      </div>
+                      {scheduleEditorBreaks.map((breakSlot, index) => (
+                        <div key={breakSlot.slot} className="grid grid-cols-[auto_1fr] gap-2 items-center">
+                          <span className="text-xs font-semibold text-muted-foreground">Break {breakSlot.slot}</span>
+                          <div className="grid grid-cols-2 gap-2">
+                            <select
+                              aria-label={`Break ${breakSlot.slot} placement`}
+                              value={!breakSlot.enabled ? "off" : breakSlot.mode}
+                              disabled={!isSupervisor}
+                              onChange={e => setScheduleEditorBreaks(prev => prev.map((item, i) => i === index
+                                ? { ...item, enabled: e.target.value !== "off", mode: e.target.value === "at-time" ? "at-time" : "after-run" }
+                                : item) as DayBreaks)}
+                              className="h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-xs outline-none disabled:opacity-60"
+                            >
+                              <option value="off">Not scheduled</option>
+                              <option value="after-run">After a run</option>
+                              <option value="at-time">At a clock time</option>
+                            </select>
+                            {breakSlot.enabled && breakSlot.mode === "after-run" ? (
+                              <select
+                                aria-label={`Break ${breakSlot.slot} run`}
+                                value={breakSlot.runId ?? ""}
+                                disabled={!isSupervisor}
+                                onChange={e => setScheduleEditorBreaks(prev => prev.map((item, i) => i === index ? { ...item, runId: e.target.value || undefined } : item) as DayBreaks)}
+                                className="h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-xs outline-none disabled:opacity-60"
+                              >
+                                <option value="">Select run…</option>
+                                {scheduleEditorRuns.map((run, runIndex) => <option key={run.id} value={run.id}>Run {runIndex + 1} — {run.brand || "Unnamed"}</option>)}
+                              </select>
+                            ) : (
+                              <input
+                                aria-label={`Break ${breakSlot.slot} time`}
+                                type="time"
+                                value={breakSlot.atTime ?? ""}
+                                disabled={!isSupervisor || !breakSlot.enabled}
+                                onChange={e => setScheduleEditorBreaks(prev => prev.map((item, i) => i === index ? { ...item, atTime: e.target.value || undefined } : item) as DayBreaks)}
+                                className="h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-xs outline-none disabled:opacity-60"
+                              />
+                            )}
+                          </div>
+                          {breakSlot.enabled && breakSlot.mode === "after-run" && !breakSlot.runId && (
+                            <p className="col-start-2 text-[11px] text-amber-400">Choose a run so this break is not left unassigned.</p>
+                          )}
+                          {breakSlot.enabled && breakSlot.mode === "after-run" && breakSlot.runId
+                            && !scheduleEditorRuns.some(run => run.id === breakSlot.runId) && (
+                            <p className="col-start-2 text-[11px] text-amber-400">The selected run was deleted or is no longer assigned.</p>
+                          )}
+                          {breakSlot.enabled && breakSlot.mode === "at-time" && !isValidLocalTime(breakSlot.atTime) && (
+                            <p className="col-start-2 text-[11px] text-amber-400">Enter a valid local time.</p>
+                          )}
+                        </div>
+                      ))}
+                      {(() => {
+                        const preview = calculateDayTimeline({
+                          date: scheduleEditorDate || todayStr(),
+                          productionStartTime,
+                          runs: scheduleEditorRuns.map(run => ({
+                            run: { id: run.id, brand: run.brand, flavor: run.flavor },
+                            durationSec: estimatedRunDurationSec(scheduleEditorRunValues[run.id]),
+                          })),
+                          breaks: scheduleEditorBreaks,
+                          nowMs: Date.now(),
+                        });
+                        return (
+                          <div className="pt-2 border-t border-border/30 text-[11px] text-muted-foreground" data-testid="schedule-break-preview">
+                            <span className="font-semibold">Preview:</span>{" "}
+                            {preview.breaks.filter(item => item.break.enabled).map(item =>
+                              item.status === "unassigned"
+                                ? `Break ${item.slot} unassigned`
+                                : item.startMs ? `Break ${item.slot} ${new Date(item.startMs).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
+                                : `Break ${item.slot} pending`,
+                            ).join(" · ") || "No breaks scheduled"}
+                            {preview.projectedFinishMs && (
+                              <span className="ml-2">· day finish {new Date(preview.projectedFinishMs).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                     {/* Runs */}
                     <div>

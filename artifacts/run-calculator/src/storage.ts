@@ -58,6 +58,7 @@ import {
   type RecipeRow,
   type CrustField,
 } from "./types";
+import { normalizeDayBreaks } from "./dayTimeline";
 import { COMPLETED_HISTORY_CACHE_KEY, COMPLETED_HISTORY_OUTBOX_KEY, queueCompletedRun } from "./completedHistorySync";
 import { resolveDieLineDefaults, type DieLineDefaultsOverrides } from "./dieDefaults";
 import { MIX_SEED } from "./mixSeed";
@@ -1420,7 +1421,7 @@ export function loadDayState(): DayState {
         brand: r.brand ?? (r.label ?? ""),
         flavor: r.flavor ?? "",
       }));
-      return { ...parsed, runs, date: parsed.date ?? todayStr() };
+      return { ...parsed, runs, breaks: normalizeDayBreaks(parsed.breaks), date: parsed.date ?? todayStr() };
     }
   } catch {}
   return freshDayState();

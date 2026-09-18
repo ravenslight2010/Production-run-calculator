@@ -1165,7 +1165,28 @@ const KNOWN_DAYSTATE_KEYS = new Set<string>([
   "substitutionLog",
   "stagedItems",
   "prepPhase",
+  "breaks",
 ]);
+
+function sanitizeBreakSlots(value: unknown): unknown[] {
+  const source = Array.isArray(value) ? value : [];
+  return [1, 2, 3].map((slot) => {
+    const raw = source[slot - 1];
+    const item = isPlainObject(raw) ? raw : {};
+    const mode = item.mode === "at-time" || item.mode === "after-run" ? item.mode : "after-run";
+    const atTime = typeof item.atTime === "string" && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(item.atTime)
+      ? item.atTime : undefined;
+    const runId = typeof item.runId === "string" && item.runId.trim() ? item.runId.slice(0, 160) : undefined;
+    return {
+      slot,
+      enabled: item.enabled === true,
+      mode,
+      ...(runId ? { runId } : {}),
+      ...(atTime ? { atTime } : {}),
+      durationMin: 30,
+    };
+  });
+}
 
 function capStringArray(arr: unknown[]): string[] {
   return arr
@@ -1238,6 +1259,8 @@ export function sanitizeSyncPayload(payload: unknown): unknown {
             // MAX_RUNS runs in a single day. Truncate rather than reject so that
             // a marginal client push doesn't lose partial data.
             ds[dsk] = asArray(val[dsk]).slice(0, MAX_RUNS);
+          } else if (dsk === "breaks") {
+            ds[dsk] = sanitizeBreakSlots(val[dsk]);
           } else {
             ds[dsk] = val[dsk];
           }

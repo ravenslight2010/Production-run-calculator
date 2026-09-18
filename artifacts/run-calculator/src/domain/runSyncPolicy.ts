@@ -7,6 +7,7 @@ import {
 } from "../types";
 import { genId, todayStr } from "../utils";
 import { SynchronizationStateMachine } from "../synchronizationStateMachine";
+import { defaultDayBreaks } from "../dayTimeline";
 
 /** React- and storage-free decisions for the live-run synchronization boundary. */
 export function deepEqual(a: unknown, b: unknown): boolean {
@@ -32,6 +33,7 @@ export function freshDayState(): DayState {
     runs: [{ id: genId(), brand: "", flavor: "", seeded: true }],
     currentIndex: 0, date: todayStr(), substitutions: [], substitutionLog: [], stagedItems: {},
     prepPhase: { prepStartedAt: null, prepBatchesDough: 0, prepBatchesSauce: 0, prepCarriedOver: false },
+    breaks: defaultDayBreaks(),
   };
 }
 
