@@ -44,6 +44,7 @@
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { resolve, relative, join } from "node:path";
+import * as ts from "typescript";
 import { describe, it, expect } from "vitest";
 
 // ── Check 1: per-function allowlist for home.tsx ───────────────────────────
@@ -156,8 +157,53 @@ function isTestFile(absPath: string): boolean {
 // Matches an actual useLiveRun() call (not an import statement or comment).
 const USE_LIVE_RUN_RE = /\buseLiveRun\s*\(\s*\)/;
 const IMPORT_COMMENT_RE = /^\s*(import|\/\/|\/\*|\*)/;
-const MODULE_SPECIFIER_RE =
-  /\b(?:from\s*|import\s*\(\s*|import\s*)["']([^"']+)["']/g;
+
+/**
+ * Collect module specifiers from real import syntax.
+ *
+ * Parsing is important here: a source-text regex also matches examples in
+ * comments and ordinary strings, which can make a safe module fail the
+ * boundary check.
+ */
+function collectModuleSpecifiers(
+  content: string,
+  filePath: string,
+): string[] {
+  const sourceFile = ts.createSourceFile(
+    filePath,
+    content,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  const specifiers: string[] = [];
+
+  function visit(node: ts.Node): void {
+    if (
+      ts.isImportDeclaration(node) &&
+      ts.isStringLiteral(node.moduleSpecifier)
+    ) {
+      specifiers.push(node.moduleSpecifier.text);
+    } else if (
+      ts.isCallExpression(node) &&
+      node.expression.kind === ts.SyntaxKind.ImportKeyword
+    ) {
+      const [argument] = node.arguments;
+      if (
+        argument &&
+        (ts.isStringLiteral(argument) ||
+          ts.isNoSubstitutionTemplateLiteral(argument))
+      ) {
+        specifiers.push(argument.text);
+      }
+    }
+
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+  return specifiers;
+}
 
 function normalizeModulePath(importerPath: string, specifier: string): string {
   return resolve(importerPath, "..", specifier).replace(/\.(tsx?|jsx?)$/, "");
@@ -174,8 +220,8 @@ function importsHomeModule(importerPath: string, specifier: string): boolean {
 }
 
 // ── Scanner ───────────────────────────────────────────────────────────────
-// Uses a simple line-by-line scan rather than an AST parser so it stays
-// dependency-free and fast. The heuristic is reliable because:
+// Uses a simple line-by-line scan for useLiveRun() rather than an AST parser
+// so it stays fast. The heuristic is reliable because:
 //   • All function declarations in home.tsx that could contain useLiveRun()
 //     are top-level `function Name(` declarations (not arrow functions).
 //   • We scan backwards — the most recent `function Name(` before any
@@ -357,8 +403,7 @@ describe("live-stations — neutral page support boundary", () => {
       if (isTestFile(absPath)) continue;
 
       const content = readFileSync(absPath, "utf8");
-      for (const match of content.matchAll(MODULE_SPECIFIER_RE)) {
-        const specifier = match[1];
+      for (const specifier of collectModuleSpecifiers(content, absPath)) {
         if (importsHomeModule(absPath, specifier)) {
           violations.push({
             file: relative(SRC_DIR, absPath).replace(/\\/g, "/"),
@@ -385,6 +430,23 @@ describe("live-stations — neutral page support boundary", () => {
 });
 
 describe("liveTabsSupport — neutral Home boundary", () => {
+  it("only collects actual static and dynamic imports", () => {
+    const content = `
+      /* import "./home"; */
+      const example = 'import("./home")';
+      // import "@/pages/home";
+      import "./liveTabsSupport";
+      import "@/pages/home";
+      void import("./home");
+    `;
+
+    expect(collectModuleSpecifiers(content, LIVE_TABS_SUPPORT_PATH)).toEqual([
+      "./liveTabsSupport",
+      "@/pages/home",
+      "./home",
+    ]);
+  });
+
   it("recognizes relative and @/ alias imports of pages/home", () => {
     expect(importsHomeModule(LIVE_TABS_SUPPORT_PATH, "./home")).toBe(true);
     expect(importsHomeModule(LIVE_TABS_SUPPORT_PATH, "@/pages/home")).toBe(true);
@@ -392,8 +454,7 @@ describe("liveTabsSupport — neutral Home boundary", () => {
 
   it("does not import pages/home", () => {
     const content = readFileSync(LIVE_TABS_SUPPORT_PATH, "utf8");
-    const violations = [...content.matchAll(MODULE_SPECIFIER_RE)]
-      .map((match) => match[1])
+    const violations = collectModuleSpecifiers(content, LIVE_TABS_SUPPORT_PATH)
       .filter((specifier) =>
         importsHomeModule(LIVE_TABS_SUPPORT_PATH, specifier)
       );
