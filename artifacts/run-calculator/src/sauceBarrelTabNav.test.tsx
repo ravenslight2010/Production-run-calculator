@@ -3,7 +3,7 @@
  * Sauce barrel timer — tab-navigation state persistence.
  *
  * Radix UI TabsContent unmounts inactive panels. This test proves that:
- *   1. Barrel count, anchor (net-elapsed seconds), and alert latch keys survive
+ *   1. Barrel count and anchor (net-elapsed seconds) survive
  *      an unmount + remount cycle (simulating a tab switch and return).
  *   2. The reset lifecycle (prevRunIdRef guard) does NOT clear the store on a
  *      same-run remount — only a genuine run-ID change triggers reset.
@@ -13,7 +13,7 @@
  * as LiveSauceTabContent, including:
  *   • useState lazy initialisers that read from the module-level store on mount
  *   • useRef initialisers that read from the store on mount
- *   • write-through setters that keep the store in sync
+ *   • write-through setters that keep progress in the store
  *   • the prevRunIdRef guard that skips reset on same-run remounts
  *
  * This is an integration test of the lifecycle pattern, not a pure formula
@@ -53,20 +53,8 @@ function BarrelCounter({
   const [barrelsMade, setBarrelsMadeRaw] = useState(
     () => getSauceBarrelEntry(runId).barrelsMade,
   );
-  const [showBarrelDue, setShowBarrelDueRaw] = useState(
-    () => getSauceBarrelEntry(runId).showBarrelDue,
-  );
-  const [showQuickCheck, setShowQuickCheckRaw] = useState(
-    () => getSauceBarrelEntry(runId).showQuickCheck,
-  );
   const lastBarrelNetSecRef = useRef<number>(
     getSauceBarrelEntry(runId).lastBarrelNetSec,
-  );
-  const barrelDueKeyRef = useRef<string>(
-    getSauceBarrelEntry(runId).barrelDueKey,
-  );
-  const quickCheckKeyRef = useRef<string>(
-    getSauceBarrelEntry(runId).quickCheckKey,
   );
 
   // ── Write-through wrappers ─────────────────────────────────────────────────
@@ -80,38 +68,10 @@ function BarrelCounter({
     },
     [runId],
   );
-  const setShowBarrelDue = useCallback(
-    (val: boolean) => {
-      getSauceBarrelEntry(runId).showBarrelDue = val;
-      setShowBarrelDueRaw(val);
-    },
-    [runId],
-  );
-  const setShowQuickCheck = useCallback(
-    (val: boolean) => {
-      getSauceBarrelEntry(runId).showQuickCheck = val;
-      setShowQuickCheckRaw(val);
-    },
-    [runId],
-  );
   const writeLastBarrel = useCallback(
     (sec: number) => {
       lastBarrelNetSecRef.current = sec;
       getSauceBarrelEntry(runId).lastBarrelNetSec = sec;
-    },
-    [runId],
-  );
-  const writeBarrelDueKey = useCallback(
-    (key: string) => {
-      barrelDueKeyRef.current = key;
-      getSauceBarrelEntry(runId).barrelDueKey = key;
-    },
-    [runId],
-  );
-  const writeQuickCheckKey = useCallback(
-    (key: string) => {
-      quickCheckKeyRef.current = key;
-      getSauceBarrelEntry(runId).quickCheckKey = key;
     },
     [runId],
   );
@@ -126,10 +86,6 @@ function BarrelCounter({
     resetSauceBarrelEntry(runId);
     setBarrelsMadeRaw(0);
     lastBarrelNetSecRef.current = 0;
-    setShowBarrelDueRaw(false);
-    barrelDueKeyRef.current = "";
-    quickCheckKeyRef.current = "";
-    setShowQuickCheckRaw(false);
   }, [runId]);
 
   // ── Ended-run terminal clear ───────────────────────────────────────────────
@@ -137,8 +93,7 @@ function BarrelCounter({
     if (runStatus === "ended") {
       resetSauceBarrelEntry(runId);
       setBarrelsMadeRaw(0);
-      setShowBarrelDueRaw(false);
-      setShowQuickCheckRaw(false);
+      lastBarrelNetSecRef.current = 0;
     }
   }, [runStatus, runId]);
 
@@ -146,36 +101,13 @@ function BarrelCounter({
   const onConsumeBarrel = () => {
     writeLastBarrel(elapsedSec);
     setBarrelsMade((n) => n + 1);
-    setShowBarrelDue(false);
   };
-  const onFireAlert = () => {
-    const key = `${runId}-${barrelsMade}`;
-    if (barrelDueKeyRef.current === key) return;
-    writeBarrelDueKey(key);
-    setShowBarrelDue(true);
-  };
-  const onFireQuickCheck = () => {
-    const key = `${runId}-qc-1`;
-    if (quickCheckKeyRef.current === key) return;
-    writeQuickCheckKey(key);
-    setShowQuickCheck(true);
-  };
-  const onDismissAlert = () => setShowBarrelDue(false);
-  const onDismissQuickCheck = () => setShowQuickCheck(false);
 
   return (
     <div>
       <span data-testid="count">{barrelsMade}</span>
       <span data-testid="anchor">{lastBarrelNetSecRef.current}</span>
-      <span data-testid="due-key">{barrelDueKeyRef.current}</span>
-      <span data-testid="qc-key">{quickCheckKeyRef.current}</span>
-      {showBarrelDue && <span data-testid="alert">alert</span>}
-      {showQuickCheck && <span data-testid="qc">qc</span>}
       <button data-testid="consume" onClick={onConsumeBarrel}>+1 Barrel</button>
-      <button data-testid="fire-alert" onClick={onFireAlert}>Fire Alert</button>
-      <button data-testid="fire-qc" onClick={onFireQuickCheck}>Fire QC</button>
-      <button data-testid="dismiss" onClick={onDismissAlert}>Dismiss</button>
-      <button data-testid="dismiss-qc" onClick={onDismissQuickCheck}>Dismiss QC</button>
     </div>
   );
 }
@@ -223,59 +155,6 @@ describe("sauce barrel — tab navigation persistence (same-run remount)", () =>
     expect(g2("anchor").textContent).toBe("75"); // anchor survived ✓
   });
 
-  it("barrel-due latch key survives tab navigation", () => {
-    const { getByTestId, unmount } = render(<BarrelCounter runId="r1" />);
-    fireEvent.click(getByTestId("fire-alert")); // latch = "r1-0"
-    expect(getByTestId("due-key").textContent).toBe("r1-0");
-    unmount();
-
-    const { getByTestId: g2 } = render(<BarrelCounter runId="r1" />);
-    expect(g2("due-key").textContent).toBe("r1-0"); // latch key survived ✓
-  });
-
-  it("quick-check latch key survives tab navigation", () => {
-    const { getByTestId, unmount } = render(<BarrelCounter runId="r1" />);
-    fireEvent.click(getByTestId("fire-qc"));
-    expect(getByTestId("qc-key").textContent).toBe("r1-qc-1");
-    unmount();
-
-    const { getByTestId: g2 } = render(<BarrelCounter runId="r1" />);
-    expect(g2("qc-key").textContent).toBe("r1-qc-1"); // key survived ✓
-  });
-
-  it("alert visibility survives tab navigation", () => {
-    const { getByTestId, unmount } = render(<BarrelCounter runId="r1" />);
-    fireEvent.click(getByTestId("fire-alert"));
-    expect(getByTestId("alert")).toBeTruthy();
-    unmount();
-
-    const { getByTestId: g2 } = render(<BarrelCounter runId="r1" />);
-    expect(g2("alert")).toBeTruthy(); // banner still showing on return ✓
-  });
-
-  it("dismissed alert stays dismissed after tab navigation", () => {
-    const { getByTestId, unmount, queryByTestId } = render(
-      <BarrelCounter runId="r1" />,
-    );
-    fireEvent.click(getByTestId("fire-alert"));
-    fireEvent.click(getByTestId("dismiss")); // user dismissed
-    expect(queryByTestId("alert")).toBeNull();
-    unmount();
-
-    const { queryByTestId: q2 } = render(<BarrelCounter runId="r1" />);
-    expect(q2("alert")).toBeNull(); // stays dismissed ✓
-  });
-
-  it("quick-check banner survives tab navigation", () => {
-    const { getByTestId, unmount } = render(<BarrelCounter runId="r1" />);
-    fireEvent.click(getByTestId("fire-qc"));
-    expect(getByTestId("qc")).toBeTruthy();
-    unmount();
-
-    const { getByTestId: g2 } = render(<BarrelCounter runId="r1" />);
-    expect(g2("qc")).toBeTruthy(); // qc banner survived ✓
-  });
-
   it("reset effect does NOT fire on same-run remount (prevRunIdRef guard)", () => {
     // This is the critical regression test: without the prevRunIdRef guard,
     // the [currentRunId] effect fires on every mount, wiping the store even
@@ -284,8 +163,6 @@ describe("sauce barrel — tab navigation persistence (same-run remount)", () =>
       <BarrelCounter runId="r1" elapsedSec={120} />,
     );
     fireEvent.click(getByTestId("consume")); // barrelsMade=1, anchor=120
-    // After consume barrelsMade=1, so alert key becomes "r1-1".
-    fireEvent.click(getByTestId("fire-alert")); // latch="r1-1", showBarrelDue=true
     unmount();
 
     // Remount with the SAME run ID — guard must skip the reset.
@@ -293,10 +170,8 @@ describe("sauce barrel — tab navigation persistence (same-run remount)", () =>
       <BarrelCounter runId="r1" elapsedSec={120} />,
     );
     // All state must be restored from the store — not wiped to zero.
-    expect(g2("count").textContent).toBe("1");     // not reset to 0 ✓
-    expect(g2("anchor").textContent).toBe("120");  // anchor intact ✓
-    expect(g2("due-key").textContent).toBe("r1-1"); // latch intact ✓
-    expect(g2("alert")).toBeTruthy();              // banner still showing ✓
+    expect(g2("count").textContent).toBe("1");    // not reset to 0 ✓
+    expect(g2("anchor").textContent).toBe("120"); // anchor intact ✓
   });
 });
 
@@ -315,7 +190,6 @@ describe("sauce barrel — genuine run-ID change resets state", () => {
     rerender(<BarrelCounter runId="run-B" elapsedSec={0} />);
     expect(getByTestId("count").textContent).toBe("0"); // reset ✓
     expect(getByTestId("anchor").textContent).toBe("0"); // anchor reset ✓
-    expect(getByTestId("due-key").textContent).toBe(""); // latch cleared ✓
   });
 
   it("new-run state does not pollute the old run's store entry", () => {
@@ -349,18 +223,16 @@ describe("sauce barrel — genuine run-ID change resets state", () => {
 // ── Suite 3: ended-run terminal clear ────────────────────────────────────────
 
 describe("sauce barrel — ended-run terminal clear", () => {
-  it("runStatus='ended' clears barrel count and banners", () => {
-    const { getByTestId, queryByTestId, rerender } = render(
+  it("runStatus='ended' clears barrel progress", () => {
+    const { getByTestId, rerender } = render(
       <BarrelCounter runId="r1" runStatus="running" />,
     );
     fireEvent.click(getByTestId("consume"));
-    fireEvent.click(getByTestId("fire-alert"));
     expect(getByTestId("count").textContent).toBe("1");
-    expect(getByTestId("alert")).toBeTruthy();
 
     rerender(<BarrelCounter runId="r1" runStatus="ended" />);
     expect(getByTestId("count").textContent).toBe("0"); // cleared ✓
-    expect(queryByTestId("alert")).toBeNull();           // banner cleared ✓
+    expect(getByTestId("anchor").textContent).toBe("0"); // anchor cleared ✓
   });
 
   it("ended-run clear also wipes the store so next mount starts fresh", () => {
@@ -376,7 +248,7 @@ describe("sauce barrel — ended-run terminal clear", () => {
   });
 });
 
-// ── Suite 4: consuming a barrel records correct anchor and clears alert ────────
+// ── Suite 4: consuming a barrel records canonical progress ───────────────────
 
 describe("sauce barrel — consume barrel write-through", () => {
   it("consuming a barrel records the net-elapsed anchor in the store", () => {
@@ -389,14 +261,12 @@ describe("sauce barrel — consume barrel write-through", () => {
     expect(entry.barrelsMade).toBe(1);
   });
 
-  it("consuming a barrel clears the nearly-exhausted banner", () => {
-    const { getByTestId, queryByTestId } = render(
-      <BarrelCounter runId="r1" />,
-    );
-    fireEvent.click(getByTestId("fire-alert"));
-    expect(getByTestId("alert")).toBeTruthy();
-    fireEvent.click(getByTestId("consume")); // consume clears the banner
-    expect(queryByTestId("alert")).toBeNull(); // cleared ✓
-    expect(getSauceBarrelEntry("r1").showBarrelDue).toBe(false);
+  it("consuming a barrel updates only the progress mirror", () => {
+    const { getByTestId } = render(<BarrelCounter runId="r1" />);
+    fireEvent.click(getByTestId("consume"));
+    expect(getSauceBarrelEntry("r1")).toEqual({
+      lastBarrelNetSec: 0,
+      barrelsMade: 1,
+    });
   });
 });

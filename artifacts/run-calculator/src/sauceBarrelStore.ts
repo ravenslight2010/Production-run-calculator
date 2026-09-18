@@ -1,13 +1,13 @@
 /**
  * Module-level sauce barrel timer store.
  *
- * Lives outside LiveSauceTabContent so barrel state (anchor, count, alert
- * latches) survives Radix TabsContent unmounts. Radix unmounts inactive tab
- * panels by default; without this store the barrel anchor and notification
- * latches reset to zero every time the operator navigates away and back.
+ * Lives outside LiveSauceTabContent so canonical barrel progress (anchor and
+ * count) survives Radix TabsContent unmounts. Radix unmounts inactive tab
+ * panels by default; without this store the progress mirror would reset every
+ * time the operator navigates away and back.
  *
- * Keyed by run ID. Entries are lazily created on first access and explicitly
- * wiped when the run changes (via the currentRunId useEffect in the component).
+ * Keyed by run ID. Entries are lazily created on first access and can be
+ * explicitly reset by lifecycle code and tests.
  */
 
 export interface SauceBarrelEntry {
@@ -15,14 +15,6 @@ export interface SauceBarrelEntry {
   lastBarrelNetSec: number;
   /** How many barrels the crew has consumed so far in this run. */
   barrelsMade: number;
-  /** Latch key for the nearly-exhausted alert (prevents re-firing same barrel). */
-  barrelDueKey: string;
-  /** Latch key for the packaging quick check (prevents re-firing same interval). */
-  quickCheckKey: string;
-  /** Whether the barrel nearly-exhausted banner is currently visible. */
-  showBarrelDue: boolean;
-  /** Whether the packaging quick check banner is currently visible. */
-  showQuickCheck: boolean;
 }
 
 const _store = new Map<string, SauceBarrelEntry>();
@@ -33,10 +25,6 @@ export function getSauceBarrelEntry(runId: string): SauceBarrelEntry {
     _store.set(runId, {
       lastBarrelNetSec: 0,
       barrelsMade: 0,
-      barrelDueKey: "",
-      quickCheckKey: "",
-      showBarrelDue: false,
-      showQuickCheck: false,
     });
   }
   return _store.get(runId)!;
@@ -47,10 +35,6 @@ export function resetSauceBarrelEntry(runId: string): void {
   _store.set(runId, {
     lastBarrelNetSec: 0,
     barrelsMade: 0,
-    barrelDueKey: "",
-    quickCheckKey: "",
-    showBarrelDue: false,
-    showQuickCheck: false,
   });
 }
 

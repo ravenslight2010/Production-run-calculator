@@ -2,8 +2,9 @@
  * E2E: authenticated phone-sized smoke coverage for the live Sauce and Dough tabs.
  *
  * This intentionally exercises the rendered cards, not the timer/math helpers:
- * the barrel countdown, its dismissible alert and +1 reset, plus the conditional
- * Dough target-ball-weight readout are all asserted through the browser.
+ * the passive barrel countdown, automatic staged-supply summary, correction
+ * controls, plus the conditional Dough target-ball-weight readout are all
+ * asserted through the browser.
  */
 
 import { expect, test, type Page } from "@playwright/test";
@@ -244,12 +245,10 @@ test("Sauce and Dough live cards work at a phone viewport", async ({ page }) => 
   await expect(sauceOutput.locator("xpath=..")).toContainText("being made 1");
   await expect(page.getByTestId("tickbar-fill")).toBeVisible();
 
-  // The intentionally short seeded barrel cadence makes the real alert appear
-  // without waiting through a production-length cycle.
-  const barrelAlert = page.getByText(/start new barrel soon/i);
-  await expect(barrelAlert).toBeVisible({ timeout: 20_000 });
-  await page.getByTestId("button-dismiss-barrel-alert").click();
-  await expect(barrelAlert).toBeHidden();
+  // Barrel depletion remains a passive countdown. The old manual-advance
+  // prompt and dismiss control must never appear.
+  await expect(page.getByText(/start new barrel soon|barrel exhausted/i)).toHaveCount(0);
+  await expect(page.getByTestId("button-dismiss-barrel-alert")).toHaveCount(0);
 
   const before = await sauceOutput.textContent();
   await sauceOutput.locator("xpath=../..")
