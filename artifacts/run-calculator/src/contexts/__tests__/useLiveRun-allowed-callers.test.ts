@@ -6,7 +6,7 @@
 // Staff…) would cause every one of those tabs to re-render once per second,
 // burning CPU and causing unnecessary UI churn.
 //
-// THREE checks live here:
+// FOUR checks live here:
 //
 //  1. HOME.TSX ALLOWLIST (per-function)
 //     Scans home.tsx and verifies that every useLiveRun() call is inside a
@@ -25,6 +25,11 @@
 //     Shared page helpers belong in the neutral pages/liveTabsSupport.tsx
 //     boundary instead. This prevents a circular dependency from silently
 //     coupling independently testable live tabs back to the page composition.
+//
+//  4. LIVE-TABS SUPPORT MODULE BOUNDARY
+//     The neutral pages/liveTabsSupport.tsx boundary must not itself import
+//     home.tsx, whether through a relative or @/ alias import. Otherwise live
+//     stations could become coupled to Home indirectly through shared support.
 //
 // HOW TO MAINTAIN THE ALLOWLISTS
 // ──────────────────────────────
@@ -122,6 +127,7 @@ const ALLOWED_FILES = new Set<string>([
 // ── Helpers ───────────────────────────────────────────────────────────────
 const SRC_DIR = resolve(__dirname, "../../../src");
 const LIVE_STATIONS_DIR = join(SRC_DIR, "components/live-stations");
+const LIVE_TABS_SUPPORT_PATH = join(SRC_DIR, "pages/liveTabsSupport.tsx");
 
 /** Collect every .ts / .tsx file under a directory, recursively. */
 function collectSourceFiles(dir: string): string[] {
@@ -373,6 +379,31 @@ describe("live-stations — neutral page support boundary", () => {
             .join("\n") +
           `\n\nMove reusable page helpers to the permitted neutral boundary at\n` +
           `src/pages/liveTabsSupport.tsx and import them from there instead.`,
+      );
+    }
+  });
+});
+
+describe("liveTabsSupport — neutral Home boundary", () => {
+  it("recognizes relative and @/ alias imports of pages/home", () => {
+    expect(importsHomeModule(LIVE_TABS_SUPPORT_PATH, "./home")).toBe(true);
+    expect(importsHomeModule(LIVE_TABS_SUPPORT_PATH, "@/pages/home")).toBe(true);
+  });
+
+  it("does not import pages/home", () => {
+    const content = readFileSync(LIVE_TABS_SUPPORT_PATH, "utf8");
+    const violations = [...content.matchAll(MODULE_SPECIFIER_RE)]
+      .map((match) => match[1])
+      .filter((specifier) =>
+        importsHomeModule(LIVE_TABS_SUPPORT_PATH, specifier)
+      );
+
+    if (violations.length > 0) {
+      expect.fail(
+        `The neutral support boundary at src/pages/liveTabsSupport.tsx must not import pages/home.tsx:\n\n` +
+          violations.map((specifier) => `  imports "${specifier}"`).join("\n") +
+          `\n\nMove the shared dependency out of the Home composition module so live\n` +
+          `stations cannot become indirectly coupled to pages/home.tsx.`,
       );
     }
   });
