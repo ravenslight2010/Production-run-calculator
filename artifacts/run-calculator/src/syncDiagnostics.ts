@@ -28,6 +28,22 @@ export type SyncDiagnostic = {
   runId?: string;
   response?: string;
   fieldCheck?: SyncDiagnosticFieldCheck;
+  wakeRecovery?: WakeRecoveryDiagnostic;
+};
+
+export type WakeRecoveryTrigger = "foreground" | "online" | "sse-reconnect" | "manual" | "retry";
+export type WakeRecoveryOutcome =
+  | "success"
+  | "connectivity-retry"
+  | "non-retryable-http"
+  | "cancelled"
+  | "background-stop";
+
+export type WakeRecoveryDiagnostic = {
+  attempts: number;
+  durationMs: number;
+  trigger: WakeRecoveryTrigger;
+  outcome: WakeRecoveryOutcome;
 };
 
 export type SyncMeasurementPath = "complete" | "partial";
@@ -120,6 +136,8 @@ export type SyncHealthReport = {
 
 const MAX_EVENTS = 20;
 const MAX_MEASUREMENTS = 50;
+const MAX_WAKE_RECOVERY_ATTEMPTS = 99;
+const MAX_WAKE_RECOVERY_DURATION_MS = 24 * 60 * 60 * 1_000;
 
 function key(date: string): string {
   return `run-calc-sync-diagnostics:${date}`;
@@ -158,6 +176,29 @@ export function recordSyncDiagnostic(event: Omit<SyncDiagnostic, "id">): SyncDia
   return next;
 }
 
+export function recordWakeRecoveryDiagnostic(input: {
+  date: string;
+  at?: number;
+  attempts: number;
+  durationMs: number;
+  trigger: WakeRecoveryTrigger;
+  outcome: WakeRecoveryOutcome;
+}): SyncDiagnostic {
+  const wakeRecovery: WakeRecoveryDiagnostic = {
+    attempts: Math.min(MAX_WAKE_RECOVERY_ATTEMPTS, Math.max(1, Math.trunc(input.attempts))),
+    durationMs: Math.min(MAX_WAKE_RECOVERY_DURATION_MS, Math.max(0, Math.trunc(input.durationMs))),
+    trigger: input.trigger,
+    outcome: input.outcome,
+  };
+  return recordSyncDiagnostic({
+    kind: wakeRecovery.outcome === "success" ? "ack" : "failure",
+    at: input.at ?? Date.now(),
+    date: input.date,
+    message: "Foreground wake recovery completed",
+    response: `wake-recovery:${wakeRecovery.outcome}`,
+    wakeRecovery,
+  });
+}
 export function clearSyncDiagnostics(date: string): void {
   try {
     browserRecordStore.record(key(date), () => [], { decode: () => null }).remove();

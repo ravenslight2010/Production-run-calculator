@@ -313,6 +313,138 @@ describe("foreground wake sync barrier", () => {
     vi.useRealTimers();
   });
 
+  it("records successful wake recovery with its trigger and duration", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const recover = vi.fn(async () => {
+      vi.setSystemTime(1_250);
+      return true;
+    });
+    const diagnostics = vi.fn();
+    const { result, unmount } = renderHook(() => useHomeSyncCoordination());
+    const scheduler = new VisibleTabScheduler();
+    const registration = result.current.registerForegroundRecovery(scheduler, recover, diagnostics);
+    scheduler.start();
+
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(diagnostics).toHaveBeenCalledWith({
+      attempts: 1,
+      durationMs: 250,
+      trigger: "online",
+      outcome: "success",
+    });
+    registration.dispose();
+    scheduler.stop();
+    unmount();
+    vi.useRealTimers();
+  });
+
+  it("records connectivity retries as one recovery episode", async () => {
+    vi.useFakeTimers();
+    const recover = vi.fn(async ({ classify }) => {
+      if (recover.mock.calls.length === 1) {
+        classify("connectivity-retry");
+        return false;
+      }
+      return true;
+    });
+    const diagnostics = vi.fn();
+    const { result, unmount } = renderHook(() => useHomeSyncCoordination());
+    const scheduler = new VisibleTabScheduler();
+    const registration = result.current.registerForegroundRecovery(scheduler, recover, diagnostics);
+    scheduler.start();
+    window.dispatchEvent(new Event("focus"));
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({
+      attempts: 2,
+      trigger: "foreground",
+      outcome: "success",
+    }));
+    registration.dispose();
+    scheduler.stop();
+    unmount();
+    vi.useRealTimers();
+  });
+
+  it("records cancellation without treating it as a connectivity retry", async () => {
+    const recover = vi.fn(async ({ classify }) => {
+      classify("cancelled");
+      return false;
+    });
+    const diagnostics = vi.fn();
+    const { result, unmount } = renderHook(() => useHomeSyncCoordination());
+    const scheduler = new VisibleTabScheduler();
+    const registration = result.current.registerForegroundRecovery(scheduler, recover, diagnostics);
+
+    await registration.reconcile();
+
+    expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({
+      attempts: 1,
+      trigger: "manual",
+      outcome: "cancelled",
+    }));
+    registration.dispose();
+    unmount();
+  });
+
+  it("records a non-retryable HTTP outcome without entering the retry cadence", async () => {
+    vi.useFakeTimers();
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      get: () => false,
+    });
+    const recover = vi.fn(async ({ classify }) => {
+      classify("non-retryable-http");
+      return false;
+    });
+    const diagnostics = vi.fn();
+    const { result, unmount } = renderHook(() => useHomeSyncCoordination());
+    const scheduler = new VisibleTabScheduler();
+    const registration = result.current.registerForegroundRecovery(scheduler, recover, diagnostics);
+    scheduler.start();
+
+    window.dispatchEvent(new Event("online"));
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(recover).toHaveBeenCalledTimes(1);
+    expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({
+      attempts: 1,
+      trigger: "online",
+      outcome: "non-retryable-http",
+    }));
+    registration.dispose();
+    scheduler.stop();
+    unmount();
+    vi.useRealTimers();
+  });
+
+  it("records a background stop for an unfinished connectivity recovery", async () => {
+    const recover = vi.fn(async ({ classify }) => {
+      classify("connectivity-retry");
+      return false;
+    });
+    const diagnostics = vi.fn();
+    const { result, unmount } = renderHook(() => useHomeSyncCoordination());
+    const scheduler = new VisibleTabScheduler();
+    const registration = result.current.registerForegroundRecovery(scheduler, recover, diagnostics);
+
+    await registration.reconcile();
+    registration.dispose();
+
+    expect(diagnostics).toHaveBeenCalledWith(expect.objectContaining({
+      attempts: 1,
+      trigger: "manual",
+      outcome: "background-stop",
+    }));
+    unmount();
+  });
+
   it("retries once when online arrives while a client-date pull is failing", async () => {
     let rejectFirst!: (reason?: unknown) => void;
     let resolveSecond!: (result: boolean) => void;
@@ -442,7 +574,7 @@ describe("foreground wake sync barrier", () => {
     expect(homeSource).toContain("tracking is paused");
 
     const catchBlock = homeSource.match(
-      /catch \{\s*\/\/ Failed pulls are not successful reconciliation[\s\S]*?return false;\s*\}/,
+      /catch(?:\s*\([^)]*\))? \{\s*classify\([\s\S]*?\/\/ Failed pulls are not successful reconciliation[\s\S]*?return false;\s*\}/,
     )?.[0] ?? "";
     expect(catchBlock).toContain("return false");
     expect(catchBlock).not.toContain("reconciled = true");

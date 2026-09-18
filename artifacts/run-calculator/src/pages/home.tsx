@@ -382,6 +382,7 @@ import {
   loadSyncMeasurements,
   recordSyncDiagnostic,
   recordSyncMeasurement,
+  recordWakeRecoveryDiagnostic,
   type SyncDiagnostic,
   type SyncDiagnosticFieldCheck,
   type SyncDiagnosticKind,
@@ -9178,7 +9179,7 @@ export default function Home() {
   useEffect(() => {
     let cancelled = false;
 
-    const foregroundRegistration = registerForegroundRecovery(visibleTabScheduler, async (): Promise<boolean> => {
+    const foregroundRegistration = registerForegroundRecovery(visibleTabScheduler, async ({ classify }): Promise<boolean> => {
       const recoveryOwner = synchronizationStateMachineRef.current.beginWake();
       foregroundRecoveryOwnerRef.current = recoveryOwner;
       const isCurrentRecovery = () =>
@@ -9236,6 +9237,7 @@ export default function Home() {
             syncTodayRequest.init,
             10_000,
           );
+          if (!res.ok) classify("non-retryable-http");
           const recovery = await consumeForegroundRecoveryResponse({
             response: res,
             expectedDate: clientDate,
@@ -9271,7 +9273,10 @@ export default function Home() {
               }
             },
           });
-          if (!recovery.accepted) return false;
+          if (!recovery.accepted) {
+            classify("cancelled");
+            return false;
+          }
           setIsOnline(true);
           if (recovery.kind === "unchanged") {
             reconciled = true;
@@ -9342,7 +9347,12 @@ export default function Home() {
          if (!isCurrentRecovery()) return false;
          reconciled = true;
           return true;
-         } catch {
+         } catch (error) {
+            classify(
+              error instanceof Error && error.message.startsWith("foreground sync GET failed:")
+                ? "non-retryable-http"
+                : "connectivity-retry",
+            );
             // Failed pulls are not successful reconciliation. Keep the barrier
            // raised: releasing it here would let hidden-time auto-track or a
            // queued lifecycle write publish stale state. The wake guard clears
@@ -9452,6 +9462,8 @@ export default function Home() {
           }
         }
       })();
+    }, (diagnostic) => {
+      recordWakeRecoveryDiagnostic({ date: todayStr(), ...diagnostic });
     });
     foregroundRecoveryRetryRef.current = foregroundRegistration.reconcile;
     return () => {

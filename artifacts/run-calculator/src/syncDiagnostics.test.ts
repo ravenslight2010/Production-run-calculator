@@ -6,6 +6,7 @@ import {
   loadSyncMeasurements,
   recordSyncDiagnostic,
   recordSyncMeasurement,
+  recordWakeRecoveryDiagnostic,
 } from "./syncDiagnostics";
 import { FIELD_CHECK_SIGNAL_EVENT } from "./fieldChecks";
 
@@ -143,5 +144,29 @@ describe("sync diagnostics", () => {
     ]);
     clearSyncDiagnostics("2026-08-21");
     expect(loadSyncMeasurements("2026-08-21")).toEqual([]);
+  });
+
+  it("records only bounded wake-recovery metadata", () => {
+    recordWakeRecoveryDiagnostic({
+      date: "2026-08-21",
+      at: 10,
+      attempts: 1_000,
+      durationMs: Number.MAX_SAFE_INTEGER,
+      trigger: "online",
+      outcome: "non-retryable-http",
+    });
+
+    expect(loadSyncDiagnostics("2026-08-21")).toEqual([
+      expect.objectContaining({
+        kind: "failure",
+        response: "wake-recovery:non-retryable-http",
+        wakeRecovery: {
+          attempts: 99,
+          durationMs: 86_400_000,
+          trigger: "online",
+          outcome: "non-retryable-http",
+        },
+      }),
+    ]);
   });
 });

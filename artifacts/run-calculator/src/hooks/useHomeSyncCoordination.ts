@@ -6,7 +6,11 @@ import { SynchronizationStateMachine } from "../synchronizationStateMachine";
 import { createForegroundSyncWakeGuard } from "../foregroundSyncWakeGuard";
 import { fetchWithTimeout } from "../fetchWithTimeout";
 import type { SyncPayload } from "../types";
-import type { SyncMeasurementTrigger } from "../syncDiagnostics";
+import type {
+  SyncMeasurementTrigger,
+  WakeRecoveryOutcome,
+  WakeRecoveryTrigger,
+} from "../syncDiagnostics";
 import { todayStr } from "../utils";
 import type { AutoTrackWakeRebaseReason } from "./useAutoTrack";
 import { claimManualSectionLock, clearManualSectionLocks, releaseManualSectionLock } from "../manualSectionLocks";
@@ -51,6 +55,14 @@ type ForegroundScheduler = {
     order: number;
     run: () => boolean | Promise<boolean>;
   }) => () => void;
+};
+
+export type ForegroundRecoveryAttemptContext = {
+  trigger: WakeRecoveryTrigger;
+  classify: (outcome: Extract<
+    WakeRecoveryOutcome,
+    "connectivity-retry" | "non-retryable-http" | "cancelled"
+  >) => void;
 };
 
 export function createForegroundSyncTodayRequest(
@@ -308,46 +320,92 @@ export function useHomeSyncCoordination() {
   // recovery callback deliberately leaves canonical day/form adoption in Home.
   const registerForegroundRecovery = useCallback((
     scheduler: ForegroundScheduler,
-    recover: () => Promise<boolean>,
+    recover: (context: ForegroundRecoveryAttemptContext) => Promise<boolean>,
+    recordDiagnostic?: (diagnostic: {
+      attempts: number;
+      durationMs: number;
+      trigger: WakeRecoveryTrigger;
+      outcome: WakeRecoveryOutcome;
+    }) => void,
   ) => {
-    const reconcile = createForegroundSyncWakeGuard(recover);
+    let episode: { attempts: number; startedAt: number; trigger: WakeRecoveryTrigger } | null = null;
     let unreconciled = false;
-    const requestRecovery = async (): Promise<boolean> => {
-      unreconciled = true;
-      const recovered = await reconcile();
-      if (recovered) unreconciled = false;
+    let disposed = false;
+    let retryConnectivity = false;
+    const finishEpisode = (outcome: WakeRecoveryOutcome) => {
+      if (!episode) return;
+      recordDiagnostic?.({
+        attempts: episode.attempts,
+        durationMs: Math.max(0, Date.now() - episode.startedAt),
+        trigger: episode.trigger,
+        outcome,
+      });
+      episode = null;
+    };
+    const recoverAttempt = async (trigger: WakeRecoveryTrigger): Promise<boolean> => {
+      if (!episode) episode = { attempts: 0, startedAt: Date.now(), trigger };
+      const attemptEpisode = episode;
+      episode.attempts += 1;
+      let classified: Extract<
+        WakeRecoveryOutcome,
+        "connectivity-retry" | "non-retryable-http" | "cancelled"
+      > = "connectivity-retry";
+      const recovered = await recover({
+        trigger,
+        classify: (outcome) => { classified = outcome; },
+      });
+      if (episode !== attemptEpisode) return recovered;
+      retryConnectivity = !recovered && classified === "connectivity-retry";
+      if (disposed) finishEpisode("background-stop");
+      else if (recovered) finishEpisode("success");
+      else if (classified !== "connectivity-retry") finishEpisode(classified);
       return recovered;
     };
-    foregroundRecoveryRequestRef.current = requestRecovery;
+    let nextTrigger: WakeRecoveryTrigger = "manual";
+    const reconcile = createForegroundSyncWakeGuard(() => recoverAttempt(
+      episode ? "retry" : nextTrigger,
+    ));
+    const requestRecovery = async (trigger: WakeRecoveryTrigger): Promise<boolean> => {
+      unreconciled = true;
+      if (!episode) nextTrigger = trigger;
+      const recovered = await reconcile();
+      if (recovered || !retryConnectivity) unreconciled = false;
+      return recovered;
+    };
+    const requestManualRecovery = () => requestRecovery("manual");
+    const requestSseRecovery = () => requestRecovery("sse-reconnect");
+    foregroundRecoveryRequestRef.current = requestSseRecovery;
     if (foregroundRecoveryRequestPendingRef.current) {
       foregroundRecoveryRequestPendingRef.current = false;
-      void requestRecovery();
+      void requestRecovery("sse-reconnect");
     }
     const onOnline = () => {
       // `online` is the recovery signal when a failed pull was left pending
       // by a browser transport. Do not discard it because the page still
       // reports hidden: WebKit can deliver the reconnect event before it
       // updates visibility, and the wake guard keeps the retry bounded.
-      void requestRecovery();
+      void requestRecovery("online");
     };
     window.addEventListener("online", onOnline);
     const unregister = scheduler.register({
       id: "foreground-reconcile",
       runOnForeground: true,
       order: 0,
-      run: requestRecovery,
+      run: () => requestRecovery("foreground"),
     });
     const unregisterRetry = scheduler.register({
       id: "foreground-reconcile-retry",
       cadenceMs: 5_000,
       order: 0,
-      run: async () => unreconciled ? requestRecovery() : false,
+      run: async () => unreconciled ? requestRecovery("retry") : false,
     });
     return {
-      reconcile: requestRecovery,
+      reconcile: requestManualRecovery,
       dispose: () => {
+        disposed = true;
         unreconciled = false;
-        if (foregroundRecoveryRequestRef.current === requestRecovery) {
+        finishEpisode("background-stop");
+        if (foregroundRecoveryRequestRef.current === requestSseRecovery) {
           foregroundRecoveryRequestRef.current = null;
         }
         window.removeEventListener("online", onOnline);
