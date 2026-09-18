@@ -1,7 +1,7 @@
 # Full Browser Release Run
 
-Generated: 2026-09-17T22:04:44.059Z
-Revision: 40497ae24a197372a029b4f884ecc22c27cbc898
+Generated: 2026-09-18T00:12:27.542Z
+Revision: 5fce8899a32e6845f73f72eb7df2cd667809cba9
 Result: FAIL
 Expected cases: 159
 Enumerated cases: 159
@@ -11,42 +11,42 @@ Skipped cases: 26
 Failed cases: 127
 Not-run cases: 0
 Coverage: COMPLETE
-Duration: 649177ms
+Duration: 566587ms
 
 ## Per-file duration
 
 | File | Cases | Completed | Passed | Skipped | Failed | Not run | Duration |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `artifacts/run-calculator/e2e/accessibility-smoke.spec.ts` | 6 | 6 | 3 | 0 | 3 | 0 | 26220ms |
-| `artifacts/run-calculator/e2e/ai-outage-reviewability.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 2102ms |
-| `artifacts/run-calculator/e2e/compact-run-strip.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 2133ms |
-| `artifacts/run-calculator/e2e/critical-workflows.spec.ts` | 2 | 2 | 0 | 0 | 2 | 0 | 4339ms |
-| `artifacts/run-calculator/e2e/cross-device-smoke.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 2082ms |
-| `artifacts/run-calculator/e2e/department-workflow-navigation.spec.ts` | 2 | 2 | 0 | 0 | 2 | 0 | 3623ms |
-| `artifacts/run-calculator/e2e/die-tunnel-defaults.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 2034ms |
-| `artifacts/run-calculator/e2e/dough-correction-resume.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 1895ms |
-| `artifacts/run-calculator/e2e/freezer-surplus.spec.ts` | 2 | 2 | 0 | 0 | 2 | 0 | 1262ms |
-| `artifacts/run-calculator/e2e/home-navigation-reload.spec.ts` | 5 | 5 | 0 | 0 | 5 | 0 | 8722ms |
-| `artifacts/run-calculator/e2e/live-sauce-dough-phone.spec.ts` | 3 | 3 | 0 | 0 | 3 | 0 | 1282ms |
-| `artifacts/run-calculator/e2e/management-performance.spec.ts` | 4 | 4 | 0 | 0 | 4 | 0 | 10758ms |
-| `artifacts/run-calculator/e2e/manager-action-queue-stale.spec.ts` | 7 | 7 | 0 | 0 | 7 | 0 | 10008ms |
-| `artifacts/run-calculator/e2e/manager-attention.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 302ms |
-| `artifacts/run-calculator/e2e/mix-plan.spec.ts` | 34 | 34 | 0 | 0 | 34 | 0 | 50576ms |
-| `artifacts/run-calculator/e2e/multi-device-convergence.spec.ts` | 4 | 4 | 0 | 0 | 4 | 0 | 4696ms |
-| `artifacts/run-calculator/e2e/phone-layout.spec.ts` | 21 | 21 | 2 | 18 | 1 | 0 | 2768ms |
-| `artifacts/run-calculator/e2e/photo-count.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 289ms |
-| `artifacts/run-calculator/e2e/photo-spec-import.spec.ts` | 5 | 5 | 0 | 0 | 5 | 0 | 7364ms |
-| `artifacts/run-calculator/e2e/prior-run-drain.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 254ms |
-| `artifacts/run-calculator/e2e/profile-subtab-reload.spec.ts` | 2 | 2 | 0 | 0 | 2 | 0 | 599ms |
-| `artifacts/run-calculator/e2e/pwa-handoff.spec.ts` | 3 | 3 | 1 | 0 | 2 | 0 | 129760ms |
-| `artifacts/run-calculator/e2e/pwa-morning-login.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 1339ms |
-| `artifacts/run-calculator/e2e/recipe-refresh-start-freeze.spec.ts` | 13 | 13 | 0 | 2 | 11 | 0 | 3006ms |
-| `artifacts/run-calculator/e2e/run-insights.spec.ts` | 3 | 3 | 0 | 0 | 3 | 0 | 1031ms |
-| `artifacts/run-calculator/e2e/screen-off-wake.spec.ts` | 14 | 14 | 0 | 0 | 14 | 0 | 4011ms |
-| `artifacts/run-calculator/e2e/spec-import-unit-provenance.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 1739ms |
-| `artifacts/run-calculator/e2e/sync-convergence.spec.ts` | 9 | 9 | 0 | 1 | 8 | 0 | 13781ms |
-| `artifacts/run-calculator/e2e/sync-diagnostics-download.spec.ts` | 3 | 3 | 0 | 0 | 3 | 0 | 4454ms |
-| `artifacts/run-calculator/e2e/visual-regression.spec.ts` | 3 | 3 | 0 | 2 | 1 | 0 | 1580ms |
+| `artifacts/run-calculator/e2e/accessibility-smoke.spec.ts` | 6 | 6 | 3 | 0 | 3 | 0 | 63149ms |
+| `artifacts/run-calculator/e2e/ai-outage-reviewability.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 1777ms |
+| `artifacts/run-calculator/e2e/compact-run-strip.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 1765ms |
+| `artifacts/run-calculator/e2e/critical-workflows.spec.ts` | 2 | 2 | 0 | 0 | 2 | 0 | 3697ms |
+| `artifacts/run-calculator/e2e/cross-device-smoke.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 1929ms |
+| `artifacts/run-calculator/e2e/department-workflow-navigation.spec.ts` | 2 | 2 | 0 | 0 | 2 | 0 | 3083ms |
+| `artifacts/run-calculator/e2e/die-tunnel-defaults.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 1409ms |
+| `artifacts/run-calculator/e2e/dough-correction-resume.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 1464ms |
+| `artifacts/run-calculator/e2e/freezer-surplus.spec.ts` | 2 | 2 | 0 | 0 | 2 | 0 | 613ms |
+| `artifacts/run-calculator/e2e/home-navigation-reload.spec.ts` | 5 | 5 | 0 | 0 | 5 | 0 | 6669ms |
+| `artifacts/run-calculator/e2e/live-sauce-dough-phone.spec.ts` | 3 | 3 | 0 | 0 | 3 | 0 | 672ms |
+| `artifacts/run-calculator/e2e/management-performance.spec.ts` | 4 | 4 | 0 | 0 | 4 | 0 | 9545ms |
+| `artifacts/run-calculator/e2e/manager-action-queue-stale.spec.ts` | 7 | 7 | 0 | 0 | 7 | 0 | 9192ms |
+| `artifacts/run-calculator/e2e/manager-attention.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 258ms |
+| `artifacts/run-calculator/e2e/mix-plan.spec.ts` | 34 | 34 | 0 | 0 | 34 | 0 | 45878ms |
+| `artifacts/run-calculator/e2e/multi-device-convergence.spec.ts` | 4 | 4 | 0 | 0 | 4 | 0 | 4137ms |
+| `artifacts/run-calculator/e2e/phone-layout.spec.ts` | 21 | 21 | 2 | 18 | 1 | 0 | 2151ms |
+| `artifacts/run-calculator/e2e/photo-count.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 255ms |
+| `artifacts/run-calculator/e2e/photo-spec-import.spec.ts` | 5 | 5 | 0 | 0 | 5 | 0 | 6149ms |
+| `artifacts/run-calculator/e2e/prior-run-drain.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 361ms |
+| `artifacts/run-calculator/e2e/profile-subtab-reload.spec.ts` | 2 | 2 | 0 | 0 | 2 | 0 | 497ms |
+| `artifacts/run-calculator/e2e/pwa-handoff.spec.ts` | 3 | 3 | 1 | 0 | 2 | 0 | 128193ms |
+| `artifacts/run-calculator/e2e/pwa-morning-login.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 1196ms |
+| `artifacts/run-calculator/e2e/recipe-refresh-start-freeze.spec.ts` | 13 | 13 | 0 | 2 | 11 | 0 | 2511ms |
+| `artifacts/run-calculator/e2e/run-insights.spec.ts` | 3 | 3 | 0 | 0 | 3 | 0 | 608ms |
+| `artifacts/run-calculator/e2e/screen-off-wake.spec.ts` | 14 | 14 | 0 | 0 | 14 | 0 | 3182ms |
+| `artifacts/run-calculator/e2e/spec-import-unit-provenance.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 1299ms |
+| `artifacts/run-calculator/e2e/sync-convergence.spec.ts` | 9 | 9 | 0 | 1 | 8 | 0 | 10720ms |
+| `artifacts/run-calculator/e2e/sync-diagnostics-download.spec.ts` | 3 | 3 | 0 | 0 | 3 | 0 | 4004ms |
+| `artifacts/run-calculator/e2e/visual-regression.spec.ts` | 3 | 3 | 0 | 2 | 1 | 0 | 1311ms |
 | `artifacts/run-calculator/e2e/warehouse-coverage.spec.ts` | 4 | 4 | 0 | 3 | 1 | 0 | 0ms |
 
 ## Failed and timed-out cases
