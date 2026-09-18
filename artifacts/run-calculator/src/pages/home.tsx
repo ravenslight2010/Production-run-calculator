@@ -383,6 +383,7 @@ import {
   recordSyncDiagnostic,
   recordSyncMeasurement,
   type SyncDiagnostic,
+  type SyncDiagnosticFieldCheck,
   type SyncDiagnosticKind,
   type SyncMeasurementTrigger,
 } from "../syncDiagnostics";
@@ -5212,8 +5213,14 @@ export default function Home() {
     loadSyncDiagnostics(syncDate).filter((event) => event.kind === "failure" || event.kind === "stale").length,
   );
   const [syncRetryWaiting, setSyncRetryWaiting] = useState(false);
-  const recordSyncEvent = (kind: SyncDiagnosticKind, message: string, response?: string, runId?: string) => {
-    const event = recordSyncDiagnostic({ kind, at: Date.now(), date: syncDate, message, response, runId });
+  const recordSyncEvent = (
+    kind: SyncDiagnosticKind,
+    message: string,
+    response?: string,
+    runId?: string,
+    fieldCheck?: SyncDiagnosticFieldCheck,
+  ) => {
+    const event = recordSyncDiagnostic({ kind, at: Date.now(), date: syncDate, message, response, runId, fieldCheck });
     setSyncDiagnostics((current) => [...current, event].slice(-20));
     if (kind === "ack") setLastAcknowledgedAt(event.at);
   };
@@ -9798,7 +9805,13 @@ export default function Home() {
         setSyncPushFailed(true);
         setSyncPendingCount(0);
         setSyncFailedCount((count) => count + 1);
-        recordSyncEvent("failure", "Sync needs attention before this change can be shared", String(res.status), currentRunId);
+        recordSyncEvent(
+          "failure",
+          "Sync needs attention before this change can be shared",
+          String(res.status),
+          currentRunId,
+          { checkName: "sync-acknowledgment", outcome: "failure" },
+        );
         syncPushQueueRef.current.finish({ drainQueued: false });
         setSyncRetryWaiting(false);
         return;
@@ -9853,7 +9866,13 @@ export default function Home() {
         setSyncPushFailed(true);
         setSyncPendingCount(0);
         setSyncFailedCount((count) => count + 1);
-        recordSyncEvent("stale", "Server rejected the write after a reset; local change is retained", "reset-stale");
+        recordSyncEvent(
+          "stale",
+          "Server rejected the write after a reset; local change is retained",
+          "reset-stale",
+          undefined,
+          { checkName: "sync-acknowledgment", outcome: "failure" },
+        );
         syncPushQueueRef.current.finish({ drainQueued: false });
         setSyncRetryWaiting(false);
         return;
@@ -9887,7 +9906,13 @@ export default function Home() {
       setSyncPushFailed(false);
       setSyncPendingCount(0);
       setSyncFailedCount(0);
-      recordSyncEvent("ack", "Server acknowledged the local change", "200", currentRunId);
+      recordSyncEvent(
+        "ack",
+        "Server acknowledged the local change",
+        "200",
+        currentRunId,
+        { checkName: "sync-acknowledgment", outcome: "success" },
+      );
       // Record the synced signature ONLY after a successful PUT, so a failed
       // push is never treated as synced (which would block its retry).
       if (sig !== undefined) lastSyncSigRef.current = sig;
@@ -9920,7 +9945,13 @@ export default function Home() {
         setSyncPushFailed(true);
         setSyncPendingCount(0);
         setSyncFailedCount((count) => count + 1);
-        recordSyncEvent("failure", "Server did not acknowledge the change; local change is retained", "network");
+        recordSyncEvent(
+          "failure",
+          "Server did not acknowledge the change; local change is retained",
+          "network",
+          undefined,
+          { checkName: "sync-acknowledgment", outcome: "failure" },
+        );
         syncPushQueueRef.current.finish({ drainQueued: false });
         setSyncRetryWaiting(false);
       }

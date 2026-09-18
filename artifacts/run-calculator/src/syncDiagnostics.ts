@@ -15,6 +15,10 @@ export type SyncDiagnosticKind =
   | "stale"
   | "failure"
   | "reset";
+export type SyncDiagnosticFieldCheck = {
+  checkName: "sync-acknowledgment";
+  outcome: "success" | "failure";
+};
 export type SyncDiagnostic = {
   id: string;
   kind: SyncDiagnosticKind;
@@ -23,6 +27,7 @@ export type SyncDiagnostic = {
   message: string;
   runId?: string;
   response?: string;
+  fieldCheck?: SyncDiagnosticFieldCheck;
 };
 
 export type SyncMeasurementPath = "complete" | "partial";
@@ -129,7 +134,10 @@ export function loadSyncDiagnostics(date: string): SyncDiagnostic[] {
     decode: (parsed) => Array.isArray(parsed) ? parsed.filter((item): item is SyncDiagnostic =>
       item && typeof item === "object" && typeof item.id === "string" &&
       typeof item.kind === "string" && typeof item.at === "number" &&
-      typeof item.date === "string" && typeof item.message === "string",
+      typeof item.date === "string" && typeof item.message === "string" &&
+      (item.fieldCheck === undefined ||
+        (item.fieldCheck && item.fieldCheck.checkName === "sync-acknowledgment" &&
+          (item.fieldCheck.outcome === "success" || item.fieldCheck.outcome === "failure"))),
     ).slice(-MAX_EVENTS) : null,
   }).read();
 }
@@ -142,10 +150,8 @@ export function recordSyncDiagnostic(event: Omit<SyncDiagnostic, "id">): SyncDia
   } catch {
     // Diagnostics must never interfere with production persistence.
   }
-  if (event.kind === "ack") {
-    emitFieldCheckSignal("sync-acknowledgment", "success");
-  } else if (event.kind === "failure" || event.kind === "stale") {
-    emitFieldCheckSignal("sync-acknowledgment", "failure");
+  if (event.fieldCheck) {
+    emitFieldCheckSignal(event.fieldCheck.checkName, event.fieldCheck.outcome);
   } else if (event.kind === "peer" || event.kind === "merge") {
     emitFieldCheckSignal("cross-device-convergence", "success");
   }

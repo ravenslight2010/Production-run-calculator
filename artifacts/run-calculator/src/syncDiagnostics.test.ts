@@ -7,6 +7,7 @@ import {
   recordSyncDiagnostic,
   recordSyncMeasurement,
 } from "./syncDiagnostics";
+import { FIELD_CHECK_SIGNAL_EVENT } from "./fieldChecks";
 
 describe("sync diagnostics", () => {
   beforeEach(() => localStorage.clear());
@@ -17,6 +18,63 @@ describe("sync diagnostics", () => {
     expect(loadSyncDiagnostics("2026-08-21")).toHaveLength(1);
     expect(loadSyncDiagnostics("2026-08-21")[0].runId).toBe("run-a");
     expect(loadSyncDiagnostics("2026-08-22")).toHaveLength(1);
+  });
+
+  it("routes only explicitly classified write outcomes to sync acknowledgment checks", () => {
+    const signals: Array<{ checkName: string; outcome: string; metrics?: Record<string, number> }> = [];
+    const listener = (event: Event) => {
+      signals.push((event as CustomEvent<typeof signals[number]>).detail);
+    };
+    window.addEventListener(FIELD_CHECK_SIGNAL_EVENT, listener);
+
+    recordSyncDiagnostic({
+      kind: "failure",
+      at: 1,
+      date: "2026-08-21",
+      message: "Live sync connection delayed",
+    });
+    recordSyncDiagnostic({
+      kind: "failure",
+      at: 2,
+      date: "2026-08-21",
+      message: "Partial peer update was unusable",
+      response: "partial-fallback",
+    });
+    recordSyncDiagnostic({
+      kind: "failure",
+      at: 3,
+      date: "2026-08-21",
+      message: "Foreground recovery failed",
+      response: "foreground-recovery",
+    });
+    recordSyncDiagnostic({
+      kind: "failure",
+      at: 4,
+      date: "2026-08-21",
+      message: "Sync write was rejected",
+      response: "403",
+      fieldCheck: { checkName: "sync-acknowledgment", outcome: "failure" },
+    });
+    recordSyncDiagnostic({
+      kind: "ack",
+      at: 5,
+      date: "2026-08-21",
+      message: "Server acknowledged the local change",
+      fieldCheck: { checkName: "sync-acknowledgment", outcome: "success" },
+    });
+    recordSyncDiagnostic({
+      kind: "ack",
+      at: 6,
+      date: "2026-08-21",
+      message: "Server baseline received",
+    });
+
+    window.removeEventListener(FIELD_CHECK_SIGNAL_EVENT, listener);
+    expect(signals).toEqual([
+      { checkName: "sync-acknowledgment", outcome: "failure", metrics: {} },
+      { checkName: "sync-acknowledgment", outcome: "success", metrics: {} },
+    ]);
+    expect(loadSyncDiagnostics("2026-08-21")).toHaveLength(6);
   });
 
   it("bounds recent activity and can clear one date without touching another", () => {
