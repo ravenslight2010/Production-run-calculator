@@ -10,6 +10,7 @@ import { LiveRunProvider } from "../../../contexts/LiveRunContext";
 import {
   claimManualSectionLock,
   clearManualSectionLocks,
+  releaseManualSectionLock,
 } from "../../../manualSectionLocks";
 import { createPackagingManager } from "../../../packagingManager";
 import { resetSauceBarrelEntry } from "../../../sauceBarrelStore";
@@ -247,6 +248,42 @@ describe("live station startup", () => {
 
     expect((screen.getByTestId("btn-inc-skidsCompleted") as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByTestId("btn-inc-casesOnCurrentSkid") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("keeps Sauce correction controls disabled while a peer owns the Sauce section, then restores them", () => {
+    claimManualSectionLock(RUN_ID, "sauce", "peer-device", 30_000, true);
+    render(
+      <StationProviders status="running">
+        <LiveSauceTabContent />
+      </StationProviders>,
+    );
+
+    const controls = screen.getAllByRole("button", { name: /consumed batches correction/ });
+    expect(controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(true);
+
+    act(() => {
+      releaseManualSectionLock(RUN_ID, "sauce", "peer-device");
+    });
+
+    expect(controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(false);
+  });
+
+  it("keeps Frontline correction controls disabled while a peer owns the applicator section, then restores them", () => {
+    claimManualSectionLock(RUN_ID, "app1", "peer-device", 30_000, true);
+    render(
+      <StationProviders status="running">
+        <LiveFrontlineTabContent />
+      </StationProviders>,
+    );
+
+    const controls = screen.getAllByRole("button", { name: /consumed batches correction/ });
+    expect(controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(true);
+
+    act(() => {
+      releaseManualSectionLock(RUN_ID, "app1", "peer-device");
+    });
+
+    expect(controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(false);
   });
 });
 
