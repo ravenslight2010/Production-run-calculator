@@ -38,7 +38,7 @@ The historical drift is fixed: the client and server blank templates now agree, 
 
 ### 2.2 Sync payload growth
 
-`.agents/memory/sync-body-limit.md` documents a production **413** when full day-state outgrew Express’s default body limit. Raising the limit was a stopgap; structural fix is delta sync (see §3.1). Full `FormValues` per run continues to grow as fields are added.
+`.agents/memory/sync-body-limit.md` documents a production **413** when full day-state outgrew Express’s default body limit. The parser limit is now 10 MB and the sanitized aggregate document is capped at 512 KB. Partial PUT and conditional partial peer SSE are implemented; Phase A must measure and expand those paths rather than treating delta sync as greenfield. Full `FormValues` per run remains the structural growth driver.
 
 ### 2.3 Inventory plan-vs-actual gap
 
@@ -54,18 +54,19 @@ Consumption and warehouse planning still lean on planned quantities (`casesNeede
 
 ### Phase A — Stabilize (highest leverage)
 
-#### A1. Delta sync (structural priority)
+#### A1. Partial-sync measurement and expansion (structural priority)
 
-**Status today:** Full-state push/store; offline queue and LWW already exist; optimistic locking via `canonicalRevision` already exists. Backlog §16 under-credited the system—update status accordingly.
+**Status today:** Complete and partial PUTs coexist. Partial writes use `syncVersion: 1` and `baseSnapshotId`, validate the base under lock, inherit omitted sections, and return complete authoritative fallback without applying the sparse write when the base is invalid or stale. Peer SSE can also send a partial frame when it is safe and materially smaller; initial/recovery frames remain complete. See [sync-deep-dive-2026-09-19.md](sync-deep-dive-2026-09-19.md).
 
 **Target**
-- Client and server keep a shadow of last mutually acknowledged day-state keyed by `canonicalRevision`
-- Wire format: JSON Patch (RFC 6902) or equivalent
-- Feature-flagged; **full-state fallback** on missing shadow, gap, or patch apply failure
-- `protectRunValues` / `capMergedResult` stay post-reconstruction (unchanged semantics)
-- Prove against `sync.convergence.integration.test.ts` + induced patch-failure soak
+- Measure complete writes, successful partial writes, partial fallbacks, and partial peer frames
+- Expand sparse coverage only for measured hot paths
+- Preserve complete initial/recovery responses and `partialFallback` behavior
+- Keep `protectRunValues` / `capMergedResult` post-reconstruction
+- Treat JSON Patch as optional future encoding, not the starting point
+- Prove changes against convergence, large-day, and induced stale-base coverage
 
-**Why first:** Addresses recurring payload-growth risk and floor Wi‑Fi cost without endless body-limit bumps.
+**Why first:** Addresses recurring payload-growth risk and floor Wi‑Fi cost using the contract already in production code.
 
 #### A2. Per-device sync health
 
@@ -83,11 +84,12 @@ When server merge keeps another device’s values, tag response/SSE with a light
 
 #### A5. Wake / background recovery (productize)
 
-Recent Replit-branch work (wake recovery diagnostics, Android PWA resume, faster visible recovery) is core for always-on tablets, not polish. Productize:
+The current merged wake-recovery implementation is core for always-on tablets, not polish. Productize:
 
 - Visible “recovering sync…” with last-success time
 - Bounded diagnostics in Sync Activity
 - Shift-handoff checklist: drain offline queue before handoff
+- Audit reconnect entry points and strengthen complete-write causality as described in [reconnect-reliability-deep-dive-2026-09-19.md](reconnect-reliability-deep-dive-2026-09-19.md)
 
 ### Phase B — Inventory truth
 
@@ -190,6 +192,9 @@ Adjust dates to facility capacity; do not reorder A before B/C unless a producti
 | Sync convergence suite | `artifacts/api-server/src/routes/sync.convergence.integration.test.ts` |
 | Further architecture research | `docs/further-research-2026-09-18.md` |
 | Capability research pack | `docs/capability-research-pack-2026-09-18.md` |
+| Current sync contract | `docs/sync-deep-dive-2026-09-19.md` |
+| Reconnect reliability | `docs/reconnect-reliability-deep-dive-2026-09-19.md` |
+| Server research | `docs/server-research-2026-09-19.md`, `docs/server-research-deep-dive-2026-09-19.md` |
 
 ---
 

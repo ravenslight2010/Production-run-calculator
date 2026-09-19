@@ -14,11 +14,12 @@ This document deepens five research tracks that were only sketched in the improv
 
 | Mechanism | Behavior |
 |-----------|----------|
-| Wire format | Full `dayState` on PUT; full (or large) SSE frames on change |
-| Conflict model | LWW via `canonicalRevision` + `protectRunValues` / blank-over-populated guard |
+| Wire format | Complete and partial PUT; complete initial/recovery SSE plus conditional partial peer frames |
+| Partial contract | `syncVersion: 1` + `baseSnapshotId`; invalid/stale base returns complete `partialFallback` without applying the sparse write |
+| Conflict model | Snapshot-base validation followed by `protectRunValues` / blank-over-populated guards and per-run LWW |
 | Offline | Client mutation queue (`syncPushQueue`); drain on reconnect |
 | Authority | Server-authoritative live calc / auto-track on the sync stream |
-| Known risk | Payload growth; body limit raised to 10mb after production 413s (`.agents/memory/sync-body-limit.md`) |
+| Known risk | Payload growth; 10 MB parser limit and 512 KB sanitized aggregate cap after the historical 413 (`.agents/memory/sync-body-limit.md`) |
 
 ### 1.2 Industry patterns (floor / MES)
 
@@ -32,23 +33,24 @@ Manufacturing offline guidance stresses: write locally first, pre-cache shift da
 
 | Option | Pros | Cons | Fit with `protectRunValues` |
 |--------|------|------|------------------------------|
-| **A. JSON Patch on day-state** (current plan) | Minimal semantic change; reuse revision + guards post-apply; feature-flag + full-state fallback | Still grows with per-run `FormValues`; patch size can spike on large form edits | Excellent — apply patch, then existing merge guards |
+| **A. Expand current partial sync; optional JSON Patch later** | Builds on the existing under-lock base contract, fallback, and peer deltas | Sparse sections are coarse; client-stamp causality and complete writes still need care | Excellent — reconstruct, then run existing guards |
 | **B. Event log for everything** | Natural audit trail; aligns with inventory actuals | Requires redesign of form editing model; large migration | Poor without dual-write period |
 | **C. Hybrid** — events for inventory/ops/QC; patch or full-state for run forms | Matches industry “events for mutable stock”; keeps forms simple | Two pipelines to operate and test | Good if event path never bypasses form guards |
 
 ### 1.4 Decision (research recommendation)
 
-**Choose Option A for Phase A1.** Defer Option C until inventory truth (Phase B) and QC tables (Phase D) are real append-only domains with their own APIs—not stuffed into day-state.
+**Choose Option A for Phase A1:** measure and expand the current partial contract first; prototype JSON Patch only if measured gaps justify another encoding. Defer Option C until inventory truth (Phase B) and QC tables (Phase D) are real append-only domains with their own APIs—not stuffed into day-state.
 
 **Do not** replace day-state LWW with a pure event store in the same effort as delta sync. That is a second project.
 
 **Acceptance criteria for A1 (design-level):**
 
-- Feature flag; full-state path remains default until soak passes
-- Shadow keyed by existing `canonicalRevision`
-- Patch apply failure → full-state fallback (no worse than today)
+- Preserve the current complete path and complete initial/recovery frames
+- Keep snapshot-base validation under the row lock
+- Invalid, stale, or raced base → complete authoritative fallback without sparse apply
 - `protectRunValues` / `capMergedResult` run on reconstructed state only
-- Convergence tests + induced patch-failure soak retained as release evidence; mirror only the durable fallback rule in `.agents/memory/`
+- Measure partial success/fallback and peer-frame ratios
+- Convergence and induced stale-base results retained as release evidence; mirror only durable fallback rules in `.agents/memory/`
 
 ---
 
@@ -59,9 +61,10 @@ Manufacturing offline guidance stresses: write locally first, pre-cache shift da
 From `.agents/memory/sync-body-limit.md`:
 
 - Default Express body limit (~100kb) was insufficient in production
-- Limit raised to **10mb** as a stopgap
+- Parser limit raised to **10mb**; sanitized aggregate sync documents are capped at **512 KB**
 - Growth driver: **per-run full recipe `FormValues`** embedded in day-state
-- Preferred fix direction: trim / structural reduction, not endless limit increases
+- Partial PUT and conditional partial peer SSE now reduce eligible wire payloads
+- Preferred direction: measure and expand structural reduction, not raise limits
 
 ### 2.2 What is *not* known (and blocks success metrics)
 
@@ -96,13 +99,13 @@ sync.last_success_age_s
 
 | Target | Rationale |
 |--------|-----------|
-| p95 delta/patch PUT body **&lt; 500 KB** | Restores headroom for the common path; track full-state fallback bytes separately against the 10mb ceiling |
+| p95 partial PUT body **&lt; 500 KB** | Provisional only; compare against the 512 KB sanitized-document cap and track complete fallback separately |
 | Wake-to-fresh **&lt; 5 s** on facility Wi‑Fi | Floor usability |
 | Queue depth **0** at documented handoff | No silent loss between shifts |
 
 ### 2.5 Decision
 
-Treat **measurement as part of Phase A**, not a separate multi-week project. One PR that emits only the bounded metrics above is enough to validate or revise the patch-size target before or during delta-sync work; it must not retain payload content.
+Treat **measurement as part of Phase A**, not a separate multi-week project. Emit bounded metrics for complete/partial PUTs, fallback rate, and SSE frame mode before expanding the contract; never retain payload content. See [sync-deep-dive-2026-09-19.md](sync-deep-dive-2026-09-19.md).
 
 ---
 
@@ -246,8 +249,8 @@ When ERP or WMS appears: **push actuals and lot usage up; pull orders/BOMs down.
 
 | # | Decision | Follow-on artifact |
 |---|----------|-------------------|
-| 1 | Phase A1 = JSON Patch on day-state + full-state fallback; not full event-sourcing | Keep [sync-system-improvements-plan.md](sync-system-improvements-plan.md) |
-| 2 | Instrument bounded PUT/SSE sizes early; provisional p95 patch body &lt; 500 KB, with full-state fallback measured separately | Optional `docs/sync-payload-baseline.md` once numbers exist |
+| 1 | Phase A1 = measure and expand existing partial PUT/SSE; JSON Patch remains optional; not full event-sourcing | Keep [sync-system-improvements-plan.md](sync-system-improvements-plan.md) |
+| 2 | Instrument bounded complete/partial PUT and SSE sizes plus fallback rates; compare sanitized documents against the 512 KB cap | Optional `docs/sync-payload-baseline.md` once numbers exist |
 | 3 | Phase D MVP = allergen map + cleaning gate + run_lots + weight checks + QC dashboard + purge exclusion | Trim sequencing in allergen/QC plans if needed |
 | 4 | Station contracts + handoff checklist guide Phase C | Optional `docs/station-contracts.md` when UI work starts |
 | 5 | Stay a shift execution system; no PLC/ERP scope creep | Reference from README / AGENTS if useful |

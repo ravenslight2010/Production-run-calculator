@@ -269,10 +269,10 @@ Single ingredient master; recipes versioned; effective-dated changes; prevent si
 ## 12. Multi-device sync & offline
 
 ### What the app uses
-- Full day-state PUT + SSE live push
+- Complete and partial day-state PUT + complete/conditional-partial SSE live push
 - LWW + protectRunValues (blank guard, run union, reset escape)
 - Offline push queue; daily-reset session fence
-- Body limit 10mb after production 413s
+- 10 MB Express parser limit and 512 KB sanitized aggregate cap after the production 413
 
 ### Industry norm
 Offline-first floor apps: local write → queue → sync events or deltas; server authority; shift handoff drains queue; device health visible to supervisors.
@@ -284,11 +284,12 @@ Offline-first floor apps: local write → queue → sync events or deltas; serve
 ### Gap / takeaway
 | Item | Stance |
 |------|--------|
-| Delta sync (JSON Patch or equivalent) | Phase A1 — evaluate and select an implementation; retain full-state fallback |
+| Partial sync | Exists; Phase A1 measures and expands it while retaining complete fallback |
+| JSON Patch | Optional future encoding if the current sparse contract cannot meet measured goals |
 | Device sync health | Phase A2 |
 | Conflict visibility toast | Phase A3 |
 | Event-sourcing entire day-state | Defer |
-| Details | further-research + sync plan |
+| Details | [sync deep dive](sync-deep-dive-2026-09-19.md) + [sync plan](sync-system-improvements-plan.md) |
 
 ---
 
@@ -403,7 +404,7 @@ Forward-only schema; immutable releases; separate migrate vs runtime images—al
 
 | Capability area | Research priority to invest next | Why |
 |-----------------|----------------------------------|-----|
-| Sync delta + health | **P0** | Production payload risk; multi-tablet trust |
+| Partial-sync adoption/expansion + device health | **P0** | Production payload risk; multi-tablet trust |
 | Inventory actuals + lots | **P0** | Downstream planning and genealogy remain less reliable without complete actuals and lot usage |
 | Allergen map + cleaning gate | **P1** | Food safety evidence |
 | QC Phase 1 dashboard | **P1** | Consolidates existing scattered features |
@@ -438,7 +439,11 @@ Open facility facts that require owner verification and should be recorded in a 
 | This file | All capability areas × industry norms |
 | [improvement-research-2026-09-18.md](improvement-research-2026-09-18.md) | Build phases A–F |
 | [further-research-2026-09-18.md](further-research-2026-09-18.md) | Sync architecture, payload measurement, Phase D scope, station handoff, and product boundaries |
-| [sync-system-improvements-plan.md](sync-system-improvements-plan.md) | Delta sync implementation plan |
+| [sync-system-improvements-plan.md](sync-system-improvements-plan.md) | Partial-sync measurement, expansion, and reliability plan |
+| [sync-deep-dive-2026-09-19.md](sync-deep-dive-2026-09-19.md) | Current partial PUT/SSE contract and invariants |
+| [reconnect-reliability-deep-dive-2026-09-19.md](reconnect-reliability-deep-dive-2026-09-19.md) | Wake, reconnect, and stale-overwrite risk |
+| [server-research-2026-09-19.md](server-research-2026-09-19.md) | Server overview and priorities |
+| [server-research-deep-dive-2026-09-19.md](server-research-deep-dive-2026-09-19.md) | Transaction, SSE, pool, health, and limits |
 | Existing `docs/*-plan.md` | Detailed build specs per domain |
 
 ---

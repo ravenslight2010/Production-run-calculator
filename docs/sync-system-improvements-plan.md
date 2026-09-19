@@ -1,7 +1,7 @@
 # Sync System Improvements — Plan
 
-**Updated:** 2026-09-18 (aligned with improvement research)
-**Related:** [improvement-research-2026-09-18.md](improvement-research-2026-09-18.md), [idea-backlog.md](idea-backlog.md) §16
+**Updated:** 2026-09-19 (aligned with current partial-sync implementation)
+**Related:** [sync-deep-dive-2026-09-19.md](sync-deep-dive-2026-09-19.md), [reconnect-reliability-deep-dive-2026-09-19.md](reconnect-reliability-deep-dive-2026-09-19.md), [improvement-research-2026-09-18.md](improvement-research-2026-09-18.md), [idea-backlog.md](idea-backlog.md) §16
 
 ## Current State
 
@@ -12,6 +12,9 @@ The sync system (`artifacts/api-server/src/routes/sync.ts`) is considerably more
 - **Optimistic locking / LWW** — every day-state row carries a `canonicalRevision`; writes are additive/tombstone-driven (`upsertProtected`), never a blind overwrite
 - **Conflict-safe merge** — `protectRunValues` + `capMergedResult` guard against a blank/stale push clobbering real data (the "I entered it, it vanished" invariant)
 - **Live push** — SSE (`GET /sync/events`) broadcasts canonical state on every accepted write (`broadcast`, `broadcastMasterDataChanged`, `broadcastReset`, `broadcastRollover`)
+- **Partial PUT** — sparse writes carry `syncVersion: 1` + `baseSnapshotId`; the base is validated under lock and stale/malformed/raced dependencies return complete `partialFallback` without applying the sparse write
+- **Conditional partial peer SSE** — peers receive a partial frame when the delta is safe and materially smaller; complete initial/recovery and fallback frames remain available
+- **Snapshot unchanged short-circuit** — matching snapshot requests avoid retransmitting the document
 - **Offline queue** — `syncPushQueue` (web) queues mutations while offline and drains on reconnect; `operationalMutationCursor` tracks replay position
 - **Daily-reset session fence** — `sessionBoundary.ts` force-expires stale tokens at the facility-local reset boundary (`applyResetBoundary`, `resetBoundaryAt`)
 - **Server-authoritative live-calc** — auto-track ticks, wall-clock claims, and the operational projection are computed server-side and streamed, not trusted from clients
@@ -19,17 +22,18 @@ The sync system (`artifacts/api-server/src/routes/sync.ts`) is considerably more
 
 ### What's Genuinely Still Missing
 
-1. **No delta sync** — every write pushes/stores the FULL `dayState`, not a diff
-2. **No payload compression** — full JSON body over the wire every time (secondary if deltas land)
-3. **No complete per-device sync health view** — wake-recovery timing is visible in Sync Activity, but managers still cannot compare each device's last-seen time, queue depth, and revision lag
-4. **No field-specific conflict reconciliation UI** — rejected writes and field-check outcomes are surfaced, but a device whose value loses a successful LWW/protect merge still lacks a direct "another device's value was kept" explanation
-5. **No selective sync** — every device pulls the full day-state row even if only viewing one run
+1. **No measured partial-adoption baseline** — success/fallback rates and complete-vs-partial wire percentiles are not retained as production evidence
+2. **Partial coverage remains coarse** — expand only for measured hot paths; JSON Patch is optional, not prerequisite
+3. **No complete per-device sync health view** — `GET /sync/health` and aggregate conflict stats exist, but managers still cannot compare every device's last-seen time, queue depth, and revision lag
+4. **No field-specific conflict reconciliation UI** — server conflict logging/stats exist, but a device whose value loses a successful merge still lacks a direct explanation
+5. **Reconnect causality remains incomplete** — ordinary partial writes use snapshot bases, but complete-write revision preconditions and future client-stamp policy are not established
+6. **No selective sync** — partial wire frames are not the same as per-run read scope
 
 ---
 
-## Why Delta Sync Is the Priority (not a nice-to-have)
+## Why Partial-Sync Measurement and Expansion Remain a Priority
 
-`.agents/memory/sync-body-limit.md` documents a **real production incident** from this exact gap: real-world day-state payloads (full per-run `FormValues` for every run) outgrew Express's default body limit and started returning `413` on every write — silently breaking live sync and scheduled-day saves until the limit was raised. That file's own conclusion prefers trimming non-essential fields / structural reduction over endlessly raising the limit. The payload driver (per-run full recipe `FormValues`) only grows as more per-run fields get added — the next incident is a matter of when, not if, unless this is addressed structurally.
+`.agents/memory/sync-body-limit.md` documents a production **413** when real day-state payloads outgrew Express's default parser limit. The parser now accepts up to 10 MB, while sanitized sync documents are capped at 512 KB. Current partial PUT and conditional partial peer SSE address eligible wire growth, but their real adoption and fallback rates must be measured before deciding whether broader sparse sections or JSON Patch are justified.
 
 **Standard approaches:**
 
@@ -41,20 +45,21 @@ The sync system (`artifacts/api-server/src/routes/sync.ts`) is considerably more
 
 ## Proposed System
 
-### 1. Delta Sync (new — top priority)
+### 1. Partial-Sync Measurement and Expansion
 
-**What:** Client and server each keep a shadow of the last mutually-acknowledged `dayState` (keyed by `canonicalRevision`, which already exists). On write, the client diffs its current state against its shadow and sends only the patch; the server applies the patch, updates its own shadow, and the SSE broadcast likewise sends a patch relative to each subscriber's last-acknowledged revision instead of the full state when possible.
+**What exists:** The client sends sparse documents against a canonical `baseSnapshotId`. The server validates that base under the row lock, inherits omitted sections, runs the normal protected merge, and returns complete authoritative fallback without applying the sparse write on a stale or invalid base. The broadcaster can compute a peer delta from each connection's accepted baseline and sends it only when materially smaller.
 
 **How:**
 
-- Use JSON Patch (RFC 6902) semantics for the diff/patch format
-- Keep `canonicalRevision` as the shadow key (already the LWW version counter — no new versioning concept needed)
-- **Fallback to full sync:** if a client's shadow revision is missing, stale beyond a bound, or a patch fails to apply cleanly, fall back to sending the full state — bounds the blast radius of any patch-computation bug to "no worse than today"
-- Keep `protectRunValues` / `capMergedResult` unchanged — they operate on the reconstructed full state after a patch is applied, not on the wire format
+- Instrument complete, partial, and `partialFallback` PUTs plus complete/partial SSE frame sizes
+- Preserve snapshot validation under lock and complete recovery/fallback
+- Expand sparse sections only for measured hot paths
+- Keep `protectRunValues` / `capMergedResult` after full reconstruction
+- Prototype JSON Patch only if the current sparse contract cannot meet measured goals
 
-**Benefit:** Directly addresses the payload-growth risk `sync-body-limit.md` flagged, and reduces bandwidth on every heartbeat/SSE push (facility Wi‑Fi).
+**Benefit:** Builds on the current contract and reduces payload risk without introducing another encoding prematurely.
 
-**Risk / sequencing:** This touches the hottest path (`upsertProtected`, reset-boundary fence, SSE broadcast loop). Land shadow/diff machinery as an **additive, feature-flagged path** that can fall back to today's full-state behavior instantly, and prove it first against `sync.convergence.integration.test.ts` before removing the full-state path.
+**Risk / sequencing:** This touches the hottest path (`upsertProtected`, reset-boundary fence, SSE broadcast loop). Preserve the complete path, prove stale-base behavior against convergence and large-day suites, and do not assume `canonicalRevision` increments on every ordinary day-state write without route-specific evidence.
 
 ### 2. Per-Device Sync Health (new)
 
@@ -82,7 +87,7 @@ The sync system (`artifacts/api-server/src/routes/sync.ts`) is considerably more
 
 **What:** A device only viewing one run's live status doesn't need the full day's `dayState` pushed on every beat.
 
-**Status:** Lower priority than delta sync — delta alone shrinks the common case significantly, and selective sync adds real complexity (partial-state reconstruction, cross-run invariants). Revisit after delta sync ships and bandwidth savings are measured.
+**Status:** Lower priority than measuring and expanding the current partial contract. Selective sync adds read-scope and cross-run reconstruction complexity; revisit only after current wire savings are measured.
 
 ### 5. Blank-template lockstep (resolved guardrail)
 
@@ -94,19 +99,22 @@ Client `DEFAULT_VALUES` and server `CURRENT_BLANK_RUN_VALUE` are currently field
 
 ### Phase 1: Foundation
 
-1. **Delta sync** (shadow + JSON Patch diff/apply, feature-flagged, full-state fallback)
-2. Prove against `sync.convergence.integration.test.ts` + a soak with induced patch-apply failures (confirm fallback engages)
-3. Preserve the existing **blank-template lockstep** test whenever client defaults change
+1. Measure complete/partial PUTs, `partialFallback`, and complete/partial peer SSE frames
+2. Prove under-lock stale-base fallback against convergence and large-day tests
+3. Audit reconnect entry points and complete-write causality
+4. Expand sparse coverage only for proven hot paths
+5. Preserve the existing **blank-template lockstep** test whenever client defaults change
 
 ### Phase 2: Visibility
 
-4. **Per-device sync health** panel
-5. **Conflict visibility** toast
+6. **Per-device sync health** panel using the existing read-only health and conflict evidence
+7. **Conflict visibility** toast
 
 ### Phase 3: Deferred
 
-6. Selective sync (only after delta sync's real-world impact is measured)
-7. Payload compression (gzip/brotli) — revisit if profiling still shows need after deltas
+8. Optional JSON Patch encoding
+9. Selective sync
+10. Payload compression (gzip/brotli) if profiling still shows need
 
 ---
 
@@ -123,9 +131,11 @@ Client `DEFAULT_VALUES` and server `CURRENT_BLANK_RUN_VALUE` are currently field
 | `.agents/memory/sync-body-limit.md` | Evidence trail for why delta sync matters |
 | `artifacts/api-server/src/routes/sync.convergence.integration.test.ts` | Existing convergence suite; extend for patch-fallback soak |
 | `.agents/memory/sync-retry-storms.md` | Related resilience — check interaction with patch-fallback retries |
+| `docs/sync-deep-dive-2026-09-19.md` | Current partial PUT/SSE contract and invariants |
+| `docs/reconnect-reliability-deep-dive-2026-09-19.md` | Adopt-before-publish and stale-overwrite design |
 
-## API Changes (proposed)
+## API Status and Proposed Changes
 
-- `PUT /api/sync/today` / `PUT /api/sync/:date` — accept optional JSON Patch body alongside existing full-state body; server falls back to full-state handling if patch application fails
-- `GET /api/sync/events` (SSE) — broadcast frames become patches relative to each subscriber's last-acknowledged revision where possible; full state on first connect or after a gap
-- `GET /api/sync/health` (new) — per-device last-seen / queue-depth for the Sync Health panel
+- `PUT /api/sync/today` / `PUT /api/sync/:date` — complete and partial sparse bodies exist; JSON Patch is optional future work
+- `GET /api/sync/events` — complete initial/recovery frames and conditional partial peer frames exist
+- `GET /api/sync/health` — authenticated, manager-facing read-only sentinel exists; per-device last-seen/queue-depth remains proposed
