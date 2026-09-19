@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-19  
 **Status:** Research synthesis and implementation plan  
-**Inputs:** [sync contract](sync-deep-dive-2026-09-19.md), [reconnect research](reconnect-reliability-deep-dive-2026-09-19.md), [server research](server-research-deep-dive-2026-09-19.md), [existing improvements plan](sync-system-improvements-plan.md), [operations deep dive](../research/sync-reliability-operations-deep-dive-2026-09-19.md), and [integrated continuation](../research/deep-dive-research-continuation-2026-09-19.md)
+**Inputs:** [sync contract](sync-deep-dive-2026-09-19.md), [reconnect research](reconnect-reliability-deep-dive-2026-09-19.md), [server research](server-research-deep-dive-2026-09-19.md), [existing improvements plan](sync-system-improvements-plan.md), [operations deep dive](../research/sync-reliability-operations-deep-dive-2026-09-19.md), [integrated continuation](../research/deep-dive-research-continuation-2026-09-19.md), and [additional domain synthesis](../research/additional-domain-research-synthesis-2026-09-19.md)
 
 ## 1. Purpose
 
@@ -57,6 +57,10 @@ It does not attribute a historical incident to clock skew, declare Autoscale inc
 6. Verify published SSE behavior before changing deployment topology, heartbeat cadence, or proxy headers.
 7. Keep the database pool conservative until capacity and instance-count inputs are known.
 8. Correct readiness provider detection independently of the AI hard-versus-soft dependency policy.
+9. Preserve auto-track claim coordination, packaging progress, and atomic sauce-barrel inventory effects while changing the day-state protocol.
+10. Treat factory data's five-minute timestamp clamp as optional defense-in-depth, not as a substitute for canonical-base validation.
+11. Do not block the complete-write protocol fix on an SSE topology decision; database locking and canonical fallback remain valid under either topology.
+12. Keep inventory truth, import atomicity, and durable QC/allergen ownership as separate follow-on product tracks.
 
 ## 4. Implementation sequence
 
@@ -99,6 +103,10 @@ It does not attribute a historical incident to clock skew, declare Autoscale inc
 - tombstones and completed history;
 - wake adoption, cancellation, and queued-write discard;
 - operational-intent idempotency and revision behavior.
+- accepted, duplicate, stale, and conflicting auto-track claims;
+- accepted case-claim packaging-progress mirroring;
+- sauce-barrel claim state and inventory-consumption atomicity;
+- offline-across-midnight recovery using `resetBoundaryAt` and the current reset epoch.
 
 **Exit:** No stale complete write can replace newer canonical run values merely by presenting a larger client stamp.
 
@@ -225,6 +233,8 @@ Phase 0
 
 Phases 1 and 2 are independent correctness tracks. Phase 3 can proceed in parallel if instrumentation does not change merge behavior. Topology, pool, and optimization decisions must wait for their required measurements.
 
+Inventory actuals/surplus, import rollback, and durable QC/allergen work are adjacent product tracks rather than dependencies of Phases 1–3. They should consume the corrected server-authoritative transaction and causality boundaries rather than introduce independent client-side write paths.
+
 ## 6. Release gates
 
 Before shipping Phase 1:
@@ -254,6 +264,8 @@ Before changing global readiness policy:
 - Do not use provider-key correction to silently change the global readiness policy.
 - Do not add future-stamp clamping as a substitute for base validation.
 - Do not use development fixtures as proof of production topology or incident causality.
+- Do not combine the sync protocol migration with inventory actuals, import rollback, or QC schema work.
+- Do not copy factory KV's timestamp-only LWW into day-state as the complete-write fix.
 
 ## 8. Unified definition of done
 

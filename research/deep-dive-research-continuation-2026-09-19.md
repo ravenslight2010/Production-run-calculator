@@ -3,7 +3,7 @@
 **Date:** 2026-09-19  
 **Branch reviewed:** `Replit` at `191fca40`  
 **Status:** Integrated with corrections after comparison against the repository research set  
-**Related:** [Operations deep dive](sync-reliability-operations-deep-dive-2026-09-19.md), [reconnect causality research](reconnect-causality-research.md), [unified plan](../docs/sync-reliability-unified-plan-2026-09-19.md)
+**Related:** [Operations deep dive](sync-reliability-operations-deep-dive-2026-09-19.md), [reconnect causality research](reconnect-causality-research.md), [additional domain synthesis](additional-domain-research-synthesis-2026-09-19.md), [unified plan](../docs/sync-reliability-unified-plan-2026-09-19.md)
 
 This note integrates the uploaded continuation into the project research. It preserves the additional `canonicalRevision` analysis while correcting two statements that were broader than the available evidence.
 
