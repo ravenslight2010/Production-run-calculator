@@ -1,4 +1,10 @@
-# Inventory Auto-Deduction — Comprehensive Plan (Updated 2026-09-09)
+# Inventory Auto-Deduction — Comprehensive Plan
+
+**Status:** Partially built; physical-event accuracy work remains
+**Updated:** 2026-09-19
+**Related:** [Idea backlog](idea-backlog.md#4-inventory-system-gap-fixes), [additional domain synthesis](../research/additional-domain-research-synthesis-2026-09-19.md)
+
+**Authority rule:** each physical inventory event must use one server-authoritative, idempotent transaction or intent. Do not add an independent client-side stock mutation path. Before implementation, decide the authoritative completed-case register, eligible onsite locations, freezer lot ownership, and packaging-ledger scope.
 
 ## The Core Problem
 Inventory consumption is a **single-point event** at run-end, computed from the **planned** `casesNeeded`. Multiple production activities that consume ingredients or packaging are not reflected in inventory. This causes inventory to drift from reality over time.
@@ -8,8 +14,6 @@ Inventory consumption is a **single-point event** at run-end, computed from the 
 ## A. Overproduction Inventory Deduction (Critical)
 
 **Status**: Not yet built
-**Owner**: Replit (working on AI right now)
-
 **What**: When actual production exceeds the planned target, extra ingredients are consumed but not deducted.
 
 **When**: At surplus confirmation moment (end of run, manager confirms extra cases).

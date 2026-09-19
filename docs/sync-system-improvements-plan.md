@@ -31,9 +31,9 @@ The sync system (`artifacts/api-server/src/routes/sync.ts`) is considerably more
 
 ---
 
-## Why Partial-Sync Measurement and Expansion Remain a Priority
+## Why Complete-Write Causality and Measurement Are the Priority
 
-`.agents/memory/sync-body-limit.md` documents a production **413** when real day-state payloads outgrew Express's default parser limit. The parser now accepts up to 10 MB, while sanitized sync documents are capped at 512 KB. Current partial PUT and conditional partial peer SSE address eligible wire growth, but their real adoption and fallback rates must be measured before deciding whether broader sparse sections or JSON Patch are justified.
+`.agents/memory/sync-body-limit.md` documents a production **413** when real day-state payloads outgrew Express's default parser limit. The parser now accepts up to 10 MB, while sanitized sync documents are capped at 512 KB. Current partial PUT and conditional partial peer SSE address eligible wire growth. The immediate correctness gap is complete-write causality; adoption and fallback rates must then be measured before broader sparse sections or JSON Patch are considered.
 
 **Standard approaches:**
 
@@ -97,24 +97,27 @@ Client `DEFAULT_VALUES` and server `CURRENT_BLANK_RUN_VALUE` are currently field
 
 ## Build Order
 
-### Phase 1: Foundation
+### Phase 1: Correctness
 
-1. Measure complete/partial PUTs, `partialFallback`, and complete/partial peer SSE frames
-2. Prove under-lock stale-base fallback against convergence and large-day tests
-3. Audit reconnect entry points and complete-write causality
-4. Expand sparse coverage only for proven hot paths
-5. Preserve the existing **blank-template lockstep** test whenever client defaults change
+1. Add the future-stamped stale-complete regression and audit every complete-write entry point
+2. Require a trusted complete-write base and return canonical state without applying on mismatch
+3. Preserve reset, wake, auto-track, packaging, inventory side-effect, tombstone, and blank-protection invariants
+4. Correct readiness provider-key detection independently of AI dependency policy
+5. Add evidence-safe complete/partial/fallback/SSE and pool measurements
 
-### Phase 2: Visibility
+### Phase 2: Deployment Evidence and Visibility
 
-6. **Per-device sync health** panel using the existing read-only health and conflict evidence
-7. **Conflict visibility** toast
+6. Run the authenticated published SSE probe and deterministic two-process fanout test
+7. Compute the database pool budget from capacity and maximum-instance inputs
+8. **Per-device sync health** panel using the existing read-only health and conflict evidence
+9. **Conflict visibility** toast
 
 ### Phase 3: Deferred
 
-8. Optional JSON Patch encoding
-9. Selective sync
-10. Payload compression (gzip/brotli) if profiling still shows need
+10. Expand sparse coverage only for proven hot paths
+11. Optional JSON Patch encoding
+12. Selective sync
+13. Payload compression or timestamp policy if profiling still shows need
 
 ---
 

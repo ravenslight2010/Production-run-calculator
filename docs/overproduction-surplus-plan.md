@@ -1,5 +1,11 @@
 # Overproduction & Surplus Management Plan
 
+**Status:** Basic freezer surplus confirmation, allocation, and lot persistence built; actual-production deduction and broader disposition/analytics remain planned
+**Updated:** 2026-09-19
+**Related:** [Inventory auto-deduction](inventory-autodeduction-plan.md), [idea backlog](idea-backlog.md#3-overproduction--surplus-management), [additional domain synthesis](../research/additional-domain-research-synthesis-2026-09-19.md)
+
+Surplus confirmation must charge excess ingredient consumption once through the server-authoritative inventory path. Reusing or allocating that finished surplus is a lot movement or offset, not a second ingredient charge.
+
 ## Current State
 
 ### What Exists

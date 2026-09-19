@@ -1,5 +1,11 @@
 # Import System — Comprehensive Plan
 
+**Status:** Foundation built; multi-entity apply remains non-transactional and recovery work is planned
+**Updated:** 2026-09-19
+**Related:** [Idea backlog](idea-backlog.md#15-import-system-improvements), [additional domain synthesis](../research/additional-domain-research-synthesis-2026-09-19.md)
+
+Imports apply authoritative changes in multiple steps. Saved review snapshots and import-history manifests are not a general transactional rollback mechanism. Prioritize structured preview, progress and transaction identity, pre-apply snapshots, and conflict-aware undo before describing import apply as recoverable.
+
 ## Current State
 
 ### The 7 Importer Types

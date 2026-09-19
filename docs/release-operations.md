@@ -4,6 +4,13 @@ This guide is the operating contract for the repository's release checks. A
 release check is successful only when the command exits zero **and** the
 retained evidence verifier passes for the same git revision.
 
+For reliability work, also follow the release gates in the
+[Sync Reliability Unified Plan](sync-reliability-unified-plan-2026-09-19.md#6-release-gates).
+Complete-write protocol changes require causality, convergence, reset, auto-track,
+packaging-progress, and atomic inventory-side-effect evidence. SSE topology or
+pool-size changes require sanitized deployment and capacity evidence. AI
+provider-key tests must not silently change the hard-versus-soft readiness policy.
+
 ## Release commands
 
 ```bash
