@@ -1,5 +1,17 @@
 # AI System — Research & Improvement Opportunities
 
+**Correction (2026-09-18):** this doc was written without finding
+`docs/ai-feature-value-audit-2026-09-05.md`, which already exists on `main` and is the
+authoritative decision record for this system's entire AI portfolio (per-capability
+Keep/Keep-but-simplify/Consolidate/Disable/Retire scoring, with Phase 1 of its
+disable-first recommendations already implemented). That audit takes a notably more
+skeptical stance than this doc's framing suggests — several capabilities this doc treats
+neutrally (e.g. citing `schedule-optimize`/`anomalies` as shipped features) are scored by
+the audit as "keep the deterministic result, retire the AI narration," not simply "keep."
+**Defer to the audit over this doc's characterization of what's shipped and why.** This
+doc's two concrete findings below (cross-provider fallback gap, prompt-injection posture)
+remain accurate and don't conflict with the audit — they just weren't informed by it.
+
 ## Current State — More Built Than the Backlog Credits
 
 `docs/idea-backlog.md` #11 lists 7 "ideas," but checking the actual routes

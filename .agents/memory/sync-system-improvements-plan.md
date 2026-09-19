@@ -1,5 +1,9 @@
 # Sync System Improvements — Plan
 
+**Updated**: 2026-09-18 — merged with an independent research pass (`improvement-research-2026-09-18.md`,
+`idea-backlog.md` §16) that reached the same delta-sync conclusion and added the
+blank-template-lockstep item (§5 below).
+
 ## Current State
 
 ### What Exists Today
@@ -131,6 +135,21 @@ significantly (most heartbeats change little), and selective sync adds real comp
 (partial-state reconstruction, cross-run invariants like `protectRunValues` needing the
 full picture). Revisit after delta sync ships and its bandwidth savings are measured.
 
+### 5. Blank-Template Lockstep (related defect, added from cross-agent research review)
+**What**: client `DEFAULT_VALUES` (`artifacts/run-calculator/src/types.ts`) and server
+`CURRENT_BLANK_RUN_VALUE` (`artifacts/api-server/src/lib/protectRunValues.ts`) must stay
+field-for-field aligned, or the exact-match blank-recognition guard silently degrades
+(falls back to stamp-based LWW, doesn't false-reject — by design — but loses the sharper
+protection). This isn't hypothetical: `cartonSize` drifted out of lockstep in this exact
+way and had to be fixed three separate times across three commits (the source constant,
+its own test file's duplicate fixture, and a second test's exception list) — see
+`.agents/memory/claude-bugs.md` for the full trail.
+
+**How**: add a lockstep regression test asserting the server blank template deep-equals
+the normalized client defaults (including machine-time/tunnel-time normalization), and
+treat "add a new default field" as a two-sided change in the same PR, not a client-only
+one. See `improvement-research-2026-09-18.md` §2.1 for the incident detail.
+
 ---
 
 ## Build Order
@@ -139,14 +158,16 @@ full picture). Revisit after delta sync ships and its bandwidth savings are meas
 1. **Delta sync** (shadow + JSON Patch diff/apply, feature-flagged, full-state fallback)
 2. Prove against `sync.convergence.integration.test.ts` + a new soak test with induced
    patch-apply failures (confirm fallback path actually engages)
+3. **Blank-template lockstep** test (§5) — cheap, independent of delta sync, closes a
+   defect class that's already recurred three times
 
 ### Phase 2: Visibility
-3. **Per-device sync health** panel (reuses `DataHealthWorkspace` pattern)
-4. **Conflict visibility** toast (reuses the diff already computed during merge)
+4. **Per-device sync health** panel (reuses `DataHealthWorkspace` pattern)
+5. **Conflict visibility** toast (reuses the diff already computed during merge)
 
 ### Phase 3: Deferred
-5. Selective sync (only after delta sync's real-world bandwidth impact is measured)
-6. Payload compression (gzip/brotli on the sync routes) — likely subsumed by delta sync
+6. Selective sync (only after delta sync's real-world bandwidth impact is measured)
+7. Payload compression (gzip/brotli on the sync routes) — likely subsumed by delta sync
    shrinking payloads enough that compression's marginal benefit is small; revisit if
    profiling says otherwise
 
@@ -161,6 +182,7 @@ full picture). Revisit after delta sync ships and its bandwidth savings are meas
 | `artifacts/api-server/src/lib/sessionBoundary.ts` | Daily-reset auth fence (unrelated to delta sync, don't conflate) |
 | `artifacts/run-calculator/src/contexts/SyncContext.tsx` | Client sync state/subscription |
 | `artifacts/run-calculator/src/syncPushQueue.ts` | Offline mutation queue (already exists) |
+| `artifacts/run-calculator/src/types.ts` | Client `DEFAULT_VALUES` — the other half of the blank-template lockstep (§5) |
 | `lib/db/src/schema/runs.ts` / daily sync table schema | Where `canonicalRevision` and the shadow (new) would live |
 | `.agents/memory/sync-body-limit.md` | The evidence trail for why delta sync matters |
 | `.agents/memory/sync-convergence-soak.md` | Existing stability notes; extend for patch-fallback soak testing |

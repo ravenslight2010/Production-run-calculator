@@ -2,25 +2,40 @@
 
 Master list of improvement ideas for the Production Run Calculator. Each idea includes what it is, why it matters, and key code references.
 
+**Prioritized research synthesis (2026-09-18):** see [improvement-research-2026-09-18.md](improvement-research-2026-09-18.md) for ordered phases (stabilize → inventory truth → floor UX → QC/allergen → AI portfolio → reporting), status corrections, and explicit non-priorities. Prefer that document when choosing *what to build next*; keep this file as the catalog of ideas and detailed notes. See also [capability-research-pack-2026-09-18.md](capability-research-pack-2026-09-18.md) (every capability area mapped against industry/MES norms) and [further-research-2026-09-18.md](further-research-2026-09-18.md) (sync architecture, payload measurement, FSMA/allergen scope, station UX decisions).
+
+**Sections 17-19** (Auto-Track Coordination, Incident Tracking & Push Notifications, Merge-Suggest) were added in a parallel research pass and aren't yet reflected in the phase table above — see those sections' own linked docs for their priority relative to Phase A-F.
+
+### Recommended build order (summary)
+
+| Phase | Focus | Priority |
+|-------|--------|----------|
+| **A** | Delta sync (flagged), blank-template lockstep, per-device sync health, conflict visibility, wake/recovery productization | Highest |
+| **B** | Inventory truth: actual cases / overproduction, mix-made deduction, freezer double-count, packaging completeness | High |
+| **C** | Station-first UX, line map, unified multi-day prep checklist | High |
+| **D** | QC Phase 1, allergen tracking | High (food safety) |
+| **E** | AI portfolio per value audit (keep extraction; simplify/retire broad surfaces) | Medium |
+| **F** | Production reporting, downtime analytics | Medium |
+
 ---
 
 ## 1. Mix Plan & Prep Mix Inventory
 
-**Status**: Done (mix surplus ledger shipped; daily deduction already existed)  
-**Priority**: High — same root issue as overproduction inventory gap
+**Status**: Partially done — verify surplus ledger vs remaining gaps (see inventory plans)  
+**Priority**: High — same root issue as overproduction inventory gap  
+**Research note (2026-09-18):** Status line previously said Done while summary still described advisory-only mix plan. Treat as **partial**: confirm what shipped (surplus ledger / daily deduction) against code before closing residual work.
 
 ### Summary
-Mix plan is purely advisory today — when prep mixes are actually made, nothing deducts from inventory. Need:
+Mix plan must move stock when prep mixes are made, track leftovers, and allocate into later runs. Residual work if any of the following still apply:
 1. Ingredient deduction when prep mix is made
 2. Leftover tracking (like freezer surplus but for mixes)
 3. Auto-allocation to next matching run + reminder of freezer stock
 
-### The Problem
-- `lib/mixes/src/index.ts` says "Advisory only — this never moves stock"
-- When prep mixes are made, ingredients get used but inventory doesn't reflect it
-- "Already Made" input exists but has no inventory connection
-- No tracking of leftover/excess mix in the freezer
-- No reminder that there's mix stock available for the next run
+### The Problem (historical / residual)
+- `lib/mixes/src/index.ts` long said "Advisory only — this never moves stock"
+- When prep mixes are made, ingredients get used but inventory may not reflect it
+- "Already Made" input may lack full inventory connection
+- Leftover/excess mix in the freezer and next-run reminders may still be incomplete
 
 ### Proposed Solution
 
@@ -356,61 +371,62 @@ Add dedicated tracking for physical stations currently missing from the app.
 
 ## 11. AI Improvements
 
-**Status**: Research complete — several items already shipped, one real gap identified  
-**Full plan**: [docs/ai-system-research.md](ai-system-research.md)  
-**Priority**: Medium — cross-provider fallback is the concrete, worth-prioritizing item
+**Status**: Portfolio governed by value audit (not open-ended expansion)  
+**Priority**: Medium — cleanup and narrow retention over new broad surfaces  
+**Authoritative doc:** [ai-feature-value-audit-2026-09-05.md](ai-feature-value-audit-2026-09-05.md)  
+**Research note (2026-09-18):** Earlier “expand AI” ideas (QC vision as authority, voice mutation, open NL day Q&A) conflict with the audit. Default stance: **keep extraction**, simplify deterministic features that were presented as AI, disable/retire high-risk or low-unique-value entry points.
 
-### Summary
-Expand AI capabilities beyond current spec/premix/cheese/shipping import parsing.
-Research found the existing system (cost limiting, result caching, deterministic-first
-design, real human-approval gate before AI output touches production data) is more
-mature than this list credited — several "ideas" below are already shipped.
+### Portfolio direction (from audit)
 
-### Ideas
-- **AI-powered QC assistant** — photo-based defect detection, ingredient verification
-- **Predictive maintenance** — based on downtime trends
-- **Smart scheduling** — **already implemented** (`POST /ai/schedule-optimize`)
-- **Anomaly detection** — **already implemented** (`POST /ai/anomalies`)
-- **Natural language queries** — "how many cases did we make yesterday?"
-- **Voice commands** — **built, then fully removed** (`lib/voice-commands` deleted in the 163-commit Replit merge); back to a clean-slate idea, nothing to resume
-- **AI model fallback** — OpenRouter integration for rate limit resilience — **still a real gap**, see full plan for why this is the priority item
+| Direction | Examples |
+|-----------|----------|
+| **Keep** | Spec/workbook extraction with review + explicit apply; correction memory; sanitizers; cost controls; shared routing/retries |
+| **Keep but simplify** | Production recap, anomalies, schedule ordering — keep deterministic results; drop model narration as the product face |
+| **Consolidate** | Import matching / merge suggest / fill-missing → one bounded “resolve unresolved setup” path |
+| **Disable / retire** | Voice command classification that mutates state; broad day Q&A; shift-optimize chat; mix/recipe chat as primary UX; forecast-from-history-only; quality/label vision treated as release authority |
+
+### Ideas still valid (narrow)
+
+- Stronger deterministic import templates + AI **fallback only** (aligns with importer redesign)
+- AI model routing / fallback providers for **retained** extraction workloads (rate-limit resilience)
+- Observability: cost, failure rate, apply-vs-discard rates for extraction
+
+### Ideas to avoid by default
+
+- Expanding voice → immediate writes without stronger confirmation
+- New open-ended assistants that recombine already-visible live-run facts
+- Presenting deterministic math as dependent on a model
 
 ### Code References
 - `artifacts/api-server/src/routes/ai*.ts` — AI route handlers
 - `lib/ai-memory/` — shared AI memory system
-- `lib/integrations-openai-ai-server/` — AI server integration (only has key-sourcing redundancy, not cross-provider fallback)
+- `lib/integrations-openai-ai-server/` — AI server integration
 - `artifacts/run-calculator/src/components/ai/` — AI UI components
+- `docs/ai-feature-value-audit-2026-09-05.md` — decision standard
 
 ---
 
 ## 12. Battery & Performance
 
-**Status**: Research complete — genuinely greenfield except one concrete gap  
-**Full plan**: [docs/battery-performance-research.md](battery-performance-research.md)  
-**Priority**: Medium — Screen Wake Lock + Floor Mode is the concrete, high-value item
+**Status**: Ideas only  
+**Priority**: Medium
 
 ### Summary
-Reduce battery drain and improve performance, especially on mobile devices. Research
-found one real, specific gap (Floor Mode has no Screen Wake Lock integration, so its
-"always-glanceable status board" purpose can be silently defeated by OS screen
-dimming) and one correction to this list's own assumptions (WebSocket would *increase*
-mobile battery drain vs. the current SSE, per real-world measurements — see full plan).
+Reduce battery drain and improve performance, especially on mobile devices.
 
 ### Ideas
-- **Screen Wake Lock for Floor Mode** — new item from research; keeps the idle "big numbers" kiosk display actually on screen instead of dimming per OS timeout
-- **Reduce network polling frequency** — adaptive polling based on run state — note: sync/auto-track already moved to server-push (SSE), confirm what's actually still polling before scoping
+- **Reduce network polling frequency** — adaptive polling based on run state
 - **Lazy load tab content** — only load active tab data
 - **Service worker caching** — offline support for viewed data
-- ~~**WebSocket instead of SSE**~~ — **research says keep SSE**; real-world measurements put WebSocket at 2-3x the mobile battery drain due to keepalive overhead
+- **WebSocket instead of SSE** — more efficient bidirectional sync
 - **Background sync** — batch updates instead of real-time push for non-critical data
-- **Compression** — gzip/brotli for API responses — **owned by the sync plan's Phase 3**, don't duplicate
+- **Compression** — gzip/brotli for API responses
 - **Virtual scrolling** — for long lists (inventory, history)
 
 ### Code References
 - `artifacts/run-calculator/src/contexts/LiveRunContext.tsx` — live data context
 - `artifacts/run-calculator/src/hooks/useAutoTrack.ts` — auto-tracking engine
 - `artifacts/api-server/src/routes/sync.ts` — sync endpoint
-- `artifacts/run-calculator/src/pages/home.tsx` (`floorModeEnabled`) — where Screen Wake Lock would be wired in
 
 ---
 
@@ -562,32 +578,40 @@ More accurate, more automatic, more verifiable, less AI:
 
 ## 16. Sync System Improvements
 
-**Status**: Planning  
-**Full plan**: [docs/sync-system-improvements-plan.md](sync-system-improvements-plan.md)  
-**Priority**: Medium — delta sync addresses a payload-growth risk already documented as
-a recurring production issue in `.agents/memory/sync-body-limit.md`
+**Status**: Partially built — delta sync and device visibility still missing  
+**Priority**: **High** (raised 2026-09-18; was Medium)  
+**Full plan:** [sync-system-improvements-plan.md](sync-system-improvements-plan.md)  
+**Research:** [improvement-research-2026-09-18.md](improvement-research-2026-09-18.md) §3 Phase A
 
 ### Summary
-Improve cross-device synchronization reliability and reduce conflicts. Note: several
-items below are already solved in the current implementation (optimistic locking via
-`canonicalRevision`/LWW, offline queue via `syncPushQueue`) — see the full plan for
-what's actually still open (delta sync, per-device sync health, conflict visibility)
-versus what this list originally assumed was unbuilt.
+Cross-device sync is already stronger than older backlog text credited. Remaining work is payload size, observability, and operator trust—not greenfield LWW.
 
-### Ideas
-- **Conflict resolution UI** — visual diff when two devices edit same thing
-- **Optimistic locking** — prevent stale writes — **already implemented** (`canonicalRevision` + `protectRunValues`)
-- **Sync health dashboard** — show sync status per device
-- **Offline queue** — queue changes when offline, sync when back — **already implemented** (`syncPushQueue`)
-- **Selective sync** — sync only active run data, not everything
-- **Compression** — reduce sync payload size
-- **Delta sync** — only send changes, not full state
+### Already built (do not re-propose as ideas)
+- **Optimistic locking / LWW** — `canonicalRevision`; additive/tombstone merges (`upsertProtected`)
+- **Conflict-safe merge** — `protectRunValues` + blank-over-populated guard
+- **Live push** — SSE broadcasts on accepted writes
+- **Offline queue** — `syncPushQueue` + operational mutation cursor
+- **Daily-reset session fence** — facility-local boundary force-expires stale sessions
+- **Server-authoritative live calc / auto-track projection** on the sync stream
+
+### Still missing (build these)
+1. **Delta sync** (top priority) — JSON Patch against shadow keyed by `canonicalRevision`; full-state fallback; feature-flagged. Evidence: production body-limit incident in `.agents/memory/sync-body-limit.md`
+2. **Per-device sync health** — last seen, queue depth, revision lag (manager-visible)
+3. **Conflict visibility** — non-blocking toast when server reconciles away a local write
+4. **Selective sync** — deferred until delta sync is measured
+5. **Compression** — likely lower priority if deltas shrink payloads enough
+
+### Related defect
+- Blank-template field drift (e.g. client `cartonSize: 1` vs server blank template) degrades empty-over-populated recognition — fix with lockstep test (research §2.1)
 
 ### Code References
 - `artifacts/api-server/src/routes/sync.ts` — sync endpoint
+- `artifacts/api-server/src/lib/protectRunValues.ts` — blank / LWW merge guard
 - `artifacts/run-calculator/src/contexts/SyncContext.tsx` — sync context
+- `artifacts/run-calculator/src/syncPushQueue.ts` — offline queue
+- `.agents/memory/sync-body-limit.md` — payload growth incident
 - `.agents/memory/sync-convergence-soak.md` — sync stability notes
-- `.agents/memory/sync-body-limit.md` — evidence for why delta sync is the priority
+
 
 ---
 
