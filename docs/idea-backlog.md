@@ -621,3 +621,43 @@ Cross-device sync is already stronger than older backlog text credited. The imme
 - `.agents/memory/sync-body-limit.md` — payload growth incident
 - `artifacts/api-server/src/routes/sync.convergence.integration.test.ts` — sync convergence coverage
 
+---
+
+## 17. Residual Observability & Resilience Ideas
+
+**Status**: Design items retained after review; the historical branch implementation was rejected
+**Priority**: Medium — build only against current architecture and measured need
+
+### A. Privacy-safe operational audit trail
+
+Preserve the goal of durable, authorized operational evidence without retaining arbitrary request or state payloads.
+
+**Required boundaries**:
+- Derive facility/scope from the authenticated request; never accept caller-selected scope as authorization
+- Use immutable, allowlisted event schemas with server-generated actor identity and timestamps
+- Store bounded identifiers, counts, outcomes, and reason codes—not recipes, day-state bodies, prompts, credentials, raw IP addresses, or unrestricted JSON
+- Define retention, redaction, export, pagination, and purge behavior before adding tables
+- Gate reads with the correct capability and live-scope fence
+- Keep high-stakes audit writes in the same durable transaction or fail the operation explicitly; do not silently swallow missing compliance records
+- Add schema migration, OpenAPI, generated-client, authorization, isolation, and retention tests
+
+**Owner plans**: [QC Department](qc-department-plan.md) for compliance records; domain-specific operational plans for non-QC events.
+
+### B. Provider-native AI resilience
+
+Retained AI extraction workloads need bounded failure behavior implemented around the active Gemini adapter.
+
+**Required boundaries**:
+- Explicit request timeout and cancellation
+- Selective retry only for transient, safe failures; honor `Retry-After` where available
+- Single-probe circuit-breaker recovery with bounded cooldown
+- Capability-specific health and user-facing degradation; do not silently change global readiness policy
+- Safe metrics for duration, outcome, retry count, and bounded token/cost totals without prompts, responses, users, or operational payloads
+- Provider-key detection and resilience tests must use the same adapter contract
+
+**Owner plans**: [Sync Reliability Unified Plan](sync-reliability-unified-plan-2026-09-19.md) Phase 6 and the [AI value audit](ai-feature-value-audit-2026-09-05.md).
+
+### Rejected implementation boundary
+
+Do not reuse the historical `improvements/observability-resilience` branch. Its query monkey-patching, caller-selected audit scope, raw diagnostic exposure, unrestricted telemetry, obsolete OpenAI client, unapplied patch files, and unbudgeted pool increase are not implementation templates.
+

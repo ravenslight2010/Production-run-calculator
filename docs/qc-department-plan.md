@@ -58,6 +58,15 @@ QC audit records must be:
 - Audit log has its own retention policy: never deleted, ever
 - API routes for audit export: `GET /api/qc/audit?from=&to=&type=&ingredient=`
 
+**Privacy and authorization guardrails before implementation**:
+- Derive facility scope from the authenticated request and enforce the live-scope fence; a query parameter must never choose the authorization scope
+- Store stable user IDs and server timestamps; do not default to raw usernames, IP addresses, user agents, request bodies, or unrestricted JSON
+- Define an allowlisted, size-bounded event schema for each QC action
+- Resolve the relationship between indefinite compliance retention and privacy/redaction requirements before creating tables
+- Paginate and capability-gate every read/export path
+- If an operation requires an audit record for compliance, persist both atomically or fail explicitly rather than swallowing the audit failure
+- Follow the retained [operational audit design boundaries](idea-backlog.md#17-residual-observability--resilience-ideas)
+
 ## Current State
 ### Move All Existing QC Features into the QC Department
 

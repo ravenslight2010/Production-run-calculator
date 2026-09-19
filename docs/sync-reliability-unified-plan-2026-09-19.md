@@ -203,6 +203,8 @@ Owner decision:
 
 Provider calls should have bounded timeout, selective retry, and circuit-breaker behavior regardless of the readiness policy.
 
+Implement these controls around the active Gemini adapter, with one bounded half-open probe and content-free metrics for duration, outcome, retry count, and bounded token/cost totals. Do not log prompts, responses, users, or operational payloads. The retained design boundaries are cataloged in [Idea Backlog §17](idea-backlog.md#17-residual-observability--resilience-ideas).
+
 **Exit:** The policy is documented, tested, and reflected consistently in health endpoints and user-facing failures.
 
 ### Phase 7 — Optimize only from evidence
