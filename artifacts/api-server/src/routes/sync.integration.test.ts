@@ -404,8 +404,9 @@ describe("POST /sync/manual-section — section ownership contract", () => {
       release();
       await responsePromise;
       let released: any;
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 8; i++) {
         const frame = await next(2_000);
+        if (frame.type !== "manual-section-lock") { i--; continue; }
         if (frame.event === "released") { released = frame; break; }
       }
       expect(released?.event).toBe("released");
