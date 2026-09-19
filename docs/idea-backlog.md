@@ -356,50 +356,61 @@ Add dedicated tracking for physical stations currently missing from the app.
 
 ## 11. AI Improvements
 
-**Status**: Ideas only  
-**Priority**: Medium
+**Status**: Research complete — several items already shipped, one real gap identified  
+**Full plan**: [docs/ai-system-research.md](ai-system-research.md)  
+**Priority**: Medium — cross-provider fallback is the concrete, worth-prioritizing item
 
 ### Summary
 Expand AI capabilities beyond current spec/premix/cheese/shipping import parsing.
+Research found the existing system (cost limiting, result caching, deterministic-first
+design, real human-approval gate before AI output touches production data) is more
+mature than this list credited — several "ideas" below are already shipped.
 
 ### Ideas
 - **AI-powered QC assistant** — photo-based defect detection, ingredient verification
 - **Predictive maintenance** — based on downtime trends
-- **Smart scheduling** — AI-optimized run order
-- **Anomaly detection** — real-time flagging of unusual patterns
+- **Smart scheduling** — **already implemented** (`POST /ai/schedule-optimize`)
+- **Anomaly detection** — **already implemented** (`POST /ai/anomalies`)
 - **Natural language queries** — "how many cases did we make yesterday?"
-- **Voice commands** — for hands-free operation on the production floor
-- **AI model fallback** — OpenRouter integration for rate limit resilience
+- **Voice commands** — **built, then fully removed** (`lib/voice-commands` deleted in the 163-commit Replit merge); back to a clean-slate idea, nothing to resume
+- **AI model fallback** — OpenRouter integration for rate limit resilience — **still a real gap**, see full plan for why this is the priority item
 
 ### Code References
 - `artifacts/api-server/src/routes/ai*.ts` — AI route handlers
 - `lib/ai-memory/` — shared AI memory system
-- `lib/integrations-openai-ai-server/` — AI server integration
+- `lib/integrations-openai-ai-server/` — AI server integration (only has key-sourcing redundancy, not cross-provider fallback)
 - `artifacts/run-calculator/src/components/ai/` — AI UI components
 
 ---
 
 ## 12. Battery & Performance
 
-**Status**: Ideas only  
-**Priority**: Medium
+**Status**: Research complete — genuinely greenfield except one concrete gap  
+**Full plan**: [docs/battery-performance-research.md](battery-performance-research.md)  
+**Priority**: Medium — Screen Wake Lock + Floor Mode is the concrete, high-value item
 
 ### Summary
-Reduce battery drain and improve performance, especially on mobile devices.
+Reduce battery drain and improve performance, especially on mobile devices. Research
+found one real, specific gap (Floor Mode has no Screen Wake Lock integration, so its
+"always-glanceable status board" purpose can be silently defeated by OS screen
+dimming) and one correction to this list's own assumptions (WebSocket would *increase*
+mobile battery drain vs. the current SSE, per real-world measurements — see full plan).
 
 ### Ideas
-- **Reduce network polling frequency** — adaptive polling based on run state
+- **Screen Wake Lock for Floor Mode** — new item from research; keeps the idle "big numbers" kiosk display actually on screen instead of dimming per OS timeout
+- **Reduce network polling frequency** — adaptive polling based on run state — note: sync/auto-track already moved to server-push (SSE), confirm what's actually still polling before scoping
 - **Lazy load tab content** — only load active tab data
 - **Service worker caching** — offline support for viewed data
-- **WebSocket instead of SSE** — more efficient bidirectional sync
+- ~~**WebSocket instead of SSE**~~ — **research says keep SSE**; real-world measurements put WebSocket at 2-3x the mobile battery drain due to keepalive overhead
 - **Background sync** — batch updates instead of real-time push for non-critical data
-- **Compression** — gzip/brotli for API responses
+- **Compression** — gzip/brotli for API responses — **owned by the sync plan's Phase 3**, don't duplicate
 - **Virtual scrolling** — for long lists (inventory, history)
 
 ### Code References
 - `artifacts/run-calculator/src/contexts/LiveRunContext.tsx` — live data context
 - `artifacts/run-calculator/src/hooks/useAutoTrack.ts` — auto-tracking engine
 - `artifacts/api-server/src/routes/sync.ts` — sync endpoint
+- `artifacts/run-calculator/src/pages/home.tsx` (`floorModeEnabled`) — where Screen Wake Lock would be wired in
 
 ---
 
@@ -609,4 +620,64 @@ server-authoritative ticking) — not a system needing a redesign.
 - `artifacts/api-server/src/lib/autoTrackServerTicks.ts` — server tick engine
 - `.agents/memory/cross-channel-auto-track-claims.md` — the core fencing/ownership write-up
 
+---
+
+## 18. Incident Tracking & Push Notification Delivery
+
+**Status**: Research complete — mature system, one concrete half-built gap  
+**Full plan**: [docs/incident-notifications-research.md](incident-notifications-research.md)  
+**Priority**: Medium — finishing an already-60%-built feature, not starting a new one
+
+### Summary
+Not previously on this backlog. The incident-reporting/AI-diagnosis pipeline itself is
+mature (deterministic fallback clustering, history-aware diagnosis with recurrence
+tracking, two dedicated prompt-injection/authorization-boundary defenses that also
+strengthen Section 11's findings). The real gap is delivery: `web-push` is a real,
+installed dependency with working VAPID/subscription-CRUD infrastructure
+(`webPush.ts`), but nothing in the codebase ever calls `sendNotification` — incident
+severity/recurrence and proactive alerts both compute a signal worth pushing and neither
+one delivers it to a closed/backgrounded device.
+
+### Ideas
+- **Wire `sendWebPush` into incident severity/recurrence and proactive alerts** — the
+  two consumers that already compute the trigger signal; this is finishing existing
+  infrastructure, not building new
+- **Standard push hygiene**: prune subscriptions that come back expired/invalid (410/404)
+
+### Code References
+- `artifacts/api-server/src/lib/incidents.ts` / `routes/incidentsAi.ts` — incident CRUD + diagnosis
+- `lib/incident-cluster/src/index.ts` — deterministic + AI-assisted clustering
+- `artifacts/api-server/src/routes/webPush.ts` — subscription CRUD, no send-side counterpart
+- `.agents/memory/incident-diagnosis.md` — full system write-up + test-isolation gotchas
+
+---
+
+## 19. Merge-Suggest (Dedup System) — Alias Chain Correctness
+
+**Status**: Research complete — solid design, one correctness gap  
+**Full plan**: [docs/merge-suggest-research.md](merge-suggest-research.md)  
+**Priority**: Low-Medium — silent, not urgent, but the same "quietly stops working"
+class of bug the auto-track lessons are about
+
+### Summary
+Not previously on this backlog. The ingredient/recipe/brand/flavor dedup system
+(`lib/merge-suggest`) is well-designed — learned aliases, existence guards, category
+scoping, transitively-clustered near-dup matching (validated against outside research:
+token-based + edit-distance is the right algorithm family for this data shape, no
+change recommended there). The gap: when an alias's target itself later gets merged
+into a newer canonical name, the older alias silently stops firing (its existence guard
+correctly fails) with no error or indication — a manager has to notice and re-approve a
+merge decision they already made once.
+
+### Ideas
+- **Retarget alias chains at merge-confirmation time** — when B (an existing alias
+  target) is merged into C, rewrite `X → B` aliases to `X → C` instead of leaving them
+  to quietly fail
+- Add an explicit `learnedAliasChain.test.ts`-style test case, matching the existing
+  transitive-clustering test's pattern, before this regresses unnoticed later
+
+### Code References
+- `lib/merge-suggest/src/index.ts` — `collectMergeAliases`, `suggestionsFromAliases`
+- `lib/db/src/schema/mergeAliases.ts` — learned alias storage
+- `lib/db/src/schema/mergedAway.ts` — tombstone only, confirmed not a lineage tracker
 
