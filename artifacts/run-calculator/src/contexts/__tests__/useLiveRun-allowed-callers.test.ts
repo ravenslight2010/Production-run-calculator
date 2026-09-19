@@ -44,7 +44,7 @@
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { resolve, relative, join } from "node:path";
-import * as ts from "typescript";
+import ts from "@workspace/typescript-api-v6";
 import { describe, it, expect } from "vitest";
 
 // ── Check 1: per-function allowlist for home.tsx ───────────────────────────
