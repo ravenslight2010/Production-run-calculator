@@ -2,25 +2,38 @@
 
 Master list of improvement ideas for the Production Run Calculator. Each idea includes what it is, why it matters, and key code references.
 
+**Prioritized research synthesis (2026-09-18):** see [improvement-research-2026-09-18.md](improvement-research-2026-09-18.md) for ordered phases (stabilize → inventory truth → floor UX → QC/allergen → AI portfolio → reporting), status corrections, and explicit non-priorities. Prefer that document when choosing *what to build next*; keep this file as the catalog of ideas and detailed notes.
+
+### Recommended build order (summary)
+
+| Phase | Focus | Priority |
+|-------|--------|----------|
+| **A** | Delta sync (flagged), blank-template lockstep, per-device sync health, conflict visibility, wake/recovery productization | Highest |
+| **B** | Inventory truth: actual cases / overproduction, mix-made deduction, freezer double-count, packaging completeness | High |
+| **C** | Station-first UX, line map, unified multi-day prep checklist | High |
+| **D** | QC Phase 1, allergen tracking | High (food safety) |
+| **E** | AI portfolio per value audit (keep extraction; simplify/retire broad surfaces) | Medium |
+| **F** | Production reporting, downtime analytics | Medium |
+
 ---
 
 ## 1. Mix Plan & Prep Mix Inventory
 
-**Status**: Done (mix surplus ledger shipped; daily deduction already existed)  
+**Status**: Partially done — verify surplus ledger vs remaining gaps (see inventory plans)
 **Priority**: High — same root issue as overproduction inventory gap
+**Research note (2026-09-18):** Status line previously said Done while summary still described advisory-only mix plan. Treat as **partial**: confirm what shipped (surplus ledger / daily deduction) against code before closing residual work.
 
 ### Summary
-Mix plan is purely advisory today — when prep mixes are actually made, nothing deducts from inventory. Need:
+Mix plan must move stock when prep mixes are made, track leftovers, and allocate into later runs. Residual work if any of the following still apply:
 1. Ingredient deduction when prep mix is made
 2. Leftover tracking (like freezer surplus but for mixes)
 3. Auto-allocation to next matching run + reminder of freezer stock
 
-### The Problem
-- `lib/mixes/src/index.ts` says "Advisory only — this never moves stock"
-- When prep mixes are made, ingredients get used but inventory doesn't reflect it
-- "Already Made" input exists but has no inventory connection
-- No tracking of leftover/excess mix in the freezer
-- No reminder that there's mix stock available for the next run
+### The Problem (historical / residual)
+- `lib/mixes/src/index.ts` long said "Advisory only — this never moves stock"
+- When prep mixes are made, ingredients get used but inventory may not reflect it
+- "Already Made" input may lack full inventory connection
+- Leftover/excess mix in the freezer and next-run reminders may still be incomplete
 
 ### Proposed Solution
 
@@ -66,8 +79,8 @@ Mix plan is purely advisory today — when prep mixes are actually made, nothing
 
 ## 2. QC Department (Comprehensive)
 
-**Status**: Planning  
-**Full plan**: [docs/qc-department-plan.md](qc-department-plan.md)  
+**Status**: Planning
+**Full plan**: [docs/qc-department-plan.md](qc-department-plan.md)
 **Priority**: High — Phase 1 first
 
 ### Summary
@@ -115,8 +128,8 @@ CRUD for each check type, dashboard/aggregation, audit/compliance, import approv
 
 ## 3. Overproduction & Surplus Management
 
-**Status**: Planning  
-**Full plan**: [docs/overproduction-surplus-plan.md](overproduction-surplus-plan.md)  
+**Status**: Planning
+**Full plan**: [docs/overproduction-surplus-plan.md](overproduction-surplus-plan.md)
 **Priority**: Medium
 
 ### Summary
@@ -148,9 +161,9 @@ Surplus system currently only handles freezer overproduction AFTER a run ends. E
 
 ## 4. Inventory System Gap Fixes
 
-**Status**: Analysis + plan complete  
-**Full plan**: [docs/inventory-autodeduction-plan.md](inventory-autodeduction-plan.md)  
-**Analysis**: [docs/inventory-gap-analysis.md](inventory-gap-analysis.md)  
+**Status**: Analysis + plan complete
+**Full plan**: [docs/inventory-autodeduction-plan.md](inventory-autodeduction-plan.md)
+**Analysis**: [docs/inventory-gap-analysis.md](inventory-gap-analysis.md)
 **Priority**: High — foundational for all other systems
 
 ### Summary
@@ -205,8 +218,8 @@ Inventory consumption is a single-point event (run-end) rather than continuous. 
 
 ## 5. Allergen Tracking
 
-**Status**: Planning  
-**Full plan**: [docs/allergen-tracking-plan.md](allergen-tracking-plan.md)  
+**Status**: Planning
+**Full plan**: [docs/allergen-tracking-plan.md](allergen-tracking-plan.md)
 **Priority**: High — food safety
 
 ### Summary
@@ -230,8 +243,8 @@ Basic allergen field exists per run. Need ingredient-level allergen mapping, QC 
 
 ## 6. Production Reporting
 
-**Status**: Planning  
-**Full plan**: [docs/production-reporting-plan.md](production-reporting-plan.md)  
+**Status**: Planning
+**Full plan**: [docs/production-reporting-plan.md](production-reporting-plan.md)
 **Priority**: Medium
 
 ### Summary
@@ -255,8 +268,8 @@ Day/week summary exists with AI narration. Need automated end-of-day reports, PD
 
 ## 7. Stoppage & Downtime Analytics
 
-**Status**: Planning  
-**Full plan**: [docs/stoppage-analytics-plan.md](stoppage-analytics-plan.md)  
+**Status**: Planning
+**Full plan**: [docs/stoppage-analytics-plan.md](stoppage-analytics-plan.md)
 **Priority**: Medium
 
 ### Summary
@@ -279,8 +292,8 @@ Downtime trends exist. Need real-time alerts, downtime cost, reason classificati
 
 ## 8. Multi-Day Lookahead Dashboard
 
-**Status**: Planning  
-**Full plan**: [docs/multi-day-lookahead-plan.md](multi-day-lookahead-plan.md)  
+**Status**: Planning
+**Full plan**: [docs/multi-day-lookahead-plan.md](multi-day-lookahead-plan.md)
 **Priority**: Medium
 
 ### Summary
@@ -304,8 +317,7 @@ Warehouse, mixes, freezer, and inventory are separate tabs with no unified upcom
 
 ## 9. Production Line Map Dashboard
 
-**Status**: Built, pending merge  
-**Branch**: `feature/line-map-dashboard`
+**Status**: Built and merged
 
 ### Summary
 Visual 7-zone production line map in the Run tab showing all physical zones in U-shaped flow layout matching the facility photo. Color-coded status badges, real-time metrics, click-to-navigate to tabs.
@@ -319,9 +331,9 @@ Dough (stone) → Sauce (red) → Press/Oven (gray) → Frontline (amber) → Fr
 - All 7 TS errors fixed
 - Typecheck passes
 
-### What's Left
-- Merge PR: https://github.com/ravenslight2010/Production-run-calculator/pull/new/feature/line-map-dashboard
-- Verify on Render after merge
+### Current State
+- Integrated into the current Run/Live station surfaces
+- Continue station-to-tab navigation and operational polish under the Floor UX phase
 
 ### Code References
 - `artifacts/run-calculator/src/components/LineMapDashboard.tsx` — new component
@@ -332,7 +344,7 @@ Dough (stone) → Sauce (red) → Press/Oven (gray) → Frontline (amber) → Fr
 
 ## 10. Line Station Expansion
 
-**Status**: Ideas only  
+**Status**: Ideas only
 **Priority**: Medium
 
 ### Summary
@@ -356,32 +368,44 @@ Add dedicated tracking for physical stations currently missing from the app.
 
 ## 11. AI Improvements
 
-**Status**: Ideas only  
-**Priority**: Medium
+**Status**: Portfolio governed by value audit (not open-ended expansion)
+**Priority**: Medium — cleanup and narrow retention over new broad surfaces
+**Authoritative doc:** [ai-feature-value-audit-2026-09-05.md](ai-feature-value-audit-2026-09-05.md)
+**Research note (2026-09-18):** Earlier “expand AI” ideas (QC vision as authority, voice mutation, open NL day Q&A) conflict with the audit. Default stance: **keep extraction**, simplify deterministic features that were presented as AI, disable/retire high-risk or low-unique-value entry points.
 
-### Summary
-Expand AI capabilities beyond current spec/premix/cheese/shipping import parsing.
+### Portfolio direction (from audit)
 
-### Ideas
-- **AI-powered QC assistant** — photo-based defect detection, ingredient verification
-- **Predictive maintenance** — based on downtime trends
-- **Smart scheduling** — AI-optimized run order
-- **Anomaly detection** — real-time flagging of unusual patterns
-- **Natural language queries** — "how many cases did we make yesterday?"
-- **Voice commands** — for hands-free operation on the production floor
-- **AI model fallback** — OpenRouter integration for rate limit resilience
+| Direction | Examples |
+|-----------|----------|
+| **Keep** | Spec/workbook extraction with review + explicit apply; correction memory; sanitizers; cost controls; shared routing/retries |
+| **Keep but simplify** | Production recap, anomalies, schedule ordering — keep deterministic results; drop model narration as the product face |
+| **Consolidate** | Import matching / merge suggest / fill-missing → one bounded “resolve unresolved setup” path |
+| **Disable / retire** | Voice command classification that mutates state; broad day Q&A; shift-optimize chat; mix/recipe chat as primary UX; forecast-from-history-only; quality/label vision treated as release authority |
+
+### Ideas still valid (narrow)
+
+- Stronger deterministic import templates + AI **fallback only** (aligns with importer redesign)
+- AI model routing / fallback providers for **retained** extraction workloads (rate-limit resilience)
+- Observability: cost, failure rate, apply-vs-discard rates for extraction
+
+### Ideas to avoid by default
+
+- Expanding voice → immediate writes without stronger confirmation
+- New open-ended assistants that recombine already-visible live-run facts
+- Presenting deterministic math as dependent on a model
 
 ### Code References
 - `artifacts/api-server/src/routes/ai*.ts` — AI route handlers
 - `lib/ai-memory/` — shared AI memory system
 - `lib/integrations-openai-ai-server/` — AI server integration
 - `artifacts/run-calculator/src/components/ai/` — AI UI components
+- `docs/ai-feature-value-audit-2026-09-05.md` — decision standard
 
 ---
 
 ## 12. Battery & Performance
 
-**Status**: Ideas only  
+**Status**: Ideas only
 **Priority**: Medium
 
 ### Summary
@@ -405,7 +429,7 @@ Reduce battery drain and improve performance, especially on mobile devices.
 
 ## 13. Server-Side Migration
 
-**Status**: Done (slices 1–7 merged; Replit saw the same goal)  
+**Status**: Done (slices 1–7 merged; Replit saw the same goal)
 **Priority**: High
 
 ### Summary
@@ -469,7 +493,7 @@ server genuinely cannot stream (unsaved edits, history, ended-run drain).
 
 ## 14. Responsive Design & Visual Quality
 
-**Status**: Ideas only  
+**Status**: Ideas only
 **Priority**: Medium
 
 ### Summary
@@ -494,9 +518,9 @@ Fix layout issues on phones (too large) and tablets (too small). Prevent overlap
 
 ## 15. Import System Improvements
 
-**Status**: Planning  
-**Full plan**: [docs/import-system-plan.md](import-system-plan.md)  
-**Redesign plan**: [docs/importer-redesign-plan.md](importer-redesign-plan.md)  
+**Status**: Planning
+**Full plan**: [docs/import-system-plan.md](import-system-plan.md)
+**Redesign plan**: [docs/importer-redesign-plan.md](importer-redesign-plan.md)
 **Priority**: High — QC is the primary source for imports
 
 ### Summary
@@ -551,23 +575,38 @@ More accurate, more automatic, more verifiable, less AI:
 
 ## 16. Sync System Improvements
 
-**Status**: Ideas only  
-**Priority**: Medium
+**Status**: Partially built — delta sync and device visibility still missing
+**Priority**: **High** (raised 2026-09-18; was Medium)
+**Full plan:** [sync-system-improvements-plan.md](sync-system-improvements-plan.md)
+**Research:** [improvement-research-2026-09-18.md](improvement-research-2026-09-18.md) §3 Phase A
 
 ### Summary
-Improve cross-device synchronization reliability and reduce conflicts.
+Cross-device sync is already stronger than older backlog text credited. Remaining work is payload size, observability, and operator trust—not greenfield LWW.
 
-### Ideas
-- **Conflict resolution UI** — visual diff when two devices edit same thing
-- **Optimistic locking** — prevent stale writes
-- **Sync health dashboard** — show sync status per device
-- **Offline queue** — queue changes when offline, sync when back
-- **Selective sync** — sync only active run data, not everything
-- **Compression** — reduce sync payload size
-- **Delta sync** — only send changes, not full state
+### Already built (do not re-propose as ideas)
+- **Optimistic locking / LWW** — `canonicalRevision`; additive/tombstone merges (`upsertProtected`)
+- **Conflict-safe merge** — `protectRunValues` + blank-over-populated guard
+- **Live push** — SSE broadcasts on accepted writes
+- **Offline queue** — `syncPushQueue` + operational mutation cursor
+- **Daily-reset session fence** — facility-local boundary force-expires stale sessions
+- **Server-authoritative live calc / auto-track projection** on the sync stream
+- **Wake-recovery timing diagnostics** in Sync Activity
+
+### Still missing (build these)
+1. **Delta sync** (top priority) — JSON Patch against shadow keyed by `canonicalRevision`; full-state fallback; feature-flagged. Evidence: production body-limit incident in `.agents/memory/sync-body-limit.md`
+2. **Complete per-device sync health** — wake timing already exists; add manager-visible last seen, queue depth, and revision lag for each device
+3. **Field-specific conflict visibility** — rejected writes are already signaled; add a non-blocking explanation when a successful server merge keeps another device's value
+4. **Selective sync** — deferred until delta sync is measured
+5. **Compression** — likely lower priority if deltas shrink payloads enough
+
+### Resolved guardrail
+- Client and server blank templates now both include `cartonSize: 1`, with mirrored regression coverage. Keep the lockstep test mandatory whenever defaults change (research §2.1).
 
 ### Code References
 - `artifacts/api-server/src/routes/sync.ts` — sync endpoint
+- `artifacts/api-server/src/lib/protectRunValues.ts` — blank / LWW merge guard
 - `artifacts/run-calculator/src/contexts/SyncContext.tsx` — sync context
-- `.agents/memory/sync-convergence-soak.md` — sync stability notes
+- `artifacts/run-calculator/src/syncPushQueue.ts` — offline queue
+- `.agents/memory/sync-body-limit.md` — payload growth incident
+- `artifacts/api-server/src/routes/sync.convergence.integration.test.ts` — sync convergence coverage
 
