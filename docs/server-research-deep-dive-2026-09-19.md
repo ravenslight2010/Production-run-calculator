@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-19
 **Parent:** [Server research overview](server-research-2026-09-19.md)
-**Related:** [Sync deep dive](sync-deep-dive-2026-09-19.md)
+**Related:** [Sync deep dive](sync-deep-dive-2026-09-19.md), [2026-09-19 operations research](../research/sync-reliability-operations-deep-dive-2026-09-19.md)
 
 ## 1. Request and document limits
 
@@ -52,7 +52,7 @@ The handler:
 - conditionally sends partial peer frames when safe and materially smaller;
 - sends complete frames on gaps or when partial is not worthwhile.
 
-The handler does not currently set `X-Accel-Buffering: no`. Add it only after confirming the deployed proxy needs it. In-process fanout is appropriate for one API instance; multiple serving instances would require a shared bus or sticky ownership.
+The handler does not currently set `X-Accel-Buffering: no`. Add it only after confirming the deployed proxy needs it. The active deployment target is Autoscale, and official Replit documentation confirms that Autoscale can add servers and scale to zero. The reviewed documentation does not explicitly guarantee or prohibit SSE, affinity, buffering, or stream duration. Because fanout is process-local, multiple serving instances would require shared fanout or another verified ownership model. Treat this as a compatibility risk requiring a sanitized live probe, not a confirmed outage.
 
 ## 4. Database pool
 
@@ -65,11 +65,14 @@ Current relevant settings:
 
 Size the pool against actual database connection limits and serving-instance count. SSE clients do not hold database clients. Keep protected write transactions short.
 
+Use `safe_pool_max <= floor((database_capacity - reserves - other_services) / maximum_instances)`. The deployed database capacity, reserves, other-service budget, maximum Autoscale instances, and production pool override are not established by repository evidence. Do not increase the per-process pool until those inputs are known.
+
 ## 5. Health and diagnostics
 
 - `/livez` reports process liveness.
 - `/readyz`, `/healthz`, and `/` include startup, database, AI-configuration, and sustained background-worker state.
 - Current readiness returns 503 when neither configured AI key is available.
+- The readiness key check is inconsistent with the active adapter: readiness accepts `OPENAI_API_KEY`, while the adapter supports Replit Gemini credentials or direct `GOOGLE_API_KEY`. Correct this configuration defect before deciding the broader readiness policy.
 - Manager-facing `GET /api/sync/health` already exists and is included in authorization inventory.
 - Sync health is read-only and must not auto-repair canonical data.
 

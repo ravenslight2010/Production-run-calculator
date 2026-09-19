@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-19
 **Status:** Repository research and design recommendations; not an incident root-cause report
-**Related:** [Sync deep dive](sync-deep-dive-2026-09-19.md), [sync improvements plan](sync-system-improvements-plan.md)
+**Related:** [Sync deep dive](sync-deep-dive-2026-09-19.md), [sync improvements plan](sync-system-improvements-plan.md), [2026-09-19 operations research](../research/sync-reliability-operations-deep-dive-2026-09-19.md)
 
 ## 1. Scope
 
@@ -39,6 +39,8 @@ A plausible failure sequence is:
 4. B's run blob wins even though it did not observe A's change.
 
 This is a design risk, not a confirmed production root cause without trace or reproduction evidence.
+
+Deep research against the current implementation strengthens the protocol finding: a stale complete document with a numerically newer client-authored run timestamp can win because complete writes do not prove their base snapshot. Existing convergence coverage does not include that focused future-clock complete-write case. This establishes a testable protocol gap, not historical incident causality.
 
 `canonicalRevision` is server-maintained, but its increment behavior is route-specific. Ordinary partial day-state PUTs carry `baseSnapshotId`; operational-intent requests carry `baseRevision`. Do not assume every day-state PUT currently has a revision precondition.
 

@@ -44,7 +44,7 @@ content_type = "image/png"
 [[outputs]]
 id = "c-2hBTSxO7Gh39pCtPEP0"
 uri = "file://artifacts/run-calculator/playwright-report/full/index.html"
-type = "text"
+type = "html"
 title = "Full Playwright browser report"
 description = "HTML report from the full browser run against a disposable PostgreSQL database."
 logical_id = "8c815840-c938-44cf-9504-f0afce7efdfa"
@@ -96,3 +96,31 @@ mtime_ms = 1787607714737
 storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:de4fa38f-10e1-481d-ab62-4ad238a33ebf/9d797b4d-3969-437b-b085-05bc6e224317/5cbbc215-9659-4868-b27a-27a488ea43cf"
 storage_version_token = "1787607734009640"
 content_type = "image/jpeg"
+
+[[outputs]]
+id = "jXBIl84dUHTNgQJCcnsXW"
+uri = "file://research/notes.md"
+type = "text"
+title = "Research Notes: Sync Reliability and Operations"
+description = "Live research plan and findings log for reconnects, payloads, SSE, database pooling, and readiness."
+logical_id = "2bf58605-e7f1-442d-9e77-6a9340a91384"
+content_hash = "sha256:2b130de0a6e35e60c935e070a776c631a426a8c2e1312329268d8f8856781688"
+size = 3595
+mtime_ms = 1789833994339
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:de4fa38f-10e1-481d-ab62-4ad238a33ebf/2bf58605-e7f1-442d-9e77-6a9340a91384/967458e1-6ef1-4070-9ff3-882c233656d9"
+storage_version_token = "1789834001430953"
+content_type = "text/markdown"
+
+[[outputs]]
+id = "pMcIGdzFeJ_sc1zFfw8Wg"
+uri = "file://research/sync-reliability-operations-deep-dive-2026-09-19.md"
+type = "text"
+title = "Sync Reliability and Operations Deep Dive"
+description = "Repository-backed research on reconnect causality, payloads, deployed SSE, database pooling, and AI readiness, with 30 saved sources."
+logical_id = "bf1baf74-a41e-4542-918c-8bff5cdece4b"
+content_hash = "sha256:be7f6739d79e61e033560b65184f4c71bc879c957a98c0e94502019e1462300f"
+size = 25972
+mtime_ms = 1789834428691
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:de4fa38f-10e1-481d-ab62-4ad238a33ebf/bf1baf74-a41e-4542-918c-8bff5cdece4b/063e7b3f-234a-4111-a7be-5c849684b652"
+storage_version_token = "1789834513910290"
+content_type = "text/markdown"
