@@ -189,6 +189,7 @@ Adjust dates to facility capacity; do not reorder A before B/C unless a producti
 | Body-limit incident | `.agents/memory/sync-body-limit.md` |
 | Sync convergence suite | `artifacts/api-server/src/routes/sync.convergence.integration.test.ts` |
 | Further architecture research | `docs/further-research-2026-09-18.md` |
+| Capability research pack | `docs/capability-research-pack-2026-09-18.md` |
 
 ---
 
