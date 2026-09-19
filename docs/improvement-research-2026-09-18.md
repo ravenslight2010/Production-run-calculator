@@ -188,6 +188,7 @@ Adjust dates to facility capacity; do not reorder A before B/C unless a producti
 | AI portfolio | `docs/ai-feature-value-audit-2026-09-05.md` |
 | Body-limit incident | `.agents/memory/sync-body-limit.md` |
 | Sync convergence suite | `artifacts/api-server/src/routes/sync.convergence.integration.test.ts` |
+| Further architecture research | `docs/further-research-2026-09-18.md` |
 
 ---
 
