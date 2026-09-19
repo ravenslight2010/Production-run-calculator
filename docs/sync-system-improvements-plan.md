@@ -1,7 +1,7 @@
 # Sync System Improvements — Plan
 
 **Updated:** 2026-09-19 (aligned with current partial-sync implementation)
-**Related:** [sync-deep-dive-2026-09-19.md](sync-deep-dive-2026-09-19.md), [reconnect-reliability-deep-dive-2026-09-19.md](reconnect-reliability-deep-dive-2026-09-19.md), [improvement-research-2026-09-18.md](improvement-research-2026-09-18.md), [idea-backlog.md](idea-backlog.md) §16
+**Related:** [unified reliability plan](sync-reliability-unified-plan-2026-09-19.md), [sync-deep-dive-2026-09-19.md](sync-deep-dive-2026-09-19.md), [reconnect-reliability-deep-dive-2026-09-19.md](reconnect-reliability-deep-dive-2026-09-19.md), [improvement-research-2026-09-18.md](improvement-research-2026-09-18.md), [idea-backlog.md](idea-backlog.md) §16
 
 ## Current State
 
@@ -9,7 +9,7 @@
 
 The sync system (`artifacts/api-server/src/routes/sync.ts`) is considerably more advanced than older backlog text credited it for. Several formerly listed “ideas” are already solved:
 
-- **Optimistic locking / LWW** — every day-state row carries a `canonicalRevision`; writes are additive/tombstone-driven (`upsertProtected`), never a blind overwrite
+- **Protected merge with route-specific revision semantics** — every day-state row carries a `canonicalRevision`, but ordinary day-state PUT retains it and does not enforce it as a universal write precondition; `upsertProtected`, tombstones, and per-run LWW still protect established merge invariants
 - **Conflict-safe merge** — `protectRunValues` + `capMergedResult` guard against a blank/stale push clobbering real data (the "I entered it, it vanished" invariant)
 - **Live push** — SSE (`GET /sync/events`) broadcasts canonical state on every accepted write (`broadcast`, `broadcastMasterDataChanged`, `broadcastReset`, `broadcastRollover`)
 - **Partial PUT** — sparse writes carry `syncVersion: 1` + `baseSnapshotId`; the base is validated under lock and stale/malformed/raced dependencies return complete `partialFallback` without applying the sparse write

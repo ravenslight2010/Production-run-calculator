@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-19
 **Status:** Current repository contract
-**Related:** [Sync improvements plan](sync-system-improvements-plan.md), [reconnect reliability](reconnect-reliability-deep-dive-2026-09-19.md)
+**Related:** [Unified reliability plan](sync-reliability-unified-plan-2026-09-19.md), [Sync improvements plan](sync-system-improvements-plan.md), [reconnect reliability](reconnect-reliability-deep-dive-2026-09-19.md)
 
 ## 1. Corrected architecture summary
 

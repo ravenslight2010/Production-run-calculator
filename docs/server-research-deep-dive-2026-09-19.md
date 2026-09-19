@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-19
 **Parent:** [Server research overview](server-research-2026-09-19.md)
-**Related:** [Sync deep dive](sync-deep-dive-2026-09-19.md), [2026-09-19 operations research](../research/sync-reliability-operations-deep-dive-2026-09-19.md)
+**Related:** [Unified reliability plan](sync-reliability-unified-plan-2026-09-19.md), [Sync deep dive](sync-deep-dive-2026-09-19.md), [2026-09-19 operations research](../research/sync-reliability-operations-deep-dive-2026-09-19.md)
 
 ## 1. Request and document limits
 

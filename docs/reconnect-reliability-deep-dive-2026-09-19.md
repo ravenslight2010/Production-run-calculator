@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-19
 **Status:** Repository research and design recommendations; not an incident root-cause report
-**Related:** [Sync deep dive](sync-deep-dive-2026-09-19.md), [sync improvements plan](sync-system-improvements-plan.md), [2026-09-19 operations research](../research/sync-reliability-operations-deep-dive-2026-09-19.md)
+**Related:** [Unified reliability plan](sync-reliability-unified-plan-2026-09-19.md), [Sync deep dive](sync-deep-dive-2026-09-19.md), [sync improvements plan](sync-system-improvements-plan.md), [2026-09-19 operations research](../research/sync-reliability-operations-deep-dive-2026-09-19.md)
 
 ## 1. Scope
 

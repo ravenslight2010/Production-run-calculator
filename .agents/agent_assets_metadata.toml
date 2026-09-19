@@ -124,3 +124,31 @@ mtime_ms = 1789834428691
 storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:de4fa38f-10e1-481d-ab62-4ad238a33ebf/bf1baf74-a41e-4542-918c-8bff5cdece4b/063e7b3f-234a-4111-a7be-5c849684b652"
 storage_version_token = "1789834513910290"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "VBNy_dI4DAcdv4h7ef6HH"
+uri = "file://research/deep-dive-research-continuation-2026-09-19.md"
+type = "text"
+title = "Integrated Deep-Dive Research Continuation"
+description = "Corrected continuation covering canonicalRevision, complete-write causality, deployment evidence, and the disposable proof test."
+logical_id = "dc1efbf7-5858-49bf-9ee6-757a31f298a0"
+content_hash = "sha256:41e11ce643737070b6d1b90b936e7bc03420e68b59cba1a86ffc3db2b155a0ee"
+size = 7635
+mtime_ms = 1789836569395
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:de4fa38f-10e1-481d-ab62-4ad238a33ebf/dc1efbf7-5858-49bf-9ee6-757a31f298a0/667aa7bd-4391-44e6-8400-47a0296e9e79"
+storage_version_token = "1789836631828520"
+content_type = "text/markdown"
+
+[[outputs]]
+id = "ieo58KqnkHzBrvjsxOyXM"
+uri = "file://docs/sync-reliability-unified-plan-2026-09-19.md"
+type = "text"
+title = "Sync Reliability Unified Plan"
+description = "Cross-document comparison and sequenced plan for causality, readiness, measurement, SSE topology, pool sizing, and policy."
+logical_id = "49edef97-e609-4710-b00a-9ba37c46662b"
+content_hash = "sha256:c345647c3cd522f16e260def116325147fa623a8d17797017c9da067236642e7"
+size = 12730
+mtime_ms = 1789836601286
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:de4fa38f-10e1-481d-ab62-4ad238a33ebf/49edef97-e609-4710-b00a-9ba37c46662b/d09fc591-4d8f-4b2e-ad21-8af6983a1f95"
+storage_version_token = "1789836632400929"
+content_type = "text/markdown"
