@@ -74,9 +74,7 @@
 - [Spec-import stub pollution](spec-import-stub-pollution.md) — spec imports mint all-zero stub recipes in every pool; unlinked stubs persist in prod; audit method + corpus pointer inside.
 - [Corpus regression harness](corpus-harness.md) — no-AI snapshot bench over the real workbook corpus (test:corpus); mix-word rule deliberately beats cheesy components in spec-import routing.
 - [Same-name pool dups](same-name-pool-dups.md) — name-keyed merge can't see two pool rows with one name; fix by deduping rows (heal), not the merge UI; beware tie-break sign under descending sort.
-- [Dev DB connection exhaustion](dev-db-connection-exhaustion.md) + [detached process reaping](detached-process-reaping.md) — "too many clients" can last hours (retry, else reboot; restart both APIs); setsid/nohup dies with the bash session, >2min runs need a workflow.
-- [Pool acquisition deadlines](pool-acquisition-deadlines.md) — node-postgres connectionTimeoutMillis cancels saturated checkout waiters; outer Promise.race does not.
-- [Background scheduler backoff](background-scheduler-backoff.md) — after bounded retry exhaustion, auxiliary DB schedulers back off independently while readiness stays fail-closed.
+- [DB runtime resilience](dev-db-connection-exhaustion.md) + [processes](detached-process-reaping.md) + [deadlines](pool-acquisition-deadlines.md) + [backoff](background-scheduler-backoff.md) — bound and isolate DB recovery work.
 - [Merge target must survive](merge-target-must-survive.md) — pool-name merges must promote a source by rename when the target name has no pool row, or deleting sources destroys the recipe.
 - [Brand-scoped import names](brand-scoped-import-names.md) — cheese/mix import links same-brand or unbranded only, never cross-brand; collisions get a brand prefix; dough/sauce not scoped yet.
 - [Applicator tolerance columns](applicator-tolerance-columns.md) — ozPerPizza = FIRST numeric cell after the name; trailing 0.2/0.1 cells are tolerances; verify via TARGET WEIGHT sum.
@@ -89,15 +87,12 @@
 - [Profile write gating](profile-write-gating.md) — profile saves/deletes gate on hasCapability("manage-profiles") not isManager; boot heals deferred to a capability-gated effect; push queue drops 403s as terminal.
 - [Explicit profile acknowledgement](explicit-profile-ack.md) — manager editor saves must verify canonical server values before success or profile fan-out; implicit autosaves stay LWW-guarded.
 - [PWA update prompts](pwa-update-prompts.md) — vite-plugin-pwa `autoUpdate` reloads clients; interactive “Reload now” UI requires `prompt` so `needRefresh` fires.
-- [Master-data health ownership](master-data-health-ownership.md) — legacy setup rows and purchased crusts stay protected as owned review warnings, not automatic launch blockers.
-- [Master-data audit boundary](master-data-audit-boundary.md) — scans are bounded/read-only; ambiguous refs stay review-only and unavailable immutable history is an explicit coverage gap.
+- [Master-data health and audit](master-data-health-ownership.md) + [boundary](master-data-audit-boundary.md) — bounded read-only reviews preserve owned legacy rows and report coverage gaps.
 - [Browser and release evidence](visual-regression-baselines.md) + [release-browser-evidence.md] + [a11y-coverage-gate.md] + [a11y-dialog-browser-fixtures.md] — isolated, masked browser evidence needs explicit review.
 - [Stoppage light-theme contrast](stoppage-light-theme-contrast.md) — custom orange-700 is too light for pale stop surfaces; use orange-800 in light mode and retain orange-400 in dark mode.
 - [Sync snapshot identity](sync-snapshot-identity.md) + [HTTP failure handling](sync-http-failure-handling.md) + [partial sync](partial-sync-contract.md) + [SSE cleanup](sse-disconnect-registration.md) — stable hashes, non-OK is never acknowledgment, partial writes recover safely, and disconnects clean up before awaits.
 - [Formula import safety](formula-import-safety.md) + [Retained workbook layouts](source-workbook-layouts.md) — compare native units with provenance; varied Excel tables need explicit, fail-closed parser guards.
-- [Release gate budgets](release-check-shard-budget.md) — size time and process use for serialized gates; keep reports revision-bound and explicit about blocked dependents.
-- [Browser release case contract](browser-release-case-contract.md) — device-only browser checks need explicit release-lane inclusion/exclusion decisions to preserve the 159-case contract.
-- [Container image release evidence](container-image-release-evidence.md) — image tags alone are insufficient; retain each pushed digest plus a pull-by-digest OCI revision-label check.
+- [Release gate contracts](release-check-shard-budget.md) + [browser cases](browser-release-case-contract.md) + [container evidence](container-image-release-evidence.md) — bound gates and retain explicit revision evidence.
 - [Source reconciliation evidence boundary](source-reconciliation-evidence-boundary.md) — production repair proof cannot be inferred from a mixed development fixture; bind verification to the matching database.
 - [Source-audit reports and CLI paths](large-source-audit-captures.md) + [source-audit-report-versions.md] + [source-audit-cli-paths.md] — keep hashed captures shard-safe, dispatch supported read versions, and resolve inputs from the script repository.
 - [Importer audit recovery](importer-audit-recovery.md) — retryable audit writes must be user/scope-bound and server-idempotent; never replay source imports automatically.
@@ -107,9 +102,7 @@
 - [Browser fixture and database isolation](browser-fixture-seeding.md) + [browser-e2e-disposable-database.md] — hydrate master data through server fixtures and use disposable DBs for destructive Playwright suites.
 - [Data Health undo coverage](data-health-undo-coverage.md) — verify persisted repair records include future-run snapshots before expecting guarded undo to restore them.
 - [String-reference purge safety](string-reference-purge-safety.md) — recipe stub purges must scan profiles and every historical/current run snapshot before deleting text-linked master data.
-- [Wake sync claim fence](wake-sync-claim-fence.md) — monotonic wake acknowledgment fences stale claims without deadlocking same-tick dough claim requests.
-- [Offline operational intents](offline-operational-intents.md) — reset-fenced, per-ID commands reconcile by occurrence time; End stays local until lifecycle and inventory finalize atomically.
-- [Offline command receipts](offline-command-receipts.md) — real canonical responses are adopted before terminalizing; data-less idempotent duplicates retain receipt metadata without a false adoption.
+- [Wake and offline command safety](wake-sync-claim-fence.md) + [intents](offline-operational-intents.md) + [receipts](offline-command-receipts.md) — fence stale claims and adopt canonical outcomes before terminalizing.
 - [Warehouse and Inventory boundary](warehouse-inventory-boundary.md) — Warehouse prepares production; Inventory maintains stock records; keep destinations and permissions distinct.
 - [Cross-device duplicate reviews](duplicate-review-ledger.md) — server-ledger reminders are facility-scoped; scans add only, and explicit merge/ignore closes work.
 - [Retained AI cache boundary](retained-ai-cache-boundary.md) — cache only unresolved model suggestions; recompute and merge deterministic matches per request.
@@ -132,8 +125,7 @@
 - [Profile import precedence](profile-import-precedence.md) — explicit product-level metadata must fence every later shared-recipe and pool hydration path, including force mode.
 - [Recipe row unit provenance](recipe-row-unit-provenance.md) — unit labels describe raw values only and must follow the selected row set through merges.
 - [Shared master-data refresh](shared-master-data-refresh.md) — facility-wide recipe edits use date-independent SSE nudges; receivers invalidate the canonical bootstrap, not payloads.
-- [Capability-gated controlled dialogs](capability-gated-controlled-dialogs.md) — revoke access with an immediate effective close plus one controlled-state close request; never unmount an open portal abruptly.
-- [Operational dialog viewport safety](operational-dialog-viewport-safety.md) — short landscape overlays need dynamic viewport height and scroll-aware hit tests; inset-0 can stop above fixed navigation.
+- [Operational dialog safety](capability-gated-controlled-dialogs.md) + [viewport](operational-dialog-viewport-safety.md) — close revoked portals safely and keep short-landscape overlays reachable.
 - [Case-based production input validity](case-based-production-input-validity.md) — requested cases without a positive pizzas-per-case value must suppress Sauce/Frontline needs, buffers, exports, and claims.
 - [Local CI PostgreSQL parity](local-ci-postgres-parity.md) — local disposable clusters need CI-matching role and writable socket settings before browser workflow diagnosis is meaningful.
 - [Server operational projection](server-operational-projection.md) — live timer/counter read models travel beside the sync snapshot, never inside its hashed persisted document.
@@ -141,19 +133,16 @@
 - [Source-heal stale-client fence](source-heal-stale-client-fence.md) — a source repair is not durable while sleeping clients can replay unfenced full-pool recipe writes.
 - [Acknowledged master-data propagation](acknowledged-master-data-propagation.md) — local recipe saves must explicitly drive pending-run refresh; cache effects alone can misclassify a save as bootstrap.
 - [ZIP asset inventory safety](zip-asset-inventory.md) — inspect central-directory metadata only; fail closed on unsafe members and label output as review evidence, not installation approval.
-- [AI evaluation boundaries](ai-evaluation-framework-boundary.md) + [network](ai-benchmark-network-boundary.md) — use project-owned offline TypeScript/Vitest; live provider checks require opt-in and are never CI evidence.
+- [AI evaluation and delivery governance](ai-evaluation-framework-boundary.md) + [network](ai-benchmark-network-boundary.md) + [delivery](ai-delivery-governance.md) — offline evidence, full delivery cost, independent checks, and human approval.
 - [WebKit operational-report fixture](webkit-operational-report-fixture.md) — authoritative report smoke needs an isolated canonical snapshot and a sync-write fence after hydration.
 - [Factory baseline ownership](factory-baseline-ownership.md) — cross-service runtime defaults use dependency-free shared constants; historical blank sentinels remain explicit compatibility values.
 - [Managed rebase tree recovery](managed-rebase-tree-recovery.md) — a completed rebase can replay malformed conflict sides without markers; compare its tree with the pre-rebase integrated baseline.
 - [Approved ingredient identities](approved-ingredient-identities.md) — owner-approved Chicken, Bacon, Cilantro, and Goat Cheese targets; keep ambiguous Spinach variants separate.
-- [Background DB recovery](background-db-recovery.md) — retry connection resets only for idempotent/lease-protected passes; sustained failures, not one reset, degrade readiness.
-- [Protected job effects](protected-job-effects.md) — cancellation-safe effects need a serialized commit boundary; long boundaries must renew the worker lease.
+- [Protected background work](background-db-recovery.md) + [job effects](protected-job-effects.md) — retry only safe passes; serialize commit effects and renew long leases.
 - [Revision trend attribution](revision-trend-attribution.md) — classify each historical revision from its own measurements; inherited aggregate failures poison later trend samples.
 - [GitHub Actions evidence extraction](github-actions-evidence-extraction.md) — when connector downloads are forbidden, validate and retain exact reports inside a short-lived CI branch.
 - [Declaration compatibility dependencies](declaration-compatibility-dependencies.md) — mirror package-local links, resolve direct imports, then ignore unrelated dependency-library diagnostics.
 - [Secret refresh for shell operations](secret-refresh-shell.md) — newly confirmed workspace secrets may be absent from shell commands until a relevant workflow refreshes the environment.
-- [Release evidence integrity](production-evidence-revision-binding.md) + [CI-pinned evidence](ci-pinned-evidence.md) + [Release Node pinning](release-node-pinning.md) — bind retained evidence to the controlled revision and pinned runtime.
-- [Release execution recovery](webkit-nix-launch.md) + [finalization retry safety](release-finalization-retry.md) — preserve runtime-library and already-promoted-evidence recovery rules.
-- [Workspace lock refresh](workspace-lock-refresh-pruning.md) + [full browser refresh](full-release-browser-refresh.md) — review lockfile scope and do not accept full evidence with an incomplete browser checkpoint.
+- [Release evidence and recovery](production-evidence-revision-binding.md) + [CI pinning](ci-pinned-evidence.md) + [runtime](release-node-pinning.md) + [execution](webkit-nix-launch.md) + [retry](release-finalization-retry.md) + [workspace](workspace-lock-refresh-pruning.md) + [browser](full-release-browser-refresh.md) — keep evidence revision-bound and recover without accepting incomplete gates.
 - [Section-scoped online edits](section-scoped-online-edits.md) — transient peer locks are UX only; correctness uses row serialization, complete baselines, and durable snapshot fencing.
 - [Automatic staged supply](automatic-staged-supply.md) — active Sauce/Frontline caps are pipeline limits, not lifetime production caps; derive stages from canonical cumulative progress.
