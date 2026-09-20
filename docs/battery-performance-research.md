@@ -1,22 +1,20 @@
 # Battery & Performance — Deep Dive
 
-**Supersedes the original pass below** (kept inline for the Wake Lock / SSE findings,
-which still hold) with a genuine code audit: every `setInterval` in the web app, checked
-individually for whether it respects tab visibility, and whether it's duplicated across
-component instances. This is not greenfield the way the first pass characterized it —
-there's a genuinely excellent existing pattern (`useClock`) sitting right next to several
-components that don't use it.
+**Supersedes the original pass below** with a code audit of every `setInterval` in the
+web app, checked individually for tab-visibility handling and duplication. The audit
+found an existing visibility-aware pattern (`useClock`), one persistent display timer
+that does not use it, and five bounded retry countdowns that could reuse the same
+pausing behavior.
 
 ## Scope Correction: This App Is Web-Only Now
 
 Before anything else: `.agents/memory/web-mobile-parity.md` confirms the standalone
 Expo/React Native mobile app was formally archived (`_archived/mobile`) — *"maintaining
 an archived native client created stale routes, dependencies, and parity tests without
-serving a current product target."* The product is a single responsive web app used on
-desktop, phone, and tablet browsers, installed as a PWA on the floor tablets. So "battery
-saving across the app" means the web app's behavior on phone/tablet browsers — there is
-no separate native codebase with its own battery APIs (KeepAwake, native BatteryLevel,
-etc.) to audit here.
+serving a current product target."* The product is a single responsive web app for
+desktop, phone, and tablet browsers. So "battery saving across the app" means the web
+app's behavior on phone/tablet browsers — there is no separate native codebase with its
+own battery APIs (KeepAwake, native BatteryLevel, etc.) to audit here.
 
 ---
 
@@ -33,48 +31,35 @@ code:
 - Used exactly once, centrally, in `LiveRunContext.tsx` — the intended single source of
   truth for "what time is it" across the live-run UI
 
-**The problem**: a full audit of every `setInterval` call in the web app (13 calls
-across 8 files) found several that duplicate `useClock`'s job with none of its
-battery-awareness:
+The audit found 13 `setInterval` calls across 8 files. Most are not clocks and should
+not be forced through `useClock`, but two UI areas lack its visibility-aware behavior:
 
 | File | Interval | Visibility-aware? | Notes |
 |---|---|---|---|
 | `hooks/useClock.ts` | 1s (live) / 10s (idle) | **Yes** | The model to follow |
-| `components/InventoryTab.tsx` | 1s, **x5 separate call sites** | No | Countdown-style "retry in" timers, each its own independent `setInterval` |
-| `components/CanonicalRunViewCard.tsx` | 1s + 15s | No | "time ago" elapsed display |
+| `components/InventoryTab.tsx` | 1s, **x5 separate call sites** | No | Bounded "retry in" timers; active only while `retryIn > 0` |
+| `components/CanonicalRunViewCard.tsx` | 1s + 15s | No | Persistent while the card is mounted |
 | `hooks/useHomeSyncCoordination.ts` | 60s | No (but low-frequency enough not to matter much) | Date-change reconnect check |
 | `pages/home.tsx` | 60s | No (same) | Date rollover check |
 | `pwaUpdateChecks.ts` | 30 min | Effectively yes (also checks on `visibilitychange`/`focus`) | Already fine |
 | `fieldChecks.ts` | 120s | No (low-frequency, fine) | Signal flush |
 | `operationalIntentOutbox.ts` | (lock renewal) | N/A | Different concern (lease renewal), not a UI ticker |
 
-**Why the 5 duplicated 1s timers in `InventoryTab.tsx` matter most**: each is an
-independent OS-level timer that wakes the JS engine and triggers a React state update
-every second, for as long as its "counting" flag is true — completely independent of
-whether the tab is visible. If a user backgrounds the tab mid-count (switches apps,
-locks the screen while a count is in progress), these keep firing every second, waking
-the device repeatedly, until the counting flag naturally clears. `useClock` already
-solves exactly this problem one file over and simply isn't reused here.
+The `InventoryTab.tsx` intervals are conditional and self-terminating, so they are not a
+standing battery drain. They can still continue briefly after the page becomes hidden
+if a retry countdown is active. The stronger persistent candidate is
+`CanonicalRunViewCard.tsx`: its 1-second age timer and 15-second refresh timer run for
+the card's full mounted lifetime without checking visibility.
 
-**This is a recognized anti-pattern, not just this codebase's opinion**: a comparable
-real-world case (an unrelated production app, a poker table UI) hit the identical
-architecture — *"During an active turn ~4-6 independent timers run... Each triggers
-separate React state updates. Measurable battery/jank on a low-end client"* — and the
-fix that project settled on was exactly the shared-ticker pattern this app already has
-in `useClock`: *"One shared `useSharedTicker(hz)` context the timed components subscribe
-to."*
-
-**Recommendation**: extend `useClock` (or extract a lower-level
-`useVisibilityAwareInterval(callback, delayMs)` hook from its guts) and have
-`InventoryTab.tsx`'s five countdown call sites and `CanonicalRunViewCard.tsx`'s
-elapsed-time display consume it instead of rolling their own `setInterval`. This doesn't
-need a shared *value* the way `useClock`'s single `Date` is shared in `LiveRunContext` —
-each countdown still owns its own state — it just needs the *pausing behavior* factored
-out so five call sites don't each reimplement (or fail to implement) it.
+**Recommendation**: extract a lower-level
+`useVisibilityAwareInterval(callback, delayMs, enabled)` hook from `useClock`. Apply it
+first to `CanonicalRunViewCard.tsx`, then use it to remove the five repeated countdown
+effects in `InventoryTab.tsx`. Each countdown should retain its own state and remain
+disabled when `retryIn` is zero.
 
 ---
 
-## Finding 2: Everything Else Checked Out Clean
+## Finding 2: Other Audited Timer Paths Need No Immediate Change
 
 To be fair to the rest of the codebase — a lot of adjacent things I checked specifically
 *because* they're common battery drains turned out fine:
@@ -87,11 +72,8 @@ To be fair to the rest of the codebase — a lot of adjacent things I checked sp
   (e.g. holding a stepper button) — bounded to while actively held, not a background
   drain
 - **No AJAX-polling anti-pattern**: the app's live-data path is SSE-based (see the sync
-  plan), not interval-based polling — this matters because mobile radios specifically
-  penalize exactly the "small request every N seconds forever" pattern (each poll forces
-  a full radio power-state escalation cycle); SSE's single long-lived connection avoids
-  that entirely, which is a real, if easy to overlook, generic advantage over
-  poll-based designs on cellular connections
+  plan), not interval-based polling. The audit found no repository evidence that a
+  transport replacement is needed for battery performance.
 
 ---
 
@@ -111,20 +93,19 @@ auto-activation re-acquire on the already-covered visibility path).
 
 ---
 
-## Finding 4: Keep SSE Over WebSocket (from the original pass, still valid)
+## Finding 4: No Evidence Supports Replacing SSE
 
-Real-world measurements put WebSocket at **2-3x the mobile battery drain of SSE**,
-because WebSocket's ping/pong keepalives (every 25-30s) fight the cellular radio's
-power-saving sleep cycles, while SSE's HTTP-level keepalives cooperate with them better.
-This app's traffic pattern (client writes occasionally, server pushes updates) doesn't
-match the profile where WebSocket's bidirectional-heavy advantage would matter. **Keep
-SSE** — don't build the backlog's "WebSocket instead of SSE" item.
+This app's traffic pattern uses occasional client writes and server-pushed updates.
+The audit found no measured project need for bidirectional WebSocket transport and no
+repository evidence that replacing SSE would reduce battery use. Keep SSE unless future
+profiling identifies a transport-specific problem; do not justify a migration with an
+unsupported generic battery comparison.
 
 ---
 
 ## Priority Order
-1. **Timer consolidation** (Finding 1) — concrete, code-audited, has a working model
-   already in the same codebase to copy from
+1. **Visibility-aware display timers** (Finding 1) — start with the persistent
+   `CanonicalRunViewCard` timers, then deduplicate the bounded Inventory retry effects
 2. **Screen Wake Lock + Floor Mode** (Finding 3) — concrete, high-value, well-scoped
 3. Everything else in the original backlog (lazy tab loading, service worker caching,
    virtual scrolling) remains reasonable but unaudited — sequence behind 1 and 2
@@ -133,8 +114,8 @@ SSE** — don't build the backlog's "WebSocket instead of SSE" item.
 | File | Purpose |
 |------|---------|
 | `artifacts/run-calculator/src/hooks/useClock.ts` | The pattern to extract/reuse |
-| `artifacts/run-calculator/src/components/InventoryTab.tsx` | 5 duplicated un-pausable 1s timers (lines ~1575, 1811, 1995, 2178, 2342) |
-| `artifacts/run-calculator/src/components/CanonicalRunViewCard.tsx` | 1s + 15s timers, no visibility check |
+| `artifacts/run-calculator/src/components/InventoryTab.tsx` | 5 bounded retry countdown effects with no visibility check |
+| `artifacts/run-calculator/src/components/CanonicalRunViewCard.tsx` | Persistent 1s + 15s timers with no visibility check |
 | `artifacts/run-calculator/src/pwaUpdateChecks.ts` | Already-correct reference for a low-frequency, visibility-aware interval |
 | `.agents/memory/web-mobile-parity.md` | Confirms web-only product scope |
 | `artifacts/run-calculator/src/pages/home.tsx` (`floorModeEnabled`) | Where Screen Wake Lock would be wired in |
