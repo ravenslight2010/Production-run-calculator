@@ -408,25 +408,42 @@ Add dedicated tracking for physical stations currently missing from the app.
 
 ## 12. Battery & Performance
 
-**Status**: Ideas only  
-**Priority**: Medium
+**Status**: Deep dive complete — one concrete code-audited fix, plus the Wake Lock item  
+**Full plan**: [docs/battery-performance-research.md](battery-performance-research.md)  
+**Priority**: Medium — timer consolidation has a working model already in the codebase to copy from
 
 ### Summary
-Reduce battery drain and improve performance, especially on mobile devices.
+Reduce battery drain and improve performance on phone/tablet browsers (the product is
+web-only now — the standalone mobile app was archived, see
+`.agents/memory/web-mobile-parity.md`). A full audit of every `setInterval` in the web
+app found the real, concrete issue: `hooks/useClock.ts` already implements the correct
+pattern (1s-while-live / 10s-idle cadence, pauses entirely when the tab is hidden,
+Android focus-fallback) but is only used in one place — `InventoryTab.tsx` has 5
+separate un-pausable 1-second countdown timers, and `CanonicalRunViewCard.tsx` has
+another, none of which reuse it. This is a recognized anti-pattern (validated against a
+real-world case with the identical symptom and fix). Also confirmed: Floor Mode still
+has no Screen Wake Lock integration (can be silently defeated by OS screen-dimming), and
+the backlog's own "WebSocket instead of SSE" idea would *increase* battery drain per
+real-world measurements — keep SSE.
 
 ### Ideas
-- **Reduce network polling frequency** — adaptive polling based on run state
+- **Extract `useClock`'s visibility-pausing logic into a reusable hook** and have `InventoryTab.tsx`'s 5 countdown timers + `CanonicalRunViewCard.tsx`'s elapsed-time timer consume it — the concrete, code-audited fix from this pass
+- **Screen Wake Lock for Floor Mode** — keeps the idle "big numbers" kiosk display actually on screen instead of dimming per OS timeout
+- **Reduce network polling frequency** — largely moot; sync/auto-track already moved to server-push (SSE), not polling
 - **Lazy load tab content** — only load active tab data
 - **Service worker caching** — offline support for viewed data
-- **WebSocket instead of SSE** — more efficient bidirectional sync
+- ~~**WebSocket instead of SSE**~~ — **research says keep SSE**; real-world measurements put WebSocket at 2-3x the mobile battery drain due to keepalive overhead
 - **Background sync** — batch updates instead of real-time push for non-critical data
-- **Compression** — gzip/brotli for API responses
+- **Compression** — gzip/brotli for API responses — **owned by the sync plan's Phase 3**, don't duplicate
 - **Virtual scrolling** — for long lists (inventory, history)
 
 ### Code References
-- `artifacts/run-calculator/src/contexts/LiveRunContext.tsx` — live data context
-- `artifacts/run-calculator/src/hooks/useAutoTrack.ts` — auto-tracking engine
+- `artifacts/run-calculator/src/hooks/useClock.ts` — the pattern to extract/reuse
+- `artifacts/run-calculator/src/components/InventoryTab.tsx` — 5 duplicated un-pausable 1s timers
+- `artifacts/run-calculator/src/components/CanonicalRunViewCard.tsx` — another un-pausable 1s timer
+- `artifacts/run-calculator/src/contexts/LiveRunContext.tsx` — live data context, `useClock`'s one current consumer
 - `artifacts/api-server/src/routes/sync.ts` — sync endpoint
+- `artifacts/run-calculator/src/pages/home.tsx` (`floorModeEnabled`) — where Screen Wake Lock would be wired in
 
 ---
 
