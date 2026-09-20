@@ -47,3 +47,24 @@ anything or picking a base branch.
 2. Code on `codex/workspace`, commit locally, push to `origin/codex/workspace`.
 3. Promote to `main` only via PR (main is protected; CI must pass).
 4. Log every fix in `.agents/memory/codex-fixes.md` per AGENTS.md.
+
+## 2026-09-20 update — main integrated into codex/workspace
+
+- Merge `8b9d9aed` brought PR #62/#63/#65 from `main` into `codex/workspace`
+  (merge-base was `afa30029`).
+- Auto-merged clean: `sync.ts`, `sync.integration.test.ts`, `importer-redesign-plan.md`,
+  `.agents/memory/idea-backlog.md`.
+- Resolved conflicts: kept Replit's updated versions of the parallel 09-18 planning docs
+  (`improvement-research`, `further-research`, `capability-research-pack`,
+  `sync-system-improvements-plan`) since they reflect the 09-19 implemented state;
+  kept both MEMORY.md registry blocks; `ci-pinned-evidence.md` = ours (superset).
+- Grafted main's unique idea-backlog sections into ours as §18 Auto-Track, §19 Incident
+  Notifications, §20 Merge-Suggest (Replit's own §17 is Residual Observability).
+- Restored main-only docs Replit had deleted: `ai-system-research.md`,
+  `autotrack-coordination-research.md`, `battery-performance-research.md`,
+  `incident-notifications-research.md`, `merge-suggest-research.md`.
+- Verification on this machine: full lib typecheck + TS v6 boundary + recovery audit +
+  api-spec checks + api-server typecheck all green. Web `pretypecheck` cannot run here
+  (arm64 sandbox; lockfile pins `lightningcss-linux-x64-gnu` — do NOT regenerate the
+  lockfile on this box, it feeds CI pinned-evidence hashes). DB-backed suites need
+  `DATABASE_URL`/CI per `post-merge-setup.md` and `integration-test-db-binding.md`.

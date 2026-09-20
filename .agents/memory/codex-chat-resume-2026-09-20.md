@@ -46,3 +46,10 @@ re-asking "what were we working on". See also `codex-branch-convention.md`.
 - Claude bug tracker: no open bugs (as of 2026-09-20).
 - AGENTS.md rules: check memory files before changes, log fixes after, never push to
   `main` directly, use branches + PRs, CI must pass.
+
+## Merge follow-up (same session)
+
+- Integrated `origin/main` into `codex/workspace` (merge `8b9d9aed`); details and
+  conflict resolutions in `codex-branch-convention.md` ("2026-09-20 update").
+- Branch `codex/workspace` is now a superset: Replit workstream + main's route/heartbeat
+  restore (PR #62) + both planning corpora.
