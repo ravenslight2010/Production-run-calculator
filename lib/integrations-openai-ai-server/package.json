@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@google/genai": "^2.22.0",
-    "openai": "^7.15.0",
+    "openai": "^7.17.0",
     "p-limit": "^7.3.2",
     "p-retry": "^8.0.1"
   },
