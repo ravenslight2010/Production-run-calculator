@@ -9,8 +9,9 @@ import type { Server } from "node:http";
 import express, { type Express } from "express";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import pg from "pg";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { signToken } from "../lib/auth";
+import { FIELD_CHECK_RETENTION_DAYS } from "../lib/fieldChecks";
 
 type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
@@ -161,6 +162,22 @@ function observation(
   };
 }
 
+function syncAcknowledgmentObservation(
+  observationId: string,
+  outcome: "success" | "failure",
+) {
+  return {
+    observationId,
+    checkName: "sync-acknowledgment",
+    checkVersion: "1",
+    outcome,
+    observedAt: new Date().toISOString(),
+    appBuild: "sync-recovery-integration",
+    deviceCategory: "mobile-chrome",
+    metrics: { latencyMs: outcome === "failure" ? 321 : 123 },
+  };
+}
+
 describe("field-check evidence from two authenticated clients", () => {
   it("deduplicates a shared failure and preserves bounded context after recovery", async () => {
     const failure = observation("phone-tablet-shared-failure", "failure", "mobile-chrome");
@@ -229,6 +246,63 @@ describe("field-check evidence from two authenticated clients", () => {
 
     const runRows = await db.select().from(dailySyncTable);
     expect(runRows).toEqual([]);
+  });
+
+  it("clears an expired legacy sync failure after current acknowledgment evidence", async () => {
+    const legacyFailure = syncAcknowledgmentObservation(
+      "legacy-sync-ack-failure",
+      "failure",
+    );
+    const failureResponse = await request(PHONE_USER, "POST", "/api/field-checks/observations", {
+      observations: [legacyFailure],
+    });
+    expect(failureResponse.status).toBe(202);
+
+    await db.update(fieldCheckObservationsTable)
+      .set({
+        receivedAt: new Date(
+          Date.now() - (FIELD_CHECK_RETENTION_DAYS + 1) * 24 * 60 * 60 * 1000,
+        ),
+      })
+      .where(eq(fieldCheckObservationsTable.observationId, legacyFailure.observationId));
+
+    const recoveryResponse = await request(
+      TABLET_USER,
+      "POST",
+      "/api/field-checks/observations",
+      {
+        observations: [
+          syncAcknowledgmentObservation("current-sync-ack-recovery", "success"),
+        ],
+      },
+    );
+    expect(recoveryResponse.status).toBe(202);
+
+    const reportResponse = await request(MANAGER, "GET", "/api/field-checks");
+    expect(reportResponse.status).toBe(200);
+    const report = await reportResponse.json() as {
+      actionableCount: number;
+      overallStatus: string;
+      checks: Array<{
+        name: string;
+        status: string;
+        failureCount: number;
+        actionable: boolean;
+        issueStatus: string | null;
+        recentFailures: unknown[];
+        lastSuccessfulAt: string | null;
+      }>;
+    };
+    expect(report.actionableCount).toBe(0);
+    expect(report.overallStatus).not.toBe("needs-review");
+    expect(report.checks.find((check) => check.name === "sync-acknowledgment")).toMatchObject({
+      status: "healthy",
+      failureCount: 1,
+      actionable: false,
+      issueStatus: "recovered",
+      recentFailures: [],
+      lastSuccessfulAt: expect.any(String),
+    });
   });
 });
 
