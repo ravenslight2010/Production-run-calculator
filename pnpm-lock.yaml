@@ -167,8 +167,8 @@ importers:
   .:
     devDependencies:
       prettier:
-        specifier: ^3.9.6
-        version: 3.9.6
+        specifier: ^3.9.7
+        version: 3.9.7
       typescript:
         specifier: ~6.0.3
         version: 6.0.3
@@ -870,7 +870,7 @@ importers:
     devDependencies:
       orval:
         specifier: 8.32.0
-        version: 8.32.0(@tanstack/react-query@5.102.8(react@19.3.0))(prettier@3.9.6)(typescript@6.0.3)(zod@4.6.2)
+        version: 8.32.0(@tanstack/react-query@5.102.8(react@19.3.0))(prettier@3.9.7)(typescript@6.0.3)(zod@4.6.2)
       typescript:
         specifier: 6.0.3
         version: 6.0.3
@@ -4887,8 +4887,8 @@ packages:
     resolution: {integrity: sha512-9ZhXKM/rw350N1ovuWHbGxnGh/SNJ4cnxHiM0rxE4VN41wsg8P8zWn9hv/buK00RP4WvlOyr/RBDiptyxVbkZQ==}
     engines: {node: '>=0.10.0'}
 
-  prettier@3.9.6:
-    resolution: {integrity: sha512-OpN0zzVdiaiAhxpuuj5efpIS4sY9j7bY6uR5mnj5yPzGkdkjNKSJeUThPb60Jw29QuAZgA4o+/iB49kFiaBX6g==}
+  prettier@3.9.7:
+    resolution: {integrity: sha512-T3mF5P7HFzZVLDQuCUNtJj6WK1pcpLMweMNUVwGb01bLNkH9AkKxtZvmInw8K6bnn2O3d6/5RHl6zSHiBAD0Og==}
     engines: {node: '>=14'}
     hasBin: true
 
@@ -9191,7 +9191,7 @@ snapshots:
       ws: 8.21.3
       zod: 4.6.2
 
-  orval@8.32.0(@tanstack/react-query@5.102.8(react@19.3.0))(prettier@3.9.6)(typescript@6.0.3)(zod@4.6.2):
+  orval@8.32.0(@tanstack/react-query@5.102.8(react@19.3.0))(prettier@3.9.7)(typescript@6.0.3)(zod@4.6.2):
     dependencies:
       '@commander-js/extra-typings': 15.0.0(commander@15.0.0)
       '@orval/angular': 8.32.0(typescript@6.0.3)
@@ -9225,7 +9225,7 @@ snapshots:
       typedoc-plugin-coverage: 4.0.3(typedoc@0.28.20(typescript@6.0.3))
       typedoc-plugin-markdown: 4.13.0(typedoc@0.28.20(typescript@6.0.3))
     optionalDependencies:
-      prettier: 3.9.6
+      prettier: 3.9.7
     transitivePeerDependencies:
       - '@faker-js/faker'
       - '@modelcontextprotocol/sdk'
@@ -9408,7 +9408,7 @@ snapshots:
     dependencies:
       xtend: 4.0.2
 
-  prettier@3.9.6: {}
+  prettier@3.9.7: {}
 
   pretty-bytes@5.6.0: {}
 
