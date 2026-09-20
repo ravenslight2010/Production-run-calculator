@@ -408,25 +408,40 @@ Add dedicated tracking for physical stations currently missing from the app.
 
 ## 12. Battery & Performance
 
-**Status**: Ideas only  
-**Priority**: Medium
+**Status**: Deep dive complete — visibility-aware timers and Wake Lock are the concrete items
+**Full plan**: [docs/battery-performance-research.md](battery-performance-research.md)
+**Priority**: Medium — the existing `useClock` behavior provides the implementation pattern
 
 ### Summary
-Reduce battery drain and improve performance, especially on mobile devices.
+Reduce battery drain and improve performance on phone/tablet browsers (the product is
+web-only now — the standalone mobile app was archived, see
+`.agents/memory/web-mobile-parity.md`). A full audit of every `setInterval` in the web
+app found a reusable pattern: `hooks/useClock.ts` already implements
+pattern (1s-while-live / 10s-idle cadence, pauses entirely when the tab is hidden,
+Android focus-fallback) but is only used in one place. `CanonicalRunViewCard.tsx` has
+persistent 1-second and 15-second timers without visibility handling. `InventoryTab.tsx`
+has 5 similar one-second retry countdown effects, but they are bounded and active only
+while `retryIn > 0`. Also confirmed: Floor Mode has no Screen Wake Lock integration,
+and the repository provides no measured reason to replace SSE with WebSocket.
 
 ### Ideas
-- **Reduce network polling frequency** — adaptive polling based on run state
+- **Extract `useClock`'s visibility-pausing logic into a reusable hook** and apply it first to `CanonicalRunViewCard.tsx`, then to the 5 bounded Inventory retry countdowns
+- **Screen Wake Lock for Floor Mode** — keeps the idle "big numbers" kiosk display actually on screen instead of dimming per OS timeout
+- **Reduce network polling frequency** — largely moot; sync/auto-track already moved to server-push (SSE), not polling
 - **Lazy load tab content** — only load active tab data
 - **Service worker caching** — offline support for viewed data
-- **WebSocket instead of SSE** — more efficient bidirectional sync
+- ~~**WebSocket instead of SSE**~~ — keep SSE unless project profiling identifies a transport-specific problem
 - **Background sync** — batch updates instead of real-time push for non-critical data
-- **Compression** — gzip/brotli for API responses
+- **Compression** — gzip/brotli for API responses — **owned by the sync plan's Phase 3**, don't duplicate
 - **Virtual scrolling** — for long lists (inventory, history)
 
 ### Code References
-- `artifacts/run-calculator/src/contexts/LiveRunContext.tsx` — live data context
-- `artifacts/run-calculator/src/hooks/useAutoTrack.ts` — auto-tracking engine
+- `artifacts/run-calculator/src/hooks/useClock.ts` — the pattern to extract/reuse
+- `artifacts/run-calculator/src/components/InventoryTab.tsx` — 5 bounded retry countdown effects without visibility handling
+- `artifacts/run-calculator/src/components/CanonicalRunViewCard.tsx` — persistent 1s + 15s timers without visibility handling
+- `artifacts/run-calculator/src/contexts/LiveRunContext.tsx` — live data context, `useClock`'s one current consumer
 - `artifacts/api-server/src/routes/sync.ts` — sync endpoint
+- `artifacts/run-calculator/src/pages/home.tsx` (`floorModeEnabled`) — where Screen Wake Lock would be wired in
 
 ---
 
