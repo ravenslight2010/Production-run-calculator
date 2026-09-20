@@ -1276,3 +1276,15 @@ In that state the sauce/applicator effects `return`/`continue` BEFORE the local 
 **Why it was needed**: 4 CI checks failed on the first merged run (Typecheck, Unit tests, API Postgres, rollback rehearsal) — every failure traced to Replit-integration artifacts (evidence staleness, catalog/ID mismatch, workflow syntax), not to our app behavior.
 
 **Verification**: root typecheck + api-server typecheck green; workflow lint (actionlint 1.7.12) passes all 8 files; local api-server units 586/586 (DB tests skip). Full CI authority: run 35138904564 -> fixed in follow-up run.
+
+## 2026-09-20 — Readiness gate ignored Render's `GOOGLE_API_KEY` provider
+
+**File(s):** `artifacts/api-server/src/routes/health.ts`, `artifacts/api-server/src/routes/health.test.ts`
+
+**What was wrong:** `/api/readyz` and `/api/healthz` only treated `AI_INTEGRATIONS_GEMINI_API_KEY` or `OPENAI_API_KEY` as a configured AI provider. Render's single-service deploy uses the standard Gemini key `GOOGLE_API_KEY` (the only key path `client.ts` accepts for off-Replit deploys), so a Render instance with startup healthy and DB healthy still reported `dependencies: "error"` → 503 degraded → Render marked the service down.
+
+**What the fix was:** Added `process.env.GOOGLE_API_KEY` to the readiness `aiConfigured` check, and added two tests (GOOGLE-only → `dependencies: ok`; no key → 503 `dependencies: error`). The flat checks body never carried the `detail` string, so assertions use statuses only.
+
+**Why it was needed:** Render healthchecks against `/api/readyz`; without this, even a successful redeploy of `main` would stay red when the env uses `GOOGLE_API_KEY`.
+
+**Verification:** `vitest run src/routes/health.test.ts` — 6/6 pass; api-server typecheck clean.
