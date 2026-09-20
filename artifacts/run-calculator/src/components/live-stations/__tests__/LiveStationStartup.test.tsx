@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { type ReactNode, useEffect, useMemo, useRef } from "react";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { FormProvider, useForm, useWatch } from "react-hook-form";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HomeCtx } from "../../../contexts/HomeCtx";
@@ -72,12 +72,14 @@ const STATION_VALUES: FormValues = {
 
 function StationProviders({
   status,
+  values = STATION_VALUES,
   children,
 }: {
   status: "pending" | "running";
+  values?: FormValues;
   children: ReactNode;
 }) {
-  const form = useForm<FormValues>({ defaultValues: STATION_VALUES });
+  const form = useForm<FormValues>({ defaultValues: values });
   const currentRun = status === "running" ? RUNNING_RUN : PENDING_RUN;
   const dayState = useMemo<DayState>(
     () => ({ runs: [currentRun], currentIndex: 0 }),
@@ -125,8 +127,8 @@ function StationProviders({
     setRunToTime: noop,
     setWriteError: noop,
     updateDrainingRunValues: noop,
-    v: STATION_VALUES,
-    ve: STATION_VALUES,
+    v: values,
+    ve: values,
   };
 
   return (
@@ -134,8 +136,8 @@ function StationProviders({
       <HomeTabCtx.Provider value={homeValue}>
         <FormProvider {...form}>
           <LiveRunProvider
-            v={STATION_VALUES}
-            ve={STATION_VALUES}
+            v={values}
+            ve={values}
             runStatus={status}
             currentRun={currentRun}
             currentRunId={RUN_ID}
@@ -181,6 +183,32 @@ const STATIONS = [
     pendingSelector: { text: "Active Skid Building" },
     runningSelector: { text: "Active Skid Building" },
   },
+] as const;
+
+const FRONTLINE_APPLICATOR_VALUES: FormValues = {
+  ...STATION_VALUES,
+  app2Type: "Cheese",
+  app2OzPerPizza: 2,
+  app2BatchLbs: 25,
+  app2CheeseRecipeName: "House Cheese 2",
+  app2CheeseRecipe: [{ ingredient: "Mozzarella", lbs: 25 }],
+  app3Type: "Cheese",
+  app3OzPerPizza: 2,
+  app3BatchLbs: 25,
+  app3CheeseRecipeName: "House Cheese 3",
+  app3CheeseRecipe: [{ ingredient: "Mozzarella", lbs: 25 }],
+  app4Type: "Cheese",
+  app4OzPerPizza: 2,
+  app4BatchLbs: 25,
+  app4CheeseRecipeName: "House Cheese 4",
+  app4CheeseRecipe: [{ ingredient: "Mozzarella", lbs: 25 }],
+};
+
+const FRONTLINE_APPLICATOR_LOCK_CASES = [
+  { slot: "app1", label: "App 1 — Cheese" },
+  { slot: "app2", label: "App 2 — Cheese" },
+  { slot: "app3", label: "App 3 — Cheese" },
+  { slot: "app4", label: "App 4 — Cheese" },
 ] as const;
 
 function expectSelector(
@@ -268,23 +296,26 @@ describe("live station startup", () => {
     expect(controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(false);
   });
 
-  it("keeps Frontline correction controls disabled while a peer owns the applicator section, then restores them", () => {
-    claimManualSectionLock(RUN_ID, "app1", "peer-device", 30_000, true);
-    render(
-      <StationProviders status="running">
-        <LiveFrontlineTabContent />
-      </StationProviders>,
-    );
+  it.each(FRONTLINE_APPLICATOR_LOCK_CASES)(
+    "keeps $slot Frontline correction controls disabled while a peer owns the applicator section, then restores them",
+    ({ slot, label }) => {
+      claimManualSectionLock(RUN_ID, slot, "peer-device", 30_000, true);
+      render(
+        <StationProviders status="running" values={FRONTLINE_APPLICATOR_VALUES}>
+          <LiveFrontlineTabContent />
+        </StationProviders>,
+      );
 
-    const controls = screen.getAllByRole("button", { name: /consumed batches correction/ });
-    expect(controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(true);
+      const controls = within(screen.getByText(label).parentElement!).getAllByRole("button", { name: /consumed batches correction/ });
+      expect(controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(true);
 
-    act(() => {
-      releaseManualSectionLock(RUN_ID, "app1", "peer-device");
-    });
+      act(() => {
+        releaseManualSectionLock(RUN_ID, slot, "peer-device");
+      });
 
-    expect(controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(false);
-  });
+      expect(controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(false);
+    },
+  );
 });
 
 /**
