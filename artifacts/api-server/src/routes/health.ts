@@ -46,7 +46,9 @@ async function readiness(req: Request, res: Response): Promise<void> {
     }
 
     const aiConfigured = Boolean(
-      process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.OPENAI_API_KEY,
+      process.env.AI_INTEGRATIONS_GEMINI_API_KEY ||
+        process.env.GOOGLE_API_KEY ||
+        process.env.OPENAI_API_KEY,
     );
     checks.dependencies = aiConfigured
       ? { status: "ok" }
