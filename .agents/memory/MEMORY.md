@@ -159,3 +159,6 @@
 - [Workspace lock refresh](workspace-lock-refresh-pruning.md) + [full browser refresh](full-release-browser-refresh.md) — review lockfile scope and do not accept full evidence with an incomplete browser checkpoint.
 - [Section-scoped online edits](section-scoped-online-edits.md) — transient peer locks are UX only; correctness uses row serialization, complete baselines, and durable snapshot fencing.
 - [Automatic staged supply](automatic-staged-supply.md) — active Sauce/Frontline caps are pipeline limits, not lifetime production caps; derive stages from canonical cumulative progress.
+- [Release verification](release-check-shard-budget.md) + [revision binding](revision-bound-release-evidence.md) + [full verifier](release-evidence-verifier-mode.md) + [browser contract](release-browser-coverage-contract.md) + [gate dependencies](release-gate-dependencies.md) — release reports must be current, complete, mode-verified, and explicit about blocked dependents.
+- [Production evidence revision binding](production-evidence-revision-binding.md) — operational reports may emit an unknown build revision; release evidence must bind to a controlled deploy revision, not infer it from live data.
+- [CI-pinned evidence refresh](ci-pinned-evidence.md) — retained evaluation manifests must move with the pinned Node runtime and lockfile hash.
