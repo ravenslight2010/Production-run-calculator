@@ -330,8 +330,11 @@ async function assertZoomedUsable(page: Page, screen: string): Promise<void> {
   await assertKeyboardTraversal(page, `${screen} at 200% zoom`, 4);
 }
 
-async function signUp(page: Page, role: "manager" | "supervisor" = "manager"): Promise<void> {
-  const username = uniqueTestId("a11y");
+async function signUp(
+  page: Page,
+  role: "manager" | "supervisor" | "operator" = "manager",
+  username = uniqueTestId("a11y"),
+): Promise<void> {
   testUsernames.add(username);
   await signUpAndHandleOnboarding(page, username, "AccessibilitySmoke123!", {
     signupCode: signupCode(),
@@ -531,6 +534,58 @@ async function seedPendingRun(page: Page): Promise<string> {
     .toEqual({ runId, startedAt: null, endedAt: null });
   await expect(page.locator('[data-testid="button-start-run"]')).toBeVisible();
   return runId;
+}
+
+async function seedBreakSchedule(): Promise<{
+  runIds: [string, string];
+  deletedRunId: string;
+}> {
+  if (!process.env.DATABASE_URL) {
+    throw new Error("DATABASE_URL must be configured for break scheduling browser tests.");
+  }
+  const date = new Date().toISOString().slice(0, 10);
+  const runIds: [string, string] = [
+    uniqueTestId("break_run_one"),
+    uniqueTestId("break_run_two"),
+  ];
+  const deletedRunId = uniqueTestId("deleted_after_run");
+  const now = Date.now();
+  const db = new Client({ connectionString: process.env.DATABASE_URL });
+  try {
+    await db.connect();
+    await db.query("DELETE FROM daily_sync WHERE date = $1 AND scope = 'live'", [date]);
+    await db.query(
+      `INSERT INTO daily_sync (date, scope, data, updated_at)
+       VALUES ($1, 'live', $2::jsonb, NOW())`,
+      [
+        date,
+        JSON.stringify({
+          dayState: {
+            date,
+            runs: [
+              { id: runIds[0], brand: "Break E2E One", flavor: "Morning", casesNeeded: 0 },
+              { id: runIds[1], brand: "Break E2E Two", flavor: "Afternoon", casesNeeded: 0 },
+            ],
+            currentIndex: 0,
+            resetAt: 0,
+            breaks: [
+              { slot: 1, enabled: true, mode: "after-run", runId: deletedRunId, durationMin: 30 },
+              { slot: 2, enabled: false, mode: "after-run", durationMin: 30 },
+              { slot: 3, enabled: false, mode: "after-run", durationMin: 30 },
+            ],
+          },
+          runValues: {
+            [runIds[0]]: { casesNeeded: 0, pizzasPerCase: 12, approxLineSpeed: 10 },
+            [runIds[1]]: { casesNeeded: 0, pizzasPerCase: 12, approxLineSpeed: 10 },
+          },
+          runValuesUpdatedAt: { [runIds[0]]: now, [runIds[1]]: now },
+        }),
+      ],
+    );
+  } finally {
+    await db.end().catch(() => {});
+  }
+  return { runIds, deletedRunId };
 }
 
 async function openSettings(page: Page): Promise<Locator> {
@@ -818,6 +873,116 @@ test.describe("accessibility smoke", () => {
     await expect(scheduleCalendar).toBeHidden();
     await scheduleEditor.getByRole("button", { name: "Close schedule editor" }).click();
     await expect(scheduleEditor).toBeHidden();
+  });
+
+  test("manager break plans persist and operators can view placements without edit controls", async ({
+    page,
+    browser,
+  }) => {
+    test.setTimeout(120_000);
+    await signUp(page);
+    await seedBreakSchedule();
+    await page.evaluate(() => {
+      for (const key of Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))) {
+        if (key?.startsWith("run-calc")) localStorage.removeItem(key);
+      }
+    });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+
+    await page.getByRole("button", { name: "More" }).click();
+    await page.getByRole("menuitem", { name: "Schedule", exact: true }).click();
+    const scheduledDaysDialog = page.getByRole("dialog", { name: "Scheduled Days" });
+    await expect(scheduledDaysDialog).toBeVisible();
+    await scheduledDaysDialog
+      .getByTestId("schedule-today-card")
+      .getByRole("button", { name: "Edit", exact: true })
+      .click();
+
+    const scheduleEditor = page.getByRole("dialog", { name: /Plan for/ });
+    const breakEditor = scheduleEditor.getByTestId("schedule-breaks");
+    await expect(breakEditor).toContainText("Each planned break is fixed at 30 minutes.");
+    await expect(breakEditor.getByText("Break 1", { exact: true })).toBeVisible();
+    await expect(breakEditor.getByText("Break 2", { exact: true })).toBeVisible();
+    await expect(breakEditor.getByText("Break 3", { exact: true })).toBeVisible();
+    await expect(
+      breakEditor.getByText("The selected run was deleted or is no longer assigned.", {
+        exact: true,
+      }),
+    ).toBeVisible();
+
+    for (const [slot, time] of [[1, "06:30"], [2, "08:00"], [3, "09:30"]] as const) {
+      await breakEditor
+        .getByRole("combobox", { name: `Break ${slot} placement` })
+        .selectOption("at-time");
+      await breakEditor.getByLabel(`Break ${slot} time`).fill(time);
+    }
+    const preview = breakEditor.getByTestId("schedule-break-preview");
+    await expect(preview).toContainText("Break 1");
+    await expect(preview).toContainText("Break 2");
+    await expect(preview).toContainText("Break 3");
+    await scan(page, "break schedule editor", [], '[data-testid="schedule-breaks"]');
+
+    const saveResponse = page.waitForResponse(
+      (response) =>
+        response.url().includes("/api/sync/today") &&
+        response.request().method() === "PUT",
+    );
+    await scheduleEditor.getByRole("button", { name: "Save Schedule", exact: true }).click();
+    expect((await saveResponse).ok()).toBe(true);
+    await expect(scheduledDaysDialog.getByTestId("schedule-today-card")).toBeVisible();
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    await page.getByRole("button", { name: "More" }).click();
+    await page.getByRole("menuitem", { name: "Schedule", exact: true }).click();
+    await page
+      .getByRole("dialog", { name: "Scheduled Days" })
+      .getByTestId("schedule-today-card")
+      .getByRole("button", { name: "Edit", exact: true })
+      .click();
+    const reloadedEditor = page.getByRole("dialog", { name: /Plan for/ });
+    const reloadedBreakEditor = reloadedEditor.getByTestId("schedule-breaks");
+    for (const [slot, time] of [[1, "06:30"], [2, "08:00"], [3, "09:30"]] as const) {
+      await expect(
+        reloadedBreakEditor.getByRole("combobox", { name: `Break ${slot} placement` }),
+      ).toHaveValue("at-time");
+      await expect(reloadedBreakEditor.getByLabel(`Break ${slot} time`)).toHaveValue(time);
+    }
+    await expect(reloadedBreakEditor.getByTestId("schedule-break-preview")).toContainText("Break 3");
+    await page.locator("#replit-dev-banner").evaluateAll((nodes) => {
+      for (const node of nodes) node.remove();
+    });
+    await reloadedEditor
+      .getByRole("button", { name: "Close schedule editor" })
+      .click({ force: true });
+    await expect(reloadedEditor).toBeHidden();
+
+    await page.getByRole("button", { name: "More" }).click();
+    await page.getByRole("menuitem", { name: "Summary", exact: true }).click();
+    const managerTimeline = page.getByTestId("day-timeline");
+    await expect(managerTimeline).toBeVisible();
+    await expect(managerTimeline).toContainText("Break 1 · 30 min");
+    await expect(managerTimeline).toContainText("Break 2 · 30 min");
+    await expect(managerTimeline).toContainText("Break 3 · 30 min");
+
+    const operatorPage = await browser.newPage();
+    const operatorUsername = uniqueTestId("break_operator");
+    await signUp(operatorPage, "operator", operatorUsername);
+    await operatorPage.reload({ waitUntil: "domcontentloaded" });
+    await operatorPage.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    await operatorPage.getByRole("button", { name: "More" }).click();
+    await expect(
+      operatorPage.getByRole("menuitem", { name: "Schedule", exact: true }),
+    ).toHaveCount(0);
+    await operatorPage.getByRole("menuitem", { name: "Summary", exact: true }).click();
+    const operatorTimeline = operatorPage.getByTestId("day-timeline");
+    await expect(operatorTimeline).toBeVisible();
+    await expect(operatorTimeline).toContainText("Break 1 · 30 min");
+    await expect(operatorTimeline).toContainText("Break 2 · 30 min");
+    await expect(operatorTimeline).toContainText("Break 3 · 30 min");
+    await expect(operatorPage.getByTestId("schedule-breaks")).toHaveCount(0);
+    await operatorPage.close();
   });
 
   test("supervisors can review field checks without physical-device attestation controls", async ({ page }) => {
