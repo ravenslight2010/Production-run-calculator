@@ -9,6 +9,7 @@ import {
   recordWakeRecoveryDiagnostic,
 } from "./syncDiagnostics";
 import { FIELD_CHECK_SIGNAL_EVENT } from "./fieldChecks";
+import { syncWriteFieldCheck } from "./syncWriteResponse";
 
 describe("sync diagnostics", () => {
   beforeEach(() => localStorage.clear());
@@ -76,6 +77,66 @@ describe("sync diagnostics", () => {
       { checkName: "sync-acknowledgment", outcome: "success", metrics: {} },
     ]);
     expect(loadSyncDiagnostics("2026-08-21")).toHaveLength(6);
+  });
+
+  it("emits manager acknowledgment signals for Home write outcomes", () => {
+    const signals: Array<{ checkName: string; outcome: string }> = [];
+    const listener = (event: Event) => {
+      const detail = (event as CustomEvent<{ checkName: string; outcome: string }>).detail;
+      signals.push({ checkName: detail.checkName, outcome: detail.outcome });
+    };
+    window.addEventListener(FIELD_CHECK_SIGNAL_EVENT, listener);
+
+    recordSyncDiagnostic({
+      kind: "failure",
+      at: 1,
+      date: "2026-08-21",
+      message: "Authorization rejected",
+      fieldCheck: syncWriteFieldCheck({ ok: false, status: 403 }),
+    });
+    recordSyncDiagnostic({
+      kind: "stale",
+      at: 2,
+      date: "2026-08-21",
+      message: "Reset-stale write",
+      fieldCheck: syncWriteFieldCheck({ ok: true, status: 200, stale: true }),
+    });
+    recordSyncDiagnostic({
+      kind: "failure",
+      at: 3,
+      date: "2026-08-21",
+      message: "Retries exhausted",
+      fieldCheck: syncWriteFieldCheck({ ok: false, status: 0, retriesExhausted: true }),
+    });
+    recordSyncDiagnostic({
+      kind: "ack",
+      at: 4,
+      date: "2026-08-21",
+      message: "Local write acknowledged",
+      fieldCheck: syncWriteFieldCheck({ ok: true, status: 200 }),
+    });
+    recordSyncDiagnostic({
+      kind: "failure",
+      at: 5,
+      date: "2026-08-21",
+      message: "Foreground recovery failed",
+      response: "foreground-recovery",
+    });
+    recordSyncDiagnostic({
+      kind: "failure",
+      at: 6,
+      date: "2026-08-21",
+      message: "Partial peer update was unusable",
+      response: "partial-fallback",
+    });
+
+    window.removeEventListener(FIELD_CHECK_SIGNAL_EVENT, listener);
+    expect(signals).toEqual([
+      { checkName: "sync-acknowledgment", outcome: "failure" },
+      { checkName: "sync-acknowledgment", outcome: "failure" },
+      { checkName: "sync-acknowledgment", outcome: "failure" },
+      { checkName: "sync-acknowledgment", outcome: "success" },
+    ]);
   });
 
   it("bounds recent activity and can clear one date without touching another", () => {

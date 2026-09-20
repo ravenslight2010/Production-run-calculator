@@ -28,6 +28,31 @@ export type PartialSyncEnvelope = {
   data?: unknown;
 };
 
+export type SyncWriteFieldCheck = {
+  checkName: "sync-acknowledgment";
+  outcome: "success" | "failure";
+};
+
+/**
+ * Classifies only terminal outcomes of a local sync write. Other sync
+ * diagnostics (stream, peer fallback, and foreground recovery) deliberately
+ * stay outside this field check.
+ */
+export function syncWriteFieldCheck(input: {
+  ok: boolean;
+  status: number;
+  stale?: boolean;
+  retriesExhausted?: boolean;
+}): SyncWriteFieldCheck | undefined {
+  if (input.stale || input.retriesExhausted || input.status === 401 || input.status === 403) {
+    return { checkName: "sync-acknowledgment", outcome: "failure" };
+  }
+  if (input.ok) {
+    return { checkName: "sync-acknowledgment", outcome: "success" };
+  }
+  return undefined;
+}
+
 interface ConsumeSyncWriteResponseOptions<T> {
   applyCanonical?: (data: T) => void | Promise<void>;
   onStale?: (body: SyncWriteResponseBody<T>) => void | Promise<void>;

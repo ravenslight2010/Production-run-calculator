@@ -7,11 +7,34 @@ import {
   persistedSyncPayload,
   readCurrentRecoveryJson,
   reconstructPartialSyncPayload,
+  syncWriteFieldCheck,
   syncPayloadMatchesSnapshot,
   syncPayloadSnapshotId,
 } from "./syncWriteResponse";
 
 describe("consumeSyncWriteResponse", () => {
+  it.each([
+    ["authorization rejection", { ok: false, status: 403 }],
+    ["reset-stale rejection", { ok: true, status: 200, stale: true }],
+    ["exhausted retry", { ok: false, status: 0, retriesExhausted: true }],
+  ])("classifies %s as a failed sync acknowledgment", (_label, input) => {
+    expect(syncWriteFieldCheck(input)).toEqual({
+      checkName: "sync-acknowledgment",
+      outcome: "failure",
+    });
+  });
+
+  it("classifies a successful local write as a successful sync acknowledgment", () => {
+    expect(syncWriteFieldCheck({ ok: true, status: 200 })).toEqual({
+      checkName: "sync-acknowledgment",
+      outcome: "success",
+    });
+  });
+
+  it("does not classify non-terminal diagnostics as a sync acknowledgment", () => {
+    expect(syncWriteFieldCheck({ ok: false, status: 503 })).toBeUndefined();
+  });
+
   it("immediately self-applies the server canonical payload on a successful write", async () => {
     const applyCanonical = vi.fn();
     const canonical = {

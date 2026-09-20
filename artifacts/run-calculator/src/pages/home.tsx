@@ -317,6 +317,7 @@ import {
   persistedSyncPayload,
   reconstructPartialSyncPayload,
   syncPayloadMatchesSnapshot,
+  syncWriteFieldCheck,
 } from "../syncWriteResponse";
 import {
   canonicalProfileKey,
@@ -9822,7 +9823,7 @@ export default function Home() {
           "Sync needs attention before this change can be shared",
           String(res.status),
           currentRunId,
-          { checkName: "sync-acknowledgment", outcome: "failure" },
+          syncWriteFieldCheck(res),
         );
         syncPushQueueRef.current.finish({ drainQueued: false });
         setSyncRetryWaiting(false);
@@ -9883,7 +9884,7 @@ export default function Home() {
           "Server rejected the write after a reset; local change is retained",
           "reset-stale",
           undefined,
-          { checkName: "sync-acknowledgment", outcome: "failure" },
+          syncWriteFieldCheck({ ...res, stale: true }),
         );
         syncPushQueueRef.current.finish({ drainQueued: false });
         setSyncRetryWaiting(false);
@@ -9923,7 +9924,7 @@ export default function Home() {
         "Server acknowledged the local change",
         "200",
         currentRunId,
-        { checkName: "sync-acknowledgment", outcome: "success" },
+        syncWriteFieldCheck(res),
       );
       // Record the synced signature ONLY after a successful PUT, so a failed
       // push is never treated as synced (which would block its retry).
@@ -9962,7 +9963,7 @@ export default function Home() {
           "Server did not acknowledge the change; local change is retained",
           "network",
           undefined,
-          { checkName: "sync-acknowledgment", outcome: "failure" },
+          syncWriteFieldCheck({ ok: false, status: 0, retriesExhausted: true }),
         );
         syncPushQueueRef.current.finish({ drainQueued: false });
         setSyncRetryWaiting(false);
