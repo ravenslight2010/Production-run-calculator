@@ -238,6 +238,7 @@ export const LiveSauceTabContent = memo(function LiveSauceTabContent() {
               testId="output-sauce-batches"
               pipeline="sauce"
               disabled={!!sauceLock}
+              disabledReason={sauceLock?.peer ? "Corrections unavailable while another station is editing." : undefined}
             />
              {/* Passive countdown only. Automatic staged supply determines the
                  visible on-line, ready, in-production, and still-to-make values. */}

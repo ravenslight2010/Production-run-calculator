@@ -61,7 +61,7 @@ export const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
             if (row.batchProgressField) {
               const slot = row.station as "app1" | "app2" | "app3" | "app4";
               const made = Math.max(0, Number(v[row.batchProgressField]) || 0);
-              return <BatchMadeRow key={row.key} label={row.label} totalBatches={row.amount} made={made} onIncrement={() => setManualAppProgress(slot, made + 1)} onDecrement={() => setManualAppProgress(slot, made - 1)} isLive={isLive} disabled={!!appLocks[slot]} testId={testId} sub={row.recipeName} pipeline="frontline" />;
+              return <BatchMadeRow key={row.key} label={row.label} totalBatches={row.amount} made={made} onIncrement={() => setManualAppProgress(slot, made + 1)} onDecrement={() => setManualAppProgress(slot, made - 1)} isLive={isLive} disabled={!!appLocks[slot]} disabledReason={appLocks[slot]?.peer ? "Corrections unavailable while another station is editing." : undefined} testId={testId} sub={row.recipeName} pipeline="frontline" />;
             }
             const bd = row.station === "sauce" && row.unit === "batches" ? sauceBarrelBreakdown(row.amount, calc.sauceEffBarrel) : null;
             return <StatRow key={row.key} label={row.label} value={bd ? `${fmtNum(row.amount, 2)} batches · ${bd.totalBarrels} barrels` : `${fmtNum(row.amount, row.unit === "lbs" ? 1 : 2)} ${row.unit}`} testId={testId} highlight={row.amount > 0} sub={row.recipeName} />;

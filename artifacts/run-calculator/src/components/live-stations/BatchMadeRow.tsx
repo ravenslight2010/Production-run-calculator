@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { computeAutomaticFrontlineSupply, computeAutomaticSauceSupply } from "@workspace/live-calc";
 import { fmtNum } from "../../utils";
 
@@ -11,6 +12,7 @@ export interface BatchMadeRowProps {
   testId?: string;
   sub?: string;
   disabled?: boolean;
+  disabledReason?: string;
   pipeline?: "sauce" | "frontline";
 }
 
@@ -25,8 +27,10 @@ export function BatchMadeRow({
   testId,
   sub,
   disabled,
+  disabledReason,
   pipeline,
 }: BatchMadeRowProps) {
+  const generatedStatusId = useId();
   const supply = pipeline === "sauce"
     ? computeAutomaticSauceSupply({ total: totalBatches, consumed: made })
     : computeAutomaticFrontlineSupply({ total: totalBatches, consumed: made });
@@ -37,15 +41,23 @@ export function BatchMadeRow({
     ? "done ✓"
     : `${fmtNum(remaining, 2)} ${unitLabel} still to make`;
   const highlight = totalBatches > 0 && !done;
+  const correctionStatusId = testId ? `${testId}-correction-status` : generatedStatusId;
   return (
     <div className={`flex items-start justify-between py-1.5 border-b border-border/40 last:border-0 ${highlight ? "text-primary" : done ? "text-emerald-400" : ""}`}>
       <span className="text-sm text-muted-foreground">{label}</span>
       <div className="flex items-start gap-2">
         {isLive && (totalBatches > 0 || made > 0) && (
-          <div className="flex items-center gap-0.5 mt-0.5 shrink-0">
-            <button type="button" onClick={onDecrement} disabled={disabled} className="h-5 w-5 rounded border border-input bg-muted/40 hover:bg-muted text-xs font-bold text-foreground transition-colors flex items-center justify-center select-none touch-none" aria-label="Decrease consumed batches correction">−</button>
-            <span className="text-xs font-mono w-5 text-center tabular-nums text-muted-foreground select-none">{made}</span>
-            <button type="button" onClick={onIncrement} disabled={disabled} className="h-5 w-5 rounded border border-input bg-muted/40 hover:bg-muted text-xs font-bold text-foreground transition-colors flex items-center justify-center select-none touch-none" aria-label="Increase consumed batches correction">+</button>
+          <div className="flex flex-col items-end gap-1 mt-0.5 shrink-0">
+            <div className="flex items-center gap-0.5">
+              <button type="button" onClick={onDecrement} disabled={disabled} aria-describedby={disabledReason ? correctionStatusId : undefined} className="h-5 w-5 rounded border border-input bg-muted/40 hover:bg-muted text-xs font-bold text-foreground transition-colors flex items-center justify-center select-none touch-none" aria-label="Decrease consumed batches correction">−</button>
+              <span className="text-xs font-mono w-5 text-center tabular-nums text-muted-foreground select-none">{made}</span>
+              <button type="button" onClick={onIncrement} disabled={disabled} aria-describedby={disabledReason ? correctionStatusId : undefined} className="h-5 w-5 rounded border border-input bg-muted/40 hover:bg-muted text-xs font-bold text-foreground transition-colors flex items-center justify-center select-none touch-none" aria-label="Increase consumed batches correction">+</button>
+            </div>
+            {disabledReason && (
+              <span id={correctionStatusId} role="status" className="max-w-48 text-right text-xs leading-tight text-amber-700 dark:text-amber-400" data-testid={correctionStatusId}>
+                {disabledReason}
+              </span>
+            )}
           </div>
         )}
         <div className="flex flex-col items-end gap-0.5">
