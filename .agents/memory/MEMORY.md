@@ -124,6 +124,8 @@
 - [Physical-total attestations](physical-total-attestations.md) — automatic observations and manager-confirmed totals remain separate append-only evidence streams.
 - [Repair definition fingerprints](repair-definition-fingerprints.md) — hash immutable metadata and source contracts, never callbacks; independently digested payloads stay separate.
 - [Replit production detection](replit-production-detection.md) — `REPLIT_ENVIRONMENT=production` can appear in isolated workspaces; use deployment/runtime markers for destructive-operation fences.
+- [Codex branch convention](codex-branch-convention.md) — `main` is Render-deploy only, `Replit` is the primary app coder, `codex/workspace` is Codex’s working branch; GitHub auth as ravenslight2010; Replit is ~121 commits ahead of main (unmerged sync-contract/staged-supply work) and 5 behind.
+- [Codex chat resume 2026-09-20](codex-chat-resume-2026-09-20.md) — session recovery note: catch-up facts, branch divergence snapshot, verified PR #62/#63/#64/#65 lineage, and open next-step options.
 - [Server/local alert ownership](server-local-alert-ownership.md) — use identical pause-aware IDs, crossing arms, and one atomic device claim so push and offline fallback never double-display.
 - [Dated sync authorization](dated-sync-authorization.md) — staff collaborate through `/sync/today`; generic dated writes are protected scheduling and must not trust client date claims.
 - [Bounded archive range reads](bounded-archive-range-reads.md) — cap date spans and results, align the index, and split exact/range endpoints when OpenAPI cannot type query unions.
