@@ -105,6 +105,7 @@ function makeParams(nowMs: number, overrides: Partial<Params> = {}): Params {
 
 type SwitchoverContractCase = {
   name: string;
+  casesPerSkid: number;
   pressCasesLeft: number;
   casesNeeded: number;
   ppm: number;
@@ -122,43 +123,50 @@ type SwitchoverContractCase = {
  * exactly two skids, exactly one skid, a completed press, missing timing, and
  * a run whose total need is less than two skids.
  */
-const PRESS_THRESHOLD_CONTRACT_CASES: SwitchoverContractCase[] = [
-  {
-    name: "exactly two skids remain",
-    pressCasesLeft: 40,
-    casesNeeded: 200,
-    ppm: 100,
-    expected: { banner: true, frontline: true, packaging: false, shortRun: false },
-  },
-  {
-    name: "exactly one skid remains",
-    pressCasesLeft: 20,
-    casesNeeded: 200,
-    ppm: 100,
-    expected: { banner: true, frontline: true, packaging: true, shortRun: false },
-  },
-  {
-    name: "zero cases remain",
-    pressCasesLeft: 0,
-    casesNeeded: 200,
-    ppm: 100,
-    expected: { banner: false, frontline: false, packaging: false, shortRun: false },
-  },
-  {
-    name: "timing is missing",
-    pressCasesLeft: 20,
-    casesNeeded: 200,
-    ppm: 0,
-    expected: { banner: false, frontline: false, packaging: false, shortRun: false },
-  },
-  {
-    name: "the run is shorter than two skids",
-    pressCasesLeft: 30,
-    casesNeeded: 30,
-    ppm: 100,
-    expected: { banner: true, frontline: true, packaging: false, shortRun: true },
-  },
-];
+const PRESS_THRESHOLD_CONTRACT_CASES: SwitchoverContractCase[] = [20, 12].flatMap(
+  (casesPerSkid) => [
+    {
+      name: "exactly two skids remain",
+      casesPerSkid,
+      pressCasesLeft: 2 * casesPerSkid,
+      casesNeeded: 10 * casesPerSkid,
+      ppm: 100,
+      expected: { banner: true, frontline: true, packaging: false, shortRun: false },
+    },
+    {
+      name: "exactly one skid remains",
+      casesPerSkid,
+      pressCasesLeft: casesPerSkid,
+      casesNeeded: 10 * casesPerSkid,
+      ppm: 100,
+      expected: { banner: true, frontline: true, packaging: true, shortRun: false },
+    },
+    {
+      name: "zero cases remain",
+      casesPerSkid,
+      pressCasesLeft: 0,
+      casesNeeded: 10 * casesPerSkid,
+      ppm: 100,
+      expected: { banner: false, frontline: false, packaging: false, shortRun: false },
+    },
+    {
+      name: "timing is missing",
+      casesPerSkid,
+      pressCasesLeft: casesPerSkid,
+      casesNeeded: 10 * casesPerSkid,
+      ppm: 0,
+      expected: { banner: false, frontline: false, packaging: false, shortRun: false },
+    },
+    {
+      name: "the run is shorter than two skids",
+      casesPerSkid,
+      pressCasesLeft: 1.5 * casesPerSkid,
+      casesNeeded: 1.5 * casesPerSkid,
+      ppm: 100,
+      expected: { banner: true, frontline: true, packaging: false, shortRun: true },
+    },
+  ],
+);
 
 // ── vibrate stub ──────────────────────────────────────────────────────────────
 // vibrate is called synchronously inside fireStage (AFTER the Notification
@@ -539,12 +547,12 @@ describe("useNotifications — warehouse-staging effect (no Notification API)", 
 
 describe("warehouse switchover threshold contract", () => {
   it.each(PRESS_THRESHOLD_CONTRACT_CASES)(
-    "keeps the Warehouse banner and notifications aligned when $name",
+    "keeps the Warehouse banner and notifications aligned when $name at $casesPerSkid cases/skid",
     async (testCase) => {
       const bannerModel = getWarehouseSwitchoverBannerModel({
         currentRun: { endedAt: null },
         runStatus: "running",
-        casesPerSkid: 20,
+        casesPerSkid: testCase.casesPerSkid,
         casesNeeded: testCase.casesNeeded,
         ppm: testCase.ppm,
         pressCasesLeft: testCase.pressCasesLeft,
@@ -571,7 +579,7 @@ describe("warehouse switchover threshold contract", () => {
           v: {
             freezerTime: 10,
             casesNeeded: testCase.casesNeeded,
-            casesPerSkid: 20,
+            casesPerSkid: testCase.casesPerSkid,
           },
         }),
       });
