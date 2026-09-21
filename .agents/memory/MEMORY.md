@@ -152,6 +152,7 @@
 - [Automatic staged supply](automatic-staged-supply.md) — active Sauce/Frontline caps are pipeline limits, not lifetime production caps; derive stages from canonical cumulative progress.
 - [Readiness evidence](readiness-evidence.md) — retain only allowlisted health outcomes with explicit deployment/revision identity, bounded samples, and expiry.
 - [Publish Python environment](publish-python-environment.md) — exclude incomplete development-only `.pythonlibs` from published source when `uv lock` fails before the Node build.
+- [Artifact preview ports](artifact-preview-ports.md) — artifact web workflows may expose a dynamic preview port; use workflow status rather than assuming port 5000.
 - [Replit custom migrations](replit-custom-migrations.md) — chain raw trigger/function migrations before the production server because publish schema sync may skip them.
 - [Atomic import operations](atomic-import-operations.md) — reviewed multi-entity imports use stable operation IDs, server transactions, canonical acknowledgment, and touched-row-only guarded undo.
 - [Approved audit maintenance](audit-maintenance-workflow.md) — redactions/deletions run through a checked-in transaction command on a separate admin channel, never the app role.

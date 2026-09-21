@@ -634,7 +634,7 @@ export const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                     </div>
                   </summary>
                   <div className="px-4 pb-4 border-t border-border/20 pt-3 bg-card/60">
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
                       {isCartonedValue(v.cartoned as string) && (
                         <div className="flex flex-col">
                           <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Cartons/Case</span>

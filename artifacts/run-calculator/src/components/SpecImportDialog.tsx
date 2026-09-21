@@ -902,14 +902,14 @@ export default function SpecImportDialog({
       // silently cancel the import (the late parse result is discarded by the
       // generation guard, so to the user "nothing happens"). Close is explicit
       // only: the X button or Cancel.
-      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4"
+      className="responsive-dialog-overlay fixed inset-x-0 top-0 z-[80] flex h-[100dvh] min-h-0 items-center justify-center overflow-y-auto bg-black/60"
     >
       <div
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="spec-import-dialog-title"
-        className="w-full max-w-lg max-h-[90vh] flex flex-col rounded-xl border border-border bg-background shadow-xl"
+        className="responsive-dialog-card flex flex-col rounded-xl border border-border bg-background shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-border p-4">
@@ -923,7 +923,7 @@ export default function SpecImportDialog({
             // While the commit is writing profiles/recipes, closing would let the
             // user navigate mid-apply — keep the dialog up until it finishes.
             disabled={applying}
-            className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50 disabled:pointer-events-none"
+            className="responsive-icon-button flex items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50 disabled:pointer-events-none"
             aria-label="Close"
           >
             <X className="h-4 w-4" />

@@ -16722,7 +16722,7 @@ export default function Home() {
         )}
 
         {/* Header */}
-        <header className="responsive-row flex items-center justify-between gap-2 print:mb-4">
+        <header className="responsive-shell-header responsive-row flex items-center justify-between gap-3 print:mb-4">
           <div className="flex items-center gap-2 min-w-0">
             <div className="w-8 h-8 sm:w-9 sm:h-9 rounded bg-primary text-primary-foreground flex items-center justify-center shrink-0 print:hidden">
               <Factory className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -16737,7 +16737,7 @@ export default function Home() {
               </p>
             </div>
           </div>
-          <div className="responsive-row print:hidden flex items-center gap-1.5 shrink-0">
+          <div className="responsive-utility-row print:hidden flex items-center gap-1.5 shrink-0">
             <SyncStatusPopover
               status={syncStatus}
               connected={syncConnected}
@@ -16760,7 +16760,7 @@ export default function Home() {
               type="button"
               onClick={() => setShowScreensDialog(true)}
               title="Cast to other screens"
-              className="flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+              className="responsive-icon-button flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
             >
               <Monitor className="w-4 h-4" />
             </button>
@@ -16770,7 +16770,7 @@ export default function Home() {
                 type="button"
                 onClick={() => setShowFloorMode(true)}
                 title="Floor mode — big numbers, status color"
-                className="flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+                className="responsive-icon-button flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
               >
                 <Layers className="w-4 h-4" />
               </button>
@@ -16780,7 +16780,7 @@ export default function Home() {
               type="button"
               onClick={toggleFullscreen}
               title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen / kiosk mode"}
-              className="flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+              className="responsive-icon-button flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
             >
               {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
             </button>
@@ -16799,7 +16799,7 @@ export default function Home() {
                 }
               }}
               title={isManager ? "Manager — full access" : isSupervisor ? "Click to exit supervisor mode" : "Click to enter supervisor mode"}
-              className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs font-semibold border transition-colors ${
+              className={`min-h-11 flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs font-semibold border transition-colors ${
                 isSupervisor
                   ? "border-primary/40 text-primary bg-primary/10 hover:bg-primary/20"
                   : "border-border text-muted-foreground bg-muted/30 hover:bg-muted/60"
@@ -16826,7 +16826,7 @@ export default function Home() {
                       ? `More — ${managerAttentionTotal} manager action${managerAttentionTotal === 1 ? "" : "s"} need attention`
                       : "More"
                   }
-                  className="relative flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+                  className="responsive-icon-button relative flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
                 >
                   <Menu className="w-4 h-4" />
                   {managerAttentionTotal > 0 && (
@@ -17096,25 +17096,25 @@ export default function Home() {
               <ManagementDepartment staff={<DeferredStaffManagementSurface />} />
 
               <TabsList className="station-nav fixed bottom-0 left-0 right-0 z-50 grid grid-cols-6 w-full rounded-none border-t border-border bg-background/95 backdrop-blur-sm print:hidden">
-                <TabsTrigger value="run" data-testid="tab-run" className="flex flex-col items-center gap-0.5 px-1">
+                <TabsTrigger value="run" data-testid="tab-run" className="min-h-11 flex flex-col items-center gap-0.5 px-1">
                   <Activity className="w-4 h-4 shrink-0" />
-                  <span className="text-[10px] truncate">Run</span>
+                  <span className="text-xs truncate">Run</span>
                 </TabsTrigger>
-                <TabsTrigger value="dough" data-testid="tab-dough" className="flex flex-col items-center gap-0.5 px-1">
+                <TabsTrigger value="dough" data-testid="tab-dough" className="min-h-11 flex flex-col items-center gap-0.5 px-1">
                   <Layers className="w-4 h-4 shrink-0" />
-                  <span className="text-[10px] truncate">Dough</span>
+                  <span className="text-xs truncate">Dough</span>
                 </TabsTrigger>
-                <TabsTrigger value="sauce" data-testid="tab-sauce" className="flex flex-col items-center gap-0.5 px-1">
+                <TabsTrigger value="sauce" data-testid="tab-sauce" className="min-h-11 flex flex-col items-center gap-0.5 px-1">
                   <Droplets className="w-4 h-4 shrink-0" />
-                  <span className="text-[10px] truncate">Sauce</span>
+                  <span className="text-xs truncate">Sauce</span>
                 </TabsTrigger>
-                <TabsTrigger value="frontline" data-testid="tab-frontline" className="flex flex-col items-center gap-0.5 px-1">
+                <TabsTrigger value="frontline" data-testid="tab-frontline" className="min-h-11 flex flex-col items-center gap-0.5 px-1">
                   <Boxes className="w-4 h-4 shrink-0" />
-                  <span className="text-[10px] truncate">Front</span>
+                  <span className="text-xs truncate">Front</span>
                 </TabsTrigger>
-                <TabsTrigger value="packaging" data-testid="tab-packaging" className="flex flex-col items-center gap-0.5 px-1">
+                <TabsTrigger value="packaging" data-testid="tab-packaging" className="min-h-11 flex flex-col items-center gap-0.5 px-1">
                   <Package className="w-4 h-4 shrink-0" />
-                  <span className="text-[10px] truncate">Pack</span>
+                  <span className="text-xs truncate">Pack</span>
                 </TabsTrigger>
                 <TabsTrigger
                   value="warehouse"
@@ -17122,10 +17122,10 @@ export default function Home() {
                   aria-label="Warehouse"
                   onPointerEnter={preloadWarehouseInventorySurface}
                   onFocus={preloadWarehouseInventorySurface}
-                  className="flex min-w-0 flex-col items-center gap-0 px-0 sm:gap-0.5 sm:px-1"
+                  className="min-h-11 flex min-w-0 flex-col items-center gap-0 px-0 sm:gap-0.5 sm:px-1"
                 >
                   <Warehouse className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />
-                  <span className="whitespace-nowrap text-[9px] leading-tight sm:text-[10px]">Warehouse</span>
+                  <span className="whitespace-nowrap text-xs leading-tight">Warehouse</span>
                 </TabsTrigger>
               </TabsList>
 

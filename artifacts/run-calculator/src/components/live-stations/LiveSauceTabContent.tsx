@@ -320,7 +320,7 @@ export const LiveSauceTabContent = memo(function LiveSauceTabContent() {
                 </span>
               )}
             </div>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
                 <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Skids done</p>
                 <div className="flex items-center justify-center gap-1.5 mt-0.5">
