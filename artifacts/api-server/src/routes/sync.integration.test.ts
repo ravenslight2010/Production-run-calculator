@@ -46,6 +46,7 @@ let runDataHeals: () => Promise<void>;
 let runAutoTrackServerTicks: typeof import("./sync")["runAutoTrackServerTicks"];
 let setManualSectionFailureHookForTest: typeof import("./sync")["setManualSectionFailureHookForTest"];
 let setManualSectionBarrierHookForTest: typeof import("./sync")["setManualSectionBarrierHookForTest"];
+let derivedRunMapSharedDayStateFields: typeof import("./sync")["DERIVED_RUN_MAP_SHARED_DAY_STATE_FIELDS"];
 
 let adminPool: pg.Pool;
 let testDbName: string;
@@ -105,6 +106,7 @@ beforeAll(async () => {
   runAutoTrackServerTicks = syncMod.runAutoTrackServerTicks;
   setManualSectionFailureHookForTest = syncMod.setManualSectionFailureHookForTest;
   setManualSectionBarrierHookForTest = syncMod.setManualSectionBarrierHookForTest;
+  derivedRunMapSharedDayStateFields = syncMod.DERIVED_RUN_MAP_SHARED_DAY_STATE_FIELDS;
 
   const app: Express = express();
   app.use(express.json({ limit: "10mb" }));
@@ -3977,23 +3979,30 @@ describe("/sync/events — date-scoped broadcasts", () => {
     expect(removalFrame.frame.summaryStats).toEqual({ [removedRunId]: null });
     expect(removalFrame.frame.runLines).toEqual({ [removedRunId]: null });
 
-    const pepTypes = ["Pepperoni", "Pepperoni Stick - NATURAL"];
-    const pepperoniPayload = {
-      ...removalBody.data,
-      dayState: { ...removalBody.data.dayState, pepTypes },
-    };
-    const pepperoniWrite = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
-      method: "PUT",
-      headers: { ...authHeaders(), "content-type": "application/json" },
-      body: JSON.stringify({ senderId: "peer-pep-types", payload: pepperoniPayload }),
-    });
-    expect(pepperoniWrite.status).toBe(200);
-    const pepperoniFrame = await readFrame((frame) => frame.senderId === "peer-pep-types");
-    const remainingRunIds = pepperoniPayload.dayState.runs.map((run) => run.id).sort();
-    expect(pepperoniFrame.frame.completeness).toBe("partial");
-    expect(pepperoniFrame.frame.data.dayState.pepTypes).toEqual(pepTypes);
-    expect(Object.keys(pepperoniFrame.frame.summaryStats).sort()).toEqual(remainingRunIds);
-    expect(Object.keys(pepperoniFrame.frame.runLines).sort()).toEqual(remainingRunIds);
+    let sharedInputPayload = removalBody.data;
+    for (const field of derivedRunMapSharedDayStateFields) {
+      const senderId = `peer-shared-${field}`;
+      const currentValue = sharedInputPayload.dayState[field];
+      const changedValue = Array.isArray(currentValue)
+        ? [...currentValue, `changed-${field}`]
+        : [`changed-${field}`];
+      sharedInputPayload = {
+        ...sharedInputPayload,
+        dayState: { ...sharedInputPayload.dayState, [field]: changedValue },
+      };
+      const sharedInputWrite = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
+        method: "PUT",
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({ senderId, payload: sharedInputPayload }),
+      });
+      expect(sharedInputWrite.status).toBe(200);
+      const sharedInputFrame = await readFrame((frame) => frame.senderId === senderId);
+      const remainingRunIds = sharedInputPayload.dayState.runs.map((run) => run.id).sort();
+      expect(sharedInputFrame.frame.completeness).toBe("partial");
+      expect(sharedInputFrame.frame.data.dayState[field]).toEqual(changedValue);
+      expect(Object.keys(sharedInputFrame.frame.summaryStats).sort()).toEqual(remainingRunIds);
+      expect(Object.keys(sharedInputFrame.frame.runLines).sort()).toEqual(remainingRunIds);
+    }
 
     await reader.cancel();
     ctrl.abort();

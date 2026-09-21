@@ -426,6 +426,24 @@ export function buildAutoTrackSchedule(
 const serverCalcCache = new Map<string, ServerCalcResult>();
 const CACHE_MAX_SIZE = 128;
 
+/**
+ * Day-level inputs shared by every run's summaryStats and runLines derivation.
+ * Keep this as the single dependency contract for both calculation and compact
+ * SSE projection so adding a shared input cannot leave unchanged runs stale.
+ */
+export const DERIVED_RUN_MAP_SHARED_DAY_STATE_FIELDS = ["pepTypes"] as const;
+
+function sharedDerivedRunInputs(dayState: Record<string, unknown> | undefined) {
+  const sharedInputs = Object.fromEntries(
+    DERIVED_RUN_MAP_SHARED_DAY_STATE_FIELDS.map((field) => [field, dayState?.[field]]),
+  ) as Record<(typeof DERIVED_RUN_MAP_SHARED_DAY_STATE_FIELDS)[number], unknown>;
+  return {
+    pepTypes: Array.isArray(sharedInputs.pepTypes)
+      ? sharedInputs.pepTypes.filter((value: unknown): value is string => typeof value === "string")
+      : SERVER_DEFAULT_PEP_TYPES,
+  };
+}
+
 function computeServerLiveState(
   data: unknown,
   nowMs = Date.now(),
@@ -483,9 +501,7 @@ function computeServerLiveState(
     const runLinesMap: Record<string, Array<{ itemKey: string; qty: number }>> = {};
     if (payload?.dayState?.runs && payload?.runValues) {
       const ds = payload.dayState as Record<string, unknown> | undefined;
-      const pepTypes = Array.isArray(ds?.pepTypes)
-        ? (ds.pepTypes as unknown[]).filter((value: unknown): value is string => typeof value === "string")
-        : SERVER_DEFAULT_PEP_TYPES;
+      const { pepTypes } = sharedDerivedRunInputs(ds);
       for (const run of payload.dayState.runs) {
         const rid = run.id;
         if (typeof rid !== "string") continue;
@@ -622,10 +638,14 @@ function compactPeerLiveState(
 ) {
   // These maps are derived from runValues. Sending every run on each peer
   // update erased most of the savings from the canonical sparse delta.
-  // Pepperoni types are a shared input, so that uncommon change still needs
-  // complete derived maps.
+  // Any shared dependency change needs complete derived maps.
   const changedDayState = isSyncRecord(deltaData.dayState) ? deltaData.dayState : null;
-  if (changedDayState && Object.hasOwn(changedDayState, "pepTypes")) return liveState;
+  if (
+    changedDayState
+    && DERIVED_RUN_MAP_SHARED_DAY_STATE_FIELDS.some((field) => Object.hasOwn(changedDayState, field))
+  ) {
+    return liveState;
+  }
   const changedValues = deltaData.runValues;
   if (!isSyncRecord(changedValues)) {
     return { ...liveState, summaryStats: {}, runLines: {} };
