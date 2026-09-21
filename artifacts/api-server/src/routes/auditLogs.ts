@@ -92,6 +92,13 @@ const MAX_PAGE_SIZE = 200;
 const MAX_EXPORT_ROWS = 5_000;
 const MAX_STRING = 200;
 const MAX_PAYLOAD_BYTES = 8_192;
+const AUDIT_EXPORT_COLUMNS = ["id", "actor", "action", "resource", "changes", "createdAt"] as const;
+const PDF_PAGE_WIDTH = 612;
+const PDF_PAGE_HEIGHT = 792;
+const PDF_MARGIN = 36;
+const PDF_LINE_HEIGHT = 11;
+const PDF_TEXT_WIDTH = 108;
+const PDF_ROWS_PER_PAGE = 64;
 const EVENT_SCHEMAS: Record<string, { required: string[]; allowed: string[] }> = {
   factory_reset: { required: ["outcome"], allowed: ["outcome", "count"] },
   role_granted: { required: ["outcome"], allowed: ["outcome", "targetId"] },
@@ -147,6 +154,156 @@ function decodeCursor(value: unknown): { createdAt: string; id: number } | undef
   } catch {
     return undefined;
   }
+}
+
+type AuditExportRow = {
+  id: number;
+  actor: string;
+  action: string;
+  resource: string | null;
+  changes: unknown;
+  createdAt: Date;
+};
+
+function parseAuditExportQuery(req: Request): {
+  limit: number;
+  startDate?: string;
+  endDate?: string;
+  error?: string;
+} {
+  const rawLimit = req.query.limit;
+  const requestedLimit = rawLimit === undefined ? MAX_EXPORT_ROWS : Number(rawLimit);
+  if (!Number.isInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > MAX_EXPORT_ROWS) {
+    return { limit: MAX_EXPORT_ROWS, error: `limit must be between 1 and ${MAX_EXPORT_ROWS}` };
+  }
+
+  const startDate = typeof req.query.startDate === "string" ? req.query.startDate : undefined;
+  const endDate = typeof req.query.endDate === "string" ? req.query.endDate : undefined;
+  if ((startDate && Number.isNaN(Date.parse(startDate))) || (endDate && Number.isNaN(Date.parse(endDate)))) {
+    return { limit: requestedLimit, startDate, endDate, error: "Invalid audit date range" };
+  }
+
+  return { limit: requestedLimit, startDate, endDate };
+}
+
+async function selectAuditExportRows(
+  scope: string,
+  query: Pick<ReturnType<typeof parseAuditExportQuery>, "limit" | "startDate" | "endDate">,
+): Promise<AuditExportRow[]> {
+  const conditions: SQL[] = [eq(auditLogsTable.scope, scope)];
+  if (query.startDate) {
+    conditions.push(sql`${auditLogsTable.createdAt} >= ${query.startDate}::timestamp`);
+  }
+  if (query.endDate) {
+    conditions.push(sql`${auditLogsTable.createdAt} <= ${query.endDate}::timestamp`);
+  }
+
+  return db.select({
+    id: auditLogsTable.id,
+    actor: auditLogsTable.actor,
+    action: auditLogsTable.action,
+    resource: auditLogsTable.resource,
+    changes: auditLogsTable.changes,
+    createdAt: auditLogsTable.createdAt,
+  }).from(auditLogsTable).where(and(...conditions))
+    .orderBy(desc(auditLogsTable.createdAt), desc(auditLogsTable.id)).limit(query.limit);
+}
+
+function publicAuditValues(row: AuditExportRow): string[] {
+  return [
+    String(row.id),
+    row.actor,
+    row.action,
+    row.resource ?? "",
+    JSON.stringify(redactAuditChanges(row.changes)),
+    row.createdAt.toISOString(),
+  ];
+}
+
+function csvCell(value: string): string {
+  return `"${value.replaceAll('"', '""')}"`;
+}
+
+function pdfText(value: string): string {
+  // The built-in Helvetica font is intentionally used to keep the export
+  // dependency-free. Replace unsupported glyphs instead of emitting invalid
+  // PDF bytes or interpreting user-controlled text as PDF syntax.
+  return value
+    .replaceAll("\\", "\\\\")
+    .replaceAll("(", "\\(")
+    .replaceAll(")", "\\)")
+    .replace(/[^\x20-\x7e]/g, "?");
+}
+
+function wrapPdfText(value: string): string[] {
+  const text = value || "";
+  if (!text) return [""];
+  const lines: string[] = [];
+  for (let offset = 0; offset < text.length; offset += PDF_TEXT_WIDTH) {
+    lines.push(text.slice(offset, offset + PDF_TEXT_WIDTH));
+  }
+  return lines;
+}
+
+function buildAuditPdf(rows: AuditExportRow[]): Buffer {
+  const lines: string[] = [
+    "Operational audit export",
+    `Rows: ${rows.length}`,
+    "",
+    AUDIT_EXPORT_COLUMNS.join(" | "),
+  ];
+  for (const row of rows) {
+    const values = publicAuditValues(row);
+    const wrapped = values.map(wrapPdfText);
+    const rowLineCount = Math.max(...wrapped.map((column) => column.length));
+    for (let line = 0; line < rowLineCount; line += 1) {
+      lines.push(wrapped.map((column) => column[line] ?? "").join(" | "));
+    }
+  }
+
+  const pages: string[] = [];
+  for (let offset = 0; offset < lines.length; offset += PDF_ROWS_PER_PAGE) {
+    const pageLines = lines.slice(offset, offset + PDF_ROWS_PER_PAGE);
+    const content = [
+      "BT",
+      "/F1 9 Tf",
+      `${PDF_MARGIN} ${PDF_PAGE_HEIGHT - PDF_MARGIN - 12} Td`,
+      ...pageLines.flatMap((line, index) => [
+        index === 0 ? "/F1 14 Tf" : "/F1 9 Tf",
+        `(${pdfText(line)}) Tj`,
+        index === pageLines.length - 1 ? "" : `0 -${PDF_LINE_HEIGHT} Td`,
+      ]),
+      "ET",
+    ].filter(Boolean).join("\n");
+    pages.push(content);
+  }
+  if (pages.length === 0) pages.push("BT /F1 9 Tf 36 744 Td (Operational audit export) Tj ET");
+
+  const objects: string[] = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    `<< /Type /Pages /Kids [${pages.map((_, index) => `${4 + index * 2} 0 R`).join(" ")}] /Count ${pages.length} >>`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  ];
+  for (const content of pages) {
+    const pageObjectNumber = objects.length + 1;
+    const contentObjectNumber = pageObjectNumber + 1;
+    objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PDF_PAGE_WIDTH} ${PDF_PAGE_HEIGHT}] /Resources << /Font << /F1 3 0 R >> >> /Contents ${contentObjectNumber} 0 R >>`);
+    objects.push(`<< /Length ${Buffer.byteLength(content, "ascii")} >>\nstream\n${content}\nendstream`);
+  }
+
+  let document = "%PDF-1.4\n";
+  const offsets = [0];
+  objects.forEach((object, index) => {
+    offsets.push(Buffer.byteLength(document, "ascii"));
+    document += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  });
+  const xrefOffset = Buffer.byteLength(document, "ascii");
+  document += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const offset of offsets.slice(1)) {
+    document += `${String(offset).padStart(10, "0")} 00000 n \n`;
+  }
+  document += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  return Buffer.from(document, "ascii");
 }
 
 // GET /api/audit-logs?startDate=2026-07-01&endDate=2026-07-31&limit=100&cursor=...
@@ -219,25 +376,42 @@ router.get(
   requireCapability("manage-staff"),
   async (req: Request, res: Response) => {
     try {
-      const requestedLimit = Number(req.query.limit) || MAX_EXPORT_ROWS;
-      if (!Number.isInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > MAX_EXPORT_ROWS) {
-        res.status(400).json({ error: `limit must be between 1 and ${MAX_EXPORT_ROWS}` });
+      const query = parseAuditExportQuery(req);
+      if (query.error) {
+        res.status(400).json({ error: query.error });
         return;
       }
-      const limit = requestedLimit;
-      const rows = await db.select({
-        id: auditLogsTable.id, actor: auditLogsTable.actor, action: auditLogsTable.action,
-        resource: auditLogsTable.resource, changes: auditLogsTable.changes, createdAt: auditLogsTable.createdAt,
-      }).from(auditLogsTable).where(eq(auditLogsTable.scope, currentScope()))
-        .orderBy(desc(auditLogsTable.createdAt), desc(auditLogsTable.id)).limit(limit);
+      const rows = await selectAuditExportRows(currentScope(), query);
       const csv = [
-        "id,actor,action,resource,changes,createdAt",
-        ...rows.map((row) => [row.id, row.actor, row.action, row.resource ?? "", JSON.stringify(row.changes), row.createdAt.toISOString()]
-          .map((value) => `"${String(value).replaceAll('"', '""')}"`).join(",")),
+        AUDIT_EXPORT_COLUMNS.join(","),
+        ...rows.map((row) => publicAuditValues(row).map(csvCell).join(",")),
       ].join("\n");
       res.type("text/csv").send(csv);
     } catch (err) {
       req.log.error({ err }, "Failed to export audit logs");
+      res.status(500).json({ error: "Failed to export audit logs" });
+    }
+  },
+);
+
+router.get(
+  "/audit-logs/export.pdf",
+  requireLiveScope,
+  requireCapability("manage-staff"),
+  async (req: Request, res: Response) => {
+    try {
+      const query = parseAuditExportQuery(req);
+      if (query.error) {
+        res.status(400).json({ error: query.error });
+        return;
+      }
+      const rows = await selectAuditExportRows(currentScope(), query);
+      const pdf = buildAuditPdf(rows);
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", 'attachment; filename="audit-logs.pdf"');
+      res.send(pdf);
+    } catch (err) {
+      req.log.error({ err }, "Failed to export audit logs as PDF");
       res.status(500).json({ error: "Failed to export audit logs" });
     }
   },

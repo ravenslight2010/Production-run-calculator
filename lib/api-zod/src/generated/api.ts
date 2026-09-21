@@ -4296,14 +4296,29 @@ export const ListAuditLogsResponse = zod.object({
 
 
 /**
- * CSV is intentionally bounded to 5000 rows per request; PDF export is deferred until a compliance-approved document renderer is available. Audit records are retained indefinitely and are excluded from ordinary reset and purge operations.
+ * CSV is intentionally bounded to 5000 rows per request. Audit records are retained indefinitely and are excluded from ordinary reset and purge operations.
  * @summary Export private facility-scoped audit records as CSV
  */
 export const ExportAuditLogsCsvQueryParams = zod.object({
+  "startDate": zod.date().optional(),
+  "endDate": zod.date().optional(),
   "limit": zod.coerce.number().int().optional().describe('Maximum 5000 rows per export; defaults to 5000.')
 })
 
 export const ExportAuditLogsCsvResponse = zod.unknown()
+
+
+/**
+ * Produces a paginated PDF containing only the public audit fields. The export is intentionally bounded to 5000 rows per request, uses the same date filters and stable ordering as the CSV export, and is available only to authorized managers in the live scope. Audit records are retained indefinitely and are excluded from ordinary reset and purge operations.
+ * @summary Export private facility-scoped audit records as PDF
+ */
+export const ExportAuditLogsPdfQueryParams = zod.object({
+  "startDate": zod.date().optional(),
+  "endDate": zod.date().optional(),
+  "limit": zod.coerce.number().int().optional().describe('Maximum 5000 rows per export; defaults to 5000.')
+})
+
+export const ExportAuditLogsPdfResponse = zod.unknown()
 
 
 /**

@@ -79,6 +79,7 @@ import type {
   DownloadCanonicalOperationalReportParams,
   DuplicateReviewList,
   ExportAuditLogsCsvParams,
+  ExportAuditLogsPdfParams,
   FacilityKnowledgeList,
   FieldCheckIngestResult,
   FieldCheckObservationBatch,
@@ -12132,7 +12133,7 @@ export const getExportAuditLogsCsvUrl = (params?: ExportAuditLogsCsvParams,) => 
 }
 
 /**
- * CSV is intentionally bounded to 5000 rows per request; PDF export is deferred until a compliance-approved document renderer is available. Audit records are retained indefinitely and are excluded from ordinary reset and purge operations.
+ * CSV is intentionally bounded to 5000 rows per request. Audit records are retained indefinitely and are excluded from ordinary reset and purge operations.
  * @summary Export private facility-scoped audit records as CSV
  */
 export const exportAuditLogsCsv = async (params?: ExportAuditLogsCsvParams, options?: Parameters<typeof customFetch>[1]): Promise<unknown> => {
@@ -12213,6 +12214,115 @@ export function useExportAuditLogsCsv<TData = Awaited<ReturnType<typeof exportAu
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getExportAuditLogsCsvQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getExportAuditLogsPdfUrl = (params?: ExportAuditLogsPdfParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/audit-logs/export.pdf?${stringifiedParams}` : `/api/audit-logs/export.pdf`
+}
+
+/**
+ * Produces a paginated PDF containing only the public audit fields. The export is intentionally bounded to 5000 rows per request, uses the same date filters and stable ordering as the CSV export, and is available only to authorized managers in the live scope. Audit records are retained indefinitely and are excluded from ordinary reset and purge operations.
+ * @summary Export private facility-scoped audit records as PDF
+ */
+export const exportAuditLogsPdf = async (params?: ExportAuditLogsPdfParams, options?: Parameters<typeof customFetch>[1]): Promise<Blob> => {
+
+  return customFetch<Blob>(getExportAuditLogsPdfUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getExportAuditLogsPdfQueryKey = (params?: ExportAuditLogsPdfParams,) => {
+    return [
+    `/api/audit-logs/export.pdf`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getExportAuditLogsPdfQueryOptions = <TData = Awaited<ReturnType<typeof exportAuditLogsPdf>>, TError = ErrorType<void>>(params?: ExportAuditLogsPdfParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogsPdf>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getExportAuditLogsPdfQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof exportAuditLogsPdf>>> = ({ signal }) => exportAuditLogsPdf(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogsPdf>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ExportAuditLogsPdfQueryResult = NonNullable<Awaited<ReturnType<typeof exportAuditLogsPdf>>>
+export type ExportAuditLogsPdfQueryError = ErrorType<void>
+
+
+export function useExportAuditLogsPdf<TData = Awaited<ReturnType<typeof exportAuditLogsPdf>>, TError = ErrorType<void>>(
+ params: undefined |  ExportAuditLogsPdfParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogsPdf>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof exportAuditLogsPdf>>,
+          TError,
+          Awaited<ReturnType<typeof exportAuditLogsPdf>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useExportAuditLogsPdf<TData = Awaited<ReturnType<typeof exportAuditLogsPdf>>, TError = ErrorType<void>>(
+ params?: ExportAuditLogsPdfParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogsPdf>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof exportAuditLogsPdf>>,
+          TError,
+          Awaited<ReturnType<typeof exportAuditLogsPdf>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useExportAuditLogsPdf<TData = Awaited<ReturnType<typeof exportAuditLogsPdf>>, TError = ErrorType<void>>(
+ params?: ExportAuditLogsPdfParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogsPdf>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Export private facility-scoped audit records as PDF
+ */
+
+export function useExportAuditLogsPdf<TData = Awaited<ReturnType<typeof exportAuditLogsPdf>>, TError = ErrorType<void>>(
+ params?: ExportAuditLogsPdfParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogsPdf>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getExportAuditLogsPdfQueryOptions(params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 

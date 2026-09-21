@@ -6,7 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type ExportAuditLogsCsvParams = {
+export type ExportAuditLogsPdfParams = {
 startDate?: Date;
 endDate?: Date;
 /**

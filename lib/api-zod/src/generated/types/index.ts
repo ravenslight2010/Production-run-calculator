@@ -123,6 +123,7 @@ export * from './duplicateReviewGroup';
 export * from './duplicateReviewGroupStatus';
 export * from './duplicateReviewList';
 export * from './exportAuditLogsCsvParams';
+export * from './exportAuditLogsPdfParams';
 export * from './facilityKnowledge';
 export * from './facilityKnowledgeHealthFinding';
 export * from './facilityKnowledgeHealthFindingEntry';

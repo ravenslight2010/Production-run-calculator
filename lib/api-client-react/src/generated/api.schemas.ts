@@ -5737,6 +5737,17 @@ cursor?: string;
 };
 
 export type ExportAuditLogsCsvParams = {
+startDate?: string;
+endDate?: string;
+/**
+ * Maximum 5000 rows per export; defaults to 5000.
+ */
+limit?: number;
+};
+
+export type ExportAuditLogsPdfParams = {
+startDate?: string;
+endDate?: string;
 /**
  * Maximum 5000 rows per export; defaults to 5000.
  */

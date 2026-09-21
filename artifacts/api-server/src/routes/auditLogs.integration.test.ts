@@ -134,7 +134,7 @@ async function seedAudit(count: number, scope = "live"): Promise<void> {
     actor: scope === "live" ? LIVE_MANAGER : sandboxUserId,
     action: "factory_reset",
     resource: `audit-test:${index}`,
-    changes: { outcome: "success", count: index },
+    changes: { outcome: "success", count: index, privatePayload: "do-not-export" },
     createdAt,
   })));
 }
@@ -145,6 +145,8 @@ describe("operational audit HTTP boundary", () => {
     expect((await req(LIVE_OPERATOR, "GET", "/api/audit-logs")).status).toBe(403);
     expect((await req(null, "GET", "/api/audit-logs/export.csv")).status).toBe(401);
     expect((await req(LIVE_OPERATOR, "GET", "/api/audit-logs/export.csv")).status).toBe(403);
+    expect((await req(null, "GET", "/api/audit-logs/export.pdf")).status).toBe(401);
+    expect((await req(LIVE_OPERATOR, "GET", "/api/audit-logs/export.pdf")).status).toBe(403);
   });
 
   it("derives actor and scope, ignores a scope query, and hides private columns", async () => {
@@ -193,6 +195,41 @@ describe("operational audit HTTP boundary", () => {
     expect(csv).not.toContain("scope");
     expect(csv).not.toContain("ip_address");
     expect(csv).not.toContain("user_agent");
+    expect(csv).not.toContain("do-not-export");
+  });
+
+  it("returns a paginated PDF with stable public audit ordering and date bounds", async () => {
+    await seedAudit(70);
+    await db.insert(auditLogsTable).values({
+      scope: "live", actor: LIVE_MANAGER, action: "factory_reset", resource: "outside-date",
+      changes: { outcome: "success" }, createdAt: new Date("2025-12-31T23:59:00.000Z"),
+    });
+
+    const tooLarge = await req(LIVE_MANAGER, "GET", "/api/audit-logs/export.pdf?limit=5001");
+    expect(tooLarge.status).toBe(400);
+    const response = await req(
+      LIVE_MANAGER,
+      "GET",
+      "/api/audit-logs/export.pdf?limit=70&startDate=2026-01-01T00:00:00.000Z&endDate=2026-01-01T23:59:59.000Z",
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("application/pdf");
+    expect(response.headers.get("content-disposition")).toContain("audit-logs.pdf");
+    const pdf = Buffer.from(await response.arrayBuffer()).toString("ascii");
+    expect(pdf.startsWith("%PDF-1.4")).toBe(true);
+    expect(pdf.match(/\/Type \/Page\b/g)).toHaveLength(2);
+    expect(pdf).toContain("Operational audit export");
+    expect(pdf.indexOf("audit-test:1")).toBeGreaterThan(-1);
+    expect(pdf.indexOf("audit-test:0")).toBeGreaterThan(pdf.indexOf("audit-test:1"));
+    expect(pdf).not.toContain("outside-date");
+    expect(pdf).not.toContain("scope");
+    expect(pdf).not.toContain("private-agent");
+    expect(pdf).not.toContain("do-not-export");
+  });
+
+  it("rejects sandbox PDF exports even when the sandbox user is seeded as a manager", async () => {
+    const response = await req(sandboxUserId, "GET", "/api/audit-logs/export.pdf");
+    expect(response.status).toBe(403);
   });
 
   it("keeps audit rows outside reset/purge deletion sets", async () => {
