@@ -15,11 +15,12 @@ reported gap, not evidence of coverage.
 | Sync merge, reset, LWW, and SSE | API sync routes plus web sync receive/write paths | `test:release:sync`, `test:release:sync-sse`, `sync-convergence.spec.ts`, and focused sync tests | Required for any sync, day-state, stamp, reset, wake, or live-counter change |
 | Concurrent sync and inventory mutations | Disposable-Postgres integration tests for live and scheduled-day sync merge retries, cross-date scheduled-write isolation, plus inventory row-lock/idempotency boundaries | `@workspace/api-server run test:release:concurrency` | Required only when sync conflict/retry (including future scheduled-day writes and cross-date isolation), inventory locking, consumption idempotency, or related transaction boundaries change; bounded to 180 seconds |
 | Web rendering and client state | Run Calculator components/hooks | `@workspace/run-calculator test`, typecheck, and focused rendered tests | Required for client or shared UI/state changes |
-| Browser operational journeys | `run-calculator/e2e` fixtures and Playwright configs | The bounded `test:e2e:compatibility` contract covers desktop/phone/tablet Chromium plus phone/tablet WebKit emulation; its WebKit projects cover lifecycle/report cases while the dedicated WebKit command retains failed-pull/reconnect recovery. Existing Chromium smoke, accessibility, visual, PWA, WebKit, physical-device, main E2E, department, management-performance, photo-count, and sync-convergence commands remain separate focused lanes; full release mode enumerates the main-suite contract | Required for layout, touch, browser-engine, or cross-device journey changes; release browser stages remain serial. Emulation is not physical Android/iOS evidence; unavailable device services are blocked/not run |
+| Browser operational journeys | `run-calculator/e2e` fixtures and Playwright configs | The bounded `test:e2e:compatibility` contract covers desktop/phone/tablet Chromium plus phone/tablet WebKit emulation; its WebKit projects cover lifecycle/report cases while the dedicated WebKit command retains failed-pull/reconnect recovery. Existing Chromium smoke, accessibility, visual, PWA, WebKit, physical Android, physical iOS Safari/PWA, main E2E, department, management-performance, photo-count, and sync-convergence commands remain separate focused lanes; full release mode enumerates the main-suite contract | Required for layout, touch, browser-engine, or cross-device journey changes; release browser stages remain serial. Emulation is not physical Android/iOS evidence; unavailable device services are blocked/not run |
 | Passive field verification | Field-check contract/unit coverage, API validation/scoping tests, and manager Reported Issues browser coverage at desktop/tablet/phone widths | Focused client/API tests plus `test:e2e:a11y` | Required for lifecycle observation, field-check ingestion, or manager-panel changes; browser evidence is limited to signals the browser can observe |
 | Accessibility | `accessibility-smoke.spec.ts` and axe checks | `test:e2e:a11y` | Required for interactive UI, semantic, focus, or layout changes |
 | Visual baselines | `visual-regression.spec.ts` snapshots | `test:e2e:visual` | Required for intentional geometry/hierarchy/responsive changes; baseline updates require explicit review |
-| PWA/service-worker handoff | `pwa-handoff.spec.ts` and `pwa-morning` fixture owners | `test:pwa-handoff`, `test:e2e:pwa-morning` | Explicitly out of the standard browser gate; required for PWA, service-worker, cache, or update-prompt changes |
+| PWA/service-worker handoff | `pwa-handoff.spec.ts` and `pwa-morning` fixture owners | `test:pwa-handoff`, `test:e2e:pwa-morning` | Explicitly out of the standard browser gate; required for PWA, service-worker, cache, or update-prompt changes; responsive/PWA emulation is not physical iOS evidence |
+| Physical iOS Safari/PWA readiness | `ios-safari-pwa-device.spec.ts` and `playwright.ios-safari-pwa.config.ts` | `check:e2e:ios:pwa:device`, then `test:e2e:ios:pwa:device` | Optional environment-dependent lane; requires `PLAYWRIGHT_REAL_IOS_SAFARI_WS_ENDPOINT`, retains separate iOS evidence, and reports unavailable services as `BLOCKED`/`NOT RUN`; browser/PWA only, not native-app coverage |
 | Import and export pipelines | Import/export libraries and corpus fixtures | `pnpm --filter @workspace/spec-import run test`, `test:spec-reconcile`, `test:spec-export`, `test:corpus`, package-specific import tests | Required for import parsing, linking, aliases, merge, or export changes |
 | Import lifecycle integrity | Import-family parser/apply tests, merge-backfill libraries, reconciliation libraries, and saved-source API routes | `docs/import-lifecycle-integrity-audit-2026-09-06.md` and the focused suites listed there | Required when changing recipe-row identity, replacement/union rules, merge backfill, source snapshot retention, or re-import resurrection guards |
 | Startup and preview health | Workflow startup and clean-start harness | `check:clean-start` | Required before browser evidence and for run-command, proxy, or workflow changes |
@@ -98,6 +99,11 @@ Interpret failures as follows:
 - **Optional environment gap:** physical Android checks run only when
   `PLAYWRIGHT_REAL_MOBILE_WS_ENDPOINT` is provided. Desktop Chromium emulation
   is not physical-device evidence.
+- **Optional environment gap:** physical iOS Safari/PWA checks run only when
+  `PLAYWRIGHT_REAL_IOS_SAFARI_WS_ENDPOINT` is provided. Responsive Chromium,
+  responsive WebKit, and the filesystem PWA handoff fixture are not physical
+  iOS evidence. A missing endpoint is a fail-closed `BLOCKED` readiness result
+  or an explicitly recorded `NOT RUN`, never a physical-device pass.
 
 ## Bounded coverage gaps
 
@@ -107,13 +113,16 @@ command:
 1. Physical Android lifecycle/keyboard evidence is unavailable without the
    configured device endpoint; keep the optional checks visible and do not
    claim them as release coverage.
-2. External notification delivery and production deployment behavior require
+2. Physical iOS Safari/PWA evidence is unavailable without the configured iOS
+   device service; keep its evidence directory separate and do not infer it
+   from responsive WebKit or PWA handoff results.
+3. External notification delivery and production deployment behavior require
    manual operational verification; local browser/API tests cannot prove them.
-3. Broad load/concurrency behavior beyond the focused disposable-database lane
+4. Broad load/concurrency behavior beyond the focused disposable-database lane
    and performance journeys is not covered by the release gate. The focused
    lane is intentionally opt-in for changes to the affected concurrency
    boundary, rather than a check on every release.
-4. The standard release command does not run visual, PWA, department,
+5. The standard release command does not run visual, PWA, department,
    station-specific physical-device, responsive visual, photo-count, or full
    E2E suites; run the category-specific commands when those surfaces change
    or use the full browser mode for broader review. Responsive ownership is

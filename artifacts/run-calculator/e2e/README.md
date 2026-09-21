@@ -19,6 +19,7 @@ classification, and bounded coverage gaps, see
 | `playwright.recipe-refresh.config.ts` | isolated manager account, disposable database | 390×844 linked-recipe refresh and Start snapshot boundary; owns unique recipe/profile/sync/account/role fixtures and removes them in `afterAll` |
 | `playwright.pwa.config.ts` | read-only filesystem fixture | builds two temporary sites, serves them on a temporary localhost port, and removes the directory and server in `finally` |
 | `playwright.pwa-morning.config.ts` | isolated account, disposable database | tablet-sized stale-day → one sign-in → mount-time rollover smoke; attaches request and browser-log evidence |
+| `playwright.ios-safari-pwa.config.ts` | physical-device readiness/evidence | connects only when `PLAYWRIGHT_REAL_IOS_SAFARI_WS_ENDPOINT` is configured; records iOS Safari/PWA runtime evidence in its own report/output directories and does not claim native-app coverage |
 | `playwright.smoke.config.ts` | cross-device release signal | runs the compact sign-in → start/pause/resume → reload → one failed sync pull → online recovery journey at desktop and phone sizes |
 | `playwright.webkit.config.ts` | bounded cross-browser release signal | runs only `release-webkit-smoke.spec.ts` in Desktop Safari/WebKit: authentication/current-run lifecycle, failed sync pull recovery, and manager report preview; retains revision-bound JSON evidence |
 
@@ -40,6 +41,23 @@ auth/sync responses, and browser errors in
 follow-up: launch the app from the iPad Home Screen after a stale local-day
 rollover, confirm one sign-in reaches Home and stays there, then separately
 confirm an already-active session still requires the next day's sign-in.
+
+The responsive PWA and WebKit suites are not physical iOS evidence. When an
+iOS device service is available, run the separate physical web/PWA lane:
+
+```sh
+pnpm --filter @workspace/run-calculator run test:e2e:ios:pwa:device
+```
+
+The command requires
+`PLAYWRIGHT_REAL_IOS_SAFARI_WS_ENDPOINT`, connects to the
+`real-ios-safari-pwa` project, and retains evidence under
+`test-results/ios-safari-pwa` and `playwright-report/ios-safari-pwa`. It reports
+the connected user agent, touch capability, viewport, and standalone-PWA
+signals. This is browser/PWA evidence only, not native iOS application
+coverage. If the service is unavailable, the readiness check exits with
+`BLOCKED` and status 2 without starting Playwright; record the environment
+reason as `BLOCKED` or `NOT RUN` rather than treating emulation as a pass.
 
 ## Database safety
 

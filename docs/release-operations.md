@@ -122,6 +122,22 @@ as regressions.
   If a required device endpoint is unavailable, record the check as `BLOCKED`
   or `NOT RUN` with the environment reason; never report emulation as a
   physical-device pass.
+- The iOS Safari/PWA lane is separate from responsive browser and PWA
+  service-worker evidence:
+
+  ```bash
+  pnpm --filter @workspace/run-calculator run check:e2e:ios:pwa:device
+  pnpm --filter @workspace/run-calculator run test:e2e:ios:pwa:device
+  ```
+
+  It requires `PLAYWRIGHT_REAL_IOS_SAFARI_WS_ENDPOINT`, retains its own
+  `test-results/ios-safari-pwa` and `playwright-report/ios-safari-pwa`
+  directories, and verifies that the connected runtime identifies as iOS with
+  touch support. The lane covers physical web/PWA behavior only; it does not
+  imply native iOS application coverage. Missing device services are a
+  fail-closed `BLOCKED` readiness result (exit status 2); release records may
+  classify an unavailable optional run as `NOT RUN` with the actionable
+  environment reason.
 - A browser duration alert is an operational review signal, not a coverage or
   serial-execution bypass. It is copied into the release summary for
   investigation; the full suite still must complete the shared case contract
