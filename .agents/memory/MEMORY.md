@@ -91,6 +91,7 @@
 - [PWA update prompts](pwa-update-prompts.md) — vite-plugin-pwa autoUpdate reloads clients; interactive “Reload now” UI requires prompt so needRefresh fires.
 - [Master-data health and audit](master-data-health-ownership.md) + [boundary](master-data-audit-boundary.md) — bounded read-only reviews preserve owned legacy rows and report coverage gaps.
 - [Browser and release evidence](visual-regression-baselines.md) + [release-browser-evidence](release-browser-evidence.md) + [a11y-coverage-gate](a11y-coverage-gate.md) + [a11y-dialog-browser-fixtures](a11y-dialog-browser-fixtures.md) — isolated, masked browser evidence needs explicit review.
+- [Browser navigation scroll timing](browser-navigation-scroll.md) — page resets may need a next-frame pass after history restoration and content reflow; never target nested overflow containers.
 - [Stoppage light-theme contrast](stoppage-light-theme-contrast.md) — custom orange-700 is too light for pale stop surfaces; use orange-800 in light mode and retain orange-400 in dark mode.
 - [Sync snapshot identity](sync-snapshot-identity.md) + [HTTP failure handling](sync-http-failure-handling.md) + [partial sync](partial-sync-contract.md) + [SSE cleanup](sse-disconnect-registration.md) — stable hashes, non-OK is never acknowledgment, partial writes recover safely, and disconnects clean up before awaits.
 - [Sleep-wake sync fences](sleep-wake-sync-fences.md) — queued wake timers must re-check the barrier; missing-row partial fallbacks need an explicit empty snapshot and forced complete seed.
