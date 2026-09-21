@@ -13,6 +13,7 @@ import { fmtCountdownParts, fmtNum } from "../../utils";
 import { AUTO_SUPPRESS_MS, TimelineNode, PkgMiniStepper, fmtMS } from "./stationShared";
 import { PackagingSpeedNudgeFeedback } from "../PackagingSpeedNudgeFeedback";
 import { runUnlockedManualSectionAction } from "../../packagingManager";
+import { isPackagingDrainComplete } from "../../linePhases";
 
 export const LivePackagingTabContent = memo(function LivePackagingTabContent() {
   const hx = useHomeTabCtx();
@@ -32,6 +33,39 @@ export const LivePackagingTabContent = memo(function LivePackagingTabContent() {
     speedNudge, speedNudgeStatus, detectPackagingSpeedDrift,
     acceptPackagingSpeedNudge, dismissPackagingSpeedNudge,
   } = useLiveRun();
+
+  const autoAdvancedRunRef = useRef<string | null>(null);
+  useEffect(() => {
+    const nextIndex = dayState.currentIndex + 1;
+    const nextRun = dayState.runs[nextIndex];
+    if (
+      !currentRun ||
+      currentRun.id !== currentRunId ||
+      !nextRun ||
+      nextRun.startedAt ||
+      nextRun.endedAt ||
+      autoAdvancedRunRef.current === currentRunId ||
+      !isPackagingDrainComplete({
+        runStatus,
+        endedAt: currentRun.endedAt,
+        elapsedBatchSec,
+        phases: linePhases,
+      })
+    ) return;
+
+    if (hx.switchToRun(nextIndex, currentRunId)) {
+      autoAdvancedRunRef.current = currentRunId;
+    }
+  }, [
+    currentRun,
+    currentRunId,
+    dayState.currentIndex,
+    dayState.runs,
+    elapsedBatchSec,
+    hx.switchToRun,
+    linePhases,
+    runStatus,
+  ]);
 
   // ── Auto-tick skid/case counter for the prior run draining through the
   // Freeze tunnel while the NEXT run is already active on the form.

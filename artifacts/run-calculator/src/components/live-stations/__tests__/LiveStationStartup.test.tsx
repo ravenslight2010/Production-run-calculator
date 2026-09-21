@@ -48,6 +48,20 @@ const PENDING_RUN: RunMeta = {
   flavor: "Startup Flavor",
   stoppages: [],
 };
+const ENDED_RUN: RunMeta = {
+  id: RUN_ID,
+  brand: "Startup Brand",
+  flavor: "Startup Flavor",
+  startedAt: Date.now() - 60 * 60_000,
+  endedAt: Date.now() - 20 * 60_000,
+  stoppages: [],
+};
+const NEXT_RUN: RunMeta = {
+  id: SWITCHED_RUN_ID,
+  brand: "Next Brand",
+  flavor: "Next Flavor",
+  stoppages: [],
+};
 
 const STATION_VALUES: FormValues = {
   ...DEFAULT_VALUES,
@@ -75,21 +89,27 @@ function StationProviders({
   status,
   runId = RUN_ID,
   values = STATION_VALUES,
+  runs,
+  switchToRun = vi.fn(() => true),
   children,
 }: {
-  status: "pending" | "running";
+  status: "pending" | "running" | "paused" | "ended";
   runId?: string;
   values?: FormValues;
+  runs?: RunMeta[];
+  switchToRun?: (newIndex: number, expectedCurrentRunId?: string) => boolean;
   children: ReactNode;
 }) {
   const form = useForm<FormValues>({ defaultValues: values });
-  const currentRun = useMemo(
-    () => ({ ...(status === "running" ? RUNNING_RUN : PENDING_RUN), id: runId }),
-    [runId, status],
-  );
+  const currentRun = useMemo(() => {
+    if (runs?.[0]) return runs[0];
+    const base = status === "ended" ? ENDED_RUN : status === "running" ? RUNNING_RUN : PENDING_RUN;
+    return { ...base, id: runId };
+  }, [runId, runs, status]);
+  const dayRuns = useMemo(() => runs ?? [currentRun], [currentRun, runs]);
   const dayState = useMemo<DayState>(
-    () => ({ runs: [currentRun], currentIndex: 0 }),
-    [currentRun],
+    () => ({ runs: dayRuns, currentIndex: 0 }),
+    [dayRuns],
   );
   const dayStateRef = useRef(dayState);
   const autoSuppressUntilRef = useRef(0);
@@ -132,6 +152,7 @@ function StationProviders({
     setDayState: noop,
     setRunToTime: noop,
     setWriteError: noop,
+    switchToRun,
     updateDrainingRunValues: noop,
     v: values,
     ve: values,
@@ -343,6 +364,60 @@ describe("live station startup", () => {
 
     expect(app1Controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(false);
     expect(app2Controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(true);
+  });
+
+  it("advances Frontline once when its ended run has cleared Stage 1", () => {
+    const switchToRun = vi.fn(() => true);
+    const view = render(
+      <StationProviders status="ended" runs={[ENDED_RUN, NEXT_RUN]} switchToRun={switchToRun}>
+        <LiveFrontlineTabContent />
+      </StationProviders>,
+    );
+
+    expect(switchToRun).toHaveBeenCalledTimes(1);
+    expect(switchToRun).toHaveBeenCalledWith(1, RUN_ID);
+    view.rerender(
+      <StationProviders status="ended" runs={[ENDED_RUN, NEXT_RUN]} switchToRun={switchToRun}>
+        <LiveFrontlineTabContent />
+      </StationProviders>,
+    );
+    expect(switchToRun).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps an ended station run selected when there is no queued next run", () => {
+    const switchToRun = vi.fn(() => true);
+    render(
+      <StationProviders status="ended" runs={[ENDED_RUN]} switchToRun={switchToRun}>
+        <LiveFrontlineTabContent />
+      </StationProviders>,
+    );
+
+    expect(switchToRun).not.toHaveBeenCalled();
+  });
+
+  it("does not advance Packaging during Frontline or Freeze tunnel drain", () => {
+    const switchToRun = vi.fn(() => true);
+    const stillDraining = { ...ENDED_RUN, endedAt: Date.now() - 5 * 60_000 };
+    render(
+      <StationProviders status="ended" runs={[stillDraining, NEXT_RUN]} switchToRun={switchToRun}>
+        <LivePackagingTabContent />
+      </StationProviders>,
+    );
+
+    expect(switchToRun).not.toHaveBeenCalled();
+  });
+
+  it("advances Packaging once when the ended run is fully drained, including on mount", () => {
+    const switchToRun = vi.fn(() => true);
+    const fullyDrained = { ...ENDED_RUN, endedAt: Date.now() - 40 * 60_000 };
+    render(
+      <StationProviders status="ended" runs={[fullyDrained, NEXT_RUN]} switchToRun={switchToRun}>
+        <LivePackagingTabContent />
+      </StationProviders>,
+    );
+
+    expect(switchToRun).toHaveBeenCalledTimes(1);
+    expect(switchToRun).toHaveBeenCalledWith(1, RUN_ID);
   });
 
   it.each(FRONTLINE_APPLICATOR_LOCK_CASES.filter(({ slot }) => slot !== "app1"))(

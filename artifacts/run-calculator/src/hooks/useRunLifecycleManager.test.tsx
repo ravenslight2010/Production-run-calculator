@@ -101,6 +101,16 @@ describe("useRunLifecycleManager", () => {
     expect(deps.saveRunValues).not.toHaveBeenCalledWith("day-current", expect.anything());
   });
 
+  it("rejects an automatic switch when the selected run changed since the timer render", () => {
+    const { deps, spies } = setup(day([run("a"), run("b")]));
+    const { result } = renderHook(() => useRunLifecycleManager(deps));
+
+    expect(result.current.switchToRun(1, "different-run")).toBe(false);
+    expect(deps.dayStateRef.current.currentIndex).toBe(0);
+    expect(spies.save).not.toHaveBeenCalled();
+    expect(deps.form.reset).not.toHaveBeenCalled();
+  });
+
   it("uses overlay generations for Start, Pause, Resume, and competing End", () => {
     const { deps, spies } = setup(day([
       run("a", { startedAt: 10 }), run("b", { startedAt: 20 }),

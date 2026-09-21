@@ -1,4 +1,4 @@
-import { memo, useCallback } from "react";
+import { memo, useCallback, useEffect, useRef } from "react";
 import { Boxes } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { applyRecipeSubstitutions } from "@workspace/inventory-math";
@@ -7,6 +7,7 @@ import { markRunValuesUpdated } from "../../adapters/browserRunPersistence";
 import { useManualControlLock } from "../../manualSectionLocks";
 import { useHomeTabCtx } from "../../contexts/HomeTabCtx";
 import { useLiveRun } from "../../contexts/LiveRunContext";
+import { isFrontlineDrainComplete } from "../../linePhases";
 import { deriveFrontlineNeedRows } from "../../frontlineRows";
 import { fmtNum, sauceBarrelBreakdown } from "../../utils";
 import { BatchMadeRow } from "./BatchMadeRow";
@@ -14,8 +15,40 @@ import { ReadOnlyRecipeCard, StatRow } from "./stationShared";
 
 export const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
   const hx = useHomeTabCtx();
-  const { v, runStatus, currentRunId, dayState, form, lastLocalEditRef, queueManualCorrection } = hx;
-  const { calc, elapsedBatchSec, autoSuppressUntilRef } = useLiveRun();
+  const { v, runStatus, currentRun, currentRunId, dayState, form, lastLocalEditRef, queueManualCorrection, switchToRun } = hx;
+  const { calc, elapsedBatchSec, linePhases, autoSuppressUntilRef } = useLiveRun();
+  const autoAdvancedRunRef = useRef<string | null>(null);
+  useEffect(() => {
+    const nextIndex = dayState.currentIndex + 1;
+    const nextRun = dayState.runs[nextIndex];
+    if (
+      !currentRun ||
+      currentRun.id !== currentRunId ||
+      !nextRun ||
+      nextRun.startedAt ||
+      nextRun.endedAt ||
+      autoAdvancedRunRef.current === currentRunId ||
+      !isFrontlineDrainComplete({
+        runStatus,
+        endedAt: currentRun.endedAt,
+        elapsedBatchSec,
+        phases: linePhases,
+      })
+    ) return;
+
+    if (switchToRun(nextIndex, currentRunId)) {
+      autoAdvancedRunRef.current = currentRunId;
+    }
+  }, [
+    currentRun,
+    currentRunId,
+    dayState.currentIndex,
+    dayState.runs,
+    elapsedBatchSec,
+    linePhases,
+    runStatus,
+    switchToRun,
+  ]);
   const packagingLock = useManualControlLock(currentRunId, "packaging-skids");
   const appLocks = {
     app1: useManualControlLock(currentRunId, "applicator-1-batches"),

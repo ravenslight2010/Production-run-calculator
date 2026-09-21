@@ -35,6 +35,7 @@ import { calcRef } from "../liveRunCalc";
 import {
   computeLinePhases,
   computePackagingDrainElapsedSec,
+  computeEndedRunElapsedSec,
   lineHasPackagingDrain,
   type LinePhases,
 } from "../linePhases";
@@ -281,9 +282,19 @@ export function LiveRunProvider({
     [currentRun?.stoppages],
   );
 
-  const localElapsedBatchSec = currentRun?.startedAt
-    ? Math.max(0, ((currentRun.pausedAt ?? nowTime.getTime()) - currentRun.startedAt - currentRunDowntimeMs)) / 1000
-    : 0;
+  const localElapsedBatchSec = currentRun?.endedAt
+    ? computeEndedRunElapsedSec({
+        startedAt: currentRun.startedAt,
+        endedAt: currentRun.endedAt,
+        stoppages: currentRun.stoppages?.map((stoppage) => ({
+          type: stoppage.type ?? "",
+          startedAt: stoppage.startedAt,
+          endedAt: stoppage.endedAt,
+        })),
+      })
+    : currentRun?.startedAt
+      ? Math.max(0, ((currentRun.pausedAt ?? nowTime.getTime()) - currentRun.startedAt - currentRunDowntimeMs)) / 1000
+      : 0;
   const elapsedBatchSec = confirmedProjection
     ? confirmedProjection.effectiveElapsedSec + (
         confirmedProjection.facts.runStatus === "running"
