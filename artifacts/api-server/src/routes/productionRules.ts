@@ -3,7 +3,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { db, productionRulesTable, type ProductionRuleRow } from "@workspace/db";
 import { SaveProductionRulesBody, DeleteProductionRulesBody } from "@workspace/api-zod";
 import { normalizeRule, type ProductionRule } from "@workspace/production-rules";
-import { logAuditEvent } from "./auditLogs";
+import { writeAuditEvent } from "./auditLogs";
 import { requireCapability } from "../middlewares/requireCapability";
 import { currentScope } from "../lib/requestScope";
 
@@ -100,9 +100,10 @@ router.post(
     }
 
     try {
-      for (const rule of byId.values()) {
+      await db.transaction(async (tx) => {
+       for (const rule of byId.values()) {
         const values = toDbValues(rule);
-        await db
+        await tx
           .insert(productionRulesTable)
           .values(values)
           .onConflictDoUpdate({
@@ -123,18 +124,10 @@ router.post(
               updatedAt: values.updatedAt,
             },
           });
-      }
+       }
+       await writeAuditEvent(tx, { action: "production_rules_updated", resource: "production_rules", changes: { outcome: "success", count: byId.size } });
+      });
       const rules = await listAll();
-      const actor = (req as any).user?.username || "unknown";
-      await logAuditEvent(
-        currentScope(),
-        actor,
-        "production_rules_updated",
-        "production_rules",
-        { rule_count: byId.size },
-        req.ip,
-        req.headers["user-agent"] as string | undefined,
-      );
       res.json({ rules });
     } catch (err) {
       req.log.error({ err }, "failed to save production rules");
@@ -159,8 +152,9 @@ router.delete(
       .filter((id) => id.length > 0);
 
     try {
-      if (ids.length > 0) {
-        await db
+      await db.transaction(async (tx) => {
+       if (ids.length > 0) {
+        await tx
           .delete(productionRulesTable)
           .where(
             and(
@@ -168,18 +162,10 @@ router.delete(
               eq(productionRulesTable.scope, currentScope()),
             ),
           );
-      }
+       }
+       await writeAuditEvent(tx, { action: "production_rules_deleted", resource: "production_rules", changes: { outcome: "success", count: ids.length } });
+      });
       const rules = await listAll();
-      const actor = (req as any).user?.username || "unknown";
-      await logAuditEvent(
-        currentScope(),
-        actor,
-        "production_rules_deleted",
-        "production_rules",
-        { deleted_ids: ids },
-        req.ip,
-        req.headers["user-agent"] as string | undefined,
-      );
       res.json({ rules });
     } catch (err) {
       req.log.error({ err }, "failed to delete production rules");

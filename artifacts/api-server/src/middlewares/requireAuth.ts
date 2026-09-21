@@ -160,5 +160,5 @@ export async function requireAuth(
   // downstream (the store propagates across the handler's awaits).
   const scope: Scope = sandbox ? "sandbox" : "live";
   req.scope = scope;
-  runWithScope(scope, () => next());
+  runWithScope(scope, () => next(), verified.sub);
 }

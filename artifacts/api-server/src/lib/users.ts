@@ -38,8 +38,9 @@ export async function getUserById(id: string): Promise<User | undefined> {
 export async function updateUserPassword(
   id: string,
   newPassword: string,
+  executor: Pick<typeof db, "update"> = db,
 ): Promise<void> {
-  await db
+  await executor
     .update(usersTable)
     .set({ passwordHash: hashPassword(newPassword), passwordChangedAt: new Date() })
     .where(eq(usersTable.id, id));

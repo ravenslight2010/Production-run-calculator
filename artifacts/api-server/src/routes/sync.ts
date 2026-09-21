@@ -2707,7 +2707,6 @@ router.post(
   requireCapability("manage-staff"),
   async (_req: Request, res: Response): Promise<void> => {
     const scope = currentScope();
-    const actor = (_req as any).user?.username || "unknown";
     const epoch = await db.transaction(async (tx) => {
       // Every writer locks this scope fence before a daily row. Establish it
       // first so reset cannot deadlock with an intent's daily-row lock.
@@ -2721,18 +2720,9 @@ router.post(
         .set({ epoch: sql`${dataResetTable.epoch} + 1`, resetAt: new Date() })
         .where(eq(dataResetTable.scope, scope))
         .returning();
-      return row?.epoch ?? 0;
+       await logAuditEvent(scope, "", "factory_reset", "daily_sync", { outcome: "success" }, undefined, undefined, tx);
+       return row?.epoch ?? 0;
     });
-    // Best-effort audit log — never fails the reset
-    void logAuditEvent(
-      scope,
-      actor,
-      "factory_reset",
-      "daily_sync",
-      { scope },
-      _req.ip,
-      _req.headers["user-agent"] as string | undefined,
-    );
     broadcastReset(scope, epoch);
     res.json({ ok: true, epoch });
   },

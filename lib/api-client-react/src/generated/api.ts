@@ -37,6 +37,7 @@ import type {
   ApplyAiRetentionCleanup200,
   ApprovePasswordResetResult,
   AuditAiMemoryHealth200,
+  AuditLogPage,
   AuditProfileDataHealth200,
   AuthCredentials,
   AuthResponse,
@@ -77,6 +78,7 @@ import type {
   DieTypeList,
   DownloadCanonicalOperationalReportParams,
   DuplicateReviewList,
+  ExportAuditLogsCsvParams,
   FacilityKnowledgeList,
   FieldCheckIngestResult,
   FieldCheckObservationBatch,
@@ -117,6 +119,7 @@ import type {
   LabelVerifyInput,
   LabelVerifyResult,
   ListApplicatorBatchEvidenceParams,
+  ListAuditLogsParams,
   ListCompletedHistoryParams,
   ListDeniedMergesParams,
   ListFinalizedOperationalReportsParams,
@@ -12003,6 +12006,224 @@ export const useUndoProfileDataHealthRepairBatch = <TError = ErrorType<void>,
       > => {
       return useMutation(getUndoProfileDataHealthRepairBatchMutationOptions(options), queryClient);
     }
+
+export const getListAuditLogsUrl = (params?: ListAuditLogsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/audit-logs?${stringifiedParams}` : `/api/audit-logs`
+}
+
+/**
+ * Manager-only, live-scope audit history. Facility scope and actor identity are derived from authentication; scope is never accepted as a query parameter. Records are retained indefinitely and returned through a bounded cursor.
+ * @summary List private facility-scoped operational audit records
+ */
+export const listAuditLogs = async (params?: ListAuditLogsParams, options?: Parameters<typeof customFetch>[1]): Promise<AuditLogPage> => {
+
+  return customFetch<AuditLogPage>(getListAuditLogsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListAuditLogsQueryKey = (params?: ListAuditLogsParams,) => {
+    return [
+    `/api/audit-logs`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListAuditLogsQueryOptions = <TData = Awaited<ReturnType<typeof listAuditLogs>>, TError = ErrorType<void>>(params?: ListAuditLogsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAuditLogs>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListAuditLogsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAuditLogs>>> = ({ signal }) => listAuditLogs(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listAuditLogs>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListAuditLogsQueryResult = NonNullable<Awaited<ReturnType<typeof listAuditLogs>>>
+export type ListAuditLogsQueryError = ErrorType<void>
+
+
+export function useListAuditLogs<TData = Awaited<ReturnType<typeof listAuditLogs>>, TError = ErrorType<void>>(
+ params: undefined |  ListAuditLogsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAuditLogs>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listAuditLogs>>,
+          TError,
+          Awaited<ReturnType<typeof listAuditLogs>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListAuditLogs<TData = Awaited<ReturnType<typeof listAuditLogs>>, TError = ErrorType<void>>(
+ params?: ListAuditLogsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAuditLogs>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listAuditLogs>>,
+          TError,
+          Awaited<ReturnType<typeof listAuditLogs>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListAuditLogs<TData = Awaited<ReturnType<typeof listAuditLogs>>, TError = ErrorType<void>>(
+ params?: ListAuditLogsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAuditLogs>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List private facility-scoped operational audit records
+ */
+
+export function useListAuditLogs<TData = Awaited<ReturnType<typeof listAuditLogs>>, TError = ErrorType<void>>(
+ params?: ListAuditLogsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAuditLogs>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListAuditLogsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getExportAuditLogsCsvUrl = (params?: ExportAuditLogsCsvParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/audit-logs/export.csv?${stringifiedParams}` : `/api/audit-logs/export.csv`
+}
+
+/**
+ * CSV is intentionally bounded to 5000 rows per request; PDF export is deferred until a compliance-approved document renderer is available. Audit records are retained indefinitely and are excluded from ordinary reset and purge operations.
+ * @summary Export private facility-scoped audit records as CSV
+ */
+export const exportAuditLogsCsv = async (params?: ExportAuditLogsCsvParams, options?: Parameters<typeof customFetch>[1]): Promise<unknown> => {
+
+  return customFetch<unknown>(getExportAuditLogsCsvUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getExportAuditLogsCsvQueryKey = (params?: ExportAuditLogsCsvParams,) => {
+    return [
+    `/api/audit-logs/export.csv`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getExportAuditLogsCsvQueryOptions = <TData = Awaited<ReturnType<typeof exportAuditLogsCsv>>, TError = ErrorType<void>>(params?: ExportAuditLogsCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogsCsv>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getExportAuditLogsCsvQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof exportAuditLogsCsv>>> = ({ signal }) => exportAuditLogsCsv(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogsCsv>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ExportAuditLogsCsvQueryResult = NonNullable<Awaited<ReturnType<typeof exportAuditLogsCsv>>>
+export type ExportAuditLogsCsvQueryError = ErrorType<void>
+
+
+export function useExportAuditLogsCsv<TData = Awaited<ReturnType<typeof exportAuditLogsCsv>>, TError = ErrorType<void>>(
+ params: undefined |  ExportAuditLogsCsvParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogsCsv>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof exportAuditLogsCsv>>,
+          TError,
+          Awaited<ReturnType<typeof exportAuditLogsCsv>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useExportAuditLogsCsv<TData = Awaited<ReturnType<typeof exportAuditLogsCsv>>, TError = ErrorType<void>>(
+ params?: ExportAuditLogsCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogsCsv>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof exportAuditLogsCsv>>,
+          TError,
+          Awaited<ReturnType<typeof exportAuditLogsCsv>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useExportAuditLogsCsv<TData = Awaited<ReturnType<typeof exportAuditLogsCsv>>, TError = ErrorType<void>>(
+ params?: ExportAuditLogsCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogsCsv>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Export private facility-scoped audit records as CSV
+ */
+
+export function useExportAuditLogsCsv<TData = Awaited<ReturnType<typeof exportAuditLogsCsv>>, TError = ErrorType<void>>(
+ params?: ExportAuditLogsCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogsCsv>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getExportAuditLogsCsvQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getGetProfileNameLinkCleanupAuditUrl = () => {
 

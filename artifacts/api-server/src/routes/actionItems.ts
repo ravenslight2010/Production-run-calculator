@@ -398,10 +398,9 @@ router.patch("/manager-action-queue/:id", requireCapability("manage-staff"), asy
       )).returning();
       if (!rows[0]) return { outcome: "conflict" as const };
       await tx.insert(auditLogsTable).values({
-        scope, actor: actor.name ?? req.userId!, action: "manager_action_item_update",
+         scope, actor: req.userId!, action: "manager_action_item_update",
         resource: `action_item:${id}`,
-        changes: { status, assigneeId, deferReason: deferReason !== undefined, resolutionNote: resolutionNote !== undefined },
-        ipAddress: req.ip, userAgent: req.get("user-agent") ?? undefined,
+         changes: { outcome: "updated", targetId: String(id) },
       });
       return { outcome: "updated" as const, item: rows[0] };
     });

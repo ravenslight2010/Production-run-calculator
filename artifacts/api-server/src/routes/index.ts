@@ -135,7 +135,7 @@ export const readAuthorizationInventory: readonly ReadAuthorization[] = [
     "/master-data/health", "/master-data/health/history",
   ]),
   ...reads(["manage-staff"], "all", "live-only", [
-    "/audit-logs/profile-name-link-cleanup", "/audit-logs",
+    "/audit-logs/profile-name-link-cleanup", "/audit-logs", "/audit-logs/export.csv",
   ]),
   ...reads(["use-ai-tools"], "all", "scoped", ["/ai-memory/facility"]),
   ...reads(["use-ai-tools"], "all", "scoped", ["/ai-corrections"]),

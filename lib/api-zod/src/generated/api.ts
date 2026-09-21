@@ -4269,6 +4269,44 @@ export const UndoProfileDataHealthRepairBatchResponse = zod.unknown()
 
 
 /**
+ * Manager-only, live-scope audit history. Facility scope and actor identity are derived from authentication; scope is never accepted as a query parameter. Records are retained indefinitely and returned through a bounded cursor.
+ * @summary List private facility-scoped operational audit records
+ */
+export const ListAuditLogsQueryParams = zod.object({
+  "startDate": zod.date().optional(),
+  "endDate": zod.date().optional(),
+  "limit": zod.coerce.number().int().optional().describe('Maximum 200 rows per page; defaults to 100.'),
+  "cursor": zod.coerce.string().optional().describe('Opaque stable cursor, limited to 200 characters.')
+})
+
+export const ListAuditLogsResponse = zod.object({
+  "logs": zod.array(zod.object({
+  "id": zod.int(),
+  "actor": zod.string().describe('Stable server-authenticated actor ID'),
+  "action": zod.string().describe('Allowlisted action name'),
+  "resource": zod.string().nullable().describe('Resource identifier'),
+  "changes": zod.object({
+
+}).describe('Allowlisted, redacted evidence object no larger than 8192 bytes.'),
+  "createdAt": zod.coerce.date()
+})).describe('At most 200 records, ordered newest first by server timestamp and ID.'),
+  "count": zod.int().describe('Number of records in this page'),
+  "nextCursor": zod.string().nullable().describe('Opaque cursor limited to 200 characters')
+})
+
+
+/**
+ * CSV is intentionally bounded to 5000 rows per request; PDF export is deferred until a compliance-approved document renderer is available. Audit records are retained indefinitely and are excluded from ordinary reset and purge operations.
+ * @summary Export private facility-scoped audit records as CSV
+ */
+export const ExportAuditLogsCsvQueryParams = zod.object({
+  "limit": zod.coerce.number().int().optional().describe('Maximum 5000 rows per export; defaults to 5000.')
+})
+
+export const ExportAuditLogsCsvResponse = zod.unknown()
+
+
+/**
  * Manager-only, read-only view of the one-time cleanup that aligned saved profile dough and sauce names to verified spec-sheet links and deleted unreferenced empty recipe stubs. Older historical markers return zero for result fields that were not recorded at the time.
  * @summary View the completed name-link cleanup result
  */

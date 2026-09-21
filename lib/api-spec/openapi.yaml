@@ -3157,6 +3157,60 @@ paths:
         "403":
           description: Missing manager capability
 
+  /audit-logs:
+    get:
+      operationId: listAuditLogs
+      tags: [audit]
+      summary: List private facility-scoped operational audit records
+      description: >-
+        Manager-only, live-scope audit history. Facility scope and actor identity
+        are derived from authentication; scope is never accepted as a query parameter.
+        Records are retained indefinitely and returned through a bounded cursor.
+      parameters:
+        - name: startDate
+          in: query
+          schema: { type: string, format: date-time }
+        - name: endDate
+          in: query
+          schema: { type: string, format: date-time }
+        - name: limit
+          in: query
+          description: Maximum 200 rows per page; defaults to 100.
+          schema: { type: integer }
+        - name: cursor
+          in: query
+          description: Opaque stable cursor, limited to 200 characters.
+          schema: { type: string }
+      responses:
+        "200":
+          description: A bounded audit page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditLogPage"
+        "400": { description: Invalid pagination or date input }
+        "403": { description: Missing manager capability or live scope }
+  /audit-logs/export.csv:
+    get:
+      operationId: exportAuditLogsCsv
+      tags: [audit]
+      summary: Export private facility-scoped audit records as CSV
+      description: >-
+        CSV is intentionally bounded to 5000 rows per request; PDF export is
+        deferred until a compliance-approved document renderer is available.
+        Audit records are retained indefinitely and are excluded from ordinary
+        reset and purge operations.
+      parameters:
+        - name: limit
+          in: query
+          description: Maximum 5000 rows per export; defaults to 5000.
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Bounded CSV export
+          content:
+            text/csv: {}
+        "403": { description: Missing manager capability or live scope }
   /audit-logs/profile-name-link-cleanup:
     get:
       operationId: getProfileNameLinkCleanupAudit
@@ -8626,6 +8680,31 @@ components:
                 type: string
                 enum: [dough, sauce, cheeseRecipes, mixes, import, setupProfiles, audit]
 
+    AuditLog:
+      type: object
+      additionalProperties: false
+      required: [id, actor, action, resource, changes, createdAt]
+      properties:
+        id: { type: integer }
+        actor: { type: string, description: Stable server-authenticated actor ID, limited to 200 characters }
+        action: { type: string, description: Allowlisted action name, limited to 100 characters }
+        resource: { type: string, nullable: true, description: Resource identifier, limited to 200 characters }
+        changes:
+          type: object
+          additionalProperties: false
+          description: Allowlisted, redacted evidence object no larger than 8192 bytes.
+        createdAt: { type: string, format: date-time }
+    AuditLogPage:
+      type: object
+      additionalProperties: false
+      required: [logs, count, nextCursor]
+      properties:
+        logs:
+          type: array
+          description: At most 200 records, ordered newest first by server timestamp and ID.
+          items: { $ref: "#/components/schemas/AuditLog" }
+        count: { type: integer, description: Number of records in this page, from 0 through 200 }
+        nextCursor: { type: string, nullable: true, description: Opaque cursor limited to 200 characters }
     ProfileNameLinkCleanupAudit:
       type: object
       required: [id, appliedAt, summary]

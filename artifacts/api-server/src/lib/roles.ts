@@ -131,8 +131,11 @@ export async function listRoles(): Promise<RoleDefinition[]> {
   return rows.map(toRoleDefinition);
 }
 
-export async function getRole(name: string): Promise<RoleDefinition | undefined> {
-  const [row] = await db
+export async function getRole(
+  name: string,
+  executor: Pick<typeof db, "select"> = db,
+): Promise<RoleDefinition | undefined> {
+  const [row] = await executor
     .select({
       name: rolesTable.name,
       capabilities: rolesTable.capabilities,
@@ -314,20 +317,23 @@ async function resolveBootstrapRole(
 // resolve to "operator" once the database already has no path to bootstrap
 // (a prior sign-up already decided that, or none did and this path fails
 // closed too).
-export async function getOrCreateUserRole(userId: string): Promise<{ role: Role }> {
-  const [existing] = await db
+export async function getOrCreateUserRole(
+  userId: string,
+  executor: Pick<typeof db, "select" | "insert"> = db,
+): Promise<{ role: Role }> {
+  const [existing] = await executor
     .select({ role: userRolesTable.role })
     .from(userRolesTable)
     .where(eq(userRolesTable.userId, userId));
   if (existing) return { role: existing.role };
 
-  const [user] = await db
+  const [user] = await executor
     .select({ username: usersTable.username })
     .from(usersTable)
     .where(eq(usersTable.id, userId));
   const role = await resolveBootstrapRole(userId, user?.username ?? "", "");
 
-  const [row] = await db
+  const [row] = await executor
     .select({ role: userRolesTable.role })
     .from(userRolesTable)
     .where(eq(userRolesTable.userId, userId));
@@ -351,10 +357,13 @@ export async function createRoleForNewUser(
   return resolveBootstrapRole(userId, username, suppliedAccessCode);
 }
 
-export async function getStaffMember(userId: string): Promise<StaffMember> {
-  const { role } = await getOrCreateUserRole(userId);
-  const def = await getRole(role);
-  const [user] = await db
+export async function getStaffMember(
+  userId: string,
+  executor: Pick<typeof db, "select" | "insert"> = db,
+): Promise<StaffMember> {
+  const { role } = await getOrCreateUserRole(userId, executor);
+  const def = await getRole(role, executor);
+  const [user] = await executor
     .select({
       username: usersTable.username,
       onboardingSeen: usersTable.onboardingSeen,
@@ -507,8 +516,9 @@ export async function setUserRole(
   targetUserId: string,
   role: Role,
   actorCapabilities: Capability[],
+  executor: Pick<typeof db, "select" | "insert"> = db,
 ): Promise<{ ok: true; row: StaffMember } | { ok: false; status: number; error: string }> {
-  const def = await getRole(role);
+  const def = await getRole(role, executor);
   if (!def) {
     return { ok: false, status: 400, error: "Unknown role" };
   }
@@ -522,7 +532,7 @@ export async function setUserRole(
     };
   }
 
-  const [user] = await db
+  const [user] = await executor
     .select({ id: usersTable.id })
     .from(usersTable)
     .where(eq(usersTable.id, targetUserId));
@@ -544,7 +554,7 @@ export async function setUserRole(
     }
   }
 
-  await db
+  await executor
     .insert(userRolesTable)
     .values({ userId: targetUserId, role })
     .onConflictDoUpdate({
@@ -552,7 +562,7 @@ export async function setUserRole(
       set: { role, updatedAt: new Date() },
     });
 
-  return { ok: true, row: await getStaffMember(targetUserId) };
+  return { ok: true, row: await getStaffMember(targetUserId, executor) };
 }
 
 // Reset a staff member's password to a manager-supplied value. Unlike the
@@ -562,6 +572,7 @@ export async function resetUserPassword(
   targetUserId: string,
   newPassword: string,
   actorCapabilities: readonly Capability[],
+  executor: Pick<typeof db, "update"> = db,
 ): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
   const [user] = await db
     .select({ id: usersTable.id })
@@ -582,7 +593,7 @@ export async function resetUserPassword(
       error: "Cannot reset a password for a higher-privileged account",
     };
   }
-  await updateUserPassword(targetUserId, newPassword);
+  await updateUserPassword(targetUserId, newPassword, executor);
   // A password reset is exactly the moment we must assume the old password
   // (and any token minted under it) may be compromised — that's the whole
   // point of a recovery reset. Evict the cache immediately so a session the

@@ -28,9 +28,10 @@ import {
   declineResetRequest,
   listPendingResetRequests,
 } from "../lib/passwordResets";
+import { db } from "@workspace/db";
 import { requireCapability, requireLiveScope } from "../middlewares/requireCapability";
 import { getUserById } from "../lib/users";
-import { logAuditEvent } from "./auditLogs";
+import { logAuditEvent, writeAuditEvent } from "./auditLogs";
 
 function pathUserId(raw: string | string[] | undefined): string | undefined {
   return Array.isArray(raw) ? raw[0] : raw;
@@ -215,38 +216,21 @@ router.put(
     return;
   }
   const previous = await getStaffMember(targetUserId);
-  const result = await setUserRole(
-    targetUserId,
-    parsed.data.role,
-    (req.capabilities ?? []) as Capability[],
-  );
+  const result = await db.transaction(async (tx) => {
+    const changed = await setUserRole(targetUserId, parsed.data.role,
+      (req.capabilities ?? []) as Capability[], tx);
+    if (changed.ok && previous.role !== changed.row.role) {
+      const action = previous.role === "operator" && changed.row.role !== "operator"
+        ? "role_granted" : changed.row.role === "operator" && previous.role !== "operator"
+          ? "role_revoked" : "role_changed";
+      await writeAuditEvent(tx, { action, resource: `user:${targetUserId}`,
+        changes: { outcome: "success", targetId: targetUserId } });
+    }
+    return changed;
+  });
   if (!result.ok) {
     res.status(result.status).json({ error: result.error });
     return;
-  }
-  if (previous.role !== result.row.role) {
-    const actor = await auditActor(req);
-    const target = result.row;
-    const metadata = auditRequestMetadata(req);
-    const action =
-      previous.role === "operator" && target.role !== "operator"
-        ? "role_granted"
-        : target.role === "operator" && previous.role !== "operator"
-          ? "role_revoked"
-          : "role_changed";
-    void logAuditEvent(
-      "live",
-      actor,
-      action,
-      `user:${target.name ?? targetUserId}`,
-      {
-        targetUsername: target.name,
-        role: { from: previous.role, to: target.role },
-        capabilities: target.capabilities,
-      },
-      metadata.ipAddress,
-      metadata.userAgent,
-    );
   }
   res.json(result.row);
 });
@@ -268,27 +252,20 @@ router.put(
       res.status(400).json({ error: parsed.error.message });
       return;
     }
-    const result = await resetUserPassword(
-      targetUserId,
-      parsed.data.newPassword,
-      (req.capabilities ?? []) as Capability[],
-    );
+    let result: Awaited<ReturnType<typeof resetUserPassword>>;
+    result = await db.transaction(async (tx) => {
+      const next = await resetUserPassword(targetUserId, parsed.data.newPassword,
+        (req.capabilities ?? []) as Capability[], tx);
+      if (next.ok) {
+        await writeAuditEvent(tx, { action: "password_reset", resource: `user:${targetUserId}`,
+          changes: { outcome: "success", targetId: targetUserId, method: "manager_reset" } });
+      }
+      return next;
+    });
     if (!result.ok) {
       res.status(result.status).json({ error: result.error });
       return;
     }
-    const actor = await auditActor(req);
-    const target = await getUserById(targetUserId);
-    const metadata = auditRequestMetadata(req);
-    void logAuditEvent(
-      "live",
-      actor,
-      "password_reset",
-      `user:${target?.username ?? targetUserId}`,
-      { targetUsername: target?.username ?? targetUserId, method: "manager_reset" },
-      metadata.ipAddress,
-      metadata.userAgent,
-    );
     res.status(204).end();
   },
 );
@@ -316,22 +293,19 @@ router.post(
       res.status(400).json({ error: "Invalid request id" });
       return;
     }
-    const result = await approveResetRequest(id, (req.capabilities ?? []) as Capability[]);
+    const result = await db.transaction(async (tx) => {
+      const approved = await approveResetRequest(id, (req.capabilities ?? []) as Capability[], tx);
+      if (approved.ok) {
+        await writeAuditEvent(tx, { action: "password_reset_approved",
+          resource: `reset_request:${id}`,
+          changes: { outcome: "success", targetId: id, requestId: id } });
+      }
+      return approved;
+    });
     if (!result.ok) {
       res.status(result.status).json({ error: result.error });
       return;
     }
-    const actor = await auditActor(req);
-    const metadata = auditRequestMetadata(req);
-    void logAuditEvent(
-      "live",
-      actor,
-      "password_reset_approved",
-      `user:${result.username}`,
-      { targetUsername: result.username, requestId: id },
-      metadata.ipAddress,
-      metadata.userAgent,
-    );
     res.json({
       username: result.username,
       code: result.code,

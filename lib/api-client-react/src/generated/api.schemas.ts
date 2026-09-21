@@ -3630,6 +3630,33 @@ export interface ProfileDataHealthWorkspace {
   sourceReconciliation: SourceLibraryReconciliationStatus;
 }
 
+/**
+ * Allowlisted, redacted evidence object no larger than 8192 bytes.
+ */
+export type AuditLogChanges = { [key: string]: unknown };
+
+export interface AuditLog {
+  id: number;
+  /** Stable server-authenticated actor ID */
+  actor: string;
+  /** Allowlisted action name */
+  action: string;
+  /** Resource identifier */
+  resource: string | null;
+  /** Allowlisted, redacted evidence object no larger than 8192 bytes. */
+  changes: AuditLogChanges;
+  createdAt: string;
+}
+
+export interface AuditLogPage {
+  /** At most 200 records, ordered newest first by server timestamp and ID. */
+  logs: AuditLog[];
+  /** Number of records in this page */
+  count: number;
+  /** Opaque cursor limited to 200 characters */
+  nextCursor: string | null;
+}
+
 export type ProfileNameLinkCleanupSummaryRemovedStubs = {
   dough: number;
   sauce: number;
@@ -5687,6 +5714,26 @@ export type AuditProfileDataHealth200 = {
 
 export type GetProfileDataHealthWorkspace200 = {
   workspace: ProfileDataHealthWorkspace;
+};
+
+export type ListAuditLogsParams = {
+startDate?: string;
+endDate?: string;
+/**
+ * Maximum 200 rows per page; defaults to 100.
+ */
+limit?: number;
+/**
+ * Opaque stable cursor, limited to 200 characters.
+ */
+cursor?: string;
+};
+
+export type ExportAuditLogsCsvParams = {
+/**
+ * Maximum 5000 rows per export; defaults to 5000.
+ */
+limit?: number;
 };
 
 export type GetProfileNameLinkCleanupAudit200 = {
