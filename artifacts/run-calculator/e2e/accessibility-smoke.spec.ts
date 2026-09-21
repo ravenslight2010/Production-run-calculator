@@ -382,6 +382,11 @@ async function signUp(
               "manage-profiles",
             ])],
           );
+        } else if (role === "supervisor") {
+          await db.query(
+            "UPDATE roles SET capabilities = $1::jsonb WHERE name = 'supervisor'",
+            [JSON.stringify(["review-incidents", "edit-production-rules"])],
+          );
         }
       } finally {
         await db.end().catch(() => {});
@@ -983,6 +988,62 @@ test.describe("accessibility smoke", () => {
     await expect(operatorTimeline).toContainText("Break 3 · 30 min");
     await expect(operatorPage.getByTestId("schedule-breaks")).toHaveCount(0);
     await operatorPage.close();
+  });
+
+  test("authorized supervisors can save all break slots without manager-only controls", async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await signUp(page, "supervisor");
+    await seedBreakSchedule();
+    await page.evaluate(() => {
+      for (const key of Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))) {
+        if (key?.startsWith("run-calc")) localStorage.removeItem(key);
+      }
+    });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+
+    await page.getByRole("button", { name: "More" }).click();
+    await expect(page.getByRole("menuitem", { name: "Schedule", exact: true })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "Staff roster", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("menuitem", { name: "Manager action queue", exact: true })).toHaveCount(0);
+    await page.getByRole("menuitem", { name: "Schedule", exact: true }).click();
+
+    const scheduledDaysDialog = page.getByRole("dialog", { name: "Scheduled Days" });
+    await scheduledDaysDialog
+      .getByTestId("schedule-today-card")
+      .getByRole("button", { name: "Edit", exact: true })
+      .click();
+    const scheduleEditor = page.getByRole("dialog", { name: /Plan for/ });
+    const breakEditor = scheduleEditor.getByTestId("schedule-breaks");
+    for (const [slot, time] of [[1, "07:00"], [2, "09:00"], [3, "11:00"]] as const) {
+      await breakEditor
+        .getByRole("combobox", { name: `Break ${slot} placement` })
+        .selectOption("at-time");
+      await breakEditor.getByLabel(`Break ${slot} time`).fill(time);
+    }
+
+    const saveResponse = page.waitForResponse(
+      (response) =>
+        response.url().includes("/api/sync/today") &&
+        response.request().method() === "PUT",
+    );
+    await scheduleEditor.getByRole("button", { name: "Save Schedule", exact: true }).click();
+    expect((await saveResponse).ok()).toBe(true);
+    await expect(scheduledDaysDialog.getByTestId("schedule-today-card")).toBeVisible();
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    await page.getByRole("button", { name: "More" }).click();
+    await expect(page.getByRole("menuitem", { name: "Staff roster", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("menuitem", { name: "Manager action queue", exact: true })).toHaveCount(0);
+    await page.getByRole("menuitem", { name: "Summary", exact: true }).click();
+    const timeline = page.getByTestId("day-timeline");
+    await expect(timeline).toBeVisible();
+    await expect(timeline).toContainText("Break 1 · 30 min");
+    await expect(timeline).toContainText("Break 2 · 30 min");
+    await expect(timeline).toContainText("Break 3 · 30 min");
   });
 
   test("supervisors can review field checks without physical-device attestation controls", async ({ page }) => {
