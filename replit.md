@@ -3,6 +3,7 @@
 - `pnpm --filter @workspace/api-server run dev` — run the API server on the artifact-configured local workflow port 8080 (`artifacts/api-server/.replit-artifact/artifact.toml`). This development command applies the development schema first, but refuses a confirmed deployed Replit runtime before schema push. `REPLIT_ENVIRONMENT=production` alone does not trigger the refusal because isolated workspaces can carry it. CI may intentionally override the port with `PORT=5000`; do not use the CI port as local startup guidance.
 - `pnpm --filter @workspace/run-calculator run prepare:e2e:department` — for a fresh isolated browser-test database, fail closed unless the target is disposable, apply the canonical schema, then start the API; run `test:e2e:department` separately while it stays up
 - `pnpm run typecheck` — full typecheck across all packages
+- `pnpm --filter @workspace/api-server run typecheck:routes` — focused API route check when a generated validator build blocks the full API check; it uses the last successful `@workspace/api-zod` declarations and does not replace the authoritative `typecheck` command
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
