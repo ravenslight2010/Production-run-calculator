@@ -4,6 +4,7 @@ import type { OperationalRunView } from "@workspace/api-client-react";
 import { reportUnauthorized } from "../inventoryShared";
 import { useMe } from "../useRole";
 import { shouldAdoptOperationalSnapshot } from "../operationalState";
+import { useVisibilityAwareInterval } from "../hooks/useVisibilityAwareInterval";
 
 type LoadState =
   | { kind: "loading" }
@@ -44,14 +45,8 @@ export default function CanonicalRunViewCard({
   const { hasCapability } = useMe();
   const allowed = hasCapability("review-incidents");
 
-  useEffect(() => {
-    const ageTimer = window.setInterval(() => setNow(Date.now()), 1_000);
-    const refreshTimer = window.setInterval(() => setRefresh((value) => value + 1), 15_000);
-    return () => {
-      window.clearInterval(ageTimer);
-      window.clearInterval(refreshTimer);
-    };
-  }, []);
+  useVisibilityAwareInterval(() => setNow(Date.now()), 1_000);
+  useVisibilityAwareInterval(() => setRefresh((value) => value + 1), 15_000);
 
   useEffect(() => {
     if (!date || !runId || !allowed) return;
