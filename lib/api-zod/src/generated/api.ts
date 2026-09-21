@@ -598,6 +598,25 @@ export const ConsumeInventoryResponse = zod.object({
 
 
 /**
+ * Idempotent by production date; retries of the same date have no physical effect.
+ * @summary Deduct the scheduled day's mix components and daily supplies
+ */
+export const consumeInventoryDayStartBodyDateRegExp = new RegExp('^\\d{4}-\\d{2}-\\d{2}$');
+
+
+export const ConsumeInventoryDayStartBody = zod.object({
+  "date": zod.string().regex(consumeInventoryDayStartBodyDateRegExp).optional().describe('Production date (defaults to today)')
+})
+
+export const ConsumeInventoryDayStartResponse = zod.object({
+  "applied": zod.boolean(),
+  "consumed": zod.number().optional(),
+  "lines": zod.int().optional(),
+  "message": zod.string().optional()
+})
+
+
+/**
  * @summary Fold one or more source items' stock into a target item
  */
 export const MergeInventoryBody = zod.object({

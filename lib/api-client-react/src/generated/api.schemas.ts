@@ -5,6 +5,14 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+export interface ConsumeInventoryDayStartInput {
+  /**
+     * Production date (defaults to today)
+     * @pattern ^\d{4}-\d{2}-\d{2}$
+     */
+  date?: string;
+}
+
 export type CompletedRunFinalizationSnapshot = { [key: string]: unknown };
 
 export interface CompletedRunFinalization {
@@ -5537,6 +5545,13 @@ export type CheckUsernameAvailableParams = {
  * @maxLength 64
  */
 username: string;
+};
+
+export type ConsumeInventoryDayStart200 = {
+  applied: boolean;
+  consumed?: number;
+  lines?: number;
+  message?: string;
 };
 
 export type ListInventoryLedgerParams = {

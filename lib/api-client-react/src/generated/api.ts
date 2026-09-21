@@ -52,6 +52,8 @@ import type {
   CompletedRunFinalization,
   ConfirmFreezerSurplusInput,
   ConsumeInput,
+  ConsumeInventoryDayStart200,
+  ConsumeInventoryDayStartInput,
   ConsumeResult,
   CreateInventoryItemInput,
   CreateInventoryLocationInput,
@@ -2223,6 +2225,95 @@ export const useConsumeInventory = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getConsumeInventoryMutationOptions(options), queryClient);
+    }
+
+export const getConsumeInventoryDayStartUrl = () => {
+
+
+
+
+  return `/api/inventory/consume-day-start`
+}
+
+/**
+ * Idempotent by production date; retries of the same date have no physical effect.
+ * @summary Deduct the scheduled day's mix components and daily supplies
+ */
+export const consumeInventoryDayStart = async (consumeInventoryDayStartInput?: ConsumeInventoryDayStartInput, options?: Parameters<typeof customFetch>[1]): Promise<ConsumeInventoryDayStart200> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ConsumeInventoryDayStart200>(getConsumeInventoryDayStartUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(consumeInventoryDayStartInput)
+  }
+);}
+
+
+
+
+
+export const getConsumeInventoryDayStartMutationKey = () => ['consumeInventoryDayStart'] as const;
+
+export const getConsumeInventoryDayStartMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof consumeInventoryDayStart>>, TError,ConsumeInventoryDayStartMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof consumeInventoryDayStart>>, TError,ConsumeInventoryDayStartMutationVariables, TContext> => {
+
+const mutationKey = getConsumeInventoryDayStartMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof consumeInventoryDayStart>>, ConsumeInventoryDayStartMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  consumeInventoryDayStart(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ConsumeInventoryDayStartMutationResult = NonNullable<Awaited<ReturnType<typeof consumeInventoryDayStart>>>
+    export type ConsumeInventoryDayStartMutationBody = BodyType<ConsumeInventoryDayStartInput> | undefined
+    export type ConsumeInventoryDayStartMutationError = ErrorType<void>
+    export type ConsumeInventoryDayStartMutationVariables = {data?: BodyType<ConsumeInventoryDayStartInput>}
+
+    /**
+ * @summary Deduct the scheduled day's mix components and daily supplies
+ */
+export const useConsumeInventoryDayStart = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof consumeInventoryDayStart>>, TError,ConsumeInventoryDayStartMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof consumeInventoryDayStart>>,
+        TError,
+        ConsumeInventoryDayStartMutationVariables,
+        TContext
+      > => {
+      return useMutation(getConsumeInventoryDayStartMutationOptions(options), queryClient);
     }
 
 export const getMergeInventoryUrl = () => {

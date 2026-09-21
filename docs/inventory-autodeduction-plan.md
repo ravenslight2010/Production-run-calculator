@@ -1,10 +1,32 @@
 # Inventory Auto-Deduction — Comprehensive Plan
 
-**Status:** Partially built; physical-event accuracy work remains
-**Updated:** 2026-09-19
+**Status:** Core physical-event accounting built
+**Updated:** 2026-09-20
 **Related:** [Idea backlog](idea-backlog.md#4-inventory-system-gap-fixes), [additional domain synthesis](../research/additional-domain-research-synthesis-2026-09-19.md)
 
-**Authority rule:** each physical inventory event must use one server-authoritative, idempotent transaction or intent. Do not add an independent client-side stock mutation path. Before implementation, decide the authoritative completed-case register, eligible onsite locations, freezer lot ownership, and packaging-ledger scope.
+**Authority rule:** each physical inventory event uses one server-authoritative, idempotent transaction. Do not add an independent client-side stock mutation path.
+
+## Authority decisions
+
+- **Completed cases:** the server-persisted run register's `actualCases` is the production quantity used for final run consumption. When it is absent or zero, planned cases remain the backward-compatible basis. The run-level claim freezes the first accepted deduction.
+- **Eligible production stock:** automatic ingredient and packaging consumption draws only from the scope's location marked `isOnsite`; legacy lots with no location are treated as onsite. Offsite and freezer stock are excluded.
+- **Confirmed finished-case surplus:** run consumption already charges all ingredients and packaging for `actualCases`, including excess cases. Surplus confirmation creates the freezer finished-case asset only; it never charges ingredients again.
+- **Freezer reuse:** allocation reduces or moves the finished-case freezer asset. It does not consume the underlying ingredients a second time.
+- **Prep mix and already-made mix:** the day-start event charges components for fresh mix actually made. `amountAlreadyMade` reduces fresh production and therefore does not trigger a second component charge.
+- **Packaging:** packaging lines are part of the same completed-run consumption event and use the same actual-case scale and onsite drawdown.
+
+## Idempotent physical events
+
+| Physical event | Stable identity | Server effect |
+|---|---|---|
+| Completed run, including confirmed excess production | Run ID | Scale all run ingredient and packaging lines to authoritative actual cases, lock onsite lots, append stock ledger rows |
+| Day-start prep/fresh mix and daily supplies | Production date | Lock mix rows and onsite lots, update mix carry/surplus, append stock ledger rows |
+| Already-made mix reuse | Existing mix surplus allocation/carry | Reduce fresh mix need only; no new component charge |
+| Finished-case surplus confirmation | Surplus lot ID | Create the dated freezer asset and matching freezer inventory lot; no ingredient charge |
+| Finished-case freezer allocation | Run and surplus lot identity | Reduce freezer finished-case stock only; no ingredient charge |
+| Sauce auto-track consumption | Run and sauce event identity | Lock onsite lots and append stock ledger rows atomically with accepted progress |
+
+The idempotency claim, stock locks, quantity updates, surplus/carry updates, and ledger rows commit or roll back together. A failed attempt leaves no claim, so a retry can safely apply the event once.
 
 ## The Core Problem
 Inventory consumption is a **single-point event** at run-end, computed from the **planned** `casesNeeded`. Multiple production activities that consume ingredients or packaging are not reflected in inventory. This causes inventory to drift from reality over time.
@@ -13,7 +35,7 @@ Inventory consumption is a **single-point event** at run-end, computed from the 
 
 ## A. Overproduction Inventory Deduction (Critical)
 
-**Status**: Not yet built
+**Status**: Built through actual-case run consumption plus freezer surplus asset creation
 **What**: When actual production exceeds the planned target, extra ingredients are consumed but not deducted.
 
 **When**: At surplus confirmation moment (end of run, manager confirms extra cases).
@@ -36,7 +58,7 @@ Inventory consumption is a **single-point event** at run-end, computed from the 
 
 ## B. Mix / Prep Mix Deduction (Critical)
 
-**Status**: Not yet built
+**Status**: Built
 
 **What**: When prep mixes are made, the component ingredients need to be accounted for. Also, leftover ("Already Made") mix needs to offset future deductions without double-charging.
 
@@ -76,7 +98,7 @@ Similar to Feature A but for mixes specifically.
 
 ## C. Freezer Pull → Inventory Sync (Medium)
 
-**Status**: Not yet built
+**Status**: Built
 
 **Problem**: When warehouse pulls items from the freezer for a run, the pull is tracked in the freezer surplus system but doesn't move inventory lots. This causes double-counting — the same stock appears in both inventory and freezer surplus.
 
@@ -94,7 +116,7 @@ Similar to Feature A but for mixes specifically.
 
 ## D. Actual Cases Instead of Planned (Medium)
 
-**Status**: Not yet built
+**Status**: Built
 
 **Problem**: `findExpectedConsumptionForRun` reads the planned `casesNeeded` from form values. When actual production differs, inventory is wrong.
 
@@ -113,7 +135,7 @@ Similar to Feature A but for mixes specifically.
 
 ## E. Full Packaging Consumption (Medium)
 
-**Status**: Not yet built
+**Status**: Built
 
 **Problem**: Only circles, shippers, and cartons are consumed from inventory. All other packaging items (slip sheets, grip sheets, labels, pallets, tape, glue, ink, shipper labels) are missing.
 

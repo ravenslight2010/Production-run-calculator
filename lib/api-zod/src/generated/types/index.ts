@@ -77,6 +77,8 @@ export * from './completedRunFinalization';
 export * from './completedRunFinalizationSnapshot';
 export * from './confirmFreezerSurplusInput';
 export * from './consumeInput';
+export * from './consumeInventoryDayStart200';
+export * from './consumeInventoryDayStartInput';
 export * from './consumeLine';
 export * from './consumeResult';
 export * from './createInventoryItemInput';
