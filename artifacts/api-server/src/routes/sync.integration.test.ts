@@ -3980,6 +3980,11 @@ describe("/sync/events — date-scoped broadcasts", () => {
     expect(removalFrame.frame.runLines).toEqual({ [removedRunId]: null });
 
     let sharedInputPayload = removalBody.data;
+    // A 32-run day is a representative full shift. Keep each shared-input
+    // refresh within 128 KiB on the wire: large enough for complete derived
+    // maps for every run, while remaining a small bounded SSE message rather
+    // than drifting toward the 10 MiB sync-write safety ceiling.
+    const sharedSetupRefreshFrameBudgetBytes = 128 * 1024;
     for (const field of derivedRunMapSharedDayStateFields) {
       const senderId = `peer-shared-${field}`;
       const currentValue = sharedInputPayload.dayState[field];
@@ -4002,6 +4007,11 @@ describe("/sync/events — date-scoped broadcasts", () => {
       expect(sharedInputFrame.frame.data.dayState[field]).toEqual(changedValue);
       expect(Object.keys(sharedInputFrame.frame.summaryStats).sort()).toEqual(remainingRunIds);
       expect(Object.keys(sharedInputFrame.frame.runLines).sort()).toEqual(remainingRunIds);
+      const sharedInputWireBytes = Buffer.byteLength(`data: ${sharedInputFrame.raw}\n\n`, "utf8");
+      expect(
+        sharedInputWireBytes,
+        `${field} shared setup refresh SSE frame bytes`,
+      ).toBeLessThanOrEqual(sharedSetupRefreshFrameBudgetBytes);
     }
 
     await reader.cancel();
