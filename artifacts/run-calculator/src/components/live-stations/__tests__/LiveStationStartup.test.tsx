@@ -62,6 +62,12 @@ const NEXT_RUN: RunMeta = {
   flavor: "Next Flavor",
   stoppages: [],
 };
+const MANUALLY_SELECTED_RUN: RunMeta = {
+  id: "station-manually-selected-run",
+  brand: "Selected Brand",
+  flavor: "Selected Flavor",
+  stoppages: [],
+};
 
 const STATION_VALUES: FormValues = {
   ...DEFAULT_VALUES,
@@ -419,6 +425,48 @@ describe("live station startup", () => {
     expect(switchToRun).toHaveBeenCalledTimes(1);
     expect(switchToRun).toHaveBeenCalledWith(1, RUN_ID);
   });
+
+  it.each([
+    { name: "Frontline", Component: LiveFrontlineTabContent },
+    { name: "Packaging", Component: LivePackagingTabContent },
+  ])(
+    "does not skip the queued run when a foreground selection races $name drain completion",
+    ({ Component }) => {
+      const fullyDrained = { ...ENDED_RUN, endedAt: Date.now() - 40 * 60_000 };
+      const runs = [fullyDrained, NEXT_RUN, MANUALLY_SELECTED_RUN];
+      const selectedRunId = { current: MANUALLY_SELECTED_RUN.id };
+      const switchToRun = vi.fn(
+        (newIndex: number, expectedCurrentRunId?: string) => {
+          // Model the real lifecycle manager's expected-run fence. The
+          // foreground/manual selection has already won before this stale
+          // station effect tries to advance the old draining run.
+          if (
+            expectedCurrentRunId &&
+            selectedRunId.current !== expectedCurrentRunId
+          ) {
+            return false;
+          }
+          selectedRunId.current = runs[newIndex]?.id ?? selectedRunId.current;
+          return true;
+        },
+      );
+
+      render(
+        <StationProviders
+          status="ended"
+          runs={runs}
+          switchToRun={switchToRun}
+        >
+          <Component />
+        </StationProviders>,
+      );
+
+      expect(switchToRun).toHaveBeenCalledTimes(1);
+      expect(switchToRun).toHaveBeenCalledWith(1, RUN_ID);
+      expect(selectedRunId.current).toBe(MANUALLY_SELECTED_RUN.id);
+      expect(selectedRunId.current).not.toBe(NEXT_RUN.id);
+    },
+  );
 
   it.each(FRONTLINE_APPLICATOR_LOCK_CASES.filter(({ slot }) => slot !== "app1"))(
     "keeps $slot Frontline correction controls usable after switching away from the peer-locked run",

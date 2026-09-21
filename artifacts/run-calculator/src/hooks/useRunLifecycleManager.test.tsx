@@ -111,6 +111,28 @@ describe("useRunLifecycleManager", () => {
     expect(deps.form.reset).not.toHaveBeenCalled();
   });
 
+  it("keeps a manually or foreground-selected run when drain completion races the stale switch", () => {
+    const { deps, spies } = setup(day([run("draining"), run("queued"), run("selected")]));
+    const { result } = renderHook(() => useRunLifecycleManager(deps));
+
+    // A foreground adoption or manual selection can update the shared day
+    // state after the station effect captured "draining" but before its
+    // auto-advance callback runs. The stale callback must not select "queued".
+    deps.dayStateRef.current = day(
+      [run("draining"), run("queued"), run("selected")],
+      2,
+    );
+
+    act(() => {
+      expect(result.current.switchToRun(1, "draining")).toBe(false);
+    });
+
+    expect(deps.dayStateRef.current.currentIndex).toBe(2);
+    expect(deps.dayStateRef.current.runs[deps.dayStateRef.current.currentIndex]?.id).toBe("selected");
+    expect(spies.save).not.toHaveBeenCalled();
+    expect(deps.form.reset).not.toHaveBeenCalled();
+  });
+
   it("uses overlay generations for Start, Pause, Resume, and competing End", () => {
     const { deps, spies } = setup(day([
       run("a", { startedAt: 10 }), run("b", { startedAt: 20 }),
