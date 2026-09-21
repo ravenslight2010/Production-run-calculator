@@ -116,6 +116,13 @@ describe("packaging manager", () => {
         skidsCompleted: 2,
         casesOnCurrentSkid: 45,
       },
+      current: {
+        ...DEFAULT_VALUES,
+        casesNeeded: 400,
+        casesPerSkid: 100,
+        skidsCompleted: 7,
+        casesOnCurrentSkid: 12,
+      },
     };
     const { manager, saveRunValues } = makeManager(values);
     const entry = { run: run("prior", 900_000), values: values.prior };
@@ -126,6 +133,10 @@ describe("packaging manager", () => {
       "prior",
       expect.objectContaining({ skidsCompleted: 2, casesOnCurrentSkid: 50 }),
     );
+    expect(values.current).toMatchObject({
+      skidsCompleted: 7,
+      casesOnCurrentSkid: 12,
+    });
   });
 
   it("does not persist an automatic write rejected by the progress register", () => {

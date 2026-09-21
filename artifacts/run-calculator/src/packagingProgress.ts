@@ -156,3 +156,17 @@ export function overlayPackagingProgress(
     casesOnCurrentSkid: progress.casesOnCurrentSkid,
   };
 }
+
+/**
+ * Apply only the progress register owned by this run. Run values are stored
+ * independently from the register, so callers that hydrate a form after a
+ * reload must never look up progress from the currently selected run or from
+ * another run's snapshot.
+ */
+export function overlayPackagingProgressForRun(
+  runId: string,
+  values: FormValues,
+  progressByRun: Record<string, PackagingProgress> = loadPackagingProgress(),
+): FormValues {
+  return overlayPackagingProgress(values, progressByRun[runId]);
+}

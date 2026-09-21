@@ -305,6 +305,7 @@ import {
 import {
   loadPackagingProgress,
   overlayPackagingProgress,
+  overlayPackagingProgressForRun,
   reconcilePackagingProgress,
   recordAutomaticPackagingProgress,
   recordManualPackagingProgress,
@@ -2719,6 +2720,10 @@ function LiveRunHandoffGuard() {
   return null;
 }
 
+function loadPackagingAwareRunValues(runId: string): FormValues {
+  return overlayPackagingProgressForRun(runId, loadRunValues(runId));
+}
+
 export default function Home() {
   const specImportOperationRef = useRef<string | null>(null);
   const premixImportOperationRef = useRef<string | null>(null);
@@ -2880,7 +2885,7 @@ export default function Home() {
     autoSuppressUntilRef,
     dayStateRef,
     autoSuppressMs: AUTO_SUPPRESS_MS,
-    loadRunValues,
+    loadRunValues: loadPackagingAwareRunValues,
     saveRunValues,
     markRunValuesUpdated,
     markLocalEdit: (now) => { lastLocalEditRef.current = now; },
@@ -3538,7 +3543,7 @@ export default function Home() {
     setDayState(ds);
     if (ds.runToTime) setRunToTime(ds.runToTime);
     const curId = ds.runs[ds.currentIndex]?.id ?? "";
-    const vals = { ...DEFAULT_VALUES, ...loadRunValues(curId) };
+    const vals = { ...DEFAULT_VALUES, ...loadPackagingAwareRunValues(curId) };
     form.reset(vals);
     resetFieldArrays(vals);
   }
@@ -3719,7 +3724,7 @@ export default function Home() {
     resolver: zodResolver(formSchema) as Resolver<FormValues>,
     defaultValues: (() => {
       const ds = loadDayState();
-      return loadRunValues(ds.runs[ds.currentIndex]?.id ?? "");
+      return loadPackagingAwareRunValues(ds.runs[ds.currentIndex]?.id ?? "");
     })(),
     mode: "onChange",
   });
@@ -8161,6 +8166,18 @@ export default function Home() {
           );
           saveRunValues(id, acceptedVals);
         }
+        // A partial sync may carry an accepted progress register without a
+        // corresponding runValues entry. Persist that register against the
+        // same run ID so reload hydration and the shared form see the same
+        // winning counters without borrowing the selected run's snapshot.
+        for (const id of packagingMerge.acceptedRemoteIds) {
+          if (Object.prototype.hasOwnProperty.call(payload.runValues, id)) continue;
+          const progress = packagingMerge.merged[id];
+          if (!progress) continue;
+          const values = loadRunValues(id);
+          const overlaid = overlayPackagingProgress(values, progress);
+          if (!deepEqual(values, overlaid)) saveRunValues(id, overlaid);
+        }
         saveRunValuesUpdated(mergedUpd);
       }
 
@@ -8456,7 +8473,7 @@ export default function Home() {
             progress?.manualOverrideUntil ?? 0,
           );
         }
-        if (currentId && payload.runValues[currentId] && (adoptedPackaging || (
+        if (currentId && (payload.runValues[currentId] || adoptedPackaging) && (adoptedPackaging || (
           curLocalTs <= curRemoteTs &&
           Date.now() - lastLocalEditRef.current > 2000 &&
           pushAcknowledgedRef.current
@@ -10086,9 +10103,9 @@ export default function Home() {
       const value =
         run.id === curId
           ? (formHandoffRef.current
-              ? loadRunValues(run.id)
-              : pickCurrentRunPushValue(form.getValues(), loadRunValues(run.id)))
-          : loadRunValues(run.id);
+              ? loadPackagingAwareRunValues(run.id)
+              : pickCurrentRunPushValue(form.getValues(), loadPackagingAwareRunValues(run.id)))
+          : loadPackagingAwareRunValues(run.id);
       // NEVER push the untouched auto-created placeholder run. Every fresh
       // device/browser starts with one (freshDayState), and pushing it lets the
       // server's additive run-list union pin a blank "Unnamed Run" into every
@@ -10103,7 +10120,7 @@ export default function Home() {
       // recipe/setup values remain on the server and protectRunValues treats
       // omitted run IDs as unchanged. Keep the current form if autosave has
       // not stamped a keystroke yet.
-      const currentFormChanged = run.id === curId && !deepEqual(value, loadRunValues(run.id));
+      const currentFormChanged = run.id === curId && !deepEqual(value, loadPackagingAwareRunValues(run.id));
       if (
         !canSendPartial ||
         localStamps[run.id] !== baselineStamps[run.id] ||
@@ -11204,7 +11221,7 @@ export default function Home() {
   } = useRunLifecycleManager({
     dayStateRef, setDayState, saveDayState, form, lastFormRunIdRef, formHandoffRef, currentRun, currentRunId,
     flushFormWrites: flushPendingHomeFormWrites,
-    loadRunValues, saveRunValues, markRunValuesUpdated,
+    loadRunValues: loadPackagingAwareRunValues, saveRunValues, markRunValuesUpdated,
     canManageProfiles, saveProfile, propagateProfileToPendingRuns, resetFieldArrays,
     setDoughSubTab, setActiveStopId, setConfirmDeleteStopId, setActiveTab,
     foregroundSyncBarrierRef, foregroundStopIntentRef, setPendingForegroundStopRunId,
