@@ -276,11 +276,27 @@ describe("operational audit HTTP boundary", () => {
       DELETE FROM audit_logs
       WHERE id = ${row.id}
     `)).rejects.toMatchObject({ cause: { code: "42501" } });
+    await expect(db.execute(sql`
+      SELECT public.redact_audit_log(${row.id}, '{"outcome":"redacted"}'::jsonb)
+    `)).rejects.toMatchObject({ cause: { code: "42501" } });
+    await expect(db.execute(sql`
+      SELECT public.record_audit_maintenance_approval(
+        ${row.id}, 'redact', 'unauthorized-app-request', 'should fail', 'application'
+      )
+    `)).rejects.toMatchObject({ cause: { code: "42501" } });
 
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
       await client.query("SET LOCAL ROLE audit_maintenance");
+      const approval = await client.query(
+        "SELECT public.record_audit_maintenance_approval($1, $2, $3, $4, $5) AS approval_id",
+        [row.id, "redact", "compliance-reviewer", "approved_test_redaction", "maintenance-operator"],
+      );
+      const deletionApproval = await client.query(
+        "SELECT public.record_audit_maintenance_approval($1, $2, $3, $4, $5) AS approval_id",
+        [rowToDelete.id, "delete", "compliance-reviewer", "approved_test_deletion", "maintenance-operator"],
+      );
       const result = await client.query(
         "SELECT public.redact_audit_log($1, $2::jsonb) AS redacted",
         [row.id, JSON.stringify({ outcome: "redacted", reasonCode: "approved_test" })],
@@ -290,6 +306,8 @@ describe("operational audit HTTP boundary", () => {
         [rowToDelete.id, "approved_test_cleanup"],
       );
       await client.query("COMMIT");
+      expect(approval.rows[0]?.approval_id).toEqual(expect.any(Number));
+      expect(deletionApproval.rows[0]?.approval_id).toEqual(expect.any(Number));
       expect(result.rows[0]?.redacted).toBe(true);
       expect(deleted.rows[0]?.deleted).toBe(true);
     } catch (error) {
@@ -303,6 +321,32 @@ describe("operational audit HTTP boundary", () => {
     const redacted = redactedRows.find((candidate) => candidate.id === row.id);
     expect(redacted?.changes).toEqual({ outcome: "redacted", reasonCode: "approved_test" });
     expect(redactedRows.some((candidate) => candidate.id === rowToDelete.id)).toBe(false);
+    expect(redactedRows.filter((candidate) => candidate.action === "audit_log_maintenance_approved")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actor: "maintenance-operator",
+          resource: `audit_logs:${row.id}`,
+          changes: expect.objectContaining({
+            outcome: "approved",
+            targetId: row.id,
+            targetType: "redact",
+            authorizedBy: "compliance-reviewer",
+            reasonCode: "approved_test_redaction",
+          }),
+        }),
+        expect.objectContaining({
+          actor: "maintenance-operator",
+          resource: `audit_logs:${rowToDelete.id}`,
+          changes: expect.objectContaining({
+            outcome: "approved",
+            targetId: rowToDelete.id,
+            targetType: "delete",
+            authorizedBy: "compliance-reviewer",
+            reasonCode: "approved_test_deletion",
+          }),
+        }),
+      ]),
+    );
     expect(redactedRows.some((candidate) => candidate.action === "audit_log_deleted")).toBe(true);
   });
 

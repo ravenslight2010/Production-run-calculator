@@ -106,6 +106,10 @@ const EVENT_SCHEMAS: Record<string, { required: string[]; allowed: string[] }> =
   role_changed: { required: ["outcome"], allowed: ["outcome", "targetId"] },
   password_reset: { required: ["outcome", "targetId"], allowed: ["outcome", "targetId", "method"] },
   password_reset_approved: { required: ["outcome", "targetId"], allowed: ["outcome", "targetId", "requestId"] },
+  audit_log_maintenance_approved: {
+    required: ["outcome", "targetId", "targetType", "authorizedBy", "reasonCode"],
+    allowed: ["outcome", "targetId", "targetType", "authorizedBy", "reasonCode"],
+  },
   production_rules_updated: { required: ["outcome", "count"], allowed: ["outcome", "count"] },
   production_rules_deleted: { required: ["outcome", "count"], allowed: ["outcome", "count"] },
   manager_action_item_update: { required: ["outcome", "targetId"], allowed: ["outcome", "targetId"] },
@@ -122,7 +126,7 @@ function boundedString(value: unknown, max = MAX_STRING): string | undefined {
 
 /** Redacts arbitrary legacy event input into the small operational evidence schema. */
 export function redactAuditChanges(value: unknown): Record<string, unknown> {
-  const allowed = new Set(["count", "outcome", "reasonCode", "targetId", "targetType", "from", "to", "method", "requestId"]);
+  const allowed = new Set(["count", "outcome", "reasonCode", "targetId", "targetType", "authorizedBy", "from", "to", "method", "requestId"]);
   const output: Record<string, unknown> = {};
   if (!value || typeof value !== "object" || Array.isArray(value)) return output;
   for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {

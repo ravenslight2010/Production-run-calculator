@@ -140,10 +140,81 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION public.record_audit_maintenance_approval(
+  p_id integer,
+  p_action text,
+  p_authorized_by text,
+  p_reason text,
+  p_operator text
+)
+RETURNS integer
+LANGUAGE plpgsql
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  target_scope text;
+  approval_id integer;
+  action text := btrim(p_action);
+  authorized_by text := btrim(p_authorized_by);
+  reason text := btrim(p_reason);
+  operator_name text := btrim(p_operator);
+BEGIN
+  IF current_user <> 'audit_maintenance' THEN
+    RAISE EXCEPTION
+      'record_audit_maintenance_approval requires the separately authorized audit_maintenance role'
+      USING ERRCODE = '42501';
+  END IF;
+  IF action IS NULL OR action NOT IN ('redact', 'delete') THEN
+    RAISE EXCEPTION 'audit maintenance approval action must be redact or delete'
+      USING ERRCODE = '22023';
+  END IF;
+  IF authorized_by IS NULL OR length(authorized_by) = 0 OR length(authorized_by) > 200 THEN
+    RAISE EXCEPTION 'audit maintenance approval requires an authorized-by value of 1 to 200 characters'
+      USING ERRCODE = '22023';
+  END IF;
+  IF reason IS NULL OR length(reason) = 0 OR length(reason) > 200 THEN
+    RAISE EXCEPTION 'audit maintenance approval requires a reason of 1 to 200 characters'
+      USING ERRCODE = '22023';
+  END IF;
+  IF operator_name IS NULL OR length(operator_name) = 0 OR length(operator_name) > 200 THEN
+    RAISE EXCEPTION 'audit maintenance approval requires an operator value of 1 to 200 characters'
+      USING ERRCODE = '22023';
+  END IF;
+
+  SELECT scope INTO target_scope
+  FROM public.audit_logs
+  WHERE id = p_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'audit log % does not exist', p_id
+      USING ERRCODE = '22023';
+  END IF;
+
+  INSERT INTO public.audit_logs (scope, actor, action, resource, changes)
+  VALUES (
+    target_scope,
+    operator_name,
+    'audit_log_maintenance_approved',
+    'audit_logs:' || p_id::text,
+    jsonb_build_object(
+      'outcome', 'approved',
+      'targetId', p_id,
+      'targetType', action,
+      'authorizedBy', authorized_by,
+      'reasonCode', reason
+    )
+  )
+  RETURNING id INTO approval_id;
+
+  RETURN approval_id;
+END;
+$$;
+
 GRANT USAGE ON SCHEMA public TO audit_maintenance;
 GRANT SELECT, INSERT, UPDATE (changes), DELETE ON TABLE public.audit_logs TO audit_maintenance;
 GRANT USAGE, SELECT ON SEQUENCE public.audit_logs_id_seq TO audit_maintenance;
 REVOKE ALL ON FUNCTION public.redact_audit_log(integer, jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.delete_audit_log(integer, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.record_audit_maintenance_approval(integer, text, text, text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.redact_audit_log(integer, jsonb) TO audit_maintenance;
 GRANT EXECUTE ON FUNCTION public.delete_audit_log(integer, text) TO audit_maintenance;
+GRANT EXECUTE ON FUNCTION public.record_audit_maintenance_approval(integer, text, text, text, text) TO audit_maintenance;
