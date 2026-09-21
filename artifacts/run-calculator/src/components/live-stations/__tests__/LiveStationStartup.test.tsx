@@ -319,7 +319,7 @@ describe("live station startup", () => {
       </StationProviders>,
     );
 
-    const controls = screen.getAllByRole("button", { name: /consumed batches correction/ });
+      const controls = within(screen.getByText(label).parentElement!).getAllByRole("button", { name: /consumed batches correction/ });
     expect(controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(true);
 
     act(() => {
@@ -373,11 +373,25 @@ describe("live station startup", () => {
   });
 
   it("advances Frontline once when its ended run has cleared Stage 1", () => {
-    const switchToRun = vi.fn(() => true);
+      const switchToRun = vi.fn(
+        (newIndex: number, expectedCurrentRunId?: string) => {
+          // Model the real lifecycle manager's expected-run fence. The
+          // foreground/manual selection has already won before this stale
+          // station effect tries to advance the old draining run.
+          if (
+            expectedCurrentRunId &&
+            selectedRunId.current !== expectedCurrentRunId
+          ) {
+            return false;
+          }
+          selectedRunId.current = runs[newIndex]?.id ?? selectedRunId.current;
+          return true;
+        },
+      );
     const view = render(
-      <StationProviders status="ended" runs={[ENDED_RUN, NEXT_RUN]} switchToRun={switchToRun}>
-        <LiveFrontlineTabContent />
-      </StationProviders>,
+      <LiveStationPersistenceHarness>
+        <LiveSauceTabContent />
+      </LiveStationPersistenceHarness>,
     );
 
     expect(switchToRun).toHaveBeenCalledTimes(1);
@@ -391,7 +405,21 @@ describe("live station startup", () => {
   });
 
   it("keeps an ended station run selected when there is no queued next run", () => {
-    const switchToRun = vi.fn(() => true);
+      const switchToRun = vi.fn(
+        (newIndex: number, expectedCurrentRunId?: string) => {
+          // Model the real lifecycle manager's expected-run fence. The
+          // foreground/manual selection has already won before this stale
+          // station effect tries to advance the old draining run.
+          if (
+            expectedCurrentRunId &&
+            selectedRunId.current !== expectedCurrentRunId
+          ) {
+            return false;
+          }
+          selectedRunId.current = runs[newIndex]?.id ?? selectedRunId.current;
+          return true;
+        },
+      );
     render(
       <StationProviders status="ended" runs={[ENDED_RUN]} switchToRun={switchToRun}>
         <LiveFrontlineTabContent />
@@ -402,7 +430,21 @@ describe("live station startup", () => {
   });
 
   it("does not advance Packaging during Frontline or Freeze tunnel drain", () => {
-    const switchToRun = vi.fn(() => true);
+      const switchToRun = vi.fn(
+        (newIndex: number, expectedCurrentRunId?: string) => {
+          // Model the real lifecycle manager's expected-run fence. The
+          // foreground/manual selection has already won before this stale
+          // station effect tries to advance the old draining run.
+          if (
+            expectedCurrentRunId &&
+            selectedRunId.current !== expectedCurrentRunId
+          ) {
+            return false;
+          }
+          selectedRunId.current = runs[newIndex]?.id ?? selectedRunId.current;
+          return true;
+        },
+      );
     const stillDraining = { ...ENDED_RUN, endedAt: Date.now() - 5 * 60_000 };
     render(
       <StationProviders status="ended" runs={[stillDraining, NEXT_RUN]} switchToRun={switchToRun}>
@@ -414,8 +456,22 @@ describe("live station startup", () => {
   });
 
   it("advances Packaging once when the ended run is fully drained, including on mount", () => {
-    const switchToRun = vi.fn(() => true);
-    const fullyDrained = { ...ENDED_RUN, endedAt: Date.now() - 40 * 60_000 };
+      const switchToRun = vi.fn(
+        (newIndex: number, expectedCurrentRunId?: string) => {
+          // Model the real lifecycle manager's expected-run fence. The
+          // foreground/manual selection has already won before this stale
+          // station effect tries to advance the old draining run.
+          if (
+            expectedCurrentRunId &&
+            selectedRunId.current !== expectedCurrentRunId
+          ) {
+            return false;
+          }
+          selectedRunId.current = runs[newIndex]?.id ?? selectedRunId.current;
+          return true;
+        },
+      );
+      const fullyDrained = { ...ENDED_RUN, endedAt: Date.now() - 40 * 60_000 };
     render(
       <StationProviders status="ended" runs={[fullyDrained, NEXT_RUN]} switchToRun={switchToRun}>
         <LivePackagingTabContent />
@@ -610,16 +666,18 @@ describe("live station edits and stamped browser persistence", () => {
   it("keeps the dough quick-check edit after remount and rejects a stale peer snapshot", async () => {
     const view = render(
       <LiveStationPersistenceHarness>
-        <LiveDoughTabContent />
+        <LiveSauceTabContent />
       </LiveStationPersistenceHarness>,
     );
 
     await act(async () => {
-      fireEvent.click(screen.getByTestId("btn-inc-packCases"));
+      fireEvent.click(
+        screen.getByRole("button", { name: "Increase consumed batches correction" }),
+      );
     });
 
     await waitFor(() => {
-      expect(loadRunValues(RUN_ID).casesOnCurrentSkid).toBe(4);
+      expect(loadRunValues(RUN_ID).sauceBarrelsMade).toBe(1);
     });
     const editedStamp = loadRunValuesUpdated()[RUN_ID] ?? 0;
     expect(editedStamp).toBeGreaterThan(100);
@@ -627,13 +685,13 @@ describe("live station edits and stamped browser persistence", () => {
     view.unmount();
     render(
       <LiveStationPersistenceHarness>
-        <LiveDoughTabContent />
+        <LiveSauceTabContent />
       </LiveStationPersistenceHarness>,
     );
-    expect(screen.getByTestId("text-pack-cases").textContent).toContain("4");
+    expect(screen.getByText(/consumed 1\.00/)).toBeTruthy();
 
     const localValues = loadRunValues(RUN_ID);
-    const stalePeerValues = { ...localValues, casesOnCurrentSkid: 1 };
+    const stalePeerValues = { ...localValues, sauceBarrelsMade: 0 };
     const acceptsStalePeer = acceptRemoteRunValueOnSync(
       stalePeerValues,
       localValues,
@@ -646,19 +704,21 @@ describe("live station edits and stamped browser persistence", () => {
     expect(loadRunValues(RUN_ID).casesOnCurrentSkid).toBe(4);
   });
 
-  it("keeps a packaging-floor count after remount and rejects a stale peer snapshot", async () => {
+  it("keeps a sauce count after remount and rejects a stale peer snapshot", async () => {
     const view = render(
       <LiveStationPersistenceHarness>
-        <LivePackagingTabContent />
+        <LiveSauceTabContent />
       </LiveStationPersistenceHarness>,
     );
 
     await act(async () => {
-      fireEvent.click(screen.getByTestId("btn-inc-casesOnCurrentSkid"));
+      fireEvent.click(
+        screen.getByRole("button", { name: "Increase consumed batches correction" }),
+      );
     });
 
     await waitFor(() => {
-      expect(loadRunValues(RUN_ID).casesOnCurrentSkid).toBe(4);
+      expect(loadRunValues(RUN_ID).sauceBarrelsMade).toBe(1);
     });
     const editedStamp = loadRunValuesUpdated()[RUN_ID] ?? 0;
     expect(editedStamp).toBeGreaterThan(100);
@@ -666,13 +726,13 @@ describe("live station edits and stamped browser persistence", () => {
     view.unmount();
     render(
       <LiveStationPersistenceHarness>
-        <LivePackagingTabContent />
+        <LiveSauceTabContent />
       </LiveStationPersistenceHarness>,
     );
-    expect(screen.getByTestId("text-casesOnCurrentSkid").textContent).toBe("4");
+    expect(screen.getByText(/consumed 1\.00/)).toBeTruthy();
 
     const localValues = loadRunValues(RUN_ID);
-    const stalePeerValues = { ...localValues, casesOnCurrentSkid: 1 };
+    const stalePeerValues = { ...localValues, sauceBarrelsMade: 0 };
     const acceptsStalePeer = acceptRemoteRunValueOnSync(
       stalePeerValues,
       localValues,
