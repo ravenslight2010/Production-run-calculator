@@ -61,6 +61,13 @@ import {
 import { applyOperationalIntent, parseOperationalIntent } from "../lib/operationalIntents";
 import { consumeRunInTransaction, consumeSauceBarrelInTransaction } from "./inventory";
 import { logger } from "../lib/logger";
+import {
+  recordSseFrame,
+  recordSyncPut,
+  recordSyncTransaction,
+  syncRunCountBucket,
+  type SyncPutMode,
+} from "../lib/capacityTelemetry";
 import { runBackgroundOperation } from "../lib/backgroundOperations";
 import {
   SYNC_SNAPSHOT_ID_RE,
@@ -538,8 +545,17 @@ function broadcast(
             ...liveState,
           }
         : complete;
+      const frameText = `data: ${JSON.stringify(frame)}\n\n`;
+      const frameMode = frame.completeness;
+      const frameStartedAt = performance.now();
       try {
-        client.res.write(`data: ${JSON.stringify(frame)}\n\n`);
+        client.res.write(frameText);
+        recordSseFrame({
+          mode: frameMode,
+          frameBytes: Buffer.byteLength(frameText),
+          durationMs: performance.now() - frameStartedAt,
+          outcome: "sent",
+        });
         // Advance only after the write succeeds. A failed stream must not
         // poison its baseline and cause the next recipient delta to be
         // generated against data the peer never received.
@@ -547,7 +563,14 @@ function broadcast(
           client.lastData = data;
           client.lastCanonicalRevision = meta.canonicalRevision ?? liveState.calculationRevision;
         }
-      } catch {}
+      } catch {
+        recordSseFrame({
+          mode: frameMode,
+          frameBytes: Buffer.byteLength(frameText),
+          durationMs: performance.now() - frameStartedAt,
+          outcome: "write_failed",
+        });
+      }
     }
   }
 }
@@ -1131,7 +1154,10 @@ async function upsertProtected(
   for (let attempt = 0; ; attempt++) {
     try {
       let existingData: unknown = undefined;
-      const merged = await db.transaction(async (tx) => {
+      const transactionStartedAt = performance.now();
+      let merged: ProtectedUpsertResult;
+      try {
+        merged = await db.transaction(async (tx) => {
         const serverTime = Date.now();
         // Scope reset fence is always acquired before the daily document,
         // matching /sync/reset and operational intents.
@@ -1215,7 +1241,10 @@ async function upsertProtected(
           canonicalRevision: existing?.canonicalRevision ?? 0,
           serverTime,
         };
-      });
+        });
+      } finally {
+        recordSyncTransaction(performance.now() - transactionStartedAt);
+      }
       if (!merged.wrote) return merged;
       // Conflict detection and logging happen outside the transaction so a
       // logging failure can never roll back the actual sync write.
@@ -1310,6 +1339,7 @@ router.get("/sync/reset-epoch", async (_req: Request, res: Response): Promise<vo
 });
 
 router.put("/sync/today", async (req: Request, res: Response): Promise<void> => {
+  const telemetryStartedAt = performance.now();
   const { senderId = "", payload, snapshotId: requestedId, syncMeta } = req.body as {
     senderId?: string;
     payload: unknown;
@@ -1319,11 +1349,34 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
   const today = clientToday(req);
     const scope = currentScope();
 
+  const requestWireBytes = Buffer.byteLength(JSON.stringify(req.body ?? {}));
+  const incomingMode: SyncPutMode = isPartialSyncPayload(payload) ? "partial" : "complete";
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+    recordSyncPut({
+      mode: incomingMode,
+      outcome: "rejected",
+      runsBucket: "0",
+      sanitizedBytes: 0,
+      wireBytes: requestWireBytes,
+      durationMs: performance.now() - telemetryStartedAt,
+      parserRejected: true,
+    });
     res.status(400).json({ error: "payload must be a JSON object" }); return;
   }
   const sanitized = sanitizeSyncPayload(payload);
-  if (isSyncPayloadTooLarge(sanitized)) { res.status(400).json({ error: "Payload too large" }); return; }
+  if (isSyncPayloadTooLarge(sanitized)) {
+    recordSyncPut({
+      mode: incomingMode,
+      outcome: "rejected",
+      runsBucket: syncRunCountBucket(payload),
+      sanitizedBytes: 0,
+      wireBytes: requestWireBytes,
+      durationMs: performance.now() - telemetryStartedAt,
+      parserRejected: true,
+    });
+    res.status(400).json({ error: "Payload too large" }); return;
+  }
+  const sanitizedBytes = Buffer.byteLength(JSON.stringify(sanitized));
   const staleEpoch = await isStaleResetPush(req, scope);
   if (staleEpoch !== null) { res.setHeader("X-Sync-Response", "stale"); res.json(await staleEpochResponse(scope, staleEpoch)); return; }
   const expectedEpoch = await getResetEpoch(scope);
@@ -1349,6 +1402,19 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
     partialFallback: result.partialFallback,
   });
   res.setHeader("X-Sync-Response-Bytes", String(Buffer.byteLength(JSON.stringify(responseBody))));
+  const telemetryMode: SyncPutMode = result.partialFallback
+    ? "fallback"
+    : !result.partialFallback && snapshotId !== undefined && requestedId === snapshotId
+      ? "unchanged"
+      : incomingMode;
+  recordSyncPut({
+    mode: telemetryMode,
+    outcome: "accepted",
+    runsBucket: syncRunCountBucket(sanitized),
+    sanitizedBytes,
+    wireBytes: requestWireBytes,
+    durationMs: performance.now() - telemetryStartedAt,
+  });
   const liveState = merged
     ? computeServerLiveState(merged, result.serverTime, result.canonicalRevision)
     : null;
@@ -2245,7 +2311,7 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
   const requested = requestedSnapshot(req);
   const initialServerTime = Date.now();
   const liveState = computeServerLiveState(data, initialServerTime, row?.canonicalRevision ?? 0);
-  res.write(`data: ${JSON.stringify({
+  const initialFrame = `data: ${JSON.stringify({
     ...(requested && requested === snapshotId
       ? { unchanged: true, snapshotId }
       : { data, snapshotId }),
@@ -2257,7 +2323,25 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
       ? { [initialResetState.rollover ? "rollover" : "reset"]: true, resetEpoch: initialResetState.epoch }
       : {}),
     ...liveState,
-  })}\n\n`);
+  })}\n\n`;
+  const initialFrameStartedAt = performance.now();
+  try {
+    res.write(initialFrame);
+    recordSseFrame({
+      mode: "complete",
+      frameBytes: Buffer.byteLength(initialFrame),
+      durationMs: performance.now() - initialFrameStartedAt,
+      outcome: "sent",
+    });
+  } catch {
+    recordSseFrame({
+      mode: "complete",
+      frameBytes: Buffer.byteLength(initialFrame),
+      durationMs: performance.now() - initialFrameStartedAt,
+      outcome: "write_failed",
+    });
+    return;
+  }
 
   // Record the client's local date so broadcasts only reach peers on the SAME
   // calendar day (see broadcast). Matches the initial-row lookup above.

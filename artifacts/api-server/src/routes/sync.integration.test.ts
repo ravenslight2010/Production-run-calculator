@@ -2023,8 +2023,8 @@ describe("/sync large-day complete versus partial measurements", () => {
   const DATE = "2030-08-25";
   type JsonRecord = Record<string, unknown>;
 
-  function largeDayFixture(): JsonRecord {
-    const runs = Array.from({ length: 32 }, (_, index) => ({
+  function largeDayFixture(runCount = 32): JsonRecord {
+    const runs = Array.from({ length: runCount }, (_, index) => ({
       id: `large-day-run-${index + 1}`,
       brand: index % 2 === 0 ? "Acme" : "Northstar",
       flavor: ["Pepperoni", "Cheese", "Supreme", "Veggie"][index % 4],
@@ -2106,7 +2106,11 @@ describe("/sync large-day complete versus partial measurements", () => {
     const responseText = await response.text();
     const responseBytes = Buffer.byteLength(responseText);
     const responseReadAt = performance.now();
-    const parsed = JSON.parse(responseText) as { data?: JsonRecord; snapshotId?: string };
+    const parsed = JSON.parse(responseText) as {
+      data?: JsonRecord;
+      snapshotId?: string;
+      partialFallback?: boolean;
+    };
     // Keep parse plus canonical adoption as a separately visible phase. The
     // test does the same clone a browser performs before storing the response.
     const canonical = parsed.data ? JSON.parse(JSON.stringify(parsed.data)) as JsonRecord : undefined;
@@ -2190,6 +2194,63 @@ describe("/sync large-day complete versus partial measurements", () => {
     console.info("[sync large-day benchmark]", report);
     expect(optimized.requestBytes).toBeLessThan(baseline.requestBytes);
     expect(requestSavingsPercent).toBeGreaterThan(50);
+  }, 30_000);
+
+  it("benchmarks bounded run counts, near-cap input, and stale/raced-base fallbacks", async () => {
+    const fixtureSizes = [0, 1, 32, 50].map((runs) => {
+      const fixture = largeDayFixture(runs);
+      return {
+        runs,
+        sanitizedBytes: Buffer.byteLength(JSON.stringify(fixture)),
+        wireBytes: Buffer.byteLength(JSON.stringify({ senderId: "fixture", payload: fixture })),
+      };
+    });
+    const nearCapFixture = {
+      ...largeDayFixture(50),
+      history: Array.from({ length: 2_500 }, (_, index) => ({
+        at: index,
+        message: "x".repeat(120),
+      })),
+    };
+    const nearCapBytes = Buffer.byteLength(JSON.stringify(nearCapFixture));
+    expect(nearCapBytes).toBeGreaterThan(256 * 1024);
+    expect(nearCapBytes).toBeLessThan(512 * 1024);
+
+    const baseline = await measuredPut(largeDayFixture(32), "fallback-baseline");
+    const baseSnapshotId = baseline.parsed.snapshotId;
+    expect(baseSnapshotId).toMatch(/^[a-f0-9]{64}$/);
+    const changedRunId = "large-day-run-1";
+    const partial = (casesOnCurrentSkid: number): JsonRecord => ({
+      syncVersion: 1,
+      completeness: "partial",
+      baseSnapshotId,
+      runValues: {
+        [changedRunId]: {
+          ...(largeDayFixture(32).runValues as Record<string, JsonRecord>)[changedRunId],
+          casesOnCurrentSkid,
+        },
+      },
+      runValuesUpdatedAt: { [changedRunId]: Date.now() + casesOnCurrentSkid },
+    });
+
+    const [raceA, raceB] = await Promise.all([
+      measuredPut(partial(41), "raced-base-a"),
+      measuredPut(partial(42), "raced-base-b"),
+    ]);
+    const racedFallbacks = [raceA, raceB].filter(({ parsed }) => parsed.partialFallback === true).length;
+    expect(racedFallbacks).toBe(1);
+
+    const stale = await measuredPut(partial(43), "stale-base");
+    expect(stale.parsed.partialFallback).toBe(true);
+    const report = {
+      fixtures: fixtureSizes,
+      nearCap: { runs: 50, sanitizedBytes: nearCapBytes },
+      fallbacks: {
+        staleBase: 1,
+        racedBase: racedFallbacks,
+      },
+    };
+    console.info("[sync capacity fixture benchmark]", report);
   }, 30_000);
 });
 
