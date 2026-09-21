@@ -2033,9 +2033,33 @@ describe("/sync partial payload contract", () => {
       }),
     });
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ data: null, partialFallback: true });
+    const fallback = await res.json() as { data: null; partialFallback: true; snapshotId: string };
+    expect(fallback).toMatchObject({
+      data: null,
+      partialFallback: true,
+      snapshotId: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
     const read = await fetch(`${baseUrl}/api/sync/2030-08-25`, { headers: authHeaders() });
     expect(await read.json()).toBeNull();
+
+    const retry = await fetch(`${baseUrl}/api/sync/today?today=2030-08-25`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "missing-row-retry",
+        payload: {
+          syncVersion: 1,
+          completeness: "complete",
+          baseSnapshotId: fallback.snapshotId,
+          dayState: { date: "2030-08-25", runs: [{ id: "must-land" }] },
+          runValues: { "must-land": { casesNeeded: 12 } },
+          runValuesUpdatedAt: { "must-land": 1 },
+        },
+      }),
+    });
+    expect(retry.status).toBe(200);
+    const retryBody = await retry.json() as { data?: { runValues?: Record<string, { casesNeeded?: number }> } };
+    expect(retryBody.data?.runValues?.["must-land"]?.casesNeeded).toBe(12);
   });
 });
 
@@ -3952,6 +3976,7 @@ describe("/sync/events — date-scoped broadcasts", () => {
 
     const removedRunId = runs[23].id;
     const afterChange = writeBody.data as typeof baselinePayload & {
+      packagingProgress?: Record<string, unknown>;
       deletedItems?: { runs?: string[] };
     };
     const removalPayload = {
@@ -3967,7 +3992,7 @@ describe("/sync/events — date-scoped broadcasts", () => {
         Object.entries(afterChange.runValuesUpdatedAt).filter(([runId]) => runId !== removedRunId),
       ),
       packagingProgress: Object.fromEntries(
-        Object.entries(afterChange.packagingProgress).filter(([runId]) => runId !== removedRunId),
+        Object.entries(afterChange.packagingProgress ?? {}).filter(([runId]) => runId !== removedRunId),
       ),
       deletedItems: {
         ...afterChange.deletedItems,
@@ -3988,7 +4013,7 @@ describe("/sync/events — date-scoped broadcasts", () => {
     expect(removalFrame.frame.summaryStats).toEqual({ [removedRunId]: null });
     expect(removalFrame.frame.runLines).toEqual({ [removedRunId]: null });
 
-    let sharedInputPayload = removalBody.data;
+    let sharedInputPayload = removalBody.data as Record<string, any>;
     // A 32-run day is a representative full shift. Keep each shared-input
     // refresh within 128 KiB on the wire: large enough for complete derived
     // maps for every run, while remaining a small bounded SSE message rather
@@ -4011,7 +4036,9 @@ describe("/sync/events — date-scoped broadcasts", () => {
       });
       expect(sharedInputWrite.status).toBe(200);
       const sharedInputFrame = await readFrame((frame) => frame.senderId === senderId);
-      const remainingRunIds = sharedInputPayload.dayState.runs.map((run) => run.id).sort();
+      const remainingRunIds = sharedInputPayload.dayState.runs
+        .map((run: { id: string }) => run.id)
+        .sort();
       expect(sharedInputFrame.frame.completeness).toBe("partial");
       expect(sharedInputFrame.frame.data.dayState[field]).toEqual(changedValue);
       expect(Object.keys(sharedInputFrame.frame.summaryStats).sort()).toEqual(remainingRunIds);

@@ -1551,6 +1551,9 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
   const responseBody = buildSyncWriteEnvelope(merged, {
     requestedSnapshotId: requestedId,
     partialFallback: result.partialFallback,
+    ...(merged === null
+      ? { snapshotIdOverride: syncSnapshotId(completeSyncData(emptySyncData(today))) }
+      : {}),
   });
   res.setHeader("X-Sync-Response-Bytes", String(Buffer.byteLength(JSON.stringify(responseBody))));
   const telemetryMode: SyncPutMode = result.partialFallback
@@ -2828,6 +2831,9 @@ router.put(
   const responseBody = buildSyncWriteEnvelope(merged, {
     requestedSnapshotId: requestedId,
     partialFallback: result.partialFallback,
+    ...(merged === null
+      ? { snapshotIdOverride: syncSnapshotId(completeSyncData(emptySyncData(date))) }
+      : {}),
   });
   res.setHeader("X-Sync-Response-Bytes", String(Buffer.byteLength(JSON.stringify(responseBody))));
   if (legacyUnversionedComplete) recordLegacySyncWrite("accepted");

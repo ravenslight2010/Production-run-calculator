@@ -7553,6 +7553,11 @@ export default function Home() {
   // separate from the local payload signature: only the server can account for
   // protective merges and canonical normalization.
   const syncSnapshotIdRef = useRef<string>("");
+  // A partial fallback for a missing row returns the canonical empty snapshot
+  // identity, but the row still does not exist. The next write must be a
+  // complete seed against that empty identity rather than another partial
+  // delta, which the server must reject without a row to materialize.
+  const forceCompleteSyncRef = useRef(false);
   // Exact server snapshot used as the base for peer partial frames. Never
   // substitute the locally merged React state here.
   const adoptedCanonicalSnapshotRef = useRef<SyncPayload | null>(null);
@@ -9714,6 +9719,9 @@ export default function Home() {
         ? (canonical) => applySyncCallbackRef.current(canonical)
         : undefined,
     });
+    if (result.malformed) {
+      throw new Error("sync write returned a malformed response");
+    }
     const snapshot = result.body?.snapshotId;
     adoptOperationalRevision(
       (result.body as { canonicalRevision?: unknown } | null | undefined)?.canonicalRevision,
@@ -9732,14 +9740,17 @@ export default function Home() {
       | null
       | undefined;
     if (partialFallbackBody?.partialFallback && partialFallbackBody.data === null) {
-      // A partial write against a missing row has no valid snapshot identity.
-      // Clear the partial baseline so the queued recovery push is complete.
-      syncSnapshotIdRef.current = "";
+      // A missing-row fallback is still a valid canonical empty baseline when
+      // the server supplies its snapshot identity. Force the next replay to be
+      // complete so it can create the row; never send another partial delta
+      // against a row that does not exist.
+      forceCompleteSyncRef.current = true;
       lastSyncSigRef.current = "";
     }
     if (result.body?.data && typeof result.body.data === "object") {
       const canonical = result.body.data as SyncPayload;
       canonicalRunValuesUpdatedAtRef.current = { ...(canonical.runValuesUpdatedAt ?? {}) };
+      forceCompleteSyncRef.current = false;
     }
     const operationalProjection = (
       result.body as (typeof result.body & { operationalProjection?: unknown }) | null | undefined
@@ -9889,6 +9900,12 @@ export default function Home() {
         | undefined;
       if (shouldReplaySyncWrite(partialFallbackBody)) {
         const recoveryPayload = buildSyncPayload(dayStateRef.current);
+        // Keep retries tied to the canonical response we just adopted. If the
+        // rebase request is interrupted, retrying the original stale payload
+        // would simply replay the same pre-wake snapshot.
+        work.payload = recoveryPayload;
+        work.sig = JSON.stringify(recoveryPayload);
+        latestSyncPayloadRef.current = recoveryPayload;
         res = await writeToday({
           payload: recoveryPayload,
           clientId: clientId.current,
@@ -9904,6 +9921,14 @@ export default function Home() {
           () => generation === syncPushGenerationRef.current,
         );
         if (generation !== syncPushGenerationRef.current) return;
+        if (shouldReplaySyncWrite(
+          canonicalResult.body as
+            | { partialFallback?: boolean; data?: unknown }
+            | null
+            | undefined,
+        )) {
+          throw new Error("sync write remained stale after canonical rebase");
+        }
       }
       const { stale } = canonicalResult;
       const acknowledgedAt = typeof performance === "undefined" ? null : performance.now();
@@ -9964,9 +9989,14 @@ export default function Home() {
       );
       // Record the synced signature ONLY after a successful PUT, so a failed
       // push is never treated as synced (which would block its retry).
-      if (sig !== undefined) lastSyncSigRef.current = sig;
-      if (payload.history !== undefined) {
-        lastSyncedHistorySigRef.current = JSON.stringify(payload.history);
+       if (work.sig !== undefined) lastSyncSigRef.current = work.sig;
+       if (payload.history !== undefined) {
+         lastSyncedHistorySigRef.current = JSON.stringify(payload.history);
+         if (work.payload.history !== payload.history) {
+           lastSyncedHistorySigRef.current = JSON.stringify(work.payload.history ?? payload.history);
+         }
+       } else if (work.payload.history !== undefined) {
+         lastSyncedHistorySigRef.current = JSON.stringify(work.payload.history);
       }
       setSyncRetryWaiting(false);
       const queued = syncPushQueueRef.current.finish({ drainQueued: true });
@@ -10018,7 +10048,8 @@ export default function Home() {
     const packagingProgress: NonNullable<SyncPayload["packagingProgress"]> = {};
     const storedPackagingProgress = loadPackagingProgress();
     const pushRuns: RunMeta[] = [];
-    const canSendPartial = Boolean(syncSnapshotIdRef.current);
+    const canSendPartial =
+      Boolean(syncSnapshotIdRef.current) && !forceCompleteSyncRef.current;
     const baselineStamps = canonicalRunValuesUpdatedAtRef.current;
     const localStamps = loadRunValuesUpdated();
     for (const run of ds.runs) {
@@ -10153,6 +10184,18 @@ export default function Home() {
         syncPushTimingRef.current = null;
         return;
       }
+      // The timer may already be queued when a wake/reset raises the fence.
+      // Re-check it here; the schedulePush guard ran before this callback was
+      // delayed and cannot protect a callback that is already in the queue.
+      if (
+        foregroundSyncBarrierRef.current
+        || operationalAdoptionInFlightRef.current > 0
+        || formHandoffRef.current
+      ) {
+        foregroundPushPendingRef.current = true;
+        syncPushTimingRef.current = null;
+        return;
+      }
       // Never push a stale-dated day into today's sync row. A tab left open
       // across midnight still holds yesterday's runs until the server-owned
       // baseline is adopted;
@@ -10160,12 +10203,12 @@ export default function Home() {
       // clock) would leak yesterday's runs into today's row. Skip until the
       // canonical current-day baseline swaps in the fresh day. The SSE-onopen
       // reconnect re-push is the main offender here.
-      if (ds.date && ds.date !== todayStr()) {
+      if (dayStateRef.current.date && dayStateRef.current.date !== todayStr()) {
         syncPushTimingRef.current = null;
         pushAcknowledgedRef.current = true;
         return;
       }
-      const payload = buildSyncPayload(ds);
+      const payload = buildSyncPayload(dayStateRef.current);
       // Skip re-pushing an unchanged state (idle periodic/reconnect pushes).
       // Without this, a second open tab keeps broadcasting its stale copy and
       // clobbers the other tab's edits ("keeps resetting / loses changes").
@@ -10188,6 +10231,15 @@ export default function Home() {
     const payload = latestSyncPayloadRef.current;
     if (!payload) {
       recordSyncEvent("local", "No retained change is available to retry");
+      return;
+    }
+    if (
+      document.hidden
+      || foregroundSyncBarrierRef.current
+      || operationalAdoptionInFlightRef.current > 0
+      || formHandoffRef.current
+    ) {
+      foregroundPushPendingRef.current = true;
       return;
     }
     setSyncPushFailed(false);

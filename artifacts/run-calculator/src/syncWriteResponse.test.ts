@@ -498,6 +498,18 @@ describe("consumeSyncWriteResponse", () => {
     expect(applyCanonical).not.toHaveBeenCalled();
   });
 
+  it("does not treat a successful response without a sync envelope as acknowledged", async () => {
+    const applyCanonical = vi.fn();
+    const result = await consumeSyncWriteResponse(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+      { applyCanonical },
+    );
+
+    expect(result.malformed).toBe(true);
+    expect(result.stale).toBe(false);
+    expect(applyCanonical).not.toHaveBeenCalled();
+  });
+
   it("leaves a failed save unapplied and permits a later successful retry", async () => {
     const applyCanonical = vi.fn();
     const intended = { runValues: { run1: { casesOnCurrentSkid: 12 } } };
