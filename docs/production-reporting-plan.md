@@ -1,5 +1,10 @@
 # Production Reporting — Plan
 
+**Status:** Partially built — day/week summaries, completed-run history, and server-authoritative operational reports exist; automated generation, export, cost, and advanced comparison work remain open
+**Updated:** 2026-09-21
+
+Repository reports and deterministic tests are implementation evidence, not proof that a published deployment generated or retained a particular production report.
+
 ## Current State
 
 | Feature | File | What It Does |

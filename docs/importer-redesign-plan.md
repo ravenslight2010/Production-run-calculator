@@ -1,5 +1,10 @@
 # Importer Redesign — Plan
 
+**Status:** Planned redesign over a substantial importer foundation; deterministic-first parsing, cell provenance, verification reports, and atomic multi-entity apply are not yet complete
+**Updated:** 2026-09-21
+
+The existing review snapshots, history, aliases, and audit retry paths must not be described as a general rollback or transactional apply mechanism.
+
 ## Goals
 1. **More accurate** — fewer AI hallucinations, silent misparses, near-duplicate recipes
 2. **More automatic** — less manual review clicking, auto-apply when confident

@@ -347,9 +347,10 @@ class SimulatedClient {
 
   rebaseQueuedWrites(): void {
     if (!this.state) throw new Error(`${this.id} cannot rebase before adoption`);
+    const adoptedState = this.state;
     this.queued = this.queued.map((item) => ({
       ...item,
-      payload: clone(this.state),
+      payload: clone(adoptedState),
       baseSnapshotId: this.snapshotId,
     }));
   }
