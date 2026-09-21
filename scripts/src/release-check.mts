@@ -59,6 +59,7 @@ import {
   retainedEvaluationDirectories,
 } from "./retained-evaluation-contract.mjs";
 import { validateReadinessEvidence } from "./capture-readiness-recovery.mts";
+import { FULL_BROWSER_EXPECTED_CASES } from "./full-browser-case-contract.mts";
 export { TYPESCRIPT_7_SUPPORTED_RUNNERS } from "./typescript-7-native-contract.mts";
 
 export type ReleaseStep = {
@@ -262,14 +263,13 @@ export const API_SHARD_WARNING_MS = 6 * 60_000;
 export const RELEASE_CHECK_DEFAULT_CONCURRENCY = 4;
 export const RELEASE_CHECK_API_CONCURRENCY = 2;
 // The main browser suite is intentionally serialized because several tests
-// reset or observe shared disposable live-day state. Its 160 cases can exceed
-// the API shard budget on a cold release environment, so give the complete
+// reset or observe shared disposable live-day state. The suite can exceed the
+// API shard budget on a cold release environment, so give the complete
 // evidence-producing gate a longer bounded window instead of weakening
 // isolation with parallel workers or masking intermittent failures with
-// retries.
+// retries. The exact coverage count lives in the shared browser contract.
 const FULL_BROWSER_TIMEOUT_MS = 45 * 60_000;
 const FULL_BROWSER_WARNING_MS = 40 * 60_000;
-const FULL_BROWSER_EXPECTED_CASES = 161;
 const FULL_BROWSER_GATE_LABEL = "full browser E2E suite";
 const RELEASE_BROWSER_ENV = {
   E2E_TEST_DB: "1",

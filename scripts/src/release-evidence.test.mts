@@ -68,6 +68,7 @@ import {
   buildReadinessEvidence,
   sanitizeReadinessResponse,
 } from "./capture-readiness-recovery.mts";
+import { FULL_BROWSER_EXPECTED_CASES } from "./full-browser-case-contract.mts";
 
 const sourceReportSha256 = createHash("sha256")
   .update(await readFile(new URL(`../../${DEFAULT_REPORT}`, import.meta.url)))
@@ -2159,32 +2160,38 @@ async function run(): Promise<void> {
       "",
       "Revision: current-revision",
       "Result: FAIL",
-      "Expected cases: 159",
-      "Enumerated cases: 159",
+      `Expected cases: ${FULL_BROWSER_EXPECTED_CASES}`,
+      `Enumerated cases: ${FULL_BROWSER_EXPECTED_CASES}`,
       "Completed cases: 0",
       "Passed cases: 0",
       "Skipped cases: 0",
       "Failed cases: 0",
-      "Not-run cases: 159",
+      `Not-run cases: ${FULL_BROWSER_EXPECTED_CASES}`,
       "Coverage: INCOMPLETE",
       "Duration: 0ms",
       "## Per-file duration",
       "",
       "| File | Cases | Completed | Passed | Skipped | Failed | Not run | Duration |",
       "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
-      "| `e2e/example.spec.ts` | 159 | 0 | 0 | 0 | 0 | 159 | 0ms |",
+      `| \`e2e/example.spec.ts\` | ${FULL_BROWSER_EXPECTED_CASES} | 0 | 0 | 0 | 0 | ${FULL_BROWSER_EXPECTED_CASES} | 0ms |`,
       "",
     ].join("\n");
     const invalidPassingBrowserReport = validBrowserReport
       .replace("Result: FAIL", "Result: PASS")
-      .replace("Completed cases: 0", "Completed cases: 159")
+      .replace(
+        "Completed cases: 0",
+        `Completed cases: ${FULL_BROWSER_EXPECTED_CASES}`,
+      )
       .replace("Passed cases: 0", "Passed cases: 111")
       .replace("Failed cases: 0", "Failed cases: 1")
-      .replace("Not-run cases: 159", "Not-run cases: 0")
+      .replace(
+        `Not-run cases: ${FULL_BROWSER_EXPECTED_CASES}`,
+        "Not-run cases: 0",
+      )
       .replace("Coverage: INCOMPLETE", "Coverage: COMPLETE")
       .replace(
-        "| `e2e/example.spec.ts` | 159 | 0 | 0 | 0 | 0 | 159 | 0ms |",
-        "| `e2e/example.spec.ts` | 159 | 159 | 156 | 0 | 1 | 0 | 0ms |",
+        `| \`e2e/example.spec.ts\` | ${FULL_BROWSER_EXPECTED_CASES} | 0 | 0 | 0 | 0 | ${FULL_BROWSER_EXPECTED_CASES} | 0ms |`,
+        `| \`e2e/example.spec.ts\` | ${FULL_BROWSER_EXPECTED_CASES} | ${FULL_BROWSER_EXPECTED_CASES} | ${FULL_BROWSER_EXPECTED_CASES - 1} | 0 | 1 | 0 | 0ms |`,
       );
     assert.throws(
       () => validateFullBrowserReport(invalidPassingBrowserReport, {

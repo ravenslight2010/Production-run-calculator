@@ -10,9 +10,25 @@ import {
   parseCompleteFullBrowserBaseline,
   parsePerFileDurations,
 } from "./release-duration-reporter.ts";
+import {
+  FULL_BROWSER_EXPECTED_CASES,
+  assertFullBrowserCaseContract,
+} from "../../../scripts/src/full-browser-case-contract.mts";
 
 const slowFile = fileURLToPath(new URL("./slow.spec.ts", import.meta.url));
 const quietFile = fileURLToPath(new URL("./quiet.spec.ts", import.meta.url));
+
+assert.equal(EXPECTED_CASES, FULL_BROWSER_EXPECTED_CASES);
+assert.doesNotThrow(() =>
+  assertFullBrowserCaseContract(FULL_BROWSER_EXPECTED_CASES),
+);
+assert.throws(
+  () => assertFullBrowserCaseContract(FULL_BROWSER_EXPECTED_CASES + 1),
+  new RegExp(
+    `discovered ${FULL_BROWSER_EXPECTED_CASES + 1} cases; expected exactly ${FULL_BROWSER_EXPECTED_CASES}`,
+  ),
+  "coverage drift must fail with the discovered and configured case counts",
+);
 
 const report = formatFullBrowserReport(
   [
@@ -102,7 +118,15 @@ const validBaselineReport = formatFullBrowserReport(
   "prior-revision",
 );
 const validBaseline = parseCompleteFullBrowserBaseline(validBaselineReport);
-assert.deepEqual(validBaseline, new Map([["artifacts/run-calculator/e2e/slow.spec.ts", 161_000]]));
+assert.deepEqual(
+  validBaseline,
+  new Map([
+    [
+      "artifacts/run-calculator/e2e/slow.spec.ts",
+      FULL_BROWSER_EXPECTED_CASES * 1_000,
+    ],
+  ]),
+);
 assert.equal(canRetainFullBrowserReport(completeCases, "passed"), true);
 assert.equal(
   canRetainFullBrowserReport(completeCases.slice(0, -1), "passed"),
@@ -133,7 +157,7 @@ assert.deepEqual(
     [
       {
         file: "artifacts/run-calculator/e2e/slow.spec.ts",
-         durationMs: 202_000,
+         durationMs: FULL_BROWSER_EXPECTED_CASES * 1_000 + 41_000,
       },
     ],
     baselineAfterIncompleteRun!,
@@ -141,10 +165,10 @@ assert.deepEqual(
   [
     {
       file: "artifacts/run-calculator/e2e/slow.spec.ts",
-        durationMs: 202_000,
-       baselineDurationMs: 161_000,
+         durationMs: FULL_BROWSER_EXPECTED_CASES * 1_000 + 41_000,
+        baselineDurationMs: FULL_BROWSER_EXPECTED_CASES * 1_000,
        increaseMs: 41_000,
-       increasePercent: (41_000 / 161_000) * 100,
+        increasePercent: (41_000 / (FULL_BROWSER_EXPECTED_CASES * 1_000)) * 100,
     },
   ],
 );
