@@ -26,7 +26,7 @@ export const NOTIFICATION_KINDS: Array<{
   {
     kind: "batchDue",
     label: "Dough batch due",
-    description: "Browser reminder when a new batch is due while the app is out of view. The Dough action card stays visible in the app.",
+    description: "Manual-mode browser reminder when a new batch is due while the app is out of view. The Dough reminder stays visible until dismissed.",
   },
   {
     kind: "fifteenMin",

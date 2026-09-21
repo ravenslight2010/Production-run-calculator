@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from "react";
-import { ArrowRight, AlertTriangle, CheckCircle2, Clock, Pause, PauseCircle, Play, Timer } from "lucide-react";
+import { ArrowRight, AlertTriangle, CheckCircle2, Clock, Pause, PauseCircle, Timer } from "lucide-react";
 import { useHomeCtx } from "../../contexts/HomeCtx";
 import { useHomeTabCtx } from "../../contexts/HomeTabCtx";
 import { useLiveRun } from "../../contexts/LiveRunContext";
@@ -51,7 +51,7 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
   const [showPrepBatchDue, setShowPrepBatchDue] = useState(false);
   useAutomaticUpdateReloadBlocker(
     "dough-production-due-alert",
-    showBatchDue || showPrepBatchDue,
+    (!autoTrackProgress && showBatchDue) || showPrepBatchDue,
   );
   const prevDoughBatchNumRef = useRef(0);
   useEffect(() => {
@@ -681,8 +681,8 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                   );
                 })()}
 
-                {/* Next batch due — merged countdown + start-next-batch card (graduated mockup) */}
-                {doughSubTab === "dough" && runStatus === "running" && !calc.pressDone && (() => {
+                {/* Manual-mode next-batch countdown and dismissible reminder. */}
+                {doughSubTab === "dough" && runStatus === "running" && !calc.pressDone && !autoTrackProgress && (() => {
                   const spinSecCard = getAutoTrackTiming(
                     calc.ppm,
                     v.pizzasPerCase,
@@ -704,7 +704,7 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                           <Timer className={`w-5 h-5 shrink-0 ${showBatchDue ? "text-orange-400" : "text-amber-500"}`} />
                           <div className="min-w-0">
                             <p className={`text-sm font-bold ${showBatchDue ? "text-orange-400" : "text-foreground"}`}>
-                              {showBatchDue ? "Dough station — start next batch now" : "Dough station — next batch due"}
+                              {showBatchDue ? "Dough station — batch reminder" : "Dough station — next batch due"}
                             </p>
                             <p className="text-xs text-muted-foreground mt-0.5">
                               {showBatchDue ? `Time per batch: ${fmtTime(spinSecCard)}` : "Countdown to the next mixer batch at current pace"}
@@ -718,12 +718,12 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                       {showBatchDue && (
                         <button
                           type="button"
-                          data-testid="button-start-next-batch"
+                          data-testid="button-dismiss-batch-reminder"
                           onClick={() => setShowBatchDue(false)}
                           className="w-full bg-amber-600 hover:bg-amber-500 text-black font-black text-sm py-3 flex items-center justify-center gap-2 transition-colors"
                         >
-                          <Play className="w-4 h-4 fill-current" />
-                          START NEXT BATCH
+                          <CheckCircle2 className="w-4 h-4" />
+                          Dismiss reminder
                         </button>
                       )}
                     </div>

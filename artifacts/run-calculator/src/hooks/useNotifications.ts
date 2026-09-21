@@ -59,6 +59,8 @@ interface NotifParams {
   v: NotifValues;
   /** Crust runs open pre-made cases — no dough is mixed, so suppress batch alerts. */
   isCrust: boolean;
+  /** Automatic tracking owns dough progress, so manual batch reminders stay hidden. */
+  automaticDoughTracking: boolean;
   /** Labels of upcoming (not yet started) runs, in order — for the warehouse switchover alert. */
   nextRunLabels: string[];
   /**
@@ -239,6 +241,7 @@ export function useNotifications({
   sauceBarrelElapsedSec,
   v,
   isCrust,
+  automaticDoughTracking,
   nextRunLabels,
   prefs,
   alertDate,
@@ -425,6 +428,7 @@ export function useNotifications({
 
   // ── Batch cycle alert ──────────────────────────────────────────────────────
   useEffect(() => {
+    if (automaticDoughTracking) { setShowBatchDue(false); return; }
     if (isCrust) { setShowBatchDue(false); return; } // crust runs mix no dough — no batch alerts; clear any stale banner
     // Suppress (and clear) once the press has made everything the run needs —
     // from this point the dough crew is on the NEXT run, not this one.
@@ -484,6 +488,7 @@ export function useNotifications({
     sauceBarrelElapsedSec,
     nowTime,
     isCrust,
+    automaticDoughTracking,
     calc.pressDone,
   ]);
 

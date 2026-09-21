@@ -156,7 +156,16 @@ export default function ScreenModeView() {
         <h1 className="text-4xl font-black break-words min-w-0">{currentRun ? runLabel(currentRun) : "No Active Run"}</h1>
 
         {/* Big countdown */}
-        {runStatus === "running" && calc.timePerBatchSec > 0 && doughSubTab !== "crusts" ? (
+        {runStatus === "running" && autoTrackProgress && doughSubTab !== "crusts" ? (
+          <div className="flex-1 flex flex-col items-center justify-center gap-5 rounded-3xl border border-emerald-600/40 bg-emerald-950/20 p-12">
+            <p className="text-lg font-bold uppercase tracking-widest text-emerald-400">
+              Automatic Dough Tracking Active
+            </p>
+            <p className="max-w-2xl text-center text-2xl font-semibold text-muted-foreground">
+              Batch progress updates automatically at the current line pace.
+            </p>
+          </div>
+        ) : runStatus === "running" && calc.timePerBatchSec > 0 && doughSubTab !== "crusts" ? (
           <div className={`flex-1 flex flex-col items-center justify-center gap-6 rounded-3xl border p-12 ${batchDue ? "bg-orange-950/40 border-orange-500/50" : batchUrgent ? "bg-amber-950/30 border-amber-600/40" : "bg-card border-border"}`}>
             <p className={`text-lg font-bold uppercase tracking-widest ${batchDue ? "text-orange-400" : batchUrgent ? "text-amber-400" : "text-muted-foreground"}`}>
               {batchDue ? "🍕 Start Next Batch Now!" : "Next Batch In"}
