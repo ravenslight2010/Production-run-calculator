@@ -10,6 +10,7 @@ import { startAutoTrackServerTicks, startDailyRolloverScheduler } from "./routes
 import { startWebPushAlertScheduler } from "./lib/webPush";
 import { startServerJobWorkerLoop } from "./lib/serverJobs";
 import { db } from "@workspace/db";
+import { setGeminiMetricsObserver } from "@workspace/integrations-openai-ai-server";
 import { sql } from "drizzle-orm";
 import {
   beginStartup,
@@ -22,6 +23,13 @@ import {
 } from "./lib/startupHealth";
 
 const rawPort = process.env["PORT"];
+
+setGeminiMetricsObserver((metrics) => {
+  logger.info(
+    { event: "gemini_request", ...metrics },
+    "bounded Gemini provider telemetry",
+  );
+});
 
 if (!rawPort) {
   throw new Error(
