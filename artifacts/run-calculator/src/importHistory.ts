@@ -1,4 +1,5 @@
 import { inventoryClientId } from "./inventoryShared";
+import { createImportOperationId } from "./importOperations";
 
 export type ImportHistorySummary = {
   phases?: Record<string, string>;
@@ -15,6 +16,8 @@ export type ImportHistorySummary = {
   /** Bounded deterministic manifest retained with the import's saved snapshot. */
   changes?: Array<{ kind: string; entity: string; message: string }>;
   snapshotId?: number | null;
+  /** Hash of the canonical post-commit state, used for guarded undo. */
+  resultHash?: string;
 };
 
 export type ImportHistoryItem = {
@@ -27,6 +30,8 @@ export type ImportHistoryItem = {
   summary: ImportHistorySummary;
   snapshotId: number | null;
   createdAt: number;
+  /** Server-owned atomic apply identity, when this is an authoritative commit. */
+  operationId?: string | null;
 };
 
 export type ImportHistoryImportType =
@@ -167,12 +172,6 @@ function writePending(identity: ImportHistoryIdentity, records: PendingImportHis
   }
 }
 
-function createOperationId(): string {
-  return typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-    ? crypto.randomUUID()
-    : `import-${Date.now()}-${Math.random().toString(36).slice(2, 14)}`;
-}
-
 function queuePending(input: PendingImportHistory["input"]): void {
   if (typeof window === "undefined" || !activeIdentity) return;
   const existing = readPending(activeIdentity).filter((record) => record.input.operationId !== input.operationId);
@@ -214,7 +213,7 @@ export async function retryPendingImportHistory(): Promise<{ saved: number; rema
 }
 
 export async function recordImportHistory(input: ImportHistoryRecordInput): Promise<ImportHistoryItem> {
-  const request = { ...input, operationId: input.operationId ?? createOperationId() };
+  const request = { ...input, operationId: input.operationId ?? createImportOperationId() };
   try {
     return await postImportHistory(request);
   } catch (error) {

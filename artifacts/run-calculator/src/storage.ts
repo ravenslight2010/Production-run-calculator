@@ -904,8 +904,10 @@ function rememberProfileSnapshot(key: string, snap: { dough: string; crust: stri
 // pre-resolution window permissive; all interactive paths are ALSO gated at
 // the call site on the same capability).
 let profileWritesAllowed = true;
-export function setProfileWritesAllowed(allowed: boolean): void {
+export function setProfileWritesAllowed(allowed: boolean): boolean {
+  const previous = profileWritesAllowed;
   profileWritesAllowed = allowed;
+  return previous;
 }
 export function profileWritesEnabled(): boolean {
   return profileWritesAllowed;

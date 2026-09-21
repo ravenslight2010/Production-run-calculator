@@ -1,9 +1,9 @@
 # Importer Redesign — Plan
 
-**Status:** Planned redesign over a substantial importer foundation; deterministic-first parsing, cell provenance, verification reports, and atomic multi-entity apply are not yet complete
+**Status:** Planned redesign over a substantial importer foundation; atomic multi-entity apply is complete for spec, premix, and cheese, while cell provenance and verification reports remain incomplete
 **Updated:** 2026-09-21
 
-The existing review snapshots, history, aliases, and audit retry paths must not be described as a general rollback or transactional apply mechanism.
+The existing review snapshots remain source-review artifacts. Spec, premix, and cheese use a separate server-owned operation record for transactional apply, idempotent retry, and conflict-guarded undo; other importer projections retain their existing boundaries.
 
 ## Goals
 1. **More accurate** — fewer AI hallucinations, silent misparses, near-duplicate recipes
@@ -21,7 +21,7 @@ Excel/photo → SheetGrid[] text
   → server sanitize (deterministic coerce/bounds/drop)
   → client merge chunks + alias apply + ingredient links + discrepancies
   → review dialog (AI match suggestions + fuzzy fallback + second-pass AI review)
-  → apply (manager-gated) → history + snapshot + audit
+  → apply (manager-gated atomic operation for spec/premix/cheese) → history + source snapshot
 ```
 
 **AI is used for**: first-pass parse (spec/premix/cheese/shipping), brand/flavor match suggestions, merge suggestions, second-pass review.

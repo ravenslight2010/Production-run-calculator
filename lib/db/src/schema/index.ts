@@ -25,6 +25,7 @@ export * from "./savedShippingGuides";
 export * from "./savedPremixSheets";
 export * from "./savedCheeseSheets";
 export * from "./importHistory";
+export * from "./importOperations";
 export * from "./mergeAliases";
 export * from "./deniedMerges";
 export * from "./duplicateReviewGroups";

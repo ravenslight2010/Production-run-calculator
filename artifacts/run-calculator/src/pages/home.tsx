@@ -470,6 +470,7 @@ import { describeSubstitution } from "../components/SubstitutionsManager";
 import MixReconcilePanel from "../components/MixReconcilePanel";
 import ImportHistoryPanel from "../components/ImportHistoryPanel";
 import { recordImportHistory, setImportHistoryIdentity, type ImportHistoryImportType, type ImportHistoryItem, type ImportHistoryReopenRequest } from "../importHistory";
+import { createImportOperationId } from "../importOperations";
 import { resetSandboxRequest, reportUnauthorized } from "../inventoryShared";
 import {
   fetchIngredientBatchWeights,
@@ -2710,6 +2711,9 @@ function LiveRunHandoffGuard() {
 }
 
 export default function Home() {
+  const specImportOperationRef = useRef<string | null>(null);
+  const premixImportOperationRef = useRef<string | null>(null);
+  const cheeseImportOperationRef = useRef<string | null>(null);
   const visibleTabScheduler = useMemo(() => new VisibleTabScheduler(), []);
   useEffect(() => {
     visibleTabScheduler.start();
@@ -12533,6 +12537,7 @@ export default function Home() {
     const abortController = new AbortController();
     specImportAbortRef.current = abortController;
     setSpecImportPrepared(null);
+    specImportOperationRef.current = null;
     setSpecImportError(null);
     setSpecImportProgress(files.length > 1 ? { done: 0, total: files.length } : null);
     setSpecImportLoading(true);
@@ -12760,9 +12765,11 @@ export default function Home() {
     // Capture the pre-import local state so the existing undo trail can restore
     // a workbook replacement when a manager decides it was not intended.
     const importRollbackBefore = captureMasterDataSnapshot();
+    const operationId = specImportOperationRef.current ?? createImportOperationId();
+    specImportOperationRef.current = operationId;
     try {
-      const { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes, touchedProfiles, crustProfiles, appliedParsed, finalImportReview, aliasSaveFailed } =
-        await (await loadWorkbookWorkflow()).specImport.commitSpecImport(toCommit, forceUpdateProfileKeys, acceptedNewMixIngredientNames);
+      const { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes, touchedProfiles, crustProfiles, appliedParsed, finalImportReview, aliasSaveFailed, resultHash } =
+        await (await loadWorkbookWorkflow()).specImport.commitSpecImport(toCommit, forceUpdateProfileKeys, acceptedNewMixIngredientNames, operationId);
       if (commitStartedAt !== null && typeof performance !== "undefined")
         recordPerformance("import-spec-commit", performance.now() - commitStartedAt, "api");
       recordMasterDataChange(
@@ -12776,7 +12783,8 @@ export default function Home() {
         const key = deriveSourceKey(toCommit.sourceNames ?? []);
         specSnapshotId = saved.find((s) => key && s.sourceKey === key)?.id ?? saved[0]?.id ?? null;
       } catch { /* history still records without the optional snapshot reference */ }
-      void recordImportHistory({
+      if (!resultHash) void recordImportHistory({
+        operationId,
         importType: "spec",
         sourceKey: deriveSourceKey(toCommit.sourceNames ?? []),
         sourceLabel: (toCommit.sourceNames ?? []).join(", ") || "Spec sheet",
@@ -13160,8 +13168,9 @@ export default function Home() {
           mixNote +
           cheeseNote +
           updatedNote +
-          autoLinkedNote,
+        autoLinkedNote,
       });
+      specImportOperationRef.current = null;
     } catch (err) {
       if (err instanceof Error && err.name === "ImportReviewReconfirmationError") {
         const reconfirmation = err as Error & {
@@ -13220,6 +13229,7 @@ export default function Home() {
     const abortController = new AbortController();
     premixImportAbortRef.current = abortController;
     setPremixImportPrepared(null);
+    premixImportOperationRef.current = null;
     setPremixImportError(null);
     setPremixImportProgress(files.length > 1 ? { done: 0, total: files.length } : null);
     setPremixImportLoading(true);
@@ -13302,6 +13312,8 @@ export default function Home() {
     }
     setPremixImportApplying(true);
     const commitStartedAt = typeof performance === "undefined" ? null : performance.now();
+    const operationId = premixImportOperationRef.current ?? createImportOperationId();
+    premixImportOperationRef.current = operationId;
     try {
       const result = await (await loadWorkbookWorkflow()).premixImport.commitPremixImport(
         premixImportPrepared,
@@ -13309,10 +13321,12 @@ export default function Home() {
         freezerPulls,
         newAliases,
         mixesToRemove,
+        operationId,
       );
       if (commitStartedAt !== null && typeof performance !== "undefined")
         recordPerformance("import-premix-commit", performance.now() - commitStartedAt, "api");
-      void recordImportHistory({
+      if (!operationId) void recordImportHistory({
+        operationId,
         importType: "premix",
         sourceKey: deriveSourceKey(premixImportPrepared.sourceNames ?? []),
         sourceLabel: (premixImportPrepared.sourceNames ?? []).join(", ") || "Premix sheet",
@@ -13355,6 +13369,7 @@ export default function Home() {
           snapshotId: result.snapshotId ?? null,
         },
       }).catch(() => {});
+      premixImportOperationRef.current = null;
       // Refresh the shared mixes query so imported mixes appear immediately in
       // the Mixes view and feed the make-day plan without waiting for polling.
       void invalidateMasterDataSlice(cycleCountQc, "mixes");
@@ -13698,6 +13713,7 @@ export default function Home() {
     const abortController = new AbortController();
     cheeseImportAbortRef.current = abortController;
     setCheeseImportPrepared(null);
+    cheeseImportOperationRef.current = null;
     setCheeseImportError(null);
     setCheeseImportProgress(files.length > 1 ? { done: 0, total: files.length } : null);
     setCheeseImportLoading(true);
@@ -13738,6 +13754,7 @@ export default function Home() {
           followUp: ["Retry the original source files. Nothing was applied."],
         },
       }).catch(() => {});
+      cheeseImportOperationRef.current = null;
       setCheeseImportError(
         err instanceof Error ? err.message : "Could not read or interpret that workbook.",
       );
@@ -13776,8 +13793,10 @@ export default function Home() {
     setCheeseImportApplying(true);
     const commitStartedAt = typeof performance === "undefined" ? null : performance.now();
     const importRollbackBefore = captureMasterDataSnapshot();
+    const operationId = cheeseImportOperationRef.current ?? createImportOperationId();
+    cheeseImportOperationRef.current = operationId;
     try {
-      const result = await (await loadWorkbookWorkflow()).cheeseImport.commitCheeseImport(cheeseImportPrepared, recipesToApply, newAliases, recipesToRemove);
+      const result = await (await loadWorkbookWorkflow()).cheeseImport.commitCheeseImport(cheeseImportPrepared, recipesToApply, newAliases, recipesToRemove, operationId);
       if (commitStartedAt !== null && typeof performance !== "undefined")
         recordPerformance("import-cheese-commit", performance.now() - commitStartedAt, "api");
       noteChange(
@@ -13787,7 +13806,8 @@ export default function Home() {
           : `Cheese recipe import: ${(cheeseImportPrepared.sourceNames ?? []).join(", ") || "workbook"}`,
         importRollbackBefore,
       );
-      void recordImportHistory({
+      if (!operationId) void recordImportHistory({
+        operationId,
         importType: "cheese",
         sourceKey: deriveSourceKey(cheeseImportPrepared.sourceNames ?? []),
         sourceLabel: (cheeseImportPrepared.sourceNames ?? []).join(", ") || "Cheese recipe sheet",

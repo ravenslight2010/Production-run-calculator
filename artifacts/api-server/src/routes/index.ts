@@ -118,7 +118,7 @@ export const readAuthorizationInventory: readonly ReadAuthorization[] = [
     "/inventory/quality-checks",
   ]),
   ...reads(["manage-profiles", "manage-inventory"], "any", "scoped", [
-    "/import-history",
+    "/import-history", "/import-operations/:operationId",
   ]),
   ...reads(["manage-factory-settings"], "all", "scoped", ["/factory-data"]),
   ...reads(["review-incidents"], "all", "scoped", [
@@ -276,6 +276,14 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
   ]),
   {
     method: "POST", path: "/import-history", ownership: "capability-gated", scope: "scoped", sandbox: "allowed",
+    capabilities: ["manage-profiles", "manage-inventory"], capabilityMatch: "any",
+  },
+  {
+    method: "POST", path: "/import-operations/:operationId/apply", ownership: "capability-gated", scope: "scoped", sandbox: "allowed",
+    capabilities: ["manage-profiles", "manage-inventory"], capabilityMatch: "any",
+  },
+  {
+    method: "POST", path: "/import-operations/:operationId/undo", ownership: "capability-gated", scope: "scoped", sandbox: "allowed",
     capabilities: ["manage-profiles", "manage-inventory"], capabilityMatch: "any",
   },
   ...writes("capability-gated", "scoped", "allowed", "use-ai-tools", [

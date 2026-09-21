@@ -96,6 +96,7 @@ import {
   loadCurrentFormulaRecipes,
   isNameDeleted,
   flavorNamespace,
+  setProfileWritesAllowed,
   type SpecImportServerPoolRecipe,
   type SpecImportNameCorrection,
 } from "./storage";
@@ -127,6 +128,7 @@ import { saveAiCorrections } from "./aiCorrections";
 import { fetchMixes, saveMixes } from "./mixes";
 import { fetchCheeseRecipes, saveCheeseRecipes } from "./cheeseRecipes";
 import { addNamedRecipesToServerIfAbsent, fetchNamedRecipes, saveNamedRecipes } from "./namedRecipes";
+import { applyImportOperation } from "./importOperations";
 import { fetchDieLineDefaults, toOverridesMap } from "./dieLineDefaultsServer";
 import type { DieLineDefaultsOverrides } from "./dieDefaults";
 import { parseDoughCustomerSection, parseDoughVariantTable, SPEC_STATIC_CUSTOMER_ASSIGNMENTS, type NamedRecipe as PoolNamedRecipe, type DoughCustomerAssignment, type DoughVariantTableEntry } from "@workspace/named-recipes";
@@ -2225,6 +2227,14 @@ export async function prepareSpecImportMultiWithAi(
   return prepareSpecImportMulti(buffers, onProgress, names, signal, { allowAi: true });
 }
 
+export type SpecImportChangeRows = {
+  brandProfiles?: { upsert?: unknown[]; delete?: string[] };
+  mixes?: { upsert?: unknown[]; delete?: string[] };
+  cheeseRecipes?: { upsert?: unknown[]; delete?: string[] };
+  doughRecipes?: { upsert?: unknown[]; delete?: string[] };
+  sauceRecipes?: { upsert?: unknown[]; delete?: string[] };
+  specImportAliases?: { upsert?: unknown[]; delete?: unknown[] };
+};
 /**
  * Apply a prepared import: write profiles + recipes, persist new aliases, and
  * add any mixes detected in the sheet to the factory-wide Mixes list. Returns
@@ -2245,6 +2255,7 @@ export async function commitSpecImport(
    * that the manager accepted are applied; unchecked ones are skipped silently.
    */
   acceptedNewMixIngredientNames?: ReadonlySet<string>,
+  operationId?: string,
 ): Promise<{
   mixesAdded: number;
   cheeseRecipesAdded: number;
@@ -2286,6 +2297,7 @@ export async function commitSpecImport(
    * instead of letting the loss stay silent.
    */
   aliasSaveFailed: boolean;
+  resultHash?: string;
 }> {
   // Collapse per-weight cheese-blend name variants ("Aldo's Cheese Mix 2.07" /
   // "…1.75") to one clean name up front, so the profile applicator fields and the
@@ -2506,7 +2518,33 @@ export async function commitSpecImport(
   }
 
   const applyOut: { nameCorrections?: SpecImportNameCorrection[] } = {};
-  const { touchedProfiles, crustProfiles } = applySpecImport(applyParsed, applyOut, livePools, dieLineDefaultOverrides, forceUpdateProfileKeys, importMergeAliases);
+  const stagedStorage = operationId ? snapshotLocalStorage() : null;
+  const stagedProfileRows = new Map<string, { values: Record<string, unknown>; crustValues: Record<string, unknown> }>();
+  const writesWereAllowed = operationId ? setProfileWritesAllowed(true) : true;
+  let projectedApply: ReturnType<typeof applySpecImport>;
+  try {
+    projectedApply = applySpecImport(
+      applyParsed, applyOut, livePools, dieLineDefaultOverrides, forceUpdateProfileKeys, importMergeAliases,
+    );
+    if (operationId) {
+      for (const profile of projectedApply.touchedProfiles) {
+        const key = canonicalProfileKey(profile.brand, profile.flavor);
+        try {
+          const values = JSON.parse(localStorage.getItem(`run-calc-profile-${key}`) ?? "{}");
+          const crustValues = JSON.parse(localStorage.getItem(`run-calc-crust-profile-${key}`) ?? "{}");
+          stagedProfileRows.set(key, { values, crustValues });
+        } catch {
+          throw new Error(`Could not project the reviewed profile "${profile.brand} / ${profile.flavor}".`);
+        }
+      }
+    }
+  } finally {
+    if (operationId) {
+      restoreLocalStorage(stagedStorage);
+      setProfileWritesAllowed(writesWereAllowed);
+    }
+  }
+  let { touchedProfiles, crustProfiles } = projectedApply;
 
   // Explicit manager Apply is AUTHORITATIVE: re-mark every profile this
   // import touched as a FORCED upsert, so the server-pool push bypasses the
@@ -2516,14 +2554,16 @@ export async function commitSpecImport(
   // apply — the manager sees "reimport hasn't fixed it" with no explanation
   // (the Hannaford Tikka Masala incident). The LWW guard stays in place for
   // ordinary autosaves; only this deliberate Apply action overrides it.
-  for (const { brand, flavor } of touchedProfiles) {
-    markProfileForceEdited(canonicalProfileKey(brand, flavor));
+  if (!operationId) {
+    for (const { brand, flavor } of touchedProfiles) {
+      markProfileForceEdited(canonicalProfileKey(brand, flavor));
+    }
   }
   // A spec import is an explicit manager repair, not an eventually-consistent
   // autosave. Do not continue into the "Import applied" success path until the
   // server has acknowledged every force-write. Failed ops remain in the queue
   // for retry rather than silently leaving the fix only in this browser.
-  await flushProfileQueueStrict();
+  if (!operationId) await flushProfileQueueStrict();
 
   // ── Bad-alias cleanup after a CORRECTING import ──
   // applySpecImport reported every name this import overwrote with a DIFFERENT
@@ -2538,6 +2578,7 @@ export async function commitSpecImport(
   // mirror included). Deletion is synchronous within the commit but
   // best-effort: the import itself already applied.
   const corrections = applyOut.nameCorrections ?? [];
+  let correctingAliasDeletes: SpecImportAlias[] = [];
   if (corrections.length) {
     // Liveness universes for the "old name is a real recipe" guard. A failed
     // fetch means "unknown" — deletion is skipped for that kind (fail safe).
@@ -2594,12 +2635,14 @@ export async function commitSpecImport(
         canonicalName: c.oldName,
         context: c.kind === "recipeName" ? c.context : null,
       }));
+    correctingAliasDeletes = toDelete;
     if (toDelete.length) {
-      try {
-        await deleteSpecImportAliases(toDelete);
-      } catch {
-        // Best-effort — the import already applied; a surviving bad alias is
-        // caught again by the next correcting re-import.
+      if (!operationId) {
+        try {
+          await deleteSpecImportAliases(toDelete);
+        } catch {
+          // Best-effort for the legacy non-atomic path.
+        }
       }
     }
     // Reverse mapping learned for EVERY correction (live-pool old names too:
@@ -2637,6 +2680,7 @@ export async function commitSpecImport(
   // sheet can't express per-pizza/batch amounts, so they arrive with those at 0
   // for the manager to fill in the editor.
   let mixesAdded = 0;
+  let atomicMixes: Mix[] = [];
   let existingMixes: Mix[];
   try {
     existingMixes = await fetchMixes();
@@ -2659,6 +2703,14 @@ export async function commitSpecImport(
       const compoundKey = `${e.brand.trim().toLowerCase()}\0${e.mixName.trim().toLowerCase()}`;
       return acceptedNewMixIngredientNames?.has(compoundKey);
     });
+    const touchedMixKeys = new Set([
+      ...candidates.map((mix) => `${mix.brand.trim().toLowerCase()}\0${mix.name.trim().toLowerCase()}`),
+      ...acceptedAdditions.map((entry) =>
+        `${entry.brand.trim().toLowerCase()}\0${entry.mixName.trim().toLowerCase()}`),
+    ]);
+    const atomicMixRows = (items: Mix[]): Mix[] => items.filter((mix) =>
+      touchedMixKeys.has(`${mix.brand.trim().toLowerCase()}\0${mix.name.trim().toLowerCase()}`),
+    );
 
     // Working state starts as raw existing mixes; the candidates block advances
     // it through add → tag → perPizza if the pruned parse has mix data.
@@ -2684,6 +2736,7 @@ export async function commitSpecImport(
       const ozRes = applyMixPerPizza(tagRes.next, candidates);
       updated += ozRes.updated;
       workingMixes = ozRes.next;
+      atomicMixes = atomicMixRows(workingMixes);
     }
 
     // Apply accepted new ingredient rows independent of whether candidates is
@@ -2702,11 +2755,13 @@ export async function commitSpecImport(
       tagged += tagRes2.tagged;
       const newCompRes = applyNewMixComponents(tagRes2.next, acceptedAdditions);
       if (added > 0 || tagged > 0 || updated > 0 || newCompRes.applied > 0) {
-        await saveMixes(newCompRes.next);
+        if (!operationId) await saveMixes(newCompRes.next);
+        atomicMixes = atomicMixRows(newCompRes.next);
         mixesAdded = added;
       }
     } else if (added > 0 || tagged > 0 || updated > 0) {
-      await saveMixes(workingMixes);
+      if (!operationId) await saveMixes(workingMixes);
+      atomicMixes = atomicMixRows(workingMixes);
       mixesAdded = added;
     }
   } catch (error) {
@@ -2738,6 +2793,8 @@ export async function commitSpecImport(
       (r.rows?.length ?? 0) > 0,
   );
   let recipesUpdated = 0;
+  const atomicNamedRecipes: { dough: PoolNamedRecipe[]; sauce: PoolNamedRecipe[] } = { dough: [], sauce: [] };
+  let atomicCheeseRecipes: CheeseRecipe[] = [];
 
   let cheeseRecipesAdded = 0;
   let existingMixesForCheese: Mix[];
@@ -2760,7 +2817,11 @@ export async function commitSpecImport(
       // recipe that already has a brand is never re-scoped.
       const tagRes = fillCheeseRecipeTags(merged, drafts);
       if (added > 0 || updated > 0 || tagRes.tagged > 0) {
-        await saveCheeseRecipes(tagRes.next);
+        if (!operationId) await saveCheeseRecipes(tagRes.next);
+        const candidateNames = new Set(candidates.map((recipe) => recipe.name.trim().toLowerCase()));
+        atomicCheeseRecipes = tagRes.next.filter((recipe) =>
+          candidateNames.has(recipe.name.trim().toLowerCase()),
+        );
         cheeseRecipesAdded = added;
       }
     }
@@ -2786,9 +2847,15 @@ export async function commitSpecImport(
         continue;
       }
       const upd = updateRecipePoolComponents(pool, updates);
+      const updateNames = new Set(updates.map((update) => update.name.trim().toLowerCase()));
+      atomicNamedRecipes[kind] = upd.next.filter((recipe) =>
+        updateNames.has(recipe.name.trim().toLowerCase()),
+      );
       if (upd.updated > 0) {
-        const saved = await saveNamedRecipes(kind, upd.next);
-        assertNamedRecipeWriteLanded(saved, updates);
+        if (!operationId) {
+          const saved = await saveNamedRecipes(kind, upd.next);
+          assertNamedRecipeWriteLanded(saved, updates);
+        }
         recipesUpdated += upd.updated;
       } else if (
         typeof window !== "undefined" &&
@@ -2803,7 +2870,8 @@ export async function commitSpecImport(
           brand: "",
           flavors: [],
         }));
-        const result = await addNamedRecipesToServerIfAbsent(
+        atomicNamedRecipes[kind] = [...atomicNamedRecipes[kind], ...candidates];
+        const result = operationId ? { updated: 0 } : await addNamedRecipesToServerIfAbsent(
           kind,
           candidates,
           undefined,
@@ -2817,6 +2885,48 @@ export async function commitSpecImport(
     } catch (error) {
       throw error;
     }
+  }
+
+  let resultHash: string | undefined;
+  if (operationId) {
+    const profiles = touchedProfiles.map((profile) => ({
+      key: canonicalProfileKey(profile.brand, profile.flavor),
+      brand: profile.brand,
+      flavor: profile.flavor,
+      values: stagedProfileRows.get(canonicalProfileKey(profile.brand, profile.flavor))!.values,
+      crustValues: stagedProfileRows.get(canonicalProfileKey(profile.brand, profile.flavor))!.crustValues,
+      updatedAtMs: Date.now(),
+      force: true,
+    }));
+    const changes = buildSpecImportChanges({
+      brandProfiles: {
+        upsert: profiles,
+        delete: (prepared.profilesMarkedForRemoval ?? []).map((profile) => canonicalProfileKey(profile.brand, profile.flavor)),
+      },
+      mixes: { upsert: atomicMixes },
+      cheeseRecipes: { upsert: atomicCheeseRecipes },
+      doughRecipes: { upsert: atomicNamedRecipes.dough },
+      sauceRecipes: { upsert: atomicNamedRecipes.sauce },
+      ...((prepared.newAliases.length || correctingAliasDeletes.length)
+        ? { specImportAliases: { upsert: prepared.newAliases, delete: correctingAliasDeletes } }
+        : {}),
+    });
+    const committed = await applyImportOperation(operationId, {
+      importType: "spec",
+      sourceKey: deriveSourceKey(prepared.sourceNames ?? []),
+      sourceLabel: (prepared.sourceNames ?? []).join(", ") || "Spec sheet",
+      changes,
+    });
+    resultHash = committed.resultHash;
+    // The first pass was a side-effect-free projection. Adopt the exact same
+    // specialized profile semantics only after the server transaction is
+    // durably acknowledged.
+    const adopted = applySpecImport(
+      applyParsed, { nameCorrections: [] }, livePools, dieLineDefaultOverrides,
+      forceUpdateProfileKeys, importMergeAliases,
+    );
+    touchedProfiles = adopted.touchedProfiles;
+    crustProfiles = adopted.crustProfiles;
   }
 
   // Snapshot this import server-side (factory-wide; only the two most recent are
@@ -2871,4 +2981,42 @@ export async function commitSpecImport(
   }
 
   return { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes: autoLinkedOut.count, touchedProfiles, crustProfiles, appliedParsed: applyParsed, finalImportReview, aliasSaveFailed };
+}
+
+/** Build the server changes envelope without mutating local state or doing I/O. */
+export function buildSpecImportChanges(rows: SpecImportChangeRows): Record<string, unknown> {
+  const changes: Record<string, unknown> = {};
+  for (const key of ["brandProfiles", "mixes", "cheeseRecipes", "doughRecipes", "sauceRecipes", "specImportAliases"] as const) {
+    const value = rows[key];
+    if (!value) continue;
+    const upsert = Array.isArray(value.upsert) ? value.upsert : [];
+    const del = Array.isArray(value.delete) ? value.delete : [];
+    if (upsert.length || del.length) changes[key] = {
+      ...(upsert.length ? { upsert } : {}),
+      ...(del.length ? { delete: del } : {}),
+    };
+  }
+  return changes;
+}
+
+type LocalStorageSnapshot = Array<[string, string]>;
+
+function snapshotLocalStorage(): LocalStorageSnapshot | null {
+  if (typeof localStorage === "undefined") return null;
+  const out: LocalStorageSnapshot = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key !== null) out.push([key, localStorage.getItem(key) ?? ""]);
+  }
+  return out;
+}
+
+function restoreLocalStorage(snapshot: LocalStorageSnapshot | null): void {
+  if (snapshot === null || typeof localStorage === "undefined") return;
+  const keep = new Set(snapshot.map(([key]) => key));
+  for (let i = localStorage.length - 1; i >= 0; i--) {
+    const key = localStorage.key(i);
+    if (key !== null && !keep.has(key)) localStorage.removeItem(key);
+  }
+  for (const [key, value] of snapshot) localStorage.setItem(key, value);
 }

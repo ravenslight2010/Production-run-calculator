@@ -4869,6 +4869,73 @@ paths:
         "400":
           description: Invalid cursor
 
+  /import-operations/{operationId}/apply:
+    post:
+      operationId: applyImportOperation
+      tags: [specImport]
+      summary: Atomically apply a reviewed import
+      parameters:
+        - in: path
+          name: operationId
+          required: true
+          schema: { type: string, minLength: 16, maxLength: 120 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImportOperationApplyInput"
+      responses:
+        "200":
+          description: Canonical committed operation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportOperationResponse" }
+        "400": { description: Invalid import operation }
+        "403": { description: Missing importer capability }
+        "409": { description: Stale review or duplicate operation with a different request }
+  /import-operations/{operationId}:
+    get:
+      operationId: getImportOperation
+      tags: [specImport]
+      summary: Read an import operation
+      parameters:
+        - in: path
+          name: operationId
+          required: true
+          schema: { type: string, minLength: 16, maxLength: 120 }
+      responses:
+        "200":
+          description: Import operation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportOperationResponse" }
+        "404": { description: Import operation not found }
+  /import-operations/{operationId}/undo:
+    post:
+      operationId: undoImportOperation
+      tags: [specImport]
+      summary: Guardedly undo an import operation
+      parameters:
+        - in: path
+          name: operationId
+          required: true
+          schema: { type: string, minLength: 16, maxLength: 120 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImportOperationUndoInput"
+      responses:
+        "200":
+          description: Canonical undone operation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportOperationResponse" }
+        "404": { description: Import operation not found }
+        "409": { description: The affected data changed after apply }
+
 components:
   parameters:
     ClientToday:
@@ -4882,6 +4949,45 @@ components:
       required: false
       schema: { type: string, pattern: "^[a-f0-9]{64}$" }
   schemas:
+    ImportOperationApplyInput:
+      type: object
+      required: [importType, sourceLabel, changes]
+      properties:
+        importType: { type: string, maxLength: 40 }
+        sourceKey: { type: string, nullable: true, maxLength: 300 }
+        sourceLabel: { type: string, maxLength: 300 }
+        requestHash: { type: string, nullable: true, pattern: "^[a-f0-9]{64}$" }
+        expectedStateHash: { type: string, nullable: true, pattern: "^[a-f0-9]{64}$" }
+        changes:
+          type: object
+          description: Reviewed entity batches keyed by supported master-data domain.
+          additionalProperties: true
+    ImportOperationUndoInput:
+      type: object
+      properties:
+        expectedResultHash:
+          type: string
+          pattern: "^[a-f0-9]{64}$"
+    ImportOperationResponse:
+      type: object
+      required: [operation]
+      properties:
+        operation:
+          type: object
+          required: [operationId, importType, status, requestHash]
+          properties:
+            operationId: { type: string }
+            importType: { type: string }
+            sourceKey: { type: string, nullable: true }
+            sourceLabel: { type: string }
+            status: { type: string, enum: [applying, applied, undone] }
+            requestHash: { type: string }
+            resultHash: { type: string, nullable: true }
+            affectedEntities: { type: object, additionalProperties: true }
+            result: { type: object, additionalProperties: true }
+            createdAt: { type: integer, format: int64 }
+            updatedAt: { type: integer, format: int64 }
+            undoneAt: { type: integer, format: int64, nullable: true }
     ConsumeInventoryDayStartInput:
       type: object
       properties:

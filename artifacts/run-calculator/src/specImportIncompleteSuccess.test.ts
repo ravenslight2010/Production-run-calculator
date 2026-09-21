@@ -1,4 +1,4 @@
-// @vitest-environment node
+// @vitest-environment jsdom
 //
 // Import success must mean the profile and its required recipe data both
 // landed. In particular, a failed shared-pool write must not be swallowed after
@@ -13,9 +13,15 @@ import type {
 import type { CheeseRecipe } from "@workspace/cheese-recipes";
 import type { Mix } from "@workspace/mixes";
 
-const { applySpy, saveNamedSpy, fetchNamedSpy } = vi.hoisted(() => ({
+const { applySpy, saveNamedSpy, fetchNamedSpy, applyOperationSpy } = vi.hoisted(() => ({
   applySpy: vi.fn(() => ({ touchedProfiles: [], crustProfiles: [] })),
   saveNamedSpy: vi.fn(async () => []),
+  applyOperationSpy: vi.fn(async (operationId: string) => ({
+    operationId,
+    status: "applied" as const,
+    result: {},
+    resultHash: "result-hash",
+  })),
   fetchNamedSpy: vi.fn(async (kind: "dough" | "sauce") => [
     {
       id: `${kind}-1`,
@@ -32,6 +38,7 @@ vi.mock("./storage", () => ({
   importProfileIsTombstoned: () => false,
   recipeNameIsTombstoned: () => false,
   applySpecImport: applySpy,
+  setProfileWritesAllowed: vi.fn(() => true),
 }));
 vi.mock("./profileServerSync", () => ({
   canonicalProfileKey: (brand: string, flavor: string) =>
@@ -83,6 +90,9 @@ vi.mock("./dieLineDefaultsServer", () => ({
 }));
 vi.mock("./mergeSuggest", () => ({
   fetchMergeAliases: async () => [],
+}));
+vi.mock("./importOperations", () => ({
+  applyImportOperation: applyOperationSpy,
 }));
 
 import { commitSpecImport } from "./specImport";
@@ -136,6 +146,8 @@ describe("commitSpecImport completeness", () => {
       },
     ]);
     saveNamedSpy.mockReset();
+    applyOperationSpy.mockClear();
+    localStorage.clear();
   saveNamedSpy.mockResolvedValue([
     {
       id: "dough-1",
@@ -193,5 +205,49 @@ describe("commitSpecImport completeness", () => {
       { id: "sauce-1", name: "House Marinara", components: [{ ingredient: "Crushed Tomato", lbs: 20 }] },
     ]);
     await expect(commitSpecImport(prepared())).rejects.toThrow("Import incomplete");
+  });
+
+  it("commits the exact projected profile blobs and existing named-recipe identities", async () => {
+    const projectedValues = {
+      brand: profile.brand,
+      flavor: profile.flavor,
+      doughType: "Classic Dough",
+      frontlineRecipeName: "House Marinara",
+      app1Type: "Mozzarella",
+    };
+    const projectedCrustValues = { crustType: "Purchased Thin" };
+    applySpy.mockImplementation(() => {
+      const key = `${profile.brand.toLowerCase()}\u0000${profile.flavor.toLowerCase()}`;
+      localStorage.setItem(`run-calc-profile-${key}`, JSON.stringify(projectedValues));
+      localStorage.setItem(`run-calc-crust-profile-${key}`, JSON.stringify(projectedCrustValues));
+      return {
+        touchedProfiles: [{ brand: profile.brand, flavor: profile.flavor }],
+        crustProfiles: [],
+      };
+    });
+
+    await commitSpecImport(
+      prepared(),
+      undefined,
+      undefined,
+      "import-spec-projection-0001",
+    );
+
+    expect(applyOperationSpy).toHaveBeenCalledOnce();
+    const payload = applyOperationSpy.mock.calls[0][1] as any;
+    expect(payload.changes.brandProfiles.upsert).toEqual([
+      expect.objectContaining({
+        values: projectedValues,
+        crustValues: projectedCrustValues,
+      }),
+    ]);
+    expect(payload.changes.doughRecipes.upsert).toEqual([
+      expect.objectContaining({ id: "dough-1", name: "Classic Dough" }),
+    ]);
+    expect(payload.changes.sauceRecipes.upsert).toEqual([
+      expect.objectContaining({ id: "sauce-1", name: "House Marinara" }),
+    ]);
+    expect(payload.changes.doughRecipes.upsert[0].id).not.toContain("spec-import-");
+    expect(payload.changes.sauceRecipes.upsert[0].id).not.toContain("spec-import-");
   });
 });

@@ -14,6 +14,7 @@ import {
   type ImportHistoryItem,
   type ImportHistoryReopenRequest,
 } from "@/importHistory";
+import { undoImportOperation } from "@/importOperations";
 
 function date(ms: number) {
   return new Date(ms).toLocaleString(undefined, {
@@ -45,6 +46,8 @@ export default function ImportHistoryPanel({
   const [operationItems, setOperationItems] = useState<ImportHistoryItem[]>([]);
   const [retryingAudit, setRetryingAudit] = useState(false);
   const [auditRecovery, setAuditRecovery] = useState<string | null>(null);
+  const [undoing, setUndoing] = useState<string | null>(null);
+  const [undoMessage, setUndoMessage] = useState<string | null>(null);
 
   async function refresh() {
     setLoading(true);
@@ -82,6 +85,23 @@ export default function ImportHistoryPanel({
         : "No pending audit records are available for this account and scope.");
     setRetryingAudit(false);
     if (result.saved) await refresh();
+  }
+  async function undo(item: ImportHistoryItem) {
+    const operationId = item.operationId?.trim();
+    const resultHash = item.summary.resultHash;
+    if (!operationId || !resultHash || undoing) return;
+    if (!window.confirm("Undo this import only if no later manager edits depend on it?")) return;
+    setUndoing(operationId);
+    setUndoMessage(null);
+    try {
+      await undoImportOperation(operationId, resultHash);
+      setUndoMessage("Import undone. Refreshing the current master-data view.");
+      await refresh();
+    } catch (error) {
+      setUndoMessage(error instanceof Error ? error.message : "The import could not be undone safely.");
+    } finally {
+      setUndoing(null);
+    }
   }
   const latestByType = new Map<ImportHistoryImportType, ImportHistoryItem>();
   for (const item of operationItems) if (!latestByType.has(item.importType)) latestByType.set(item.importType, item);
@@ -236,12 +256,25 @@ export default function ImportHistoryPanel({
                     ) : (
                       <p className="text-muted-foreground">This record keeps the committed changes, but no saved source snapshot is available for scoped repair.</p>
                     )}
+                    {item.operationId && item.summary.resultHash ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={undoing === item.operationId}
+                        onClick={() => void undo(item)}
+                      >
+                        <RotateCcw className="mr-1 h-3.5 w-3.5" />
+                        {undoing === item.operationId ? "Undoing…" : "Undo guarded import"}
+                      </Button>
+                    ) : null}
                   </div>}
                 </div>
               );
             })}
           </div>
         )}
+        {undoMessage ? <p className="mt-2 text-sm text-muted-foreground" role="status">{undoMessage}</p> : null}
       </CardContent>
     </Card>
   );
