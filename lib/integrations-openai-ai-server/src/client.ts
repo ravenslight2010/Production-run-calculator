@@ -44,6 +44,26 @@ interface ChatChunk {
 }
 
 let _client: GoogleGenAI | null = null;
+
+export interface GeminiProviderEnvironment {
+  AI_INTEGRATIONS_GEMINI_API_KEY?: string;
+  GOOGLE_API_KEY?: string;
+}
+
+/**
+ * Reports whether the Gemini adapter has a credential it can use.
+ *
+ * Keep readiness and other configuration checks on this helper so they cannot
+ * drift from the credential selection performed by client().
+ */
+export function isGeminiProviderConfigured(
+  env: GeminiProviderEnvironment = process.env,
+): boolean {
+  return Boolean(
+    env.AI_INTEGRATIONS_GEMINI_API_KEY || env.GOOGLE_API_KEY,
+  );
+}
+
 // Lazily construct the client so merely importing this module (e.g. in a
 // non-AI context or a mocked test) never throws on a missing env var.
 //
@@ -57,14 +77,14 @@ function client(): GoogleGenAI {
   const replitKey = process.env.AI_INTEGRATIONS_GEMINI_API_KEY;
   const replitBase = process.env.AI_INTEGRATIONS_GEMINI_BASE_URL;
   const directKey = process.env.GOOGLE_API_KEY;
-  const apiKey = replitKey || directKey;
-  if (!apiKey) {
+  if (!isGeminiProviderConfigured(process.env)) {
     throw new Error(
       "No Gemini API key found. Set GOOGLE_API_KEY for the direct Gemini API " +
         "(get one at https://aistudio.google.com/apikey), or set " +
         "AI_INTEGRATIONS_GEMINI_API_KEY for the Replit proxy.",
     );
   }
+  const apiKey = replitKey || directKey!;
   _client = new GoogleGenAI({
     apiKey,
     ...(replitKey && replitBase

@@ -2,6 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { HealthCheckResponse } from "@workspace/api-zod";
+import { isGeminiProviderConfigured } from "@workspace/integrations-openai-ai-server";
 import { logger } from "../lib/logger";
 import { getCacheMaintenanceDiagnostics } from "../lib/observability";
 import { getStartupHealth } from "../lib/startupHealth";
@@ -45,9 +46,10 @@ async function readiness(req: Request, res: Response): Promise<void> {
       checks.database = { status: "error", detail: "database_unreachable" };
     }
 
-    const aiConfigured = Boolean(
-      process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.OPENAI_API_KEY,
-    );
+    // AI remains a hard readiness dependency under the existing operational
+    // policy. Only its credential detection is delegated to the active Gemini
+    // adapter so this probe cannot drift to unrelated provider keys.
+    const aiConfigured = isGeminiProviderConfigured();
     checks.dependencies = aiConfigured
       ? { status: "ok" }
       : { status: "error", detail: "ai_provider_not_configured" };
