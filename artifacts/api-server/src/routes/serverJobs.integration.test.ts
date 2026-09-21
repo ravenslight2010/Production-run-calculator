@@ -354,31 +354,32 @@ describe("server job route idempotency", () => {
   });
 
   it("returns one canonical job when identical submissions arrive concurrently", async () => {
-      const responses = await Promise.all(
-        instances.map(({ url }) => submitJobAt(url)),
-      );
+    const instances = Array.from({ length: 12 }, () => ({ url: baseUrl }));
+    const responses = await Promise.all(
+      instances.map(({ url }) => submitJobAt(url)),
+    );
 
-      expect(
-        responses.every((candidate) => candidate.status === 200 || candidate.status === 202),
-      ).toBe(true);
-      const responseBodies = await Promise.all(responses.map(async (candidate) => (
-        await candidate.json() as {
-          id: string;
-          status: string;
-          idempotentReplay: boolean;
-        }
-      )));
+    expect(
+      responses.every((candidate) => candidate.status === 200 || candidate.status === 202),
+    ).toBe(true);
+    const responseBodies = await Promise.all(responses.map(async (candidate) => (
+      await candidate.json() as {
+        id: string;
+        status: string;
+        idempotentReplay: boolean;
+      }
+    )));
     const responseIds = responseBodies.map((body) => body.id);
     expect(responseIds).toHaveLength(12);
     expect(new Set(responseIds)).toHaveLength(1);
     expect(responseIds[0]).toEqual(expect.any(String));
     expect(responseBodies.every((body) => body.status === "queued")).toBe(true);
 
-      const jobs = await db.select().from(serverJobsTable).where(and(
-        eq(serverJobsTable.scope, "live"),
-        eq(serverJobsTable.actorId, ACTOR),
-        eq(serverJobsTable.idempotencyKey, IDEMPOTENCY_KEY),
-      ));
+    const jobs = await db.select().from(serverJobsTable).where(and(
+      eq(serverJobsTable.scope, "live"),
+      eq(serverJobsTable.actorId, ACTOR),
+      eq(serverJobsTable.idempotencyKey, IDEMPOTENCY_KEY),
+    ));
     expect(jobs).toHaveLength(1);
     expect(responseBodies.every((body) => body.id === jobs[0]!.id)).toBe(true);
     expect(responseBodies.filter((body) => body.idempotentReplay)).toHaveLength(11);
