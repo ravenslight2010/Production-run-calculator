@@ -62,6 +62,11 @@ const MANAGER = "soak-manager";
 const TODAY = "2031-06-15";
 const TOMORROW = "2031-06-16";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
+const CANONICAL_BREAKS = [
+  { slot: 1, enabled: true, mode: "at-time", atTime: "08:15", durationMin: 30 },
+  { slot: 2, enabled: false, mode: "after-run", durationMin: 30 },
+  { slot: 3, enabled: true, mode: "after-run", runId: "run-main", durationMin: 30 },
+];
 
 beforeAll(async () => {
   originalDatabaseUrl = process.env.DATABASE_URL;
@@ -97,9 +102,6 @@ beforeAll(async () => {
   app.use(express.json({ limit: "10mb" }));
   app.use((req, _res, next) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
-    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
-    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
     (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
     next();
   });
@@ -343,6 +345,15 @@ class SimulatedClient {
     }
   }
 
+  rebaseQueuedWrites(): void {
+    if (!this.state) throw new Error(`${this.id} cannot rebase before adoption`);
+    this.queued = this.queued.map((item) => ({
+      ...item,
+      payload: clone(this.state),
+      baseSnapshotId: this.snapshotId,
+    }));
+  }
+
   async adoptReset(): Promise<void> {
     const res = await this.request("GET", "/api/sync/reset-epoch");
     this._epoch = ((await res.json()) as { epoch: number }).epoch;
@@ -353,6 +364,7 @@ class SimulatedClient {
 const fixture = (): SyncPayload => ({
   dayState: {
     resetAt: 0,
+    breaks: clone(CANONICAL_BREAKS),
     runs: [{
       id: "run-main",
       brand: "Acme",
@@ -388,6 +400,36 @@ const fixture = (): SyncPayload => ({
 });
 
 describe("multi-client sync convergence soak", () => {
+  it("keeps the canonical break plan when reconnect replays a stale queued snapshot", async () => {
+    const client = new SimulatedClient("break-offline");
+    expect(await client.pull()).toBe(true);
+    client.state = fixture();
+    await client.push();
+
+    const staleBreaks = [
+      { slot: 1, enabled: true, mode: "at-time", atTime: "06:00", durationMin: 5 },
+      { slot: 2, enabled: true, mode: "after-run", runId: "run-main", durationMin: 90 },
+    ];
+    client.setOnline(false);
+    client.edit((state) => {
+      (state.dayState as Record<string, unknown>).breaks = staleBreaks;
+    });
+    await client.push();
+
+    client.setOnline(true);
+    expect(await client.pull()).toBe(true);
+    expect((client.state?.dayState as Record<string, unknown>).breaks).toEqual(CANONICAL_BREAKS);
+    client.rebaseQueuedWrites();
+    await client.flush();
+    expect((client.state?.dayState as Record<string, unknown>).breaks).toEqual(CANONICAL_BREAKS);
+
+    expect(await client.pull()).toBe(true);
+    const recoveredBreaks = (client.state?.dayState as Record<string, unknown>).breaks;
+    expect(recoveredBreaks).toEqual(CANONICAL_BREAKS);
+    expect(recoveredBreaks).toHaveLength(3);
+    expect((recoveredBreaks as Array<{ durationMin: number }>).every((slot) => slot.durationMin === 30)).toBe(true);
+  }, 30_000);
+
   it("documents the cross-process fanout boundary and complete reconnect recovery", async () => {
     const isolated = await startIsolatedSyncProcess();
     try {
@@ -401,6 +443,7 @@ describe("multi-client sync convergence soak", () => {
       expect(initial).toMatchObject({ initial: true, completeness: "complete" });
 
       const writer = new SimulatedClient("process-a-writer");
+      expect(await writer.pull()).toBe(true);
       writer.state = fixture();
       const write = await writer.push();
       expect(write?.ok).toBe(true);
@@ -439,9 +482,7 @@ describe("multi-client sync convergence soak", () => {
     clients[1].setOnline(false);
     for (let i = 0; i < 12; i++) {
       clients[0].edit((state) => {
-      const values = state.runValues as Record<string, Record<string, unknown>>;
-
-      const progress = state.packagingProgress as Record<string, Record<string, unknown>>;
+        const values = state.runValues as Record<string, Record<string, unknown>>;
         values["run-main"].casesOnCurrentSkid = 13 + i;
         if (i === 11) {
           const runs = state.dayState as { runs: Array<Record<string, unknown>> };
@@ -451,9 +492,7 @@ describe("multi-client sync convergence soak", () => {
       });
       await clients[0].push();
       clients[1].edit((state) => {
-      const values = state.runValues as Record<string, Record<string, unknown>>;
-
-      const progress = state.packagingProgress as Record<string, Record<string, unknown>>;
+        const values = state.runValues as Record<string, Record<string, unknown>>;
         values["run-main"].casesNeeded = 240 + i;
       });
       await clients[1].push(); // queued while offline
@@ -464,7 +503,7 @@ describe("multi-client sync convergence soak", () => {
     await clients[2].pull();
 
     // An old lifecycle and blank value arrive after the latest canonical edit.
-    const stale = await client.push(TODAY, fixture(), 0);
+    const stale = clone(fixture());
     const stalePut = await clients[2].push(TODAY, {
       ...stale,
       runValues: { "run-main": {} },
@@ -493,8 +532,15 @@ describe("multi-client sync convergence soak", () => {
       convergenceMs: Date.now() - start,
       divergentFields: clients.flatMap((c) => c.metrics.divergentFields),
     };
+    for (const client of clients) Object.assign(client.metrics, report);
+    console.info("[sync convergence soak]", report);
+    expect(totalRequests).toBeLessThan(80);
+    expect(retries).toBeLessThan(20);
+    expect(conflicts.length).toBeGreaterThan(0);
+    expect(report.convergenceMs).toBeLessThan(5_000);
+  }, 30_000);
 
-    const awake = new SimulatedClient("future-clock-awake");
+  it("keeps client-date rows separate and prevents stale re-adoption after reset", async () => {
     const client = new SimulatedClient("date-client");
     await client.pull();
     client.state = fixture();
@@ -540,11 +586,3 @@ describe("multi-client sync convergence soak", () => {
     });
   }, 30_000);
 });
-
-    const rejected = await offline.push(TODAY, staleFuture);
-
-    const staleFuture = clone(offline.state!);
-
-    const staleProgress = staleFuture.packagingProgress as Record<string, Record<string, unknown>>;
-
-    const offline = new SimulatedClient("future-clock-offline");

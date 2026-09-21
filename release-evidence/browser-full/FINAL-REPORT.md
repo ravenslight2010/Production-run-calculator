@@ -1,59 +1,55 @@
 # Full Browser Release Run
 
-Generated: 2026-09-20T15:38:56.512Z
-Revision: 0e803293151902eca8a3635510e4816b17d0a9e9
+Generated: 2026-09-21T01:09:45.896Z
+Revision: be5264d8c6d5f8a4a0e73faa506c7107d1b47e3f
 Result: FAIL
 Expected cases: 160
 Enumerated cases: 160
 Completed cases: 160
-Passed cases: 76
+Passed cases: 74
 Skipped cases: 17
-Failed cases: 67
+Failed cases: 69
 Not-run cases: 0
 Coverage: COMPLETE
-Duration: 3704635ms
+Duration: 3575532ms
 
 ## Per-file duration
 
 | File | Cases | Completed | Passed | Skipped | Failed | Not run | Duration |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `artifacts/run-calculator/e2e/accessibility-smoke.spec.ts` | 6 | 6 | 5 | 0 | 1 | 0 | 94976ms |
-| `artifacts/run-calculator/e2e/ai-outage-reviewability.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 25362ms |
-| `artifacts/run-calculator/e2e/compact-run-strip.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 5475ms |
-| `artifacts/run-calculator/e2e/critical-workflows.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 23648ms |
-| `artifacts/run-calculator/e2e/cross-device-smoke.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 16811ms |
-| `artifacts/run-calculator/e2e/department-workflow-navigation.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 27790ms |
-| `artifacts/run-calculator/e2e/die-tunnel-defaults.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 3273ms |
-| `artifacts/run-calculator/e2e/dough-correction-resume.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 9783ms |
-| `artifacts/run-calculator/e2e/freezer-surplus.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 8992ms |
-| `artifacts/run-calculator/e2e/home-navigation-reload.spec.ts` | 5 | 5 | 5 | 0 | 0 | 0 | 14494ms |
-| `artifacts/run-calculator/e2e/live-sauce-dough-phone.spec.ts` | 3 | 3 | 2 | 0 | 1 | 0 | 48321ms |
-| `artifacts/run-calculator/e2e/management-performance.spec.ts` | 4 | 4 | 4 | 0 | 0 | 0 | 14361ms |
-| `artifacts/run-calculator/e2e/manager-action-queue-stale.spec.ts` | 7 | 7 | 1 | 0 | 6 | 0 | 59974ms |
-| `artifacts/run-calculator/e2e/manager-attention.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 9639ms |
-| `artifacts/run-calculator/e2e/mix-plan.spec.ts` | 34 | 34 | 6 | 0 | 28 | 0 | 1152485ms |
-| `artifacts/run-calculator/e2e/multi-device-convergence.spec.ts` | 4 | 4 | 4 | 0 | 0 | 0 | 33965ms |
-| `artifacts/run-calculator/e2e/phone-layout.spec.ts` | 21 | 21 | 8 | 12 | 1 | 0 | 47338ms |
-| `artifacts/run-calculator/e2e/photo-count.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 5631ms |
-| `artifacts/run-calculator/e2e/photo-spec-import.spec.ts` | 5 | 5 | 5 | 0 | 0 | 0 | 51275ms |
-| `artifacts/run-calculator/e2e/prior-run-drain.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 4163ms |
-| `artifacts/run-calculator/e2e/profile-subtab-reload.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 20705ms |
-| `artifacts/run-calculator/e2e/pwa-handoff.spec.ts` | 3 | 3 | 1 | 0 | 2 | 0 | 128467ms |
-| `artifacts/run-calculator/e2e/pwa-morning-login.spec.ts` | 2 | 2 | 1 | 0 | 1 | 0 | 7703ms |
-| `artifacts/run-calculator/e2e/recipe-refresh-start-freeze.spec.ts` | 13 | 13 | 3 | 2 | 8 | 0 | 1299575ms |
-| `artifacts/run-calculator/e2e/run-insights.spec.ts` | 3 | 3 | 3 | 0 | 0 | 0 | 13224ms |
-| `artifacts/run-calculator/e2e/screen-off-wake.spec.ts` | 14 | 14 | 3 | 0 | 11 | 0 | 145347ms |
-| `artifacts/run-calculator/e2e/spec-import-unit-provenance.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 9964ms |
-| `artifacts/run-calculator/e2e/sync-convergence.spec.ts` | 9 | 9 | 5 | 1 | 3 | 0 | 113817ms |
-| `artifacts/run-calculator/e2e/sync-diagnostics-download.spec.ts` | 3 | 3 | 3 | 0 | 0 | 0 | 10720ms |
-| `artifacts/run-calculator/e2e/visual-regression.spec.ts` | 3 | 3 | 0 | 2 | 1 | 0 | 5681ms |
-| `artifacts/run-calculator/e2e/warehouse-coverage.spec.ts` | 4 | 4 | 4 | 0 | 0 | 0 | 11862ms |
+| `artifacts/run-calculator/e2e/accessibility-smoke.spec.ts` | 6 | 6 | 6 | 0 | 0 | 0 | 75998ms |
+| `artifacts/run-calculator/e2e/ai-outage-reviewability.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 11173ms |
+| `artifacts/run-calculator/e2e/compact-run-strip.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 5194ms |
+| `artifacts/run-calculator/e2e/critical-workflows.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 20297ms |
+| `artifacts/run-calculator/e2e/cross-device-smoke.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 16311ms |
+| `artifacts/run-calculator/e2e/department-workflow-navigation.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 27730ms |
+| `artifacts/run-calculator/e2e/die-tunnel-defaults.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 3371ms |
+| `artifacts/run-calculator/e2e/dough-correction-resume.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 10093ms |
+| `artifacts/run-calculator/e2e/freezer-surplus.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 9938ms |
+| `artifacts/run-calculator/e2e/home-navigation-reload.spec.ts` | 5 | 5 | 5 | 0 | 0 | 0 | 14230ms |
+| `artifacts/run-calculator/e2e/live-sauce-dough-phone.spec.ts` | 3 | 3 | 0 | 0 | 3 | 0 | 654ms |
+| `artifacts/run-calculator/e2e/management-performance.spec.ts` | 4 | 4 | 3 | 0 | 1 | 0 | 12205ms |
+| `artifacts/run-calculator/e2e/manager-action-queue-stale.spec.ts` | 7 | 7 | 1 | 0 | 6 | 0 | 70949ms |
+| `artifacts/run-calculator/e2e/manager-attention.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 10456ms |
+| `artifacts/run-calculator/e2e/mix-plan.spec.ts` | 34 | 34 | 6 | 0 | 28 | 0 | 1142300ms |
+| `artifacts/run-calculator/e2e/multi-device-convergence.spec.ts` | 4 | 4 | 4 | 0 | 0 | 0 | 30986ms |
+| `artifacts/run-calculator/e2e/phone-layout.spec.ts` | 21 | 21 | 8 | 12 | 1 | 0 | 49413ms |
+| `artifacts/run-calculator/e2e/photo-count.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 5302ms |
+| `artifacts/run-calculator/e2e/photo-spec-import.spec.ts` | 5 | 5 | 5 | 0 | 0 | 0 | 51429ms |
+| `artifacts/run-calculator/e2e/prior-run-drain.spec.ts` | 1 | 1 | 1 | 0 | 0 | 0 | 4283ms |
+| `artifacts/run-calculator/e2e/profile-subtab-reload.spec.ts` | 2 | 2 | 2 | 0 | 0 | 0 | 36636ms |
+| `artifacts/run-calculator/e2e/pwa-handoff.spec.ts` | 3 | 3 | 1 | 0 | 2 | 0 | 86637ms |
+| `artifacts/run-calculator/e2e/pwa-morning-login.spec.ts` | 2 | 2 | 1 | 0 | 1 | 0 | 7911ms |
+| `artifacts/run-calculator/e2e/recipe-refresh-start-freeze.spec.ts` | 13 | 13 | 3 | 2 | 8 | 0 | 1301664ms |
+| `artifacts/run-calculator/e2e/run-insights.spec.ts` | 3 | 3 | 3 | 0 | 0 | 0 | 13366ms |
+| `artifacts/run-calculator/e2e/screen-off-wake.spec.ts` | 14 | 14 | 3 | 0 | 11 | 0 | 149453ms |
+| `artifacts/run-calculator/e2e/spec-import-unit-provenance.spec.ts` | 1 | 1 | 0 | 0 | 1 | 0 | 10346ms |
+| `artifacts/run-calculator/e2e/sync-convergence.spec.ts` | 9 | 9 | 5 | 1 | 3 | 0 | 106579ms |
+| `artifacts/run-calculator/e2e/sync-diagnostics-download.spec.ts` | 3 | 3 | 3 | 0 | 0 | 0 | 10490ms |
+| `artifacts/run-calculator/e2e/visual-regression.spec.ts` | 3 | 3 | 0 | 2 | 1 | 0 | 5173ms |
+| `artifacts/run-calculator/e2e/warehouse-coverage.spec.ts` | 4 | 4 | 4 | 0 | 0 | 0 | 12598ms |
 
 ## Failed and timed-out cases
-
-### `artifacts/run-calculator/e2e/accessibility-smoke.spec.ts`
-
-- **FAILED** `› chromium › accessibility-smoke.spec.ts › accessibility smoke › authenticated staff workflows expose accessible controls and dialogs`
 
 ### `artifacts/run-calculator/e2e/cross-device-smoke.spec.ts`
 
@@ -66,6 +62,12 @@ Duration: 3704635ms
 ### `artifacts/run-calculator/e2e/live-sauce-dough-phone.spec.ts`
 
 - **FAILED** `› chromium › live-sauce-dough-phone.spec.ts › Dough and Sauce phone quick checks share line-speed feedback across tab switches`
+- **FAILED** `› chromium › live-sauce-dough-phone.spec.ts › Frontline App tracking survives off-tab work, corrections, pause, and reload`
+- **FAILED** `› chromium › live-sauce-dough-phone.spec.ts › Sauce and Dough live cards work at a phone viewport`
+
+### `artifacts/run-calculator/e2e/management-performance.spec.ts`
+
+- **FAILED** `› chromium › management-performance.spec.ts › keeps role-management controls unavailable to a non-manager on the staff roster`
 
 ### `artifacts/run-calculator/e2e/manager-action-queue-stale.spec.ts`
 
@@ -89,7 +91,7 @@ Duration: 3704635ms
 - **FAILED** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › empty state is preserved after a page reload when all runs are ended`
 - **FAILED** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › ending one run keeps the other run's mix card visible in a multi-run shift`
 - **FAILED** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › manager can retry an already-made amount after the first save fails`
-- **TIMEDOUT** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › mix card disappears from the plan after the run is marked ended`
+- **FAILED** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › mix card disappears from the plan after the run is marked ended`
 - **FAILED** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › mix plan collapses to empty when all runs in a shift are ended`
 - **FAILED** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › need 0.00 lbs badge appears on regular mix card when amountAlreadyMade >= totalLbs`
 - **FAILED** `› chromium › mix-plan.spec.ts › Mix Plan — prep card suppression and ended-run removal › need X lbs badge on regular mix card shows correct remaining amount`
@@ -118,7 +120,7 @@ Duration: 3704635ms
 ### `artifacts/run-calculator/e2e/pwa-handoff.spec.ts`
 
 - **TIMEDOUT** `› chromium › pwa-handoff.spec.ts › PWA update handoff › auto-reloads when Home was already safe before update discovery`
-- **TIMEDOUT** `› chromium › pwa-handoff.spec.ts › PWA update handoff › preserves unsafe work, then auto-reloads after safe inactivity`
+- **FAILED** `› chromium › pwa-handoff.spec.ts › PWA update handoff › preserves unsafe work, then auto-reloads after safe inactivity`
 
 ### `artifacts/run-calculator/e2e/pwa-morning-login.spec.ts`
 
@@ -129,9 +131,9 @@ Duration: 3704635ms
 - **TIMEDOUT** `› chromium › recipe-refresh-start-freeze.spec.ts › cheese recipe edits refresh pending runs across browsers but freeze after Start`
 - **TIMEDOUT** `› chromium › recipe-refresh-start-freeze.spec.ts › dough recipe edits refresh pending runs across browsers but freeze after Start`
 - **TIMEDOUT** `› chromium › recipe-refresh-start-freeze.spec.ts › dough recipe refresh stays with its original run after a rapid switch`
-- **FAILED** `› chromium › recipe-refresh-start-freeze.spec.ts › manager weight edits acknowledge, propagate, clear, and remain retryable across devices`
 - **TIMEDOUT** `› chromium › recipe-refresh-start-freeze.spec.ts › mix recipe edits refresh pending runs across browsers but freeze after Start`
 - **TIMEDOUT** `› chromium › recipe-refresh-start-freeze.spec.ts › mix recipe refresh stays with its original run after a rapid switch`
+- **FAILED** `› chromium › recipe-refresh-start-freeze.spec.ts › remembered plain ingredient batch weights survive a fresh sign-in`
 - **TIMEDOUT** `› chromium › recipe-refresh-start-freeze.spec.ts › sauce recipe edits refresh pending runs across browsers but freeze after Start`
 - **TIMEDOUT** `› chromium › recipe-refresh-start-freeze.spec.ts › sauce recipe refresh stays with its original run after a rapid switch`
 
