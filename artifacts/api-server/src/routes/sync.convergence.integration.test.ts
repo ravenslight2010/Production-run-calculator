@@ -16,7 +16,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import express, { type Express } from "express";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { spawnSync } from "node:child_process";
+import { fork, spawnSync, type ChildProcess } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
@@ -48,6 +48,7 @@ let testDbName: string;
 let originalDatabaseUrl: string | undefined;
 let server: Server;
 let baseUrl: string;
+let testDatabaseUrl: string;
 
 const OPERATOR = "soak-operator";
 const MANAGER = "soak-manager";
@@ -65,6 +66,7 @@ beforeAll(async () => {
   const testUrl = new URL(originalDatabaseUrl);
   testUrl.pathname = `/${testDbName}`;
   const testUrlStr = testUrl.toString();
+  testDatabaseUrl = testUrlStr;
   const push = spawnSync("pnpm", ["--filter", "@workspace/db", "run", "push-force"], {
     cwd: repoRoot,
     env: { ...process.env, DATABASE_URL: testUrlStr },
@@ -126,6 +128,70 @@ beforeEach(async () => {
 
 function headers(user = OPERATOR): Record<string, string> {
   return { authorization: `Bearer ${signToken(user)}` };
+}
+
+async function startIsolatedSyncProcess(): Promise<{ child: ChildProcess; baseUrl: string }> {
+  const fixturePath = path.join(repoRoot, "artifacts/api-server/src/test-fixtures/syncProcessServer.mts");
+  const child = fork(fixturePath, {
+    cwd: repoRoot,
+    execPath: path.join(repoRoot, "scripts/node_modules/.bin/tsx"),
+    env: {
+      ...process.env,
+      DATABASE_URL: testDatabaseUrl,
+      AUTO_TRACK_HEARTBEAT_MS: "1000",
+    },
+    stdio: ["ignore", "ignore", "ignore", "ipc"],
+  });
+  const port = await new Promise<number>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("isolated sync process did not start")), 10_000);
+    child.once("error", reject);
+    child.once("exit", (code) => reject(new Error(`isolated sync process exited before ready (${code})`)));
+    child.on("message", (message) => {
+      if (message && typeof message === "object" && (message as { type?: string }).type === "ready") {
+        clearTimeout(timeout);
+        resolve((message as { port: number }).port);
+      }
+    });
+  });
+  return { child, baseUrl: `http://127.0.0.1:${port}` };
+}
+
+async function stopIsolatedSyncProcess(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null) return;
+  child.kill("SIGTERM");
+  await new Promise<void>((resolve) => {
+    const timeout = setTimeout(() => {
+      child.kill("SIGKILL");
+      resolve();
+    }, 5_000);
+    child.once("exit", () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+  });
+}
+
+async function readDataFrame(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  state: { buffer: string },
+  timeoutMs = 5_000,
+): Promise<Record<string, unknown>> {
+  const read = async (): Promise<Record<string, unknown>> => {
+    for (;;) {
+      const match = state.buffer.match(/data: (.+)\n\n/);
+      if (match) {
+        state.buffer = state.buffer.slice(match.index! + match[0].length);
+        return JSON.parse(match[1]) as Record<string, unknown>;
+      }
+      const chunk = await reader.read();
+      if (chunk.done) throw new Error("stream closed");
+      state.buffer += new TextDecoder().decode(chunk.value);
+    }
+  };
+  return Promise.race([
+    read(),
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timed out waiting for data frame")), timeoutMs)),
+  ]);
 }
 
 function clone<T>(value: T): T {
@@ -287,6 +353,43 @@ const fixture = (): SyncPayload => ({
 });
 
 describe("multi-client sync convergence soak", () => {
+  it("documents the cross-process fanout boundary and complete reconnect recovery", async () => {
+    const isolated = await startIsolatedSyncProcess();
+    try {
+      const stream = await fetch(`${isolated.baseUrl}/api/sync/events?today=${TODAY}&clientId=process-b-peer`, {
+        headers: headers(),
+      });
+      expect(stream.status).toBe(200);
+      const reader = stream.body!.getReader();
+      const readState = { buffer: "" };
+      const initial = await readDataFrame(reader, readState);
+      expect(initial).toMatchObject({ initial: true, completeness: "complete" });
+
+      const writer = new SimulatedClient("process-a-writer");
+      writer.state = fixture();
+      const write = await writer.push();
+      expect(write?.ok).toBe(true);
+
+      await expect(readDataFrame(reader, readState, 400)).rejects.toThrow("timed out waiting for data frame");
+      await reader.cancel();
+
+      const recoveredStream = await fetch(
+        `${isolated.baseUrl}/api/sync/events?today=${TODAY}&clientId=process-b-reconnect`,
+        { headers: headers() },
+      );
+      const recoveredReader = recoveredStream.body!.getReader();
+      const recovered = await readDataFrame(recoveredReader, { buffer: "" });
+      expect(recovered).toMatchObject({
+        initial: true,
+        completeness: "complete",
+        data: { dayState: { runs: [{ id: "run-main" }] } },
+      });
+      await recoveredReader.cancel();
+    } finally {
+      await stopIsolatedSyncProcess(isolated.child);
+    }
+  }, 30_000);
+
   it("converges edits, offline reconnects, wake recovery, stale writes, and blank protection", async () => {
     const clients = ["A", "B", "C"].map((id) => new SimulatedClient(id));
     const start = Date.now();
