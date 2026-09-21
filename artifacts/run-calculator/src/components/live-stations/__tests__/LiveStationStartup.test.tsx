@@ -323,6 +323,28 @@ describe("live station startup", () => {
     },
   );
 
+  it("keeps simultaneous peer locks scoped to their matching Frontline correction rows", () => {
+    claimManualSectionLock(RUN_ID, "app1", "peer-app1", 30_000, true);
+    claimManualSectionLock(RUN_ID, "app2", "peer-app2", 30_000, true);
+    render(
+      <StationProviders status="running" values={FRONTLINE_APPLICATOR_VALUES}>
+        <LiveFrontlineTabContent />
+      </StationProviders>,
+    );
+
+    const app1Controls = within(screen.getByText("App 1 — Cheese").parentElement!).getAllByRole("button", { name: /consumed batches correction/ });
+    const app2Controls = within(screen.getByText("App 2 — Cheese").parentElement!).getAllByRole("button", { name: /consumed batches correction/ });
+    expect(app1Controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(true);
+    expect(app2Controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(true);
+
+    act(() => {
+      releaseManualSectionLock(RUN_ID, "app1", "peer-app1");
+    });
+
+    expect(app1Controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(false);
+    expect(app2Controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(true);
+  });
+
   it.each(FRONTLINE_APPLICATOR_LOCK_CASES.filter(({ slot }) => slot !== "app1"))(
     "keeps $slot Frontline correction controls usable after switching away from the peer-locked run",
     ({ slot, label }) => {
@@ -342,7 +364,6 @@ describe("live station startup", () => {
     },
   );
 });
-
 /**
  * These are intentionally component-level regressions rather than more
  * packaging-manager unit tests. The production stations call their handlers
@@ -498,7 +519,6 @@ describe("live station edits and stamped browser persistence", () => {
     );
     expect(acceptsStalePeer).toBe(false);
 
-    // Mirror the receive guard: only an accepted peer snapshot is written.
     if (acceptsStalePeer) saveRunValues(RUN_ID, stalePeerValues);
     expect(loadRunValues(RUN_ID).casesOnCurrentSkid).toBe(4);
   });
