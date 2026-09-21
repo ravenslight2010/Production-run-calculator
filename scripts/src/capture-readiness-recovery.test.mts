@@ -1,14 +1,16 @@
 import { execFile as execFileCallback } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import {
   READINESS_EVIDENCE_MAX_SAMPLES,
   READINESS_EVIDENCE_RETENTION_MS,
+  READINESS_DEPLOYMENT_HANDOFF_MAX_AGE_MS,
   buildReadinessEvidence,
   sanitizeReadinessResponse,
+  validateReadinessDeploymentHandoff,
   validateReadinessEvidence,
 } from "./capture-readiness-recovery.mjs";
 
@@ -17,6 +19,21 @@ const rootDir = path.resolve(new URL("../..", import.meta.url).pathname);
 const revision = "a".repeat(40);
 const generatedAt = "2026-09-18T12:00:00.000Z";
 const deploymentId = "published-deployment-1";
+
+function deploymentHandoff(overrides: Record<string, unknown> = {}) {
+  const issuedAt = new Date(Date.now() - 1_000).toISOString();
+  return {
+    schemaVersion: 1,
+    kind: "published-deployment-handoff",
+    deploymentId,
+    deployedRevision: revision,
+    issuedAt,
+    expiresAt: new Date(
+      Date.parse(issuedAt) + READINESS_DEPLOYMENT_HANDOFF_MAX_AGE_MS,
+    ).toISOString(),
+    ...overrides,
+  };
+}
 
 function healthySample() {
   return sanitizeReadinessResponse({
@@ -71,6 +88,79 @@ function incidentSample() {
 }
 
 describe("readiness evidence projection", () => {
+  it("accepts only a current bounded deployment handoff", () => {
+    const handoff = validateReadinessDeploymentHandoff(deploymentHandoff());
+
+    expect(handoff).toMatchObject({
+      deploymentId,
+      deployedRevision: revision,
+      kind: "published-deployment-handoff",
+    });
+    expect(JSON.stringify(handoff)).not.toMatch(
+      /url|response|credential|password|diagnostic|provider/i,
+    );
+
+    expect(() =>
+      validateReadinessDeploymentHandoff(
+        deploymentHandoff({
+          expiresAt: new Date(Date.now() - 1_000).toISOString(),
+        }),
+      ),
+    ).toThrow("Readiness deployment handoff is stale");
+  });
+
+  it("rejects conflicting deployment metadata before probing or writing evidence", async () => {
+    const outputDirectory = await mkdtemp(
+      path.join(rootDir, "tmp-readiness-handoff-conflict-"),
+    );
+    const handoffPath = path.join(outputDirectory, "deployment-handoff.json");
+    const outputPath = path.join(outputDirectory, "readiness-recovery.json");
+    await writeFile(handoffPath, `${JSON.stringify(deploymentHandoff())}\n`, "utf8");
+
+    try {
+      await expect(
+        execFile(
+          "pnpm",
+          [
+            "--filter",
+            "@workspace/scripts",
+            "exec",
+            "tsx",
+            "./src/capture-readiness-recovery.mts",
+            "--url",
+            "http://127.0.0.1:1/api/readyz",
+            "--environment",
+            "development",
+            "--deployment-handoff",
+            handoffPath,
+            "--deployment-id",
+            "different-published-deployment",
+            "--samples",
+            "1",
+            "--interval-ms",
+            "1",
+            "--timeout-ms",
+            "50",
+            "--output",
+            outputPath,
+          ],
+          {
+            cwd: rootDir,
+            env: process.env,
+            maxBuffer: 128_000,
+          },
+        ),
+      ).rejects.toMatchObject({
+        stderr: expect.stringContaining(
+          "Readiness deployment handoff conflicts with --deployment-id",
+        ),
+      });
+      await expect(readFile(outputPath)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(outputDirectory, { recursive: true, force: true });
+    }
+  });
+
   it("retains only bounded readiness and worker outcomes", () => {
     const sample = healthySample();
     expect(sample).toMatchObject({
@@ -183,6 +273,16 @@ describe("readiness evidence projection", () => {
       path.join(rootDir, "tmp-readiness-recovery-cli-"),
     );
     const outputPath = path.join(outputDirectory, "readiness-recovery.json");
+    const handoffPath = path.join(outputDirectory, "deployment-handoff.json");
+    await writeFile(
+      handoffPath,
+      `${JSON.stringify(
+        deploymentHandoff({
+          deploymentId: "local-recovery-fixture",
+        }),
+      )}\n`,
+      "utf8",
+    );
 
     try {
       const result = await execFile(
@@ -197,10 +297,8 @@ describe("readiness evidence projection", () => {
           targetUrl,
           "--environment",
           "development",
-          "--deployment-id",
-          "local-recovery-fixture",
-          "--revision",
-          revision,
+          "--deployment-handoff",
+          handoffPath,
           "--mode",
           "recovery",
           "--samples",
@@ -277,6 +375,16 @@ describe("readiness evidence projection", () => {
       expect(evidence.verification).toMatchObject({
         mode: "recovery",
         passed: true,
+      });
+      expect(
+        validateReadinessEvidence(Buffer.from(retainedJson), {
+          expectedDeploymentId: "local-recovery-fixture",
+          expectedRevision: revision,
+          now: new Date(),
+        }),
+      ).toMatchObject({
+        deploymentId: "local-recovery-fixture",
+        revision,
       });
 
       expect(retainedJson).not.toMatch(

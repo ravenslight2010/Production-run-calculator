@@ -1,12 +1,15 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 export const READINESS_EVIDENCE_SCHEMA_VERSION = 1;
+export const READINESS_DEPLOYMENT_HANDOFF_SCHEMA_VERSION = 1;
 export const READINESS_EVIDENCE_MAX_SAMPLES = 60;
 export const READINESS_EVIDENCE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 export const READINESS_EVIDENCE_MIN_NORMAL_SAMPLES = 2;
 export const READINESS_EVIDENCE_MAX_RESPONSE_BYTES = 32_000;
 export const READINESS_EVIDENCE_MAX_BYTES = 256_000;
+export const READINESS_DEPLOYMENT_HANDOFF_MAX_BYTES = 8_192;
+export const READINESS_DEPLOYMENT_HANDOFF_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 export const READINESS_EVIDENCE_DEFAULT_INTERVAL_MS = 5_000;
 export const READINESS_EVIDENCE_DEFAULT_TIMEOUT_MS = 5_000;
 
@@ -51,6 +54,15 @@ export type ReadinessSample = {
     backgroundWorkers: HealthStatus;
   };
   workers: ReadinessWorkerObservation[];
+};
+
+export type ReadinessDeploymentHandoff = {
+  schemaVersion: typeof READINESS_DEPLOYMENT_HANDOFF_SCHEMA_VERSION;
+  kind: "published-deployment-handoff";
+  deploymentId: string;
+  deployedRevision: string;
+  issuedAt: string;
+  expiresAt: string;
 };
 
 export type ReadinessEvidence = {
@@ -153,6 +165,20 @@ function parseEvidenceInput(input: Uint8Array | unknown): unknown {
   }
 }
 
+function parseDeploymentHandoffInput(input: Uint8Array | unknown): unknown {
+  if (!(input instanceof Uint8Array)) return input;
+  if (input.byteLength > READINESS_DEPLOYMENT_HANDOFF_MAX_BYTES) {
+    throw new Error(
+      `Readiness deployment handoff exceeds the ${READINESS_DEPLOYMENT_HANDOFF_MAX_BYTES}-byte bound`,
+    );
+  }
+  try {
+    return JSON.parse(Buffer.from(input).toString("utf8")) as unknown;
+  } catch {
+    throw new Error("Readiness deployment handoff must be valid JSON");
+  }
+}
+
 function requireRecord(value: unknown, message: string): JsonRecord {
   if (!isRecord(value)) throw new Error(message);
   return value;
@@ -167,6 +193,69 @@ function requireTimestamp(value: unknown, field: string): number {
     throw new Error(`Readiness evidence ${field} must be an ISO timestamp`);
   }
   return timestamp;
+}
+
+export type ReadinessDeploymentHandoffValidationOptions = {
+  now?: Date;
+};
+
+/**
+ * Validate the provider-neutral deployment handoff before probing the
+ * published app. Only the bounded identity fields returned by this function
+ * are allowed to influence retained readiness evidence.
+ */
+export function validateReadinessDeploymentHandoff(
+  input: Uint8Array | unknown,
+  options: ReadinessDeploymentHandoffValidationOptions = {},
+): ReadinessDeploymentHandoff {
+  const handoff = requireRecord(
+    parseDeploymentHandoffInput(input),
+    "Readiness deployment handoff must be a JSON object",
+  );
+  if (
+    handoff.schemaVersion !== READINESS_DEPLOYMENT_HANDOFF_SCHEMA_VERSION ||
+    handoff.kind !== "published-deployment-handoff"
+  ) {
+    throw new Error("Readiness deployment handoff has an unsupported schema or kind");
+  }
+  if (!isValidDeploymentId(handoff.deploymentId)) {
+    throw new Error("Readiness deployment handoff deployment ID is malformed");
+  }
+  if (!isValidRevision(handoff.deployedRevision)) {
+    throw new Error("Readiness deployment handoff deployed revision is malformed");
+  }
+  const issuedAtMs = requireTimestamp(
+    handoff.issuedAt,
+    "deployment handoff issuedAt",
+  );
+  const expiresAtMs = requireTimestamp(
+    handoff.expiresAt,
+    "deployment handoff expiresAt",
+  );
+  const nowMs = (options.now ?? new Date()).getTime();
+  if (!Number.isFinite(nowMs)) {
+    throw new Error("Readiness deployment handoff validation time is invalid");
+  }
+  if (issuedAtMs > nowMs) {
+    throw new Error("Readiness deployment handoff is from the future");
+  }
+  if (expiresAtMs <= nowMs) {
+    throw new Error("Readiness deployment handoff is stale");
+  }
+  if (
+    expiresAtMs <= issuedAtMs ||
+    expiresAtMs - issuedAtMs > READINESS_DEPLOYMENT_HANDOFF_MAX_AGE_MS
+  ) {
+    throw new Error("Readiness deployment handoff validity window is invalid");
+  }
+  return {
+    schemaVersion: READINESS_DEPLOYMENT_HANDOFF_SCHEMA_VERSION,
+    kind: "published-deployment-handoff",
+    deploymentId: handoff.deploymentId,
+    deployedRevision: handoff.deployedRevision,
+    issuedAt: new Date(issuedAtMs).toISOString(),
+    expiresAt: new Date(expiresAtMs).toISOString(),
+  };
 }
 
 function validateReadinessSample(value: unknown, index: number): void {
@@ -719,8 +808,29 @@ async function main(): Promise<void> {
   if (environment !== "development" && environment !== "release") {
     throw new Error("--environment must be development or release");
   }
-  const deploymentId = requiredArgument("--deployment-id");
-  const revision = requiredArgument("--revision");
+  const handoffPath = path.resolve(
+    process.cwd(),
+    requiredArgument("--deployment-handoff"),
+  );
+  const handoff = validateReadinessDeploymentHandoff(await readFile(handoffPath));
+  const suppliedDeploymentId = argument("--deployment-id")?.trim();
+  if (
+    suppliedDeploymentId !== undefined &&
+    suppliedDeploymentId !== handoff.deploymentId
+  ) {
+    throw new Error(
+      "Readiness deployment handoff conflicts with --deployment-id",
+    );
+  }
+  const suppliedRevision = argument("--revision")?.trim();
+  if (
+    suppliedRevision !== undefined &&
+    suppliedRevision !== handoff.deployedRevision
+  ) {
+    throw new Error(
+      "Readiness deployment handoff conflicts with --revision",
+    );
+  }
   const sampleCount = positiveInteger(
     argument("--samples"),
     "--samples",
@@ -752,8 +862,8 @@ async function main(): Promise<void> {
   }
   const evidence = buildReadinessEvidence({
     environment,
-    deploymentId,
-    revision,
+    deploymentId: handoff.deploymentId,
+    revision: handoff.deployedRevision,
     generatedAt: new Date().toISOString(),
     mode,
     samples,

@@ -6,10 +6,30 @@ Run the bounded, read-only capture against the published `/api/readyz` endpoint:
 pnpm --filter @workspace/scripts run check:readiness-recovery -- \
   --url https://published-host.example/api/readyz \
   --environment release \
-  --deployment-id <published-deployment-id> \
-  --revision <deployed-40-character-git-sha> \
+  --deployment-handoff ./release-evidence/published-deployment-handoff.json \
   --mode normal
 ```
+
+The deployment step must provide the explicit handoff before capture starts.
+It is a provider-neutral JSON object with only bounded identity and validity
+fields:
+
+```json
+{
+  "schemaVersion": 1,
+  "kind": "published-deployment-handoff",
+  "deploymentId": "<published-deployment-id>",
+  "deployedRevision": "<deployed-40-character-git-sha>",
+  "issuedAt": "2026-09-21T12:00:00.000Z",
+  "expiresAt": "2026-09-21T13:00:00.000Z"
+}
+```
+
+The handoff must be current when capture begins and its validity window may
+not exceed 24 hours. Missing, malformed, expired, future-dated, or conflicting
+metadata fails before the first live probe and before the evidence output is
+written. `--deployment-id` and `--revision` may be supplied as transitional
+cross-checks, but the handoff is the source of truth.
 
 Use `--mode recovery` during a real sustained worker incident. That mode only
 passes after it observes a worker-diagnostic `503` and a later healthy `200`;
@@ -18,8 +38,10 @@ statuses, bounded counts, operation names, and timestamps. It never retains the
 URL, response body, request data, recipe data, credentials, or provider errors.
 
 The output is capped at 60 samples and expires seven days after capture. Treat
-the deployment ID and full deployed revision as required provenance, not values
-to infer from the verifier's checkout.
+the deployment ID and full deployed revision in the handoff as required
+provenance, not values to infer from the verifier's checkout. The retained
+readiness record copies only those two identity values; it does not copy the
+handoff path or any provider metadata.
 
 
 ## Verification
