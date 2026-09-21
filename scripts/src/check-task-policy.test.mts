@@ -14,12 +14,16 @@ const validDocuments: Record<string, string> = {
     "Before starting, capture the task's scope, affected surfaces, owner, applicable specialist safety checks, and validation matrix.",
     "Keep discoveries for the same objective in the owning task's progress updates and failure ledger. Fix every in-scope finding before completion.",
     "A separate project task is allowed only for a genuinely independent outcome with separate acceptance criteria, an explicitly deferred user outcome, or an out-of-scope safety, security, data-integrity, or release blocker.",
+    "For every web-facing task, record a compatibility applicability matrix covering desktop, phone, tablet portrait/landscape, Chromium/Chrome, and WebKit/Safari. Each check must have an explicit not applicable, blocked, or not run reason when it is not a pass.",
+    "Responsive browser emulation is automated evidence only; it is not proof of physical Android Chrome or iOS Safari/PWA behavior. This is a web-only product and does not create a native-mobile requirement.",
   ].join("\n"),
   "replit.md": [
     "Generate one durable task per work objective.",
     "Before starting, capture the task's scope, affected surfaces, expected owner, applicable specialist safety checks, and validation matrix.",
     "Keep newly discovered in-scope failures in the owning task's failure ledger and close them before completion.",
     "A separate project task requires a genuinely independent outcome with separate acceptance criteria, an explicitly deferred user outcome, or an out-of-scope safety, security, data-integrity, or release blocker.",
+    "Every web-facing task must include a compatibility applicability matrix for desktop, phone, tablet portrait/landscape, Chromium/Chrome, and WebKit/Safari. Record an explicit not applicable, blocked, or not run reason for each check that is not a pass.",
+    "Responsive browser emulation is automated evidence, not physical Android Chrome or iOS Safari/PWA evidence; this remains a web-only product with no native-mobile requirement.",
   ].join("\n"),
 };
 
@@ -119,6 +123,26 @@ test("names the document and missing rule when the policies drift", async () => 
         "- replit.md: missing failure-ledger closure rule; keep same-objective discoveries in the owning task's failure ledger and close them before completion",
         "",
       ].join("\n"),
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("protects the compatibility matrix requirement from policy drift", async () => {
+  const root = await createFixture({
+    "replit.md": validDocuments["replit.md"].replace(
+      "compatibility applicability matrix",
+      "compatibility checklist",
+    ),
+  });
+
+  try {
+    const result = await runChecker(root);
+    assert.equal(result.exitCode, 1);
+    assert.match(
+      result.stderr,
+      /replit\.md: missing web compatibility applicability matrix; require a compatibility applicability matrix for every web-facing task/,
     );
   } finally {
     await rm(root, { recursive: true, force: true });

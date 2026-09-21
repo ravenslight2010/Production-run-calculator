@@ -33,6 +33,23 @@ execution budget, not a retry or an evidence-validation bypass: all 159
 enumerated cases still need to complete and the retained report must pass the
 same revision-bound evidence verifier.
 
+For compatibility work, or as the bounded pre-release browser-engine check, run:
+
+```bash
+pnpm --filter @workspace/run-calculator run test:e2e:compatibility
+```
+
+This serialized lane reuses the isolated staff lifecycle smoke on desktop,
+phone, tablet portrait, and tablet landscape Chromium, then runs the lifecycle
+and report cases from the isolated WebKit release smoke at phone and tablet
+sizes. The dedicated WebKit command remains the owner of the full WebKit
+contract, including failed-pull/reconnect recovery. The compatibility lane
+retains traces and failure-only screenshots under
+`artifacts/run-calculator/test-results/compatibility` and an HTML report under
+`artifacts/run-calculator/playwright-report/compatibility`. The lane is
+separate from the existing smoke, accessibility, visual, PWA, WebKit,
+physical-device, and full-release commands; it does not replace them.
+
 The GitHub Actions standard and full jobs install WebKit and the Linux runtime
 dependencies required by its browser bundle before running the release gates:
 
@@ -98,6 +115,13 @@ as regressions.
 - A missing gate in the report is an incomplete run, never a pass.
 - A missing, empty, stale-revision, or unexpected evidence file is an evidence
   failure, never a pass.
+- The compatibility lane's Chromium and WebKit projects are responsive browser
+  emulations. They are not proof of physical Android Chrome or iOS Safari/PWA
+  behavior. Run physical Android Chrome through the dedicated device command
+  and any available iOS Safari/PWA service through its separate device lane.
+  If a required device endpoint is unavailable, record the check as `BLOCKED`
+  or `NOT RUN` with the environment reason; never report emulation as a
+  physical-device pass.
 - A browser duration alert is an operational review signal, not a coverage or
   serial-execution bypass. It is copied into the release summary for
   investigation; the full suite still must complete the shared case contract

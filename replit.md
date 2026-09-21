@@ -75,6 +75,8 @@ This section is the project-specific application of the shared task-scope rule i
 
 - Generate one durable task per work objective. The owning task includes investigation, implementation, integration and persistence impacts, regression coverage, final verification, and all in-scope repair work. Do not create a new task for each symptom, test failure, fixture repair, or sub-outcome inside the same objective.
 - Before starting, capture the task's scope, affected surfaces, expected owner, applicable specialist safety checks, and validation matrix. Search the task board for overlap and dependencies; do not duplicate an existing task.
+- Every web-facing task must include a compatibility applicability matrix for desktop, phone, tablet portrait/landscape, Chromium/Chrome, and WebKit/Safari. Record an explicit `not applicable`, `blocked`, or `not run` reason for each check that is not a pass.
+- Responsive browser emulation is automated evidence, not physical Android Chrome or iOS Safari/PWA evidence. Real-device checks are a separate environment-dependent lane when required; this remains a web-only product with no native-mobile requirement.
 - Use one task when the work has one objective and shared ownership. A separate project task is allowed only when it has a genuinely independent outcome with separate acceptance criteria, is an explicitly deferred user outcome, or is an out-of-scope safety, security, data-integrity, or release blocker that cannot responsibly remain in the owning task.
 - Ask a question only for a genuine product decision, missing access or secret, or destructive action. Otherwise follow existing project patterns and choose the smallest safe behavior.
 
@@ -86,6 +88,7 @@ This section is the project-specific application of the shared task-scope rule i
 - Keep newly discovered in-scope failures in the owning task's failure ledger and close them before completion. A new project task requires a genuinely independent objective, an explicitly deferred user outcome, or an out-of-scope safety, security, data-integrity, or release blocker that cannot responsibly be absorbed.
 - Do not create recursive or speculative “one more task” work. A separate task must have independent acceptance criteria, an owner, and a documented reason it cannot remain in the current objective.
 - Completion evidence must name the changed surface, focused checks, broader affected checks, known failures, data/authorization/sync implications where applicable, and the exact remaining action for anything not completed.
+- Web-facing completion evidence must include the compatibility applicability matrix and separate emulated Chromium/WebKit results from physical Android Chrome and iOS Safari/PWA results. Missing device services are `blocked` or `not run`, never a pass.
 
 ### Long-running task progress
 

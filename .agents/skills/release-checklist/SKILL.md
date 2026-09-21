@@ -226,6 +226,29 @@ Expected evidence is one passing desktop Chromium project and one passing
 390×844 phone-sized Chromium project. This suite resets only a disposable
 today row and must never use production or a shared operational database.
 
+For web-facing work, record a compatibility applicability matrix before
+validation. The matrix covers desktop, phone, tablet portrait/landscape,
+Chromium/Chrome, and WebKit/Safari. Mark every non-pass as `not applicable`,
+`blocked`, or `not run` with a reason. Responsive browser emulation is
+automated evidence only; it does not prove physical Android Chrome or iOS
+Safari/PWA behavior, and this web-only product does not require a native app.
+
+For layout, touch, or browser-engine changes, run the bounded compatibility
+lane in addition to the focused suite:
+
+```sh
+pnpm --filter @workspace/run-calculator run test:e2e:compatibility
+```
+
+It serially reuses the isolated staff lifecycle smoke for desktop, phone,
+tablet portrait, and tablet landscape Chromium, then reuses the lifecycle and
+report cases from the isolated WebKit release smoke at phone and tablet sizes.
+The dedicated WebKit command remains the owner of failed-pull/reconnect
+recovery. The compatibility lane's traces, failure screenshots, and HTML
+report are retained in compatibility-specific output directories.
+This lane does not replace the existing smoke, accessibility, visual, PWA,
+WebKit, physical-device, or full-release commands.
+
 For UI or interaction changes, run the axe-based accessibility suite:
 
 ```sh
@@ -270,6 +293,11 @@ pnpm --filter @workspace/run-calculator run test:e2e:phone:device
 This is environment-dependent and requires
 `PLAYWRIGHT_REAL_MOBILE_WS_ENDPOINT`; the emulated phone suite is not evidence
 that a physical keyboard and browser handoff work.
+
+Physical Android Chrome and any available iOS Safari/PWA service are separate
+environment-dependent checks. If the endpoint or device service is unavailable,
+record `blocked` or `not run` and the reason; never turn viewport emulation into
+physical-device evidence.
 
 ### Full browser E2E
 

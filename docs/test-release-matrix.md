@@ -15,7 +15,7 @@ reported gap, not evidence of coverage.
 | Sync merge, reset, LWW, and SSE | API sync routes plus web sync receive/write paths | `test:release:sync`, `test:release:sync-sse`, `sync-convergence.spec.ts`, and focused sync tests | Required for any sync, day-state, stamp, reset, wake, or live-counter change |
 | Concurrent sync and inventory mutations | Disposable-Postgres integration tests for live and scheduled-day sync merge retries, cross-date scheduled-write isolation, plus inventory row-lock/idempotency boundaries | `@workspace/api-server run test:release:concurrency` | Required only when sync conflict/retry (including future scheduled-day writes and cross-date isolation), inventory locking, consumption idempotency, or related transaction boundaries change; bounded to 180 seconds |
 | Web rendering and client state | Run Calculator components/hooks | `@workspace/run-calculator test`, typecheck, and focused rendered tests | Required for client or shared UI/state changes |
-| Browser operational journeys | `run-calculator/e2e` fixtures and Playwright configs | Chromium smoke plus the bounded `test:e2e:webkit` contract; main E2E, department, management-performance, photo-count, and sync-convergence remain focused commands; full release mode enumerates the main-suite contract | Required when navigation, reload, auth, persistence, or user-visible behavior changes; release browser stages remain serial |
+| Browser operational journeys | `run-calculator/e2e` fixtures and Playwright configs | The bounded `test:e2e:compatibility` contract covers desktop/phone/tablet Chromium plus phone/tablet WebKit emulation; its WebKit projects cover lifecycle/report cases while the dedicated WebKit command retains failed-pull/reconnect recovery. Existing Chromium smoke, accessibility, visual, PWA, WebKit, physical-device, main E2E, department, management-performance, photo-count, and sync-convergence commands remain separate focused lanes; full release mode enumerates the main-suite contract | Required for layout, touch, browser-engine, or cross-device journey changes; release browser stages remain serial. Emulation is not physical Android/iOS evidence; unavailable device services are blocked/not run |
 | Passive field verification | Field-check contract/unit coverage, API validation/scoping tests, and manager Reported Issues browser coverage at desktop/tablet/phone widths | Focused client/API tests plus `test:e2e:a11y` | Required for lifecycle observation, field-check ingestion, or manager-panel changes; browser evidence is limited to signals the browser can observe |
 | Accessibility | `accessibility-smoke.spec.ts` and axe checks | `test:e2e:a11y` | Required for interactive UI, semantic, focus, or layout changes |
 | Visual baselines | `visual-regression.spec.ts` snapshots | `test:e2e:visual` | Required for intentional geometry/hierarchy/responsive changes; baseline updates require explicit review |
@@ -63,8 +63,9 @@ test gates are `run-calculator`, `production-rules`, `inventory-math`,
   projects use separate configs where their setup boundaries differ. This
   prevents a destructive live-day reset from leaking into isolated checks.
 - The minimum cross-browser release contract is Chromium smoke plus the
-  single-project WebKit smoke. WebKit owns only authentication, current-run
-  lifecycle, failed-pull/reconnect recovery, and manager report preview; it
+  single-project WebKit smoke. The compatibility lane's WebKit projects cover
+  authentication, current-run lifecycle, and manager report preview; the
+  dedicated WebKit smoke additionally owns failed-pull/reconnect recovery. It
   does not duplicate the full Chromium inventory.
 - The WebKit fixture uses unique accounts, a disposable database guard, one
   worker, no inherited destructive global setup, and teardown cleanup. Its

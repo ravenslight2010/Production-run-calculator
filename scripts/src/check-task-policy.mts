@@ -34,6 +34,41 @@ const requirements: Requirement[] = [
     remediation:
       "allow a separate task only for an independent outcome, explicitly deferred outcome, or out-of-scope safety, security, data-integrity, or release blocker",
   },
+  {
+    label: "web compatibility applicability matrix",
+    pattern:
+      /web-facing tasks?[\s\S]{0,300}compatibility applicability matrix/i,
+    remediation:
+      "require a compatibility applicability matrix for every web-facing task",
+  },
+  {
+    label: "compatibility matrix dimensions",
+    pattern:
+      /desktop, phone, tablet portrait\/landscape, Chromium\/Chrome, and WebKit\/Safari/i,
+    remediation:
+      "cover desktop, phone, tablet portrait/landscape, Chromium/Chrome, and WebKit/Safari",
+  },
+  {
+    label: "compatibility exception reasons",
+    pattern:
+      /not applicable[\s\S]{0,180}blocked[\s\S]{0,180}not run/i,
+    remediation:
+      "require explicit not applicable, blocked, or not run reasons",
+  },
+  {
+    label: "physical-device evidence distinction",
+    pattern:
+      /responsive browser emulation[\s\S]{0,240}physical Android Chrome[\s\S]{0,240}iOS Safari\/PWA/i,
+    remediation:
+      "distinguish responsive emulation from physical Android Chrome and iOS Safari/PWA evidence",
+  },
+  {
+    label: "web-only native boundary",
+    pattern:
+      /web-only[\s\S]{0,180}native-mobile requirement/i,
+    remediation:
+      "preserve the web-only boundary without creating a native-mobile requirement",
+  },
 ];
 
 const root = resolve(

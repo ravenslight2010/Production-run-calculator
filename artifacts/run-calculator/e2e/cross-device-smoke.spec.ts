@@ -59,6 +59,7 @@ async function dismissOnboarding(page: Page): Promise<void> {
 
 async function seedPendingRun(page: Page): Promise<string> {
   const runId = `smoke-run-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const seedStamp = Date.now();
   await page.evaluate((id) => {
     const dayKey = "run-calc-day";
     const day = JSON.parse(localStorage.getItem(dayKey) ?? "{}") as {
@@ -94,11 +95,22 @@ async function seedPendingRun(page: Page): Promise<string> {
         payload: {
           dayState: {
             date: today,
-            runs: [{ id: runId, brand: "Smoke", flavor: "Lifecycle" }],
+            runs: [{
+              id: runId,
+              brand: "Smoke",
+              flavor: "Lifecycle",
+              metaUpdatedAt: seedStamp,
+            }],
             currentIndex: 0,
             resetAt: 0,
           },
-          runValues: {},
+          runValues: {
+            [runId]: {
+              casesNeeded: 30,
+              pizzasPerCase: 12,
+            },
+          },
+          runValuesUpdatedAt: { [runId]: seedStamp },
         },
       },
       failOnStatusCode: true,
