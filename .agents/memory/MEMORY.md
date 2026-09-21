@@ -102,7 +102,7 @@
 - [Importer audit recovery](importer-audit-recovery.md) — retryable audit writes must be user/scope-bound and server-idempotent; never replay source imports automatically.
 - [Cross-channel auto-track claims](cross-channel-auto-track-claims.md) — shared run stamps require queued deltas to distinguish peer auto accepts from manual edits before rebasing.
 - [GitHub release proof](github-git-push.md) + [cancelled summaries](github-actions-job-summary-visibility.md) + [external forks](github-external-fork-verification.md) — pushes need secure remotes; cancelled Markdown may hide; live fork checks need another owner.
-- [Deterministic AI gates](deterministic-ai-gates.md) — route boundaries must re-run local resolution and cache stable optional AI outcomes so callers cannot force redundant model work.
+- [Deterministic AI gates](deterministic-ai-gates.md) + [evaluation governance](ai-evaluation-framework-boundary.md) — re-run local resolution; keep model evidence offline, bounded, and independently checked.
 - [Browser fixture and database isolation](browser-fixture-seeding.md) + [browser-e2e-disposable-database.md] — hydrate master data through server fixtures and use disposable DBs for destructive Playwright suites.
 - [Data Health undo coverage](data-health-undo-coverage.md) — verify persisted repair records include future-run snapshots before expecting guarded undo to restore them.
 - [String-reference purge safety](string-reference-purge-safety.md) — recipe stub purges must scan profiles and every historical/current run snapshot before deleting text-linked master data.
@@ -137,7 +137,6 @@
 - [Source-heal stale-client fence](source-heal-stale-client-fence.md) — a source repair is not durable while sleeping clients can replay unfenced full-pool recipe writes.
 - [Acknowledged master-data propagation](acknowledged-master-data-propagation.md) — local recipe saves must explicitly drive pending-run refresh; cache effects alone can misclassify a save as bootstrap.
 - [ZIP asset inventory safety](zip-asset-inventory.md) — inspect central-directory metadata only; fail closed on unsafe members and label output as review evidence, not installation approval.
-- [AI evaluation and delivery governance](ai-evaluation-framework-boundary.md) + [network](ai-benchmark-network-boundary.md) + [delivery](ai-delivery-governance.md) — offline evidence, full delivery cost, independent checks, and human approval.
 - [WebKit operational-report fixture](webkit-operational-report-fixture.md) — authoritative report smoke needs an isolated canonical snapshot and a sync-write fence after hydration.
 - [Factory baseline ownership](factory-baseline-ownership.md) — cross-service runtime defaults use dependency-free shared constants; historical blank sentinels remain explicit compatibility values.
 - [Managed rebase tree recovery](managed-rebase-tree-recovery.md) — a completed rebase can replay malformed conflict sides without markers; compare its tree with the pre-rebase integrated baseline.
