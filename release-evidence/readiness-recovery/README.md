@@ -21,6 +21,24 @@ The output is capped at 60 samples and expires seven days after capture. Treat
 the deployment ID and full deployed revision as required provenance, not values
 to infer from the verifier's checkout.
 
+
+## Verification
+
+Only the JSON record passes as current proof after a consumer validates it. The
+validator rejects malformed records, prose snapshots, expired records, records
+over the 60-sample bound, and records from another published deployment or
+revision. Release evidence verification requires both values explicitly:
+
+```sh
+pnpm --filter @workspace/scripts run check:release-evidence -- \
+  --readiness-deployment-id <published-deployment-id> \
+  --deployed-revision <deployed-40-character-git-sha>
+```
+
+`--deployed-revision` is the revision running in the published deployment; it
+is not the verifier checkout revision. A useful uptime brief or manually
+written observation can guide investigation, but it is not authoritative
+readiness evidence unless it is represented by the bounded JSON contract.
 ## Deterministic local recovery proof
 
 The CLI is also covered by a local HTTP fixture that serves two normal `200`

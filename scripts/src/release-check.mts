@@ -58,6 +58,7 @@ import {
   RETAINED_EVALUATION_CANONICAL_RELATIVE_PATH,
   retainedEvaluationDirectories,
 } from "./retained-evaluation-contract.mjs";
+import { validateReadinessEvidence } from "./capture-readiness-recovery.mts";
 export { TYPESCRIPT_7_SUPPORTED_RUNNERS } from "./typescript-7-native-contract.mts";
 
 export type ReleaseStep = {
@@ -154,6 +155,8 @@ export type ReleaseEvidenceOptions = {
   allowIncompleteCheckpoint?: boolean;
   expectedSourceLibraryEnvironment?: SourceLibraryEvidenceEnvironment;
   expectedSourceLibraryRevision?: string;
+  expectedReadinessDeploymentId?: string;
+  expectedDeployedRevision?: string;
 };
 
 export function validateReleaseAiEvaluationEvidence(
@@ -851,9 +854,13 @@ export function retainedEvaluationEvidenceInventory(
   );
 }
 const SOURCE_LIBRARY_RECONCILIATION_PENDING_EVIDENCE = `.${SOURCE_LIBRARY_RECONCILIATION_EVIDENCE}.pending`;
+export const READINESS_EVIDENCE_PATH =
+  "readiness-recovery/readiness-recovery.json";
 export const RELEASE_EVIDENCE_ALLOWLIST = [
   "release-check-report.md",
   "release-check-checkpoint.md",
+  "readiness-recovery/README.md",
+  READINESS_EVIDENCE_PATH,
   "report-key-rotation-preflight.json",
   "clean-start/clean-start-evidence.json",
   "clean-start/browser-result.json",
@@ -1124,6 +1131,14 @@ const sourceLibraryEnvironment = resolveSourceLibraryEvidenceEnvironment(
 const configuredSourceLibraryRevision =
   (cliOptionValue("--source-library-revision") ??
     process.env.SOURCE_LIBRARY_RECONCILIATION_REVISION?.trim()) ||
+  undefined;
+const configuredReadinessDeploymentId =
+  (cliOptionValue("--readiness-deployment-id") ??
+    process.env.READINESS_EVIDENCE_DEPLOYMENT_ID?.trim()) ||
+  undefined;
+const configuredDeployedRevision =
+  (cliOptionValue("--deployed-revision") ??
+    process.env.READINESS_EVIDENCE_DEPLOYED_REVISION?.trim()) ||
   undefined;
 
 export function resolveSourceLibraryReleaseRevision(
@@ -1780,6 +1795,12 @@ function printHelp(): void {
     "  --source-library-revision <sha>   Exact deployed 40-character SHA for production reconciliation evidence",
   );
   console.log(
+    "  --readiness-deployment-id <id>   Expected published deployment ID for retained readiness evidence",
+  );
+  console.log(
+    "  --deployed-revision <sha>       Expected deployed 40-character SHA for retained readiness evidence",
+  );
+  console.log(
     "  pnpm --silent --filter @workspace/scripts exec tsx ./src/verify-source-library-reconciliation.mts --capture-production --environment release --revision <deployed-40-character-sha>  Capture bounded production evidence (read-only)",
   );
   console.log(
@@ -1987,6 +2008,23 @@ export async function verifyReleaseEvidence(
       `Required release evidence is empty:\n${emptyEvidence
         .map((file) => `- ${file}`)
         .join("\n")}`,
+    );
+  }
+  if (files.includes(READINESS_EVIDENCE_PATH)) {
+    if (
+      options.expectedReadinessDeploymentId === undefined ||
+      options.expectedDeployedRevision === undefined
+    ) {
+      throw new Error(
+        "Readiness evidence verification requires the expected published deployment ID and deployed revision; pass --readiness-deployment-id and --deployed-revision.",
+      );
+    }
+    validateReadinessEvidence(
+      await readFile(resolve(evidenceRoot, READINESS_EVIDENCE_PATH)),
+      {
+        expectedDeploymentId: options.expectedReadinessDeploymentId,
+        expectedRevision: options.expectedDeployedRevision,
+      },
     );
   }
   const revision = options.currentRevision ?? (await currentRevision());
@@ -3589,6 +3627,8 @@ async function main(): Promise<void> {
         expectedMode:
           releaseMode === "standard" ? undefined : releaseMode,
         expectedSourceLibraryRevision: sourceLibraryRevision,
+        expectedReadinessDeploymentId: configuredReadinessDeploymentId,
+        expectedDeployedRevision: configuredDeployedRevision,
       });
       process.exit(0);
     } catch (error) {
@@ -4029,6 +4069,8 @@ async function main(): Promise<void> {
         currentRevision: revision,
         expectedMode: releaseMode,
         expectedSourceLibraryRevision: sourceLibraryRevision,
+        expectedReadinessDeploymentId: configuredReadinessDeploymentId,
+        expectedDeployedRevision: configuredDeployedRevision,
         allowIncompleteCheckpoint: true,
       });
       await rm(checkpointReportPath, { force: true });

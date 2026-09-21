@@ -6,6 +6,7 @@ export const READINESS_EVIDENCE_MAX_SAMPLES = 60;
 export const READINESS_EVIDENCE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 export const READINESS_EVIDENCE_MIN_NORMAL_SAMPLES = 2;
 export const READINESS_EVIDENCE_MAX_RESPONSE_BYTES = 32_000;
+export const READINESS_EVIDENCE_MAX_BYTES = 256_000;
 export const READINESS_EVIDENCE_DEFAULT_INTERVAL_MS = 5_000;
 export const READINESS_EVIDENCE_DEFAULT_TIMEOUT_MS = 5_000;
 
@@ -52,7 +53,7 @@ export type ReadinessSample = {
   workers: ReadinessWorkerObservation[];
 };
 
-type ReadinessEvidence = {
+export type ReadinessEvidence = {
   schemaVersion: typeof READINESS_EVIDENCE_SCHEMA_VERSION;
   kind: "readiness-recovery";
   environment: "development" | "release";
@@ -82,10 +83,308 @@ type ReadinessEvidence = {
   };
 };
 
+export type ReadinessEvidenceValidationOptions = {
+  expectedDeploymentId: string;
+  expectedRevision: string;
+  now?: Date;
+};
+
 type JsonRecord = Record<string, unknown>;
 
 function isRecord(value: unknown): value is JsonRecord {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isReadinessCaptureMode(value: unknown): value is ReadinessCaptureMode {
+  return value === "normal" || value === "recovery" || value === "observe";
+}
+
+function isReadinessSampleOutcome(value: unknown): value is ReadinessSampleOutcome {
+  return value === "healthy" ||
+    value === "worker_incident" ||
+    value === "not_ready" ||
+    value === "unexpected" ||
+    value === "probe_error";
+}
+
+function isFinalState(
+  value: unknown,
+): value is ReadinessEvidence["summary"]["finalState"] {
+  return value === "normal" ||
+    value === "degraded" ||
+    value === "worker_incident" ||
+    value === "incident_recovered";
+}
+
+function isValidDeploymentId(value: unknown): value is string {
+  return typeof value === "string" &&
+    /^[A-Za-z0-9._:-]{1,128}$/u.test(value);
+}
+
+function isValidRevision(value: unknown): value is string {
+  return typeof value === "string" && /^[a-f0-9]{40}$/u.test(value);
+}
+
+function isHealthStatus(value: unknown): value is HealthStatus {
+  return value === "ok" ||
+    value === "error" ||
+    value === "pending" ||
+    value === "unknown";
+}
+
+function isFiniteNonNegativeInteger(value: unknown, maximum: number): value is number {
+  return typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= 0 &&
+    value <= maximum;
+}
+
+function parseEvidenceInput(input: Uint8Array | unknown): unknown {
+  if (!(input instanceof Uint8Array)) return input;
+  if (input.byteLength > READINESS_EVIDENCE_MAX_BYTES) {
+    throw new Error(
+      `Readiness evidence exceeds the ${READINESS_EVIDENCE_MAX_BYTES}-byte bound`,
+    );
+  }
+  try {
+    return JSON.parse(Buffer.from(input).toString("utf8")) as unknown;
+  } catch {
+    throw new Error("Readiness evidence must be valid JSON");
+  }
+}
+
+function requireRecord(value: unknown, message: string): JsonRecord {
+  if (!isRecord(value)) throw new Error(message);
+  return value;
+}
+
+function requireTimestamp(value: unknown, field: string): number {
+  if (typeof value !== "string") {
+    throw new Error(`Readiness evidence ${field} must be an ISO timestamp`);
+  }
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) {
+    throw new Error(`Readiness evidence ${field} must be an ISO timestamp`);
+  }
+  return timestamp;
+}
+
+function validateReadinessSample(value: unknown, index: number): void {
+  const sample = requireRecord(
+    value,
+    `Readiness evidence sample ${index + 1} is malformed`,
+  );
+  requireTimestamp(sample.capturedAt, `sample ${index + 1} capturedAt`);
+  if (
+    !isFiniteNonNegativeInteger(sample.httpStatus, 599) ||
+    !isReadinessSampleOutcome(sample.outcome)
+  ) {
+    throw new Error(`Readiness evidence sample ${index + 1} is malformed`);
+  }
+  const checks = requireRecord(
+    sample.checks,
+    `Readiness evidence sample ${index + 1} checks are malformed`,
+  );
+  for (const name of [
+    "process",
+    "startup",
+    "database",
+    "dependencies",
+    "backgroundWorkers",
+  ]) {
+    if (!isHealthStatus(checks[name])) {
+      throw new Error(`Readiness evidence sample ${index + 1} checks are malformed`);
+    }
+  }
+  if (!Array.isArray(sample.workers) || sample.workers.length !== BACKGROUND_OPERATION_NAMES.length) {
+    throw new Error(`Readiness evidence sample ${index + 1} workers are malformed`);
+  }
+  const operations = new Set<string>();
+  for (const workerValue of sample.workers) {
+    const worker = requireRecord(
+      workerValue,
+      `Readiness evidence sample ${index + 1} workers are malformed`,
+    );
+    if (
+      typeof worker.operation !== "string" ||
+      !BACKGROUND_OPERATION_NAMES.includes(
+        worker.operation as (typeof BACKGROUND_OPERATION_NAMES)[number],
+      ) ||
+      operations.has(worker.operation) ||
+      (worker.status !== "ok" &&
+        worker.status !== "warning" &&
+        worker.status !== "unknown") ||
+      !isFiniteNonNegativeInteger(worker.recentFailureCount, 100) ||
+      !isFiniteNonNegativeInteger(worker.threshold, 100)
+    ) {
+      throw new Error(`Readiness evidence sample ${index + 1} workers are malformed`);
+    }
+    operations.add(worker.operation);
+    if (worker.lastFailureAt !== undefined) {
+      requireTimestamp(
+        worker.lastFailureAt,
+        `sample ${index + 1} worker timestamp`,
+      );
+    }
+  }
+  if (operations.size !== BACKGROUND_OPERATION_NAMES.length) {
+    throw new Error(`Readiness evidence sample ${index + 1} workers are malformed`);
+  }
+}
+
+/**
+ * Validate retained readiness evidence before using it as current proof.
+ *
+ * The expected deployment identity is deliberately supplied by the caller.
+ * In particular, this function never treats the verifier's checkout revision
+ * or an evidence record's own identity as authoritative.
+ */
+export function validateReadinessEvidence(
+  input: Uint8Array | unknown,
+  options: ReadinessEvidenceValidationOptions,
+): ReadinessEvidence {
+  const evidence = requireRecord(
+    parseEvidenceInput(input),
+    "Readiness evidence must be a JSON object",
+  );
+  if (evidence.schemaVersion !== READINESS_EVIDENCE_SCHEMA_VERSION ||
+      evidence.kind !== "readiness-recovery") {
+    throw new Error("Readiness evidence has an unsupported schema or kind");
+  }
+  if (!isValidDeploymentId(options.expectedDeploymentId)) {
+    throw new Error("Readiness evidence requires an expected published deployment ID");
+  }
+  if (!isValidRevision(options.expectedRevision)) {
+    throw new Error("Readiness evidence requires the expected deployed revision");
+  }
+  if (!isValidDeploymentId(evidence.deploymentId)) {
+    throw new Error("Readiness evidence deployment ID is malformed");
+  }
+  if (!isValidRevision(evidence.revision)) {
+    throw new Error("Readiness evidence revision is malformed");
+  }
+  if (evidence.deploymentId !== options.expectedDeploymentId) {
+    throw new Error(
+      "Readiness evidence deployment ID does not match the expected published deployment",
+    );
+  }
+  if (evidence.revision !== options.expectedRevision) {
+    throw new Error(
+      "Readiness evidence revision does not match the expected deployed revision",
+    );
+  }
+  if (evidence.environment !== "development" && evidence.environment !== "release") {
+    throw new Error("Readiness evidence environment is malformed");
+  }
+  const generatedAtMs = requireTimestamp(evidence.generatedAt, "generatedAt");
+  const expiresAtMs = requireTimestamp(evidence.expiresAt, "expiresAt");
+  const nowMs = (options.now ?? new Date()).getTime();
+  if (!Number.isFinite(nowMs)) {
+    throw new Error("Readiness evidence validation time is invalid");
+  }
+  if (generatedAtMs > nowMs) {
+    throw new Error("Readiness evidence generatedAt is in the future");
+  }
+  if (expiresAtMs <= nowMs) {
+    throw new Error("Readiness evidence is expired");
+  }
+  const retention = requireRecord(
+    evidence.retention,
+    "Readiness evidence retention metadata is malformed",
+  );
+  if (
+    retention.maxSamples !== READINESS_EVIDENCE_MAX_SAMPLES ||
+    retention.maxAgeMs !== READINESS_EVIDENCE_RETENTION_MS ||
+    expiresAtMs !== generatedAtMs + READINESS_EVIDENCE_RETENTION_MS
+  ) {
+    throw new Error("Readiness evidence retention metadata is malformed");
+  }
+  if (evidence.target === undefined ||
+      !isRecord(evidence.target) ||
+      evidence.target.probe !== "readyz") {
+    throw new Error("Readiness evidence target is malformed");
+  }
+  if (!Array.isArray(evidence.samples) ||
+      evidence.samples.length === 0 ||
+      evidence.samples.length > READINESS_EVIDENCE_MAX_SAMPLES) {
+    throw new Error(
+      `Readiness evidence requires 1-${READINESS_EVIDENCE_MAX_SAMPLES} samples`,
+    );
+  }
+  evidence.samples.forEach((sample, index) => validateReadinessSample(sample, index));
+  const summary = requireRecord(
+    evidence.summary,
+    "Readiness evidence summary is malformed",
+  );
+  for (const field of [
+    "normal200Samples",
+    "workerIncident503Samples",
+    "recovery200Samples",
+  ]) {
+    if (!isFiniteNonNegativeInteger(summary[field], evidence.samples.length)) {
+      throw new Error("Readiness evidence summary is malformed");
+    }
+  }
+  if (
+    !Array.isArray(summary.observedStates) ||
+    summary.observedStates.some(
+      (state) => typeof state !== "string" || state.length > 64,
+    ) ||
+    !isFinalState(summary.finalState)
+  ) {
+    throw new Error("Readiness evidence summary is malformed");
+  }
+  const incidentIndex = evidence.samples.findIndex(
+    ({ outcome }) => outcome === "worker_incident",
+  );
+  const workerIncident503Samples = evidence.samples.filter(
+    ({ outcome }) => outcome === "worker_incident",
+  ).length;
+  const recovery200Samples = incidentIndex < 0
+    ? 0
+    : evidence.samples
+      .slice(incidentIndex + 1)
+      .filter(({ outcome }) => outcome === "healthy").length;
+  const normal200Samples = evidence.samples.filter(
+    ({ outcome }) => outcome === "healthy",
+  ).length;
+  const observedStates = [...new Set(evidence.samples.map(({ outcome }, index) =>
+    stateForSample(
+      outcome,
+      incidentIndex >= 0 && index > incidentIndex && outcome === "healthy",
+    ),
+  ))];
+  const finalState =
+    workerIncident503Samples > 0
+      ? recovery200Samples > 0
+        ? "incident_recovered"
+        : "worker_incident"
+      : normal200Samples === evidence.samples.length
+        ? "normal"
+        : "degraded";
+  if (
+    summary.normal200Samples !== normal200Samples ||
+    summary.workerIncident503Samples !== workerIncident503Samples ||
+    summary.recovery200Samples !== recovery200Samples ||
+    JSON.stringify(summary.observedStates) !== JSON.stringify(observedStates) ||
+    summary.finalState !== finalState
+  ) {
+    throw new Error("Readiness evidence summary does not match its samples");
+  }
+  const verification = requireRecord(
+    evidence.verification,
+    "Readiness evidence verification is malformed",
+  );
+  if (
+    !isReadinessCaptureMode(verification.mode) ||
+    typeof verification.passed !== "boolean" ||
+    typeof verification.reason !== "string" ||
+    verification.reason.length > 256 ||
+    !verification.passed
+  ) {
+    throw new Error("Readiness evidence verification is not a passing proof");
+  }
+  return evidence as ReadinessEvidence;
 }
 
 function boundedInteger(value: unknown, fallback: number, max: number): number {

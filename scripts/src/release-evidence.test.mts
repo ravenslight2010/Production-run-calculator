@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   RELEASE_EVIDENCE_ALLOWLIST,
+  READINESS_EVIDENCE_PATH,
   RELEASE_CHECKPOINT_REPORT,
   RELEASE_CHECK_API_CONCURRENCY,
   RELEASE_CHECK_DEFAULT_CONCURRENCY,
@@ -62,6 +63,10 @@ import {
   DEFAULT_REPORT,
   parseSourceLibraryPreflightDiagnostic as parseStoredSourceLibraryPreflightDiagnostic,
 } from "./verify-source-library-reconciliation.mts";
+import {
+  buildReadinessEvidence,
+  sanitizeReadinessResponse,
+} from "./capture-readiness-recovery.mts";
 
 const sourceReportSha256 = createHash("sha256")
   .update(await readFile(new URL(`../../${DEFAULT_REPORT}`, import.meta.url)))
@@ -100,6 +105,33 @@ function sourceEvidence(overrides: Record<string, unknown> = {}) {
     ...evidence,
     evidenceId: computeSourceLibraryEvidenceId(evidence),
   };
+}
+
+function readinessEvidenceFixture() {
+  const capturedAt = new Date(Date.now() - 60_000).toISOString();
+  const sample = sanitizeReadinessResponse({
+    capturedAt,
+    httpStatus: 200,
+    payload: {
+      status: "ok",
+      checks: {
+        process: "ok",
+        startup: "ok",
+        database: "ok",
+        dependencies: "ok",
+        backgroundWorkers: "ok",
+      },
+      diagnostics: { backgroundOperations: {} },
+    },
+  });
+  return buildReadinessEvidence({
+    environment: "release",
+    deploymentId: "published-deployment-fixture",
+    revision: "e".repeat(40),
+    generatedAt: capturedAt,
+    mode: "normal",
+    samples: [sample, sample],
+  });
 }
 
 const aiDigest = "a".repeat(64);
@@ -182,9 +214,10 @@ async function fixture(
   const retainedEvaluationFiles = retainedEvaluationEvidenceInventory().map(
     (entry) => entry.evidencePath,
   );
-  const fixtureFiles = files.includes(IMPORT_CORPUS_EVALUATION_EVIDENCE)
-    ? [...new Set([...files, ...retainedEvaluationFiles])]
-    : files;
+  const filteredFiles = files.filter((file) => file !== READINESS_EVIDENCE_PATH);
+  const fixtureFiles = filteredFiles.includes(IMPORT_CORPUS_EVALUATION_EVIDENCE)
+    ? [...new Set([...filteredFiles, ...retainedEvaluationFiles])]
+    : filteredFiles;
   const retainedSourceByEvidencePath = new Map(
     retainedEvaluationEvidenceInventory().map((entry) => [
       entry.evidencePath,
@@ -1793,6 +1826,21 @@ async function run(): Promise<void> {
       }),
       "an allowlisted evidence set should pass",
     );
+    const readinessEvidence = readinessEvidenceFixture();
+    const readinessEvidencePath = join(root, READINESS_EVIDENCE_PATH);
+    await mkdir(join(readinessEvidencePath, ".."), { recursive: true });
+    await writeFile(readinessEvidencePath, `${JSON.stringify(readinessEvidence)}\n`);
+    await assert.doesNotReject(
+      verifyReleaseEvidence(root, {
+        currentRevision: "current-revision",
+        expectedMode: "standard",
+        expectedLabels: validLabels,
+        expectedReadinessDeploymentId: "published-deployment-fixture",
+        expectedDeployedRevision: "e".repeat(40),
+      }),
+      "retained readiness evidence should use explicit published identity",
+    );
+    await rm(readinessEvidencePath);
     const nonCanonicalRetainedEvaluation =
       retainedEvaluationInventory.find(
         (entry) => entry.evidencePath !== IMPORT_CORPUS_EVALUATION_EVIDENCE,

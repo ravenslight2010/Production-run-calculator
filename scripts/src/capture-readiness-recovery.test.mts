@@ -9,12 +9,14 @@ import {
   READINESS_EVIDENCE_RETENTION_MS,
   buildReadinessEvidence,
   sanitizeReadinessResponse,
+  validateReadinessEvidence,
 } from "./capture-readiness-recovery.mjs";
 
 const execFile = promisify(execFileCallback);
 const rootDir = path.resolve(new URL("../..", import.meta.url).pathname);
 const revision = "a".repeat(40);
 const generatedAt = "2026-09-18T12:00:00.000Z";
+const deploymentId = "published-deployment-1";
 
 function healthySample() {
   return sanitizeReadinessResponse({
@@ -313,5 +315,121 @@ describe("readiness evidence projection", () => {
         samples: Array.from({ length: READINESS_EVIDENCE_MAX_SAMPLES + 1 }, healthySample),
       }),
     ).toThrow(/requires 1-60 samples/);
+  });
+
+  it("accepts only an unexpired record bound to the published deployment and revision", () => {
+    const evidence = buildReadinessEvidence({
+      environment: "release",
+      deploymentId,
+      revision,
+      generatedAt,
+      mode: "normal",
+      samples: [healthySample(), healthySample()],
+    });
+
+    expect(
+      validateReadinessEvidence(evidence, {
+        expectedDeploymentId: deploymentId,
+        expectedRevision: revision,
+        now: new Date("2026-09-18T12:01:00.000Z"),
+      }),
+    ).toMatchObject({ deploymentId, revision });
+  });
+
+  it("rejects expired records and records that exceed the sample bound", () => {
+    const evidence = buildReadinessEvidence({
+      environment: "release",
+      deploymentId,
+      revision,
+      generatedAt,
+      mode: "normal",
+      samples: [healthySample(), healthySample()],
+    });
+    expect(() =>
+      validateReadinessEvidence(evidence, {
+        expectedDeploymentId: deploymentId,
+        expectedRevision: revision,
+        now: new Date(evidence.expiresAt),
+      }),
+    ).toThrow("Readiness evidence is expired");
+
+    const overBound = {
+      ...evidence,
+      samples: Array.from(
+        { length: READINESS_EVIDENCE_MAX_SAMPLES + 1 },
+        () => evidence.samples[0],
+      ),
+    };
+    expect(() =>
+      validateReadinessEvidence(overBound, {
+        expectedDeploymentId: deploymentId,
+        expectedRevision: revision,
+        now: new Date("2026-09-18T12:01:00.000Z"),
+      }),
+    ).toThrow(/requires 1-60 samples/);
+  });
+
+  it("rejects provenance mismatches without echoing evidence details", () => {
+    const evidence = buildReadinessEvidence({
+      environment: "release",
+      deploymentId,
+      revision,
+      generatedAt,
+      mode: "normal",
+      samples: [healthySample(), healthySample()],
+    });
+    expect(() =>
+      validateReadinessEvidence(evidence, {
+        expectedDeploymentId: "another-published-deployment",
+        expectedRevision: "b".repeat(40),
+        now: new Date("2026-09-18T12:01:00.000Z"),
+      }),
+    ).toThrow(/does not match the expected published deployment/);
+    expect(() =>
+      validateReadinessEvidence(evidence, {
+        expectedDeploymentId: deploymentId,
+        expectedRevision: "b".repeat(40),
+        now: new Date("2026-09-18T12:01:00.000Z"),
+      }),
+    ).toThrow(/does not match the expected deployed revision/);
+  });
+
+  it("rejects prose snapshots and incomplete probe records as current proof", () => {
+    for (const input of [
+      "The published app was healthy during a live probe.",
+      {
+        kind: "readiness-recovery",
+        deploymentId,
+        revision,
+        generatedAt,
+        expiresAt: new Date(
+          Date.parse(generatedAt) + READINESS_EVIDENCE_RETENTION_MS,
+        ).toISOString(),
+      },
+    ]) {
+      expect(() =>
+        validateReadinessEvidence(input, {
+          expectedDeploymentId: deploymentId,
+          expectedRevision: revision,
+          now: new Date("2026-09-18T12:01:00.000Z"),
+        }),
+      ).toThrow(/Readiness evidence/);
+    }
+    let failure: unknown;
+    try {
+      validateReadinessEvidence(
+        Buffer.from("a prose snapshot with recipe details"),
+        {
+          expectedDeploymentId: deploymentId,
+          expectedRevision: revision,
+          now: new Date("2026-09-18T12:01:00.000Z"),
+        },
+      );
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toMatch(/valid JSON|JSON object/);
+    expect((failure as Error).message).not.toMatch(/recipe|snapshot details/);
   });
 });
