@@ -39,6 +39,14 @@ pnpm --filter @workspace/scripts run check:release-evidence -- \
 is not the verifier checkout revision. A useful uptime brief or manually
 written observation can guide investigation, but it is not authoritative
 readiness evidence unless it is represented by the bounded JSON contract.
+
+Standard and full published-release verification require this JSON path and
+validate it against both supplied identities before a GO report is accepted.
+The verifier never infers either identity from its checkout. Development and
+disposable CI fixture tests use an explicit
+`requireReadinessEvidence: false` verifier option; that fixture contract is not
+available to the published standard/full release command.
+
 ## Deterministic local recovery proof
 
 The CLI is also covered by a local HTTP fixture that serves two normal `200`

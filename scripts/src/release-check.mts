@@ -157,6 +157,11 @@ export type ReleaseEvidenceOptions = {
   expectedSourceLibraryRevision?: string;
   expectedReadinessDeploymentId?: string;
   expectedDeployedRevision?: string;
+  /**
+   * Published standard/full verification must opt into the readiness
+   * requirement explicitly. Development and disposable fixtures use false.
+   */
+  requireReadinessEvidence?: boolean;
 };
 
 export function validateReleaseAiEvaluationEvidence(
@@ -1285,6 +1290,19 @@ const importsProductionSourceLibraryReconciliation =
 const hasProductionSourceLibraryReconciliation =
   requiresProductionSourceLibraryReconciliation ||
   importsProductionSourceLibraryReconciliation;
+export function publishedReleaseReadinessRequired(
+  mode: ReleaseMode,
+  hasProductionEvidence: boolean,
+): boolean {
+  return (
+    (mode === "standard" || mode === "full") &&
+    hasProductionEvidence
+  );
+}
+const requiresPublishedReadiness = publishedReleaseReadinessRequired(
+  releaseMode,
+  hasProductionSourceLibraryReconciliation,
+);
 const sourceLibraryPreflightEnabled =
   sourceLibraryReconciliationPreflightEnabled(
     requiresProductionSourceLibraryReconciliation,
@@ -1942,14 +1960,25 @@ export async function verifyReleaseEvidence(
   const requiresSourceLibraryEvidence = expectedGateLabels.includes(
     "source-library reconciliation verification",
   );
+  const requiresReadinessEvidence = options.requireReadinessEvidence === true;
   const requiresWebKitEvidence = expectedGateLabels.includes(
     "browser WebKit smoke",
   );
   const requiresFullBrowserEvidence = evidenceMode === "full";
+  if (
+    requiresReadinessEvidence &&
+    (!options.expectedReadinessDeploymentId ||
+      !options.expectedDeployedRevision)
+  ) {
+    throw new Error(
+      "Published release readiness verification requires the expected deployment ID and deployed revision before GO validation; pass --readiness-deployment-id and --deployed-revision.",
+    );
+  }
   const requiredEvidence = [
     REPORT_KEY_ROTATION_PREFLIGHT_EVIDENCE,
     ...retainedEvaluationEvidencePaths,
     TYPESCRIPT_7_COMPARISON_EVIDENCE,
+    ...(requiresReadinessEvidence ? [READINESS_EVIDENCE_PATH] : []),
     ...RELEASE_EVIDENCE_ALLOWLIST.filter((file) =>
       file.startsWith("clean-start/"),
     ),
@@ -2046,6 +2075,7 @@ export async function verifyReleaseEvidence(
     currentRevision: revision,
     expectedMode: options.expectedMode,
     expectedLabels: options.expectedLabels,
+    requireReadinessEvidence: requiresReadinessEvidence,
     expectedSourceLibraryEnvironment,
     expectedSourceLibraryRevision,
     expectedTypescript7TrendHistory: typescript7TrendHistory,
@@ -2657,6 +2687,7 @@ export function validateReleaseReport(
   options: {
     currentRevision: string;
     expectedMode?: ReleaseMode;
+    requireReadinessEvidence?: boolean;
     expectedLabels?: readonly string[];
     expectedSourceLibraryEnvironment?: SourceLibraryEvidenceEnvironment;
     expectedSourceLibraryRevision?: string;
@@ -2687,6 +2718,16 @@ export function validateReleaseReport(
   }
   if (!decision) {
     throw new Error("Release report is malformed: missing GO/NO-GO decision.");
+  }
+  if (
+    decision === "GO" &&
+    options.requireReadinessEvidence === true &&
+    report.match(/^Readiness evidence:\s*(\S+)\s*$/m)?.[1] !==
+      READINESS_EVIDENCE_PATH
+  ) {
+    throw new Error(
+      "Release report cannot record GO without the retained readiness evidence path.",
+    );
   }
   if (options.expectedTypescript7TrendHistory !== undefined) {
     const summaries = [
@@ -3014,6 +3055,7 @@ export function formatReleaseReport(
     sourceLibraryEnvironment?: SourceLibraryEvidenceEnvironment;
     sourceLibraryRevision?: string;
     deployedRevision?: string;
+    requireReadinessEvidence?: boolean;
     decision?: "GO" | "NO-GO";
     browserDurationRegressions?: readonly BrowserDurationRegression[];
     sourceLibraryPreflight?: SourceLibraryPreflightDiagnostic;
@@ -3152,6 +3194,11 @@ export function formatReleaseReport(
         ? metadata.sourceLibraryRevision ?? revision
         : "not applicable")
     }`,
+    `Readiness evidence: ${
+      availableEvidenceFiles.has(READINESS_EVIDENCE_PATH)
+        ? READINESS_EVIDENCE_PATH
+        : "not produced"
+    }`,
     "Commands: listed in the gate results table below",
     `Evidence paths: ${releaseEvidenceDir}/ and retained files linked below`,
     formatTypescript7TrendHistorySummary(typescript7TrendHistory),
@@ -3281,6 +3328,7 @@ async function writeReleaseReport(
     revision: string;
     sourceLibraryRevision: string;
     deployedRevision?: string;
+    requireReadinessEvidence?: boolean;
     decision: "GO" | "NO-GO";
     expectedLabels?: readonly string[];
     timing?: ReleaseTiming;
@@ -3346,6 +3394,14 @@ async function writeReleaseReport(
     );
   } catch {
     // The retained evidence verifier reports the missing comparison artifact.
+  }
+  try {
+    await access(
+      resolve(rootDir, releaseEvidenceDir, READINESS_EVIDENCE_PATH),
+    );
+    availableEvidenceFiles.add(READINESS_EVIDENCE_PATH);
+  } catch {
+    // Published readiness validation reports a missing artifact when required.
   }
   try {
     await access(
@@ -3416,6 +3472,7 @@ async function writeReleaseReport(
           (sourceLibraryEnvironment === "release"
             ? metadata.sourceLibraryRevision
             : undefined),
+        requireReadinessEvidence: metadata.requireReadinessEvidence,
         sourceLibraryPreflight: results.find(
           (result) =>
             result.label === SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL,
@@ -3606,6 +3663,28 @@ async function promoteSourceLibraryEvidence(
   });
 }
 
+async function publishedReadinessEvidenceIsCurrent(): Promise<boolean> {
+  if (!requiresPublishedReadiness) return true;
+  if (!configuredReadinessDeploymentId || !configuredDeployedRevision) {
+    return false;
+  }
+  try {
+    await access(resolve(rootDir, releaseEvidenceDir, READINESS_EVIDENCE_PATH));
+    validateReadinessEvidence(
+      await readFile(
+        resolve(rootDir, releaseEvidenceDir, READINESS_EVIDENCE_PATH),
+      ),
+      {
+        expectedDeploymentId: configuredReadinessDeploymentId,
+        expectedRevision: configuredDeployedRevision,
+      },
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function main(): Promise<void> {
   if (process.argv.includes("--help") || process.argv.includes("-h")) {
     printHelp();
@@ -3629,6 +3708,7 @@ async function main(): Promise<void> {
         expectedSourceLibraryRevision: sourceLibraryRevision,
         expectedReadinessDeploymentId: configuredReadinessDeploymentId,
         expectedDeployedRevision: configuredDeployedRevision,
+        requireReadinessEvidence: requiresPublishedReadiness,
       });
       process.exit(0);
     } catch (error) {
@@ -3664,6 +3744,15 @@ async function main(): Promise<void> {
       : revision;
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
+  if (
+    requiresPublishedReadiness &&
+    (!configuredReadinessDeploymentId || !configuredDeployedRevision)
+  ) {
+    console.error(
+      "Published standard/full release verification requires --readiness-deployment-id and --deployed-revision before GO validation.",
+    );
     process.exit(1);
   }
   const evidenceRoot = resolve(rootDir, releaseEvidenceDir);
@@ -4041,7 +4130,9 @@ async function main(): Promise<void> {
     results.length === steps.length &&
     results.every((result) => result.passed)
   ) {
-    const releaseDecision = hasProductionSourceLibraryReconciliation
+    const releaseDecision =
+      hasProductionSourceLibraryReconciliation &&
+      (await publishedReadinessEvidenceIsCurrent())
       ? "GO"
       : "NO-GO";
     try {
@@ -4055,6 +4146,7 @@ async function main(): Promise<void> {
       const reportPath = await writeReleaseReport(results, {
         revision,
         sourceLibraryRevision,
+        requireReadinessEvidence: requiresPublishedReadiness,
         decision: releaseDecision,
         expectedLabels: releaseGateLabelsForMode(releaseMode),
         timing: {
@@ -4071,6 +4163,7 @@ async function main(): Promise<void> {
         expectedSourceLibraryRevision: sourceLibraryRevision,
         expectedReadinessDeploymentId: configuredReadinessDeploymentId,
         expectedDeployedRevision: configuredDeployedRevision,
+        requireReadinessEvidence: requiresPublishedReadiness,
         allowIncompleteCheckpoint: true,
       });
       await rm(checkpointReportPath, { force: true });

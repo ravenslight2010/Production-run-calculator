@@ -36,6 +36,7 @@ import {
   formatReleaseReport,
   parseBrowserDurationRegressions,
   parseSourceLibraryPreflightDiagnostic,
+  publishedReleaseReadinessRequired,
   releaseConcurrencyLimit,
   releaseGateLabelsForMode,
   releaseStepDependencies,
@@ -376,6 +377,26 @@ async function run(): Promise<void> {
     discoverReleaseRetainedEvaluationPaths(),
     discoverRoutineRetainedEvaluationPaths(),
     "release verification and routine Node preflight must discover the same retained evaluation files",
+  );
+  assert.equal(
+    publishedReleaseReadinessRequired("standard", true),
+    true,
+    "published standard verification must require readiness evidence",
+  );
+  assert.equal(
+    publishedReleaseReadinessRequired("full", true),
+    true,
+    "published full verification must require readiness evidence",
+  );
+  assert.equal(
+    publishedReleaseReadinessRequired("typescript-7-promotion", true),
+    false,
+    "TypeScript promotion verification must retain its separate evidence contract",
+  );
+  assert.equal(
+    publishedReleaseReadinessRequired("standard", false),
+    false,
+    "disposable fixture verification must have an explicit readiness opt-out contract",
   );
   const retainedEvaluationInventory = retainedEvaluationEvidenceInventory();
   const retainedEvidenceFiles = new Set(
@@ -1204,6 +1225,17 @@ async function run(): Promise<void> {
       expectedLabels: validLabels,
     }),
   );
+  assert.throws(
+    () =>
+      validateReleaseReport(validReport, {
+        currentRevision: "current-revision",
+        expectedMode: "standard",
+        expectedLabels: validLabels,
+        requireReadinessEvidence: true,
+      }),
+    /without the retained readiness evidence path/,
+    "a GO report that omits readiness evidence must be rejected",
+  );
   const missingHistory = {
     state: "missing" as const,
     distinctRevisionCount: 1,
@@ -1823,13 +1855,54 @@ async function run(): Promise<void> {
         currentRevision: "current-revision",
         expectedMode: "standard",
         expectedLabels: validLabels,
+        requireReadinessEvidence: false,
       }),
       "an allowlisted evidence set should pass",
+    );
+    await assert.rejects(
+      verifyReleaseEvidence(root, {
+        currentRevision: "current-revision",
+        expectedMode: "standard",
+        expectedLabels: validLabels,
+        requireReadinessEvidence: true,
+      }),
+      /requires the expected deployment ID and deployed revision/,
+      "published verification must require readiness identities before checking GO",
+    );
+    await assert.rejects(
+      verifyReleaseEvidence(root, {
+        currentRevision: "current-revision",
+        expectedMode: "standard",
+        expectedLabels: validLabels,
+        expectedReadinessDeploymentId: "published-deployment-fixture",
+        expectedDeployedRevision: "e".repeat(40),
+        requireReadinessEvidence: true,
+      }),
+      /Required release evidence is missing:[\s\S]*readiness-recovery\/readiness-recovery\.json/,
+      "published verification must fail when readiness evidence is missing",
     );
     const readinessEvidence = readinessEvidenceFixture();
     const readinessEvidencePath = join(root, READINESS_EVIDENCE_PATH);
     await mkdir(join(readinessEvidencePath, ".."), { recursive: true });
     await writeFile(readinessEvidencePath, `${JSON.stringify(readinessEvidence)}\n`);
+    await writeFile(
+      join(root, "release-check-report.md"),
+      formatReleaseReport(
+        validLabels.map((label) => ({
+          label,
+          status: "PASS" as const,
+          elapsedMs: 100,
+        })),
+        "standard",
+        new Set([...retainedEvidenceFiles, READINESS_EVIDENCE_PATH]),
+        {
+          revision: "current-revision",
+          environment: "disposable release test",
+          decision: "GO",
+        },
+      ),
+      "utf8",
+    );
     await assert.doesNotReject(
       verifyReleaseEvidence(root, {
         currentRevision: "current-revision",
@@ -1837,6 +1910,7 @@ async function run(): Promise<void> {
         expectedLabels: validLabels,
         expectedReadinessDeploymentId: "published-deployment-fixture",
         expectedDeployedRevision: "e".repeat(40),
+        requireReadinessEvidence: true,
       }),
       "retained readiness evidence should use explicit published identity",
     );
