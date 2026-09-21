@@ -6981,6 +6981,16 @@ export default function Home() {
   const [scheduleEditorRuns, setScheduleEditorRuns] = useState<{id: string; brand: string; flavor: string; casesNeeded: number}[]>([]);
   const [scheduleEditorRunValues, setScheduleEditorRunValues] = useState<Record<string, FormValues>>({});
   const [scheduleEditorBreaks, setScheduleEditorBreaks] = useState<DayBreaks>(() => defaultDayBreaks());
+  const [scheduleBreaksExpanded, setScheduleBreaksExpanded] = useState(false);
+  const scheduleBreakSummary = useMemo(
+    () => scheduleEditorBreaks
+      .filter((breakSlot) => breakSlot.enabled)
+      .map((breakSlot) =>
+        `Break ${breakSlot.slot} · ${breakSlot.mode === "at-time" ? breakSlot.atTime ?? "clock time" : "after run"}`,
+      )
+      .join(" · "),
+    [scheduleEditorBreaks],
+  );
   const [scheduleAdvancedRunId, setScheduleAdvancedRunId] = useState<string | null>(null);
   const [scheduleSaving, setScheduleSaving] = useState(false);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
@@ -7051,6 +7061,7 @@ export default function Home() {
   async function openScheduleEditor(date?: string) {
     setScheduleAdvancedRunId(null);
     setScheduleCalendarOpen(false);
+    setScheduleBreaksExpanded(false);
     // TODAY is the live day — seed the editor from the in-memory day state (the
     // freshest copy this tab has, including in-flight form edits), NOT the
     // server row. Saving routes back through the live day-state path below.
@@ -18286,87 +18297,109 @@ export default function Home() {
                     {/* Fixed standard breaks. Operators can see the saved plan,
                         while managers and authorized supervisors can edit it. */}
                     <div className="rounded-lg border border-border/50 bg-muted/20 p-3 space-y-3" data-testid="schedule-breaks">
-                      <div>
-                        <label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Standard breaks</label>
-                        <p className="text-[11px] text-muted-foreground mt-1">Each planned break is fixed at 30 minutes. A clock-time break never pauses production automatically.</p>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Standard breaks</label>
+                          <p className="text-[11px] text-muted-foreground mt-1">Each planned break is fixed at 30 minutes. A clock-time break never pauses production automatically.</p>
+                          <p className="text-[11px] text-primary/90 mt-1" data-testid="schedule-break-summary">
+                            {scheduleBreakSummary || "No breaks configured yet."}
+                          </p>
+                        </div>
+                        {isSupervisor && (
+                          <button
+                            type="button"
+                            aria-expanded={scheduleBreaksExpanded}
+                            aria-controls="schedule-break-fields"
+                            data-testid="schedule-break-toggle"
+                            onClick={() => setScheduleBreaksExpanded(prev => !prev)}
+                            className="shrink-0 rounded-md border border-primary/50 px-2.5 py-1.5 text-xs font-semibold text-primary hover:bg-primary/10 transition-colors sm:hidden"
+                          >
+                            {scheduleBreaksExpanded ? "Hide breaks" : "Add breaks"}
+                          </button>
+                        )}
                       </div>
-                      {scheduleEditorBreaks.map((breakSlot, index) => (
-                        <div key={breakSlot.slot} className="grid grid-cols-[auto_1fr] gap-2 items-center">
-                          <span className="text-xs font-semibold text-muted-foreground">Break {breakSlot.slot}</span>
-                          <div className="grid grid-cols-2 gap-2">
-                            <select
-                              aria-label={`Break ${breakSlot.slot} placement`}
-                              value={!breakSlot.enabled ? "off" : breakSlot.mode}
-                              disabled={!isSupervisor}
-                              onChange={e => setScheduleEditorBreaks(prev => prev.map((item, i) => i === index
-                                ? { ...item, enabled: e.target.value !== "off", mode: e.target.value === "at-time" ? "at-time" : "after-run" }
-                                : item) as DayBreaks)}
-                              className="h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-xs outline-none disabled:opacity-60"
-                            >
-                              <option value="off">Not scheduled</option>
-                              <option value="after-run">After a run</option>
-                              <option value="at-time">At a clock time</option>
-                            </select>
-                            {breakSlot.enabled && breakSlot.mode === "after-run" ? (
+                      <div
+                        id="schedule-break-fields"
+                        className={`${scheduleBreaksExpanded ? "block" : "hidden"} sm:block space-y-3`}
+                      >
+                        {scheduleEditorBreaks.map((breakSlot, index) => (
+                          <div key={breakSlot.slot} className="grid grid-cols-[auto_1fr] gap-2 items-center">
+                            <span className="text-xs font-semibold text-muted-foreground">Break {breakSlot.slot}</span>
+                            <div className="grid grid-cols-2 gap-2">
                               <select
-                                aria-label={`Break ${breakSlot.slot} run`}
-                                value={breakSlot.runId ?? ""}
+                                aria-label={`Break ${breakSlot.slot} placement`}
+                                value={!breakSlot.enabled ? "off" : breakSlot.mode}
                                 disabled={!isSupervisor}
-                                onChange={e => setScheduleEditorBreaks(prev => prev.map((item, i) => i === index ? { ...item, runId: e.target.value || undefined } : item) as DayBreaks)}
+                                onChange={e => setScheduleEditorBreaks(prev => prev.map((item, i) => i === index
+                                  ? { ...item, enabled: e.target.value !== "off", mode: e.target.value === "at-time" ? "at-time" : "after-run" }
+                                  : item) as DayBreaks)}
                                 className="h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-xs outline-none disabled:opacity-60"
                               >
-                                <option value="">Select run…</option>
-                                {scheduleEditorRuns.map((run, runIndex) => <option key={run.id} value={run.id}>Run {runIndex + 1} — {run.brand || "Unnamed"}</option>)}
+                                <option value="off">Not scheduled</option>
+                                <option value="after-run">After a run</option>
+                                <option value="at-time">At a clock time</option>
                               </select>
-                            ) : (
-                              <input
-                                aria-label={`Break ${breakSlot.slot} time`}
-                                type="time"
-                                value={breakSlot.atTime ?? ""}
-                                disabled={!isSupervisor || !breakSlot.enabled}
-                                onChange={e => setScheduleEditorBreaks(prev => prev.map((item, i) => i === index ? { ...item, atTime: e.target.value || undefined } : item) as DayBreaks)}
-                                className="h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-xs outline-none disabled:opacity-60"
-                              />
+                              {breakSlot.enabled && breakSlot.mode === "after-run" ? (
+                                <select
+                                  aria-label={`Break ${breakSlot.slot} run`}
+                                  value={breakSlot.runId ?? ""}
+                                  disabled={!isSupervisor}
+                                  onChange={e => setScheduleEditorBreaks(prev => prev.map((item, i) => i === index ? { ...item, runId: e.target.value || undefined } : item) as DayBreaks)}
+                                  className="h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-xs outline-none disabled:opacity-60"
+                                >
+                                  <option value="">Select run…</option>
+                                  {scheduleEditorRuns.map((run, runIndex) => <option key={run.id} value={run.id}>Run {runIndex + 1} — {run.brand || "Unnamed"}</option>)}
+                                </select>
+                              ) : (
+                                <input
+                                  aria-label={`Break ${breakSlot.slot} time`}
+                                  type="time"
+                                  value={breakSlot.atTime ?? ""}
+                                  disabled={!isSupervisor || !breakSlot.enabled}
+                                  onChange={e => setScheduleEditorBreaks(prev => prev.map((item, i) => i === index ? { ...item, atTime: e.target.value || undefined } : item) as DayBreaks)}
+                                  className="h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-xs outline-none disabled:opacity-60"
+                                />
+                              )}
+                            </div>
+                            {breakSlot.enabled && breakSlot.mode === "after-run" && !breakSlot.runId && (
+                              <p className="col-start-2 text-[11px] text-amber-400">Choose a run so this break is not left unassigned.</p>
+                            )}
+                            {breakSlot.enabled && breakSlot.mode === "after-run" && breakSlot.runId
+                              && !scheduleEditorRuns.some(run => run.id === breakSlot.runId) && (
+                              <p className="col-start-2 text-[11px] text-amber-400">The selected run was deleted or is no longer assigned.</p>
+                            )}
+                            {breakSlot.enabled && breakSlot.mode === "at-time" && !isValidLocalTime(breakSlot.atTime) && (
+                              <p className="col-start-2 text-[11px] text-amber-400">Enter a valid local time.</p>
                             )}
                           </div>
-                          {breakSlot.enabled && breakSlot.mode === "after-run" && !breakSlot.runId && (
-                            <p className="col-start-2 text-[11px] text-amber-400">Choose a run so this break is not left unassigned.</p>
-                          )}
-                          {breakSlot.enabled && breakSlot.mode === "after-run" && breakSlot.runId
-                            && !scheduleEditorRuns.some(run => run.id === breakSlot.runId) && (
-                            <p className="col-start-2 text-[11px] text-amber-400">The selected run was deleted or is no longer assigned.</p>
-                          )}
-                          {breakSlot.enabled && breakSlot.mode === "at-time" && !isValidLocalTime(breakSlot.atTime) && (
-                            <p className="col-start-2 text-[11px] text-amber-400">Enter a valid local time.</p>
-                          )}
-                        </div>
-                      ))}
-                      {(() => {
-                        const preview = calculateDayTimeline({
-                          date: scheduleEditorDate || todayStr(),
-                          productionStartTime,
-                          runs: scheduleEditorRuns.map(run => ({
-                            run: { id: run.id, brand: run.brand, flavor: run.flavor },
-                            durationSec: estimatedRunDurationSec(scheduleEditorRunValues[run.id]),
-                          })),
-                          breaks: scheduleEditorBreaks,
-                          nowMs: Date.now(),
-                        });
-                        return (
-                          <div className="pt-2 border-t border-border/30 text-[11px] text-muted-foreground" data-testid="schedule-break-preview">
-                            <span className="font-semibold">Preview:</span>{" "}
-                            {preview.breaks.filter(item => item.break.enabled).map(item =>
-                              item.status === "unassigned"
-                                ? `Break ${item.slot} unassigned`
-                                : item.startMs ? `Break ${item.slot} ${new Date(item.startMs).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
-                                : `Break ${item.slot} pending`,
-                            ).join(" · ") || "No breaks scheduled"}
-                            {preview.projectedFinishMs && (
-                              <span className="ml-2">· day finish {new Date(preview.projectedFinishMs).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
-                            )}
-                          </div>
-                        );
-                      })()}
+                        ))}
+                        {(() => {
+                          const preview = calculateDayTimeline({
+                            date: scheduleEditorDate || todayStr(),
+                            productionStartTime,
+                            runs: scheduleEditorRuns.map(run => ({
+                              run: { id: run.id, brand: run.brand, flavor: run.flavor },
+                              durationSec: estimatedRunDurationSec(scheduleEditorRunValues[run.id]),
+                            })),
+                            breaks: scheduleEditorBreaks,
+                            nowMs: Date.now(),
+                          });
+                          return (
+                            <div className="pt-2 border-t border-border/30 text-[11px] text-muted-foreground" data-testid="schedule-break-preview">
+                              <span className="font-semibold">Preview:</span>{" "}
+                              {preview.breaks.filter(item => item.break.enabled).map(item =>
+                                item.status === "unassigned"
+                                  ? `Break ${item.slot} unassigned`
+                                  : item.startMs ? `Break ${item.slot} ${new Date(item.startMs).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
+                                  : `Break ${item.slot} pending`,
+                              ).join(" · ") || "No breaks scheduled"}
+                              {preview.projectedFinishMs && (
+                                <span className="ml-2">· day finish {new Date(preview.projectedFinishMs).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </div>
                     </div>
                     {/* Runs */}
                     <div>
