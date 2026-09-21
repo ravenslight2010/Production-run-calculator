@@ -34,6 +34,7 @@ vi.mock("../../../useRole", () => ({
 vi.mock("../../../hooks/useNotifications");
 
 const RUN_ID = "station-startup-run";
+const SWITCHED_RUN_ID = "station-switched-run";
 const RUNNING_RUN: RunMeta = {
   id: RUN_ID,
   brand: "Startup Brand",
@@ -72,15 +73,20 @@ const STATION_VALUES: FormValues = {
 
 function StationProviders({
   status,
+  runId = RUN_ID,
   values = STATION_VALUES,
   children,
 }: {
   status: "pending" | "running";
+  runId?: string;
   values?: FormValues;
   children: ReactNode;
 }) {
   const form = useForm<FormValues>({ defaultValues: values });
-  const currentRun = status === "running" ? RUNNING_RUN : PENDING_RUN;
+  const currentRun = useMemo(
+    () => ({ ...(status === "running" ? RUNNING_RUN : PENDING_RUN), id: runId }),
+    [runId, status],
+  );
   const dayState = useMemo<DayState>(
     () => ({ runs: [currentRun], currentIndex: 0 }),
     [currentRun],
@@ -104,7 +110,7 @@ function StationProviders({
     autoSuppressUntilRef,
     confirmRunSurplus: vi.fn().mockResolvedValue(undefined),
     currentRun,
-    currentRunId: RUN_ID,
+    currentRunId: runId,
     dayState,
     dayStateRef,
     doughSubTab: "dough",
@@ -140,7 +146,7 @@ function StationProviders({
             ve={values}
             runStatus={status}
             currentRun={currentRun}
-            currentRunId={RUN_ID}
+            currentRunId={runId}
             form={form}
             dayState={dayState}
             doughSubTab="dough"
@@ -313,6 +319,25 @@ describe("live station startup", () => {
         releaseManualSectionLock(RUN_ID, slot, "peer-device");
       });
 
+      expect(controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(false);
+    },
+  );
+
+  it.each(FRONTLINE_APPLICATOR_LOCK_CASES.filter(({ slot }) => slot !== "app1"))(
+    "keeps $slot Frontline correction controls usable after switching away from the peer-locked run",
+    ({ slot, label }) => {
+      claimManualSectionLock(RUN_ID, slot, "peer-device", 30_000, true);
+      render(
+        <StationProviders
+          status="running"
+          runId={SWITCHED_RUN_ID}
+          values={FRONTLINE_APPLICATOR_VALUES}
+        >
+          <LiveFrontlineTabContent />
+        </StationProviders>,
+      );
+
+      const controls = within(screen.getByText(label).parentElement!).getAllByRole("button", { name: /consumed batches correction/ });
       expect(controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(false);
     },
   );
