@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -47,6 +47,39 @@ function renderAuditLogCard() {
 }
 
 describe("AuditLogCard PDF export", () => {
+  it("uses newly applied date and row filters for the list and PDF", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(auditResponse())
+      .mockResolvedValueOnce(auditResponse());
+    vi.stubGlobal("fetch", fetchMock);
+    const pdf = new Blob(["%PDF-1.4"], { type: "application/pdf" });
+    exportAuditLogsPdf.mockResolvedValueOnce(pdf);
+
+    renderAuditLogCard();
+    await screen.findByText("role_changed");
+    const dateInputs = document.querySelectorAll<HTMLInputElement>('input[type="date"]');
+    const limitInput = document.querySelector<HTMLInputElement>('input[type="number"]');
+    expect(dateInputs).toHaveLength(2);
+    expect(limitInput).toBeTruthy();
+    fireEvent.change(dateInputs[0] as HTMLInputElement, { target: { value: "2026-01-01" } });
+    fireEvent.change(dateInputs[1] as HTMLInputElement, { target: { value: "2026-01-02" } });
+    fireEvent.change(limitInput as HTMLInputElement, { target: { value: "7" } });
+    await userEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const listUrl = new URL(fetchMock.mock.calls[1]?.[0] as string, "http://localhost");
+    expect(listUrl.searchParams.get("startDate")).toBe("2026-01-01");
+    expect(listUrl.searchParams.get("endDate")).toBe("2026-01-02T23:59:59");
+    expect(listUrl.searchParams.get("limit")).toBe("7");
+
+    await userEvent.click(screen.getByRole("button", { name: "PDF" }));
+    await waitFor(() => expect(exportAuditLogsPdf).toHaveBeenCalledWith({
+      startDate: "2026-01-01T00:00:00.000Z",
+      endDate: "2026-01-02T23:59:59.999Z",
+      limit: 7,
+    }));
+  });
+
   it("downloads a PDF using the committed date range and row limit", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => auditResponse()));
     const createObjectURL = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob: audit");
