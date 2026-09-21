@@ -3924,8 +3924,8 @@ describe("/sync/events — date-scoped broadcasts", () => {
       syncVersion: 1,
       baseSnapshotId: seedBody.snapshotId,
       snapshotId: writeBody.snapshotId,
-      resultingSnapshotId: writeBody.snapshotId,
     });
+    expect(received.frame).not.toHaveProperty("resultingSnapshotId");
     expect(Object.keys(received.frame.data.runValues)).toEqual([changedRunId]);
     expect(received.frame.data.runValues[changedRunId].casesNeeded).toBe(999);
     const equivalentComplete: Record<string, any> = {

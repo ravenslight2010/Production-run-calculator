@@ -104,6 +104,7 @@ import { appendAutomaticApplicatorEvidence } from "./applicatorBatchEvidence";
 import {
   MANUAL_SECTION_FIELDS,
   isManualSection,
+  isSyncRecord,
   type ManualSection,
 } from "@workspace/sync-contract";
 export { dateInTimeZone, facilityTimeZone } from "../lib/facilityTime";
@@ -568,6 +569,9 @@ function broadcast(
         resultingSnapshotId: deltaResultingSnapshotId,
         ...deltaData
       } = delta ?? {};
+      const partialLiveState = delta
+        ? compactPeerLiveState(liveState, deltaData)
+        : liveState;
       const frame = delta && syncWireBytes(delta) < syncWireBytes(complete) * 0.8
         ? {
             data: deltaData,
@@ -578,9 +582,8 @@ function broadcast(
             syncVersion: deltaSyncVersion,
             snapshotId: deltaResultingSnapshotId,
             baseSnapshotId: deltaBaseSnapshotId,
-            resultingSnapshotId: deltaResultingSnapshotId,
             canonicalRevision: meta.canonicalRevision ?? liveState.calculationRevision,
-            ...liveState,
+            ...partialLiveState,
           }
         : complete;
       const frameText = `data: ${JSON.stringify(frame)}\n\n`;
@@ -611,6 +614,28 @@ function broadcast(
       }
     }
   }
+}
+
+function compactPeerLiveState(
+  liveState: ReturnType<typeof computeServerLiveState>,
+  deltaData: Record<string, unknown>,
+) {
+  // These maps are derived from runValues. Sending every run on each peer
+  // update erased most of the savings from the canonical sparse delta.
+  // Pepperoni types are a shared input, so that uncommon change still needs
+  // complete derived maps.
+  if (Object.hasOwn(deltaData, "pepTypes")) return liveState;
+  const changedValues = deltaData.runValues;
+  if (!isSyncRecord(changedValues)) {
+    return { ...liveState, summaryStats: {}, runLines: {} };
+  }
+  const summaryStats: Record<string, SummaryStats | null> = {};
+  const runLines: Record<string, Array<{ itemKey: string; qty: number }> | null> = {};
+  for (const runId of Object.keys(changedValues)) {
+    summaryStats[runId] = liveState.summaryStats[runId] ?? null;
+    runLines[runId] = liveState.runLines[runId] ?? null;
+  }
+  return { ...liveState, summaryStats, runLines };
 }
 
 // Master data is facility-wide rather than date-scoped. Reuse the authenticated

@@ -316,6 +316,7 @@ import {
   isCanonicalRecoverySyncPayload,
   isUnchangedSyncResponse,
   isValidSyncSnapshotId,
+  mergeSparseServerRunMap,
   persistedSyncPayload,
   reconstructPartialSyncPayload,
   syncPayloadMatchesSnapshot,
@@ -9059,10 +9060,14 @@ export default function Home() {
         }
         // Adopt server-computed summary stats when available (offline fallback: compute locally)
         if (msg.summaryStats && typeof msg.summaryStats === "object") {
-          serverSummaryStatsRef.current = msg.summaryStats;
+          serverSummaryStatsRef.current = msg.completeness === "partial"
+            ? mergeSparseServerRunMap(serverSummaryStatsRef.current, msg.summaryStats)
+            : msg.summaryStats;
         }
         if (msg.runLines && typeof msg.runLines === "object") {
-          serverRunLinesRef.current = msg.runLines;
+          serverRunLinesRef.current = msg.completeness === "partial"
+            ? mergeSparseServerRunMap(serverRunLinesRef.current, msg.runLines)
+            : msg.runLines;
         }
         if (msg.initial) {
           // An initial frame is also the reconnect baseline: refresh every

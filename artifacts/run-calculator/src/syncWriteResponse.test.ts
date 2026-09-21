@@ -4,6 +4,7 @@ import {
   consumeSyncWriteResponse,
   isCanonicalRecoverySyncPayload,
   isUnchangedSyncResponse,
+  mergeSparseServerRunMap,
   persistedSyncPayload,
   readCurrentRecoveryJson,
   reconstructPartialSyncPayload,
@@ -242,7 +243,6 @@ describe("consumeSyncWriteResponse", () => {
       completeness: "partial",
       baseSnapshotId: baseId,
       snapshotId: targetId,
-      resultingSnapshotId: targetId,
       data: { runValues: { r1: { casesNeeded: 12 } } },
     })).resolves.toEqual(target);
     await expect(reconstructPartialSyncPayload(base as any, "b".repeat(64), {
@@ -253,6 +253,16 @@ describe("consumeSyncWriteResponse", () => {
       resultingSnapshotId: targetId,
       data: { runValues: { r1: { casesNeeded: 12 } } },
     })).resolves.toBeNull();
+  });
+
+  it("merges sparse server run maps and applies removal tombstones", () => {
+    expect(mergeSparseServerRunMap(
+      { unchanged: { total: 1 }, changed: { total: 2 }, removed: { total: 3 } },
+      { changed: { total: 4 }, removed: null },
+    )).toEqual({
+      unchanged: { total: 1 },
+      changed: { total: 4 },
+    });
   });
 
   it("applies sparse peer map tombstones without dropping omitted values", async () => {

@@ -128,8 +128,11 @@ export async function reconstructPartialSyncPayload(
   if (!isValidSyncSnapshotId(baseSnapshotId) || envelope.baseSnapshotId !== baseSnapshotId) return null;
   if (!isValidSyncSnapshotId(envelope.snapshotId) || !isSyncRecord(envelope.data)) return null;
   if (
-    !isValidSyncSnapshotId(envelope.resultingSnapshotId)
-    || envelope.resultingSnapshotId !== envelope.snapshotId
+    envelope.resultingSnapshotId !== undefined
+    && (
+      !isValidSyncSnapshotId(envelope.resultingSnapshotId)
+      || envelope.resultingSnapshotId !== envelope.snapshotId
+    )
   ) return null;
   if (!await syncPayloadMatchesSnapshot(base, baseSnapshotId)) return null;
   const merged = applySyncDeltaData(
@@ -145,6 +148,18 @@ export async function reconstructPartialSyncPayload(
   return await syncPayloadMatchesSnapshot(merged as SyncPayload, envelope.snapshotId)
     ? merged as SyncPayload
     : null;
+}
+
+export function mergeSparseServerRunMap(
+  current: Record<string, unknown>,
+  sparse: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged = { ...current };
+  for (const [runId, value] of Object.entries(sparse)) {
+    if (value === null) delete merged[runId];
+    else merged[runId] = value;
+  }
+  return merged;
 }
 
 export async function readCurrentRecoveryJson(
