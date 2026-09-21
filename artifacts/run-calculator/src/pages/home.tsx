@@ -7,6 +7,7 @@ import {
   useHomeFormLifecycle,
 } from "../hooks/useHomeFormLifecycle";
 import { useRunLifecycleManager } from "../hooks/useRunLifecycleManager";
+import { useScreenWakeLock } from "../hooks/useScreenWakeLock";
 import {
   coordinateForegroundAdoption,
   createForegroundSyncTodayRequest,
@@ -14377,6 +14378,8 @@ export default function Home() {
 
 
   // ── Idle screen-saver: auto-activate floor mode after 3 min of no activity ──
+  useScreenWakeLock(showFloorMode);
+
   useEffect(() => {
     if (!floorModeEnabled) return; // Floor Mode disabled — never auto-activate
     const IDLE_MS = 3 * 60 * 1000;
