@@ -4666,7 +4666,7 @@ paths:
               $ref: "#/components/schemas/SyncWriteRequest"
       responses:
         "200":
-          description: Canonical merge, unchanged acknowledgement, or stale reset rejection
+          description: Canonical merge, authoritative stale-base fallback, unchanged acknowledgement, or stale reset rejection
           content:
             application/json:
               schema:
@@ -4678,6 +4678,9 @@ paths:
                   snapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
                   stale: { type: boolean }
                   epoch: { type: integer }
+                  partialFallback:
+                    type: boolean
+                    description: The write was not applied because its snapshot dependency was missing, malformed, or stale; data is authoritative and must be adopted before a bounded replay.
                   canonicalRevision: { type: integer, minimum: 0 }
                   serverTime: { type: integer, minimum: 0 }
                   operationalProjection:
@@ -5383,7 +5386,15 @@ components:
       properties:
         senderId: { type: string }
         snapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
-        payload: { $ref: "#/components/schemas/SyncPayload" }
+        payload:
+          allOf:
+            - $ref: "#/components/schemas/SyncPayload"
+            - type: object
+              description: Protocol-marked complete and partial writes must carry the exact baseSnapshotId most recently adopted from the server. Legacy payloads without completeness remain compatibility writes.
+              properties:
+                syncVersion: { type: integer, enum: [1] }
+                completeness: { type: string, enum: [complete, partial] }
+                baseSnapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
 
     ProductionRun:
       type: object

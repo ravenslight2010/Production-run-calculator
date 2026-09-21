@@ -620,6 +620,7 @@ export * from './syncRecoveryPayload';
 export * from './syncSnapshotParameter';
 export * from './syncUnchangedResponse';
 export * from './syncWriteRequest';
+export * from './syncWriteRequestPayload';
 export * from './transferInput';
 export * from './unreviewedIncidentCount';
 export * from './updateInventoryItemInput';

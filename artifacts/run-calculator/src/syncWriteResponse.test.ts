@@ -8,6 +8,7 @@ import {
   readCurrentRecoveryJson,
   reconstructPartialSyncPayload,
   syncWriteFieldCheck,
+  shouldReplaySyncWrite,
   syncPayloadMatchesSnapshot,
   syncPayloadSnapshotId,
 } from "./syncWriteResponse";
@@ -33,6 +34,13 @@ describe("consumeSyncWriteResponse", () => {
 
   it("does not classify non-terminal diagnostics as a sync acknowledgment", () => {
     expect(syncWriteFieldCheck({ ok: false, status: 503 })).toBeUndefined();
+  });
+
+  it("replays stale-base fallbacks after canonical adoption but not ordinary acknowledgements", () => {
+    expect(shouldReplaySyncWrite({ partialFallback: true, data: { runValues: {} } })).toBe(true);
+    expect(shouldReplaySyncWrite({ partialFallback: true })).toBe(true);
+    expect(shouldReplaySyncWrite({ data: { runValues: {} } })).toBe(false);
+    expect(shouldReplaySyncWrite(null)).toBe(false);
   });
 
   it("immediately self-applies the server canonical payload on a successful write", async () => {

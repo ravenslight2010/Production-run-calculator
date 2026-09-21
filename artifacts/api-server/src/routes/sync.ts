@@ -1248,22 +1248,28 @@ async function upsertProtected(
         }))) as Record<string, any>;
         canonicalizePepNames(m);
         applyResetBoundary(m, existing?.data, date === clientTodayDate);
-        if (existing) {
+        const changed = currentSnapshotId !== syncSnapshotId(m);
+        const canonicalRevision = (existing?.canonicalRevision ?? 0) + (changed ? 1 : 0);
+        if (existing && changed) {
           await tx
             .update(dailySyncTable)
-            .set({ data: m as any, updatedAt: new Date() })
+            .set({ data: m as any, canonicalRevision, updatedAt: new Date() })
             .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)));
-        } else {
+        } else if (!existing) {
           await tx
             .insert(dailySyncTable)
-            .values({ date, scope, data: m as any, updatedAt: new Date() });
+            .values({ date, scope, data: m as any, canonicalRevision, updatedAt: new Date() });
         }
         return {
           data: m,
+          // An accepted merge may intentionally preserve the canonical
+          // document (for example, the blank-over-populated guard). Keep the
+          // accepted signal true so conflict evidence and peer convergence
+          // behavior remain intact; canonicalRevision advances only on change.
           wrote: true,
           partialFallback: false,
           retries: attempt,
-          canonicalRevision: existing?.canonicalRevision ?? 0,
+          canonicalRevision,
           serverTime,
         };
         });

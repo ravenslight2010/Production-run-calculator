@@ -750,7 +750,7 @@ describe("POST /sync/operational-intents — atomic run finalization", () => {
     expect(firstBody.outcome).toBe("accepted");
     expect(firstBody.duplicate).toBe(false);
     expect(firstBody.cursor).toBeTypeOf("number");
-    expect(firstBody.canonicalRevision).toBe(1);
+    expect(firstBody.canonicalRevision).toBe(2);
     expect(firstBody.serverTime).toBeTypeOf("number");
     expect(firstBody.data.dayState.runs.find((r: any) => r.id === RUN).endedAt).toBeTypeOf("number");
     expect(firstBody.data.dayState.runs.find((r: any) => r.id === RUN).pausedAt).toBeUndefined();
@@ -774,7 +774,7 @@ describe("POST /sync/operational-intents — atomic run finalization", () => {
       actorId: USER,
       deviceId: "end-client",
       baseRevision: 0,
-      canonicalRevision: 1,
+      canonicalRevision: 2,
     });
     expect(receipt.serverReceivedAt.getTime()).toBe(firstBody.serverTime);
     expect((completion.snapshot as any).dayState.runs.find((r: any) => r.id === RUN).endedAt)
@@ -1283,7 +1283,7 @@ describe("POST /sync/auto-track/claim", () => {
     }>;
     expect(bodies.map((body) => body.outcome).sort()).toEqual(["accepted", "stale"]);
     expect(bodies.every((body) => body.values.traysOnLine === 9)).toBe(true);
-    expect(new Set(bodies.map((body) => body.canonicalRevision))).toEqual(new Set([1, 2]));
+    expect(new Set(bodies.map((body) => body.canonicalRevision))).toEqual(new Set([2, 3]));
     expect(bodies.every((body) => typeof body.serverTime === "number")).toBe(true);
     const receipts = await db.select().from(operationalIntentLedgerTable);
     expect(receipts).toHaveLength(2);
@@ -2025,6 +2025,89 @@ describe("/sync partial payload contract", () => {
     expect(await res.json()).toMatchObject({ data: null, partialFallback: true });
     const read = await fetch(`${baseUrl}/api/sync/2030-08-25`, { headers: authHeaders() });
     expect(await read.json()).toBeNull();
+  });
+});
+
+describe("/sync/today — complete-write causal fence", () => {
+  const DATE = "2030-04-01";
+
+  function put(payload: Record<string, unknown>, senderId: string) {
+    return fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId, payload }),
+    });
+  }
+
+  function complete(
+    baseSnapshotId: string,
+    casesNeeded: number,
+    stamp: number,
+  ): Record<string, unknown> {
+    return {
+      syncVersion: 1,
+      completeness: "complete",
+      baseSnapshotId,
+      dayState: {
+        date: DATE,
+        runs: [{ id: "complete-fence-run", brand: "Acme", flavor: "Pep" }],
+      },
+      runValues: { "complete-fence-run": { casesNeeded } },
+      runValuesUpdatedAt: { "complete-fence-run": stamp },
+    };
+  }
+
+  it("advances revision for accepted changes and not for idempotent repeats", async () => {
+    const first = await put(complete(emptyCompleteSnapshotId(DATE), 12, 1), "first");
+    expect(first.status).toBe(200);
+    const firstBody = await first.json() as {
+      canonicalRevision: number;
+      snapshotId: string;
+    };
+    expect(firstBody.canonicalRevision).toBe(1);
+
+    const repeat = await put(complete(firstBody.snapshotId, 12, 1), "repeat");
+    expect(repeat.status).toBe(200);
+    const repeatBody = await repeat.json() as { canonicalRevision: number };
+    expect(repeatBody.canonicalRevision).toBe(1);
+  });
+
+  it("returns authoritative state when a future-stamped complete write has a stale base", async () => {
+    const first = await put(complete(emptyCompleteSnapshotId(DATE), 12, 1), "first");
+    const firstBody = await first.json() as { snapshotId: string };
+    const current = await put(complete(firstBody.snapshotId, 24, 2), "current");
+    const currentBody = await current.json() as {
+      canonicalRevision: number;
+      data: { runValues: Record<string, { casesNeeded: number }> };
+    };
+
+    const stale = await put(complete(firstBody.snapshotId, 999, Date.now() + 86_400_000), "stale");
+    expect(stale.status).toBe(200);
+    const staleBody = await stale.json() as {
+      partialFallback?: boolean;
+      canonicalRevision: number;
+      data: { runValues: Record<string, { casesNeeded: number }> };
+    };
+    expect(staleBody.partialFallback).toBe(true);
+    expect(staleBody.canonicalRevision).toBe(currentBody.canonicalRevision);
+    expect(staleBody.data.runValues["complete-fence-run"].casesNeeded).toBe(24);
+  });
+
+  it("serializes concurrent complete writes from the same base with one winner", async () => {
+    const first = await put(complete(emptyCompleteSnapshotId(DATE), 12, 1), "first");
+    const firstBody = await first.json() as { snapshotId: string };
+    const [a, b] = await Promise.all([
+      put(complete(firstBody.snapshotId, 41, 2), "race-a"),
+      put(complete(firstBody.snapshotId, 42, 3), "race-b"),
+    ]);
+    const bodies = await Promise.all([a.json(), b.json()]) as Array<{
+      partialFallback?: boolean;
+      canonicalRevision: number;
+      data: { runValues: Record<string, { casesNeeded: number }> };
+    }>;
+    expect(bodies.filter((body) => body.partialFallback === true)).toHaveLength(1);
+    expect(new Set(bodies.map((body) => body.canonicalRevision))).toEqual(new Set([2]));
+    expect(new Set(bodies.map((body) => body.data.runValues["complete-fence-run"].casesNeeded)).size).toBe(1);
   });
 });
 
@@ -3559,7 +3642,7 @@ describe("/sync/events — date-scoped broadcasts", () => {
     expect(initial.operationalProjection).toMatchObject({
       version: 1,
       runId: "scheduled-run",
-      calculationRevision: 0,
+      calculationRevision: 1,
       facts: { runStatus: "running", pressDone: false },
     });
     expect(initial.operationalProjection?.serverTimeMs).toBe(initial.serverTime);

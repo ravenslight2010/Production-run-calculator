@@ -6326,6 +6326,7 @@ export const PutSyncTodayQueryParams = zod.object({
 })
 
 export const putSyncTodayBodySnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
+export const putSyncTodayBodyPayloadTwoBaseSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
 
 
 export const PutSyncTodayBody = zod.object({
@@ -6334,7 +6335,11 @@ export const PutSyncTodayBody = zod.object({
   "payload": zod.object({
   "dayState": zod.record(zod.string(), zod.unknown()),
   "runValues": zod.record(zod.string(), zod.unknown())
-}).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.')
+}).describe('Existing canonical day-state payload; additional fields are preserved for forward compatibility.').and(zod.object({
+  "syncVersion": zod.literal(1).optional(),
+  "completeness": zod.enum(['complete', 'partial']).optional(),
+  "baseSnapshotId": zod.string().regex(putSyncTodayBodyPayloadTwoBaseSnapshotIdRegExp).optional()
+}).describe('Protocol-marked complete and partial writes must carry the exact baseSnapshotId most recently adopted from the server. Legacy payloads without completeness remain compatibility writes.'))
 })
 
 export const putSyncTodayResponseSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
@@ -6356,6 +6361,7 @@ export const PutSyncTodayResponse = zod.object({
   "snapshotId": zod.string().regex(putSyncTodayResponseSnapshotIdRegExp).optional(),
   "stale": zod.boolean().optional(),
   "epoch": zod.int().optional(),
+  "partialFallback": zod.boolean().optional().describe('The write was not applied because its snapshot dependency was missing, malformed, or stale; data is authoritative and must be adopted before a bounded replay.'),
   "canonicalRevision": zod.int().min(putSyncTodayResponseCanonicalRevisionMin).optional(),
   "serverTime": zod.int().min(putSyncTodayResponseServerTimeMin).optional(),
   "operationalProjection": zod.union([zod.object({

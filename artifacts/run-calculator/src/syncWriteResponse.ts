@@ -198,3 +198,10 @@ export function isUnchangedSyncResponse(body: SyncWriteResponseBody<unknown> | n
     && body.data === undefined
     && isValidSyncSnapshotId(body.snapshotId);
 }
+
+/** A stale-base fallback is authoritative recovery data, not an acknowledgement of the attempted write. */
+export function shouldReplaySyncWrite(
+  body: SyncWriteResponseBody<unknown> | null | undefined,
+): boolean {
+  return body?.partialFallback === true;
+}

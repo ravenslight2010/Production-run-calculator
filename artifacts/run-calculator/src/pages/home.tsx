@@ -312,6 +312,7 @@ import {
 import { isolatePendingRunPackagingProgress } from "../runProgressIsolation";
 import {
   consumeSyncWriteResponse,
+  shouldReplaySyncWrite,
   isCanonicalRecoverySyncPayload,
   isUnchangedSyncResponse,
   isValidSyncSnapshotId,
@@ -9726,15 +9727,15 @@ export default function Home() {
       epoch: getStoredResetEpoch(),
     });
     let result = await consumeCanonicalSyncWriteResponse(res, true);
-    // A stale partial snapshot can return successful transport with no
-    // canonical data. The local change is not acknowledged in that case.
-    // The response consumer clears the unusable snapshot identity, so replay
-    // the current local state as a complete write before reporting success.
+    // A stale base can return successful transport with the authoritative
+    // canonical snapshot instead of applying this write. Adopt it first, then
+    // rebuild once from the reconciled local state so only edits still eligible
+    // after canonical adoption are replayed against the new exact base.
     const partialFallbackBody = result.body as
       | { partialFallback?: boolean; data?: unknown }
       | null
       | undefined;
-    if (partialFallbackBody?.partialFallback && partialFallbackBody.data === null) {
+    if (shouldReplaySyncWrite(partialFallbackBody)) {
       const recoveryPayload = buildSyncPayload(dayStateRef.current);
       res = await writeToday({
         payload: recoveryPayload,
@@ -9843,16 +9844,14 @@ export default function Home() {
         () => generation === syncPushGenerationRef.current,
       );
       if (generation !== syncPushGenerationRef.current) return;
-      // A stale partial snapshot is successful transport, but it did not
-      // persist this local change. The response consumer clears the stale
-      // snapshot identity; replay the latest local state as a complete write
-      // so lifecycle changes cannot leave another run absent until a timer
-      // happens to repair it.
+      // A stale base is successful transport, but it did not persist this
+      // local change. Canonical response consumption runs first; rebuild from
+      // that reconciled state and replay once against its exact snapshot.
       const partialFallbackBody = canonicalResult.body as
         | { partialFallback?: boolean; data?: unknown }
         | null
         | undefined;
-      if (partialFallbackBody?.partialFallback && partialFallbackBody.data === null) {
+      if (shouldReplaySyncWrite(partialFallbackBody)) {
         const recoveryPayload = buildSyncPayload(dayStateRef.current);
         res = await writeToday({
           payload: recoveryPayload,

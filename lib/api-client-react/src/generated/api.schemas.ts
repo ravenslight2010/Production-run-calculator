@@ -1026,11 +1026,18 @@ export type SyncRecoveryPayload = SyncPayload & {
   rollover: boolean;
 };
 
+export type SyncWriteRequestPayload = SyncPayload & ({
+  syncVersion?: 1;
+  completeness?: 'complete' | 'partial';
+  /** @pattern ^[a-f0-9]{64}$ */
+  baseSnapshotId?: string;
+});
+
 export interface SyncWriteRequest {
   senderId?: string;
   /** @pattern ^[a-f0-9]{64}$ */
   snapshotId?: string;
-  payload: SyncPayload;
+  payload: SyncWriteRequestPayload;
 }
 
 export type ProductionRunInputs = { [key: string]: unknown };
@@ -5868,6 +5875,8 @@ export type PutSyncToday200 = {
   snapshotId?: string;
   stale?: boolean;
   epoch?: number;
+  /** The write was not applied because its snapshot dependency was missing, malformed, or stale; data is authoritative and must be adopted before a bounded replay. */
+  partialFallback?: boolean;
   /** @minimum 0 */
   canonicalRevision?: number;
   /** @minimum 0 */
