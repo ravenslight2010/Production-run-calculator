@@ -93,10 +93,11 @@ import {
   importProfileIsTombstoned,
   recipeNameIsTombstoned,
   applySpecImport,
+  projectSpecImport,
+  adoptSpecImportProjection,
   loadCurrentFormulaRecipes,
   isNameDeleted,
   flavorNamespace,
-  setProfileWritesAllowed,
   type SpecImportServerPoolRecipe,
   type SpecImportNameCorrection,
 } from "./storage";
@@ -2517,34 +2518,17 @@ export async function commitSpecImport(
     throw new ImportReviewReconfirmationError(finalImportReview);
   }
 
+  const projection = operationId
+    ? projectSpecImport(
+        applyParsed, livePools, dieLineDefaultOverrides, forceUpdateProfileKeys, importMergeAliases,
+      )
+    : null;
   const applyOut: { nameCorrections?: SpecImportNameCorrection[] } = {};
-  const stagedStorage = operationId ? snapshotLocalStorage() : null;
-  const stagedProfileRows = new Map<string, { values: Record<string, unknown>; crustValues: Record<string, unknown> }>();
-  const writesWereAllowed = operationId ? setProfileWritesAllowed(true) : true;
-  let projectedApply: ReturnType<typeof applySpecImport>;
-  try {
-    projectedApply = applySpecImport(
-      applyParsed, applyOut, livePools, dieLineDefaultOverrides, forceUpdateProfileKeys, importMergeAliases,
-    );
-    if (operationId) {
-      for (const profile of projectedApply.touchedProfiles) {
-        const key = canonicalProfileKey(profile.brand, profile.flavor);
-        try {
-          const values = JSON.parse(localStorage.getItem(`run-calc-profile-${key}`) ?? "{}");
-          const crustValues = JSON.parse(localStorage.getItem(`run-calc-crust-profile-${key}`) ?? "{}");
-          stagedProfileRows.set(key, { values, crustValues });
-        } catch {
-          throw new Error(`Could not project the reviewed profile "${profile.brand} / ${profile.flavor}".`);
-        }
-      }
-    }
-  } finally {
-    if (operationId) {
-      restoreLocalStorage(stagedStorage);
-      setProfileWritesAllowed(writesWereAllowed);
-    }
-  }
-  let { touchedProfiles, crustProfiles } = projectedApply;
+  const applied = projection ?? applySpecImport(
+    applyParsed, applyOut, livePools, dieLineDefaultOverrides, forceUpdateProfileKeys, importMergeAliases,
+  );
+  if (projection) applyOut.nameCorrections = projection.nameCorrections;
+  let { touchedProfiles, crustProfiles } = applied;
 
   // Explicit manager Apply is AUTHORITATIVE: re-mark every profile this
   // import touched as a FORCED upsert, so the server-pool push bypasses the
@@ -2889,12 +2873,13 @@ export async function commitSpecImport(
 
   let resultHash: string | undefined;
   if (operationId) {
+    const committedProjection = projection!;
     const profiles = touchedProfiles.map((profile) => ({
       key: canonicalProfileKey(profile.brand, profile.flavor),
       brand: profile.brand,
       flavor: profile.flavor,
-      values: stagedProfileRows.get(canonicalProfileKey(profile.brand, profile.flavor))!.values,
-      crustValues: stagedProfileRows.get(canonicalProfileKey(profile.brand, profile.flavor))!.crustValues,
+      values: committedProjection.profileRows.find((row) => row.key === canonicalProfileKey(profile.brand, profile.flavor))!.values,
+      crustValues: committedProjection.profileRows.find((row) => row.key === canonicalProfileKey(profile.brand, profile.flavor))!.crustValues,
       updatedAtMs: Date.now(),
       force: true,
     }));
@@ -2921,12 +2906,9 @@ export async function commitSpecImport(
     // The first pass was a side-effect-free projection. Adopt the exact same
     // specialized profile semantics only after the server transaction is
     // durably acknowledged.
-    const adopted = applySpecImport(
-      applyParsed, { nameCorrections: [] }, livePools, dieLineDefaultOverrides,
-      forceUpdateProfileKeys, importMergeAliases,
-    );
-    touchedProfiles = adopted.touchedProfiles;
-    crustProfiles = adopted.crustProfiles;
+    adoptSpecImportProjection(committedProjection);
+    touchedProfiles = committedProjection.touchedProfiles;
+    crustProfiles = committedProjection.crustProfiles;
   }
 
   // Snapshot this import server-side (factory-wide; only the two most recent are
@@ -2997,26 +2979,4 @@ export function buildSpecImportChanges(rows: SpecImportChangeRows): Record<strin
     };
   }
   return changes;
-}
-
-type LocalStorageSnapshot = Array<[string, string]>;
-
-function snapshotLocalStorage(): LocalStorageSnapshot | null {
-  if (typeof localStorage === "undefined") return null;
-  const out: LocalStorageSnapshot = [];
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-    if (key !== null) out.push([key, localStorage.getItem(key) ?? ""]);
-  }
-  return out;
-}
-
-function restoreLocalStorage(snapshot: LocalStorageSnapshot | null): void {
-  if (snapshot === null || typeof localStorage === "undefined") return;
-  const keep = new Set(snapshot.map(([key]) => key));
-  for (let i = localStorage.length - 1; i >= 0; i--) {
-    const key = localStorage.key(i);
-    if (key !== null && !keep.has(key)) localStorage.removeItem(key);
-  }
-  for (const [key, value] of snapshot) localStorage.setItem(key, value);
 }

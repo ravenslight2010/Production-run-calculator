@@ -151,12 +151,17 @@ import {
   applyResetWipe as wipeBrowserRunCalculator,
   getStoredResetEpoch as readBrowserResetEpoch,
 } from "./adapters/browserResetPersistence";
-import { browserStorage as localStorage } from "./adapters/browserRecordStore";
+import {
+  browserStorage as localStorage,
+  withBrowserStorageOverride,
+  type BrowserKeyValueStorage,
+} from "./adapters/browserRecordStore";
 import {
   cachedProfileKeys,
   deleteCachedProfile,
   profileCacheIsActive,
   readCachedProfileBlobs,
+  withProfileCacheProjection,
   writeCachedProfileBlobs,
 } from "./profileCache";
 
@@ -904,6 +909,7 @@ function rememberProfileSnapshot(key: string, snap: { dough: string; crust: stri
 // pre-resolution window permissive; all interactive paths are ALSO gated at
 // the call site on the same capability).
 let profileWritesAllowed = true;
+let profileSyncSuppressed = false;
 export function setProfileWritesAllowed(allowed: boolean): boolean {
   const previous = profileWritesAllowed;
   profileWritesAllowed = allowed;
@@ -997,8 +1003,10 @@ export function saveProfile(
   const remotelyDeleted = loadRemotelyDeletedProfiles();
   if (remotelyDeleted.delete(key)) saveRemotelyDeletedProfiles(remotelyDeleted);
   loadedProfileSnapshots.set(key, [{ dough, crust }]);
-  if (options.authoritative) markProfileForceEdited(key);
-  else markProfileEdited(key);
+  if (!profileSyncSuppressed) {
+    if (options.authoritative) markProfileForceEdited(key);
+    else markProfileEdited(key);
+  }
   return true;
 }
 
@@ -3455,6 +3463,115 @@ export type SpecImportNameCorrection = {
   /** The correct name this import wrote. */
   newName: string;
 };
+
+export type SpecImportProjection = {
+  touchedProfiles: Array<{ brand: string; flavor: string }>;
+  crustProfiles: Array<{ brand: string; flavor: string }>;
+  nameCorrections: SpecImportNameCorrection[];
+  profileRows: Array<{
+    key: string;
+    brand: string;
+    flavor: string;
+    values: Record<string, unknown>;
+    crustValues: Record<string, unknown>;
+  }>;
+  storageChanges: Array<{ key: string; value: string | null }>;
+};
+
+function memoryStorage(entries: ReadonlyArray<[string, string]>): BrowserKeyValueStorage {
+  const values = new Map(entries);
+  return {
+    get length() { return values.size; },
+    key(index) { return [...values.keys()][index] ?? null; },
+    getItem(key) { return values.get(key) ?? null; },
+    setItem(key, value) { values.set(key, value); },
+    removeItem(key) { values.delete(key); },
+  };
+}
+
+function storageEntries(storage: BrowserKeyValueStorage): Array<[string, string]> {
+  const entries: Array<[string, string]> = [];
+  for (let index = 0; index < storage.length; index++) {
+    const key = storage.key(index);
+    if (key !== null) entries.push([key, storage.getItem(key) ?? ""]);
+  }
+  return entries;
+}
+
+export function projectSpecImport(
+  parsed: ParsedSpecImport,
+  serverPools?: { dough?: SpecImportServerPoolRecipe[]; sauce?: SpecImportServerPoolRecipe[] },
+  dieLineDefaultOverrides?: DieLineDefaultsOverrides,
+  forceUpdateProfileKeys?: ReadonlySet<string>,
+  importMergeAliases?: ImportMergeAliasMap,
+): SpecImportProjection {
+  const beforeEntries = storageEntries(localStorage);
+  const before = new Map(beforeEntries);
+  const projectedStorage = memoryStorage(beforeEntries);
+  const out: { nameCorrections?: SpecImportNameCorrection[] } = {};
+  const previousSyncSuppressed = profileSyncSuppressed;
+  profileSyncSuppressed = true;
+  let applied: ReturnType<typeof applySpecImport>;
+  let profileRows: SpecImportProjection["profileRows"] = [];
+  try {
+    applied = withBrowserStorageOverride(projectedStorage, () =>
+      withProfileCacheProjection(() => {
+        const result = applySpecImport(
+          parsed,
+          out,
+          serverPools,
+          dieLineDefaultOverrides,
+          forceUpdateProfileKeys,
+          importMergeAliases,
+        );
+        profileRows = result.touchedProfiles.map(({ brand, flavor }) => {
+          const key = canonicalProfileKey(brand, flavor);
+          const parse = (kind: "dough" | "crust"): Record<string, unknown> => {
+            const raw = readProfileBlob(key, kind);
+            return raw ? JSON.parse(raw) as Record<string, unknown> : {};
+          };
+          return {
+            key,
+            brand,
+            flavor,
+            values: parse("dough"),
+            crustValues: parse("crust"),
+          };
+        });
+        return result;
+      }));
+  } finally {
+    profileSyncSuppressed = previousSyncSuppressed;
+  }
+  const afterEntries = storageEntries(projectedStorage);
+  const after = new Map(afterEntries);
+  const changedKeys = new Set([...before.keys(), ...after.keys()]);
+  const storageChanges = [...changedKeys]
+    .filter((key) => before.get(key) !== after.get(key))
+    .map((key) => ({ key, value: after.get(key) ?? null }));
+  return {
+    ...applied,
+    nameCorrections: out.nameCorrections ?? [],
+    profileRows,
+    storageChanges,
+  };
+}
+
+export function adoptSpecImportProjection(projection: SpecImportProjection): void {
+  for (const change of projection.storageChanges) {
+    if (profileCacheIsActive() && change.key.startsWith("run-calc-profile-cache-v1:")) continue;
+    if (change.value === null) localStorage.removeItem(change.key);
+    else localStorage.setItem(change.key, change.value);
+  }
+  if (profileCacheIsActive()) {
+    for (const row of projection.profileRows) {
+      writeCachedProfileBlobs(row.key, {
+        dough: JSON.stringify(row.values),
+        crust: JSON.stringify(row.crustValues),
+      });
+    }
+  }
+}
 
 export function applySpecImport(
   parsed: ParsedSpecImport,

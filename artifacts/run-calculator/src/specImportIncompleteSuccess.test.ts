@@ -38,7 +38,25 @@ vi.mock("./storage", () => ({
   importProfileIsTombstoned: () => false,
   recipeNameIsTombstoned: () => false,
   applySpecImport: applySpy,
-  setProfileWritesAllowed: vi.fn(() => true),
+  projectSpecImport: (...args: unknown[]) => {
+    const applied = applySpy(...args);
+    return {
+      ...applied,
+      nameCorrections: [],
+      profileRows: applied.touchedProfiles.map((item: { brand: string; flavor: string }) => {
+        const key = `${item.brand.toLowerCase()}\u0000${item.flavor.toLowerCase()}`;
+        return {
+          key,
+          brand: item.brand,
+          flavor: item.flavor,
+          values: JSON.parse(localStorage.getItem(`run-calc-profile-${key}`) ?? "{}"),
+          crustValues: JSON.parse(localStorage.getItem(`run-calc-crust-profile-${key}`) ?? "{}"),
+        };
+      }),
+      storageChanges: [],
+    };
+  },
+  adoptSpecImportProjection: vi.fn(),
 }));
 vi.mock("./profileServerSync", () => ({
   canonicalProfileKey: (brand: string, flavor: string) =>
