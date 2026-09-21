@@ -2,6 +2,7 @@
 // This suite uses the same disposable-Postgres fixture pattern as the route
 // isolation suites; it never connects to the developer database.
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { AddressInfo } from "node:net";
@@ -12,7 +13,6 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vites
 import { eq, sql } from "drizzle-orm";
 import { signToken } from "../lib/auth";
 import { runWithScope } from "../lib/requestScope";
-import { writeAuditEvent } from "./auditLogs";
 
 vi.mock("@workspace/integrations-openai-ai-server", () => ({
   openai: { chat: { completions: { create: async () => ({ choices: [{ message: { content: "{}" } }] }) } } },
@@ -31,6 +31,7 @@ let seedRoles: () => Promise<void>;
 let seedSandboxUser: () => Promise<void>;
 let findUserByUsername: (username: string) => Promise<{ id: string } | undefined>;
 let clearUserValidityCache: () => void;
+let writeAuditEvent: typeof import("./auditLogs")["writeAuditEvent"];
 let adminPool: pg.Pool;
 let testDbName = "";
 let originalDatabaseUrl: string | undefined;
@@ -58,6 +59,7 @@ beforeAll(async () => {
   if (push.status !== 0) throw new Error(`drizzle push failed:\n${push.stdout}\n${push.stderr}`);
   process.env.DATABASE_URL = testUrlString;
   const dbMod = await import("@workspace/db");
+  const auditLogsMod = await import("./auditLogs");
   const routerMod = await import("./index");
   const rolesMod = await import("../lib/roles");
   const sandboxMod = await import("../lib/sandbox");
@@ -73,6 +75,7 @@ beforeAll(async () => {
   seedSandboxUser = sandboxMod.seedSandboxUser;
   findUserByUsername = usersMod.findUserByUsername;
   clearUserValidityCache = validityMod.clearUserValidityCache;
+  writeAuditEvent = auditLogsMod.writeAuditEvent;
 
   const app: Express = express();
   app.use(express.json({ limit: "10mb" }));
@@ -254,5 +257,88 @@ describe("operational audit HTTP boundary", () => {
       }));
     })).rejects.toThrow("injected audit failure");
     expect(await db.select().from(productionRulesTable)).toHaveLength(0);
+  });
+
+  it("blocks ordinary database mutations while allowing the authorized redaction path", async () => {
+    await seedAudit(2);
+    const rows = await db.select().from(auditLogsTable);
+    const row = rows[0];
+    const rowToDelete = rows[1];
+    if (!row) throw new Error("audit fixture was not inserted");
+    if (!rowToDelete) throw new Error("second audit fixture was not inserted");
+
+    await expect(db.execute(sql`
+      UPDATE audit_logs
+      SET resource = 'tampered'
+      WHERE id = ${row.id}
+    `)).rejects.toMatchObject({ cause: { code: "42501" } });
+    await expect(db.execute(sql`
+      DELETE FROM audit_logs
+      WHERE id = ${row.id}
+    `)).rejects.toMatchObject({ cause: { code: "42501" } });
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL ROLE audit_maintenance");
+      const result = await client.query(
+        "SELECT public.redact_audit_log($1, $2::jsonb) AS redacted",
+        [row.id, JSON.stringify({ outcome: "redacted", reasonCode: "approved_test" })],
+      );
+      const deleted = await client.query(
+        "SELECT public.delete_audit_log($1, $2) AS deleted",
+        [rowToDelete.id, "approved_test_cleanup"],
+      );
+      await client.query("COMMIT");
+      expect(result.rows[0]?.redacted).toBe(true);
+      expect(deleted.rows[0]?.deleted).toBe(true);
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    const redactedRows = await db.select().from(auditLogsTable);
+    const redacted = redactedRows.find((candidate) => candidate.id === row.id);
+    expect(redacted?.changes).toEqual({ outcome: "redacted", reasonCode: "approved_test" });
+    expect(redactedRows.some((candidate) => candidate.id === rowToDelete.id)).toBe(false);
+    expect(redactedRows.some((candidate) => candidate.action === "audit_log_deleted")).toBe(true);
+  });
+
+  it("tests the documented down/up rollback cycle without losing historical rows", async () => {
+    await seedAudit(1);
+    const [row] = await db.select().from(auditLogsTable);
+    if (!row) throw new Error("audit fixture was not inserted");
+    const down = readFileSync(
+      path.join(repoRoot, "lib/db/migrations/0001_audit_logs_append_only.down.sql"),
+      "utf8",
+    );
+    const up = readFileSync(
+      path.join(repoRoot, "lib/db/migrations/0001_audit_logs_append_only.sql"),
+      "utf8",
+    );
+
+    const client = await pool.connect();
+    try {
+      await client.query(down);
+      await client.query(
+        "UPDATE audit_logs SET resource = 'rollback-test' WHERE id = $1",
+        [row.id],
+      );
+    } catch (error) {
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    await pool.query(up);
+    const [historical] = await db.select().from(auditLogsTable);
+    expect(historical?.resource).toBe("rollback-test");
+    await expect(db.execute(sql`
+      UPDATE audit_logs
+      SET resource = 'tampered-after-reapply'
+      WHERE id = ${row.id}
+    `)).rejects.toMatchObject({ cause: { code: "42501" } });
   });
 });
