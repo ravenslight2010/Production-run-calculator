@@ -1,4 +1,5 @@
 - [Policy evidence anchors](policy-evidence-anchors.md) — operational policy prose is checked by stable regex anchors; preserve required phrases when clarifying task rules.
+- [Orval Zod declaration order](orval-zod-declaration-order.md) — generated scalar constraints must be normalized ahead of validators after Orval generation.
 - [Post-merge lockfile recovery](post-merge-setup.md) — repair stale peer-resolution entries non-frozen, prove frozen install, then rerun the strict post-merge hook.
 - [Safe operational observability](observability-safe-events.md) — events carry correlation, timing, outcomes, and bounded counts; never copy request or recipe payloads into logs.
 - [Audit-log scope boundary](audit-log-scope-boundary.md) — manager capability alone is not enough for audit reads; keep compliance records behind the live-scope fence.

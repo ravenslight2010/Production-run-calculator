@@ -7,6 +7,353 @@
  */
 import * as zod from 'zod';
 
+export const signUpBodyOneUsernameMin = 3;
+export const signUpBodyOneUsernameMax = 64;
+export const signUpBodyOnePasswordMin = 6;
+export const signUpBodyOnePasswordMax = 200;
+export const signUpBodyTwoAccessCodeMax = 200;
+export const acceptStaffInvitationBodyInvitationMin = 20;
+export const acceptStaffInvitationBodyInvitationMax = 512;
+export const acceptStaffInvitationBodyUsernameMin = 3;
+export const acceptStaffInvitationBodyUsernameMax = 64;
+export const acceptStaffInvitationBodyPasswordMin = 6;
+export const acceptStaffInvitationBodyPasswordMax = 200;
+export const checkUsernameAvailableQueryUsernameMax = 64;
+export const signInBodyUsernameMin = 3;
+export const signInBodyUsernameMax = 64;
+export const signInBodyPasswordMin = 6;
+export const signInBodyPasswordMax = 200;
+export const changePasswordBodyCurrentPasswordMax = 200;
+export const changePasswordBodyNewPasswordMin = 6;
+export const changePasswordBodyNewPasswordMax = 200;
+export const forgotPasswordBodyUsernameMax = 64;
+export const resetPasswordBodyUsernameMax = 64;
+export const resetPasswordBodyCodeMax = 64;
+export const resetPasswordBodyNewPasswordMin = 6;
+export const resetPasswordBodyNewPasswordMax = 200;
+export const consumeInventoryDayStartBodyDateRegExp = new RegExp('^\\d{4}-\\d{2}-\\d{2}$');
+export const identifyInventoryPhotoBodyCandidatesItemKeyMax = 200;
+export const identifyInventoryPhotoBodyCandidatesItemCategoryMax = 100;
+export const identifyInventoryPhotoBodyCandidatesItemNameMax = 200;
+export const identifyInventoryPhotoBodyCandidatesItemUnitMax = 50;
+export const parseSpecImagesBodyImagesMax = 10;
+export const wasteInsightBodyPlannedItemsItemKeyMax = 200;
+export const wasteInsightBodyPlannedItemsItemCategoryMax = 100;
+export const wasteInsightBodyPlannedItemsItemNameMax = 200;
+export const wasteInsightBodyPlannedItemsItemUnitMax = 50;
+export const exportOperationalReportBodyRunsMax = 600;
+export const finalizeOperationalReportBodyRunsMax = 600;
+export const searchFinalizedOperationalReportsQueryLimitDefault = 100;
+export const searchFinalizedOperationalReportsQueryLimitMax = 100;
+export const aiParseSpecSheetResponseProfilesItemTargetDoughballWeightExclusiveMin = 0;
+export const aiParseSpecSheetResponseProfilesItemApplicatorsItemSlotMax = 4;
+export const listDuplicateReviewsResponseGroupsItemGroupKeyMax = 500;
+export const listDuplicateReviewsResponseCountMin = 0;
+export const saveDuplicateReviewsBodyGroupsItemGroupKeyMax = 500;
+export const saveDuplicateReviewsBodyGroupsMax = 1000;
+export const saveDuplicateReviewsResponseGroupsItemGroupKeyMax = 500;
+export const saveDuplicateReviewsResponseCountMin = 0;
+export const resolveDuplicateReviewBodyGroupKeyMax = 500;
+export const resolveDuplicateReviewResponseGroupsItemGroupKeyMax = 500;
+export const resolveDuplicateReviewResponseCountMin = 0;
+export const listFreezerSurplusResponseLotsItemRemainingCasesMin = 0;
+export const confirmFreezerSurplusBodyBrandMax = 120;
+export const confirmFreezerSurplusBodyFlavorMax = 120;
+export const confirmFreezerSurplusBodyCasesMax = 1000000;
+export const confirmFreezerSurplusResponseLotsItemRemainingCasesMin = 0;
+export const confirmFreezerSurplusResponseCreatedLotOneRemainingCasesMin = 0;
+export const replaceFreezerSurplusAllocationPathRunIdMax = 120;
+export const replaceFreezerSurplusAllocationBodyBrandMax = 120;
+export const replaceFreezerSurplusAllocationBodyFlavorMax = 120;
+export const replaceFreezerSurplusAllocationBodyAllocationsItemLotIdMax = 120;
+export const replaceFreezerSurplusAllocationBodyAllocationsItemCasesMax = 1000000;
+export const replaceFreezerSurplusAllocationBodyAllocationsMax = 500;
+export const replaceFreezerSurplusAllocationResponseLotsItemRemainingCasesMin = 0;
+export const replaceFreezerSurplusAllocationResponseCreatedLotOneRemainingCasesMin = 0;
+export const listMixSurplusResponseLotsItemAmountMadeMin = 0;
+export const listMixSurplusResponseLotsItemAmountUsedMin = 0;
+export const listMixSurplusResponseLotsItemAmountRemainingMin = 0;
+export const listMixSurplusResponseAllocationsItemAmountMin = 0;
+export const listMixSurplusResponseBalancesItemLbsMin = 0;
+export const recordMixSurplusBodyMixIdMax = 120;
+export const recordMixSurplusBodyAmountMadeExclusiveMin = 0.1;
+export const recordMixSurplusResponseLotsItemAmountMadeMin = 0;
+export const recordMixSurplusResponseLotsItemAmountUsedMin = 0;
+export const recordMixSurplusResponseLotsItemAmountRemainingMin = 0;
+export const recordMixSurplusResponseAllocationsItemAmountMin = 0;
+export const recordMixSurplusResponseBalancesItemLbsMin = 0;
+export const recordMixSurplusResponseCreatedLotOneAmountMadeMin = 0;
+export const recordMixSurplusResponseCreatedLotOneAmountUsedMin = 0;
+export const recordMixSurplusResponseCreatedLotOneAmountRemainingMin = 0;
+export const replaceMixSurplusAllocationsBodyAllocationsItemLotIdMax = 120;
+export const replaceMixSurplusAllocationsBodyAllocationsItemAmountMin = 0;
+export const replaceMixSurplusAllocationsBodyAllocationsMax = 500;
+export const replaceMixSurplusAllocationsResponseLotsItemAmountMadeMin = 0;
+export const replaceMixSurplusAllocationsResponseLotsItemAmountUsedMin = 0;
+export const replaceMixSurplusAllocationsResponseLotsItemAmountRemainingMin = 0;
+export const replaceMixSurplusAllocationsResponseAllocationsItemAmountMin = 0;
+export const replaceMixSurplusAllocationsResponseBalancesItemLbsMin = 0;
+export const replaceMixSurplusAllocationsResponseCreatedLotOneAmountMadeMin = 0;
+export const replaceMixSurplusAllocationsResponseCreatedLotOneAmountUsedMin = 0;
+export const replaceMixSurplusAllocationsResponseCreatedLotOneAmountRemainingMin = 0;
+export const voidMixSurplusLotPathIdMax = 120;
+export const voidMixSurplusLotResponseLotsItemAmountMadeMin = 0;
+export const voidMixSurplusLotResponseLotsItemAmountUsedMin = 0;
+export const voidMixSurplusLotResponseLotsItemAmountRemainingMin = 0;
+export const voidMixSurplusLotResponseAllocationsItemAmountMin = 0;
+export const voidMixSurplusLotResponseBalancesItemLbsMin = 0;
+export const voidMixSurplusLotResponseCreatedLotOneAmountMadeMin = 0;
+export const voidMixSurplusLotResponseCreatedLotOneAmountUsedMin = 0;
+export const voidMixSurplusLotResponseCreatedLotOneAmountRemainingMin = 0;
+export const listRunTemplatesResponseTemplatesItemRevisionMin = 0;
+export const listRunTemplatesResponseTemplatesItemRevisionMax = 9007199254740991;
+export const listRunTemplatesResponseTemplatesItemDeletedDefault = false;
+export const saveRunTemplatesBodyTemplatesItemRevisionMin = 0;
+export const saveRunTemplatesBodyTemplatesItemRevisionMax = 9007199254740991;
+export const saveRunTemplatesBodyTemplatesItemDeletedDefault = false;
+export const saveRunTemplatesResponseTemplatesItemRevisionMin = 0;
+export const saveRunTemplatesResponseTemplatesItemRevisionMax = 9007199254740991;
+export const saveRunTemplatesResponseTemplatesItemDeletedDefault = false;
+export const deleteRunTemplatesBodyOneItemsItemRevisionMin = 0;
+export const deleteRunTemplatesBodyOneItemsItemRevisionMax = 9007199254740991;
+export const deleteRunTemplatesBodyTwoItemsItemRevisionMin = 0;
+export const deleteRunTemplatesBodyTwoItemsItemRevisionMax = 9007199254740991;
+export const deleteRunTemplatesBodyThreeItemsItemRevisionMin = 0;
+export const deleteRunTemplatesBodyThreeItemsItemRevisionMax = 9007199254740991;
+export const deleteRunTemplatesResponseTemplatesItemRevisionMin = 0;
+export const deleteRunTemplatesResponseTemplatesItemRevisionMax = 9007199254740991;
+export const deleteRunTemplatesResponseTemplatesItemDeletedDefault = false;
+export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesConversationTurnsMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesRetiredFacilityFactsMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesIncidentGeneratedTextToLabelMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesQualityThumbnailsToRedactMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesClosedObservationsToRedactMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesTotalMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionProtectedOperationalIncidentRowsMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionProtectedConfirmedQualityRowsMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionProtectedOpenInventoryObservationsMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportAutomaticProposalsMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportStubsMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportPlanSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportSnapshotSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportManifestSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportManifestRetainedMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportManifestExcludedOlderDuplicatesMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultReplacementsMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultAliasesInsertedMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultRepointedProfilesMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultRepointedRunsMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultDeletedStubsMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryPoolMismatchesMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryAliasGapsMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryStaleProfileLinksMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryStalePendingRunLinksMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryProtectedStubsMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryUnexpectedStubsMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryProtectedHistoryReferencesMin = 0;
+export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryOmittedFindingsMin = 0;
+export const listServerJobsResponseProgressMin = 0;
+export const listServerJobsResponseProgressMax = 100;
+export const createServerJobBodyTypeRegExp = new RegExp('^[a-z][a-z0-9-]{1,63}$');
+export const createServerJobBodyIdempotencyKeyMin = 8;
+export const createServerJobBodyIdempotencyKeyMax = 128;
+export const createServerJobBodySnapshotIdMax = 200;
+export const createServerJobResponseProgressMin = 0;
+export const createServerJobResponseProgressMax = 100;
+export const getServerJobResponseProgressMin = 0;
+export const getServerJobResponseProgressMax = 100;
+export const cancelServerJobResponseProgressMin = 0;
+export const cancelServerJobResponseProgressMax = 100;
+export const listImportHistoryResponseImportsItemSummaryCountsMinOne = 0;
+export const recordImportHistoryBodySummaryCountsMinOne = 0;
+export const recordImportHistoryResponseImportSummaryCountsMinOne = 0;
+export const submitFieldCheckObservationsBodyObservationsItemObservationIdMin = 8;
+export const submitFieldCheckObservationsBodyObservationsItemObservationIdMax = 160;
+export const submitFieldCheckObservationsBodyObservationsItemCheckVersionMax = 20;
+export const submitFieldCheckObservationsBodyObservationsItemAppBuildMax = 100;
+export const submitFieldCheckObservationsBodyObservationsItemMetricsMinOne = 0;
+export const submitFieldCheckObservationsBodyObservationsItemMetricsMaxOne = 10000000;
+export const submitFieldCheckObservationsBodyObservationsMax = 20;
+export const submitFieldCheckObservationsResponseAcceptedMin = 0;
+export const submitFieldCheckObservationsResponseDuplicateMin = 0;
+export const confirmHardwareFieldCheckResponseAcceptedMin = 0;
+export const confirmHardwareFieldCheckResponseDuplicateMin = 0;
+export const applyAiRetentionCleanupResponseReportCandidatesConversationTurnsMin = 0;
+export const applyAiRetentionCleanupResponseReportCandidatesRetiredFacilityFactsMin = 0;
+export const applyAiRetentionCleanupResponseReportCandidatesIncidentGeneratedTextToLabelMin = 0;
+export const applyAiRetentionCleanupResponseReportCandidatesQualityThumbnailsToRedactMin = 0;
+export const applyAiRetentionCleanupResponseReportCandidatesClosedObservationsToRedactMin = 0;
+export const applyAiRetentionCleanupResponseReportCandidatesTotalMin = 0;
+export const applyAiRetentionCleanupResponseReportProtectedOperationalIncidentRowsMin = 0;
+export const applyAiRetentionCleanupResponseReportProtectedConfirmedQualityRowsMin = 0;
+export const applyAiRetentionCleanupResponseReportProtectedOpenInventoryObservationsMin = 0;
+export const reportIncidentBodyScreenMax = 200;
+export const reportIncidentBodyAppVersionMax = 100;
+export const reportIncidentBodyDescriptionMax = 4000;
+export const reportIncidentBodyErrorMessageMax = 4000;
+export const reportIncidentBodyErrorStackMax = 8000;
+export const reportIncidentBodyUserAgentMax = 500;
+export const reportIncidentBodyDiagnosticsActionMax = 80;
+export const reportIncidentBodyDiagnosticsRetryCountMin = 0;
+export const reportIncidentBodyDiagnosticsRetryCountMax = 10;
+export const reportIncidentBodyDiagnosticsCorrelationIdMax = 128;
+export const getBackgroundOperationDiagnosticsResponseWarningsMax = 4;
+export const updateManagerActionItemBodyDeferReasonMax = 2000;
+export const updateManagerActionItemBodyResolutionNoteMax = 2000;
+export const updateIncidentWorkflowBodyNoteMax = 2000;
+export const createRoleBodyNameMax = 60;
+export const updateRoleBodyNameMax = 60;
+export const resetStaffPasswordBodyNewPasswordMin = 6;
+export const resetStaffPasswordBodyNewPasswordMax = 200;
+export const listCompletedHistoryResponseHistoryItemOneOperationIdMax = 300;
+export const listCompletedHistoryResponseHistoryItemOneRunIdMax = 500;
+export const finalizeCompletedRunBodyOperationIdMax = 300;
+export const finalizeCompletedRunBodyRunIdMax = 500;
+export const listApplicatorBatchEvidenceQueryRunIdMax = 500;
+export const listApplicatorBatchEvidenceQueryCursorMax = 4096;
+export const listApplicatorBatchEvidenceQueryCursorRegExp = new RegExp('^[A-Za-z0-9_-]+$');
+export const listApplicatorBatchEvidenceQueryLimitDefault = 500;
+export const listApplicatorBatchEvidenceQueryLimitMax = 500;
+export const listApplicatorBatchEvidenceResponseEvidenceItemSlotMax = 4;
+export const listApplicatorBatchEvidenceResponseEvidenceItemObservedTotalMin = 0;
+export const listApplicatorBatchEvidenceResponseEvidenceItemConfirmedTotalMin = 0;
+export const listApplicatorBatchEvidenceResponseEvidenceItemEvidenceHashRegExp = new RegExp('^[a-f0-9]{64}$');
+export const finalizeApplicatorBatchTotalBodyOperationIdMax = 300;
+export const finalizeApplicatorBatchTotalBodyOperationIdRegExp = new RegExp('^[A-Za-z0-9:_-]+$');
+export const finalizeApplicatorBatchTotalBodyRunIdMax = 500;
+export const finalizeApplicatorBatchTotalBodySlotMax = 4;
+export const finalizeApplicatorBatchTotalBodyFinalTotalMin = 0;
+export const finalizeApplicatorBatchTotalBodyFinalTotalMax = 1000000;
+export const finalizeApplicatorBatchTotalBodyCorrectionOfMax = 300;
+export const finalizeApplicatorBatchTotalBodyCorrectionOfRegExp = new RegExp('^[A-Za-z0-9:_-]+$');
+export const finalizeApplicatorBatchTotalResponseEvidenceHashRegExp = new RegExp('^[a-f0-9]{64}$');
+export const finalizeApplicatorBatchTotalResponseCanonicalSlotMax = 4;
+export const finalizeApplicatorBatchTotalResponseCanonicalObservedTotalMin = 0;
+export const finalizeApplicatorBatchTotalResponseCanonicalConfirmedTotalMin = 0;
+export const finalizeApplicatorBatchTotalResponseCanonicalEvidenceHashRegExp = new RegExp('^[a-f0-9]{64}$');
+export const getSyncTodayQuerySnapshotRegExp = new RegExp('^[a-f0-9]{64}$');
+export const getSyncTodayResponseOneTwoResetEpochMin = 0;
+export const getSyncTodayResponseTwoSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
+export const getSyncTodayResponseTwoResetEpochMin = 0;
+export const getSyncTodayResponseTwoCanonicalRevisionMin = 0;
+export const putSyncTodayQueryEpochMin = 0;
+export const putSyncTodayBodySnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
+export const putSyncTodayBodyPayloadTwoBaseSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
+export const putSyncTodayResponseSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
+export const putSyncTodayResponseCanonicalRevisionMin = 0;
+export const putSyncTodayResponseServerTimeMin = 0;
+export const putSyncTodayResponseOperationalProjectionOneCalculationRevisionMin = 0;
+export const streamSyncEventsQuerySnapshotRegExp = new RegExp('^[a-f0-9]{64}$');
+export const claimAutoTrackEventQueryEpochMin = 0;
+export const claimAutoTrackEventBodySenderIdMax = 160;
+export const claimAutoTrackEventBodyClaimRunIdMax = 160;
+export const claimAutoTrackEventBodyClaimGenerationMax = 160;
+export const claimAutoTrackEventBodyClaimSequenceMax = 10000000;
+export const claimAutoTrackEventBodyClaimEventIdMax = 160;
+export const claimAutoTrackEventBodyClaimBaseUpdatedAtMin = 0;
+export const claimAutoTrackEventBodyClaimCorrectionGenerationMin = 0;
+export const claimAutoTrackEventBodyClaimMutationsItemFromMin = 0;
+export const claimAutoTrackEventBodyClaimMutationsItemFromMax = 1000000;
+export const claimAutoTrackEventBodyClaimMutationsItemToMin = 0;
+export const claimAutoTrackEventBodyClaimMutationsItemToMax = 1000000;
+export const claimAutoTrackEventBodyClaimMutationsMax = 3;
+export const claimAutoTrackEventResponseStateAcceptedRunValuesUpdatedAtMin = 0;
+export const claimAutoTrackEventResponseSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
+export const claimAutoTrackEventResponseCanonicalRevisionMin = 0;
+export const claimAutoTrackEventResponseServerTimeMin = 0;
+export const submitManualSectionEditBodyOneOneIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyOneOneRunIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyOneOneObservedGenerationMax = 160;
+export const submitManualSectionEditBodyOneOneBaseRevisionMin = 0;
+export const submitManualSectionEditBodyOneOneResetEpochMin = 0;
+export const submitManualSectionEditBodyOneOneDeviceIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyTwoOneIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyTwoOneRunIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyTwoOneObservedGenerationMax = 160;
+export const submitManualSectionEditBodyTwoOneBaseRevisionMin = 0;
+export const submitManualSectionEditBodyTwoOneResetEpochMin = 0;
+export const submitManualSectionEditBodyTwoOneDeviceIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyThreeOneIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyThreeOneRunIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyThreeOneObservedGenerationMax = 160;
+export const submitManualSectionEditBodyThreeOneBaseRevisionMin = 0;
+export const submitManualSectionEditBodyThreeOneResetEpochMin = 0;
+export const submitManualSectionEditBodyThreeOneDeviceIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyFourOneIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyFourOneRunIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyFourOneObservedGenerationMax = 160;
+export const submitManualSectionEditBodyFourOneBaseRevisionMin = 0;
+export const submitManualSectionEditBodyFourOneResetEpochMin = 0;
+export const submitManualSectionEditBodyFourOneDeviceIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyFiveOneIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyFiveOneRunIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyFiveOneObservedGenerationMax = 160;
+export const submitManualSectionEditBodyFiveOneBaseRevisionMin = 0;
+export const submitManualSectionEditBodyFiveOneResetEpochMin = 0;
+export const submitManualSectionEditBodyFiveOneDeviceIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodySixOneIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodySixOneRunIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodySixOneObservedGenerationMax = 160;
+export const submitManualSectionEditBodySixOneBaseRevisionMin = 0;
+export const submitManualSectionEditBodySixOneResetEpochMin = 0;
+export const submitManualSectionEditBodySixOneDeviceIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodySevenOneIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodySevenOneRunIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodySevenOneObservedGenerationMax = 160;
+export const submitManualSectionEditBodySevenOneBaseRevisionMin = 0;
+export const submitManualSectionEditBodySevenOneResetEpochMin = 0;
+export const submitManualSectionEditBodySevenOneDeviceIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyEightIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyEightRunIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyEightValuesMinOne = 0;
+export const submitManualSectionEditBodyEightValuesMaxOne = 1000000;
+export const submitManualSectionEditBodyEightBaseValuesMinOne = 0;
+export const submitManualSectionEditBodyEightBaseValuesMaxOne = 1000000;
+export const submitManualSectionEditBodyEightObservedGenerationMax = 160;
+export const submitManualSectionEditBodyEightBaseRevisionMin = 0;
+export const submitManualSectionEditBodyEightResetEpochMin = 0;
+export const submitManualSectionEditBodyEightDeviceIdMax = 160;
+export const submitManualSectionEditBodyEightDeviceIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditResponseCanonicalRevisionMin = 0;
+export const submitManualSectionEditResponseServerTimeMin = 0;
+export const submitManualSectionEditResponseSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
+export const submitOperationalIntentQueryEpochMin = 0;
+export const submitOperationalIntentBodySenderIdMax = 160;
+export const submitOperationalIntentBodyDeviceIdMax = 160;
+export const submitOperationalIntentBodyBaseRevisionMin = 0;
+export const submitOperationalIntentBodyIntentIdMax = 160;
+export const submitOperationalIntentBodyIntentRunIdMax = 160;
+export const submitOperationalIntentBodyIntentObservedGenerationMax = 160;
+export const submitOperationalIntentBodyIntentResetEpochMin = 0;
+export const submitOperationalIntentBodyIntentBaseRevisionMin = 0;
+export const submitOperationalIntentBodyIntentValuesMinOne = 0;
+export const submitOperationalIntentBodyIntentValuesMaxOne = 1000000;
+export const submitOperationalIntentBodyIntentInventoryLinesItemItemKeyMax = 300;
+export const submitOperationalIntentBodyIntentInventoryLinesItemQtyExclusiveMin = 0;
+export const submitOperationalIntentBodyIntentInventoryLinesItemQtyMax = 1000000;
+export const submitOperationalIntentBodyIntentInventoryLinesMax = 200;
+export const submitOperationalIntentResponseCanonicalRevisionMin = 0;
+export const submitOperationalIntentResponseServerTimeMin = 0;
+export const submitOperationalIntentResponseSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
+export const listOperationalIntentReceiptsQueryAfterMin = 0;
+export const listOperationalIntentReceiptsResponseCursorMin = 0;
+export const listOperationalIntentReceiptsResponseMutationsItemCanonicalRevisionMin = 0;
+export const listOperationalIntentReceiptsResponseMutationsItemBaseRevisionMin = 0;
+export const applyImportOperationPathOperationIdMin = 16;
+export const applyImportOperationPathOperationIdMax = 120;
+export const applyImportOperationBodyImportTypeMax = 40;
+export const applyImportOperationBodySourceKeyMax = 300;
+export const applyImportOperationBodySourceLabelMax = 300;
+export const applyImportOperationBodyRequestHashRegExp = new RegExp('^[a-f0-9]{64}$');
+export const applyImportOperationBodyExpectedStateHashRegExp = new RegExp('^[a-f0-9]{64}$');
+export const getImportOperationPathOperationIdMin = 16;
+export const getImportOperationPathOperationIdMax = 120;
+export const undoImportOperationPathOperationIdMin = 16;
+export const undoImportOperationPathOperationIdMax = 120;
+export const undoImportOperationBodyExpectedResultHashRegExp = new RegExp('^[a-f0-9]{64}$');
+
+
 
 /**
  * Returns server health status
@@ -21,13 +368,9 @@ export const HealthCheckResponse = zod.object({
  * Creates a new username + password account. Requires a facility access code (configured server-side out of band and shared only with legitimate staff) — sign-up is otherwise closed to the public internet. The very first account ever created becomes a manager; all later accounts default to operator.
  * @summary Create a staff account and start a session
  */
-export const signUpBodyOneUsernameMin = 3;
-export const signUpBodyOneUsernameMax = 64;
 
-export const signUpBodyOnePasswordMin = 6;
-export const signUpBodyOnePasswordMax = 200;
 
-export const signUpBodyTwoAccessCodeMax = 200;
+
 
 
 export const SignUpBody = zod.object({
@@ -56,15 +399,46 @@ export const SignUpResponse = zod.object({
 })
 })
 
+
 /**
  * @summary Accept a one-time staff invitation
  */
-export const acceptStaffInvitationBodyInvitationMin = 20;
+
+
+
+
+
+export const AcceptStaffInvitationBody = zod.object({
+  "invitation": zod.string().min(acceptStaffInvitationBodyInvitationMin).max(acceptStaffInvitationBodyInvitationMax),
+  "username": zod.string().min(acceptStaffInvitationBodyUsernameMin).max(acceptStaffInvitationBodyUsernameMax),
+  "password": zod.string().min(acceptStaffInvitationBodyPasswordMin).max(acceptStaffInvitationBodyPasswordMax)
+})
+
+export const AcceptStaffInvitationResponse = zod.object({
+  "token": zod.string(),
+  "user": zod.object({
+  "userId": zod.string(),
+  "role": zod.string().describe('The name of the role assigned to this user.'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
+  "email": zod.string().nullable(),
+  "name": zod.string().nullable(),
+  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login "Get Started" overview.'),
+  "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).'),
+  "floorModeEnabled": zod.boolean().describe('Whether Floor Mode (the idle big-numbers monitor) is enabled for this user. Per-user so the preference follows them across devices.'),
+  "notificationPrefs": zod.record(zod.string(), zod.boolean()).describe('Per-alert push-notification preferences: alert kind → enabled. A MISSING key means that alert is ON (default). Per-user so the choices follow them across devices.'),
+  "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated "sandbox" data scope. Clients show a persistent sandbox banner and offer a "Reset sandbox" action when true.'),
+  "disabled": zod.boolean().describe('Whether sign-in is disabled for this account.'),
+  "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as "Sandbox copied from live at …".'),
+  "sandboxStale": zod.boolean().describe('Whether the sandbox copy is stale and due for an automatic refresh from live. The client drives the re-copy (reusing the manual reset flow); the server owns the staleness cutoff so web and mobile stay in lockstep. Always false for non-sandbox accounts.')
+})
+})
+
+
 /**
  * Lightweight, read-only lookup used by the sign-up form to tell users in real time whether a username is still free. Public — sign-up is itself public. The check is case-insensitive, mirroring account creation.
  * @summary Check whether a username is available for sign-up
  */
-export const checkUsernameAvailableQueryUsernameMax = 64;
+
 
 
 export const CheckUsernameAvailableQueryParams = zod.object({
@@ -79,11 +453,8 @@ export const CheckUsernameAvailableResponse = zod.object({
 /**
  * @summary Sign in with username and password
  */
-export const signInBodyUsernameMin = 3;
-export const signInBodyUsernameMax = 64;
 
-export const signInBodyPasswordMin = 6;
-export const signInBodyPasswordMax = 200;
+
 
 
 export const SignInBody = zod.object({
@@ -121,10 +492,8 @@ export const SignOutResponse = zod.void()
  * Updates the signed-in user's password. The current password must be provided and is verified before the stored scrypt hash is replaced. Changing the password invalidates every previously-issued session token (including the one used for this request), so a fresh token is returned and must replace the caller's stored session.
  * @summary Change the signed-in user's password
  */
-export const changePasswordBodyCurrentPasswordMax = 200;
 
-export const changePasswordBodyNewPasswordMin = 6;
-export const changePasswordBodyNewPasswordMax = 200;
+
 
 
 export const ChangePasswordBody = zod.object({
@@ -156,7 +525,7 @@ export const ChangePasswordResponse = zod.object({
  * A signed-out user requests recovery for a forgotten password. Always responds 200 regardless of whether the username exists, so the endpoint never reveals which accounts are real. When the account exists a pending reset request is recorded for a manager to approve.
  * @summary Request a manager-approved password reset
  */
-export const forgotPasswordBodyUsernameMax = 64;
+
 
 
 export const ForgotPasswordBody = zod.object({
@@ -172,12 +541,9 @@ export const ForgotPasswordResponse = zod.object({
  * Verifies the single-use, short-lived code a manager issued for the account and, if valid and unexpired, replaces the password. The code is consumed on success so it can never be reused.
  * @summary Complete a password reset using a manager-issued code
  */
-export const resetPasswordBodyUsernameMax = 64;
 
-export const resetPasswordBodyCodeMax = 64;
 
-export const resetPasswordBodyNewPasswordMin = 6;
-export const resetPasswordBodyNewPasswordMax = 200;
+
 
 
 export const ResetPasswordBody = zod.object({
@@ -601,7 +967,6 @@ export const ConsumeInventoryResponse = zod.object({
  * Idempotent by production date; retries of the same date have no physical effect.
  * @summary Deduct the scheduled day's mix components and daily supplies
  */
-export const consumeInventoryDayStartBodyDateRegExp = new RegExp('^\\d{4}-\\d{2}-\\d{2}$');
 
 
 export const ConsumeInventoryDayStartBody = zod.object({
@@ -787,13 +1152,10 @@ export const UpdateInventorySettingsResponse = zod.object({
 /**
  * @summary Identify incoming stock items from a photo (AI vision); read-only
  */
-export const identifyInventoryPhotoBodyCandidatesItemKeyMax = 200;
 
-export const identifyInventoryPhotoBodyCandidatesItemCategoryMax = 100;
 
-export const identifyInventoryPhotoBodyCandidatesItemNameMax = 200;
 
-export const identifyInventoryPhotoBodyCandidatesItemUnitMax = 50;
+
 
 
 export const IdentifyInventoryPhotoBody = zod.object({
@@ -874,7 +1236,7 @@ export const ProductionSheetPhotoResponse = zod.object({
  * Transcribes one or more photographed spec-sheet or recipe pages into bounded workbook-style text. The result is advisory and must be sent through the existing spec import review before anything is changed.
  * @summary Read photographed spec sheets into workbook text (AI vision); read-only
  */
-export const parseSpecImagesBodyImagesMax = 10;
+
 
 
 export const ParseSpecImagesBody = zod.object({
@@ -996,13 +1358,10 @@ export const ListQualityChecksResponse = zod.array(ListQualityChecksResponseItem
  * Reads current inventory and the configured expiry lead time, flags lots that are expired or expiring soon, and (when anything is flagged) asks the AI for a plain-language run-order suggestion to consume the at-risk stock first. Grounded in the real inventory data and the shared facility memory. Read-only — never applies any change.
  * @summary Flag items trending toward expiry and suggest run-order to use them first
  */
-export const wasteInsightBodyPlannedItemsItemKeyMax = 200;
 
-export const wasteInsightBodyPlannedItemsItemCategoryMax = 100;
 
-export const wasteInsightBodyPlannedItemsItemNameMax = 200;
 
-export const wasteInsightBodyPlannedItemsItemUnitMax = 50;
+
 
 
 export const WasteInsightBody = zod.object({
@@ -1162,7 +1521,7 @@ export const OperationsRecapResponse = zod.object({
  * Deterministically aggregates production facts derived from every canonical scoped daily-sync snapshot in the requested date range. The legacy runs field is accepted for compatibility but ignored; clients cannot supply report production facts. The report enriches them with date-filtered quality and incident records plus a clearly labeled current inventory snapshot plus date-scoped inventory ledger events. No AI is required and source statistics are authoritative.
  * @summary Export a manager-only operational day or week report
  */
-export const exportOperationalReportBodyRunsMax = 600;
+
 
 
 export const ExportOperationalReportBody = zod.object({
@@ -1236,7 +1595,7 @@ export const ExportOperationalReportResponse = zod.object({
  * Re-derives the canonical report from server-side scoped records and appends it to the audit archive. Client report JSON is never accepted. Repeating a finalization for the same scope and reporting period returns the original immutable record and never replaces it.
  * @summary Finalize an immutable authoritative operational report
  */
-export const finalizeOperationalReportBodyRunsMax = 600;
+
 
 
 export const FinalizeOperationalReportBody = zod.object({
@@ -1355,8 +1714,7 @@ export const ListFinalizedOperationalReportsResponse = zod.array(ListFinalizedOp
  * Returns at most 100 immutable archive summaries from the authenticated facility whose reporting end date falls within the inclusive range. Searches are limited to 366 inclusive days and include both day and week reports unless scope is supplied.
  * @summary Search finalized operational reports across a date range
  */
-export const searchFinalizedOperationalReportsQueryLimitDefault = 100;
-export const searchFinalizedOperationalReportsQueryLimitMax = 100;
+
 
 
 export const SearchFinalizedOperationalReportsQueryParams = zod.object({
@@ -1851,10 +2209,9 @@ export const AiParseSpecSheetBody = zod.object({
 }).describe('A learned mapping from a raw spreadsheet label to a canonical app name.')).optional().describe('Learned spec-import aliases to ground name mapping')
 })
 
-export const aiParseSpecSheetResponseProfilesItemTargetDoughballWeightExclusiveMin = 0;
 
 
-export const aiParseSpecSheetResponseProfilesItemApplicatorsItemSlotMax = 4;
+
 
 
 export const AiParseSpecSheetResponse = zod.object({
@@ -2016,10 +2373,10 @@ export const DeleteDeniedMergesResponse = zod.object({
  * Returns the pending duplicate groups for the current facility scope. This is a manager-only advisory read; it never applies a merge.
  * @summary List outstanding duplicate-review groups
  */
-export const listDuplicateReviewsResponseGroupsItemGroupKeyMax = 500;
 
 
-export const listDuplicateReviewsResponseCountMin = 0;
+
+
 
 
 export const ListDuplicateReviewsResponse = zod.object({
@@ -2039,10 +2396,10 @@ export const ListDuplicateReviewsResponse = zod.object({
  * Adds newly observed duplicate groups to the current facility's pending review ledger. Existing groups are left unchanged, including groups already resolved or ignored, so stale scans cannot reopen work.
  * @summary Record duplicate groups for manager review
  */
-export const saveDuplicateReviewsBodyGroupsItemGroupKeyMax = 500;
 
 
-export const saveDuplicateReviewsBodyGroupsMax = 1000;
+
+
 
 
 export const SaveDuplicateReviewsBody = zod.object({
@@ -2056,10 +2413,10 @@ export const SaveDuplicateReviewsBody = zod.object({
 })).max(saveDuplicateReviewsBodyGroupsMax)
 })
 
-export const saveDuplicateReviewsResponseGroupsItemGroupKeyMax = 500;
 
 
-export const saveDuplicateReviewsResponseCountMin = 0;
+
+
 
 
 export const SaveDuplicateReviewsResponse = zod.object({
@@ -2079,7 +2436,7 @@ export const SaveDuplicateReviewsResponse = zod.object({
  * Explicitly closes one pending group after a manager reviewed it. This endpoint does not merge or delete master data.
  * @summary Resolve or ignore one duplicate-review group
  */
-export const resolveDuplicateReviewBodyGroupKeyMax = 500;
+
 
 
 export const ResolveDuplicateReviewBody = zod.object({
@@ -2087,10 +2444,10 @@ export const ResolveDuplicateReviewBody = zod.object({
   "outcome": zod.enum(['resolved', 'ignored'])
 })
 
-export const resolveDuplicateReviewResponseGroupsItemGroupKeyMax = 500;
 
 
-export const resolveDuplicateReviewResponseCountMin = 0;
+
+
 
 
 export const ResolveDuplicateReviewResponse = zod.object({
@@ -2304,7 +2661,8 @@ export const DeleteFreezerPullItemsResponse = zod.object({
  * @summary List dated finished-case freezer surplus
  */
 
-export const listFreezerSurplusResponseLotsItemRemainingCasesMin = 0;
+
+
 
 
 export const ListFreezerSurplusResponse = zod.object({
@@ -2333,11 +2691,9 @@ export const ListFreezerSurplusResponse = zod.object({
 /**
  * @summary Confirm a new dated finished-case surplus lot
  */
-export const confirmFreezerSurplusBodyBrandMax = 120;
 
-export const confirmFreezerSurplusBodyFlavorMax = 120;
 
-export const confirmFreezerSurplusBodyCasesMax = 1000000;
+
 
 
 export const ConfirmFreezerSurplusBody = zod.object({
@@ -2348,10 +2704,10 @@ export const ConfirmFreezerSurplusBody = zod.object({
 })
 
 
-export const confirmFreezerSurplusResponseLotsItemRemainingCasesMin = 0;
 
 
-export const confirmFreezerSurplusResponseCreatedLotOneRemainingCasesMin = 0;
+
+
 
 
 export const ConfirmFreezerSurplusResponse = zod.object({
@@ -2389,22 +2745,18 @@ export const ConfirmFreezerSurplusResponse = zod.object({
 /**
  * @summary Apply or revise dated surplus for an unstarted run
  */
-export const replaceFreezerSurplusAllocationPathRunIdMax = 120;
+
 
 
 export const ReplaceFreezerSurplusAllocationParams = zod.object({
   "runId": zod.coerce.string().min(1).max(replaceFreezerSurplusAllocationPathRunIdMax)
 })
 
-export const replaceFreezerSurplusAllocationBodyBrandMax = 120;
 
-export const replaceFreezerSurplusAllocationBodyFlavorMax = 120;
 
-export const replaceFreezerSurplusAllocationBodyAllocationsItemLotIdMax = 120;
 
-export const replaceFreezerSurplusAllocationBodyAllocationsItemCasesMax = 1000000;
 
-export const replaceFreezerSurplusAllocationBodyAllocationsMax = 500;
+
 
 
 export const ReplaceFreezerSurplusAllocationBody = zod.object({
@@ -2418,10 +2770,10 @@ export const ReplaceFreezerSurplusAllocationBody = zod.object({
 })
 
 
-export const replaceFreezerSurplusAllocationResponseLotsItemRemainingCasesMin = 0;
 
 
-export const replaceFreezerSurplusAllocationResponseCreatedLotOneRemainingCasesMin = 0;
+
+
 
 
 export const ReplaceFreezerSurplusAllocationResponse = zod.object({
@@ -2460,15 +2812,11 @@ export const ReplaceFreezerSurplusAllocationResponse = zod.object({
  * Returns scoped mix surplus lots (dated over-production of prep mixes), explicit make-day allocations, and a per-mix balance rollup (remaining lbs > 0) used by the Mixes tab's "freezer stock" reminder. Lots are ledger/audit rows only — using surplus never re-deducts inventory.
  * @summary List dated prep-mix surplus ledger and freezer balances
  */
-export const listMixSurplusResponseLotsItemAmountMadeMin = 0;
 
-export const listMixSurplusResponseLotsItemAmountUsedMin = 0;
 
-export const listMixSurplusResponseLotsItemAmountRemainingMin = 0;
 
-export const listMixSurplusResponseAllocationsItemAmountMin = 0;
 
-export const listMixSurplusResponseBalancesItemLbsMin = 0;
+
 
 
 export const ListMixSurplusResponse = zod.object({
@@ -2509,9 +2857,8 @@ export const ListMixSurplusResponse = zod.object({
  * Manager-confirmed record of surplus mix (pounds already made beyond a day's fresh need) as freezer stock. Creates a dated lot with remaining equal to the entered amount. Ledger action only — no inventory writes.
  * @summary Record a confirmed prep-mix surplus lot
  */
-export const recordMixSurplusBodyMixIdMax = 120;
 
-export const recordMixSurplusBodyAmountMadeExclusiveMin = 0.1;
+
 
 
 export const RecordMixSurplusBody = zod.object({
@@ -2520,21 +2867,14 @@ export const RecordMixSurplusBody = zod.object({
   "amountMade": zod.number().gt(recordMixSurplusBodyAmountMadeExclusiveMin)
 })
 
-export const recordMixSurplusResponseLotsItemAmountMadeMin = 0;
 
-export const recordMixSurplusResponseLotsItemAmountUsedMin = 0;
 
-export const recordMixSurplusResponseLotsItemAmountRemainingMin = 0;
 
-export const recordMixSurplusResponseAllocationsItemAmountMin = 0;
 
-export const recordMixSurplusResponseBalancesItemLbsMin = 0;
 
-export const recordMixSurplusResponseCreatedLotOneAmountMadeMin = 0;
 
-export const recordMixSurplusResponseCreatedLotOneAmountUsedMin = 0;
 
-export const recordMixSurplusResponseCreatedLotOneAmountRemainingMin = 0;
+
 
 
 export const RecordMixSurplusResponse = zod.object({
@@ -2592,11 +2932,9 @@ export const ReplaceMixSurplusAllocationsParams = zod.object({
   "runDate": zod.date()
 })
 
-export const replaceMixSurplusAllocationsBodyAllocationsItemLotIdMax = 120;
 
-export const replaceMixSurplusAllocationsBodyAllocationsItemAmountMin = 0;
 
-export const replaceMixSurplusAllocationsBodyAllocationsMax = 500;
+
 
 
 export const ReplaceMixSurplusAllocationsBody = zod.object({
@@ -2607,21 +2945,14 @@ export const ReplaceMixSurplusAllocationsBody = zod.object({
 })).max(replaceMixSurplusAllocationsBodyAllocationsMax)
 })
 
-export const replaceMixSurplusAllocationsResponseLotsItemAmountMadeMin = 0;
 
-export const replaceMixSurplusAllocationsResponseLotsItemAmountUsedMin = 0;
 
-export const replaceMixSurplusAllocationsResponseLotsItemAmountRemainingMin = 0;
 
-export const replaceMixSurplusAllocationsResponseAllocationsItemAmountMin = 0;
 
-export const replaceMixSurplusAllocationsResponseBalancesItemLbsMin = 0;
 
-export const replaceMixSurplusAllocationsResponseCreatedLotOneAmountMadeMin = 0;
 
-export const replaceMixSurplusAllocationsResponseCreatedLotOneAmountUsedMin = 0;
 
-export const replaceMixSurplusAllocationsResponseCreatedLotOneAmountRemainingMin = 0;
+
 
 
 export const ReplaceMixSurplusAllocationsResponse = zod.object({
@@ -2675,28 +3006,21 @@ export const ReplaceMixSurplusAllocationsResponse = zod.object({
  * Manager override: voids a surplus lot entirely — its remaining balance is set to 0, its allocation rows are removed, and the mix row's amountAlreadyMade is decremented by the voided amount so the plan reducer stops counting disposed surplus (ledger == scalar invariant). Ledger action only — never writes inventory.
  * @summary Void a mix surplus lot (release it from use)
  */
-export const voidMixSurplusLotPathIdMax = 120;
+
 
 
 export const VoidMixSurplusLotParams = zod.object({
   "id": zod.coerce.string().min(1).max(voidMixSurplusLotPathIdMax)
 })
 
-export const voidMixSurplusLotResponseLotsItemAmountMadeMin = 0;
 
-export const voidMixSurplusLotResponseLotsItemAmountUsedMin = 0;
 
-export const voidMixSurplusLotResponseLotsItemAmountRemainingMin = 0;
 
-export const voidMixSurplusLotResponseAllocationsItemAmountMin = 0;
 
-export const voidMixSurplusLotResponseBalancesItemLbsMin = 0;
 
-export const voidMixSurplusLotResponseCreatedLotOneAmountMadeMin = 0;
 
-export const voidMixSurplusLotResponseCreatedLotOneAmountUsedMin = 0;
 
-export const voidMixSurplusLotResponseCreatedLotOneAmountRemainingMin = 0;
+
 
 
 export const VoidMixSurplusLotResponse = zod.object({
@@ -2971,10 +3295,7 @@ export const DeleteDieTypesResponse = zod.object({
  * Returns every facility-wide saved run template (a named run-setup preset). These are global master-data (not part of the per-day sync payload). Any signed-in user can read and write them — templates are a shared convenience, not a policy control.
  * @summary List facility-wide run templates
  */
-export const listRunTemplatesResponseTemplatesItemRevisionMin = 0;
-export const listRunTemplatesResponseTemplatesItemRevisionMax = 9007199254740991;
 
-export const listRunTemplatesResponseTemplatesItemDeletedDefault = false;
 
 export const ListRunTemplatesResponse = zod.object({
   "templates": zod.array(zod.object({
@@ -2994,10 +3315,7 @@ export const ListRunTemplatesResponse = zod.object({
  * Upserts a batch of run templates by id and revision. A write applies only when its revision is strictly newer than the stored revision; equal revisions are idempotent. Any signed-in user may save.
  * @summary Create or update run templates
  */
-export const saveRunTemplatesBodyTemplatesItemRevisionMin = 0;
-export const saveRunTemplatesBodyTemplatesItemRevisionMax = 9007199254740991;
 
-export const saveRunTemplatesBodyTemplatesItemDeletedDefault = false;
 
 export const SaveRunTemplatesBody = zod.object({
   "templates": zod.array(zod.object({
@@ -3012,10 +3330,7 @@ export const SaveRunTemplatesBody = zod.object({
 }).describe('A run template mutation. `revision` is optional solely for compatibility with cached legacy clients; when omitted, the server assigns a revision newer than the stored record atomically.')).describe('The batch of run templates to create or update (by id)')
 })
 
-export const saveRunTemplatesResponseTemplatesItemRevisionMin = 0;
-export const saveRunTemplatesResponseTemplatesItemRevisionMax = 9007199254740991;
 
-export const saveRunTemplatesResponseTemplatesItemDeletedDefault = false;
 
 export const SaveRunTemplatesResponse = zod.object({
   "templates": zod.array(zod.object({
@@ -3035,14 +3350,9 @@ export const SaveRunTemplatesResponse = zod.object({
  * Persists a deletion tombstone for each item when its revision is strictly newer than the stored revision. Any signed-in user may delete.
  * @summary Tombstone run templates by id and revision
  */
-export const deleteRunTemplatesBodyOneItemsItemRevisionMin = 0;
-export const deleteRunTemplatesBodyOneItemsItemRevisionMax = 9007199254740991;
 
-export const deleteRunTemplatesBodyTwoItemsItemRevisionMin = 0;
-export const deleteRunTemplatesBodyTwoItemsItemRevisionMax = 9007199254740991;
 
-export const deleteRunTemplatesBodyThreeItemsItemRevisionMin = 0;
-export const deleteRunTemplatesBodyThreeItemsItemRevisionMax = 9007199254740991;
+
 
 
 export const DeleteRunTemplatesBody = zod.union([zod.object({
@@ -3065,10 +3375,7 @@ export const DeleteRunTemplatesBody = zod.union([zod.object({
   "ids": zod.array(zod.string()).optional().describe('Legacy deletion ids. The server atomically assigns a newer revision.')
 })).describe('Revisioned deletion tombstones and/or legacy template ids. At least one of `items` or `ids` must be supplied.')
 
-export const deleteRunTemplatesResponseTemplatesItemRevisionMin = 0;
-export const deleteRunTemplatesResponseTemplatesItemRevisionMax = 9007199254740991;
 
-export const deleteRunTemplatesResponseTemplatesItemDeletedDefault = false;
 
 export const DeleteRunTemplatesResponse = zod.object({
   "templates": zod.array(zod.object({
@@ -4043,61 +4350,33 @@ export const ApplyProfileDataHealthRepairsResponse = zod.object({
  * @summary Read the manager data-health workspace
  */
 
-export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesConversationTurnsMin = 0;
 
-export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesRetiredFacilityFactsMin = 0;
 
-export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesIncidentGeneratedTextToLabelMin = 0;
 
-export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesQualityThumbnailsToRedactMin = 0;
 
-export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesClosedObservationsToRedactMin = 0;
 
-export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesTotalMin = 0;
 
-export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionProtectedOperationalIncidentRowsMin = 0;
 
-export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionProtectedConfirmedQualityRowsMin = 0;
 
-export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionProtectedOpenInventoryObservationsMin = 0;
 
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportSha256RegExp = new RegExp('^[a-f0-9]{64}$');
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportAutomaticProposalsMin = 0;
 
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportStubsMin = 0;
 
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportPlanSha256RegExp = new RegExp('^[a-f0-9]{64}$');
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportSnapshotSha256RegExp = new RegExp('^[a-f0-9]{64}$');
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportManifestSha256RegExp = new RegExp('^[a-f0-9]{64}$');
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportManifestRetainedMin = 0;
 
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationReportManifestExcludedOlderDuplicatesMin = 0;
 
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultReplacementsMin = 0;
 
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultAliasesInsertedMin = 0;
 
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultRepointedProfilesMin = 0;
 
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultRepointedRunsMin = 0;
 
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationHealResultDeletedStubsMin = 0;
 
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryPoolMismatchesMin = 0;
 
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryAliasGapsMin = 0;
 
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryStaleProfileLinksMin = 0;
 
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryStalePendingRunLinksMin = 0;
 
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryProtectedStubsMin = 0;
 
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryUnexpectedStubsMin = 0;
 
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryProtectedHistoryReferencesMin = 0;
 
-export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryOmittedFindingsMin = 0;
+
+
 
 
 export const GetProfileDataHealthWorkspaceResponse = zod.object({
@@ -4830,8 +5109,7 @@ export const DeletePremixSheetResponse = zod.object({
 /**
  * @summary List the authenticated user's retained server jobs
  */
-export const listServerJobsResponseProgressMin = 0;
-export const listServerJobsResponseProgressMax = 100;
+
 
 
 export const ListServerJobsResponseItem = zod.object({
@@ -4860,11 +5138,8 @@ export const ListServerJobsResponse = zod.array(ListServerJobsResponseItem)
 /**
  * @summary Enqueue a bounded, idempotent server job
  */
-export const createServerJobBodyTypeRegExp = new RegExp('^[a-z][a-z0-9-]{1,63}$');
-export const createServerJobBodyIdempotencyKeyMin = 8;
-export const createServerJobBodyIdempotencyKeyMax = 128;
 
-export const createServerJobBodySnapshotIdMax = 200;
+
 
 
 export const CreateServerJobBody = zod.object({
@@ -4874,8 +5149,7 @@ export const CreateServerJobBody = zod.object({
   "snapshotId": zod.string().max(createServerJobBodySnapshotIdMax).optional()
 })
 
-export const createServerJobResponseProgressMin = 0;
-export const createServerJobResponseProgressMax = 100;
+
 
 
 export const CreateServerJobResponse = zod.object({
@@ -4907,8 +5181,7 @@ export const GetServerJobParams = zod.object({
   "id": zod.uuid()
 })
 
-export const getServerJobResponseProgressMin = 0;
-export const getServerJobResponseProgressMax = 100;
+
 
 
 export const GetServerJobResponse = zod.object({
@@ -4940,8 +5213,7 @@ export const CancelServerJobParams = zod.object({
   "id": zod.uuid()
 })
 
-export const cancelServerJobResponseProgressMin = 0;
-export const cancelServerJobResponseProgressMax = 100;
+
 
 
 export const CancelServerJobResponse = zod.object({
@@ -4975,7 +5247,7 @@ export const ListImportHistoryQueryParams = zod.object({
   "customer": zod.coerce.string().optional()
 })
 
-export const listImportHistoryResponseImportsItemSummaryCountsMinOne = 0;
+
 
 
 export const ListImportHistoryResponse = zod.object({
@@ -5005,7 +5277,7 @@ export const ListImportHistoryResponse = zod.object({
 /**
  * @summary Record a sanitized workbook import outcome
  */
-export const recordImportHistoryBodySummaryCountsMinOne = 0;
+
 
 
 export const RecordImportHistoryBody = zod.object({
@@ -5026,7 +5298,7 @@ export const RecordImportHistoryBody = zod.object({
 })
 })
 
-export const recordImportHistoryResponseImportSummaryCountsMinOne = 0;
+
 
 
 export const RecordImportHistoryResponse = zod.object({
@@ -5193,17 +5465,11 @@ export const SavePhotoAliasesResponse = zod.object({
  * Stores bounded, authenticated, facility-scoped observations from normal staff use. Observations are deduplicated by observationId and never call an AI provider or modify production data.
  * @summary Submit passive browser field-check observations
  */
-export const submitFieldCheckObservationsBodyObservationsItemObservationIdMin = 8;
-export const submitFieldCheckObservationsBodyObservationsItemObservationIdMax = 160;
 
-export const submitFieldCheckObservationsBodyObservationsItemCheckVersionMax = 20;
 
-export const submitFieldCheckObservationsBodyObservationsItemAppBuildMax = 100;
 
-export const submitFieldCheckObservationsBodyObservationsItemMetricsMinOne = 0;
-export const submitFieldCheckObservationsBodyObservationsItemMetricsMaxOne = 10000000;
 
-export const submitFieldCheckObservationsBodyObservationsMax = 20;
+
 
 
 export const SubmitFieldCheckObservationsBody = zod.object({
@@ -5219,9 +5485,8 @@ export const SubmitFieldCheckObservationsBody = zod.object({
 })).min(1).max(submitFieldCheckObservationsBodyObservationsMax)
 })
 
-export const submitFieldCheckObservationsResponseAcceptedMin = 0;
 
-export const submitFieldCheckObservationsResponseDuplicateMin = 0;
+
 
 
 export const SubmitFieldCheckObservationsResponse = zod.object({
@@ -5276,9 +5541,8 @@ export const ConfirmHardwareFieldCheckBody = zod.object({
   "deviceCategory": zod.enum(['android-phone', 'android-tablet', 'ipad'])
 })
 
-export const confirmHardwareFieldCheckResponseAcceptedMin = 0;
 
-export const confirmHardwareFieldCheckResponseDuplicateMin = 0;
+
 
 
 export const ConfirmHardwareFieldCheckResponse = zod.object({
@@ -5292,23 +5556,15 @@ export const ConfirmHardwareFieldCheckResponse = zod.object({
  * @summary Apply the bounded retired-AI retention cleanup
  */
 
-export const applyAiRetentionCleanupResponseReportCandidatesConversationTurnsMin = 0;
 
-export const applyAiRetentionCleanupResponseReportCandidatesRetiredFacilityFactsMin = 0;
 
-export const applyAiRetentionCleanupResponseReportCandidatesIncidentGeneratedTextToLabelMin = 0;
 
-export const applyAiRetentionCleanupResponseReportCandidatesQualityThumbnailsToRedactMin = 0;
 
-export const applyAiRetentionCleanupResponseReportCandidatesClosedObservationsToRedactMin = 0;
 
-export const applyAiRetentionCleanupResponseReportCandidatesTotalMin = 0;
 
-export const applyAiRetentionCleanupResponseReportProtectedOperationalIncidentRowsMin = 0;
 
-export const applyAiRetentionCleanupResponseReportProtectedConfirmedQualityRowsMin = 0;
 
-export const applyAiRetentionCleanupResponseReportProtectedOpenInventoryObservationsMin = 0;
+
 
 
 export const ApplyAiRetentionCleanupResponse = zod.object({
@@ -5347,24 +5603,15 @@ export const ApplyAiRetentionCleanupResponse = zod.object({
  * Records an incident (a user-reported problem or an auto-captured crash) for manager review. Retired automated diagnosis fields are returned as null. Allowed for any signed-in user. Rate-limited per user.
  * @summary Report an issue or a crash for manager review
  */
-export const reportIncidentBodyScreenMax = 200;
 
-export const reportIncidentBodyAppVersionMax = 100;
 
-export const reportIncidentBodyDescriptionMax = 4000;
 
-export const reportIncidentBodyErrorMessageMax = 4000;
 
-export const reportIncidentBodyErrorStackMax = 8000;
 
-export const reportIncidentBodyUserAgentMax = 500;
 
-export const reportIncidentBodyDiagnosticsActionMax = 80;
 
-export const reportIncidentBodyDiagnosticsRetryCountMin = 0;
-export const reportIncidentBodyDiagnosticsRetryCountMax = 10;
 
-export const reportIncidentBodyDiagnosticsCorrelationIdMax = 128;
+
 
 
 export const ReportIncidentBody = zod.object({
@@ -5709,7 +5956,8 @@ export const ListManagerActionQueueResponse = zod.object({
 /**
  * @summary List sustained background-operation failures visible to managers
  */
-export const getBackgroundOperationDiagnosticsResponseWarningsMax = 4;
+
+
 
 
 export const GetBackgroundOperationDiagnosticsResponse = zod.object({
@@ -5728,9 +5976,8 @@ export const UpdateManagerActionItemParams = zod.object({
   "id": zod.coerce.number().int()
 })
 
-export const updateManagerActionItemBodyDeferReasonMax = 2000;
 
-export const updateManagerActionItemBodyResolutionNoteMax = 2000;
+
 
 
 export const UpdateManagerActionItemBody = zod.object({
@@ -5772,7 +6019,7 @@ export const UpdateIncidentWorkflowParams = zod.object({
   "id": zod.coerce.string()
 })
 
-export const updateIncidentWorkflowBodyNoteMax = 2000;
+
 
 
 export const UpdateIncidentWorkflowBody = zod.object({
@@ -5962,7 +6209,7 @@ export const ListRolesResponse = zod.array(ListRolesResponseItem)
 /**
  * @summary Create a new role (manage-staff)
  */
-export const createRoleBodyNameMax = 60;
+
 
 
 export const CreateRoleBody = zod.object({
@@ -5984,7 +6231,7 @@ export const UpdateRoleParams = zod.object({
   "name": zod.coerce.string()
 })
 
-export const updateRoleBodyNameMax = 60;
+
 
 
 export const UpdateRoleBody = zod.object({
@@ -6065,8 +6312,7 @@ export const ResetStaffPasswordParams = zod.object({
   "userId": zod.coerce.string()
 })
 
-export const resetStaffPasswordBodyNewPasswordMin = 6;
-export const resetStaffPasswordBodyNewPasswordMax = 200;
+
 
 
 export const ResetStaffPasswordBody = zod.object({
@@ -6074,6 +6320,7 @@ export const ResetStaffPasswordBody = zod.object({
 })
 
 export const ResetStaffPasswordResponse = zod.void()
+
 
 /**
  * @summary Read bounded transitional sign-up code counters
@@ -6084,6 +6331,23 @@ export const GetSignupCodeStatusResponse = zod.object({
   "failedUses": zod.int(),
   "rotatedAt": zod.coerce.date().nullish()
 })
+
+
+export const SetSignupCodeStatusBody = zod.object({
+  "enabled": zod.boolean()
+})
+
+export const SetSignupCodeStatusResponse = zod.unknown()
+
+
+/**
+ * @summary Rotate transitional sign-up code (secret returned once)
+ */
+export const RotateSignupCodeResponse = zod.object({
+  "secret": zod.string()
+})
+
+
 /**
  * @summary Remove a staff member (manager only)
  */
@@ -6102,9 +6366,8 @@ export const ListCompletedHistoryQueryParams = zod.object({
   "to": zod.date().optional()
 })
 
-export const listCompletedHistoryResponseHistoryItemOneOperationIdMax = 300;
 
-export const listCompletedHistoryResponseHistoryItemOneRunIdMax = 500;
+
 
 
 export const ListCompletedHistoryResponse = zod.object({
@@ -6123,9 +6386,8 @@ export const ListCompletedHistoryResponse = zod.object({
 /**
  * @summary Append an immutable completed-run snapshot idempotently
  */
-export const finalizeCompletedRunBodyOperationIdMax = 300;
 
-export const finalizeCompletedRunBodyRunIdMax = 500;
+
 
 
 export const FinalizeCompletedRunBody = zod.object({
@@ -6142,14 +6404,10 @@ export const FinalizeCompletedRunResponse = zod.unknown()
 /**
  * @summary List append-only applicator batch observations and manager attestations
  */
-export const listApplicatorBatchEvidenceQueryRunIdMax = 500;
-
-export const listApplicatorBatchEvidenceQueryCursorMax = 4096;
 
 
-export const listApplicatorBatchEvidenceQueryCursorRegExp = new RegExp('^[A-Za-z0-9_-]+$');
-export const listApplicatorBatchEvidenceQueryLimitDefault = 500;
-export const listApplicatorBatchEvidenceQueryLimitMax = 500;
+
+
 
 
 export const ListApplicatorBatchEvidenceQueryParams = zod.object({
@@ -6160,13 +6418,9 @@ export const ListApplicatorBatchEvidenceQueryParams = zod.object({
   "limit": zod.coerce.number().int().min(1).max(listApplicatorBatchEvidenceQueryLimitMax).default(listApplicatorBatchEvidenceQueryLimitDefault)
 })
 
-export const listApplicatorBatchEvidenceResponseEvidenceItemSlotMax = 4;
 
-export const listApplicatorBatchEvidenceResponseEvidenceItemObservedTotalMin = 0;
 
-export const listApplicatorBatchEvidenceResponseEvidenceItemConfirmedTotalMin = 0;
 
-export const listApplicatorBatchEvidenceResponseEvidenceItemEvidenceHashRegExp = new RegExp('^[a-f0-9]{64}$');
 
 
 export const ListApplicatorBatchEvidenceResponse = zod.object({
@@ -6192,21 +6446,13 @@ export const ListApplicatorBatchEvidenceResponse = zod.object({
  * Attests a slot only for an existing immutable completed run in this authenticated scope. Corrections append a new manager record and reference the latest finalization.
  * @summary Append an immutable manager-confirmed physical applicator total
  */
-export const finalizeApplicatorBatchTotalBodyOperationIdMax = 300;
 
 
-export const finalizeApplicatorBatchTotalBodyOperationIdRegExp = new RegExp('^[A-Za-z0-9:_-]+$');
-export const finalizeApplicatorBatchTotalBodyRunIdMax = 500;
-
-export const finalizeApplicatorBatchTotalBodySlotMax = 4;
-
-export const finalizeApplicatorBatchTotalBodyFinalTotalMin = 0;
-export const finalizeApplicatorBatchTotalBodyFinalTotalMax = 1000000;
-
-export const finalizeApplicatorBatchTotalBodyCorrectionOfMax = 300;
 
 
-export const finalizeApplicatorBatchTotalBodyCorrectionOfRegExp = new RegExp('^[A-Za-z0-9:_-]+$');
+
+
+
 
 
 export const FinalizeApplicatorBatchTotalBody = zod.object({
@@ -6218,14 +6464,9 @@ export const FinalizeApplicatorBatchTotalBody = zod.object({
   "correctionOf": zod.string().min(1).max(finalizeApplicatorBatchTotalBodyCorrectionOfMax).regex(finalizeApplicatorBatchTotalBodyCorrectionOfRegExp).optional()
 })
 
-export const finalizeApplicatorBatchTotalResponseEvidenceHashRegExp = new RegExp('^[a-f0-9]{64}$');
-export const finalizeApplicatorBatchTotalResponseCanonicalSlotMax = 4;
 
-export const finalizeApplicatorBatchTotalResponseCanonicalObservedTotalMin = 0;
 
-export const finalizeApplicatorBatchTotalResponseCanonicalConfirmedTotalMin = 0;
 
-export const finalizeApplicatorBatchTotalResponseCanonicalEvidenceHashRegExp = new RegExp('^[a-f0-9]{64}$');
 
 
 export const FinalizeApplicatorBatchTotalResponse = zod.object({
@@ -6253,7 +6494,6 @@ export const FinalizeApplicatorBatchTotalResponse = zod.object({
 /**
  * @summary Read the client-local current-day sync snapshot
  */
-export const getSyncTodayQuerySnapshotRegExp = new RegExp('^[a-f0-9]{64}$');
 
 
 export const GetSyncTodayQueryParams = zod.object({
@@ -6261,12 +6501,9 @@ export const GetSyncTodayQueryParams = zod.object({
   "snapshot": zod.coerce.string().regex(getSyncTodayQuerySnapshotRegExp).optional()
 })
 
-export const getSyncTodayResponseOneTwoResetEpochMin = 0;
 
-export const getSyncTodayResponseTwoSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
-export const getSyncTodayResponseTwoResetEpochMin = 0;
 
-export const getSyncTodayResponseTwoCanonicalRevisionMin = 0;
+
 
 
 export const GetSyncTodayResponse = zod.union([zod.object({
@@ -6287,7 +6524,7 @@ export const GetSyncTodayResponse = zod.union([zod.object({
 /**
  * @summary Merge the client-local current-day sync snapshot
  */
-export const putSyncTodayQueryEpochMin = 0;
+
 
 
 export const PutSyncTodayQueryParams = zod.object({
@@ -6295,8 +6532,6 @@ export const PutSyncTodayQueryParams = zod.object({
   "epoch": zod.coerce.number().int().min(putSyncTodayQueryEpochMin).optional()
 })
 
-export const putSyncTodayBodySnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
-export const putSyncTodayBodyPayloadTwoBaseSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
 
 
 export const PutSyncTodayBody = zod.object({
@@ -6312,12 +6547,9 @@ export const PutSyncTodayBody = zod.object({
 }).describe('Protocol-marked complete and partial writes must carry the exact baseSnapshotId most recently adopted from the server. During the measured compatibility window, legacy payloads without completeness receive Deprecation, Sunset, and X-Sync-Upgrade-Required headers; after retirement they receive 409 with the authoritative snapshot and are not applied.'))
 })
 
-export const putSyncTodayResponseSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
-export const putSyncTodayResponseCanonicalRevisionMin = 0;
 
-export const putSyncTodayResponseServerTimeMin = 0;
 
-export const putSyncTodayResponseOperationalProjectionOneCalculationRevisionMin = 0;
+
 
 
 export const PutSyncTodayResponse = zod.object({
@@ -6389,7 +6621,6 @@ export const PutSyncTodayResponse = zod.object({
  * Server-sent events. Initial and recovery frames are complete. A routine peer update may be partial only when it names the receiver's exact canonical base snapshot and the resulting snapshot identity.
  * @summary Stream date-scoped canonical sync updates
  */
-export const streamSyncEventsQuerySnapshotRegExp = new RegExp('^[a-f0-9]{64}$');
 
 
 export const StreamSyncEventsQueryParams = zod.object({
@@ -6404,7 +6635,7 @@ export const StreamSyncEventsResponse = zod.unknown()
 /**
  * @summary Atomically claim one due automatic production event
  */
-export const claimAutoTrackEventQueryEpochMin = 0;
+
 
 
 export const ClaimAutoTrackEventQueryParams = zod.object({
@@ -6412,27 +6643,16 @@ export const ClaimAutoTrackEventQueryParams = zod.object({
   "epoch": zod.coerce.number().int().min(claimAutoTrackEventQueryEpochMin).optional()
 })
 
-export const claimAutoTrackEventBodySenderIdMax = 160;
 
-export const claimAutoTrackEventBodyClaimRunIdMax = 160;
 
-export const claimAutoTrackEventBodyClaimGenerationMax = 160;
 
-export const claimAutoTrackEventBodyClaimSequenceMax = 10000000;
 
-export const claimAutoTrackEventBodyClaimEventIdMax = 160;
 
-export const claimAutoTrackEventBodyClaimBaseUpdatedAtMin = 0;
 
-export const claimAutoTrackEventBodyClaimCorrectionGenerationMin = 0;
 
-export const claimAutoTrackEventBodyClaimMutationsItemFromMin = 0;
-export const claimAutoTrackEventBodyClaimMutationsItemFromMax = 1000000;
 
-export const claimAutoTrackEventBodyClaimMutationsItemToMin = 0;
-export const claimAutoTrackEventBodyClaimMutationsItemToMax = 1000000;
 
-export const claimAutoTrackEventBodyClaimMutationsMax = 3;
+
 
 
 export const ClaimAutoTrackEventBody = zod.object({
@@ -6456,12 +6676,9 @@ export const ClaimAutoTrackEventBody = zod.object({
 })
 })
 
-export const claimAutoTrackEventResponseStateAcceptedRunValuesUpdatedAtMin = 0;
 
-export const claimAutoTrackEventResponseSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
-export const claimAutoTrackEventResponseCanonicalRevisionMin = 0;
 
-export const claimAutoTrackEventResponseServerTimeMin = 0;
+
 
 
 export const ClaimAutoTrackEventResponse = zod.object({
@@ -6494,94 +6711,48 @@ export const SubmitManualSectionEditQueryParams = zod.object({
   "today": zod.date().optional()
 })
 
-export const submitManualSectionEditBodyOneOneIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
-export const submitManualSectionEditBodyOneOneRunIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
-export const submitManualSectionEditBodyOneOneObservedGenerationMax = 160;
-
-export const submitManualSectionEditBodyOneOneBaseRevisionMin = 0;
-
-export const submitManualSectionEditBodyOneOneResetEpochMin = 0;
 
 
-export const submitManualSectionEditBodyOneOneDeviceIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
-export const submitManualSectionEditBodyTwoOneIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
-export const submitManualSectionEditBodyTwoOneRunIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
-export const submitManualSectionEditBodyTwoOneObservedGenerationMax = 160;
-
-export const submitManualSectionEditBodyTwoOneBaseRevisionMin = 0;
-
-export const submitManualSectionEditBodyTwoOneResetEpochMin = 0;
 
 
-export const submitManualSectionEditBodyTwoOneDeviceIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
-export const submitManualSectionEditBodyThreeOneIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
-export const submitManualSectionEditBodyThreeOneRunIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
-export const submitManualSectionEditBodyThreeOneObservedGenerationMax = 160;
-
-export const submitManualSectionEditBodyThreeOneBaseRevisionMin = 0;
-
-export const submitManualSectionEditBodyThreeOneResetEpochMin = 0;
 
 
-export const submitManualSectionEditBodyThreeOneDeviceIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
-export const submitManualSectionEditBodyFourOneIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
-export const submitManualSectionEditBodyFourOneRunIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
-export const submitManualSectionEditBodyFourOneObservedGenerationMax = 160;
-
-export const submitManualSectionEditBodyFourOneBaseRevisionMin = 0;
-
-export const submitManualSectionEditBodyFourOneResetEpochMin = 0;
 
 
-export const submitManualSectionEditBodyFourOneDeviceIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
-export const submitManualSectionEditBodyFiveOneIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
-export const submitManualSectionEditBodyFiveOneRunIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
-export const submitManualSectionEditBodyFiveOneObservedGenerationMax = 160;
-
-export const submitManualSectionEditBodyFiveOneBaseRevisionMin = 0;
-
-export const submitManualSectionEditBodyFiveOneResetEpochMin = 0;
 
 
-export const submitManualSectionEditBodyFiveOneDeviceIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
-export const submitManualSectionEditBodySixOneIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
-export const submitManualSectionEditBodySixOneRunIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
-export const submitManualSectionEditBodySixOneObservedGenerationMax = 160;
-
-export const submitManualSectionEditBodySixOneBaseRevisionMin = 0;
-
-export const submitManualSectionEditBodySixOneResetEpochMin = 0;
 
 
-export const submitManualSectionEditBodySixOneDeviceIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
-export const submitManualSectionEditBodySevenOneIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
-export const submitManualSectionEditBodySevenOneRunIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
-export const submitManualSectionEditBodySevenOneObservedGenerationMax = 160;
-
-export const submitManualSectionEditBodySevenOneBaseRevisionMin = 0;
-
-export const submitManualSectionEditBodySevenOneResetEpochMin = 0;
 
 
-export const submitManualSectionEditBodySevenOneDeviceIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
-export const submitManualSectionEditBodyEightIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
-export const submitManualSectionEditBodyEightRunIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
-export const submitManualSectionEditBodyEightValuesMinOne = 0;
-export const submitManualSectionEditBodyEightValuesMaxOne = 1000000;
-
-export const submitManualSectionEditBodyEightBaseValuesMinOne = 0;
-export const submitManualSectionEditBodyEightBaseValuesMaxOne = 1000000;
-
-export const submitManualSectionEditBodyEightObservedGenerationMax = 160;
-
-export const submitManualSectionEditBodyEightBaseRevisionMin = 0;
-
-export const submitManualSectionEditBodyEightResetEpochMin = 0;
-
-export const submitManualSectionEditBodyEightDeviceIdMax = 160;
 
 
-export const submitManualSectionEditBodyEightDeviceIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 export const SubmitManualSectionEditBody = zod.union([zod.object({
@@ -6733,11 +6904,8 @@ export const SubmitManualSectionEditBody = zod.union([zod.object({
   "deviceId": zod.string().min(1).max(submitManualSectionEditBodyEightDeviceIdMax).regex(submitManualSectionEditBodyEightDeviceIdRegExp)
 }))
 
-export const submitManualSectionEditResponseCanonicalRevisionMin = 0;
 
-export const submitManualSectionEditResponseServerTimeMin = 0;
 
-export const submitManualSectionEditResponseSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
 
 
 export const SubmitManualSectionEditResponse = zod.object({
@@ -6757,7 +6925,7 @@ export const SubmitManualSectionEditResponse = zod.object({
 /**
  * @summary Apply one server-authoritative production command
  */
-export const submitOperationalIntentQueryEpochMin = 0;
+
 
 
 export const SubmitOperationalIntentQueryParams = zod.object({
@@ -6765,31 +6933,18 @@ export const SubmitOperationalIntentQueryParams = zod.object({
   "epoch": zod.coerce.number().int().min(submitOperationalIntentQueryEpochMin).optional()
 })
 
-export const submitOperationalIntentBodySenderIdMax = 160;
 
-export const submitOperationalIntentBodyDeviceIdMax = 160;
 
-export const submitOperationalIntentBodyBaseRevisionMin = 0;
 
-export const submitOperationalIntentBodyIntentIdMax = 160;
 
-export const submitOperationalIntentBodyIntentRunIdMax = 160;
 
-export const submitOperationalIntentBodyIntentObservedGenerationMax = 160;
 
-export const submitOperationalIntentBodyIntentResetEpochMin = 0;
 
-export const submitOperationalIntentBodyIntentBaseRevisionMin = 0;
 
-export const submitOperationalIntentBodyIntentValuesMinOne = 0;
-export const submitOperationalIntentBodyIntentValuesMaxOne = 1000000;
 
-export const submitOperationalIntentBodyIntentInventoryLinesItemItemKeyMax = 300;
 
-export const submitOperationalIntentBodyIntentInventoryLinesItemQtyExclusiveMin = 0;
-export const submitOperationalIntentBodyIntentInventoryLinesItemQtyMax = 1000000;
 
-export const submitOperationalIntentBodyIntentInventoryLinesMax = 200;
+
 
 
 export const SubmitOperationalIntentBody = zod.object({
@@ -6816,11 +6971,8 @@ export const SubmitOperationalIntentBody = zod.object({
 })
 
 
-export const submitOperationalIntentResponseCanonicalRevisionMin = 0;
 
-export const submitOperationalIntentResponseServerTimeMin = 0;
 
-export const submitOperationalIntentResponseSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
 
 
 export const SubmitOperationalIntentResponse = zod.object({
@@ -6841,19 +6993,17 @@ export const SubmitOperationalIntentResponse = zod.object({
 /**
  * @summary Read durable command receipts after a scoped cursor
  */
-export const listOperationalIntentReceiptsQueryAfterMin = 0;
+
 
 
 export const ListOperationalIntentReceiptsQueryParams = zod.object({
   "after": zod.coerce.number().int().min(listOperationalIntentReceiptsQueryAfterMin).optional()
 })
 
-export const listOperationalIntentReceiptsResponseCursorMin = 0;
 
 
-export const listOperationalIntentReceiptsResponseMutationsItemCanonicalRevisionMin = 0;
 
-export const listOperationalIntentReceiptsResponseMutationsItemBaseRevisionMin = 0;
+
 
 
 export const ListOperationalIntentReceiptsResponse = zod.object({
@@ -6877,31 +7027,21 @@ export const ListOperationalIntentReceiptsResponse = zod.object({
 }))
 })
 
+
 /**
  * @summary Atomically apply a reviewed import
  */
-export const applyImportOperationPathOperationIdMin = 16;
 
-export const applyImportOperationBodySourceKeyMax = 300;
 
-export const applyImportOperationBodyExpectedStateHashRegExp = new RegExp('^[a-f0-9]{64}$');
 
-export const GetImportOperationResponse = zod.object({
-  "operation": zod.object({
-  "operationId": zod.string(),
-  "importType": zod.string(),
-  "sourceKey": zod.string().nullish(),
-  "sourceLabel": zod.string().optional(),
-  "status": zod.enum(['applying', 'applied', 'undone']),
-  "requestHash": zod.string(),
-  "resultHash": zod.string().nullish(),
-  "affectedEntities": zod.record(zod.string(), zod.unknown()).optional(),
-  "result": zod.record(zod.string(), zod.unknown()).optional(),
-  "createdAt": zod.int().optional(),
-  "updatedAt": zod.int().optional(),
-  "undoneAt": zod.int().nullish()
+export const ApplyImportOperationParams = zod.object({
+  "operationId": zod.coerce.string().min(applyImportOperationPathOperationIdMin).max(applyImportOperationPathOperationIdMax)
 })
-})
+
+
+
+
+
 
 export const ApplyImportOperationBody = zod.object({
   "importType": zod.string().max(applyImportOperationBodyImportTypeMax),
@@ -6911,37 +7051,6 @@ export const ApplyImportOperationBody = zod.object({
   "expectedStateHash": zod.string().regex(applyImportOperationBodyExpectedStateHashRegExp).nullish(),
   "changes": zod.record(zod.string(), zod.unknown()).describe('Reviewed entity batches keyed by supported master-data domain.')
 })
-
-export const UndoImportOperationParams = zod.object({
-  "operationId": zod.coerce.string().min(undoImportOperationPathOperationIdMin).max(undoImportOperationPathOperationIdMax)
-})
-
-export const undoImportOperationBodyExpectedResultHashRegExp = new RegExp('^[a-f0-9]{64}$');
-
-export const applyImportOperationPathOperationIdMax = 120;
-
-export const GetImportOperationParams = zod.object({
-  "operationId": zod.coerce.string().min(getImportOperationPathOperationIdMin).max(getImportOperationPathOperationIdMax)
-})
-
-export const UndoImportOperationResponse = zod.object({
-  "operation": zod.object({
-  "operationId": zod.string(),
-  "importType": zod.string(),
-  "sourceKey": zod.string().nullish(),
-  "sourceLabel": zod.string().optional(),
-  "status": zod.enum(['applying', 'applied', 'undone']),
-  "requestHash": zod.string(),
-  "resultHash": zod.string().nullish(),
-  "affectedEntities": zod.record(zod.string(), zod.unknown()).optional(),
-  "result": zod.record(zod.string(), zod.unknown()).optional(),
-  "createdAt": zod.int().optional(),
-  "updatedAt": zod.int().optional(),
-  "undoneAt": zod.int().nullish()
-})
-})
-
-export const applyImportOperationBodyRequestHashRegExp = new RegExp('^[a-f0-9]{64}$');
 
 export const ApplyImportOperationResponse = zod.object({
   "operation": zod.object({
@@ -6960,76 +7069,64 @@ export const ApplyImportOperationResponse = zod.object({
 })
 })
 
-export const applyImportOperationBodySourceLabelMax = 300;
 
 /**
  * @summary Read an import operation
  */
-export const getImportOperationPathOperationIdMin = 16;
 
-export const undoImportOperationPathOperationIdMax = 120;
+
+
+export const GetImportOperationParams = zod.object({
+  "operationId": zod.coerce.string().min(getImportOperationPathOperationIdMin).max(getImportOperationPathOperationIdMax)
+})
+
+export const GetImportOperationResponse = zod.object({
+  "operation": zod.object({
+  "operationId": zod.string(),
+  "importType": zod.string(),
+  "sourceKey": zod.string().nullish(),
+  "sourceLabel": zod.string().optional(),
+  "status": zod.enum(['applying', 'applied', 'undone']),
+  "requestHash": zod.string(),
+  "resultHash": zod.string().nullish(),
+  "affectedEntities": zod.record(zod.string(), zod.unknown()).optional(),
+  "result": zod.record(zod.string(), zod.unknown()).optional(),
+  "createdAt": zod.int().optional(),
+  "updatedAt": zod.int().optional(),
+  "undoneAt": zod.int().nullish()
+})
+})
+
+
+/**
+ * @summary Guardedly undo an import operation
+ */
+
+
+
+export const UndoImportOperationParams = zod.object({
+  "operationId": zod.coerce.string().min(undoImportOperationPathOperationIdMin).max(undoImportOperationPathOperationIdMax)
+})
+
+
 
 export const UndoImportOperationBody = zod.object({
   "expectedResultHash": zod.string().regex(undoImportOperationBodyExpectedResultHashRegExp).optional()
 })
 
-/**
- * @summary Guardedly undo an import operation
- */
-export const undoImportOperationPathOperationIdMin = 16;
-
-export const getImportOperationPathOperationIdMax = 120;
-
-export const ApplyImportOperationParams = zod.object({
-  "operationId": zod.coerce.string().min(applyImportOperationPathOperationIdMin).max(applyImportOperationPathOperationIdMax)
-})
-
-export const applyImportOperationBodyImportTypeMax = 40;
-
-export const acceptStaffInvitationBodyInvitationMax = 512;
-
-export const SetSignupCodeStatusBody = zod.object({
-  "enabled": zod.boolean()
-})
-
-export const AcceptStaffInvitationResponse = zod.object({
-  "token": zod.string(),
-  "user": zod.object({
-  "userId": zod.string(),
-  "role": zod.string().describe('The name of the role assigned to this user.'),
-  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
-  "email": zod.string().nullable(),
-  "name": zod.string().nullable(),
-  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login "Get Started" overview.'),
-  "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).'),
-  "floorModeEnabled": zod.boolean().describe('Whether Floor Mode (the idle big-numbers monitor) is enabled for this user. Per-user so the preference follows them across devices.'),
-  "notificationPrefs": zod.record(zod.string(), zod.boolean()).describe('Per-alert push-notification preferences: alert kind → enabled. A MISSING key means that alert is ON (default). Per-user so the choices follow them across devices.'),
-  "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated "sandbox" data scope. Clients show a persistent sandbox banner and offer a "Reset sandbox" action when true.'),
-  "disabled": zod.boolean().describe('Whether sign-in is disabled for this account.'),
-  "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as "Sandbox copied from live at …".'),
-  "sandboxStale": zod.boolean().describe('Whether the sandbox copy is stale and due for an automatic refresh from live. The client drives the re-copy (reusing the manual reset flow); the server owns the staleness cutoff so web and mobile stay in lockstep. Always false for non-sandbox accounts.')
+export const UndoImportOperationResponse = zod.object({
+  "operation": zod.object({
+  "operationId": zod.string(),
+  "importType": zod.string(),
+  "sourceKey": zod.string().nullish(),
+  "sourceLabel": zod.string().optional(),
+  "status": zod.enum(['applying', 'applied', 'undone']),
+  "requestHash": zod.string(),
+  "resultHash": zod.string().nullish(),
+  "affectedEntities": zod.record(zod.string(), zod.unknown()).optional(),
+  "result": zod.record(zod.string(), zod.unknown()).optional(),
+  "createdAt": zod.int().optional(),
+  "updatedAt": zod.int().optional(),
+  "undoneAt": zod.int().nullish()
 })
 })
-
-export const acceptStaffInvitationBodyPasswordMax = 200;
-
-export const SetSignupCodeStatusResponse = zod.unknown()
-
-export const acceptStaffInvitationBodyPasswordMin = 6;
-
-export const acceptStaffInvitationBodyUsernameMin = 3;
-
-/**
- * @summary Rotate transitional sign-up code (secret returned once)
- */
-export const RotateSignupCodeResponse = zod.object({
-  "secret": zod.string()
-})
-
-export const AcceptStaffInvitationBody = zod.object({
-  "invitation": zod.string().min(acceptStaffInvitationBodyInvitationMin).max(acceptStaffInvitationBodyInvitationMax),
-  "username": zod.string().min(acceptStaffInvitationBodyUsernameMin).max(acceptStaffInvitationBodyUsernameMax),
-  "password": zod.string().min(acceptStaffInvitationBodyPasswordMin).max(acceptStaffInvitationBodyPasswordMax)
-})
-
-export const acceptStaffInvitationBodyUsernameMax = 64;
