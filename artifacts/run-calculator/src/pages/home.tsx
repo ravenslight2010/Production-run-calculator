@@ -498,6 +498,13 @@ import GuidedTour from "../components/GuidedTour";
 import { moveEntries, relocateValues } from "@workspace/schedule-move";
 import { findScheduledRecipeIssues } from "@workspace/scheduled-recipe-check";
 import {
+  dismissSauceAutoTrackFailure as dismissSauceAutoTrackFailureState,
+  noteSauceAutoTrackFailure,
+  resolveSauceAutoTrackFailure,
+  sauceAutoTrackBarrelId,
+  type SauceAutoTrackFailure,
+} from "../sauceAutoTrackFailure";
+import {
   applyRecipeSuggestion as applyRecipeSuggestionShared,
   type RecipeFieldId,
   type RecipeSuggestionLike,
@@ -5211,6 +5218,20 @@ export default function Home() {
   // failure modes and surface a clear, dismissible banner + a red status dot.
   const [syncPushFailed, setSyncPushFailed] = useState(false);
   const [writeError, setWriteError] = useState<string | null>(null);
+  const [sauceAutoTrackFailure, setSauceAutoTrackFailure] = useState<SauceAutoTrackFailure | null>(null);
+  const reportSauceAutoTrackFailure = useCallback((claim: AutoTrackEventClaim) => {
+    setSauceAutoTrackFailure((current) =>
+      noteSauceAutoTrackFailure(current, sauceAutoTrackBarrelId(claim.runId, claim.eventId)),
+    );
+  }, []);
+  const clearSauceAutoTrackFailure = useCallback((claim: AutoTrackEventClaim) => {
+    setSauceAutoTrackFailure((current) =>
+      resolveSauceAutoTrackFailure(current, sauceAutoTrackBarrelId(claim.runId, claim.eventId)),
+    );
+  }, []);
+  const dismissSauceAutoTrackFailure = useCallback(() => {
+    setSauceAutoTrackFailure((current) => dismissSauceAutoTrackFailureState(current));
+  }, []);
   const syncDate = todayStr();
   const [syncDiagnostics, setSyncDiagnostics] = useState<SyncDiagnostic[]>(() => loadSyncDiagnostics(syncDate));
   const [lastAcknowledgedAt, setLastAcknowledgedAt] = useState<number | null>(() => {
@@ -7922,16 +7943,8 @@ export default function Home() {
     }
     return { outcome: body.outcome, state: body.state, values: body.values };
       });
-    const surfaced = request.catch((error) => {
-      if (claim.channel === "sauce-barrel") {
-        setWriteError(
-          "Automatic Sauce barrel tracking is delayed. Inventory was not advanced; the same barrel will retry when the connection is ready.",
-        );
-      }
-      throw error;
-    });
-    autoTrackClaimQueueRef.current = surfaced.then(() => {}, () => {});
-    return surfaced;
+    autoTrackClaimQueueRef.current = request.then(() => {}, () => {});
+    return request;
   }
 
   // Mirror today's substitution overlay into the shared-calc module so every
@@ -14957,7 +14970,7 @@ export default function Home() {
     setShowShippingImport, setShowSpecImport, setShowStopDialog, setShowTour, setSkidStacking,
     setSpecImportApplying, setSpecImportError, setSpecImportLoading, setSpecImportPrepared, setSpecImportProgress, setSpecReconcileSignal,
     setStopNotes, setStopReason, setStopReasonsList, setSwipeCue, setSyncConnected, setSyncPushFailed,
-    setUndoBusy, setWriteError, setupEditorBrand,
+    setUndoBusy, setWriteError, dismissSauceAutoTrackFailure, setupEditorBrand,
     setupEditorFlavor, setupEditorOpen, sheetListSignal, shipper, shipperList, shippingImportApplying,
     shippingImportError, shippingImportFileNameRef, shippingImportGenRef, shippingImportInputRef, shippingImportLoading, shippingImportPrepared,
     showAlertSettings, showBrandDrop, showCheeseImport, showEditReasonsDialog, showFlavorDrop, showFloorMode,
@@ -14973,7 +14986,7 @@ export default function Home() {
     toggleAck, toggleFloorModeEnabled, toggleFullscreen, toggleMergeSource,
     toggleMergeSuggestSelected, toggleStagedItem, tomorrowStr, undoBusy, unifiedIngredientUniverse, unreviewedIncidentCount,
     upcomingRunLabels, updateAdvancedArray, updateAdvancedField, updateDrainingRunValues, updateRunMeta, updateStop,
-    v, ve, writeError,
+    v, ve, writeError, sauceAutoTrackFailure,
   }), [
     // ── Reactive state values that actually live in this context object ──
     // setState dispatches (set*), refs (*Ref), plain-function callbacks, and
@@ -15105,7 +15118,7 @@ export default function Home() {
       staleCleanupSuggestions, stopNotes, stopReason, stopReasonsList, strictViolations,
       swipeCue, syncConnected, syncPushFailed,
       templatesLoaded, undoBusy, unifiedIngredientUniverse, unreviewedIncidentCount,
-      upcomingRunLabels, v, ve, writeError,
+      upcomingRunLabels, v, ve, writeError, sauceAutoTrackFailure,
     ]
   );
 
@@ -18737,6 +18750,8 @@ export default function Home() {
         autoTrackWakeRebaseReason={autoTrackWakeRebaseReason}
         autoTrackWakeAcknowledgement={foregroundSyncAcknowledgement}
         claimAutoTrackEvent={claimAutoTrackEvent}
+        onAutomaticClaimFailure={reportSauceAutoTrackFailure}
+        onAutomaticClaimSuccess={clearSauceAutoTrackFailure}
         onAutoTrackProgressChange={(enabled) => {
           updateRunMeta(currentRunId, { autoTrackDisabled: !enabled });
         }}

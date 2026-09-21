@@ -156,3 +156,4 @@
 - [Replit custom migrations](replit-custom-migrations.md) — chain raw trigger/function migrations before the production server because publish schema sync may skip them.
 - [Atomic import operations](atomic-import-operations.md) — reviewed multi-entity imports use stable operation IDs, server transactions, canonical acknowledgment, and touched-row-only guarded undo.
 - [Approved audit maintenance](audit-maintenance-workflow.md) — redactions/deletions run through a checked-in transaction command on a separate admin channel, never the app role.
+- [Sauce auto-track failure identity](sauce-auto-track-failure-identity.md) — retry notices follow the claim event identity; accepted recovery clears only the matching barrel.

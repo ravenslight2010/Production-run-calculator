@@ -148,6 +148,11 @@ export interface LiveRunProviderProps {
   autoTrackWakeRebaseReason?: AutoTrackWakeRebaseReason | null;
   autoTrackWakeAcknowledgement?: number;
   claimAutoTrackEvent?: (claim: AutoTrackEventClaim) => Promise<AutoTrackEventResult>;
+  onAutomaticClaimFailure?: (claim: AutoTrackEventClaim) => void;
+  onAutomaticClaimSuccess?: (
+    claim: AutoTrackEventClaim,
+    outcome: AutoTrackEventResult["outcome"],
+  ) => void;
   onAutoTrackProgressChange?: (enabled: boolean) => void;
   operationalSnapshotReceipt?: OperationalSnapshotReceipt | null;
   operationalServerCalc?: Calc | null;
@@ -189,6 +194,8 @@ export function LiveRunProvider({
   autoTrackWakeRebaseReason = null,
   autoTrackWakeAcknowledgement = 0,
   claimAutoTrackEvent,
+  onAutomaticClaimFailure,
+  onAutomaticClaimSuccess,
   onAutoTrackProgressChange,
   operationalSnapshotReceipt = null,
   operationalServerCalc = null,
@@ -521,6 +528,8 @@ export function LiveRunProvider({
       autoTrackWakeRebaseReason,
       autoTrackWakeAcknowledgement,
       claimAutoTrackEvent,
+      onAutomaticClaimFailure,
+      onAutomaticClaimSuccess,
       authoritativeServerAutoTrack: true,
       autoTrackProgressEnabled: currentRun?.autoTrackDisabled !== true,
       nextRunPrepActive,

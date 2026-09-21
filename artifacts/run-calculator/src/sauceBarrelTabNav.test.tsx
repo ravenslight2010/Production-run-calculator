@@ -28,6 +28,11 @@ import {
   resetSauceBarrelEntry,
   _storeForTest,
 } from "./sauceBarrelStore";
+import {
+  dismissSauceAutoTrackFailure,
+  noteSauceAutoTrackFailure,
+  resolveSauceAutoTrackFailure,
+} from "./sauceAutoTrackFailure";
 
 // ── Minimal production-faithful stand-in for LiveSauceTabContent's barrel state
 //
@@ -268,5 +273,26 @@ describe("sauce barrel — consume barrel write-through", () => {
       lastBarrelNetSec: 0,
       barrelsMade: 1,
     });
+  });
+});
+
+describe("sauce automatic failure dismissal identity", () => {
+  it("keeps a dismissed barrel hidden across retries, then clears it on success", () => {
+    let failure = noteSauceAutoTrackFailure(null, "run-1:event-1");
+    failure = dismissSauceAutoTrackFailure(failure);
+    failure = noteSauceAutoTrackFailure(failure, "run-1:event-1");
+
+    expect(failure).toEqual({ barrelId: "run-1:event-1", dismissed: true });
+    expect(resolveSauceAutoTrackFailure(failure, "run-1:event-1")).toBeNull();
+  });
+
+  it("surfaces a distinct later barrel and ignores stale recovery for the old one", () => {
+    const oldFailure = dismissSauceAutoTrackFailure(
+      noteSauceAutoTrackFailure(null, "run-1:event-1"),
+    );
+    const newFailure = noteSauceAutoTrackFailure(oldFailure, "run-1:event-2");
+
+    expect(newFailure).toEqual({ barrelId: "run-1:event-2", dismissed: false });
+    expect(resolveSauceAutoTrackFailure(newFailure, "run-1:event-1")).toEqual(newFailure);
   });
 });

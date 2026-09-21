@@ -233,6 +233,12 @@ interface AutoTrackParams {
    */
   autoTrackWakeAcknowledgement?: number;
   claimAutoTrackEvent?: (claim: AutoTrackEventClaim) => Promise<AutoTrackEventResult>;
+  /** Reports only automatic claim outcomes; manual corrections use Home's existing error path. */
+  onAutomaticClaimFailure?: (claim: AutoTrackEventClaim) => void;
+  onAutomaticClaimSuccess?: (
+    claim: AutoTrackEventClaim,
+    outcome: AutoTrackEventResult["outcome"],
+  ) => void;
   /**
    * The server is the sole automatic writer for synchronized clients. In this
    * mode the hook still computes suggestions and countdowns, but never submits
@@ -346,6 +352,8 @@ export function useAutoTrack({
   autoTrackWakeRebaseReason = null,
   autoTrackWakeAcknowledgement = 0,
   claimAutoTrackEvent,
+  onAutomaticClaimFailure,
+  onAutomaticClaimSuccess,
   authoritativeServerAutoTrack = false,
   autoTrackProgressEnabled,
   nextRunPrepActive = false,
@@ -779,25 +787,29 @@ useEffect(() => {
         const correctionGeneration = correctionMutation?.from;
         coordinationRetryEventRef.current[channel] = eventId;
         setCoordinationDelayed(false);
+        const claim: AutoTrackEventClaim = {
+          version: 1,
+          runId,
+          channel,
+          generation,
+          sequence,
+          eventId,
+          dueAt,
+          nextDueAt,
+          // Home replaces this placeholder with its last adopted canonical stamp.
+          baseUpdatedAt: 0,
+          correctionGeneration,
+          mutations: claimMutations,
+        };
         try {
-          const result = await claimAutoTrackEvent({
-            version: 1,
-            runId,
-            channel,
-            generation,
-            sequence,
-            eventId,
-            dueAt,
-            nextDueAt,
-            // Home replaces this placeholder with its last adopted canonical stamp.
-            baseUpdatedAt: 0,
-            correctionGeneration,
-            mutations: claimMutations,
-          });
+          const result = await claimAutoTrackEvent(claim);
           // The hook shares one form across selected runs. A response from the
           // previously selected run must not write into the new run or advance
           // its coordination bookkeeping.
           if (coordinationIdentityRef.current !== claimIdentity) return;
+          if (result.outcome === "accepted" || result.outcome === "duplicate") {
+            onAutomaticClaimSuccess?.(claim, result.outcome);
+          }
           // A manual correction can happen while this request is in flight. Its
           // incremented generation is the local authority until that snapshot
           // reaches the server, so never let the older acknowledgement restore
@@ -827,6 +839,9 @@ useEffect(() => {
           applyValues(result.values);
         } catch {
           if (coordinationIdentityRef.current !== claimIdentity) return;
+          if (channel === "sauce-barrel") {
+            onAutomaticClaimFailure?.(claim);
+          }
           const dueRef = dueRefForChannel(channel);
           dueRef.current = Math.min(dueRef.current || dueAt, dueAt);
           // A failed coordinated case claim did not actually apply the mutation.
@@ -854,6 +869,8 @@ useEffect(() => {
     endedAt,
     form,
     onPackagingProgressAutoAdvance,
+    onAutomaticClaimFailure,
+    onAutomaticClaimSuccess,
     runGeneration,
     runId,
     runStatus,
