@@ -231,14 +231,17 @@ function headers(actorId = ACTOR): Record<string, string> {
   };
 }
 
-async function submitJob(actorId = ACTOR, body = JOB_BODY): Promise<globalThis.Response> {
+async function submitJob(
+  actorId = ACTOR,
+  body: Record<string, unknown> = JOB_BODY,
+): Promise<globalThis.Response> {
   return submitJobAt(baseUrl, actorId, body);
 }
 
 async function submitJobAt(
   url: string,
   actorId = ACTOR,
-  body = JOB_BODY,
+  body: Record<string, unknown> = JOB_BODY,
 ): Promise<globalThis.Response> {
   return fetch(`${url}/api/server-jobs`, {
     method: "POST",
@@ -374,6 +377,25 @@ describe("server job route idempotency", () => {
     expect(jobs).toHaveLength(1);
     expect(responseBodies.every((body) => body.id === jobs[0]!.id)).toBe(true);
     expect(responseBodies.filter((body) => body.idempotentReplay)).toHaveLength(11);
+  });
+
+  it("rejects sensitive workbook job input before it is queued", async () => {
+    const response = await submitJob(ACTOR, {
+      ...JOB_BODY,
+      idempotencyKey: "job-sensitive-input-001",
+      input: {
+        workbookText: "Brand\tFlavor",
+        logs: ["Bearer must-not-leave"],
+      } as Record<string, unknown>,
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "Sensitive or unrelated fields are not allowed in AI requests",
+    });
+    const jobs = await db.select().from(serverJobsTable).where(
+      eq(serverJobsTable.idempotencyKey, "job-sensitive-input-001"),
+    );
+    expect(jobs).toHaveLength(0);
   });
 
   it("isolates identical keys by actor and by live or sandbox scope", async () => {

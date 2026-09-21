@@ -1870,6 +1870,10 @@ function ProductionSheetCard() {
             Photograph a paper run sheet to transcribe its rows. This is advisory only — review the
             results and add the runs you want through the schedule yourself. Nothing is saved.
           </p>
+          <p className="text-[11px] text-muted-foreground" data-testid="production-sheet-ai-disclosure">
+            The selected photo and optional notes are sent to the configured AI provider. Credentials,
+            logs, unrelated recipes, and user details are not included.
+          </p>
           <Input
             placeholder="Optional context (e.g. Line 2 sheet, covers tomorrow)"
             value={notes}
@@ -2522,6 +2526,10 @@ function PhotoIntakeCard({
           <p className="text-xs text-muted-foreground">
             Take or upload a photo of incoming stock. We'll identify the items and pre-fill
             restock entries for you to confirm.
+          </p>
+          <p className="text-[11px] text-muted-foreground" data-testid="inventory-photo-ai-disclosure">
+            The selected photo and bounded inventory-item candidates are sent to the configured AI
+            provider. Credentials, logs, unrelated production records, and user details are not included.
           </p>
           <CameraFilePicker multiple disabled={preparing || analyzing} onFiles={(files) => void onPick(files)} />
           <BarcodeScanner

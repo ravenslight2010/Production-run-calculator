@@ -79,6 +79,7 @@ import {
   buildCountPrompt,
   sanitizeCountDraft,
 } from "./countObservation";
+import { AI_ROUTE_BOUNDARIES, validateAiRequestBoundary } from "../lib/aiDataBoundary";
 import {
   applyRunConsumption,
   planDrawDown,
@@ -640,6 +641,11 @@ function registerCountObservationRoute(
     }),
     options.countObservationCostLimit ?? aiCostLimit,
     async (req, res): Promise<void> => {
+      const boundary = validateAiRequestBoundary(AI_ROUTE_BOUNDARIES.inventoryCountObservation, req.body);
+      if (!boundary.ok) {
+        res.status(boundary.status).json({ error: boundary.error });
+        return;
+      }
       const parsed = CountObservationBody.safeParse(req.body);
       if (!parsed.success) {
         res.status(400).json({ error: "Attach one to three valid photos." });
@@ -810,6 +816,11 @@ router.post(
     store: photoRateStore,
   }),
   async (req, res): Promise<void> => {
+  const boundary = validateAiRequestBoundary(AI_ROUTE_BOUNDARIES.identifyInventoryPhoto, req.body);
+  if (!boundary.ok) {
+    res.status(boundary.status).json({ error: boundary.error });
+    return;
+  }
   const validation = validateIdentifyPhotoBody(req.body);
   if (!validation.ok) {
     res.status(validation.status).json({ error: validation.error });
@@ -971,6 +982,11 @@ router.post(
     store: productionSheetRateStore,
   }),
   async (req, res): Promise<void> => {
+    const boundary = validateAiRequestBoundary(AI_ROUTE_BOUNDARIES.productionSheetPhoto, req.body);
+    if (!boundary.ok) {
+      res.status(boundary.status).json({ error: boundary.error });
+      return;
+    }
     const validation = validateProductionSheetBody(req.body);
     if (!validation.ok) {
       res.status(validation.status).json({ error: validation.error });

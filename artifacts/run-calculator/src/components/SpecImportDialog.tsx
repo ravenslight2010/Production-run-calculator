@@ -1357,14 +1357,22 @@ export default function SpecImportDialog({
                   </div>
                   <p className="mt-1 text-sm text-amber-700">{prepared.note}</p>
                   {prepared.unresolved?.length && canUseAiTools ? (
-                    <button
-                      type="button"
-                      onClick={onUseAiFallback}
-                      disabled={loading || applying}
-                      className="mt-3 rounded-md bg-amber-700 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-800 disabled:opacity-50"
-                    >
-                      Use AI for {prepared.unresolved.length} unresolved item{prepared.unresolved.length === 1 ? "" : "s"}
-                    </button>
+                    <>
+                      <p className="mt-3 text-xs text-amber-800" data-testid="ai-import-data-disclosure">
+                        This sends only the selected workbook rows, unresolved names, bounded saved-name
+                        candidates, and confirmed name corrections to the configured AI provider. It does not
+                        send credentials, unrelated recipes, logs, or user details. Suggestions are not applied
+                        until you review and confirm the import.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={onUseAiFallback}
+                        disabled={loading || applying}
+                        className="mt-2 rounded-md bg-amber-700 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-800 disabled:opacity-50"
+                      >
+                        Use AI for {prepared.unresolved.length} unresolved item{prepared.unresolved.length === 1 ? "" : "s"}
+                      </button>
+                    </>
                   ) : null}
                 </div>
               )}

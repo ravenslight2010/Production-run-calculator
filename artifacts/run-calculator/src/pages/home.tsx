@@ -16211,6 +16211,12 @@ export default function Home() {
                         <p className="text-[11px] text-muted-foreground">
                           Add one or more clear pages. They will be transcribed and shown in the same two-step review before anything is changed.
                         </p>
+                        {canUseAiTools && (
+                          <p className="text-[11px] text-muted-foreground" data-testid="spec-photo-ai-disclosure">
+                            Selected photos are sent to the configured AI provider for transcription.
+                            Credentials, logs, unrelated production records, and user details are not included.
+                          </p>
+                        )}
                         <CameraFilePicker
                           accept="image/*"
                           multiple
@@ -16258,10 +16264,17 @@ export default function Home() {
                       </div>
                     )}
                     {canImportSpec && (
-                      <button type="button" onClick={() => { noteBreadcrumb("Import Spec Sheet clicked (picker opening)"); specImportInputRef.current?.click(); }}
-                        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90">
-                        <Upload className="w-4 h-4" /> Import Spec Sheet
-                      </button>
+                      <div className="space-y-2">
+                        <p className="text-[11px] text-muted-foreground" data-testid="spec-workbook-ai-disclosure">
+                          Selected workbook rows, bounded saved-name candidates, and confirmed name
+                          corrections are sent to the configured AI provider for a reviewable import.
+                          Credentials, logs, unrelated recipes, and user details are not included.
+                        </p>
+                        <button type="button" onClick={() => { noteBreadcrumb("Import Spec Sheet clicked (picker opening)"); specImportInputRef.current?.click(); }}
+                          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90">
+                          <Upload className="w-4 h-4" /> Import Spec Sheet
+                        </button>
+                      </div>
                     )}
                     {canImportProfileGuide && (
                       <button type="button" onClick={() => { noteBreadcrumb("Import Shipping Guide clicked (picker opening)"); shippingImportInputRef.current?.click(); }}
