@@ -1,3 +1,8 @@
+import { execFile as execFileCallback } from "node:child_process";
+import { createServer } from "node:http";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import path from "node:path";
+import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import {
   READINESS_EVIDENCE_MAX_SAMPLES,
@@ -6,6 +11,8 @@ import {
   sanitizeReadinessResponse,
 } from "./capture-readiness-recovery.mjs";
 
+const execFile = promisify(execFileCallback);
+const rootDir = path.resolve(new URL("../..", import.meta.url).pathname);
 const revision = "a".repeat(40);
 const generatedAt = "2026-09-18T12:00:00.000Z";
 
@@ -96,6 +103,191 @@ describe("readiness evidence projection", () => {
     expect(evidence.expiresAt).toBe(
       new Date(Date.parse(generatedAt) + READINESS_EVIDENCE_RETENTION_MS).toISOString(),
     );
+  });
+
+  it("captures a real HTTP normal, hard-failure, and recovery sequence", async () => {
+    const servedStatuses: number[] = [];
+    const servedPaths: string[] = [];
+    let targetUrl = "";
+    const server = createServer((request, response) => {
+      const requestNumber = servedStatuses.length + 1;
+      const isNormal = requestNumber <= 2;
+      const isIncident = requestNumber > 2 && requestNumber <= 4;
+      servedPaths.push(request.url ?? "");
+
+      const payload = {
+        status: isIncident ? "degraded" : "ok",
+        checks: {
+          process: "ok",
+          // The fixture's 503 is caused by a hard readiness condition. Worker
+          // diagnostics are included to prove they remain visible separately.
+          startup: isIncident ? "error" : "ok",
+          database: "ok",
+          dependencies: "ok",
+          backgroundWorkers: isIncident ? "error" : "ok",
+        },
+        startup: isIncident
+          ? {
+            phase: "failed",
+            stage: "data_heals",
+            errorCode: "fixture_startup_not_ready",
+            privateDiagnostic: "FIXTURE_PRIVATE_STARTUP_DETAIL",
+          }
+          : undefined,
+        diagnostics: {
+          backgroundOperations: {
+            "daily-rollover": {
+              status: isIncident ? "warning" : "ok",
+              recentFailureCount: isIncident ? 3 : 0,
+              threshold: 3,
+              lastFailureAt: isIncident
+                ? "2026-09-18T12:00:04.000Z"
+                : undefined,
+              privateDiagnostic: "FIXTURE_PRIVATE_WORKER_DETAIL",
+            },
+          },
+        },
+        request: "FIXTURE_REQUEST_PAYLOAD",
+        recipe: "FIXTURE_RECIPE_PAYLOAD",
+        url: targetUrl,
+        privateDiagnostic: "FIXTURE_PRIVATE_RESPONSE_DETAIL",
+      };
+      const status = isIncident ? 503 : 200;
+      servedStatuses.push(status);
+      response.statusCode = status;
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify(payload));
+
+      // Keep this explicit so the test fails if the command probes a
+      // different route or the fixture is accidentally reused for another
+      // endpoint.
+      if (request.url !== "/api/readyz") {
+        response.destroy(new Error(`unexpected fixture path: ${request.url}`));
+      }
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+
+    const address = server.address();
+    if (address === null || typeof address === "string") {
+      server.close();
+      throw new Error("readiness fixture did not receive a TCP address");
+    }
+    targetUrl = `http://127.0.0.1:${address.port}/api/readyz`;
+    const outputDirectory = await mkdtemp(
+      path.join(rootDir, "tmp-readiness-recovery-cli-"),
+    );
+    const outputPath = path.join(outputDirectory, "readiness-recovery.json");
+
+    try {
+      const result = await execFile(
+        "pnpm",
+        [
+          "--filter",
+          "@workspace/scripts",
+          "exec",
+          "tsx",
+          "./src/capture-readiness-recovery.mts",
+          "--url",
+          targetUrl,
+          "--environment",
+          "development",
+          "--deployment-id",
+          "local-recovery-fixture",
+          "--revision",
+          revision,
+          "--mode",
+          "recovery",
+          "--samples",
+          "6",
+          "--interval-ms",
+          "1",
+          "--timeout-ms",
+          "1000",
+          "--output",
+          outputPath,
+        ],
+        {
+          cwd: rootDir,
+          env: process.env,
+          maxBuffer: 128_000,
+        },
+      );
+      expect(result.stdout).toContain("incident_recovered");
+      expect(result.stderr).toBe("");
+
+      const retainedJson = await readFile(outputPath, "utf8");
+      const evidence = JSON.parse(retainedJson) as {
+        samples: Array<{
+          httpStatus: number;
+          outcome: string;
+          checks: Record<string, string>;
+          workers: Array<{
+            operation: string;
+            status: string;
+            recentFailureCount: number;
+          }>;
+        }>;
+        summary: {
+          normal200Samples: number;
+          workerIncident503Samples: number;
+          recovery200Samples: number;
+          observedStates: string[];
+          finalState: string;
+        };
+        verification: { mode: string; passed: boolean };
+      };
+
+      expect(servedStatuses).toEqual([200, 200, 503, 503, 200, 200]);
+      expect(servedPaths).toEqual(Array(6).fill("/api/readyz"));
+      expect(evidence.samples.map(({ httpStatus, outcome }) => [httpStatus, outcome]))
+        .toEqual([
+          [200, "healthy"],
+          [200, "healthy"],
+          [503, "worker_incident"],
+          [503, "worker_incident"],
+          [200, "healthy"],
+          [200, "healthy"],
+        ]);
+      expect(evidence.samples[2]).toMatchObject({
+        checks: {
+          startup: "error",
+          backgroundWorkers: "error",
+        },
+      });
+      expect(evidence.samples[2]?.workers.find(
+        ({ operation }) => operation === "daily-rollover",
+      )).toMatchObject({
+        operation: "daily-rollover",
+        status: "warning",
+        recentFailureCount: 3,
+      });
+      expect(evidence.summary).toEqual({
+        normal200Samples: 4,
+        workerIncident503Samples: 2,
+        recovery200Samples: 2,
+        observedStates: ["normal_200", "worker_incident_503", "recovery_200"],
+        finalState: "incident_recovered",
+      });
+      expect(evidence.verification).toMatchObject({
+        mode: "recovery",
+        passed: true,
+      });
+
+      expect(retainedJson).not.toMatch(
+        /FIXTURE_(?:REQUEST_PAYLOAD|RECIPE_PAYLOAD|PRIVATE_STARTUP_DETAIL|PRIVATE_WORKER_DETAIL|PRIVATE_RESPONSE_DETAIL)/,
+      );
+      expect(retainedJson).not.toContain(targetUrl);
+      expect(retainedJson).not.toMatch(
+        /"url"|"request"|"recipe"|"privateDiagnostic"|"diagnostics"/,
+      );
+    } finally {
+      await rm(outputDirectory, { recursive: true, force: true });
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 
   it("requires sustained 200 samples in normal mode", () => {
