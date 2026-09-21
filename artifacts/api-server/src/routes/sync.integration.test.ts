@@ -1059,6 +1059,14 @@ describe("GET /sync/health — read-only scoped sentinel", () => {
         ledgerRowsScanned: 0,
         historyRowsScanned: 0,
       },
+      legacySyncReadiness: {
+        compatibilityMode: "accept",
+        status: "not-ready",
+        acceptedLegacyWrites: 0,
+        requiredAcceptedLegacyWrites: 0,
+        fullWindowObserved: false,
+        windowMs: 86_400_000,
+      },
     });
     expect(body.checks.map((check: any) => check.name)).toEqual([
       "canonical-document",
@@ -1069,6 +1077,7 @@ describe("GET /sync/health — read-only scoped sentinel", () => {
     expect(body).not.toHaveProperty("data");
     expect(body).not.toHaveProperty("payload");
     expect(JSON.stringify(body)).not.toContain("health-run");
+    expect(body.legacySyncReadiness.expiresAt).toMatch(/Z$/);
   });
 
   it("reports a representative canonical mismatch as failing and never repairs it", async () => {

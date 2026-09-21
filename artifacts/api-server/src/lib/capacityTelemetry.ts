@@ -5,6 +5,9 @@ import { logger } from "./logger";
 const MAX_SAMPLES = 2_048;
 const REPORT_INTERVAL_MS = 60_000;
 const MAX_METRIC_VALUE = 10 * 60 * 1_000;
+export const LEGACY_SYNC_READINESS_WINDOW_MS = 24 * 60 * 60 * 1_000;
+export const LEGACY_SYNC_EVIDENCE_TTL_MS = 5 * 60 * 1_000;
+const LEGACY_SYNC_BUCKET_MS = 60_000;
 
 export type SyncPutMode = "complete" | "partial" | "fallback" | "unchanged";
 export type SseFrameMode = "complete" | "partial";
@@ -38,6 +41,23 @@ let windowStartedAt = Date.now();
 let lastReportAt = windowStartedAt;
 let latestPool = { total: 0, idle: 0, waiting: 0 };
 let installedPool: Pool | undefined;
+let legacyObservationStartedAt = windowStartedAt;
+const legacySyncBuckets = new Map<number, { accepted: number; rejected: number }>();
+
+export type LegacySyncCompatibilityMode = "accept" | "reject";
+
+export type LegacySyncReadiness = {
+  compatibilityMode: LegacySyncCompatibilityMode;
+  status: "ready" | "not-ready" | "rejection-enabled";
+  acceptedLegacyWrites: number;
+  rejectedLegacyWrites: number;
+  requiredAcceptedLegacyWrites: 0;
+  windowMs: number;
+  observedFrom: string;
+  observedUntil: string;
+  fullWindowObserved: boolean;
+  expiresAt: string;
+};
 
 function bounded(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value)
@@ -103,9 +123,54 @@ export function recordSyncPut(fields: {
   maybeReport();
 }
 
-export function recordLegacySyncWrite(outcome: "accepted" | "rejected"): void {
+function pruneLegacySyncBuckets(now: number): void {
+  const oldestBucket = Math.floor((now - LEGACY_SYNC_READINESS_WINDOW_MS) / LEGACY_SYNC_BUCKET_MS) * LEGACY_SYNC_BUCKET_MS;
+  for (const bucket of legacySyncBuckets.keys()) {
+    if (bucket < oldestBucket) legacySyncBuckets.delete(bucket);
+  }
+}
+
+export function recordLegacySyncWrite(outcome: "accepted" | "rejected", now = Date.now()): void {
   increment(`sync.put.legacy_unversioned.${outcome}.count`);
+  pruneLegacySyncBuckets(now);
+  const bucket = Math.floor(now / LEGACY_SYNC_BUCKET_MS) * LEGACY_SYNC_BUCKET_MS;
+  const counts = legacySyncBuckets.get(bucket) ?? { accepted: 0, rejected: 0 };
+  counts[outcome] += 1;
+  legacySyncBuckets.set(bucket, counts);
   maybeReport();
+}
+
+export function legacySyncReadinessSnapshot(
+  compatibilityMode: LegacySyncCompatibilityMode,
+  now = Date.now(),
+): LegacySyncReadiness {
+  pruneLegacySyncBuckets(now);
+  const windowStart = now - LEGACY_SYNC_READINESS_WINDOW_MS;
+  let acceptedLegacyWrites = 0;
+  let rejectedLegacyWrites = 0;
+  for (const [bucket, counts] of legacySyncBuckets) {
+    if (bucket + LEGACY_SYNC_BUCKET_MS <= windowStart || bucket > now) continue;
+    acceptedLegacyWrites += counts.accepted;
+    rejectedLegacyWrites += counts.rejected;
+  }
+  const fullWindowObserved = legacyObservationStartedAt <= windowStart;
+  const observedFrom = Math.max(legacyObservationStartedAt, windowStart);
+  return {
+    compatibilityMode,
+    status: compatibilityMode === "reject"
+      ? "rejection-enabled"
+      : fullWindowObserved && acceptedLegacyWrites === 0
+        ? "ready"
+        : "not-ready",
+    acceptedLegacyWrites,
+    rejectedLegacyWrites,
+    requiredAcceptedLegacyWrites: 0,
+    windowMs: LEGACY_SYNC_READINESS_WINDOW_MS,
+    observedFrom: new Date(observedFrom).toISOString(),
+    observedUntil: new Date(now).toISOString(),
+    fullWindowObserved,
+    expiresAt: new Date(now + LEGACY_SYNC_EVIDENCE_TTL_MS).toISOString(),
+  };
 }
 
 export function recordSseFrame(fields: {
@@ -219,4 +284,6 @@ export function clearCapacityTelemetryForTests(now = Date.now()): void {
   latestPool = { total: 0, idle: 0, waiting: 0 };
   windowStartedAt = now;
   lastReportAt = now;
+  legacyObservationStartedAt = now;
+  legacySyncBuckets.clear();
 }

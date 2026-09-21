@@ -66,6 +66,7 @@ import {
   recordLegacySyncWrite,
   recordSyncPut,
   recordSyncTransaction,
+  legacySyncReadinessSnapshot,
   syncRunCountBucket,
   type SyncPutMode,
 } from "../lib/capacityTelemetry";
@@ -2708,7 +2709,13 @@ router.get(
       (req as Request & { correlationId?: string }).correlationId ?? req.id ?? "sync-health",
     );
     try {
-      const report = await buildSyncHealthReport(db, currentScope(), date);
+      const report = await buildSyncHealthReport(
+        db,
+        currentScope(),
+        date,
+        new Date(),
+        legacySyncReadinessSnapshot(legacyCompleteWritesRejected() ? "reject" : "accept"),
+      );
       logger.info({
         event: "sync_health_check",
         correlationId,
