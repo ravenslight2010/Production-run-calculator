@@ -28,6 +28,8 @@
     "test:skill-catalog": "tsx ./src/skill-catalog.test.mts",
     "test:task-policy": "tsx ./src/check-task-policy.test.mts",
     "test:operational-skill-evidence": "tsx ./src/check-operational-skill-evidence.test.mts",
+    "check:audit-protection-config": "node ./src/check-audit-protection-config.mjs",
+    "test:audit-protection-config": "node --test ./src/check-audit-protection-config.test.mjs",
     "verify-large-spec-import": "tsx ./src/verify-large-spec-import.mts",
     "audit:report-key-rotation": "tsx ./src/report-key-rotation-preflight.mts",
     "audit:maintain": "tsx ./src/maintain-audit-log.mts",

@@ -1311,6 +1311,11 @@ const sourceLibraryPreflightEnabled =
   );
 
 const steps: ReleaseStep[] = [
+  {
+    label: "audit protection publish configuration",
+    args: ["run", "check:audit-protection-config"],
+    stage: "prerequisites",
+  },
   ...(sourceLibraryPreflightEnabled
     ? [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_STEP]
     : []),
