@@ -167,6 +167,7 @@ import {
   runLabel,
 } from "../utils";
 import { normalizeScheduledDays, type ScheduledDay } from "../scheduledDays";
+import { reconcileLiveScheduleSave } from "../scheduleLiveReconciliation";
 import { fetchWithTimeout } from "../fetchWithTimeout";
 import { deriveFrontlineNeedRows } from "../frontlineRows";
 import {
@@ -7053,11 +7054,10 @@ export default function Home() {
     const d = new Date(); d.setDate(d.getDate() + 1);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }
-  // Run ids the schedule editor actually LOADED when it was opened. On save we
-  // may only treat a live run as "removed by the user" if the editor showed it
-  // to them (its id is in this set) — an editor opened blank ("Schedule New
-  // Day") must never delete today's existing runs it never displayed.
-  const scheduleEditorLoadedRunIdsRef = useRef<Set<string>>(new Set());
+  // Run snapshots the schedule editor actually loaded when it was opened. On
+  // save we may only treat a live run as removed if the editor showed it, while
+  // lifecycle changes that happened after opening must still be preserved.
+  const scheduleEditorLoadedRunsRef = useRef<RunMeta[]>([]);
   async function openScheduleEditor(date?: string) {
     setScheduleAdvancedRunId(null);
     setScheduleCalendarOpen(false);
@@ -7076,7 +7076,7 @@ export default function Home() {
       setScheduleEditorBreaks(normalizeDayBreaks(dayState.breaks));
       setScheduleEditorDate(date);
       setScheduleEditorRuns(runs);
-      scheduleEditorLoadedRunIdsRef.current = new Set(runs.map(r => r.id));
+      scheduleEditorLoadedRunsRef.current = dayState.runs.map((run) => ({ ...run }));
       setScheduleEditorIsLiveDay(true);
       setScheduleView("editor");
       return;
@@ -7097,7 +7097,7 @@ export default function Home() {
                 return { id: r.id, brand: r.brand, flavor: r.flavor, casesNeeded: v.casesNeeded ?? 0 };
               })
             );
-            scheduleEditorLoadedRunIdsRef.current = new Set(payload.dayState.runs.map(r => r.id));
+            scheduleEditorLoadedRunsRef.current = payload.dayState.runs.map((run) => ({ ...run }));
             setScheduleEditorIsLiveDay(false);
             setScheduleView("editor");
             return;
@@ -7110,7 +7110,7 @@ export default function Home() {
     setScheduleEditorBreaks(defaultDayBreaks());
     setScheduleEditorDate(todayStr());
     setScheduleEditorRuns([{ id: newId, brand: "", flavor: "", casesNeeded: 0 }]);
-    scheduleEditorLoadedRunIdsRef.current = new Set();
+    scheduleEditorLoadedRunsRef.current = [];
     setScheduleEditorIsLiveDay(false);
     setScheduleView("editor");
   }
@@ -7156,27 +7156,21 @@ export default function Home() {
     if (scheduleEditorDate === todayStr()) {
       try {
         const now = Date.now();
-        const liveById = new Map(dayState.runs.map(r => [r.id, r]));
-        const editorIds = new Set(scheduleEditorRuns.map(r => r.id));
-        // Editor order first; existing runs keep their lifecycle fields
-        // (startedAt/stoppages/…) — saveDayState diff-stamps metaUpdatedAt.
-        const newRuns: RunMeta[] = scheduleEditorRuns.map(er => {
-          const live = liveById.get(er.id);
-          return live
-            ? { ...live, brand: er.brand, flavor: er.flavor }
-            : { id: er.id, brand: er.brand, flavor: er.flavor };
-        });
-        // Live runs the editor omitted: treat as user-deleted ONLY if the
-        // editor actually showed them and they never started; keep the rest.
-        for (const r of dayState.runs) {
-          if (editorIds.has(r.id)) continue;
-          if (scheduleEditorLoadedRunIdsRef.current.has(r.id) && !r.startedAt && !r.endedAt) {
-            tombstoneDeleted("runs", r.id);
-          } else {
-            newRuns.push(r);
-          }
+        const freshestDayState = dayStateRef.current;
+        const reconciliation = reconcileLiveScheduleSave(
+          scheduleEditorLoadedRunsRef.current,
+          scheduleEditorRuns,
+          freshestDayState.runs,
+        );
+        if (!reconciliation.ok) {
+          setScheduleError("Today's schedule must keep at least one run.");
+          setScheduleSaving(false);
+          return;
         }
-        if (newRuns.length === 0) { setScheduleSaving(false); return; } // never leave the day with 0 runs
+        const newRuns = reconciliation.runs;
+        for (const runId of reconciliation.removedRunIds) {
+          tombstoneDeleted("runs", runId);
+        }
         // Persist values with a fresh edit stamp ONLY when they actually
         // changed, so untouched runs don't gratuitously win the LWW merge.
         let currentValsChanged = false;
@@ -7191,9 +7185,9 @@ export default function Home() {
             if (r.id === currentRunId) currentValsChanged = true;
           }
         }
-        const prevCurId = dayState.runs[dayState.currentIndex]?.id;
+        const prevCurId = freshestDayState.runs[freshestDayState.currentIndex]?.id;
         const newIndex = Math.max(0, newRuns.findIndex(r => r.id === prevCurId));
-        const newDs = { ...dayState, runs: newRuns, currentIndex: newIndex, breaks: normalizeDayBreaks(scheduleEditorBreaks) };
+        const newDs = { ...freshestDayState, runs: newRuns, currentIndex: newIndex, breaks: normalizeDayBreaks(scheduleEditorBreaks) };
         setDayState(newDs);
         saveDayState(newDs);
         // Re-load the form if the current run's stored values changed (or the
@@ -7205,7 +7199,8 @@ export default function Home() {
           form.reset(curVals);
           resetFieldArrays(curVals);
         }
-        schedulePush(newDs, 0);
+        const response = await pushTodayCanonical(buildSyncPayload(newDs));
+        if (!response.ok) throw new Error(`schedule sync write failed: ${response.status}`);
         setScheduleView("list");
       } catch {
         setScheduleError("Couldn't save — check your connection and try again.");
@@ -9785,6 +9780,8 @@ export default function Home() {
       epoch: getStoredResetEpoch(),
     });
     let result = await consumeCanonicalSyncWriteResponse(res, true);
+    if (!res.ok) throw new Error(`sync write failed: ${res.status}`);
+    if (result.stale) throw new Error("sync write was rejected by the reset boundary");
     // A stale base can return successful transport with the authoritative
     // canonical snapshot instead of applying this write. Adopt it first, then
     // rebuild once from the reconciled local state so only edits still eligible
@@ -9802,6 +9799,13 @@ export default function Home() {
         epoch: getStoredResetEpoch(),
       });
       result = await consumeCanonicalSyncWriteResponse(res, true);
+      if (!res.ok) throw new Error(`sync recovery write failed: ${res.status}`);
+      if (result.stale) throw new Error("sync recovery write was rejected by the reset boundary");
+      if (shouldReplaySyncWrite(
+        result.body as { partialFallback?: boolean; data?: unknown } | null | undefined,
+      )) {
+        throw new Error("sync write remained stale after canonical rebase");
+      }
     }
     return res;
   }
@@ -10121,10 +10125,10 @@ export default function Home() {
     }
     // Brand+flavor profiles are NOT in the sync payload anymore — they live in
     // their own stamped factory-wide server pool (see profileServerSync.ts).
-    // Name lists, presets, tombstones, packaging settings, and stop reasons are
-    // NOT in the sync payload anymore — they live in the factory KV store
-    // (/api/factory-data) and are replicated via write-through PUTs + startup
-    // fetch (see factoryDataSync.ts).
+    // Name lists, presets, packaging settings, and stop reasons live in the
+    // factory KV store. Run tombstones are also retained in live sync because
+    // the server's additive same-day run merge needs them atomically with the
+    // shortened run list to prevent a stale peer from restoring removed runs.
     const history = loadHistory();
     const historySig = JSON.stringify(history);
     return {
@@ -10142,6 +10146,9 @@ export default function Home() {
       })(),
       ...(Object.keys(packagingProgress).length > 0 ? { packagingProgress } : {}),
       ...(historySig !== lastSyncedHistorySigRef.current ? { history } : {}),
+      deletedItems: loadDeletedItems(),
+      deletedStamps: loadDeletedStamps(),
+      undeletedStamps: loadUndeletedStamps(),
     };
   }
 
@@ -15002,7 +15009,7 @@ export default function Home() {
     resumeRun, revalidate, role, ruleViolations, runStatus, runSummaryStatsById, runToTime, runValuesById,
     saucePoolDrift, sauceRecipesList, sauceWeightsOpen, saveCatalogEntry, saveScheduledDay,
     savedFlashRef, savedFlashTimer, scheduleAdvancedRunId, scheduleDeleteConfirm, scheduleEditorDate, scheduleEditorIsLiveDay,
-    scheduleEditorLoadedRunIdsRef, scheduleEditorRunValues, scheduleEditorRuns, scheduleImportInputRef, scheduleMove, scheduleMoveDate,
+    scheduleEditorLoadedRunsRef, scheduleEditorRunValues, scheduleEditorRuns, scheduleImportInputRef, scheduleMove, scheduleMoveDate,
     scheduleMoving, schedulePush, scheduleSaving, scheduleView, scheduledDays, screenMode,
     serverCheeseByName, serverCheeseNames, serverCheeseRowsByName, serverDoughNames, serverDoughRowsByName, serverDoughTrayByName,
     serverDoughVariantsByName, serverDoughWeightByName, serverMixNames, serverMixRowsByName, serverPin, serverSauceNames,
