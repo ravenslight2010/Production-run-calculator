@@ -89,6 +89,24 @@ paths:
         "409":
           description: Username already taken
 
+  /auth/accept-invitation:
+    post:
+      operationId: acceptStaffInvitation
+      tags: [auth]
+      summary: Accept a one-time staff invitation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InvitationAcceptance" }
+      responses:
+        "201":
+          description: Account created and signed in
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthResponse" }
+        "400": { description: Invitation is invalid or unavailable }
+
   /auth/username-available:
     get:
       operationId: checkUsernameAvailable
@@ -4556,6 +4574,51 @@ paths:
         "404":
           description: User not found
 
+  /signup-code/status:
+    get:
+      operationId: getSignupCodeStatus
+      tags: [roles]
+      summary: Read bounded transitional sign-up code counters
+      responses:
+        "200":
+          description: Code status without the code itself
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled, successfulUses, failedUses]
+                properties:
+                  enabled: { type: boolean }
+                  successfulUses: { type: integer }
+                  failedUses: { type: integer }
+                  rotatedAt: { type: [string, "null"], format: date-time }
+    patch:
+      operationId: setSignupCodeStatus
+      tags: [roles]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SignupCodeStatusUpdate"
+      responses:
+        "200": { description: Updated code status }
+  /signup-code/rotate:
+    post:
+      operationId: rotateSignupCode
+      tags: [roles]
+      summary: Rotate transitional sign-up code (secret returned once)
+      responses:
+        "201":
+          description: Replacement secret, shown once
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [secret]
+                properties:
+                  secret: { type: string }
+
   /users/{userId}:
     delete:
       operationId: deleteStaffMember
@@ -6519,6 +6582,33 @@ components:
                 Facility access code configured server-side (STAFF_SIGNUP_CODE)
                 and shared out of band with legitimate new staff.
 
+    InvitationAcceptance:
+      type: object
+      required:
+        - invitation
+        - username
+        - password
+      properties:
+        invitation:
+          type: string
+          minLength: 20
+          maxLength: 512
+        username:
+          type: string
+          minLength: 3
+          maxLength: 64
+        password:
+          type: string
+          minLength: 6
+          maxLength: 200
+
+    SignupCodeStatusUpdate:
+      type: object
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+
     AuthResponse:
       type: object
       required:
@@ -6649,6 +6739,7 @@ components:
         - floorModeEnabled
         - notificationPrefs
         - sandbox
+        - disabled
         - sandboxCopiedAt
         - sandboxStale
       properties:
@@ -6695,6 +6786,9 @@ components:
             Whether this is the seeded sandbox account, which operates in the
             isolated "sandbox" data scope. Clients show a persistent sandbox
             banner and offer a "Reset sandbox" action when true.
+        disabled:
+          type: boolean
+          description: Whether sign-in is disabled for this account.
         sandboxCopiedAt:
           type: [string, "null"]
           description: >-

@@ -21,7 +21,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { sql } from "drizzle-orm";
-import { signToken } from "../lib/auth";
+import { signLegacyTokenForTests } from "../lib/auth";
 
 type DbModule = typeof import("@workspace/db");
 type SyncPayload = Record<string, unknown>;
@@ -139,7 +139,7 @@ beforeEach(async () => {
 });
 
 function headers(user = OPERATOR): Record<string, string> {
-  return { authorization: `Bearer ${signToken(user)}` };
+  return { authorization: `Bearer ${signLegacyTokenForTests(user)}` };
 }
 
 async function startIsolatedSyncProcess(): Promise<{ child: ChildProcess; baseUrl: string }> {

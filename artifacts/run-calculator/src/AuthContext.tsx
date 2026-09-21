@@ -12,6 +12,7 @@ import {
   signInRequest,
   signOutRequest,
   signUpRequest,
+  acceptStaffInvitation,
   InventoryApiError,
   type AuthSessionReason,
   type StaffMember,
@@ -203,6 +204,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     [advanceAuthEpoch, resetCacheTo],
   );
+  const acceptInvitation = useCallback(
+    async (invitation: string, username: string, password: string) => {
+      const transitionEpoch = advanceAuthEpoch();
+      const { user } = await acceptStaffInvitation(invitation, username, password);
+      if (transitionEpoch !== authEpochRef.current) return;
+      setSessionEndedReason(null);
+      freshSessionRef.current = true;
+      await resetCacheTo(user);
+    },
+    [advanceAuthEpoch, resetCacheTo],
+  );
 
   // Sign in as the seeded sandbox account. Credentials are intentionally the
   // well-known "test"/"test" pair — this is a non-production demo shortcut.
@@ -353,6 +365,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         retryStartup,
         signIn,
         signUp,
+        acceptInvitation,
         signInAsTest,
         signOut,
         forceSignedOut,

@@ -50,12 +50,16 @@ export const SignUpResponse = zod.object({
   "floorModeEnabled": zod.boolean().describe('Whether Floor Mode (the idle big-numbers monitor) is enabled for this user. Per-user so the preference follows them across devices.'),
   "notificationPrefs": zod.record(zod.string(), zod.boolean()).describe('Per-alert push-notification preferences: alert kind → enabled. A MISSING key means that alert is ON (default). Per-user so the choices follow them across devices.'),
   "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated "sandbox" data scope. Clients show a persistent sandbox banner and offer a "Reset sandbox" action when true.'),
+  "disabled": zod.boolean().describe('Whether sign-in is disabled for this account.'),
   "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as "Sandbox copied from live at …".'),
   "sandboxStale": zod.boolean().describe('Whether the sandbox copy is stale and due for an automatic refresh from live. The client drives the re-copy (reusing the manual reset flow); the server owns the staleness cutoff so web and mobile stay in lockstep. Always false for non-sandbox accounts.')
 })
 })
 
-
+/**
+ * @summary Accept a one-time staff invitation
+ */
+export const acceptStaffInvitationBodyInvitationMin = 20;
 /**
  * Lightweight, read-only lookup used by the sign-up form to tell users in real time whether a username is still free. Public — sign-up is itself public. The check is case-insensitive, mirroring account creation.
  * @summary Check whether a username is available for sign-up
@@ -100,6 +104,7 @@ export const SignInResponse = zod.object({
   "floorModeEnabled": zod.boolean().describe('Whether Floor Mode (the idle big-numbers monitor) is enabled for this user. Per-user so the preference follows them across devices.'),
   "notificationPrefs": zod.record(zod.string(), zod.boolean()).describe('Per-alert push-notification preferences: alert kind → enabled. A MISSING key means that alert is ON (default). Per-user so the choices follow them across devices.'),
   "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated "sandbox" data scope. Clients show a persistent sandbox banner and offer a "Reset sandbox" action when true.'),
+  "disabled": zod.boolean().describe('Whether sign-in is disabled for this account.'),
   "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as "Sandbox copied from live at …".'),
   "sandboxStale": zod.boolean().describe('Whether the sandbox copy is stale and due for an automatic refresh from live. The client drives the re-copy (reusing the manual reset flow); the server owns the staleness cutoff so web and mobile stay in lockstep. Always false for non-sandbox accounts.')
 })
@@ -140,6 +145,7 @@ export const ChangePasswordResponse = zod.object({
   "floorModeEnabled": zod.boolean().describe('Whether Floor Mode (the idle big-numbers monitor) is enabled for this user. Per-user so the preference follows them across devices.'),
   "notificationPrefs": zod.record(zod.string(), zod.boolean()).describe('Per-alert push-notification preferences: alert kind → enabled. A MISSING key means that alert is ON (default). Per-user so the choices follow them across devices.'),
   "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated "sandbox" data scope. Clients show a persistent sandbox banner and offer a "Reset sandbox" action when true.'),
+  "disabled": zod.boolean().describe('Whether sign-in is disabled for this account.'),
   "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as "Sandbox copied from live at …".'),
   "sandboxStale": zod.boolean().describe('Whether the sandbox copy is stale and due for an automatic refresh from live. The client drives the re-copy (reusing the manual reset flow); the server owns the staleness cutoff so web and mobile stay in lockstep. Always false for non-sandbox accounts.')
 })
@@ -5844,6 +5850,7 @@ export const GetMeResponse = zod.object({
   "floorModeEnabled": zod.boolean().describe('Whether Floor Mode (the idle big-numbers monitor) is enabled for this user. Per-user so the preference follows them across devices.'),
   "notificationPrefs": zod.record(zod.string(), zod.boolean()).describe('Per-alert push-notification preferences: alert kind → enabled. A MISSING key means that alert is ON (default). Per-user so the choices follow them across devices.'),
   "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated "sandbox" data scope. Clients show a persistent sandbox banner and offer a "Reset sandbox" action when true.'),
+  "disabled": zod.boolean().describe('Whether sign-in is disabled for this account.'),
   "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as "Sandbox copied from live at …".'),
   "sandboxStale": zod.boolean().describe('Whether the sandbox copy is stale and due for an automatic refresh from live. The client drives the re-copy (reusing the manual reset flow); the server owns the staleness cutoff so web and mobile stay in lockstep. Always false for non-sandbox accounts.')
 })
@@ -5864,6 +5871,7 @@ export const MarkOnboardingSeenResponse = zod.object({
   "floorModeEnabled": zod.boolean().describe('Whether Floor Mode (the idle big-numbers monitor) is enabled for this user. Per-user so the preference follows them across devices.'),
   "notificationPrefs": zod.record(zod.string(), zod.boolean()).describe('Per-alert push-notification preferences: alert kind → enabled. A MISSING key means that alert is ON (default). Per-user so the choices follow them across devices.'),
   "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated "sandbox" data scope. Clients show a persistent sandbox banner and offer a "Reset sandbox" action when true.'),
+  "disabled": zod.boolean().describe('Whether sign-in is disabled for this account.'),
   "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as "Sandbox copied from live at …".'),
   "sandboxStale": zod.boolean().describe('Whether the sandbox copy is stale and due for an automatic refresh from live. The client drives the re-copy (reusing the manual reset flow); the server owns the staleness cutoff so web and mobile stay in lockstep. Always false for non-sandbox accounts.')
 })
@@ -5884,6 +5892,7 @@ export const MarkTourCompletedResponse = zod.object({
   "floorModeEnabled": zod.boolean().describe('Whether Floor Mode (the idle big-numbers monitor) is enabled for this user. Per-user so the preference follows them across devices.'),
   "notificationPrefs": zod.record(zod.string(), zod.boolean()).describe('Per-alert push-notification preferences: alert kind → enabled. A MISSING key means that alert is ON (default). Per-user so the choices follow them across devices.'),
   "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated "sandbox" data scope. Clients show a persistent sandbox banner and offer a "Reset sandbox" action when true.'),
+  "disabled": zod.boolean().describe('Whether sign-in is disabled for this account.'),
   "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as "Sandbox copied from live at …".'),
   "sandboxStale": zod.boolean().describe('Whether the sandbox copy is stale and due for an automatic refresh from live. The client drives the re-copy (reusing the manual reset flow); the server owns the staleness cutoff so web and mobile stay in lockstep. Always false for non-sandbox accounts.')
 })
@@ -5908,6 +5917,7 @@ export const SetNotificationPrefsResponse = zod.object({
   "floorModeEnabled": zod.boolean().describe('Whether Floor Mode (the idle big-numbers monitor) is enabled for this user. Per-user so the preference follows them across devices.'),
   "notificationPrefs": zod.record(zod.string(), zod.boolean()).describe('Per-alert push-notification preferences: alert kind → enabled. A MISSING key means that alert is ON (default). Per-user so the choices follow them across devices.'),
   "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated "sandbox" data scope. Clients show a persistent sandbox banner and offer a "Reset sandbox" action when true.'),
+  "disabled": zod.boolean().describe('Whether sign-in is disabled for this account.'),
   "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as "Sandbox copied from live at …".'),
   "sandboxStale": zod.boolean().describe('Whether the sandbox copy is stale and due for an automatic refresh from live. The client drives the re-copy (reusing the manual reset flow); the server owns the staleness cutoff so web and mobile stay in lockstep. Always false for non-sandbox accounts.')
 })
@@ -5932,6 +5942,7 @@ export const SetFloorModeResponse = zod.object({
   "floorModeEnabled": zod.boolean().describe('Whether Floor Mode (the idle big-numbers monitor) is enabled for this user. Per-user so the preference follows them across devices.'),
   "notificationPrefs": zod.record(zod.string(), zod.boolean()).describe('Per-alert push-notification preferences: alert kind → enabled. A MISSING key means that alert is ON (default). Per-user so the choices follow them across devices.'),
   "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated "sandbox" data scope. Clients show a persistent sandbox banner and offer a "Reset sandbox" action when true.'),
+  "disabled": zod.boolean().describe('Whether sign-in is disabled for this account.'),
   "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as "Sandbox copied from live at …".'),
   "sandboxStale": zod.boolean().describe('Whether the sandbox copy is stale and due for an automatic refresh from live. The client drives the re-copy (reusing the manual reset flow); the server owns the staleness cutoff so web and mobile stay in lockstep. Always false for non-sandbox accounts.')
 })
@@ -6012,6 +6023,7 @@ export const ListStaffResponseItem = zod.object({
   "floorModeEnabled": zod.boolean().describe('Whether Floor Mode (the idle big-numbers monitor) is enabled for this user. Per-user so the preference follows them across devices.'),
   "notificationPrefs": zod.record(zod.string(), zod.boolean()).describe('Per-alert push-notification preferences: alert kind → enabled. A MISSING key means that alert is ON (default). Per-user so the choices follow them across devices.'),
   "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated "sandbox" data scope. Clients show a persistent sandbox banner and offer a "Reset sandbox" action when true.'),
+  "disabled": zod.boolean().describe('Whether sign-in is disabled for this account.'),
   "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as "Sandbox copied from live at …".'),
   "sandboxStale": zod.boolean().describe('Whether the sandbox copy is stale and due for an automatic refresh from live. The client drives the re-copy (reusing the manual reset flow); the server owns the staleness cutoff so web and mobile stay in lockstep. Always false for non-sandbox accounts.')
 })
@@ -6040,6 +6052,7 @@ export const SetStaffRoleResponse = zod.object({
   "floorModeEnabled": zod.boolean().describe('Whether Floor Mode (the idle big-numbers monitor) is enabled for this user. Per-user so the preference follows them across devices.'),
   "notificationPrefs": zod.record(zod.string(), zod.boolean()).describe('Per-alert push-notification preferences: alert kind → enabled. A MISSING key means that alert is ON (default). Per-user so the choices follow them across devices.'),
   "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated "sandbox" data scope. Clients show a persistent sandbox banner and offer a "Reset sandbox" action when true.'),
+  "disabled": zod.boolean().describe('Whether sign-in is disabled for this account.'),
   "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as "Sandbox copied from live at …".'),
   "sandboxStale": zod.boolean().describe('Whether the sandbox copy is stale and due for an automatic refresh from live. The client drives the re-copy (reusing the manual reset flow); the server owns the staleness cutoff so web and mobile stay in lockstep. Always false for non-sandbox accounts.')
 })
@@ -6062,7 +6075,15 @@ export const ResetStaffPasswordBody = zod.object({
 
 export const ResetStaffPasswordResponse = zod.void()
 
-
+/**
+ * @summary Read bounded transitional sign-up code counters
+ */
+export const GetSignupCodeStatusResponse = zod.object({
+  "enabled": zod.boolean(),
+  "successfulUses": zod.int(),
+  "failedUses": zod.int(),
+  "rotatedAt": zod.coerce.date().nullish()
+})
 /**
  * @summary Remove a staff member (manager only)
  */
@@ -6964,3 +6985,51 @@ export const ApplyImportOperationParams = zod.object({
 })
 
 export const applyImportOperationBodyImportTypeMax = 40;
+
+export const acceptStaffInvitationBodyInvitationMax = 512;
+
+export const SetSignupCodeStatusBody = zod.object({
+  "enabled": zod.boolean()
+})
+
+export const AcceptStaffInvitationResponse = zod.object({
+  "token": zod.string(),
+  "user": zod.object({
+  "userId": zod.string(),
+  "role": zod.string().describe('The name of the role assigned to this user.'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
+  "email": zod.string().nullable(),
+  "name": zod.string().nullable(),
+  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login "Get Started" overview.'),
+  "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).'),
+  "floorModeEnabled": zod.boolean().describe('Whether Floor Mode (the idle big-numbers monitor) is enabled for this user. Per-user so the preference follows them across devices.'),
+  "notificationPrefs": zod.record(zod.string(), zod.boolean()).describe('Per-alert push-notification preferences: alert kind → enabled. A MISSING key means that alert is ON (default). Per-user so the choices follow them across devices.'),
+  "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated "sandbox" data scope. Clients show a persistent sandbox banner and offer a "Reset sandbox" action when true.'),
+  "disabled": zod.boolean().describe('Whether sign-in is disabled for this account.'),
+  "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as "Sandbox copied from live at …".'),
+  "sandboxStale": zod.boolean().describe('Whether the sandbox copy is stale and due for an automatic refresh from live. The client drives the re-copy (reusing the manual reset flow); the server owns the staleness cutoff so web and mobile stay in lockstep. Always false for non-sandbox accounts.')
+})
+})
+
+export const acceptStaffInvitationBodyPasswordMax = 200;
+
+export const SetSignupCodeStatusResponse = zod.unknown()
+
+export const acceptStaffInvitationBodyPasswordMin = 6;
+
+export const acceptStaffInvitationBodyUsernameMin = 3;
+
+/**
+ * @summary Rotate transitional sign-up code (secret returned once)
+ */
+export const RotateSignupCodeResponse = zod.object({
+  "secret": zod.string()
+})
+
+export const AcceptStaffInvitationBody = zod.object({
+  "invitation": zod.string().min(acceptStaffInvitationBodyInvitationMin).max(acceptStaffInvitationBodyInvitationMax),
+  "username": zod.string().min(acceptStaffInvitationBodyUsernameMin).max(acceptStaffInvitationBodyUsernameMax),
+  "password": zod.string().min(acceptStaffInvitationBodyPasswordMin).max(acceptStaffInvitationBodyPasswordMax)
+})
+
+export const acceptStaffInvitationBodyUsernameMax = 64;

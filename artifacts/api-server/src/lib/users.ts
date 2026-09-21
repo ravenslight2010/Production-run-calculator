@@ -51,13 +51,14 @@ export async function updateUserPassword(
 export async function createUser(
   username: string,
   password: string,
+  executor: Pick<typeof db, "select" | "insert"> = db,
 ): Promise<{ ok: true; user: User } | { ok: false; reason: "taken" }> {
   const handle = normalizeUsername(username);
-  const existing = await findUserByUsername(handle);
+  const [existing] = await executor.select().from(usersTable).where(sql`lower(${usersTable.username}) = lower(${handle})`);
   if (existing) return { ok: false, reason: "taken" };
 
   try {
-    const [row] = await db
+    const [row] = await executor
       .insert(usersTable)
       .values({ id: newUserId(), username: handle, passwordHash: hashPassword(password) })
       .returning();

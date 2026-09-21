@@ -28,9 +28,13 @@ import {
   declineResetRequest,
   listPendingResetRequests,
 } from "../lib/passwordResets";
-import { db } from "@workspace/db";
+import { db, usersTable } from "@workspace/db";
 import { requireCapability, requireLiveScope } from "../middlewares/requireCapability";
 import { getUserById } from "../lib/users";
+import { revokeSessionsForUser } from "../lib/authSessions";
+import { eq } from "drizzle-orm";
+import { createInvitation, listInvitations, revokeInvitation } from "../lib/invitations";
+import { rotateSignupCode, setSignupCodeEnabled, signupCodeStatus } from "../lib/signupAccessCode";
 import { logAuditEvent, writeAuditEvent } from "./auditLogs";
 
 function pathUserId(raw: string | string[] | undefined): string | undefined {
@@ -38,6 +42,67 @@ function pathUserId(raw: string | string[] | undefined): string | undefined {
 }
 
 const router: IRouter = Router();
+
+router.get("/signup-code/status", requireLiveScope, requireCapability("manage-staff"), async (_req, res): Promise<void> => {
+  res.json(await signupCodeStatus());
+});
+router.patch("/signup-code/status", requireLiveScope, requireCapability("manage-staff"), async (req, res): Promise<void> => {
+  if (typeof req.body?.enabled !== "boolean") {
+    res.status(400).json({ error: "enabled must be boolean" });
+    return;
+  }
+  await setSignupCodeEnabled(req.body.enabled);
+  res.json(await signupCodeStatus());
+});
+router.post("/signup-code/rotate", requireLiveScope, requireCapability("manage-staff"), async (_req, res): Promise<void> => {
+  const secret = await rotateSignupCode();
+  // The replacement is returned exactly once; only bounded counters/status are
+  // ever suitable for audit or subsequent reads.
+  res.status(201).json({ secret });
+});
+
+router.post("/staff-invitations", requireLiveScope, requireCapability("manage-staff"), async (req, res): Promise<void> => {
+  const role = typeof req.body?.role === "string" ? req.body.role.trim() : "operator";
+  if (!role || role.length > 64) {
+    res.status(400).json({ error: "Invalid invitation role." });
+    return;
+  }
+  const created = await createInvitation(req.userId!, role, req.capabilities ?? []);
+  if (!created.ok) {
+    res.status(created.status).json({ error: created.error });
+    return;
+  }
+  await writeAuditEvent(db, {
+    action: "staff_invitation_created",
+    resource: "staff_invitation",
+    changes: { outcome: "success", role },
+  });
+  // `secret` is intentionally returned only in this one response and is never
+  // persisted or included in audit/log output.
+  res.status(201).json(created);
+});
+router.get("/staff-invitations", requireLiveScope, requireCapability("manage-staff"), async (_req, res): Promise<void> => {
+  res.json(await listInvitations());
+});
+
+router.delete("/staff-invitations/:id", requireLiveScope, requireCapability("manage-staff"), async (req, res): Promise<void> => {
+  const id = pathUserId(req.params.id);
+  if (!id) {
+    res.status(400).json({ error: "Invalid invitation id." });
+    return;
+  }
+  const revoked = await revokeInvitation(id);
+  if (!revoked) {
+    res.status(404).json({ error: "Invitation is invalid or unavailable." });
+    return;
+  }
+  await writeAuditEvent(db, {
+    action: "staff_invitation_revoked",
+    resource: "staff_invitation",
+    changes: { outcome: "success" },
+  });
+  res.status(204).end();
+});
 
 async function auditActor(req: { userId?: string }): Promise<string> {
   if (!req.userId) return "unknown";
@@ -195,6 +260,56 @@ router.delete(
 // reassign roles.
 router.get("/users", requireLiveScope, requireCapability("manage-staff"), async (_req, res): Promise<void> => {
   res.json(await listStaff());
+});
+
+// Disable/enable is the normal lifecycle operation. It preserves audit history
+// and immediately fences both cookie and bearer sessions without deleting data.
+router.patch("/users/:userId/status", requireLiveScope, requireCapability("manage-staff"), async (req, res): Promise<void> => {
+  const targetUserId = pathUserId(req.params.userId);
+  if (!targetUserId || typeof req.body?.disabled !== "boolean") {
+    res.status(400).json({ error: "A valid user id and disabled boolean are required." });
+    return;
+  }
+  const target = await getUserById(targetUserId);
+  if (!target) {
+    res.status(404).json({ error: "Staff member not found." });
+    return;
+  }
+  if (targetUserId === req.userId && req.body.disabled) {
+    res.status(409).json({ error: "You cannot disable your own account." });
+    return;
+  }
+  await db.update(usersTable).set({
+    disabled: req.body.disabled,
+    disabledAt: req.body.disabled ? new Date() : null,
+  }).where(eq(usersTable.id, targetUserId));
+  if (req.body.disabled) await revokeSessionsForUser(targetUserId);
+  await writeAuditEvent(db, {
+    action: req.body.disabled ? "account_disabled" : "account_enabled",
+    resource: `user:${targetUserId}`,
+    changes: { outcome: "success", targetId: targetUserId },
+  });
+  res.json({ disabled: req.body.disabled });
+});
+
+router.post("/users/:userId/revoke-sessions", requireLiveScope, requireCapability("manage-staff"), async (req, res): Promise<void> => {
+  const targetUserId = pathUserId(req.params.userId);
+  if (!targetUserId) {
+    res.status(400).json({ error: "Invalid user id" });
+    return;
+  }
+  const target = await getUserById(targetUserId);
+  if (!target) {
+    res.status(404).json({ error: "Staff member not found." });
+    return;
+  }
+  await revokeSessionsForUser(targetUserId);
+  await writeAuditEvent(db, {
+    action: "sessions_revoked",
+    resource: `user:${targetUserId}`,
+    changes: { outcome: "success", targetId: targetUserId },
+  });
+  res.status(204).end();
 });
 
 // Change a staff member's role — manage-staff only. Refuses to remove the last

@@ -116,6 +116,11 @@ const EVENT_SCHEMAS: Record<string, { required: string[]; allowed: string[] }> =
   incident_workflow_updated: { required: ["outcome", "targetId"], allowed: ["outcome", "targetId"] },
   incident_note_added: { required: ["outcome", "targetId"], allowed: ["outcome", "targetId"] },
   profile_data_health_repair: { required: ["outcome", "count"], allowed: ["outcome", "count"] },
+  account_disabled: { required: ["outcome", "targetId"], allowed: ["outcome", "targetId"] },
+  account_enabled: { required: ["outcome", "targetId"], allowed: ["outcome", "targetId"] },
+  sessions_revoked: { required: ["outcome", "targetId"], allowed: ["outcome", "targetId"] },
+  staff_invitation_created: { required: ["outcome"], allowed: ["outcome", "targetType", "from"] },
+  staff_invitation_revoked: { required: ["outcome"], allowed: ["outcome", "targetType"] },
 };
 
 function boundedString(value: unknown, max = MAX_STRING): string | undefined {

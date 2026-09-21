@@ -43,6 +43,14 @@ import {
   approvePasswordReset,
   declinePasswordReset,
   deleteStaffMember,
+  setStaffAccountStatus,
+  revokeStaffSessions,
+  createStaffInvitation,
+  listStaffInvitations,
+  revokeStaffInvitation,
+  fetchSignupCodeStatus,
+  setSignupCodeEnabledRequest,
+  rotateSignupCodeRequest,
   fetchPasswordResetRequests,
   fetchRoles,
   fetchStaff,
@@ -134,6 +142,8 @@ export default function StaffRolesCard() {
   const [approvedCode, setApprovedCode] = useState<ApproveResetResult | null>(
     null,
   );
+  const [inviteRole, setInviteRole] = useState("operator");
+  const [inviteSecret, setInviteSecret] = useState<{ secret: string; expiresAt: string } | null>(null);
 
   const isIdle = useIdle();
   const jitter = useMemo(() => Math.floor(Math.random() * 10_000), []);
@@ -193,6 +203,29 @@ export default function StaffRolesCard() {
       qc.invalidateQueries({ queryKey: ["staff"] });
     },
   });
+  const statusMutation = useMutation({
+    mutationFn: ({ userId, disabled }: { userId: string; disabled: boolean }) =>
+      setStaffAccountStatus(userId, disabled),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["staff"] }),
+  });
+  const revokeMutation = useMutation({
+    mutationFn: (userId: string) => revokeStaffSessions(userId),
+  });
+  const inviteMutation = useMutation({
+    mutationFn: () => createStaffInvitation(inviteRole),
+    onSuccess: (value) => { setInviteSecret(value); qc.invalidateQueries({ queryKey: ["staff-invitations"] }); },
+  });
+  const invitationsQuery = useQuery({ queryKey: ["staff-invitations"], queryFn: listStaffInvitations, enabled: canManageStaff });
+  const revokeInviteMutation = useMutation({
+    mutationFn: revokeStaffInvitation,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["staff-invitations"] }),
+  });
+  const signupCodeQuery = useQuery({ queryKey: ["signup-code-status"], queryFn: fetchSignupCodeStatus, enabled: canManageStaff });
+  const signupCodeMutation = useMutation({
+    mutationFn: (enabled: boolean) => setSignupCodeEnabledRequest(enabled),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["signup-code-status"] }),
+  });
+  const rotateCodeMutation = useMutation({ mutationFn: rotateSignupCodeRequest });
 
   const staff: StaffMember[] = data ?? [];
   const roles: RoleDefinition[] = rolesQuery.data ?? [];
@@ -301,6 +334,45 @@ export default function StaffRolesCard() {
         )}
         {canManageStaff && (
           <>
+        <div className="rounded-md border border-border/40 bg-muted/10 p-3 space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Invite staff</p>
+          <div className="flex gap-2">
+            <select className="h-8 flex-1 rounded-md border border-border/60 bg-background px-2 text-xs" value={inviteRole} onChange={(e) => setInviteRole(e.target.value)}>
+              {roles.map((r) => <option key={r.name} value={r.name}>{roleLabel(r.name)}</option>)}
+            </select>
+            <Button size="sm" onClick={() => inviteMutation.mutate()} disabled={inviteMutation.isPending}>
+              {inviteMutation.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />} Create invite
+            </Button>
+          </div>
+          {inviteSecret && (
+            <div className="rounded border border-amber-500/40 bg-amber-500/10 p-2">
+              <p className="text-xs text-muted-foreground">Copy this invitation now. It is shown once and expires {new Date(inviteSecret.expiresAt).toLocaleString()}.</p>
+              <p className="mt-1 break-all font-mono text-xs select-all">{inviteSecret.secret}</p>
+              <Button size="sm" variant="outline" className="mt-2" onClick={() => setInviteSecret(null)}>Done</Button>
+            </div>
+          )}
+          <div className="space-y-1">
+            {invitationsQuery.data?.filter((invite) => !invite.revokedAt && !invite.consumedAt).map((invite) => (
+              <div key={invite.id} className="flex items-center justify-between text-xs">
+                <span>{roleLabel(invite.role)} · expires {new Date(invite.expiresAt).toLocaleDateString()}</span>
+                <Button size="sm" variant="ghost" onClick={() => revokeInviteMutation.mutate(invite.id)}>Revoke</Button>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="rounded-md border border-border/40 bg-muted/10 p-3 space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Legacy sign-up code</p>
+          <p className="text-xs text-muted-foreground">
+            {signupCodeQuery.data?.enabled ? "Enabled" : "Disabled"} · {signupCodeQuery.data?.successfulUses ?? 0} successful uses · {signupCodeQuery.data?.failedUses ?? 0} failed attempts
+          </p>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={() => signupCodeMutation.mutate(!signupCodeQuery.data?.enabled)} disabled={signupCodeMutation.isPending}>
+              {signupCodeQuery.data?.enabled ? "Disable" : "Enable"}
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => rotateCodeMutation.mutate()} disabled={rotateCodeMutation.isPending}>Rotate</Button>
+          </div>
+          {rotateCodeMutation.data && <p className="break-all font-mono text-xs select-all">New code (copy now): {rotateCodeMutation.data.secret}</p>}
+        </div>
         {isLoading && (
           <p className="text-xs text-muted-foreground italic flex items-center gap-1.5">
             <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading staff…
@@ -389,6 +461,14 @@ export default function StaffRolesCard() {
                       }}
                     >
                       <KeyRound className="w-4 h-4 mr-2" /> Reset password
+                    </DropdownMenuItem>
+                    {!isSelf && (
+                      <DropdownMenuItem onSelect={() => statusMutation.mutate({ userId: member.userId, disabled: !member.disabled })}>
+                        {member.disabled ? "Enable account" : "Disable account"}
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuItem onSelect={() => revokeMutation.mutate(member.userId)}>
+                      Revoke all sessions
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       className="text-red-600 focus:text-red-600"

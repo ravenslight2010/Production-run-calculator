@@ -22,7 +22,7 @@ import { useAuth } from "@/useAuth";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import NotFound from "@/pages/not-found";
 import Landing from "@/pages/landing";
-import { SignInPage, SignUpPage, ForgotPasswordPage } from "@/pages/auth";
+import { SignInPage, SignUpPage, InvitationPage, ForgotPasswordPage } from "@/pages/auth";
 import { startServiceWorkerUpdateChecks } from "@/pwaUpdateChecks";
 import { updateAndReload } from "@/pwaUpdateRecovery";
 import { useRegisterSW } from "virtual:pwa-register/react";
@@ -137,6 +137,7 @@ function AppRoutes() {
         <Route path="/" component={HomeGate} />
         <Route path="/sign-in" component={SignInPage} />
         <Route path="/sign-up" component={SignUpPage} />
+        <Route path="/accept-invitation" component={InvitationPage} />
         <Route path="/forgot-password" component={ForgotPasswordPage} />
         <Route component={NotFound} />
       </Switch>

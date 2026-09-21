@@ -96,6 +96,7 @@ import type {
   GetProfileDataHealthWorkspace200,
   GetProfileNameLinkCleanupAudit200,
   GetShiftHandoffDigestParams,
+  GetSignupCodeStatus200,
   GetSyncTodayParams,
   HardwareFieldCheckConfirmation,
   HealthStatus,
@@ -120,6 +121,7 @@ import type {
   InventoryLocation,
   InventoryProductLinkInput,
   InventorySettings,
+  InvitationAcceptance,
   LabelVerifyInput,
   LabelVerifyResult,
   ListApplicatorBatchEvidenceParams,
@@ -192,6 +194,7 @@ import type {
   RestockInput,
   RoleCapabilitiesUpdate,
   RoleDefinition,
+  RotateSignupCode201,
   RunSuggestionFollowUpInput,
   RunSuggestionsList,
   RunTemplateList,
@@ -235,6 +238,7 @@ import type {
   SetNotificationPrefs,
   ShiftHandoffDigest,
   SignUpCredentials,
+  SignupCodeStatusUpdate,
   SpecImportAliasList,
   SpecReconcileInput,
   SpecReconcileResult,
@@ -450,6 +454,11 @@ export const useSignUp = <TError = ErrorType<void>,
       return useMutation(getSignUpMutationOptions(options), queryClient);
     }
 
+export const getAcceptStaffInvitationUrl = () => {
+
+
+  return `/api/auth/accept-invitation`
+}
 export const getCheckUsernameAvailableUrl = (params: CheckUsernameAvailableParams,) => {
   const normalizedParams = new URLSearchParams();
 
@@ -15579,6 +15588,11 @@ export const useResetStaffPassword = <TError = ErrorType<void>,
       return useMutation(getResetStaffPasswordMutationOptions(options), queryClient);
     }
 
+export const getGetSignupCodeStatusUrl = () => {
+
+
+  return `/api/signup-code/status`
+}
 export const getDeleteStaffMemberUrl = (userId: string,) => {
 
 
@@ -16844,3 +16858,264 @@ return customFetch<ImportOperationResponse>(getUndoImportOperationUrl(operationI
 );}
 
     export type UndoImportOperationMutationError = ErrorType<void>
+
+export type GetSignupCodeStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getSignupCodeStatus>>>
+
+    export type SetSignupCodeStatusMutationError = ErrorType<unknown>
+
+export const getSetSignupCodeStatusMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setSignupCodeStatus>>, TError,SetSignupCodeStatusMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof setSignupCodeStatus>>, TError,SetSignupCodeStatusMutationVariables, TContext> => {
+
+const mutationKey = getSetSignupCodeStatusMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setSignupCodeStatus>>, SetSignupCodeStatusMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  setSignupCodeStatus(data,requestOptions)
+        }
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+export const getRotateSignupCodeUrl = () => {
+
+
+  return `/api/signup-code/rotate`
+}
+
+    export type AcceptStaffInvitationMutationBody = BodyType<InvitationAcceptance>
+
+    export type AcceptStaffInvitationMutationError = ErrorType<void>
+
+export type GetSignupCodeStatusQueryError = ErrorType<unknown>
+
+export const setSignupCodeStatus = async (signupCodeStatusUpdate: SignupCodeStatusUpdate, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<void>(getSetSignupCodeStatusUrl(),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(signupCodeStatusUpdate)
+  }
+);}
+
+export const getAcceptStaffInvitationMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acceptStaffInvitation>>, TError,AcceptStaffInvitationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof acceptStaffInvitation>>, TError,AcceptStaffInvitationMutationVariables, TContext> => {
+
+const mutationKey = getAcceptStaffInvitationMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof acceptStaffInvitation>>, AcceptStaffInvitationMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  acceptStaffInvitation(data,requestOptions)
+        }
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+/**
+ * @summary Accept a one-time staff invitation
+ */
+export const acceptStaffInvitation = async (invitationAcceptance: InvitationAcceptance, options?: Parameters<typeof customFetch>[1]): Promise<AuthResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<AuthResponse>(getAcceptStaffInvitationUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(invitationAcceptance)
+  }
+);}
+
+    export type SetSignupCodeStatusMutationVariables = {data: BodyType<SignupCodeStatusUpdate>}
+
+export const getGetSignupCodeStatusQueryKey = () => {
+    return [
+    `/api/signup-code/status`
+    ] as const;
+    }
+
+export const getRotateSignupCodeMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rotateSignupCode>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof rotateSignupCode>>, TError,void, TContext> => {
+
+const mutationKey = getRotateSignupCodeMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof rotateSignupCode>>, void> = () => {
+
+
+          return  rotateSignupCode(requestOptions)
+        }
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    /**
+ * @summary Rotate transitional sign-up code (secret returned once)
+ */
+export const useRotateSignupCode = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rotateSignupCode>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof rotateSignupCode>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getRotateSignupCodeMutationOptions(options), queryClient);
+    }
+
+/**
+ * @summary Read bounded transitional sign-up code counters
+ */
+export const getSignupCodeStatus = async ( options?: Parameters<typeof customFetch>[1]): Promise<GetSignupCodeStatus200> => {
+
+  return customFetch<GetSignupCodeStatus200>(getGetSignupCodeStatusUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+    export type RotateSignupCodeMutationResult = NonNullable<Awaited<ReturnType<typeof rotateSignupCode>>>
+
+export const getGetSignupCodeStatusQueryOptions = <TData = Awaited<ReturnType<typeof getSignupCodeStatus>>, TError = ErrorType<unknown>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSignupCodeStatus>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetSignupCodeStatusQueryKey();
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSignupCodeStatus>>> = ({ signal }) => getSignupCodeStatus({ signal, ...requestOptions });
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getSignupCodeStatus>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export const getSetSignupCodeStatusMutationKey = () => ['setSignupCodeStatus'] as const;
+
+/**
+ * @summary Read bounded transitional sign-up code counters
+ */
+
+export function useGetSignupCodeStatus<TData = Awaited<ReturnType<typeof getSignupCodeStatus>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSignupCodeStatus>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetSignupCodeStatusQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+    export type SetSignupCodeStatusMutationResult = NonNullable<Awaited<ReturnType<typeof setSignupCodeStatus>>>
+
+    export type SetSignupCodeStatusMutationBody = BodyType<SignupCodeStatusUpdate>
+
+    export type RotateSignupCodeMutationError = ErrorType<unknown>
+
+export const getRotateSignupCodeMutationKey = () => ['rotateSignupCode'] as const;
+
+    export type AcceptStaffInvitationMutationResult = NonNullable<Awaited<ReturnType<typeof acceptStaffInvitation>>>
+
+    export const useSetSignupCodeStatus = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setSignupCodeStatus>>, TError,SetSignupCodeStatusMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof setSignupCodeStatus>>,
+        TError,
+        SetSignupCodeStatusMutationVariables,
+        TContext
+      > => {
+      return useMutation(getSetSignupCodeStatusMutationOptions(options), queryClient);
+    }
+
+/**
+ * @summary Rotate transitional sign-up code (secret returned once)
+ */
+export const rotateSignupCode = async ( options?: Parameters<typeof customFetch>[1]): Promise<RotateSignupCode201> => {
+
+  return customFetch<RotateSignupCode201>(getRotateSignupCodeUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+    /**
+ * @summary Accept a one-time staff invitation
+ */
+export const useAcceptStaffInvitation = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acceptStaffInvitation>>, TError,AcceptStaffInvitationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof acceptStaffInvitation>>,
+        TError,
+        AcceptStaffInvitationMutationVariables,
+        TContext
+      > => {
+      return useMutation(getAcceptStaffInvitationMutationOptions(options), queryClient);
+    }
+
+export const getSetSignupCodeStatusUrl = () => {
+
+
+  return `/api/signup-code/status`
+}
+
+    export type AcceptStaffInvitationMutationVariables = {data: BodyType<InvitationAcceptance>}
+
+export const getAcceptStaffInvitationMutationKey = () => ['acceptStaffInvitation'] as const;

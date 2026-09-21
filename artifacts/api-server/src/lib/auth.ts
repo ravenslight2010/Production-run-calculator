@@ -38,7 +38,14 @@ export function verifyPassword(password: string, stored: string): boolean {
 // Compact, stateless, HMAC-SHA256-signed token: `<payloadB64url>.<sigB64url>`.
 // Payload carries the user id and an expiry; verification is a constant-time
 // signature check plus expiry check, so sessions survive server restarts.
-const SESSION_TTL_SEC = 60 * 60 * 24 * 30; // 30 days
+const DEFAULT_SESSION_TTL_SEC = 60 * 60 * 24 * 30;
+function configuredSeconds(name: string, fallback: number, max: number): number {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value > 0 ? Math.min(Math.floor(value), max) : fallback;
+}
+export function sessionTtlSec(): number {
+  return configuredSeconds("SESSION_TTL_SEC", DEFAULT_SESSION_TTL_SEC, 60 * 60 * 24 * 365);
+}
 
 // Fallback issued-at (seconds) for legacy tokens minted before the `iat` field
 // existed. We use the process start time so that, on the deploy that introduces
@@ -75,15 +82,27 @@ function sign(data: string): string {
 export function signToken(userId: string): string {
   const now = Math.floor(Date.now() / 1000);
   const payload = b64url(
-    JSON.stringify({ sub: userId, iat: now, exp: now + SESSION_TTL_SEC }),
+    JSON.stringify({ sub: userId, jti: randomUUID(), iat: now, exp: now + sessionTtlSec() }),
   );
+  return `${payload}.${sign(payload)}`;
+}
+
+/**
+ * Test-fixture-only token for legacy compatibility cases. It deliberately
+ * omits jti, so requireAuth exercises the pre-server-session token path.
+ * Production code must never call this helper; it throws when NODE_ENV is
+ * production. New-session tests must use signToken instead.
+ */
+export function signLegacyTokenForTests(userId: string): string {
+  const now = Math.floor(Date.now() / 1000);
+  const payload = b64url(JSON.stringify({ sub: userId, iat: now, exp: now + sessionTtlSec() }));
   return `${payload}.${sign(payload)}`;
 }
 
 // A verified token: the subject (user id) plus its issued-at time in seconds.
 // `iat` falls back to PROCESS_START_SEC for legacy tokens that lack the field
 // (see the comment on PROCESS_START_SEC for the deploy-safety rationale).
-export type VerifiedToken = { sub: string; iat: number };
+export type VerifiedToken = { sub: string; jti?: string; iat: number; exp: number };
 
 export function verifyToken(token: string): VerifiedToken | null {
   const dot = token.indexOf(".");
@@ -99,14 +118,19 @@ export function verifyToken(token: string): VerifiedToken | null {
   try {
     const decoded = JSON.parse(
       Buffer.from(payload.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8"),
-    ) as { sub?: unknown; iat?: unknown; exp?: unknown };
+    ) as { sub?: unknown; jti?: unknown; iat?: unknown; exp?: unknown };
     if (typeof decoded.sub !== "string") return null;
     if (typeof decoded.exp !== "number" || decoded.exp < Math.floor(Date.now() / 1000)) {
       return null;
     }
     const iat =
       typeof decoded.iat === "number" ? decoded.iat : PROCESS_START_SEC;
-    return { sub: decoded.sub, iat };
+    return {
+      sub: decoded.sub,
+      jti: typeof decoded.jti === "string" ? decoded.jti : undefined,
+      iat,
+      exp: decoded.exp,
+    };
   } catch {
     return null;
   }
@@ -143,4 +167,4 @@ export function hashResetCode(code: string): string {
 }
 
 export const SESSION_COOKIE = "rc_auth";
-export const SESSION_COOKIE_MAX_AGE_MS = SESSION_TTL_SEC * 1000;
+export const SESSION_COOKIE_MAX_AGE_MS = sessionTtlSec() * 1000;

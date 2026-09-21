@@ -7,7 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { sql } from "drizzle-orm";
-import { signToken } from "../lib/auth";
+import { signLegacyTokenForTests } from "../lib/auth";
 
 // Covers the single, reliable data-reset action (POST /api/sync/reset) that
 // replaced the fragile "bump a one-time wipe-marker constant + take the API down"
@@ -136,7 +136,7 @@ beforeEach(async () => {
 });
 
 function authHeaders(user: string): Record<string, string> {
-  return { authorization: `Bearer ${signToken(user)}` };
+  return { authorization: `Bearer ${signLegacyTokenForTests(user)}` };
 }
 
 describe("GET /sync/reset-epoch", () => {

@@ -12,6 +12,7 @@
 - [Profile/autosave clobber guards](autosave-edit-attribution.md) + [Open form clobbers profiles](open-form-profile-clobber.md) — save only attributed data and reload open forms after out-of-band profile rewrites.
 - [Daily reset trigger](daily-reset-trigger.md) — reset is client-driven at LOCAL midnight; both apps need a live timer+foreground check, not just on-load, or a device left open never resets.
 - [Web auth identity cache](auth-identity-cache.md) — set ["me"] directly on sign-in/up/out; never qc.clear() it (its observer refetch races and bounces the user).
+- [Account lifecycle sessions](account-lifecycle-sessions.md) — new tokens require server session rows; invitations are one-time and role-bounded; cookie and Bearer share every revocation fence.
 - [Ingredient merge](ingredient-merge.md) — user-driven merge of ingredient names across web+mobile+server; inventory-first-or-abort invariant; recipe rows renamed not combined.
 - [Inventory concurrency](inventory-settings-concurrency.md) + [consume idempotency](inventory-consume-idempotency.md) — drawDown needs FOR UPDATE locks; marker even at 0-consume; EVERY run-finalization path must consume; keys identical web+mobile.
 - [Auth boundaries](clerk-auth-gating.md) + [roles](role-gating.md) + [daily-reset-auth-boundary.md] + [password-reset-relay.md] + [password-change-session-invalidation.md] — cookie/bearer auth, DB roles, local-midnight expiry, and manager-relayed reset tokens share strict scope fences.

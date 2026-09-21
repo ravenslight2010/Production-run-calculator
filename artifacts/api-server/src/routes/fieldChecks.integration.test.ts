@@ -10,7 +10,7 @@ import express, { type Express } from "express";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import pg from "pg";
 import { eq, sql } from "drizzle-orm";
-import { signToken } from "../lib/auth";
+import { signLegacyTokenForTests } from "../lib/auth";
 import { FIELD_CHECK_RETENTION_DAYS } from "../lib/fieldChecks";
 
 type DbModule = typeof import("@workspace/db");
@@ -59,6 +59,13 @@ beforeAll(async () => {
 
   process.env.DATABASE_URL = testUrlString;
   const dbModule = await import("@workspace/db");
+  // This suite's historical disposable schema can predate additive lifecycle
+  // columns when drizzle's push cache is reused. Keep the fixture explicitly
+  // compatible with the nullable persisted revoke watermark.
+  await dbModule.db.execute(sql`
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS session_revoked_at TIMESTAMPTZ
+  `);
   const router = (await import("./index")).default;
   db = dbModule.db;
   pool = dbModule.pool;
@@ -138,7 +145,7 @@ async function request(
   return fetch(`${baseUrl}${pathname}`, {
     method,
     headers: {
-      authorization: `Bearer ${signToken(userId)}`,
+      authorization: `Bearer ${signLegacyTokenForTests(userId)}`,
       ...(body === undefined ? {} : { "content-type": "application/json" }),
     },
     body: body === undefined ? undefined : JSON.stringify(body),

@@ -1663,6 +1663,23 @@ export type SignUpCredentials = AuthCredentials & {
   accessCode: string;
 };
 
+export interface InvitationAcceptance {
+  /**
+     * @minLength 20
+     * @maxLength 512
+     */
+  invitation: string;
+  /**
+     * @minLength 3
+     * @maxLength 64
+     */
+  username: string;
+  /**
+     * @minLength 6
+     * @maxLength 200
+     */
+  password: string;
+}
 /**
  * A discrete permission. A role grants a set of capabilities, and a user holds the union of their role's capabilities.
  */
@@ -1703,6 +1720,8 @@ export interface StaffMember {
   notificationPrefs: StaffMemberNotificationPrefs;
   /** Whether this is the seeded sandbox account, which operates in the isolated "sandbox" data scope. Clients show a persistent sandbox banner and offer a "Reset sandbox" action when true. */
   sandbox: boolean;
+  /** Whether sign-in is disabled for this account. */
+  disabled: boolean;
   /**
      * ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as "Sandbox copied from live at …".
      * @nullable
@@ -5831,6 +5850,13 @@ export type UpdateManagerActionItem200 = {
   item: ManagerActionItem;
 };
 
+export type GetSignupCodeStatus200 = {
+  enabled: boolean;
+  successfulUses: number;
+  failedUses: number;
+  /** @nullable */
+  rotatedAt?: string | null;
+};
 export type ListCompletedHistoryParams = {
 from?: string;
 to?: string;
@@ -5993,3 +6019,11 @@ export interface ImportOperationUndoInput {
 export interface ImportOperationResponse {
   operation: ImportOperationResponseOperation;
 }
+
+export interface SignupCodeStatusUpdate {
+  enabled: boolean;
+}
+
+export type RotateSignupCode201 = {
+  secret: string;
+};

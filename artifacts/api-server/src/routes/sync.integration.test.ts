@@ -7,7 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { and, eq, sql } from "drizzle-orm";
-import { signToken } from "../lib/auth";
+import { signLegacyTokenForTests } from "../lib/auth";
 import { syncSnapshotId } from "../lib/syncContract";
 
 const emptyCompleteSnapshotId = (date: string) => syncSnapshotId({
@@ -427,15 +427,15 @@ describe("POST /sync/manual-section — section ownership contract", () => {
 });
 
 function authHeaders(): Record<string, string> {
-  return { authorization: `Bearer ${signToken(USER)}` };
+  return { authorization: `Bearer ${signLegacyTokenForTests(USER)}` };
 }
 
 function managerAuthHeaders(): Record<string, string> {
-  return { authorization: `Bearer ${signToken(MANAGER)}` };
+  return { authorization: `Bearer ${signLegacyTokenForTests(MANAGER)}` };
 }
 
 function sandboxAuthHeaders(): Record<string, string> {
-  return { authorization: `Bearer ${signToken(SANDBOX)}` };
+  return { authorization: `Bearer ${signLegacyTokenForTests(SANDBOX)}` };
 }
 
 const EVIDENCE_DATE = "2030-03-10";

@@ -476,6 +476,55 @@ export function SignUpPage() {
   return <AuthForm mode="sign-up" />;
 }
 
+export function InvitationPage() {
+  const [, setLocation] = useLocation();
+  const { acceptInvitation } = useAuth();
+  const [invitation, setInvitation] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (password.length < MIN_PASSWORD_LENGTH || password !== confirm) {
+      setError("Use a password of at least 6 characters and confirm it exactly.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await acceptInvitation(invitation.trim(), username.trim(), password);
+      setLocation("/");
+    } catch (err) {
+      setError(err instanceof InventoryApiError && err.serverMessage
+        ? err.serverMessage
+        : "This invitation is invalid or unavailable. Ask your manager for a new invitation.");
+      setSubmitting(false);
+    }
+  }
+  return (
+    <main className="dark flex min-h-[100dvh] items-center justify-center bg-background px-4 text-foreground">
+      <form onSubmit={submit} className="w-full max-w-sm space-y-4 rounded-2xl border border-border/50 bg-card/50 p-6 shadow-md">
+        <h1 className="text-xl font-bold">Accept staff invitation</h1>
+        <p className="text-sm text-muted-foreground">Use the one-time invitation your manager gave you.</p>
+        <Label htmlFor="invitation">Invitation</Label>
+        <Input id="invitation" value={invitation} onChange={(e) => setInvitation(e.target.value)} required />
+        <Label htmlFor="invitation-username">Username</Label>
+        <Input id="invitation-username" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
+        <Label htmlFor="invitation-password">Password</Label>
+        <PasswordInput id="invitation-password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        <Label htmlFor="invitation-confirm">Confirm password</Label>
+        <PasswordInput id="invitation-confirm" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+        {error && <p className="text-sm text-destructive">{error}</p>}
+        <Button className="w-full" disabled={submitting || invitation.length < 20 || username.trim().length < MIN_USERNAME_LENGTH}>
+          {submitting ? "Creating account…" : "Create account"}
+        </Button>
+      </form>
+    </main>
+  );
+}
+
 type ResetStep = "request" | "verify" | "done";
 
 function ForgotPasswordForm() {

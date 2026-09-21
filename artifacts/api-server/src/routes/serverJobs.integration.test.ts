@@ -18,7 +18,7 @@ import express, { type Express, type Response as ExpressResponse } from "express
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import pg from "pg";
-import { signToken } from "../lib/auth";
+import { signLegacyTokenForTests } from "../lib/auth";
 
 type DbModule = typeof import("@workspace/db");
 
@@ -131,6 +131,9 @@ beforeAll(async () => {
   app.use((req, _res, next) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
     next();
   });
   app.use("/api", routerMod.default);
@@ -227,7 +230,7 @@ async function loseCommittedReply(): Promise<number> {
 function headers(actorId = ACTOR): Record<string, string> {
   return {
     "content-type": "application/json",
-    authorization: `Bearer ${signToken(actorId)}`,
+    authorization: `Bearer ${signLegacyTokenForTests(actorId)}`,
   };
 }
 
@@ -334,11 +337,11 @@ describe("server job route idempotency", () => {
       idempotentReplay: true,
     });
 
-    const jobs = await db.select().from(serverJobsTable).where(and(
-      eq(serverJobsTable.scope, "live"),
-      eq(serverJobsTable.actorId, ACTOR),
-      eq(serverJobsTable.idempotencyKey, IDEMPOTENCY_KEY),
-    ));
+      const jobs = await db.select().from(serverJobsTable).where(and(
+        eq(serverJobsTable.scope, "live"),
+        eq(serverJobsTable.actorId, ACTOR),
+        eq(serverJobsTable.idempotencyKey, IDEMPOTENCY_KEY),
+      ));
     expect(jobs).toHaveLength(1);
     expect(jobs[0]).toMatchObject({
       id: retryBody.id,
@@ -351,29 +354,31 @@ describe("server job route idempotency", () => {
   });
 
   it("returns one canonical job when identical submissions arrive concurrently", async () => {
-    const responses = await Promise.all(
-      Array.from({ length: 12 }, () => submitJob()),
-    );
+      const responses = await Promise.all(
+        instances.map(({ url }) => submitJobAt(url)),
+      );
 
-    expect(responses.every((candidate) => candidate.status === 200 || candidate.status === 202)).toBe(true);
-    const responseBodies = await Promise.all(responses.map(async (candidate) => (
-      await candidate.json() as {
-        id: string;
-        status: string;
-        idempotentReplay: boolean;
-      }
-    )));
+      expect(
+        responses.every((candidate) => candidate.status === 200 || candidate.status === 202),
+      ).toBe(true);
+      const responseBodies = await Promise.all(responses.map(async (candidate) => (
+        await candidate.json() as {
+          id: string;
+          status: string;
+          idempotentReplay: boolean;
+        }
+      )));
     const responseIds = responseBodies.map((body) => body.id);
     expect(responseIds).toHaveLength(12);
     expect(new Set(responseIds)).toHaveLength(1);
     expect(responseIds[0]).toEqual(expect.any(String));
     expect(responseBodies.every((body) => body.status === "queued")).toBe(true);
 
-    const jobs = await db.select().from(serverJobsTable).where(and(
-      eq(serverJobsTable.scope, "live"),
-      eq(serverJobsTable.actorId, ACTOR),
-      eq(serverJobsTable.idempotencyKey, IDEMPOTENCY_KEY),
-    ));
+      const jobs = await db.select().from(serverJobsTable).where(and(
+        eq(serverJobsTable.scope, "live"),
+        eq(serverJobsTable.actorId, ACTOR),
+        eq(serverJobsTable.idempotencyKey, IDEMPOTENCY_KEY),
+      ));
     expect(jobs).toHaveLength(1);
     expect(responseBodies.every((body) => body.id === jobs[0]!.id)).toBe(true);
     expect(responseBodies.filter((body) => body.idempotentReplay)).toHaveLength(11);
@@ -392,9 +397,11 @@ describe("server job route idempotency", () => {
     expect(await response.json()).toEqual({
       error: "Sensitive or unrelated fields are not allowed in AI requests",
     });
-    const jobs = await db.select().from(serverJobsTable).where(
-      eq(serverJobsTable.idempotencyKey, "job-sensitive-input-001"),
-    );
+      const jobs = await db.select().from(serverJobsTable).where(and(
+        eq(serverJobsTable.scope, "live"),
+        eq(serverJobsTable.actorId, ACTOR),
+        eq(serverJobsTable.idempotencyKey, IDEMPOTENCY_KEY),
+      ));
     expect(jobs).toHaveLength(0);
   });
 

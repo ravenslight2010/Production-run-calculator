@@ -6,6 +6,7 @@ import { getUserSecurityState } from "../lib/userValidity";
 import { isSandboxUser, sandboxAllowed } from "../lib/sandbox";
 import { runWithScope, type Scope } from "../lib/requestScope";
 import { logger } from "../lib/logger";
+import { checkAndTouchSession } from "../lib/authSessions";
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -43,7 +44,10 @@ type AuthRejectionCategory =
   | "reset_boundary"
   | "user_missing"
   | "password_session_invalidated"
-  | "sandbox_forbidden";
+  | "sandbox_forbidden"
+  | "account_disabled"
+  | "session_revoked"
+  | "session_idle";
 
 // Keep the public contract deliberately small. The internal category is useful
 // in bounded operational diagnostics, but revealing whether a token mapped to a
@@ -136,12 +140,27 @@ export async function requireAuth(
     rejectAuth(req, res, "user_missing");
     return;
   }
+  if (security.disabled) {
+    rejectAuth(req, res, "account_disabled");
+    return;
+  }
   if (
     security.passwordChangedAtMs > 0 &&
     (verified.iat + 1) * 1000 <= security.passwordChangedAtMs
   ) {
     rejectAuth(req, res, "password_session_invalidated");
     return;
+  }
+  if (security.sessionRevokedAtMs > 0 && (verified.iat + 1) * 1000 <= security.sessionRevokedAtMs) {
+    rejectAuth(req, res, "session_revoked");
+    return;
+  }
+  if (verified.jti) {
+    const sessionStatus = await checkAndTouchSession(verified.sub, token!);
+    if (sessionStatus !== "ok") {
+      rejectAuth(req, res, sessionStatus === "idle" ? "session_idle" : "session_revoked");
+      return;
+    }
   }
   req.userId = verified.sub;
   // Sandbox gate: the sandbox account uses publicly-known credentials (it is

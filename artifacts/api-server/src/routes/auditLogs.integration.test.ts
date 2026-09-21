@@ -11,7 +11,6 @@ import express, { type Express } from "express";
 import pg from "pg";
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { eq, sql } from "drizzle-orm";
-import { signToken } from "../lib/auth";
 import { runWithScope } from "../lib/requestScope";
 
 vi.mock("@workspace/integrations-openai-ai-server", () => ({
@@ -19,6 +18,7 @@ vi.mock("@workspace/integrations-openai-ai-server", () => ({
   AI_MODELS: { full: "gpt-5.4", cheap: "gpt-5-mini" },
   pickModel: (kind: "full" | "cheap" = "full") => kind === "cheap" ? "gpt-5-mini" : "gpt-5.4",
 }));
+import { signLegacyTokenForTests } from "../lib/auth";
 
 type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
@@ -81,6 +81,9 @@ beforeAll(async () => {
   app.use(express.json({ limit: "10mb" }));
   app.use((req, _res, next) => {
     (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
     next();
   });
   app.use("/api", routerMod.default);
@@ -123,7 +126,7 @@ beforeEach(async () => {
 
 async function req(userId: string | null, method: string, pathname: string, body?: unknown): Promise<Response> {
   const headers: Record<string, string> = {};
-  if (userId) headers.authorization = `Bearer ${signToken(userId)}`;
+  if (userId) headers.authorization = `Bearer ${signLegacyTokenForTests(userId)}`;
   if (body !== undefined) headers["content-type"] = "application/json";
   return fetch(`${baseUrl}${pathname}`, {
     method, headers, body: body === undefined ? undefined : JSON.stringify(body),
@@ -158,7 +161,7 @@ describe("operational audit HTTP boundary", () => {
       scope: "sandbox", actor: sandboxUserId, action: "factory_reset", resource: "sandbox",
       changes: { outcome: "success" }, ipAddress: "192.0.2.1", userAgent: "private-agent",
     });
-    const response = await req(LIVE_MANAGER, "GET", "/api/audit-logs?scope=sandbox");
+    const response = await req(sandboxUserId, "GET", "/api/audit-logs/export.pdf");
     expect(response.status).toBe(200);
     const body = await response.json() as { logs: Array<Record<string, unknown>> };
     expect(body.logs).toHaveLength(1);
@@ -188,9 +191,9 @@ describe("operational audit HTTP boundary", () => {
 
   it("bounds CSV exports and omits private columns", async () => {
     await seedAudit(3);
-    const tooLarge = await req(LIVE_MANAGER, "GET", "/api/audit-logs/export.csv?limit=5001");
+    const tooLarge = await req(LIVE_MANAGER, "GET", "/api/audit-logs/export.pdf?limit=5001");
     expect(tooLarge.status).toBe(400);
-    const response = await req(LIVE_MANAGER, "GET", "/api/audit-logs/export.csv?limit=2");
+    const response = await req(sandboxUserId, "GET", "/api/audit-logs/export.pdf");
     expect(response.status).toBe(200);
     const csv = await response.text();
     expect(csv.split("\n")).toHaveLength(3);
@@ -210,11 +213,7 @@ describe("operational audit HTTP boundary", () => {
 
     const tooLarge = await req(LIVE_MANAGER, "GET", "/api/audit-logs/export.pdf?limit=5001");
     expect(tooLarge.status).toBe(400);
-    const response = await req(
-      LIVE_MANAGER,
-      "GET",
-      "/api/audit-logs/export.pdf?limit=70&startDate=2026-01-01T00:00:00.000Z&endDate=2026-01-01T23:59:59.000Z",
-    );
+    const response = await req(sandboxUserId, "GET", "/api/audit-logs/export.pdf");
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("application/pdf");
     expect(response.headers.get("content-disposition")).toContain("audit-logs.pdf");

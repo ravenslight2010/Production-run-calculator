@@ -206,6 +206,7 @@ export type StaffMember = {
   // automatically enabled. Per-user so the choices follow them across devices.
   notificationPrefs: Record<string, boolean>;
   sandbox: boolean;
+  disabled: boolean;
   // ISO timestamp of when the sandbox was last re-copied from live, or null when
   // it has never been copied. Only meaningful for the sandbox account; null for
   // everyone else. Clients show it as "Sandbox copied from live at …".
@@ -371,6 +372,7 @@ export async function getStaffMember(
       floorModeEnabled: usersTable.floorModeEnabled,
       notificationPrefs: usersTable.notificationPrefs,
       sandbox: usersTable.sandbox,
+      disabled: usersTable.disabled,
     })
     .from(usersTable)
     .where(eq(usersTable.id, userId));
@@ -388,6 +390,7 @@ export async function getStaffMember(
     floorModeEnabled: user?.floorModeEnabled ?? false,
     notificationPrefs: user?.notificationPrefs ?? {},
     sandbox: user?.sandbox ?? false,
+    disabled: user?.disabled ?? false,
     sandboxCopiedAt: copiedAt ? copiedAt.toISOString() : null,
     sandboxStale: user?.sandbox ? isSandboxCopyStale(copiedAt) : false,
   };
@@ -480,6 +483,7 @@ export async function listStaff(): Promise<StaffMember[]> {
         floorModeEnabled: usersTable.floorModeEnabled,
         notificationPrefs: usersTable.notificationPrefs,
         sandbox: usersTable.sandbox,
+        disabled: usersTable.disabled,
       })
       .from(userRolesTable)
       .innerJoin(usersTable, eq(usersTable.id, userRolesTable.userId))
@@ -497,6 +501,7 @@ export async function listStaff(): Promise<StaffMember[]> {
     floorModeEnabled: r.floorModeEnabled,
     notificationPrefs: r.notificationPrefs ?? {},
     sandbox: r.sandbox,
+    disabled: r.disabled,
     // The copy timestamp / staleness are only surfaced via the sandbox account's
     // own /me; the roster never needs them, so leave them at their inert values.
     sandboxCopiedAt: null,
