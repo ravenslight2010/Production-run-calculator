@@ -34,6 +34,8 @@ async function trimGeneratedTrailingBlankLines(
 
 async function hoistZodValidatorConstants(filePath: string): Promise<void> {
   const source = await readFile(filePath, "utf8");
+  if (!source.includes("zod.")) return;
+
   const lines = source.split("\n");
   const constants: string[] = [];
   const remainingLines: string[] = [];
@@ -69,6 +71,19 @@ async function hoistZodValidatorConstants(filePath: string): Promise<void> {
     "",
   );
   await writeFile(filePath, remainingLines.join("\n"));
+}
+
+async function hoistZodValidatorConstantsInDirectory(
+  directory: string,
+): Promise<void> {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const entryPath = path.resolve(directory, entry.name);
+    if (entry.isDirectory()) {
+      await hoistZodValidatorConstantsInDirectory(entryPath);
+    } else if (entry.isFile() && entry.name.endsWith(".ts")) {
+      await hoistZodValidatorConstants(entryPath);
+    }
+  }
 }
 
 // Our exports make assumptions about the title of the API being "Api" (i.e. generated output is `api.ts`).
@@ -155,8 +170,8 @@ export default defineConfig({
           ),
           trimGeneratedTrailingBlankLines(path.resolve(apiZodSrc, "generated")),
         ]);
-        await hoistZodValidatorConstants(
-          path.resolve(apiZodSrc, "generated", "api.ts"),
+        await hoistZodValidatorConstantsInDirectory(
+          path.resolve(apiZodSrc, "generated"),
         );
       },
     },
