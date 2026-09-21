@@ -123,7 +123,7 @@
 - [Repair definition fingerprints](repair-definition-fingerprints.md) — hash immutable metadata and source contracts, never callbacks; independently digested payloads stay separate.
 - [Replit production detection](replit-production-detection.md) — REPLIT_ENVIRONMENT=production can appear in isolated workspaces; use deployment/runtime markers for destructive-operation fences.
 - [Server/local alert ownership](server-local-alert-ownership.md) — use identical pause-aware IDs, crossing arms, and one atomic device claim so push and offline fallback never double-display.
-- [Dated sync authorization](dated-sync-authorization.md) — staff collaborate through /sync/today; generic dated writes are protected scheduling and must not trust client date claims.
+- [Dated sync authorization](dated-sync-authorization.md) — staff collaborate through `/sync/today`; generic dated writes are protected scheduling and must not trust client date claims.
 - [Bounded archive range reads](bounded-archive-range-reads.md) — cap date spans and results, align the index, and split exact/range endpoints when OpenAPI cannot type query unions.
 - [Finalized report authenticity](finalized-report-authenticity.md) — sign canonical payload+audit envelopes with a dedicated retained-key keyring; verify persisted rows and classify unsigned legacy records.
 - [Shared recipe freeze coverage](shared-recipe-freeze-coverage.md) — use Ingredient Detail snapshots; mix aggregate pounds can stay constant while component proportions change.
@@ -135,20 +135,27 @@
 - [Local CI PostgreSQL parity](local-ci-postgres-parity.md) — local disposable clusters need CI-matching role and writable socket settings before browser workflow diagnosis is meaningful.
 - [Server operational projection](server-operational-projection.md) — live timer/counter read models travel beside the sync snapshot, never inside its hashed persisted document.
 - [Browser peer and evidence assertions](browser-peer-startup-ordering.md) + [browser-evidence-assertions](browser-evidence-assertions.md) + [browser-fixture-server-identifiers](browser-fixture-server-identifiers.md) — assert no-op startup, visible business labels, and stable fixture fields.
+- [Touch picker browser coverage](touch-picker-browser-coverage.md) — viewport size does not exercise touch routing; mobile picker tests need explicit pointer/touch capabilities.
 - [Source-heal stale-client fence](source-heal-stale-client-fence.md) — a source repair is not durable while sleeping clients can replay unfenced full-pool recipe writes.
 - [Acknowledged master-data propagation](acknowledged-master-data-propagation.md) — local recipe saves must explicitly drive pending-run refresh; cache effects alone can misclassify a save as bootstrap.
 - [ZIP asset inventory safety](zip-asset-inventory.md) — inspect central-directory metadata only; fail closed on unsafe members and label output as review evidence, not installation approval.
-- [AI evaluation and delivery governance](ai-evaluation-framework-boundary.md) + [network](ai-benchmark-network-boundary.md) + [delivery](ai-delivery-governance.md) — offline evidence, full delivery cost, independent checks, and human approval.
 - [WebKit operational-report fixture](webkit-operational-report-fixture.md) — authoritative report smoke needs an isolated canonical snapshot and a sync-write fence after hydration.
 - [Factory baseline ownership](factory-baseline-ownership.md) — cross-service runtime defaults use dependency-free shared constants; historical blank sentinels remain explicit compatibility values.
 - [Release evidence and recovery](production-evidence-revision-binding.md) + [CI pinning](ci-pinned-evidence.md) + [runtime](release-node-pinning.md) + [execution](webkit-nix-launch.md) + [retry](release-finalization-retry.md) + [workspace](workspace-lock-refresh-pruning.md) + [browser](full-release-browser-refresh.md) — keep evidence revision-bound and recover without accepting incomplete gates.
 - [Section-scoped online edits](section-scoped-online-edits.md) — transient peer locks are UX only; correctness uses row serialization, complete baselines, and durable snapshot fencing.
 - [Automatic staged supply](automatic-staged-supply.md) — active Sauce/Frontline caps are pipeline limits, not lifetime production caps; derive stages from canonical cumulative progress.
 - [Readiness evidence](readiness-evidence.md) — retain only allowlisted health outcomes with explicit deployment/revision identity, bounded samples, and expiry.
-- [Publish Python environment](publish-python-environment.md) — exclude incomplete development-only .pythonlibs from published source when uv lock fails before the Node build.
 - [Artifact preview ports](artifact-preview-ports.md) — artifact web workflows may expose a dynamic preview port; use workflow status rather than assuming port 5000.
 - [WebKit compatibility boundary](webkit-compatibility-lane-boundary.md) — phone/tablet responsive WebKit covers lifecycle/report; keep synthetic sync-recovery timing in the dedicated WebKit gate.
 - [Replit custom migrations](replit-custom-migrations.md) — chain raw trigger/function migrations before the production server because publish schema sync may skip them.
 - [Atomic import operations](atomic-import-operations.md) — reviewed multi-entity imports use stable operation IDs, server transactions, canonical acknowledgment, and touched-row-only guarded undo.
 - [Approved audit maintenance](audit-maintenance-workflow.md) — redactions/deletions run through a checked-in transaction command on a separate admin channel, never the app role.
 - [Sauce auto-track failure identity](sauce-auto-track-failure-identity.md) — retry notices follow the claim event identity; accepted recovery clears only the matching barrel.
+- [Managed rebase tree recovery](managed-rebase-tree-recovery.md) — a completed rebase can replay malformed conflict sides without markers; compare its tree with the pre-rebase integrated baseline.
+- [Approved ingredient identities](approved-ingredient-identities.md) — owner-approved Chicken, Bacon, Cilantro, and Goat Cheese targets; keep ambiguous Spinach variants separate.
+- [Protected background work](background-db-recovery.md) + [job effects](protected-job-effects.md) — retry only safe passes; serialize commit effects and renew long leases.
+- [Revision trend attribution](revision-trend-attribution.md) — classify each historical revision from its own measurements; inherited aggregate failures poison later trend samples.
+- [GitHub Actions evidence extraction](github-actions-evidence-extraction.md) — when connector downloads are forbidden, validate and retain exact reports inside a short-lived CI branch.
+- [Declaration compatibility dependencies](declaration-compatibility-dependencies.md) — mirror package-local links, resolve direct imports, then ignore unrelated dependency-library diagnostics.
+- [API route typecheck isolation](api-route-typecheck-isolation.md) — focused route diagnostics use last-successful API Zod declarations; the full package check remains authoritative.
+- [Secret refresh for shell operations](secret-refresh-shell.md) — newly confirmed workspace secrets may be absent from shell commands until a relevant workflow refreshes the environment.

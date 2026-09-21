@@ -415,6 +415,7 @@ import { LineSetupRoleGate } from "../components/LineSetupRoleGate";
 import { DoughRoleGate } from "../components/DoughRoleGate";
 import { useFreezerPullItems } from "../hooks/useFreezerPullItems";
 import { useDropdownScrollKeeper } from "../hooks/useDropdownScrollKeeper";
+import { useIsTouchDevice } from "../hooks/use-mobile";
 import { useSupervisorPin } from "../hooks/useSupervisorPin";
 import { updateSupervisorPin } from "../supervisorPinApi";
 import {
@@ -495,6 +496,7 @@ import ManagerActionQueue from "../components/ManagerActionQueue";
 import ShiftHandoffDigest from "../components/ShiftHandoffDigest";
 import ReportIssueDialog from "../components/ReportIssueDialog";
 import GetStartedDialog from "../components/GetStartedDialog";
+import { TouchOptionPicker, TouchSelect } from "../components/TouchOptionPicker";
 import { useGetStartedOverview } from "@workspace/onboarding";
 import GuidedTour from "../components/GuidedTour";
 import { moveEntries, relocateValues } from "@workspace/schedule-move";
@@ -1208,6 +1210,7 @@ export function IngredientSelect({
   optionLabels?: ReadonlyMap<string, string>;
 }) {
   const labelOf = (opt: string) => optionLabels?.get(opt) ?? opt;
+  const isTouchDevice = useIsTouchDevice();
   const [open, setOpen] = useState(false);
   const [inputVal, setInputVal] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -1245,6 +1248,25 @@ export function IngredientSelect({
           : { top: rect.bottom + 4 }),
       }
     : {};
+
+  if (isTouchDevice) {
+    const accessibleLabel = (placeholder ?? "Select option").replace(/[.…]+$/, "").trim();
+    return (
+      <TouchOptionPicker
+        value={value}
+        options={(options ?? []).map((option) => ({
+          value: option,
+          label: labelOf(option),
+        }))}
+        onValueChange={onChange}
+        placeholder={placeholder}
+        title={`Select ${accessibleLabel.toLocaleLowerCase()}`}
+        aria-label={accessibleLabel}
+        onAddOption={onAddOption}
+        onRemoveOption={onRemoveOption}
+      />
+    );
+  }
 
   return (
     <div className="relative w-full">
@@ -1534,16 +1556,18 @@ export function CheesePickCard({
 
   const recipeSelector = (
     <div className="w-full sm:w-auto sm:flex-1 sm:max-w-xs">
-      <select
-        value={recipeName}
-        onChange={e => onRecipeNameChange(e.target.value)}
-        className="h-8 w-full px-2 rounded bg-muted/40 border border-border/40 text-xs sm:text-sm outline-none focus:border-primary/60"
-      >
-        <option value="">Pick a cheese recipe…</option>
-        {options.map(name => (
-          <option key={name} value={name}>{optionLabels?.get(name) ?? name}</option>
-        ))}
-      </select>
+        <TouchSelect
+          aria-label="Pick a cheese recipe"
+          title="Pick a cheese recipe"
+          value={recipeName}
+          onChange={e => onRecipeNameChange(e.target.value)}
+          className="h-8 w-full px-2 rounded bg-muted/40 border border-border/40 text-xs sm:text-sm outline-none focus:border-primary/60"
+        >
+          <option value="">Pick a cheese recipe…</option>
+          {options.map(name => (
+            <option key={name} value={name}>{optionLabels?.get(name) ?? name}</option>
+          ))}
+        </TouchSelect>
     </div>
   );
 
@@ -18350,7 +18374,7 @@ export default function Home() {
                           <div key={breakSlot.slot} className="grid grid-cols-[auto_1fr] gap-2 items-center">
                             <span className="text-xs font-semibold text-muted-foreground">Break {breakSlot.slot}</span>
                             <div className="grid grid-cols-2 gap-2">
-                              <select
+                              <TouchSelect
                                 aria-label={`Break ${breakSlot.slot} placement`}
                                 value={!breakSlot.enabled ? "off" : breakSlot.mode}
                                 disabled={!isSupervisor}
@@ -18362,9 +18386,9 @@ export default function Home() {
                                 <option value="off">Not scheduled</option>
                                 <option value="after-run">After a run</option>
                                 <option value="at-time">At a clock time</option>
-                              </select>
+                              </TouchSelect>
                               {breakSlot.enabled && breakSlot.mode === "after-run" ? (
-                                <select
+                                <TouchSelect
                                   aria-label={`Break ${breakSlot.slot} run`}
                                   value={breakSlot.runId ?? ""}
                                   disabled={!isSupervisor}
@@ -18373,7 +18397,7 @@ export default function Home() {
                                 >
                                   <option value="">Select run…</option>
                                   {scheduleEditorRuns.map((run, runIndex) => <option key={run.id} value={run.id}>Run {runIndex + 1} — {run.brand || "Unnamed"}</option>)}
-                                </select>
+                                </TouchSelect>
                               ) : (
                                 <input
                                   aria-label={`Break ${breakSlot.slot} time`}
@@ -18475,7 +18499,8 @@ export default function Home() {
                             <div className="grid grid-cols-2 gap-2">
                               <div>
                                 <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Brand</label>
-                                <select
+                                <TouchSelect
+                                  aria-label="Schedule brand"
                                   value={run.brand}
                                   onChange={e => {
                                     const brand = e.target.value;
@@ -18490,11 +18515,12 @@ export default function Home() {
                                 >
                                   <option value="">— Brand —</option>
                                   {brands.map(b => <option key={b} value={b}>{b}</option>)}
-                                </select>
+                                </TouchSelect>
                               </div>
                               <div>
                                 <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Flavor</label>
-                                <select
+                                <TouchSelect
+                                  aria-label="Schedule flavor"
                                   value={run.flavor}
                                   onChange={e => {
                                     const flavor = e.target.value;
@@ -18510,7 +18536,7 @@ export default function Home() {
                                 >
                                   <option value="">— Flavor —</option>
                                   {(brandFlavors[run.brand] ?? []).map(f => <option key={f} value={f}>{f}</option>)}
-                                </select>
+                                </TouchSelect>
                               </div>
                             </div>
                             <div>
@@ -18609,14 +18635,15 @@ export default function Home() {
                       </div>
                       <div className="mt-3">
                         <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Die Type</label>
-                        <select
+                        <TouchSelect
+                          aria-label="Die type"
                           value={scheduleEditorRunValues[scheduleAdvancedRunId]?.dieType ?? ""}
                           onChange={e => updateAdvancedField(scheduleAdvancedRunId!, "dieType", e.target.value)}
                           className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                         >
                           <option value="">— Select —</option>
                           {dieTypes.map(d => <option key={d} value={d}>{d}</option>)}
-                        </select>
+                        </TouchSelect>
                       </div>
                     </section>
                     {/* ── Dough Recipe ───────────────────────────────────────── */}
@@ -18624,25 +18651,26 @@ export default function Home() {
                       <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-3 pb-1 border-b border-border/30">Dough Recipe</h3>
                       <div className="mb-2">
                         <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Recipe Name</label>
-                        <select
+                        <TouchSelect
+                          aria-label="Dough recipe name"
                           value={scheduleEditorRunValues[scheduleAdvancedRunId]?.doughRecipeName ?? ""}
                           onChange={e => updateAdvancedField(scheduleAdvancedRunId!, "doughRecipeName", e.target.value)}
                           className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                         >
                           <option value="">— Select —</option>
                           {doughRecipeNames.map(n => <option key={n} value={n}>{n}</option>)}
-                        </select>
+                        </TouchSelect>
                       </div>
                       <div className="space-y-1.5">
                         {(scheduleEditorRunValues[scheduleAdvancedRunId]?.doughRecipe ?? []).map((row, ri) => (
                           <div key={ri} className="flex gap-2 items-center">
-                            <select value={row.ingredient}
+                            <TouchSelect aria-label="Dough ingredient" value={row.ingredient}
                               onChange={e => { const rows = [...(scheduleEditorRunValues[scheduleAdvancedRunId]?.doughRecipe ?? [])]; rows[ri] = { ...rows[ri], ingredient: e.target.value }; updateAdvancedArray(scheduleAdvancedRunId!, "doughRecipe", rows); }}
                               className="flex-1 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                             >
                               <option value="">— Ingredient —</option>
                               {doughIngredients.map(i => <option key={i} value={i}>{i}</option>)}
-                            </select>
+                            </TouchSelect>
                             <input type="number" min="0" step="0.1" value={row.lbs || ""}
                               onChange={e => { const rows = [...(scheduleEditorRunValues[scheduleAdvancedRunId]?.doughRecipe ?? [])]; rows[ri] = { ...rows[ri], lbs: Number(e.target.value) || 0 }; updateAdvancedArray(scheduleAdvancedRunId!, "doughRecipe", rows); }}
                               placeholder="lbs" className="w-20 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors"
@@ -18670,13 +18698,13 @@ export default function Home() {
                         {([1, 2, 3, 4] as const).map(n => (
                           <div key={n} className="rounded-md bg-muted/20 p-2.5 space-y-2">
                             <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Applicator {n}</p>
-                            <select value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[`app${n}Type` as keyof FormValues] as string) ?? ""}
+                            <TouchSelect aria-label={`Applicator ${n} type`} value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[`app${n}Type` as keyof FormValues] as string) ?? ""}
                               onChange={e => updateAdvancedField(scheduleAdvancedRunId!, `app${n}Type` as keyof FormValues, e.target.value)}
                               className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                             >
                               <option value="">— Type —</option>
                               {ingredientTypeOptions.map(t => <option key={t} value={t}>{t}</option>)}
-                            </select>
+                            </TouchSelect>
                             <div className="grid grid-cols-2 gap-2">
                               <div>
                                 <label className="text-[10px] text-muted-foreground mb-0.5 block">Oz / Pizza</label>
@@ -18698,13 +18726,13 @@ export default function Home() {
                         {([1, 2] as const).map(n => (
                           <div key={n} className="rounded-md bg-muted/20 p-2.5 space-y-2">
                             <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Pepperoni {n}</p>
-                            <select value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[`pep${n}Type` as keyof FormValues] as string) ?? ""}
+                            <TouchSelect aria-label={`Pepperoni ${n} type`} value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[`pep${n}Type` as keyof FormValues] as string) ?? ""}
                               onChange={e => updateAdvancedField(scheduleAdvancedRunId!, `pep${n}Type` as keyof FormValues, e.target.value)}
                               className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                             >
                               <option value="">— Type —</option>
                               {pepTypes.map(p => <option key={p} value={p}>{p}</option>)}
-                            </select>
+                            </TouchSelect>
                             <div className="grid grid-cols-3 gap-2">
                               <div>
                                 <label className="text-[10px] text-muted-foreground mb-0.5 block">Sticks</label>
@@ -18744,24 +18772,24 @@ export default function Home() {
                             <div key={n}>
                               <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2">App {n} Recipe</p>
                               <div className="mb-2">
-                                <select value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[nameField] as string) ?? ""}
+                                <TouchSelect aria-label={`App ${n} recipe name`} value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[nameField] as string) ?? ""}
                                   onChange={e => updateAdvancedField(scheduleAdvancedRunId!, nameField, e.target.value)}
                                   className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                                 >
                                   <option value="">— Recipe Name —</option>
                                   {cheeseRecipeNames.map(r => <option key={r} value={r}>{r}</option>)}
-                                </select>
+                                </TouchSelect>
                               </div>
                               <div className="space-y-1.5">
                                 {rows.map((row, ri) => (
                                   <div key={ri} className="flex gap-2 items-center">
-                                    <select value={row.ingredient}
+                                    <TouchSelect aria-label={`App ${n} ingredient`} value={row.ingredient}
                                       onChange={e => { const next = [...rows]; next[ri] = { ...next[ri], ingredient: e.target.value }; updateAdvancedArray(scheduleAdvancedRunId!, recipeField, next); }}
                                       className="flex-1 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                                     >
                                       <option value="">— Ingredient —</option>
                                       {cheeseIngredients.map(i => <option key={i} value={i}>{i}</option>)}
-                                    </select>
+                                    </TouchSelect>
                                     <input type="number" min="0" step="0.1" value={row.lbs || ""}
                                       onChange={e => { const next = [...rows]; next[ri] = { ...next[ri], lbs: Number(e.target.value) || 0 }; updateAdvancedArray(scheduleAdvancedRunId!, recipeField, next); }}
                                       placeholder="lbs" className="w-20 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors"
@@ -18780,24 +18808,24 @@ export default function Home() {
                     <section>
                       <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-3 pb-1 border-b border-border/30">Frontline Recipe</h3>
                       <div className="mb-2">
-                        <select value={scheduleEditorRunValues[scheduleAdvancedRunId]?.frontlineRecipeName ?? ""}
+                        <TouchSelect aria-label="Frontline recipe name" value={scheduleEditorRunValues[scheduleAdvancedRunId]?.frontlineRecipeName ?? ""}
                           onChange={e => updateAdvancedField(scheduleAdvancedRunId!, "frontlineRecipeName", e.target.value)}
                           className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                         >
                           <option value="">— Select —</option>
                           {frontlineRecipeNames.map(r => <option key={r} value={r}>{r}</option>)}
-                        </select>
+                        </TouchSelect>
                       </div>
                       <div className="space-y-1.5">
                         {(scheduleEditorRunValues[scheduleAdvancedRunId]?.frontlineRecipe ?? []).map((row, ri) => (
                           <div key={ri} className="flex gap-2 items-center">
-                            <select value={row.ingredient}
+                            <TouchSelect aria-label="Frontline ingredient" value={row.ingredient}
                               onChange={e => { const rows = [...(scheduleEditorRunValues[scheduleAdvancedRunId]?.frontlineRecipe ?? [])]; rows[ri] = { ...rows[ri], ingredient: e.target.value }; updateAdvancedArray(scheduleAdvancedRunId!, "frontlineRecipe", rows); }}
                               className="flex-1 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                             >
                               <option value="">— Ingredient —</option>
                               {frontlineIngredients.map(i => <option key={i} value={i}>{i}</option>)}
-                            </select>
+                            </TouchSelect>
                             <input type="number" min="0" step="0.1" value={row.lbs || ""}
                               onChange={e => { const rows = [...(scheduleEditorRunValues[scheduleAdvancedRunId]?.frontlineRecipe ?? [])]; rows[ri] = { ...rows[ri], lbs: Number(e.target.value) || 0 }; updateAdvancedArray(scheduleAdvancedRunId!, "frontlineRecipe", rows); }}
                               placeholder="lbs" className="w-20 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors"

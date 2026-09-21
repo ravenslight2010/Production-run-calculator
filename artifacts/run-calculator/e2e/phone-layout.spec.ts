@@ -1726,6 +1726,85 @@ test.describe("phone layout smoke", () => {
       await cleanup.end().catch(() => {});
     }
   });
+
+  for (const viewport of [
+    { name: "phone", width: 390, height: 844 },
+    { name: "tablet", width: 768, height: 1024 },
+  ] as const) {
+    test.describe(`touch selection dialogs on ${viewport.name}`, () => {
+      test.use({
+        viewport: { width: viewport.width, height: viewport.height },
+        hasTouch: true,
+        isMobile: true,
+      });
+
+      test("opens schedule and recipe pickers without page scrolling", async ({ page }) => {
+        await signInToManagerSandbox(page);
+        await page.getByRole("button", { name: "More", exact: true }).click();
+        await page.getByRole("menuitem", { name: "Schedule", exact: true }).click();
+
+        const scheduleDialog = page
+          .getByRole("dialog")
+          .filter({ hasText: "Scheduled Days" })
+          .first();
+        await expect(scheduleDialog).toBeVisible();
+        await scheduleDialog.getByRole("button", { name: "Schedule New Day", exact: true }).click();
+        await expect(scheduleDialog.getByRole("button", { name: "Add Run", exact: true })).toBeVisible();
+        await scheduleDialog.getByRole("button", { name: "Add Run", exact: true }).click();
+
+        const brandTrigger = scheduleDialog.getByRole("button", {
+          name: "Schedule brand",
+          exact: true,
+        });
+        await expect(brandTrigger).toBeVisible();
+        await brandTrigger.tap();
+        const brandPicker = page.getByRole("dialog", { name: "Schedule brand", exact: true });
+        await expect(brandPicker).toBeVisible();
+        const brandOptions = brandPicker.getByRole("option");
+        expect(await brandOptions.count()).toBeGreaterThan(1);
+        const brandOption = brandOptions.nth(1);
+        const brandLabel = (await brandOption.textContent())?.trim() ?? "";
+        await brandOption.tap();
+        await expect(brandPicker).toBeHidden();
+        await expect(brandTrigger).toBeFocused();
+        expect(brandLabel).not.toBe("");
+        await expect(brandTrigger).toContainText(brandLabel);
+
+        const pickerState = await page.evaluate(() => ({
+          bodyOverflow: getComputedStyle(document.body).overflow,
+          documentScrollWidth: document.documentElement.scrollWidth,
+          viewportWidth: window.innerWidth,
+        }));
+        expect(pickerState.bodyOverflow).toBe("hidden");
+        expect(pickerState.documentScrollWidth).toBeLessThanOrEqual(pickerState.viewportWidth + 1);
+
+        await scheduleDialog
+          .getByRole("button", { name: "Full Recipe & Settings", exact: true })
+          .tap();
+        const recipeTrigger = scheduleDialog.getByRole("button", {
+          name: "Dough recipe name",
+          exact: true,
+        });
+        await expect(recipeTrigger).toBeVisible();
+        await recipeTrigger.tap();
+        const recipePicker = page.getByRole("dialog", {
+          name: "Dough recipe name",
+          exact: true,
+        });
+        await expect(recipePicker).toBeVisible();
+        const optionList = recipePicker.getByTestId("touch-option-picker-options");
+        await expect(optionList).toHaveCSS("overflow-y", "auto");
+        await page.keyboard.press("Escape");
+        await expect(recipePicker).toBeHidden();
+        await expect(recipeTrigger).toBeFocused();
+
+        await scheduleDialog.getByRole("button", { name: "Cancel", exact: true }).tap();
+        await expect(scheduleDialog.getByRole("button", { name: "Schedule New Day", exact: true })).toBeVisible();
+        await scheduleDialog.getByRole("button", { name: "Close scheduled days", exact: true }).tap();
+        await expect(scheduleDialog).toBeHidden();
+      });
+    });
+  }
 });
 
 async function prepareGuideReviewForCommit(
