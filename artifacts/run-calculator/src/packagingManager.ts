@@ -105,7 +105,11 @@ export interface PackagingManager {
     casesOnCurrentSkid: number,
     manualOverrideUntil?: number,
   ): void;
-  persistAutomaticProgress(skidsCompleted: number, casesOnCurrentSkid: number): boolean;
+  persistAutomaticProgress(
+    runId: string,
+    skidsCompleted: number,
+    casesOnCurrentSkid: number,
+  ): boolean;
   updateDrainingRun(
     runId: string,
     partial: Partial<FormValues>,
@@ -113,7 +117,11 @@ export interface PackagingManager {
   ): void;
   selectDrainingRun(runs: RunMeta[], currentRunId: string, nowMs: number): DrainingPackagingRun | null;
   casesInDrainingFreezer(entry: DrainingPackagingRun, nowMs: number): number;
-  advanceDrainingRun(entry: DrainingPackagingRun, exitedCases: number): void;
+  advanceDrainingRun(
+    runId: string,
+    values: FormValues,
+    exitedCases: number,
+  ): void;
 }
 
 type PackagingManagerDependencies = {
@@ -183,13 +191,21 @@ export function createPackagingManager(deps: PackagingManagerDependencies): Pack
   };
 
   const persistAutomaticProgress: PackagingManager["persistAutomaticProgress"] = (
+    runId,
     skidsCompleted,
     casesOnCurrentSkid,
-  ) => deps.recordAutomaticProgress({
-    runId: deps.currentRunIdRef.current,
-    skidsCompleted,
-    casesOnCurrentSkid,
-  }) !== null;
+  ) => {
+    const accepted = deps.recordAutomaticProgress({
+      runId,
+      skidsCompleted,
+      casesOnCurrentSkid,
+    }) !== null;
+    // The hook shares one form across runs. A drain tick may finish after a
+    // foreground adoption or manual switch has selected another run: keep the
+    // old run's independent progress, but never apply that old snapshot to the
+    // newly selected form.
+    return accepted && runId === deps.currentRunIdRef.current;
+  };
 
   const updateDrainingRun: PackagingManager["updateDrainingRun"] = (
     runId,
@@ -269,7 +285,8 @@ export function createPackagingManager(deps: PackagingManagerDependencies): Pack
   };
 
   const advanceDrainingRun: PackagingManager["advanceDrainingRun"] = (
-    { run, values },
+    runId,
+    values,
     exitedCases,
   ) => {
     if (exitedCases <= 0) return;
@@ -283,7 +300,7 @@ export function createPackagingManager(deps: PackagingManagerDependencies): Pack
     const nextTotal =
       casesNeeded > 0 ? Math.min(target, Math.max(currentTotal, casesNeeded)) : target;
     if (nextTotal === currentTotal) return;
-    updateDrainingRun(run.id, {
+    updateDrainingRun(runId, {
       skidsCompleted: Math.floor(nextTotal / casesPerSkid),
       casesOnCurrentSkid: Math.round(nextTotal % casesPerSkid),
     }, "auto");

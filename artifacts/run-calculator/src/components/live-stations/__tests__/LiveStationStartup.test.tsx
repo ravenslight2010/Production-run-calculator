@@ -12,7 +12,7 @@ import {
   clearManualSectionLocks,
   releaseManualSectionLock,
 } from "../../../manualSectionLocks";
-import { createPackagingManager } from "../../../packagingManager";
+import { createPackagingManager, type PackagingManager } from "../../../packagingManager";
 import { resetSauceBarrelEntry } from "../../../sauceBarrelStore";
 import {
   acceptRemoteRunValueOnSync,
@@ -97,6 +97,7 @@ function StationProviders({
   values = STATION_VALUES,
   runs,
   switchToRun = vi.fn(() => true),
+  packagingManager: packagingManagerOverride,
   children,
 }: {
   status: "pending" | "running" | "paused" | "ended";
@@ -104,6 +105,7 @@ function StationProviders({
   values?: FormValues;
   runs?: RunMeta[];
   switchToRun?: (newIndex: number, expectedCurrentRunId?: string) => boolean;
+  packagingManager?: PackagingManager;
   children: ReactNode;
 }) {
   const form = useForm<FormValues>({ defaultValues: values });
@@ -132,6 +134,7 @@ function StationProviders({
     }),
     [noop],
   );
+  const stationPackagingManager = packagingManagerOverride ?? packagingManager;
   const homeValue = {
     autoSuppressUntilRef,
     confirmRunSurplus: vi.fn().mockResolvedValue(undefined),
@@ -148,7 +151,7 @@ function StationProviders({
     isSupervisor: true,
     lastEndedRun: null,
     lastLocalEditRef,
-    packagingManager,
+    packagingManager: stationPackagingManager,
     persistManualPackagingProgress: noop,
     queueManualCorrection: noop,
     refreshFreezerSurplus: vi.fn().mockResolvedValue(undefined),
@@ -523,6 +526,71 @@ describe("live station startup", () => {
       expect(selectedRunId.current).not.toBe(NEXT_RUN.id);
     },
   );
+
+  it("keeps a prior-run drain update keyed to that run across a selected-run handoff", () => {
+    const priorRun: RunMeta = {
+      ...ENDED_RUN,
+      id: "station-prior-drain",
+      endedAt: Date.now() - 5 * 60_000,
+    };
+    const priorValues = {
+      ...STATION_VALUES,
+      casesNeeded: 500,
+      casesPerSkid: 40,
+      skidsCompleted: 2,
+      casesOnCurrentSkid: 10,
+    };
+    const draining = { run: priorRun, values: priorValues };
+    const selectDrainingRun = vi.fn(() => draining);
+    const casesInDrainingFreezer = vi.fn()
+      .mockReturnValueOnce(12)
+      .mockReturnValueOnce(11);
+    const advanceDrainingRun = vi.fn();
+    const packagingManager = {
+      persistManualProgress: vi.fn(),
+      persistAutomaticProgress: vi.fn(() => false),
+      updateDrainingRun: vi.fn(),
+      selectDrainingRun,
+      casesInDrainingFreezer,
+      advanceDrainingRun,
+    } satisfies PackagingManager;
+
+    const { rerender } = render(
+      <StationProviders
+        status="running"
+        runId={SWITCHED_RUN_ID}
+        runs={[NEXT_RUN, priorRun]}
+        packagingManager={packagingManager}
+      >
+        <LivePackagingTabContent />
+      </StationProviders>,
+    );
+
+    // The first effect call establishes the prior run's freezer baseline.
+    // Re-render as if the foreground/manual handoff selected the next run;
+    // the second call must still persist the old run's exited case.
+    rerender(
+      <StationProviders
+        status="running"
+        runId={SWITCHED_RUN_ID}
+        runs={[{ ...NEXT_RUN }, priorRun]}
+        packagingManager={packagingManager}
+      >
+        <LivePackagingTabContent />
+      </StationProviders>,
+    );
+
+    expect(advanceDrainingRun).toHaveBeenCalledWith(
+      priorRun.id,
+      priorValues,
+      1,
+    );
+    expect(advanceDrainingRun).not.toHaveBeenCalledWith(
+      SWITCHED_RUN_ID,
+      expect.anything(),
+      expect.anything(),
+    );
+  });
 
   it.each(FRONTLINE_APPLICATOR_LOCK_CASES.filter(({ slot }) => slot !== "app1"))(
     "keeps $slot Frontline correction controls usable after switching away from the peer-locked run",

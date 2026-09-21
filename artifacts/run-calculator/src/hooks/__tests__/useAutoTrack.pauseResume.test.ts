@@ -1526,7 +1526,11 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
         packagingAutoTrackActive: true,
       }));
     });
-    expect(persistAutomaticProgress).toHaveBeenLastCalledWith(5, 0);
+    expect(persistAutomaticProgress).toHaveBeenLastCalledWith(
+      "manual-packaging-pause-handoff",
+      5,
+      0,
+    );
     expect(store.skidsCompleted * BASE_V.casesPerSkid + store.casesOnCurrentSkid).toBe(50);
   });
 

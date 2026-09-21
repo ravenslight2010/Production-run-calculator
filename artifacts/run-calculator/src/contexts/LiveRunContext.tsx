@@ -140,6 +140,7 @@ export interface LiveRunProviderProps {
   externalAutoSuppressRef?: React.MutableRefObject<number>;
   externalDoughAutoSuppressRef?: React.MutableRefObject<number>;
   onPackagingProgressAutoAdvance?: (
+    runId: string,
     skidsCompleted: number,
     casesOnCurrentSkid: number,
   ) => boolean;

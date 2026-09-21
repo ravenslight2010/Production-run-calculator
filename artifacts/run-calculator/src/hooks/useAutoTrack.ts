@@ -205,6 +205,7 @@ interface AutoTrackParams {
    * newly adopted manual-override deadline.
    */
   onPackagingProgressAutoAdvance?: (
+    runId: string,
     skidsCompleted: number,
     casesOnCurrentSkid: number,
   ) => boolean;
@@ -708,7 +709,7 @@ useEffect(() => {
       const nextSkids = values.skidsCompleted;
       const nextCases = values.casesOnCurrentSkid;
       if (typeof nextSkids === "number" && typeof nextCases === "number") {
-        if (onPackagingProgressAutoAdvance?.(nextSkids, nextCases) === false) return;
+        if (onPackagingProgressAutoAdvance?.(runId, nextSkids, nextCases) === false) return;
         form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
         form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
       }

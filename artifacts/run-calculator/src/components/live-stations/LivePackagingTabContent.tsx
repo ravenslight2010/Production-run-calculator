@@ -94,7 +94,7 @@ export const LivePackagingTabContent = memo(function LivePackagingTabContent() {
     priorDrainFreezerRef.current = { id: draining.run.id, cases: curFreezer };
 
     const exited = Math.max(0, prev.cases - curFreezer);
-    packagingManager.advanceDrainingRun(draining, exited);
+    packagingManager.advanceDrainingRun(draining.run.id, draining.values, exited);
   }, [nowTime, autoTrackProgress, currentRunId, dayState.runs, packagingManager]);
 
   return (

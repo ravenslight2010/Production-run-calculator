@@ -120,7 +120,7 @@ describe("packaging manager", () => {
     const { manager, saveRunValues } = makeManager(values);
     const entry = { run: run("prior", 900_000), values: values.prior };
 
-    manager.advanceDrainingRun(entry, 20);
+    manager.advanceDrainingRun(entry.run.id, entry.values, 20);
 
     expect(saveRunValues).toHaveBeenCalledWith(
       "prior",
@@ -137,6 +137,23 @@ describe("packaging manager", () => {
 
     expect(saveRunValues).not.toHaveBeenCalled();
     expect(dependencies.schedulePush).not.toHaveBeenCalled();
+  });
+
+  it("persists a draining run by ID without applying it to a newly selected form", () => {
+    const values = {
+      prior: { ...DEFAULT_VALUES, casesPerSkid: 100 },
+    };
+    const { manager, dependencies } = makeManager(values);
+
+    expect(manager.persistAutomaticProgress("prior", 2, 14)).toBe(false);
+    expect(dependencies.recordAutomaticProgress).toHaveBeenCalledWith({
+      runId: "prior",
+      skidsCompleted: 2,
+      casesOnCurrentSkid: 14,
+    });
+
+    dependencies.currentRunIdRef.current = "prior";
+    expect(manager.persistAutomaticProgress("prior", 2, 15)).toBe(true);
   });
 
   it("records manual correction ownership and shares the suppression deadline", () => {
