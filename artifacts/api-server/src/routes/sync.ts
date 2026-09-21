@@ -624,7 +624,8 @@ function compactPeerLiveState(
   // update erased most of the savings from the canonical sparse delta.
   // Pepperoni types are a shared input, so that uncommon change still needs
   // complete derived maps.
-  if (Object.hasOwn(deltaData, "pepTypes")) return liveState;
+  const changedDayState = isSyncRecord(deltaData.dayState) ? deltaData.dayState : null;
+  if (changedDayState && Object.hasOwn(changedDayState, "pepTypes")) return liveState;
   const changedValues = deltaData.runValues;
   if (!isSyncRecord(changedValues)) {
     return { ...liveState, summaryStats: {}, runLines: {} };

@@ -255,13 +255,31 @@ describe("consumeSyncWriteResponse", () => {
     })).resolves.toBeNull();
   });
 
-  it("merges sparse server run maps and applies removal tombstones", () => {
-    expect(mergeSparseServerRunMap(
-      { unchanged: { total: 1 }, changed: { total: 2 }, removed: { total: 3 } },
-      { changed: { total: 4 }, removed: null },
-    )).toEqual({
+  it("retains unchanged run totals while updating and removing changed entries", () => {
+    const currentSummaryStats = {
+      unchanged: { total: 1 },
+      changed: { total: 2 },
+      removed: { total: 3 },
+    };
+    const currentRunLines = {
+      unchanged: [{ itemKey: "cheese", qty: 1 }],
+      changed: [{ itemKey: "pepperoni", qty: 2 }],
+      removed: [{ itemKey: "sauce", qty: 3 }],
+    };
+
+    expect(mergeSparseServerRunMap(currentSummaryStats, {
+      changed: { total: 4 },
+      removed: null,
+    })).toEqual({
       unchanged: { total: 1 },
       changed: { total: 4 },
+    });
+    expect(mergeSparseServerRunMap(currentRunLines, {
+      changed: [{ itemKey: "pepperoni", qty: 5 }],
+      removed: null,
+    })).toEqual({
+      unchanged: [{ itemKey: "cheese", qty: 1 }],
+      changed: [{ itemKey: "pepperoni", qty: 5 }],
     });
   });
 

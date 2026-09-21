@@ -3916,8 +3916,6 @@ describe("/sync/events — date-scoped broadcasts", () => {
     });
     const writeBody = await write.json() as { data: Record<string, unknown>; snapshotId: string };
     const received = await readFrame((frame) => frame.senderId === "peer-writer");
-    await reader.cancel();
-    ctrl.abort();
 
     expect(received.frame).toMatchObject({
       completeness: "partial",
@@ -3928,6 +3926,8 @@ describe("/sync/events — date-scoped broadcasts", () => {
     expect(received.frame).not.toHaveProperty("resultingSnapshotId");
     expect(Object.keys(received.frame.data.runValues)).toEqual([changedRunId]);
     expect(received.frame.data.runValues[changedRunId].casesNeeded).toBe(999);
+    expect(Object.keys(received.frame.summaryStats)).toEqual([changedRunId]);
+    expect(Object.keys(received.frame.runLines)).toEqual([changedRunId]);
     const equivalentComplete: Record<string, any> = {
       ...received.frame,
       completeness: "complete",
@@ -3938,6 +3938,65 @@ describe("/sync/events — date-scoped broadcasts", () => {
     delete equivalentComplete.resultingSnapshotId;
     expect(Buffer.byteLength(received.raw) * 2)
       .toBeLessThan(Buffer.byteLength(JSON.stringify(equivalentComplete)));
+
+    const removedRunId = runs[23].id;
+    const afterChange = writeBody.data as typeof baselinePayload & {
+      deletedItems?: { runs?: string[] };
+    };
+    const removalPayload = {
+      ...afterChange,
+      dayState: {
+        ...afterChange.dayState,
+        runs: afterChange.dayState.runs.filter((run) => run.id !== removedRunId),
+      },
+      runValues: Object.fromEntries(
+        Object.entries(afterChange.runValues).filter(([runId]) => runId !== removedRunId),
+      ),
+      runValuesUpdatedAt: Object.fromEntries(
+        Object.entries(afterChange.runValuesUpdatedAt).filter(([runId]) => runId !== removedRunId),
+      ),
+      packagingProgress: Object.fromEntries(
+        Object.entries(afterChange.packagingProgress).filter(([runId]) => runId !== removedRunId),
+      ),
+      deletedItems: {
+        ...afterChange.deletedItems,
+        runs: [...(afterChange.deletedItems?.runs ?? []), removedRunId],
+      },
+    };
+    const removalWrite = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "peer-remover", payload: removalPayload }),
+    });
+    const removalBody = await removalWrite.json() as {
+      data: typeof removalPayload;
+      snapshotId: string;
+    };
+    const removalFrame = await readFrame((frame) => frame.senderId === "peer-remover");
+    expect(removalFrame.frame.completeness).toBe("partial");
+    expect(removalFrame.frame.summaryStats).toEqual({ [removedRunId]: null });
+    expect(removalFrame.frame.runLines).toEqual({ [removedRunId]: null });
+
+    const pepTypes = ["Pepperoni", "Pepperoni Stick - NATURAL"];
+    const pepperoniPayload = {
+      ...removalBody.data,
+      dayState: { ...removalBody.data.dayState, pepTypes },
+    };
+    const pepperoniWrite = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "peer-pep-types", payload: pepperoniPayload }),
+    });
+    expect(pepperoniWrite.status).toBe(200);
+    const pepperoniFrame = await readFrame((frame) => frame.senderId === "peer-pep-types");
+    const remainingRunIds = pepperoniPayload.dayState.runs.map((run) => run.id).sort();
+    expect(pepperoniFrame.frame.completeness).toBe("partial");
+    expect(pepperoniFrame.frame.data.dayState.pepTypes).toEqual(pepTypes);
+    expect(Object.keys(pepperoniFrame.frame.summaryStats).sort()).toEqual(remainingRunIds);
+    expect(Object.keys(pepperoniFrame.frame.runLines).sort()).toEqual(remainingRunIds);
+
+    await reader.cancel();
+    ctrl.abort();
   });
 
   it("keeps multi-peer delta savings and convergence through a synthetic full shift", async () => {
