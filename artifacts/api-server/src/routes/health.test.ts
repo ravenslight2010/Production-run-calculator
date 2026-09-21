@@ -27,12 +27,23 @@ import {
 } from "../lib/backgroundOperations";
 
 const mocks = vi.hoisted(() => ({
-  execute: vi.fn(async () => []),
+  execute: vi.fn(async () => ({
+    rows: [{
+      has_trigger: true,
+      has_guard_function: true,
+      has_redact_function: true,
+      has_delete_function: true,
+    }],
+  })),
+  pool: {
+    connect: vi.fn(),
+  },
   info: vi.fn(),
 }));
 
 vi.mock("@workspace/db", () => ({
   db: { execute: mocks.execute },
+  pool: mocks.pool,
 }));
 
 vi.mock("../lib/logger", () => ({
@@ -200,6 +211,36 @@ describe("GET /healthz background operation diagnostics", () => {
     expect(response.status).toBe(200);
     expect(body.checks.backgroundWorkers).toBe("ok");
     vi.useRealTimers();
+  });
+});
+
+describe("audit append-only protection readiness", () => {
+  it("fails readiness with an operator-facing reason when protection is missing", async () => {
+    mocks.execute
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [{
+          has_trigger: false,
+          has_guard_function: true,
+          has_redact_function: false,
+          has_delete_function: true,
+        }],
+      });
+
+    const response = await fetch(`${baseUrl}/readyz`);
+    const body = (await response.json()) as {
+      checks: Record<string, string>;
+      diagnostics: {
+        auditProtection: { status: string; detail?: string };
+      };
+    };
+
+    expect(response.status).toBe(503);
+    expect(body.checks.auditProtection).toBe("error");
+    expect(body.diagnostics.auditProtection).toEqual({
+      status: "error",
+      detail: "audit_append_only_protection_missing: append-only trigger, redact_audit_log(integer,jsonb)",
+    });
   });
 });
 

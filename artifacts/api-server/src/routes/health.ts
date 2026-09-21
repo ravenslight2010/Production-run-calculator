@@ -7,6 +7,10 @@ import { logger } from "../lib/logger";
 import { getCacheMaintenanceDiagnostics } from "../lib/observability";
 import { getStartupHealth } from "../lib/startupHealth";
 import {
+  getAuditLogProtectionCheck,
+  type AuditProtectionCheck,
+} from "../lib/health";
+import {
   backgroundOperationsDegraded,
   getBackgroundOperationDiagnostics,
 } from "../lib/backgroundOperations";
@@ -26,6 +30,7 @@ async function readiness(req: Request, res: Response): Promise<void> {
     process: { status: "ok" },
     startup: { status: startup.phase === "ready" ? "ok" : "error" },
     database: { status: "pending" },
+    auditProtection: { status: "pending" },
     dependencies: { status: "pending" },
     backgroundWorkers: { status: "pending" },
   };
@@ -42,8 +47,17 @@ async function readiness(req: Request, res: Response): Promise<void> {
     try {
       await db.execute(sql`SELECT 1`);
       checks.database = { status: "ok" };
+      const auditProtection = await getAuditLogProtectionCheck();
+      checks.auditProtection = auditProtection;
+      res.locals.auditProtection = auditProtection;
     } catch {
       checks.database = { status: "error", detail: "database_unreachable" };
+      const auditProtection: AuditProtectionCheck = {
+        status: "error",
+        detail: "database_unreachable",
+      };
+      checks.auditProtection = auditProtection;
+      res.locals.auditProtection = auditProtection;
     }
 
     // AI remains a hard readiness dependency under the existing operational
@@ -70,6 +84,7 @@ async function readiness(req: Request, res: Response): Promise<void> {
     startup.phase === "ready"
       ? {
         cacheMaintenance: await getCacheMaintenanceDiagnostics(),
+        auditProtection: res.locals.auditProtection,
         backgroundOperations: res.locals.backgroundOperationDiagnostics,
       }
       : undefined;
