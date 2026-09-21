@@ -6309,7 +6309,7 @@ export const PutSyncTodayBody = zod.object({
   "syncVersion": zod.literal(1).optional(),
   "completeness": zod.enum(['complete', 'partial']).optional(),
   "baseSnapshotId": zod.string().regex(putSyncTodayBodyPayloadTwoBaseSnapshotIdRegExp).optional()
-}).describe('Protocol-marked complete and partial writes must carry the exact baseSnapshotId most recently adopted from the server. Legacy payloads without completeness remain compatibility writes.'))
+}).describe('Protocol-marked complete and partial writes must carry the exact baseSnapshotId most recently adopted from the server. During the measured compatibility window, legacy payloads without completeness receive Deprecation, Sunset, and X-Sync-Upgrade-Required headers; after retirement they receive 409 with the authoritative snapshot and are not applied.'))
 })
 
 export const putSyncTodayResponseSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');

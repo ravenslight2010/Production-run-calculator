@@ -253,6 +253,7 @@ import type {
   SyncPeerFrame,
   SyncRecoveryPayload,
   SyncUnchangedResponse,
+  SyncUpgradeRequiredResponse,
   SyncWriteRequest,
   TransferInput,
   UnreviewedIncidentCount,
@@ -16146,7 +16147,7 @@ return customFetch<PutSyncToday200>(getPutSyncTodayUrl(params),
 
 export const getPutSyncTodayMutationKey = () => ['putSyncToday'] as const;
 
-export const getPutSyncTodayMutationOptions = <TError = ErrorType<unknown>,
+export const getPutSyncTodayMutationOptions = <TError = ErrorType<SyncUpgradeRequiredResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putSyncToday>>, TError,PutSyncTodayMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof putSyncToday>>, TError,PutSyncTodayMutationVariables, TContext> => {
 
@@ -16169,13 +16170,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type PutSyncTodayMutationResult = NonNullable<Awaited<ReturnType<typeof putSyncToday>>>
     export type PutSyncTodayMutationBody = BodyType<SyncWriteRequest>
-    export type PutSyncTodayMutationError = ErrorType<unknown>
+    export type PutSyncTodayMutationError = ErrorType<SyncUpgradeRequiredResponse>
     export type PutSyncTodayMutationVariables = {data: BodyType<SyncWriteRequest>;params?: PutSyncTodayParams}
 
     /**
  * @summary Merge the client-local current-day sync snapshot
  */
-export const usePutSyncToday = <TError = ErrorType<unknown>,
+export const usePutSyncToday = <TError = ErrorType<SyncUpgradeRequiredResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putSyncToday>>, TError,PutSyncTodayMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof putSyncToday>>,

@@ -103,6 +103,11 @@ export function recordSyncPut(fields: {
   maybeReport();
 }
 
+export function recordLegacySyncWrite(outcome: "accepted" | "rejected"): void {
+  increment(`sync.put.legacy_unversioned.${outcome}.count`);
+  maybeReport();
+}
+
 export function recordSseFrame(fields: {
   mode: SseFrameMode;
   frameBytes: number;

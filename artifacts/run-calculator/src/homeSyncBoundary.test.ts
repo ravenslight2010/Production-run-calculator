@@ -38,4 +38,16 @@ describe("Home sync manager boundary", () => {
     expect(terminalWriteSections.every((section) => section.includes("syncWriteFieldCheck"))).toBe(true);
     expect(home.match(/syncWriteFieldCheck/g)).toHaveLength(5);
   });
+
+  it("keeps scheduled profile propagation on the causally fenced write contract", () => {
+    const home = readFileSync(resolve(import.meta.dirname, "pages/home.tsx"), "utf8");
+    const start = home.indexOf("async function propagateProfileToPendingRunsNow");
+    const end = home.indexOf("// Recipe-manager acknowledgements", start);
+    const propagation = home.slice(start, end);
+
+    expect(propagation).toContain("!payloadResult.snapshotId");
+    expect(propagation).toContain('completeness: "complete"');
+    expect(propagation).toContain("baseSnapshotId: payloadResult.snapshotId");
+    expect(propagation).toContain("fallback?.partialFallback");
+  });
 });

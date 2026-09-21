@@ -4789,6 +4789,12 @@ paths:
                     oneOf:
                       - $ref: "#/components/schemas/OperationalProjection"
                       - { type: "null" }
+        "409":
+          description: Legacy unversioned complete writes are retired; the write was not applied and data is the authoritative snapshot to adopt before retrying with the current protocol.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncUpgradeRequiredResponse"
 
   /sync/events:
     get:
@@ -5598,11 +5604,25 @@ components:
           allOf:
             - $ref: "#/components/schemas/SyncPayload"
             - type: object
-              description: Protocol-marked complete and partial writes must carry the exact baseSnapshotId most recently adopted from the server. Legacy payloads without completeness remain compatibility writes.
+              description: Protocol-marked complete and partial writes must carry the exact baseSnapshotId most recently adopted from the server. During the measured compatibility window, legacy payloads without completeness receive Deprecation, Sunset, and X-Sync-Upgrade-Required headers; after retirement they receive 409 with the authoritative snapshot and are not applied.
               properties:
                 syncVersion: { type: integer, enum: [1] }
                 completeness: { type: string, enum: [complete, partial] }
                 baseSnapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
+
+    SyncUpgradeRequiredResponse:
+      type: object
+      required: [ok, data, snapshotId, partialFallback, error, code, recoveryRequired, canonicalRevision, serverTime]
+      properties:
+        ok: { type: boolean, const: true }
+        data: { $ref: "#/components/schemas/SyncPayload" }
+        snapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
+        partialFallback: { type: boolean, const: true }
+        error: { type: string }
+        code: { type: string, const: SYNC_CLIENT_UPGRADE_REQUIRED }
+        recoveryRequired: { type: boolean, const: true }
+        canonicalRevision: { type: integer, minimum: 0 }
+        serverTime: { type: integer, minimum: 0 }
 
     ProductionRun:
       type: object

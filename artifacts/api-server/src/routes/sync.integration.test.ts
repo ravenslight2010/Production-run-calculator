@@ -2109,6 +2109,126 @@ describe("/sync/today — complete-write causal fence", () => {
     expect(new Set(bodies.map((body) => body.canonicalRevision))).toEqual(new Set([2]));
     expect(new Set(bodies.map((body) => body.data.runValues["complete-fence-run"].casesNeeded)).size).toBe(1);
   });
+
+  it("advertises the compatibility sunset while legacy writes are still accepted", async () => {
+    const legacy = await put({
+      dayState: {
+        date: DATE,
+        runs: [{ id: "legacy-window-run", brand: "Acme", flavor: "Cheese" }],
+      },
+      runValues: { "legacy-window-run": { casesNeeded: 8 } },
+      runValuesUpdatedAt: { "legacy-window-run": 1 },
+    }, "legacy-window");
+
+    expect(legacy.status).toBe(200);
+    expect(legacy.headers.get("Deprecation")).toBe("true");
+    expect(legacy.headers.get("Sunset")).toBe("Wed, 21 Oct 2026 00:00:00 GMT");
+    expect(legacy.headers.get("X-Sync-Upgrade-Required")).toContain("baseSnapshotId");
+  });
+
+  it("rejects retired legacy writes with authoritative recovery state", async () => {
+    const baseline = await put(
+      complete(emptyCompleteSnapshotId(DATE), 24, 10),
+      "retirement-baseline",
+    );
+    const baselineBody = await baseline.json() as {
+      snapshotId: string;
+      canonicalRevision: number;
+    };
+    process.env.SYNC_LEGACY_COMPLETE_WRITES = "reject";
+    try {
+      const rejected = await put({
+        dayState: {
+          date: DATE,
+          runs: [{ id: "complete-fence-run", brand: "Acme", flavor: "Pep" }],
+        },
+        runValues: { "complete-fence-run": { casesNeeded: 999 } },
+        runValuesUpdatedAt: { "complete-fence-run": Date.now() + 86_400_000 },
+      }, "retired-legacy");
+
+      expect(rejected.status).toBe(409);
+      expect(rejected.headers.get("X-Sync-Response")).toBe("legacy-rejected");
+      expect(rejected.headers.get("Deprecation")).toBe("true");
+      expect(await rejected.json()).toMatchObject({
+        code: "SYNC_CLIENT_UPGRADE_REQUIRED",
+        recoveryRequired: true,
+        partialFallback: true,
+        snapshotId: baselineBody.snapshotId,
+        canonicalRevision: baselineBody.canonicalRevision,
+        data: {
+          runValues: {
+            "complete-fence-run": { casesNeeded: 24 },
+          },
+        },
+      });
+    } finally {
+      delete process.env.SYNC_LEGACY_COMPLETE_WRITES;
+    }
+  });
+
+  it("keeps versioned scheduled writes working after legacy retirement", async () => {
+    const scheduledDate = "2030-04-02";
+    const read = await fetch(`${baseUrl}/api/sync/${scheduledDate}?today=${DATE}`, {
+      headers: authHeaders(),
+    });
+    const baseSnapshotId = read.headers.get("X-Sync-Snapshot");
+    expect(baseSnapshotId).toMatch(/^[a-f0-9]{64}$/);
+
+    process.env.SYNC_LEGACY_COMPLETE_WRITES = "reject";
+    try {
+      const accepted = await fetch(`${baseUrl}/api/sync/${scheduledDate}?today=${DATE}`, {
+        method: "PUT",
+        headers: { ...managerAuthHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({
+          payload: {
+            syncVersion: 1,
+            completeness: "complete",
+            baseSnapshotId,
+            dayState: {
+              date: scheduledDate,
+              runs: [{ id: "scheduled-versioned-run", brand: "Acme", flavor: "Cheese" }],
+            },
+            runValues: { "scheduled-versioned-run": { casesNeeded: 16 } },
+            runValuesUpdatedAt: { "scheduled-versioned-run": 1 },
+          },
+        }),
+      });
+      expect(accepted.status).toBe(200);
+      expect(await accepted.json()).toMatchObject({
+        data: {
+          runValues: {
+            "scheduled-versioned-run": { casesNeeded: 16 },
+          },
+        },
+      });
+
+      const legacy = await fetch(`${baseUrl}/api/sync/${scheduledDate}?today=${DATE}`, {
+        method: "PUT",
+        headers: { ...managerAuthHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({
+          payload: {
+            dayState: {
+              date: scheduledDate,
+              runs: [{ id: "scheduled-versioned-run", brand: "Acme", flavor: "Cheese" }],
+            },
+            runValues: { "scheduled-versioned-run": { casesNeeded: 999 } },
+            runValuesUpdatedAt: { "scheduled-versioned-run": 2 },
+          },
+        }),
+      });
+      expect(legacy.status).toBe(409);
+      expect(await legacy.json()).toMatchObject({
+        code: "SYNC_CLIENT_UPGRADE_REQUIRED",
+        data: {
+          runValues: {
+            "scheduled-versioned-run": { casesNeeded: 16 },
+          },
+        },
+      });
+    } finally {
+      delete process.env.SYNC_LEGACY_COMPLETE_WRITES;
+    }
+  });
 });
 
 describe("/sync large-day complete versus partial measurements", () => {

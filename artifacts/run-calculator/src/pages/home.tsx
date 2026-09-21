@@ -7181,6 +7181,12 @@ export default function Home() {
       return;
     }
     try {
+      const scheduleBase = await fetchSchedulePayload(scheduleEditorDate);
+      if (!scheduleBase.available || !scheduleBase.snapshotId) {
+        setScheduleError("Couldn't load the latest plan before saving. Check your connection and try again.");
+        setScheduleSaving(false);
+        return;
+      }
       const runs: RunMeta[] = scheduleEditorRuns.map(r => ({ id: r.id, brand: r.brand, flavor: r.flavor }));
       const runValues: Record<string, FormValues> = {};
       for (const r of scheduleEditorRuns) {
@@ -7193,6 +7199,9 @@ export default function Home() {
         runValues[r.id] = backfillFromProfile({ ...base, casesNeeded: r.casesNeeded }, r.brand, r.flavor);
       }
       const payload: SyncPayload = {
+        syncVersion: 1,
+        completeness: "complete",
+        baseSnapshotId: scheduleBase.snapshotId,
         dayState: { runs, date: scheduleEditorDate, resetAt: writeDayResetAt(scheduleEditorDate, todayStr(), undefined, dayStateRef.current.resetAt, Date.now()), breaks: normalizeDayBreaks(scheduleEditorBreaks) },
         runValues,
         brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
@@ -7228,7 +7237,11 @@ export default function Home() {
       setScheduleDeleteConfirm(null);
     } catch {}
   }
-  async function fetchSchedulePayload(date: string): Promise<{ payload: SyncPayload | null; available: boolean }> {
+  async function fetchSchedulePayload(date: string): Promise<{
+    payload: SyncPayload | null;
+    available: boolean;
+    snapshotId?: string;
+  }> {
     try {
       const res = date === todayStr()
         ? await fetchWithTimeout(`/api/sync/today?today=${todayStr()}`, { cache: "no-store" }, 10_000)
@@ -7238,6 +7251,7 @@ export default function Home() {
       return {
         payload: payload?.dayState ? payload : null,
         available: true,
+        snapshotId: res.headers.get("X-Sync-Snapshot") ?? undefined,
       };
     } catch {
       return { payload: null, available: false };
@@ -7263,12 +7277,12 @@ export default function Home() {
       setScheduleError("Choose a future scheduled day and today or a future date.");
       return false;
     }
-    const sourceResult = await fetchSchedulePayload(fromDate);
-    if (!sourceResult.available) {
+    const sourceFetch = await fetchSchedulePayload(fromDate);
+    if (!sourceFetch.available) {
       setScheduleError("Couldn't load the source day. Check your connection and try again.");
       return false;
     }
-    const src = sourceResult.payload;
+    const src = sourceFetch.payload;
     if (!src?.dayState) {
       setScheduleError("That scheduled day is no longer available. Refresh and try again.");
       return false;
@@ -7333,7 +7347,7 @@ export default function Home() {
       // between the read and this write.
       syncVersion: 1,
       completeness: "complete",
-      baseSnapshotId: undefined,
+      baseSnapshotId: targetResult.snapshotId,
       dayState: {
         ...(base.dayState ?? src.dayState),
         runs: target,
@@ -7401,7 +7415,7 @@ export default function Home() {
           },
           syncVersion: 1,
           completeness: "complete",
-          baseSnapshotId: undefined,
+          baseSnapshotId: sourceFetch.snapshotId,
           runValues: vals.source,
           runValuesUpdatedAt: stamps.source,
           packagingProgress: packaging.source,
@@ -10439,7 +10453,10 @@ export default function Home() {
         if (!(day.runs ?? []).some(matches)) continue;
         const payloadResult = await fetchSchedulePayload(day.date);
         const payload = payloadResult.payload;
-        if (!payloadResult.available || !payload?.dayState?.runs) { allOk = false; continue; }
+        if (!payloadResult.available || !payloadResult.snapshotId || !payload?.dayState?.runs) {
+          allOk = false;
+          continue;
+        }
         const rv = { ...(payload.runValues ?? {}) };
         const stamps = { ...(payload.runValuesUpdatedAt ?? {}) };
         let dayChanged = false;
@@ -10458,14 +10475,24 @@ export default function Home() {
           {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ payload: { ...payload, runValues: rv, runValuesUpdatedAt: stamps } }),
+            body: JSON.stringify({
+              payload: {
+                ...payload,
+                syncVersion: 1,
+                completeness: "complete",
+                baseSnapshotId: payloadResult.snapshotId,
+                runValues: rv,
+                runValuesUpdatedAt: stamps,
+              },
+            }),
           },
           10_000,
         );
         if (res.status === 401) { reportUnauthorized(); return; }
         if (!res.ok) { allOk = false; continue; }
-        const { stale } = await consumeCanonicalSyncWriteResponse(res, false);
-        if (stale) { allOk = false; continue; }
+        const result = await consumeCanonicalSyncWriteResponse(res, false);
+        const fallback = result.body as { partialFallback?: boolean } | null;
+        if (result.stale || fallback?.partialFallback) { allOk = false; continue; }
         updatedAny = true;
       }
       if (updatedAny) void refreshScheduledDays();
@@ -13942,10 +13969,24 @@ export default function Home() {
     // dropping any existing run metadata (started/ended times, stoppages,
     // actuals) or other day-level fields (shiftNotes, recipe presets, etc.).
     let existing: SyncPayload | null = null;
+    let existingSnapshotId: string | undefined;
     try {
-      const res = await fetch(`/api/sync/${date}`);
-      if (res.ok) existing = (await res.json()) as SyncPayload | null;
+      const res = await fetch(`/api/sync/${date}?today=${todayStr()}`);
+      if (res.ok) {
+        existingSnapshotId = res.headers.get("X-Sync-Snapshot") ?? undefined;
+        existing = (await res.json()) as SyncPayload | null;
+      }
     } catch {}
+    if (!existingSnapshotId) {
+      setShowImportDialog(false);
+      setImportResult(null);
+      toast({
+        variant: "destructive",
+        title: "Schedule was not saved",
+        description: "The latest plan could not be loaded. Check your connection and import the file again.",
+      });
+      return;
+    }
     const existingDayState = existing?.dayState ?? { runs: [] as RunMeta[] };
     const existingRuns: RunMeta[] = existingDayState.runs ?? [];
     const existingRunValues: Record<string, FormValues> = existing?.runValues ?? {};
@@ -13962,6 +14003,9 @@ export default function Home() {
     const runValues = { ...existingRunValues, ...newRunValues };
     const outPayload: SyncPayload = {
       ...(existing ?? {}),
+      syncVersion: 1,
+      completeness: "complete",
+      baseSnapshotId: existingSnapshotId,
       dayState: { ...existingDayState, runs, date, resetAt: writeDayResetAt(date, todayStr(), existingDayState.resetAt, dayStateRef.current.resetAt, Date.now()) },
       runValues,
       brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
@@ -14075,10 +14119,21 @@ export default function Home() {
     for (const day of byDate) {
       const date = day.date;
       let existing: SyncPayload | null = null;
+      let existingSnapshotId: string | undefined;
       try {
-        const res = await fetch(`/api/sync/${date}`);
-        if (res.ok) existing = (await res.json()) as SyncPayload | null;
+        const res = await fetch(`/api/sync/${date}?today=${todayStr()}`);
+        if (res.ok) {
+          existingSnapshotId = res.headers.get("X-Sync-Snapshot") ?? undefined;
+          existing = (await res.json()) as SyncPayload | null;
+        }
       } catch {}
+      if (!existingSnapshotId) {
+        failed++;
+        done++;
+        lastErrorDetail = `Couldn't load the latest ${date} plan before saving it.`;
+        setImportProgress({ done, total: byDate.length });
+        continue;
+      }
       const existingDayState = existing?.dayState ?? { runs: [] as RunMeta[] };
       const existingRuns: RunMeta[] = existingDayState.runs ?? [];
       const existingRunValues: Record<string, FormValues> = existing?.runValues ?? {};
@@ -14128,6 +14183,9 @@ export default function Home() {
       const runValues = { ...keptRunValues, ...newRunValues };
       const outPayload: SyncPayload = {
         ...(existing ?? {}),
+        syncVersion: 1,
+        completeness: "complete",
+        baseSnapshotId: existingSnapshotId,
         dayState: { ...existingDayState, runs, date, resetAt: writeDayResetAt(date, todayStr(), existingDayState.resetAt, dayStateRef.current.resetAt, Date.now()) },
         runValues,
         brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),

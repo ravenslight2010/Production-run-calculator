@@ -632,6 +632,7 @@ export * from './syncPeerFrameSyncVersion';
 export * from './syncRecoveryPayload';
 export * from './syncSnapshotParameter';
 export * from './syncUnchangedResponse';
+export * from './syncUpgradeRequiredResponse';
 export * from './syncWriteRequest';
 export * from './syncWriteRequestPayload';
 export * from './transferInput';

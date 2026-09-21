@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   capacityTelemetrySnapshot,
   clearCapacityTelemetryForTests,
+  recordLegacySyncWrite,
   recordSseFrame,
   recordSyncParserRejection,
   recordSyncPut,
@@ -24,6 +25,7 @@ describe("capacity telemetry", () => {
       });
     }
     recordSseFrame({ mode: "complete", frameBytes: 800, durationMs: 7, outcome: "sent" });
+    recordLegacySyncWrite("accepted");
     const snapshot = capacityTelemetrySnapshot();
     expect(snapshot.distributions["sync.put.partial.accepted.duration_ms"]).toEqual({
       count: 5,
@@ -36,6 +38,7 @@ describe("capacity telemetry", () => {
       "sync.put.partial.accepted.count": 5,
       "sync.put.runs.21-50": 5,
       "sync.sse.complete.sent.count": 1,
+      "sync.put.legacy_unversioned.accepted.count": 1,
     });
     expect(JSON.stringify(snapshot)).not.toMatch(/payload|runId|recipe|user|facility|errorText/i);
   });

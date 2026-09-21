@@ -63,6 +63,7 @@ import { consumeRunInTransaction, consumeSauceBarrelInTransaction } from "./inve
 import { logger } from "../lib/logger";
 import {
   recordSseFrame,
+  recordLegacySyncWrite,
   recordSyncPut,
   recordSyncTransaction,
   syncRunCountBucket,
@@ -189,7 +190,44 @@ type ProtectedUpsertResult = {
   canonicalRevision: number;
   serverTime: number;
   staleEpoch?: number;
+  legacyRejected?: boolean;
 };
+
+const LEGACY_SYNC_SUNSET = "Wed, 21 Oct 2026 00:00:00 GMT";
+
+function isLegacyUnversionedComplete(payload: unknown): boolean {
+  return !!payload
+    && typeof payload === "object"
+    && !Array.isArray(payload)
+    && (payload as Record<string, unknown>).completeness === undefined;
+}
+
+function legacyCompleteWritesRejected(): boolean {
+  return process.env.SYNC_LEGACY_COMPLETE_WRITES === "reject";
+}
+
+function setLegacySyncUpgradeHeaders(res: Response): void {
+  res.setHeader("Deprecation", "true");
+  res.setHeader("Sunset", LEGACY_SYNC_SUNSET);
+  res.setHeader("X-Sync-Upgrade-Required", "syncVersion=1; completeness=complete; baseSnapshotId");
+}
+
+function sendLegacySyncRecovery(res: Response, result: ProtectedUpsertResult): void {
+  const data = result.data;
+  const snapshotId = data === null ? undefined : syncSnapshotId(data);
+  const envelope = buildSyncWriteEnvelope(data, { partialFallback: true });
+  res.setHeader("X-Sync-Response", "legacy-rejected");
+  res.setHeader("X-Sync-Convergence", "fallback");
+  if (snapshotId) res.setHeader("X-Sync-Snapshot", snapshotId);
+  res.status(409).json({
+    ...envelope,
+    error: "This tablet must refresh before it can save shared production data.",
+    code: "SYNC_CLIENT_UPGRADE_REQUIRED",
+    recoveryRequired: true,
+    canonicalRevision: result.canonicalRevision,
+    serverTime: result.serverTime,
+  });
+}
 
 function unchangedResponse(
   res: Response,
@@ -1150,6 +1188,7 @@ async function upsertProtected(
   clientTodayDate: string,
   expectedEpoch: number,
   clientIp?: string,
+  rejectLegacyComplete = false,
 ): Promise<ProtectedUpsertResult> {
   for (let attempt = 0; ; attempt++) {
     try {
@@ -1189,6 +1228,17 @@ async function upsertProtected(
         const completeBaseSnapshotId = syncSnapshotId(
           canonicalExisting ?? completeSyncData(emptySyncData(date)),
         );
+        if (rejectLegacyComplete && isLegacyUnversionedComplete(payload)) {
+          return {
+            data: canonicalExisting ?? completeSyncData(emptySyncData(date)),
+            wrote: false,
+            partialFallback: true,
+            retries: attempt,
+            canonicalRevision: existing?.canonicalRevision ?? 0,
+            serverTime,
+            legacyRejected: true,
+          };
+        }
         // Complete protocol writes are also causally tied to the exact snapshot
         // the client adopted. A future-skewed per-run timestamp must not let an
         // offline client overwrite a canonical edit it never observed.
@@ -1408,13 +1458,36 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
     res.status(400).json({ error: "Payload too large" }); return;
   }
   const sanitizedBytes = Buffer.byteLength(JSON.stringify(sanitized));
+  const legacyUnversionedComplete = isLegacyUnversionedComplete(sanitized);
+  if (legacyUnversionedComplete) setLegacySyncUpgradeHeaders(res);
   const staleEpoch = await isStaleResetPush(req, scope);
   if (staleEpoch !== null) { res.setHeader("X-Sync-Response", "stale"); res.json(await staleEpochResponse(scope, staleEpoch)); return; }
   const expectedEpoch = await getResetEpoch(scope);
-  const result = await upsertProtected(today, scope, sanitized, today, expectedEpoch, req.ip);
+  const result = await upsertProtected(
+    today,
+    scope,
+    sanitized,
+    today,
+    expectedEpoch,
+    req.ip,
+    legacyCompleteWritesRejected(),
+  );
   if (result.staleEpoch !== undefined) {
     res.setHeader("X-Sync-Response", "stale");
     res.json(await staleEpochResponse(scope, result.staleEpoch));
+    return;
+  }
+  if (result.legacyRejected) {
+    recordLegacySyncWrite("rejected");
+    recordSyncPut({
+      mode: "fallback",
+      outcome: "rejected",
+      runsBucket: syncRunCountBucket(sanitized),
+      sanitizedBytes,
+      wireBytes: requestWireBytes,
+      durationMs: performance.now() - telemetryStartedAt,
+    });
+    sendLegacySyncRecovery(res, result);
     return;
   }
   const merged = result.data;
@@ -1446,6 +1519,7 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
     wireBytes: requestWireBytes,
     durationMs: performance.now() - telemetryStartedAt,
   });
+  if (legacyUnversionedComplete) recordLegacySyncWrite("accepted");
   const liveState = merged
     ? computeServerLiveState(merged, result.serverTime, result.canonicalRevision)
     : null;
@@ -2631,7 +2705,10 @@ router.get("/sync/:date", async (req: Request<{ date: string }>, res: Response):
   res.setHeader("X-Sync-Canonical-Revision", String(row?.canonicalRevision ?? 0));
   res.setHeader("X-Sync-Server-Time", String(Date.now()));
   if (unchangedResponse(res, data, requestedSnapshot(req))) return;
-  if (data) res.setHeader("X-Sync-Snapshot", syncSnapshotId(data));
+  res.setHeader(
+    "X-Sync-Snapshot",
+    syncSnapshotId(completeSyncData(data ?? emptySyncData(date))),
+  );
   res.json(data);
 });
 
@@ -2658,13 +2735,28 @@ router.put(
   }
   const sanitized = sanitizeSyncPayload(payload);
   if (isSyncPayloadTooLarge(sanitized)) { res.status(400).json({ error: "Payload too large" }); return; }
+  const legacyUnversionedComplete = isLegacyUnversionedComplete(sanitized);
+  if (legacyUnversionedComplete) setLegacySyncUpgradeHeaders(res);
   const staleEpoch = await isStaleResetPush(req, scope);
   if (staleEpoch !== null) { res.setHeader("X-Sync-Response", "stale"); res.json(await staleEpochResponse(scope, staleEpoch)); return; }
   const expectedEpoch = await getResetEpoch(scope);
-  const result = await upsertProtected(date, scope, sanitized, clientToday(req), expectedEpoch, req.ip);
+  const result = await upsertProtected(
+    date,
+    scope,
+    sanitized,
+    clientToday(req),
+    expectedEpoch,
+    req.ip,
+    legacyCompleteWritesRejected(),
+  );
   if (result.staleEpoch !== undefined) {
     res.setHeader("X-Sync-Response", "stale");
     res.json(await staleEpochResponse(scope, result.staleEpoch));
+    return;
+  }
+  if (result.legacyRejected) {
+    recordLegacySyncWrite("rejected");
+    sendLegacySyncRecovery(res, result);
     return;
   }
   const merged = result.data;
@@ -2685,6 +2777,7 @@ router.put(
     partialFallback: result.partialFallback,
   });
   res.setHeader("X-Sync-Response-Bytes", String(Buffer.byteLength(JSON.stringify(responseBody))));
+  if (legacyUnversionedComplete) recordLegacySyncWrite("accepted");
     res.json(responseBody);
   },
 );

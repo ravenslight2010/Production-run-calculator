@@ -1033,6 +1033,20 @@ export interface SyncWriteRequest {
   payload: SyncWriteRequestPayload;
 }
 
+export interface SyncUpgradeRequiredResponse {
+  ok: true;
+  data: SyncPayload;
+  /** @pattern ^[a-f0-9]{64}$ */
+  snapshotId: string;
+  partialFallback: true;
+  error: string;
+  code: 'SYNC_CLIENT_UPGRADE_REQUIRED';
+  recoveryRequired: true;
+  /** @minimum 0 */
+  canonicalRevision: number;
+  /** @minimum 0 */
+  serverTime: number;
+}
 export type ProductionRunInputs = { [key: string]: unknown };
 
 export interface ProductionRun {
