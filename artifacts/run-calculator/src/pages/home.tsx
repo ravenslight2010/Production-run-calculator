@@ -10052,7 +10052,7 @@ export default function Home() {
     return {
       syncVersion: 1,
       completeness: canSendPartial ? "partial" : "complete",
-      ...(canSendPartial ? { baseSnapshotId: syncSnapshotIdRef.current } : {}),
+      baseSnapshotId: syncSnapshotIdRef.current,
       dayState: { runs: fencePendingEndSnapshots(overlayRunMetaStamps(pushRuns)), shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [], substitutionLog: ds.substitutionLog ?? [], stagedItems: ds.stagedItems ?? {}, prepPhase: ds.prepPhase, breaks: normalizeDayBreaks(ds.breaks) },
       runValues: fenceActiveManualSectionValues(fencePendingOperationalValues(runValues)),
       runValuesUpdatedAt,

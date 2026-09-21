@@ -10,6 +10,14 @@ import { and, eq, sql } from "drizzle-orm";
 import { signToken } from "../lib/auth";
 import { syncSnapshotId } from "../lib/syncContract";
 
+const emptyCompleteSnapshotId = (date: string) => syncSnapshotId({
+  dayState: { date, runs: [] },
+  runValues: {},
+  runValuesUpdatedAt: {},
+  syncVersion: 1,
+  completeness: "complete",
+});
+
 // Regression guard for the "scheduled day disappears a day early" bug: the app is
 // driven by the CLIENT's local midnight, but the server runs in UTC in
 // production. GET /sync/scheduled and DELETE /sync/:date must honour a
@@ -1885,6 +1893,7 @@ describe("/sync partial payload contract", () => {
     const complete = {
       syncVersion: 1,
       completeness: "complete",
+      baseSnapshotId: emptyCompleteSnapshotId(DATE),
       dayState: {
         runs: [
           { id: "partial-r1", brand: "Acme", flavor: "Pep" },
@@ -2068,6 +2077,7 @@ describe("/sync large-day complete versus partial measurements", () => {
     return {
       syncVersion: 1,
       completeness: "complete",
+      baseSnapshotId: emptyCompleteSnapshotId(DATE),
       dayState: {
         date: DATE,
         resetAt: 1_000,
@@ -2787,12 +2797,21 @@ describe("/sync — additive run-list protection (whole-run loss guard)", () => 
       runValues: { active: { casesNeeded: 40 } },
       runValuesUpdatedAt: { active: 1_000 },
     };
-    const peerPut = (senderId: string, payload: unknown) =>
-      fetch(`${baseUrl}/api/sync/today?today=${conflictDate}`, {
-        method: "PUT",
-        headers: { ...authHeaders(), "content-type": "application/json" },
-        body: JSON.stringify({ senderId, payload }),
-      });
+    const peerPut = async (senderId: string, payload: any): Promise<Response> => {
+      let nextPayload = payload;
+      let response: Response;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        response = await fetch(`${baseUrl}/api/sync/today?today=${conflictDate}`, {
+          method: "PUT",
+          headers: { ...authHeaders(), "content-type": "application/json" },
+          body: JSON.stringify({ senderId, payload: nextPayload }),
+        });
+        const body = await response.clone().json() as { partialFallback?: boolean; snapshotId?: string };
+        if (!body.partialFallback || !body.snapshotId) return response;
+        nextPayload = { ...nextPayload, baseSnapshotId: body.snapshotId };
+      }
+      return response!;
+    };
 
     const seeded = await peerPut("lifecycle-seed", baseline);
     expect(seeded.status).toBe(200);
@@ -2957,12 +2976,21 @@ describe("/sync — additive run-list protection (whole-run loss guard)", () => 
         runValues: { [activeRun.id]: { casesNeeded: 40 } },
         runValuesUpdatedAt: { [activeRun.id]: 1_000 },
       };
-      const peerPut = (senderId: string, payload: unknown) =>
-        fetch(`${baseUrl}/api/sync/today?today=${date}`, {
-          method: "PUT",
-          headers: { ...authHeaders(), "content-type": "application/json" },
-          body: JSON.stringify({ senderId, payload }),
-        });
+      const peerPut = async (senderId: string, payload: any): Promise<Response> => {
+        let nextPayload = payload;
+        let response: Response;
+        for (let attempt = 0; attempt < 4; attempt++) {
+          response = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
+            method: "PUT",
+            headers: { ...authHeaders(), "content-type": "application/json" },
+            body: JSON.stringify({ senderId, payload: nextPayload }),
+          });
+          const body = await response.clone().json() as { partialFallback?: boolean; snapshotId?: string };
+          if (!body.partialFallback || !body.snapshotId) return response;
+          nextPayload = { ...nextPayload, baseSnapshotId: body.snapshotId };
+        }
+        return response!;
+      };
 
       const seeded = await peerPut(`pause-resume-seed-${date}`, baseline);
       expect(seeded.status).toBe(200);
@@ -3732,6 +3760,7 @@ describe("/sync/events — date-scoped broadcasts", () => {
     let canonical: Record<string, any> = {
       syncVersion: 1,
       completeness: "complete",
+      baseSnapshotId: emptyCompleteSnapshotId(date),
       dayState: { date, runs, shiftNotes: "Synthetic full-shift soak fixture" },
       runValues,
       runValuesUpdatedAt: Object.fromEntries(runs.map((run, index) => [run.id, 10_000 + index])),
@@ -3875,6 +3904,7 @@ describe("/sync/events — date-scoped broadcasts", () => {
         const lifecycleKind = lifecycleSteps.get(step);
         let nextPayload: Record<string, any> = {
           ...canonical,
+          baseSnapshotId: syncSnapshotId(canonical),
           runValues: {
             ...canonical.runValues,
             [changedRun]: {

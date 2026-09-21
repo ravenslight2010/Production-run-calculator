@@ -1183,6 +1183,34 @@ async function upsertProtected(
           .for("update");
         const canonicalExisting = completeSyncData(existing?.data);
         existingData = canonicalExisting;
+        const currentSnapshotId = canonicalExisting === undefined
+          ? undefined
+          : syncSnapshotId(canonicalExisting);
+        const completeBaseSnapshotId = syncSnapshotId(
+          canonicalExisting ?? completeSyncData(emptySyncData(date)),
+        );
+        // Complete protocol writes are also causally tied to the exact snapshot
+        // the client adopted. A future-skewed per-run timestamp must not let an
+        // offline client overwrite a canonical edit it never observed.
+        if (
+          payload
+          && typeof payload === "object"
+          && !Array.isArray(payload)
+          && (payload as Record<string, unknown>).completeness === "complete"
+          && (
+            !SYNC_SNAPSHOT_ID_RE.test(String((payload as Record<string, unknown>).baseSnapshotId ?? ""))
+            || (payload as Record<string, unknown>).baseSnapshotId !== completeBaseSnapshotId
+          )
+        ) {
+          return {
+            data: canonicalExisting ?? completeSyncData(emptySyncData(date)),
+            wrote: false,
+            partialFallback: true,
+            retries: attempt,
+            canonicalRevision: existing?.canonicalRevision ?? 0,
+            serverTime,
+          };
+        }
         // A partial payload is a delta over the exact locked snapshot. Inherit
         // omitted cold sections (such as history) from that snapshot before the
         // normal per-run/LWW protection runs.
@@ -1193,9 +1221,6 @@ async function upsertProtected(
         // Otherwise another writer could change the row between validation and
         // merge, making the client's base snapshot unsafe.
         if (isPartialSyncPayload(payload)) {
-          const currentSnapshotId = canonicalExisting === undefined
-            ? undefined
-            : syncSnapshotId(canonicalExisting);
           if (
             !isValidPartialSyncContract(payload) ||
             typeof currentSnapshotId !== "string" ||
