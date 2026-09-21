@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { and, eq, isNull, lt } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, lt, or } from "drizzle-orm";
 import { authSessionsTable, db, usersTable } from "@workspace/db";
 import { sessionTtlSec } from "./auth";
 import { invalidateUserSessions } from "./userValidity";
@@ -51,4 +51,26 @@ export async function revokeSession(token: string): Promise<void> {
 }
 export async function purgeExpiredSessions(): Promise<void> {
   await db.delete(authSessionsTable).where(lt(authSessionsTable.expiresAt, new Date()));
+}
+
+export const AUTH_SESSION_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+export const AUTH_SESSION_RETENTION_DELETE_LIMIT = 1_000;
+
+export async function purgeRetainedSessions(now = Date.now()): Promise<number> {
+  const cutoff = new Date(now - AUTH_SESSION_RETENTION_MS);
+  const candidates = await db.select({ id: authSessionsTable.id })
+    .from(authSessionsTable)
+    .where(or(
+      lt(authSessionsTable.expiresAt, cutoff),
+      and(
+        isNotNull(authSessionsTable.revokedAt),
+        lt(authSessionsTable.revokedAt, cutoff),
+      ),
+    ))
+    .limit(AUTH_SESSION_RETENTION_DELETE_LIMIT);
+  if (candidates.length === 0) return 0;
+  const deleted = await db.delete(authSessionsTable)
+    .where(inArray(authSessionsTable.id, candidates.map(({ id }) => id)))
+    .returning({ id: authSessionsTable.id });
+  return deleted.length;
 }

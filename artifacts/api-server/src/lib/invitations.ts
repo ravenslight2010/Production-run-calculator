@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, lt, or } from "drizzle-orm";
 import { db, staffInvitationsTable } from "@workspace/db";
 
 const INVITE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -59,4 +59,30 @@ export async function revokeInvitation(id: string): Promise<boolean> {
     .where(and(eq(staffInvitationsTable.id, id), isNull(staffInvitationsTable.consumedAt), isNull(staffInvitationsTable.revokedAt)))
     .returning({ id: staffInvitationsTable.id });
   return result.length > 0;
+}
+
+export const STAFF_INVITATION_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+export const STAFF_INVITATION_RETENTION_DELETE_LIMIT = 1_000;
+
+export async function purgeRetainedInvitations(now = Date.now()): Promise<number> {
+  const cutoff = new Date(now - STAFF_INVITATION_RETENTION_MS);
+  const candidates = await db.select({ id: staffInvitationsTable.id })
+    .from(staffInvitationsTable)
+    .where(or(
+      lt(staffInvitationsTable.expiresAt, cutoff),
+      and(
+        isNotNull(staffInvitationsTable.consumedAt),
+        lt(staffInvitationsTable.consumedAt, cutoff),
+      ),
+      and(
+        isNotNull(staffInvitationsTable.revokedAt),
+        lt(staffInvitationsTable.revokedAt, cutoff),
+      ),
+    ))
+    .limit(STAFF_INVITATION_RETENTION_DELETE_LIMIT);
+  if (candidates.length === 0) return 0;
+  const deleted = await db.delete(staffInvitationsTable)
+    .where(inArray(staffInvitationsTable.id, candidates.map(({ id }) => id)))
+    .returning({ id: staffInvitationsTable.id });
+  return deleted.length;
 }
