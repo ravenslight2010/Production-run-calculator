@@ -1303,3 +1303,11 @@ In that state the sauce/applicator effects `return`/`continue` BEFORE the local 
 **Live verification:** `/api/livez` 200; `/api/readyz` now reports `startup: ok`, `database: ok` (was failing) — the only red check left is `dependencies` because Render still runs the pre-fix `:latest` image. Render API ignored all PATCH imagePath shapes and rejects env-var updates, so pointing the service at the sha tag needs a dashboard click (Settings → Image) unless CI starts publishing `:latest`.
 
 **Watch items:** `runcalc-db` is free tier and **expires 2026-09-29**. Nightly CI still lacks a `DATABASE_URL` Actions secret.
+
+## 2026-09-22 (later) — Render fully green; image switched to immutable sha tag
+
+**What was done:** User changed the service image tag in the Render dashboard (Settings → Image) to `ghcr.io/ravenslight2010/runcalc-api:6a8f5f89cdf213e573866660c61b9ca35dea9687` and redeployed. The Render API cannot change the image path for image services (all PATCH `imagePath` shapes, deploy-with-image bodies, and env-var writes are accepted-but-ignored or 400/405), so the dashboard is the only non-code path.
+
+**Verification (2026-09-22 ~23:12 UTC):** `https://runcalc.onrender.com/api/readyz` → HTTP 200 with `process/startup/database/dependencies/backgroundWorkers` all `ok`; `/api/healthz` 200; `/api/livez` 200. Live deploy image ref is the sha tag (digest `caf0787b…` platform manifest; evidence index digest for the same publish is `fff67f56…`).
+
+**Outstanding watch items:** `runcalc-db` (free tier) expires **2026-09-29**; nightly CI still has no `DATABASE_URL` Actions secret.
