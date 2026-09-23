@@ -128,7 +128,11 @@ test("manager setup stays usable when recipe names are incomplete", async ({
       await expect(dropdown.getByRole("button", { name: validName, exact: true })).toBeVisible();
       await expect(dropdown.getByText(malformedName, { exact: true })).toHaveCount(0);
       await dropdown.getByRole("button", { name: validName, exact: true }).click();
-      await expect(page.getByRole("button", { name: validName, exact: true }).first()).toBeVisible();
+      // The trigger keeps its stable accessible label (for example
+      // "Dough recipe") after selection; the chosen recipe is its content,
+      // not its accessible name. Assert the picker contract directly instead
+      // of looking for a second button named after the selected recipe.
+      await expect(picker).toContainText(validName);
     };
 
     await openPickerAndSelect(

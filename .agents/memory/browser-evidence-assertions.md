@@ -28,3 +28,15 @@ visible recipe controls.
 **How to apply:** In manager setup browser fixtures, await the mocked bootstrap
 response, assert malformed option values are absent from the open control, and
 select the valid value through the control's actual interaction model.
+
+Custom recipe-picker triggers retain their fixed accessible label after a
+selection; the selected recipe is rendered as trigger content. Assert the
+stable picker locator plus `toContainText` for the selected value rather than
+looking for a new button whose accessible name is the recipe.
+
+**Why:** The accessible name is intentionally the control label ("Dough
+recipe", "Sauce recipe", etc.), so a role/name assertion against the selected
+recipe fails even when the picker works correctly.
+
+**How to apply:** Keep selector-drift checks anchored to the picker test ID
+and accessible label, then verify the chosen recipe through container text.
