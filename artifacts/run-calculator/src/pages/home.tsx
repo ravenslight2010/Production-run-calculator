@@ -178,6 +178,7 @@ import {
 } from "../profileRecipeRefresh";
 import { clearActiveSubstitutions, setActiveSubstitutions, withTodaySubstitutions } from "../substitutionState";
 import { brandTagLabels } from "@workspace/name-match";
+import { normalizeSelectableName, selectableNames } from "../setupRecipeNames";
 import { computeLinePhases, pickMostActivePhase, computeEndedRunElapsedSec, type PhaseInfo } from "../linePhases";
 import {
   pauseDecisionRemainingMs,
@@ -3941,7 +3942,8 @@ export default function Home() {
       const rows = (mix.components ?? [])
         .filter((c) => c.ingredient.trim())
         .map((c) => ({ ingredient: c.ingredient, lbs: c.perPizza }));
-      if (rows.length > 0) map.set(mix.name.trim().toLowerCase(), rows);
+      const name = normalizeSelectableName(mix.name);
+      if (rows.length > 0 && name) map.set(name.toLowerCase(), rows);
     }
     return map;
   }, [mixes]);
@@ -3949,7 +3951,7 @@ export default function Home() {
   // server Mixes master data — the single source for mixes across the app now
   // that the separate "Mix" recipe-type lists have been merged into Mixes.
   const serverMixNames = useMemo(
-    () => [...new Set(mixes.map((m) => m.name.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    () => selectableNames(mixes.map((m) => m.name)),
     [mixes],
   );
   // Factory-wide cheese recipes (server master-data, like Mixes but a SEPARATE
@@ -3966,7 +3968,7 @@ export default function Home() {
   const serverCheeseByName = useMemo(() => {
     const map = new Map<string, CheeseRecipe>();
     for (const r of enabledCheeseRecipes) {
-      const key = r.name.trim().toLowerCase();
+      const key = normalizeSelectableName(r.name).toLowerCase();
       if (key) map.set(key, r);
     }
     return map;
@@ -3982,24 +3984,32 @@ export default function Home() {
           ingredient: c.ingredient,
           lbs: c.lbs,
         }));
-      const key = r.name.trim().toLowerCase();
+      const key = normalizeSelectableName(r.name).toLowerCase();
       if (key) map.set(key, rows);
     }
     return map;
   }, [enabledCheeseRecipes]);
   const serverCheeseNames = useMemo(
-    () => [...new Set(enabledCheeseRecipes.map((r) => r.name.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    () => selectableNames(enabledCheeseRecipes.map((r) => r.name)),
     [enabledCheeseRecipes],
   );
   // Brand tags for cheese/mix names that collide across customers (same name
   // under 2+ brands, or a bare name whose brand-prefixed twin exists) — the
   // pickers show "Taco Mix (Marco's)" while the stored value stays the name.
   const cheeseNameBrandTags = useMemo(
-    () => brandTagLabels(enabledCheeseRecipes.map((r) => ({ name: r.name, brand: r.brand }))),
+    () => brandTagLabels(
+      enabledCheeseRecipes
+        .map((r) => ({ name: normalizeSelectableName(r.name), brand: normalizeSelectableName(r.brand) }))
+        .filter((r) => r.name),
+    ),
     [enabledCheeseRecipes],
   );
   const mixNameBrandTags = useMemo(
-    () => brandTagLabels(mixes.map((m) => ({ name: m.name, brand: m.brand ?? "" }))),
+    () => brandTagLabels(
+      mixes
+        .map((m) => ({ name: normalizeSelectableName(m.name), brand: normalizeSelectableName(m.brand) }))
+        .filter((m) => m.name),
+    ),
     [mixes],
   );
 
@@ -4104,7 +4114,7 @@ export default function Home() {
       const rows = r.components
         .filter((c) => c.ingredient.trim())
         .map((c) => ({ ingredient: c.ingredient, lbs: c.lbs }));
-      const key = r.name.trim().toLowerCase();
+      const key = normalizeSelectableName(r.name).toLowerCase();
       if (key) map.set(key, rows);
     }
     return map;
@@ -4115,7 +4125,7 @@ export default function Home() {
     const map = new Map<string, number>();
     for (const r of doughRecipesList) {
       if (r.enabled === false) continue;
-      const key = r.name.trim().toLowerCase();
+      const key = normalizeSelectableName(r.name).toLowerCase();
       const oz = r.doughballWeightOz ?? 0;
       if (key && oz > 0) map.set(key, oz);
     }
@@ -4127,7 +4137,7 @@ export default function Home() {
     const map = new Map<string, number>();
     for (const r of doughRecipesList) {
       if (r.enabled === false) continue;
-      const key = r.name.trim().toLowerCase();
+      const key = normalizeSelectableName(r.name).toLowerCase();
       const n = r.doughballsPerTray ?? 0;
       if (key && n > 0) map.set(key, n);
     }
@@ -4141,7 +4151,7 @@ export default function Home() {
     const map = new Map<string, DoughballVariant[]>();
     for (const r of doughRecipesList) {
       if (r.enabled === false) continue;
-      const key = r.name.trim().toLowerCase();
+      const key = normalizeSelectableName(r.name).toLowerCase();
       const variants = normalizeDoughballVariants(r.doughballVariants);
       if (key && variants.length > 0) map.set(key, variants);
     }
@@ -4154,17 +4164,17 @@ export default function Home() {
       const rows = r.components
         .filter((c) => c.ingredient.trim())
         .map((c) => ({ ingredient: c.ingredient, lbs: c.lbs }));
-      const key = r.name.trim().toLowerCase();
+      const key = normalizeSelectableName(r.name).toLowerCase();
       if (key) map.set(key, rows);
     }
     return map;
   }, [sauceRecipesList]);
   const serverDoughNames = useMemo(
-    () => [...new Set(doughRecipesList.filter((r) => r.enabled !== false).map((r) => r.name.trim()).filter(Boolean))],
+    () => selectableNames(doughRecipesList.filter((r) => r.enabled !== false).map((r) => r.name)),
     [doughRecipesList],
   );
   const serverSauceNames = useMemo(
-    () => [...new Set(sauceRecipesList.filter((r) => r.enabled !== false).map((r) => r.name.trim()).filter(Boolean))],
+    () => selectableNames(sauceRecipesList.filter((r) => r.enabled !== false).map((r) => r.name)),
     [sauceRecipesList],
   );
   // ── Unified ingredient universe ──
@@ -4322,7 +4332,7 @@ export default function Home() {
       const flavorMatches = f ? brandMatches.filter(matchesFlavor) : brandMatches;
       const rest = f ? brandMatches.filter((r) => !matchesFlavor(r)) : [];
       const toNames = (pool: typeof brandMatches) =>
-        [...new Set(pool.map((r) => r.name.trim()).filter(Boolean))].sort((x, y) => x.localeCompare(y));
+        selectableNames(pool.map((r) => r.name));
       const first = toNames(flavorMatches);
       const firstSet = new Set(first);
       return [...first, ...toNames(rest).filter((n) => !firstSet.has(n))];
@@ -4880,18 +4890,24 @@ export default function Home() {
           pending = JSON.parse(localStorage.getItem(PENDING_KEY) ?? "{}") as Record<string, string>;
         } catch {}
         const pool = await fetchNamedRecipes(kind);
-        const taken = new Set(pool.map((r) => r.name.trim().toLowerCase()));
+        const taken = new Set(
+          pool
+            .map((r) => normalizeSelectableName(r.name).toLowerCase())
+            .filter(Boolean),
+        );
         const map: Record<string, string> = { ...pending };
         const changed: NamedRecipe[] = [];
         for (const r of pool) {
-          const clean = cleanSpecNamedRecipeName(kind, r.name);
-          if (!clean || clean === r.name) continue;
+          const rawName = normalizeSelectableName(r.name);
+          if (!rawName) continue;
+          const clean = cleanSpecNamedRecipeName(kind, rawName);
+          if (!clean || clean === rawName) continue;
           const key = clean.trim().toLowerCase();
           // Same name modulo trim/case: rename in place, no re-pointing needed
           // beyond the exact-string surfaces applyRecipeNameMerge covers.
-          if (taken.has(key) && key !== r.name.trim().toLowerCase()) continue;
+          if (taken.has(key) && key !== rawName.toLowerCase()) continue;
           taken.add(key);
-          map[r.name] = clean;
+          map[rawName] = clean;
           changed.push({ ...r, name: clean });
         }
         if (Object.keys(map).length === 0) continue;
@@ -10737,7 +10753,8 @@ export default function Home() {
       const acknowledgedNames = new Set(
         canonicalItems
           .filter((item) => submittedIds.has(item.id))
-          .map((item) => item.name.trim().toLowerCase()),
+          .map((item) => normalizeSelectableName(item.name).toLowerCase())
+          .filter(Boolean),
       );
       await applyNamedPoolChange(kind, canonicalItems, undefined, acknowledgedNames);
     });
@@ -10765,7 +10782,8 @@ export default function Home() {
     const byKey = new Map<string, NamedRecipePoolPatch>();
     for (const r of list) {
       if (r.enabled === false) continue;
-      const key = r.name.trim().toLowerCase();
+      const name = normalizeSelectableName(r.name);
+      const key = name.toLowerCase();
       if (!key) continue;
       const rows = normalizeRecipeRowsForCompare(r.components);
       const weight = kind === "dough" ? Number(r.doughballWeightOz ?? 0) : 0;
@@ -10785,7 +10803,7 @@ export default function Home() {
           : "";
       snap.set(key, JSON.stringify({ rows, weight, perTray, variantSig }));
       byKey.set(key, {
-        name: r.name,
+        name,
         rows,
         ...(weight > 0 ? { doughballWeightOz: weight } : {}),
         ...(perTray > 0 ? { doughballsPerTray: perTray } : {}),
@@ -11022,16 +11040,18 @@ export default function Home() {
         // Ongoing pass — recipe edits are authoritative for linked pending work,
         // not just for profiles whose rows happened to be empty.
         for (const r of cheeseRecipesList) {
-          if (r.enabled === false || !r.name.trim()) continue;
+          const name = normalizeSelectableName(r.name);
+          if (r.enabled === false || !name) continue;
           const rows = normalizeRecipeRowsForCompare(r.components);
           if (rows.length === 0) continue;
-          remember(refreshCheeseOrMixProfileRows(r.name, rows));
+          remember(refreshCheeseOrMixProfileRows(name, rows));
         }
         for (const m of mixes) {
-          if (!m.name.trim()) continue;
+          const name = normalizeSelectableName(m.name);
+          if (!name) continue;
           const rows = mixRows(m);
           if (rows.length === 0) continue;
-          remember(refreshCheeseOrMixProfileRows(m.name, rows));
+          remember(refreshCheeseOrMixProfileRows(name, rows));
         }
       } else {
         // First-time full heal — wait for pool data, run once per mount.
@@ -11039,16 +11059,18 @@ export default function Home() {
         if (cheeseMixFullHealDoneRef.current) return;
         cheeseMixFullHealDoneRef.current = true;
         for (const r of cheeseRecipesList) {
-          if (r.enabled === false || !r.name.trim()) continue;
+          const name = normalizeSelectableName(r.name);
+          if (r.enabled === false || !name) continue;
           const rows = normalizeRecipeRowsForCompare(r.components);
           if (rows.length === 0) continue;
-          remember(refreshCheeseOrMixProfileRows(r.name, rows));
+          remember(refreshCheeseOrMixProfileRows(name, rows));
         }
         for (const m of mixes) {
-          if (!m.name.trim()) continue;
+          const name = normalizeSelectableName(m.name);
+          if (!name) continue;
           const rows = mixRows(m);
           if (rows.length === 0) continue;
-          remember(refreshCheeseOrMixProfileRows(m.name, rows));
+          remember(refreshCheeseOrMixProfileRows(name, rows));
         }
         localStorage.setItem(markerKey, "1");
       }
@@ -11193,7 +11215,9 @@ export default function Home() {
     const name = String((kind === "dough" ? vals.doughRecipeName : vals.frontlineRecipeName) ?? "").trim();
     if (!name) return;
     const list = kind === "dough" ? doughRecipesList : sauceRecipesList;
-    const target = list.find((r) => r.enabled !== false && r.name.trim().toLowerCase() === name.toLowerCase());
+    const target = list.find(
+      (r) => r.enabled !== false && normalizeSelectableName(r.name).toLowerCase() === name.toLowerCase(),
+    );
     if (!target) return;
     const rows = normalizeRecipeRowsForCompare((kind === "dough" ? vals.doughRecipe : vals.frontlineRecipe) ?? []);
     const next: NamedRecipe = { ...target, components: rows };

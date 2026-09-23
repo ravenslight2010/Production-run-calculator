@@ -18,6 +18,101 @@ async function openManagerAttention(page: Page): Promise<void> {
   await expect(page.getByRole("dialog", { name: "Manager attention" })).toBeVisible();
 }
 
+test("manager setup stays usable when recipe names are incomplete", async ({
+  page,
+  playwright,
+}) => {
+  test.setTimeout(120_000);
+  const fixtures = await AuthorizedBrowserFixtures.create(playwright, API_BASE, SIGNUP_CODE);
+
+  try {
+    const account = await fixtures.createAccount({
+      username: uniqueTestId("e2e_manager_setup_incomplete"),
+      password: PASSWORD,
+      capabilities: DEFAULT_MANAGER_CAPABILITIES,
+      onboardingSeen: true,
+    });
+    const scheduledBrand = uniqueTestId("IncompleteBrand");
+    const scheduledFlavor = uniqueTestId("IncompleteFlavor");
+    const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+
+    await page.route("**/api/password-reset-requests", async (route) => {
+      if (route.request().method() !== "GET") return route.continue();
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: "[]",
+      });
+    });
+    await page.route("**/api/incidents/actionable-count", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ count: 0 }),
+      }));
+    await page.route("**/api/sync/scheduled?*", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([{
+          date: tomorrow,
+          runCount: 1,
+          runs: [{
+            id: uniqueTestId("scheduled-incomplete"),
+            brand: scheduledBrand,
+            flavor: scheduledFlavor,
+            casesNeeded: 10,
+            dieType: "",
+          }],
+        }]),
+      }));
+    await page.route("**/api/master-data/bootstrap*", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ingredients: [],
+          doughRecipes: [
+            { id: uniqueTestId("malformed-dough"), name: null, components: [], enabled: true },
+            { id: uniqueTestId("valid-dough"), name: "Valid Dough", components: [], enabled: true },
+          ],
+          sauceRecipes: [
+            { id: uniqueTestId("malformed-sauce"), name: 42, components: [], enabled: true },
+            { id: uniqueTestId("valid-sauce"), name: "Valid Sauce", components: [], enabled: true },
+          ],
+          cheeseRecipes: [
+            { id: uniqueTestId("malformed-cheese"), name: {}, components: [], enabled: true },
+            { id: uniqueTestId("valid-cheese"), name: "Valid Cheese", brand: "", flavors: [], components: [], enabled: true },
+          ],
+          mixes: [
+            { id: uniqueTestId("malformed-mix"), name: false, components: [], enabled: true },
+            { id: uniqueTestId("valid-mix"), name: "Valid Mix", brand: "", flavor: "", components: [], enabled: true },
+          ],
+        }),
+      }));
+    await page.addInitScript(() => {
+      localStorage.setItem("run-calc-dough-recipe-names", JSON.stringify([null, "Legacy Dough"]));
+      localStorage.setItem("run-calc-frontline-recipe-names", JSON.stringify([{}, "Legacy Sauce"]));
+    });
+
+    await page.context().addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    await openManagerAttention(page);
+    await page.getByTestId("manager-attention-action-recipe-setup").click();
+    await expect(page.getByRole("heading", { name: "Setup Profiles" })).toBeVisible();
+    await expect(page.getByText(scheduledBrand, { exact: true })).toBeVisible();
+    await expect(page.getByText(scheduledFlavor, { exact: true })).toBeVisible();
+
+    const doughRecipePicker = page.getByRole("button", { name: "Recipe name…" }).first();
+    await doughRecipePicker.click();
+    await expect(page.getByText("Valid Dough", { exact: true })).toBeVisible();
+    await expect(page.getByText("Legacy Dough", { exact: true })).toBeVisible();
+  } finally {
+    await fixtures.cleanup();
+  }
+});
+
 test("manager attention remains stable across dialog and destination transitions", async ({
   page,
   playwright,
@@ -98,6 +193,34 @@ test("manager attention remains stable across dialog and destination transitions
           }],
         }]),
       }));
+    await page.route("**/api/master-data/bootstrap*", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ingredients: [],
+          doughRecipes: [
+            { id: uniqueTestId("malformed-dough"), name: null, components: [], enabled: true },
+            { id: uniqueTestId("valid-dough"), name: "Valid Dough", components: [], enabled: true },
+          ],
+          sauceRecipes: [
+            { id: uniqueTestId("malformed-sauce"), name: 42, components: [], enabled: true },
+            { id: uniqueTestId("valid-sauce"), name: "Valid Sauce", components: [], enabled: true },
+          ],
+          cheeseRecipes: [
+            { id: uniqueTestId("malformed-cheese"), name: {}, components: [], enabled: true },
+            { id: uniqueTestId("valid-cheese"), name: "Valid Cheese", brand: "", flavors: [], components: [], enabled: true },
+          ],
+          mixes: [
+            { id: uniqueTestId("malformed-mix"), name: false, components: [], enabled: true },
+            { id: uniqueTestId("valid-mix"), name: "Valid Mix", brand: "", flavor: "", components: [], enabled: true },
+          ],
+        }),
+      }));
+    await page.addInitScript(() => {
+      localStorage.setItem("run-calc-dough-recipe-names", JSON.stringify([null, "Legacy Dough"]));
+      localStorage.setItem("run-calc-frontline-recipe-names", JSON.stringify([{}, "Legacy Sauce"]));
+    });
 
     await page.context().addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
     await page.setViewportSize({ width: 1440, height: 1000 });
@@ -146,6 +269,11 @@ test("manager attention remains stable across dialog and destination transitions
     await expect(page.getByRole("heading", { name: "Setup Profiles" })).toBeVisible();
     await expect(page.getByText(scheduledBrand, { exact: true })).toBeVisible();
     await expect(page.getByText(scheduledFlavor, { exact: true })).toBeVisible();
+    const doughRecipePicker = page.getByRole("button", { name: "Recipe name…" }).first();
+    await doughRecipePicker.click();
+    await expect(page.getByText("Valid Dough", { exact: true })).toBeVisible();
+    await expect(page.getByText("Legacy Dough", { exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
     await page.screenshot({ path: testInfo.outputPath("manager-attention-destination.png") });
     await page.getByRole("button", { name: "Close", exact: true }).click();
 

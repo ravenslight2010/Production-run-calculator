@@ -52,6 +52,7 @@ import { AppSlotMathBadge } from "./AppSlotMathBadge";
 import { matchDoughballVariant, normalizeDoughballVariants, type DoughballVariant } from "@workspace/named-recipes";
 import { getProfileCacheVersion, subscribeProfileCache } from "../profileCache";
 import { caseBasedProductionNeedsAvailable } from "@workspace/inventory-math";
+import { normalizeSelectableName, selectableNames } from "../setupRecipeNames";
 
 type ApplicatorNum = 1 | 2 | 3 | 4;
 
@@ -376,36 +377,48 @@ export default function SetupProfileEditor({
     const map = new Map<string, RecipeRow[]>();
     for (const mix of mixes) {
       const rows = (mix.components ?? []).filter(c => c.ingredient.trim()).map(c => ({ ingredient: c.ingredient, lbs: c.perPizza }));
-      if (rows.length > 0) map.set(mix.name.trim().toLowerCase(), rows);
+      const name = normalizeSelectableName(mix.name);
+      if (rows.length > 0 && name) map.set(name.toLowerCase(), rows);
     }
     return map;
   }, [mixes]);
-  const serverMixNames = useMemo(() => [...new Set(mixes.map(m => m.name.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [mixes]);
+  const serverMixNames = useMemo(() => selectableNames(mixes.map(m => m.name)), [mixes]);
   const serverMixIngredients = useMemo(() => [...new Set(mixes.flatMap(m => (m.components ?? []).map(c => c.ingredient.trim()).filter(Boolean)))].sort((a, b) => a.localeCompare(b)), [mixes]);
 
   const serverCheeseByName = useMemo(() => {
     const map = new Map<string, CheeseRecipe>();
-    for (const r of enabledCheeseRecipes) { const key = r.name.trim().toLowerCase(); if (key) map.set(key, r); }
+    for (const r of enabledCheeseRecipes) {
+      const key = normalizeSelectableName(r.name).toLowerCase();
+      if (key) map.set(key, r);
+    }
     return map;
   }, [enabledCheeseRecipes]);
   const serverCheeseRowsByName = useMemo(() => {
     const map = new Map<string, RecipeRow[]>();
     for (const r of enabledCheeseRecipes) {
       const rows = r.components.filter(c => c.ingredient.trim()).map(c => ({ ingredient: c.ingredient, lbs: c.lbs }));
-      const key = r.name.trim().toLowerCase();
+      const key = normalizeSelectableName(r.name).toLowerCase();
       if (key) map.set(key, rows);
     }
     return map;
   }, [enabledCheeseRecipes]);
-  const serverCheeseNames = useMemo(() => [...new Set(enabledCheeseRecipes.map(r => r.name.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [enabledCheeseRecipes]);
+  const serverCheeseNames = useMemo(() => selectableNames(enabledCheeseRecipes.map(r => r.name)), [enabledCheeseRecipes]);
   // Brand tags for cheese/mix names that collide across customers — pickers
   // show "Taco Mix (Marco's)" while the stored value stays the bare name.
   const cheeseNameBrandTags = useMemo(
-    () => brandTagLabels(enabledCheeseRecipes.map(r => ({ name: r.name, brand: r.brand }))),
+    () => brandTagLabels(
+      enabledCheeseRecipes
+        .map(r => ({ name: normalizeSelectableName(r.name), brand: normalizeSelectableName(r.brand) }))
+        .filter(r => r.name),
+    ),
     [enabledCheeseRecipes],
   );
   const mixNameBrandTags = useMemo(
-    () => brandTagLabels(mixes.map(m => ({ name: m.name, brand: m.brand ?? "" }))),
+    () => brandTagLabels(
+      mixes
+        .map(m => ({ name: normalizeSelectableName(m.name), brand: normalizeSelectableName(m.brand) }))
+        .filter(m => m.name),
+    ),
     [mixes],
   );
 
@@ -414,7 +427,7 @@ export default function SetupProfileEditor({
     for (const r of doughRecipesList) {
       if (r.enabled === false) continue;
       const rows = r.components.filter(c => c.ingredient.trim()).map(c => ({ ingredient: c.ingredient, lbs: c.lbs }));
-      const key = r.name.trim().toLowerCase();
+      const key = normalizeSelectableName(r.name).toLowerCase();
       if (key) map.set(key, rows);
     }
     return map;
@@ -427,7 +440,7 @@ export default function SetupProfileEditor({
     for (const r of doughRecipesList) {
       if (r.enabled === false) continue;
       const variants = normalizeDoughballVariants(r.doughballVariants);
-      const key = r.name.trim().toLowerCase();
+      const key = normalizeSelectableName(r.name).toLowerCase();
       if (key && variants.length > 0) map.set(key, variants);
     }
     return map;
@@ -454,7 +467,7 @@ export default function SetupProfileEditor({
     if (!name) return;
     if ((Number(v.targetDoughballWeight) || 0) > 0) return;
     const matched = matchDoughballVariant(serverDoughVariantsByName.get(name), { dieType: String(v.dieType ?? ""), brand, flavor });
-    const rec = doughRecipesList.find(r => r.enabled !== false && r.name.trim().toLowerCase() === name);
+    const rec = doughRecipesList.find(r => r.enabled !== false && normalizeSelectableName(r.name).toLowerCase() === name);
     const ballOz = matched?.weightOz ?? rec?.doughballWeightOz ?? 0;
     if (ballOz > 0) form.setValue("targetDoughballWeight", ballOz, { shouldDirty: true });
   }, [v.doughRecipeName, v.targetDoughballWeight, v.dieType, brand, flavor, doughRecipesList, serverDoughVariantsByName, form]);
@@ -463,7 +476,7 @@ export default function SetupProfileEditor({
     if (!name) return;
     if ((Number(v.doughballsPerTray) || 0) > 0) return;
     const matched = matchDoughballVariant(serverDoughVariantsByName.get(name), { dieType: String(v.dieType ?? ""), brand, flavor });
-    const rec = doughRecipesList.find(r => r.enabled !== false && r.name.trim().toLowerCase() === name);
+    const rec = doughRecipesList.find(r => r.enabled !== false && normalizeSelectableName(r.name).toLowerCase() === name);
     const perTray = matched?.perTray ?? rec?.doughballsPerTray ?? 0;
     if (perTray > 0) form.setValue("doughballsPerTray", perTray, { shouldDirty: true });
   }, [v.doughRecipeName, v.doughballsPerTray, v.dieType, brand, flavor, doughRecipesList, serverDoughVariantsByName, form]);
@@ -472,15 +485,27 @@ export default function SetupProfileEditor({
     for (const r of sauceRecipesList) {
       if (r.enabled === false) continue;
       const rows = r.components.filter(c => c.ingredient.trim()).map(c => ({ ingredient: c.ingredient, lbs: c.lbs }));
-      const key = r.name.trim().toLowerCase();
+      const key = normalizeSelectableName(r.name).toLowerCase();
       if (key) map.set(key, rows);
     }
     return map;
   }, [sauceRecipesList]);
-  const serverDoughNames = useMemo(() => [...new Set(doughRecipesList.filter(r => r.enabled !== false).map(r => r.name.trim()).filter(Boolean))], [doughRecipesList]);
-  const serverSauceNames = useMemo(() => [...new Set(sauceRecipesList.filter(r => r.enabled !== false).map(r => r.name.trim()).filter(Boolean))], [sauceRecipesList]);
-  const doughRecipeNameOptions = useMemo(() => [...new Set([...serverDoughNames, ...doughRecipeNames].map(n => n.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [serverDoughNames, doughRecipeNames]);
-  const frontlineRecipeNameOptions = useMemo(() => [...new Set([...serverSauceNames, ...frontlineRecipeNames].map(n => n.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [serverSauceNames, frontlineRecipeNames]);
+  const serverDoughNames = useMemo(
+    () => selectableNames(doughRecipesList.filter(r => r.enabled !== false).map(r => r.name)),
+    [doughRecipesList],
+  );
+  const serverSauceNames = useMemo(
+    () => selectableNames(sauceRecipesList.filter(r => r.enabled !== false).map(r => r.name)),
+    [sauceRecipesList],
+  );
+  const doughRecipeNameOptions = useMemo(
+    () => selectableNames([...serverDoughNames, ...doughRecipeNames]),
+    [serverDoughNames, doughRecipeNames],
+  );
+  const frontlineRecipeNameOptions = useMemo(
+    () => selectableNames([...serverSauceNames, ...frontlineRecipeNames]),
+    [serverSauceNames, frontlineRecipeNames],
+  );
 
   const cheeseNamesForRun = useMemo(() => {
     return (b: string, f: string): string[] => {
@@ -494,7 +519,7 @@ export default function SetupProfileEditor({
       const flavorMatches = fl ? brandMatches.filter(matchesFlavor) : brandMatches;
       const rest = fl ? brandMatches.filter(r => !matchesFlavor(r)) : [];
       const toNames = (pool: typeof brandMatches) =>
-        [...new Set(pool.map(r => r.name.trim()).filter(Boolean))].sort((a, b2) => a.localeCompare(b2));
+        selectableNames(pool.map(r => r.name));
       const first = toNames(flavorMatches);
       const firstSet = new Set(first);
       return [...first, ...toNames(rest).filter(n => !firstSet.has(n))];
@@ -1228,7 +1253,7 @@ export default function SetupProfileEditor({
                       // value already typed into the profile.
                       const variants = serverDoughVariantsByName.get(key) ?? [];
                       const matched = matchDoughballVariant(variants, { dieType: String(form.getValues("dieType") ?? ""), brand, flavor });
-                      const rec = doughRecipesList.find(r => r.enabled !== false && r.name.trim().toLowerCase() === key);
+                      const rec = doughRecipesList.find(r => r.enabled !== false && normalizeSelectableName(r.name).toLowerCase() === key);
                       const ballOz = matched?.weightOz ?? rec?.doughballWeightOz ?? 0;
                       const weightBlank = !(Number(form.getValues("targetDoughballWeight") ?? 0) > 0);
                       if (ballOz > 0 && weightBlank) form.setValue("targetDoughballWeight", ballOz, { shouldDirty: true });

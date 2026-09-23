@@ -136,11 +136,8 @@
 - [Atomic import operations](atomic-import-operations.md) — reviewed multi-entity imports use stable operation IDs, server transactions, canonical acknowledgment, and touched-row-only guarded undo.
 - [Approved audit maintenance](audit-maintenance-workflow.md) — redactions/deletions run through a checked-in transaction command on a separate admin channel, never the app role.
 - [Sauce auto-track failure identity](sauce-auto-track-failure-identity.md) — retry notices follow the claim event identity; accepted recovery clears only the matching barrel.
-- [Managed rebase tree recovery](managed-rebase-tree-recovery.md) — a completed rebase can replay malformed conflict sides without markers; compare its tree with the pre-rebase integrated baseline.
+- [Recovery and background safety](managed-rebase-tree-recovery.md) + [background-db-recovery](background-db-recovery.md) + [protected-job-effects](protected-job-effects.md) — compare integrated trees after rebases; retry only safe work and serialize protected effects.
 - [Approved ingredient identities](approved-ingredient-identities.md) — owner-approved Chicken, Bacon, Cilantro, and Goat Cheese targets; keep ambiguous Spinach variants separate.
-- [Protected background work](background-db-recovery.md) + [job effects](protected-job-effects.md) — retry only safe passes; serialize commit effects and renew long leases.
 - [Revision trend attribution](revision-trend-attribution.md) — classify each historical revision from its own measurements; inherited aggregate failures poison later trend samples.
-- [GitHub Actions evidence extraction](github-actions-evidence-extraction.md) — when connector downloads are forbidden, validate and retain exact reports inside a short-lived CI branch.
-- [Declaration compatibility dependencies](declaration-compatibility-dependencies.md) — mirror package-local links, resolve direct imports, then ignore unrelated dependency-library diagnostics.
-- [API route typecheck isolation](api-route-typecheck-isolation.md) — focused route diagnostics use last-successful API Zod declarations; the full package check remains authoritative.
-- [Secret refresh for shell operations](secret-refresh-shell.md) — newly confirmed workspace secrets may be absent from shell commands until a relevant workflow refreshes the environment.
+- [GitHub and CI evidence](github-actions-evidence-extraction.md) + [github-git-push](github-git-push.md) — validate exact retained reports and secure remotes when connector downloads or live fork checks are limited.
+- [Declaration and route diagnostics](declaration-compatibility-dependencies.md) + [api-route-typecheck-isolation](api-route-typecheck-isolation.md) + [secret-refresh-shell](secret-refresh-shell.md) — isolate focused typechecks and refresh workflow environments before trusting shell results.

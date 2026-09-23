@@ -243,7 +243,12 @@ function writeProfileBlob(key: string, kind: "dough" | "crust", raw: string): vo
 export function loadList(key: string, fallback: string[]): string[] {
   try {
     const raw = localStorage.getItem(key);
-    if (raw) return JSON.parse(raw) as string[];
+    if (raw) {
+      const parsed: unknown = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((value): value is string => typeof value === "string");
+      }
+    }
   } catch {}
   return fallback;
 }
