@@ -643,24 +643,26 @@ export function fillCheeseRecipeTags(
 ): { next: CheeseRecipe[]; tagged: number } {
   const byName = new Map<string, { brand: string; flavors: string[] }>();
   for (const d of drafts) {
-    const key = d.name.trim().toLowerCase();
-    const brand = d.brand.trim();
+    const key = coerceStr(d.name).toLowerCase();
+    const brand = coerceStr(d.brand);
     if (!key || !brand || byName.has(key)) continue;
     byName.set(key, {
       brand,
-      flavors: d.flavors.map((f) => f.trim()).filter(Boolean),
+      flavors: (Array.isArray(d.flavors) ? d.flavors : [])
+        .map((f) => coerceStr(f))
+        .filter(Boolean),
     });
   }
   let tagged = 0;
   const next = existing.map((r) => {
-    if ((r.brand ?? "").trim()) return r;
-    const d = byName.get(r.name.trim().toLowerCase());
+    if (coerceStr(r.brand)) return r;
+    const d = byName.get(coerceStr(r.name).toLowerCase());
     if (!d) return r;
     tagged++;
     return {
       ...r,
       brand: d.brand,
-      flavors: (r.flavors ?? []).length ? r.flavors : d.flavors,
+      flavors: Array.isArray(r.flavors) && r.flavors.length ? r.flavors : d.flavors,
     };
   });
   return { next, tagged };
@@ -708,7 +710,7 @@ export function repointCheeseRecipesForBrandMerge(
   if (srcSet.size === 0) return [];
   const changed: CheeseRecipe[] = [];
   for (const r of recipes) {
-    if (srcSet.has(r.brand.trim().toLowerCase())) {
+    if (srcSet.has(coerceStr(r.brand).toLowerCase())) {
       changed.push({ ...r, brand: tgt });
     }
   }
@@ -733,7 +735,8 @@ export function renameCheeseRecipesBrand(
   if (!tgt || !fromKey || from.trim() === tgt) return [];
   const changed: CheeseRecipe[] = [];
   for (const r of recipes) {
-    if (r.brand.trim().toLowerCase() === fromKey && r.brand.trim() !== tgt) {
+    const brand = coerceStr(r.brand);
+    if (brand.toLowerCase() === fromKey && brand !== tgt) {
       changed.push({ ...r, brand: tgt });
     }
   }
@@ -764,13 +767,15 @@ export function repointCheeseRecipesForFlavorMerge(
   if (srcSet.size === 0) return [];
   const changed: CheeseRecipe[] = [];
   for (const r of recipes) {
-    if (r.brand.trim().toLowerCase() !== b) continue;
-    if (!r.flavors.some((f) => srcSet.has(f.trim().toLowerCase()))) continue;
+    if (coerceStr(r.brand).toLowerCase() !== b) continue;
+    const flavors = Array.isArray(r.flavors) ? r.flavors : [];
+    if (!flavors.some((f) => srcSet.has(coerceStr(f).toLowerCase()))) continue;
     const seen = new Set<string>();
     const nextFlavors: string[] = [];
-    for (const f of r.flavors) {
-      const mapped = srcSet.has(f.trim().toLowerCase()) ? tgt : f;
-      const key = mapped.trim().toLowerCase();
+    for (const rawFlavor of flavors) {
+      const flavor = coerceStr(rawFlavor);
+      const mapped = srcSet.has(flavor.toLowerCase()) ? tgt : flavor;
+      const key = mapped.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
       nextFlavors.push(mapped);
@@ -897,10 +902,14 @@ export function backfillCheeseRecipeFromMergedSources(
       next.notes = src.notes;
       changed = true;
     }
-    if (!next.brand.trim() && src.brand.trim()) {
-      next.brand = src.brand;
-      if (next.flavors.length === 0 && src.flavors.length > 0) {
-        next.flavors = [...src.flavors];
+    const nextBrand = coerceStr(next.brand);
+    const sourceBrand = coerceStr(src.brand);
+    if (!nextBrand && sourceBrand) {
+      next.brand = sourceBrand;
+      const nextFlavors = Array.isArray(next.flavors) ? next.flavors : [];
+      const sourceFlavors = Array.isArray(src.flavors) ? src.flavors : [];
+      if (nextFlavors.length === 0 && sourceFlavors.length > 0) {
+        next.flavors = sourceFlavors.map((f) => coerceStr(f)).filter(Boolean);
       }
       changed = true;
     }
@@ -945,9 +954,10 @@ export function cheeseRecipeMatchesQuery(recipe: CheeseRecipe, query: string): b
   const q = query.trim().toLowerCase();
   if (!q) return true;
   return (
-    recipe.name.toLowerCase().includes(q) ||
-    recipe.brand.toLowerCase().includes(q) ||
-    recipe.flavors.some((f) => f.toLowerCase().includes(q))
+    coerceStr(recipe.name).toLowerCase().includes(q) ||
+    coerceStr(recipe.brand).toLowerCase().includes(q) ||
+    (Array.isArray(recipe.flavors) &&
+      recipe.flavors.some((f) => coerceStr(f).toLowerCase().includes(q)))
   );
 }
 
@@ -971,18 +981,19 @@ export function groupCheeseRecipesByBrand(
 ): CheeseRecipeBrandGroup[] {
   const byBrand = new Map<string, CheeseRecipeBrandGroup>();
   for (const recipe of recipes) {
-    const brand = recipe.brand.trim();
+    const brand = coerceStr(recipe.brand);
     const key = brand.toLowerCase();
     const g = byBrand.get(key);
     if (g) {
       g.recipes.push(recipe);
-      if (!g.shredderSetting && recipe.shredderSetting) {
-        g.shredderSetting = recipe.shredderSetting;
+      const shredderSetting = coerceStr(recipe.shredderSetting);
+      if (!g.shredderSetting && shredderSetting) {
+        g.shredderSetting = shredderSetting;
       }
     } else {
       byBrand.set(key, {
         brand,
-        shredderSetting: recipe.shredderSetting,
+        shredderSetting: coerceStr(recipe.shredderSetting),
         recipes: [recipe],
       });
     }

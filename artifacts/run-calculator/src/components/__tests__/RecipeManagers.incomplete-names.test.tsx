@@ -104,6 +104,12 @@ describe("recipe managers with incomplete persisted names", () => {
     namedItems.push(
       namedRecipe({ id: "blank", name: "   " }),
       namedRecipe({ id: "non-string", name: null as unknown as string }),
+      namedRecipe({
+        id: "malformed-customer",
+        name: "Legacy Dough",
+        brand: null as unknown as string,
+        flavors: [null] as unknown as string[],
+      }),
       namedRecipe(),
     );
 
@@ -120,15 +126,42 @@ describe("recipe managers with incomplete persisted names", () => {
     expect(screen.getByTitle("Delete recipe")).toBeTruthy();
   });
 
+  it("keeps valid sauce rows usable with malformed customer metadata", () => {
+    namedItems.push(
+      namedRecipe({
+        id: "malformed-customer",
+        name: "Legacy Sauce",
+        brand: { bad: true } as unknown as string,
+        flavors: [null] as unknown as string[],
+      }),
+      namedRecipe({ id: "sauce-valid", name: "Valid Sauce" }),
+    );
+
+    renderWithQueryClient(<NamedRecipesManager kind="sauce" />);
+
+    expect(screen.getByText("Valid Sauce")).toBeTruthy();
+    fireEvent.click(screen.getByText("Valid Sauce"));
+    expect(
+      (screen.getByPlaceholderText("Recipe name…") as HTMLInputElement).value,
+    ).toBe("Valid Sauce");
+  });
+
   it("keeps valid cheese rows usable", () => {
     cheeseItems.push(
       cheeseRecipe({ id: "blank", name: "" }),
       cheeseRecipe({ id: "non-string", name: undefined as unknown as string }),
+      cheeseRecipe({
+        id: "malformed-customer",
+        name: "Legacy Cheese",
+        brand: null as unknown as string,
+        flavors: [null] as unknown as string[],
+      }),
       cheeseRecipe(),
     );
 
     renderWithQueryClient(<CheeseRecipesManager />);
 
+    fireEvent.click(screen.getByRole("button", { name: /Northside/ }));
     expect(screen.getByText("Valid Cheese")).toBeTruthy();
     expect(screen.queryByText("Unnamed recipe")).toBeNull();
 
@@ -145,11 +178,18 @@ describe("recipe managers with incomplete persisted names", () => {
     mixItems.push(
       mix({ id: "blank", name: " " }),
       mix({ id: "non-string", name: 42 as unknown as string }),
+      mix({
+        id: "malformed-customer",
+        name: "Legacy Mix",
+        brand: null as unknown as string,
+        flavor: { bad: true } as unknown as string,
+      }),
       mix(),
     );
 
     renderWithQueryClient(<MixesManager />);
 
+    fireEvent.click(screen.getByRole("button", { name: /Northside/ }));
     expect(screen.getByText("Valid Mix")).toBeTruthy();
     expect(screen.queryByText("Unnamed mix")).toBeNull();
 

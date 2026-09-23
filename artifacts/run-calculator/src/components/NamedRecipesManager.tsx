@@ -81,10 +81,10 @@ export default function NamedRecipesManager({
 
   const validItems = useMemo(
     () =>
-      items.filter(
-        (recipe) =>
-          typeof recipe?.name === "string" && recipe.name.trim().length > 0,
-      ),
+      items.flatMap((recipe) => {
+        const normalized = normalizeNamedRecipe(recipe);
+        return normalized ? [normalized] : [];
+      }),
     [items],
   );
 

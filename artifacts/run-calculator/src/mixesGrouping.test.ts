@@ -33,6 +33,17 @@ describe("mixMatchesQuery", () => {
     expect(mixMatchesQuery(mix, "pepperoni")).toBe(false);
   });
 
+  it("ignores malformed brand and flavor values", () => {
+    const malformed = mk({
+      name: "Veggie Blend",
+      brand: null as unknown as string,
+      flavor: { bad: true } as unknown as string,
+    });
+    expect(() => mixMatchesQuery(malformed, "veggie")).not.toThrow();
+    expect(mixMatchesQuery(malformed, "veggie")).toBe(true);
+    expect(mixMatchesQuery(malformed, "missing")).toBe(false);
+  });
+
   it("empty / whitespace query matches everything", () => {
     expect(mixMatchesQuery(mix, "")).toBe(true);
     expect(mixMatchesQuery(mix, "   ")).toBe(true);
@@ -73,6 +84,16 @@ describe("groupMixesByBrand", () => {
     expect(groups).toHaveLength(1);
     expect(groups[0].brand).toBe("Acme");
     expect(groups[0].mixes).toHaveLength(2);
+  });
+
+  it("puts malformed brands in the no-brand group without affecting valid groups", () => {
+    const groups = groupMixesByBrand([
+      mk({ name: "Valid", brand: "Alpha" }),
+      mk({ name: "Legacy", brand: null as unknown as string }),
+    ]);
+    expect(groups.map((g) => g.brand)).toEqual(["Alpha", ""]);
+    expect(groups[0].mixes.map((m) => m.name)).toEqual(["Valid"]);
+    expect(groups[1].mixes.map((m) => m.name)).toEqual(["Legacy"]);
   });
 
   it("returns empty array for no mixes", () => {

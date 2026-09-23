@@ -121,6 +121,10 @@ function coerceNum(value: unknown, fallback: number): number {
   return n;
 }
 
+function coerceStr(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
 // Coerce a raw value into a clean component, or null if it has no usable
 // ingredient name. perPizza defaults to 0 and is clamped to >= 0.
 export function normalizeMixComponent(input: unknown): MixComponent | null {
@@ -222,7 +226,7 @@ export function repointMixesForBrandMerge(
   if (srcSet.size === 0) return [];
   const changed: Mix[] = [];
   for (const m of mixes) {
-    if (srcSet.has(m.brand.trim().toLowerCase())) changed.push({ ...m, brand: tgt });
+    if (srcSet.has(coerceStr(m.brand).toLowerCase())) changed.push({ ...m, brand: tgt });
   }
   return changed;
 }
@@ -245,7 +249,8 @@ export function renameMixesBrand(
   if (!tgt || !fromKey || from.trim() === tgt) return [];
   const changed: Mix[] = [];
   for (const m of mixes) {
-    if (m.brand.trim().toLowerCase() === fromKey && m.brand.trim() !== tgt) {
+    const brand = coerceStr(m.brand);
+    if (brand.toLowerCase() === fromKey && brand !== tgt) {
       changed.push({ ...m, brand: tgt });
     }
   }
@@ -273,8 +278,8 @@ export function repointMixesForFlavorMerge(
   if (srcSet.size === 0) return [];
   const changed: Mix[] = [];
   for (const m of mixes) {
-    if (m.brand.trim().toLowerCase() !== b) continue;
-    if (srcSet.has(m.flavor.trim().toLowerCase())) changed.push({ ...m, flavor: tgt });
+    if (coerceStr(m.brand).toLowerCase() !== b) continue;
+    if (srcSet.has(coerceStr(m.flavor).toLowerCase())) changed.push({ ...m, flavor: tgt });
   }
   return changed;
 }
@@ -374,12 +379,16 @@ export function backfillMixFromMergedSources(
   }
   next.components = canonicalComponents;
   for (const src of sources) {
-    if (!next.brand.trim() && src.brand.trim()) {
-      next.brand = src.brand;
+    const nextBrand = coerceStr(next.brand);
+    const sourceBrand = coerceStr(src.brand);
+    if (!nextBrand && sourceBrand) {
+      next.brand = sourceBrand;
       changed = true;
     }
-    if (!next.flavor.trim() && src.flavor.trim()) {
-      next.flavor = src.flavor;
+    const nextFlavor = coerceStr(next.flavor);
+    const sourceFlavor = coerceStr(src.flavor);
+    if (!nextFlavor && sourceFlavor) {
+      next.flavor = sourceFlavor;
       changed = true;
     }
     if (!(next.batchSize > 0) && src.batchSize > 0) {
@@ -481,7 +490,7 @@ export function addSpecMixesIfAbsent(
   // ("Lucia's Taco Mix") so both survive, and a re-import of the same workbook
   // matches its own prefixed row and updates it. Matchers are built ONCE per
   // brand scope (never per candidate) to keep large imports linear.
-  const brandKeyOf = (m: { brand?: string }) => (m.brand ?? "").trim().toLowerCase();
+  const brandKeyOf = (m: { brand?: string }) => coerceStr(m.brand).toLowerCase();
   // Loose keys per brand scope ("" = unbranded pool mixes).
   const scopeNames = new Map<string, Set<string>>();
   const allNames = new Set<string>();
@@ -620,7 +629,7 @@ export function addSpecMixesIfAbsent(
     if (brand !== "" && (allNames.has(key) || matchAll(name) !== null)) {
       // Cross-brand-only collision on a branded candidate: keep both apart by
       // prefixing the new mix with its brand.
-      const prefixed = brandPrefixedName((c.brand ?? "").trim(), name);
+      const prefixed = brandPrefixedName(coerceStr(c.brand), name);
       const prefixedKey = mixNameMatchKey(prefixed);
       if (prefixedKey === key) continue; // already brand-prefixed yet still colliding — treat as dup
       // Re-import: the prefixed mix already exists in this brand's scope → update.
@@ -677,7 +686,9 @@ export function mixFromCheeseRecipe(recipe: {
 }): Mix | null {
   const name = recipe.name.trim();
   if (!name) return null;
-  const flavors = recipe.flavors.map((f) => f.trim()).filter(Boolean);
+  const flavors = (Array.isArray(recipe.flavors) ? recipe.flavors : [])
+    .map((f) => coerceStr(f))
+    .filter(Boolean);
   const noteParts: string[] = [];
   if ((recipe.notes ?? "").trim()) noteParts.push((recipe.notes ?? "").trim());
   if (flavors.length > 1) {
@@ -724,13 +735,13 @@ export function fillSpecMixTags(
   const byKey = new Map<string, { brand: string; flavor: string }>();
   for (const c of candidates) {
     const key = mixNameMatchKey(c.name);
-    const brand = c.brand.trim();
+    const brand = coerceStr(c.brand);
     if (!key || !brand || byKey.has(key)) continue;
-    byKey.set(key, { brand, flavor: c.flavor.trim() });
+    byKey.set(key, { brand, flavor: coerceStr(c.flavor) });
   }
   let tagged = 0;
   const next = existing.map((m) => {
-    if ((m.brand ?? "").trim()) return m;
+    if (coerceStr(m.brand)) return m;
     const c = byKey.get(mixNameMatchKey(m.name));
     if (!c) return m;
     tagged++;
@@ -962,7 +973,7 @@ export function daysUntil(runDate: string, today: string): number {
 }
 
 function productKey(brand: string, flavor: string): string {
-  return `${brand.trim().toLowerCase()}|${flavor.trim().toLowerCase()}`;
+  return `${coerceStr(brand).toLowerCase()}|${coerceStr(flavor).toLowerCase()}`;
 }
 
 // Compute a single matched mix against a run's pizza count.
@@ -1290,9 +1301,9 @@ export function mixMatchesQuery(mix: Mix, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
   return (
-    mix.name.toLowerCase().includes(q) ||
-    mix.brand.toLowerCase().includes(q) ||
-    mix.flavor.toLowerCase().includes(q)
+    coerceStr(mix.name).toLowerCase().includes(q) ||
+    coerceStr(mix.brand).toLowerCase().includes(q) ||
+    coerceStr(mix.flavor).toLowerCase().includes(q)
   );
 }
 
@@ -1311,7 +1322,7 @@ export interface MixBrandGroup {
 export function groupMixesByBrand(mixes: ReadonlyArray<Mix>): MixBrandGroup[] {
   const byBrand = new Map<string, { brand: string; mixes: Mix[] }>();
   for (const mix of mixes) {
-    const brand = mix.brand.trim();
+    const brand = coerceStr(mix.brand);
     const key = brand.toLowerCase();
     const g = byBrand.get(key);
     if (g) g.mixes.push(mix);

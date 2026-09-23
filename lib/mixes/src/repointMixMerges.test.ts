@@ -55,6 +55,16 @@ describe("renameMixesBrand", () => {
     expect(changed.every((m) => m.brand === "Bobo")).toBe(true);
   });
 
+  it("skips malformed brand values while renaming valid rows", () => {
+    const mixes = [
+      make({ id: "valid", brand: "Alpha" }),
+      make({ id: "malformed", brand: null as unknown as string }),
+    ];
+    expect(renameMixesBrand(mixes, "Alpha", "Beta")).toEqual([
+      { ...mixes[0], brand: "Beta" },
+    ]);
+  });
+
   it("allows a case-only respelling (unlike the merge repoint helper)", () => {
     const mixes = [make({ id: "1", brand: "aldos" })];
     const changed = renameMixesBrand(mixes, "aldos", "Aldos");
