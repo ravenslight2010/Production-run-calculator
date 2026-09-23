@@ -9,7 +9,6 @@ const mocks = vi.hoisted(() => ({
   saveProfileAndWaitForServer: vi.fn(),
   toast: vi.fn(),
 }));
-
 vi.mock("../storage", () => ({
   loadProfile: mocks.loadProfile,
   saveProfileAndWaitForServer: mocks.saveProfileAndWaitForServer,
@@ -58,16 +57,13 @@ vi.mock("../pages/home", () => ({
   }: {
     recipePickerLabel?: string;
     recipePickerTestId?: string;
-  }) => (
-    <div data-testid={recipePickerTestId} aria-label={recipePickerLabel}>
-      {recipePickerLabel}
-    </div>
-  ),
+  }) => recipePickerTestId ? (
+    <div data-testid={recipePickerTestId} aria-label={recipePickerLabel} />
+  ) : null,
   TypeDropdown: () => null,
 }));
 
 import SetupProfileEditor from "./SetupProfileEditor";
-
 const noop = vi.fn();
 
 function editorProps(canManageProfiles: boolean) {
