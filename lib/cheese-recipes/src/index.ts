@@ -155,6 +155,21 @@ function normalizeFlavors(input: unknown): string[] {
   return out;
 }
 
+export interface RecipeCustomerMetadata {
+  brand: string;
+  flavors: string[];
+}
+
+/** Normalize the customer tag without changing any other recipe fields. */
+export function normalizeCheeseRecipeCustomerMetadata(input: unknown): RecipeCustomerMetadata {
+  const raw = input && typeof input === "object" ? input as Record<string, unknown> : {};
+  const brand = coerceStr(raw.brand);
+  return {
+    brand,
+    flavors: brand ? normalizeFlavors(raw.flavors) : [],
+  };
+}
+
 // Coerce a raw API/DB record into a clean CheeseRecipe, or null if it has no
 // usable name. Numeric component pounds are clamped to >= 0; enabled defaults to
 // true; malformed components are dropped.
@@ -165,8 +180,7 @@ export function normalizeCheeseRecipe(input: unknown): CheeseRecipe | null {
   if (!name) return null;
   const id =
     typeof raw.id === "string" && raw.id.trim() ? raw.id : name.toLowerCase();
-  const brand = coerceStr(raw.brand);
-  const flavors = normalizeFlavors(raw.flavors);
+  const { brand, flavors } = normalizeCheeseRecipeCustomerMetadata(raw);
   const shredderSetting = coerceStr(raw.shredderSetting);
   const cellulose = coerceStr(raw.cellulose);
   const enabled = raw.enabled === undefined ? true : raw.enabled !== false;

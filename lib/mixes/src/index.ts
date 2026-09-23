@@ -125,6 +125,20 @@ function coerceStr(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+export interface MixCustomerMetadata {
+  brand: string;
+  flavor: string;
+}
+
+/** Normalize the customer tag without changing any other mix fields. */
+export function normalizeMixCustomerMetadata(input: unknown): MixCustomerMetadata {
+  const raw = input && typeof input === "object" ? input as Record<string, unknown> : {};
+  return {
+    brand: coerceStr(raw.brand),
+    flavor: coerceStr(raw.flavor),
+  };
+}
+
 // Coerce a raw value into a clean component, or null if it has no usable
 // ingredient name. perPizza defaults to 0 and is clamped to >= 0.
 export function normalizeMixComponent(input: unknown): MixComponent | null {
@@ -150,8 +164,7 @@ export function normalizeMix(input: unknown): Mix | null {
   if (!name) return null;
   const id =
     typeof raw.id === "string" && raw.id.trim() ? raw.id : name.toLowerCase();
-  const brand = typeof raw.brand === "string" ? raw.brand.trim() : "";
-  const flavor = typeof raw.flavor === "string" ? raw.flavor.trim() : "";
+  const { brand, flavor } = normalizeMixCustomerMetadata(raw);
   const batchSize = Math.max(0, coerceNum(raw.batchSize, 0));
   const daysEarly = Math.max(0, coerceInt(raw.daysEarly, DEFAULT_DAYS_EARLY));
   const amountAlreadyMade = Math.max(0, coerceNum(raw.amountAlreadyMade, 0));

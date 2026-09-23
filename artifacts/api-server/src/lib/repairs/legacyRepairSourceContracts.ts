@@ -330,4 +330,10 @@ export const LEGACY_REPAIR_SOURCE_CONTRACTS: Readonly<
     writes: { workflowState: "resolved" },
     excludedFields: ["ownership", "notes", "priority", "timestamps"],
   },
+  "recipe-customer-metadata-cleanup-v1": {
+    tables: ["dough_recipes", "sauce_recipes", "cheese_recipes", "mixes"],
+    normalizers: ["brand-trim", "flavor-trim", "flavor-dedupe", "blank-brand-clears-flavors"],
+    nestedDoughField: "doughballVariants.customers",
+    writes: ["brand", "flavors", "flavor", "doughballVariants.customers", "updatedAt"],
+  },
 });

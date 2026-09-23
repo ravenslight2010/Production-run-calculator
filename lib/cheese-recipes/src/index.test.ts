@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   normalizeCheeseRecipe,
+  normalizeCheeseRecipeCustomerMetadata,
   normalizeCheeseRecipes,
   normalizeCheeseComponent,
   cheeseRecipeTotalLbs,
@@ -55,6 +56,17 @@ describe("normalizeCheeseComponent", () => {
 });
 
 describe("normalizeCheeseRecipe", () => {
+  it("normalizes customer metadata to the blank-safe representation", () => {
+    expect(normalizeCheeseRecipeCustomerMetadata({
+      brand: " Bobo ",
+      flavors: ["All Varieties", " Pepperoni ", "pepperoni", null],
+    })).toEqual({ brand: "Bobo", flavors: ["Pepperoni"] });
+    expect(normalizeCheeseRecipeCustomerMetadata({
+      brand: null,
+      flavors: ["Stray"],
+    })).toEqual({ brand: "", flavors: [] });
+  });
+
   it("requires a name, defaults enabled true, de-dups flavors case-insensitively", () => {
     const r = normalizeCheeseRecipe({
       id: "x",

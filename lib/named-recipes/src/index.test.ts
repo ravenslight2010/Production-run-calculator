@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   normalizeNamedRecipe,
+  normalizeNamedRecipeCustomerMetadata,
   normalizeNamedRecipes,
   namedRecipeTotalLbs,
   namedRecipeMatchesQuery,
@@ -13,6 +14,7 @@ import {
   fillNamedRecipeDoughballWeights,
   fillNamedRecipeDoughballsPerTray,
   normalizeDoughballVariants,
+  normalizeDoughballVariantCustomers,
   doughballVariantLabelKey,
   collapseDoughballVariantSuffixDuplicates,
   mergeNamedRecipeDoughballVariants,
@@ -333,6 +335,17 @@ describe("planNameConsolidation", () => {
 });
 
 describe("normalizeNamedRecipe brand/flavor tags", () => {
+  it("normalizes only customer metadata to the manager-safe representation", () => {
+    expect(normalizeNamedRecipeCustomerMetadata({
+      brand: " Hannaford ",
+      flavors: ["Cheese", " cheese ", "", null],
+    })).toEqual({ brand: "Hannaford", flavors: ["Cheese"] });
+    expect(normalizeNamedRecipeCustomerMetadata({
+      brand: " ",
+      flavors: ["Should be removed"],
+    })).toEqual({ brand: "", flavors: [] });
+  });
+
   it("defaults older records to untagged", () => {
     const r = normalizeNamedRecipe({ id: "d1", name: "CRB Dough" })!;
     expect(r.brand).toBe("");
@@ -358,6 +371,21 @@ describe("normalizeNamedRecipe brand/flavor tags", () => {
     })!;
     expect(r.brand).toBe("");
     expect(r.flavors).toEqual([]);
+  });
+});
+
+describe("normalizeDoughballVariantCustomers", () => {
+  it("drops malformed assignments, trims values, and de-duplicates case-insensitively", () => {
+    expect(normalizeDoughballVariantCustomers([
+      { brand: " Hannaford ", flavor: " Cheese " },
+      { brand: "hannaford", flavor: "cheese" },
+      { brand: " ", flavor: "Ignored" },
+      null,
+      { brand: "Costco", flavor: null },
+    ])).toEqual([
+      { brand: "Hannaford", flavor: "Cheese" },
+      { brand: "Costco", flavor: "" },
+    ]);
   });
 });
 
