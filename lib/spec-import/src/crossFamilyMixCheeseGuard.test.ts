@@ -48,8 +48,8 @@ describe("sanitizeSpecAliases cross-family rule", () => {
     expect(kept).toEqual([fine]);
   });
 
-  it("leaves non-appType kinds alone (recipeName picks may cross)", () => {
-    const recipePick = alias("recipeName", "Bobo Breakfast Mix", "Bobo's Breakfast Cheese Mix");
+  it("leaves recipeName cross-family names alone when their recipe context is valid", () => {
+    const recipePick = { ...alias("recipeName", "Bobo Breakfast Mix", "Bobo's Breakfast Cheese Mix"), context: "dough" };
     expect(sanitizeSpecAliases([recipePick])).toEqual([recipePick]);
   });
 });

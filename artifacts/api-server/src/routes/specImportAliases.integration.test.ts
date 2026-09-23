@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import express, { type Express } from "express";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import pg from "pg";
@@ -17,6 +17,7 @@ type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
 let pool: DbModule["pool"];
 let specImportAliasesTable: DbModule["specImportAliasesTable"];
+let dataHealsTable: DbModule["dataHealsTable"];
 let usersTable: DbModule["usersTable"];
 let userRolesTable: DbModule["userRolesTable"];
 let seedRoles: () => Promise<void>;
@@ -55,6 +56,7 @@ beforeAll(async () => {
   db = dbMod.db;
   pool = dbMod.pool;
   specImportAliasesTable = dbMod.specImportAliasesTable;
+  dataHealsTable = dbMod.dataHealsTable;
   usersTable = dbMod.usersTable;
   userRolesTable = dbMod.userRolesTable;
   seedRoles = (await import("../lib/roles")).seedRoles;
@@ -87,7 +89,7 @@ afterAll(async () => {
 }, 120_000);
 
 beforeEach(async () => {
-  await db.execute(sql`TRUNCATE ${specImportAliasesTable}, ${userRolesTable}, ${usersTable} RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE ${specImportAliasesTable}, ${dataHealsTable}, ${userRolesTable}, ${usersTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
   await db.insert(usersTable).values([
     { id: "profile-live", username: "profile-live", passwordHash: "x" },
@@ -197,12 +199,6 @@ describe("POST /spec-import-aliases/delete", () => {
       {
         kind: "flavor",
         externalName: "Sheet Pepperoni",
-        canonicalName: "House Pepperoni",
-        context: null,
-      },
-      {
-        kind: "flavor",
-        externalName: "Sheet Pepperoni",
         canonicalName: "Different Canonical",
         context: "Brand A",
       },
@@ -273,5 +269,109 @@ describe("POST /spec-import-aliases/delete", () => {
       body: JSON.stringify(body),
     });
     expect(response.status).toBe(400);
+  });
+});
+
+describe("legacy spec-import alias context repair", () => {
+  it("removes only context-invalid legacy rows, returns valid aliases, and is idempotent", async () => {
+    await db.insert(specImportAliasesTable).values([
+      {
+        scope: "live",
+        kind: "flavor",
+        externalName: "Sheet Pepperoni",
+        canonicalName: "House Pepperoni",
+        context: null,
+      },
+      {
+        scope: "live",
+        kind: "recipeName",
+        externalName: "Sheet Dough",
+        canonicalName: "House Dough",
+        context: "cheese",
+      },
+      {
+        scope: "live",
+        kind: "crossFamilyRouting",
+        externalName: "Sheet Blend",
+        canonicalName: "House Blend",
+        context: null,
+      },
+      {
+        scope: "live",
+        kind: "flavor",
+        externalName: "Sheet Pepperoni",
+        canonicalName: "House Pepperoni",
+        context: "Brand A",
+      },
+      {
+        scope: "live",
+        kind: "recipeName",
+        externalName: "Sheet Dough",
+        canonicalName: "House Dough",
+        context: "dough",
+      },
+      {
+        scope: "live",
+        kind: "appType",
+        externalName: "Sheet Mix",
+        canonicalName: "House Mix",
+        context: null,
+      },
+      {
+        scope: "sandbox",
+        kind: "flavor",
+        externalName: "Sandbox Flavor",
+        canonicalName: "Sandbox Canonical",
+        context: null,
+      },
+    ]);
+
+    const { runSpecAliasContextHygieneRepair } = await import("../lib/dataHeals");
+    await runSpecAliasContextHygieneRepair();
+
+    expect(await listAliases()).toEqual([
+      {
+        kind: "flavor",
+        externalName: "Sheet Pepperoni",
+        canonicalName: "House Pepperoni",
+        context: "Brand A",
+      },
+      {
+        kind: "recipeName",
+        externalName: "Sheet Dough",
+        canonicalName: "House Dough",
+        context: "dough",
+      },
+      {
+        kind: "appType",
+        externalName: "Sheet Mix",
+        canonicalName: "House Mix",
+        context: null,
+      },
+    ]);
+    expect(await listAliases("sandbox")).toEqual([]);
+
+    const [marker] = await db
+      .select()
+      .from(dataHealsTable)
+      .where(eq(dataHealsTable.id, "spec-alias-context-hygiene-v1"));
+    expect(marker?.result).toEqual({
+      scanned: 7,
+      missingContextRows: 4,
+      deletedRows: 4,
+      invalidByKind: {
+        flavor: 2,
+        recipeName: 1,
+        crossFamilyRouting: 1,
+      },
+    });
+
+    await runSpecAliasContextHygieneRepair();
+    expect(await listAliases()).toHaveLength(3);
+    const [rerunMarker] = await db
+      .select()
+      .from(dataHealsTable)
+      .where(eq(dataHealsTable.id, "spec-alias-context-hygiene-v1"));
+    expect(rerunMarker?.result).toEqual(marker?.result);
   });
 });

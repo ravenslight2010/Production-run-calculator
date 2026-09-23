@@ -4,7 +4,15 @@ import { db, specImportAliasesTable, type SpecImportAlias as SpecImportAliasRow 
 import { SaveSpecImportAliasesBody, DeleteSpecImportAliasesBody } from "@workspace/api-zod";
 import { currentScope } from "../lib/requestScope";
 import { requireCapability } from "../middlewares/requireCapability";
-import { SPEC_ALIAS_KINDS, specAliasKey, isGenericSlotTypeName, isModifierDropNamePair, isCrossFamilyMixCheesePair, type SpecAliasKind } from "@workspace/spec-import";
+import {
+  SPEC_ALIAS_KINDS,
+  specAliasKey,
+  hasRequiredSpecAliasContext,
+  isGenericSlotTypeName,
+  isModifierDropNamePair,
+  isCrossFamilyMixCheesePair,
+  type SpecAliasKind,
+} from "@workspace/spec-import";
 import {
   matchesSpecImportAliasDeletion,
   type SpecImportAliasDeletionEntry,
@@ -33,6 +41,7 @@ type AliasRow = {
 
 function toApiAlias(row: SpecImportAliasRow): AliasRow | null {
   if (!KIND_SET.has(row.kind)) return null;
+  if (!hasRequiredSpecAliasContext(row.kind as SpecAliasKind, row.context)) return null;
   return {
     kind: row.kind as SpecAliasKind,
     externalName: row.externalName,

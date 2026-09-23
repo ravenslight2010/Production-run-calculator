@@ -28,7 +28,7 @@ describe("historical automatic repair registration", () => {
       "crb-ingredient-conversion-v1",
       "crb-dough-family-consolidation-v1",
       "cheese-import-poison-cleanup-v1",
-      "spec-alias-hygiene-purge-v1", "cheese-recipe-name-dedupe-v1", "generic-mix-poison-purge-v2",
+      "spec-alias-hygiene-purge-v1", "spec-alias-context-hygiene-v1", "cheese-recipe-name-dedupe-v1", "generic-mix-poison-purge-v2",
       "cheese-named-mix-crossover-purge-v1", "cheese-share-backfill-v1", "cheese-oz-depoison-v1",
       "named-recipe-name-cleanup-v1", "dough-batch-yield-depoison-v1", "dough-family-weight-depoison-v1",
       "smd-pep-cheese-mix-restore-v1", "sea-salt-alias-undo-v1", "mix-duplicate-name-purge-v1",

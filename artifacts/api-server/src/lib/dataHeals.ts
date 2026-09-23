@@ -47,6 +47,7 @@ export const AUTOMATIC_DATA_HEAL_IDS = Object.freeze([
   "crb-dough-family-consolidation-v1",
   "cheese-import-poison-cleanup-v1",
   "spec-alias-hygiene-purge-v1",
+  "spec-alias-context-hygiene-v1",
   "cheese-recipe-name-dedupe-v1",
   "generic-mix-poison-purge-v2",
   "cheese-named-mix-crossover-purge-v1",
@@ -169,3 +170,5 @@ export const runSourceLibraryReconciliationHeal = () =>
   runById("source-library-reconciliation-2026-08-26-v1");
 export const runSourceLibraryReconciliationHealV2 = () =>
   runById("source-library-reconciliation-2026-08-26-v2");
+export const runSpecAliasContextHygieneRepair = () =>
+  runById("spec-alias-context-hygiene-v1");
