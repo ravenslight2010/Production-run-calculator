@@ -188,8 +188,10 @@ test("live and setup profile recipe pickers keep the shared selector contract", 
       capabilities: DEFAULT_MANAGER_CAPABILITIES,
       onboardingSeen: true,
     });
-    const brand = uniqueTestId("PickerContractBrand");
-    const flavor = uniqueTestId("PickerContractFlavor");
+    const brand = uniqueTestId("RecipeRoundTripBrand");
+    const flavor = uniqueTestId("RecipeRoundTripFlavor");
+
+    const oldCheeseName = uniqueTestId("RecipeRoundTripOldCheese");
     const doughName = uniqueTestId("PickerContractDough");
     const sauceName = uniqueTestId("PickerContractSauce");
     const cheeseName = uniqueTestId("PickerContractCheese");
@@ -205,22 +207,32 @@ test("live and setup profile recipe pickers keep the shared selector contract", 
       crustsPerCycle: 1,
       cycleSpeed: 1,
       speedAdjustment: 1,
-      doughRecipeName: doughName,
-      doughRecipe: [{ ingredient: "Flour", lbs: 10 }],
-      frontlineRecipeName: sauceName,
-      frontlineRecipe: [{ ingredient: "Tomato", lbs: 10 }],
       app1Type: "Cheese",
-      app1CheeseRecipeName: cheeseName,
-      app1CheeseRecipe: [{ ingredient: "Cheese", lbs: 10 }],
+      app1CheeseRecipeName: oldCheeseName,
+      app1CheeseRecipe: [{ ingredient: "Old Cheese", lbs: 10 }],
       app2Type: "Mix",
-      app2CheeseRecipeName: mixName,
-      app2CheeseRecipe: [{ ingredient: "Blend", lbs: 10 }],
+      app2CheeseRecipeName: oldMixName,
+      app2CheeseRecipe: [{ ingredient: "Old Mix", lbs: 10 }],
       app3Type: "Cheese",
-      app3CheeseRecipeName: cheeseName,
-      app3CheeseRecipe: [{ ingredient: "Cheese", lbs: 10 }],
+      app3CheeseRecipeName: oldCheeseName,
+      app3CheeseRecipe: [{ ingredient: "Old Cheese", lbs: 10 }],
       app4Type: "Mix",
-      app4CheeseRecipeName: mixName,
-      app4CheeseRecipe: [{ ingredient: "Blend", lbs: 10 }],
+      app4CheeseRecipeName: oldMixName,
+      app4CheeseRecipe: [{ ingredient: "Old Mix", lbs: 10 }],
+    };
+
+    const openSetupProfiles = async () => {
+      await page.getByRole("button", { name: /^More/ }).click();
+      await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
+      const settings = page.getByRole("dialog", { name: "Manage Lists & Settings" });
+      await expect(settings).toBeVisible();
+      await settings.getByRole("button", { name: "Tools", exact: true }).click();
+      await settings.getByRole("button", { name: "Setup Profiles", exact: true }).click();
+      await settings.getByRole("button", { name: "Open Setup Profiles Editor", exact: true }).click();
+
+      const profileSurface = page.getByRole("dialog", { name: "Setup Profiles" });
+      await expect(profileSurface).toBeVisible();
+      return profileSurface;
     };
 
     await fixtures.seedNamedRecipe("dough", account, {
@@ -298,7 +310,7 @@ test("live and setup profile recipe pickers keep the shared selector contract", 
     await settings.getByRole("button", { name: "Setup Profiles", exact: true }).click();
     await settings.getByRole("button", { name: "Open Setup Profiles Editor", exact: true }).click();
 
-    const profileSurface = page.getByRole("dialog", { name: "Setup Profiles" });
+    let profileSurface = await openSetupProfiles();
     await expect(profileSurface).toBeVisible();
     const brandPicker = profileSurface.getByRole("button", {
       name: "Pick or add a brand…",
@@ -583,3 +595,37 @@ test("manager attention remains stable across dialog and destination transitions
     await fixtures.cleanup();
   }
 });
+
+    const newCheeseName = uniqueTestId("RecipeRoundTripNewCheese");
+
+    const oldMixName = uniqueTestId("RecipeRoundTripOldMix");
+
+    const newMixName = uniqueTestId("RecipeRoundTripNewMix");
+
+    const chooseIdentity = async (profileSurface: Locator) => {
+      const chooseExisting = async (pickerName: string, value: string) => {
+        await profileSurface.getByRole("button", { name: pickerName, exact: true }).click();
+        await page.getByPlaceholder("Search or add…").fill(value);
+        const existing = page.getByRole("button", { name: value, exact: true });
+        if (await existing.count()) {
+          await existing.last().click();
+        } else {
+          await page.getByRole("button", { name: `Add "${value}"`, exact: true }).click();
+        }
+      };
+      await chooseExisting("Pick or add a brand…", brand);
+      await chooseExisting("Pick or add a flavor…", flavor);
+    };
+
+    const chooseMixRecipe = async (
+      profileSurface: Locator,
+      testId: string,
+      recipeName: string,
+    ) => {
+      const picker = profileSurface.getByTestId(testId);
+      await picker.click();
+      const dropdown = page.getByPlaceholder("Search or add…").locator("..");
+      await expect(dropdown.getByRole("button", { name: recipeName, exact: true })).toBeVisible();
+      await dropdown.getByRole("button", { name: recipeName, exact: true }).click();
+      await expect(picker).toContainText(recipeName);
+    };
