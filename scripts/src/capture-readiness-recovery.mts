@@ -10,6 +10,7 @@ export const READINESS_EVIDENCE_MAX_RESPONSE_BYTES = 32_000;
 export const READINESS_EVIDENCE_MAX_BYTES = 256_000;
 export const READINESS_DEPLOYMENT_HANDOFF_MAX_BYTES = 8_192;
 export const READINESS_DEPLOYMENT_HANDOFF_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+export const READINESS_DEPLOYMENT_HANDOFF_DATABASE_OWNER_MAX_LENGTH = 128;
 export const READINESS_EVIDENCE_DEFAULT_INTERVAL_MS = 5_000;
 export const READINESS_EVIDENCE_DEFAULT_TIMEOUT_MS = 5_000;
 
@@ -61,6 +62,7 @@ export type ReadinessDeploymentHandoff = {
   kind: "published-deployment-handoff";
   deploymentId: string;
   deployedRevision: string;
+  databaseOwner?: string;
   issuedAt: string;
   expiresAt: string;
 };
@@ -135,6 +137,15 @@ function isValidDeploymentId(value: unknown): value is string {
 
 function isValidRevision(value: unknown): value is string {
   return typeof value === "string" && /^[a-f0-9]{40}$/u.test(value);
+}
+
+function isValidDatabaseOwner(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= READINESS_DEPLOYMENT_HANDOFF_DATABASE_OWNER_MAX_LENGTH &&
+    /^[A-Za-z_][A-Za-z0-9_$-]*$/u.test(value)
+  );
 }
 
 function isHealthStatus(value: unknown): value is HealthStatus {
@@ -224,6 +235,12 @@ export function validateReadinessDeploymentHandoff(
   if (!isValidRevision(handoff.deployedRevision)) {
     throw new Error("Readiness deployment handoff deployed revision is malformed");
   }
+  if (
+    handoff.databaseOwner !== undefined &&
+    !isValidDatabaseOwner(handoff.databaseOwner)
+  ) {
+    throw new Error("Readiness deployment handoff database owner is malformed");
+  }
   const issuedAtMs = requireTimestamp(
     handoff.issuedAt,
     "deployment handoff issuedAt",
@@ -253,6 +270,9 @@ export function validateReadinessDeploymentHandoff(
     kind: "published-deployment-handoff",
     deploymentId: handoff.deploymentId,
     deployedRevision: handoff.deployedRevision,
+    ...(handoff.databaseOwner === undefined
+      ? {}
+      : { databaseOwner: handoff.databaseOwner }),
     issuedAt: new Date(issuedAtMs).toISOString(),
     expiresAt: new Date(expiresAtMs).toISOString(),
   };

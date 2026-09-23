@@ -1350,6 +1350,27 @@ export function resolveSourceLibraryRevision(
   return revision;
 }
 
+export function resolveSourceLibraryDatabaseOwner(
+  configuredDatabaseOwner: string | undefined,
+  deploymentHandoffPath?: string,
+  now?: Date,
+): string | undefined {
+  const explicitOwner = configuredDatabaseOwner?.trim() || undefined;
+  const handoffOwner = deploymentHandoffPath
+    ? readSourceLibraryDeploymentHandoff(deploymentHandoffPath, now).databaseOwner
+    : undefined;
+  if (
+    explicitOwner !== undefined &&
+    handoffOwner !== undefined &&
+    explicitOwner !== handoffOwner
+  ) {
+    throw new Error(
+      "Source-library database owner conflicts with the database owner in the deployment handoff.",
+    );
+  }
+  return explicitOwner ?? handoffOwner;
+}
+
 export function readSourceLibraryDeploymentHandoff(
   handoffPath: string,
   now?: Date,
@@ -1375,6 +1396,10 @@ export function assertProductionSourceLibraryCapture(options: {
   configuredDatabaseOwner?: string;
   environment: NodeJS.ProcessEnv;
 }): void {
+  const databaseOwner = resolveSourceLibraryDatabaseOwner(
+    options.configuredDatabaseOwner,
+    options.deploymentHandoffPath,
+  );
   if (options.environmentArgument !== "release") {
     throw new Error(
       "Production source-library capture requires the explicit --environment release flag.",
@@ -1385,9 +1410,9 @@ export function assertProductionSourceLibraryCapture(options: {
       "Production source-library capture requires --revision or --deployment-handoff with the deployed Git SHA.",
     );
   }
-  if (!validDatabaseOwner(options.configuredDatabaseOwner?.trim())) {
+  if (!validDatabaseOwner(databaseOwner)) {
     throw new Error(
-      "Production source-library capture requires --database-owner with the approved PostgreSQL database owner.",
+      "Production source-library capture requires --database-owner or --deployment-handoff with the approved PostgreSQL database owner.",
     );
   }
   if (
@@ -1454,6 +1479,10 @@ async function main() {
     "--deployment-handoff",
     process.env.SOURCE_LIBRARY_RECONCILIATION_DEPLOYMENT_HANDOFF,
   );
+  const databaseOwner = resolveSourceLibraryDatabaseOwner(
+    configuredDatabaseOwner,
+    deploymentHandoffPath,
+  );
   const revision = resolveSourceLibraryRevision(
     environment,
     configuredRevisionArgument,
@@ -1470,7 +1499,7 @@ async function main() {
       deploymentHandoffPath,
       outputPath,
       preflight: preflightOnly,
-      configuredDatabaseOwner,
+      configuredDatabaseOwner: databaseOwner,
       environment: process.env,
     });
   }
@@ -1489,7 +1518,7 @@ async function main() {
           query,
           environment,
           revision,
-          configuredDatabaseOwner,
+          databaseOwner,
         )
       : verifySourceLibraryReconciliation(
           report,
@@ -1499,7 +1528,7 @@ async function main() {
           fromDate,
           environment,
           revision,
-          configuredDatabaseOwner,
+          databaseOwner,
         ),
   );
   if (!preflightOnly) {

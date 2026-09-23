@@ -48,3 +48,17 @@ counts while still being the wrong production target.
 **How to apply:** Configure the approved owner for release preflight and full
 capture; classify missing or mismatched ownership as a fail-closed
 `databaseOwner` check while retaining only bounded diagnostics.
+
+The controlled deployment handoff may also carry a bounded `databaseOwner`
+attestation. Release source-library checks use it when the environment does
+not provide an owner and reject any mismatch between the two sources; the
+owner remains outside retained evidence and checkpoint diagnostics.
+
+**Why:** Keeping the owner attestation with deployment and revision identity
+prevents preflight and production capture from silently targeting different
+approved databases when release configuration drifts.
+
+**How to apply:** Validate the handoff owner with the same PostgreSQL role
+identifier bounds as the release configuration, resolve handoff-or-
+environment ownership before database work, and report only the
+`databaseOwner` check name and bounded count.

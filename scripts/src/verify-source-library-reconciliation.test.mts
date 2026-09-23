@@ -8,6 +8,7 @@ import {
   ownedFields,
   parseReport,
   preflightSourceLibraryReconciliation,
+  resolveSourceLibraryDatabaseOwner,
   resolveSourceLibraryRevision,
   readSourceLibraryDeploymentHandoff,
   assertProductionSourceLibraryCapture,
@@ -187,6 +188,7 @@ try {
       kind: "published-deployment-handoff",
       deploymentId: "published-source-evidence-test",
       deployedRevision: "b".repeat(40),
+      databaseOwner: "approved_source_owner",
       issuedAt,
       expiresAt: new Date(Date.parse(issuedAt) + 60 * 60 * 1_000).toISOString(),
     }),
@@ -194,6 +196,14 @@ try {
   assert.equal(
     readSourceLibraryDeploymentHandoff(handoffPath).deployedRevision,
     "b".repeat(40),
+  );
+  assert.equal(
+    readSourceLibraryDeploymentHandoff(handoffPath).databaseOwner,
+    "approved_source_owner",
+  );
+  assert.equal(
+    resolveSourceLibraryDatabaseOwner(undefined, handoffPath),
+    "approved_source_owner",
   );
   assert.equal(
     resolveSourceLibraryRevision("release", undefined, handoffPath),
@@ -208,13 +218,44 @@ try {
       deploymentHandoffPath: handoffPath,
       outputPath: undefined,
       preflight: false,
-      configuredDatabaseOwner: "approved_source_owner",
+      configuredDatabaseOwner: resolveSourceLibraryDatabaseOwner(
+        undefined,
+        handoffPath,
+      ),
       environment: { DATABASE_URL: "postgresql://production.example/app" },
     }),
   );
   assert.throws(
     () => resolveSourceLibraryRevision("release", "c".repeat(40), handoffPath),
     /conflicts with the deployed revision/,
+  );
+  assert.throws(
+    () =>
+      resolveSourceLibraryDatabaseOwner(
+        "different_source_owner",
+        handoffPath,
+      ),
+    (error: unknown) =>
+      error instanceof Error &&
+      error.message ===
+        "Source-library database owner conflicts with the database owner in the deployment handoff." &&
+      !error.message.includes("approved_source_owner") &&
+      !error.message.includes("different_source_owner"),
+  );
+  assert.throws(
+    () =>
+      assertProductionSourceLibraryCapture({
+        environmentArgument: "release",
+        configuredRevision: undefined,
+        revisionArgumentProvided: false,
+        deploymentHandoffArgumentProvided: true,
+        deploymentHandoffPath: handoffPath,
+        outputPath: undefined,
+        preflight: false,
+        configuredDatabaseOwner: "different_source_owner",
+        environment: { DATABASE_URL: "postgresql://production.example/app" },
+      }),
+    /database owner in the deployment handoff/,
   );
   await writeFile(
     handoffPath,

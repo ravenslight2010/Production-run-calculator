@@ -25,6 +25,7 @@ import {
   SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_STEP,
   SOURCE_LIBRARY_RECONCILIATION_STEP,
   resolveSourceLibraryEvidenceEnvironment,
+  resolveSourceLibraryReleaseDatabaseOwner,
   resolveSourceLibraryReleaseRevision,
   sourceLibraryReconciliationPreflightEnabled,
   assertUniqueReleaseSteps,
@@ -629,6 +630,7 @@ async function run(): Promise<void> {
         kind: "published-deployment-handoff",
         deploymentId: "published-release-test",
         deployedRevision: "c".repeat(40),
+        databaseOwner: "approved_source_owner",
         issuedAt,
         expiresAt: new Date(
           Date.parse(issuedAt) + 60 * 60 * 1_000,
@@ -643,6 +645,28 @@ async function run(): Promise<void> {
         handoffPath,
       ),
       "c".repeat(40),
+    );
+    assert.equal(
+      resolveSourceLibraryReleaseDatabaseOwner(
+        "release",
+        undefined,
+        handoffPath,
+      ),
+      "approved_source_owner",
+    );
+    assert.throws(
+      () =>
+        resolveSourceLibraryReleaseDatabaseOwner(
+          "release",
+          "different_source_owner",
+          handoffPath,
+        ),
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message ===
+          "Source-library database owner conflicts with the database owner in the deployment handoff." &&
+        !error.message.includes("approved_source_owner") &&
+        !error.message.includes("different_source_owner"),
     );
     assert.throws(
       () =>

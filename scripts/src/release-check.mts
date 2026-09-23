@@ -26,6 +26,7 @@ import {
   computeSourceLibraryEvidenceId,
   parseSourceLibraryPreflightDiagnostic as parseStoredSourceLibraryPreflightDiagnostic,
   parseSourceLibraryEvidenceEnvironment,
+  resolveSourceLibraryDatabaseOwner,
   readSourceLibraryDeploymentHandoff,
   summarizeSourceLibraryPreflight,
   type SourceLibraryEvidenceEnvironment,
@@ -1199,6 +1200,23 @@ export function resolveSourceLibraryReleaseRevision(
     );
   }
   return revision;
+}
+
+export function resolveSourceLibraryReleaseDatabaseOwner(
+  environment: SourceLibraryEvidenceEnvironment,
+  configuredDatabaseOwner: string | undefined,
+  deploymentHandoffPath?: string,
+): string | undefined {
+  const owner = resolveSourceLibraryDatabaseOwner(
+    configuredDatabaseOwner,
+    deploymentHandoffPath,
+  );
+  if (environment === "release" && owner === undefined) {
+    throw new Error(
+      "Production source-library evidence requires --source-library-database-owner or --source-library-deployment-handoff with the approved PostgreSQL database owner.",
+    );
+  }
+  return owner;
 }
 export const SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL =
   "source-library reconciliation database preflight";
@@ -3744,6 +3762,13 @@ async function main(): Promise<void> {
   if (process.argv.includes("--verify-evidence")) {
     try {
       const revision = await currentRevision();
+      if (hasProductionSourceLibraryReconciliation) {
+        resolveSourceLibraryReleaseDatabaseOwner(
+          sourceLibraryEnvironment,
+          configuredSourceLibraryDatabaseOwner,
+          configuredSourceLibraryDeploymentHandoff,
+        );
+      }
       const sourceLibraryRevision = hasProductionSourceLibraryReconciliation
         ? resolveSourceLibraryReleaseRevision(
             revision,
@@ -3786,6 +3811,13 @@ async function main(): Promise<void> {
   }
   let sourceLibraryRevision: string;
   try {
+    if (hasProductionSourceLibraryReconciliation) {
+      resolveSourceLibraryReleaseDatabaseOwner(
+        sourceLibraryEnvironment,
+        configuredSourceLibraryDatabaseOwner,
+        configuredSourceLibraryDeploymentHandoff,
+      );
+    }
     sourceLibraryRevision = hasProductionSourceLibraryReconciliation
       ? resolveSourceLibraryReleaseRevision(
           revision,
