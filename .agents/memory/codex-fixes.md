@@ -144,6 +144,79 @@ passes all three Vite loaders. Documentation-only change, so no test suites appl
 `node_modules`. `verify-before-commit` step 4 still claims ARM cannot run
 vitest/vite — now demonstrably false here — and correcting that shared skill is
 left for a separate change, since it redirects every agent's verification path.
+## 2026-09-23 — Fix Render import: retired Gemini model + cold-start chunk fetch
+
+**File(s):** `lib/integrations-openai-ai-server/src/models.ts`, `lib/integrations-openai-ai-server/src/client.ts`, `artifacts/run-calculator/src/specImport.ts`, `artifacts/run-calculator/src/App.tsx`
+
+**Problem:** On Render, "the import feature isn't working": imports either
+fail with an auto-captured `Failed to fetch dynamically imported module:
+…/specImport-CuF8iBes.js` crash (lazy-chunk fetch dying at the autoscale edge
+during cold start) or never attempt the AI fallback. Root causes:
+
+- `gemini-2.5-flash` (main's `AI_MODELS`) is restricted for new users on the
+  direct Gemini API — with Render's `GOOGLE_API_KEY`, `generateContent` returns
+  404 "no longer available to new users"; Google points to `gemini-3.6-flash`.
+  Every AI import/parse call on Render was failing at the provider, so "AI
+  last" never fired.
+- The import workspace's lazy chunks (`specImport-*.js`, xlsx, …) are fetched on
+  the user's first click; on the autoscale deployment that fetch can die during
+  the ~90s cold start (the chunk later returns 200 — transient, not a missing
+  file).
+
+**Fix:**
+- `AI_MODELS` full/cheap → `gemini-3.6-flash`; restored
+  `thinkingConfig: { thinkingLevel: ThinkingLevel.LOW }` in the adapter's
+  `buildConfig` so thinking tokens can't starve `maxOutputTokens`; bumped
+  `SPEC_PARSE_VERSION` 39 → 40 so stale cached parses are invalidated.
+- `App.tsx` `HomeGate` preloads `loadWorkbookWorkflow()` after sign-in, warming
+  the lazy workbook/import chunks while the instance is already warm; the
+  existing `createRetryableLoader` still allows a fresh attempt if the first
+  click ever hits a transient failure.
+
+**Why it was needed:** Render runs the direct Gemini API (`GOOGLE_API_KEY`);
+the configured model was retired, so "AI last" never fired, and cold starts
+made the first import click fail at the chunk layer.
+
+**Verification:** live API probes (3.6-flash JSON + thinkingLevel LOW → 200
+STOP; 2.5-flash/2.5-pro/2.0-flash → 404), `check-model-version-bump.sh` pass,
+targeted `tsc -b` typechecks for the changed packages
+(integrations-openai-ai-server, run-calculator, api-server, spec-import,
+inventory-math, recipe-guide-import). Full root `CI=true pnpm run typecheck`
+is pending on this ARM box — its pretypecheck needs a missing `lightningcss`
+aarch64 binary (the CI Typecheck job covers it). Large-spec harness
+re-verification runs via CI/nightly.
+
+**Ported to `codex/dep-refresh` (2026-10-03).** Cherry-picking `0a99498d` from
+`main` landed with three divergences, because this branch is ahead of `main` on
+the AI client, the readiness route, and the spec-import pipeline:
+
+- **`SPEC_PARSE_VERSION` NOT bumped.** This branch derives it from
+  `SPEC_IMPORT_PARSE_VERSION` (`lib/spec-import/src/index.ts`), which is
+  already `"41"` — ahead of `main`'s `"40"`. Taking `main`'s literal would have
+  moved the branch *backwards*. No bump: the parses that failed under
+  `gemini-2.5-flash` errored at the provider rather than producing cached
+  results, and this branch's own parse-logic changes are already accounted for
+  by `41`.
+- **`client.ts` import block kept this branch's shape** (multi-line `import
+  type` including `GenerateContentResponse`, which the timeout/retry/circuit
+  breaker layer below `buildConfig` depends on). Only `ThinkingLevel` was added
+  to the value import. The `thinkingConfig: { thinkingLevel: LOW }` hunk itself
+  applied cleanly.
+- **`AI_MODELS` and the `HomeGate` lazy-chunk warm-up ported unchanged** — the
+  model switch and the cold-start preload are the substance of the fix and apply
+  identically here.
+
+**Not ported from `main`, because this branch already carries them:**
+`c90043ba` (`GOOGLE_API_KEY` in the readiness check) and `2d3ad6db` (readiness
+env isolation). This branch reaches the same behaviour through
+`isGeminiProviderConfigured()` (`AI_INTEGRATIONS_GEMINI_API_KEY ||
+GOOGLE_API_KEY`) plus a `setProviderEnv()` harness that clears all four provider
+keys — a superset of both. This branch also deliberately treats an *unused*
+`OPENAI_API_KEY` as `not_configured`, which `main` counts as configured; the
+wider `main` check was **not** adopted, since this app's AI layer is
+Gemini-only and widening `isGeminiProviderConfigured()` would also stop the
+Gemini client from throwing on a missing Gemini key.
+
 ## 2026-09-14 — Add metadata-only ZIP upload inventory
 
 **File(s):** `scripts/zip_asset_inventory.py`, `scripts/test_zip_asset_inventory.py`, `scripts/package.json`
