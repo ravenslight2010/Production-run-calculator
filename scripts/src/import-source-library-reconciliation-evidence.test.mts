@@ -112,6 +112,7 @@ try {
     now,
   });
   assert.deepEqual(await readFile(output), await readFile(input));
+  const retainedEvidence = await readFile(output);
 
   const handoffOutput = path.join(directory, "handoff-output.json");
   await importSourceLibraryReconciliationEvidence({
@@ -160,6 +161,11 @@ try {
     }),
     /revision is stale or missing/,
   );
+  assert.deepEqual(
+    await readFile(output),
+    retainedEvidence,
+    "a revision mismatch must not replace retained evidence",
+  );
 
   await assert.rejects(
     importSourceLibraryReconciliationEvidence({
@@ -172,6 +178,34 @@ try {
       now,
     }),
     /exact deployed 40-character Git commit SHA/,
+  );
+  assert.deepEqual(
+    await readFile(output),
+    retainedEvidence,
+    "an invalid deployed revision must not replace retained evidence",
+  );
+
+  const wrongReportInput = path.join(directory, "wrong-report.json");
+  await writeFile(
+    wrongReportInput,
+    JSON.stringify(evidence("f".repeat(64))),
+  );
+  await assert.rejects(
+    importSourceLibraryReconciliationEvidence({
+      input: wrongReportInput,
+      output,
+      report,
+      healId: DEFAULT_HEAL_ID,
+      fromDate: DEFAULT_FROM_DATE,
+      revision,
+      now,
+    }),
+    /wrong source report/,
+  );
+  assert.deepEqual(
+    await readFile(output),
+    retainedEvidence,
+    "a source report hash mismatch must not replace retained evidence",
   );
 
   const tamperedInput = path.join(directory, "tampered.json");
@@ -190,6 +224,11 @@ try {
     }),
     /invalid bounded content digest/,
   );
+  assert.deepEqual(
+    await readFile(output),
+    retainedEvidence,
+    "a failed content validation must not replace retained evidence",
+  );
 
   const linkedInput = path.join(directory, "linked.json");
   await symlink(input, linkedInput);
@@ -204,6 +243,11 @@ try {
       now,
     }),
     /regular file/,
+  );
+  assert.deepEqual(
+    await readFile(output),
+    retainedEvidence,
+    "a non-regular input must not replace retained evidence",
   );
 
   const stdinInput = path.join(directory, "stdin-output.json");

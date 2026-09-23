@@ -615,9 +615,10 @@ import fs from "node:fs";
 const databaseModule = \`
   import fs from "node:fs";
 
-  const fixture = JSON.parse(
-    fs.readFileSync(process.env.SOURCE_LIBRARY_VERIFIER_QUERY_FIXTURE, "utf8"),
-  );
+  const fixturePath =
+    process.env.SOURCE_LIBRARY_TEST_QUERY_FIXTURE ??
+    process.env.SOURCE_LIBRARY_VERIFIER_QUERY_FIXTURE;
+  const fixture = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
   const query = async (text) => {
     if (text.startsWith("BEGIN TRANSACTION READ ONLY") || text === "ROLLBACK") {
       return { rows: [] };
@@ -695,7 +696,11 @@ function runVerifierCli(
   return runScriptCli(verifierPath, args, env);
 }
 
-function assertBoundedCliEvidence(value: Record<string, unknown>) {
+function assertBoundedCliEvidence(
+  value: Record<string, unknown>,
+  expectedEnvironment = "development",
+  expectedRevision?: string,
+) {
   assert.deepEqual(Object.keys(value).sort(), [
     "aliases",
     "capturedAt",
@@ -717,7 +722,10 @@ function assertBoundedCliEvidence(value: Record<string, unknown>) {
     "verifier",
   ]);
   assert.equal(value.verifier, "source-library-reconciliation");
-  assert.equal(value.environment, "development");
+  assert.equal(value.environment, expectedEnvironment);
+  if (expectedRevision !== undefined) {
+    assert.equal(value.revision, expectedRevision);
+  }
   const expectedSummaryKeys: Record<string, string[]> = {
     repairBoundary: ["fromDate"],
     marker: [
@@ -912,6 +920,101 @@ try {
     "a recovered preflight must retain the requested release revision",
   );
 
+  const productionRevision = "c".repeat(40);
+  const productionFixture = createCliFixture("pass");
+  const productionReportPath = path.join(cliRoot, "production-report.json");
+  const productionQueriesPath = path.join(cliRoot, "production-queries.json");
+  const productionPreflightOutputPath = path.join(
+    cliRoot,
+    "production-preflight-output.json",
+  );
+  const productionOutputPath = path.join(cliRoot, "production-output.json");
+  await writeFile(productionReportPath, productionFixture.reportBytes);
+  await writeFile(
+    productionQueriesPath,
+    JSON.stringify(productionFixture.fixture),
+  );
+  const productionFixtureEnvironment = {
+    DATABASE_URL: "postgresql://approved-production.example/app",
+    SOURCE_LIBRARY_TEST_QUERY_FIXTURE: productionQueriesPath,
+    NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --loader=${loaderPath}`.trim(),
+  };
+  const productionPreflightResult = await runVerifierCli(
+    [
+      "--report",
+      productionReportPath,
+      "--heal-id",
+      "source-library-reconciliation-2026-08-26-v1",
+      "--from-date",
+      "2026-08-26",
+      "--environment",
+      "release",
+      "--revision",
+      productionRevision,
+      "--preflight",
+      "--output",
+      productionPreflightOutputPath,
+    ],
+    productionFixtureEnvironment,
+  );
+  assert.equal(productionPreflightResult.code, 0, productionPreflightResult.stderr);
+  const productionPreflightOutput = JSON.parse(
+    await readFile(productionPreflightOutputPath, "utf8"),
+  ) as Record<string, unknown>;
+  assert.equal(productionPreflightOutput.environment, "release");
+  assert.equal(productionPreflightOutput.revision, productionRevision);
+  assert.equal(productionPreflightOutput.database, "approved-matching");
+  assert.equal(productionPreflightOutput.ok, true);
+  assert.deepEqual(productionPreflightOutput.observed, {
+    poolRows: 68,
+    aliasesExact: 25,
+    aliasesMissing: 0,
+    aliasesMismatched: 0,
+    markerPresent: true,
+    markerValid: true,
+  });
+  assert.deepEqual(
+    Object.keys(productionPreflightOutput).sort(),
+    [
+      "capturedAt",
+      "database",
+      "environment",
+      "expected",
+      "failures",
+      "healId",
+      "observed",
+      "ok",
+      "report",
+      "revision",
+      "verifier",
+    ],
+    "production preflight must retain only aggregate diagnostics",
+  );
+  const productionResult = await runVerifierCli(
+    [
+      "--report",
+      productionReportPath,
+      "--heal-id",
+      "source-library-reconciliation-2026-08-26-v1",
+      "--from-date",
+      "2026-08-26",
+      "--capture-production",
+      "--environment",
+      "release",
+      "--revision",
+      productionRevision,
+      "--output",
+      productionOutputPath,
+    ],
+    productionFixtureEnvironment,
+  );
+  assert.equal(productionResult.code, 0, productionResult.stderr);
+  const productionOutput = JSON.parse(
+    await readFile(productionOutputPath, "utf8"),
+  ) as Record<string, unknown>;
+  assertBoundedCliEvidence(productionOutput, "release", productionRevision);
+  assert.equal(productionOutput.ok, true);
+
   const exhaustedPreflightOutputPath = path.join(cliRoot, "exhausted-preflight-output.json");
   const exhaustedPreflightResult = await runVerifierCli(
     [
@@ -922,7 +1025,7 @@ try {
       "--from-date",
       "2026-08-26",
       "--environment",
-      "development",
+      "release",
       "--revision",
       "b".repeat(40),
       "--preflight",
@@ -930,7 +1033,8 @@ try {
       exhaustedPreflightOutputPath,
     ],
     {
-      SOURCE_LIBRARY_VERIFIER_QUERY_FIXTURE: preflightQueriesPath,
+      DATABASE_URL: "postgresql://approved-production.example/app",
+      SOURCE_LIBRARY_TEST_QUERY_FIXTURE: preflightQueriesPath,
       SOURCE_LIBRARY_VERIFIER_CONNECT_FAILURES: "3",
       NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --loader=${loaderPath}`.trim(),
     },
@@ -962,13 +1066,16 @@ try {
       "--from-date",
       "2026-08-26",
       "--environment",
-      "development",
+      "release",
+      "--revision",
+      productionRevision,
       "--preflight",
       "--output",
       partialOutputPath,
     ],
     {
-      SOURCE_LIBRARY_VERIFIER_QUERY_FIXTURE: partialQueriesPath,
+      DATABASE_URL: "postgresql://approved-production.example/app",
+      SOURCE_LIBRARY_TEST_QUERY_FIXTURE: partialQueriesPath,
       NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --loader=${loaderPath}`.trim(),
     },
   );
@@ -976,8 +1083,48 @@ try {
   const partialOutput = JSON.parse(
     await readFile(partialOutputPath, "utf8"),
   ) as Record<string, unknown>;
+  assert.equal(partialOutput.environment, "release");
+  assert.equal(partialOutput.revision, productionRevision);
   assert.equal(partialOutput.database, "partial-fixture");
   assert.equal(partialOutput.ok, false);
+
+  const missingMarkerFixture = createCliFixture("pass");
+  missingMarkerFixture.fixture.markerRows = [];
+  const missingMarkerQueriesPath = path.join(cliRoot, "missing-marker-queries.json");
+  const missingMarkerOutputPath = path.join(cliRoot, "missing-marker-output.json");
+  await writeFile(
+    missingMarkerQueriesPath,
+    JSON.stringify(missingMarkerFixture.fixture),
+  );
+  const missingMarkerResult = await runVerifierCli(
+    [
+      "--report",
+      productionReportPath,
+      "--heal-id",
+      "source-library-reconciliation-2026-08-26-v1",
+      "--from-date",
+      "2026-08-26",
+      "--environment",
+      "release",
+      "--revision",
+      productionRevision,
+      "--preflight",
+      "--output",
+      missingMarkerOutputPath,
+    ],
+    {
+      DATABASE_URL: "postgresql://approved-production.example/app",
+      SOURCE_LIBRARY_TEST_QUERY_FIXTURE: missingMarkerQueriesPath,
+      NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --loader=${loaderPath}`.trim(),
+    },
+  );
+  assert.equal(missingMarkerResult.code, 1);
+  const missingMarkerOutput = JSON.parse(
+    await readFile(missingMarkerOutputPath, "utf8"),
+  ) as Record<string, unknown>;
+  assert.equal(missingMarkerOutput.database, "partial-fixture");
+  assert.equal(missingMarkerOutput.ok, false);
+  assert.deepEqual(missingMarkerOutput.failures, [{ check: "marker", count: 1 }]);
 
   const failedCaptureOutputPath = path.join(cliRoot, "failed-production-capture.json");
   const failedImportOutputPath = path.join(cliRoot, "failed-production-import.json");
