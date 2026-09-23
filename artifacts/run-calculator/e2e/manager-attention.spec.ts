@@ -1,4 +1,4 @@
-import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { Client } from "pg";
 import {
   AuthorizedBrowserFixtures,
@@ -24,6 +24,13 @@ test("manager setup stays usable when recipe names are incomplete", async ({
 }) => {
   test.setTimeout(120_000);
   const fixtures = await AuthorizedBrowserFixtures.create(playwright, API_BASE, SIGNUP_CODE);
+  const browserErrors: string[] = [];
+  page.on("pageerror", (error) => browserErrors.push(error.stack ?? error.message));
+  page.on("response", (response) => {
+    if (response.status() >= 400) {
+      browserErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+    }
+  });
 
   try {
     const account = await fixtures.createAccount({
@@ -96,18 +103,65 @@ test("manager setup stays usable when recipe names are incomplete", async ({
     });
 
     await page.context().addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
+    const bootstrapRead = page.waitForResponse(
+      (response) =>
+        response.request().method() === "GET"
+        && response.url().includes("/api/master-data/bootstrap"),
+      { timeout: 25_000 },
+    );
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    await expect((await bootstrapRead).status()).toBe(200);
     await openManagerAttention(page);
     await page.getByTestId("manager-attention-action-recipe-setup").click();
     await expect(page.getByRole("heading", { name: "Setup Profiles" })).toBeVisible();
     await expect(page.getByText(scheduledBrand, { exact: true })).toBeVisible();
     await expect(page.getByText(scheduledFlavor, { exact: true })).toBeVisible();
 
-    const doughRecipePicker = page.getByRole("button", { name: "Recipe name…" }).first();
-    await doughRecipePicker.click();
-    await expect(page.getByText("Valid Dough", { exact: true })).toBeVisible();
-    await expect(page.getByText("Legacy Dough", { exact: true })).toBeVisible();
+    const openPickerAndSelect = async (
+      picker: Locator,
+      validName: string,
+      malformedName: string,
+    ) => {
+      await picker.click();
+      const dropdown = page.getByPlaceholder("Search or add…").locator("..");
+      await expect(dropdown.getByRole("button", { name: validName, exact: true })).toBeVisible();
+      await expect(dropdown.getByText(malformedName, { exact: true })).toHaveCount(0);
+      await dropdown.getByRole("button", { name: validName, exact: true }).click();
+      await expect(page.getByRole("button", { name: validName, exact: true }).first()).toBeVisible();
+    };
+
+    await openPickerAndSelect(
+      page.getByRole("button", { name: "Recipe name…" }).first(),
+      "Valid Dough",
+      "null",
+    );
+
+    const saucePicker = page.getByText("Sauce", { exact: true }).locator("..").getByRole("button");
+    await openPickerAndSelect(saucePicker, "Valid Sauce", "42");
+
+    const app1TypePicker = page.getByText("Applicator 1", { exact: true }).locator("..").getByRole("button");
+    await app1TypePicker.click();
+    let dropdown = page.getByPlaceholder("Search or add…").locator("..");
+    await expect(dropdown.getByRole("button", { name: "Cheese", exact: true })).toBeVisible();
+    await dropdown.getByRole("button", { name: "Cheese", exact: true }).click();
+
+    const cheeseRecipePicker = page.getByText(/Cheese Blend/).locator("..").locator("select");
+    await expect(cheeseRecipePicker.locator("option", { hasText: "Valid Cheese" })).toHaveCount(1);
+    await expect(cheeseRecipePicker.locator("option", { hasText: "[object Object]" })).toHaveCount(0);
+    await cheeseRecipePicker.selectOption("Valid Cheese");
+    await expect(cheeseRecipePicker).toHaveValue("Valid Cheese");
+
+    await app1TypePicker.click();
+    dropdown = page.getByPlaceholder("Search or add…").locator("..");
+    await dropdown.getByRole("button", { name: "Mix", exact: true }).click();
+    await openPickerAndSelect(
+      page.getByRole("button", { name: "Valid Cheese", exact: true }),
+      "Valid Mix",
+      "false",
+    );
+
+    expect(browserErrors).toEqual([]);
   } finally {
     await fixtures.cleanup();
   }
