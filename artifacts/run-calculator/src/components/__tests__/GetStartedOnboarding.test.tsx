@@ -130,6 +130,20 @@ describe("useGetStartedOverview latch", () => {
     expect(markSeen).toHaveBeenCalledTimes(1);
   });
 
+  it("does not send duplicate acknowledgements when dismiss callbacks race", () => {
+    const markSeen = vi.fn();
+    const { result } = renderHook(() =>
+      useGetStartedOverview({ onboardingSeen: false }, markSeen),
+    );
+
+    act(() => {
+      result.current.dismiss();
+      result.current.dismiss();
+    });
+
+    expect(markSeen).toHaveBeenCalledTimes(1);
+  });
+
   it("never auto-opens when the user has already seen it", () => {
     const markSeen = vi.fn();
     const { result } = renderHook(() =>

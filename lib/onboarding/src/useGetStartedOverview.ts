@@ -37,6 +37,7 @@ export function useGetStartedOverview(
 ): GetStartedOverview {
   const [open, setOpen] = useState(false);
   const autoOpened = useRef(false);
+  const acknowledgementStarted = useRef(false);
 
   useEffect(() => {
     if (autoOpened.current) return;
@@ -47,7 +48,17 @@ export function useGetStartedOverview(
   }, [me]);
 
   const dismiss = useCallback(() => {
-    if (me && me.onboardingSeen === false) void markOnboardingSeen();
+    if (
+      me &&
+      me.onboardingSeen === false &&
+      !acknowledgementStarted.current
+    ) {
+      // The dialog's action closes the dialog and also triggers onOpenChange.
+      // Latch before starting the async request so both callbacks cannot issue
+      // duplicate acknowledgements while the cached identity is still unseen.
+      acknowledgementStarted.current = true;
+      void markOnboardingSeen();
+    }
   }, [me, markOnboardingSeen]);
 
   const openOverview = useCallback(() => setOpen(true), []);
