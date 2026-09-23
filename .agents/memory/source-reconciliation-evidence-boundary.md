@@ -36,3 +36,15 @@ deployed revision as an actionable NO-GO. Do not generate a write-side
 operational report merely to discover the revision; obtain the controlled
 handoff, run the full read-only verifier, then import only its summary-shaped
 output.
+
+Production source-library evidence also requires an explicit approved database
+owner attestation, compared with PostgreSQL's read-only catalog owner. Matching
+counts alone are not evidence of database ownership, and owner names must not
+enter retained summaries.
+
+**Why:** An unrelated database can reproduce aggregate pool, alias, and marker
+counts while still being the wrong production target.
+
+**How to apply:** Configure the approved owner for release preflight and full
+capture; classify missing or mismatched ownership as a fail-closed
+`databaseOwner` check while retaining only bounded diagnostics.

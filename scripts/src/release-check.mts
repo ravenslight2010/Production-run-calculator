@@ -1138,12 +1138,19 @@ const configuredSourceLibraryRevision =
   (cliOptionValue("--source-library-revision") ??
     process.env.SOURCE_LIBRARY_RECONCILIATION_REVISION?.trim()) ||
   undefined;
+const configuredSourceLibraryDatabaseOwner =
+  (cliOptionValue("--source-library-database-owner") ??
+    process.env.SOURCE_LIBRARY_RECONCILIATION_DATABASE_OWNER?.trim()) ||
+  undefined;
 const configuredSourceLibraryDeploymentHandoff =
   (cliOptionValue("--source-library-deployment-handoff") ??
     process.env.SOURCE_LIBRARY_RECONCILIATION_DEPLOYMENT_HANDOFF?.trim()) ||
   undefined;
 const sourceLibraryRevisionArgs = configuredSourceLibraryRevision
   ? ["--revision", configuredSourceLibraryRevision]
+  : [];
+const sourceLibraryDatabaseOwnerArgs = configuredSourceLibraryDatabaseOwner
+  ? ["--database-owner", configuredSourceLibraryDatabaseOwner]
   : [];
 const sourceLibraryDeploymentHandoffArgs =
   configuredSourceLibraryDeploymentHandoff
@@ -1212,6 +1219,7 @@ export const SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_STEP: ReleaseStep = {
     "--environment",
     sourceLibraryEnvironment,
     ...sourceLibraryRevisionArgs,
+    ...sourceLibraryDatabaseOwnerArgs,
     ...sourceLibraryDeploymentHandoffArgs,
     "--preflight",
   ],
@@ -1234,6 +1242,7 @@ export const SOURCE_LIBRARY_RECONCILIATION_STEP: ReleaseStep = {
     "--environment",
     sourceLibraryEnvironment,
     ...sourceLibraryRevisionArgs,
+    ...sourceLibraryDatabaseOwnerArgs,
     ...sourceLibraryDeploymentHandoffArgs,
     "--output",
     resolve(

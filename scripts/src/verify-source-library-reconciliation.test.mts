@@ -114,6 +114,7 @@ assert.doesNotThrow(() =>
     revisionArgumentProvided: true,
     outputPath: undefined,
     preflight: false,
+    configuredDatabaseOwner: "approved_source_owner",
     environment: { DATABASE_URL: "postgresql://production.example/app" },
   }),
 );
@@ -125,6 +126,7 @@ assert.throws(
       revisionArgumentProvided: true,
       outputPath: undefined,
       preflight: false,
+      configuredDatabaseOwner: "approved_source_owner",
       environment: { DATABASE_URL: "postgresql://production.example/app" },
     }),
   /explicit --environment release/,
@@ -137,6 +139,7 @@ assert.throws(
       revisionArgumentProvided: true,
       outputPath: undefined,
       preflight: false,
+      configuredDatabaseOwner: "approved_source_owner",
       environment: {
         DATABASE_URL: "postgresql://production.example/app",
         SOURCE_LIBRARY_VERIFIER_QUERY_FIXTURE: "/tmp/fixture.json",
@@ -152,6 +155,7 @@ assert.throws(
       revisionArgumentProvided: true,
       outputPath: undefined,
       preflight: true,
+      configuredDatabaseOwner: "approved_source_owner",
       environment: { DATABASE_URL: "postgresql://production.example/app" },
     }),
   /does not support --preflight/,
@@ -164,6 +168,7 @@ assert.throws(
       revisionArgumentProvided: false,
       outputPath: undefined,
       preflight: false,
+      configuredDatabaseOwner: "approved_source_owner",
       environment: { DATABASE_URL: "postgresql://production.example/app" },
     }),
   /requires --revision or --deployment-handoff on the command line/,
@@ -203,6 +208,7 @@ try {
       deploymentHandoffPath: handoffPath,
       outputPath: undefined,
       preflight: false,
+      configuredDatabaseOwner: "approved_source_owner",
       environment: { DATABASE_URL: "postgresql://production.example/app" },
     }),
   );
@@ -473,6 +479,7 @@ type CliQueryFixture = {
   dailyRunRows: Array<Record<string, unknown>>;
   aliasRows: Array<Record<string, unknown>>;
   markerRows: Array<Record<string, unknown>>;
+  databaseOwnerRows: Array<Record<string, unknown>>;
 };
 
 function createCliFixture(scenario: CliScenario): {
@@ -605,6 +612,7 @@ function createCliFixture(scenario: CliScenario): {
           deletedStubs: 0,
         },
       }],
+      databaseOwnerRows: [{ databaseOwner: "approved_source_owner" }],
     },
   };
 }
@@ -627,6 +635,7 @@ const databaseModule = \`
     if (text.includes("FROM brand_profiles")) return { rows: fixture.profileRows };
     if (text.includes("FROM daily_sync")) return { rows: fixture.dailyRunRows };
     if (text.includes("FROM spec_import_aliases")) return { rows: fixture.aliasRows };
+    if (text.includes("FROM pg_database")) return { rows: fixture.databaseOwnerRows };
     if (text.startsWith("SELECT id, name, components FROM cheese_recipes")) {
       return { rows: fixture.stubRows };
     }
@@ -898,6 +907,8 @@ try {
       "development",
       "--revision",
       "a".repeat(40),
+      "--database-owner",
+      "approved_source_owner",
       "--preflight",
       "--output",
       recoveredPreflightOutputPath,
@@ -951,6 +962,8 @@ try {
       "release",
       "--revision",
       productionRevision,
+      "--database-owner",
+      "approved_source_owner",
       "--preflight",
       "--output",
       productionPreflightOutputPath,
@@ -1003,6 +1016,8 @@ try {
       "release",
       "--revision",
       productionRevision,
+      "--database-owner",
+      "approved_source_owner",
       "--output",
       productionOutputPath,
     ],
@@ -1014,6 +1029,103 @@ try {
   ) as Record<string, unknown>;
   assertBoundedCliEvidence(productionOutput, "release", productionRevision);
   assert.equal(productionOutput.ok, true);
+
+  const wrongOwnerFixture = createCliFixture("pass");
+  wrongOwnerFixture.fixture.databaseOwnerRows = [{
+    databaseOwner: "unrelated_database_owner",
+  }];
+  const wrongOwnerQueriesPath = path.join(cliRoot, "wrong-owner-queries.json");
+  const wrongOwnerPreflightOutputPath = path.join(
+    cliRoot,
+    "wrong-owner-preflight-output.json",
+  );
+  const wrongOwnerOutputPath = path.join(cliRoot, "wrong-owner-output.json");
+  await writeFile(
+    wrongOwnerQueriesPath,
+    JSON.stringify(wrongOwnerFixture.fixture),
+  );
+  const wrongOwnerPreflightResult = await runVerifierCli(
+    [
+      "--report",
+      productionReportPath,
+      "--heal-id",
+      "source-library-reconciliation-2026-08-26-v1",
+      "--from-date",
+      "2026-08-26",
+      "--environment",
+      "release",
+      "--revision",
+      productionRevision,
+      "--database-owner",
+      "approved_source_owner",
+      "--preflight",
+      "--output",
+      wrongOwnerPreflightOutputPath,
+    ],
+    {
+      DATABASE_URL: "postgresql://approved-production.example/app",
+      SOURCE_LIBRARY_TEST_QUERY_FIXTURE: wrongOwnerQueriesPath,
+      NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --loader=${loaderPath}`.trim(),
+    },
+  );
+  assert.equal(wrongOwnerPreflightResult.code, 1);
+  const wrongOwnerPreflightOutput = JSON.parse(
+    await readFile(wrongOwnerPreflightOutputPath, "utf8"),
+  ) as Record<string, unknown>;
+  assert.equal(wrongOwnerPreflightOutput.database, "unverified");
+  assert.equal(wrongOwnerPreflightOutput.ok, false);
+  assert.deepEqual(wrongOwnerPreflightOutput.failures, [{
+    check: "databaseOwner",
+    count: 1,
+  }]);
+  assert.equal(
+    wrongOwnerPreflightOutput.expected &&
+      (wrongOwnerPreflightOutput.expected as Record<string, unknown>).poolRows,
+    68,
+  );
+  assert.equal(
+    wrongOwnerPreflightOutput.observed &&
+      (wrongOwnerPreflightOutput.observed as Record<string, unknown>).poolRows,
+    68,
+  );
+  const wrongOwnerCaptureResult = await runVerifierCli(
+    [
+      "--report",
+      productionReportPath,
+      "--heal-id",
+      "source-library-reconciliation-2026-08-26-v1",
+      "--from-date",
+      "2026-08-26",
+      "--capture-production",
+      "--environment",
+      "release",
+      "--revision",
+      productionRevision,
+      "--database-owner",
+      "approved_source_owner",
+      "--output",
+      wrongOwnerOutputPath,
+    ],
+    {
+      DATABASE_URL: "postgresql://approved-production.example/app",
+      SOURCE_LIBRARY_TEST_QUERY_FIXTURE: wrongOwnerQueriesPath,
+      NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --loader=${loaderPath}`.trim(),
+    },
+  );
+  assert.equal(wrongOwnerCaptureResult.code, 1);
+  const wrongOwnerOutput = JSON.parse(
+    await readFile(wrongOwnerOutputPath, "utf8"),
+  ) as Record<string, unknown>;
+  assert.equal(wrongOwnerOutput.ok, false);
+  assert.deepEqual(wrongOwnerOutput.failures, [{
+    check: "databaseOwner",
+    count: 1,
+  }]);
+  assert.doesNotMatch(
+    JSON.stringify(wrongOwnerOutput),
+    /approved_source_owner|unrelated_database_owner/,
+    "wrong-owner evidence must remain summary-only",
+  );
 
   const exhaustedPreflightOutputPath = path.join(cliRoot, "exhausted-preflight-output.json");
   const exhaustedPreflightResult = await runVerifierCli(
@@ -1028,6 +1140,8 @@ try {
       "release",
       "--revision",
       "b".repeat(40),
+      "--database-owner",
+      "approved_source_owner",
       "--preflight",
       "--output",
       exhaustedPreflightOutputPath,
@@ -1069,6 +1183,8 @@ try {
       "release",
       "--revision",
       productionRevision,
+      "--database-owner",
+      "approved_source_owner",
       "--preflight",
       "--output",
       partialOutputPath,
@@ -1108,6 +1224,8 @@ try {
       "release",
       "--revision",
       productionRevision,
+      "--database-owner",
+      "approved_source_owner",
       "--preflight",
       "--output",
       missingMarkerOutputPath,
@@ -1141,6 +1259,8 @@ try {
       "release",
       "--revision",
       "a".repeat(40),
+      "--database-owner",
+      "approved_source_owner",
       "--output",
       failedCaptureOutputPath,
     ],

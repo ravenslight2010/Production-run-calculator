@@ -27,6 +27,7 @@ export const DEFAULT_HEAL_ID = "source-library-reconciliation-2026-08-26-v2";
 export const DEFAULT_FROM_DATE = "2026-08-26";
 export const SOURCE_LIBRARY_EVIDENCE_ENVIRONMENTS = ["development", "release"] as const;
 export type SourceLibraryEvidenceEnvironment = (typeof SOURCE_LIBRARY_EVIDENCE_ENVIRONMENTS)[number];
+const DATABASE_OWNER_MAX_LENGTH = 128;
 const SOURCE_LINK_FIELDS = [
   "doughRecipeName",
   "frontlineRecipeName",
@@ -351,6 +352,38 @@ function zeroComponents(value: unknown) {
 
 function boundedCount(value: unknown) {
   return isFiniteNumber(value) && Number.isInteger(value) && value >= 0;
+}
+
+function validDatabaseOwner(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= DATABASE_OWNER_MAX_LENGTH &&
+    /^[A-Za-z_][A-Za-z0-9_$-]*$/u.test(value)
+  );
+}
+
+async function checkDatabaseOwner(
+  query: ReadOnlyQuery,
+  environment: SourceLibraryEvidenceEnvironment,
+  expectedDatabaseOwner: string | undefined,
+): Promise<boolean> {
+  // Development fixture verification intentionally remains independent of a
+  // production deployment's owner configuration. Release verification must
+  // always have an explicit, externally approved owner to compare with the
+  // owner reported by PostgreSQL.
+  if (environment !== "release" && expectedDatabaseOwner === undefined) {
+    return true;
+  }
+  if (!validDatabaseOwner(expectedDatabaseOwner)) return false;
+  const result = await query(
+    `SELECT pg_get_userbyid(datdba) AS "databaseOwner"
+       FROM pg_database
+      WHERE datname = current_database()
+      LIMIT 1`,
+  );
+  return result.rows.length === 1 &&
+    result.rows[0]?.databaseOwner === expectedDatabaseOwner;
 }
 
 function comparePoolRows(report: Report, rowsByTable: Record<RecipeTable, Array<Record<string, unknown>>>) {
@@ -997,11 +1030,11 @@ function preflightMarkerIsValid(
 /**
  * Cheap, bounded identity check used before expensive release gates.
  *
- * This checks only live recipe IDs, alias identities, and the marker shape. It
- * does not inspect recipe payloads, references, or mutate the database. A
- * complete identity match is not a substitute for the full verifier below; it
- * only prevents a partial fixture database from allowing expensive release
- * work to start.
+ * This checks only live recipe IDs, alias identities, the marker shape, and
+ * the approved owner of a release database. It does not inspect recipe
+ * payloads, references, or mutate the database. A complete identity match is
+ * not a substitute for the full verifier below; it only prevents a partial or
+ * wrong-owner database from allowing expensive release work to start.
  */
 export async function preflightSourceLibraryReconciliation(
   report: Report,
@@ -1010,6 +1043,7 @@ export async function preflightSourceLibraryReconciliation(
   query: ReadOnlyQuery,
   environment: SourceLibraryEvidenceEnvironment,
   revision: string,
+  expectedDatabaseOwner?: string,
 ): Promise<SourceLibraryPreflightOutput> {
   const proposals = report.proposals as unknown as Proposal[];
   const idsByTable = Object.fromEntries(
@@ -1036,6 +1070,11 @@ export async function preflightSourceLibraryReconciliation(
     );
   }
   const aliases = compareAliases(await selectAliases(query, report));
+  const databaseOwnerAttested = await checkDatabaseOwner(
+    query,
+    environment,
+    expectedDatabaseOwner,
+  );
   const markerResult = await query(
     'SELECT applied_at AS "appliedAt", result FROM data_heals WHERE id = $1 LIMIT 1',
     [healId],
@@ -1054,6 +1093,7 @@ export async function preflightSourceLibraryReconciliation(
   const failureCandidates: Array<[string, number]> = [
     ["databaseShape", expectedPoolRows - observedPoolRows],
     ["aliases", aliases.counts.missing + aliases.counts.mismatches],
+    ["databaseOwner", Number(!databaseOwnerAttested)],
     ["marker", Number(!marker.valid)],
   ];
   const failures = failureCandidates
@@ -1113,6 +1153,7 @@ export async function verifySourceLibraryReconciliation(
   fromDate = DEFAULT_FROM_DATE,
   environment: SourceLibraryEvidenceEnvironment = "development",
   revision = "development-unbound",
+  expectedDatabaseOwner?: string,
 ): Promise<VerificationOutput> {
   const proposals = report.proposals as unknown as Proposal[];
   const idsByTable = Object.fromEntries(TABLES.map((table) => [
@@ -1128,6 +1169,11 @@ export async function verifySourceLibraryReconciliation(
   const mappings = buildMappings(report);
   const references = await selectReferences(query, mappings, fromDate);
   const aliases = compareAliases(await selectAliases(query, report));
+  const databaseOwnerAttested = await checkDatabaseOwner(
+    query,
+    environment,
+    expectedDatabaseOwner,
+  );
   const poolState = comparePoolRows(report, rowsByTable);
   const pendingSummary = summarizeReferences(references.runs.filter((reference) => reference.scope === "pending"));
   const profileSummary = summarizeReferences(references.profiles);
@@ -1141,6 +1187,7 @@ export async function verifySourceLibraryReconciliation(
 
   const failureCandidates: Array<[string, number]> = [
     ["marker", Number(!marker.present || !marker.appliedAtPresent || !marker.resultValid || !marker.resultWithinBounds)],
+    ["databaseOwner", Number(!databaseOwnerAttested)],
     ["pools", poolState.counts.missing + poolState.counts.mismatches],
     ["aliases", aliases.counts.missing + aliases.counts.mismatches],
     ["profiles", profileSummary.stale + profileSummary.nonCanonical],
@@ -1325,6 +1372,7 @@ export function assertProductionSourceLibraryCapture(options: {
   deploymentHandoffPath?: string;
   outputPath: string | undefined;
   preflight: boolean;
+  configuredDatabaseOwner?: string;
   environment: NodeJS.ProcessEnv;
 }): void {
   if (options.environmentArgument !== "release") {
@@ -1335,6 +1383,11 @@ export function assertProductionSourceLibraryCapture(options: {
   if (!options.configuredRevision?.trim() && !options.deploymentHandoffPath?.trim()) {
     throw new Error(
       "Production source-library capture requires --revision or --deployment-handoff with the deployed Git SHA.",
+    );
+  }
+  if (!validDatabaseOwner(options.configuredDatabaseOwner?.trim())) {
+    throw new Error(
+      "Production source-library capture requires --database-owner with the approved PostgreSQL database owner.",
     );
   }
   if (
@@ -1393,6 +1446,10 @@ async function main() {
     process.argv.includes("--deployment-handoff");
   const configuredRevisionArgument =
     argument("--revision", process.env.SOURCE_LIBRARY_RECONCILIATION_REVISION);
+  const configuredDatabaseOwner = argument(
+    "--database-owner",
+    process.env.SOURCE_LIBRARY_RECONCILIATION_DATABASE_OWNER,
+  );
   const deploymentHandoffPath = argument(
     "--deployment-handoff",
     process.env.SOURCE_LIBRARY_RECONCILIATION_DEPLOYMENT_HANDOFF,
@@ -1413,6 +1470,7 @@ async function main() {
       deploymentHandoffPath,
       outputPath,
       preflight: preflightOnly,
+      configuredDatabaseOwner,
       environment: process.env,
     });
   }
@@ -1431,6 +1489,7 @@ async function main() {
           query,
           environment,
           revision,
+          configuredDatabaseOwner,
         )
       : verifySourceLibraryReconciliation(
           report,
@@ -1440,6 +1499,7 @@ async function main() {
           fromDate,
           environment,
           revision,
+          configuredDatabaseOwner,
         ),
   );
   if (!preflightOnly) {
