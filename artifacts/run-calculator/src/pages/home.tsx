@@ -1265,8 +1265,8 @@ export function IngredientSelect({
         }))}
         onValueChange={onChange}
         placeholder={placeholder}
-        title={`Select ${accessibleLabel.toLocaleLowerCase()}`}
-        aria-label={ariaLabel ?? accessibleLabel}
+        title={ariaLabel ?? `Select ${accessibleLabel.toLocaleLowerCase()}`}
+        aria-label={ariaLabel ?? placeholder ?? accessibleLabel}
         data-testid={testId}
         onAddOption={onAddOption}
         onRemoveOption={onRemoveOption}
@@ -1583,7 +1583,7 @@ export function CheesePickCard({
     <div className="w-full sm:w-auto sm:flex-1 sm:max-w-xs">
         <TouchSelect
           aria-label={recipePickerLabel ?? "Pick a cheese recipe"}
-          title="Pick a cheese recipe"
+          title={recipePickerLabel ?? "Pick a cheese recipe"}
           value={recipeName}
           onChange={e => onRecipeNameChange(e.target.value)}
           data-testid={recipePickerTestId}
@@ -2191,6 +2191,7 @@ export function TypeDropdown({
   ariaLabel?: string;
   testId?: string;
 }) {
+  const isTouchDevice = useIsTouchDevice();
   const [open, setOpen] = useState(false);
   const [inputVal, setInputVal] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -2229,6 +2230,32 @@ export function TypeDropdown({
           : { top: rect.bottom + 4 }),
       }
     : {};
+
+  if (isTouchDevice) {
+    const touchOptions = [
+      ...(allowClear && value ? [{ value: "", label: "— None" }] : []),
+      ...options.map((option) => ({ value: option, label: option })),
+    ];
+    const accessibleLabel = ariaLabel ?? label;
+    return (
+      <div className="flex items-center justify-between mb-2 mt-5 first:mt-0">
+        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+          {label}
+        </p>
+        <TouchOptionPicker
+          value={value}
+          options={touchOptions}
+          onValueChange={onChange}
+          placeholder="Select…"
+          title={accessibleLabel}
+          aria-label={accessibleLabel}
+          data-testid={testId}
+          onAddOption={onAddOption}
+          onRemoveOption={onRemoveOption}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="flex items-center justify-between mb-2 mt-5 first:mt-0">

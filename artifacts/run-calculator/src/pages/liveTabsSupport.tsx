@@ -1,5 +1,6 @@
 import { createContext, lazy, memo, Profiler, useCallback, useEffect, useId, useMemo, useRef, useState, useContext } from "react";
 import { useEvent } from "../hooks/useEvent";
+import { useIsTouchDevice } from "../hooks/use-mobile";
 import { createFrameRepeater } from "../frameRepeater";
 import {
   flushPendingHomeFormWrites,
@@ -64,6 +65,7 @@ import { LivePackagingTabContent } from "../components/live-stations/LivePackagi
 import { LiveDoughTabContent } from "../components/live-stations/LiveDoughTabContent";
 import { AUTO_SUPPRESS_MS, fmtMS } from "../components/live-stations/stationShared";
 import { MixAlreadyMadeInput } from "../components/MixAlreadyMadeInput";
+import { TouchOptionPicker, TouchSelect } from "../components/TouchOptionPicker";
 import { PrepMixMissingAmountsWarning } from "../components/PrepMixMissingAmountsWarning";
 import { useForm, useFieldArray } from "react-hook-form";
 import type { Resolver } from "react-hook-form";
@@ -864,6 +866,7 @@ export function IngredientSelect({
   testId?: string;
 }) {
   const labelOf = (opt: string) => optionLabels?.get(opt) ?? opt;
+  const isTouchDevice = useIsTouchDevice();
   const [open, setOpen] = useState(false);
   const [inputVal, setInputVal] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -901,6 +904,26 @@ export function IngredientSelect({
           : { top: rect.bottom + 4 }),
       }
     : {};
+
+  if (isTouchDevice) {
+    const accessibleLabel = (placeholder ?? "Select option").replace(/[.…]+$/, "").trim();
+    return (
+      <TouchOptionPicker
+        value={value}
+        options={(options ?? []).map((option) => ({
+          value: option,
+          label: labelOf(option),
+        }))}
+        onValueChange={onChange}
+        placeholder={placeholder}
+        title={ariaLabel ?? `Select ${accessibleLabel.toLocaleLowerCase()}`}
+        aria-label={ariaLabel ?? placeholder ?? accessibleLabel}
+        data-testid={testId}
+        onAddOption={onAddOption}
+        onRemoveOption={onRemoveOption}
+      />
+    );
+  }
 
   return (
     <div className="relative w-full">
@@ -1196,7 +1219,7 @@ export function CheesePickCard({
 
   const recipeSelector = (
     <div className="w-full sm:w-auto sm:flex-1 sm:max-w-xs">
-      <select
+      <TouchSelect
         value={recipeName}
         onChange={e => onRecipeNameChange(e.target.value)}
         aria-label={recipePickerLabel ?? "Pick a cheese recipe"}
@@ -1207,7 +1230,7 @@ export function CheesePickCard({
         {options.map(name => (
           <option key={name} value={name}>{optionLabels?.get(name) ?? name}</option>
         ))}
-      </select>
+      </TouchSelect>
     </div>
   );
 
@@ -1786,6 +1809,7 @@ export function TypeDropdown({
   ariaLabel?: string;
   testId?: string;
 }) {
+  const isTouchDevice = useIsTouchDevice();
   const [open, setOpen] = useState(false);
   const [inputVal, setInputVal] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -1824,6 +1848,27 @@ export function TypeDropdown({
           : { top: rect.bottom + 4 }),
       }
     : {};
+
+  if (isTouchDevice) {
+    const touchOptions = [
+      ...(allowClear && value ? [{ value: "", label: "— None" }] : []),
+      ...options.map((option) => ({ value: option, label: option })),
+    ];
+    const accessibleLabel = ariaLabel ?? label;
+    return (
+      <TouchOptionPicker
+        value={value}
+        options={touchOptions}
+        onValueChange={onChange}
+        placeholder="Select…"
+        title={accessibleLabel}
+        aria-label={accessibleLabel}
+        data-testid={testId}
+        onAddOption={onAddOption}
+        onRemoveOption={onRemoveOption}
+      />
+    );
+  }
 
   return (
     <div className="flex items-center justify-between mb-2 mt-5 first:mt-0">

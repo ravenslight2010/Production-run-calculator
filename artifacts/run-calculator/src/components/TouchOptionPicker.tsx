@@ -85,12 +85,20 @@ export function TouchOptionPicker({
       )
     : options;
 
+  const restoreFocus = React.useCallback(() => {
+    const focusTrigger = () => triggerRef.current?.focus({ preventScroll: true });
+    window.setTimeout(() => {
+      focusTrigger();
+      window.requestAnimationFrame(focusTrigger);
+    }, 0);
+  }, []);
+
   const close = React.useCallback(() => {
     setOpen(false);
     setQuery("");
     setConfirmDelete(null);
-    window.setTimeout(() => triggerRef.current?.focus(), 0);
-  }, []);
+    restoreFocus();
+  }, [restoreFocus]);
 
   const onOpenChange = (nextOpen: boolean) => {
     if (nextOpen) {
@@ -128,6 +136,10 @@ export function TouchOptionPicker({
       <DialogContent
         aria-modal="true"
         className="max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-md gap-0 overflow-hidden p-0"
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          restoreFocus();
+        }}
       >
         <DialogHeader className="border-b border-border/60 px-5 pb-4 pt-5 pr-12 text-left">
           <DialogTitle>{title}</DialogTitle>
