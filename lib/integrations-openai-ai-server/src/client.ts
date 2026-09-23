@@ -11,7 +11,7 @@
 // async iterable of { choices: [{ delta: { content } }] } (stream). Vision is
 // supported via `image_url` data-URI parts. Everything else in the app (routes,
 // prompts, parsing) stays byte-for-byte unchanged.
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import type { Content, Part, GenerateContentConfig } from "@google/genai";
 
 type TextPart = { type: "text"; text: string };
@@ -135,9 +135,13 @@ function buildConfig(
   systemInstruction?: string,
 ): GenerateContentConfig {
   const config: GenerateContentConfig = {
-    // No thinkingConfig — gemini-2.5-flash does not support thinkingLevel.
-    // (Gemini 3.x models used thinkingLevel: "low" to avoid thinking tokens
-    // consuming the maxOutputTokens budget, but that knob is absent in 2.5.)
+    // Lower reasoning effort: Gemini 3.x models draw thoughts from the same
+    // maxOutputTokens pool, so hidden thinking can consume the whole budget and
+    // return EMPTY text with finishReason MAX_TOKENS. ThinkingLevel.LOW reduces
+    // that risk without reserving output tokens. The gemini-2.5-flash era
+    // removed this knob because 2.5 did not support thinkingLevel; it is
+    // restored now that gemini-3.6-flash is active.
+    thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
   };
   if (systemInstruction) config.systemInstruction = systemInstruction;
   if (params.response_format?.type === "json_object") {

@@ -3,6 +3,48 @@ name: Codex fixes log
 description: Running log of every fix Codex has made. Check this BEFORE making changes to avoid duplicate work.
 ---
 
+## 2026-09-23 — Fix Render import: retired Gemini model + cold-start chunk fetch
+
+**File(s):** `lib/integrations-openai-ai-server/src/models.ts`, `lib/integrations-openai-ai-server/src/client.ts`, `artifacts/run-calculator/src/specImport.ts`, `artifacts/run-calculator/src/App.tsx`
+
+**Problem:** On Render, "the import feature isn't working": imports either
+fail with an auto-captured `Failed to fetch dynamically imported module:
+…/specImport-CuF8iBes.js` crash (lazy-chunk fetch dying at the autoscale edge
+during cold start) or never attempt the AI fallback. Root causes:
+
+- `gemini-2.5-flash` (main's `AI_MODELS`) is restricted for new users on the
+  direct Gemini API — with Render's `GOOGLE_API_KEY`, `generateContent` returns
+  404 "no longer available to new users"; Google points to `gemini-3.6-flash`.
+  Every AI import/parse call on Render was failing at the provider, so "AI
+  last" never fired.
+- The import workspace's lazy chunks (`specImport-*.js`, xlsx, …) are fetched on
+  the user's first click; on the autoscale deployment that fetch can die during
+  the ~90s cold start (the chunk later returns 200 — transient, not a missing
+  file).
+
+**Fix:**
+- `AI_MODELS` full/cheap → `gemini-3.6-flash`; restored
+  `thinkingConfig: { thinkingLevel: ThinkingLevel.LOW }` in the adapter's
+  `buildConfig` so thinking tokens can't starve `maxOutputTokens`; bumped
+  `SPEC_PARSE_VERSION` 39 → 40 so stale cached parses are invalidated.
+- `App.tsx` `HomeGate` preloads `loadWorkbookWorkflow()` after sign-in, warming
+  the lazy workbook/import chunks while the instance is already warm; the
+  existing `createRetryableLoader` still allows a fresh attempt if the first
+  click ever hits a transient failure.
+
+**Why it was needed:** Render runs the direct Gemini API (`GOOGLE_API_KEY`);
+the configured model was retired, so "AI last" never fired, and cold starts
+made the first import click fail at the chunk layer.
+
+**Verification:** live API probes (3.6-flash JSON + thinkingLevel LOW → 200
+STOP; 2.5-flash/2.5-pro/2.0-flash → 404), `check-model-version-bump.sh` pass,
+targeted `tsc -b` typechecks for the changed packages
+(integrations-openai-ai-server, run-calculator, api-server, spec-import,
+inventory-math, recipe-guide-import). Full root `CI=true pnpm run typecheck`
+is pending on this ARM box — its pretypecheck needs a missing `lightningcss`
+aarch64 binary (the CI Typecheck job covers it). Large-spec harness
+re-verification runs via CI/nightly.
+
 ## 2026-09-14 — Add metadata-only ZIP upload inventory
 
 **File(s):** `scripts/zip_asset_inventory.py`, `scripts/test_zip_asset_inventory.py`, `scripts/package.json`
