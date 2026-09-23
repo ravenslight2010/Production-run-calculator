@@ -12,6 +12,38 @@ const API_BASE =
 const PASSWORD = "TestPass123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 
+const RECIPE_PICKER_CONTRACT = [
+  { context: "dough", testId: "setup-recipe-picker-dough", label: "Dough recipe" },
+  { context: "sauce", testId: "setup-recipe-picker-sauce", label: "Sauce recipe" },
+  {
+    context: "cheese",
+    testId: "setup-recipe-picker-app-1-cheese",
+    label: "Applicator 1 cheese recipe",
+  },
+  {
+    context: "mix",
+    testId: "setup-recipe-picker-app-2-mix",
+    label: "Applicator 2 mix recipe",
+  },
+] as const;
+
+async function assertRecipePickerContract(
+  surface: Locator,
+  surfaceName: string,
+): Promise<void> {
+  for (const picker of RECIPE_PICKER_CONTRACT) {
+    const selector = surface.getByTestId(picker.testId);
+    await expect(
+      selector,
+      `${surfaceName}: ${picker.context} picker drifted (${picker.testId})`,
+    ).toHaveCount(1);
+    await expect(
+      selector,
+      `${surfaceName}: ${picker.context} picker has the wrong accessible label`,
+    ).toHaveAttribute("aria-label", picker.label);
+  }
+}
+
 async function openManagerAttention(page: Page): Promise<void> {
   await page.getByRole("button", { name: /^More/ }).click();
   await page.getByRole("menuitem", { name: "Manager attention", exact: true }).click();
@@ -166,6 +198,145 @@ test("manager setup stays usable when recipe names are incomplete", async ({
     );
 
     expect(browserErrors).toEqual([]);
+  } finally {
+    await fixtures.cleanup();
+  }
+});
+
+test("live and setup profile recipe pickers keep the shared selector contract", async ({
+  page,
+  playwright,
+}) => {
+  test.setTimeout(120_000);
+  const fixtures = await AuthorizedBrowserFixtures.create(playwright, API_BASE, SIGNUP_CODE);
+
+  try {
+    const account = await fixtures.createAccount({
+      username: uniqueTestId("e2e_recipe_picker_contract"),
+      password: PASSWORD,
+      capabilities: DEFAULT_MANAGER_CAPABILITIES,
+      onboardingSeen: true,
+    });
+    const brand = uniqueTestId("PickerContractBrand");
+    const flavor = uniqueTestId("PickerContractFlavor");
+    const doughName = uniqueTestId("PickerContractDough");
+    const sauceName = uniqueTestId("PickerContractSauce");
+    const cheeseName = uniqueTestId("PickerContractCheese");
+    const mixName = uniqueTestId("PickerContractMix");
+    const runId = uniqueTestId("picker-contract-run");
+    const now = Date.now();
+    const values = {
+      casesNeeded: 1,
+      pizzasPerCase: 1,
+      casesPerSkid: 1,
+      crustsPerCycle: 1,
+      cycleSpeed: 1,
+      speedAdjustment: 1,
+      doughRecipeName: doughName,
+      doughRecipe: [{ ingredient: "Flour", lbs: 10 }],
+      frontlineRecipeName: sauceName,
+      frontlineRecipe: [{ ingredient: "Tomato", lbs: 10 }],
+      app1Type: "Cheese",
+      app1CheeseRecipeName: cheeseName,
+      app1CheeseRecipe: [{ ingredient: "Cheese", lbs: 10 }],
+      app2Type: "Mix",
+      app2CheeseRecipeName: mixName,
+      app2CheeseRecipe: [{ ingredient: "Blend", lbs: 10 }],
+    };
+
+    await fixtures.seedNamedRecipe("dough", account, {
+      id: uniqueTestId("picker-contract-dough"),
+      name: doughName,
+      components: [{ ingredient: "Flour", lbs: 10 }],
+    });
+    await fixtures.seedNamedRecipe("sauce", account, {
+      id: uniqueTestId("picker-contract-sauce"),
+      name: sauceName,
+      components: [{ ingredient: "Tomato", lbs: 10 }],
+    });
+    await fixtures.seedCheeseRecipe(account, {
+      id: uniqueTestId("picker-contract-cheese"),
+      name: cheeseName,
+      components: [{ ingredient: "Cheese", lbs: 10 }],
+    });
+    await fixtures.seedMix(account, {
+      id: uniqueTestId("picker-contract-mix"),
+      name: mixName,
+      components: [{ ingredient: "Blend", perPizza: 1 }],
+    });
+    await fixtures.seedBrandProfile(account, {
+      brand,
+      flavor,
+      values,
+      updatedAt: now,
+    });
+    await fixtures.seedTodaySync({
+      token: account.token,
+      senderId: uniqueTestId("picker-contract-sender"),
+      payload: {
+        dayState: {
+          date: new Date().toISOString().slice(0, 10),
+          runs: [{ id: runId, brand, flavor, casesNeeded: 1, seeded: false }],
+          currentIndex: 0,
+          resetAt: 0,
+          substitutions: [],
+          substitutionLog: [],
+          stagedItems: {},
+        },
+        runValues: { [runId]: values },
+        runValuesUpdatedAt: { [runId]: now },
+        packagingProgress: {},
+      },
+    });
+
+    await page.context().addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+
+    await page.getByRole("button", { name: /^More/ }).click();
+    await page.getByRole("menuitem", { name: "Setup", exact: true }).click();
+    const liveSurface = page.getByTestId("setup-recipes-fieldset");
+    await expect(liveSurface).toBeVisible();
+    await expect(liveSurface.getByTestId("setup-recipe-picker-dough")).toBeVisible();
+    await liveSurface.getByText("Sauce & Applicator Weights", { exact: true }).click();
+    await assertRecipePickerContract(liveSurface, "live Setup tab");
+
+    await page.getByRole("button", { name: /^More/ }).click();
+    await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
+    const settings = page.getByRole("dialog", { name: "Manage Lists & Settings" });
+    await expect(settings).toBeVisible();
+    await settings.getByRole("button", { name: "Tools", exact: true }).click();
+    await settings.getByRole("button", { name: "Setup Profiles", exact: true }).click();
+    await settings.getByRole("button", { name: "Open Setup Profiles Editor", exact: true }).click();
+
+    const profileSurface = page.getByRole("dialog", { name: "Setup Profiles" });
+    await expect(profileSurface).toBeVisible();
+    const brandPicker = profileSurface.getByRole("button", {
+      name: "Pick or add a brand…",
+      exact: true,
+    });
+    await brandPicker.click();
+    await page.getByPlaceholder("Search or add…").fill(brand);
+    const existingBrand = page.getByRole("button", { name: brand, exact: true });
+    if (await existingBrand.count()) {
+      await existingBrand.last().click();
+    } else {
+      await page.getByRole("button", { name: `Add "${brand}"`, exact: true }).click();
+    }
+    const flavorPicker = profileSurface.getByRole("button", {
+      name: "Pick or add a flavor…",
+      exact: true,
+    });
+    await flavorPicker.click();
+    await page.getByPlaceholder("Search or add…").fill(flavor);
+    const existingFlavor = page.getByRole("button", { name: flavor, exact: true });
+    if (await existingFlavor.count()) {
+      await existingFlavor.last().click();
+    } else {
+      await page.getByRole("button", { name: `Add "${flavor}"`, exact: true }).click();
+    }
+    await expect(profileSurface.getByTestId("setup-recipe-picker-dough")).toBeVisible();
+    await assertRecipePickerContract(profileSurface, "Setup Profiles editor");
   } finally {
     await fixtures.cleanup();
   }
