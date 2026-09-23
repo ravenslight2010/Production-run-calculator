@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { DEFAULT_VALUES } from "../types";
 
 const mocks = vi.hoisted(() => ({
   loadProfile: vi.fn(),
@@ -51,7 +52,17 @@ vi.mock("../pages/home", () => ({
   CheesePickCard: () => null,
   MixRecipeCard: () => null,
   DoughRecipeCard: () => null,
-  FrontlineRecipeCard: () => null,
+  FrontlineRecipeCard: ({
+    recipePickerLabel,
+    recipePickerTestId,
+  }: {
+    recipePickerLabel?: string;
+    recipePickerTestId?: string;
+  }) => (
+    <div data-testid={recipePickerTestId} aria-label={recipePickerLabel}>
+      {recipePickerLabel}
+    </div>
+  ),
   TypeDropdown: () => null,
 }));
 
@@ -116,6 +127,19 @@ afterEach(() => {
 });
 
 describe("SetupProfileEditor capability gate", () => {
+  it("keeps the sauce ingredient picker labeled in Setup Profiles", () => {
+    mocks.loadProfile.mockReturnValue({
+      ...DEFAULT_VALUES,
+      frontlineRecipeName: "Tomato Sauce",
+      frontlineRecipe: [{ ingredient: "Tomato", lbs: 1 }],
+    });
+
+    render(<SetupProfileEditor {...editorProps(true)} />);
+
+    const picker = screen.getByTestId("setup-recipe-picker-sauce-ingredients");
+    expect(picker.getAttribute("aria-label")).toBe("Sauce recipe ingredients");
+  });
+
   it("keeps a missing case pack saveable as a clearly labeled draft", async () => {
     mocks.loadProfile.mockReturnValue(null);
     mocks.saveProfileAndWaitForServer.mockResolvedValue("saved");
