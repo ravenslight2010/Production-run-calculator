@@ -20,3 +20,19 @@ production status, keep local release evidence bound to its matching database
 and environment, and leave retained reports untouched when a development
 source gate fails. Record the exact remaining NO-GO counts instead of resetting
 markers, copying production data, or fabricating evidence.
+
+Aggregate read-only counts from a managed production replica can classify the
+target as matching, but they are not the bounded verifier result. Full release
+evidence still requires the exact deployed Git SHA from the controlled
+deployment/report handoff and a verifier run in the database-owning environment.
+
+**Why:** Deployment metadata may confirm that a build is healthy without
+exposing its source revision, while the local development `DATABASE_URL` can
+point at a partial fixture. Accepting counts or the current checkout SHA would
+mix database ownership and revision identity.
+
+**How to apply:** Treat a matching production preflight without a bound
+deployed revision as an actionable NO-GO. Do not generate a write-side
+operational report merely to discover the revision; obtain the controlled
+handoff, run the full read-only verifier, then import only its summary-shaped
+output.
