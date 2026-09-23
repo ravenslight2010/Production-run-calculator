@@ -1,7 +1,9 @@
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import { Client } from "pg";
 import {
   AuthorizedBrowserFixtures,
   DEFAULT_MANAGER_CAPABILITIES,
+  requireIsolatedTestDatabase,
   uniqueTestId,
 } from "./isolation";
 
@@ -29,6 +31,7 @@ test("manager attention remains stable across dialog and destination transitions
       browserErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
     }
   });
+  let malformedAliasId: number | null = null;
 
   try {
     const account = await fixtures.createAccount({
@@ -37,6 +40,25 @@ test("manager attention remains stable across dialog and destination transitions
       capabilities: DEFAULT_MANAGER_CAPABILITIES,
       onboardingSeen: true,
     });
+    const malformedAliasExternalName = uniqueTestId("MalformedFlavorAlias");
+    const malformedAliasCanonicalName = uniqueTestId("CanonicalFlavor");
+    const seedDb = new Client({
+      connectionString: requireIsolatedTestDatabase("seed malformed manager-attention alias"),
+    });
+    try {
+      await seedDb.connect();
+      const result = await seedDb.query<{ id: number }>(
+        `INSERT INTO spec_import_aliases
+          (scope, kind, external_name, canonical_name, context)
+         VALUES ('live', 'flavor', $1, $2, NULL)
+         RETURNING id`,
+        [malformedAliasExternalName, malformedAliasCanonicalName],
+      );
+      malformedAliasId = result.rows[0]?.id ?? null;
+      expect(malformedAliasId).not.toBeNull();
+    } finally {
+      await seedDb.end().catch(() => {});
+    }
     const scheduledBrand = uniqueTestId("AttentionBrand");
     const scheduledFlavor = uniqueTestId("AttentionFlavor");
     const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
@@ -79,8 +101,15 @@ test("manager attention remains stable across dialog and destination transitions
 
     await page.context().addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
     await page.setViewportSize({ width: 1440, height: 1000 });
+    const malformedAliasRead = page.waitForResponse(
+      (response) =>
+        response.request().method() === "GET"
+        && response.url().includes("/api/spec-import-aliases"),
+      { timeout: 25_000 },
+    );
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    await expect((await malformedAliasRead).status()).toBe(200);
 
     await openManagerAttention(page);
     await expect(page.getByTestId("manager-attention-password-resets")).toBeVisible();
@@ -110,7 +139,7 @@ test("manager attention remains stable across dialog and destination transitions
 
     await openManagerAttention(page);
     await page.getByTestId("manager-attention-action-incidents").click();
-    await expect(page.getByRole("heading", { name: "Reported issues" })).toBeVisible();
+    await expect(page.getByText("Reported issues", { exact: true })).toBeVisible();
 
     await openManagerAttention(page);
     await page.getByTestId("manager-attention-action-recipe-setup").click();
@@ -118,7 +147,7 @@ test("manager attention remains stable across dialog and destination transitions
     await expect(page.getByText(scheduledBrand, { exact: true })).toBeVisible();
     await expect(page.getByText(scheduledFlavor, { exact: true })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("manager-attention-destination.png") });
-    await page.getByRole("button", { name: "Close" }).click();
+    await page.getByRole("button", { name: "Close", exact: true }).click();
 
     await page.reload({ waitUntil: "domcontentloaded" });
     await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
@@ -126,8 +155,20 @@ test("manager attention remains stable across dialog and destination transitions
     await expect(page.getByTestId("manager-attention-list")).toBeVisible();
     await page.getByRole("button", { name: "Open full manager queue" }).click();
     await expect(page.getByTestId("manager-action-queue")).toBeVisible();
+    await expect(page.getByText("Something went wrong", { exact: true })).toHaveCount(0);
     expect(browserErrors).toEqual([]);
   } finally {
+    if (malformedAliasId !== null) {
+      const cleanupDb = new Client({
+        connectionString: requireIsolatedTestDatabase("remove malformed manager-attention alias"),
+      });
+      try {
+        await cleanupDb.connect();
+        await cleanupDb.query("DELETE FROM spec_import_aliases WHERE id = $1", [malformedAliasId]);
+      } finally {
+        await cleanupDb.end().catch(() => {});
+      }
+    }
     await fixtures.cleanup();
   }
 });
