@@ -16,6 +16,10 @@ import {
   RELEASE_PREFLIGHT_DB_ATTEMPTS,
   runReleasePreflightDatabaseRetry,
 } from "./release-preflight-db-retry.mts";
+import {
+  validateReadinessDeploymentHandoff,
+  type ReadinessDeploymentHandoff,
+} from "./capture-readiness-recovery.mts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const DEFAULT_REPORT = "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json";
@@ -1266,24 +1270,59 @@ function currentRevision(): string {
 export function resolveSourceLibraryRevision(
   environment: SourceLibraryEvidenceEnvironment,
   configuredRevision: string | undefined,
+  deploymentHandoffPath?: string,
+  now?: Date,
 ): string {
-  const revision = configuredRevision?.trim() ||
+  const explicitRevision = configuredRevision?.trim() || undefined;
+  const handoffRevision = deploymentHandoffPath
+    ? readSourceLibraryDeploymentHandoff(deploymentHandoffPath, now).deployedRevision
+    : undefined;
+  if (
+    explicitRevision !== undefined &&
+    handoffRevision !== undefined &&
+    explicitRevision !== handoffRevision
+  ) {
+    throw new Error(
+      "Source-library revision conflicts with the deployed revision in the deployment handoff.",
+    );
+  }
+  const revision =
+    explicitRevision ||
+    handoffRevision ||
     (environment === "development" ? currentRevision() : undefined);
   if (!revision) {
     throw new Error(
-      "Missing --revision for release evidence; pass the exact deployed 40-character Git commit SHA",
+      "Missing deployed revision for release evidence; pass --revision or --deployment-handoff with the exact deployed 40-character Git commit SHA",
     );
   }
   if (!/^[a-f0-9]{40}$/u.test(revision)) {
-    throw new Error("Invalid --revision; expected the full 40-character Git commit SHA");
+    throw new Error(
+      "Invalid --revision; expected the full 40-character Git commit SHA; pass the exact deployed 40-character Git commit SHA.",
+    );
   }
   return revision;
+}
+
+export function readSourceLibraryDeploymentHandoff(
+  handoffPath: string,
+  now?: Date,
+): ReadinessDeploymentHandoff {
+  const resolvedPath = path.resolve(process.cwd(), handoffPath);
+  const stats = fs.lstatSync(resolvedPath);
+  if (!stats.isFile() || stats.isSymbolicLink()) {
+    throw new Error(
+      "Source-library deployment handoff must be a regular file.",
+    );
+  }
+  return validateReadinessDeploymentHandoff(fs.readFileSync(resolvedPath), { now });
 }
 
 export function assertProductionSourceLibraryCapture(options: {
   environmentArgument: string | undefined;
   configuredRevision: string | undefined;
   revisionArgumentProvided: boolean;
+  deploymentHandoffArgumentProvided?: boolean;
+  deploymentHandoffPath?: string;
   outputPath: string | undefined;
   preflight: boolean;
   environment: NodeJS.ProcessEnv;
@@ -1293,17 +1332,24 @@ export function assertProductionSourceLibraryCapture(options: {
       "Production source-library capture requires the explicit --environment release flag.",
     );
   }
-  if (!options.configuredRevision?.trim()) {
+  if (!options.configuredRevision?.trim() && !options.deploymentHandoffPath?.trim()) {
     throw new Error(
-      "Production source-library capture requires the explicit --revision deployed Git SHA.",
+      "Production source-library capture requires --revision or --deployment-handoff with the deployed Git SHA.",
     );
   }
-  if (!options.revisionArgumentProvided) {
+  if (
+    !options.revisionArgumentProvided &&
+    options.deploymentHandoffArgumentProvided !== true
+  ) {
     throw new Error(
-      "Production source-library capture requires --revision on the command line; do not rely on an ambient revision variable.",
+      "Production source-library capture requires --revision or --deployment-handoff on the command line; do not rely on an ambient revision variable.",
     );
   }
-  resolveSourceLibraryRevision("release", options.configuredRevision);
+  resolveSourceLibraryRevision(
+    "release",
+    options.configuredRevision,
+    options.deploymentHandoffPath,
+  );
   if (options.preflight) {
     throw new Error(
       "Production source-library capture does not support --preflight; capture the full bounded verifier result.",
@@ -1343,11 +1389,18 @@ async function main() {
   const environment = parseSourceLibraryEvidenceEnvironment(environmentArgument);
   const captureProduction = process.argv.includes("--capture-production");
   const revisionArgumentProvided = process.argv.includes("--revision");
+  const deploymentHandoffArgumentProvided =
+    process.argv.includes("--deployment-handoff");
   const configuredRevisionArgument =
     argument("--revision", process.env.SOURCE_LIBRARY_RECONCILIATION_REVISION);
+  const deploymentHandoffPath = argument(
+    "--deployment-handoff",
+    process.env.SOURCE_LIBRARY_RECONCILIATION_DEPLOYMENT_HANDOFF,
+  );
   const revision = resolveSourceLibraryRevision(
     environment,
     configuredRevisionArgument,
+    deploymentHandoffPath,
   );
   const outputPath = outputPathArgument();
   const preflightOnly = process.argv.includes("--preflight");
@@ -1356,6 +1409,8 @@ async function main() {
       environmentArgument,
       configuredRevision: configuredRevisionArgument,
       revisionArgumentProvided,
+      deploymentHandoffArgumentProvided,
+      deploymentHandoffPath,
       outputPath,
       preflight: preflightOnly,
       environment: process.env,

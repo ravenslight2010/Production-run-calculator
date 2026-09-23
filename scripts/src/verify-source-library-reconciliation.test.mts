@@ -9,6 +9,7 @@ import {
   parseReport,
   preflightSourceLibraryReconciliation,
   resolveSourceLibraryRevision,
+  readSourceLibraryDeploymentHandoff,
   assertProductionSourceLibraryCapture,
   assertBoundedSourceLibraryReconciliationEvidence,
   isRetryableSourceLibraryDatabaseError,
@@ -165,8 +166,68 @@ assert.throws(
       preflight: false,
       environment: { DATABASE_URL: "postgresql://production.example/app" },
     }),
-  /requires --revision on the command line/,
+  /requires --revision or --deployment-handoff on the command line/,
 );
+
+const handoffDirectory = await mkdtemp(
+  path.join(tmpdir(), "source-library-handoff-"),
+);
+try {
+  const handoffPath = path.join(handoffDirectory, "deployment-handoff.json");
+  const issuedAt = new Date(Date.now() - 1_000).toISOString();
+  await writeFile(
+    handoffPath,
+    JSON.stringify({
+      schemaVersion: 1,
+      kind: "published-deployment-handoff",
+      deploymentId: "published-source-evidence-test",
+      deployedRevision: "b".repeat(40),
+      issuedAt,
+      expiresAt: new Date(Date.parse(issuedAt) + 60 * 60 * 1_000).toISOString(),
+    }),
+  );
+  assert.equal(
+    readSourceLibraryDeploymentHandoff(handoffPath).deployedRevision,
+    "b".repeat(40),
+  );
+  assert.equal(
+    resolveSourceLibraryRevision("release", undefined, handoffPath),
+    "b".repeat(40),
+  );
+  assert.doesNotThrow(() =>
+    assertProductionSourceLibraryCapture({
+      environmentArgument: "release",
+      configuredRevision: undefined,
+      revisionArgumentProvided: false,
+      deploymentHandoffArgumentProvided: true,
+      deploymentHandoffPath: handoffPath,
+      outputPath: undefined,
+      preflight: false,
+      environment: { DATABASE_URL: "postgresql://production.example/app" },
+    }),
+  );
+  assert.throws(
+    () => resolveSourceLibraryRevision("release", "c".repeat(40), handoffPath),
+    /conflicts with the deployed revision/,
+  );
+  await writeFile(
+    handoffPath,
+    JSON.stringify({
+      schemaVersion: 1,
+      kind: "published-deployment-handoff",
+      deploymentId: "published-source-evidence-test",
+      deployedRevision: "b".repeat(40),
+      issuedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1_000).toISOString(),
+      expiresAt: new Date(Date.now() - 24 * 60 * 60 * 1_000).toISOString(),
+    }),
+  );
+  assert.throws(
+    () => readSourceLibraryDeploymentHandoff(handoffPath),
+    /handoff is stale/,
+  );
+} finally {
+  await rm(handoffDirectory, { recursive: true, force: true });
+}
 
 const rowsByTable = new Map<string, Array<Record<string, unknown>>>();
 for (const proposal of report.proposals) {

@@ -616,6 +616,47 @@ async function run(): Promise<void> {
     () => resolveSourceLibraryReleaseRevision("a".repeat(40), "release", undefined),
     /requires --source-library-revision/,
   );
+  const handoffDirectory = await mkdtemp(
+    join(tmpdir(), "release-source-handoff-"),
+  );
+  try {
+    const issuedAt = new Date(Date.now() - 1_000).toISOString();
+    const handoffPath = join(handoffDirectory, "deployment-handoff.json");
+    await writeFile(
+      handoffPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        kind: "published-deployment-handoff",
+        deploymentId: "published-release-test",
+        deployedRevision: "c".repeat(40),
+        issuedAt,
+        expiresAt: new Date(
+          Date.parse(issuedAt) + 60 * 60 * 1_000,
+        ).toISOString(),
+      }),
+    );
+    assert.equal(
+      resolveSourceLibraryReleaseRevision(
+        "a".repeat(40),
+        "release",
+        undefined,
+        handoffPath,
+      ),
+      "c".repeat(40),
+    );
+    assert.throws(
+      () =>
+        resolveSourceLibraryReleaseRevision(
+          "a".repeat(40),
+          "release",
+          "d".repeat(40),
+          handoffPath,
+        ),
+      /conflicts with the deployed revision/,
+    );
+  } finally {
+    await rm(handoffDirectory, { recursive: true, force: true });
+  }
   assert.deepEqual(
     configuredKeyrings,
     [

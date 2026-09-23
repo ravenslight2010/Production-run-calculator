@@ -87,8 +87,20 @@ try {
     .digest("hex");
   const input = path.join(directory, "input.json");
   const output = path.join(directory, "output.json");
+  const handoffPath = path.join(directory, "deployment-handoff.json");
   const now = new Date("2026-09-08T12:01:00.000Z");
   await writeFile(input, JSON.stringify(evidence(reportSha256)));
+  await writeFile(
+    handoffPath,
+    JSON.stringify({
+      schemaVersion: 1,
+      kind: "published-deployment-handoff",
+      deploymentId: "published-source-evidence-test",
+      deployedRevision: revision,
+      issuedAt: "2026-09-08T12:00:00.000Z",
+      expiresAt: "2026-09-08T13:00:00.000Z",
+    }),
+  );
 
   await importSourceLibraryReconciliationEvidence({
     input,
@@ -100,6 +112,36 @@ try {
     now,
   });
   assert.deepEqual(await readFile(output), await readFile(input));
+
+  const handoffOutput = path.join(directory, "handoff-output.json");
+  await importSourceLibraryReconciliationEvidence({
+    input,
+    output: handoffOutput,
+    report,
+    healId: DEFAULT_HEAL_ID,
+    fromDate: DEFAULT_FROM_DATE,
+    deploymentHandoffPath: handoffPath,
+    now,
+  });
+  assert.deepEqual(await readFile(handoffOutput), await readFile(input));
+  assert.doesNotMatch(
+    await readFile(handoffOutput, "utf8"),
+    /published-source-evidence-test|deployment-handoff/,
+  );
+
+  await assert.rejects(
+    importSourceLibraryReconciliationEvidence({
+      input,
+      output: handoffOutput,
+      report,
+      healId: DEFAULT_HEAL_ID,
+      fromDate: DEFAULT_FROM_DATE,
+      revision: "c".repeat(40),
+      deploymentHandoffPath: handoffPath,
+      now,
+    }),
+    /conflicts with the deployed revision/,
+  );
 
   const staleInput = path.join(directory, "stale.json");
   await writeFile(

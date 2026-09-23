@@ -26,6 +26,7 @@ import {
   computeSourceLibraryEvidenceId,
   parseSourceLibraryPreflightDiagnostic as parseStoredSourceLibraryPreflightDiagnostic,
   parseSourceLibraryEvidenceEnvironment,
+  readSourceLibraryDeploymentHandoff,
   summarizeSourceLibraryPreflight,
   type SourceLibraryEvidenceEnvironment,
   type SourceLibraryPreflightDiagnostic,
@@ -1137,6 +1138,17 @@ const configuredSourceLibraryRevision =
   (cliOptionValue("--source-library-revision") ??
     process.env.SOURCE_LIBRARY_RECONCILIATION_REVISION?.trim()) ||
   undefined;
+const configuredSourceLibraryDeploymentHandoff =
+  (cliOptionValue("--source-library-deployment-handoff") ??
+    process.env.SOURCE_LIBRARY_RECONCILIATION_DEPLOYMENT_HANDOFF?.trim()) ||
+  undefined;
+const sourceLibraryRevisionArgs = configuredSourceLibraryRevision
+  ? ["--revision", configuredSourceLibraryRevision]
+  : [];
+const sourceLibraryDeploymentHandoffArgs =
+  configuredSourceLibraryDeploymentHandoff
+    ? ["--deployment-handoff", configuredSourceLibraryDeploymentHandoff]
+    : [];
 const configuredReadinessDeploymentId =
   (cliOptionValue("--readiness-deployment-id") ??
     process.env.READINESS_EVIDENCE_DEPLOYMENT_ID?.trim()) ||
@@ -1150,13 +1162,28 @@ export function resolveSourceLibraryReleaseRevision(
   releaseRevision: string,
   environment: SourceLibraryEvidenceEnvironment,
   configuredRevision: string | undefined,
+  deploymentHandoffPath?: string,
 ): string {
+  const explicitRevision = configuredRevision?.trim() || undefined;
+  const handoffRevision = deploymentHandoffPath
+    ? readSourceLibraryDeploymentHandoff(deploymentHandoffPath).deployedRevision
+    : undefined;
+  if (
+    explicitRevision !== undefined &&
+    handoffRevision !== undefined &&
+    explicitRevision !== handoffRevision
+  ) {
+    throw new Error(
+      "Source-library revision conflicts with the deployed revision in the deployment handoff.",
+    );
+  }
   const revision =
-    configuredRevision ??
+    explicitRevision ??
+    handoffRevision ??
     (environment === "development" ? releaseRevision : undefined);
   if (!revision) {
     throw new Error(
-      "Production source-library evidence requires --source-library-revision with the exact deployed 40-character Git commit SHA.",
+      "Production source-library evidence requires --source-library-revision or --source-library-deployment-handoff with the exact deployed 40-character Git commit SHA.",
     );
   }
   if (!/^[a-f0-9]{40}$/u.test(revision)) {
@@ -1184,6 +1211,8 @@ export const SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_STEP: ReleaseStep = {
     sourceLibraryFromDate,
     "--environment",
     sourceLibraryEnvironment,
+    ...sourceLibraryRevisionArgs,
+    ...sourceLibraryDeploymentHandoffArgs,
     "--preflight",
   ],
   stage: "source-library-preflight",
@@ -1204,6 +1233,8 @@ export const SOURCE_LIBRARY_RECONCILIATION_STEP: ReleaseStep = {
     sourceLibraryFromDate,
     "--environment",
     sourceLibraryEnvironment,
+    ...sourceLibraryRevisionArgs,
+    ...sourceLibraryDeploymentHandoffArgs,
     "--output",
     resolve(
       rootDir,
@@ -1237,6 +1268,8 @@ export const SOURCE_LIBRARY_RECONCILIATION_IMPORT_STEP: ReleaseStep = {
     sourceLibraryHealId,
     "--from-date",
     sourceLibraryFromDate,
+    ...sourceLibraryRevisionArgs,
+    ...sourceLibraryDeploymentHandoffArgs,
     "--output",
     resolve(
       rootDir,
@@ -1818,13 +1851,16 @@ function printHelp(): void {
     "  --source-library-revision <sha>   Exact deployed 40-character SHA for production reconciliation evidence",
   );
   console.log(
+    "  --source-library-deployment-handoff <path>   Validate a current published deployment handoff and obtain its deployed SHA",
+  );
+  console.log(
     "  --readiness-deployment-id <id>   Expected published deployment ID for retained readiness evidence",
   );
   console.log(
     "  --deployed-revision <sha>       Expected deployed 40-character SHA for retained readiness evidence",
   );
   console.log(
-    "  pnpm --silent --filter @workspace/scripts exec tsx ./src/verify-source-library-reconciliation.mts --capture-production --environment release --revision <deployed-40-character-sha>  Capture bounded production evidence (read-only)",
+    "  pnpm --silent --filter @workspace/scripts exec tsx ./src/verify-source-library-reconciliation.mts --capture-production --environment release --deployment-handoff <handoff-path>  Capture bounded production evidence (read-only)",
   );
   console.log(
     "  pnpm --filter @workspace/scripts run check:release-evidence -- --evidence-dir <directory>  Verify a selected evidence directory (mode is read from its report)",
@@ -3704,6 +3740,7 @@ async function main(): Promise<void> {
             revision,
             sourceLibraryEnvironment,
             configuredSourceLibraryRevision,
+            configuredSourceLibraryDeploymentHandoff,
           )
         : revision;
       await verifyReleaseEvidence(undefined, {
@@ -3745,6 +3782,7 @@ async function main(): Promise<void> {
           revision,
           sourceLibraryEnvironment,
           configuredSourceLibraryRevision,
+          configuredSourceLibraryDeploymentHandoff,
         )
       : revision;
   } catch (error) {

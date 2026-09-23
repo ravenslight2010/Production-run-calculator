@@ -207,26 +207,30 @@ retained evidence are mandatory.
 
 ### Bind production reconciliation evidence to the deployed build
 
-Set `RELEASE_REVISION` on the controlled deployment to the full 40-character
-Git commit SHA that was deployed. The operational report exposes that value at
-`evidence.release.revision`; malformed or absent revision metadata is reported
-as `unknown` and is not valid release proof. `REPLIT_GIT_COMMIT` and
-`GIT_COMMIT` remain compatibility fallbacks, but operators should not depend on
-either being supplied automatically by the deployment platform.
+The controlled deployment must provide a current published-deployment handoff
+with the full 40-character Git commit SHA that was deployed. The
+provider-neutral handoff has this bounded shape:
+`{schemaVersion, kind, deploymentId, deployedRevision, issuedAt, expiresAt}`.
+The operational report may expose the same value at
+`evidence.release.revision`; malformed, absent, or expired revision metadata is
+not valid release proof. `REPLIT_GIT_COMMIT` and `GIT_COMMIT` remain
+compatibility fallbacks for development-only checks, but production source
+evidence never falls back to repository `HEAD`.
 
-Capture and import production reconciliation evidence with the exact revision
-returned by the deployed operational report. Run this from the deployment
-environment that owns the production `DATABASE_URL`; the capture mode refuses
-fixture query input, requires the explicit release environment and deployed
-revision, and runs one PostgreSQL `READ ONLY` transaction. Its stdout contains
-only the bounded verifier result, so it can be piped directly to the importer:
+Capture and import production reconciliation evidence with the revision in that
+handoff. Run this from the deployment environment that owns the production
+`DATABASE_URL`; the capture mode validates the handoff before querying,
+refuses fixture query input, requires the explicit release environment, and
+runs one PostgreSQL `READ ONLY` transaction. Its stdout contains only the
+bounded verifier result, so it can be piped directly to the importer:
 
 ```bash
+HANDOFF=/secure/path/published-deployment-handoff.json
 pnpm --silent --filter @workspace/scripts exec tsx \
   ./src/verify-source-library-reconciliation.mts \
   --capture-production \
   --environment release \
-  --revision <deployed-40-character-sha> \
+  --deployment-handoff "$HANDOFF" \
   --report attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json \
 | pnpm --filter @workspace/scripts exec tsx \
   ./src/import-source-library-reconciliation-evidence.mts \
@@ -234,7 +238,7 @@ pnpm --silent --filter @workspace/scripts exec tsx \
   --report attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json \
   --heal-id source-library-reconciliation-2026-08-26-v2 \
   --from-date 2026-08-26 \
-  --revision <deployed-40-character-sha> \
+  --deployment-handoff "$HANDOFF" \
   --output /secure/path/source-library-reconciliation.json
 ```
 
@@ -243,26 +247,29 @@ If a file handoff is required, add `--output
 regular file as `--input` to the importer. Do not export query results,
 database dumps, or development fixtures.
 
-Import the retained bounded file into a release run with the same explicit
-revision:
+Import the retained bounded file into a release run with the same validated
+handoff:
 
 ```bash
-SOURCE_LIBRARY_RECONCILIATION_REVISION=<deployed-40-character-sha> \
 pnpm run release:check -- \
   --source-library-environment release \
-  --source-library-revision <deployed-40-character-sha> \
+  --source-library-deployment-handoff /secure/path/published-deployment-handoff.json \
   --source-library-evidence /secure/path/source-library-reconciliation.json
 ```
 
 Release captures and imports reject a missing, malformed, `unknown`, or
-different revision. The production revision must come from the controlled
+stale handoff, and reject an explicit `--revision` that differs from the
+handoff. The production revision must come from the controlled
 deployment/report path; never substitute the current repository `HEAD`. The
-retained release report records both `Source-library evidence revision` and
-`Deployed revision`; for release evidence those values must match the SHA
-returned by the deployed operational report. The release runner passes that SHA
-explicitly to the source verifier's preflight and full verification/import
-steps, so an older release-state file or an omitted preflight value cannot
-silently qualify.
+handoff is read only for its bounded deployment identity and SHA and is not
+copied into retained evidence; recipe rows, aliases, database responses, and
+credentials are never retained. The retained release report records both
+`Source-library evidence revision` and `Deployed revision`; for release
+evidence those values must match the SHA returned by the controlled
+deployment/report path. The release runner validates and passes that SHA
+through the source verifier's preflight and full verification/import steps, so
+an older release-state file or an omitted preflight value cannot silently
+qualify.
 
 When a job stops before all gates complete, the workflow writes a separate
 NO-GO summary with the uploaded checkpoint-artifact link, the matching resume

@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { validateSourceLibraryReconciliationEvidence } from "./release-check.mts";
 import {
   assertBoundedSourceLibraryReconciliationEvidence,
+  resolveSourceLibraryRevision,
 } from "./verify-source-library-reconciliation.mts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -16,7 +17,8 @@ export type SourceLibraryEvidenceImportOptions = {
   report: string;
   healId: string;
   fromDate: string;
-  revision: string;
+  revision?: string;
+  deploymentHandoffPath?: string;
   now?: Date;
 };
 
@@ -62,12 +64,12 @@ export async function importSourceLibraryReconciliationEvidence(
   if (healDate !== undefined && healDate !== fromDate) {
     throw new Error("--from-date must match the dated heal identity.");
   }
-  const revision = options.revision.trim();
-  if (!/^[a-f0-9]{40}$/u.test(revision)) {
-    throw new Error(
-      "Invalid --revision; pass the exact deployed 40-character Git commit SHA.",
-    );
-  }
+  const revision = resolveSourceLibraryRevision(
+    "release",
+    options.revision,
+    options.deploymentHandoffPath,
+    options.now,
+  );
 
   const [evidenceBytes, reportBytes] = await Promise.all([
     readInput(options.input === "-" ? "-" : input),
@@ -102,15 +104,31 @@ export async function importSourceLibraryReconciliationEvidence(
 }
 
 async function main(): Promise<void> {
+  const optionalArgument = (
+    name: string,
+    fallback?: string,
+  ): string | undefined => {
+    const index = process.argv.indexOf(name);
+    if (index < 0) return fallback;
+    const value = process.argv[index + 1];
+    if (!value || value.startsWith("--")) {
+      throw new Error(`Missing value for ${name}`);
+    }
+    return value;
+  };
   await importSourceLibraryReconciliationEvidence({
     input: argument("--input"),
     output: argument("--output"),
     report: argument("--report"),
     healId: argument("--heal-id"),
     fromDate: argument("--from-date"),
-    revision: argument(
+    revision: optionalArgument(
       "--revision",
       process.env.SOURCE_LIBRARY_RECONCILIATION_REVISION,
+    ),
+    deploymentHandoffPath: optionalArgument(
+      "--deployment-handoff",
+      process.env.SOURCE_LIBRARY_RECONCILIATION_DEPLOYMENT_HANDOFF,
     ),
   });
 }
