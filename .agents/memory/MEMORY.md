@@ -131,7 +131,6 @@
 - [Mix Plan snapshot refresh](mix-plan-snapshot-refresh.md) — canonical Mix Plan snapshots must invalidate on run ingredient/value edits, not only lifecycle changes.
 - [Operational dialog safety](capability-gated-controlled-dialogs.md) + [viewport](operational-dialog-viewport-safety.md) — close revoked portals safely and keep short-landscape overlays reachable.
 - [Case-based production input validity](case-based-production-input-validity.md) — requested cases without a positive pizzas-per-case value must suppress Sauce/Frontline needs, buffers, exports, and claims.
-- [Local CI PostgreSQL parity](local-ci-postgres-parity.md) — local disposable clusters need CI-matching role and writable socket settings before browser workflow diagnosis is meaningful.
 - [Server operational projection](server-operational-projection.md) — live timer/counter read models travel beside the sync snapshot, never inside its hashed persisted document.
 - [Browser peer and evidence assertions](browser-peer-startup-ordering.md) + [browser-evidence-assertions](browser-evidence-assertions.md) + [browser-fixture-server-identifiers](browser-fixture-server-identifiers.md) — assert no-op startup, visible business labels, and stable fixture fields.
 - [Touch picker browser coverage](touch-picker-browser-coverage.md) — viewport size does not exercise touch routing; mobile picker tests need explicit pointer/touch capabilities.

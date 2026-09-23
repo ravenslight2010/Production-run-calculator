@@ -816,6 +816,8 @@ export const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabConte
                 <SetupRecipesRoleGate isSupervisor={!!isSupervisor}>
                 <div className="space-y-5">
                   <DoughRecipeCard
+                    recipePickerLabel="Dough recipe"
+                    recipePickerTestId="setup-recipe-picker-dough"
                     batchesNeeded={calc.batchesNeeded}
                     fields={doughFields}
                     recipe={v.doughRecipe ?? []}
@@ -969,6 +971,8 @@ export const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabConte
                     {sauceWeightsOpen && <CardContent className="px-5 pb-5 space-y-4">
                       <TypeDropdown
                         label="Sauce"
+                        ariaLabel="Sauce recipe"
+                        testId="setup-recipe-picker-sauce"
                         value={v.frontlineRecipeName}
                         onChange={val => { form.setValue("frontlineRecipeName", val, { shouldDirty: true }); if (!val) { form.setValue("sauceOzPerPizza", 0, { shouldDirty: true }); form.setValue("sauceBarrelLbs", 0, { shouldDirty: true }); } else { const poolRows = serverSauceRowsByName.get(val.trim().toLowerCase()) ?? loadFrontlineRecipePresets()[val.trim()]; const rows = poolRows?.map((row: any) => ({ ...row })); if (rows) { form.setValue("frontlineRecipe", rows, { shouldDirty: true }); replaceFrontline(rows); } if (!(rows ?? []).some((r: any) => Number(r.lbs) > 0)) { applyLearnedBatchLbs(val, "sauceBarrelLbs"); } } }}
                         options={frontlineRecipeNameOptions}
@@ -999,6 +1003,8 @@ export const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabConte
                       {v.frontlineRecipeName.trim() && (
                         <FrontlineRecipeCard
                           embedded
+                          recipePickerLabel="Sauce recipe ingredients"
+                          recipePickerTestId="setup-recipe-picker-sauce-ingredients"
                           fields={frontlineFields}
                           recipe={v.frontlineRecipe ?? []}
                           register={form.register}
@@ -1075,6 +1081,8 @@ export const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabConte
                         <CheesePickCard
                           embedded
                           label={v.app1Type || "Applicator 1"}
+                          recipePickerLabel="Applicator 1 cheese recipe"
+                          recipePickerTestId="setup-recipe-picker-app-1-cheese"
                           batches={calc.app1Batches}
                           ozPerPizza={v.app1OzPerPizza}
                           recipe={v.app1CheeseRecipe ?? []}
@@ -1099,6 +1107,8 @@ export const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabConte
                         <MixRecipeCard
                           embedded
                           label={v.app1Type || "Applicator 1"}
+                          recipePickerLabel="Applicator 1 mix recipe"
+                          recipePickerTestId="setup-recipe-picker-app-1-mix"
                           totalRunLbs={calc.app1Lbs}
                           fields={cheese1Fields}
                           recipe={v.app1CheeseRecipe ?? []}
@@ -1152,6 +1162,8 @@ export const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabConte
                         <CheesePickCard
                           embedded
                           label={v.app2Type || "Applicator 2"}
+                          recipePickerLabel="Applicator 2 cheese recipe"
+                          recipePickerTestId="setup-recipe-picker-app-2-cheese"
                           batches={calc.app2Batches}
                           ozPerPizza={v.app2OzPerPizza}
                           recipe={v.app2CheeseRecipe ?? []}
@@ -1176,6 +1188,8 @@ export const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabConte
                         <MixRecipeCard
                           embedded
                           label={v.app2Type || "Applicator 2"}
+                          recipePickerLabel="Applicator 2 mix recipe"
+                          recipePickerTestId="setup-recipe-picker-app-2-mix"
                           totalRunLbs={calc.app2Lbs}
                           fields={cheese2Fields}
                           recipe={v.app2CheeseRecipe ?? []}
@@ -1410,6 +1424,8 @@ export const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabConte
                         <CheesePickCard
                           embedded
                           label={v.app3Type || "Applicator 3"}
+                          recipePickerLabel="Applicator 3 cheese recipe"
+                          recipePickerTestId="setup-recipe-picker-app-3-cheese"
                           batches={calc.app3Batches}
                           ozPerPizza={v.app3OzPerPizza}
                           recipe={v.app3CheeseRecipe ?? []}
@@ -1434,6 +1450,8 @@ export const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabConte
                         <MixRecipeCard
                           embedded
                           label={v.app3Type || "Applicator 3"}
+                          recipePickerLabel="Applicator 3 mix recipe"
+                          recipePickerTestId="setup-recipe-picker-app-3-mix"
                           totalRunLbs={calc.app3Lbs}
                           fields={cheese3Fields}
                           recipe={v.app3CheeseRecipe ?? []}
@@ -1487,6 +1505,8 @@ export const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabConte
                         <CheesePickCard
                           embedded
                           label={v.app4Type || "Applicator 4"}
+                          recipePickerLabel="Applicator 4 cheese recipe"
+                          recipePickerTestId="setup-recipe-picker-app-4-cheese"
                           batches={calc.app4Batches}
                           ozPerPizza={v.app4OzPerPizza}
                           recipe={v.app4CheeseRecipe ?? []}
@@ -1511,6 +1531,8 @@ export const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabConte
                         <MixRecipeCard
                           embedded
                           label={v.app4Type || "Applicator 4"}
+                          recipePickerLabel="Applicator 4 mix recipe"
+                          recipePickerTestId="setup-recipe-picker-app-4-mix"
                           totalRunLbs={calc.app4Lbs}
                           fields={cheese4Fields}
                           recipe={v.app4CheeseRecipe ?? []}

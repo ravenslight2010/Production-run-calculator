@@ -848,6 +848,8 @@ export function IngredientSelect({
   onRemoveOption,
   placeholder,
   optionLabels,
+  ariaLabel,
+  testId,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -858,6 +860,8 @@ export function IngredientSelect({
   // Optional display label per option value (e.g. brand tags for colliding
   // recipe names: "Taco Mix (Marco's)"). The VALUE stored stays the bare name.
   optionLabels?: ReadonlyMap<string, string>;
+  ariaLabel?: string;
+  testId?: string;
 }) {
   const labelOf = (opt: string) => optionLabels?.get(opt) ?? opt;
   const [open, setOpen] = useState(false);
@@ -904,6 +908,8 @@ export function IngredientSelect({
         ref={triggerRef}
         type="button"
         onClick={openDropdown}
+        aria-label={ariaLabel}
+        data-testid={testId}
         className="flex items-center gap-1 h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm hover:bg-muted/70 transition-colors w-full justify-between"
       >
         <span className={`truncate ${value ? "text-foreground" : "text-muted-foreground"}`}>
@@ -1127,6 +1133,8 @@ export function CheesePickCard({
   recipeMissing,
   poolComponents,
   optionLabels,
+  recipePickerLabel,
+  recipePickerTestId,
 }: {
   label: string;
   batches: number;
@@ -1154,6 +1162,8 @@ export function CheesePickCard({
   recipeMissing?: boolean;
   // Optional display label per recipe name (brand tags for colliding names).
   optionLabels?: ReadonlyMap<string, string>;
+  recipePickerLabel?: string;
+  recipePickerTestId?: string;
 }) {
   const updateReloadBlockerId = useId();
   // A temporary substitution must be visible anywhere floor staff read the
@@ -1189,6 +1199,8 @@ export function CheesePickCard({
       <select
         value={recipeName}
         onChange={e => onRecipeNameChange(e.target.value)}
+        aria-label={recipePickerLabel ?? "Pick a cheese recipe"}
+        data-testid={recipePickerTestId}
         className="h-8 w-full px-2 rounded bg-muted/40 border border-border/40 text-xs sm:text-sm outline-none focus:border-primary/60"
       >
         <option value="">Pick a cheese recipe…</option>
@@ -1323,6 +1335,8 @@ export function MixRecipeCard({
   onRemoveRecipeName,
   onRecipeNameChange,
   recipeNameLabels,
+  recipePickerLabel,
+  recipePickerTestId,
 }: {
   label: string;
   totalRunLbs: number;
@@ -1344,6 +1358,8 @@ export function MixRecipeCard({
   onRecipeNameChange?: (v: string) => void;
   // Optional display label per recipe name (brand tags for colliding names).
   recipeNameLabels?: ReadonlyMap<string, string>;
+  recipePickerLabel?: string;
+  recipePickerTestId?: string;
 }) {
   const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   const [confirmIdx, setConfirmIdx] = useState<number | null>(null);
@@ -1354,7 +1370,7 @@ export function MixRecipeCard({
     <>
       {recipeNameOptions && onRecipeNameChange && (
         <div className="w-full sm:max-w-xs mb-3">
-          <IngredientSelect value={recipeName ?? ""} onChange={onRecipeNameChange} options={recipeNameOptions} onAddOption={onAddRecipeName} onRemoveOption={onRemoveRecipeName} placeholder="Recipe name…" optionLabels={recipeNameLabels} />
+          <IngredientSelect value={recipeName ?? ""} onChange={onRecipeNameChange} options={recipeNameOptions} onAddOption={onAddRecipeName} onRemoveOption={onRemoveRecipeName} placeholder="Recipe name…" optionLabels={recipeNameLabels} ariaLabel={recipePickerLabel} testId={recipePickerTestId} />
         </div>
       )}
       {fields.length === 0 ? (
@@ -1449,6 +1465,8 @@ export function DoughRecipeCard({
   onAddRecipeName,
   onRemoveRecipeName,
   onRecipeNameChange,
+  recipePickerLabel,
+  recipePickerTestId,
 }: {
   batchesNeeded: number;
   fields: { id: string }[];
@@ -1468,6 +1486,8 @@ export function DoughRecipeCard({
   onAddRecipeName: (v: string) => void;
   onRemoveRecipeName: (v: string) => void;
   onRecipeNameChange: (v: string) => void;
+  recipePickerLabel?: string;
+  recipePickerTestId?: string;
 }) {
   const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   const totalBatchWeight = totalLbsPerBatch * Math.max(1, batchesNeeded);
@@ -1494,6 +1514,8 @@ export function DoughRecipeCard({
               onAddOption={onAddRecipeName}
               onRemoveOption={onRemoveRecipeName}
               placeholder="Recipe name…"
+              ariaLabel={recipePickerLabel}
+              testId={recipePickerTestId}
             />
           </div>
           <span className="text-xs text-muted-foreground shrink-0">
@@ -1633,6 +1655,8 @@ export function FrontlineRecipeCard({
   onRemoveRecipeName,
   onRecipeNameChange,
   embedded,
+  recipePickerLabel,
+  recipePickerTestId,
 }: {
   fields: { id: string }[];
   recipe: RecipeRow[];
@@ -1649,13 +1673,15 @@ export function FrontlineRecipeCard({
   onRemoveRecipeName: (v: string) => void;
   onRecipeNameChange: (v: string) => void;
   embedded?: boolean;
+  recipePickerLabel?: string;
+  recipePickerTestId?: string;
 }) {
   const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   const [confirmIdx, setConfirmIdx] = useState<number | null>(null);
 
   const recipeSelector = (
     <div className="w-full sm:w-auto sm:flex-1 sm:max-w-xs">
-      <IngredientSelect value={recipeName} onChange={onRecipeNameChange} options={recipeNameOptions} onAddOption={onAddRecipeName} onRemoveOption={onRemoveRecipeName} placeholder="Recipe name…" />
+      <IngredientSelect value={recipeName} onChange={onRecipeNameChange} options={recipeNameOptions} onAddOption={onAddRecipeName} onRemoveOption={onRemoveRecipeName} placeholder="Recipe name…" ariaLabel={recipePickerLabel} testId={recipePickerTestId} />
     </div>
   );
 
@@ -1747,6 +1773,8 @@ export function TypeDropdown({
   onAddOption,
   onRemoveOption,
   allowClear,
+  ariaLabel,
+  testId,
 }: {
   label: string;
   value: string;
@@ -1755,6 +1783,8 @@ export function TypeDropdown({
   onAddOption: (v: string) => void;
   onRemoveOption: (v: string) => void;
   allowClear?: boolean;
+  ariaLabel?: string;
+  testId?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [inputVal, setInputVal] = useState("");
@@ -1805,6 +1835,8 @@ export function TypeDropdown({
           ref={triggerRef}
           type="button"
           onClick={openDropdown}
+          aria-label={ariaLabel}
+          data-testid={testId}
           className="flex items-center gap-1 px-2 py-0.5 rounded bg-muted/40 border border-border/40 text-xs font-semibold hover:bg-muted/70 transition-colors min-w-[110px] justify-between"
         >
           <span className={value ? "text-foreground" : "text-muted-foreground/50"}>
