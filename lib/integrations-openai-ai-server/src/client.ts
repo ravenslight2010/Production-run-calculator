@@ -13,6 +13,7 @@
 // prompts, parsing) stays byte-for-byte unchanged.
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import type { Content, Part, GenerateContentConfig } from "@google/genai";
+import { modelChain } from "./models";
 
 type TextPart = { type: "text"; text: string };
 type ImagePart = { type: "image_url"; image_url: { url: string } };
@@ -176,28 +177,48 @@ async function create(
   options?: CreateRequestOptions,
 ): Promise<ChatResponse | AsyncIterable<ChatChunk>> {
   const { systemInstruction, contents } = toGemini(params.messages);
-  const config = buildConfig(params, systemInstruction);
-  const ai = client();
+  // Ordered model chain: primary first, then the fallback models. Provider
+  // failures (quota 429s, capacity 503s, retired-model 404s) and empty-content
+  // responses (3.x flash can burn its whole output budget on hidden thoughts
+  // and still return HTTP 200 with no text) move on to the next model instead
+  // of 502'ing the route or surfacing a hollow "0 specs / 0 recipes" parse.
+  // Bounded: primary + configured fallbacks (default 3 calls worst case).
+  const models = modelChain(params.model);
+  let lastError: unknown;
 
-  if (params.stream) {
-    const stream = await abortable(ai.models.generateContentStream({
-      model: params.model,
-      contents,
-      config,
-    }), options);
-    return (async function* () {
-      for await (const chunk of stream) {
-        yield { choices: [{ delta: { content: chunk.text ?? null } }] };
+  for (const model of models) {
+    const config = buildConfig(params, systemInstruction);
+    try {
+      const ai = client();
+      if (params.stream) {
+        const stream = await abortable(ai.models.generateContentStream({
+          model,
+          contents,
+          config,
+        }), options);
+        return (async function* () {
+          for await (const chunk of stream) {
+            yield { choices: [{ delta: { content: chunk.text ?? null } }] };
+          }
+        })();
       }
-    })();
-  }
 
-  const response = await abortable(ai.models.generateContent({
-    model: params.model,
-    contents,
-    config,
-  }), options);
-  return { choices: [{ message: { content: response.text ?? null } }] };
+      const response = await abortable(ai.models.generateContent({
+        model,
+        contents,
+        config,
+      }), options);
+      const content = response.text ?? null;
+      if (content === null || content.trim() === "") {
+        lastError = new Error(`AI provider returned empty content from ${model}`);
+        continue;
+      }
+      return { choices: [{ message: { content } }] };
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError;
 }
 
 // OpenAI-compatible surface consumed across the server.

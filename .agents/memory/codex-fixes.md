@@ -1330,3 +1330,21 @@ In that state the sauce/applicator effects `return`/`continue` BEFORE the local 
 **Why it was needed:** Render healthchecks against `/api/readyz`; without this, even a successful redeploy of `main` would stay red when the env uses `GOOGLE_API_KEY`.
 
 **Verification:** `vitest run src/routes/health.test.ts` — 6/6 pass; api-server typecheck clean.
+
+## 2026-09-23 (later) — Import AI model fallback: 3.6-flash quota-exhausted on Render key; switch to 3.8-flash + lite fallbacks
+
+**File(s):** `lib/integrations-openai-ai-server/src/models.ts`, `lib/integrations-openai-ai-server/src/client.ts`, `artifacts/run-calculator/src/specImport.ts` (SPEC_PARSE_VERSION 40→41).
+
+**What was wrong:** After the 77e54c01 deploy, spec imports "tried" but returned 0 specs / 0 recipes (or provider errors). Root cause: gemini-3.6-flash (the PR #81 default) is quota-exhausted and capacity-starved on Render's GOOGLE_API_KEY — live probes returned repeated 429 "You exceeded your current quota" and 503 "high demand" across the 3.x flash line (9 consecutive 503s then 429 on the parse-sized prompt, 2026-09-23). The single-model pin has no ops override, and thrown provider errors 502 the route (or surface as empty parses after the malformed-retry path).
+
+**What the fix was:**
+- Primary model for both tiers → `gemini-3.8-flash` (verified on the full parse prompt: valid JSON with profiles + recipes).
+- Ordered fallback chain in `client.ts` create (models.ts `aiModelFallbacks` + `modelChain`): provider failures (429/503/404) AND empty-content responses (3.x flash MAX_TOKENS-without-text) fall through to the next model — `gemini-3.5-flash-lite`, then `gemini-3.1-flash-lite` (both verified returning complete JSON on the real Brand fixture). Bounded: primary + 2 fallbacks.
+- Env overrides `AI_MODEL_FULL` / `AI_MODEL_CHEAP` / `AI_MODEL_FALLBACKS` so re-pinning no longer needs a code deploy + Render image switch.
+- `SPEC_PARSE_VERSION` 40→41 (the check-model-version-bump gate requires it for model changes; PR #81's 3.6 switch shipped without one).
+
+**Why it was needed:** A single hard-coded model keeps breaking Render imports whenever Google retires / quota-limits / capacity-spikes it (2.5-flash retired, 3.6-flash quota-exhausted). The fallback chain keeps the route working through capacity spikes instead of 502ing or returning hollow parses.
+
+**Verification:** `tsc --build lib/integrations-openai-ai-server/tsconfig.json` clean. Live replay of the exact parse call (prompt builder + client adapter + Render key) returns valid JSON (2 profiles / 1 recipe) through the chain. Model availability on the key is volatile — re-verify per incident.
+
+**Deploy:** after PR merge + CI image publish, user flips the Render dashboard Image tag to the new sha (the API can't change it).
