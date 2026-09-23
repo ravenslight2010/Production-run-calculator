@@ -23,15 +23,34 @@ export default memo(function MixesTabContent() {
   const [prepMixExpanded, setPrepMixExpanded] = useState<Set<string>>(new Set());
   // Online: the server pre-computes the make-day plan from canonical runs +
   // the mix pool, so every device sees identical batches/lbs with a single
-  // shared fetch instead of per-device recomputation. Refetch when the make-day
-  // or the canonical mix pool changes (manager saves refresh the pool).
+  // shared fetch instead of per-device recomputation. Refetch when the
+  // make-day, canonical mix pool, or live-run membership changes. The live-run
+  // signature matters because assigning a brand, adding a run, or ending a run
+  // changes which products qualify without changing the mix pool.
   const serverSnap = useMixPlanSnapshot(ctx.mixMakeDay);
   const mixesSignature = (ctx.mixPlanItems ?? [])
     .map((m) => `${m.id}:${m.updatedAt ?? ""}:${m.amountAlreadyMade}`)
     .join(",");
+  const liveRunsSignature = JSON.stringify(ctx.dayState.runs.map((run) => {
+    const values = ctx.effectiveValuesForRun(
+      run,
+      run.id === ctx.currentRunId ? ctx.form.getValues() : loadRunValues(run.id),
+    );
+    return {
+      id: run.id,
+      brand: run.brand ?? "",
+      flavor: run.flavor ?? "",
+      startedAt: run.startedAt ?? "",
+      endedAt: run.endedAt ?? "",
+      // Ingredient selection and quantity fields are part of the canonical
+      // snapshot input. Include them so a mounted Mixes tab refetches when a
+      // run is edited without changing its lifecycle metadata.
+      values,
+    };
+  }));
   useEffect(() => {
     void refreshMixPlanSnapshot(ctx.mixMakeDay);
-  }, [ctx.mixMakeDay, mixesSignature]);
+  }, [ctx.mixMakeDay, mixesSignature, liveRunsSignature]);
 
   const [mixSurplusLedger, setMixSurplusLedger] = useState<MixSurplusLedger | null>(null);
   useEffect(() => {
