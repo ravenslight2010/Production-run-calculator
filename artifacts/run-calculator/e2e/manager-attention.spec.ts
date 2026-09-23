@@ -35,13 +35,13 @@ test("manager setup stays usable when recipe names are incomplete", async ({
 
   try {
     const account = await fixtures.createAccount({
-      username: uniqueTestId("e2e_manager_setup_incomplete"),
+      username: uniqueTestId("e2e_manager_attention"),
       password: PASSWORD,
       capabilities: DEFAULT_MANAGER_CAPABILITIES,
       onboardingSeen: true,
     });
-    const scheduledBrand = uniqueTestId("IncompleteBrand");
-    const scheduledFlavor = uniqueTestId("IncompleteFlavor");
+    const scheduledBrand = uniqueTestId("AttentionBrand");
+    const scheduledFlavor = uniqueTestId("AttentionFlavor");
     const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
 
     await page.route("**/api/password-reset-requests", async (route) => {
@@ -181,7 +181,7 @@ test("live and setup profile recipe pickers keep the shared selector contract", 
 
   try {
     const account = await fixtures.createAccount({
-      username: uniqueTestId("e2e_recipe_picker_contract"),
+      username: uniqueTestId("e2e_manager_attention"),
       password: PASSWORD,
       capabilities: DEFAULT_MANAGER_CAPABILITIES,
       onboardingSeen: true,
@@ -211,6 +211,12 @@ test("live and setup profile recipe pickers keep the shared selector contract", 
       app2Type: "Mix",
       app2CheeseRecipeName: mixName,
       app2CheeseRecipe: [{ ingredient: "Blend", lbs: 10 }],
+      app3Type: "Cheese",
+      app3CheeseRecipeName: cheeseName,
+      app3CheeseRecipe: [{ ingredient: "Cheese", lbs: 10 }],
+      app4Type: "Mix",
+      app4CheeseRecipeName: mixName,
+      app4CheeseRecipe: [{ ingredient: "Blend", lbs: 10 }],
     };
 
     await fixtures.seedNamedRecipe("dough", account, {
