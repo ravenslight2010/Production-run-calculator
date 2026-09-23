@@ -143,16 +143,25 @@ export default function CheeseRecipesManager({
   // Customer group (lowercased key) whose rename/merge panel is open, if any.
   const [renamingBrand, setRenamingBrand] = useState<string | null>(null);
 
+  const validItems = useMemo(
+    () =>
+      items.filter(
+        (recipe) =>
+          typeof recipe?.name === "string" && recipe.name.trim().length > 0,
+      ),
+    [items],
+  );
+
   const searching = query.trim().length > 0;
   const groups = useMemo(() => {
-    const filtered = items.filter((r) => cheeseRecipeMatchesQuery(r, query));
+    const filtered = validItems.filter((r) => cheeseRecipeMatchesQuery(r, query));
     return groupCheeseRecipesByBrand(filtered);
-  }, [items, query]);
+  }, [validItems, query]);
   // All customer names in the FULL pool (ignoring the search filter), so the
   // rename panel can offer every possible merge target.
   const allBrands = useMemo(
-    () => groupCheeseRecipesByBrand(items).map((g) => g.brand).filter(Boolean),
-    [items],
+    () => groupCheeseRecipesByBrand(validItems).map((g) => g.brand).filter(Boolean),
+    [validItems],
   );
 
   function toggleBrand(key: string) {
@@ -291,7 +300,7 @@ export default function CheeseRecipesManager({
 
         {isLoading ? (
           <p className="text-xs text-muted-foreground">Loading cheese recipes…</p>
-        ) : items.length === 0 ? (
+        ) : validItems.length === 0 ? (
           <p className="text-xs text-muted-foreground">
             No cheese recipes yet. Add one below or import a Cheese Mix Recipe
             Specs workbook.
@@ -425,7 +434,7 @@ export default function CheeseRecipesManager({
                                     maybeLearnRowBrandChange(
                                       recipe.brand,
                                       next.brand,
-                                      items.some(
+                                      validItems.some(
                                         (r) =>
                                           r.id !== recipe.id &&
                                           r.brand.trim().toLowerCase() === oldBrandLc,

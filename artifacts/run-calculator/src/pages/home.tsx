@@ -13814,7 +13814,9 @@ export default function Home() {
         file.arrayBuffer(),
         fetchNamedRecipes("dough").catch(() => [] as NamedRecipe[]),
       ]);
-      const extraDoughNames = serverDoughRecipes.map((r) => r.name).filter(Boolean);
+      const extraDoughNames = serverDoughRecipes
+        .map((r) => (typeof r?.name === "string" ? r.name.trim() : ""))
+        .filter((name): name is string => name.length > 0);
       const prepared = await (await loadWorkbookWorkflow()).recipeGuideImport.prepareDoughGuideImport(buffer, extraDoughNames);
       if (gen !== doughGuideImportGenRef.current) return;
       setDoughGuideImportPrepared(prepared);
