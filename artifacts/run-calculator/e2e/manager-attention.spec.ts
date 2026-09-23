@@ -132,12 +132,12 @@ test("manager setup stays usable when recipe names are incomplete", async ({
     };
 
     await openPickerAndSelect(
-      page.getByRole("button", { name: "Recipe name…" }).first(),
+      page.getByTestId("setup-recipe-picker-dough"),
       "Valid Dough",
       "null",
     );
 
-    const saucePicker = page.getByText("Sauce", { exact: true }).locator("..").getByRole("button");
+    const saucePicker = page.getByTestId("setup-recipe-picker-sauce");
     await openPickerAndSelect(saucePicker, "Valid Sauce", "42");
 
     const app1TypePicker = page.getByText("Applicator 1", { exact: true }).locator("..").getByRole("button");
@@ -146,7 +146,7 @@ test("manager setup stays usable when recipe names are incomplete", async ({
     await expect(dropdown.getByRole("button", { name: "Cheese", exact: true })).toBeVisible();
     await dropdown.getByRole("button", { name: "Cheese", exact: true }).click();
 
-    const cheeseRecipePicker = page.getByText(/Cheese Blend/).locator("..").locator("select");
+    const cheeseRecipePicker = page.getByTestId("setup-recipe-picker-app-1-cheese");
     await expect(cheeseRecipePicker.locator("option", { hasText: "Valid Cheese" })).toHaveCount(1);
     await expect(cheeseRecipePicker.locator("option", { hasText: "[object Object]" })).toHaveCount(0);
     await cheeseRecipePicker.selectOption("Valid Cheese");
@@ -156,7 +156,7 @@ test("manager setup stays usable when recipe names are incomplete", async ({
     dropdown = page.getByPlaceholder("Search or add…").locator("..");
     await dropdown.getByRole("button", { name: "Mix", exact: true }).click();
     await openPickerAndSelect(
-      page.getByRole("button", { name: "Valid Cheese", exact: true }),
+      page.getByTestId("setup-recipe-picker-app-1-mix"),
       "Valid Mix",
       "false",
     );
@@ -323,7 +323,7 @@ test("manager attention remains stable across dialog and destination transitions
     await expect(page.getByRole("heading", { name: "Setup Profiles" })).toBeVisible();
     await expect(page.getByText(scheduledBrand, { exact: true })).toBeVisible();
     await expect(page.getByText(scheduledFlavor, { exact: true })).toBeVisible();
-    const doughRecipePicker = page.getByRole("button", { name: "Recipe name…" }).first();
+    const doughRecipePicker = page.getByTestId("setup-recipe-picker-dough");
     await doughRecipePicker.click();
     await expect(page.getByText("Valid Dough", { exact: true })).toBeVisible();
     await expect(page.getByText("Legacy Dough", { exact: true })).toBeVisible();

@@ -779,6 +779,8 @@ export default function SetupProfileEditor({
           <CheesePickCard
             embedded
             label={type || APPLICATOR_LABELS[app]}
+            recipePickerLabel={`${APPLICATOR_LABELS[app]} cheese recipe`}
+            recipePickerTestId={`setup-recipe-picker-app-${app}-cheese`}
             batches={0}
             ozPerPizza={Number((v[ozKey] as number) ?? 0)}
             recipe={recipe}
@@ -802,6 +804,8 @@ export default function SetupProfileEditor({
           <MixRecipeCard
             embedded
             label={type || APPLICATOR_LABELS[app]}
+            recipePickerLabel={`${APPLICATOR_LABELS[app]} mix recipe`}
+            recipePickerTestId={`setup-recipe-picker-app-${app}-mix`}
             totalRunLbs={totalLbs}
             fields={cheeseFieldsByApp[app]}
             recipe={recipe}
@@ -1220,6 +1224,8 @@ export default function SetupProfileEditor({
                 </details>
 
                 <DoughRecipeCard
+                  recipePickerLabel="Dough recipe"
+                  recipePickerTestId="setup-recipe-picker-dough"
                   batchesNeeded={0}
                   fields={doughFields}
                   recipe={v.doughRecipe ?? []}
@@ -1390,6 +1396,8 @@ export default function SetupProfileEditor({
                     <CardContent className="px-5 pb-5 space-y-4">
                       <TypeDropdown
                         label="Sauce"
+                        ariaLabel="Sauce recipe"
+                        testId="setup-recipe-picker-sauce"
                         value={v.frontlineRecipeName}
                         onChange={val => {
                           form.setValue("frontlineRecipeName", val, { shouldDirty: true });
@@ -1429,6 +1437,8 @@ export default function SetupProfileEditor({
                           onRemove={removeFrontline}
                           recipeName={v.frontlineRecipeName ?? ""}
                           recipeNameOptions={frontlineRecipeNameOptions}
+                          recipePickerLabel="Sauce recipe ingredients"
+                          recipePickerTestId="setup-recipe-picker-sauce-ingredients"
                           onAddRecipeName={onAddFrontlineRecipeName}
                           onRemoveRecipeName={onRemoveFrontlineRecipeName}
                           onRecipeNameChange={val => {
