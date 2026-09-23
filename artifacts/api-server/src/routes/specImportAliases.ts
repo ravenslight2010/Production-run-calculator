@@ -32,6 +32,17 @@ const MAX_NAME_LEN = 200;
 
 const KIND_SET = new Set<string>(SPEC_ALIAS_KINDS);
 
+function requiresContext(kind: SpecAliasKind): boolean {
+  return kind === "flavor" || kind === "recipeName" || kind === "crossFamilyRouting";
+}
+
+function hasValidContext(kind: SpecAliasKind, context: string | null): boolean {
+  const normalized = context?.toLowerCase() ?? null;
+  if (kind === "recipeName") return normalized === "dough" || normalized === "sauce";
+  if (kind === "crossFamilyRouting") return normalized === "cheese" || normalized === "mix";
+  return !requiresContext(kind) || !!context;
+}
+
 type AliasRow = {
   kind: SpecAliasKind;
   externalName: string;
@@ -82,8 +93,16 @@ router.post("/spec-import-aliases", requireCapability("manage-profiles"), async 
     const kind = a.kind as SpecAliasKind;
     const externalName = (a.externalName ?? "").trim().slice(0, MAX_NAME_LEN);
     const canonicalName = (a.canonicalName ?? "").trim().slice(0, MAX_NAME_LEN);
-    const context = a.context ? a.context.trim().slice(0, MAX_NAME_LEN) || null : null;
+    const rawContext = a.context ? a.context.trim().slice(0, MAX_NAME_LEN) || null : null;
+    const context =
+      kind === "recipeName" || kind === "crossFamilyRouting"
+        ? rawContext?.toLowerCase() ?? null
+        : rawContext;
     if (!externalName || !canonicalName) continue;
+    if (!hasValidContext(kind, context)) {
+      res.status(400).json({ error: `Alias kind ${kind} requires valid context` });
+      return;
+    }
     // A mapping that just restates the same name carries no information.
     if (externalName.toLowerCase() === canonicalName.toLowerCase()) continue;
     // Server-side backstop for the blend-name namespace: a generic slot-type
@@ -166,11 +185,12 @@ router.post("/spec-import-aliases", requireCapability("manage-profiles"), async 
 // (external label -> wrong canonical name) must be removed or the next import
 // re-applies it and undoes the correction. Matching is exact-by-names
 // (case-insensitive) on kind + externalName + canonicalName. By default, an
-// entry's null/omitted context matches rows with ANY context (legacy behavior
-// for callers that cannot know the poisoned alias's context); `exactContext`
-// changes that to an exact null match. A provided context always matches only
-// that context case-insensitively. This is deliberately NOT a broad sweep —
-// only rows whose full mapping is named get deleted.
+// For context-free kinds, an entry's null/omitted context matches rows with
+// ANY context (legacy behavior for callers that cannot know the poisoned
+// alias's context); `exactContext` changes that to an exact null match. Kinds
+// with required context must provide it, and a provided context always matches
+// only that context case-insensitively. This is deliberately NOT a broad
+// sweep — only rows whose full mapping is named get deleted.
 router.post("/spec-import-aliases/delete", requireCapability("manage-profiles"), async (req: Request, res: Response) => {
   const parsed = DeleteSpecImportAliasesBody.safeParse(req.body);
   if (!parsed.success) {
@@ -183,8 +203,16 @@ router.post("/spec-import-aliases/delete", requireCapability("manage-profiles"),
     if (!KIND_SET.has(a.kind)) continue;
     const externalName = (a.externalName ?? "").trim().slice(0, MAX_NAME_LEN);
     const canonicalName = (a.canonicalName ?? "").trim().slice(0, MAX_NAME_LEN);
-    const context = a.context ? a.context.trim().slice(0, MAX_NAME_LEN) || null : null;
+    const rawContext = a.context ? a.context.trim().slice(0, MAX_NAME_LEN) || null : null;
+    const context =
+      (a.kind as SpecAliasKind) === "recipeName" || (a.kind as SpecAliasKind) === "crossFamilyRouting"
+        ? rawContext?.toLowerCase() ?? null
+        : rawContext;
     if (!externalName || !canonicalName) continue;
+    if (!hasValidContext(a.kind as SpecAliasKind, context)) {
+      res.status(400).json({ error: `Alias kind ${a.kind} requires valid context` });
+      return;
+    }
     entries.push({ kind: a.kind as SpecAliasKind, externalName, canonicalName, context });
   }
 

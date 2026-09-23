@@ -73,6 +73,10 @@ router.post("/import-aliases", requireCapability("manage-profiles"), async (req:
         ? a.brandContext.trim().slice(0, MAX_NAME_LEN) || null
         : null;
     if (!externalName || !canonicalName) continue;
+    if (type === "flavor" && !brandContext) {
+      res.status(400).json({ error: "Flavor aliases require a non-empty brandContext" });
+      return;
+    }
     // A mapping that just restates the same name carries no information.
     if (externalName.toLowerCase() === canonicalName.toLowerCase()) continue;
     incoming.push({ type, externalName, canonicalName, brandContext });

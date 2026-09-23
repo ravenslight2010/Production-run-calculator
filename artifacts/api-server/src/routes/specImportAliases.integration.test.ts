@@ -124,6 +124,14 @@ async function deleteAliases(aliases: Alias[], scope: Scope = "live"): Promise<R
   });
 }
 
+async function saveAliases(aliases: Alias[], scope: Scope = "live"): Promise<Response> {
+  return fetch(`${baseUrl}/api/spec-import-aliases`, {
+    method: "POST",
+    headers: headers(scope),
+    body: JSON.stringify({ aliases }),
+  });
+}
+
 async function listAliases(scope: Scope = "live"): Promise<Alias[]> {
   const response = await fetch(`${baseUrl}/api/spec-import-aliases`, {
     headers: headers(scope),
@@ -131,6 +139,36 @@ async function listAliases(scope: Scope = "live"): Promise<Alias[]> {
   expect(response.status).toBe(200);
   return ((await response.json()) as { aliases: Alias[] }).aliases;
 }
+
+describe("POST /spec-import-aliases", () => {
+  it.each([
+    { kind: "flavor", externalName: "Sheet Flavor", canonicalName: "House Flavor" },
+    { kind: "recipeName", externalName: "Sheet Dough", canonicalName: "House Dough" },
+    { kind: "crossFamilyRouting", externalName: "Sheet Blend", canonicalName: "House Blend" },
+  ])("rejects a missing required context for $kind", async (alias) => {
+    const response = await saveAliases([alias]);
+    expect(response.status).toBe(400);
+    expect(await listAliases()).toEqual([]);
+  });
+
+  it("preserves valid context-free and context-dependent mappings", async () => {
+    const response = await saveAliases([
+      { kind: "brand", externalName: " Sheet Brand ", canonicalName: " House Brand " },
+      { kind: "appType", externalName: "Sheet Mix", canonicalName: "House Mix", context: null },
+      { kind: "flavor", externalName: "Sheet Flavor", canonicalName: "House Flavor", context: "Brand A" },
+      { kind: "recipeName", externalName: "Sheet Dough", canonicalName: "House Dough", context: "DOUGH" },
+      { kind: "crossFamilyRouting", externalName: "Sheet Blend", canonicalName: "House Blend", context: "CHEESE" },
+    ]);
+    expect(response.status).toBe(200);
+    expect(await listAliases()).toEqual([
+      { kind: "brand", externalName: "Sheet Brand", canonicalName: "House Brand", context: null },
+      { kind: "appType", externalName: "Sheet Mix", canonicalName: "House Mix", context: null },
+      { kind: "flavor", externalName: "Sheet Flavor", canonicalName: "House Flavor", context: "Brand A" },
+      { kind: "recipeName", externalName: "Sheet Dough", canonicalName: "House Dough", context: "dough" },
+      { kind: "crossFamilyRouting", externalName: "Sheet Blend", canonicalName: "House Blend", context: "cheese" },
+    ]);
+  });
+});
 
 describe("POST /spec-import-aliases/delete", () => {
   it("deletes only exact case-insensitive mappings, respecting context and scope", async () => {
@@ -253,6 +291,29 @@ describe("POST /spec-import-aliases/delete", () => {
         kind: "appType",
         externalName: "Sheet Mix",
         canonicalName: "Other Mix",
+        context: "Brand A",
+      },
+    ]);
+  });
+
+  it("rejects a missing required context without deleting anything", async () => {
+    await db.insert(specImportAliasesTable).values({
+      scope: "live",
+      kind: "flavor",
+      externalName: "Sheet Flavor",
+      canonicalName: "House Flavor",
+      context: "Brand A",
+    });
+
+    const response = await deleteAliases([
+      { kind: "flavor", externalName: "Sheet Flavor", canonicalName: "House Flavor" },
+    ]);
+    expect(response.status).toBe(400);
+    expect(await listAliases()).toEqual([
+      {
+        kind: "flavor",
+        externalName: "Sheet Flavor",
+        canonicalName: "House Flavor",
         context: "Brand A",
       },
     ]);

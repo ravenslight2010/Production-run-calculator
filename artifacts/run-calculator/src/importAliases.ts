@@ -29,14 +29,24 @@ export async function fetchImportAliases(): Promise<ImportAlias[]> {
 }
 
 export async function saveImportAliases(aliases: ImportAlias[]): Promise<void> {
-  if (aliases.length === 0) return;
+  const validAliases = aliases.flatMap((alias) => {
+    const externalName = alias.externalName?.trim();
+    const canonicalName = alias.canonicalName?.trim();
+    const brandContext =
+      alias.type === "flavor" ? alias.brandContext?.trim() || null : null;
+    if (!externalName || !canonicalName || (alias.type === "flavor" && !brandContext)) {
+      return [];
+    }
+    return [{ ...alias, externalName, canonicalName, brandContext }];
+  });
+  if (validAliases.length === 0) return;
   const res = await fetch("/api/import-aliases", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "x-client-id": inventoryClientId(),
     },
-    body: JSON.stringify({ aliases }),
+    body: JSON.stringify({ aliases: validAliases }),
   });
   if (!res.ok) throw new Error(`Save import aliases failed (${res.status})`);
 }
