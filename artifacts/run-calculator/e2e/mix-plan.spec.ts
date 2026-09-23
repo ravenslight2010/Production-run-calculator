@@ -252,8 +252,32 @@ async function stampLocalFixtureForReload(page: Page): Promise<void> {
       key === "run-calc-runvalues-updated" ||
       key.startsWith("run-calc-run-"),
     );
-    return Object.fromEntries(keys.map((key) => [key, localStorage.getItem(key)]));
+    const saved = Object.fromEntries(keys.map((key) => [key, localStorage.getItem(key)]));
+    const now = Date.now() + 60_000;
+    try {
+      const rawDay = localStorage.getItem("run-calc-day");
+      const day = rawDay
+        ? JSON.parse(rawDay) as { runs?: Array<{ id: string; metaUpdatedAt?: number }> }
+        : {};
+      if (Array.isArray(day.runs)) {
+        day.runs = day.runs.map((run) => ({ ...run, metaUpdatedAt: now }));
+        // resetAt is the server's daily auth boundary, not a generic LWW
+        // freshness stamp. Today's fixture must never advance it.
+        day.resetAt = typeof day.resetAt === "number" ? day.resetAt : 0;
+        localStorage.setItem("run-calc-day", JSON.stringify(day));
+        const updated = JSON.parse(localStorage.getItem("run-calc-runvalues-updated") ?? "{}") as Record<string, number>;
+        for (const run of day.runs) updated[run.id] = now;
+        localStorage.setItem("run-calc-runvalues-updated", JSON.stringify(updated));
+      }
+    } catch {}
+    return Object.fromEntries(
+      keys.map((key) => [key, localStorage.getItem(key)]),
+    );
   });
+  // The server-authoritative Mix Plan endpoint reads the canonical daily
+  // snapshot, not the browser's localStorage. Persist the same stamped fixture
+  // before a reload or a live Mixes assertion can ask for a fresh snapshot.
+  await dbSeedCanonicalDayFromPage(page);
   await page.addInitScript((saved) => {
     // Seed before React/auth/sync boot. Startup may reconcile and clear an
     // authenticated blank baseline before a normal evaluate() can win.
@@ -992,6 +1016,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
           casesPerLayer: 0,
         }));
       }, { ingredient });
+      await stampLocalFixtureForReload(page);
       await page.getByRole("button", { name: /next/i }).click();
       await page.waitForTimeout(1_000);
 
@@ -2597,6 +2622,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         { brand, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
       );
 
+      await stampLocalFixtureForReload(page);
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
       await page.getByRole("button", { name: /^get.?started$/i })
@@ -3168,6 +3194,9 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
 
       const stopBtn1 = page.getByRole("button", { name: /stop run/i });
       await stopBtn1.waitFor({ state: "visible", timeout: 10_000 });
+      await expect(page.getByText("Synchronized", { exact: true })).toBeVisible({
+        timeout: 15_000,
+      });
       await stopBtn1.click();
       await page.waitForTimeout(800);
 
@@ -3188,11 +3217,25 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       const startBtn2 = page.locator('[data-testid="button-start-run"]');
       await startBtn2.waitFor({ state: "visible", timeout: 8_000 });
       await startBtn2.click();
+      const run2Id = await page.evaluate(() => {
+        const day = JSON.parse(localStorage.getItem("run-calc-day") ?? "{}") as {
+          runs?: Array<{ id?: string }>;
+          currentIndex?: number;
+        };
+        return day.runs?.[day.currentIndex ?? 0]?.id ?? "";
+      });
 
       const stopBtn2 = page.getByRole("button", { name: /stop run/i });
       await stopBtn2.waitFor({ state: "visible", timeout: 10_000 });
+      await expect(page.getByText("Synchronized", { exact: true })).toBeVisible({
+        timeout: 15_000,
+      });
       await stopBtn2.click();
-      await page.waitForTimeout(800);
+      await waitForLocalRunEnded(page, run2Id);
+      await waitForCanonicalRunField(run2Id, "endedAt");
+      await expect(page.getByText("Synchronized", { exact: true })).toBeVisible({
+        timeout: 15_000,
+      });
 
       // Both runs ended → plan must be empty
       await goToMixes(page);
@@ -3288,6 +3331,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         { brand, ingredient, runOz: RUN_OZ, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
       );
 
+      await stampLocalFixtureForReload(page);
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
       await page.getByRole("button", { name: /^get.?started$/i })
@@ -3410,6 +3454,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         { brand, qualifiedIngredient, runOz: RUN_OZ, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
       );
 
+      await stampLocalFixtureForReload(page);
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
       await page.getByRole("button", { name: /^get.?started$/i })
@@ -3507,6 +3552,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         { brand, qualifiedIngredient, runOz: RUN_OZ, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
       );
 
+      await stampLocalFixtureForReload(page);
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
       await page.getByRole("button", { name: /^get.?started$/i })
@@ -3604,6 +3650,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         { brand, qualifiedIngredient, runOz: RUN_OZ, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
       );
 
+      await stampLocalFixtureForReload(page);
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
       await page.getByRole("button", { name: /^get.?started$/i })
@@ -4177,10 +4224,12 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       await startBtn2.waitFor({ state: "visible", timeout: 8_000 });
       await startBtn2.click();
       await waitForLocalRunStarted(page, runId2);
+      await waitForCanonicalRunField(runId2, "startedAt");
       const stopBtn2 = page.getByRole("button", { name: /stop run/i });
       await stopBtn2.waitFor({ state: "visible", timeout: 10_000 });
       await stopBtn2.click();
       await waitForLocalRunEnded(page, runId2);
+      await waitForCanonicalRunField(runId2, "endedAt");
 
       // Reload before the first Mixes visit in this browser session.
       await page.reload({ waitUntil: "domcontentloaded" });

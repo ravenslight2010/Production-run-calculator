@@ -53,7 +53,17 @@ export function toMixScheduledRun(input: MixPlanRunInput): {
   ingredients: string[];
   ingredientOzPerPizza: Record<string, number>;
 } {
-  const vals = input.values;
+  // Saved profiles are partial by design. The web form supplies zero-valued
+  // defaults for fields such as casesPerLayer, but the server receives only
+  // the persisted profile fields plus casesNeeded for scheduled runs. Fill
+  // those numeric defaults before the shared summary math so an omitted field
+  // cannot turn the whole scheduled plan into NaN/null JSON.
+  const vals = {
+    ...input.values,
+    casesNeeded: Number(input.values.casesNeeded) || 0,
+    pizzasPerCase: Number(input.values.pizzasPerCase) || 0,
+    casesPerLayer: Number(input.values.casesPerLayer) || 0,
+  } as SummaryStatsInput;
   // DB rows may legitimately lack optional recipe fields; the lib guards reads.
   const s = computeSummaryStats(
     vals as unknown as SummaryStatsInput,

@@ -88,11 +88,8 @@
 - [Correcting-import alias cleanup](correcting-import-alias-cleanup.md) — overwrite of a different stored name = correction: delete bad alias (unless old name live/unknown — cheese ingredients check cheese AND mix pools), learn reverse alias.
 - [Profile write gating](profile-write-gating.md) — profile saves/deletes gate on hasCapability("manage-profiles") not isManager; boot heals deferred to a capability-gated effect; push queue drops 403s as terminal.
 - [Explicit profile acknowledgement](explicit-profile-ack.md) — manager editor saves must verify canonical server values before success or profile fan-out; implicit autosaves stay LWW-guarded.
-- [PWA update prompts](pwa-update-prompts.md) — vite-plugin-pwa autoUpdate reloads clients; interactive “Reload now” UI requires prompt so needRefresh fires.
 - [Master-data health and audit](master-data-health-ownership.md) + [boundary](master-data-audit-boundary.md) — bounded read-only reviews preserve owned legacy rows and report coverage gaps.
 - [Browser and release evidence](visual-regression-baselines.md) + [release-browser-evidence](release-browser-evidence.md) + [a11y-coverage-gate](a11y-coverage-gate.md) + [a11y-dialog-browser-fixtures](a11y-dialog-browser-fixtures.md) — isolated, masked browser evidence needs explicit review.
-- [Browser navigation scroll timing](browser-navigation-scroll.md) — page resets may need a next-frame pass after history restoration and content reflow; never target nested overflow containers.
-- [Stoppage light-theme contrast](stoppage-light-theme-contrast.md) — custom orange-700 is too light for pale stop surfaces; use orange-800 in light mode and retain orange-400 in dark mode.
 - [Sync consistency fences](sync-snapshot-identity.md) + [HTTP failures](sync-http-failure-handling.md) + [partial sync](partial-sync-contract.md) + [SSE cleanup](sse-disconnect-registration.md) + [sleep/wake](sleep-wake-sync-fences.md) + [complete writes](complete-sync-snapshot-fencing.md) — stable hashes, non-OK is never acknowledgment, partial writes recover safely, cleanup precedes awaits, and complete writes fence under lock.
 - [Formula import safety](formula-import-safety.md) + [Retained workbook layouts](source-workbook-layouts.md) — compare native units with provenance; varied Excel tables need explicit, fail-closed parser guards.
 - [Release gate contracts](release-shard-budget.md) + [browser cases](browser-release-case-contract.md) + [container evidence](container-image-release-evidence.md) — bound gates and retain explicit revision evidence.
@@ -133,7 +130,6 @@
 - [Case-based production input validity](case-based-production-input-validity.md) — requested cases without a positive pizzas-per-case value must suppress Sauce/Frontline needs, buffers, exports, and claims.
 - [Server operational projection](server-operational-projection.md) — live timer/counter read models travel beside the sync snapshot, never inside its hashed persisted document.
 - [Browser peer and evidence assertions](browser-peer-startup-ordering.md) + [browser-evidence-assertions](browser-evidence-assertions.md) + [browser-fixture-server-identifiers](browser-fixture-server-identifiers.md) — assert no-op startup, visible business labels, and stable fixture fields.
-- [Touch picker browser coverage](touch-picker-browser-coverage.md) — viewport size does not exercise touch routing; mobile picker tests need explicit pointer/touch capabilities.
 - [Source-heal stale-client fence](source-heal-stale-client-fence.md) — a source repair is not durable while sleeping clients can replay unfenced full-pool recipe writes.
 - [Acknowledged master-data propagation](acknowledged-master-data-propagation.md) — local recipe saves must explicitly drive pending-run refresh; cache effects alone can misclassify a save as bootstrap.
 - [ZIP asset inventory safety](zip-asset-inventory.md) — inspect central-directory metadata only; fail closed on unsafe members and label output as review evidence, not installation approval.
@@ -143,7 +139,6 @@
 - [Section-scoped online edits](section-scoped-online-edits.md) — transient peer locks are UX only; correctness uses row serialization, complete baselines, and durable snapshot fencing.
 - [Automatic staged supply](automatic-staged-supply.md) — active Sauce/Frontline caps are pipeline limits, not lifetime production caps; derive stages from canonical cumulative progress.
 - [Readiness evidence](readiness-evidence.md) — retain only allowlisted health outcomes with explicit deployment/revision identity, bounded samples, and expiry.
-- [Artifact preview ports](artifact-preview-ports.md) — artifact web workflows may expose a dynamic preview port; use workflow status rather than assuming port 5000.
 - [WebKit compatibility boundary](webkit-compatibility-lane-boundary.md) — phone/tablet responsive WebKit covers lifecycle/report; keep synthetic sync-recovery timing in the dedicated WebKit gate.
 - [Replit custom migrations](replit-custom-migrations.md) — chain raw trigger/function migrations before the production server because publish schema sync may skip them.
 - [Atomic import operations](atomic-import-operations.md) — reviewed multi-entity imports use stable operation IDs, server transactions, canonical acknowledgment, and touched-row-only guarded undo.
