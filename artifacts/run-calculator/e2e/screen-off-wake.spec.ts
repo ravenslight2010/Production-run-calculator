@@ -384,6 +384,31 @@ async function mockDateNow(
 }
 
 /**
+ * Keep live sync data canonical while making its operational projection match
+ * the deterministic fixture tick. Only the read-model projection is replaced.
+ */
+async function installOperationalProjectionOverride(
+  page: Page,
+): Promise<(projection: unknown) => void> {
+  let projection: unknown;
+  await page.route("**/api/sync/today**", async (route) => {
+    if (route.request().method() !== "GET" || projection === undefined) {
+      await route.continue();
+      return;
+    }
+    const response = await route.fetch();
+    const body = await response.json() as Record<string, unknown>;
+    await route.fulfill({
+      response,
+      json: { ...body, operationalProjection: projection },
+    });
+  });
+  return (nextProjection) => {
+    projection = nextProjection;
+  };
+}
+
+/**
  * Restore the original Date object.
  * Call this only at the very end of a test (or not at all — each test uses
  * an isolated page context that is closed after the test).  Never call this
@@ -610,6 +635,7 @@ async function setupAndStartRun(
   page: Page,
   casesPerSkid = "10",
   capabilities: readonly E2ECapability[] = [],
+  options: { initialDoughCounters?: { trays: number; batches: number } } = {},
 ): Promise<number> {
   const username = uid();
   const account = await authorizedFixtures.createAccount({
@@ -694,6 +720,15 @@ async function setupAndStartRun(
   await page.evaluate((ms) => {
     (window as unknown as Record<string, unknown>).__testFakeMs = ms;
   }, canonicalStartedAt);
+  if (options.initialDoughCounters) {
+    // Seed nonzero dough before the first authoritative auto-track beat.
+    // Otherwise that beat may stage the full expected run supply while the
+    // form still contains its zero defaults.
+    await page.locator('[data-testid="tab-dough"]').click();
+    await page.getByText("Machine Times", { exact: true }).waitFor({ state: "visible" });
+    await seedDoughCounters(page, options.initialDoughCounters);
+    await page.locator('[data-testid="tab-run"]').click();
+  }
   // Arm the server-owned wall-clock channels at the exact run start. Later
   // mocked wake times invoke the same authoritative tick path and SSE update
   // used in production instead of relying on retired browser-side mutations.
@@ -723,6 +758,18 @@ async function setupAndStartRun(
     casesPerSkid: Number(casesPerSkid),
     freezerTime: 5,
   });
+  if (options.initialDoughCounters) {
+    await expect.poll(async () => {
+      const { values } = await readLiveRunSnapshot(page);
+      return {
+        trays: Number(values.traysOnLine ?? 0),
+        batches: Number(values.batchesReady ?? 0),
+      };
+    }, {
+      timeout: 15_000,
+      message: "initial dough counters changed during the authoritative start tick",
+    }).toEqual(options.initialDoughCounters);
+  }
 
   return canonicalStartedAt;
 }
@@ -929,7 +976,11 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         ...occupancy,
       });
 
-      await mockDateNow(page, safeBaseMs + 2 * 60_000);
+      const setOperationalProjection = await installOperationalProjectionOverride(page);
+      const runningProjection = await mockDateNow(page, safeBaseMs + 2 * 60_000);
+      expect(runningProjection.operationalProjection?.counters?.casesOnLine)
+        .toBe(expectedRunning);
+      setOperationalProjection(runningProjection.operationalProjection);
       await simulateScreenOff(page);
       await simulateOnlineWake(page);
       await expect.poll(() => readCasesOnLine(page)).toBe(expectedRunning);
@@ -950,6 +1001,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       const pausedProjection = await mockDateNow(page, safeBaseMs + 12 * 60_000);
       const expectedPaused = pausedProjection.operationalProjection?.counters?.casesOnLine;
       expect(expectedPaused).toEqual(expect.any(Number));
+      setOperationalProjection(pausedProjection.operationalProjection);
       await simulateScreenOff(page);
       await simulateOnlineWake(page);
       await expect.poll(() => readCasesOnLine(page)).toBe(expectedPaused);
@@ -970,6 +1022,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       // closed pause separately.
       const requestedEndAt = safeBaseMs + 15 * 60_000;
       const endProjection = await mockDateNow(page, requestedEndAt);
+      setOperationalProjection(endProjection.operationalProjection);
       await simulateScreenOff(page);
       await simulateOnlineWake(page);
       await expect.poll(() => readCasesOnLine(page)).toBe(
@@ -984,6 +1037,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       }, { timeout: 15_000 }).toBe(true);
 
       const drainProjection = await mockDateNow(page, endedAt + 3 * 60_000);
+      setOperationalProjection(drainProjection.operationalProjection);
       await simulateScreenOff(page);
       await simulateOnlineWake(page);
       await expect.poll(() => readCasesOnLine(page)).toBe(
@@ -1094,9 +1148,11 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       // elapsed wall time as newly-running time.
       await page.reload({ waitUntil: "domcontentloaded" });
       await installHiddenMock(page);
+      const setOperationalProjection = await installOperationalProjectionOverride(page);
       const pausedProjection = await mockDateNow(page, pausedCheckAt);
       const expectedPaused = pausedProjection.operationalProjection?.counters?.casesOnLine;
-      await simulateWake(page);
+      setOperationalProjection(pausedProjection.operationalProjection);
+      await simulateOnlineWake(page);
       await expect.poll(() => readCasesOnLine(page)).toBe(expectedPaused);
       await expect(
         page.locator(
@@ -1117,8 +1173,9 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         return run.pausedAt == null;
       }, { timeout: 20_000 }).toBe(true);
       const resumedProjection = await mockDateNow(page, resumedCheckAt);
+      setOperationalProjection(resumedProjection.operationalProjection);
       await simulateScreenOff(page);
-      await simulateWake(page);
+      await simulateOnlineWake(page);
       await expect.poll(() => readCasesOnLine(page)).toBe(
         resumedProjection.operationalProjection?.counters?.casesOnLine,
       );
@@ -1271,15 +1328,13 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         page,
         "10",
         DEFAULT_MANAGER_CAPABILITIES,
+        { initialDoughCounters: { trays: 10, batches: 2 } },
       );
 
-      // Use the real Dough station controls to establish known on-hand stock,
-      // then return to Run for the operator's speed edit. The production
-      // fixture is intentionally simple: 60 PPM initially, 2 doughballs/tray,
-      // and 4 doughballs/batch.
+      // The setup helper seeded known stock through the real Dough controls
+      // before its first authoritative auto-track beat.
       await page.locator('[data-testid="tab-dough"]').click();
       await page.getByText("Machine Times", { exact: true }).waitFor({ state: "visible" });
-      await seedDoughCounters(page, { trays: 10, batches: 2 });
       await page.getByTestId("btn-resume-now").click();
       await page.locator('[data-testid="tab-run"]').click();
 
@@ -1517,14 +1572,14 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         page,
         "10",
         DEFAULT_MANAGER_CAPABILITIES,
+        { initialDoughCounters: { trays: 10, batches: 2 } },
       );
 
-      // Establish the same known dough state used by the normal wake-claim
-      // journey. The speed edit is persisted before zeroing machine timings,
-      // so the reconnect case starts from the same clean cadence baseline.
+      // The setup helper seeded known counters through the visible station
+      // controls before the first auto-track beat. Persist the speed edit
+      // before zeroing machine timings for the reconnect cadence baseline.
       await page.locator('[data-testid="tab-dough"]').click();
       await page.getByText("Machine Times", { exact: true }).waitFor({ state: "visible" });
-      await seedDoughCounters(page, { trays: 10, batches: 2 });
       await page.getByTestId("btn-resume-now").click();
       await page.locator('[data-testid="tab-run"]').click();
       const lineSetupDetails = page.locator("details").filter({
@@ -1831,6 +1886,9 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         await sleepingPage.unroute("**/api/sync/today**");
         // Do not click Retry. A visible app must recover on the fixed five-second
         // cadence even when the browser's online signal was false or premature.
+        // Advance only the proxied browser clock past the retry deadline; real
+        // timers remain active and no authoritative server tick is triggered.
+        await mockDateNow(sleepingPage, advancedAt + 6_000, { tick: false });
         await expect(sleepingStatus).toHaveAttribute(
           "data-foreground-recovery-state",
           "outcome",
