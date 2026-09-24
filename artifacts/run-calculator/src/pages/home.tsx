@@ -5219,7 +5219,7 @@ export default function Home() {
           ? localStorage.getItem(SUPERVISOR_PIN_KEY)
           : null);
   const noFacilityPin = resolvedPin === "";
-  const isSupervisor = isManager || role === "supervisor" || noFacilityPin;
+  const isSupervisor = isManager || me?.role === "supervisor" || role === "supervisor" || noFacilityPin;
 
   // ── Glance overlay ────────────────────────────────────────────────────────
   const [showGlance, setShowGlance] = useState(false);

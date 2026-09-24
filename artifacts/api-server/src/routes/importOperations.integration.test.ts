@@ -8,6 +8,7 @@ import pg from "pg";
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { signToken } from "../lib/auth";
+import { recordSession } from "../lib/authSessions";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 let db: typeof import("@workspace/db").db;
@@ -20,6 +21,7 @@ let baseUrl: string;
 let tables: typeof import("@workspace/db");
 let route: typeof import("./importOperations");
 let seedRoles: () => Promise<void>;
+const sessionTokens = new Map<string, string>();
 
 beforeAll(async () => {
   originalUrl = process.env.DATABASE_URL;
@@ -59,7 +61,7 @@ afterAll(async () => {
 }, 120_000);
 
 beforeEach(async () => {
-  await db.execute(sql`TRUNCATE ${tables.importOperationsTable}, ${tables.importHistoryTable}, ${tables.mixesTable}, ${tables.specImportAliasesTable}, ${tables.userRolesTable}, ${tables.usersTable} RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE ${tables.importOperationsTable}, ${tables.importHistoryTable}, ${tables.mixesTable}, ${tables.specImportAliasesTable}, ${tables.authSessionsTable}, ${tables.userRolesTable}, ${tables.usersTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
   await db.insert(tables.usersTable).values([
     { id: "inventory", username: "inventory", passwordHash: "x" },
@@ -71,10 +73,18 @@ beforeEach(async () => {
     { userId: "profiles", role: "operator" },
     { userId: "sandbox", role: "manager" },
   ]);
+  sessionTokens.clear();
+  for (const user of ["inventory", "profiles", "sandbox"]) {
+    const token = signToken(user);
+    sessionTokens.set(user, token);
+    await recordSession(user, token);
+  }
 });
 
 function headers(user = "inventory") {
-  return { "content-type": "application/json", authorization: `Bearer ${signToken(user)}` };
+  const token = sessionTokens.get(user);
+  if (!token) throw new Error(`No test session established for ${user}`);
+  return { "content-type": "application/json", authorization: `Bearer ${token}` };
 }
 function change(id = "mix-atomic") {
   return {

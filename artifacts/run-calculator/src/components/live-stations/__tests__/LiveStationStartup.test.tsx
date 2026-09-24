@@ -322,7 +322,10 @@ describe("live station startup", () => {
       </StationProviders>,
     );
 
-      const controls = within(screen.getByText(label).parentElement!).getAllByRole("button", { name: /consumed batches correction/ });
+    const controls = within(screen.getAllByText("House Sauce")[0].parentElement!).getAllByRole(
+      "button",
+      { name: /consumed batches correction/ },
+    );
     expect(controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(true);
 
     act(() => {
@@ -376,31 +379,23 @@ describe("live station startup", () => {
   });
 
   it("advances Frontline once when its ended run has cleared Stage 1", () => {
-      const switchToRun = vi.fn(
-        (newIndex: number, expectedCurrentRunId?: string) => {
-          // Model the real lifecycle manager's expected-run fence. The
-          // foreground/manual selection has already won before this stale
-          // station effect tries to advance the old draining run.
-          if (
-            expectedCurrentRunId &&
-            selectedRunId.current !== expectedCurrentRunId
-          ) {
-            return false;
-          }
-          selectedRunId.current = runs[newIndex]?.id ?? selectedRunId.current;
-          return true;
-        },
-      );
+    const runs = [ENDED_RUN, NEXT_RUN];
+    const selectedRunId = { current: RUN_ID };
+    const switchToRun = vi.fn((newIndex: number, expectedCurrentRunId?: string) => {
+      if (expectedCurrentRunId && selectedRunId.current !== expectedCurrentRunId) return false;
+      selectedRunId.current = runs[newIndex]?.id ?? selectedRunId.current;
+      return true;
+    });
     const view = render(
-      <LiveStationPersistenceHarness>
-        <LiveSauceTabContent />
-      </LiveStationPersistenceHarness>,
+      <StationProviders status="ended" runs={runs} switchToRun={switchToRun}>
+        <LiveFrontlineTabContent />
+      </StationProviders>,
     );
 
     expect(switchToRun).toHaveBeenCalledTimes(1);
     expect(switchToRun).toHaveBeenCalledWith(1, RUN_ID);
     view.rerender(
-      <StationProviders status="ended" runs={[ENDED_RUN, NEXT_RUN]} switchToRun={switchToRun}>
+      <StationProviders status="ended" runs={runs} switchToRun={switchToRun}>
         <LiveFrontlineTabContent />
       </StationProviders>,
     );
@@ -408,21 +403,7 @@ describe("live station startup", () => {
   });
 
   it("keeps an ended station run selected when there is no queued next run", () => {
-      const switchToRun = vi.fn(
-        (newIndex: number, expectedCurrentRunId?: string) => {
-          // Model the real lifecycle manager's expected-run fence. The
-          // foreground/manual selection has already won before this stale
-          // station effect tries to advance the old draining run.
-          if (
-            expectedCurrentRunId &&
-            selectedRunId.current !== expectedCurrentRunId
-          ) {
-            return false;
-          }
-          selectedRunId.current = runs[newIndex]?.id ?? selectedRunId.current;
-          return true;
-        },
-      );
+    const switchToRun = vi.fn();
     render(
       <StationProviders status="ended" runs={[ENDED_RUN]} switchToRun={switchToRun}>
         <LiveFrontlineTabContent />
@@ -433,21 +414,7 @@ describe("live station startup", () => {
   });
 
   it("does not advance Packaging during Frontline or Freeze tunnel drain", () => {
-      const switchToRun = vi.fn(
-        (newIndex: number, expectedCurrentRunId?: string) => {
-          // Model the real lifecycle manager's expected-run fence. The
-          // foreground/manual selection has already won before this stale
-          // station effect tries to advance the old draining run.
-          if (
-            expectedCurrentRunId &&
-            selectedRunId.current !== expectedCurrentRunId
-          ) {
-            return false;
-          }
-          selectedRunId.current = runs[newIndex]?.id ?? selectedRunId.current;
-          return true;
-        },
-      );
+    const switchToRun = vi.fn();
     const stillDraining = { ...ENDED_RUN, endedAt: Date.now() - 5 * 60_000 };
     render(
       <StationProviders status="ended" runs={[stillDraining, NEXT_RUN]} switchToRun={switchToRun}>
@@ -459,22 +426,14 @@ describe("live station startup", () => {
   });
 
   it("advances Packaging once when the ended run is fully drained, including on mount", () => {
-      const switchToRun = vi.fn(
-        (newIndex: number, expectedCurrentRunId?: string) => {
-          // Model the real lifecycle manager's expected-run fence. The
-          // foreground/manual selection has already won before this stale
-          // station effect tries to advance the old draining run.
-          if (
-            expectedCurrentRunId &&
-            selectedRunId.current !== expectedCurrentRunId
-          ) {
-            return false;
-          }
-          selectedRunId.current = runs[newIndex]?.id ?? selectedRunId.current;
-          return true;
-        },
-      );
-      const fullyDrained = { ...ENDED_RUN, endedAt: Date.now() - 40 * 60_000 };
+    const fullyDrained = { ...ENDED_RUN, endedAt: Date.now() - 40 * 60_000 };
+    const runs = [fullyDrained, NEXT_RUN];
+    const selectedRunId = { current: RUN_ID };
+    const switchToRun = vi.fn((newIndex: number, expectedCurrentRunId?: string) => {
+      if (expectedCurrentRunId && selectedRunId.current !== expectedCurrentRunId) return false;
+      selectedRunId.current = runs[newIndex]?.id ?? selectedRunId.current;
+      return true;
+    });
     render(
       <StationProviders status="ended" runs={[fullyDrained, NEXT_RUN]} switchToRun={switchToRun}>
         <LivePackagingTabContent />
@@ -769,7 +728,7 @@ describe("live station edits and stamped browser persistence", () => {
     expect(acceptsStalePeer).toBe(false);
 
     if (acceptsStalePeer) saveRunValues(RUN_ID, stalePeerValues);
-    expect(loadRunValues(RUN_ID).casesOnCurrentSkid).toBe(4);
+    expect(loadRunValues(RUN_ID).sauceBarrelsMade).toBe(1);
   });
 
   it("keeps a sauce count after remount and rejects a stale peer snapshot", async () => {
@@ -810,7 +769,7 @@ describe("live station edits and stamped browser persistence", () => {
     expect(acceptsStalePeer).toBe(false);
 
     if (acceptsStalePeer) saveRunValues(RUN_ID, stalePeerValues);
-    expect(loadRunValues(RUN_ID).casesOnCurrentSkid).toBe(4);
+    expect(loadRunValues(RUN_ID).sauceBarrelsMade).toBe(1);
   });
 
   it("keeps a sauce count after remount and rejects a stale peer snapshot", async () => {

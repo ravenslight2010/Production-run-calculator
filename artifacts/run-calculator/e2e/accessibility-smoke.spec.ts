@@ -876,6 +876,9 @@ test.describe("accessibility smoke", () => {
     await page.keyboard.press("ArrowRight");
     await page.keyboard.press("Enter");
     await expect(scheduleCalendar).toBeHidden();
+    await page.locator("#replit-dev-banner").evaluateAll((nodes) => {
+      for (const node of nodes) node.remove();
+    });
     await scheduleEditor.getByRole("button", { name: "Close schedule editor" }).click();
     await expect(scheduleEditor).toBeHidden();
   });
@@ -907,6 +910,11 @@ test.describe("accessibility smoke", () => {
     const scheduleEditor = page.getByRole("dialog", { name: /Plan for/ });
     const breakEditor = scheduleEditor.getByTestId("schedule-breaks");
     await expect(breakEditor).toContainText("Each planned break is fixed at 30 minutes.");
+    // Phone layouts intentionally collapse the editable planner behind the
+    // summary toggle; expand it before asserting the same break-slot contract
+    // exercised directly on desktop.
+    const breakToggle = breakEditor.getByTestId("schedule-break-toggle");
+    if (await breakToggle.isVisible()) await breakToggle.click();
     await expect(breakEditor.getByText("Break 1", { exact: true })).toBeVisible();
     await expect(breakEditor.getByText("Break 2", { exact: true })).toBeVisible();
     await expect(breakEditor.getByText("Break 3", { exact: true })).toBeVisible();
@@ -948,6 +956,9 @@ test.describe("accessibility smoke", () => {
       .click();
     const reloadedEditor = page.getByRole("dialog", { name: /Plan for/ });
     const reloadedBreakEditor = reloadedEditor.getByTestId("schedule-breaks");
+    await expect(reloadedBreakEditor).toContainText("Each planned break is fixed at 30 minutes.");
+    const reloadedBreakToggle = reloadedBreakEditor.getByTestId("schedule-break-toggle");
+    if (await reloadedBreakToggle.isVisible()) await reloadedBreakToggle.click();
     for (const [slot, time] of [[1, "06:30"], [2, "08:00"], [3, "09:30"]] as const) {
       await expect(
         reloadedBreakEditor.getByRole("combobox", { name: `Break ${slot} placement` }),
@@ -1002,7 +1013,7 @@ test.describe("accessibility smoke", () => {
         if (key?.startsWith("run-calc")) localStorage.removeItem(key);
       }
     });
-    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await page.reload({ waitUntil: "domcontentloaded" });
     await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
 
     const openScheduleEditor = async (): Promise<Locator> => {
@@ -1105,6 +1116,9 @@ test.describe("accessibility smoke", () => {
       .click();
     const scheduleEditor = page.getByRole("dialog", { name: /Plan for/ });
     const breakEditor = scheduleEditor.getByTestId("schedule-breaks");
+    await expect(breakEditor).toContainText("Each planned break is fixed at 30 minutes.");
+    const breakToggle = breakEditor.getByTestId("schedule-break-toggle");
+    if (await breakToggle.isVisible()) await breakToggle.click();
     for (const [slot, time] of [[1, "07:00"], [2, "09:00"], [3, "11:00"]] as const) {
       await breakEditor
         .getByRole("combobox", { name: `Break ${slot} placement` })

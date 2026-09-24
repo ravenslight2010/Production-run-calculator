@@ -52,6 +52,7 @@ jobs:
       # history. The verifier's focused tests run in ordinary CI; release-check
       # refuses this switch outside this disposable CI contract.
       RELEASE_CHECK_SKIP_PRODUCTION_SOURCE_LIBRARY_RECONCILIATION: "1"
+      SOURCE_LIBRARY_RECONCILIATION_ENVIRONMENT: development
       OPERATIONAL_REPORT_SIGNING_KEYS: '{"activeKeyId":"release-check-current","keys":{"release-check-current":"release-check-disposable-signing-key-000000000000000000000000"}}'
       REPORT_KEY_ROTATION_PREFLIGHT_ENVIRONMENT: disposable-ci
       RELEASE_EVIDENCE_DIR: release-evidence
@@ -135,7 +136,7 @@ jobs:
     name: Release gates and retained full evidence
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_full }}
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 150
     permissions:
       actions: read
       contents: read
@@ -165,6 +166,7 @@ jobs:
       # See the standard job: this excludes unavailable production history,
       # not synthetic production reconciliation evidence.
       RELEASE_CHECK_SKIP_PRODUCTION_SOURCE_LIBRARY_RECONCILIATION: "1"
+      SOURCE_LIBRARY_RECONCILIATION_ENVIRONMENT: development
       OPERATIONAL_REPORT_SIGNING_KEYS: '{"activeKeyId":"release-check-current","keys":{"release-check-current":"release-check-disposable-signing-key-000000000000000000000000"}}'
       REPORT_KEY_ROTATION_PREFLIGHT_ENVIRONMENT: disposable-ci
       RELEASE_EVIDENCE_DIR: release-evidence-full

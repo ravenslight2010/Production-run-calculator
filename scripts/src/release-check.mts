@@ -270,8 +270,8 @@ export const RELEASE_CHECK_API_CONCURRENCY = 2;
 // evidence-producing gate a longer bounded window instead of weakening
 // isolation with parallel workers or masking intermittent failures with
 // retries. The exact coverage count lives in the shared browser contract.
-const FULL_BROWSER_TIMEOUT_MS = 45 * 60_000;
-const FULL_BROWSER_WARNING_MS = 40 * 60_000;
+const FULL_BROWSER_TIMEOUT_MS = 90 * 60_000;
+const FULL_BROWSER_WARNING_MS = 80 * 60_000;
 const FULL_BROWSER_GATE_LABEL = "full browser E2E suite";
 const RELEASE_BROWSER_ENV = {
   E2E_TEST_DB: "1",

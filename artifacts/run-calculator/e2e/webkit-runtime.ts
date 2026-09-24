@@ -6,7 +6,10 @@ const NIX_LIBRARY_ATTRIBUTES = ["gcc.cc.lib", "libglvnd", "x264.lib"] as const;
 function resolveNixLibraryPath(): string | undefined {
   const configured = process.env.PLAYWRIGHT_WEBKIT_LIBRARY_PATH?.trim();
   if (configured) return configured;
-  if (process.env.CI) return undefined;
+  // Release gates run with CI=true even in the Replit Nix workspace. Keep the
+  // local Nix wrapper there, but leave ordinary CI hosts on Playwright's
+  // installed system libraries.
+  if (process.env.CI && !process.env.REPLIT_DEV_DOMAIN) return undefined;
 
   try {
     const paths = NIX_LIBRARY_ATTRIBUTES.map((attribute) => {

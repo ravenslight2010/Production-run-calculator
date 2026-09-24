@@ -17,6 +17,7 @@ import AuditLogCard from "./AuditLogCard";
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.useRealTimers();
   exportAuditLogsPdf.mockReset();
   toast.mockReset();
 });
@@ -81,6 +82,10 @@ describe("AuditLogCard PDF export", () => {
   });
 
   it("downloads a PDF using the committed date range and row limit", async () => {
+    // Freeze Date only for this rolling-range test; do not couple it to the
+    // calendar date on which the suite happens to run.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-21T12:00:00.000Z"));
     vi.stubGlobal("fetch", vi.fn(async () => auditResponse()));
     const createObjectURL = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob: audit");
     const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});

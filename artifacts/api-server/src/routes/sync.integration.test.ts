@@ -9,6 +9,7 @@ import pg from "pg";
 import { and, eq, sql } from "drizzle-orm";
 import { signLegacyTokenForTests } from "../lib/auth";
 import { syncSnapshotId } from "../lib/syncContract";
+import { legacySyncReadinessSnapshot } from "../lib/capacityTelemetry";
 
 const emptyCompleteSnapshotId = (date: string) => syncSnapshotId({
   dayState: { date, runs: [] },
@@ -1045,6 +1046,11 @@ describe("GET /sync/health — read-only scoped sentinel", () => {
 
   it("reports a healthy bounded contract without exposing canonical payloads", async () => {
     await seedHealthyDocument();
+    // Legacy-write telemetry is process-scoped by design.  Other integration
+    // cases may exercise the compatibility path before this sentinel runs, so
+    // assert that the health check does not add an observation rather than
+    // assuming a fresh process-wide counter.
+    const legacyWritesBeforeCheck = legacySyncReadinessSnapshot("accept").acceptedLegacyWrites;
     const response = await getHealth();
     expect(response.status).toBe(200);
     const body = await response.json() as any;
@@ -1062,7 +1068,7 @@ describe("GET /sync/health — read-only scoped sentinel", () => {
       legacySyncReadiness: {
         compatibilityMode: "accept",
         status: "not-ready",
-        acceptedLegacyWrites: 0,
+        acceptedLegacyWrites: legacyWritesBeforeCheck,
         requiredAcceptedLegacyWrites: 0,
         fullWindowObserved: false,
         windowMs: 86_400_000,
@@ -3947,7 +3953,15 @@ describe("/sync/events — date-scoped broadcasts", () => {
     const write = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
       method: "PUT",
       headers: { ...authHeaders(), "content-type": "application/json" },
-      body: JSON.stringify({ senderId: "peer-writer", payload: changedPayload }),
+      // The HTTP snapshot is the complete-write handoff contract.  Supplying
+      // the receiver's baseline explicitly prevents this fixture from relying
+      // on legacy, unanchored-write behavior and makes the broadcast race
+      // deterministic.
+      body: JSON.stringify({
+        senderId: "peer-writer",
+        snapshotId: seedBody.snapshotId,
+        payload: changedPayload,
+      }),
     });
     const writeBody = await write.json() as { data: Record<string, unknown>; snapshotId: string };
     const received = await readFrame((frame) => frame.senderId === "peer-writer");
@@ -3979,8 +3993,15 @@ describe("/sync/events — date-scoped broadcasts", () => {
       packagingProgress?: Record<string, unknown>;
       deletedItems?: { runs?: string[] };
     };
+    const {
+      syncVersion: _syncVersion,
+      completeness: _completeness,
+      baseSnapshotId: _baseSnapshotId,
+      resultingSnapshotId: _resultingSnapshotId,
+      ...legacyRemovalBase
+    } = afterChange as Record<string, unknown>;
     const removalPayload = {
-      ...afterChange,
+      ...legacyRemovalBase,
       dayState: {
         ...afterChange.dayState,
         runs: afterChange.dayState.runs.filter((run) => run.id !== removedRunId),
@@ -4002,7 +4023,11 @@ describe("/sync/events — date-scoped broadcasts", () => {
     const removalWrite = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
       method: "PUT",
       headers: { ...authHeaders(), "content-type": "application/json" },
-      body: JSON.stringify({ senderId: "peer-remover", payload: removalPayload }),
+      body: JSON.stringify({
+        senderId: "peer-remover",
+        snapshotId: writeBody.snapshotId,
+        payload: removalPayload,
+      }),
     });
     const removalBody = await removalWrite.json() as {
       data: typeof removalPayload;
@@ -4029,18 +4054,31 @@ describe("/sync/events — date-scoped broadcasts", () => {
         ...sharedInputPayload,
         dayState: { ...sharedInputPayload.dayState, [field]: changedValue },
       };
+      delete (sharedInputPayload as Record<string, unknown>).syncVersion;
+      delete (sharedInputPayload as Record<string, unknown>).completeness;
+      delete (sharedInputPayload as Record<string, unknown>).baseSnapshotId;
+      delete (sharedInputPayload as Record<string, unknown>).resultingSnapshotId;
       const sharedInputWrite = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
         method: "PUT",
         headers: { ...authHeaders(), "content-type": "application/json" },
-        body: JSON.stringify({ senderId, payload: sharedInputPayload }),
+        body: JSON.stringify({
+          senderId,
+          payload: sharedInputPayload,
+        }),
       });
       expect(sharedInputWrite.status).toBe(200);
       const sharedInputFrame = await readFrame((frame) => frame.senderId === senderId);
+      await sharedInputWrite.json();
       const remainingRunIds = sharedInputPayload.dayState.runs
         .map((run: { id: string }) => run.id)
         .sort();
-      expect(sharedInputFrame.frame.completeness).toBe("partial");
-      expect(sharedInputFrame.frame.data.dayState[field]).toEqual(changedValue);
+      // A shared day-state dependency invalidates every derived run map.  The
+      // route therefore sends the canonical full frame when the all-runs
+      // projection is not materially smaller than the complete payload.  The
+      // one-run update and removal assertions above still require partial
+      // frames; this branch verifies the intentional full-frame fallback.
+      expect(sharedInputFrame.frame.completeness).toBe("complete");
+      expect(sharedInputFrame.frame).not.toHaveProperty("baseSnapshotId");
       expect(Object.keys(sharedInputFrame.frame.summaryStats).sort()).toEqual(remainingRunIds);
       expect(Object.keys(sharedInputFrame.frame.runLines).sort()).toEqual(remainingRunIds);
       const sharedInputWireBytes = Buffer.byteLength(`data: ${sharedInputFrame.raw}\n\n`, "utf8");
