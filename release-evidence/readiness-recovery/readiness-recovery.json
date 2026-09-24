@@ -4,8 +4,8 @@
   "environment": "release",
   "deploymentId": "411f3a0b-be0f-499a-9b85-b35deec43e5d",
   "revision": "eb6f2bafa48dab5d184e700e28980ae21699fd56",
-  "generatedAt": "2026-09-24T02:41:06.698Z",
-  "expiresAt": "2026-10-01T02:41:06.698Z",
+  "generatedAt": "2026-09-24T02:43:21.766Z",
+  "expiresAt": "2026-10-01T02:43:21.766Z",
   "retention": {
     "maxSamples": 60,
     "maxAgeMs": 604800000
@@ -15,15 +15,15 @@
   },
   "samples": [
     {
-      "capturedAt": "2026-09-24T02:40:55.673Z",
-      "httpStatus": 503,
-      "outcome": "worker_incident",
+      "capturedAt": "2026-09-24T02:43:10.742Z",
+      "httpStatus": 200,
+      "outcome": "healthy",
       "checks": {
         "process": "ok",
         "startup": "ok",
         "database": "ok",
         "dependencies": "ok",
-        "backgroundWorkers": "error"
+        "backgroundWorkers": "ok"
       },
       "workers": [
         {
@@ -35,9 +35,8 @@
         {
           "operation": "server-job-run",
           "status": "ok",
-          "recentFailureCount": 2,
-          "threshold": 3,
-          "lastFailureAt": "2026-09-24T02:40:34.232Z"
+          "recentFailureCount": 0,
+          "threshold": 3
         },
         {
           "operation": "server-job-prune",
@@ -47,23 +46,23 @@
         },
         {
           "operation": "web-push-schedule",
-          "status": "warning",
-          "recentFailureCount": 3,
+          "status": "ok",
+          "recentFailureCount": 1,
           "threshold": 3,
-          "lastFailureAt": "2026-09-24T02:40:34.032Z"
+          "lastFailureAt": "2026-09-24T02:42:34.232Z"
         }
       ]
     },
     {
-      "capturedAt": "2026-09-24T02:41:01.182Z",
-      "httpStatus": 503,
-      "outcome": "worker_incident",
+      "capturedAt": "2026-09-24T02:43:16.238Z",
+      "httpStatus": 200,
+      "outcome": "healthy",
       "checks": {
         "process": "ok",
         "startup": "ok",
         "database": "ok",
         "dependencies": "ok",
-        "backgroundWorkers": "error"
+        "backgroundWorkers": "ok"
       },
       "workers": [
         {
@@ -86,23 +85,23 @@
         },
         {
           "operation": "web-push-schedule",
-          "status": "warning",
-          "recentFailureCount": 3,
+          "status": "ok",
+          "recentFailureCount": 1,
           "threshold": 3,
-          "lastFailureAt": "2026-09-24T02:40:34.032Z"
+          "lastFailureAt": "2026-09-24T02:42:34.232Z"
         }
       ]
     },
     {
-      "capturedAt": "2026-09-24T02:41:06.451Z",
-      "httpStatus": 503,
-      "outcome": "worker_incident",
+      "capturedAt": "2026-09-24T02:43:21.512Z",
+      "httpStatus": 200,
+      "outcome": "healthy",
       "checks": {
         "process": "ok",
         "startup": "ok",
         "database": "ok",
         "dependencies": "ok",
-        "backgroundWorkers": "error"
+        "backgroundWorkers": "ok"
       },
       "workers": [
         {
@@ -125,26 +124,26 @@
         },
         {
           "operation": "web-push-schedule",
-          "status": "warning",
-          "recentFailureCount": 3,
+          "status": "ok",
+          "recentFailureCount": 1,
           "threshold": 3,
-          "lastFailureAt": "2026-09-24T02:40:34.032Z"
+          "lastFailureAt": "2026-09-24T02:42:34.232Z"
         }
       ]
     }
   ],
   "summary": {
-    "normal200Samples": 0,
-    "workerIncident503Samples": 3,
+    "normal200Samples": 3,
+    "workerIncident503Samples": 0,
     "recovery200Samples": 0,
     "observedStates": [
-      "worker_incident_503"
+      "normal_200"
     ],
-    "finalState": "worker_incident"
+    "finalState": "normal"
   },
   "verification": {
     "mode": "normal",
-    "passed": false,
-    "reason": "normal mode requires sustained HTTP 200 readiness"
+    "passed": true,
+    "reason": "sustained HTTP 200 readiness"
   }
 }

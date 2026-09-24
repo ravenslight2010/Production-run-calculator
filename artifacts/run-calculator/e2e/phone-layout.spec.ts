@@ -1741,7 +1741,7 @@ test.describe("phone layout smoke", () => {
     { name: "phone", width: 390, height: 844 },
     { name: "tablet", width: 768, height: 1024 },
   ] as const) {
-    test.describe(`touch selection dialogs on ${viewport.name}`, () => {
+    test.describe(`touch selection dialogs on ${viewport.name} @focused-only`, () => {
       test.use({
         viewport: { width: viewport.width, height: viewport.height },
         hasTouch: true,
@@ -1816,7 +1816,7 @@ test.describe("phone layout smoke", () => {
     });
   }
 
-  test.describe("touch recipe picker contract at compact phone viewport", () => {
+  test.describe("touch recipe picker contract at compact phone viewport @focused-only", () => {
     test.use({
       viewport: { width: 390, height: 844 },
       hasTouch: true,

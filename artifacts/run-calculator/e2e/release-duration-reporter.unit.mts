@@ -157,7 +157,7 @@ assert.deepEqual(
     [
       {
         file: "artifacts/run-calculator/e2e/slow.spec.ts",
-         durationMs: FULL_BROWSER_EXPECTED_CASES * 1_000 + 41_000,
+         durationMs: FULL_BROWSER_EXPECTED_CASES * 1_000 + 50_000,
       },
     ],
     baselineAfterIncompleteRun!,
@@ -165,10 +165,10 @@ assert.deepEqual(
   [
     {
       file: "artifacts/run-calculator/e2e/slow.spec.ts",
-         durationMs: FULL_BROWSER_EXPECTED_CASES * 1_000 + 41_000,
+         durationMs: FULL_BROWSER_EXPECTED_CASES * 1_000 + 50_000,
         baselineDurationMs: FULL_BROWSER_EXPECTED_CASES * 1_000,
-       increaseMs: 41_000,
-        increasePercent: (41_000 / (FULL_BROWSER_EXPECTED_CASES * 1_000)) * 100,
+       increaseMs: 50_000,
+        increasePercent: (50_000 / (FULL_BROWSER_EXPECTED_CASES * 1_000)) * 100,
     },
   ],
 );

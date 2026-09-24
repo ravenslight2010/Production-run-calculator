@@ -46,7 +46,11 @@ export default defineConfig({
   // WebKit and the desktop/phone calendar matrix have isolated standard-release
   // configs. Keep them out of the destructive full suite so that suite retains
   // its existing case/runtime budget instead of duplicating focused coverage.
-  testIgnore: ["calendar.spec.ts", "release-webkit-smoke.spec.ts"],
+  testIgnore: [
+    "calendar.spec.ts",
+    "release-webkit-smoke.spec.ts",
+    "ios-safari-pwa-device.spec.ts",
+  ],
   // Physical Android checks run through the dedicated device lane. Keep the
   // three phone-layout checks, the process-restart-only sync check, and
   // focused-only regressions outside the full-browser Chromium contract. The
