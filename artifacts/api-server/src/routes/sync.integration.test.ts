@@ -268,6 +268,76 @@ describe("POST /sync/manual-section — section ownership contract", () => {
     expect((await retry.json() as { duplicate?: boolean }).duplicate).toBe(true);
   });
 
+  it("accepted Packaging correction survives a newer stale ordinary snapshot write", async () => {
+    const acceptedResponse = await request({
+      ...edit("packaging-hold"),
+      values: { skidsCompleted: 0, casesOnCurrentSkid: 45 },
+      baseValues: { skidsCompleted: 1, casesOnCurrentSkid: 2 },
+    });
+    expect(acceptedResponse.status).toBe(200);
+    const accepted = await acceptedResponse.json() as {
+      data: Record<string, any>;
+      serverTime: number;
+      snapshotId: string;
+    };
+    const acceptedProgress = accepted.data.packagingProgress["manual-run"];
+    expect(accepted.data.runValues["manual-run"]).toMatchObject({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 45,
+    });
+    expect(acceptedProgress).toMatchObject({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 45,
+      correctionGeneration: 1,
+    });
+    expect(acceptedProgress.manualOverrideUntil).toBeGreaterThan(accepted.serverTime);
+
+    const staleProgress = {
+      skidsCompleted: 1,
+      casesOnCurrentSkid: 44,
+      correctionGeneration: 99,
+      updatedAt: accepted.serverTime + 5_000,
+      manualOverrideUntil: 0,
+    };
+    const stalePayload = {
+      ...accepted.data,
+      syncVersion: 1,
+      completeness: "complete",
+      baseSnapshotId: accepted.snapshotId,
+      runValues: {
+        ...accepted.data.runValues,
+        "manual-run": {
+          ...accepted.data.runValues["manual-run"],
+          skidsCompleted: staleProgress.skidsCompleted,
+          casesOnCurrentSkid: staleProgress.casesOnCurrentSkid,
+        },
+      },
+      runValuesUpdatedAt: { "manual-run": accepted.serverTime + 5_000 },
+      packagingProgress: { "manual-run": staleProgress },
+    };
+    const staleWrite = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "stale-packaging-peer", payload: stalePayload }),
+    });
+    expect(staleWrite.status).toBe(200);
+    const canonical = await staleWrite.json() as {
+      data: {
+        runValues: Record<string, Record<string, number>>;
+        packagingProgress: Record<string, Record<string, number>>;
+      };
+    };
+    expect(canonical.data.runValues["manual-run"]).toMatchObject({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 45,
+    });
+    expect(canonical.data.packagingProgress["manual-run"]).toMatchObject({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 45,
+      correctionGeneration: 1,
+    });
+  });
+
   it("same accepted id conflicts after reset epoch bump", async () => {
     const body = edit("post-reset-retry");
     const accepted = await request(body);

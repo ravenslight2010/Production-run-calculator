@@ -307,8 +307,11 @@ export const LiveSauceTabContent = memo(function LiveSauceTabContent() {
           skidsCompleted: packedSkids,
           casesOnCurrentSkid: packedCasesOnSkid,
           casesPerSkid: cps,
-          applyProgress: (nextSkids, nextCases) => {
-            persistManualPackagingProgress(currentRunId, nextSkids, nextCases);
+          applyProgress: (nextSkids, nextCases, previousSkids, previousCases) => {
+            persistManualPackagingProgress(currentRunId, nextSkids, nextCases, undefined, {
+              skidsCompleted: previousSkids,
+              casesOnCurrentSkid: previousCases,
+            });
             form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
             form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
           },

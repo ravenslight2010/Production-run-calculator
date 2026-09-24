@@ -19345,16 +19345,27 @@ function FloorModeView() {
                   {(packagingLock || packagingConflict) && <p role="status" aria-live="polite" className="col-span-3 text-center text-xs text-amber-200">{packagingConflict ?? sectionLockedMessage(packagingLock)}</p>}
                   <button type="button" data-testid="floor-cases-minus" aria-label="Correct cases down by one" onClick={() => {
                     runUnlockedManualSectionAction(() => !!getManualSectionLock(currentRun?.id ?? "", "packaging")?.peer, () => {
-                      const nextCases = Math.max(0, v.casesOnCurrentSkid - 1);
-                      persistManualPackagingProgress(currentRun?.id ?? "", v.skidsCompleted, nextCases);
+                      const before = {
+                        skidsCompleted: Number(form.getValues("skidsCompleted")) || 0,
+                        casesOnCurrentSkid: Number(form.getValues("casesOnCurrentSkid")) || 0,
+                      };
+                      const nextCases = Math.max(0, before.casesOnCurrentSkid - 1);
+                      persistManualPackagingProgress(currentRun?.id ?? "", before.skidsCompleted, nextCases, undefined, before);
                       form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
                     });
                   }} disabled={!!packagingLock} className="min-h-12 rounded-xl text-lg font-bold disabled:cursor-not-allowed disabled:opacity-40" style={{ background: "rgba(255,255,255,0.08)" }}>−1 case</button>
                   <div className="flex items-center justify-center text-center text-xs font-bold tracking-wide" style={{ color: "rgba(255,255,255,0.65)" }}>CORRECT<br />COUNT</div>
                   <button type="button" data-testid="floor-cases-plus" aria-label="Correct cases up by one" onClick={() => {
                     runUnlockedManualSectionAction(() => !!getManualSectionLock(currentRun?.id ?? "", "packaging")?.peer, () => {
-                      const nextCases = incrementFloorCaseCount(v.casesOnCurrentSkid, v.casesPerSkid);
-                      persistManualPackagingProgress(currentRun?.id ?? "", v.skidsCompleted, nextCases);
+                      const before = {
+                        skidsCompleted: Number(form.getValues("skidsCompleted")) || 0,
+                        casesOnCurrentSkid: Number(form.getValues("casesOnCurrentSkid")) || 0,
+                      };
+                      const nextCases = incrementFloorCaseCount(
+                        before.casesOnCurrentSkid,
+                        Number(form.getValues("casesPerSkid")) || 0,
+                      );
+                      persistManualPackagingProgress(currentRun?.id ?? "", before.skidsCompleted, nextCases, undefined, before);
                       form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
                     });
                   }} disabled={!!packagingLock || (v.casesPerSkid > 0 && v.casesOnCurrentSkid >= v.casesPerSkid)} className="min-h-12 rounded-xl text-lg font-bold disabled:cursor-not-allowed disabled:opacity-40" style={{ background: "rgba(255,255,255,0.08)" }}>+1 case</button>
@@ -19410,8 +19421,12 @@ function FloorModeView() {
                         () => !!getManualSectionLock(currentRun?.id ?? "", "packaging")?.peer,
                         () => {
                           navigator.vibrate?.(15);
-                          const nextSkids = v.skidsCompleted + 1;
-                          persistManualPackagingProgress(currentRun?.id ?? "", nextSkids, 0);
+                          const before = {
+                            skidsCompleted: Number(form.getValues("skidsCompleted")) || 0,
+                            casesOnCurrentSkid: Number(form.getValues("casesOnCurrentSkid")) || 0,
+                          };
+                          const nextSkids = before.skidsCompleted + 1;
+                          persistManualPackagingProgress(currentRun?.id ?? "", nextSkids, 0, undefined, before);
                           form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
                           form.setValue("casesOnCurrentSkid", 0, { shouldDirty: true });
                         },

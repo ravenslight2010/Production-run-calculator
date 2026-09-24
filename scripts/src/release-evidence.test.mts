@@ -1745,6 +1745,55 @@ async function run(): Promise<void> {
     /Source-library reconciliation evidence: not produced/,
     "release reports must link the retained source-library evidence",
   );
+  const developmentRevision = "c".repeat(40);
+  const developmentLabels = ["development gate one"];
+  const developmentReport = formatReleaseReport(
+    developmentLabels.map((label) => ({
+      label,
+      status: "PASS" as const,
+      elapsedMs: 100,
+    })),
+    "standard",
+    new Set([READINESS_EVIDENCE_PATH]),
+    {
+      revision: developmentRevision,
+      environment: "development release validation",
+      sourceLibraryEnvironment: "development",
+      sourceLibraryRevision: developmentRevision,
+      deployedRevision: "d".repeat(40),
+      decision: "NO-GO",
+      expectedLabels: developmentLabels,
+    },
+  );
+  assert.match(
+    developmentReport,
+    /^Deployed revision: not applicable$/m,
+    "development evidence must not retain a supplied deployed revision",
+  );
+  assert.match(
+    developmentReport,
+    /^Readiness evidence: not applicable$/m,
+    "development evidence must mark readiness as not applicable",
+  );
+  assert.doesNotMatch(
+    developmentReport,
+    new RegExp(
+      `^Readiness evidence: ${READINESS_EVIDENCE_PATH.replaceAll("/", "\\/")}$`,
+      "m",
+    ),
+    "a stale readiness path must be ignored for development evidence",
+  );
+  assert.doesNotThrow(
+    () =>
+      validateReleaseReport(developmentReport, {
+        currentRevision: developmentRevision,
+        expectedMode: "standard",
+        expectedLabels: developmentLabels,
+        expectedSourceLibraryEnvironment: "development",
+        expectedSourceLibraryRevision: developmentRevision,
+      }),
+    "the validator must accept explicit development N/A fields",
+  );
   assert.doesNotThrow(() =>
     validateReleaseReport(alertingReleaseReport, {
       currentRevision: "current-revision",
@@ -1964,6 +2013,9 @@ async function run(): Promise<void> {
         {
           revision: "current-revision",
           environment: "disposable release test",
+          sourceLibraryEnvironment: "development",
+          deployedRevision: "e".repeat(40),
+          requireReadinessEvidence: true,
           decision: "GO",
         },
       ),

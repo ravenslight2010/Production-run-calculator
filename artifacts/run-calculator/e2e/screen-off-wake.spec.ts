@@ -289,7 +289,18 @@ async function currentForegroundSyncAck(page: Page): Promise<number> {
 /** Wait for the online wake pull to be adopted before reading live counters. */
 async function simulateOnlineWake(page: Page): Promise<void> {
   const ackBeforeWake = await currentForegroundSyncAck(page);
+  const wakePull = page.waitForResponse(
+    (response) =>
+      response.request().method() === "GET" &&
+      new URL(response.url()).pathname === "/api/sync/today",
+    { timeout: 20_000 },
+  );
   await simulateWake(page);
+  const response = await wakePull;
+  expect(
+    response.ok(),
+    `foreground wake pull failed with HTTP ${response.status()}`,
+  ).toBe(true);
   const status = page.getByTestId("foreground-recovery-status");
   await expect(status).toBeVisible({ timeout: 10_000 });
   await expect(status).toHaveAttribute(
@@ -302,11 +313,11 @@ async function simulateOnlineWake(page: Page): Promise<void> {
   });
   await expect.poll(async () => {
     const ack = Number(await status.getAttribute("data-foreground-sync-ack"));
-    return Number.isFinite(ack) && ack > ackBeforeWake;
+    return Number.isFinite(ack) ? ack : 0;
   }, {
     timeout: 20_000,
-    message: "online wake did not acknowledge canonical state",
-  }).toBe(true);
+    message: `online wake did not acknowledge canonical state; prior acknowledgement ${ackBeforeWake}`,
+  }).toBeGreaterThan(ackBeforeWake);
 }
 
 /**
@@ -389,8 +400,51 @@ async function mockDateNow(
  */
 async function installOperationalProjectionOverride(
   page: Page,
-): Promise<(projection: unknown) => void> {
+): Promise<(projection: unknown) => Promise<void>> {
   let projection: unknown;
+  await page.addInitScript(() => {
+    const testWindow = window as unknown as { __testOperationalProjection?: unknown };
+    const descriptor = Object.getOwnPropertyDescriptor(EventSource.prototype, "onmessage");
+    if (!descriptor?.set) return;
+    const originalSetter = descriptor.set;
+    const originalGetter = descriptor.get;
+    Object.defineProperty(EventSource.prototype, "onmessage", {
+      configurable: true,
+      enumerable: descriptor.enumerable,
+      get: originalGetter
+        ? function (this: EventSource) { return originalGetter.call(this); }
+        : undefined,
+      set: function (this: EventSource, handler: unknown) {
+        if (typeof handler !== "function") {
+          originalSetter.call(this, handler);
+          return;
+        }
+        const source = this;
+        const listener = handler as (event: MessageEvent) => void;
+        originalSetter.call(this, (event: MessageEvent) => {
+          const replacement = testWindow.__testOperationalProjection;
+          if (replacement === undefined) {
+            listener.call(source, event);
+            return;
+          }
+          try {
+            const frame = JSON.parse(event.data) as Record<string, unknown>;
+            if (!Object.prototype.hasOwnProperty.call(frame, "operationalProjection")) {
+              listener.call(source, event);
+              return;
+            }
+            listener.call(source, new MessageEvent(event.type, {
+              data: JSON.stringify({ ...frame, operationalProjection: replacement }),
+              origin: event.origin,
+              lastEventId: event.lastEventId,
+            }));
+          } catch {
+            listener.call(source, event);
+          }
+        });
+      },
+    });
+  });
   await page.route("**/api/sync/today**", async (route) => {
     if (route.request().method() !== "GET" || projection === undefined) {
       await route.continue();
@@ -403,8 +457,12 @@ async function installOperationalProjectionOverride(
       json: { ...body, operationalProjection: projection },
     });
   });
-  return (nextProjection) => {
+  return async (nextProjection) => {
     projection = nextProjection;
+    await page.evaluate((value) => {
+      (window as unknown as { __testOperationalProjection?: unknown })
+        .__testOperationalProjection = value;
+    }, nextProjection);
   };
 }
 
@@ -611,6 +669,14 @@ async function seedDoughCounters(
   }).toEqual(counters);
 }
 
+async function resumeDoughTrackingIfVisible(page: Page): Promise<void> {
+  const resumeNow = page.getByTestId("btn-resume-now");
+  // This action is only present while a manual override has an actionable
+  // suggestion. Tests that reseed the same values must not wait for a banner
+  // the app correctly does not render.
+  if (await resumeNow.isVisible()) await resumeNow.click();
+}
+
 // ── shared setup ──────────────────────────────────────────────────────────────
 
 /**
@@ -635,7 +701,10 @@ async function setupAndStartRun(
   page: Page,
   casesPerSkid = "10",
   capabilities: readonly E2ECapability[] = [],
-  options: { initialDoughCounters?: { trays: number; batches: number } } = {},
+  options: {
+    initialDoughCounters?: { trays: number; batches: number };
+    verifyInitialDoughCounters?: boolean;
+  } = {},
 ): Promise<number> {
   const username = uid();
   const account = await authorizedFixtures.createAccount({
@@ -663,8 +732,36 @@ async function setupAndStartRun(
   }]);
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
-
   await page.locator('[data-testid="tab-run"]').click();
+
+  // Foreground recovery is intentionally event-driven rather than a startup
+  // job. Trigger its focus fallback after the bootstrap pull has settled, then
+  // require the recovery pull and its canonical acknowledgement before setup.
+  const initialRecoveryPull = page.waitForResponse(
+    (response) =>
+      response.request().method() === "GET" &&
+      new URL(response.url()).pathname === "/api/sync/today",
+    { timeout: 20_000 },
+  );
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  const initialRecoveryResponse = await initialRecoveryPull;
+  expect(
+    initialRecoveryResponse.ok(),
+    `initial foreground recovery failed with HTTP ${initialRecoveryResponse.status()}`,
+  ).toBe(true);
+
+  const initialRecovery = page.getByTestId("foreground-recovery-status");
+  await expect(initialRecovery).toHaveAttribute(
+    "data-foreground-recovery-state",
+    "outcome",
+    { timeout: 20_000 },
+  );
+  await expect(initialRecovery).toContainText("Production state synchronized.", {
+    timeout: 20_000,
+  });
+  await expect.poll(() => currentForegroundSyncAck(page), { timeout: 20_000 })
+    .toBeGreaterThan(0);
+
   await fillFormValues(page, casesPerSkid);
 
   // Keep the browser close to API server time so server-owned manual-override
@@ -758,7 +855,7 @@ async function setupAndStartRun(
     casesPerSkid: Number(casesPerSkid),
     freezerTime: 5,
   });
-  if (options.initialDoughCounters) {
+  if (options.initialDoughCounters && options.verifyInitialDoughCounters !== false) {
     await expect.poll(async () => {
       const { values } = await readLiveRunSnapshot(page);
       return {
@@ -964,7 +1061,14 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
     "responsive display matches shared line occupancy while running, paused, and draining",
     async ({ page }) => {
       await page.setViewportSize({ width: 390, height: 844 });
+      const setOperationalProjection = await installOperationalProjectionOverride(page);
       const safeBaseMs = await setupAndStartRun(page);
+      await expect(page.getByTestId("foreground-recovery-status"))
+        .toHaveAttribute("data-foreground-recovery-state", "outcome", { timeout: 20_000 });
+      expect(
+        await currentForegroundSyncAck(page),
+        "setup foreground recovery must be acknowledged before testing another wake",
+      ).toBeGreaterThan(0);
       const occupancy = {
         ppm: 60,
         pizzasPerCase: 6,
@@ -976,12 +1080,15 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         ...occupancy,
       });
 
-      const setOperationalProjection = await installOperationalProjectionOverride(page);
       const runningProjection = await mockDateNow(page, safeBaseMs + 2 * 60_000);
       expect(runningProjection.operationalProjection?.counters?.casesOnLine)
         .toBe(expectedRunning);
-      setOperationalProjection(runningProjection.operationalProjection);
+      await setOperationalProjection(runningProjection.operationalProjection);
       await simulateScreenOff(page);
+      // The foreground scheduler coalesces wake signals for 500 ms. Advance
+      // the fixture clock past that window without issuing another auto-track
+      // tick so the synthetic wake must make its own canonical GET.
+      await mockDateNow(page, safeBaseMs + 2 * 60_000 + 501, { tick: false });
       await simulateOnlineWake(page);
       await expect.poll(() => readCasesOnLine(page)).toBe(expectedRunning);
 
@@ -1001,7 +1108,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       const pausedProjection = await mockDateNow(page, safeBaseMs + 12 * 60_000);
       const expectedPaused = pausedProjection.operationalProjection?.counters?.casesOnLine;
       expect(expectedPaused).toEqual(expect.any(Number));
-      setOperationalProjection(pausedProjection.operationalProjection);
+      await setOperationalProjection(pausedProjection.operationalProjection);
       await simulateScreenOff(page);
       await simulateOnlineWake(page);
       await expect.poll(() => readCasesOnLine(page)).toBe(expectedPaused);
@@ -1022,7 +1129,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       // closed pause separately.
       const requestedEndAt = safeBaseMs + 15 * 60_000;
       const endProjection = await mockDateNow(page, requestedEndAt);
-      setOperationalProjection(endProjection.operationalProjection);
+      await setOperationalProjection(endProjection.operationalProjection);
       await simulateScreenOff(page);
       await simulateOnlineWake(page);
       await expect.poll(() => readCasesOnLine(page)).toBe(
@@ -1037,7 +1144,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       }, { timeout: 15_000 }).toBe(true);
 
       const drainProjection = await mockDateNow(page, endedAt + 3 * 60_000);
-      setOperationalProjection(drainProjection.operationalProjection);
+      await setOperationalProjection(drainProjection.operationalProjection);
       await simulateScreenOff(page);
       await simulateOnlineWake(page);
       await expect.poll(() => readCasesOnLine(page)).toBe(
@@ -1119,6 +1226,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
     "keeps cases-on-line occupancy frozen across reload while paused",
     async ({ page }) => {
       await page.setViewportSize({ width: 390, height: 844 });
+      const setOperationalProjection = await installOperationalProjectionOverride(page);
       const safeBaseMs = await setupAndStartRun(page);
       const occupancy = {
         ppm: 60,
@@ -1148,10 +1256,9 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       // elapsed wall time as newly-running time.
       await page.reload({ waitUntil: "domcontentloaded" });
       await installHiddenMock(page);
-      const setOperationalProjection = await installOperationalProjectionOverride(page);
       const pausedProjection = await mockDateNow(page, pausedCheckAt);
       const expectedPaused = pausedProjection.operationalProjection?.counters?.casesOnLine;
-      setOperationalProjection(pausedProjection.operationalProjection);
+      await setOperationalProjection(pausedProjection.operationalProjection);
       await simulateOnlineWake(page);
       await expect.poll(() => readCasesOnLine(page)).toBe(expectedPaused);
       await expect(
@@ -1173,7 +1280,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         return run.pausedAt == null;
       }, { timeout: 20_000 }).toBe(true);
       const resumedProjection = await mockDateNow(page, resumedCheckAt);
-      setOperationalProjection(resumedProjection.operationalProjection);
+      await setOperationalProjection(resumedProjection.operationalProjection);
       await simulateScreenOff(page);
       await simulateOnlineWake(page);
       await expect.poll(() => readCasesOnLine(page)).toBe(
@@ -1185,7 +1292,12 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
   test(
     "D. pause, background sleep, and resume keep all live countdowns aligned",
     async ({ page }) => {
-      const safeBaseMs = await setupAndStartRun(page);
+      const safeBaseMs = await setupAndStartRun(
+        page,
+        "10",
+        [],
+        { initialDoughCounters: { trays: 6, batches: 2 } },
+      );
       const initialCases = await readCaseTotal(page);
       await page.locator('[data-testid="tab-dough"]').click();
       await page.getByText("Machine Times", { exact: true }).waitFor({ state: "visible" });
@@ -1328,14 +1440,19 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         page,
         "10",
         DEFAULT_MANAGER_CAPABILITIES,
-        { initialDoughCounters: { trays: 10, batches: 2 } },
+        {
+          initialDoughCounters: { trays: 10, batches: 2 },
+          // This scenario reseeds and asserts its exact 10/2 baseline below;
+          // the first zero-arm rearm beat may consume from this helper seed.
+          verifyInitialDoughCounters: false,
+        },
       );
 
       // The setup helper seeded known stock through the real Dough controls
       // before its first authoritative auto-track beat.
       await page.locator('[data-testid="tab-dough"]').click();
       await page.getByText("Machine Times", { exact: true }).waitFor({ state: "visible" });
-      await page.getByTestId("btn-resume-now").click();
+      await resumeDoughTrackingIfVisible(page);
       await page.locator('[data-testid="tab-run"]').click();
 
       const lineSetupDetails = page.locator("details").filter({
@@ -1388,7 +1505,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         "input-hopperSec": "0",
       });
       await seedDoughCounters(page, { trays: 10, batches: 2 });
-      await page.getByTestId("btn-resume-now").click();
+      await resumeDoughTrackingIfVisible(page);
       await page.locator('[data-testid="tab-run"]').click();
 
       await page.screenshot({
@@ -1580,7 +1697,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       // before zeroing machine timings for the reconnect cadence baseline.
       await page.locator('[data-testid="tab-dough"]').click();
       await page.getByText("Machine Times", { exact: true }).waitFor({ state: "visible" });
-      await page.getByTestId("btn-resume-now").click();
+      await resumeDoughTrackingIfVisible(page);
       await page.locator('[data-testid="tab-run"]').click();
       const lineSetupDetails = page.locator("details").filter({
         has: page.locator("summary", { hasText: /line.?setup/i }),
@@ -1606,7 +1723,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         "input-hopperSec": "0",
       });
       await seedDoughCounters(page, { trays: 10, batches: 2 });
-      await page.getByTestId("btn-resume-now").click();
+      await resumeDoughTrackingIfVisible(page);
       await page.locator('[data-testid="tab-run"]').click();
       await expect.poll(async () => {
         const snapshot = await readLiveRunSnapshot(page);
@@ -2641,8 +2758,82 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         // deadline represents one canonical server minute, not the deliberately
         // advanced production-clock fixture.
         await mockDateNow(page, Date.now());
+        const manualSectionStatuses: number[] = [];
+        const manualSectionConflictDetails: Array<Record<string, unknown>> = [];
+        page.on("response", (response) => {
+          if (new URL(response.url()).pathname !== "/api/sync/manual-section") return;
+          const responseIndex = manualSectionStatuses.push(response.status()) - 1;
+          if (response.status() !== 409) return;
+          const request = response.request().postDataJSON() as {
+            runId?: string;
+            baseValues?: Record<string, number>;
+            values?: Record<string, number>;
+            observedGeneration?: string;
+            resetEpoch?: number;
+          };
+          void response.json().then((body: {
+            outcome?: string;
+            canonicalRevision?: number;
+            data?: {
+              dayState?: {
+                runs?: Array<{
+                  id?: string;
+                  metaUpdatedAt?: number;
+                  startedAt?: number;
+                }>;
+              };
+              runValues?: Record<string, {
+                skidsCompleted?: number;
+                casesOnCurrentSkid?: number;
+              }>;
+            };
+          }) => {
+            const canonicalRun = body.data?.dayState?.runs?.find(
+              (candidate) => candidate.id === request.runId,
+            );
+            const canonicalValues = body.data?.runValues?.[request.runId ?? ""];
+            manualSectionConflictDetails.push({
+              responseIndex,
+              outcome: body.outcome,
+              canonicalRevision: body.canonicalRevision,
+              requestBase: {
+                skidsCompleted: request.baseValues?.skidsCompleted,
+                casesOnCurrentSkid: request.baseValues?.casesOnCurrentSkid,
+              },
+              requestValues: {
+                skidsCompleted: request.values?.skidsCompleted,
+                casesOnCurrentSkid: request.values?.casesOnCurrentSkid,
+              },
+              requestResetEpoch: request.resetEpoch,
+              canonicalGenerationMatchesRequest: canonicalRun
+                ? `${canonicalRun.id ?? ""}:${canonicalRun.metaUpdatedAt ?? canonicalRun.startedAt ?? 0}` === request.observedGeneration
+                : false,
+              canonicalPackagingValues: {
+                skidsCompleted: canonicalValues?.skidsCompleted,
+                casesOnCurrentSkid: canonicalValues?.casesOnCurrentSkid,
+              },
+            });
+          }).catch(() => {
+            manualSectionConflictDetails.push({
+              responseIndex,
+              responseBodyAvailable: false,
+            });
+          });
+        });
         const decrement = page.locator('[data-testid="btn-dec-casesOnCurrentSkid"]');
         for (let i = 0; i < 12; i++) await decrement.click();
+        await expect.poll(() => manualSectionStatuses.length, {
+          timeout: 15_000,
+          message: "all 12 rapid Packaging corrections must reach the server",
+        }).toBe(12);
+        await expect.poll(
+          () => manualSectionConflictDetails.length,
+          { timeout: 5_000 },
+        ).toBe(manualSectionStatuses.filter((status) => status === 409).length);
+        expect(
+          manualSectionStatuses,
+          `Packaging correction conflicts: ${JSON.stringify(manualSectionConflictDetails)}`,
+        ).toEqual(Array(12).fill(200));
         await expect(primaryCases).toHaveText("24");
         await expect(peerCases).toHaveText("24", { timeout: 15_000 });
 

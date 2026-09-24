@@ -56,7 +56,13 @@ export function useRunLifecycleManager(deps: {
     runId: string; skidsCompleted: number; casesOnCurrentSkid: number;
     manualOverrideUntil: number; now: number;
   }) => void;
-  persistManualPackagingProgress: (runId: string, skids: number, cases: number) => void;
+  persistManualPackagingProgress: (
+    runId: string,
+    skids: number,
+    cases: number,
+    manualOverrideUntil?: number,
+    beforeOverride?: Record<string, number>,
+  ) => void;
   calcTotalTimeSec: () => number;
   initialFinishTimestampRef: MutableRefObject<number>;
   summarizeCarriedInCases: (run: RunMeta, originalTarget: number) => number;
@@ -204,7 +210,10 @@ export function useRunLifecycleManager(deps: {
       const cases = casesPerSkid > 0 ? carried % casesPerSkid : carried;
       deps.form.setValue("skidsCompleted", skids, { shouldDirty: true });
       deps.form.setValue("casesOnCurrentSkid", cases, { shouldDirty: true });
-      deps.persistManualPackagingProgress(activeRunId, skids, cases);
+      deps.persistManualPackagingProgress(activeRunId, skids, cases, undefined, {
+        skidsCompleted: Number(openingValues.skidsCompleted) || 0,
+        casesOnCurrentSkid: Number(openingValues.casesOnCurrentSkid) || 0,
+      });
       deps.saveRunValues(activeRunId, deps.form.getValues());
     }
     const prep = base.prepPhase;

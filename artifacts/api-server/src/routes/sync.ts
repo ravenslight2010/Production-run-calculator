@@ -1342,6 +1342,7 @@ async function upsertProtected(
         const serverOwnedPayload = capPackagingManualOverrideUntil(payloadForMerge, serverTime);
         const m = completeSyncData(capMergedResult(protectRunValues(serverOwnedPayload, canonicalExisting, {
           allowRunListReplacement: date > clientTodayDate,
+          nowMs: serverTime,
         }))) as Record<string, any>;
         canonicalizePepNames(m);
         applyResetBoundary(m, existing?.data, date === clientTodayDate);
@@ -1664,7 +1665,34 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
     }
     const next = JSON.parse(JSON.stringify(current)) as Record<string, any>;
     next.runValues = { ...(next.runValues ?? {}), [runId]: { ...(next.runValues?.[runId] ?? {}), ...values } };
-    next.runValuesUpdatedAt = { ...(next.runValuesUpdatedAt ?? {}), [runId]: Date.now() };
+    next.runValuesUpdatedAt = { ...(next.runValuesUpdatedAt ?? {}), [runId]: serverTime };
+    if (section === "packaging") {
+      const progressMap = current.packagingProgress
+        && typeof current.packagingProgress === "object"
+        && !Array.isArray(current.packagingProgress)
+        ? current.packagingProgress as Record<string, any>
+        : {};
+      const previousProgress = progressMap[runId];
+      const previousGeneration =
+        Number.isSafeInteger(previousProgress?.correctionGeneration)
+        && previousProgress.correctionGeneration >= 0
+          ? previousProgress.correctionGeneration as number
+          : 0;
+      const correctionGeneration = Math.min(Number.MAX_SAFE_INTEGER, previousGeneration + 1);
+      const canonicalValues = next.runValues[runId] ?? {};
+      const canonicalCounter = (value: unknown) =>
+        typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
+      next.packagingProgress = {
+        ...progressMap,
+        [runId]: {
+          skidsCompleted: canonicalCounter(canonicalValues.skidsCompleted),
+          casesOnCurrentSkid: canonicalCounter(canonicalValues.casesOnCurrentSkid),
+          correctionGeneration,
+          updatedAt: serverTime,
+          manualOverrideUntil: serverTime + MAX_PACKAGING_MANUAL_OVERRIDE_MS,
+        },
+      };
+    }
     const revision = currentRevision + 1;
     if (existing) {
       await tx.update(dailySyncTable).set({ data: next, canonicalRevision: revision, updatedAt: new Date() })

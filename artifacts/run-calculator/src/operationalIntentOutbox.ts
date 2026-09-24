@@ -512,24 +512,57 @@ export function submitManualSection(input: {
   owner?: string;
   onPersistenceFailure?: (baseValues: Record<string, number>) => boolean | void | Promise<boolean | void>;
 }): Promise<"accepted" | "conflicted" | "offline" | "persistence-failed" | "identity-mismatch"> {
+  const sectionFields = MANUAL_SECTION_FIELDS[
+    input.section as keyof typeof MANUAL_SECTION_FIELDS
+  ];
+  if (!sectionFields) throw new Error(`Unknown manual section: ${input.section}`);
+  const allowedFields = new Set<string>(sectionFields);
+  const unexpectedFields = Object.keys(input.values).filter((field) => !allowedFields.has(field));
+  if (unexpectedFields.length) {
+    throw new Error(`Manual ${input.section} edit contains fields outside its section`);
+  }
+  const baseValues = Object.fromEntries(sectionFields.map((field) => [
+    field,
+    Number(input.baseValues[field]) || 0,
+  ]));
+  const values = Object.fromEntries(sectionFields.map((field) => [
+    field,
+    Object.prototype.hasOwnProperty.call(input.values, field)
+      ? Number(input.values[field]) || 0
+      : Number(baseValues[field]) || 0,
+  ]));
   const owner = input.owner ?? activeOwner;
+  const completeInput = { ...input, values, baseValues, owner };
   const key = owner ? `${owner}:${input.runId}:${input.section}` : `${input.runId}:${input.section}`;
   const previous = manualSectionChains.get(key) ?? Promise.resolve();
-  const delta = [...new Set([...Object.keys(input.baseValues), ...Object.keys(input.values)])]
-    .reduce<Record<string, number>>((result, field) => {
-    result[field] = (Number(input.values[field]) || 0) - (Number(input.baseValues[field]) || 0);
+  const delta = sectionFields.reduce<Record<string, number>>((result, field) => {
+    result[field] = (Number(values[field]) || 0) - (Number(baseValues[field]) || 0);
     return result;
     }, {});
-  const run = previous.catch(() => {}).then(async () => {
-    const base = manualSectionCanonical.get(key) ?? input.baseValues;
-    const values = [...new Set([...Object.keys(base), ...Object.keys(delta)])]
-      .reduce<Record<string, number>>((result, field) => {
+  const submit = async (): Promise<"accepted" | "conflicted" | "offline" | "persistence-failed" | "identity-mismatch"> => {
+    // Bind the account at enqueue time. A queued section edit must never be
+    // rebound to whichever account is active when an earlier request settles.
+    if (!owner || owner !== activeOwner) return "identity-mismatch";
+    const base = manualSectionCanonical.get(key) ?? baseValues;
+    const nextValues = sectionFields.reduce<Record<string, number>>((result, field) => {
       result[field] = (Number(base[field]) || 0) + (Number(delta[field]) || 0);
       return result;
       }, {});
-    const result = await submitManualSectionNow({ ...input, values, baseValues: base });
+    const result = await submitManualSectionNow({
+      ...completeInput,
+      values: nextValues,
+      baseValues: base,
+      owner,
+    });
     return result;
-  });
+  };
+  // Start a new owner's head request immediately. The identity may change in
+  // the same turn; delaying the first dispatch to a microtask would suppress
+  // that request before its response can be safely fenced. Later edits remain
+  // serialized behind the preceding canonical acknowledgement.
+  const run = manualSectionChains.has(key)
+    ? previous.catch(() => {}).then(submit)
+    : submit();
   manualSectionChains.set(key, run);
   void run.then(() => {
     if (manualSectionChains.get(key) === run) {

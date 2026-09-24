@@ -3195,6 +3195,24 @@ export function formatReleaseReport(
           )
           .join("; ");
   const revision = metadata.revision ?? "unknown";
+  const reportSourceLibraryEnvironment =
+    metadata.sourceLibraryEnvironment ?? sourceLibraryEnvironment;
+  const developmentOnlyEvidence =
+    reportSourceLibraryEnvironment === "development" &&
+    metadata.requireReadinessEvidence !== true;
+  const deployedRevision =
+    developmentOnlyEvidence
+      ? "not applicable"
+      : metadata.deployedRevision ??
+        (reportSourceLibraryEnvironment === "release"
+          ? metadata.sourceLibraryRevision ?? revision
+          : "not applicable");
+  const readinessEvidence =
+    developmentOnlyEvidence
+      ? "not applicable"
+      : availableEvidenceFiles.has(READINESS_EVIDENCE_PATH)
+        ? READINESS_EVIDENCE_PATH
+        : "not produced";
   const decision =
     metadata.decision ??
     (results.length ===
@@ -3254,19 +3272,10 @@ export function formatReleaseReport(
         ]
       : []),
     `Environment: ${metadata.environment ?? "release validation environment"}`,
-    `Source-library evidence environment: ${metadata.sourceLibraryEnvironment ?? sourceLibraryEnvironment}`,
+    `Source-library evidence environment: ${reportSourceLibraryEnvironment}`,
     `Source-library evidence revision: ${metadata.sourceLibraryRevision ?? revision}`,
-    `Deployed revision: ${
-      metadata.deployedRevision ??
-      ((metadata.sourceLibraryEnvironment ?? sourceLibraryEnvironment) === "release"
-        ? metadata.sourceLibraryRevision ?? revision
-        : "not applicable")
-    }`,
-    `Readiness evidence: ${
-      availableEvidenceFiles.has(READINESS_EVIDENCE_PATH)
-        ? READINESS_EVIDENCE_PATH
-        : "not produced"
-    }`,
+    `Deployed revision: ${deployedRevision}`,
+    `Readiness evidence: ${readinessEvidence}`,
     "Commands: listed in the gate results table below",
     `Evidence paths: ${releaseEvidenceDir}/ and retained files linked below`,
     formatTypescript7TrendHistorySummary(typescript7TrendHistory),

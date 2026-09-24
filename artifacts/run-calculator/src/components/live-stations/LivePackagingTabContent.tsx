@@ -359,20 +359,36 @@ export const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                             nextSkids: number,
                             nextCases: number,
                             manualOverrideUntil = Date.now() + AUTO_SUPPRESS_MS,
+                            beforeOverride: Record<string, number> = {
+                              skidsCompleted: skids,
+                              casesOnCurrentSkid: casesOnSkid,
+                            },
                           ) => {
                             persistManualPackagingProgress(
                               currentRunId,
                               nextSkids,
                               nextCases,
                               manualOverrideUntil,
+                              beforeOverride,
                             );
                           };
                           const packagingControls = createPackagingControlAdapter({
                             skidsCompleted: skids,
                             casesOnCurrentSkid: casesOnSkid,
                             casesPerSkid,
-                            applyProgress: (nextSkids, nextCases) => {
-                              onManual(nextSkids, nextCases);
+                            // Read the form's synchronous current snapshot for
+                            // every action; the adapter is recreated on render,
+                            // and a rapid tap sequence must not restart from a
+                            // stale render value.
+                            getProgress: () => ({
+                              skidsCompleted: Number(form.getValues("skidsCompleted")) || 0,
+                              casesOnCurrentSkid: Number(form.getValues("casesOnCurrentSkid")) || 0,
+                            }),
+                            applyProgress: (nextSkids, nextCases, previousSkids, previousCases) => {
+                              onManual(nextSkids, nextCases, undefined, {
+                                skidsCompleted: previousSkids,
+                                casesOnCurrentSkid: previousCases,
+                              });
                               form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
                               form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
                             },

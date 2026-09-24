@@ -69,6 +69,31 @@ describe("operational intent outbox", () => {
     expect(requests.map((request) => request.baseValues.casesOnCurrentSkid)).toEqual([30, 24, 23]);
   });
 
+  it("preserves untouched Dough fields when a manual edit supplies only one field", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const requests: Array<Record<string, any>> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      requests.push(JSON.parse(String(init.body)) as Record<string, any>);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ outcome: "accepted" }),
+      };
+    }));
+
+    await submitManualSection({
+      runId: "dough-run", section: "dough",
+      values: { batchesReady: 1 },
+      baseValues: { traysOnLine: 5, batchesReady: 0 },
+      observedGeneration: "dough-run:1",
+    });
+
+    expect(requests[0]).toMatchObject({
+      values: { traysOnLine: 5, batchesReady: 1 },
+      baseValues: { traysOnLine: 5, batchesReady: 0 },
+    });
+  });
+
   it("uses a newer supplied baseline after the prior section chain drains", async () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
     const requests: Array<Record<string, any>> = [];
