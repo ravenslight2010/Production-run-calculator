@@ -9881,6 +9881,17 @@ export default function Home() {
       (result.body as { canonicalRevision?: unknown } | null | undefined)?.canonicalRevision,
     );
     if (typeof snapshot === "string") syncSnapshotIdRef.current = snapshot;
+    const partialFallbackBody = result.body as
+      | { partialFallback?: boolean; data?: unknown }
+      | null
+      | undefined;
+    if (partialFallbackBody?.partialFallback) {
+      // A fallback is a full canonical rebase. The next write must be complete:
+      // an empty baseline can have a snapshot ID even when no daily row exists,
+      // and a partial replay cannot create that row.
+      forceCompleteSyncRef.current = true;
+      lastSyncSigRef.current = "";
+    }
     if (
       result.body?.data
       && typeof result.body.data === "object"
@@ -9889,22 +9900,10 @@ export default function Home() {
     ) {
       adoptedCanonicalSnapshotRef.current = persistedSyncPayload(result.body.data);
     }
-    const partialFallbackBody = result.body as
-      | { partialFallback?: boolean; data?: unknown }
-      | null
-      | undefined;
-    if (partialFallbackBody?.partialFallback && partialFallbackBody.data === null) {
-      // A missing-row fallback is still a valid canonical empty baseline when
-      // the server supplies its snapshot identity. Force the next replay to be
-      // complete so it can create the row; never send another partial delta
-      // against a row that does not exist.
-      forceCompleteSyncRef.current = true;
-      lastSyncSigRef.current = "";
-    }
     if (result.body?.data && typeof result.body.data === "object") {
       const canonical = result.body.data as SyncPayload;
       canonicalRunValuesUpdatedAtRef.current = { ...(canonical.runValuesUpdatedAt ?? {}) };
-      forceCompleteSyncRef.current = false;
+      if (!partialFallbackBody?.partialFallback) forceCompleteSyncRef.current = false;
     }
     const operationalProjection = (
       result.body as (typeof result.body & { operationalProjection?: unknown }) | null | undefined

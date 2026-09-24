@@ -23,7 +23,7 @@
  *
  * Form setup:
  *   casesNeeded=200 (set via the always-visible Target Cases input in the header)
- *   cycleSpeed=30, crustsPerCycle=2  → ppm=60 pizza/min
+ *   cycleSpeed=30, crustsPerCycle=2, speedAdjustment=1  → ppm=60 pizza/min
  *   pizzasPerCase=6                  → casePeriod = 6 s
  *   freezerTime=5 min, casesPerSkid=10
  *   These NumFields are rendered unconditionally in the setup panel — the
@@ -93,16 +93,17 @@ test.afterAll(async () => {
  * first so all NumField inputs are in an expanded subtree.
  *
  * Values applied:
- *   casesNeeded=200, cycleSpeed=30, crustsPerCycle=2, pizzasPerCase=6,
+ *   casesNeeded=200, cycleSpeed=30, crustsPerCycle=2, speedAdjustment=1,
+ *   pizzasPerCase=6,
  *   casesPerSkid=10, freezerTime=5, doughballsPerTray=2,
  *   doughBatchYield=4
  *
  * Derived constants:
- *   ppm = 30 × 2 = 60 pizza/min → casePeriod = 6 pizzas / 60 ppm = 6 s/case
+ *   ppm = 30 × 2 × 1 = 60 pizza/min → casePeriod = 6 pizzas / 60 ppm = 6 s/case
  *   At t=15 min: afterTunnel=10 → expectedRaw = floor(600/6) = 100 cases
  *   At t=20 min: afterTunnel=15 → expectedRaw = floor(900/6) = 150 cases
  *
- * After setting values, DOM assertions confirm all eight inputs hold the
+ * After setting values, DOM assertions confirm all nine inputs hold the
  * expected numbers before returning.
  */
 async function fillFormValues(page: Page, casesPerSkid = "10"): Promise<void> {
@@ -163,6 +164,7 @@ async function fillFormValues(page: Page, casesPerSkid = "10"): Promise<void> {
     const fields: Array<[string, string]> = [
       ["input-cycleSpeed", "30"],
       ["input-crustsPerCycle", "2"],
+      ["input-speedAdjustment", "1"],
       ["input-pizzasPerCase", "6"],
       ["input-casesPerSkid", requestedCasesPerSkid],
       ["input-freezerTime", "5"],
@@ -212,6 +214,7 @@ async function fillFormValues(page: Page, casesPerSkid = "10"): Promise<void> {
       casesNeeded: casesNeededVal,
       cycleSpeed: val("input-cycleSpeed"),
       crustsPerCycle: val("input-crustsPerCycle"),
+      speedAdjustment: val("input-speedAdjustment"),
       pizzasPerCase: val("input-pizzasPerCase"),
       casesPerSkid: val("input-casesPerSkid"),
       freezerTime: val("input-freezerTime"),
@@ -223,6 +226,7 @@ async function fillFormValues(page: Page, casesPerSkid = "10"): Promise<void> {
   expect(domValues.casesNeeded, "casesNeeded not set in DOM").toBe("200");
   expect(domValues.cycleSpeed, "cycleSpeed not set in DOM").toBe("30");
   expect(domValues.crustsPerCycle, "crustsPerCycle not set in DOM").toBe("2");
+  expect(domValues.speedAdjustment, "speedAdjustment not set in DOM").toBe("1");
   expect(domValues.pizzasPerCase, "pizzasPerCase not set in DOM").toBe("6");
   expect(domValues.casesPerSkid, "casesPerSkid not set in DOM").toBe(casesPerSkid);
   expect(domValues.freezerTime, "freezerTime not set in DOM").toBe("5");
@@ -273,6 +277,36 @@ async function simulateWake(page: Page): Promise<void> {
     document.dispatchEvent(new Event("visibilitychange"));
     window.dispatchEvent(new Event("focus")); // Android-tablet fallback in useClock
   });
+}
+
+async function currentForegroundSyncAck(page: Page): Promise<number> {
+  const status = page.getByTestId("foreground-recovery-status");
+  if (await status.count() === 0) return 0;
+  const ack = Number(await status.getAttribute("data-foreground-sync-ack"));
+  return Number.isFinite(ack) ? ack : 0;
+}
+
+/** Wait for the online wake pull to be adopted before reading live counters. */
+async function simulateOnlineWake(page: Page): Promise<void> {
+  const ackBeforeWake = await currentForegroundSyncAck(page);
+  await simulateWake(page);
+  const status = page.getByTestId("foreground-recovery-status");
+  await expect(status).toBeVisible({ timeout: 10_000 });
+  await expect(status).toHaveAttribute(
+    "data-foreground-recovery-state",
+    "outcome",
+    { timeout: 20_000 },
+  );
+  await expect(status).toContainText("Production state synchronized.", {
+    timeout: 20_000,
+  });
+  await expect.poll(async () => {
+    const ack = Number(await status.getAttribute("data-foreground-sync-ack"));
+    return Number.isFinite(ack) && ack > ackBeforeWake;
+  }, {
+    timeout: 20_000,
+    message: "online wake did not acknowledge canonical state",
+  }).toBe(true);
 }
 
 /**
@@ -525,34 +559,31 @@ async function chooseRunningTunnelIfPrompted(page: Page): Promise<void> {
   }
 }
 
-/** Seed visible dough inventory through the same form events as an operator. */
+/** Seed dough inventory through the visible operator controls and await the server write. */
 async function seedDoughCounters(
   page: Page,
   counters: { trays: number; batches: number },
 ): Promise<void> {
-  const result = await page.evaluate(({ trays, batches }) => {
-    const setter = Object.getOwnPropertyDescriptor(
-      HTMLInputElement.prototype,
-      "value",
-    )?.set;
-    const changed: string[] = [];
-    if (!setter) return changed;
-    for (const [name, value] of [
-      ["traysOnLine", String(trays)],
-      ["batchesReady", String(batches)],
-    ] as const) {
-      const input = document.querySelector<HTMLInputElement>(`input[name="${name}"]`);
-      if (!input) continue;
-      setter.call(input, value);
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-      input.dispatchEvent(new Event("change", { bubbles: true }));
-      changed.push(name);
-    }
-    return changed;
-  }, counters);
-  expect(result, "dough inventory inputs").toEqual(["traysOnLine", "batchesReady"]);
-  await page.waitForTimeout(500);
-  await expect.poll(() => readDoughCounters(page)).toEqual(counters);
+  const traysInput = page.locator('input[name="traysOnLine"]');
+  const batchesInput = page.locator('input[name="batchesReady"]');
+  await traysInput.fill(String(counters.trays));
+  await traysInput.press("Tab");
+  await batchesInput.fill(String(counters.batches));
+  await batchesInput.press("Tab");
+  await expect.poll(() => readDoughCounters(page), {
+    timeout: 15_000,
+    message: "dough inventory did not update in the form",
+  }).toEqual(counters);
+  await expect.poll(async () => {
+    const { values } = await readLiveRunSnapshot(page);
+    return {
+      trays: Number(values.traysOnLine ?? 0),
+      batches: Number(values.batchesReady ?? 0),
+    };
+  }, {
+    timeout: 15_000,
+    message: "dough inventory correction was not acknowledged by the server",
+  }).toEqual(counters);
 }
 
 // ── shared setup ──────────────────────────────────────────────────────────────
@@ -561,7 +592,8 @@ async function seedDoughCounters(
  * Full setup for one test:
  *   1. Create an isolated authorized account and open the app with its cookie.
  *   2. Navigate to the Run tab.
- *   3. Fill form values (cycleSpeed=30, crustsPerCycle=2, pizzasPerCase=6,
+ *   3. Fill form values (cycleSpeed=30, crustsPerCycle=2, speedAdjustment=1,
+ *      pizzasPerCase=6,
  *      casesPerSkid=10, freezerTime=5, casesNeeded=200).
  *   4. Install the Date proxy and hidden mock BEFORE clicking Start Run,
  *      anchored to the real clock except near UTC midnight, when it uses
@@ -670,6 +702,27 @@ async function setupAndStartRun(
     data: { nowMs: canonicalStartedAt, rearm: true },
   });
   expect(tick.ok(), `initial authoritative auto-track fixture tick failed: ${tick.status()}`).toBe(true);
+  await expect.poll(async () => {
+    const { values } = await readLiveRunSnapshot(page);
+    return {
+      speedAdjustment: Number(values.speedAdjustment),
+      cycleSpeed: Number(values.cycleSpeed),
+      crustsPerCycle: Number(values.crustsPerCycle),
+      pizzasPerCase: Number(values.pizzasPerCase),
+      casesPerSkid: Number(values.casesPerSkid),
+      freezerTime: Number(values.freezerTime),
+    };
+  }, {
+    timeout: 15_000,
+    message: "canonical run values do not match the screen-off fixture",
+  }).toEqual({
+    speedAdjustment: 1,
+    cycleSpeed: 30,
+    crustsPerCycle: 2,
+    pizzasPerCase: 6,
+    casesPerSkid: Number(casesPerSkid),
+    freezerTime: 5,
+  });
 
   return canonicalStartedAt;
 }
@@ -878,7 +931,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
 
       await mockDateNow(page, safeBaseMs + 2 * 60_000);
       await simulateScreenOff(page);
-      await simulateWake(page);
+      await simulateOnlineWake(page);
       await expect.poll(() => readCasesOnLine(page)).toBe(expectedRunning);
 
       const pauseButton = page.getByRole("button", { name: /pause.?run/i }).first();
@@ -898,7 +951,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       const expectedPaused = pausedProjection.operationalProjection?.counters?.casesOnLine;
       expect(expectedPaused).toEqual(expect.any(Number));
       await simulateScreenOff(page);
-      await simulateWake(page);
+      await simulateOnlineWake(page);
       await expect.poll(() => readCasesOnLine(page)).toBe(expectedPaused);
 
       await page.evaluate((ms) => {
@@ -918,7 +971,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       const requestedEndAt = safeBaseMs + 15 * 60_000;
       const endProjection = await mockDateNow(page, requestedEndAt);
       await simulateScreenOff(page);
-      await simulateWake(page);
+      await simulateOnlineWake(page);
       await expect.poll(() => readCasesOnLine(page)).toBe(
         endProjection.operationalProjection?.counters?.casesOnLine,
       );
@@ -932,7 +985,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
 
       const drainProjection = await mockDateNow(page, endedAt + 3 * 60_000);
       await simulateScreenOff(page);
-      await simulateWake(page);
+      await simulateOnlineWake(page);
       await expect.poll(() => readCasesOnLine(page)).toBe(
         drainProjection.operationalProjection?.counters?.casesOnLine,
       );
@@ -974,7 +1027,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       await page.reload({ waitUntil: "domcontentloaded" });
       await installHiddenMock(page);
       await mockDateNow(page, drainingAt);
-      await simulateWake(page);
+      await simulateOnlineWake(page);
       await expect.poll(() => readCasesOnLine(page)).toBe(expectedDraining);
 
       // The two-wide press-to-oven segment extends physical occupancy beyond
@@ -995,7 +1048,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
       await installHiddenMock(page);
       await mockDateNow(page, drainAt, { tick: false });
-      await simulateWake(page);
+      await simulateOnlineWake(page);
       await expect.poll(() => readCasesOnLine(page)).toBe(
         computeCasesOnLine({
           startedAt: safeBaseMs,
@@ -1279,7 +1332,6 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         "input-mixerHighSec": "0",
         "input-hopperSec": "0",
       });
-      await seedDoughCounters(page, { trays: 0, batches: 0 });
       await seedDoughCounters(page, { trays: 10, batches: 2 });
       await page.getByTestId("btn-resume-now").click();
       await page.locator('[data-testid="tab-run"]').click();
@@ -1498,7 +1550,6 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         "input-mixerHighSec": "0",
         "input-hopperSec": "0",
       });
-      await seedDoughCounters(page, { trays: 0, batches: 0 });
       await seedDoughCounters(page, { trays: 10, batches: 2 });
       await page.getByTestId("btn-resume-now").click();
       await page.locator('[data-testid="tab-run"]').click();
@@ -1780,10 +1831,16 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         await sleepingPage.unroute("**/api/sync/today**");
         // Do not click Retry. A visible app must recover on the fixed five-second
         // cadence even when the browser's online signal was false or premature.
+        await expect(sleepingStatus).toHaveAttribute(
+          "data-foreground-recovery-state",
+          "outcome",
+          { timeout: 20_000 },
+        );
         await expect(sleepingStatus)
-          .toContainText("Production state synchronized.", { timeout: 12_000 });
-        expect(Number(await sleepingStatus.getAttribute("data-foreground-sync-ack")))
-          .toBeGreaterThan(failedAck);
+          .toContainText("Production state synchronized.", { timeout: 20_000 });
+        await expect.poll(async () =>
+          Number(await sleepingStatus.getAttribute("data-foreground-sync-ack")),
+        { timeout: 20_000 }).toBeGreaterThan(failedAck);
 
         const expected = {
           skidsCompleted: canonicalAfterAdvance.values.skidsCompleted,

@@ -74,6 +74,26 @@ describe("consumeSyncWriteResponse", () => {
     expect(applyCanonical).toHaveBeenCalledWith(canonical);
   });
 
+  it("does not apply a null fallback as a canonical payload", async () => {
+    const applyCanonical = vi.fn();
+    const result = await consumeSyncWriteResponse(
+      new Response(JSON.stringify({
+        ok: true,
+        data: null,
+        partialFallback: true,
+        snapshotId: "a".repeat(64),
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+      { applyCanonical },
+    );
+
+    expect(result).toMatchObject({ stale: false, malformed: false });
+    expect(result.body).toMatchObject({ data: null, partialFallback: true });
+    expect(applyCanonical).not.toHaveBeenCalled();
+  });
+
   it("handles reset-stale responses without applying their data", async () => {
     const applyCanonical = vi.fn();
     const onStale = vi.fn();

@@ -85,7 +85,7 @@ export async function consumeSyncWriteResponse<T>(
     // Callers keep their retry/fence state until a canonical response arrives.
   } else if (stale) {
     await options.onStale?.(body);
-  } else if (response.ok && body?.data !== undefined) {
+  } else if (response.ok && body?.data !== undefined && body.data !== null) {
     await options.applyCanonical?.(body.data);
   }
 
