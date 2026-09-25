@@ -4005,6 +4005,9 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
   test("empty state is preserved after a page reload when all runs are ended", async ({
     page,
   }) => {
+    // This two-run start/stop/reload journey can exceed the suite's 60-second
+    // default under full-run load; keep a bounded, case-local budget.
+    test.setTimeout(90_000);
     const suffix = uid();
     const username = `user_${suffix}`;
     const mixId1 = `reload-ended-mix-a-${suffix}`;
@@ -4096,6 +4099,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       await waitForLocalRunStarted(page, runId2);
       await waitForCanonicalRunField(runId2, "startedAt");
       await waitForLocalRunEnded(page, runId1);
+      await waitForCanonicalRunField(runId1, "endedAt");
 
       const stopBtn2 = page.getByRole("button", { name: /stop run/i });
       await stopBtn2.waitFor({ state: "visible", timeout: 10_000 });
@@ -4200,7 +4204,8 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         },
       ], 1);
 
-      // Stop run 1.
+      // Complete both runs without visiting Mixes. The cold reload below must
+      // be followed by this browser's first Mixes visit.
       const prevBtn = page.getByRole("button", { name: /prev/i });
       await prevBtn.waitFor({ state: "visible", timeout: 8_000 });
       await prevBtn.click();
@@ -4210,21 +4215,23 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       await startBtn1.waitFor({ state: "visible", timeout: 8_000 });
       await startBtn1.click();
       await waitForLocalRunStarted(page, runId1);
-      const stopBtn1 = page.getByRole("button", { name: /stop run/i });
-      await stopBtn1.waitFor({ state: "visible", timeout: 10_000 });
-      await expect(page.getByText("Synchronized", { exact: true })).toBeVisible({ timeout: 15_000 });
-      await stopBtn1.click();
-      await expect(startBtn1).toBeVisible({ timeout: 15_000 });
-      await waitForLocalRunEnded(page, runId1);
+      await waitForCanonicalRunField(runId1, "startedAt");
+      await expect(page.getByText("Synchronized", { exact: true })).toBeVisible({
+        timeout: 15_000,
+      });
 
-      await page.reload({ waitUntil: "domcontentloaded" });
-      await waitForAppAfterNavigation(page);
+      const nextBtn = page.getByRole("button", { name: /next/i });
+      await nextBtn.waitFor({ state: "visible", timeout: 8_000 });
+      await nextBtn.click();
+      await page.waitForTimeout(600);
 
       const startBtn2 = page.locator('[data-testid="button-start-run"]');
       await startBtn2.waitFor({ state: "visible", timeout: 8_000 });
       await startBtn2.click();
       await waitForLocalRunStarted(page, runId2);
       await waitForCanonicalRunField(runId2, "startedAt");
+      await waitForLocalRunEnded(page, runId1);
+
       const stopBtn2 = page.getByRole("button", { name: /stop run/i });
       await stopBtn2.waitFor({ state: "visible", timeout: 10_000 });
       await stopBtn2.click();

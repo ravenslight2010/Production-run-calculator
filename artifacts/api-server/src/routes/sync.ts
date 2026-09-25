@@ -2655,7 +2655,9 @@ router.post("/sync/e2e/auto-track-tick", async (req: Request, res: Response): Pr
       ));
     });
   }
-  const summary = await runAutoTrackServerTicks({ nowMs, scope, date });
+  const summary = req.body?.skipAutoTrack === true
+    ? { examinedDates: 0, builtClaims: 0, accepted: 0, outcomes: {} }
+    : await runAutoTrackServerTicks({ nowMs, scope, date });
   // A deterministic E2E clock step is also an authoritative projection frame.
   // Production heartbeats publish this frame even when no counter cadence is
   // due; without it, a test step inside the freezer-fill window would leave the
@@ -2679,6 +2681,7 @@ router.post("/sync/e2e/auto-track-tick", async (req: Request, res: Response): Pr
     canonicalRevision: row?.canonicalRevision ?? 0,
     serverTime: nowMs,
     projected: !!row,
+    snapshotId: row ? syncSnapshotId(row.data) : undefined,
     autoTrackSchedule: authoritative?.autoTrackSchedule ?? null,
     operationalProjection: authoritative?.operationalProjection ?? null,
   });

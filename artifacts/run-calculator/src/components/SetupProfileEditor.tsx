@@ -580,22 +580,30 @@ export default function SetupProfileEditor({
     const values = form.getValues();
     setSaveBusy(true);
     setSaveError("");
+    let serverAcknowledged = false;
     try {
       const result = await saveProfileAndWaitForServer(b, f, values);
       if (result === "unchanged") {
         toast({ title: `No changes to save for ${b} — ${f}` });
         return;
       }
-      toast({ title: `Saved setup for ${b} — ${f}` });
+      serverAcknowledged = true;
       await onSaved?.(b, f, values);
+      toast({ title: `Saved setup for ${b} — ${f}` });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "The server did not acknowledge this setup.";
-      const retryMessage = /retry the save/i.test(message)
-        ? message
-        : "The setup could not be saved on the server. Check your connection and retry.";
+      const retryMessage = serverAcknowledged
+        ? "The setup was saved, but the current run could not be refreshed. Refresh the run before continuing."
+        : (() => {
+            const message = error instanceof Error ? error.message : "The server did not acknowledge this setup.";
+            return /retry the save/i.test(message)
+              ? message
+              : "The setup could not be saved on the server. Check your connection and retry.";
+          })();
       setSaveError(retryMessage);
       toast({
-        title: "Setup was not saved",
+        title: serverAcknowledged
+          ? "Setup saved, but run refresh did not complete"
+          : "Setup was not saved",
         description: retryMessage,
         variant: "destructive",
       });
@@ -1423,33 +1431,31 @@ export default function SetupProfileEditor({
                           </div>
                         );
                       })()}
-                      {v.frontlineRecipeName.trim() && (
-                        <FrontlineRecipeCard
-                          embedded
-                          fields={frontlineFields}
-                          recipe={v.frontlineRecipe ?? []}
-                          register={form.register}
-                          ingredientOptions={ingredientUniverse ?? frontlineIngredients}
-                          onAddIngredient={onAddFrontlineIngredient}
-                          onRemoveIngredient={onRemoveFrontlineIngredient}
-                          onSetIngredient={(idx, val) => form.setValue(`frontlineRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
-                          onAppend={() => appendFrontline({ ingredient: "", lbs: 0 })}
-                          onRemove={removeFrontline}
-                          recipeName={v.frontlineRecipeName ?? ""}
-                          recipeNameOptions={frontlineRecipeNameOptions}
-                          recipePickerLabel="Sauce recipe ingredients"
-                          recipePickerTestId="setup-recipe-picker-sauce-ingredients"
-                          onAddRecipeName={onAddFrontlineRecipeName}
-                          onRemoveRecipeName={onRemoveFrontlineRecipeName}
-                          onRecipeNameChange={val => {
-                            form.setValue("frontlineRecipeName", val, { shouldDirty: true });
-                            if (val.trim()) {
-                              const rows = serverSauceRowsByName.get(val.trim().toLowerCase());
-                              if (rows) { form.setValue("frontlineRecipe", rows, { shouldDirty: true }); replaceFrontline(rows); }
-                            }
-                          }}
-                        />
-                      )}
+                      <FrontlineRecipeCard
+                        embedded
+                        fields={frontlineFields}
+                        recipe={v.frontlineRecipe ?? []}
+                        register={form.register}
+                        ingredientOptions={ingredientUniverse ?? frontlineIngredients}
+                        onAddIngredient={onAddFrontlineIngredient}
+                        onRemoveIngredient={onRemoveFrontlineIngredient}
+                        onSetIngredient={(idx, val) => form.setValue(`frontlineRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
+                        onAppend={() => appendFrontline({ ingredient: "", lbs: 0 })}
+                        onRemove={removeFrontline}
+                        recipeName={v.frontlineRecipeName ?? ""}
+                        recipeNameOptions={frontlineRecipeNameOptions}
+                        recipePickerLabel="Sauce recipe ingredients"
+                        recipePickerTestId="setup-recipe-picker-sauce-ingredients"
+                        onAddRecipeName={onAddFrontlineRecipeName}
+                        onRemoveRecipeName={onRemoveFrontlineRecipeName}
+                        onRecipeNameChange={val => {
+                          form.setValue("frontlineRecipeName", val, { shouldDirty: true });
+                          if (val.trim()) {
+                            const rows = serverSauceRowsByName.get(val.trim().toLowerCase());
+                            if (rows) { form.setValue("frontlineRecipe", rows, { shouldDirty: true }); replaceFrontline(rows); }
+                          }
+                        }}
+                      />
 
                       {/* Physical line order: App 1, App 2, then the pep
                           applicators (they sit between stations 2 and 3 on the

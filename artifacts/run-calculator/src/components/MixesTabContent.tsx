@@ -59,6 +59,11 @@ export default memo(function MixesTabContent() {
     };
   }));
   const [snapshotRefreshing, setSnapshotRefreshing] = useState(true);
+  const scheduledRunsSignature = ctx.scheduledDays
+    .map((day) => `${day.date}:${(day.runs ?? [])
+      .map((run) => `${run.id ?? ""}:${run.brand ?? ""}:${run.flavor ?? ""}:${run.casesNeeded ?? ""}`)
+      .join(",")}`)
+    .join("|");
   useEffect(() => {
     let active = true;
     setSnapshotRefreshing(true);
@@ -70,7 +75,7 @@ export default memo(function MixesTabContent() {
     return () => {
       active = false;
     };
-  }, [ctx.mixMakeDay, mixesSignature, liveRunsSignature]);
+  }, [ctx.mixMakeDay, mixesSignature, liveRunsSignature, scheduledRunsSignature]);
   const handleOptimisticMixSave = (nextMix: Mix): void => {
     setOptimisticMixes((current) => {
       const next = new Map(current);
@@ -94,7 +99,6 @@ export default memo(function MixesTabContent() {
       setSnapshotRefreshing(false);
     });
   };
-
   const [mixSurplusLedger, setMixSurplusLedger] = useState<MixSurplusLedger | null>(null);
   useEffect(() => {
     fetchMixSurplusLedger().then(setMixSurplusLedger).catch(() => {});
@@ -240,6 +244,9 @@ export default memo(function MixesTabContent() {
                     const plan = serverSnap
                       && !snapshotRefreshing
                       && optimisticMixes.size === 0
+                      && !ctx.dayState.runs.some(
+                        (run) => Boolean(run.brand && run.endedAt),
+                      )
                       ? serverSnap.plan
                       : fallbackPlan;
                     if (plan.length === 0) {

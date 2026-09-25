@@ -4,6 +4,7 @@ import {
   type DayState,
   type FormValues,
   type RunMeta,
+  type SyncPayload,
 } from "../types";
 import { genId, todayStr } from "../utils";
 import { SynchronizationStateMachine } from "../synchronizationStateMachine";
@@ -91,8 +92,18 @@ export function removeRunByIdFromDayState(
 
 export function shouldKeepLocalRunLifecycle(local: RunMeta | undefined, remote: RunMeta | undefined): boolean {
   if (!local || !remote) return false;
-  return (!!local.pausedAt && !local.endedAt && !remote.pausedAt && !remote.endedAt
-    && remote.startedAt === local.startedAt)
+  // Same-day lifecycle transitions are monotonic from the operator's point of
+  // view: a stale snapshot may omit a locally started or ended run, but there
+  // is no valid same-day action that turns either transition back into an
+  // unstarted/unended run. Keep that local transition even when the older
+  // snapshot carries an equal or missing stamp. The stamp comparison below
+  // still handles unrelated metadata and newer peer lifecycle changes.
+  const localTransitionIsMissingRemotely =
+    (local.startedAt !== undefined && remote.startedAt === undefined)
+    || (local.endedAt !== undefined && remote.endedAt === undefined);
+  return (localTransitionIsMissingRemotely)
+    || (!!local.pausedAt && !local.endedAt && !remote.pausedAt && !remote.endedAt
+      && remote.startedAt === local.startedAt)
     || (local.metaUpdatedAt ?? 0) > (remote.metaUpdatedAt ?? 0);
 }
 export function selectInboundRunLifecycles(local: RunMeta[], remote: RunMeta[]): RunMeta[] {
@@ -160,6 +171,63 @@ export function shouldResetFormOnRunSwitch(live: FormValues, stored: FormValues,
 }
 export function acceptRemoteRunValueOnSync(remote: FormValues, local: FormValues, remoteTs: number, localTs: number): boolean {
   return !isEmptyOverPopulated(remote, local) && !(localTs > remoteTs);
+}
+
+/**
+ * Select the one App 1 counter that may converge independently of whole-run
+ * LWW. A private server ownership entry must match the public accepted claim
+ * sequence and its run-value stamp; the operator's slot correction generation
+ * remains a causal fence against an older automatic event.
+ */
+export function serverOwnedApp1BatchProgress(
+  payload: Pick<SyncPayload, "runValues" | "runValuesUpdatedAt" | "autoTrackCoordination" | "autoTrackServerState">,
+  runId: string,
+  localValues: FormValues,
+): Partial<Pick<FormValues, "app1BatchesMade" | "app1BatchCorrectionGeneration">> | null {
+  const remoteValues = payload.runValues[runId];
+  const remoteStamp = Number(payload.runValuesUpdatedAt?.[runId]);
+  const coordination = payload.autoTrackCoordination?.runs?.[runId]?.["app1-batch"];
+  const ownership = payload.autoTrackServerState?.netOwnership?.[runId]?.["app1-batch"];
+  if (
+    !remoteValues
+    || !Number.isFinite(remoteStamp)
+    || remoteStamp <= 0
+    || !coordination
+    || !ownership
+    || !Number.isFinite(ownership.updatedAt)
+    || Number(ownership.updatedAt) <= 0
+    || remoteStamp < Number(ownership.updatedAt)
+    || !Number.isSafeInteger(coordination.sequence)
+    || coordination.sequence < 1
+    || coordination.generation !== ownership.generation
+    || coordination.sequence !== ownership.sequence
+    || Number(coordination.acceptedRunValuesUpdatedAt) !== remoteStamp
+    || typeof coordination.acceptedEventId !== "string"
+    || coordination.acceptedEventId.length === 0
+  ) return null;
+
+  const remoteCount = Number(remoteValues.app1BatchesMade);
+  const localCount = Number(localValues.app1BatchesMade);
+  const remoteGeneration = Number(remoteValues.app1BatchCorrectionGeneration) || 0;
+  const localGeneration = Number(localValues.app1BatchCorrectionGeneration) || 0;
+  if (
+    !Number.isSafeInteger(remoteCount)
+    || remoteCount < 0
+    || !Number.isSafeInteger(localCount)
+    || !Number.isSafeInteger(remoteGeneration)
+    || remoteGeneration < 0
+    || !Number.isSafeInteger(localGeneration)
+    || localGeneration < 0
+    || localGeneration > remoteGeneration
+    || remoteCount <= localCount
+  ) return null;
+
+  return {
+    app1BatchesMade: remoteCount,
+    ...(remoteGeneration > localGeneration
+      ? { app1BatchCorrectionGeneration: remoteGeneration }
+      : {}),
+  };
 }
 
 type OperationalCanonicalIntent = {

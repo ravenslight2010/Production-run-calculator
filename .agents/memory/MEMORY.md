@@ -99,7 +99,7 @@
 - [Cross-channel auto-track claims](cross-channel-auto-track-claims.md) — shared run stamps require queued deltas to distinguish peer auto accepts from manual edits before rebasing.
 - [GitHub release proof](github-git-push.md) + [cancelled summaries](github-actions-job-summary-visibility.md) + [external forks](github-external-fork-verification.md) — pushes need secure remotes; cancelled Markdown may hide; live fork checks need another owner.
 - [Deterministic AI gates](deterministic-ai-gates.md) + [evaluation governance](ai-evaluation-framework-boundary.md) — re-run local resolution; keep model evidence offline, bounded, and independently checked.
-- [Browser fixture and database isolation](browser-fixture-seeding.md) + [browser-e2e-disposable-database](browser-e2e-disposable-database.md) — hydrate master data through server fixtures and use disposable DBs for destructive Playwright suites.
+- [Browser fixtures and reloads](browser-fixture-seeding.md) + [disposable E2E DBs](browser-e2e-disposable-database.md) — finish setup before reload, test the first destination, and use isolated databases.
 - [Data Health undo coverage](data-health-undo-coverage.md) — verify persisted repair records include future-run snapshots before expecting guarded undo to restore them.
 - [String-reference purge safety](string-reference-purge-safety.md) — recipe stub purges must scan profiles and every historical/current run snapshot before deleting text-linked master data.
 - [Wake and offline command safety](wake-sync-claim-fence.md) + [intents](offline-operational-intents.md) + [receipts](offline-command-receipts.md) — fence stale claims and adopt canonical outcomes before terminalizing.
@@ -129,6 +129,7 @@
 - [Operational dialog safety](capability-gated-controlled-dialogs.md) + [viewport](operational-dialog-viewport-safety.md) — close revoked portals safely and keep short-landscape overlays reachable.
 - [Case-based production input validity](case-based-production-input-validity.md) — requested cases without a positive pizzas-per-case value must suppress Sauce/Frontline needs, buffers, exports, and claims.
 - [Server operational projection](server-operational-projection.md) — live timer/counter read models travel beside the sync snapshot, never inside its hashed persisted document.
+- [Packaging calc receipts](packaging-calc-receipts.md) — packaging corrections revoke only that run’s stale Calc receipt; preserve the projection high-water mark.
 - [Browser peer and evidence assertions](browser-peer-startup-ordering.md) + [browser-evidence-assertions](browser-evidence-assertions.md) + [browser-fixture-server-identifiers](browser-fixture-server-identifiers.md) — assert no-op startup, visible business labels, and stable fixture fields.
 - [Source-heal stale-client fence](source-heal-stale-client-fence.md) — a source repair is not durable while sleeping clients can replay unfenced full-pool recipe writes.
 - [Acknowledged master-data propagation](acknowledged-master-data-propagation.md) — local recipe saves must explicitly drive pending-run refresh; cache effects alone can misclassify a save as bootstrap.

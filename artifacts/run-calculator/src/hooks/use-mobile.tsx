@@ -2,17 +2,25 @@ import * as React from "react"
 
 const MOBILE_BREAKPOINT = 768
 
+function matchesMedia(query: string): boolean {
+  return typeof window.matchMedia === "function"
+    ? window.matchMedia(query).matches
+    : false;
+}
+
 export function useIsMobile() {
   const [isMobile, setIsMobile] = React.useState<boolean | undefined>(undefined)
 
   React.useEffect(() => {
-    const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`)
+    const mql = typeof window.matchMedia === "function"
+      ? window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`)
+      : null;
     const onChange = () => {
       setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
     }
-    mql.addEventListener("change", onChange)
+    mql?.addEventListener("change", onChange)
     setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
-    return () => mql.removeEventListener("change", onChange)
+    return () => mql?.removeEventListener("change", onChange)
   }, [])
 
   return !!isMobile
@@ -21,9 +29,9 @@ export function useIsMobile() {
 function canUseTouchInput(): boolean {
   if (typeof window === "undefined") return false;
 
-  const primaryCoarse = window.matchMedia("(pointer: coarse)").matches;
-  const anyCoarse = window.matchMedia("(any-pointer: coarse)").matches;
-  const primaryFine = window.matchMedia("(pointer: fine)").matches;
+  const primaryCoarse = matchesMedia("(pointer: coarse)");
+  const anyCoarse = matchesMedia("(any-pointer: coarse)");
+  const primaryFine = matchesMedia("(pointer: fine)");
   const touchPoints = navigator.maxTouchPoints ?? 0;
 
   // A coarse primary pointer is touch-oriented even when the browser does
@@ -42,11 +50,13 @@ export function useIsTouchDevice(): boolean {
   const [isTouchDevice, setIsTouchDevice] = React.useState(false);
 
   React.useEffect(() => {
-    const mediaQueries = [
-      window.matchMedia("(pointer: coarse)"),
-      window.matchMedia("(pointer: fine)"),
-      window.matchMedia("(any-pointer: coarse)"),
-    ];
+    const mediaQueries = typeof window.matchMedia === "function"
+      ? [
+          window.matchMedia("(pointer: coarse)"),
+          window.matchMedia("(pointer: fine)"),
+          window.matchMedia("(any-pointer: coarse)"),
+        ]
+      : [];
     const update = () => setIsTouchDevice(canUseTouchInput());
     mediaQueries.forEach((query) => query.addEventListener("change", update));
     window.addEventListener("touchstart", update, { passive: true });

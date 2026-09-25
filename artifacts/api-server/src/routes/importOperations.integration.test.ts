@@ -7,8 +7,8 @@ import express from "express";
 import pg from "pg";
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { signToken } from "../lib/auth";
 import { recordSession } from "../lib/authSessions";
+import { signToken } from "../lib/auth";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 let db: typeof import("@workspace/db").db;
@@ -134,7 +134,7 @@ describe("atomic import operations", () => {
     expect(firstUndo.status).toBe(200);
     expect(await db.select().from(tables.mixesTable)).toHaveLength(0);
 
-    const second = await (await apply("undo-refuse-000001", change("affected"))).json() as any;
+    const second = await (await apply("undo-refuse-000001", change("unrelated-target"))).json() as any;
     await db.insert(tables.mixesTable).values({ id: "unrelated", scope: "live", name: "Unrelated", brand: "", flavor: "", batchSize: 1, daysEarly: 0, notes: "", amountAlreadyMade: 0, components: [], isPrep: false, enabled: true });
     expect((await fetch(`${baseUrl}/api/import-operations/undo-refuse-000001/undo`, { method: "POST", headers: headers(), body: JSON.stringify({ expectedResultHash: second.operation.resultHash }) })).status).toBe(200);
     expect(await db.select().from(tables.mixesTable).where(eq(tables.mixesTable.id, "unrelated"))).toHaveLength(1);

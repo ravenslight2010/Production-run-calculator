@@ -1,4 +1,11 @@
-import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
+import {
+  expect,
+  test,
+  type Locator,
+  type Page,
+  type Request,
+  type Route,
+} from "@playwright/test";
 import {
   AuthorizedBrowserFixtures,
   DEFAULT_MANAGER_CAPABILITIES,
@@ -7,7 +14,8 @@ import {
 
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 const PASSWORD = "TestPass123!";
-const API_BASE = process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
+const API_BASE =
+  process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
 const TODAY = new Date().toISOString().slice(0, 10);
 const TOMORROW = new Date(Date.parse(`${TODAY}T00:00:00Z`) + 86_400_000)
   .toISOString()
@@ -16,7 +24,11 @@ const TOMORROW = new Date(Date.parse(`${TODAY}T00:00:00Z`) + 86_400_000)
 let fixtures: AuthorizedBrowserFixtures;
 
 test.beforeAll(async ({ playwright }) => {
-  fixtures = await AuthorizedBrowserFixtures.create(playwright, API_BASE, SIGNUP_CODE);
+  fixtures = await AuthorizedBrowserFixtures.create(
+    playwright,
+    API_BASE,
+    SIGNUP_CODE,
+  );
 });
 
 test.beforeEach(async () => {
@@ -36,22 +48,34 @@ async function openSettings(page: Page): Promise<Locator> {
   return dialog;
 }
 
-async function openIngredientWeights(page: Page, ingredientName: string): Promise<Locator> {
+async function openIngredientWeights(
+  page: Page,
+  ingredientName: string,
+): Promise<Locator> {
   const dialog = await openSettings(page);
   await dialog.getByRole("button", { name: "Lists", exact: true }).click();
-  await dialog.getByRole("button", { name: "Applicator Types", exact: true }).click();
+  await dialog
+    .getByRole("button", { name: "Applicator Types", exact: true })
+    .click();
   const addInput = dialog.getByPlaceholder("Add to Applicator Types…");
   if (!(await dialog.getByText(ingredientName, { exact: true }).count())) {
     await addInput.fill(ingredientName);
     await addInput.press("Enter");
-    await expect(dialog.getByText(ingredientName, { exact: true })).toBeVisible();
+    await expect(
+      dialog.getByText(ingredientName, { exact: true }),
+    ).toBeVisible();
   }
-  await dialog.getByRole("button", { name: "Ingredient Weights", exact: true }).click();
+  await dialog
+    .getByRole("button", { name: "Ingredient Weights", exact: true })
+    .click();
   await expect(dialog.getByText(ingredientName, { exact: true })).toBeVisible();
   return dialog;
 }
 
-function ingredientWeightInput(dialog: Locator, ingredientName: string): Locator {
+function ingredientWeightInput(
+  dialog: Locator,
+  ingredientName: string,
+): Locator {
   return dialog
     .getByText(ingredientName, { exact: true })
     .locator("..")
@@ -62,11 +86,12 @@ async function openRecipeSettings(
   kind: "dough" | "sauce" | "mixes" | "cheese",
 ): Promise<Locator> {
   const dialog = await openSettings(page);
-  const label = kind === "mixes"
-    ? "Mix Recipes"
-    : kind === "cheese"
-      ? "Cheese"
-      : kind[0].toUpperCase() + kind.slice(1);
+  const label =
+    kind === "mixes"
+      ? "Mix Recipes"
+      : kind === "cheese"
+        ? "Cheese"
+        : kind[0].toUpperCase() + kind.slice(1);
   await dialog.getByRole("button", { name: label, exact: true }).click();
   return dialog;
 }
@@ -83,9 +108,9 @@ function responseContainsRecipeValue(
   value: string,
 ): boolean {
   if (
-    !response.url().includes(endpoint)
-    || response.request().method() !== "POST"
-    || response.status() !== 200
+    !response.url().includes(endpoint) ||
+    response.request().method() !== "POST" ||
+    response.status() !== 200
   ) {
     return false;
   }
@@ -99,16 +124,19 @@ function responseContainsRecipeValue(
       }>;
     };
     const expected = Number(value);
-    return body.items?.some((item) =>
-      item.name === recipeName
-      && (
-        Number(item.perPizza) === expected
-        || Number(item.batchSize) === expected
-        || item.components?.some((row) =>
-          Number(row.lbs) === expected || Number(row.perPizza) === expected
-        )
-      )
-    ) ?? false;
+    return (
+      body.items?.some(
+        (item) =>
+          item.name === recipeName &&
+          (Number(item.perPizza) === expected ||
+            Number(item.batchSize) === expected ||
+            item.components?.some(
+              (row) =>
+                Number(row.lbs) === expected ||
+                Number(row.perPizza) === expected,
+            )),
+      ) ?? false
+    );
   } catch {
     return false;
   }
@@ -119,7 +147,9 @@ async function setRecipeBatchLbs(
   lbs: string,
 ): Promise<void> {
   const dialog = await openRecipeSettings(page, "cheese");
-  const search = dialog.getByPlaceholder("Search cheese recipes by name, customer, or flavor…");
+  const search = dialog.getByPlaceholder(
+    "Search cheese recipes by name, customer, or flavor…",
+  );
   await search.fill(recipeName);
   await dialog.getByRole("button", { name: new RegExp(recipeName) }).click();
   const input = dialog.getByRole("textbox", { name: "lbs per batch" });
@@ -148,6 +178,7 @@ async function holdNextDelayedCompletion(
   page: Page,
   requestPath: string,
   requestMethod = "GET",
+  matches?: (request: Request) => boolean,
 ): Promise<{
   observed: Promise<void>;
   release: () => Promise<void>;
@@ -168,9 +199,10 @@ async function holdNextDelayedCompletion(
   });
   const handler = async (route: Route): Promise<void> => {
     if (
-      !held
-      && route.request().method() === requestMethod
-      && route.request().url().includes(requestPath)
+      !held &&
+      route.request().method() === requestMethod &&
+      route.request().url().includes(requestPath) &&
+      (matches === undefined || matches(route.request()))
     ) {
       held = true;
       observedResolve();
@@ -179,7 +211,7 @@ async function holdNextDelayedCompletion(
       completedResolve();
       return;
     }
-    await route.continue();
+    await route.fallback();
   };
 
   await page.route("**/api/**", handler);
@@ -200,6 +232,32 @@ async function holdNextDelayedCompletion(
   };
 }
 
+async function waitForGateObserved(
+  gate: { observed: Promise<void> },
+  description: string,
+  timeoutMs = 20_000,
+): Promise<void> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      gate.observed,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(
+          () =>
+            reject(
+              new Error(
+                `Timed out after ${timeoutMs}ms waiting for ${description}`,
+              ),
+            ),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
+}
+
 async function holdNextProfileRefresh(page: Page): Promise<{
   observed: Promise<void>;
   release: () => Promise<void>;
@@ -209,11 +267,15 @@ async function holdNextProfileRefresh(page: Page): Promise<{
 
 async function signIn(page: Page, username: string): Promise<void> {
   await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
-  await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
+  await page
+    .locator("#username")
+    .waitFor({ state: "visible", timeout: 20_000 });
   await page.locator("#username").fill(username);
   await page.locator("#password").fill(PASSWORD);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  await page
+    .getByTestId("tab-run")
+    .waitFor({ state: "attached", timeout: 25_000 });
 }
 
 async function readServerProfileValue(
@@ -233,9 +295,11 @@ async function readServerIngredientBatchWeight(
     headers: { "Cache-Control": "no-cache" },
   });
   if (!response.ok()) {
-    throw new Error(`Read canonical ingredient batch weight failed (${response.status()})`);
+    throw new Error(
+      `Read canonical ingredient batch weight failed (${response.status()})`,
+    );
   }
-  const payload = await response.json() as {
+  const payload = (await response.json()) as {
     weights?: Array<{ name?: string; lbs?: number }>;
   };
   const match = payload.weights?.find(
@@ -244,26 +308,25 @@ async function readServerIngredientBatchWeight(
   return match?.lbs ?? null;
 }
 
-function waitForBatchWeightWrite(
-  page: Page,
-  ingredient: string,
-  lbs: number,
-) {
+function waitForBatchWeightWrite(page: Page, ingredient: string, lbs: number) {
   const key = ingredient.trim().toLowerCase();
   return page.waitForResponse((response) => {
     if (
-      !response.url().endsWith("/api/ingredient-batch-weights")
-      || response.request().method() !== "POST"
-      || response.status() !== 200
+      !response.url().endsWith("/api/ingredient-batch-weights") ||
+      response.request().method() !== "POST" ||
+      response.status() !== 200
     ) {
       return false;
     }
     const payload = response.request().postDataJSON() as {
       weights?: Array<{ name?: string; lbs?: number }>;
     };
-    return payload.weights?.some(
-      (row) => row.name?.trim().toLowerCase() === key && Number(row.lbs) === lbs,
-    ) ?? false;
+    return (
+      payload.weights?.some(
+        (row) =>
+          row.name?.trim().toLowerCase() === key && Number(row.lbs) === lbs,
+      ) ?? false
+    );
   });
 }
 async function setNamedRecipeLbs(
@@ -298,7 +361,9 @@ async function setNamedRecipeLbs(
   if (waitForSave) {
     await expect(input).toBeEnabled({ timeout: 45_000 });
   }
-  await dialog.getByRole("button", { name: "Close settings" }).click({ force: true });
+  await dialog
+    .getByRole("button", { name: "Close settings" })
+    .click({ force: true });
 }
 
 async function setMixPerPizza(
@@ -308,7 +373,9 @@ async function setMixPerPizza(
   waitForSave = true,
 ): Promise<void> {
   const dialog = await openRecipeSettings(page, "mixes");
-  const search = dialog.getByPlaceholder("Search mixes by name, brand, or flavor…");
+  const search = dialog.getByPlaceholder(
+    "Search mixes by name, brand, or flavor…",
+  );
   await search.fill(recipeName);
   await dialog.getByRole("button", { name: new RegExp(recipeName) }).click();
   // The filtered manager contains only this fixture mix. Target the component
@@ -331,7 +398,9 @@ async function setMixPerPizza(
   if (waitForSave) {
     await expect(input).toBeEnabled({ timeout: 45_000 });
   }
-  await dialog.getByRole("button", { name: "Close settings" }).click({ force: true });
+  await dialog
+    .getByRole("button", { name: "Close settings" })
+    .click({ force: true });
 }
 
 async function primeRecipeSettings(
@@ -340,18 +409,24 @@ async function primeRecipeSettings(
   recipeName: string,
 ): Promise<void> {
   const dialog = await openRecipeSettings(page, kind);
-  const placeholder = kind === "cheese"
-    ? "Search cheese recipes by name, customer, or flavor…"
-    : kind === "mixes"
-      ? "Search mixes by name, brand, or flavor…"
-      : `Search ${kind} recipes by name or ingredient…`;
+  const placeholder =
+    kind === "cheese"
+      ? "Search cheese recipes by name, customer, or flavor…"
+      : kind === "mixes"
+        ? "Search mixes by name, brand, or flavor…"
+        : `Search ${kind} recipes by name or ingredient…`;
   await dialog.getByPlaceholder(placeholder).fill(recipeName);
-  await expect(dialog.getByRole("button", { name: new RegExp(recipeName) })).toBeVisible({
+  await expect(
+    dialog.getByRole("button", { name: new RegExp(recipeName) }),
+  ).toBeVisible({
     timeout: 15_000,
   });
   await dialog.getByRole("button", { name: "Close settings" }).click();
 }
-async function readIngredientDetail(page: Page, runId: string): Promise<string> {
+async function readIngredientDetail(
+  page: Page,
+  runId: string,
+): Promise<string> {
   await openSummary(page);
   const card = page.getByTestId(`run-summary-${runId}`);
   await card.getByRole("button", { name: "Ingredient Detail" }).click();
@@ -373,10 +448,9 @@ async function expectIngredientDetailChanged(
   await card.getByRole("button", { name: "Ingredient Detail" }).click();
   const detail = page.getByRole("dialog", { name: /Ingredient Detail/ });
   await expect(detail).toBeVisible();
-  await expect.poll(
-    async () => (await detail.textContent()) ?? "",
-    { timeout: 20_000 },
-  ).not.toBe(previous);
+  await expect
+    .poll(async () => (await detail.textContent()) ?? "", { timeout: 20_000 })
+    .not.toBe(previous);
   const text = (await detail.textContent()) ?? "";
   await page.keyboard.press("Escape");
   await expect(detail).toBeHidden();
@@ -393,10 +467,9 @@ async function expectIngredientDetailStable(
   await card.getByRole("button", { name: "Ingredient Detail" }).click();
   const detail = page.getByRole("dialog", { name: /Ingredient Detail/ });
   await expect(detail).toBeVisible();
-  await expect.poll(
-    async () => (await detail.textContent()) ?? "",
-    { timeout: 20_000 },
-  ).toBe(expected);
+  await expect
+    .poll(async () => (await detail.textContent()) ?? "", { timeout: 20_000 })
+    .toBe(expected);
   await page.keyboard.press("Escape");
   await expect(detail).toBeHidden();
 }
@@ -419,7 +492,7 @@ async function readServerRunValue(page: Page, runId: string): Promise<string> {
   if (!response.ok()) {
     throw new Error(`Read canonical run value failed (${response.status()})`);
   }
-  const payload = await response.json() as {
+  const payload = (await response.json()) as {
     runValues?: Record<string, unknown>;
   };
   return JSON.stringify(payload.runValues?.[runId] ?? null);
@@ -435,7 +508,9 @@ async function reloadAfterMasterBootstrap(page: Page): Promise<void> {
     page.reload({ waitUntil: "domcontentloaded" }),
     masterReady,
   ]);
-  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  await page
+    .getByTestId("tab-run")
+    .waitFor({ state: "attached", timeout: 25_000 });
 }
 async function readServerRunField(
   page: Page,
@@ -448,22 +523,27 @@ async function readServerRunField(
   if (!response.ok()) {
     throw new Error(`Read canonical run field failed (${response.status()})`);
   }
-  const payload = await response.json() as {
+  const payload = (await response.json()) as {
     runValues?: Record<string, Record<string, unknown>>;
   };
   return payload.runValues?.[runId]?.[field];
 }
 
-async function serverRunHasStarted(page: Page, runId: string): Promise<boolean> {
+async function serverRunHasStarted(
+  page: Page,
+  runId: string,
+): Promise<boolean> {
   const response = await page.request.get(`/api/sync/today?today=${TODAY}`, {
     headers: { "Cache-Control": "no-cache" },
   });
   if (!response.ok()) return false;
-  const payload = await response.json() as {
+  const payload = (await response.json()) as {
     dayState?: { runs?: Array<{ id?: string; startedAt?: number }> };
   };
   return Boolean(
-    payload.dayState?.runs?.some((run) => run.id === runId && Number(run.startedAt) > 0),
+    payload.dayState?.runs?.some(
+      (run) => run.id === runId && Number(run.startedAt) > 0,
+    ),
   );
 }
 async function readServerProfileValues(
@@ -476,7 +556,7 @@ async function readServerProfileValues(
   if (!response.ok()) {
     throw new Error(`Read canonical profile failed (${response.status()})`);
   }
-  const payload = await response.json() as {
+  const payload = (await response.json()) as {
     items?: { key: string; values?: Record<string, unknown> }[];
   };
   return payload.items?.find((item) => item.key === key)?.values;
@@ -488,10 +568,9 @@ async function expectServerRunValueChanged(
   previous: string,
   timeout = 45_000,
 ): Promise<string> {
-  await expect.poll(
-    () => readServerRunValue(page, runId),
-    { timeout },
-  ).not.toBe(previous);
+  await expect
+    .poll(() => readServerRunValue(page, runId), { timeout })
+    .not.toBe(previous);
   return readServerRunValue(page, runId);
 }
 
@@ -500,17 +579,16 @@ async function readScheduledRunValues(
   date: string,
   runId: string,
 ): Promise<Record<string, unknown> | undefined> {
-  const response = await page.request.get(
-    `/api/sync/${date}?today=${TODAY}`,
-    { failOnStatusCode: true },
-  );
-  const payload = await response.json() as {
+  const response = await page.request.get(`/api/sync/${date}?today=${TODAY}`, {
+    failOnStatusCode: true,
+  });
+  const payload = (await response.json()) as {
     runValues?: Record<string, Record<string, unknown>>;
   };
   return payload.runValues?.[runId];
 }
 
-test.skip("remembered plain ingredient batch weights rehydrate in a peer without changing the active run", async ({
+test.skip("@focused-only remembered plain ingredient batch weights rehydrate in a peer without changing the active run", async ({
   browser,
   page,
 }) => {
@@ -523,10 +601,10 @@ test.skip("remembered plain ingredient batch weights rehydrate in a peer without
   const flavor = "Manager Journey";
 
   const otherBrand = `Other Weight ${uniqueTestId("brand")}`;
-    const recipeId = uniqueTestId(`${scenario.label}-recipe`);
-    const recipeName = `Shared ${scenario.label} ${uniqueTestId("recipe")}`;
-    const currentRunId = uniqueTestId("current-run");
-    const upcomingRunId = uniqueTestId("upcoming-run");
+  const recipeId = uniqueTestId(`${scenario.label}-recipe`);
+  const recipeName = `Shared ${scenario.label} ${uniqueTestId("recipe")}`;
+  const currentRunId = uniqueTestId("current-run");
+  const upcomingRunId = uniqueTestId("upcoming-run");
   const scheduledRunId = uniqueTestId("scheduled-run");
   const now = Date.now();
   const account = await fixtures.createAccount({
@@ -535,7 +613,7 @@ test.skip("remembered plain ingredient batch weights rehydrate in a peer without
     capabilities: DEFAULT_MANAGER_CAPABILITIES,
   });
 
-    const values = scenario.values(recipeName);
+  const values = scenario.values(recipeName);
 
   await fixtures.seedCheeseRecipe(account, {
     id: recipeId,
@@ -558,8 +636,20 @@ test.skip("remembered plain ingredient batch weights rehydrate in a peer without
       dayState: {
         date: TODAY,
         runs: [
-          { id: currentRunId, brand, flavor, metaUpdatedAt: now, seeded: false },
-          { id: upcomingRunId, brand, flavor, metaUpdatedAt: now, seeded: false },
+          {
+            id: currentRunId,
+            brand,
+            flavor,
+            metaUpdatedAt: now,
+            seeded: false,
+          },
+          {
+            id: upcomingRunId,
+            brand,
+            flavor,
+            metaUpdatedAt: now,
+            seeded: false,
+          },
         ],
         currentIndex: 0,
         resetAt: 0,
@@ -586,7 +676,13 @@ test.skip("remembered plain ingredient batch weights rehydrate in a peer without
       dayState: {
         date: TOMORROW,
         runs: [
-          { id: scheduledRunId, brand, flavor, metaUpdatedAt: now, seeded: false },
+          {
+            id: scheduledRunId,
+            brand,
+            flavor,
+            metaUpdatedAt: now,
+            seeded: false,
+          },
         ],
         currentIndex: 0,
         resetAt: 0,
@@ -604,11 +700,17 @@ test.skip("remembered plain ingredient batch weights rehydrate in a peer without
     },
   });
 
-  await page.context().addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
+  await page
+    .context()
+    .addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
   await page.goto("/", { waitUntil: "domcontentloaded" });
-  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  await page
+    .getByTestId("tab-run")
+    .waitFor({ state: "attached", timeout: 25_000 });
   await page.getByTestId("tab-frontline").click();
-  await expect(page.getByTestId("output-app1-batches")).toHaveText("12.00 batches");
+  await expect(page.getByTestId("output-app1-batches")).toHaveText(
+    "12.00 batches",
+  );
 
   await openSummary(page);
   const upcoming = page.getByTestId(`run-summary-${upcomingRunId}`);
@@ -616,13 +718,19 @@ test.skip("remembered plain ingredient batch weights rehydrate in a peer without
 
   await setRecipeBatchLbs(page, recipeName, "20");
   await expect(upcoming).toContainText("6.00 batches");
-  await expect.poll(
-    async () => {
-      const scheduled = await readScheduledRunValues(page, TOMORROW, scheduledRunId);
-      return scheduled?.app1CheeseRecipe;
-    },
-    { timeout: 20_000 },
-  ).toEqual([expect.objectContaining({ ingredient: "Cheese", lbs: 20 })]);
+  await expect
+    .poll(
+      async () => {
+        const scheduled = await readScheduledRunValues(
+          page,
+          TOMORROW,
+          scheduledRunId,
+        );
+        return scheduled?.app1CheeseRecipe;
+      },
+      { timeout: 20_000 },
+    )
+    .toEqual([expect.objectContaining({ ingredient: "Cheese", lbs: 20 })]);
   await page.getByTestId("tab-frontline").click();
   await expect(page.getByTestId("output-app1-batches")).toContainText("6.00");
 
@@ -634,16 +742,28 @@ test.skip("remembered plain ingredient batch weights rehydrate in a peer without
   await setRecipeBatchLbs(page, recipeName, "40");
   await openSummary(page);
   await expect(upcoming).toContainText("3.00 batches");
-  await expect.poll(
-    async () => {
-      const scheduled = await readScheduledRunValues(page, TOMORROW, scheduledRunId);
-      return scheduled?.app1CheeseRecipe;
-    },
-    { timeout: 20_000 },
-  ).toEqual([expect.objectContaining({ ingredient: "Cheese", lbs: 40 })]);
-  await expectServerRunValueChanged(page, upcomingRunId, serverBeforeSecondEdit);
+  await expect
+    .poll(
+      async () => {
+        const scheduled = await readScheduledRunValues(
+          page,
+          TOMORROW,
+          scheduledRunId,
+        );
+        return scheduled?.app1CheeseRecipe;
+      },
+      { timeout: 20_000 },
+    )
+    .toEqual([expect.objectContaining({ ingredient: "Cheese", lbs: 40 })]);
+  await expectServerRunValueChanged(
+    page,
+    upcomingRunId,
+    serverBeforeSecondEdit,
+  );
   await page.reload({ waitUntil: "domcontentloaded" });
-  await page.getByTestId("tab-frontline").waitFor({ state: "attached", timeout: 25_000 });
+  await page
+    .getByTestId("tab-frontline")
+    .waitFor({ state: "attached", timeout: 25_000 });
   await page.getByTestId("tab-frontline").click();
   await expect(page.getByTestId("output-app1-batches")).toContainText("6.00");
   await openSummary(page);
@@ -750,7 +870,9 @@ test("a delayed shared recipe refresh stays with its original run after a rapid 
       | { observed: Promise<void>; release: () => Promise<void> }
       | undefined;
 */
-test.skip("a delayed shared recipe refresh stays with its original run after a rapid switch", async ({ page }) => {
+test.skip("@focused-only a delayed shared recipe refresh stays with its original run after a rapid switch", async ({
+  page,
+}) => {
   test.setTimeout(90_000);
   await page.setViewportSize({ width: 390, height: 844 });
 
@@ -783,7 +905,14 @@ test.skip("a delayed shared recipe refresh stays with its original run after a r
           }),
   };
 
-  await scenario.seed(fixtures, account, recipeName, recipeId, originalBrand, originalFlavor);
+  await scenario.seed(
+    fixtures,
+    account,
+    recipeName,
+    recipeId,
+    originalBrand,
+    originalFlavor,
+  );
   await fixtures.seedBrandProfile(account, {
     brand: originalBrand,
     flavor: originalFlavor,
@@ -832,15 +961,18 @@ test.skip("a delayed shared recipe refresh stays with its original run after a r
     },
   });
 
-  await page.context().addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
+  await page
+    .context()
+    .addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
   await page.goto("/", { waitUntil: "domcontentloaded" });
-  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  await page
+    .getByTestId("tab-run")
+    .waitFor({ state: "attached", timeout: 25_000 });
 
   const originalBefore = await readIngredientDetail(page, originalRunId);
   const switchedBefore = await readIngredientDetail(page, switchedRunId);
   let refreshGate:
-    | { observed: Promise<void>; release: () => Promise<void> }
-    | undefined;
+    { observed: Promise<void>; release: () => Promise<void> } | undefined;
 
   try {
     await setRecipeBatchLbs(page, recipeName, "20");
@@ -952,7 +1084,13 @@ test("a delayed learned batch weight reaches future pending runs but preserves s
       dayState: {
         date: TOMORROW,
         runs: [
-          { id: futurePendingRunId, brand, flavor, metaUpdatedAt: now, seeded: false },
+          {
+            id: futurePendingRunId,
+            brand,
+            flavor,
+            metaUpdatedAt: now,
+            seeded: false,
+          },
           {
             id: futureStartedRunId,
             brand,
@@ -1002,25 +1140,38 @@ test("a delayed learned batch weight reaches future pending runs but preserves s
     },
   });
 
-  await page.addInitScript(({ ingredientName }) => {
-    localStorage.setItem("run-calc-ingredient-types", JSON.stringify([ingredientName]));
-  }, { ingredientName: ingredient });
-  await page.context().addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
+  await page.addInitScript(
+    ({ ingredientName }) => {
+      localStorage.setItem(
+        "run-calc-ingredient-types",
+        JSON.stringify([ingredientName]),
+      );
+    },
+    { ingredientName: ingredient },
+  );
+  await page
+    .context()
+    .addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
   await page.goto("/", { waitUntil: "domcontentloaded" });
-  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  await page
+    .getByTestId("tab-run")
+    .waitFor({ state: "attached", timeout: 25_000 });
 
   await page.getByRole("button", { name: /^More/ }).click();
   await page.getByRole("menuitem", { name: "Setup", exact: true }).click();
-  await page.getByRole("button", { name: "Sauce & Applicator Weights" }).click();
+  await page
+    .getByRole("button", { name: "Sauce & Applicator Weights" })
+    .click();
   const batchWeight = page.getByTestId("input-app1BatchLbs");
   await expect(batchWeight).toHaveValue("5");
 
   const refreshGate = await holdNextProfileRefresh(page);
   try {
-    const savedWeight = page.waitForResponse((response) =>
-      response.url().includes("/api/ingredient-batch-weights")
-        && response.request().method() === "POST"
-        && response.status() === 200,
+    const savedWeight = page.waitForResponse(
+      (response) =>
+        response.url().includes("/api/ingredient-batch-weights") &&
+        response.request().method() === "POST" &&
+        response.status() === 200,
     );
     await batchWeight.fill("12");
     await batchWeight.blur();
@@ -1033,22 +1184,38 @@ test("a delayed learned batch weight reaches future pending runs but preserves s
 
     await refreshGate.release();
 
-    await expect.poll(
-      async () => (await readScheduledRunValues(page, TOMORROW, futurePendingRunId))?.app1BatchLbs,
-      { timeout: 25_000 },
-    ).toBe(12);
-    await expect.poll(
-      async () => (await readScheduledRunValues(page, TOMORROW, futureStartedRunId))?.app1BatchLbs,
-      { timeout: 25_000 },
-    ).toBe(7);
-    await expect.poll(
-      async () => (await readScheduledRunValues(page, TOMORROW, futurePausedRunId))?.app1BatchLbs,
-      { timeout: 25_000 },
-    ).toBe(11);
-    await expect.poll(
-      async () => (await readScheduledRunValues(page, TOMORROW, futureHistoryRunId))?.app1BatchLbs,
-      { timeout: 25_000 },
-    ).toBe(9);
+    await expect
+      .poll(
+        async () =>
+          (await readScheduledRunValues(page, TOMORROW, futurePendingRunId))
+            ?.app1BatchLbs,
+        { timeout: 25_000 },
+      )
+      .toBe(12);
+    await expect
+      .poll(
+        async () =>
+          (await readScheduledRunValues(page, TOMORROW, futureStartedRunId))
+            ?.app1BatchLbs,
+        { timeout: 25_000 },
+      )
+      .toBe(7);
+    await expect
+      .poll(
+        async () =>
+          (await readScheduledRunValues(page, TOMORROW, futurePausedRunId))
+            ?.app1BatchLbs,
+        { timeout: 25_000 },
+      )
+      .toBe(11);
+    await expect
+      .poll(
+        async () =>
+          (await readScheduledRunValues(page, TOMORROW, futureHistoryRunId))
+            ?.app1BatchLbs,
+        { timeout: 25_000 },
+      )
+      .toBe(9);
   } finally {
     await refreshGate.release();
   }
@@ -1077,7 +1244,12 @@ const sharedRecipeFreezeScenarios: SharedRecipeFreezeScenario[] = [
     kind: "dough" as const,
     firstLbs: "20",
     secondLbs: "40",
-    seed: (fixtures: AuthorizedBrowserFixtures, account: { token: string }, recipeName: string, recipeId: string) =>
+    seed: (
+      fixtures: AuthorizedBrowserFixtures,
+      account: { token: string },
+      recipeName: string,
+      recipeId: string,
+    ) =>
       fixtures.seedNamedRecipe("dough", account, {
         id: recipeId,
         name: recipeName,
@@ -1097,7 +1269,8 @@ const sharedRecipeFreezeScenarios: SharedRecipeFreezeScenario[] = [
       doughRecipe: [{ ingredient: "Dough Flour", lbs: 10 }],
       targetDoughballWeight: 16,
     }),
-    edit: (page, recipeName, lbs) => setNamedRecipeLbs(page, "dough", recipeName, lbs),
+    edit: (page, recipeName, lbs) =>
+      setNamedRecipeLbs(page, "dough", recipeName, lbs),
   },
   {
     label: "sauce",
@@ -1132,14 +1305,22 @@ const sharedRecipeFreezeScenarios: SharedRecipeFreezeScenario[] = [
       frontlineRecipe: [{ ingredient: "Sauce Tomatoes", lbs: 10 }],
       sauceOzPerPizza: 16,
     }),
-    edit: (page, recipeName, lbs) => setNamedRecipeLbs(page, "sauce", recipeName, lbs),
+    edit: (page, recipeName, lbs) =>
+      setNamedRecipeLbs(page, "sauce", recipeName, lbs),
   },
   {
     label: "mix",
     kind: "mixes" as const,
     firstLbs: "2",
     secondLbs: "4",
-    seed: (fixtures: AuthorizedBrowserFixtures, account: { token: string }, recipeName: string, recipeId: string, brand: string, flavor: string) =>
+    seed: (
+      fixtures: AuthorizedBrowserFixtures,
+      account: { token: string },
+      recipeName: string,
+      recipeId: string,
+      brand: string,
+      flavor: string,
+    ) =>
       fixtures.seedMix(account, {
         id: recipeId,
         name: recipeName,
@@ -1181,12 +1362,13 @@ const sharedRecipeFreezeScenarios: SharedRecipeFreezeScenario[] = [
       recipeName: string,
       recipeId: string,
       brand: string,
-    ) => fixtures.seedCheeseRecipe(account, {
-      id: recipeId,
-      name: recipeName,
-      brand,
-      components: [{ ingredient: "Cheese", lbs: 10 }],
-    }),
+    ) =>
+      fixtures.seedCheeseRecipe(account, {
+        id: recipeId,
+        name: recipeName,
+        brand,
+        components: [{ ingredient: "Cheese", lbs: 10 }],
+      }),
     values: (recipeName: string) => ({
       casesNeeded: 100,
       pizzasPerCase: 1,
@@ -1213,22 +1395,22 @@ for (const scenario of sharedRecipeFreezeScenarios) {
     test.setTimeout(240_000);
     await page.setViewportSize({ width: 390, height: 844 });
 
-  const username = uniqueTestId("e2e_batch_weight_sign_in");
+    const username = uniqueTestId("e2e_batch_weight_sign_in");
 
-  const brand = `Weight Sync ${uniqueTestId("brand")}`;
-  const flavor = "Manager Journey";
+    const brand = `Weight Sync ${uniqueTestId("brand")}`;
+    const flavor = "Manager Journey";
 
-  const otherBrand = `Other Weight ${uniqueTestId("brand")}`;
+    const otherBrand = `Other Weight ${uniqueTestId("brand")}`;
     const recipeId = uniqueTestId(`${scenario.label}-recipe`);
     const recipeName = `Shared ${scenario.label} ${uniqueTestId("recipe")}`;
     const currentRunId = uniqueTestId("current-run");
     const upcomingRunId = uniqueTestId("upcoming-run");
-  const now = Date.now();
-  const account = await fixtures.createAccount({
-    username: uniqueTestId("e2e_weight_sync"),
-    password: PASSWORD,
-    capabilities: DEFAULT_MANAGER_CAPABILITIES,
-  });
+    const now = Date.now();
+    const account = await fixtures.createAccount({
+      username: uniqueTestId("e2e_weight_sync"),
+      password: PASSWORD,
+      capabilities: DEFAULT_MANAGER_CAPABILITIES,
+    });
     const values = scenario.values(recipeName);
 
     await scenario.seed(fixtures, account, recipeName, recipeId, brand, flavor);
@@ -1246,8 +1428,20 @@ for (const scenario of sharedRecipeFreezeScenarios) {
         dayState: {
           date: TODAY,
           runs: [
-            { id: currentRunId, brand, flavor, metaUpdatedAt: now, seeded: false },
-            { id: upcomingRunId, brand, flavor, metaUpdatedAt: now, seeded: false },
+            {
+              id: currentRunId,
+              brand,
+              flavor,
+              metaUpdatedAt: now,
+              seeded: false,
+            },
+            {
+              id: upcomingRunId,
+              brand,
+              flavor,
+              metaUpdatedAt: now,
+              seeded: false,
+            },
           ],
           currentIndex: 0,
           currentRunId,
@@ -1268,29 +1462,35 @@ for (const scenario of sharedRecipeFreezeScenarios) {
       },
     });
 
-    await page.context().addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
-  const peerContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
-  await peerContext.addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
-  const peer = await peerContext.newPage();
+    await page
+      .context()
+      .addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
+    const peerContext = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+    });
+    await peerContext.addCookies([
+      { name: "rc_auth", value: account.token, url: API_BASE },
+    ]);
+    const peer = await peerContext.newPage();
 
-      const sourceEventsReady = page.waitForRequest(
-        (request) => request.url().includes("/api/sync/events"),
-        { timeout: 25_000 },
-      );
-      const peerEventsReady = peer.waitForRequest(
-        (request) => request.url().includes("/api/sync/events"),
-        { timeout: 25_000 },
-      );
-      const sourceMasterReady = page.waitForResponse(
-        (response) =>
-          response.url().includes("/api/master-data/bootstrap") && response.ok(),
-        { timeout: 25_000 },
-      );
-      const peerMasterReady = peer.waitForResponse(
-        (response) =>
-          response.url().includes("/api/master-data/bootstrap") && response.ok(),
-        { timeout: 25_000 },
-      );
+    const sourceEventsReady = page.waitForRequest(
+      (request) => request.url().includes("/api/sync/events"),
+      { timeout: 25_000 },
+    );
+    const peerEventsReady = peer.waitForRequest(
+      (request) => request.url().includes("/api/sync/events"),
+      { timeout: 25_000 },
+    );
+    const sourceMasterReady = page.waitForResponse(
+      (response) =>
+        response.url().includes("/api/master-data/bootstrap") && response.ok(),
+      { timeout: 25_000 },
+    );
+    const peerMasterReady = peer.waitForResponse(
+      (response) =>
+        response.url().includes("/api/master-data/bootstrap") && response.ok(),
+      { timeout: 25_000 },
+    );
 
     try {
       await Promise.all([
@@ -1302,8 +1502,12 @@ for (const scenario of sharedRecipeFreezeScenarios) {
         peerMasterReady,
       ]);
       await Promise.all([
-        page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 }),
-        peer.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 }),
+        page
+          .getByTestId("tab-run")
+          .waitFor({ state: "attached", timeout: 25_000 }),
+        peer
+          .getByTestId("tab-run")
+          .waitFor({ state: "attached", timeout: 25_000 }),
       ]);
       await Promise.all([
         primeRecipeSettings(page, scenario.kind, recipeName),
@@ -1315,38 +1519,51 @@ for (const scenario of sharedRecipeFreezeScenarios) {
       ]);
       expect(peerPendingBefore).toBe(pendingBefore);
 
-      const serverBeforeFirstEdit = await readServerRunValue(page, upcomingRunId);
+      const serverBeforeFirstEdit = await readServerRunValue(
+        page,
+        upcomingRunId,
+      );
       await scenario.edit(page, recipeName, scenario.firstLbs);
       const serverAfterFirstEdit = await expectServerRunValueChanged(
         page,
         upcomingRunId,
         serverBeforeFirstEdit,
       );
-      const [pendingAfterFirstEdit, peerPendingAfterFirstEdit] = await Promise.all([
-        expectIngredientDetailChanged(page, upcomingRunId, pendingBefore),
-        expectIngredientDetailChanged(peer, upcomingRunId, peerPendingBefore),
-      ]);
+      const [pendingAfterFirstEdit, peerPendingAfterFirstEdit] =
+        await Promise.all([
+          expectIngredientDetailChanged(page, upcomingRunId, pendingBefore),
+          expectIngredientDetailChanged(peer, upcomingRunId, peerPendingBefore),
+        ]);
       expect(peerPendingAfterFirstEdit).toBe(pendingAfterFirstEdit);
 
       await page.getByTestId("tab-run").click();
       const startRun = page.getByTestId("button-start-run");
       await startRun.click();
       await expect(startRun).toBeHidden({ timeout: 20_000 });
-      await expect(page.getByRole("button", { name: /pause.?run/i })).toBeVisible({
+      await expect(
+        page.getByRole("button", { name: /pause.?run/i }),
+      ).toBeVisible({
         timeout: 20_000,
       });
-      await expect.poll(
-        () => serverRunHasStarted(page, currentRunId),
-        { timeout: 20_000, message: "Start did not reach canonical sync state" },
-      ).toBe(true);
+      await expect
+        .poll(() => serverRunHasStarted(page, currentRunId), {
+          timeout: 20_000,
+          message: "Start did not reach canonical sync state",
+        })
+        .toBe(true);
       await reloadAfterMasterBootstrap(page);
       await page.getByTestId("tab-run").click();
-      await expect(page.getByRole("button", { name: /pause.?run/i })).toBeVisible({
+      await expect(
+        page.getByRole("button", { name: /pause.?run/i }),
+      ).toBeVisible({
         timeout: 20_000,
       });
       await page.waitForTimeout(1_500);
       const startedSnapshot = await readIngredientDetail(page, currentRunId);
-      const peerStartedSnapshot = await readIngredientDetail(peer, currentRunId);
+      const peerStartedSnapshot = await readIngredientDetail(
+        peer,
+        currentRunId,
+      );
 
       await scenario.edit(page, recipeName, scenario.secondLbs);
       const serverAfterSecondEdit = await expectServerRunValueChanged(
@@ -1354,20 +1571,42 @@ for (const scenario of sharedRecipeFreezeScenarios) {
         upcomingRunId,
         serverAfterFirstEdit,
       );
-      const [pendingAfterSecondEdit, peerPendingAfterSecondEdit] = await Promise.all([
-        expectIngredientDetailChanged(page, upcomingRunId, pendingAfterFirstEdit),
-        expectIngredientDetailChanged(peer, upcomingRunId, peerPendingAfterFirstEdit),
-      ]);
+      const [pendingAfterSecondEdit, peerPendingAfterSecondEdit] =
+        await Promise.all([
+          expectIngredientDetailChanged(
+            page,
+            upcomingRunId,
+            pendingAfterFirstEdit,
+          ),
+          expectIngredientDetailChanged(
+            peer,
+            upcomingRunId,
+            peerPendingAfterFirstEdit,
+          ),
+        ]);
       expect(peerPendingAfterSecondEdit).toBe(pendingAfterSecondEdit);
-      await expect.poll(
-        () => readServerRunValue(page, upcomingRunId),
-        { timeout: 20_000 },
-      ).toBe(serverAfterSecondEdit);
+      await expect
+        .poll(() => readServerRunValue(page, upcomingRunId), {
+          timeout: 20_000,
+        })
+        .toBe(serverAfterSecondEdit);
       await reloadAfterMasterBootstrap(peer);
-      await expectIngredientDetailStable(peer, upcomingRunId, peerPendingAfterSecondEdit);
-      await expectIngredientDetailStable(peer, currentRunId, peerStartedSnapshot);
+      await expectIngredientDetailStable(
+        peer,
+        upcomingRunId,
+        peerPendingAfterSecondEdit,
+      );
+      await expectIngredientDetailStable(
+        peer,
+        currentRunId,
+        peerStartedSnapshot,
+      );
       await reloadAfterMasterBootstrap(page);
-      await expectIngredientDetailStable(page, upcomingRunId, pendingAfterSecondEdit);
+      await expectIngredientDetailStable(
+        page,
+        upcomingRunId,
+        pendingAfterSecondEdit,
+      );
       await expectIngredientDetailStable(page, currentRunId, startedSnapshot);
 
       // Reload both contexts once more so neither browser can reintroduce its
@@ -1398,11 +1637,13 @@ for (const scenario of sharedRecipeFreezeScenarios) {
 for (const scenario of sharedRecipeFreezeScenarios) {
   if (scenario.kind === "cheese") continue;
 
-  test(`${scenario.label} recipe refresh stays with its original run after a rapid switch`, async ({ page }) => {
+  test(`${scenario.label} recipe refresh stays with its original run after a rapid switch`, async ({
+    page,
+  }) => {
     test.setTimeout(90_000);
     await page.setViewportSize({ width: 390, height: 844 });
 
-  const username = uniqueTestId("e2e_batch_weight_sign_in");
+    const username = uniqueTestId("e2e_batch_weight_sign_in");
 
     const originalBrand = `Original ${scenario.label} ${uniqueTestId("brand")}`;
     const originalFlavor = "Profile-backed";
@@ -1410,12 +1651,12 @@ for (const scenario of sharedRecipeFreezeScenarios) {
     const recipeName = `Shared ${scenario.label} ${uniqueTestId("recipe")}`;
     const originalRunId = uniqueTestId("original-run");
     const switchedRunId = uniqueTestId("switched-run");
-  const now = Date.now();
-  const account = await fixtures.createAccount({
-    username: uniqueTestId("e2e_weight_sync"),
-    password: PASSWORD,
-    capabilities: DEFAULT_MANAGER_CAPABILITIES,
-  });
+    const now = Date.now();
+    const account = await fixtures.createAccount({
+      username: uniqueTestId("e2e_weight_sync"),
+      password: PASSWORD,
+      capabilities: DEFAULT_MANAGER_CAPABILITIES,
+    });
     const originalValues = scenario.values(recipeName);
     const switchedValues = {
       ...originalValues,
@@ -1432,7 +1673,14 @@ for (const scenario of sharedRecipeFreezeScenarios) {
             }),
     };
 
-    await scenario.seed(fixtures, account, recipeName, recipeId, originalBrand, originalFlavor);
+    await scenario.seed(
+      fixtures,
+      account,
+      recipeName,
+      recipeId,
+      originalBrand,
+      originalFlavor,
+    );
     await fixtures.seedBrandProfile(account, {
       brand: originalBrand,
       flavor: originalFlavor,
@@ -1481,30 +1729,66 @@ for (const scenario of sharedRecipeFreezeScenarios) {
       },
     });
 
-    await page.context().addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
+    await page
+      .context()
+      .addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    await page
+      .getByTestId("tab-run")
+      .waitFor({ state: "attached", timeout: 25_000 });
 
     const originalBefore = await readIngredientDetail(page, originalRunId);
     const switchedBefore = await readIngredientDetail(page, switchedRunId);
+    const switchedServerBefore = await readServerRunValue(page, switchedRunId);
     let saveGate:
-      | { observed: Promise<void>; release: () => Promise<void> }
-      | undefined;
+      { observed: Promise<void>; release: () => Promise<void> } | undefined;
     let refreshGate:
-      | { observed: Promise<void>; release: () => Promise<void> }
-      | undefined;
+      { observed: Promise<void>; release: () => Promise<void> } | undefined;
 
     try {
       let edit: Promise<void>;
       if (scenario.kind === "mixes") {
         saveGate = await holdNextDelayedCompletion(page, "/api/mixes", "POST");
-        edit = setMixPerPizza(page, recipeName, scenario.firstLbs, false);
       } else if (scenario.kind === "dough" || scenario.kind === "sauce") {
         saveGate = await holdNextDelayedCompletion(
           page,
           `/api/${scenario.kind}-recipes`,
           "POST",
         );
+      } else {
+        throw new Error(`Unsupported recipe kind: ${scenario.kind}`);
+      }
+      // Named dough refresh always hydrates profiles before fan-out. Some
+      // already-current profiles need no POST, so hold that GET instead.
+      // Sauce/mix changes still exercise the profile write boundary.
+      const refreshMethod = scenario.kind === "dough" ? "GET" : "POST";
+      refreshGate = await holdNextDelayedCompletion(
+        page,
+        "/api/brand-profiles",
+        refreshMethod,
+        scenario.kind === "dough" ? undefined : (request) => {
+          const body = request.postDataJSON() as
+            | {
+                items?: Array<{ brand?: unknown; flavor?: unknown }>;
+              }
+            | undefined;
+          return (
+            body?.items?.some(
+              (item) =>
+                String(item.brand ?? "")
+                  .trim()
+                  .toLowerCase() === originalBrand.trim().toLowerCase() &&
+                String(item.flavor ?? "")
+                  .trim()
+                  .toLowerCase() === originalFlavor.trim().toLowerCase(),
+            ) ?? false
+          );
+        },
+      );
+
+      if (scenario.kind === "mixes") {
+        edit = setMixPerPizza(page, recipeName, scenario.firstLbs, false);
+      } else {
         edit = setNamedRecipeLbs(
           page,
           scenario.kind,
@@ -1512,22 +1796,37 @@ for (const scenario of sharedRecipeFreezeScenarios) {
           scenario.firstLbs,
           false,
         );
-      } else {
-        throw new Error(`Unsupported recipe kind: ${scenario.kind}`);
       }
-      await saveGate.observed;
-      refreshGate = await holdNextDelayedCompletion(page, "/api/brand-profiles", "POST");
+
+      await waitForGateObserved(
+        saveGate,
+        `POST /api/${scenario.kind === "mixes" ? "mixes" : `${scenario.kind}-recipes`}`,
+      );
       await saveGate.release();
-      await refreshGate.observed;
+      await waitForGateObserved(
+        refreshGate,
+        scenario.kind === "dough"
+          ? "GET /api/brand-profiles before dough refresh"
+          : `matching POST /api/brand-profiles refresh for ${originalBrand} / ${originalFlavor}`,
+      );
 
       await page.getByTestId("tab-run").click();
       await page.getByRole("button", { name: "Select run 2" }).click();
-    await expect(page.getByText("Run 2 of 2", { exact: true })).toBeVisible();
+      await expect(page.getByText("Run 2 of 2", { exact: true })).toBeVisible();
 
       await refreshGate.release();
       await edit;
+      // Let the acknowledged profile response finish its pending-run fan-out
+      // before the server-backed detail assertions begin.
+      await page.waitForTimeout(250);
 
       await expectIngredientDetailChanged(page, originalRunId, originalBefore);
+      await expect
+        .poll(() => readServerRunValue(page, switchedRunId), {
+          timeout: 20_000,
+          message: "The delayed refresh mutated the unrelated unprofiled run",
+        })
+        .toBe(switchedServerBefore);
       await expectIngredientDetailStable(page, switchedRunId, switchedBefore);
     } finally {
       await refreshGate?.release();
@@ -1601,8 +1900,20 @@ test("remembered non-default pepperoni batch weights rehydrate in a peer without
       dayState: {
         date: TODAY,
         runs: [
-          { id: activeRunId, brand: activeBrand, flavor: activeFlavor, metaUpdatedAt: now, seeded: false },
-          { id: pendingRunId, brand: pendingBrand, flavor: pendingFlavor, metaUpdatedAt: now, seeded: false },
+          {
+            id: activeRunId,
+            brand: activeBrand,
+            flavor: activeFlavor,
+            metaUpdatedAt: now,
+            seeded: false,
+          },
+          {
+            id: pendingRunId,
+            brand: pendingBrand,
+            flavor: pendingFlavor,
+            metaUpdatedAt: now,
+            seeded: false,
+          },
         ],
         currentIndex: 0,
         resetAt: 0,
@@ -1623,23 +1934,32 @@ test("remembered non-default pepperoni batch weights rehydrate in a peer without
   });
 
   const setPepTypes = (context: { addInitScript: Page["addInitScript"] }) =>
-    context.addInitScript(({ defaultPepName, nonDefaultPepName }) => {
-      localStorage.setItem(
-        "run-calc-pep-types",
-        JSON.stringify([defaultPepName, nonDefaultPepName]),
-      );
-    }, { defaultPepName: defaultPep, nonDefaultPepName: nonDefaultPep });
+    context.addInitScript(
+      ({ defaultPepName, nonDefaultPepName }) => {
+        localStorage.setItem(
+          "run-calc-pep-types",
+          JSON.stringify([defaultPepName, nonDefaultPepName]),
+        );
+      },
+      { defaultPepName: defaultPep, nonDefaultPepName: nonDefaultPep },
+    );
   await setPepTypes(page.context());
-  await page.context().addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
-  const peerContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  await page
+    .context()
+    .addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
+  const peerContext = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+  });
   await setPepTypes(peerContext);
-  await peerContext.addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
+  await peerContext.addCookies([
+    { name: "rc_auth", value: account.token, url: API_BASE },
+  ]);
   const peer = await peerContext.newPage();
 
-      const sourceEventsReady = page.waitForRequest(
-        (request) => request.url().includes("/api/sync/events"),
-        { timeout: 25_000 },
-      );
+  const sourceEventsReady = page.waitForRequest(
+    (request) => request.url().includes("/api/sync/events"),
+    { timeout: 25_000 },
+  );
 
   const activeFreezeSignature = (raw: string) => {
     const values = JSON.parse(raw) as Record<string, unknown>;
@@ -1651,43 +1971,56 @@ test("remembered non-default pepperoni batch weights rehydrate in a peer without
       pep1Combined: values.pep1Combined,
     });
   };
-  const activeBefore = activeFreezeSignature(await readServerRunValue(page, activeRunId));
+  const activeBefore = activeFreezeSignature(
+    await readServerRunValue(page, activeRunId),
+  );
   try {
     await Promise.all([
       page.goto("/", { waitUntil: "domcontentloaded" }),
       peer.goto("/", { waitUntil: "domcontentloaded" }),
     ]);
     await Promise.all([
-      page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 }),
-      peer.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 }),
+      page
+        .getByTestId("tab-run")
+        .waitFor({ state: "attached", timeout: 25_000 }),
+      peer
+        .getByTestId("tab-run")
+        .waitFor({ state: "attached", timeout: 25_000 }),
     ]);
 
     await page.getByRole("button", { name: "Select run 2" }).click();
     await page.getByRole("button", { name: /^More/ }).click();
     await page.getByRole("menuitem", { name: "Setup", exact: true }).click();
     await ensureSauceWeightsOpen(page, "input-pep1BatchLbs");
-  const batchWeight = page.getByTestId("input-pep1BatchLbs");
-  await expect(batchWeight).toHaveValue("0");
-  const savedWeight = page.waitForResponse((response) =>
-    response.url().includes("/api/brand-profiles")
-      && response.request().method() === "POST"
-      && response.ok(),
-  );
+    const batchWeight = page.getByTestId("input-pep1BatchLbs");
+    await expect(batchWeight).toHaveValue("0");
+    const savedWeight = page.waitForResponse(
+      (response) =>
+        response.url().includes("/api/brand-profiles") &&
+        response.request().method() === "POST" &&
+        response.ok(),
+    );
     await batchWeight.fill("14");
     await batchWeight.blur();
     await savedWeight;
 
-    await expect.poll(
-      () => readServerRunField(page, pendingRunId, "pep1BatchLbs"),
-      { timeout: 25_000 },
-    ).toBe(14);
-    await expect.poll(
-      async () => activeFreezeSignature(await readServerRunValue(page, activeRunId)),
-      { timeout: 25_000 },
-    ).toBe(activeBefore);
+    await expect
+      .poll(() => readServerRunField(page, pendingRunId, "pep1BatchLbs"), {
+        timeout: 25_000,
+      })
+      .toBe(14);
+    await expect
+      .poll(
+        async () =>
+          activeFreezeSignature(await readServerRunValue(page, activeRunId)),
+        { timeout: 25_000 },
+      )
+      .toBe(activeBefore);
 
     await peer.reload({ waitUntil: "domcontentloaded" });
-    await peer.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    await peer
+      .getByTestId("tab-run")
+      .waitFor({ state: "attached", timeout: 25_000 });
     await peer.getByTestId("tab-run").click();
     await peer.getByRole("button", { name: "Select run 2" }).click();
     await peer.getByRole("button", { name: /^More/ }).click();
@@ -1703,10 +2036,13 @@ test("remembered non-default pepperoni batch weights rehydrate in a peer without
     await expect(peer.getByTestId("input-pep1Sticks")).toHaveValue("8");
     await expect(peer.getByTestId("input-pep1OzPerPizza")).toHaveValue("1.2");
     await expect(peer.getByTestId("input-pep1BatchLbs")).toHaveValue("0");
-    await expect.poll(
-      async () => activeFreezeSignature(await readServerRunValue(peer, activeRunId)),
-      { timeout: 25_000 },
-    ).toBe(activeBefore);
+    await expect
+      .poll(
+        async () =>
+          activeFreezeSignature(await readServerRunValue(peer, activeRunId)),
+        { timeout: 25_000 },
+      )
+      .toBe(activeBefore);
   } finally {
     await peerContext.close();
   }
@@ -1813,17 +2149,32 @@ test("remembered plain ingredient batch weights survive a fresh sign-in", async 
     },
   });
 
-  await page.addInitScript(({ ingredients }) => {
-    localStorage.setItem("run-calc-ingredient-types", JSON.stringify(ingredients));
-  }, { ingredients: [activeIngredient, rememberedIngredient] });
-  await page.context().addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
+  await page.addInitScript(
+    ({ ingredients }) => {
+      localStorage.setItem(
+        "run-calc-ingredient-types",
+        JSON.stringify(ingredients),
+      );
+    },
+    { ingredients: [activeIngredient, rememberedIngredient] },
+  );
+  await page
+    .context()
+    .addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
   await page.goto("/", { waitUntil: "domcontentloaded" });
-  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  await page
+    .getByTestId("tab-run")
+    .waitFor({ state: "attached", timeout: 25_000 });
 
   await page.getByRole("button", { name: /^More/ }).click();
   await page.getByRole("menuitem", { name: "Setup", exact: true }).click();
-  await page.getByRole("button", { name: "Sauce & Applicator Weights" }).click();
-  await expect(page.getByTestId("input-app1BatchLbs")).toHaveValue("5");
+  await page
+    .getByRole("button", { name: "Sauce & Applicator Weights" })
+    .click();
+  await expect(
+    page.getByTestId("input-app1BatchLbs"),
+    "active profile batch weight did not hydrate",
+  ).toHaveValue("5", { timeout: 25_000 });
   await page.getByTestId("tab-run").click();
   await page.getByTestId("button-start-run").click();
   await expect(page.getByRole("button", { name: /pause.?run/i })).toBeVisible();
@@ -1834,37 +2185,50 @@ test("remembered plain ingredient batch weights survive a fresh sign-in", async 
   await page.getByRole("menuitem", { name: "Setup", exact: true }).click();
   const batchWeight = page.getByTestId("input-app1BatchLbs");
   await expect(batchWeight).toHaveValue("0");
-   const savedWeight = waitForBatchWeightWrite(page, rememberedIngredient, 12);
+  const savedWeight = waitForBatchWeightWrite(page, rememberedIngredient, 12);
   await batchWeight.fill("12");
   await batchWeight.blur();
   await savedWeight;
   await expect(batchWeight).toHaveValue("12");
   await page.getByTestId("tab-run").click();
 
-  await expect.poll(
-    () => readServerIngredientBatchWeight(page, rememberedIngredient),
-    { timeout: 25_000 },
-  ).toBe(12);
-  await expect.poll(
-    async () => (await readServerProfileValue(page, pendingBrand, pendingFlavor))?.app1BatchLbs,
-    { timeout: 25_000 },
-  ).toBe(12);
-  await expect.poll(
-    () => readServerRunField(page, pendingRunId, "app1BatchLbs"),
-    { timeout: 25_000 },
-  ).toBe(12);
-  await expect.poll(
-    () => readServerRunField(page, activeRunId, "app1BatchLbs"),
-    { timeout: 25_000 },
-  ).toBe(5);
-  await expect.poll(
-    async () => (await readServerProfileValue(page, activeBrand, activeFlavor))?.app1BatchLbs,
-    { timeout: 25_000 },
-  ).toBe(5);
+  await expect
+    .poll(() => readServerIngredientBatchWeight(page, rememberedIngredient), {
+      timeout: 25_000,
+    })
+    .toBe(12);
+  await expect
+    .poll(
+      async () =>
+        (await readServerProfileValue(page, pendingBrand, pendingFlavor))
+          ?.app1BatchLbs,
+      { timeout: 25_000 },
+    )
+    .toBe(12);
+  await expect
+    .poll(() => readServerRunField(page, pendingRunId, "app1BatchLbs"), {
+      timeout: 25_000,
+    })
+    .toBe(12);
+  await expect
+    .poll(() => readServerRunField(page, activeRunId, "app1BatchLbs"), {
+      timeout: 25_000,
+    })
+    .toBe(5);
+  await expect
+    .poll(
+      async () =>
+        (await readServerProfileValue(page, activeBrand, activeFlavor))
+          ?.app1BatchLbs,
+      { timeout: 25_000 },
+    )
+    .toBe(5);
 
   await page.getByRole("button", { name: /^More/ }).click();
   await page.getByText("Sign out", { exact: true }).click();
-  await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Sign in", exact: true }),
+  ).toBeVisible();
 
   const freshContext = await browser.newContext({
     viewport: { width: 390, height: 844 },
@@ -1874,32 +2238,44 @@ test("remembered plain ingredient batch weights survive a fresh sign-in", async 
     await signIn(freshPage, username);
     await freshPage.getByTestId("tab-run").click();
     await freshPage.getByRole("button", { name: "Select run 1" }).click();
-    await expect(freshPage.getByText("Run 1 of 2", { exact: true })).toBeVisible();
+    await expect(
+      freshPage.getByText("Run 1 of 2", { exact: true }),
+    ).toBeVisible();
     await freshPage.getByRole("button", { name: /^More/ }).click();
-    await freshPage.getByRole("menuitem", { name: "Setup", exact: true }).click();
+    await freshPage
+      .getByRole("menuitem", { name: "Setup", exact: true })
+      .click();
     await ensureSauceWeightsOpen(freshPage, "input-app1BatchLbs");
     await expect(freshPage.getByTestId("input-app1BatchLbs")).toHaveValue("5");
     await freshPage.getByTestId("tab-run").click();
 
     await freshPage.getByRole("button", { name: "Select run 2" }).click();
-    await expect(freshPage.getByText("Run 2 of 2", { exact: true })).toBeVisible();
+    await expect(
+      freshPage.getByText("Run 2 of 2", { exact: true }),
+    ).toBeVisible();
     await freshPage.getByRole("button", { name: /^More/ }).click();
-    await freshPage.getByRole("menuitem", { name: "Setup", exact: true }).click();
+    await freshPage
+      .getByRole("menuitem", { name: "Setup", exact: true })
+      .click();
     await ensureSauceWeightsOpen(freshPage, "input-app1BatchLbs");
     await expect(freshPage.getByTestId("input-app1BatchLbs")).toHaveValue("12");
 
-    await expect.poll(
-      () => readServerIngredientBatchWeight(freshPage, rememberedIngredient),
-      { timeout: 25_000 },
-    ).toBe(12);
-    await expect.poll(
-      () => readServerRunField(freshPage, activeRunId, "app1BatchLbs"),
-      { timeout: 25_000 },
-    ).toBe(5);
-    await expect.poll(
-      () => readServerRunField(freshPage, pendingRunId, "app1BatchLbs"),
-      { timeout: 25_000 },
-    ).toBe(12);
+    await expect
+      .poll(
+        () => readServerIngredientBatchWeight(freshPage, rememberedIngredient),
+        { timeout: 25_000 },
+      )
+      .toBe(12);
+    await expect
+      .poll(() => readServerRunField(freshPage, activeRunId, "app1BatchLbs"), {
+        timeout: 25_000,
+      })
+      .toBe(5);
+    await expect
+      .poll(() => readServerRunField(freshPage, pendingRunId, "app1BatchLbs"), {
+        timeout: 25_000,
+      })
+      .toBe(12);
   } finally {
     await freshContext.close();
   }
@@ -2046,16 +2422,40 @@ test("manager weight edits acknowledge, propagate, clear, and remain retryable a
     },
   });
 
-  await page.addInitScript(({ ingredientName }) => {
-    localStorage.setItem("run-calc-ingredient-types", JSON.stringify([ingredientName]));
-  }, { ingredientName: ingredient });
-  await page.context().addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
+  await page.addInitScript(
+    ({ ingredientName }) => {
+      localStorage.setItem(
+        "run-calc-ingredient-types",
+        JSON.stringify([ingredientName]),
+      );
+    },
+    { ingredientName: ingredient },
+  );
+  await page
+    .context()
+    .addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
   await page.goto("/", { waitUntil: "domcontentloaded" });
-  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  await page
+    .getByTestId("tab-run")
+    .waitFor({ state: "attached", timeout: 25_000 });
+  // A mounted Run tab is not proof that today's seeded snapshot was adopted.
+  // Weight propagation scans the loaded runs, so wait for both fixture runs
+  // before initiating the first edit rather than racing the initial sync.
+  await expect(
+    page.getByText("Run 1 of 2", { exact: true }),
+  ).toBeVisible({ timeout: 25_000 });
 
   const activeBefore = await readServerRunValue(page, activeRunId);
-  const futureStartedBefore = await readScheduledRunValues(page, TOMORROW, futureStartedRunId);
-  const futureEndedBefore = await readScheduledRunValues(page, TOMORROW, futureEndedRunId);
+  const futureStartedBefore = await readScheduledRunValues(
+    page,
+    TOMORROW,
+    futureStartedRunId,
+  );
+  const futureEndedBefore = await readScheduledRunValues(
+    page,
+    TOMORROW,
+    futureEndedRunId,
+  );
 
   const dialog = await openIngredientWeights(page, ingredient);
   const weightInput = ingredientWeightInput(dialog, ingredient);
@@ -2064,43 +2464,77 @@ test("manager weight edits acknowledge, propagate, clear, and remain retryable a
   await weightInput.blur();
   await savedWeight;
   await expect(weightInput).toHaveValue("12");
-  await dialog.getByRole("button", { name: "Close settings", exact: true }).click();
+  await dialog
+    .getByRole("button", { name: "Close settings", exact: true })
+    .click();
 
-  await expect.poll(
-    () => readServerIngredientBatchWeight(page, ingredient),
-    { timeout: 25_000 },
-  ).toBe(12);
-  await expect.poll(
-    () => readServerRunField(page, pendingRunId, "app1BatchLbs"),
-    { timeout: 25_000 },
-  ).toBe(12);
-  await expect.poll(
-    async () => (await readScheduledRunValues(page, TOMORROW, futurePendingRunId))?.app1BatchLbs,
-    { timeout: 25_000 },
-  ).toBe(12);
-  await expect.poll(() => readServerRunValue(page, activeRunId), { timeout: 25_000 }).toBe(activeBefore);
-  await expect.poll(
-    async () => (await readScheduledRunValues(page, TOMORROW, futureStartedRunId))?.app1BatchLbs,
-    { timeout: 25_000 },
-  ).toBe(futureStartedBefore?.app1BatchLbs);
-  await expect.poll(
-    async () => (await readScheduledRunValues(page, TOMORROW, futureEndedRunId))?.app1BatchLbs,
-    { timeout: 25_000 },
-  ).toBe(futureEndedBefore?.app1BatchLbs);
+  await expect
+    .poll(() => readServerIngredientBatchWeight(page, ingredient), {
+      timeout: 25_000,
+    })
+    .toBe(12);
+  await expect
+    .poll(() => readServerRunField(page, pendingRunId, "app1BatchLbs"), {
+      timeout: 25_000,
+    })
+    .toBe(12);
+  await expect
+    .poll(
+      async () =>
+        (await readScheduledRunValues(page, TOMORROW, futurePendingRunId))
+          ?.app1BatchLbs,
+      { timeout: 25_000 },
+    )
+    .toBe(12);
+  await expect
+    .poll(() => readServerRunValue(page, activeRunId), { timeout: 25_000 })
+    .toBe(activeBefore);
+  await expect
+    .poll(
+      async () =>
+        (await readScheduledRunValues(page, TOMORROW, futureStartedRunId))
+          ?.app1BatchLbs,
+      { timeout: 25_000 },
+    )
+    .toBe(futureStartedBefore?.app1BatchLbs);
+  await expect
+    .poll(
+      async () =>
+        (await readScheduledRunValues(page, TOMORROW, futureEndedRunId))
+          ?.app1BatchLbs,
+      { timeout: 25_000 },
+    )
+    .toBe(futureEndedBefore?.app1BatchLbs);
 
-  const peerContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const peerContext = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+  });
   const peer = await peerContext.newPage();
 
-  await peer.addInitScript(({ ingredientName }) => {
-    localStorage.setItem("run-calc-ingredient-types", JSON.stringify([ingredientName]));
-  }, { ingredientName: ingredient });
-  await peer.context().addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
+  await peer.addInitScript(
+    ({ ingredientName }) => {
+      localStorage.setItem(
+        "run-calc-ingredient-types",
+        JSON.stringify([ingredientName]),
+      );
+    },
+    { ingredientName: ingredient },
+  );
+  await peer
+    .context()
+    .addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
   try {
     await peer.goto("/", { waitUntil: "domcontentloaded" });
-    await peer.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    await peer
+      .getByTestId("tab-run")
+      .waitFor({ state: "attached", timeout: 25_000 });
     const peerDialog = await openIngredientWeights(peer, ingredient);
-    await expect(ingredientWeightInput(peerDialog, ingredient)).toHaveValue("12");
-    await peerDialog.getByRole("button", { name: "Close settings", exact: true }).click();
+    await expect(ingredientWeightInput(peerDialog, ingredient)).toHaveValue(
+      "12",
+    );
+    await peerDialog
+      .getByRole("button", { name: "Close settings", exact: true })
+      .click();
   } finally {
     await peerContext.close();
   }
@@ -2120,78 +2554,110 @@ test("manager weight edits acknowledge, propagate, clear, and remain retryable a
   const failingInput = ingredientWeightInput(failingDialog, ingredient);
   await failingInput.fill("13");
   await failingInput.blur();
-  await expect(page.getByText("Batch weight was not saved", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("Batch weight was not saved", { exact: true }),
+  ).toBeVisible();
   await page.unroute("**/api/ingredient-batch-weights");
 
   const retrySaved = waitForBatchWeightWrite(page, ingredient, 14);
   await failingInput.fill("14");
   await failingInput.blur();
   await retrySaved;
-  await failingDialog.getByRole("button", { name: "Close settings", exact: true }).click();
-  await expect.poll(
-    () => readServerIngredientBatchWeight(page, ingredient),
-    { timeout: 25_000 },
-  ).toBe(14);
-  await expect.poll(
-    async () => (await readServerProfileValue(page, brand, flavor))?.app1BatchLbs,
-    { timeout: 25_000 },
-  ).toBe(14);
-  await expect.poll(
-    () => readServerRunField(page, pendingRunId, "app1BatchLbs"),
-    { timeout: 25_000 },
-  ).toBe(14);
+  await failingDialog
+    .getByRole("button", { name: "Close settings", exact: true })
+    .click();
+  await expect
+    .poll(() => readServerIngredientBatchWeight(page, ingredient), {
+      timeout: 25_000,
+    })
+    .toBe(14);
+  await expect
+    .poll(
+      async () =>
+        (await readServerProfileValue(page, brand, flavor))?.app1BatchLbs,
+      { timeout: 25_000 },
+    )
+    .toBe(14);
+  await expect
+    .poll(() => readServerRunField(page, pendingRunId, "app1BatchLbs"), {
+      timeout: 25_000,
+    })
+    .toBe(14);
 
   const profileDialog = await openSettings(page);
-  await profileDialog.getByRole("button", { name: "Tools", exact: true }).click();
-  await profileDialog.getByRole("button", { name: "Setup Profiles", exact: true }).click();
-  await profileDialog.getByRole("button", {
-    name: "Open Setup Profiles Editor",
-    exact: true,
-  }).click();
+  await profileDialog
+    .getByRole("button", { name: "Tools", exact: true })
+    .click();
+  await profileDialog
+    .getByRole("button", { name: "Setup Profiles", exact: true })
+    .click();
+  await profileDialog
+    .getByRole("button", {
+      name: "Open Setup Profiles Editor",
+      exact: true,
+    })
+    .click();
   const setupDialog = page.getByRole("dialog", { name: "Setup Profiles" });
   await expect(setupDialog).toBeVisible();
-  await setupDialog.getByRole("button", { name: /Pick or add a brand/ }).click();
+  await setupDialog
+    .getByRole("button", { name: /Pick or add a brand/ })
+    .click();
   await page.getByPlaceholder("Search or add…").fill(brand);
 
   const existingBrand = page.getByRole("button", { name: brand, exact: true });
   if (await existingBrand.count()) {
     await existingBrand.last().click();
   } else {
-    await page.getByRole("button", { name: `Add "${brand}"`, exact: true }).click();
+    await page
+      .getByRole("button", { name: `Add "${brand}"`, exact: true })
+      .click();
   }
-  await setupDialog.getByRole("button", { name: /Pick or add a flavor/ }).click();
+  await setupDialog
+    .getByRole("button", { name: /Pick or add a flavor/ })
+    .click();
   await page.getByPlaceholder("Search or add…").fill(flavor);
-  const existingFlavor = page.getByRole("button", { name: flavor, exact: true });
+  const existingFlavor = page.getByRole("button", {
+    name: flavor,
+    exact: true,
+  });
   if (await existingFlavor.count()) {
     await existingFlavor.last().click();
   } else {
-    await page.getByRole("button", { name: `Add "${flavor}"`, exact: true }).click();
+    await page
+      .getByRole("button", { name: `Add "${flavor}"`, exact: true })
+      .click();
   }
 
   const profileWeight = setupDialog.getByTestId("input-app1BatchLbs");
   await expect(profileWeight).toHaveValue("14");
-  const savedProfile = page.waitForResponse((response) =>
-    response.url().includes("/api/brand-profiles")
-      && response.request().method() === "POST"
-      && response.status() === 200,
+  const savedProfile = page.waitForResponse(
+    (response) =>
+      response.url().includes("/api/brand-profiles") &&
+      response.request().method() === "POST" &&
+      response.status() === 200,
   );
   await profileWeight.fill("16");
   await profileWeight.blur();
-  await setupDialog.getByRole("button", { name: "Save Setup", exact: true }).click();
+  await setupDialog
+    .getByRole("button", { name: "Save Setup", exact: true })
+    .click();
   await savedProfile;
-  await expect(page.getByText(`Saved setup for ${brand} — ${flavor}`, { exact: true })).toBeVisible();
-  await expect.poll(
-    () => readServerIngredientBatchWeight(page, ingredient),
-    { timeout: 25_000 },
-  ).toBe(16);
-  await expect.poll(
-    () => readServerRunField(page, pendingRunId, "app1BatchLbs"),
-    { timeout: 25_000 },
-  ).toBe(16);
-  await expect.poll(
-    () => readServerRunValue(page, activeRunId),
-    { timeout: 25_000 },
-  ).toBe(activeBefore);
+  await expect(
+    page.getByText(`Saved setup for ${brand} — ${flavor}`, { exact: true }),
+  ).toBeVisible();
+  await expect
+    .poll(() => readServerIngredientBatchWeight(page, ingredient), {
+      timeout: 25_000,
+    })
+    .toBe(16);
+  await expect
+    .poll(() => readServerRunField(page, pendingRunId, "app1BatchLbs"), {
+      timeout: 25_000,
+    })
+    .toBe(16);
+  await expect
+    .poll(() => readServerRunValue(page, activeRunId), { timeout: 25_000 })
+    .toBe(activeBefore);
 
   await setupDialog.getByRole("button", { name: "Close", exact: true }).click();
   const clearDialog = await openIngredientWeights(page, ingredient);
@@ -2200,21 +2666,32 @@ test("manager weight edits acknowledge, propagate, clear, and remain retryable a
   await clearInput.fill("");
   await clearInput.blur();
   await clearedWeight;
-  await clearDialog.getByRole("button", { name: "Close settings", exact: true }).click();
-  await expect.poll(
-    () => readServerIngredientBatchWeight(page, ingredient),
-    { timeout: 25_000 },
-  ).toBeNull();
-  await expect.poll(
-    async () => (await readServerProfileValue(page, brand, flavor))?.app1BatchLbs,
-    { timeout: 25_000 },
-  ).toBe(16);
+  await clearDialog
+    .getByRole("button", { name: "Close settings", exact: true })
+    .click();
+  await expect
+    .poll(() => readServerIngredientBatchWeight(page, ingredient), {
+      timeout: 25_000,
+    })
+    .toBeNull();
+  await expect
+    .poll(
+      async () =>
+        (await readServerProfileValue(page, brand, flavor))?.app1BatchLbs,
+      { timeout: 25_000 },
+    )
+    .toBe(16);
 });
 
-async function ensureSauceWeightsOpen(page: Page, inputTestId: string): Promise<void> {
+async function ensureSauceWeightsOpen(
+  page: Page,
+  inputTestId: string,
+): Promise<void> {
   const input = page.getByTestId(inputTestId);
   if (!(await input.isVisible().catch(() => false))) {
-    await page.getByRole("button", { name: "Sauce & Applicator Weights" }).click();
+    await page
+      .getByRole("button", { name: "Sauce & Applicator Weights" })
+      .click();
   }
   await expect(input).toBeVisible();
 }

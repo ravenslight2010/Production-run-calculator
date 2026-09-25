@@ -340,21 +340,21 @@ semantic drift.
 | Corpus harness library `--noEmit` | Pass, 0.80s | Pass, 0.16s |
 | Generated API client/Zod forced build | Pass | Pass |
 | Diagnostic count in checks above | 0 | 0 |
-| Declaration file count | 729 | 729 |
-| Declaration files with textual differences | baseline | 205 |
+| Declaration file count | 795 | 795 |
+| Declaration files with textual differences | baseline | 217 |
 | Declaration contract comparison | baseline | Pass (196 formatting-only, 9 approved semantic, 0 unexplained) |
 
 The declaration differences break down as:
 
 - 2 `api-client-react` generated declarations,
-- 142 `api-zod` generated declarations, and
-- 61 database schema declarations.
+- 150 `api-zod` generated declarations, and
+- 65 database schema declarations.
 
 There were 2,664 removed and 2,664 added diff lines. Inspected database differences were
 double-quote to single-quote changes in string literal types. Generated API declarations
 also changed some quoted literal renderings to template-literal or single-quoted forms.
-The two builds typechecked successfully. Formatting normalization accounts for 195 changed
-files, and exact hash-pinned review accounts for the remaining 9. A production switch must
+The two builds typechecked successfully. Formatting normalization accounts for 196 changed
+files, and exact hash-pinned review accounts for the remaining 10. A production switch must
 continue to block any new declaration output until it is fixed or receives the same
 contract-owner review.
 

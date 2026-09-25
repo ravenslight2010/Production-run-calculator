@@ -522,6 +522,14 @@ export type SyncPayload = {
       }
     >>>;
   };
+  /** Server-written ownership proof for authoritative net-time auto-track claims. */
+  autoTrackServerState?: {
+    netOwnership?: Record<string, Record<string, {
+      generation?: string;
+      sequence?: number;
+      updatedAt?: number;
+    }>>;
+  };
   doughTimerControls?: Record<string, {
     generation: string;
     pausedAt: number;

@@ -291,8 +291,15 @@ test("live and setup profile recipe pickers keep the shared selector contract", 
     });
 
     await page.context().addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
+    const profilesRead = page.waitForResponse(
+      (response) =>
+        response.url().includes("/api/brand-profiles")
+        && response.request().method() === "GET"
+        && response.status() === 200,
+    );
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    await profilesRead;
 
     await page.getByRole("button", { name: /^More/ }).click();
     await page.getByRole("menuitem", { name: "Setup", exact: true }).click();
@@ -301,14 +308,6 @@ test("live and setup profile recipe pickers keep the shared selector contract", 
     await expect(liveSurface.getByTestId("setup-recipe-picker-dough")).toBeVisible();
     await liveSurface.getByText("Sauce & Applicator Weights", { exact: true }).click();
     await assertRecipePickerContract(liveSurface, "live Setup tab");
-
-    await page.getByRole("button", { name: /^More/ }).click();
-    await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
-    const settings = page.getByRole("dialog", { name: "Manage Lists & Settings" });
-    await expect(settings).toBeVisible();
-    await settings.getByRole("button", { name: "Tools", exact: true }).click();
-    await settings.getByRole("button", { name: "Setup Profiles", exact: true }).click();
-    await settings.getByRole("button", { name: "Open Setup Profiles Editor", exact: true }).click();
 
     let profileSurface = await openSetupProfiles();
     await expect(profileSurface).toBeVisible();
@@ -357,7 +356,14 @@ test("live and setup profile recipe pickers keep the shared selector contract", 
     await selectMixRecipe("setup-recipe-picker-app-2-mix", savedMixName);
     await selectMixRecipe("setup-recipe-picker-app-4-mix", savedMixName);
 
+    const savedProfile = page.waitForResponse(
+      (response) =>
+        response.url().includes("/api/brand-profiles")
+        && response.request().method() === "POST"
+        && response.status() === 200,
+    );
     await profileSurface.getByRole("button", { name: "Save Setup", exact: true }).click();
+    await savedProfile;
     await expect(
       page.getByText(`Saved setup for ${brand} — ${flavor}`, { exact: true }),
     ).toBeVisible();
@@ -515,6 +521,7 @@ test("manager attention remains stable across dialog and destination transitions
     await page.addInitScript(() => {
       localStorage.setItem("run-calc-dough-recipe-names", JSON.stringify([null, "Legacy Dough"]));
       localStorage.setItem("run-calc-frontline-recipe-names", JSON.stringify([{}, "Legacy Sauce"]));
+      localStorage.setItem("run-calc-recipe-name-consolidation-v1", "1");
     });
 
     await page.context().addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
@@ -570,7 +577,10 @@ test("manager attention remains stable across dialog and destination transitions
     await expect(page.getByText("Legacy Dough", { exact: true })).toBeVisible();
     await page.keyboard.press("Escape");
     await page.screenshot({ path: testInfo.outputPath("manager-attention-destination.png") });
-    await page.getByRole("button", { name: "Close", exact: true }).click();
+    const setupProfilesClose = page.getByRole("button", { name: "Close", exact: true });
+    if (await setupProfilesClose.count()) {
+      await setupProfilesClose.click();
+    }
 
     await page.reload({ waitUntil: "domcontentloaded" });
     await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });

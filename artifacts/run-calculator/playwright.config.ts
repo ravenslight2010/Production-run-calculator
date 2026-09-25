@@ -9,7 +9,6 @@ import { validateBrowserSpecSyntaxDirectory } from "./e2e/validate-browser-spec-
 const baseURL = releaseBrowserBaseUrl(
   process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`,
 );
-
 // The main suite's global setup deletes shared disposable-day data before
 // Playwright collects specs. Validate the complete suite first so malformed
 // TypeScript cannot be masked by that database setup.
@@ -49,15 +48,16 @@ export default defineConfig({
   testIgnore: [
     "calendar.spec.ts",
     "release-webkit-smoke.spec.ts",
+    // Physical iOS evidence is collected by its dedicated device lane.
     "ios-safari-pwa-device.spec.ts",
   ],
   // Physical Android checks run through the dedicated device lane. Keep the
-  // three phone-layout checks, the process-restart-only sync check, and
+  // three phone-layout checks, the two Android-only sync checks, and
   // focused-only regressions outside the full-browser Chromium contract. The
   // exclusions live here so focused suites still run them without relying on
   // an operator CLI grep flag.
   grepInvert:
-    /@focused-only|@real-mobile-browser (?:physical Android Chrome|queued Target Cases edit survives an Android Chrome process restart)/,
+    /@focused-only|@real-mobile-browser (?:physical Android Chrome|queued Target Cases edit (?:recovers after Android Chrome suspension|survives an Android Chrome process restart))/,
   projects: [
     {
       name: "chromium",

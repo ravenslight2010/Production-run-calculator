@@ -391,7 +391,6 @@ describe("live station startup", () => {
         <LiveFrontlineTabContent />
       </StationProviders>,
     );
-
     expect(switchToRun).toHaveBeenCalledTimes(1);
     expect(switchToRun).toHaveBeenCalledWith(1, RUN_ID);
     view.rerender(
@@ -728,6 +727,7 @@ describe("live station edits and stamped browser persistence", () => {
     expect(acceptsStalePeer).toBe(false);
 
     if (acceptsStalePeer) saveRunValues(RUN_ID, stalePeerValues);
+    expect(loadRunValues(RUN_ID).casesOnCurrentSkid).toBe(3);
     expect(loadRunValues(RUN_ID).sauceBarrelsMade).toBe(1);
   });
 
@@ -769,6 +769,7 @@ describe("live station edits and stamped browser persistence", () => {
     expect(acceptsStalePeer).toBe(false);
 
     if (acceptsStalePeer) saveRunValues(RUN_ID, stalePeerValues);
+    expect(loadRunValues(RUN_ID).casesOnCurrentSkid).toBe(3);
     expect(loadRunValues(RUN_ID).sauceBarrelsMade).toBe(1);
   });
 

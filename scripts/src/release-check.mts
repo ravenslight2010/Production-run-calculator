@@ -1564,7 +1564,11 @@ const steps: ReleaseStep[] = [
   },
   {
     label: "browser smoke tests",
-    args: ["--filter", "@workspace/run-calculator", "run", "test:e2e:smoke"],
+    command: "bash",
+    args: [
+      "scripts/src/run-isolated-browser-suite.sh",
+      "--playwright-config=playwright.smoke.config.ts",
+    ],
     env: {
       ...RELEASE_BROWSER_ENV,
     },
@@ -1573,18 +1577,24 @@ const steps: ReleaseStep[] = [
   },
   {
     label: "browser calendar tests",
+    command: "bash",
     args: [
-      "--filter",
-      "@workspace/run-calculator",
-      "run",
-      "test:e2e:calendar",
+      "scripts/src/run-isolated-browser-suite.sh",
+      "--playwright-config=playwright.calendar.config.ts",
     ],
+    env: {
+      ...RELEASE_BROWSER_ENV,
+    },
     stage: "browser-calendar",
     concurrencyLimit: 1,
   },
   {
     label: "browser accessibility tests",
-    args: ["--filter", "@workspace/run-calculator", "run", "test:e2e:a11y"],
+    command: "bash",
+    args: [
+      "scripts/src/run-isolated-browser-suite.sh",
+      "--playwright-config=playwright.a11y.config.ts",
+    ],
     env: {
       ...RELEASE_BROWSER_ENV,
     },
@@ -1593,9 +1603,14 @@ const steps: ReleaseStep[] = [
   },
   {
     label: "browser WebKit smoke",
-    args: ["--filter", "@workspace/run-calculator", "run", "test:e2e:webkit"],
+    command: "bash",
+    args: [
+      "scripts/src/run-isolated-browser-suite.sh",
+      "--playwright-config=playwright.webkit.config.ts",
+    ],
     env: {
       ...RELEASE_BROWSER_ENV,
+      BROWSER_TEST_INSTALL_WEBKIT: "1",
       PLAYWRIGHT_RELEASE_SMOKE_EVIDENCE_PATH: webkitBrowserEvidencePath,
       RELEASE_BROWSER_ENVIRONMENT: process.env.CI ? "ci" : "development",
     },
@@ -1607,7 +1622,11 @@ const steps: ReleaseStep[] = [
 if (fullRun) {
   steps.push({
     label: FULL_BROWSER_GATE_LABEL,
-    args: ["--filter", "@workspace/run-calculator", "run", "test:e2e"],
+    command: "bash",
+    args: [
+      "scripts/src/run-isolated-browser-suite.sh",
+      "--playwright-config=playwright.config.ts",
+    ],
     env: {
       ...RELEASE_BROWSER_ENV,
       PLAYWRIGHT_RELEASE_REPORT_PATH: fullBrowserReportPath,

@@ -32,3 +32,9 @@ For sequential same-date station scenarios, remove the disposable today snapshot
 **Why:** Today-state sync is additive, and an open live stream can reapply the previous scenario after the database row is cleared, leaving stale runs selected during the next reload.
 
 **How to apply:** Clear browser storage, navigate away from the app, remove the isolated date row, seed the replacement document, then navigate back to the app.
+
+For cold-reload journey tests, finish and canonically confirm lifecycle setup before reloading, then make the tested destination the first post-reload navigation.
+
+**Why:** Starting another run after reload exercises a separate hydration and adoption path, which can obscure whether the cold destination itself restored the expected state.
+
+**How to apply:** Complete the relevant lifecycle transitions before reload, wait for canonical start/end fields for each target run, reload once, then navigate directly to the surface under test.

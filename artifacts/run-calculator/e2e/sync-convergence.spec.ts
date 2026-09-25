@@ -264,12 +264,15 @@ async function putToday(page: Page, payload: SyncPayload): Promise<{
     const epoch = typeof epochBody.epoch === "number" ? epochBody.epoch : 0;
     const snapshotId = baselineResponse.headers.get("X-Sync-Snapshot");
     if (!snapshotId) throw new Error("sync fixture snapshot identity is missing");
+    const payloadToSend = payload.completeness === "complete"
+      ? { ...payload, baseSnapshotId: payload.baseSnapshotId ?? snapshotId }
+      : payload;
     const response = await fetch(`/api/sync/today?today=${date}&epoch=${epoch}`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         senderId: "sync-matrix",
-        payload: { ...payload, baseSnapshotId: snapshotId },
+        payload: payloadToSend,
         snapshotId,
       }),
     });
@@ -857,7 +860,11 @@ test(
         body: JSON.stringify({ senderId: "unchanged-wake", payload: completePayload, snapshotId }),
       });
       return { status: response.status, body: await response.json() as Record<string, unknown> };
-    }, { date: today(), payload: seeded, snapshotId: firstSnapshot });
+    }, {
+      date: today(),
+      payload: { ...seeded, baseSnapshotId: firstSnapshot },
+      snapshotId: firstSnapshot,
+    });
     expect(unchanged.status).toBe(200);
     expect(unchanged.body).toMatchObject({ unchanged: true, snapshotId: firstSnapshot });
     expect(unchanged.body.data).toBeUndefined();

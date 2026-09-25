@@ -378,16 +378,22 @@ export function LiveRunProvider({
   ]);
   const packagingDrainActive =
     runStatus === "paused" && lineHasPackagingDrain(linePhases);
+  const pausedOccupancyConfirmed =
+    runStatus === "paused" && confirmedProjection?.facts.runStatus === "paused";
   const operationalCalc =
     confirmedProjection?.calc
       ? {
           // The server frame remains authoritative for production counters,
-          // but occupancy is a time-relative display value. Rebase both
-          // windows onto the current clock so a wake/reload can drain stale
-          // freezer contents without waiting for another server frame.
+          // but running/draining occupancy is time-relative. A paused run's
+          // occupancy is fixed at its pause point: the confirmed server frame
+          // must not be replaced with a stale local pre-wake calculation.
           ...confirmedProjection.calc,
-          casesOnLine: calc.casesOnLine,
-          casesInFreezer: calc.casesInFreezer,
+          casesOnLine: pausedOccupancyConfirmed
+            ? confirmedProjection.calc.casesOnLine
+            : calc.casesOnLine,
+          casesInFreezer: pausedOccupancyConfirmed
+            ? confirmedProjection.calc.casesInFreezer
+            : calc.casesInFreezer,
         }
       : (adoptServerCalc
         ? operationalServerCalc

@@ -20,7 +20,11 @@ import type { Calc, OperationalProjection, LinePhases } from "@workspace/live-ca
 vi.mock("../../hooks/useNotifications");
 vi.mock("../../hooks/useAutoTrack");
 
-const LOCAL_SENTINEL = { __localCalc: true } as unknown as Calc;
+const LOCAL_SENTINEL = {
+  __localCalc: true,
+  casesOnLine: 32,
+  casesInFreezer: 25,
+} as unknown as Calc;
 vi.mock("@workspace/live-calc", async (importOriginal) => {
   const mod = await importOriginal<typeof import("@workspace/live-calc")>();
   const spy = vi.fn((...args: Parameters<typeof mod.computeCalc>) => LOCAL_SENTINEL);
@@ -56,6 +60,7 @@ function projectionFor(options: {
   capturedAtMs?: number;
   runStatus?: "running" | "paused" | "ended" | "pending";
   linePhases?: LinePhases;
+  calc?: Partial<Calc>;
 }): OperationalProjection {
   return {
     runId: RUN_ID,
@@ -64,12 +69,26 @@ function projectionFor(options: {
     facts: { runStatus: options.runStatus ?? "running" },
     timers: { currentBatchNum: 1, secUntilNextBatch: 5, totalBatchesNeeded: 3 },
     linePhases: options.linePhases ?? SERVER_PHASES,
+    calc: options.calc,
   } as unknown as OperationalProjection;
 }
 
 function Probe({ probeRef }: { probeRef: { current: LinePhases | null } }) {
   const { linePhases } = useLiveRun();
   probeRef.current = linePhases;
+  return null;
+}
+
+function OccupancyProbe({
+  probeRef,
+}: {
+  probeRef: { current: { casesOnLine: number; casesInFreezer: number } | null };
+}) {
+  const { calc } = useLiveRun();
+  probeRef.current = {
+    casesOnLine: calc.casesOnLine,
+    casesInFreezer: calc.casesInFreezer,
+  };
   return null;
 }
 
@@ -124,6 +143,44 @@ describe("LiveRunProvider — line-phase model adoption", () => {
   afterEach(() => {
     vi.useRealTimers();
     cleanup();
+  });
+
+  it("keeps confirmed paused occupancy instead of stale pre-wake local occupancy", () => {
+    const occupancy = {
+      current: null as { casesOnLine: number; casesInFreezer: number } | null,
+    };
+    render(
+      <TestProvider
+        runStatus="paused"
+        currentRun={{ ...fakeRun, pausedAt: NOW_MS - 30_000 }}
+        operationalSnapshotReceipt={freshReceipt}
+        operationalProjection={projectionFor({
+          runStatus: "paused",
+          calc: { casesOnLine: 1, casesInFreezer: 1 },
+        })}
+      >
+        <OccupancyProbe probeRef={occupancy} />
+      </TestProvider>,
+    );
+    expect(occupancy.current).toEqual({ casesOnLine: 1, casesInFreezer: 1 });
+  });
+
+  it("still rebases running occupancy locally between confirmed server frames", () => {
+    const occupancy = {
+      current: null as { casesOnLine: number; casesInFreezer: number } | null,
+    };
+    render(
+      <TestProvider
+        currentRun={fakeRun}
+        operationalSnapshotReceipt={freshReceipt}
+        operationalProjection={projectionFor({
+          calc: { casesOnLine: 1, casesInFreezer: 1 },
+        })}
+      >
+        <OccupancyProbe probeRef={occupancy} />
+      </TestProvider>,
+    );
+    expect(occupancy.current).toEqual({ casesOnLine: 32, casesInFreezer: 25 });
   });
 
   it("adopts server linePhases from a confirmed projection and extrapolates countdowns", () => {

@@ -525,9 +525,9 @@ export default function IncidentsTab() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
+        <h1 className="flex items-center gap-2 font-semibold leading-none tracking-tight">
           <LifeBuoy className="w-5 h-5 text-primary" /> Reported issues
-        </CardTitle>
+        </h1>
       </CardHeader>
       <CardContent className="space-y-3">
         <FieldChecksPanel

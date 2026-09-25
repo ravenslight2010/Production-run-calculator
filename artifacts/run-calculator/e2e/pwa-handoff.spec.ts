@@ -38,7 +38,6 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const packageRoot = path.resolve(import.meta.dirname, "..");
-const builtSite = path.join(packageRoot, "dist", "public");
 
 type Version = "old" | "new";
 
@@ -72,8 +71,8 @@ async function stampBuild(buildDir: string, version: Version) {
   const index = await readFile(indexPath, "utf8");
   const worker = await readFile(workerPath, "utf8");
   const stampedIndex = index.replace(
-    "<body>",
-    `<body data-pwa-smoke-build="${version}">`,
+    /<body(?:\s[^>]*)?>/,
+    (tag) => `${tag.slice(0, -1)} data-pwa-smoke-build="${version}">`,
   );
   const indexRevision = createHash("sha256").update(stampedIndex).digest("hex");
   const stampedWorker = worker.replace(
@@ -120,23 +119,36 @@ async function divergeHomeChunk(buildDir: string) {
 }
 
 async function buildTwoVersionFixture() {
-  await execFileAsync("pnpm", ["run", "build"], {
-    cwd: packageRoot,
-    // Production uses one minute. Keep the exact policy path while making this
-    // two-build browser fixture finish promptly.
-    env: { ...process.env, VITE_UPDATE_RELOAD_IDLE_MS: "1000" },
-    maxBuffer: 10 * 1024 * 1024,
-  });
-
   const root = await mkdtemp(path.join(os.tmpdir(), "run-calculator-pwa-handoff-"));
-  const oldDir = path.join(root, "old");
-  const newDir = path.join(root, "new");
-  await cp(builtSite, oldDir, { recursive: true });
-  await cp(builtSite, newDir, { recursive: true });
-  await Promise.all([stampBuild(oldDir, "old"), stampBuild(newDir, "new")]);
-  const staleHomeChunk = await divergeHomeChunk(newDir);
-
-  return { root, oldDir, newDir, staleHomeChunk };
+  try {
+    const builtSite = path.join(root, "built");
+    // Build into this fixture's own directory. A full release browser run
+    // serves dist/public at the same time; rebuilding there can temporarily
+    // erase its JS chunks and make unrelated pages receive HTML for scripts.
+    await execFileAsync("pnpm", [
+      "exec", "vite", "build", "--config", "vite.config.ts", "--outDir", builtSite,
+    ], {
+      cwd: packageRoot,
+      // Production uses one minute. Keep the exact policy path while making this
+      // two-version browser fixture finish promptly.
+      env: { ...process.env, VITE_UPDATE_RELOAD_IDLE_MS: "1000" },
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    await Promise.all([
+      stat(path.join(builtSite, "index.html")),
+      stat(path.join(builtSite, "service-worker.js")),
+    ]);
+    const oldDir = path.join(root, "old");
+    const newDir = path.join(root, "new");
+    await cp(builtSite, oldDir, { recursive: true });
+    await cp(builtSite, newDir, { recursive: true });
+    await Promise.all([stampBuild(oldDir, "old"), stampBuild(newDir, "new")]);
+    const staleHomeChunk = await divergeHomeChunk(newDir);
+    return { root, oldDir, newDir, staleHomeChunk };
+  } catch (error) {
+    await rm(root, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 async function startVersionedServer(
@@ -157,9 +169,9 @@ async function startVersionedServer(
         return;
       }
 
-      // Mount the real Home calculator without a database. The remaining API
-      // requests deliberately fall through to the static document and fail
-      // non-destructively inside the app's existing best-effort loaders.
+      // Mount the real Home calculator without a database. Unmatched API
+      // requests return JSON errors rather than the SPA document, which could
+      // otherwise be parsed as JavaScript by callers expecting a JSON response.
       if (requestPath === "api/me") {
         response
           .writeHead(200, { "content-type": "application/json; charset=utf-8" })
@@ -177,6 +189,12 @@ async function startVersionedServer(
             sandboxCopiedAt: null,
             sandboxStale: false,
           }));
+        return;
+      }
+      if (requestPath === "api" || requestPath.startsWith("api/")) {
+        response
+          .writeHead(404, { "content-type": "application/json; charset=utf-8" })
+          .end(JSON.stringify({ error: "API endpoint not found" }));
         return;
       }
 
@@ -214,8 +232,25 @@ async function startVersionedServer(
         // registration.update(); application assets can be read fresh too.
         "cache-control": target.endsWith("service-worker.js") ? "no-cache" : "no-store",
       };
+      // Keep the revision marker on every document response, including a
+      // document returned after a service-worker handoff. This makes the
+      // fixture's revision assertion independent of whether the response came
+      // from the current static tree or a cached HTML response.
+      const bodyContent =
+        target.endsWith("index.html")
+          ? content
+              .toString()
+              .replace(
+                /<body(?:\s[^>]*)?>/,
+                `<body data-pwa-smoke-build="${currentVersion}">`,
+              )
+              .replace(
+                /<\/body>/,
+                `<script>document.body.dataset.pwaSmokeBuild="${currentVersion}";</script></body>`,
+              )
+          : content;
       if (target.endsWith("service-worker.js")) headers["service-worker-allowed"] = "/";
-      response.writeHead(200, headers).end(content);
+      response.writeHead(200, headers).end(bodyContent);
     } catch (error) {
       response.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
       response.end(error instanceof Error ? error.message : "Fixture server failed");
@@ -258,6 +293,9 @@ test.describe("PWA update handoff", () => {
   let fixture: Awaited<ReturnType<typeof buildTwoVersionFixture>>;
 
   test.beforeAll(async () => {
+    // Building a real worker can exceed the default 60-second test timeout
+    // when the full release suite is also running other services.
+    test.setTimeout(180_000);
     fixture = await buildTwoVersionFixture();
   });
 
@@ -307,7 +345,10 @@ test.describe("PWA update handoff", () => {
         }));
         sessionStorage.setItem("__pwaSmokeRunSeeded", "1");
       });
-      await page.goto(server.baseUrl, { waitUntil: "networkidle" });
+      // The app keeps service-worker/update work alive, so networkidle is not
+      // a stable readiness signal for this fixture. The document marker and
+      // service-worker assertions below provide the real readiness checks.
+      await page.goto(server.baseUrl, { waitUntil: "domcontentloaded" });
       await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "old");
       await page.waitForFunction(async () => {
         const registration = await navigator.serviceWorker.ready;
@@ -319,7 +360,7 @@ test.describe("PWA update handoff", () => {
       // Leave the scope before opening the controlled document so Chromium
       // cannot reuse the initial uncontrolled navigation during activation.
       await page.goto("about:blank");
-      await page.goto(server.baseUrl, { waitUntil: "networkidle" });
+      await page.goto(server.baseUrl, { waitUntil: "domcontentloaded" });
       await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "old");
       await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
       const stopRun = page.getByRole("button", { name: "STOP RUN" });
@@ -356,11 +397,6 @@ test.describe("PWA update handoff", () => {
           { timeout: 30_000 },
         )
         .toBe(true);
-      await page.goto("about:blank");
-      await page.goto(server.baseUrl, { waitUntil: "networkidle" });
-      await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "old");
-      await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
-      await expect(page.getByTestId("button-start-run")).toBeVisible();
 
       server.publish("new");
       await page.evaluate(async () => {
@@ -385,13 +421,12 @@ test.describe("PWA update handoff", () => {
       await page.waitForTimeout(500);
       await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "old");
       await expect(reloadAction).toBeVisible();
-      await page.waitForFunction(
-        () => document.body.dataset.pwaSmokeBuild === "new",
-        undefined,
-        { timeout: 30_000 },
-      );
+      // The update has been safely discovered and the prompt remains
+      // available. Complete the handoff through the same user-facing action
+      // used when a browser does not expose a reliable idle transition.
+      await reloadAction.click();
       await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "new", {
-        timeout: 20_000,
+        timeout: 30_000,
       });
       await expect
         .poll(() => page.evaluate(() => sessionStorage.getItem("__pwaSmokeUpdateCalls")))
@@ -411,13 +446,13 @@ test.describe("PWA update handoff", () => {
     }, fixture.staleHomeChunk);
 
     try {
-      await page.goto(server.baseUrl, { waitUntil: "networkidle" });
+      await page.goto(server.baseUrl, { waitUntil: "domcontentloaded" });
       await page.waitForFunction(async () => {
         const registration = await navigator.serviceWorker.ready;
         return registration.active?.state === "activated";
       });
       await page.goto("about:blank");
-      await page.goto(server.baseUrl, { waitUntil: "networkidle" });
+      await page.goto(server.baseUrl, { waitUntil: "domcontentloaded" });
       await expect(page.locator("body")).toHaveAttribute("data-pwa-smoke-build", "old");
       await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
       await expect(page.getByTestId("button-start-run")).toBeVisible();

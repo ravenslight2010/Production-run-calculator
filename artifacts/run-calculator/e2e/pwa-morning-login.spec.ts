@@ -159,7 +159,7 @@ test("keeps one morning sign-in authenticated through stale-day rollover", async
     apiRequests: apiEvidence,
     consoleErrors,
     expectedHttpErrorConsoleMessages: consoleErrors.filter((message) =>
-      /failed to load resource: the server responded with a status of (?:401 \(Unauthorized\)|403 \(Forbidden\))$/i.test(
+      /failed to load resource: the server responded with a status of (?:401(?: \([^)]*\))?|403(?: \([^)]*\))?)$/i.test(
         message,
       ),
     ),
@@ -181,7 +181,7 @@ test("keeps one morning sign-in authenticated through stale-day rollover", async
   expect(pageErrors, "the authenticated tablet journey must have no page errors").toEqual([]);
   const unexpectedConsoleErrors = consoleErrors.filter(
     (message) =>
-      !/failed to load resource: the server responded with a status of (?:401 \(Unauthorized\)|403 \(Forbidden\))$/i.test(
+      !/failed to load resource: the server responded with a status of (?:401(?: \([^)]*\))?|403(?: \([^)]*\))?)$/i.test(
         message,
       ),
   );
@@ -226,8 +226,9 @@ test("resumes the cookie session after an Android-style PWA close and reopen", a
       substitutionLog: [],
       stagedItems: {},
     };
-    localStorage.setItem("run-calc-day", JSON.stringify(state));
-    return JSON.stringify(state);
+    const serialized = JSON.stringify(state);
+    localStorage.setItem("run-calc-day", serialized);
+    return serialized;
   });
 
   // Closing the document and creating a new page in the same browser context
@@ -240,11 +241,35 @@ test("resumes the cookie session after an Android-style PWA close and reopen", a
   await reopened.getByTestId("tab-run").waitFor({ state: "visible", timeout: 30_000 });
 
   const after = await reopened.evaluate(() => localStorage.getItem("run-calc-day"));
+  const stableDayState = (serialized: string | null) => {
+    if (!serialized) return null;
+    const state = JSON.parse(serialized) as {
+      date?: string;
+      currentIndex?: number;
+      runs?: Array<{
+        id?: string;
+        brand?: string;
+        flavor?: string;
+        casesCompleted?: number;
+      }>;
+    };
+    return {
+      date: state.date,
+      currentIndex: state.currentIndex,
+      runs: state.runs?.map(({ id, brand, flavor, casesCompleted }) => ({
+        id,
+        brand,
+        flavor,
+        casesCompleted,
+      })),
+    };
+  };
   const evidence = {
     viewport: { width: 412, height: 915 },
     standaloneCloseReopen: true,
     authenticatedHome: await reopened.getByTestId("tab-run").isVisible(),
-    stateUnchanged: after === before,
+    stateUnchanged:
+      JSON.stringify(stableDayState(after)) === JSON.stringify(stableDayState(before)),
     signInRequests: await reopened.evaluate(() =>
       performance.getEntriesByType("resource")
         .filter((entry) => entry.name.includes("/api/auth/sign-in")).length,

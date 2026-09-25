@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { DEFAULT_VALUES } from "../types";
 
@@ -177,6 +177,52 @@ describe("SetupProfileEditor capability gate", () => {
       "Northstar",
       "Pepperoni",
       expect.objectContaining({ pep1Combined: true }),
+    );
+  });
+
+  it("shows the save acknowledgement after run-refresh feedback", async () => {
+    mocks.loadProfile.mockReturnValue(null);
+    mocks.saveProfileAndWaitForServer.mockResolvedValue("saved");
+    const events: string[] = [];
+    mocks.toast.mockImplementation(({ title }: { title?: string }) => {
+      events.push(title ?? "");
+    });
+    const onSaved = vi.fn(async () => {
+      await Promise.resolve();
+      mocks.toast({ title: "Run form updated" });
+    });
+    const user = userEvent.setup();
+
+    render(<SetupProfileEditor {...editorProps(true)} onSaved={onSaved} />);
+    await user.click(screen.getByRole("button", { name: "Save Setup" }));
+
+    await waitFor(() =>
+      expect(events).toEqual([
+        "Run form updated",
+        "Saved setup for Northstar — Pepperoni",
+      ]),
+    );
+  });
+
+  it("distinguishes a saved setup from a failed run refresh", async () => {
+    mocks.loadProfile.mockReturnValue(null);
+    mocks.saveProfileAndWaitForServer.mockResolvedValue("saved");
+    const onSaved = vi.fn().mockRejectedValue(new Error("run refresh failed"));
+    const user = userEvent.setup();
+
+    render(<SetupProfileEditor {...editorProps(true)} onSaved={onSaved} />);
+    await user.click(screen.getByRole("button", { name: "Save Setup" }));
+
+    const error = await screen.findByTestId("setup-profile-save-error");
+    expect(error.textContent).toMatch(/setup was saved.*run could not be refreshed/i);
+    expect(mocks.toast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Setup saved, but run refresh did not complete",
+        variant: "destructive",
+      }),
+    );
+    expect(mocks.toast).not.toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Setup was not saved" }),
     );
   });
 

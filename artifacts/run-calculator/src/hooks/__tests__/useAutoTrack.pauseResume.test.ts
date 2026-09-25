@@ -512,6 +512,61 @@ describe("useAutoTrack — pause/resume counter correctness", () => {
     expect(store.traysOnLine).toBe(20);
   });
 
+  it("wake acknowledgement preserves an active timed dough correction", () => {
+    const { form, store } = makeFakeForm({ traysOnLine: 32, batchesReady: 2 });
+    const doughSuppressRef = { current: 0 };
+
+    type Props = Parameters<typeof useAutoTrack>[0];
+    const props = (nowMs: number, acknowledgement: number): Props => ({
+      runId: "run-wake-dough-pause",
+      runGeneration: "stable-lifecycle",
+      runStatus: "running",
+      nowTime: ms(nowMs),
+      elapsedBatchSec: ELAPSED_SEC,
+      calc: BASE_CALC,
+      v: { ...BASE_V, traysOnLine: store.traysOnLine, batchesReady: store.batchesReady },
+      form,
+      externalDoughAutoSuppressRef: doughSuppressRef,
+      autoTrackWakeRebaseReason: null,
+      autoTrackWakeAcknowledgement: acknowledgement,
+    });
+    const { result, rerender } = renderHook((p: Props) => useAutoTrack(p), {
+      initialProps: props(T0, 0),
+    });
+
+    const correctionAt = T0 + 1_000;
+    const resumeAt = correctionAt + TRAY_PERIOD_MS;
+    act(() => {
+      vi.setSystemTime(correctionAt);
+      store.traysOnLine = 31;
+      doughSuppressRef.current = resumeAt;
+      result.current.pauseDoughTimers(TRAY_PERIOD_MS);
+      rerender(props(correctionAt, 0));
+    });
+    expect(result.current.isDoughTimerPaused).toBe(true);
+
+    // A wake acknowledgement may land after the operator edit. It may re-arm
+    // Packaging, but must not erase the independent Dough pause or replay work.
+    act(() => {
+      vi.setSystemTime(correctionAt + 242);
+      rerender(props(correctionAt + 242, 1));
+    });
+    expect(result.current.isDoughTimerPaused).toBe(true);
+    expect(store.traysOnLine).toBe(31);
+
+    act(() => {
+      vi.setSystemTime(resumeAt - 1);
+      rerender(props(resumeAt - 1, 1));
+    });
+    expect(result.current.isDoughTimerPaused).toBe(true);
+    act(() => {
+      vi.setSystemTime(resumeAt);
+      rerender(props(resumeAt, 1));
+    });
+    expect(result.current.isDoughTimerPaused).toBe(false);
+    expect(store.traysOnLine).toBe(31);
+  });
+
   it("4b. a second dough correction restarts the one-tray deadline", () => {
     const { form, store } = makeFakeForm({ traysOnLine: 5, batchesReady: 2 });
     const doughSuppressRef = { current: 0 };

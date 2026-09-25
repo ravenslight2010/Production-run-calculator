@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  getEqualPackagingProgress,
   loadPackagingProgress,
   overlayPackagingProgress,
   overlayPackagingProgressForRun,
@@ -63,6 +64,35 @@ describe("packaging progress register", () => {
 
     expect(result.merged.run1.casesOnCurrentSkid).toBe(25);
     expect(result.acceptedRemoteIds.has("run1")).toBe(true);
+  });
+
+  it("identifies equal-version echoes without treating stale or newer candidates as equal", () => {
+    const durable = {
+      skidsCompleted: 1,
+      casesOnCurrentSkid: 26,
+      correctionGeneration: 3,
+      updatedAt: 400,
+      manualOverrideUntil: 900,
+    };
+    const equalVersion = {
+      ...durable,
+      casesOnCurrentSkid: 28,
+    };
+
+    const merged = reconcilePackagingProgress({ run1: durable }, { run1: equalVersion });
+    expect(merged.acceptedRemoteIds.has("run1")).toBe(false);
+    expect(getEqualPackagingProgress({ run1: durable }, { run1: equalVersion }, "run1"))
+      .toEqual(durable);
+    expect(getEqualPackagingProgress(
+      { run1: durable },
+      { run1: { ...durable, updatedAt: 399 } },
+      "run1",
+    )).toBeUndefined();
+    expect(getEqualPackagingProgress(
+      { run1: durable },
+      { run1: { ...durable, updatedAt: 401 } },
+      "run1",
+    )).toBeUndefined();
   });
 
   it("preserves established metadata when a legacy payload omits it", () => {

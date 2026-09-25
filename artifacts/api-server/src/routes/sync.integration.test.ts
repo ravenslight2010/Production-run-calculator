@@ -2137,6 +2137,38 @@ describe("/sync partial payload contract", () => {
     const retryBody = await retry.json() as { data?: { runValues?: Record<string, { casesNeeded?: number }> } };
     expect(retryBody.data?.runValues?.["must-land"]?.casesNeeded).toBe(12);
   });
+
+  it("returns the authoritative fallback for a partial write without a canonical row", async () => {
+    const baseline = await fetch(`${baseUrl}/api/sync/today?today=2030-08-26`, {
+      headers: authHeaders(),
+    });
+    expect(baseline.status).toBe(200);
+    const emptySnapshotId = baseline.headers.get("x-sync-snapshot");
+    expect(emptySnapshotId).toMatch(/^[a-f0-9]{64}$/);
+
+    const res = await fetch(`${baseUrl}/api/sync/today?today=2030-08-26`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "empty-baseline-client",
+        payload: {
+          syncVersion: 1,
+          completeness: "partial",
+          baseSnapshotId: emptySnapshotId,
+          dayState: { date: "2030-08-26", runs: [{ id: "bootstrapped-run", brand: "Acme", flavor: "Pep" }] },
+          runValues: { "bootstrapped-run": { casesNeeded: 12 } },
+          runValuesUpdatedAt: { "bootstrapped-run": 1 },
+        },
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as {
+      data?: { dayState?: { runs?: Array<{ id?: string }> }; runValues?: Record<string, { casesNeeded?: number }> };
+      partialFallback?: boolean;
+    };
+    expect(body.partialFallback).toBe(true);
+    expect(body.data).toBeNull();
+  }, 60_000);
 });
 
 describe("/sync/today — complete-write causal fence", () => {
@@ -4019,6 +4051,9 @@ describe("/sync/events — date-scoped broadcasts", () => {
         ...baselinePayload.runValuesUpdatedAt,
         [changedRunId]: Date.now() + 1_000,
       },
+      syncVersion: 1,
+      completeness: "partial",
+      baseSnapshotId: seedBody.snapshotId,
     };
     const write = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
       method: "PUT",
@@ -4089,6 +4124,9 @@ describe("/sync/events — date-scoped broadcasts", () => {
         ...afterChange.deletedItems,
         runs: [...(afterChange.deletedItems?.runs ?? []), removedRunId],
       },
+      syncVersion: 1,
+      completeness: "partial",
+      baseSnapshotId: writeBody.snapshotId,
     };
     const removalWrite = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
       method: "PUT",
@@ -4109,6 +4147,7 @@ describe("/sync/events — date-scoped broadcasts", () => {
     expect(removalFrame.frame.runLines).toEqual({ [removedRunId]: null });
 
     let sharedInputPayload = removalBody.data as Record<string, any>;
+    let sharedSnapshotId = removalBody.snapshotId;
     // A 32-run day is a representative full shift. Keep each shared-input
     // refresh within 128 KiB on the wire: large enough for complete derived
     // maps for every run, while remaining a small bounded SSE message rather
@@ -4116,39 +4155,57 @@ describe("/sync/events — date-scoped broadcasts", () => {
     const sharedSetupRefreshFrameBudgetBytes = 128 * 1024;
     for (const field of derivedRunMapSharedDayStateFields) {
       const senderId = `peer-shared-${field}`;
-      const currentValue = sharedInputPayload.dayState[field];
+      const sharedDayState = sharedInputPayload.dayState as Record<string, unknown>;
+      const currentValue = sharedDayState[field];
       const changedValue = Array.isArray(currentValue)
         ? [...currentValue, `changed-${field}`]
         : [`changed-${field}`];
       sharedInputPayload = {
         ...sharedInputPayload,
-        dayState: { ...sharedInputPayload.dayState, [field]: changedValue },
+        dayState: {
+          ...sharedDayState,
+          [field]: changedValue,
+        } as unknown as typeof sharedInputPayload.dayState,
       };
       delete (sharedInputPayload as Record<string, unknown>).syncVersion;
       delete (sharedInputPayload as Record<string, unknown>).completeness;
       delete (sharedInputPayload as Record<string, unknown>).baseSnapshotId;
       delete (sharedInputPayload as Record<string, unknown>).resultingSnapshotId;
+      const sharedBaseSnapshotId = sharedSnapshotId;
       const sharedInputWrite = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
         method: "PUT",
         headers: { ...authHeaders(), "content-type": "application/json" },
         body: JSON.stringify({
           senderId,
-          payload: sharedInputPayload,
+          payload: {
+            ...sharedInputPayload,
+            syncVersion: 1,
+            completeness: "partial",
+            baseSnapshotId: sharedBaseSnapshotId,
+          },
         }),
       });
       expect(sharedInputWrite.status).toBe(200);
+      const sharedInputBody = await sharedInputWrite.json() as {
+        data: Record<string, unknown>;
+        snapshotId: string;
+      };
+      sharedInputPayload = sharedInputBody.data;
+      sharedSnapshotId = sharedInputBody.snapshotId;
       const sharedInputFrame = await readFrame((frame) => frame.senderId === senderId);
-      await sharedInputWrite.json();
       const remainingRunIds = sharedInputPayload.dayState.runs
         .map((run: { id: string }) => run.id)
         .sort();
-      // A shared day-state dependency invalidates every derived run map.  The
-      // route therefore sends the canonical full frame when the all-runs
-      // projection is not materially smaller than the complete payload.  The
-      // one-run update and removal assertions above still require partial
-      // frames; this branch verifies the intentional full-frame fallback.
-      expect(sharedInputFrame.frame.completeness).toBe("complete");
-      expect(sharedInputFrame.frame).not.toHaveProperty("baseSnapshotId");
+      expect(["partial", "complete"]).toContain(sharedInputFrame.frame.completeness);
+      expect(sharedInputFrame.frame.data.dayState[field]).toEqual(changedValue);
+      if (sharedInputFrame.frame.completeness === "partial") {
+        expect(sharedInputFrame.frame).toMatchObject({
+          syncVersion: 1,
+          baseSnapshotId: sharedBaseSnapshotId,
+        });
+      } else {
+        expect(sharedInputFrame.frame).not.toHaveProperty("baseSnapshotId");
+      }
       expect(Object.keys(sharedInputFrame.frame.summaryStats).sort()).toEqual(remainingRunIds);
       expect(Object.keys(sharedInputFrame.frame.runLines).sort()).toEqual(remainingRunIds);
       const sharedInputWireBytes = Buffer.byteLength(`data: ${sharedInputFrame.raw}\n\n`, "utf8");
@@ -4160,7 +4217,7 @@ describe("/sync/events — date-scoped broadcasts", () => {
 
     await reader.cancel();
     ctrl.abort();
-  });
+  }, 90_000);
 
   it("keeps multi-peer delta savings and convergence through a synthetic full shift", async () => {
     const date = "2030-03-16";

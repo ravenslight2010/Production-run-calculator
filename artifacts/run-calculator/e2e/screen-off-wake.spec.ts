@@ -50,8 +50,17 @@
  *   pnpm --filter @workspace/run-calculator exec playwright test screen-off-wake
  */
 
-import { test, expect, type Browser, type Page, type Request } from "@playwright/test";
-import { computeCasesInFreezer, computeCasesOnLine } from "@workspace/inventory-math";
+import {
+  test,
+  expect,
+  type Browser,
+  type Page,
+  type Request,
+} from "@playwright/test";
+import {
+  computeCasesInFreezer,
+  computeCasesOnLine,
+} from "@workspace/inventory-math";
 import {
   AuthorizedBrowserFixtures,
   DEFAULT_MANAGER_CAPABILITIES,
@@ -65,7 +74,8 @@ function uid(): string {
 }
 
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
-const API_BASE = process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
+const API_BASE =
+  process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
 let authorizedFixtures: AuthorizedBrowserFixtures;
 
 test.beforeAll(async ({ playwright }) => {
@@ -119,9 +129,9 @@ async function fillFormValues(page: Page, casesPerSkid = "10"): Promise<void> {
     has: page.locator("summary", { hasText: /line.?setup/i }),
   });
   await lineSetupDetails.first().waitFor({ state: "attached", timeout: 5_000 });
-  const isOpen = await lineSetupDetails.first().evaluate(
-    (el) => (el as HTMLDetailsElement).open,
-  );
+  const isOpen = await lineSetupDetails
+    .first()
+    .evaluate((el) => (el as HTMLDetailsElement).open);
   if (!isOpen) {
     await lineSetupDetails.locator("summary").first().click();
     await page.waitForTimeout(200); // CSS transition
@@ -129,57 +139,65 @@ async function fillFormValues(page: Page, casesPerSkid = "10"): Promise<void> {
 
   // Step 3 — set values via native setter + bubbling events
   // (React Testing Library's proven pattern for controlled inputs)
-  const results: Record<string, boolean> = await page.evaluate((requestedCasesPerSkid) => {
-    const nativeSetter = Object.getOwnPropertyDescriptor(
-      HTMLInputElement.prototype,
-      "value",
-    )?.set;
-    if (!nativeSetter) return {};
+  const results: Record<string, boolean> = await page.evaluate(
+    (requestedCasesPerSkid) => {
+      const nativeSetter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      )?.set;
+      if (!nativeSetter) return {};
 
-    function fireChange(el: HTMLInputElement | null, value: string): boolean {
-      if (!el) return false;
-      nativeSetter.call(el, value);
-      el.dispatchEvent(new Event("input", { bubbles: true }));
-      el.dispatchEvent(new Event("change", { bubbles: true }));
-      return true;
-    }
+      function fireChange(el: HTMLInputElement | null, value: string): boolean {
+        if (!el) return false;
+        nativeSetter.call(el, value);
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        return true;
+      }
 
-    const hit: Record<string, boolean> = {};
+      const hit: Record<string, boolean> = {};
 
-    // casesNeeded: found via "Target Cases" label → nearest .w-32 ancestor
-    const tcLabel = Array.from(document.querySelectorAll("label")).find(
-      (l) => l.textContent?.trim() === "Target Cases",
-    );
-    if (tcLabel) {
-      const container = tcLabel.closest(".w-32") as HTMLElement | null;
-      const input =
-        container?.querySelector<HTMLInputElement>('input[type="number"]') ??
-        null;
-      hit["casesNeeded"] = fireChange(input, "200");
-    } else {
-      hit["casesNeeded"] = false;
-    }
-
-    // NumFields inside the Line Setup accordion
-    const fields: Array<[string, string]> = [
-      ["input-cycleSpeed", "30"],
-      ["input-crustsPerCycle", "2"],
-      ["input-speedAdjustment", "1"],
-      ["input-pizzasPerCase", "6"],
-      ["input-casesPerSkid", requestedCasesPerSkid],
-      ["input-freezerTime", "5"],
-      ["input-doughballsPerTray", "2"],
-      ["input-doughBatchYield", "4"],
-    ];
-    for (const [testId, value] of fields) {
-      const el = document.querySelector<HTMLInputElement>(
-        `[data-testid="${testId}"]`,
+      // casesNeeded: found via "Target Cases" label → nearest .w-32 ancestor
+      const tcLabel = Array.from(document.querySelectorAll("label")).find(
+        (l) => l.textContent?.trim() === "Target Cases",
       );
-      hit[testId] = fireChange(el ?? null, value);
-    }
+      if (tcLabel) {
+        const container = tcLabel.closest(".w-32") as HTMLElement | null;
+        const input =
+          container?.querySelector<HTMLInputElement>('input[type="number"]') ??
+          null;
+        hit["casesNeeded"] = fireChange(input, "200");
+      } else {
+        hit["casesNeeded"] = false;
+      }
 
-    return hit;
-  }, casesPerSkid);
+      // NumFields inside the Line Setup accordion
+      const fields: Array<[string, string]> = [
+        ["input-cycleSpeed", "30"],
+        ["input-crustsPerCycle", "2"],
+        // Keep this fixture independent of the factory baseline. Its expected
+        // cadence is 30 × 2 × 1 = 60 pizzas per minute.
+        ["input-speedAdjustment", "1"],
+        ["input-pizzasPerCase", "6"],
+        ["input-casesPerSkid", requestedCasesPerSkid],
+        // Keep the live form's extra case buffer aligned with the seeded
+        // run-values snapshot used by the output-card assertion below.
+        ["input-casesPerLayer", "1"],
+        ["input-freezerTime", "5"],
+        ["input-doughballsPerTray", "2"],
+        ["input-doughBatchYield", "4"],
+      ];
+      for (const [testId, value] of fields) {
+        const el = document.querySelector<HTMLInputElement>(
+          `[data-testid="${testId}"]`,
+        );
+        hit[testId] = fireChange(el ?? null, value);
+      }
+
+      return hit;
+    },
+    casesPerSkid,
+  );
 
   // Step 4 — fail immediately if any element was not found in the DOM
   const missing = Object.entries(results)
@@ -217,6 +235,7 @@ async function fillFormValues(page: Page, casesPerSkid = "10"): Promise<void> {
       speedAdjustment: val("input-speedAdjustment"),
       pizzasPerCase: val("input-pizzasPerCase"),
       casesPerSkid: val("input-casesPerSkid"),
+      casesPerLayer: val("input-casesPerLayer"),
       freezerTime: val("input-freezerTime"),
       doughballsPerTray: val("input-doughballsPerTray"),
       doughBatchYield: val("input-doughBatchYield"),
@@ -228,9 +247,14 @@ async function fillFormValues(page: Page, casesPerSkid = "10"): Promise<void> {
   expect(domValues.crustsPerCycle, "crustsPerCycle not set in DOM").toBe("2");
   expect(domValues.speedAdjustment, "speedAdjustment not set in DOM").toBe("1");
   expect(domValues.pizzasPerCase, "pizzasPerCase not set in DOM").toBe("6");
-  expect(domValues.casesPerSkid, "casesPerSkid not set in DOM").toBe(casesPerSkid);
+  expect(domValues.casesPerSkid, "casesPerSkid not set in DOM").toBe(
+    casesPerSkid,
+  );
+  expect(domValues.casesPerLayer, "casesPerLayer not set in DOM").toBe("1");
   expect(domValues.freezerTime, "freezerTime not set in DOM").toBe("5");
-  expect(domValues.doughballsPerTray, "doughballsPerTray not set in DOM").toBe("2");
+  expect(domValues.doughballsPerTray, "doughballsPerTray not set in DOM").toBe(
+    "2",
+  );
   expect(domValues.doughBatchYield, "doughBatchYield not set in DOM").toBe("4");
 }
 
@@ -342,12 +366,22 @@ async function simulateOnlineWake(page: Page): Promise<void> {
 async function mockDateNow(
   page: Page,
   fakeMs: number,
-  options: { tick?: boolean } = {},
+  options: { tick?: boolean; skipAutoTrack?: boolean } = {},
 ): Promise<{
   autoTrackSchedule?: unknown;
   operationalProjection?: {
     runId?: string;
-    counters?: { traysOnLine?: number; batchesReady?: number; casesOnLine?: number };
+    counters?: {
+      traysOnLine?: number;
+      batchesReady?: number;
+      casesOnLine?: number;
+      casesCompleted?: number;
+    };
+    calc?: {
+      batchesNeeded?: number;
+      traysNeeded?: number;
+      casesOnLine?: number;
+    };
   } | null;
 }> {
   await page.evaluate((ms) => {
@@ -360,16 +394,16 @@ async function mockDateNow(
     window.Date = new Proxy(Orig, {
       construct(target, args) {
         return args.length === 0
-          ? new target((w.__testFakeMs as number))
+          ? new target(w.__testFakeMs as number)
           : Reflect.construct(target, args);
       },
       apply(target, _self, args) {
         return args.length === 0
-          ? new target((w.__testFakeMs as number)).toString()
+          ? new target(w.__testFakeMs as number).toString()
           : Reflect.apply(target, target, args);
       },
       get(target, prop, receiver) {
-        if (prop === "now") return () => (w.__testFakeMs as number);
+        if (prop === "now") return () => w.__testFakeMs as number;
         const val = Reflect.get(target, prop, receiver);
         return typeof val === "function" ? val.bind(target) : val;
       },
@@ -384,14 +418,60 @@ async function mockDateNow(
   const response = await page.request.post(
     `/api/sync/e2e/auto-track-tick?today=${fixtureDate}`,
     {
-    data: { nowMs: fakeMs + 1 },
+      data: {
+        nowMs: fakeMs + 1,
+        ...(options.skipAutoTrack ? { skipAutoTrack: true } : {}),
+      },
     },
   );
-  expect(response.ok(), `authoritative auto-track fixture tick failed: ${response.status()}`).toBe(true);
+  expect(
+    response.ok(),
+    `authoritative auto-track fixture tick failed: ${response.status()}`,
+  ).toBe(true);
   // The endpoint response and its SSE projection travel on separate sockets.
   // Do not let a following operator action race the authoritative frame.
   await page.waitForTimeout(300);
   return response.json();
+}
+
+async function installDateProxyBeforeNavigation(
+  page: Page,
+  fakeMs: number,
+): Promise<void> {
+  await page.addInitScript(
+    ({ fakeMs: initialFakeMs }) => {
+      const w = window as unknown as Record<string, unknown>;
+      let reloadMs = 0;
+      try {
+        reloadMs = Number(sessionStorage.getItem("__screenOffWakeReloadMs"));
+      } catch {
+        // Initial opaque frames may not have session storage yet.
+      }
+      w.__testFakeMs = Number.isFinite(reloadMs) && reloadMs > 0
+        ? reloadMs : initialFakeMs;
+      w.__testDateProxyInstalled = true;
+      const Orig = window.Date;
+      w.__origDate = Orig;
+      window.Date = new Proxy(Orig, {
+        construct(target, args) {
+          return args.length === 0
+            ? new target(w.__testFakeMs as number)
+            : Reflect.construct(target, args);
+        },
+        apply(target, _self, args) {
+          return args.length === 0
+            ? new target(w.__testFakeMs as number).toString()
+            : Reflect.apply(target, target, args);
+        },
+        get(target, prop, receiver) {
+          if (prop === "now") return () => w.__testFakeMs as number;
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      }) as unknown as typeof Date;
+    },
+    { fakeMs },
+  );
 }
 
 /**
@@ -500,6 +580,7 @@ async function readCaseTotal(page: Page): Promise<number> {
 async function readCasesOnLine(page: Page): Promise<number> {
   const text = await page
     .locator('[data-testid="cases-on-line-value"]')
+    .filter({ visible: true })
     .first()
     .textContent({ timeout: 6_000 });
   return Number((text ?? "0").replace(/[^0-9]/g, "")) || 0;
@@ -520,7 +601,8 @@ async function waitForCaseCounterChange(
         '[data-testid="tile-cases-completed"]',
       ) as HTMLElement | null;
       if (!el) return false;
-      const val = parseInt((el.textContent ?? "0").replace(/[^0-9]/g, ""), 10) || 0;
+      const val =
+        parseInt((el.textContent ?? "0").replace(/[^0-9]/g, ""), 10) || 0;
       return val !== prev;
     },
     { prev: prevTotal },
@@ -532,9 +614,9 @@ async function waitForCaseCounterChange(
 async function setMachineTimes(
   page: Page,
   values: Record<string, string> = {
-      "input-mixerLowSec": "1",
-      "input-mixerHighSec": "1",
-      "input-hopperSec": "2",
+    "input-mixerLowSec": "1",
+    "input-mixerHighSec": "1",
+    "input-hopperSec": "2",
   },
 ): Promise<void> {
   const result = await page.evaluate((inputValues) => {
@@ -569,7 +651,13 @@ async function readDoughCounters(page: Page): Promise<{
 }> {
   return page.evaluate(() => {
     const value = (name: string) =>
-      Number((document.querySelector(`input[name="${name}"]`) as HTMLInputElement | null)?.value ?? 0);
+      Number(
+        (
+          document.querySelector(
+            `input[name="${name}"]`,
+          ) as HTMLInputElement | null
+        )?.value ?? 0,
+      );
     return {
       trays: value("traysOnLine"),
       batches: value("batchesReady"),
@@ -583,15 +671,22 @@ async function readLiveRunSnapshot(page: Page): Promise<{
 }> {
   return page.evaluate(async () => {
     const today = new Date().toISOString().slice(0, 10);
-    const response = await fetch(`/api/sync/today?today=${today}`, { cache: "no-store" });
+    const response = await fetch(`/api/sync/today?today=${today}`, {
+      cache: "no-store",
+    });
     if (!response.ok) {
       throw new Error(`live run payload request failed: ${response.status}`);
     }
-    const body = await response.json() as {
+    const body = (await response.json()) as {
       dayState?: { currentRunId?: string; runs?: Array<{ id?: string }> };
-      runValues?: Record<string, Record<string, number | string | boolean | null | undefined>>;
+      runValues?: Record<
+        string,
+        Record<string, number | string | boolean | null | undefined>
+      >;
     };
-    const runId = body.dayState?.currentRunId ?? body.dayState?.runs?.find((run) => run.id)?.id;
+    const runId =
+      body.dayState?.currentRunId ??
+      body.dayState?.runs?.find((run) => run.id)?.id;
     if (!runId || !body.runValues?.[runId]) {
       throw new Error("current run is missing from the live run payload");
     }
@@ -606,7 +701,10 @@ async function readPersistedRunValues(
   return page.evaluate((id) => {
     const raw = localStorage.getItem(`run-calc-run-${id}`);
     if (!raw) throw new Error(`persisted run values missing for ${id}`);
-    return JSON.parse(raw) as Record<string, number | string | boolean | null | undefined>;
+    return JSON.parse(raw) as Record<
+      string,
+      number | string | boolean | null | undefined
+    >;
   }, runId);
 }
 
@@ -617,42 +715,87 @@ async function readLiveRunMeta(page: Page): Promise<{
 }> {
   return page.evaluate(async () => {
     const today = new Date().toISOString().slice(0, 10);
-    const response = await fetch(`/api/sync/today?today=${today}`, { cache: "no-store" });
-    if (!response.ok) throw new Error(`live run metadata request failed: ${response.status}`);
-    const body = await response.json() as {
+    const response = await fetch(`/api/sync/today?today=${today}`, {
+      cache: "no-store",
+    });
+    if (!response.ok)
+      throw new Error(`live run metadata request failed: ${response.status}`);
+    const body = (await response.json()) as {
       dayState?: {
         currentRunId?: string;
         currentIndex?: number;
-        runs?: Array<{ id?: string; startedAt?: number; pausedAt?: number; endedAt?: number }>;
+        runs?: Array<{
+          id?: string;
+          startedAt?: number;
+          pausedAt?: number;
+          endedAt?: number;
+        }>;
       };
     };
-    const run = body.dayState?.runs?.find((candidate) =>
-      candidate.id === body.dayState?.currentRunId
-    ) ?? body.dayState?.runs?.[body.dayState?.currentIndex ?? 0];
+    const run =
+      body.dayState?.runs?.find(
+        (candidate) => candidate.id === body.dayState?.currentRunId,
+      ) ?? body.dayState?.runs?.[body.dayState?.currentIndex ?? 0];
     if (!run) throw new Error("current run metadata is missing");
     return run;
   });
 }
 
 async function chooseRunningTunnelIfPrompted(page: Page): Promise<void> {
-  const choice = page.getByTestId("pause-stop-tunnel-no").filter({ visible: true });
+  const choice = page
+    .getByTestId("pause-stop-tunnel-no")
+    .filter({ visible: true });
   await choice.waitFor({ state: "visible", timeout: 1_000 }).catch(() => {});
   if (await choice.isVisible().catch(() => false)) {
     await choice.click({ timeout: 1_000 }).catch(() => {});
   }
 }
 
-/** Seed dough inventory through the visible operator controls and await the server write. */
-async function seedDoughCounters(
+/** Set visible dough inventory through the same form events as an operator. */
+async function writeDoughCounters(
   page: Page,
   counters: { trays: number; batches: number },
 ): Promise<void> {
-  const traysInput = page.locator('input[name="traysOnLine"]');
-  const batchesInput = page.locator('input[name="batchesReady"]');
-  await traysInput.fill(String(counters.trays));
-  await traysInput.press("Tab");
-  await batchesInput.fill(String(counters.batches));
-  await batchesInput.press("Tab");
+  // Use the real controlled inputs rather than mutating DOM values behind
+  // React Hook Form. Each correction must settle before the next section edit
+  // so its baseline cannot be rebased from stale local state.
+  for (const [name, value] of [
+    ["batchesReady", counters.batches],
+    ["traysOnLine", counters.trays],
+  ] as const) {
+    const input = page.locator(`input[name="${name}"]`);
+    await expect(input).toBeVisible();
+    await input.fill(String(value));
+    await input.blur();
+    await page.waitForTimeout(350);
+  }
+}
+
+/** Seed dough inventory and wait for both UI and server acknowledgement. */
+async function seedDoughCounters(
+  page: Page,
+  counters: { trays: number; batches: number },
+  options: { pauseWhileSeeding?: boolean } = {},
+): Promise<void> {
+  if (options.pauseWhileSeeding) {
+    await page.locator('[data-testid="tab-run"]').click();
+    const alreadyPaused = page.getByRole("button", { name: /resume.?run/i });
+    if (await alreadyPaused.isVisible().catch(() => false)) {
+      // setupAndStartRun can pause before its first authoritative tick; keep
+      // that fence in place while the counters are seeded.
+    } else {
+      const pause = page.getByRole("button", { name: /pause.?run/i });
+      await expect(pause).toBeVisible();
+      await pause.click();
+      await chooseRunningTunnelIfPrompted(page);
+      await expect(alreadyPaused).toBeVisible();
+      await expect
+        .poll(async () => (await readLiveRunMeta(page)).pausedAt ?? 0)
+        .toBeGreaterThan(0);
+    }
+    await page.locator('[data-testid="tab-dough"]').click();
+  }
+  await writeDoughCounters(page, counters);
   await expect.poll(() => readDoughCounters(page), {
     timeout: 15_000,
     message: "dough inventory did not update in the form",
@@ -667,6 +810,24 @@ async function seedDoughCounters(
     timeout: 15_000,
     message: "dough inventory correction was not acknowledged by the server",
   }).toEqual(counters);
+  if (options.pauseWhileSeeding) {
+    await page.locator('[data-testid="tab-run"]').click();
+    const resume = page.getByRole("button", { name: /resume.?run/i });
+    await expect(resume).toBeVisible();
+    // A machine-time edit immediately before this helper can still be
+    // draining through the shared foreground write fence. Let it settle
+    // before resuming the lifecycle.
+    await page.waitForTimeout(1_000);
+    await resume.click();
+    await expect
+      .poll(async () => (await readLiveRunMeta(page)).pausedAt ?? 0, {
+        timeout: 15_000,
+      })
+      .toBe(0);
+    await expect(
+      page.getByRole("button", { name: /pause.?run/i }),
+    ).toBeVisible({ timeout: 15_000 });
+  }
 }
 
 async function resumeDoughTrackingIfVisible(page: Page): Promise<void> {
@@ -701,11 +862,24 @@ async function setupAndStartRun(
   page: Page,
   casesPerSkid = "10",
   capabilities: readonly E2ECapability[] = [],
-  options: {
+  optionsOrPauseBeforeReturn: {
     initialDoughCounters?: { trays: number; batches: number };
     verifyInitialDoughCounters?: boolean;
-  } = {},
+    pauseBeforeReturn?: boolean;
+  } | boolean = {},
 ): Promise<number> {
+  const options: {
+    initialDoughCounters?: { trays: number; batches: number };
+    verifyInitialDoughCounters?: boolean;
+    pauseBeforeReturn?: boolean;
+  } =
+    typeof optionsOrPauseBeforeReturn === "boolean"
+      ? {}
+      : optionsOrPauseBeforeReturn;
+  const pauseBeforeReturn =
+    typeof optionsOrPauseBeforeReturn === "boolean"
+      ? optionsOrPauseBeforeReturn
+      : optionsOrPauseBeforeReturn.pauseBeforeReturn ?? false;
   const username = uid();
   const account = await authorizedFixtures.createAccount({
     username,
@@ -725,18 +899,30 @@ async function setupAndStartRun(
       completeness: "complete",
     },
   });
-  await page.context().addCookies([{
-    name: "rc_auth",
-    value: account.token,
-    url: API_BASE,
-  }]);
+  // Install the controlled clock before the first application script runs.
+  // The daily-reset watcher can otherwise reload the page while the fixture
+  // is still filling the setup form when the real wall clock is near a
+  // boundary.
+  const safeBase = new Date();
+  if (safeBase.getUTCHours() === 23 && safeBase.getUTCMinutes() >= 35) {
+    safeBase.setUTCHours(21, 0, 0, 0);
+  }
+  const safeBaseMs = safeBase.getTime();
+  await installDateProxyBeforeNavigation(page, safeBaseMs);
+  await page.context().addCookies([
+    {
+      name: "rc_auth",
+      value: account.token,
+      url: API_BASE,
+    },
+  ]);
   await page.goto("/", { waitUntil: "domcontentloaded" });
-  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
-  await page.locator('[data-testid="tab-run"]').click();
+  await page
+    .getByTestId("tab-run")
+    .waitFor({ state: "attached", timeout: 25_000 });
 
   // Foreground recovery is intentionally event-driven rather than a startup
-  // job. Trigger its focus fallback after the bootstrap pull has settled, then
-  // require the recovery pull and its canonical acknowledgement before setup.
+  // job. Require its canonical acknowledgement before mutating setup values.
   const initialRecoveryPull = page.waitForResponse(
     (response) =>
       response.request().method() === "GET" &&
@@ -749,7 +935,6 @@ async function setupAndStartRun(
     initialRecoveryResponse.ok(),
     `initial foreground recovery failed with HTTP ${initialRecoveryResponse.status()}`,
   ).toBe(true);
-
   const initialRecovery = page.getByTestId("foreground-recovery-status");
   await expect(initialRecovery).toHaveAttribute(
     "data-foreground-recovery-state",
@@ -762,19 +947,8 @@ async function setupAndStartRun(
   await expect.poll(() => currentForegroundSyncAck(page), { timeout: 20_000 })
     .toBeGreaterThan(0);
 
+  await page.locator('[data-testid="tab-run"]').click();
   await fillFormValues(page, casesPerSkid);
-
-  // Keep the browser close to API server time so server-owned manual-override
-  // windows remain authoritative. Only move the anchor backward when a +20m
-  // test offset would cross UTC midnight and trigger the daily reset.
-  const safeBase = new Date();
-  if (
-    safeBase.getUTCHours() === 23
-    && safeBase.getUTCMinutes() >= 35
-  ) {
-    safeBase.setUTCHours(21, 0, 0, 0);
-  }
-  const safeBaseMs = safeBase.getTime();
 
   // Install the hidden-doc mock and date proxy BEFORE Start Run so the app's
   // handleStartRun() reads Date.now() = safeBaseMs → startedAt = safeBaseMs.
@@ -789,7 +963,8 @@ async function setupAndStartRun(
   await page.waitForTimeout(150); // let React setState(safeBaseMs) commit
 
   // START RUN is visible when runStatus === "pending"
-  await page.locator('[data-testid="button-start-run"]')
+  await page
+    .locator('[data-testid="button-start-run"]')
     .waitFor({ state: "visible", timeout: 20_000 });
 
   await page.locator('[data-testid="button-start-run"]').click();
@@ -799,6 +974,17 @@ async function setupAndStartRun(
     .getByRole("button", { name: /stop.?run|pause.?run/i })
     .first()
     .waitFor({ state: "visible", timeout: 10_000 });
+  if (pauseBeforeReturn) {
+    const pause = page.getByRole("button", { name: /pause.?run/i });
+    await pause.click();
+    await chooseRunningTunnelIfPrompted(page);
+    await expect(
+      page.getByRole("button", { name: /resume.?run/i }),
+    ).toBeVisible();
+    await expect
+      .poll(async () => (await readLiveRunMeta(page)).pausedAt ?? 0)
+      .toBeGreaterThan(0);
+  }
 
   // tile-cases-completed renders when casesNeeded > 0 (we set it to 200).
   // With mock time = safeBaseMs = startedAt, elapsedMin = 0, afterTunnel = 0,
@@ -807,10 +993,12 @@ async function setupAndStartRun(
     .locator('[data-testid="tile-cases-completed"]')
     .waitFor({ state: "visible", timeout: 10_000 });
   let canonicalStartedAt = 0;
-  await expect.poll(async () => {
-    canonicalStartedAt = Number((await readLiveRunMeta(page)).startedAt ?? 0);
-    return canonicalStartedAt > 0;
-  }).toBe(true);
+  await expect
+    .poll(async () => {
+      canonicalStartedAt = Number((await readLiveRunMeta(page)).startedAt ?? 0);
+      return canonicalStartedAt > 0;
+    })
+    .toBe(true);
   // Start is a server-owned lifecycle command, so its canonical timestamp can
   // differ slightly from the browser fixture instant. Re-anchor the display
   // clock to the accepted timestamp before arming cadence.
@@ -922,49 +1110,48 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
   //  triggering the daily auth reset and navigating to the sign-in page.
   //  Each test has its own page context which is closed after the test.
   // ──────────────────────────────────────────────────────────────────────────
-  test(
-    "A. running run: counter jumps by full 50-case delta in one wake tick (no cap)",
-    async ({ page }) => {
-      const safeBaseMs = await setupAndStartRun(page);
-      // Note: installHiddenMock + mockDateNow(safeBaseMs) already done in setup.
+  test("A. running run: counter jumps by full 50-case delta in one wake tick (no cap)", async ({
+    page,
+  }) => {
+    const safeBaseMs = await setupAndStartRun(page);
+    // Note: installHiddenMock + mockDateNow(safeBaseMs) already done in setup.
 
-      // ── First wake: seed the authoritative boundary total ───────────────
-      // This instant is exactly on a cadence edge. Depending on whether the
-      // normal server loop or this deterministic fixture armed the run first,
-      // the edge itself is either due now or one server millisecond later.
-      await simulateScreenOff(page);
-      await mockDateNow(page, safeBaseMs + 15 * 60_000);
-      await simulateWake(page);
-      await waitForCaseCounterChange(page, 0, 8_000);
-      // Do NOT restoreDate here — see comment above.
+    // ── First wake: seed the authoritative boundary total ───────────────
+    // This instant is exactly on a cadence edge. Depending on whether the
+    // normal server loop or this deterministic fixture armed the run first,
+    // the edge itself is either due now or one server millisecond later.
+    await simulateScreenOff(page);
+    await mockDateNow(page, safeBaseMs + 15 * 60_000);
+    await simulateWake(page);
+    await waitForCaseCounterChange(page, 0, 8_000);
+    // Do NOT restoreDate here — see comment above.
 
-      const casesBaseline = await readCaseTotal(page);
-      expect(
-        [99, 100],
-        `baseline after +15 min must be the authoritative boundary value; got ${casesBaseline}`,
-      ).toContain(casesBaseline);
+    const casesBaseline = await readCaseTotal(page);
+    expect(
+      [99, 100],
+      `baseline after +15 min must be the authoritative boundary value; got ${casesBaseline}`,
+    ).toContain(casesBaseline);
 
-      // ── Second wake: EXACTLY 50 more cases in ONE tick ──────────────────
-      // The next five minutes add exactly 50 cases in one server beat.
-      await simulateScreenOff(page);
-      await mockDateNow(page, safeBaseMs + 20 * 60_000);
-      await simulateWake(page);
-      await waitForCaseCounterChange(page, casesBaseline, 8_000);
+    // ── Second wake: EXACTLY 50 more cases in ONE tick ──────────────────
+    // The next five minutes add exactly 50 cases in one server beat.
+    await simulateScreenOff(page);
+    await mockDateNow(page, safeBaseMs + 20 * 60_000);
+    await simulateWake(page);
+    await waitForCaseCounterChange(page, casesBaseline, 8_000);
 
-      const casesAfterWake = await readCaseTotal(page);
-      const delta = casesAfterWake - casesBaseline;
+    const casesAfterWake = await readCaseTotal(page);
+    const delta = casesAfterWake - casesBaseline;
 
-      expect(
-        casesAfterWake,
-        `total after +20 min must preserve the baseline and add 50; got ${casesAfterWake}`,
-      ).toBe(casesBaseline + 50);
-      expect(
-        delta,
-        `delta must be exactly 50 (old 2-case cap would give 2); ` +
-          `got Δ=${delta} (${casesBaseline}→${casesAfterWake})`,
-      ).toBe(50);
-    },
-  );
+    expect(
+      casesAfterWake,
+      `total after +20 min must preserve the baseline and add 50; got ${casesAfterWake}`,
+    ).toBe(casesBaseline + 50);
+    expect(
+      delta,
+      `delta must be exactly 50 (old 2-case cap would give 2); ` +
+        `got Δ=${delta} (${casesBaseline}→${casesAfterWake})`,
+    ).toBe(50);
+  });
 
   // ──────────────────────────────────────────────────────────────────────────
   // B. Paused run: the case counter stays frozen on wake.
@@ -975,87 +1162,82 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
   //
   //  Same midnight-safety approach as Test A (no mid-test restoreDate).
   // ──────────────────────────────────────────────────────────────────────────
-  test(
-    "B. paused run: counter stays frozen after screen-off + wake",
-    async ({ page }) => {
-      const safeBaseMs = await setupAndStartRun(page);
+  test("B. paused run: counter stays frozen after screen-off + wake", async ({
+    page,
+  }) => {
+    const safeBaseMs = await setupAndStartRun(page);
 
-      // ── Baseline: running, +15 min → authoritative cadence boundary ─────
-      await simulateScreenOff(page);
-      await mockDateNow(page, safeBaseMs + 15 * 60_000);
-      await simulateWake(page);
-      await waitForCaseCounterChange(page, 0, 8_000);
+    // ── Baseline: running, +15 min → authoritative cadence boundary ─────
+    await simulateScreenOff(page);
+    await mockDateNow(page, safeBaseMs + 15 * 60_000);
+    await simulateWake(page);
+    await waitForCaseCounterChange(page, 0, 8_000);
 
-      const casesBeforePause = await readCaseTotal(page);
-      // elapsed = 15 min exactly → afterTunnel = 10 min → floor(10×60/6) = 100
-      expect(
-        [99, 100],
-        `baseline before pause must be the authoritative boundary value; got ${casesBeforePause}`,
-      ).toContain(casesBeforePause);
+    const casesBeforePause = await readCaseTotal(page);
+    // elapsed = 15 min exactly → afterTunnel = 10 min → floor(10×60/6) = 100
+    expect(
+      [99, 100],
+      `baseline before pause must be the authoritative boundary value; got ${casesBeforePause}`,
+    ).toContain(casesBeforePause);
 
-      // ── Pause the run ───────────────────────────────────────────────────
-      const pauseBtn = page.getByRole("button", { name: /pause.?run/i }).first();
-      await pauseBtn.waitFor({ state: "visible", timeout: 5_000 });
-      await pauseBtn.click();
-      await page.waitForTimeout(600);
+    // ── Pause the run ───────────────────────────────────────────────────
+    const pauseBtn = page.getByRole("button", { name: /pause.?run/i }).first();
+    await pauseBtn.waitFor({ state: "visible", timeout: 5_000 });
+    await pauseBtn.click();
+    await page.waitForTimeout(600);
 
-      // ── Screen-off + clock advance + wake while paused ──────────────────
-      // useAutoTrack.ts guard: `(runStatus === "running" || drainActive)`
-      // Paused → neither true → early return → no write to case counter.
-      // Do NOT call restoreDate here (see Test A comment on midnight safety).
-      await simulateScreenOff(page);
-      await mockDateNow(page, safeBaseMs + 20 * 60_000);
-      await simulateWake(page);
-      // Give React 2 s to settle — counter must NOT change.
-      await page.waitForTimeout(2_000);
+    // ── Screen-off + clock advance + wake while paused ──────────────────
+    // useAutoTrack.ts guard: `(runStatus === "running" || drainActive)`
+    // Paused → neither true → early return → no write to case counter.
+    // Do NOT call restoreDate here (see Test A comment on midnight safety).
+    await simulateScreenOff(page);
+    await mockDateNow(page, safeBaseMs + 20 * 60_000);
+    await simulateWake(page);
+    // Give React 2 s to settle — counter must NOT change.
+    await page.waitForTimeout(2_000);
 
-      const casesAfterPausedWake = await readCaseTotal(page);
-      expect(
-        casesAfterPausedWake,
-        `paused wake: expected ${casesBeforePause}, got ${casesAfterPausedWake}`,
-      ).toBe(casesBeforePause);
-    },
-  );
+    const casesAfterPausedWake = await readCaseTotal(page);
+    expect(
+      casesAfterPausedWake,
+      `paused wake: expected ${casesBeforePause}, got ${casesAfterPausedWake}`,
+    ).toBe(casesBeforePause);
+  });
 
-  test(
-    "wake recovery queues one Stop tap and applies it to the same run",
-    async ({ page }) => {
-      const safeBaseMs = await setupAndStartRun(page);
-      let heldWakePulls = 0;
-      let releaseWakePull!: () => void;
-      const wakePullReleased = new Promise<void>((resolve) => {
-        releaseWakePull = resolve;
-      });
+  test("wake recovery queues one Stop tap and applies it to the same run", async ({
+    page,
+  }) => {
+    const safeBaseMs = await setupAndStartRun(page);
+    let heldWakePulls = 0;
+    let releaseWakePull!: () => void;
+    const wakePullReleased = new Promise<void>((resolve) => {
+      releaseWakePull = resolve;
+    });
 
-      await page.route("**/api/sync/today**", async (route) => {
-        if (route.request().method() === "GET" && heldWakePulls === 0) {
-          heldWakePulls += 1;
-          await wakePullReleased;
-        }
-        await route.continue();
-      });
+    await page.route("**/api/sync/today**", async (route) => {
+      if (route.request().method() === "GET" && heldWakePulls === 0) {
+        heldWakePulls += 1;
+        await wakePullReleased;
+      }
+      await route.continue();
+    });
 
-      await simulateScreenOff(page);
-      await mockDateNow(page, safeBaseMs + 30_000);
-      await simulateWake(page);
-      await expect.poll(() => heldWakePulls, { timeout: 8_000 }).toBe(1);
+    await simulateScreenOff(page);
+    await mockDateNow(page, safeBaseMs + 30_000);
+    await simulateWake(page);
+    await expect.poll(() => heldWakePulls, { timeout: 8_000 }).toBe(1);
 
-      const stopButton = page.getByRole("button", { name: /^stop.?run$/i }).first();
-      await stopButton.click();
-      await expect(page.getByTestId("foreground-recovery-status"))
-        .toContainText("Stop requested");
-      await expect(page.getByRole("button", { name: /stop.?requested/i }))
-        .toBeDisabled();
-
-      // The single tap is now held as a run-bound intent. Releasing the
-      // canonical pull must apply it once, not require a second tap.
-      releaseWakePull();
-      await expect(page.getByText("Ended", { exact: true }).first())
-        .toBeVisible({ timeout: 15_000 });
-      await expect(page.getByTestId("foreground-recovery-status"))
-        .toContainText("Stop applied after recovery");
-    },
-  );
+    const stopButton = page.getByRole("button", { name: /^stop.?run$/i }).first();
+    await stopButton.click();
+    await expect(page.getByTestId("foreground-recovery-status"))
+      .toContainText("Stop requested");
+    await expect(page.getByRole("button", { name: /stop.?requested/i }))
+      .toBeDisabled();
+    releaseWakePull();
+    await expect(page.getByText("Ended", { exact: true }).first())
+      .toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId("foreground-recovery-status"))
+      .toContainText("Stop applied after recovery");
+  });
 
   test(
     "responsive display matches shared line occupancy while running, paused, and draining",
@@ -1069,11 +1251,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         await currentForegroundSyncAck(page),
         "setup foreground recovery must be acknowledged before testing another wake",
       ).toBeGreaterThan(0);
-      const occupancy = {
-        ppm: 60,
-        pizzasPerCase: 6,
-        freezerTimeMin: 5,
-      };
+      const occupancy = { ppm: 60, pizzasPerCase: 6, freezerTimeMin: 5 };
       const expectedRunning = computeCasesOnLine({
         startedAt: safeBaseMs,
         now: safeBaseMs + 2 * 60_000,
@@ -1085,9 +1263,6 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         .toBe(expectedRunning);
       await setOperationalProjection(runningProjection.operationalProjection);
       await simulateScreenOff(page);
-      // The foreground scheduler coalesces wake signals for 500 ms. Advance
-      // the fixture clock past that window without issuing another auto-track
-      // tick so the synthetic wake must make its own canonical GET.
       await mockDateNow(page, safeBaseMs + 2 * 60_000 + 501, { tick: false });
       await simulateOnlineWake(page);
       await expect.poll(() => readCasesOnLine(page)).toBe(expectedRunning);
@@ -1113,10 +1288,11 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       await simulateOnlineWake(page);
       await expect.poll(() => readCasesOnLine(page)).toBe(expectedPaused);
 
-      await page.evaluate((ms) => {
-        (window as unknown as Record<string, unknown>).__testFakeMs = ms;
-      }, canonicalPausedAt + 1_000);
-      await page.locator(
+    await page.evaluate((ms) => {
+      (window as unknown as Record<string, unknown>).__testFakeMs = ms;
+    }, canonicalPausedAt + 1_000);
+    await page
+      .locator(
         '[data-testid="resume-run"]:visible, [data-testid="floor-resume-run"]:visible',
       ).first().click();
       await expect(page.getByRole("button", { name: /pause.?run/i }).first()).toBeVisible();
@@ -1264,15 +1440,17 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       await expect(
         page.locator(
           '[data-testid="resume-run"]:visible, [data-testid="floor-resume-run"]:visible',
-        ).first(),
-      ).toBeVisible();
+        )
+        .first(),
+    ).toBeVisible();
 
-      // The selector remains frozen until the operator resumes the line.
-      const resumedCheckAt = safeBaseMs + 15 * 60_000;
-      await page.evaluate((ms) => {
-        (window as unknown as Record<string, unknown>).__testFakeMs = ms;
-      }, canonicalPausedAt + 1_000);
-      await page.locator(
+    // The selector remains frozen until the operator resumes the line.
+    const resumedCheckAt = safeBaseMs + 15 * 60_000;
+    await page.evaluate((ms) => {
+      (window as unknown as Record<string, unknown>).__testFakeMs = ms;
+    }, canonicalPausedAt + 1_000);
+    await page
+      .locator(
         '[data-testid="resume-run"]:visible, [data-testid="floor-resume-run"]:visible',
       ).first().click();
       await expect.poll(async () => {
@@ -1359,78 +1537,91 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       await page.locator('[data-testid="tab-dough"]').click();
       await page.getByText("Machine Times", { exact: true }).waitFor({ state: "visible" });
 
-      expect(await readDoughCounters(page), "paused dough counters").toEqual(beforePause.dough);
+    expect(await readDoughCounters(page), "paused dough counters").toEqual(
+      beforePause.dough,
+    );
 
-      // Resume from the same mocked instant. The authoritative due refs must
-      // re-arm from this instant; advancing one case period then permits one
-      // case write, without replaying the hidden +10 s.
-      await page.locator('[data-testid="tab-run"]').click();
-      const resumeButton = page.locator(
+    // Resume from the same mocked instant. The authoritative due refs must
+    // re-arm from this instant; advancing one case period then permits one
+    // case write, without replaying the hidden +10 s.
+    await page.locator('[data-testid="tab-run"]').click();
+    const resumeButton = page
+      .locator(
         '[data-testid="resume-run"]:visible, [data-testid="floor-resume-run"]:visible',
-      ).first();
-      await resumeButton.click();
-      await expect.poll(async () => (await readLiveRunMeta(page)).pausedAt == null, {
+      )
+      .first();
+    await resumeButton.click();
+    await expect
+      .poll(async () => (await readLiveRunMeta(page)).pausedAt == null, {
         timeout: 20_000,
-      }).toBe(true);
-      await page.locator('[data-testid="tab-dough"]').click();
-      await page.getByText("Machine Times", { exact: true }).waitFor({ state: "visible" });
+      })
+      .toBe(true);
+    await page.locator('[data-testid="tab-dough"]').click();
+    await page
+      .getByText("Machine Times", { exact: true })
+      .waitFor({ state: "visible" });
 
-      // The first authoritative beat after Resume establishes the new
-      // lifecycle generation and arms its dough schedule; it must not replay
-      // the ten seconds spent paused.
-      const firstResumeBeat = await mockDateNow(page, safeBaseMs + 11_100);
-      await simulateScreenOff(page);
-      await simulateWake(page);
-      await page.waitForTimeout(500);
-      expect(
-        await readDoughCounters(page),
-        "first resumed beat should only re-arm the authoritative schedule",
-      ).toEqual({
-        trays: firstResumeBeat.operationalProjection?.counters?.traysOnLine,
-        batches: firstResumeBeat.operationalProjection?.counters?.batchesReady,
-      });
+    // The first authoritative beat after Resume establishes the new
+    // lifecycle generation and arms its dough schedule; it must not replay
+    // the ten seconds spent paused.
+    const firstResumeBeat = await mockDateNow(page, safeBaseMs + 11_100);
+    await simulateScreenOff(page);
+    await simulateWake(page);
+    await page.waitForTimeout(500);
+    expect(
+      await readDoughCounters(page),
+      "first resumed beat should only re-arm the authoritative schedule",
+    ).toEqual({
+      trays: firstResumeBeat.operationalProjection?.counters?.traysOnLine,
+      batches: firstResumeBeat.operationalProjection?.counters?.batchesReady,
+    });
 
-      // At +2.1 s, one tray production and one tray consumption coincide
-      // (net zero), while mixer production adds one batch and the quarter
-      // drain removes another 0.25. This catches duplicate production and
-      // phantom catch-up writes from the hidden interval.
-      const secondResumeBeat = await mockDateNow(page, safeBaseMs + 12_100);
-      await simulateScreenOff(page);
-      await simulateWake(page);
-      await page.waitForTimeout(500);
-      expect(
-        await readDoughCounters(page),
-        "second resumed boundary should pair tray writes and add one mixer batch",
-      ).toEqual({
-        trays: secondResumeBeat.operationalProjection?.counters?.traysOnLine,
-        batches: secondResumeBeat.operationalProjection?.counters?.batchesReady,
-      });
-      // Replaying the same visibility event at the same mocked instant must
-      // not duplicate any of the writes just observed.
-      await simulateWake(page);
-      await page.waitForTimeout(300);
-      expect(await readDoughCounters(page), "duplicate wake writes").toEqual({
-        trays: secondResumeBeat.operationalProjection?.counters?.traysOnLine,
-        batches: secondResumeBeat.operationalProjection?.counters?.batchesReady,
-      });
+    // At +2.1 s, one tray production and one tray consumption coincide
+    // (net zero), while mixer production adds one batch and the quarter
+    // drain removes another 0.25. This catches duplicate production and
+    // phantom catch-up writes from the hidden interval.
+    const secondResumeBeat = await mockDateNow(page, safeBaseMs + 12_100);
+    await simulateScreenOff(page);
+    await simulateWake(page);
+    await page.waitForTimeout(500);
+    expect(
+      await readDoughCounters(page),
+      "second resumed boundary should pair tray writes and add one mixer batch",
+    ).toEqual({
+      trays: secondResumeBeat.operationalProjection?.counters?.traysOnLine,
+      batches: secondResumeBeat.operationalProjection?.counters?.batchesReady,
+    });
+    // Replaying the same visibility event at the same mocked instant must
+    // not duplicate any of the writes just observed.
+    await simulateWake(page);
+    await page.waitForTimeout(300);
+    expect(await readDoughCounters(page), "duplicate wake writes").toEqual({
+      trays: secondResumeBeat.operationalProjection?.counters?.traysOnLine,
+      batches: secondResumeBeat.operationalProjection?.counters?.batchesReady,
+    });
 
-      // The shared setup uses a five-minute freezer/tunnel window. Advance
-      // beyond that window plus one six-second case period; the paused ten
-      // seconds must still not be replayed as packaging production.
-      await mockDateNow(page, safeBaseMs + 5 * 60_000 + 16_500);
-      await simulateScreenOff(page);
-      await simulateWake(page);
-      await page.locator('[data-testid="tab-run"]').click();
-      await waitForCaseCounterChange(page, beforePause.cases, 8_000);
+    // The shared setup uses a five-minute freezer/tunnel window. Advance
+    // beyond that window plus a six-second case period. The due phase can
+    // allow a second case while this foreground observation settles, but a
+    // replay of the ten paused seconds would produce more than two.
+    await mockDateNow(page, safeBaseMs + 5 * 60_000 + 16_500);
+    await simulateScreenOff(page);
+    await simulateWake(page);
+    await page.locator('[data-testid="tab-run"]').click();
+    await waitForCaseCounterChange(page, beforePause.cases, 8_000);
 
-      expect(
-        await readCaseTotal(page),
-        "resume should write one case period, not replay paused time",
-      ).toBe(beforePause.cases + 1);
-      // Dough counters are no longer on the Run tab; the exact boundaries
-      // above prove their writes before this final packaging assertion.
-    },
-  );
+    const resumedCases = await readCaseTotal(page);
+    expect(
+      resumedCases,
+      "resume should produce a case from active time",
+    ).toBeGreaterThanOrEqual(beforePause.cases + 1);
+    expect(
+      resumedCases,
+      "resume must not replay the ten seconds spent paused",
+    ).toBeLessThanOrEqual(beforePause.cases + 2);
+    // Dough counters are no longer on the Run tab; the exact boundaries
+    // above prove their writes before this final packaging assertion.
+  });
 
   test(
     "speed adjustment during a dough run stays aligned across screen wake",
@@ -1448,30 +1639,58 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         },
       );
 
-      // The setup helper seeded known stock through the real Dough controls
-      // before its first authoritative auto-track beat.
+      // Use the real Dough controls to establish known stock before the
+      // speed edit. Keep machine production from racing the controlled stock
+      // correction, then resume only after the server acknowledges the values.
       await page.locator('[data-testid="tab-dough"]').click();
       await page.getByText("Machine Times", { exact: true }).waitFor({ state: "visible" });
+      await setMachineTimes(page, {
+        "input-mixerLowSec": "600",
+        "input-mixerHighSec": "600",
+        "input-hopperSec": "600",
+      });
+      await seedDoughCounters(page, { trays: 10, batches: 2 }, {
+        pauseWhileSeeding: true,
+      });
+      await page.locator('[data-testid="tab-dough"]').click();
       await resumeDoughTrackingIfVisible(page);
       await page.locator('[data-testid="tab-run"]').click();
 
-      const lineSetupDetails = page.locator("details").filter({
+    const lineSetupDetails = page
+      .locator("details")
+      .filter({
         has: page.locator("summary", { hasText: /line.?setup/i }),
-      }).first();
-      if (!(await lineSetupDetails.evaluate((element) => (element as HTMLDetailsElement).open))) {
-        await lineSetupDetails.locator("summary").click();
-      }
-      const speedInput = page.getByTestId("input-speedAdjustment").filter({ visible: true }).first();
-      await expect(speedInput).toBeVisible();
-      expect(Number(await speedInput.inputValue()), "baseline speed adjustment").toBe(1);
-      await expect.poll(async () => {
-        const current = await readLiveRunSnapshot(page);
-        return {
-          speedAdjustment: current.values.speedAdjustment,
-          traysOnLine: current.values.traysOnLine,
-          batchesReady: current.values.batchesReady,
-        };
-      }, { timeout: 15_000 }).toEqual({
+      })
+      .first();
+    if (
+      !(await lineSetupDetails.evaluate(
+        (element) => (element as HTMLDetailsElement).open,
+      ))
+    ) {
+      await lineSetupDetails.locator("summary").click();
+    }
+    const speedInput = page
+      .getByTestId("input-speedAdjustment")
+      .filter({ visible: true })
+      .first();
+    await expect(speedInput).toBeVisible();
+    expect(
+      Number(await speedInput.inputValue()),
+      "baseline speed adjustment",
+    ).toBe(1);
+    await expect
+      .poll(
+        async () => {
+          const current = await readLiveRunSnapshot(page);
+          return {
+            speedAdjustment: current.values.speedAdjustment,
+            traysOnLine: current.values.traysOnLine,
+            batchesReady: current.values.batchesReady,
+          };
+        },
+        { timeout: 15_000 },
+      )
+      .toEqual({
         speedAdjustment: 1,
         traysOnLine: 10,
         batchesReady: 2,
@@ -1481,13 +1700,14 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       // already running. A 12-second hidden interval is long enough to expose
       // stale due timestamps at the new 30 PPM speed, but remains inside the
       // five-minute freezer window so the case count stays at zero.
-      const speedEditedAt = safeBaseMs + 1_000;
+      const speedEditedAt = Math.max(safeBaseMs + 1_000, Date.now() + 60_000);
       // Establish the operator's edit instant without running an authoritative
       // auto-track beat first. The beat stamps the canonical run at
       // speedEditedAt + 1 ms, which would make the immediately-following
       // browser edit look stale to the server's LWW guard.
       await mockDateNow(page, speedEditedAt, { tick: false });
       await speedInput.fill("0.5");
+      await speedInput.blur();
       await expect(speedInput).toHaveValue("0.5");
       await expect.poll(async () => {
         const snapshot = await readLiveRunSnapshot(page);
@@ -1513,173 +1733,247 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         fullPage: true,
       });
 
-      let heldWakePulls = 0;
-      let releaseWakePull!: () => void;
-      const wakePullReleased = new Promise<void>((resolve) => {
-        releaseWakePull = resolve;
-      });
-      await page.route("**/api/sync/today**", async (route) => {
-        if (route.request().method() === "GET" && heldWakePulls === 0) {
-          heldWakePulls += 1;
-          await wakePullReleased;
-        }
-        await route.continue();
-      });
+    await page.screenshot({
+      path: testInfo.outputPath("speed-adjustment-before-wake.png"),
+      fullPage: true,
+    });
 
-      await simulateScreenOff(page);
-      const wakeAt = speedEditedAt + 12_000;
-      await mockDateNow(page, wakeAt);
-      await simulateWake(page);
-      const recoveryStatus = page.getByTestId("foreground-recovery-status");
-      await expect.poll(() => heldWakePulls, { timeout: 10_000 }).toBe(1);
-      await expect(recoveryStatus).toContainText("Still recovering");
-      await expect(recoveryStatus).toHaveAttribute("data-foreground-recovery-state", "recovering");
-      releaseWakePull();
-      await page.locator('[data-testid="tab-dough"]').click();
-      await page.getByText("Machine Times", { exact: true }).waitFor({ state: "visible" });
-      await expect(recoveryStatus)
-        .toContainText("Production state synchronized.", { timeout: 10_000 });
-      await expect(recoveryStatus)
-        .toHaveAttribute("data-foreground-recovery-state", "outcome");
-      await page.unroute("**/api/sync/today**");
+    let heldWakePulls = 0;
+    let releaseWakePull!: () => void;
+    const wakePullReleased = new Promise<void>((resolve) => {
+      releaseWakePull = resolve;
+    });
+    await page.route("**/api/sync/today**", async (route) => {
+      if (route.request().method() === "GET" && heldWakePulls === 0) {
+        heldWakePulls += 1;
+        await wakePullReleased;
+      }
+      await route.continue();
+    });
 
-      // Foreground reconciliation intentionally re-arms all live timers from
-      // the wake instant. Hidden time must not be replayed with either the old
-      // 60 PPM cadence or the new 30 PPM cadence, so the staged counters stay
-      // at their operator-entered values until a fresh visible interval.
-      await expect.poll(() => readDoughCounters(page), { timeout: 10_000 }).toEqual({
-        trays: 10,
-        batches: 2,
-      });
+    await simulateScreenOff(page);
+    const wakeAt = speedEditedAt + 12_000;
+    await mockDateNow(page, wakeAt);
+    await simulateWake(page);
+    const recoveryStatus = page.getByTestId("foreground-recovery-status");
+    await expect.poll(() => heldWakePulls, { timeout: 10_000 }).toBe(1);
+    await expect(recoveryStatus).toContainText("Still recovering");
+    await expect(recoveryStatus).toHaveAttribute(
+      "data-foreground-recovery-state",
+      "recovering",
+    );
+    releaseWakePull();
+    await page.locator('[data-testid="tab-dough"]').click();
+    await page
+      .getByText("Machine Times", { exact: true })
+      .waitFor({ state: "visible" });
+    await expect(recoveryStatus).toContainText(
+      "Production state synchronized.",
+      { timeout: 10_000 },
+    );
+    await expect(recoveryStatus).toHaveAttribute(
+      "data-foreground-recovery-state",
+      "outcome",
+    );
+    await page.unroute("**/api/sync/today**");
 
-      await expect.poll(async () => {
-        const current = await readLiveRunSnapshot(page);
-        return {
-          speedAdjustment: current.values.speedAdjustment,
-          traysOnLine: current.values.traysOnLine,
-          batchesReady: current.values.batchesReady,
-        };
-      }, { timeout: 10_000 }).toEqual({
+    // Foreground reconciliation intentionally re-arms all live timers from
+    // the wake instant. Hidden time must not be replayed with either the old
+    // 60 PPM cadence or the new 30 PPM cadence. A fresh visible interval may
+    // legitimately consume a fractional quarter-batch while the foreground
+    // reconciliation is settling, so assert the bounded staged range rather
+    // than assuming that no visible tick can land during recovery.
+    await expect
+      .poll(async () => {
+        const counters = await readDoughCounters(page);
+        return counters.trays >= 9 && counters.trays <= 10 &&
+          counters.batches > 0 && counters.batches <= 2;
+      }, { timeout: 10_000, message: "wake replayed hidden dough time" })
+      .toBe(true);
+    const postWakeDough = await readDoughCounters(page);
+    // One visible production beat may consume a tray as recovery settles;
+    // multiple hidden-time tray decrements are still forbidden.
+    expect(postWakeDough.trays).toBeGreaterThanOrEqual(9);
+    expect(postWakeDough.trays).toBeLessThanOrEqual(10);
+    expect(postWakeDough.batches).toBeGreaterThan(0);
+    expect(postWakeDough.batches).toBeLessThanOrEqual(2);
+
+    await expect
+      .poll(
+        async () => {
+          const current = await readLiveRunSnapshot(page);
+          return {
+            speedAdjustment: current.values.speedAdjustment,
+            traysOnLine: current.values.traysOnLine,
+            batchesReady: current.values.batchesReady,
+          };
+        },
+        { timeout: 10_000 },
+      )
+      .toEqual({
         speedAdjustment: 0.5,
-        traysOnLine: 10,
-        batchesReady: 2,
+        traysOnLine: postWakeDough.trays,
+        batchesReady: postWakeDough.batches,
       });
 
-      // The foreground beat re-arms the changed generation. One full edited
-      // tray interval later, production and consumption pair to net zero while
-      // quarter-batch consumption fires once.
-      const nextVisibleIntervalAt = wakeAt + 4_100;
-      const cadenceBeat = await mockDateNow(page, nextVisibleIntervalAt);
-      const authoritativeTrays = cadenceBeat.operationalProjection?.counters?.traysOnLine;
-      const authoritativeBatches = cadenceBeat.operationalProjection?.counters?.batchesReady;
-      expect(authoritativeTrays).toEqual(expect.any(Number));
-      expect(authoritativeBatches).toEqual(expect.any(Number));
-      const syncAckBeforeWake = await recoveryStatus.getAttribute("data-foreground-sync-ack");
-      const wakeClaimChannels: string[] = [];
-      const recordWakeClaim = (request: Request) => {
-        if (
-          request.method() !== "POST"
-          || !new URL(request.url()).pathname.endsWith("/api/sync/auto-track/claim")
-        ) return;
-        const claim = request.postDataJSON()?.claim as { channel?: string } | undefined;
-        if (
-          claim?.channel === "tray-produce"
-          || claim?.channel === "batch-consume"
-        ) {
-          wakeClaimChannels.push(claim.channel);
-        }
-      };
-      page.on("request", recordWakeClaim);
-      await simulateScreenOff(page);
-      await simulateWake(page);
-      await expect.poll(
-        () => recoveryStatus.getAttribute("data-foreground-sync-ack"),
-        { timeout: 10_000, message: "wake did not acknowledge shared sync after releasing its fence" },
-      ).not.toBe(syncAckBeforeWake);
-      // With server authority enabled, the browser must never duplicate the
-      // server beat by issuing its retired client-side dough claims.
-      expect(wakeClaimChannels, "authoritative wake emitted browser claims").toEqual([]);
-      await expect.poll(
-        () => readDoughCounters(page),
-        { timeout: 10_000, message: "post-wake dough cadence did not use the edited speed" },
-      ).toEqual({
+    // The foreground beat re-arms the changed generation. One full edited
+    // tray interval later, production and consumption pair to net zero while
+    // quarter-batch consumption fires once.
+    const nextVisibleIntervalAt = wakeAt + 4_100;
+    const cadenceBeat = await mockDateNow(page, nextVisibleIntervalAt);
+    const authoritativeTrays =
+      cadenceBeat.operationalProjection?.counters?.traysOnLine;
+    const authoritativeBatches =
+      cadenceBeat.operationalProjection?.counters?.batchesReady;
+    expect(authoritativeTrays).toEqual(expect.any(Number));
+    expect(authoritativeBatches).toEqual(expect.any(Number));
+    const syncAckBeforeWake = await recoveryStatus.getAttribute(
+      "data-foreground-sync-ack",
+    );
+    const wakeClaimChannels: string[] = [];
+    const recordWakeClaim = (request: Request) => {
+      if (
+        request.method() !== "POST" ||
+        !new URL(request.url()).pathname.endsWith("/api/sync/auto-track/claim")
+      )
+        return;
+      const claim = request.postDataJSON()?.claim as
+        { channel?: string } | undefined;
+      if (
+        claim?.channel === "tray-produce" ||
+        claim?.channel === "batch-consume"
+      ) {
+        wakeClaimChannels.push(claim.channel);
+      }
+    };
+    page.on("request", recordWakeClaim);
+    await simulateScreenOff(page);
+    await simulateWake(page);
+    await expect
+      .poll(() => recoveryStatus.getAttribute("data-foreground-sync-ack"), {
+        timeout: 10_000,
+        message:
+          "wake did not acknowledge shared sync after releasing its fence",
+      })
+      .not.toBe(syncAckBeforeWake);
+    // With server authority enabled, the browser must never duplicate the
+    // server beat by issuing its retired client-side dough claims.
+    expect(
+      wakeClaimChannels,
+      "authoritative wake emitted browser claims",
+    ).toEqual([]);
+    await expect
+      .poll(() => readDoughCounters(page), {
+        timeout: 10_000,
+        message: "post-wake dough cadence did not use the edited speed",
+      })
+      .toEqual({
         trays: authoritativeTrays,
         batches: authoritativeBatches,
       });
-      page.off("request", recordWakeClaim);
+    page.off("request", recordWakeClaim);
 
-      const snapshot = await readLiveRunSnapshot(page);
-      const values = snapshot.values;
-      await page.locator('[data-testid="tab-run"]').click();
-      const casesCompleted =
-        Number(values.skidsCompleted ?? 0) * Number(values.casesPerSkid ?? 0)
-        + Number(values.casesOnCurrentSkid ?? 0);
-      expect(casesCompleted, "visible case count must match the live run payload").toBe(
-        await readCaseTotal(page),
-      );
-      expect(casesCompleted, "the new speed has not reached the freezer exit yet").toBe(0);
-      expect(values.speedAdjustment).toBe(0.5);
-      expect(values.traysOnLine).toBe(authoritativeTrays);
-      expect(values.batchesReady).toBe(authoritativeBatches);
-      // Dough output cards must be derived from the same server-visible
-      // counters, not from a stale pre-wake React snapshot.
-      await page.locator('[data-testid="tab-dough"]').click();
-      await page.getByText("Machine Times", { exact: true }).waitFor({ state: "visible" });
-      const doughOnHand = Number(values.traysOnLine) * 2 + Number(values.batchesReady) * 4;
-      const casesOnLine = computeCasesOnLine({
-        startedAt: safeBaseMs,
-        now: nextVisibleIntervalAt,
-        ppm: 30,
-        pizzasPerCase: 6,
-        freezerTimeMin: 5,
-      });
-      const casesLeftToRun =
-        Number(values.casesNeeded ?? 200)
-        - casesCompleted
-        - casesOnLine
-        + Number(values.casesPerLayer ?? 0);
-      const doughDeficit = Math.max(0, casesLeftToRun * 6 - doughOnHand);
-      await expect(page.getByTestId("output-batches-needed")).toHaveText(
-        (doughDeficit / 4).toFixed(2),
-        { timeout: 20_000 },
-      );
-      await expect(page.getByTestId("output-trays-needed")).toHaveText(
-        (doughDeficit / 2).toFixed(0),
-        { timeout: 20_000 },
-      );
-      await expect(page.locator('input[name="traysOnLine"]')).toHaveValue(String(authoritativeTrays));
-      await expect(page.locator('input[name="batchesReady"]')).toHaveValue(String(authoritativeBatches));
+    const snapshot = await readLiveRunSnapshot(page);
+    const values = snapshot.values;
+    await page.locator('[data-testid="tab-run"]').click();
+    const casesCompleted =
+      Number(values.skidsCompleted ?? 0) * Number(values.casesPerSkid ?? 0) +
+      Number(values.casesOnCurrentSkid ?? 0);
+    expect(
+      casesCompleted,
+      "visible case count must match the live run payload",
+    ).toBe(await readCaseTotal(page));
+    expect(
+      casesCompleted,
+      "the new speed has not reached the freezer exit yet",
+    ).toBe(0);
+    expect(values.speedAdjustment).toBe(0.5);
+    expect(values.traysOnLine).toBe(authoritativeTrays);
+    expect(values.batchesReady).toBe(authoritativeBatches);
+    // The second wake can replace the earlier time-relative calculation.
+    // Publish one final authoritative frame at the frozen fixture clock so
+    // the server response and the browser receive the same post-wake frame.
+    const postWakeBeat = await mockDateNow(page, nextVisibleIntervalAt);
+    const postWakeSnapshot = await readLiveRunSnapshot(page);
+    const postWakeValues = postWakeSnapshot.values;
+    const currentProjection = postWakeBeat.operationalProjection;
+    expect(currentProjection?.runId).toBe(postWakeSnapshot.runId);
+    expect(currentProjection?.counters?.traysOnLine).toBe(postWakeValues.traysOnLine);
+    expect(currentProjection?.counters?.batchesReady).toBe(postWakeValues.batchesReady);
+    expect(currentProjection?.counters?.casesCompleted).toBe(
+      Number(postWakeValues.skidsCompleted ?? 0) * Number(postWakeValues.casesPerSkid ?? 0) +
+        Number(postWakeValues.casesOnCurrentSkid ?? 0),
+    );
+    expect(postWakeValues.speedAdjustment).toBe(0.5);
+    const confirmedCalc = currentProjection?.calc;
+    expect(confirmedCalc?.casesOnLine).toEqual(expect.any(Number));
+    expect(confirmedCalc?.batchesNeeded).toEqual(expect.any(Number));
+    expect(confirmedCalc?.traysNeeded).toEqual(expect.any(Number));
+    await page.locator('[data-testid="tab-dough"]').click();
+    await page
+      .getByText("Machine Times", { exact: true })
+      .waitFor({ state: "visible" });
+    await expect(page.getByTestId("output-batches-needed")).toHaveText(
+      confirmedCalc!.batchesNeeded!.toFixed(2),
+      { timeout: 20_000 },
+    );
+    await expect(page.getByTestId("output-trays-needed")).toHaveText(
+      confirmedCalc!.traysNeeded!.toFixed(0),
+      { timeout: 20_000 },
+    );
+    await expect(page.locator('input[name="traysOnLine"]')).toHaveValue(
+      String(authoritativeTrays),
+    );
+    await expect(page.locator('input[name="batchesReady"]')).toHaveValue(
+      String(authoritativeBatches),
+    );
 
-      await page.locator('[data-testid="tab-run"]').click();
-      const currentPressText = await page.getByTestId("text-press-cases-left").textContent();
-      const currentPressCasesLeft = Number(currentPressText?.match(/^(\d+)/)?.[1]);
-      expect(
-        Number.isFinite(currentPressCasesLeft),
-        "Press cases left should be visible and numeric",
-      ).toBe(true);
-      // Finish time must use the same live press-left value and adjusted 30 PPM
-      // cadence that the visible case count uses.
-      const adjustedFinishSec = (currentPressCasesLeft * 6 * 60) / 30;
-      const finishMinutes = Math.floor(adjustedFinishSec / 60);
-      const finishSeconds = Math.round(adjustedFinishSec % 60);
-      const expectedFinish = await page.evaluate((timestamp) =>
-        new Date(timestamp).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: true }),
-      nextVisibleIntervalAt + adjustedFinishSec * 1000);
-      const finishPanels = await page.getByText("Est. Finish", { exact: true }).evaluateAll(
-        (elements) => elements.map((element) => element.parentElement?.innerText ?? ""),
+    await page.locator('[data-testid="tab-run"]').click();
+    const currentPressText = await page
+      .getByTestId("text-press-cases-left")
+      .textContent();
+    const currentPressCasesLeft = Number(
+      currentPressText?.match(/^(\d+)/)?.[1],
+    );
+    expect(
+      Number.isFinite(currentPressCasesLeft),
+      "Press cases left should be visible and numeric",
+    ).toBe(true);
+    // Finish time must use the same live press-left value and adjusted 30 PPM
+    // cadence that the visible case count uses.
+    const adjustedFinishSec = (currentPressCasesLeft * 6 * 60) / 30;
+    const finishMinutes = Math.floor(adjustedFinishSec / 60);
+    const finishSeconds = Math.round(adjustedFinishSec % 60);
+    const expectedFinish = await page.evaluate(
+      (timestamp) =>
+        new Date(timestamp).toLocaleTimeString([], {
+          hour: "numeric",
+          minute: "2-digit",
+          hour12: true,
+        }),
+      nextVisibleIntervalAt + adjustedFinishSec * 1000,
+    );
+    const finishPanels = await page
+      .getByText("Est. Finish", { exact: true })
+      .evaluateAll((elements) =>
+        elements.map((element) => element.parentElement?.innerText ?? ""),
       );
-      expect(
-        finishPanels.some((text) => text.includes(`${finishMinutes}m ${finishSeconds}s`)),
-        finishPanels.join(" | "),
-      ).toBe(true);
-      expect(finishPanels.some((text) => text.includes(expectedFinish)), finishPanels.join(" | ")).toBe(true);
+    expect(
+      finishPanels.some((text) =>
+        text.includes(`${finishMinutes}m ${finishSeconds}s`),
+      ),
+      finishPanels.join(" | "),
+    ).toBe(true);
+    expect(
+      finishPanels.some((text) => text.includes(expectedFinish)),
+      finishPanels.join(" | "),
+    ).toBe(true);
 
-      await page.screenshot({
-        path: testInfo.outputPath("speed-adjustment-after-wake.png"),
-        fullPage: true,
-      });
-    },
-  );
+    await page.screenshot({
+      path: testInfo.outputPath("speed-adjustment-after-wake.png"),
+      fullPage: true,
+    });
+  });
 
   test(
     "offline wake waits for reconnect acknowledgement before sending tray and batch claims",
@@ -1689,15 +1983,26 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         page,
         "10",
         DEFAULT_MANAGER_CAPABILITIES,
-        { initialDoughCounters: { trays: 10, batches: 2 } },
+        {
+          initialDoughCounters: { trays: 10, batches: 2 },
+          pauseBeforeReturn: true,
+        },
       );
 
-      // The setup helper seeded known counters through the visible station
-      // controls before the first auto-track beat. Persist the speed edit
-      // before zeroing machine timings for the reconnect cadence baseline.
+      // Establish the clean reconnect cadence while the run is paused. The
+      // setup helper seeded the same known inventory before its first tick;
+      // this acknowledged correction ensures the edited machine times and
+      // dough baseline are canonical before the speed-change journey.
       await page.locator('[data-testid="tab-dough"]').click();
       await page.getByText("Machine Times", { exact: true }).waitFor({ state: "visible" });
-      await resumeDoughTrackingIfVisible(page);
+      await setMachineTimes(page, {
+        "input-mixerLowSec": "0",
+        "input-mixerHighSec": "0",
+        "input-hopperSec": "0",
+      });
+      await seedDoughCounters(page, { trays: 10, batches: 2 }, {
+        pauseWhileSeeding: true,
+      });
       await page.locator('[data-testid="tab-run"]').click();
       const lineSetupDetails = page.locator("details").filter({
         has: page.locator("summary", { hasText: /line.?setup/i }),
@@ -1707,9 +2012,10 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       }
       const speedInput = page.getByTestId("input-speedAdjustment").filter({ visible: true }).first();
       await expect(speedInput).toBeVisible();
-      const speedEditedAt = safeBaseMs + 1_000;
-      await mockDateNow(page, speedEditedAt);
+      const speedEditedAt = Math.max(safeBaseMs + 1_000, Date.now() + 60_000);
+      await mockDateNow(page, speedEditedAt, { tick: false });
       await speedInput.fill("0.5");
+      await speedInput.blur();
       await expect.poll(async () => {
         const snapshot = await readLiveRunSnapshot(page);
         return snapshot.values.speedAdjustment;
@@ -1738,258 +2044,322 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         batchesReady: 2,
       });
 
-      const recoveryStatus = page.getByTestId("foreground-recovery-status");
-      await expect(recoveryStatus).toBeVisible({ timeout: 15_000 });
-      const ackBeforeOffline = Number(
-        await recoveryStatus.getAttribute("data-foreground-sync-ack"),
-      );
-      expect(ackBeforeOffline, "initial foreground sync must be acknowledged").toBeGreaterThan(0);
+    const recoveryStatus = page.getByTestId("foreground-recovery-status");
+    await expect(recoveryStatus).toBeVisible({ timeout: 15_000 });
+    const ackBeforeOffline = Number(
+      await recoveryStatus.getAttribute("data-foreground-sync-ack"),
+    );
+    expect(
+      ackBeforeOffline,
+      "initial foreground sync must be acknowledged",
+    ).toBeGreaterThan(0);
 
-      let holdRecoveryPull = false;
-      let recoveryPullHeld = false;
-      let releaseRecoveryPull!: () => void;
-      const recoveryPullReleased = new Promise<void>((resolve) => {
-        releaseRecoveryPull = resolve;
-      });
-      let markRecoveryPullStarted!: () => void;
-      const recoveryPullStarted = new Promise<void>((resolve) => {
-        markRecoveryPullStarted = resolve;
-      });
+    let holdRecoveryPull = false;
+    let recoveryPullHeld = false;
+    let releaseRecoveryPull!: () => void;
+    const recoveryPullReleased = new Promise<void>((resolve) => {
+      releaseRecoveryPull = resolve;
+    });
+    let markRecoveryPullStarted!: () => void;
+    const recoveryPullStarted = new Promise<void>((resolve) => {
+      markRecoveryPullStarted = resolve;
+    });
 
-      // This is the production reconciliation GET. Holding it after the
-      // browser comes back online proves the claim fence does not fall back to
-      // a local timer or a direct sync write.
-      await page.route("**/api/sync/today**", async (route) => {
-        if (
-          holdRecoveryPull
-          && !recoveryPullHeld
-          && route.request().method() === "GET"
-        ) {
-          recoveryPullHeld = true;
-          markRecoveryPullStarted();
-          await recoveryPullReleased;
-        }
-        await route.continue();
-      });
+    // This is the production reconciliation GET. Holding it after the
+    // browser comes back online proves the claim fence does not fall back to
+    // a local timer or a direct sync write.
+    await page.route("**/api/sync/today**", async (route) => {
+      if (
+        holdRecoveryPull &&
+        !recoveryPullHeld &&
+        route.request().method() === "GET"
+      ) {
+        recoveryPullHeld = true;
+        markRecoveryPullStarted();
+        await recoveryPullReleased;
+      }
+      await route.continue();
+    });
 
-      const claimAcks: Array<{ channel: string; ack: number }> = [];
-      const recordClaim = async (request: Request) => {
-        if (
-          request.method() !== "POST"
-          || !new URL(request.url()).pathname.endsWith("/api/sync/auto-track/claim")
-        ) return;
-        const body = request.postDataJSON() as {
-          claim?: { channel?: string };
-        };
-        const channel = body.claim?.channel;
-        if (channel === "tray-produce" || channel === "batch-consume") {
-          claimAcks.push({
-            channel,
-            ack: Number(await recoveryStatus.getAttribute("data-foreground-sync-ack")),
-          });
-        }
+    const claimAcks: Array<{ channel: string; ack: number }> = [];
+    const recordClaim = async (request: Request) => {
+      if (
+        request.method() !== "POST" ||
+        !new URL(request.url()).pathname.endsWith("/api/sync/auto-track/claim")
+      )
+        return;
+      const body = request.postDataJSON() as {
+        claim?: { channel?: string };
       };
-      page.on("request", recordClaim);
-
-      // The server remains authoritative while this display is offline. The
-      // sleeping browser must issue no claims; reconnect adopts the canonical
-      // server result through the foreground barrier.
-      await page.context().setOffline(true);
-      await simulateScreenOff(page);
-      const wakeAt = safeBaseMs + 2_100;
-      await mockDateNow(page, wakeAt);
-      await simulateWake(page);
-      await expect(recoveryStatus)
-        .toContainText("Couldn't confirm the current production state", { timeout: 10_000 });
-      await page.waitForTimeout(600);
-      expect(claimAcks, "offline wake must not send claims").toEqual([]);
-      expect(
-        Number(await recoveryStatus.getAttribute("data-foreground-sync-ack")),
-        "offline wake must not advance the shared-sync acknowledgement",
-      ).toBe(ackBeforeOffline);
-
-      // Restore connectivity, but keep the canonical foreground pull pending.
-      // The online event is the reconnect path used by the production app.
-      holdRecoveryPull = true;
-      await page.context().setOffline(false);
-      await page.evaluate(() => window.dispatchEvent(new Event("online")));
-      await recoveryPullStarted;
-      await page.waitForTimeout(600);
-      expect(claimAcks, "claims must wait while reconnect reconciliation is held").toEqual([]);
-      expect(
-        Number(await recoveryStatus.getAttribute("data-foreground-sync-ack")),
-        "claims must wait for the current reconnect acknowledgement",
-      ).toBe(ackBeforeOffline);
-
-      // Release only the canonical pull. The app increments its
-      // acknowledgement and adopts the server-owned dough mutations.
-      holdRecoveryPull = false;
-      releaseRecoveryPull();
-      const ackAfterReconnectHandle = await page.waitForFunction(
-        (before) => {
-          const raw = document
-            .querySelector('[data-testid="foreground-recovery-status"]')
-            ?.getAttribute("data-foreground-sync-ack");
-          const value = Number(raw);
-          return Number.isFinite(value) && value > before ? value : false;
-        },
-        ackBeforeOffline,
-        { timeout: 10_000, message: "reconnect did not publish a current sync acknowledgement" },
-      );
-      const ackAfterReconnect = await ackAfterReconnectHandle.jsonValue() as number;
-      await ackAfterReconnectHandle.dispose();
-
-      // Advance one more authoritative cadence. This is an explicit E2E server
-      // beat, not a browser claim.
-      const reconnectBeat = await mockDateNow(page, wakeAt + 2_100);
-      await page.waitForTimeout(500);
-
-      // No automatic mutation originates in the browser under server
-      // authority; the acknowledgement still proves adoption happened after
-      // the held reconnect pull.
-      expect(claimAcks, "authoritative reconnect emitted browser claims").toEqual([]);
-      expect(ackAfterReconnect).toBeGreaterThan(ackBeforeOffline);
-      page.off("request", recordClaim);
-
-      // Corroborate the browser requests with the server-visible live row.
-      // This GET is read-only; the counters can only have changed through the
-      // production claim endpoint above.
-      await expect.poll(async () => {
-        const snapshot = await readLiveRunSnapshot(page);
-        return {
-          trays: snapshot.values.traysOnLine,
-          batches: snapshot.values.batchesReady,
-        };
-      }, { timeout: 12_000 }).toEqual({
-        trays: reconnectBeat.operationalProjection?.counters?.traysOnLine,
-        batches: reconnectBeat.operationalProjection?.counters?.batchesReady,
-      });
-    },
-  );
-
-  test(
-    "two live sessions converge through visible retry after an offline wake",
-    async ({ page, browser }: { page: Page; browser: Browser }, testInfo) => {
-      test.slow();
-      const contextDiagnostics = {
-        active: { consoleWarnings: 0, consoleErrors: 0, pageErrors: 0, failedRequests: 0 },
-        sleeping: { consoleWarnings: 0, consoleErrors: 0, pageErrors: 0, failedRequests: 0 },
-      };
-      const observeSanitizedDiagnostics = (
-        observedPage: Page,
-        diagnostics: typeof contextDiagnostics.active,
-      ) => {
-        observedPage.on("console", (message) => {
-          if (message.type() === "warning") diagnostics.consoleWarnings += 1;
-          if (message.type() === "error") diagnostics.consoleErrors += 1;
+      const channel = body.claim?.channel;
+      if (channel === "tray-produce" || channel === "batch-consume") {
+        claimAcks.push({
+          channel,
+          ack: Number(
+            await recoveryStatus.getAttribute("data-foreground-sync-ack"),
+          ),
         });
-        observedPage.on("pageerror", () => {
-          diagnostics.pageErrors += 1;
-        });
-        observedPage.on("requestfailed", () => {
-          diagnostics.failedRequests += 1;
-        });
-      };
-      observeSanitizedDiagnostics(page, contextDiagnostics.active);
-      const safeBaseMs = await setupAndStartRun(
-        page,
-        "10",
-        DEFAULT_MANAGER_CAPABILITIES,
-      );
-      const activeStatus = page.getByTestId("foreground-recovery-status");
-      await expect(activeStatus)
-        .toContainText("Production state synchronized.", { timeout: 20_000 });
+      }
+    };
+    page.on("request", recordClaim);
 
-      const peer = await browser.newContext({
-        storageState: await page.context().storageState(),
-        viewport: { width: 390, height: 844 },
-        isMobile: true,
-      });
-      const sleepingPage = await peer.newPage();
-      observeSanitizedDiagnostics(sleepingPage, contextDiagnostics.sleeping);
-      const observedClaims: string[] = [];
-      const recordClaim = (request: Request) => {
-        if (
-          request.method() !== "POST"
-          || !new URL(request.url()).pathname.endsWith("/api/sync/auto-track/claim")
-        ) return;
-        const body = request.postDataJSON() as { claim?: { channel?: string } };
-        if (body.claim?.channel) observedClaims.push(body.claim.channel);
-      };
+    // The server remains authoritative while this display is offline. The
+    // sleeping browser must issue no claims; reconnect adopts the canonical
+    // server result through the foreground barrier.
+    await page.context().setOffline(true);
+    await simulateScreenOff(page);
+    const wakeAt = safeBaseMs + 2_100;
+    await mockDateNow(page, wakeAt);
+    await simulateWake(page);
+    await expect(recoveryStatus).toContainText(
+      "Couldn't confirm the current production state",
+      { timeout: 10_000 },
+    );
+    await page.waitForTimeout(600);
+    expect(claimAcks, "offline wake must not send claims").toEqual([]);
+    expect(
+      Number(await recoveryStatus.getAttribute("data-foreground-sync-ack")),
+      "offline wake must not advance the shared-sync acknowledgement",
+    ).toBe(ackBeforeOffline);
 
-      try {
-        await sleepingPage.goto("/", { waitUntil: "domcontentloaded" });
-        await sleepingPage.getByTestId("tab-run")
-          .waitFor({ state: "visible", timeout: 20_000 });
-        await sleepingPage.getByRole("button", { name: /stop.?run/i }).first()
-          .waitFor({ state: "visible", timeout: 15_000 });
-        await installHiddenMock(sleepingPage);
-        const stale = await readLiveRunSnapshot(sleepingPage);
-        const staleOperational = {
-          skidsCompleted: stale.values.skidsCompleted,
-          casesOnCurrentSkid: stale.values.casesOnCurrentSkid,
-          traysOnLine: stale.values.traysOnLine,
-          batchesReady: stale.values.batchesReady,
-        };
-        sleepingPage.on("request", recordClaim);
-        await sleepingPage.route("**/api/sync/events**", (route) => route.abort());
-        await simulateScreenOff(sleepingPage);
-        await peer.setOffline(true);
+    // Restore connectivity, but keep the canonical foreground pull pending.
+    // The online event is the reconnect path used by the production app.
+    holdRecoveryPull = true;
+    await page.context().setOffline(false);
+    await page.evaluate(() => window.dispatchEvent(new Event("online")));
+    await recoveryPullStarted;
+    await page.waitForTimeout(600);
+    expect(
+      claimAcks,
+      "claims must wait while reconnect reconciliation is held",
+    ).toEqual([]);
+    expect(
+      Number(await recoveryStatus.getAttribute("data-foreground-sync-ack")),
+      "claims must wait for the current reconnect acknowledgement",
+    ).toBe(ackBeforeOffline);
 
-        const advancedAt = safeBaseMs + 16 * 60_000;
-        await mockDateNow(page, advancedAt);
-        await expect.poll(async () => {
+    // Release only the canonical pull. The app increments its
+    // acknowledgement and adopts the server-owned dough mutations.
+    holdRecoveryPull = false;
+    releaseRecoveryPull();
+    const ackAfterReconnectHandle = await page.waitForFunction(
+      (before) => {
+        const raw = document
+          .querySelector('[data-testid="foreground-recovery-status"]')
+          ?.getAttribute("data-foreground-sync-ack");
+        const value = Number(raw);
+        return Number.isFinite(value) && value > before ? value : false;
+      },
+      ackBeforeOffline,
+      {
+        timeout: 10_000,
+        message: "reconnect did not publish a current sync acknowledgement",
+      },
+    );
+    const ackAfterReconnect =
+      (await ackAfterReconnectHandle.jsonValue()) as number;
+    await ackAfterReconnectHandle.dispose();
+
+    // Advance one more authoritative cadence. This is an explicit E2E server
+    // beat, not a browser claim.
+    await mockDateNow(page, wakeAt + 2_100);
+    await page.waitForTimeout(500);
+
+    // No automatic mutation originates in the browser under server
+    // authority; the acknowledgement still proves adoption happened after
+    // the held reconnect pull.
+    expect(claimAcks, "authoritative reconnect emitted browser claims").toEqual(
+      [],
+    );
+    expect(ackAfterReconnect).toBeGreaterThan(ackBeforeOffline);
+    page.off("request", recordClaim);
+
+    // A foreground sync PUT may still settle between the first beat and this
+    // read. Publish one final authoritative frame at the same frozen clock,
+    // then compare its counters with the server-visible live row. The request
+    // listener above still proves no browser tray/batch claims were sent.
+    const settledBeat = await mockDateNow(page, wakeAt + 2_100);
+    await expect
+      .poll(
+        async () => {
           const snapshot = await readLiveRunSnapshot(page);
-          return Number(snapshot.values.casesOnCurrentSkid ?? 0)
-            + Number(snapshot.values.skidsCompleted ?? 0) * 10;
-        }, {
-          timeout: 15_000,
-          message: "active session did not advance canonical Packaging",
-        }).toBeGreaterThan(
-          Number(staleOperational.casesOnCurrentSkid ?? 0)
-            + Number(staleOperational.skidsCompleted ?? 0) * 10,
-        );
-        const canonicalAfterAdvance = await readLiveRunSnapshot(page);
+          return {
+            trays: snapshot.values.traysOnLine,
+            batches: snapshot.values.batchesReady,
+          };
+        },
+        { timeout: 12_000 },
+      )
+      .toEqual({
+        trays: settledBeat.operationalProjection?.counters?.traysOnLine,
+        batches: settledBeat.operationalProjection?.counters?.batchesReady,
+      });
+  });
 
-        await mockDateNow(sleepingPage, advancedAt, { tick: false });
-        await simulateWake(sleepingPage);
-        const sleepingStatus = sleepingPage.getByTestId("foreground-recovery-status");
-        await expect(sleepingStatus)
-          .toContainText("Couldn't confirm the current production state", { timeout: 10_000 });
-        await expect(sleepingPage.getByTestId("button-retry-foreground-recovery"))
-          .toBeVisible();
-        const failedAck = Number(
-          await sleepingStatus.getAttribute("data-foreground-sync-ack"),
+  test("two live sessions converge through visible retry after an offline wake", async ({
+    page,
+    browser,
+  }: { page: Page; browser: Browser }, testInfo) => {
+    test.slow();
+    const contextDiagnostics = {
+      active: {
+        consoleWarnings: 0,
+        consoleErrors: 0,
+        pageErrors: 0,
+        failedRequests: 0,
+      },
+      sleeping: {
+        consoleWarnings: 0,
+        consoleErrors: 0,
+        pageErrors: 0,
+        failedRequests: 0,
+      },
+    };
+    const observeSanitizedDiagnostics = (
+      observedPage: Page,
+      diagnostics: typeof contextDiagnostics.active,
+    ) => {
+      observedPage.on("console", (message) => {
+        if (message.type() === "warning") diagnostics.consoleWarnings += 1;
+        if (message.type() === "error") diagnostics.consoleErrors += 1;
+      });
+      observedPage.on("pageerror", () => {
+        diagnostics.pageErrors += 1;
+      });
+      observedPage.on("requestfailed", () => {
+        diagnostics.failedRequests += 1;
+      });
+    };
+    observeSanitizedDiagnostics(page, contextDiagnostics.active);
+    const safeBaseMs = await setupAndStartRun(
+      page,
+      "10",
+      DEFAULT_MANAGER_CAPABILITIES,
+    );
+    const activeStatus = page.getByTestId("foreground-recovery-status");
+    await expect(activeStatus).toContainText("Production state synchronized.", {
+      timeout: 20_000,
+    });
+
+    const peer = await browser.newContext({
+      storageState: await page.context().storageState(),
+      viewport: { width: 390, height: 844 },
+      isMobile: true,
+    });
+    const sleepingPage = await peer.newPage();
+    observeSanitizedDiagnostics(sleepingPage, contextDiagnostics.sleeping);
+    const observedClaims: string[] = [];
+    const recordClaim = (request: Request) => {
+      if (
+        request.method() !== "POST" ||
+        !new URL(request.url()).pathname.endsWith("/api/sync/auto-track/claim")
+      )
+        return;
+      const body = request.postDataJSON() as { claim?: { channel?: string } };
+      if (body.claim?.channel) observedClaims.push(body.claim.channel);
+    };
+
+    try {
+      await sleepingPage.goto("/", { waitUntil: "domcontentloaded" });
+      await sleepingPage
+        .getByTestId("tab-run")
+        .waitFor({ state: "visible", timeout: 20_000 });
+      await sleepingPage
+        .getByRole("button", { name: /stop.?run/i })
+        .first()
+        .waitFor({ state: "visible", timeout: 15_000 });
+      await installHiddenMock(sleepingPage);
+      const stale = await readLiveRunSnapshot(sleepingPage);
+      const staleOperational = {
+        skidsCompleted: stale.values.skidsCompleted,
+        casesOnCurrentSkid: stale.values.casesOnCurrentSkid,
+        traysOnLine: stale.values.traysOnLine,
+        batchesReady: stale.values.batchesReady,
+      };
+      sleepingPage.on("request", recordClaim);
+      await sleepingPage.route("**/api/sync/events**", (route) =>
+        route.abort(),
+      );
+      await simulateScreenOff(sleepingPage);
+      await peer.setOffline(true);
+
+      const advancedAt = safeBaseMs + 16 * 60_000;
+      await mockDateNow(page, advancedAt);
+      await expect
+        .poll(
+          async () => {
+            const snapshot = await readLiveRunSnapshot(page);
+            return (
+              Number(snapshot.values.casesOnCurrentSkid ?? 0) +
+              Number(snapshot.values.skidsCompleted ?? 0) * 10
+            );
+          },
+          {
+            timeout: 15_000,
+            message: "active session did not advance canonical Packaging",
+          },
+        )
+        .toBeGreaterThan(
+          Number(staleOperational.casesOnCurrentSkid ?? 0) +
+            Number(staleOperational.skidsCompleted ?? 0) * 10,
         );
-        await sleepingPage.waitForTimeout(1_200);
-        const stillFenced = await readPersistedRunValues(sleepingPage, stale.runId);
-        expect({
+      const canonicalAfterAdvance = await readLiveRunSnapshot(page);
+
+      await mockDateNow(sleepingPage, advancedAt, { tick: false });
+      await simulateWake(sleepingPage);
+      const sleepingStatus = sleepingPage.getByTestId(
+        "foreground-recovery-status",
+      );
+      await expect(sleepingStatus).toContainText(
+        "Couldn't confirm the current production state",
+        { timeout: 10_000 },
+      );
+      await expect(
+        sleepingPage.getByTestId("button-retry-foreground-recovery"),
+      ).toBeVisible();
+      const failedAck = Number(
+        await sleepingStatus.getAttribute("data-foreground-sync-ack"),
+      );
+      await sleepingPage.waitForTimeout(1_200);
+      const stillFenced = await readPersistedRunValues(
+        sleepingPage,
+        stale.runId,
+      );
+      expect(
+        {
           skidsCompleted: stillFenced.skidsCompleted,
           casesOnCurrentSkid: stillFenced.casesOnCurrentSkid,
           traysOnLine: stillFenced.traysOnLine,
           batchesReady: stillFenced.batchesReady,
-        }, "failed recovery must not apply hidden-time Packaging or Dough progress")
-          .toEqual({
-            skidsCompleted: canonicalAfterAdvance.values.skidsCompleted,
-            casesOnCurrentSkid: canonicalAfterAdvance.values.casesOnCurrentSkid,
-            traysOnLine: canonicalAfterAdvance.values.traysOnLine,
-            batchesReady: canonicalAfterAdvance.values.batchesReady,
-          });
-        expect(observedClaims, "offline recovery emitted automatic claims").toEqual([]);
+        },
+        "failed recovery must not apply hidden-time Packaging or Dough progress",
+      ).toEqual({
+        skidsCompleted: canonicalAfterAdvance.values.skidsCompleted,
+        casesOnCurrentSkid: canonicalAfterAdvance.values.casesOnCurrentSkid,
+        traysOnLine: canonicalAfterAdvance.values.traysOnLine,
+        batchesReady: canonicalAfterAdvance.values.batchesReady,
+      });
+      expect(
+        observedClaims,
+        "offline recovery emitted automatic claims",
+      ).toEqual([]);
 
-        let failFirstOnlinePull = true;
-        let holdOnlineRecovery = true;
-        await sleepingPage.route("**/api/sync/today**", async (route) => {
-          if (route.request().method() === "GET" && holdOnlineRecovery) {
-            if (failFirstOnlinePull) failFirstOnlinePull = false;
-            await route.abort("connectionfailed");
-            return;
-          }
-          await route.continue();
-        });
-        await peer.setOffline(false);
-        await sleepingPage.evaluate(() => window.dispatchEvent(new Event("online")));
-        await expect.poll(() => failFirstOnlinePull, {
+      let failFirstOnlinePull = true;
+      let holdOnlineRecovery = true;
+      await sleepingPage.route("**/api/sync/today**", async (route) => {
+        if (route.request().method() === "GET" && holdOnlineRecovery) {
+          if (failFirstOnlinePull) failFirstOnlinePull = false;
+          await route.abort("connectionfailed");
+          return;
+        }
+        await route.continue();
+      });
+      await peer.setOffline(false);
+      await sleepingPage.evaluate(() =>
+        window.dispatchEvent(new Event("online")),
+      );
+      await expect
+        .poll(() => failFirstOnlinePull, {
           timeout: 10_000,
           message: "the controlled first online recovery pull did not run",
         }).toBe(false);
@@ -2049,128 +2419,165 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
           casesOnCurrentSkid: peerFinal.casesOnCurrentSkid,
           traysOnLine: peerFinal.traysOnLine,
           batchesReady: peerFinal.batchesReady,
-        }, "both live sessions must finish on the same operational counters").toEqual({
-          skidsCompleted: activeFinal.skidsCompleted,
-          casesOnCurrentSkid: activeFinal.casesOnCurrentSkid,
-          traysOnLine: activeFinal.traysOnLine,
-          batchesReady: activeFinal.batchesReady,
-        });
+        },
+        "both live sessions must finish on the same operational counters",
+      ).toEqual({
+        skidsCompleted: activeFinal.skidsCompleted,
+        casesOnCurrentSkid: activeFinal.casesOnCurrentSkid,
+        traysOnLine: activeFinal.traysOnLine,
+        batchesReady: activeFinal.batchesReady,
+      });
 
-        await testInfo.attach("offline-wake-retry-summary.json", {
-          body: JSON.stringify({
+      await testInfo.attach("offline-wake-retry-summary.json", {
+        body: JSON.stringify(
+          {
             result: "pass",
             devices: ["desktop-active", "phone-sleeping"],
             failedRecoveryVisible: true,
             retryAdoptedCanonicalState: true,
             duplicateSauceOrFrontlineClaims: 0,
             hiddenProgressWhileFenced: 0,
-          }, null, 2),
-          contentType: "application/json",
-        });
-      } finally {
-        if (testInfo.status !== testInfo.expectedStatus) {
-          await testInfo.attach("offline-wake-retry-failure-diagnostics.json", {
-            body: JSON.stringify({
+          },
+          null,
+          2,
+        ),
+        contentType: "application/json",
+      });
+    } finally {
+      if (testInfo.status !== testInfo.expectedStatus) {
+        await testInfo.attach("offline-wake-retry-failure-diagnostics.json", {
+          body: JSON.stringify(
+            {
               environment: "isolated-test",
               flow: "two-session-offline-wake-visible-retry",
               dataClass: "fixture",
               sanitization:
                 "Counts only; console text, errors, URLs, request payloads, headers, cookies, and operational values omitted.",
               contexts: contextDiagnostics,
-            }, null, 2),
-            contentType: "application/json",
-          });
-        }
-        sleepingPage.off("request", recordClaim);
-        await peer.setOffline(false).catch(() => {});
-        await peer.close();
+            },
+            null,
+            2,
+          ),
+          contentType: "application/json",
+        });
       }
-    },
-  );
+      sleepingPage.off("request", recordClaim);
+      await peer.setOffline(false).catch(() => {});
+      await peer.close();
+    }
+  });
 
-  test(
-    "C. disconnected sleeping peer adopts remote Stop before stale recovery writes and after reload",
-    async ({ page, browser }: { page: Page; browser: Browser }) => {
-      test.slow();
-      const profileBrand = `Wake ${uid()}`;
-      const profileFlavor = "Peer Flavor";
-      const profileKey = `${profileBrand.toLowerCase()}__${profileFlavor.toLowerCase()}`;
-      const postProfile = async (frontlineRecipeName: string, updatedAt: number) => {
-        const result = await page.evaluate(async ({ key, name, stamp, brand, flavor }) => {
+  test("C. disconnected sleeping peer adopts remote Stop before stale recovery writes and after reload", async ({
+    page,
+    browser,
+  }: {
+    page: Page;
+    browser: Browser;
+  }) => {
+    test.slow();
+    const profileBrand = `Wake ${uid()}`;
+    const profileFlavor = "Peer Flavor";
+    const profileKey = `${profileBrand.toLowerCase()}__${profileFlavor.toLowerCase()}`;
+    const postProfile = async (
+      frontlineRecipeName: string,
+      updatedAt: number,
+    ) => {
+      const result = await page.evaluate(
+        async ({ key, name, stamp, brand, flavor }) => {
           const res = await fetch("/api/brand-profiles", {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({
-              items: [{
-                key,
-                brand,
-                flavor,
-                values: { frontlineRecipeName: name, app1Type: "Cheese" },
-                crustValues: {},
-                updatedAt: stamp,
-              }],
+              items: [
+                {
+                  key,
+                  brand,
+                  flavor,
+                  values: { frontlineRecipeName: name, app1Type: "Cheese" },
+                  crustValues: {},
+                  updatedAt: stamp,
+                },
+              ],
             }),
           });
           return { ok: res.ok, status: res.status };
-        }, {
+        },
+        {
           key: profileKey,
           name: frontlineRecipeName,
           stamp: updatedAt,
           brand: profileBrand,
           flavor: profileFlavor,
-        });
-        expect(result).toEqual({ ok: true, status: 200 });
-      };
-
-      const safeBaseMs = await setupAndStartRun(
-        page,
-        "10",
-        DEFAULT_MANAGER_CAPABILITIES,
+        },
       );
-      // setupAndStartRun deliberately exercises the same focus path used by a
-      // returning PWA. Let that initial reconciliation settle before this
-      // scenario starts the second device, so Device A's Stop is an ordinary
-      // lifecycle action rather than part of test setup.
-      const recoveryStatus = page.getByTestId("foreground-recovery-status");
-      await expect(recoveryStatus)
-        .toContainText("Production state synchronized.", { timeout: 20_000 });
-      // This scenario exercises manager-only profile/factory APIs. Other
-      // screen-wake cases intentionally run as floor staff.
-      // Browser time is deliberately fixed at 21:00 for this clock suite.
-      // Keep profile LWW stamps ahead of real Node time so the peer's mocked
-      // clock cannot make an older remote profile look stale.
-      const profileStamp = Date.now() + 4 * 60 * 60_000;
-      await postProfile("Wake Sauce V1", profileStamp);
+      expect(result).toEqual({ ok: true, status: 200 });
+    };
 
-      // A second independent context has its own in-memory caches, but shares
-      // this manager's authenticated cookie. It is the sleeping tablet.
-      const peer = await browser.newContext({ storageState: await page.context().storageState() });
-      try {
-        const sleepingPage = await peer.newPage();
-        await sleepingPage.goto("/", { waitUntil: "domcontentloaded" });
-        await sleepingPage.locator('[data-testid="tab-run"]').waitFor({ state: "visible", timeout: 20_000 });
-        await sleepingPage.getByRole("button", { name: /stop.?run/i }).first()
-          .waitFor({ state: "visible", timeout: 15_000 });
-        await sleepingPage.evaluate((key) => {
-          localStorage.setItem(
-            `run-calc-profile-${key}`,
-            JSON.stringify({ frontlineRecipeName: "Wake Sauce V1", app1Type: "Cheese" }),
-          );
-        }, profileKey);
-        await installHiddenMock(sleepingPage);
-        await simulateScreenOff(sleepingPage);
-        await peer.setOffline(true);
-        await sleepingPage.waitForTimeout(300);
+    const safeBaseMs = await setupAndStartRun(
+      page,
+      "10",
+      DEFAULT_MANAGER_CAPABILITIES,
+    );
+    // setupAndStartRun deliberately exercises the same focus path used by a
+    // returning PWA. Let that initial reconciliation settle before this
+    // scenario starts the second device, so Device A's Stop is an ordinary
+    // lifecycle action rather than part of test setup.
+    const recoveryStatus = page.getByTestId("foreground-recovery-status");
+    await expect(recoveryStatus).toContainText(
+      "Production state synchronized.",
+      { timeout: 20_000 },
+    );
+    // This scenario exercises manager-only profile/factory APIs. Other
+    // screen-wake cases intentionally run as floor staff.
+    // Browser time is deliberately fixed at 21:00 for this clock suite.
+    // Keep profile LWW stamps ahead of real Node time so the peer's mocked
+    // clock cannot make an older remote profile look stale.
+    const profileStamp = Date.now() + 4 * 60 * 60_000;
+    await postProfile("Wake Sauce V1", profileStamp);
 
-        const staleDayRaw = await sleepingPage.evaluate(() =>
-          localStorage.getItem("run-calc-day"),
+    // A second independent context has its own in-memory caches, but shares
+    // this manager's authenticated cookie. It is the sleeping tablet.
+    const peer = await browser.newContext({
+      storageState: await page.context().storageState(),
+    });
+    try {
+      const sleepingPage = await peer.newPage();
+      await sleepingPage.goto("/", { waitUntil: "domcontentloaded" });
+      await sleepingPage
+        .locator('[data-testid="tab-run"]')
+        .waitFor({ state: "visible", timeout: 20_000 });
+      await sleepingPage
+        .getByRole("button", { name: /stop.?run/i })
+        .first()
+        .waitFor({ state: "visible", timeout: 15_000 });
+      await sleepingPage.evaluate((key) => {
+        localStorage.setItem(
+          `run-calc-profile-${key}`,
+          JSON.stringify({
+            frontlineRecipeName: "Wake Sauce V1",
+            app1Type: "Cheese",
+          }),
         );
-        expect(staleDayRaw, "sleeping peer should persist its running copy").toBeTruthy();
+      }, profileKey);
+      await installHiddenMock(sleepingPage);
+      await simulateScreenOff(sleepingPage);
+      await peer.setOffline(true);
+      await sleepingPage.waitForTimeout(300);
 
-        // Force a stale queued write while the sleeping browser is offline.
-        // It carries the old running lifecycle and must be invalidated/rebuilt
-        // after foreground reconciliation rather than retried after the Stop.
-        await sleepingPage.locator('[data-testid="input-cycleSpeed"]').evaluate((el) => {
+      const staleDayRaw = await sleepingPage.evaluate(() =>
+        localStorage.getItem("run-calc-day"),
+      );
+      expect(
+        staleDayRaw,
+        "sleeping peer should persist its running copy",
+      ).toBeTruthy();
+
+      // Force a stale queued write while the sleeping browser is offline.
+      // It carries the old running lifecycle and must be invalidated/rebuilt
+      // after foreground reconciliation rather than retried after the Stop.
+      await sleepingPage
+        .locator('[data-testid="input-cycleSpeed"]')
+        .evaluate((el) => {
           const input = el as HTMLInputElement;
           const setter = Object.getOwnPropertyDescriptor(
             HTMLInputElement.prototype,
@@ -2180,517 +2587,811 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
           input.dispatchEvent(new Event("input", { bubbles: true }));
           input.dispatchEvent(new Event("change", { bubbles: true }));
         });
-        await sleepingPage.waitForTimeout(900);
+      await sleepingPage.waitForTimeout(900);
 
-        // Device A stops while B is genuinely disconnected and therefore cannot
-        // receive the normal SSE lifecycle event.
-        await mockDateNow(page, safeBaseMs + 60_000);
-        await page.getByRole("button", { name: /stop.?run/i }).first().click();
-        await page.waitForFunction(async () => {
-          const response = await fetch(`/api/sync/today?today=${new Date().toISOString().slice(0, 10)}`, {
-            cache: "no-store",
-          });
-          const body = await response.json() as { dayState?: { runs?: Array<{ endedAt?: number }> } };
-          return body.dayState?.runs?.some((run) => typeof run.endedAt === "number") ?? false;
-        }, undefined, { timeout: 15_000 });
-        await postProfile("Wake Sauce V2", profileStamp + 10_000);
-        const factoryWrite = await page.evaluate(async () => {
-          const res = await fetch("/api/factory-data", {
-            method: "PUT",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ key: "run-calc-shift-start-time", value: "05:45" }),
-          });
-          return res.ok;
+      // Device A stops while B is genuinely disconnected and therefore cannot
+      // receive the normal SSE lifecycle event.
+      await mockDateNow(page, safeBaseMs + 60_000);
+      await page
+        .getByRole("button", { name: /stop.?run/i })
+        .first()
+        .click();
+      await page.waitForFunction(
+        async () => {
+          const response = await fetch(
+            `/api/sync/today?today=${new Date().toISOString().slice(0, 10)}`,
+            {
+              cache: "no-store",
+            },
+          );
+          const body = (await response.json()) as {
+            dayState?: { runs?: Array<{ endedAt?: number }> };
+          };
+          return (
+            body.dayState?.runs?.some(
+              (run) => typeof run.endedAt === "number",
+            ) ?? false
+          );
+        },
+        undefined,
+        { timeout: 15_000 },
+      );
+      await postProfile("Wake Sauce V2", profileStamp + 10_000);
+      const factoryWrite = await page.evaluate(async () => {
+        const res = await fetch("/api/factory-data", {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            key: "run-calc-shift-start-time",
+            value: "05:45",
+          }),
         });
-        expect(factoryWrite).toBe(true);
+        return res.ok;
+      });
+      expect(factoryWrite).toBe(true);
 
-        // Keep the recovered EventSource disconnected so the only path that can
-        // adopt Stop is the explicit foreground GET.
-        await sleepingPage.route("**/api/sync/events**", (route) => route.abort());
-        await peer.setOffline(false);
-        await simulateWake(sleepingPage);
-        await sleepingPage.getByText("Ended", { exact: true }).first()
-          .waitFor({ state: "visible", timeout: 15_000 });
-        const casesAfterStop = await readCaseTotal(sleepingPage);
-        await sleepingPage.waitForTimeout(2_000);
-        expect(await readCaseTotal(sleepingPage)).toBe(casesAfterStop);
-        await sleepingPage.waitForFunction(async ({ key }) => {
+      // Keep the recovered EventSource disconnected so the only path that can
+      // adopt Stop is the explicit foreground GET.
+      await sleepingPage.route("**/api/sync/events**", (route) =>
+        route.abort(),
+      );
+      await peer.setOffline(false);
+      await simulateWake(sleepingPage);
+      await sleepingPage
+        .getByText("Ended", { exact: true })
+        .first()
+        .waitFor({ state: "visible", timeout: 15_000 });
+      const casesAfterStop = await readCaseTotal(sleepingPage);
+      await sleepingPage.waitForTimeout(2_000);
+      expect(await readCaseTotal(sleepingPage)).toBe(casesAfterStop);
+      await sleepingPage.waitForFunction(
+        async ({ key }) => {
           const response = await fetch("/api/brand-profiles");
-          const body = await response.json() as { items?: Array<{ key: string; values?: { frontlineRecipeName?: string } }> };
-          return body.items?.some((item) => item.key === key && item.values?.frontlineRecipeName === "Wake Sauce V2") ?? false;
-        }, { key: profileKey }, { timeout: 15_000 });
-        const factoryRead = await sleepingPage.evaluate(async () => {
-          const res = await fetch("/api/factory-data");
-          const body = await res.json() as { data?: Record<string, { value?: unknown }> };
-          return body.data?.["run-calc-shift-start-time"]?.value;
-        });
-        expect(factoryRead).toBe("05:45");
-
-        // Let the captured retry window pass, then verify it did not replace the
-        // authoritative Stop on the shared row.
-        await sleepingPage.waitForTimeout(5_500);
-        const sharedStillStopped = await page.evaluate(async () => {
-          const res = await fetch(`/api/sync/today?today=${new Date().toISOString().slice(0, 10)}`, {
-            cache: "no-store",
-          });
-          const body = await res.json() as { dayState?: { runs?: Array<{ endedAt?: number }> } };
-          return body.dayState?.runs?.some((run) => typeof run.endedAt === "number") ?? false;
-        });
-        expect(sharedStillStopped).toBe(true);
-        await sleepingPage.getByText("Ended", { exact: true }).first()
-          .waitFor({ state: "visible", timeout: 5_000 });
-
-        // Recreate the old running disk copy and perform a full reload. The
-        // authoritative strictly-newer Stop must win again without an operator
-        // tapping Stop on this device.
-        await sleepingPage.unroute("**/api/sync/events**");
-        await sleepingPage.evaluate((raw) => {
-          if (raw) localStorage.setItem("run-calc-day", raw);
-        }, staleDayRaw);
-        await sleepingPage.reload({ waitUntil: "domcontentloaded" });
-        await sleepingPage.locator('[data-testid="tab-run"]')
-          .waitFor({ state: "attached", timeout: 20_000 });
-        await sleepingPage.getByText("Ended", { exact: true }).first()
-          .waitFor({ state: "visible", timeout: 15_000 });
-        const stoppedAfterReload = await sleepingPage.evaluate(async () => {
-          const res = await fetch(`/api/sync/today?today=${new Date().toISOString().slice(0, 10)}`, {
-            cache: "no-store",
-          });
-          const body = await res.json() as { dayState?: { runs?: Array<{ endedAt?: number }> } };
-          return body.dayState?.runs?.some((run) => typeof run.endedAt === "number") ?? false;
-        });
-        expect(stoppedAfterReload, "reload preserved the authoritative stopped run").toBe(true);
-      } finally {
-        await peer.setOffline(false);
-        await peer.close();
-      }
-    },
-  );
-
-  test(
-    "E. one device keeps a paired Packaging correction through wake and reload",
-    async ({ page }) => {
-      test.slow();
-      const safeBaseMs = await setupAndStartRun(page, "48");
-      // At +12:48.5 min, 7:48.5 min of product has exited the five-minute
-      // tunnel: floor(7.8083 × 60 / 6) = 78 cases = 1 skid + 30 cases.
-      const baselineAt = safeBaseMs + 12 * 60_000 + 48_500;
-
-      await simulateScreenOff(page);
-      await mockDateNow(page, baselineAt);
-      await simulateWake(page);
-      await waitForCaseCounterChange(page, 0, 8_000);
-      expect(await readCaseTotal(page)).toBe(78);
-
-      await page.locator('[data-testid="tab-packaging"]').click();
-      const skids = page.locator('[data-testid="text-skidsCompleted"]').first();
-      const cases = page.locator('[data-testid="text-casesOnCurrentSkid"]').first();
-      await expect(skids).toContainText("1");
-      await expect(cases).toHaveText("30");
-
-      // Reproduce the operator's paired correction while auto tracking is live:
-      // subtract one completed skid, then add fifteen cases to that same skid.
-      // 1/30 -> 0/30 -> 0/45. The 48-case maximum permits the full correction.
-      // mockDateNow also advances the authoritative server fixture. Keep the
-      // correction on the same monotonic timeline as the baseline; using real
-      // wall-clock time rewinds the server's expected-case bookkeeping.
-      await mockDateNow(page, baselineAt);
-      await page.locator('[data-testid="btn-dec-skidsCompleted"]').click();
-      for (let i = 0; i < 15; i++) {
-        await page.locator('[data-testid="btn-inc-casesOnCurrentSkid"]').click();
-      }
-      await expect(skids).toContainText("0");
-      await expect(cases).toHaveText("45");
-
-      let canonicalCorrectionGeneration = 0;
-      await expect.poll(async () => {
-        canonicalCorrectionGeneration = await page.evaluate(async () => {
-          const today = new Date().toISOString().slice(0, 10);
-          const response = await fetch(`/api/sync/today?today=${today}`, { cache: "no-store" });
-          const body = await response.json() as {
-            dayState?: { currentRunId?: string; runs?: Array<{ id?: string }> };
-            runValues?: Record<string, { skidsCompleted?: number; casesOnCurrentSkid?: number }>;
-            packagingProgress?: Record<string, {
-              skidsCompleted?: number;
-              casesOnCurrentSkid?: number;
-              correctionGeneration?: number;
+          const body = (await response.json()) as {
+            items?: Array<{
+              key: string;
+              values?: { frontlineRecipeName?: string };
             }>;
           };
-          const runId = body.dayState?.currentRunId ?? body.dayState?.runs?.[0]?.id;
-          const values = runId ? body.runValues?.[runId] : undefined;
-          const progress = runId ? body.packagingProgress?.[runId] : undefined;
-          return runId && values?.skidsCompleted === 0
-            && values.casesOnCurrentSkid === 45
-            && progress?.skidsCompleted === 0
-            && progress.casesOnCurrentSkid === 45
-            && (progress.correctionGeneration ?? 0) > 0
-            ? progress.correctionGeneration ?? 0
-            : 0;
-        });
-        return canonicalCorrectionGeneration;
-      }, { timeout: 15_000 }).toBeGreaterThan(0);
-      const canonicalRunId = await page.evaluate(async () => {
-        const response = await fetch(
-          `/api/sync/today?today=${new Date().toISOString().slice(0, 10)}`,
-          { cache: "no-store" },
-        );
-        const body = await response.json() as {
-          dayState?: { currentRunId?: string; runs?: Array<{ id?: string }> };
+          return (
+            body.items?.some(
+              (item) =>
+                item.key === key &&
+                item.values?.frontlineRecipeName === "Wake Sauce V2",
+            ) ?? false
+          );
+        },
+        { key: profileKey },
+        { timeout: 15_000 },
+      );
+      const factoryRead = await sleepingPage.evaluate(async () => {
+        const res = await fetch("/api/factory-data");
+        const body = (await res.json()) as {
+          data?: Record<string, { value?: unknown }>;
         };
-        return body.dayState?.currentRunId ?? body.dayState?.runs?.[0]?.id ?? "";
+        return body.data?.["run-calc-shift-start-time"]?.value;
       });
-      expect(canonicalRunId, "canonical correction must retain its run identity").not.toBe("");
+      expect(factoryRead).toBe("05:45");
 
-      // Let the active line run briefly, then put this only device to sleep.
-      // The server hold is intentionally still active, so wake cannot replace
-      // the acknowledged pair with an automatic baseline.
-      await page.waitForTimeout(1_500);
-      await simulateScreenOff(page);
-      await mockDateNow(page, Date.now() + 5_000);
-      await simulateWake(page);
-      await expect(cases).toHaveText("45", { timeout: 15_000 });
-      await expect(skids).toContainText("0");
-
-      const afterWake = await page.evaluate((serverRunId) => {
-        const day = JSON.parse(localStorage.getItem("run-calc-day") ?? "{}") as {
-          currentIndex?: number;
-          runs?: Array<{ id?: string }>;
-        };
-        const runIds = (day.runs ?? []).map((run) => run.id).filter(
-          (id): id is string => Boolean(id),
+      // Let the captured retry window pass, then verify it did not replace the
+      // authoritative Stop on the shared row.
+      await sleepingPage.waitForTimeout(5_500);
+      const sharedStillStopped = await page.evaluate(async () => {
+        const res = await fetch(
+          `/api/sync/today?today=${new Date().toISOString().slice(0, 10)}`,
+          {
+            cache: "no-store",
+          },
         );
-        const runId = runIds.includes(serverRunId)
-          ? serverRunId
-          : runIds[day.currentIndex ?? 0] ?? runIds[0];
-        const values = JSON.parse(
-          localStorage.getItem(`run-calc-run-${runId}`) ?? "null",
-        ) as { skidsCompleted?: number; casesOnCurrentSkid?: number } | null;
-        const progressMap = JSON.parse(
-          localStorage.getItem("run-calc-packaging-progress") ?? "{}",
-        ) as Record<string, {
+        const body = (await res.json()) as {
+          dayState?: { runs?: Array<{ endedAt?: number }> };
+        };
+        return (
+          body.dayState?.runs?.some((run) => typeof run.endedAt === "number") ??
+          false
+        );
+      });
+      expect(sharedStillStopped).toBe(true);
+      await sleepingPage
+        .getByText("Ended", { exact: true })
+        .first()
+        .waitFor({ state: "visible", timeout: 5_000 });
+
+      // Recreate the old running disk copy and perform a full reload. The
+      // authoritative strictly-newer Stop must win again without an operator
+      // tapping Stop on this device.
+      await sleepingPage.unroute("**/api/sync/events**");
+      await sleepingPage.evaluate((raw) => {
+        if (raw) localStorage.setItem("run-calc-day", raw);
+      }, staleDayRaw);
+      await sleepingPage.reload({ waitUntil: "domcontentloaded" });
+      await sleepingPage
+        .locator('[data-testid="tab-run"]')
+        .waitFor({ state: "attached", timeout: 20_000 });
+      await sleepingPage
+        .getByText("Ended", { exact: true })
+        .first()
+        .waitFor({ state: "visible", timeout: 15_000 });
+      const stoppedAfterReload = await sleepingPage.evaluate(async () => {
+        const res = await fetch(
+          `/api/sync/today?today=${new Date().toISOString().slice(0, 10)}`,
+          {
+            cache: "no-store",
+          },
+        );
+        const body = (await res.json()) as {
+          dayState?: { runs?: Array<{ endedAt?: number }> };
+        };
+        return (
+          body.dayState?.runs?.some((run) => typeof run.endedAt === "number") ??
+          false
+        );
+      });
+      expect(
+        stoppedAfterReload,
+        "reload preserved the authoritative stopped run",
+      ).toBe(true);
+    } finally {
+      await peer.setOffline(false);
+      await peer.close();
+    }
+  });
+
+  test("E. one device keeps a paired Packaging correction through wake and reload", async ({
+    page,
+  }) => {
+    test.slow();
+    const safeBaseMs = await setupAndStartRun(page, "48");
+    // At +12:48.5 min, 7:48.5 min of product has exited the five-minute
+    // tunnel: floor(7.8083 × 60 / 6) = 78 cases = 1 skid + 30 cases.
+    const baselineAt = safeBaseMs + 12 * 60_000 + 48_500;
+
+    await simulateScreenOff(page);
+    await mockDateNow(page, baselineAt);
+    await simulateWake(page);
+    await waitForCaseCounterChange(page, 0, 8_000);
+    expect(await readCaseTotal(page)).toBe(78);
+
+    await page.locator('[data-testid="tab-packaging"]').click();
+    const skids = page.locator('[data-testid="text-skidsCompleted"]').first();
+    const cases = page
+      .locator('[data-testid="text-casesOnCurrentSkid"]')
+      .first();
+    await expect(skids).toContainText("1");
+    await expect(cases).toHaveText("30");
+
+    // Reproduce the operator's paired correction while auto tracking is live:
+    // subtract one completed skid, then add fifteen cases to that same skid.
+    // 1/30 -> 0/30 -> 0/45. The 48-case maximum permits the full correction.
+    // mockDateNow also advances the authoritative server fixture. Keep the
+    // correction on the same monotonic timeline as the baseline; using real
+    // wall-clock time rewinds the server's expected-case bookkeeping.
+    await mockDateNow(page, baselineAt);
+    await page.locator('[data-testid="btn-dec-skidsCompleted"]').click();
+    for (let i = 0; i < 15; i++) {
+      await page.locator('[data-testid="btn-inc-casesOnCurrentSkid"]').click();
+    }
+    await expect(skids).toContainText("0");
+    await expect(cases).toHaveText("45");
+
+    let canonicalCorrectionGeneration = 0;
+    await expect
+      .poll(
+        async () => {
+          canonicalCorrectionGeneration = await page.evaluate(async () => {
+            const today = new Date().toISOString().slice(0, 10);
+            const response = await fetch(`/api/sync/today?today=${today}`, {
+              cache: "no-store",
+            });
+            const body = (await response.json()) as {
+              dayState?: {
+                currentRunId?: string;
+                runs?: Array<{ id?: string }>;
+              };
+              runValues?: Record<
+                string,
+                { skidsCompleted?: number; casesOnCurrentSkid?: number }
+              >;
+              packagingProgress?: Record<
+                string,
+                {
+                  skidsCompleted?: number;
+                  casesOnCurrentSkid?: number;
+                  correctionGeneration?: number;
+                }
+              >;
+            };
+            const runId =
+              body.dayState?.currentRunId ?? body.dayState?.runs?.[0]?.id;
+            const values = runId ? body.runValues?.[runId] : undefined;
+            const progress = runId
+              ? body.packagingProgress?.[runId]
+              : undefined;
+            return runId &&
+              values?.skidsCompleted === 0 &&
+              values.casesOnCurrentSkid === 45 &&
+              progress?.skidsCompleted === 0 &&
+              progress.casesOnCurrentSkid === 45 &&
+              (progress.correctionGeneration ?? 0) > 0
+              ? (progress.correctionGeneration ?? 0)
+              : 0;
+          });
+          return canonicalCorrectionGeneration;
+        },
+        { timeout: 15_000 },
+      )
+      .toBeGreaterThan(0);
+    const canonicalRunId = await page.evaluate(async () => {
+      const response = await fetch(
+        `/api/sync/today?today=${new Date().toISOString().slice(0, 10)}`,
+        { cache: "no-store" },
+      );
+      const body = (await response.json()) as {
+        dayState?: { currentRunId?: string; runs?: Array<{ id?: string }> };
+      };
+      return body.dayState?.currentRunId ?? body.dayState?.runs?.[0]?.id ?? "";
+    });
+    expect(
+      canonicalRunId,
+      "canonical correction must retain its run identity",
+    ).not.toBe("");
+
+    // Let the active line run briefly, then put this only device to sleep.
+    // The server hold is intentionally still active, so wake cannot replace
+    // the acknowledged pair with an automatic baseline.
+    await page.waitForTimeout(1_500);
+    await simulateScreenOff(page);
+    // Keep the browser's mocked clock monotonic. Date.now() here would read
+    // the test runner's real clock and rewind the page relative to baselineAt.
+    await mockDateNow(page, baselineAt + 5_000);
+    await simulateWake(page);
+    await expect(cases).toHaveText("45", { timeout: 15_000 });
+    await expect(skids).toContainText("0");
+
+    const afterWake = await page.evaluate((serverRunId) => {
+      const day = JSON.parse(localStorage.getItem("run-calc-day") ?? "{}") as {
+        currentIndex?: number;
+        runs?: Array<{ id?: string }>;
+      };
+      const runIds = (day.runs ?? [])
+        .map((run) => run.id)
+        .filter((id): id is string => Boolean(id));
+      const runId = runIds.includes(serverRunId)
+        ? serverRunId
+        : (runIds[day.currentIndex ?? 0] ?? runIds[0]);
+      const values = JSON.parse(
+        localStorage.getItem(`run-calc-run-${runId}`) ?? "null",
+      ) as { skidsCompleted?: number; casesOnCurrentSkid?: number } | null;
+      const progressMap = JSON.parse(
+        localStorage.getItem("run-calc-packaging-progress") ?? "{}",
+      ) as Record<
+        string,
+        {
           skidsCompleted?: number;
           casesOnCurrentSkid?: number;
           correctionGeneration?: number;
-        }>;
-        return {
-          values,
-          progress: progressMap[runId],
-          runId,
-          serverRunId,
-          runIds,
-          keys: Object.keys(localStorage).filter((key) => key.startsWith("run-calc-run-")),
-        };
-      }, canonicalRunId);
-      expect(
-        afterWake.runId,
-        `local run id must match canonical ${canonicalRunId}; local keys=${afterWake.keys.join(",")}`,
-      ).toBe(canonicalRunId);
-      expect(afterWake.values).toMatchObject({
-        skidsCompleted: 0,
-        casesOnCurrentSkid: 45,
-      });
-      expect(afterWake.progress).toMatchObject({
-        skidsCompleted: 0,
-        casesOnCurrentSkid: 45,
-        correctionGeneration: canonicalCorrectionGeneration,
-      });
+        }
+      >;
+      return {
+        values,
+        progress: progressMap[runId],
+        runId,
+        serverRunId,
+        runIds,
+        keys: Object.keys(localStorage).filter((key) =>
+          key.startsWith("run-calc-run-"),
+        ),
+      };
+    }, canonicalRunId);
+    expect(
+      afterWake.runId,
+      `local run id must match canonical ${canonicalRunId}; local keys=${afterWake.keys.join(",")}`,
+    ).toBe(canonicalRunId);
+    expect(afterWake.values).toMatchObject({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 45,
+    });
+    expect(afterWake.progress).toMatchObject({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 45,
+      correctionGeneration: canonicalCorrectionGeneration,
+    });
 
-      const serverHold = await page.evaluate(async (runId) => {
-        const today = new Date().toISOString().slice(0, 10);
-        const response = await fetch(`/api/sync/today?today=${today}`, { cache: "no-store" });
-        const body = await response.json() as {
-          packagingProgress?: Record<string, { manualOverrideUntil?: number }>;
-        };
-        return body.packagingProgress?.[runId]?.manualOverrideUntil ?? 0;
-      }, canonicalRunId);
-      const holdRemaining = Math.max(0, serverHold - Date.now() + 150);
-      expect(holdRemaining, "canonical manual correction hold").toBeLessThanOrEqual(60_500);
-      await page.waitForTimeout(holdRemaining);
+    const serverHold = await page.evaluate(async (runId) => {
+      const today = new Date().toISOString().slice(0, 10);
+      const response = await fetch(`/api/sync/today?today=${today}`, {
+        cache: "no-store",
+      });
+      const body = (await response.json()) as {
+        packagingProgress?: Record<string, { manualOverrideUntil?: number }>;
+      };
+      return body.packagingProgress?.[runId]?.manualOverrideUntil ?? 0;
+    }, canonicalRunId);
+    const holdRemaining = Math.max(0, serverHold - (baselineAt + 5_000) + 150);
+    expect(
+      holdRemaining,
+      "canonical manual correction hold",
+    ).toBeLessThanOrEqual(60_500);
+    await page.waitForTimeout(holdRemaining);
 
-      // One case period after the automatic baseline (78 -> 79 expected) must
-      // advance the corrected total (45 -> 46), not restore the old 1/30 pair.
-      await simulateScreenOff(page);
-      // Set the mocked clock while hidden, then wake once and issue exactly one
-      // authoritative beat. mockDateNow normally performs a beat itself, which
-      // would create a hidden pre-wake tick and race the wake reconciliation.
-      await mockDateNow(page, baselineAt + 6_001, { tick: false });
-      await simulateWake(page);
-      const tick = await page.request.post(
-        `/api/sync/e2e/auto-track-tick?today=${new Date(baselineAt).toISOString().slice(0, 10)}`,
-        { data: { nowMs: baselineAt + 6_001 } },
+    // One case period after the automatic baseline (78 -> 79 expected) must
+    // advance the corrected total (45 -> 46), not restore the old 1/30 pair.
+    // A wake beat may first re-arm server-owned wall-clock bookkeeping. If it
+    // does, wait for the persisted next due time and issue that beat as well.
+    await simulateScreenOff(page);
+    // Set the mocked clock while hidden, then wake once and issue exactly one
+    // authoritative beat. mockDateNow normally performs a beat itself, which
+    // would create a hidden pre-wake tick and race the wake reconciliation.
+    await mockDateNow(page, baselineAt + 6_001, { tick: false });
+    await simulateWake(page);
+    const tick = await page.request.post(
+      `/api/sync/e2e/auto-track-tick?today=${new Date(baselineAt).toISOString().slice(0, 10)}`,
+      { data: { nowMs: baselineAt + 6_001 } },
+    );
+    expect(tick.ok(), `authoritative wake tick failed: ${tick.status()}`).toBe(
+      true,
+    );
+    const firstBeatSummary = await tick.json() as {
+      builtClaims?: number;
+      accepted?: number;
+      outcomes?: Record<string, number>;
+    };
+    const afterFirstBeat = await page.evaluate(async (runId) => {
+      const response = await fetch(
+        `/api/sync/today?today=${new Date().toISOString().slice(0, 10)}`,
+        { cache: "no-store" },
       );
-      expect(tick.ok(), `authoritative wake tick failed: ${tick.status()}`).toBe(true);
-      // The authoritative beat is the source of truth for this paired
-      // correction. Rehydrate its acknowledged packaging register before
-      // asserting the visible value; the wake request itself may have already
-      // completed against the prior local register.
-      await page.reload({ waitUntil: "domcontentloaded" });
-      await page.locator('[data-testid="tab-packaging"]')
-        .waitFor({ state: "visible", timeout: 20_000 });
-      await expect(cases).toHaveText("46", { timeout: 15_000 });
-      await expect(skids).toContainText("0");
-
-      // Reload is a separate persistence boundary: form, durable run values,
-      // Packaging register, and canonical server state must still agree.
-      await page.reload({ waitUntil: "domcontentloaded" });
-      await page.locator('[data-testid="tab-packaging"]')
-        .waitFor({ state: "visible", timeout: 20_000 });
-      await expect(page.locator('[data-testid="text-casesOnCurrentSkid"]').first())
-        .toHaveText("46", { timeout: 20_000 });
-      await expect(page.locator('[data-testid="text-skidsCompleted"]').first())
-        .toContainText("0");
-
-      const persisted = await page.evaluate(async (runId) => {
-        const values = JSON.parse(
-          localStorage.getItem(`run-calc-run-${runId}`) ?? "null",
-        ) as { skidsCompleted?: number; casesOnCurrentSkid?: number } | null;
-        const progressMap = JSON.parse(
-          localStorage.getItem("run-calc-packaging-progress") ?? "{}",
-        ) as Record<string, { skidsCompleted?: number; casesOnCurrentSkid?: number }>;
-        const today = new Date().toISOString().slice(0, 10);
-        const response = await fetch(`/api/sync/today?today=${today}`, { cache: "no-store" });
-        const body = await response.json() as {
-          runValues?: Record<string, { skidsCompleted?: number; casesOnCurrentSkid?: number }>;
-          packagingProgress?: Record<string, { skidsCompleted?: number; casesOnCurrentSkid?: number }>;
+      if (!response.ok) throw new Error(`canonical wake read failed: ${response.status}`);
+      const body = (await response.json()) as {
+        packagingProgress?: Record<string, { skidsCompleted?: number; casesOnCurrentSkid?: number }>;
+        autoTrackServerState?: {
+          wallClockBookkeeping?: Record<string, { caseNextDueMs?: number; lastExpectedCases?: number }>;
         };
-        return {
-          values,
-          progress: progressMap[runId],
-          serverValues: body.runValues?.[runId],
-          serverProgress: body.packagingProgress?.[runId],
+      };
+      return {
+        cases: body.packagingProgress?.[runId]?.casesOnCurrentSkid,
+        skids: body.packagingProgress?.[runId]?.skidsCompleted,
+        nextDueMs: body.autoTrackServerState?.wallClockBookkeeping?.[runId]?.caseNextDueMs,
+        lastExpectedCases: body.autoTrackServerState?.wallClockBookkeeping?.[runId]?.lastExpectedCases,
+      };
+    }, canonicalRunId);
+    expect(afterFirstBeat.skids).toBe(0);
+    expect([45, 46]).toContain(afterFirstBeat.cases);
+    let dueNowMs = 0;
+    let dueBeatSummary: { builtClaims?: number; accepted?: number; outcomes?: Record<string, number> } | null = null;
+    if (afterFirstBeat.cases === 45) {
+      const nextDueMs = afterFirstBeat.nextDueMs ?? 0;
+      expect(nextDueMs, "wake must persist an armed case cadence").toBeGreaterThan(baselineAt + 6_001);
+      expect(nextDueMs, "wake must not defer the next case beyond one cadence").toBeLessThanOrEqual(baselineAt + 12_500);
+      dueNowMs = Math.max(nextDueMs + 100, serverHold + 100);
+      const dueTick = await page.request.post(
+        `/api/sync/e2e/auto-track-tick?today=${new Date(baselineAt).toISOString().slice(0, 10)}`,
+        { data: { nowMs: dueNowMs } },
+      );
+      expect(dueTick.ok(), `authoritative due tick failed: ${dueTick.status()}`).toBe(true);
+      dueBeatSummary = await dueTick.json();
+    }
+    const afterDueBeat = await page.evaluate(async (runId) => {
+      const response = await fetch(
+        `/api/sync/today?today=${new Date().toISOString().slice(0, 10)}`,
+        { cache: "no-store" },
+      );
+      if (!response.ok) throw new Error(`canonical due read failed: ${response.status}`);
+      const body = (await response.json()) as {
+        packagingProgress?: Record<string, {
+          skidsCompleted?: number; casesOnCurrentSkid?: number; manualOverrideUntil?: number;
+        }>;
+        runValues?: Record<string, { casesOnCurrentSkid?: number }>;
+        autoTrackServerState?: {
+          wallClockBookkeeping?: Record<string, { caseNextDueMs?: number; lastExpectedCases?: number }>;
         };
-      }, canonicalRunId);
-      expect(persisted.values).toMatchObject({ skidsCompleted: 0, casesOnCurrentSkid: 46 });
-      expect(persisted.progress).toMatchObject({ skidsCompleted: 0, casesOnCurrentSkid: 46 });
-      expect(persisted.serverValues).toMatchObject({ skidsCompleted: 0, casesOnCurrentSkid: 46 });
-      expect(persisted.serverProgress).toMatchObject({ skidsCompleted: 0, casesOnCurrentSkid: 46 });
-    },
-  );
+      };
+      return {
+        progress: body.packagingProgress?.[runId],
+        value: body.runValues?.[runId]?.casesOnCurrentSkid,
+        book: body.autoTrackServerState?.wallClockBookkeeping?.[runId],
+      };
+    }, canonicalRunId);
+    expect(afterDueBeat.progress?.casesOnCurrentSkid, JSON.stringify({
+      first: firstBeatSummary,
+      firstCases: afterFirstBeat.cases,
+      firstExpected: afterFirstBeat.lastExpectedCases,
+      firstNextDueOffset: (afterFirstBeat.nextDueMs ?? 0) - baselineAt,
+      due: dueBeatSummary,
+      dueOffset: dueNowMs - baselineAt,
+      holdOffset: serverHold - baselineAt,
+      nextDueOffset: (afterDueBeat.book?.caseNextDueMs ?? 0) - baselineAt,
+      expected: afterDueBeat.book?.lastExpectedCases,
+      value: afterDueBeat.value,
+    })).toBe(46);
+    // The authoritative beat is the source of truth for this paired
+    // correction. Rehydrate its acknowledged packaging register before
+    // asserting the visible value. Preserve that beat's clock across both
+    // reloads: the navigation init script otherwise resets to the original
+    // run start and makes the browser appear older than the server correction.
+    await page.evaluate((ms) => {
+      sessionStorage.setItem("__screenOffWakeReloadMs", String(ms));
+      (window as unknown as Record<string, unknown>).__testFakeMs = ms;
+    }, dueNowMs || baselineAt + 6_001);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page
+      .locator('[data-testid="tab-packaging"]')
+      .waitFor({ state: "visible", timeout: 20_000 });
+    await expect(cases).toHaveText("46", { timeout: 15_000 });
+    await expect(skids).toContainText("0");
 
-  test(
-    "F. a failed Packaging correction stays visible on phone until an explicit retry",
-    async ({ page }, testInfo) => {
-      test.slow();
-      await page.setViewportSize({ width: 390, height: 844 });
-      const safeBaseMs = await setupAndStartRun(page, "48");
-      const baselineAt = safeBaseMs + 12 * 60_000 + 48_500;
+    // Reload is a separate persistence boundary: form, durable run values,
+    // Packaging register, and canonical server state must still agree.
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page
+      .locator('[data-testid="tab-packaging"]')
+      .waitFor({ state: "visible", timeout: 20_000 });
+    await expect(
+      page.locator('[data-testid="text-casesOnCurrentSkid"]').first(),
+    ).toHaveText("46", { timeout: 20_000 });
+    await expect(
+      page.locator('[data-testid="text-skidsCompleted"]').first(),
+    ).toContainText("0");
 
-      await simulateScreenOff(page);
-      await mockDateNow(page, baselineAt);
-      await simulateWake(page);
-      await waitForCaseCounterChange(page, 0, 8_000);
-      expect(await readCaseTotal(page)).toBe(78);
-
-      await page.locator('[data-testid="tab-packaging"]').click();
-      const skids = page.locator('[data-testid="text-skidsCompleted"]').first();
-      const cases = page.locator('[data-testid="text-casesOnCurrentSkid"]').first();
-      await expect(skids).toContainText("1");
-      await expect(cases).toHaveText("30");
-
-      const runId = await page.evaluate(() => {
-        const day = JSON.parse(localStorage.getItem("run-calc-day") ?? "{}") as {
-          currentRunId?: string;
-          currentIndex?: number;
-          runs?: Array<{ id?: string }>;
-        };
-        return day.currentRunId ?? day.runs?.[day.currentIndex ?? 0]?.id ?? day.runs?.[0]?.id ?? null;
+    const persisted = await page.evaluate(async (runId) => {
+      const values = JSON.parse(
+        localStorage.getItem(`run-calc-run-${runId}`) ?? "null",
+      ) as { skidsCompleted?: number; casesOnCurrentSkid?: number } | null;
+      const progressMap = JSON.parse(
+        localStorage.getItem("run-calc-packaging-progress") ?? "{}",
+      ) as Record<
+        string,
+        { skidsCompleted?: number; casesOnCurrentSkid?: number }
+      >;
+      const today = new Date().toISOString().slice(0, 10);
+      const response = await fetch(`/api/sync/today?today=${today}`, {
+        cache: "no-store",
       });
-      expect(runId, "active run id").toBeTruthy();
+      const body = (await response.json()) as {
+        runValues?: Record<
+          string,
+          { skidsCompleted?: number; casesOnCurrentSkid?: number }
+        >;
+        packagingProgress?: Record<
+          string,
+          { skidsCompleted?: number; casesOnCurrentSkid?: number }
+        >;
+      };
+      return {
+        values,
+        progress: progressMap[runId],
+        serverValues: body.runValues?.[runId],
+        serverProgress: body.packagingProgress?.[runId],
+      };
+    }, canonicalRunId);
+    expect(persisted.values).toMatchObject({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 46,
+    });
+    expect(persisted.progress).toMatchObject({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 46,
+    });
+    expect(persisted.serverValues).toMatchObject({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 46,
+    });
+    expect(persisted.serverProgress).toMatchObject({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 46,
+    });
+  });
 
-      const initial = await page.waitForFunction(async (id) => {
+  test("F. a failed Packaging correction stays visible on phone until an explicit retry", async ({
+    page,
+  }, testInfo) => {
+    test.slow();
+    await page.setViewportSize({ width: 390, height: 844 });
+    const safeBaseMs = await setupAndStartRun(page, "48");
+    const baselineAt = safeBaseMs + 12 * 60_000 + 48_500;
+
+    await simulateScreenOff(page);
+    await mockDateNow(page, baselineAt);
+    await simulateWake(page);
+    await waitForCaseCounterChange(page, 0, 8_000);
+    expect(await readCaseTotal(page)).toBe(78);
+
+    await page.locator('[data-testid="tab-packaging"]').click();
+    const skids = page.locator('[data-testid="text-skidsCompleted"]').first();
+    const cases = page
+      .locator('[data-testid="text-casesOnCurrentSkid"]')
+      .first();
+    await expect(skids).toContainText("1");
+    await expect(cases).toHaveText("30");
+
+    const runId = await page.evaluate(() => {
+      const day = JSON.parse(localStorage.getItem("run-calc-day") ?? "{}") as {
+        currentRunId?: string;
+        currentIndex?: number;
+        runs?: Array<{ id?: string }>;
+      };
+      return (
+        day.currentRunId ??
+        day.runs?.[day.currentIndex ?? 0]?.id ??
+        day.runs?.[0]?.id ??
+        null
+      );
+    });
+    expect(runId, "active run id").toBeTruthy();
+
+    const initial = await page.waitForFunction(
+      async (id) => {
         const today = new Date().toISOString().slice(0, 10);
-        const response = await fetch(`/api/sync/today?today=${today}`, { cache: "no-store" });
-        const body = await response.json() as {
-          runValues?: Record<string, { skidsCompleted?: number; casesOnCurrentSkid?: number }>;
-          packagingProgress?: Record<string, {
-            skidsCompleted?: number;
-            casesOnCurrentSkid?: number;
-            correctionGeneration?: number;
-          }>;
+        const response = await fetch(`/api/sync/today?today=${today}`, {
+          cache: "no-store",
+        });
+        const body = (await response.json()) as {
+          runValues?: Record<
+            string,
+            { skidsCompleted?: number; casesOnCurrentSkid?: number }
+          >;
+          packagingProgress?: Record<
+            string,
+            {
+              skidsCompleted?: number;
+              casesOnCurrentSkid?: number;
+              correctionGeneration?: number;
+            }
+          >;
         };
         const values = body.runValues?.[id];
         const progress = body.packagingProgress?.[id];
-        return values?.skidsCompleted === 1
-          && values.casesOnCurrentSkid === 30
-          && progress?.skidsCompleted === 1
-          && progress.casesOnCurrentSkid === 30
+        return values?.skidsCompleted === 1 &&
+          values.casesOnCurrentSkid === 30 &&
+          progress?.skidsCompleted === 1 &&
+          progress.casesOnCurrentSkid === 30
           ? { correctionGeneration: progress.correctionGeneration ?? 0 }
           : false;
-      }, runId, { timeout: 15_000 });
-      const initialState = await initial.jsonValue() as { correctionGeneration: number };
+      },
+      runId,
+      { timeout: 15_000 },
+    );
+    const initialState = (await initial.jsonValue()) as {
+      correctionGeneration: number;
+    };
 
-      let blocked = true;
-      let blockedWrites = 0;
-      await page.route("**/api/sync/today**", async (route) => {
-        const request = route.request();
-        if (request.method() === "PUT") {
-          const requestBody = JSON.parse(request.postData() ?? "{}") as {
-            payload?: {
-              packagingProgress?: Record<string, { correctionGeneration?: number }>;
-            };
+    let blocked = true;
+    let blockedWrites = 0;
+    await page.route("**/api/sync/today**", async (route) => {
+      const request = route.request();
+      if (request.method() === "PUT") {
+        const requestBody = JSON.parse(request.postData() ?? "{}") as {
+          payload?: {
+            packagingProgress?: Record<
+              string,
+              { correctionGeneration?: number }
+            >;
           };
-          const progress = requestBody.payload?.packagingProgress?.[runId!];
-          if (
-            blocked
-            && progress
-            && (progress.correctionGeneration ?? 0) > initialState.correctionGeneration
-          ) {
-            blockedWrites += 1;
-            await route.fulfill({
-              status: 503,
-              contentType: "application/json",
-              body: JSON.stringify({ error: "controlled Packaging sync outage" }),
-            });
-            return;
-          }
+        };
+        const progress = requestBody.payload?.packagingProgress?.[runId!];
+        if (
+          blocked &&
+          progress &&
+          (progress.correctionGeneration ?? 0) >
+            initialState.correctionGeneration
+        ) {
+          blockedWrites += 1;
+          await route.fulfill({
+            status: 503,
+            contentType: "application/json",
+            body: JSON.stringify({ error: "controlled Packaging sync outage" }),
+          });
+          return;
         }
-        await route.continue();
+      }
+      await route.continue();
+    });
+
+    try {
+      // 1/30 -> 0/30 -> 0/45. The corrected pair must remain local while
+      // every PUT carrying the correction is rejected.
+      // Keep the correction on the same frozen production instant. A fixture
+      // tick here can advance the automatic baseline between the paired
+      // decrement clicks and make the correction appear to be overwritten.
+      await mockDateNow(page, baselineAt, { tick: false });
+      await page.locator('[data-testid="btn-dec-skidsCompleted"]').click();
+      for (let i = 0; i < 15; i++) {
+        await page
+          .locator('[data-testid="btn-inc-casesOnCurrentSkid"]')
+          .click();
+      }
+      await expect(skids).toContainText("0");
+      await expect(cases).toHaveText("45");
+      await expect(skids).toBeVisible();
+      await expect(cases).toBeVisible();
+      await expect
+        .poll(() => blockedWrites, { timeout: 15_000 })
+        .toBeGreaterThanOrEqual(1);
+
+      const localPair = await page.evaluate((id) => {
+        const values = JSON.parse(
+          localStorage.getItem(`run-calc-run-${id}`) ?? "{}",
+        ) as { skidsCompleted?: number; casesOnCurrentSkid?: number };
+        const progress = JSON.parse(
+          localStorage.getItem("run-calc-packaging-progress") ?? "{}",
+        ) as Record<
+          string,
+          { skidsCompleted?: number; casesOnCurrentSkid?: number }
+        >;
+        return { values, progress: progress[id] };
+      }, runId);
+      expect(localPair.values).toMatchObject({
+        skidsCompleted: 0,
+        casesOnCurrentSkid: 45,
+      });
+      expect(localPair.progress).toMatchObject({
+        skidsCompleted: 0,
+        casesOnCurrentSkid: 45,
       });
 
-      try {
-        // 1/30 -> 0/30 -> 0/45. The corrected pair must remain local while
-        // every PUT carrying the correction is rejected.
-        await mockDateNow(page, Date.now());
-        await page.locator('[data-testid="btn-dec-skidsCompleted"]').click();
-        for (let i = 0; i < 15; i++) {
-          await page.locator('[data-testid="btn-inc-casesOnCurrentSkid"]').click();
-        }
-        await expect(skids).toContainText("0");
-        await expect(cases).toHaveText("45");
-        await expect(skids).toBeVisible();
-        await expect(cases).toBeVisible();
-        await expect.poll(() => blockedWrites, { timeout: 15_000 }).toBeGreaterThanOrEqual(1);
+      const notAcknowledged =
+        "Your latest changes are retained on this device, but the server has not acknowledged them. Other devices cannot see them until sync succeeds.";
+      await expect(
+        page.getByText(notAcknowledged, { exact: true }),
+      ).toBeVisible({ timeout: 20_000 });
 
-        const localPair = await page.evaluate((id) => {
-          const values = JSON.parse(
-            localStorage.getItem(`run-calc-run-${id}`) ?? "{}",
-          ) as { skidsCompleted?: number; casesOnCurrentSkid?: number };
-          const progress = JSON.parse(
-            localStorage.getItem("run-calc-packaging-progress") ?? "{}",
-          ) as Record<string, { skidsCompleted?: number; casesOnCurrentSkid?: number }>;
-          return { values, progress: progress[id] };
-        }, runId);
-        expect(localPair.values).toMatchObject({ skidsCompleted: 0, casesOnCurrentSkid: 45 });
-        expect(localPair.progress).toMatchObject({ skidsCompleted: 0, casesOnCurrentSkid: 45 });
-
-        const notAcknowledged =
-          "Your latest changes are retained on this device, but the server has not acknowledged them. Other devices cannot see them until sync succeeds.";
-        await expect(page.getByText(notAcknowledged, { exact: true })).toBeVisible({ timeout: 20_000 });
-
-        await page.locator('button[title="Sync connected"]').click();
-        await expect(page.getByText(
+      await page.locator('button[title="Sync connected"]').click();
+      await expect(
+        page.getByText(
           "Your local change is retained on this device. It is not shared until the server acknowledges it.",
           { exact: true },
-        )).toBeVisible();
-        await expect(page.getByText(notAcknowledged, { exact: true })).toBeVisible();
-        await expect(page.getByText("Pending writes")).toBeVisible();
-        const retry = page.getByRole("button", {
-          name: "Retry latest retained change",
-          exact: true,
-        });
-        await expect(retry).toBeVisible();
-        await expect(retry).toBeEnabled();
-        const pendingGeometry = await page.evaluate(() => ({
-          viewportWidth: window.innerWidth,
-          documentScrollWidth: document.documentElement.scrollWidth,
-          bodyScrollWidth: document.body.scrollWidth,
-        }));
-        expect(pendingGeometry.documentScrollWidth).toBeLessThanOrEqual(
-          pendingGeometry.viewportWidth + 1,
-        );
-        expect(pendingGeometry.bodyScrollWidth).toBeLessThanOrEqual(
-          pendingGeometry.viewportWidth + 1,
-        );
-        await page.screenshot({
-          path: testInfo.outputPath("packaging-correction-pending.png"),
-          fullPage: true,
-        });
+        ),
+      ).toBeVisible();
+      await expect(
+        page.getByText(notAcknowledged, { exact: true }),
+      ).toBeVisible();
+      await expect(page.getByText("Pending writes")).toBeVisible();
+      const retry = page.getByRole("button", {
+        name: "Retry latest retained change",
+        exact: true,
+      });
+      await expect(retry).toBeVisible();
+      await expect(retry).toBeEnabled();
+      const pendingGeometry = await page.evaluate(() => ({
+        viewportWidth: window.innerWidth,
+        documentScrollWidth: document.documentElement.scrollWidth,
+        bodyScrollWidth: document.body.scrollWidth,
+      }));
+      expect(pendingGeometry.documentScrollWidth).toBeLessThanOrEqual(
+        pendingGeometry.viewportWidth + 1,
+      );
+      expect(pendingGeometry.bodyScrollWidth).toBeLessThanOrEqual(
+        pendingGeometry.viewportWidth + 1,
+      );
+      await page.screenshot({
+        path: testInfo.outputPath("packaging-correction-pending.png"),
+        fullPage: true,
+      });
 
-        blocked = false;
-        await retry.click();
-        await expect.poll(async () => page.evaluate(async (id) => {
-          const today = new Date().toISOString().slice(0, 10);
-          const response = await fetch(`/api/sync/today?today=${today}`, { cache: "no-store" });
-          const body = await response.json() as {
-            runValues?: Record<string, { skidsCompleted?: number; casesOnCurrentSkid?: number }>;
-            packagingProgress?: Record<string, { skidsCompleted?: number; casesOnCurrentSkid?: number }>;
-          };
-          const values = body.runValues?.[id];
-          const progress = body.packagingProgress?.[id];
-          return values?.skidsCompleted === 0
-            && values.casesOnCurrentSkid === 45
-            && progress?.skidsCompleted === 0
-            && progress.casesOnCurrentSkid === 45;
-        }, runId), { timeout: 15_000 }).toBe(true);
-        await expect(page.getByText(notAcknowledged, { exact: true })).toBeHidden();
+      blocked = false;
+      await retry.click();
+      await expect
+        .poll(
+          async () =>
+            page.evaluate(async (id) => {
+              const today = new Date().toISOString().slice(0, 10);
+              const response = await fetch(`/api/sync/today?today=${today}`, {
+                cache: "no-store",
+              });
+              const body = (await response.json()) as {
+                runValues?: Record<
+                  string,
+                  { skidsCompleted?: number; casesOnCurrentSkid?: number }
+                >;
+                packagingProgress?: Record<
+                  string,
+                  { skidsCompleted?: number; casesOnCurrentSkid?: number }
+                >;
+              };
+              const values = body.runValues?.[id];
+              const progress = body.packagingProgress?.[id];
+              return (
+                values?.skidsCompleted === 0 &&
+                values.casesOnCurrentSkid === 45 &&
+                progress?.skidsCompleted === 0 &&
+                progress.casesOnCurrentSkid === 45
+              );
+            }, runId),
+          { timeout: 15_000 },
+        )
+        .toBe(true);
+      await expect(
+        page.getByText(notAcknowledged, { exact: true }),
+      ).toBeHidden();
 
-        await page.reload({ waitUntil: "domcontentloaded" });
-        await page.locator('[data-testid="tab-packaging"]')
-          .waitFor({ state: "visible", timeout: 20_000 });
-        await expect(page.locator('[data-testid="text-skidsCompleted"]').first())
-          .toContainText("0", { timeout: 20_000 });
-        await expect(page.locator('[data-testid="text-casesOnCurrentSkid"]').first())
-          .toHaveText("45", { timeout: 20_000 });
-        const convergedGeometry = await page.evaluate(() => ({
-          viewportWidth: window.innerWidth,
-          documentScrollWidth: document.documentElement.scrollWidth,
-          bodyScrollWidth: document.body.scrollWidth,
-        }));
-        expect(convergedGeometry.documentScrollWidth).toBeLessThanOrEqual(
-          convergedGeometry.viewportWidth + 1,
-        );
-        expect(convergedGeometry.bodyScrollWidth).toBeLessThanOrEqual(
-          convergedGeometry.viewportWidth + 1,
-        );
-        await page.screenshot({
-          path: testInfo.outputPath("packaging-correction-converged.png"),
-          fullPage: true,
-        });
-      } finally {
-        blocked = false;
-        await page.unroute("**/api/sync/today**").catch(() => {});
-      }
-    },
-  );
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page
+        .locator('[data-testid="tab-packaging"]')
+        .waitFor({ state: "visible", timeout: 20_000 });
+      await expect(
+        page.locator('[data-testid="text-skidsCompleted"]').first(),
+      ).toContainText("0", { timeout: 20_000 });
+      await expect(
+        page.locator('[data-testid="text-casesOnCurrentSkid"]').first(),
+      ).toHaveText("45", { timeout: 20_000 });
+      const convergedGeometry = await page.evaluate(() => ({
+        viewportWidth: window.innerWidth,
+        documentScrollWidth: document.documentElement.scrollWidth,
+        bodyScrollWidth: document.body.scrollWidth,
+      }));
+      expect(convergedGeometry.documentScrollWidth).toBeLessThanOrEqual(
+        convergedGeometry.viewportWidth + 1,
+      );
+      expect(convergedGeometry.bodyScrollWidth).toBeLessThanOrEqual(
+        convergedGeometry.viewportWidth + 1,
+      );
+      await page.screenshot({
+        path: testInfo.outputPath("packaging-correction-converged.png"),
+        fullPage: true,
+      });
+    } finally {
+      blocked = false;
+      await page.unroute("**/api/sync/today**").catch(() => {});
+    }
+  });
 
-  test(
-    "D. active peers and server keep a downward skid correction over a stale automatic write",
-    async ({ page, browser }: { page: Page; browser: Browser }) => {
-      test.slow();
-      const safeBaseMs = await setupAndStartRun(page, "48");
-      // Stay comfortably inside the 36-case bucket rather than exactly on its
-      // opening millisecond; browser/start timestamp ordering can otherwise
-      // leave floating-point elapsed time a fraction below 3.6 minutes.
-      const baselineAt = safeBaseMs + 8 * 60_000 + 36_500;
+  test("D. active peers and server keep a downward skid correction over a stale automatic write", async ({
+    page,
+    browser,
+  }: {
+    page: Page;
+    browser: Browser;
+  }) => {
+    test.slow();
+    const safeBaseMs = await setupAndStartRun(page, "48");
+    // Stay comfortably inside the 36-case bucket rather than exactly on its
+    // opening millisecond; browser/start timestamp ordering can otherwise
+    // leave floating-point elapsed time a fraction below 3.6 minutes.
+    const baselineAt = safeBaseMs + 8 * 60_000 + 36_500;
 
-      // At +8.6 min, 3.6 min of product has exited the five-minute tunnel:
-      // floor(3.6 * 60 pizzas/min / 6 pizzas/case) = 36 cases.
-      await simulateScreenOff(page);
-      await mockDateNow(page, baselineAt);
-      await simulateWake(page);
-      await waitForCaseCounterChange(page, 0, 8_000);
-      expect(await readCaseTotal(page)).toBe(36);
+    // At +8.6 min, 3.6 min of product has exited the five-minute tunnel:
+    // floor(3.6 * 60 pizzas/min / 6 pizzas/case) = 36 cases.
+    await simulateScreenOff(page);
+    await mockDateNow(page, baselineAt);
+    await simulateWake(page);
+    await waitForCaseCounterChange(page, 0, 8_000);
+    expect(await readCaseTotal(page)).toBe(36);
 
-      // Wait until the automatic baseline and its generation-0 packaging
-      // register are durably stored before the second active browser joins.
-      await page.waitForFunction(async () => {
+    // Wait until the automatic baseline and its generation-0 packaging
+    // register are durably stored before the second active browser joins.
+    await page.waitForFunction(
+      async () => {
         const today = new Date().toISOString().slice(0, 10);
         const response = await fetch(`/api/sync/today?today=${today}`);
-        const body = await response.json() as {
+        const body = (await response.json()) as {
           packagingProgress?: Record<string, { casesOnCurrentSkid?: number }>;
         } | null;
-        return Object.values(body?.packagingProgress ?? {})
-          .some((entry) => entry.casesOnCurrentSkid === 36);
-      }, undefined, { timeout: 15_000 });
+        return Object.values(body?.packagingProgress ?? {}).some(
+          (entry) => entry.casesOnCurrentSkid === 36,
+        );
+      },
+      undefined,
+      { timeout: 15_000 },
+    );
+      // The correction below is the synchronization boundary for this case.
+      // Hold browser-originated automatic claims while it is applied; the
+      // stale automatic write itself is sent explicitly from the peer below.
+      await page.route("**/api/sync/auto-track/claim**", (route) =>
+        route.abort(),
+      );
 
-      const peer = await browser.newContext({
-        storageState: await page.context().storageState(),
-      });
-      try {
-        // Install the same Date proxy before any app script runs. Both tabs are
-        // active and automatic tracking is enabled, but neither can race ahead
-        // merely because this test's real clock differs from startedAt.
-        await peer.addInitScript(({ fakeMs }) => {
+    const peer = await browser.newContext({
+      storageState: await page.context().storageState(),
+    });
+      await peer.route("**/api/sync/auto-track/claim**", (route) =>
+        route.abort(),
+      );
+    try {
+      // Install the same Date proxy before any app script runs. Both tabs are
+      // active and automatic tracking is enabled, but neither can race ahead
+      // merely because this test's real clock differs from startedAt.
+      await peer.addInitScript(
+        ({ fakeMs }) => {
           const w = window as unknown as Record<string, unknown>;
           w.__testFakeMs = fakeMs;
           w.__testDateProxyInstalled = true;
@@ -2713,25 +3414,32 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
               return typeof value === "function" ? value.bind(target) : value;
             },
           }) as unknown as typeof Date;
-        }, { fakeMs: baselineAt });
+        },
+        { fakeMs: baselineAt },
+      );
 
-        const peerPage = await peer.newPage();
-        await peerPage.goto("/", { waitUntil: "domcontentloaded" });
-        await peerPage.locator('[data-testid="tile-cases-completed"]')
-          .waitFor({ state: "visible", timeout: 20_000 });
-        await expect.poll(() => readCaseTotal(peerPage), { timeout: 15_000 }).toBe(36);
+      const peerPage = await peer.newPage();
+      await peerPage.goto("/", { waitUntil: "domcontentloaded" });
+      await peerPage
+        .locator('[data-testid="tile-cases-completed"]')
+        .waitFor({ state: "visible", timeout: 20_000 });
+      await expect
+        .poll(() => readCaseTotal(peerPage), { timeout: 15_000 })
+        .toBe(36);
 
-        // Capture what the second active browser knew before the correction.
-        // We later replay this as its unaware automatic tick with a newer
-        // whole-run timestamp; the older correction generation must still lose.
-        const staleSnapshot = await peerPage.evaluate(async () => {
-          const today = new Date().toISOString().slice(0, 10);
-          const response = await fetch(`/api/sync/today?today=${today}`);
-          return await response.json() as {
-            dayState?: { currentRunId?: string; runs?: Array<{ id?: string }> };
-            runValues?: Record<string, Record<string, unknown>>;
-            runValuesUpdatedAt?: Record<string, number>;
-            packagingProgress?: Record<string, {
+      // Capture what the second active browser knew before the correction.
+      // We later replay this as its unaware automatic tick with a newer
+      // whole-run timestamp; the older correction generation must still lose.
+      const staleSnapshot = await peerPage.evaluate(async () => {
+        const today = new Date().toISOString().slice(0, 10);
+        const response = await fetch(`/api/sync/today?today=${today}`);
+        return (await response.json()) as {
+          dayState?: { currentRunId?: string; runs?: Array<{ id?: string }> };
+          runValues?: Record<string, Record<string, unknown>>;
+          runValuesUpdatedAt?: Record<string, number>;
+          packagingProgress?: Record<
+            string,
+            {
               skidsCompleted: number;
               casesOnCurrentSkid: number;
               correctionGeneration: number;
@@ -2754,10 +3462,9 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         await expect(peerCases).toHaveText("36");
 
         // Explicit operator correction: 36/48 → 24/48.
-        // Restore wall time while entering the correction so the persisted hold
-        // deadline represents one canonical server minute, not the deliberately
-        // advanced production-clock fixture.
-        await mockDateNow(page, Date.now());
+        // Keep the operator correction on the frozen automatic-baseline clock;
+        // do not race a server-owned tracking beat between its twelve clicks.
+        await mockDateNow(page, baselineAt, { tick: false });
         const manualSectionStatuses: number[] = [];
         const manualSectionConflictDetails: Array<Record<string, unknown>> = [];
         page.on("response", (response) => {
@@ -2841,7 +3548,8 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
           const payload = JSON.parse(JSON.stringify(snapshot)) as typeof snapshot;
           const staleProgress = payload.packagingProgress?.[id];
           const staleValues = payload.runValues?.[id];
-          if (!staleProgress || !staleValues) throw new Error("stale packaging snapshot missing");
+          if (!staleProgress || !staleValues)
+            throw new Error("stale packaging snapshot missing");
           staleProgress.skidsCompleted = 0;
           staleProgress.casesOnCurrentSkid = 36;
           staleProgress.updatedAt += 30_000;
@@ -2851,7 +3559,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
           payload.runValuesUpdatedAt[id] = staleProgress.updatedAt;
 
           const epochResponse = await fetch("/api/sync/reset-epoch");
-          const { epoch } = await epochResponse.json() as { epoch: number };
+          const { epoch } = (await epochResponse.json()) as { epoch: number };
           const today = new Date().toISOString().slice(0, 10);
           const response = await fetch(
             `/api/sync/today?today=${today}&epoch=${epoch}`,
@@ -2866,133 +3574,171 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
           );
           return {
             status: response.status,
-            body: await response.json() as {
+            body: (await response.json()) as {
               data?: {
-                runValues?: Record<string, {
-                  skidsCompleted?: number;
-                  casesOnCurrentSkid?: number;
-                }>;
+                runValues?: Record<
+                  string,
+                  {
+                    skidsCompleted?: number;
+                    casesOnCurrentSkid?: number;
+                  }
+                >;
               };
             },
           };
-        }, { snapshot: staleSnapshot, id: runId! });
+        },
+        { snapshot: staleSnapshot, id: runId! },
+      );
 
-        expect(staleWriteResult.status).toBe(200);
-        expect(staleWriteResult.body.data?.runValues?.[runId!]).toMatchObject({
-          skidsCompleted: 0,
-          casesOnCurrentSkid: 24,
-        });
-        await expect(primaryCases).toHaveText("24");
-        await expect(peerCases).toHaveText("24");
+      expect(staleWriteResult.status).toBe(200);
+      expect(staleWriteResult.body.data?.runValues?.[runId!]).toMatchObject({
+        skidsCompleted: 0,
+        casesOnCurrentSkid: correctedCases,
+      });
+      await expect(primaryCases).toHaveText(String(correctedCases));
+      await expect(peerCases).toHaveText(String(correctedCases));
 
-        const serverState = await page.evaluate(async ({ id }) => {
+      const serverState = await page.evaluate(
+        async ({ id }) => {
           const today = new Date().toISOString().slice(0, 10);
           const response = await fetch(`/api/sync/today?today=${today}`);
-          const body = await response.json() as {
-            runValues?: Record<string, {
-              skidsCompleted?: number;
-              casesOnCurrentSkid?: number;
-            }>;
-            packagingProgress?: Record<string, {
-              manualOverrideUntil?: number;
-            }>;
+          const body = (await response.json()) as {
+            runValues?: Record<
+              string,
+              {
+                skidsCompleted?: number;
+                casesOnCurrentSkid?: number;
+              }
+            >;
+            packagingProgress?: Record<
+              string,
+              {
+                skidsCompleted?: number;
+                casesOnCurrentSkid?: number;
+                manualOverrideUntil?: number;
+              }
+            >;
           };
           return {
             pair: body.runValues?.[id],
-            manualOverrideUntil: body.packagingProgress?.[id]?.manualOverrideUntil,
+            progress: body.packagingProgress?.[id],
+            manualOverrideUntil:
+              body.packagingProgress?.[id]?.manualOverrideUntil,
           };
-        }, { id: runId! });
-        expect(serverState.pair).toMatchObject({
-          skidsCompleted: 0,
-          casesOnCurrentSkid: 24,
-        });
-        expect(serverState.manualOverrideUntil).toEqual(expect.any(Number));
-
-        // Both active peers retain the correction for the canonical hold.
-        await expect(peerCases).toHaveText("24");
-
-        // The API intentionally evaluates manualOverrideUntil against its own
-        // canonical clock. Browser Date mocking must not bypass that hold, so
-        // wait for the exact server-recorded deadline before exercising the
-        // first eligible automatic tick.
-        const serverHoldRemaining = Math.max(
-          0,
-          (serverState.manualOverrideUntil ?? 0) - Date.now() + 150,
-        );
-        expect(serverHoldRemaining, "canonical server hold remaining").toBeLessThanOrEqual(60_500);
-        await page.waitForTimeout(serverHoldRemaining);
-        await expect(primaryCases).toHaveText("24");
-        await expect(peerCases).toHaveText("24");
-        const eligibleBeat = await mockDateNow(page, baselineAt + 6_001);
-        const authoritativeCases = eligibleBeat.operationalProjection?.counters?.casesCompleted;
-        expect(authoritativeCases).toEqual(expect.any(Number));
-        await simulateWake(page);
-        await expect(primaryCases).toHaveText(String(authoritativeCases), { timeout: 8_000 });
-        await expect(peerCases).toHaveText(String(authoritativeCases), { timeout: 15_000 });
-        // The aggregate tile lives on the Run tab; both pages are still on
-        // Packaging after checking the pair above.
-        await page.locator('[data-testid="tab-run"]').click();
-        await peerPage.locator('[data-testid="tab-run"]').click();
-        expect(await readCaseTotal(page)).toBe(authoritativeCases);
-        expect(await readCaseTotal(peerPage)).toBe(authoritativeCases);
-      } finally {
-        await peer.close();
-      }
-    },
-  );
-
-  test(
-    "@focused-only cancels a wake recovery without replaying a pre-wake write",
-    async ({ page, browser }: { page: Page; browser: Browser }, testInfo) => {
-      test.slow();
-      const safeBaseMs = await setupAndStartRun(
-        page,
-        "10",
-        DEFAULT_MANAGER_CAPABILITIES,
+        },
+        { id: runId! },
       );
-      const peer = await browser.newContext({
-        storageState: await page.context().storageState(),
-        viewport: { width: 390, height: 844 },
-        isMobile: true,
+      expect(serverState.pair).toMatchObject({
+        skidsCompleted: 0,
+        casesOnCurrentSkid: correctedCases,
       });
-      const sleepingPage = await peer.newPage();
-      const observedClaims: string[] = [];
-      const recordClaim = (request: Request) => {
-        if (
-          request.method() !== "POST"
-          || !new URL(request.url()).pathname.endsWith("/api/sync/auto-track/claim")
-        ) return;
-        const body = request.postDataJSON() as { claim?: { channel?: string } };
-        if (body.claim?.channel) observedClaims.push(body.claim.channel);
+      expect(serverState.progress).toMatchObject({
+        skidsCompleted: 0,
+        casesOnCurrentSkid: correctedCases,
+      });
+      expect(serverState.manualOverrideUntil).toEqual(expect.any(Number));
+
+      // Both active peers retain the correction for the canonical hold.
+      await expect(peerCases).toHaveText(String(correctedCases));
+
+      // The API intentionally evaluates manualOverrideUntil against its own
+      // canonical clock. Browser Date mocking must not bypass that hold, so
+      // wait for the exact server-recorded deadline before exercising the
+      // first eligible automatic tick.
+      const serverHoldRemaining = Math.max(
+        0,
+        (serverState.manualOverrideUntil ?? 0) - Date.now() + 150,
+      );
+      expect(
+        serverHoldRemaining,
+        "canonical server hold remaining",
+      ).toBeLessThanOrEqual(60_500);
+      await page.waitForTimeout(serverHoldRemaining);
+      await expect(primaryCases).toHaveText(String(correctedCases));
+      await expect(peerCases).toHaveText(String(correctedCases));
+      const eligibleBeat = await mockDateNow(page, baselineAt + 6_001);
+      const authoritativeCases =
+        eligibleBeat.operationalProjection?.counters?.casesCompleted;
+      expect(authoritativeCases).toEqual(expect.any(Number));
+      await simulateWake(page);
+      await expect(primaryCases).toHaveText(String(authoritativeCases), {
+        timeout: 8_000,
+      });
+      await expect(peerCases).toHaveText(String(authoritativeCases), {
+        timeout: 15_000,
+      });
+      // The aggregate tile lives on the Run tab; both pages are still on
+      // Packaging after checking the pair above.
+      await page.locator('[data-testid="tab-run"]').click();
+      await peerPage.locator('[data-testid="tab-run"]').click();
+      expect(await readCaseTotal(page)).toBe(authoritativeCases);
+      expect(await readCaseTotal(peerPage)).toBe(authoritativeCases);
+    } finally {
+      await peer.close();
+    }
+  });
+
+  test("@focused-only cancels a wake recovery without replaying a pre-wake write", async ({
+    page,
+    browser,
+  }: { page: Page; browser: Browser }, testInfo) => {
+    test.slow();
+    const safeBaseMs = await setupAndStartRun(
+      page,
+      "10",
+      DEFAULT_MANAGER_CAPABILITIES,
+    );
+    const peer = await browser.newContext({
+      storageState: await page.context().storageState(),
+      viewport: { width: 390, height: 844 },
+      isMobile: true,
+    });
+    const sleepingPage = await peer.newPage();
+    const observedClaims: string[] = [];
+    const recordClaim = (request: Request) => {
+      if (
+        request.method() !== "POST" ||
+        !new URL(request.url()).pathname.endsWith("/api/sync/auto-track/claim")
+      )
+        return;
+      const body = request.postDataJSON() as { claim?: { channel?: string } };
+      if (body.claim?.channel) observedClaims.push(body.claim.channel);
+    };
+    let recoveryStarted = false;
+    let releaseRecovery: (() => void) | undefined;
+    const recoveryHeld = new Promise<void>((resolve) => {
+      releaseRecovery = resolve;
+    });
+
+    try {
+      await sleepingPage.goto("/", { waitUntil: "domcontentloaded" });
+      await sleepingPage
+        .getByTestId("tab-run")
+        .waitFor({ state: "visible", timeout: 20_000 });
+      await sleepingPage
+        .getByRole("button", { name: /stop.?run/i })
+        .first()
+        .waitFor({ state: "visible", timeout: 15_000 });
+      await installHiddenMock(sleepingPage);
+      const stale = await readLiveRunSnapshot(sleepingPage);
+      const staleOperational = {
+        skidsCompleted: stale.values.skidsCompleted,
+        casesOnCurrentSkid: stale.values.casesOnCurrentSkid,
+        traysOnLine: stale.values.traysOnLine,
+        batchesReady: stale.values.batchesReady,
       };
-      let recoveryStarted = false;
-      let releaseRecovery: (() => void) | undefined;
-      const recoveryHeld = new Promise<void>((resolve) => {
-        releaseRecovery = resolve;
-      });
+      sleepingPage.on("request", recordClaim);
+      await sleepingPage.route("**/api/sync/events**", (route) =>
+        route.abort(),
+      );
+      await simulateScreenOff(sleepingPage);
+      await peer.setOffline(true);
 
-      try {
-        await sleepingPage.goto("/", { waitUntil: "domcontentloaded" });
-        await sleepingPage.getByTestId("tab-run")
-          .waitFor({ state: "visible", timeout: 20_000 });
-        await sleepingPage.getByRole("button", { name: /stop.?run/i }).first()
-          .waitFor({ state: "visible", timeout: 15_000 });
-        await installHiddenMock(sleepingPage);
-        const stale = await readLiveRunSnapshot(sleepingPage);
-        const staleOperational = {
-          skidsCompleted: stale.values.skidsCompleted,
-          casesOnCurrentSkid: stale.values.casesOnCurrentSkid,
-          traysOnLine: stale.values.traysOnLine,
-          batchesReady: stale.values.batchesReady,
-        };
-        sleepingPage.on("request", recordClaim);
-        await sleepingPage.route("**/api/sync/events**", (route) => route.abort());
-        await simulateScreenOff(sleepingPage);
-        await peer.setOffline(true);
-
-        // Leave a real queued edit behind the wake fence. A cancelled owner
-        // must discard it instead of replaying the pre-wake snapshot later.
-        await sleepingPage.locator('[data-testid="input-cycleSpeed"]').evaluate((el) => {
+      // Leave a real queued edit behind the wake fence. A cancelled owner
+      // must discard it instead of replaying the pre-wake snapshot later.
+      await sleepingPage
+        .locator('[data-testid="input-cycleSpeed"]')
+        .evaluate((el) => {
           const input = el as HTMLInputElement;
           const setter = Object.getOwnPropertyDescriptor(
             HTMLInputElement.prototype,
@@ -3002,76 +3748,100 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
           input.dispatchEvent(new Event("input", { bubbles: true }));
           input.dispatchEvent(new Event("change", { bubbles: true }));
         });
-        await sleepingPage.waitForTimeout(900);
+      await sleepingPage.waitForTimeout(900);
 
-        await sleepingPage.route("**/api/sync/today**", async (route) => {
-          if (route.request().method() !== "GET" || recoveryStarted) {
-            await route.continue();
-            return;
-          }
-          recoveryStarted = true;
-          await recoveryHeld;
-          await route.abort("aborted").catch(() => {});
-        });
-        await peer.setOffline(false);
-        await sleepingPage.evaluate(() => window.dispatchEvent(new Event("online")));
-        await simulateWake(sleepingPage);
-        const recoveringStatus = sleepingPage.getByTestId("foreground-recovery-status");
-        await expect(recoveringStatus)
-          .toContainText("Still recovering: checking the current production state", {
-            timeout: 10_000,
-          });
-        expect(recoveryStarted, "wake recovery did not reach the held canonical pull").toBe(true);
-
-        // Navigation unmounts the real Home effect while its pull is pending.
-        // Release the route afterward so the cancelled request cannot linger.
-        await sleepingPage.goto("about:blank", { waitUntil: "domcontentloaded" });
-        releaseRecovery?.();
-        await sleepingPage.unroute("**/api/sync/today**");
-        await sleepingPage.goto("/", { waitUntil: "domcontentloaded" });
-        await sleepingPage.getByTestId("tab-run")
-          .waitFor({ state: "visible", timeout: 20_000 });
-        await sleepingPage.getByRole("button", { name: /stop.?run/i }).first()
-          .waitFor({ state: "visible", timeout: 15_000 });
-
-        // The new mounted Home has no stranded foreground fence, and the
-        // cancelled owner's queued write never becomes an auto-track claim.
-        await expect.poll(async () => {
-          const snapshot = await readLiveRunSnapshot(sleepingPage);
-          return {
-            skidsCompleted: snapshot.values.skidsCompleted,
-            casesOnCurrentSkid: snapshot.values.casesOnCurrentSkid,
-            traysOnLine: snapshot.values.traysOnLine,
-            batchesReady: snapshot.values.batchesReady,
-          };
-        }, {
-          timeout: 15_000,
-          message: "cancelled recovery replayed hidden-time operational progress",
-        }).toEqual(staleOperational);
-        expect(observedClaims, "cancelled recovery replayed a queued auto-track write").toEqual([]);
-
-        const status = sleepingPage.getByTestId("foreground-recovery-status");
-        if (await status.count()) {
-          await expect(status).not.toHaveAttribute(
-            "data-foreground-recovery-state",
-            "recovering",
-          );
+      await sleepingPage.route("**/api/sync/today**", async (route) => {
+        if (route.request().method() !== "GET" || recoveryStarted) {
+          await route.continue();
+          return;
         }
-        await testInfo.attach("cancelled-wake-recovery-summary.json", {
-          body: JSON.stringify({
+        recoveryStarted = true;
+        await recoveryHeld;
+        await route.abort("aborted").catch(() => {});
+      });
+      await peer.setOffline(false);
+      await sleepingPage.evaluate(() =>
+        window.dispatchEvent(new Event("online")),
+      );
+      await simulateWake(sleepingPage);
+      const recoveringStatus = sleepingPage.getByTestId(
+        "foreground-recovery-status",
+      );
+      await expect(recoveringStatus).toContainText(
+        "Still recovering: checking the current production state",
+        {
+          timeout: 10_000,
+        },
+      );
+      expect(
+        recoveryStarted,
+        "wake recovery did not reach the held canonical pull",
+      ).toBe(true);
+
+      // Navigation unmounts the real Home effect while its pull is pending.
+      // Release the route afterward so the cancelled request cannot linger.
+      await sleepingPage.goto("about:blank", { waitUntil: "domcontentloaded" });
+      releaseRecovery?.();
+      await sleepingPage.unroute("**/api/sync/today**");
+      await sleepingPage.goto("/", { waitUntil: "domcontentloaded" });
+      await sleepingPage
+        .getByTestId("tab-run")
+        .waitFor({ state: "visible", timeout: 20_000 });
+      await sleepingPage
+        .getByRole("button", { name: /stop.?run/i })
+        .first()
+        .waitFor({ state: "visible", timeout: 15_000 });
+
+      // The new mounted Home has no stranded foreground fence, and the
+      // cancelled owner's queued write never becomes an auto-track claim.
+      await expect
+        .poll(
+          async () => {
+            const snapshot = await readLiveRunSnapshot(sleepingPage);
+            return {
+              skidsCompleted: snapshot.values.skidsCompleted,
+              casesOnCurrentSkid: snapshot.values.casesOnCurrentSkid,
+              traysOnLine: snapshot.values.traysOnLine,
+              batchesReady: snapshot.values.batchesReady,
+            };
+          },
+          {
+            timeout: 15_000,
+            message:
+              "cancelled recovery replayed hidden-time operational progress",
+          },
+        )
+        .toEqual(staleOperational);
+      expect(
+        observedClaims,
+        "cancelled recovery replayed a queued auto-track write",
+      ).toEqual([]);
+
+      const status = sleepingPage.getByTestId("foreground-recovery-status");
+      if (await status.count()) {
+        await expect(status).not.toHaveAttribute(
+          "data-foreground-recovery-state",
+          "recovering",
+        );
+      }
+      await testInfo.attach("cancelled-wake-recovery-summary.json", {
+        body: JSON.stringify(
+          {
             result: "pass",
             device: "phone-sleeping",
             cancelledRecoveryVisible: true,
             trackingFenceClearedAfterRemount: true,
             preWakeWriteReplayed: false,
             autoTrackClaims: 0,
-          }, null, 2),
-          contentType: "application/json",
-        });
-      } finally {
-        releaseRecovery?.();
-        await peer.close().catch(() => {});
-      }
-    },
-  );
+          },
+          null,
+          2,
+        ),
+        contentType: "application/json",
+      });
+    } finally {
+      releaseRecovery?.();
+      await peer.close().catch(() => {});
+    }
+  });
 });

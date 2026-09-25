@@ -1000,34 +1000,32 @@ export const LiveSetupRecipesTabContent = memo(function LiveSetupRecipesTabConte
                           </div>
                         );
                       })()}
-                      {v.frontlineRecipeName.trim() && (
-                        <FrontlineRecipeCard
-                          embedded
-                          recipePickerLabel="Sauce recipe ingredients"
-                          recipePickerTestId="setup-recipe-picker-sauce-ingredients"
-                          fields={frontlineFields}
-                          recipe={v.frontlineRecipe ?? []}
-                          register={form.register}
-                          ingredientOptions={unifiedIngredientUniverse}
-                          onAddIngredient={addFrontlineIngredient}
-                          onRemoveIngredient={removeFrontlineIngredient}
-                          onSetIngredient={(idx: any, val: any) => form.setValue(`frontlineRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
-                          onAppend={() => appendFrontline({ ingredient: "", lbs: 0 })}
-                          onRemove={removeFrontline}
-                          recipeName={v.frontlineRecipeName ?? ""}
-                          recipeNameOptions={frontlineRecipeNameOptions}
-                          onAddRecipeName={addFrontlineRecipeName}
-                          onRemoveRecipeName={removeFrontlineRecipeName}
-                          onRecipeNameChange={val => {
-                            form.setValue("frontlineRecipeName", val, { shouldDirty: true });
-                            if (val.trim()) {
-                              const poolRows = serverSauceRowsByName.get(val.trim().toLowerCase()) ?? loadFrontlineRecipePresets()[val.trim()];
-                              const rows = poolRows?.map((row: any) => ({ ...row }));
-                              if (rows) { form.setValue("frontlineRecipe", rows, { shouldDirty: true }); replaceFrontline(rows); }
-                            }
-                          }}
-                        />
-                      )}
+                      <FrontlineRecipeCard
+                        embedded
+                        recipePickerLabel="Sauce recipe ingredients"
+                        recipePickerTestId="setup-recipe-picker-sauce-ingredients"
+                        fields={frontlineFields}
+                        recipe={v.frontlineRecipe ?? []}
+                        register={form.register}
+                        ingredientOptions={unifiedIngredientUniverse}
+                        onAddIngredient={addFrontlineIngredient}
+                        onRemoveIngredient={removeFrontlineIngredient}
+                        onSetIngredient={(idx: any, val: any) => form.setValue(`frontlineRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
+                        onAppend={() => appendFrontline({ ingredient: "", lbs: 0 })}
+                        onRemove={removeFrontline}
+                        recipeName={v.frontlineRecipeName ?? ""}
+                        recipeNameOptions={frontlineRecipeNameOptions}
+                        onAddRecipeName={addFrontlineRecipeName}
+                        onRemoveRecipeName={removeFrontlineRecipeName}
+                        onRecipeNameChange={val => {
+                          form.setValue("frontlineRecipeName", val, { shouldDirty: true });
+                          if (val.trim()) {
+                            const poolRows = serverSauceRowsByName.get(val.trim().toLowerCase()) ?? loadFrontlineRecipePresets()[val.trim()];
+                            const rows = poolRows?.map((row: any) => ({ ...row }));
+                            if (rows) { form.setValue("frontlineRecipe", rows, { shouldDirty: true }); replaceFrontline(rows); }
+                          }
+                        }}
+                      />
                       {saucePoolDrift && (
                         <div className="flex flex-wrap items-center gap-2 px-1 text-xs text-amber-500" data-testid="sauce-pool-drift">
                           <AlertTriangle className="w-3.5 h-3.5 shrink-0" />

@@ -341,6 +341,33 @@ export function collectBatchWeightProfileUpdates(
   return updates;
 }
 
+/**
+ * Snapshot the acknowledged weight into matching visible open-run fields,
+ * including a field that already displays the submitted value. The form can
+ * be ahead of its persisted run snapshot when a manager edits it directly.
+ */
+export function collectAcknowledgedBatchWeightSnapshotUpdates(
+  profile: BatchWeightProfileLike,
+  entries: BatchWeightCandidate[],
+  defaultPepTypes: string[],
+): Partial<Record<string, number>> {
+  const newWeights = buildNewBatchWeightMap(entries);
+  const updates: Partial<Record<string, number>> = {};
+
+  for (const { typeField, lbsField, hidden } of BATCH_WEIGHT_PROFILE_SLOTS) {
+    if (hidden(profile, defaultPepTypes)) continue;
+    const typeName = typeof profile[typeField] === "string"
+      ? profile[typeField].trim()
+      : "";
+    if (!typeName) continue;
+    const newLbs = newWeights.get(typeName.toLowerCase());
+    if (newLbs == null) continue;
+    updates[lbsField] = newLbs;
+  }
+
+  return updates;
+}
+
 /** Collect visible, positive manual weights from a saved profile. */
 export function collectBatchWeightCandidatesFromProfile(
   profile: BatchWeightProfileLike,

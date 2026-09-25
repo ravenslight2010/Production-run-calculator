@@ -171,6 +171,13 @@ test.describe("intentional visual regression baselines", () => {
     }
   });
 
+  test.beforeEach(async () => {
+    requireIsolatedTestDatabase("visual regression beforeEach");
+    await cleanupDb?.query("DELETE FROM daily_sync WHERE date = $1", [
+      new Date().toLocaleDateString("en-CA"),
+    ]);
+  });
+
   test.afterAll(async () => {
     if (!cleanupDb) return;
     try {
@@ -201,6 +208,14 @@ test.describe("intentional visual regression baselines", () => {
     await expect(page.getByTestId("operational-state-badge")).toHaveText(
       "Confirmed server baseline",
     );
+    // Foreground reconciliation can display an outcome notice after Start.
+    // Dismiss that transient state rather than recording it in the baseline.
+    const syncOutcome = page.getByTestId("foreground-recovery-status")
+      .filter({ hasText: "Production state synchronized." });
+    if (await syncOutcome.isVisible().catch(() => false)) {
+      await syncOutcome.getByRole("button", { name: "Dismiss", exact: true }).click();
+      await expect(syncOutcome).toBeHidden();
+    }
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
 
     await expect(page).toHaveScreenshot("live-run-desktop.png", {
@@ -272,6 +287,20 @@ test.describe("intentional visual regression baselines", () => {
       state: "visible",
       timeout: 10_000,
     });
+    await expect(page.getByTestId("operational-state-badge")).toHaveText(
+      "Confirmed server baseline",
+      { timeout: 15_000 },
+    );
+    await expect(page.getByTestId("operational-state-badge")).toBeVisible();
+    // Match the desktop/tablet capture boundary: the foreground sync outcome
+    // is transient and shifts the whole phone layout while it is displayed.
+    const syncOutcome = page.getByTestId("foreground-recovery-status")
+      .filter({ hasText: "Production state synchronized." });
+    if (await syncOutcome.isVisible().catch(() => false)) {
+      await syncOutcome.getByRole("button", { name: "Dismiss", exact: true }).click();
+      await expect(syncOutcome).toBeHidden();
+    }
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     await expect(page).toHaveScreenshot("run-overview-phone.png", {
       fullPage: false,
       mask: dynamicMask(page),
@@ -283,6 +312,31 @@ test.describe("intentional visual regression baselines", () => {
   test("tablet portrait and landscape compact presentation", async ({ page }) => {
     await signUp(page, tabletUsername);
     await page.locator('[data-testid="tab-run"]').click();
+    const startRun = page.getByRole("button", { name: /start run/i });
+    if (await startRun.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await startRun.click();
+    }
+    await page.getByRole("button", { name: /pause run/i }).waitFor({
+      state: "visible",
+      timeout: 10_000,
+    });
+    await expect(page.getByTestId("operational-state-badge")).toHaveText(
+      "Confirmed server baseline",
+      { timeout: 15_000 },
+    );
+    await expect(page.locator('button[title="Sync connected"]')).toHaveText(
+      "Synchronized",
+      { timeout: 15_000 },
+    );
+    // Foreground reconciliation can display an outcome notice after Start.
+    // Dismiss that transient state rather than recording it in the baseline.
+    const syncOutcome = page.getByTestId("foreground-recovery-status")
+      .filter({ hasText: "Production state synchronized." });
+    if (await syncOutcome.isVisible().catch(() => false)) {
+      await syncOutcome.getByRole("button", { name: "Dismiss", exact: true }).click();
+      await expect(syncOutcome).toBeHidden();
+    }
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
 
     await page.setViewportSize({ width: 768, height: 1024 });
     await expect(page).toHaveScreenshot("run-overview-tablet-portrait.png", {

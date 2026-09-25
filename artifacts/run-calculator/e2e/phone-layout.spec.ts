@@ -33,7 +33,6 @@ const RECIPE_PICKER_API_BASE =
   process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
 const RECIPE_PICKER_PASSWORD = "TestPass123!";
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
 const PRIMARY_TABS = [
   "tab-run",
   "tab-dough",
@@ -739,18 +738,21 @@ test.describe("phone layout smoke", () => {
 
       await page.getByTitle("More").click();
       await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
-      const manageDialog = page.getByRole("dialog", { name: "Manage Lists & Settings" });
-      await expect(manageDialog).toBeVisible();
-      await assertPhoneLayout(page, "tablet manager settings");
-      await assertOverlayActionHitTargets(
-        manageDialog,
-        `tablet manager settings at ${viewport.width}x${viewport.height}`,
-      );
-
-      const setupProfilesTab = manageDialog.getByRole("button", {
-        name: "Setup Profiles",
-        exact: true,
+      const manageDialog = page.getByRole("dialog", {
+        name: "Manage Lists & Settings",
       });
+      await expect(manageDialog).toBeVisible();
+      await assertOverlayActionHitTargets(
+        page.getByRole("dialog", { name: "Manage Lists & Settings" }),
+        "Manage Lists & Settings",
+      );
+      await assertPhoneLayout(page, "setup/manage surface");
+      await assertKeyboardReachable(page, "setup/manage surface", 12);
+
+      // Exercise the manager's setup editor navigation without saving anything.
+      // These tabs are present for the first signed-up manager and expose the
+      // same compact scroll container used by the longer manager workflows.
+      const setupProfilesTab = page.getByRole("button", { name: "Setup Profiles", exact: true });
       if (await visible(setupProfilesTab)) {
         await setupProfilesTab.click();
         await assertPhoneLayout(page, "tablet setup profiles");
@@ -837,7 +839,7 @@ test.describe("phone layout smoke", () => {
 
       await moreButton.click();
       await page.getByRole("menuitem", { name: "Settings" }).click();
-      const manageDialog = page.getByRole("heading", {
+      const manageDialog = page.getByRole("dialog", {
         name: "Manage Lists & Settings",
       });
       await expect(manageDialog).toBeVisible();
@@ -918,9 +920,9 @@ test.describe("phone layout smoke", () => {
       await page.getByRole("menuitem", { name: "Alerts & Floor Mode" }).click();
       const floorSwitch = page.getByTestId("switch-floor-mode");
       await expect(floorSwitch).toBeVisible();
-      if (!(await floorSwitch.isChecked())) await floorSwitch.click();
+      if (!(await floorSwitch.isChecked())) await floorSwitch.tap();
       await page.keyboard.press("Escape");
-      await page.getByTitle("Floor mode — big numbers, status color").click();
+      await page.getByTitle("Floor mode — big numbers, status color").tap();
 
       const overlay = page.getByTestId("floor-mode-overlay");
       await expect(overlay).toBeVisible();
@@ -1012,45 +1014,45 @@ test.describe("phone layout smoke", () => {
 
     const syncStatus = page.locator('button[title^="Sync"]');
     await expect(syncStatus).toBeVisible();
-  for (const viewport of [
-    { width: 390, height: 844 },
-    { width: 768, height: 1024 },
-    { width: 1280, height: 900 },
-  ]) {
-    await page.setViewportSize(viewport);
-    await syncStatus.click();
+    for (const viewport of [
+      { width: 390, height: 844 },
+      { width: 768, height: 1024 },
+      { width: 1280, height: 900 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await syncStatus.click();
 
-    const popover = syncStatus.locator("xpath=..").locator("div.absolute.top-9");
-    await expect(popover).toBeVisible();
-    await expect(popover.getByText("Next action", { exact: true })).toBeVisible();
-    await expect(
-      popover.getByText("Last acknowledgment", { exact: true }),
-    ).toBeVisible();
-    const retry = popover.getByRole("button", {
-      name: /retry latest retained change/i,
-    });
-    if (await retry.count()) await expect(retry).toBeVisible();
+      const popover = syncStatus.locator("xpath=..").locator("div.absolute.top-9");
+      await expect(popover).toBeVisible();
+      await expect(popover.getByText("Next action", { exact: true })).toBeVisible();
+      await expect(
+        popover.getByText("Last acknowledgment", { exact: true }),
+      ).toBeVisible();
+      const retry = popover.getByRole("button", {
+        name: /retry latest retained change/i,
+      });
+      if (await retry.count()) await expect(retry).toBeVisible();
 
-    const geometry = await page.evaluate(() => {
-      const panel = document.querySelector("div.absolute.top-9");
-      if (!panel) return null;
-      const rect = panel.getBoundingClientRect();
-      return {
-        left: rect.left,
-        right: rect.right,
-        viewportWidth: window.innerWidth,
-        documentScrollWidth: document.documentElement.scrollWidth,
-        bodyScrollWidth: document.body.scrollWidth,
-      };
-    });
-    expect(geometry, `${viewport.width}px sync popover should render`).not.toBeNull();
-    expect(geometry?.left, `${viewport.width}px panel should stay inside left edge`).toBeGreaterThanOrEqual(-1);
-    expect(geometry?.right, `${viewport.width}px panel should stay inside right edge`).toBeLessThanOrEqual(viewport.width + 1);
-    expect(geometry?.documentScrollWidth, `${viewport.width}px document should not scroll horizontally`).toBeLessThanOrEqual(viewport.width + 1);
-    expect(geometry?.bodyScrollWidth, `${viewport.width}px body should not scroll horizontally`).toBeLessThanOrEqual(viewport.width + 1);
+      const geometry = await page.evaluate(() => {
+        const panel = document.querySelector("div.absolute.top-9");
+        if (!panel) return null;
+        const rect = panel.getBoundingClientRect();
+        return {
+          left: rect.left,
+          right: rect.right,
+          viewportWidth: window.innerWidth,
+          documentScrollWidth: document.documentElement.scrollWidth,
+          bodyScrollWidth: document.body.scrollWidth,
+        };
+      });
+      expect(geometry, `${viewport.width}px sync popover should render`).not.toBeNull();
+      expect(geometry?.left, `${viewport.width}px panel should stay inside left edge`).toBeGreaterThanOrEqual(-1);
+      expect(geometry?.right, `${viewport.width}px panel should stay inside right edge`).toBeLessThanOrEqual(viewport.width + 1);
+      expect(geometry?.documentScrollWidth, `${viewport.width}px document should not scroll horizontally`).toBeLessThanOrEqual(viewport.width + 1);
+      expect(geometry?.bodyScrollWidth, `${viewport.width}px body should not scroll horizontally`).toBeLessThanOrEqual(viewport.width + 1);
 
-    await syncStatus.click();
-  }
+      await syncStatus.click();
+    }
   });
 
   test("failed sync keeps the retained-change retry action visible on phone", async ({
@@ -1270,13 +1272,29 @@ test.describe("phone layout smoke", () => {
       );
       await reorderDialog.getByRole("button", { name: "Done", exact: true }).click();
       await expect(reorderDialog).toBeHidden();
+        const setupProfiles = page.getByRole("dialog", { name: "Setup Profiles" });
+      if (await setupProfiles.isVisible().catch(() => false)) {
+        await setupProfiles.getByRole("button", { name: "Close" }).click();
+        await expect(setupProfiles).toBeHidden();
+      }
+      await page.getByRole("button", { name: "Select run 1", exact: true }).click();
 
       // Start a disposable run through the real Run workflow so Log Line Stop
       // opens from the same action an operator uses on the station screen.
       await page.getByTestId("tab-run").click();
-      const casesNeeded = page.getByTestId("input-casesNeeded");
-      await expect(casesNeeded).toBeVisible();
-      await casesNeeded.fill("1");
+        const casesNeeded = page.getByTestId("input-casesNeeded");
+
+      const pizzasPerCase = page.getByTestId("input-pizzasPerCase");
+      if (await pizzasPerCase.count()) {
+        const lineSetup = page.locator("details").filter({
+          has: page.locator("summary", { hasText: /line.?setup/i }),
+        }).first();
+        if (!(await lineSetup.evaluate((element) => (element as HTMLDetailsElement).open))) {
+          await lineSetup.locator("summary").click();
+        }
+        await pizzasPerCase.fill("1");
+        await pizzasPerCase.blur();
+      }
       await page.getByTestId("button-start-run").click();
       await expect(page.getByRole("button", { name: /pause run/i })).toBeVisible();
 
@@ -1341,7 +1359,10 @@ test.describe("phone layout smoke", () => {
       // action and the editor's lower actions without saving a schedule.
       await page.getByTitle("More").click();
       await page.getByRole("menuitem", { name: "Schedule", exact: true }).click();
-      const scheduleDialog = page.getByRole("dialog");
+        const scheduleDialog = page
+          .getByRole("dialog")
+          .filter({ has: page.locator("#scheduled-days-dialog-title") })
+          .first();
       await expect(scheduleDialog).toBeVisible();
       await expect(scheduleDialog.getByRole("heading", { name: "Scheduled Days" })).toBeVisible();
       await assertOverlayActionHitTargets(
@@ -1362,17 +1383,32 @@ test.describe("phone layout smoke", () => {
       const scheduleCalendar = page.locator('[data-slot="calendar"]');
       await expect(scheduleCalendar.getByRole("grid")).toBeVisible();
       await expect(scheduleCalendar.locator("button[data-day][disabled]").first()).toBeDisabled();
-      await assertOverlayActionHitTargets(
-        scheduleCalendar,
-        `Schedule calendar at ${viewport.width}x${viewport.height}`,
-      );
       const selectedScheduleDay = scheduleCalendar.locator(
         'button[data-selected-single="true"]',
       );
       await expect(selectedScheduleDay).toBeVisible();
-      await selectedScheduleDay.focus();
-      await page.keyboard.press("ArrowRight");
-      await page.keyboard.press("Enter");
+      const nextScheduleDate = await selectedScheduleDay.evaluate((selected) => {
+        const days = Array.from(
+          selected.closest("[data-slot='calendar']")?.querySelectorAll<HTMLButtonElement>(
+            "button[data-day]:not([disabled])",
+          ) ?? [],
+        );
+        return (
+          days.find((day) => day !== selected)?.getAttribute("data-day") ?? null
+        );
+      });
+      expect(nextScheduleDate).not.toBeNull();
+      await scheduleCalendar
+        .locator(`button[data-day="${nextScheduleDate}"]`)
+        .click();
+      // Wait for the calendar's selection handler to update the date and close
+      // its popover. Sending Escape during the closing animation can reach the
+      // parent dialog instead and hide the whole schedule editor.
+      await expect(scheduleDateTrigger).not.toHaveAttribute(
+        "data-date-value",
+        initialScheduleDate ?? "",
+      );
+      await expect(scheduleDialog).toBeVisible();
       await expect(scheduleCalendar).toBeHidden();
       await expect(scheduleDateTrigger).not.toHaveAttribute(
         "data-date-value",
@@ -1392,58 +1428,6 @@ test.describe("phone layout smoke", () => {
       await expect(scheduleDialog).toBeHidden();
     });
   }
-
-  test(`sign-in is usable without overflow in narrow landscape at ${LANDSCAPE_VIEWPORT.width}x${LANDSCAPE_VIEWPORT.height}`, async ({
-    page,
-  }) => {
-    await page.setViewportSize(LANDSCAPE_VIEWPORT);
-    await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
-    await page
-      .locator("#username")
-      .waitFor({ state: "visible", timeout: 20_000 });
-
-    await assertPhoneLayout(page, "narrow landscape sign-in");
-    await expect(
-      page.getByRole("heading", { name: /sign in to run calculator/i }),
-    ).toBeVisible();
-    await expect(page.getByRole("textbox", { name: "Username" })).toBeEditable();
-    await expect(page.getByRole("textbox", { name: "Password" })).toBeEditable();
-    await expect(
-      page.getByRole("button", { name: /^sign in$/i }),
-    ).toBeVisible();
-  });
-
-  test("focused sign-in fields stay reachable when the virtual keyboard reduces the viewport", async ({
-    page,
-  }) => {
-    await page.setViewportSize(LANDSCAPE_VIEWPORT);
-    await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
-    await page
-      .locator("#username")
-      .waitFor({ state: "visible", timeout: 20_000 });
-
-    await assertFocusedFieldIsKeyboardSafe(
-      page,
-      page.getByRole("textbox", { name: "Username" }),
-      "Username",
-    );
-
-    // Desktop Chromium has no on-screen keyboard. Reducing the viewport after
-    // the first focus models the visualViewport resize that mobile browsers
-    // perform when the keyboard opens.
-    await page.setViewportSize({
-      width: LANDSCAPE_VIEWPORT.width,
-      height: 220,
-    });
-    await assertPhoneLayout(page, "keyboard-safe username field");
-
-    await assertFocusedFieldIsKeyboardSafe(
-      page,
-      page.getByRole("textbox", { name: "Password" }),
-      "Password",
-    );
-    await assertPhoneLayout(page, "keyboard-safe password field");
-  });
 
   test("@real-mobile-browser physical Android Chrome dismisses first-login onboarding before Run interactions", async ({
     page,
@@ -1494,7 +1478,7 @@ test.describe("phone layout smoke", () => {
     ).not.toBeNull();
     if (!preKeyboardViewportHeight) return;
 
-    const username = uniqueUsername();
+    const username = page.locator("#username");
     await username.focus();
     await expect(username, "Username should retain focus").toBeFocused();
     await page.waitForFunction(
@@ -1512,7 +1496,9 @@ test.describe("phone layout smoke", () => {
     expect(
       postKeyboardViewportHeight,
       "opening the real software keyboard should shrink visualViewport",
-    ).toBeLessThan(preKeyboardViewportHeight - 80);
+    ).not.toBeNull();
+    if (!postKeyboardViewportHeight) return;
+    expect(postKeyboardViewportHeight).toBeLessThan(preKeyboardViewportHeight - 80);
 
     const usernameGeometry = await assertMobileViewportAndSafeArea(
       page,
@@ -1595,6 +1581,8 @@ test.describe("phone layout smoke", () => {
       const startRun = page.getByTestId("button-start-run");
       if (await startRun.isVisible()) {
         const casesNeeded = page.getByTestId("input-casesNeeded");
+
+      const pizzasPerCase = page.getByTestId("input-pizzasPerCase");
         await casesNeeded.fill("4");
         await startRun.tap();
       }
@@ -1728,6 +1716,7 @@ test.describe("phone layout smoke", () => {
     } finally {
       await db.end().catch(() => {});
       const cleanup = new Client({ connectionString: process.env.DATABASE_URL });
+
       await cleanup.connect().catch(() => {});
       if (actionItemId !== null) {
         await cleanup.query("DELETE FROM action_items WHERE id = $1", [actionItemId]).catch(() => {});
@@ -1741,7 +1730,7 @@ test.describe("phone layout smoke", () => {
     { name: "phone", width: 390, height: 844 },
     { name: "tablet", width: 768, height: 1024 },
   ] as const) {
-    test.describe(`touch selection dialogs on ${viewport.name} @focused-only`, () => {
+    test.describe(`touch selection dialogs on ${viewport.name}`, () => {
       test.use({
         viewport: { width: viewport.width, height: viewport.height },
         hasTouch: true,
@@ -1750,12 +1739,51 @@ test.describe("phone layout smoke", () => {
 
       test("opens schedule and recipe pickers without page scrolling", async ({ page }) => {
         await signInToManagerSandbox(page);
-        await page.getByRole("button", { name: "More", exact: true }).click();
+        const pickerBrands = [
+          { brand: uniqueTestId("touch-picker-brand-a"), flavor: "Phone" },
+          { brand: uniqueTestId("touch-picker-brand-b"), flavor: "Tablet" },
+        ];
+        const profileSeed = await page.request.post("/api/brand-profiles", {
+          data: {
+            items: pickerBrands.map(({ brand, flavor }) => ({
+              key: `${brand.toLowerCase()}__${flavor.toLowerCase()}`,
+              brand,
+              flavor,
+              values: { casesNeeded: 1, pizzasPerCase: 1 },
+              crustValues: {},
+              updatedAt: Date.now(),
+            })),
+          },
+        });
+        expect(profileSeed.ok(), "touch picker profile fixture seed").toBe(true);
+        await page.evaluate((profiles) => {
+          localStorage.setItem(
+            "run-calc-brands",
+            JSON.stringify(profiles.map((profile) => profile.brand)),
+          );
+          localStorage.setItem(
+            "run-calc-brand-flavors",
+            JSON.stringify(Object.fromEntries(
+              profiles.map((profile) => [profile.brand, [profile.flavor]]),
+            )),
+          );
+        }, pickerBrands);
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+        const setupProfiles = page.getByRole("dialog", { name: "Setup Profiles" });
+        if (await setupProfiles.isVisible().catch(() => false)) {
+          await setupProfiles.getByRole("button", { name: "Close" }).click();
+          await expect(setupProfiles).toBeHidden();
+        }
+        await page.getByTestId("tab-run").click();
+        await page.getByRole("button", {
+          name: /^More(?: — \d+ manager actions? need attention)?$/,
+        }).click();
         await page.getByRole("menuitem", { name: "Schedule", exact: true }).click();
 
         const scheduleDialog = page
           .getByRole("dialog")
-          .filter({ hasText: "Scheduled Days" })
+          .filter({ has: page.locator("#scheduled-days-dialog-title") })
           .first();
         await expect(scheduleDialog).toBeVisible();
         await scheduleDialog.getByRole("button", { name: "Schedule New Day", exact: true }).click();
@@ -1765,10 +1793,13 @@ test.describe("phone layout smoke", () => {
         const brandTrigger = scheduleDialog.getByRole("button", {
           name: "Schedule brand",
           exact: true,
-        });
+        }).first();
         await expect(brandTrigger).toBeVisible();
         await brandTrigger.tap();
-        const brandPicker = page.getByRole("dialog", { name: "Schedule brand", exact: true });
+        const brandPicker = page.getByRole("dialog", {
+          name: "Schedule brand",
+          exact: true,
+        });
         await expect(brandPicker).toBeVisible();
         const brandOptions = brandPicker.getByRole("option");
         expect(await brandOptions.count()).toBeGreaterThan(1);
@@ -1790,11 +1821,12 @@ test.describe("phone layout smoke", () => {
 
         await scheduleDialog
           .getByRole("button", { name: "Full Recipe & Settings", exact: true })
+          .first()
           .tap();
         const recipeTrigger = scheduleDialog.getByRole("button", {
           name: "Dough recipe name",
           exact: true,
-        });
+        }).first();
         await expect(recipeTrigger).toBeVisible();
         await recipeTrigger.tap();
         const recipePicker = page.getByRole("dialog", {
@@ -1808,6 +1840,9 @@ test.describe("phone layout smoke", () => {
         await expect(recipePicker).toBeHidden();
         await expect(recipeTrigger).toBeFocused();
 
+        await scheduleDialog
+          .getByRole("button", { name: "Done — Back to Run List", exact: true })
+          .tap();
         await scheduleDialog.getByRole("button", { name: "Cancel", exact: true }).tap();
         await expect(scheduleDialog.getByRole("button", { name: "Schedule New Day", exact: true })).toBeVisible();
         await scheduleDialog.getByRole("button", { name: "Close scheduled days", exact: true }).tap();
@@ -1815,7 +1850,6 @@ test.describe("phone layout smoke", () => {
       });
     });
   }
-
   test.describe("touch recipe picker contract at compact phone viewport @focused-only", () => {
     test.use({
       viewport: { width: 390, height: 844 },

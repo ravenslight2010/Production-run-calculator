@@ -119,6 +119,12 @@ PROMPTS: dict[str, tuple[list[str], list[str]]] = {
         ["Design the successful response shape and pagination contract for a new HTTP endpoint.",
          "Rename a component prop and update its imports; rendered output stays unchanged."],
     ),
+    "media-prompt-quality": (
+        ["Improve this image-generation prompt with precise composition, lighting, text, output constraints, and unacceptable-defect criteria.",
+         "Review an image-edit request by separating the requested change from the visual details that must remain unchanged, including transparency requirements."],
+        ["Generate the image using the configured provider and return the finished asset.",
+         "Create a new SVG icon for the existing UI component library instead of a raster image."],
+    ),
     "evidence-hygiene": (
         ["Sanitize and store these browser traces, logs, screenshots, and test reports without retaining credentials or production personal data.",
          "Review this release evidence bundle for sensitive payloads, environment-specific data, and safe retention labels."],

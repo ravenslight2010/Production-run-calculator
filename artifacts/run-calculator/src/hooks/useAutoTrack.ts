@@ -1212,7 +1212,13 @@ useEffect(() => {
           rebaseAfterForegroundSync();
         } else {
           rearmCaseTimer(nowTime.getTime());
-          rearmDoughTimers(nowTime.getTime());
+          // A wake acknowledgement can land immediately after an operator
+          // correction. Preserve its independent Dough pause; its timed
+          // expiry (or explicit Resume) will re-arm the Dough channels from
+          // a full interval without replaying hidden time.
+          if (doughTimerPausedRef.current === 0) {
+            rearmDoughTimers(nowTime.getTime());
+          }
         }
         wakeRebaseAppliedRef.current = true;
       }

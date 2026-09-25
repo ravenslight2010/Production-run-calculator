@@ -1,6 +1,9 @@
 import { expect, type Locator, type Page, type Response } from "@playwright/test";
 
-const ONBOARDING_RESPONSE_TIMEOUT = 15_000;
+// Release browser runs can briefly saturate the disposable database while a
+// fresh account's bootstrap requests are settling. Keep the assertion tied to
+// the real POST, but allow that bounded server-side queue time.
+const ONBOARDING_RESPONSE_TIMEOUT = 30_000;
 const SIGNUP_FORM_TIMEOUT = 20_000;
 const APP_READY_TIMEOUT = 25_000;
 
