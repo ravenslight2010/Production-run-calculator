@@ -362,6 +362,13 @@ describe("POST /api/ai/* — aiCostLimit is wired onto the /ai router", () => {
     const owner = callMatch();
     await started;
     const waiter = callMatch();
+    // The waiter has to JOIN the owner's in-flight entry. Releasing the
+    // provider in the same tick as firing the waiter used to race the waiter's
+    // arrival: on a loaded runner the owner completed first, the waiter became
+    // a fresh owner, and — with one unit of budget left — that second charge
+    // answered 429. Settle briefly so the waiter is registered as the
+    // in-flight waiter before the owner is released.
+    await new Promise((resolve) => setTimeout(resolve, 150));
     provider.release?.();
     const [ownerResponse, waiterResponse] = await Promise.all([owner, waiter]);
     expect(ownerResponse.status).toBe(200);
