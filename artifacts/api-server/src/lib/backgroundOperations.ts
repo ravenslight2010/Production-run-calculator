@@ -21,6 +21,7 @@ const sharedBackgroundOperationPersistence = createSharedDiagnosticPersistence({
 });
 
 export type BackgroundOperationName =
+  | "auth-retention"
   | "daily-rollover"
   | "server-job-run"
   | "server-job-prune"
@@ -76,6 +77,7 @@ export function createBackgroundOperationBackoff(options: {
 }
 
 const operationNames: BackgroundOperationName[] = [
+  "auth-retention",
   "daily-rollover",
   "server-job-run",
   "server-job-prune",

@@ -10,7 +10,7 @@ import { and, eq, sql } from "drizzle-orm";
 import express, { type Express } from "express";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import pg from "pg";
-import { signToken } from "../lib/auth";
+import { signLegacyTokenForTests } from "../lib/auth";
 
 type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
@@ -131,7 +131,7 @@ beforeEach(async () => {
 
 async function req(userId: string | null, method: string, pathname: string, body?: unknown): Promise<Response> {
   const headers: Record<string, string> = {};
-  if (userId) headers.authorization = `Bearer ${signToken(userId)}`;
+  if (userId) headers.authorization = `Bearer ${signLegacyTokenForTests(userId)}`;
   if (body !== undefined) headers["content-type"] = "application/json";
   return fetch(`${baseUrl}${pathname}`, {
     method, headers, body: body === undefined ? undefined : JSON.stringify(body),

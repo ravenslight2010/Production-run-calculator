@@ -1,5 +1,7 @@
 # Idea Backlog
 
+> Historical mirror retained for context. The current catalog is `docs/idea-backlog.md`; sync sequencing is governed by `docs/sync-reliability-unified-plan-2026-09-19.md`, and cross-domain ordering by `research/additional-domain-research-synthesis-2026-09-19.md`. Do not use status lines below as current authority.
+
 Master list of improvement ideas for the Production Run Calculator. Each idea includes what it is, why it matters, and key code references.
 
 ---

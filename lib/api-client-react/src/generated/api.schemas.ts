@@ -5,6 +5,71 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+/**
+ * Reviewed entity batches keyed by supported master-data domain.
+ */
+export type ImportOperationApplyInputChanges = { [key: string]: unknown };
+
+export interface ImportOperationApplyInput {
+  /** @maxLength 40 */
+  importType: string;
+  /** @maxLength 300 */
+  sourceKey?: string | null;
+  /** @maxLength 300 */
+  sourceLabel: string;
+  /** @pattern ^[a-f0-9]{64}$ */
+  requestHash?: string | null;
+  /** @pattern ^[a-f0-9]{64}$ */
+  expectedStateHash?: string | null;
+  /** Reviewed entity batches keyed by supported master-data domain. */
+  changes: ImportOperationApplyInputChanges;
+}
+
+export interface ImportOperationUndoInput {
+  /** @pattern ^[a-f0-9]{64}$ */
+  expectedResultHash?: string;
+}
+
+export type ImportOperationResponseOperationStatus = typeof ImportOperationResponseOperationStatus[keyof typeof ImportOperationResponseOperationStatus];
+
+
+export const ImportOperationResponseOperationStatus = {
+  applying: 'applying',
+  applied: 'applied',
+  undone: 'undone',
+} as const;
+
+export type ImportOperationResponseOperationAffectedEntities = { [key: string]: unknown };
+
+export type ImportOperationResponseOperationResult = { [key: string]: unknown };
+
+export type ImportOperationResponseOperation = {
+  operationId: string;
+  importType: string;
+  sourceKey?: string | null;
+  sourceLabel?: string;
+  status: ImportOperationResponseOperationStatus;
+  requestHash: string;
+  resultHash?: string | null;
+  affectedEntities?: ImportOperationResponseOperationAffectedEntities;
+  result?: ImportOperationResponseOperationResult;
+  createdAt?: number;
+  updatedAt?: number;
+  undoneAt?: number | null;
+};
+
+export interface ImportOperationResponse {
+  operation: ImportOperationResponseOperation;
+}
+
+export interface ConsumeInventoryDayStartInput {
+  /**
+     * Production date (defaults to today)
+     * @pattern ^\d{4}-\d{2}-\d{2}$
+     */
+  date?: string;
+}
+
 export type CompletedRunFinalizationSnapshot = { [key: string]: unknown };
 
 export interface CompletedRunFinalization {
@@ -1018,11 +1083,33 @@ export type SyncRecoveryPayload = SyncPayload & {
   rollover: boolean;
 };
 
+export type SyncWriteRequestPayload = SyncPayload & ({
+  syncVersion?: 1;
+  completeness?: 'complete' | 'partial';
+  /** @pattern ^[a-f0-9]{64}$ */
+  baseSnapshotId?: string;
+});
+
 export interface SyncWriteRequest {
   senderId?: string;
   /** @pattern ^[a-f0-9]{64}$ */
   snapshotId?: string;
-  payload: SyncPayload;
+  payload: SyncWriteRequestPayload;
+}
+
+export interface SyncUpgradeRequiredResponse {
+  ok: true;
+  data: SyncPayload;
+  /** @pattern ^[a-f0-9]{64}$ */
+  snapshotId: string;
+  partialFallback: true;
+  error: string;
+  code: 'SYNC_CLIENT_UPGRADE_REQUIRED';
+  recoveryRequired: true;
+  /** @minimum 0 */
+  canonicalRevision: number;
+  /** @minimum 0 */
+  serverTime: number;
 }
 
 export type ProductionRunInputs = { [key: string]: unknown };
@@ -1655,6 +1742,28 @@ export type SignUpCredentials = AuthCredentials & {
   accessCode: string;
 };
 
+export interface InvitationAcceptance {
+  /**
+     * @minLength 20
+     * @maxLength 512
+     */
+  invitation: string;
+  /**
+     * @minLength 3
+     * @maxLength 64
+     */
+  username: string;
+  /**
+     * @minLength 6
+     * @maxLength 200
+     */
+  password: string;
+}
+
+export interface SignupCodeStatusUpdate {
+  enabled: boolean;
+}
+
 /**
  * A discrete permission. A role grants a set of capabilities, and a user holds the union of their role's capabilities.
  */
@@ -1695,6 +1804,8 @@ export interface StaffMember {
   notificationPrefs: StaffMemberNotificationPrefs;
   /** Whether this is the seeded sandbox account, which operates in the isolated "sandbox" data scope. Clients show a persistent sandbox banner and offer a "Reset sandbox" action when true. */
   sandbox: boolean;
+  /** Whether sign-in is disabled for this account. */
+  disabled: boolean;
   /**
      * ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as "Sandbox copied from live at …".
      * @nullable
@@ -3622,6 +3733,33 @@ export interface ProfileDataHealthWorkspace {
   sourceReconciliation: SourceLibraryReconciliationStatus;
 }
 
+/**
+ * Allowlisted, redacted evidence object no larger than 8192 bytes.
+ */
+export type AuditLogChanges = { [key: string]: unknown };
+
+export interface AuditLog {
+  id: number;
+  /** Stable server-authenticated actor ID */
+  actor: string;
+  /** Allowlisted action name */
+  action: string;
+  /** Resource identifier */
+  resource: string | null;
+  /** Allowlisted, redacted evidence object no larger than 8192 bytes. */
+  changes: AuditLogChanges;
+  createdAt: string;
+}
+
+export interface AuditLogPage {
+  /** At most 200 records, ordered newest first by server timestamp and ID. */
+  logs: AuditLog[];
+  /** Number of records in this page */
+  count: number;
+  /** Opaque cursor limited to 200 characters */
+  nextCursor: string | null;
+}
+
 export type ProfileNameLinkCleanupSummaryRemovedStubs = {
   dough: number;
   sauce: number;
@@ -5539,6 +5677,13 @@ export type CheckUsernameAvailableParams = {
 username: string;
 };
 
+export type ConsumeInventoryDayStart200 = {
+  applied: boolean;
+  consumed?: number;
+  lines?: number;
+  message?: string;
+};
+
 export type ListInventoryLedgerParams = {
 itemId?: number;
 };
@@ -5674,6 +5819,37 @@ export type GetProfileDataHealthWorkspace200 = {
   workspace: ProfileDataHealthWorkspace;
 };
 
+export type ListAuditLogsParams = {
+startDate?: string;
+endDate?: string;
+/**
+ * Maximum 200 rows per page; defaults to 100.
+ */
+limit?: number;
+/**
+ * Opaque stable cursor, limited to 200 characters.
+ */
+cursor?: string;
+};
+
+export type ExportAuditLogsCsvParams = {
+startDate?: string;
+endDate?: string;
+/**
+ * Maximum 5000 rows per export; defaults to 5000.
+ */
+limit?: number;
+};
+
+export type ExportAuditLogsPdfParams = {
+startDate?: string;
+endDate?: string;
+/**
+ * Maximum 5000 rows per export; defaults to 5000.
+ */
+limit?: number;
+};
+
 export type GetProfileNameLinkCleanupAudit200 = {
   heal: ProfileNameLinkCleanupAudit | null;
 };
@@ -5758,6 +5934,18 @@ export type UpdateManagerActionItem200 = {
   item: ManagerActionItem;
 };
 
+export type GetSignupCodeStatus200 = {
+  enabled: boolean;
+  successfulUses: number;
+  failedUses: number;
+  /** @nullable */
+  rotatedAt?: string | null;
+};
+
+export type RotateSignupCode201 = {
+  secret: string;
+};
+
 export type ListCompletedHistoryParams = {
 from?: string;
 to?: string;
@@ -5806,6 +5994,8 @@ export type PutSyncToday200 = {
   snapshotId?: string;
   stale?: boolean;
   epoch?: number;
+  /** The write was not applied because its snapshot dependency was missing, malformed, or stale; data is authoritative and must be adopted before a bounded replay. */
+  partialFallback?: boolean;
   /** @minimum 0 */
   canonicalRevision?: number;
   /** @minimum 0 */

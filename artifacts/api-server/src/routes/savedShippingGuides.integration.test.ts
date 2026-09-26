@@ -30,7 +30,7 @@ import { sql } from "drizzle-orm";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import pg from "pg";
-import { signToken } from "../lib/auth";
+import { signLegacyTokenForTests } from "../lib/auth";
 
 type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
@@ -139,7 +139,7 @@ type TestScope = "live" | "sandbox";
 function headers(scope: TestScope): Record<string, string> {
   return {
     "Content-Type": "application/json",
-    authorization: `Bearer ${signToken(scope === "sandbox" ? "profile-sandbox" : "profile-live")}`,
+    authorization: `Bearer ${signLegacyTokenForTests(scope === "sandbox" ? "profile-sandbox" : "profile-live")}`,
   };
 }
 

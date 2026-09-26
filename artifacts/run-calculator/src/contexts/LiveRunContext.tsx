@@ -35,6 +35,7 @@ import { calcRef } from "../liveRunCalc";
 import {
   computeLinePhases,
   computePackagingDrainElapsedSec,
+  computeEndedRunElapsedSec,
   lineHasPackagingDrain,
   type LinePhases,
 } from "../linePhases";
@@ -281,9 +282,19 @@ export function LiveRunProvider({
     [currentRun?.stoppages],
   );
 
-  const localElapsedBatchSec = currentRun?.startedAt
-    ? Math.max(0, ((currentRun.pausedAt ?? nowTime.getTime()) - currentRun.startedAt - currentRunDowntimeMs)) / 1000
-    : 0;
+  const localElapsedBatchSec = currentRun?.endedAt
+    ? computeEndedRunElapsedSec({
+        startedAt: currentRun.startedAt,
+        endedAt: currentRun.endedAt,
+        stoppages: currentRun.stoppages?.map((stoppage) => ({
+          type: stoppage.type ?? "",
+          startedAt: stoppage.startedAt,
+          endedAt: stoppage.endedAt,
+        })),
+      })
+    : currentRun?.startedAt
+      ? Math.max(0, ((currentRun.pausedAt ?? nowTime.getTime()) - currentRun.startedAt - currentRunDowntimeMs)) / 1000
+      : 0;
   const elapsedBatchSec = confirmedProjection
     ? confirmedProjection.effectiveElapsedSec + (
         confirmedProjection.facts.runStatus === "running"
@@ -445,20 +456,6 @@ export function LiveRunProvider({
     !nextRun.startedAt &&
     (nextRun.subTab ?? "dough") !== "crusts";
 
-  // ── Notifications ────────────────────────────────────────────────────────
-  const { showBatchDue, setShowBatchDue, showPaceAlert, setShowPaceAlert, paceAlertMsg } = useNotifications({
-    runStatus,
-    nowTime,
-    currentRun,
-    calc,
-    sauceBarrelElapsedSec,
-    v: ve,
-    isCrust: doughSubTab === "crusts",
-    nextRunLabels: upcomingRunLabels,
-    prefs,
-    alertDate: dayState.date,
-  });
-
   // ── Stall detection ───────────────────────────────────────────────────────
   const stallCheck = useMemo(
     () =>
@@ -536,6 +533,23 @@ export function LiveRunProvider({
     },
     [autoTrackProgress, onAutoTrackProgressChange, setLocalAutoTrackProgress],
   );
+
+  // ── Notifications ────────────────────────────────────────────────────────
+  // Automatic dough tracking owns batch progress. Pass its live toggle state
+  // into the reminder hook so enabling it clears any manual prompt immediately.
+  const { showBatchDue, setShowBatchDue, showPaceAlert, setShowPaceAlert, paceAlertMsg } = useNotifications({
+    runStatus,
+    nowTime,
+    currentRun,
+    calc,
+    sauceBarrelElapsedSec,
+    v: ve,
+    isCrust: doughSubTab === "crusts",
+    automaticDoughTracking: autoTrackProgress,
+    nextRunLabels: upcomingRunLabels,
+    prefs,
+    alertDate: dayState.date,
+  });
 
   // Packaging speed feedback is shared by the Packaging tab and the quick
   // check cards on Dough/Sauce. Keep the lifecycle in this always-mounted

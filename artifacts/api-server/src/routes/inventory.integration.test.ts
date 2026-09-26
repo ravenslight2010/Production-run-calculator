@@ -38,7 +38,10 @@ let inventoryLedgerTable: DbModule["inventoryLedgerTable"];
 let inventoryConsumedRunsTable: DbModule["inventoryConsumedRunsTable"];
 let inventoryLocationsTable: DbModule["inventoryLocationsTable"];
 let dailySyncTable: DbModule["dailySyncTable"];
+let mixesTable: DbModule["mixesTable"];
+let mixSurplusLotsTable: DbModule["mixSurplusLotsTable"];
 let consumeRun: InvModule["consumeRun"];
+let consumeDayStart: InvModule["consumeDayStart"];
 let drawDown: InvModule["drawDown"];
 let adjustInventory: InvModule["adjustInventory"];
 let mergeInventoryItems: InvModule["mergeInventoryItems"];
@@ -90,7 +93,10 @@ beforeAll(async () => {
   inventoryConsumedRunsTable = dbMod.inventoryConsumedRunsTable;
   inventoryLocationsTable = dbMod.inventoryLocationsTable;
   dailySyncTable = dbMod.dailySyncTable;
+  mixesTable = dbMod.mixesTable;
+  mixSurplusLotsTable = dbMod.mixSurplusLotsTable;
   consumeRun = invMod.consumeRun;
+  consumeDayStart = invMod.consumeDayStart;
   drawDown = invMod.drawDown;
   adjustInventory = invMod.adjustInventory;
   mergeInventoryItems = invMod.mergeInventoryItems;
@@ -130,7 +136,7 @@ afterAll(async () => {
 beforeEach(async () => {
   // Each test starts from an empty inventory.
   await db.execute(
-    sql`TRUNCATE ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryLocationsTable}, ${inventoryItemsTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryLocationsTable}, ${inventoryItemsTable}, ${mixSurplusLotsTable}, ${mixesTable} RESTART IDENTITY CASCADE`,
   );
 });
 
@@ -1267,5 +1273,141 @@ describe("POST /api/inventory/consume-sauce-barrel — retry-safe barrel taps", 
       .toEqual({ applied: true, consumed: 10 });
     expect(await onHand(itemId)).toBe(80);
     expect(await consumeLedgerCount(itemId)).toBe(2);
+  });
+});
+
+function dayStartRequest(date: string) {
+  return {
+    body: { date },
+    headers: {},
+    header() {
+      return undefined;
+    },
+  } as unknown as Parameters<typeof consumeDayStart>[0];
+}
+
+function dayStartResponse() {
+  let statusCode = 200;
+  let body: unknown;
+  const response = {
+    status(code: number) {
+      statusCode = code;
+      return response;
+    },
+    json(value: unknown) {
+      body = value;
+      return response;
+    },
+  } as unknown as Parameters<typeof consumeDayStart>[1];
+  return {
+    response,
+    result: () => ({ statusCode, body }),
+  };
+}
+
+async function callDayStart(
+  date: string,
+  options?: Parameters<typeof consumeDayStart>[2],
+): Promise<{ statusCode: number; body: unknown }> {
+  const res = dayStartResponse();
+  await consumeDayStart(dayStartRequest(date), res.response, options);
+  return res.result();
+}
+
+describe("day-start physical inventory event against a real database", () => {
+  beforeEach(async () => {
+    await db.execute(sql`TRUNCATE ${dailySyncTable} RESTART IDENTITY CASCADE`);
+  });
+
+  it("applies a concurrent same-date mix and supply event exactly once", async () => {
+    const tapeId = await makeItem("packaging:tape:count");
+    const onionId = await makeItem("ingredient:Onion:lbs");
+    await addLot(tapeId, 20);
+    await addLot(onionId, 100);
+    await db.insert(dailySyncTable).values({
+      date: "2026-07-03",
+      scope: "live",
+      data: {
+        dayState: {
+          date: "2026-07-03",
+          runs: [{ id: "run-mix-event", brand: "Test", flavor: "Deluxe" }],
+        },
+        runValues: {
+          "run-mix-event": { casesNeeded: 10, pizzasPerCase: 10 },
+        },
+      },
+    });
+    // Retained scheduled days share the same scope but must not be included
+    // in the physical event for the requested production date.
+    await db.insert(dailySyncTable).values({
+      date: "2026-07-04",
+      scope: "live",
+      data: {
+        dayState: {
+          date: "2026-07-04",
+          runs: [{ id: "run-future-mix-event", brand: "Test", flavor: "Deluxe" }],
+        },
+        runValues: {
+          "run-future-mix-event": { casesNeeded: 100, pizzasPerCase: 10 },
+        },
+      },
+    });
+    await db.insert(mixesTable).values({
+      id: "mix-event",
+      scope: "live",
+      name: "Onion Mix",
+      brand: "Test",
+      flavor: "Deluxe",
+      batchSize: 40,
+      daysEarly: 1,
+      notes: "",
+      amountAlreadyMade: 0,
+      amountActualMade: 50,
+      components: [{ ingredient: "Onion", perPizza: 2 }],
+      isPrep: false,
+      enabled: true,
+    });
+
+    const results = await Promise.all([
+      callDayStart("2026-07-03"),
+      callDayStart("2026-07-03"),
+    ]);
+
+    const bodies = results.map((result) => result.body as { applied: boolean });
+    expect(bodies.filter((body) => body.applied)).toHaveLength(1);
+    expect(bodies.filter((body) => !body.applied)).toHaveLength(1);
+    expect(await onHand(tapeId)).toBe(16);
+    expect(await onHand(onionId)).toBeLessThan(100);
+    const onionConsumes = (await db.select().from(inventoryLedgerTable))
+      .filter((row) => row.itemId === onionId && row.type === "consume");
+    expect(onionConsumes).toHaveLength(1);
+    expect(onionConsumes[0]?.qtyDelta).toBe(-18.182);
+    const claims = await db.select().from(inventoryConsumedRunsTable);
+    expect(claims.filter((claim) => claim.runId === "day-start:2026-07-03")).toHaveLength(1);
+    const surplus = await db.select().from(mixSurplusLotsTable);
+    expect(surplus).toHaveLength(1);
+    const [mix] = await db.select().from(mixesTable);
+    expect(mix.amountAlreadyMade).toBeGreaterThan(0);
+  });
+
+  it("rolls back every effect on failure and lets the same event retry once", async () => {
+    const tapeId = await makeItem("packaging:tape:count");
+    await addLot(tapeId, 20);
+
+    await expect(
+      callDayStart("2026-07-04", { failBeforeCommit: true }),
+    ).rejects.toThrow("test day-start pre-commit failpoint");
+
+    expect(await onHand(tapeId)).toBe(20);
+    expect(await consumeLedgerCount(tapeId)).toBe(0);
+    let claims = await db.select().from(inventoryConsumedRunsTable);
+    expect(claims.filter((claim) => claim.runId === "day-start:2026-07-04")).toHaveLength(0);
+
+    const retry = await callDayStart("2026-07-04");
+    expect(retry.body).toMatchObject({ applied: true });
+    expect(await onHand(tapeId)).toBe(16);
+    expect(await consumeLedgerCount(tapeId)).toBe(1);
+    claims = await db.select().from(inventoryConsumedRunsTable);
+    expect(claims.filter((claim) => claim.runId === "day-start:2026-07-04")).toHaveLength(1);
   });
 });

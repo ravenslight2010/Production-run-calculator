@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from "react";
-import { ArrowRight, AlertTriangle, CheckCircle2, Clock, Pause, PauseCircle, Play, Timer } from "lucide-react";
+import { ArrowRight, AlertTriangle, CheckCircle2, Clock, Pause, PauseCircle, Timer } from "lucide-react";
 import { useHomeCtx } from "../../contexts/HomeCtx";
 import { useHomeTabCtx } from "../../contexts/HomeTabCtx";
 import { useLiveRun } from "../../contexts/LiveRunContext";
@@ -51,7 +51,7 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
   const [showPrepBatchDue, setShowPrepBatchDue] = useState(false);
   useAutomaticUpdateReloadBlocker(
     "dough-production-due-alert",
-    showBatchDue || showPrepBatchDue,
+    (!autoTrackProgress && showBatchDue) || showPrepBatchDue,
   );
   const prevDoughBatchNumRef = useRef(0);
   useEffect(() => {
@@ -199,7 +199,7 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                               </button>
                             </div>
                           )}
-                          <div className="grid grid-cols-3 gap-2">
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                             <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
                               <p className="text-[10px] uppercase tracking-wider text-muted-foreground">1 · Prepped</p>
                               <p className="text-xs font-semibold text-foreground mt-1">Waiting</p>
@@ -266,7 +266,7 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                               : "time your mixer & hopper for live timers"}
                           </p>
                         </div>
-                        <div className="grid grid-cols-3 gap-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                           <SecondsField control={form.control} name="mixerLowSec" label="Mixer low (sec)" />
                           <SecondsField control={form.control} name="mixerHighSec" label="Mixer high (sec)" />
                           <SecondsField control={form.control} name="hopperSec" label="Hopper (sec)" />
@@ -280,7 +280,7 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                 <DoughRoleGate isSupervisor={!!isSupervisor}>
                 {/* ── Crust run ── */}
                 {doughSubTab === "crusts" && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-4 min-w-0">
                     <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden">
                       <div className="h-1 bg-sky-500 w-full" />
                       <CardHeader className="pb-2 pt-4 px-5">
@@ -289,7 +289,7 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                         </CardTitle>
                       </CardHeader>
                       <CardContent className="px-4 pb-4">
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div className="bg-muted/20 rounded-lg p-3 text-center">
                             <p className="text-3xl font-mono font-bold text-sky-400 tabular-nums" data-testid="output-cases-to-open">{fmtNum(calc.casesLeftToOpen, 0)}</p>
                             <p className="text-xs text-muted-foreground mt-0.5">Cases to open</p>
@@ -307,7 +307,7 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                 {/* ── Dough run ── */}
                 {doughSubTab === "dough" && (
                   <>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-4 min-w-0">
                   <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden">
                     <div className="h-1 bg-primary w-full" />
                     <CardHeader className="pb-2 pt-4 px-5">
@@ -316,7 +316,7 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="px-4 pb-4">
-                      <div className="grid grid-cols-2 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         {(() => {
                           const traysOnLine = v.traysOnLine ?? 0;
                           const batchesReady = v.batchesReady ?? 0;
@@ -681,8 +681,8 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                   );
                 })()}
 
-                {/* Next batch due — merged countdown + start-next-batch card (graduated mockup) */}
-                {doughSubTab === "dough" && runStatus === "running" && !calc.pressDone && (() => {
+                {/* Manual-mode next-batch countdown and dismissible reminder. */}
+                {doughSubTab === "dough" && runStatus === "running" && !calc.pressDone && !autoTrackProgress && (() => {
                   const spinSecCard = getAutoTrackTiming(
                     calc.ppm,
                     v.pizzasPerCase,
@@ -704,7 +704,7 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                           <Timer className={`w-5 h-5 shrink-0 ${showBatchDue ? "text-orange-400" : "text-amber-500"}`} />
                           <div className="min-w-0">
                             <p className={`text-sm font-bold ${showBatchDue ? "text-orange-400" : "text-foreground"}`}>
-                              {showBatchDue ? "Dough station — start next batch now" : "Dough station — next batch due"}
+                              {showBatchDue ? "Dough station — batch reminder" : "Dough station — next batch due"}
                             </p>
                             <p className="text-xs text-muted-foreground mt-0.5">
                               {showBatchDue ? `Time per batch: ${fmtTime(spinSecCard)}` : "Countdown to the next mixer batch at current pace"}
@@ -718,12 +718,12 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                       {showBatchDue && (
                         <button
                           type="button"
-                          data-testid="button-start-next-batch"
+                          data-testid="button-dismiss-batch-reminder"
                           onClick={() => setShowBatchDue(false)}
                           className="w-full bg-amber-600 hover:bg-amber-500 text-black font-black text-sm py-3 flex items-center justify-center gap-2 transition-colors"
                         >
-                          <Play className="w-4 h-4 fill-current" />
-                          START NEXT BATCH
+                          <CheckCircle2 className="w-4 h-4" />
+                          Dismiss reminder
                         </button>
                       )}
                     </div>
@@ -792,7 +792,7 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                           />
                           <span className="text-xs text-muted-foreground shrink-0 font-mono">{fmtNum(timePerBatchMin, 1)} min/batch</span>
                         </div>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                        <div className="responsive-metric-grid">
                           <div className="bg-muted/30 rounded-lg p-2 text-center">
                             <p className="text-xl font-mono font-bold text-amber-400">
                               {Math.floor(minutesAvailable / 60) > 0 && `${Math.floor(minutesAvailable / 60)}h `}{Math.round(minutesAvailable % 60)}m
@@ -881,7 +881,7 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                             className="flex-1 rounded-md border border-input bg-background px-2 py-1 font-mono text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                           />
                         </div>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                        <div className="responsive-metric-grid">
                           <div className="bg-muted/30 rounded-lg p-2 text-center">
                             <p className="text-xl font-mono font-bold text-amber-400">
                               {Math.floor(minutesAvailable / 60) > 0 && `${Math.floor(minutesAvailable / 60)}h `}{Math.round(minutesAvailable % 60)}m
@@ -922,7 +922,7 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                     <div className="bg-muted/30 px-4 py-2.5 border-b border-border/40">
                       <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Extra Info</p>
                     </div>
-                    <div className="grid grid-cols-3 divide-x divide-border/40">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-border/40">
                       <div className="p-3 text-center">
                         <p className="text-lg font-mono font-bold text-foreground tabular-nums" data-testid="output-trays-per-skid">{fmtNum(calc.traysPerSkid, 2)}</p>
                         <p className="text-[10px] text-muted-foreground uppercase tracking-wider mt-0.5">Trays / Skid</p>

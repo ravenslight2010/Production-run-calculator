@@ -48,6 +48,7 @@ import {
 } from "./specImportAliases";
 import { saveAiCorrections } from "./aiCorrections";
 import { saveCheeseSheet, buildCheeseSheetLabel, deriveSourceKey } from "./savedCheeseSheets";
+import { applyImportOperation } from "./importOperations";
 import {
   auditedCheeseApprovalFor,
   isAuditedCheeseWorkbook,
@@ -286,6 +287,7 @@ export type CheeseCommitResult = {
   saved: CheeseRecipe[];
   snapshotId?: number;
   warning?: string;
+  resultHash?: string;
 };
 
 /**
@@ -300,6 +302,7 @@ export async function commitCheeseImport(
   recipesToApply: ReadonlyArray<CheeseRecipe>,
   newAliases: ReadonlyArray<SpecImportAlias> = [],
   recipesToRemove: ReadonlyArray<string> = [],
+  operationId?: string,
 ): Promise<CheeseCommitResult> {
   // Commit is a second trust boundary: never write a name-only/empty recipe
   // that could replace a populated server recipe during a re-import.
@@ -319,16 +322,47 @@ export async function commitCheeseImport(
     }
   }
   let saved: CheeseRecipe[] = [];
+  let atomicApplied = false;
+  let resultHash: string | undefined;
   if (recipesToApply.length > 0 || recipesToRemove.length > 0) {
     const existing = await fetchCheeseRecipes();
-  const removeSet = new Set(recipesToRemove);
-  const afterRemoval = recipesToRemove.length > 0
-    ? existing.filter((r) => !removeSet.has(r.id))
-    : existing;
-  const merged = recipesWithComponents.length > 0
-    ? mergeCheeseRecipes(afterRemoval, recipesWithComponents)
-    : afterRemoval;
-    saved = await saveCheeseRecipes(merged);
+    const removeSet = new Set(recipesToRemove);
+    const afterRemoval = recipesToRemove.length > 0
+      ? existing.filter((r) => !removeSet.has(r.id))
+      : existing;
+    const merged = recipesWithComponents.length > 0
+      ? mergeCheeseRecipes(afterRemoval, recipesWithComponents)
+      : afterRemoval;
+    const importedIds = new Set(recipesWithComponents.map((recipe) => recipe.id));
+    const atomicRecipeUpserts = merged.filter((recipe) => importedIds.has(recipe.id));
+    if (operationId) {
+      const committed = await applyImportOperation(operationId, {
+        importType: "cheese",
+        sourceKey: deriveSourceKey(prepared.sourceNames ?? []),
+        sourceLabel: buildCheeseSheetLabel(prepared.recipes, prepared.sourceNames),
+        changes: {
+          cheeseRecipes: { upsert: atomicRecipeUpserts, delete: recipesToRemove },
+          ...(newAliases.length ? { specImportAliases: { upsert: newAliases } } : {}),
+        },
+      });
+      atomicApplied = true;
+      resultHash = committed.resultHash;
+      saved = merged;
+    } else {
+      saved = await saveCheeseRecipes(merged);
+    }
+  }
+  if (operationId && !atomicApplied) {
+    const committed = await applyImportOperation(operationId, {
+      importType: "cheese",
+      sourceKey: deriveSourceKey(prepared.sourceNames ?? []),
+      sourceLabel: buildCheeseSheetLabel(prepared.recipes, prepared.sourceNames),
+      changes: {
+        ...(newAliases.length ? { specImportAliases: { upsert: newAliases } } : {}),
+      },
+    });
+    atomicApplied = true;
+    resultHash = committed.resultHash;
   }
   let snapshotId: number | undefined;
   let warning: string | undefined;
@@ -346,7 +380,7 @@ export async function commitCheeseImport(
   // Remember the review's manual "use existing recipe" picks as blend-name
   // aliases so the next import of the same sheet pre-suggests the same links.
   // Best-effort: the recipes already saved; learning is a bonus.
-  if (newAliases.length) {
+  if (newAliases.length && !atomicApplied) {
     let priorAliases: SpecImportAlias[] = [];
     try {
       priorAliases = await fetchSpecImportAliases();
@@ -429,6 +463,7 @@ export async function commitCheeseImport(
   return {
     count: recipesWithComponents.length,
     saved,
+    ...(resultHash ? { resultHash } : {}),
     ...(snapshotId != null ? { snapshotId } : {}),
     ...(warning ? { warning } : {}),
   };

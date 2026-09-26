@@ -1,5 +1,9 @@
 # Multi-Day Lookahead Dashboard — Plan
 
+**Status:** Schedule, freezer-pull, mix-plan, reorder, and use-first inputs built; unified timeline, availability, capacity, and preparation checklist remain planned
+**Updated:** 2026-09-19
+**Dependency:** projections must consume trustworthy inventory actuals, surplus, prep-mix, and packaging events rather than create another stock-write path. See the [inventory plan](inventory-autodeduction-plan.md) and [idea backlog](idea-backlog.md#8-multi-day-lookahead-dashboard).
+
 ## Current State
 
 | Feature | File | What It Does |

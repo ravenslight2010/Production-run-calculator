@@ -10,6 +10,7 @@ import {
 } from "../lib/serverJobs";
 import { CAPABILITIES } from "../lib/roles";
 import { requireAnyCapability } from "../middlewares/requireCapability";
+import { AI_ROUTE_BOUNDARIES, validateAiRequestBoundary } from "../lib/aiDataBoundary";
 
 const router: IRouter = Router();
 const CreateJob = z.object({
@@ -38,6 +39,13 @@ router.post("/server-jobs", requireAnyCapability(CAPABILITIES), async (req, res)
   if (!definition) { res.status(400).json({ error: "Unsupported server job type" }); return; }
   if (!req.capabilities?.includes(definition.capability)) {
     res.status(403).json({ error: "Missing capability for this server job" }); return;
+  }
+  if (parsed.data.type === "workbook-parse") {
+    const boundary = validateAiRequestBoundary(AI_ROUTE_BOUNDARIES.workbookParseJob, parsed.data.input);
+    if (!boundary.ok) {
+      res.status(boundary.status).json({ error: boundary.error });
+      return;
+    }
   }
   try {
     const outcome = await enqueueServerJob({

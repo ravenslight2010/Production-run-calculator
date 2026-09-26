@@ -11,7 +11,7 @@ import { sql } from "drizzle-orm";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import pg from "pg";
-import { signToken } from "../lib/auth";
+import { signLegacyTokenForTests } from "../lib/auth";
 
 type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
@@ -130,7 +130,7 @@ async function req(
 ): Promise<Response> {
   const headers: Record<string, string> = {};
   if (body !== undefined) headers["content-type"] = "application/json";
-  if (userId) headers.authorization = `Bearer ${signToken(userId)}`;
+  if (userId) headers.authorization = `Bearer ${signLegacyTokenForTests(userId)}`;
   return fetch(`${baseUrl}${pathname}`, {
     method,
     headers,

@@ -12,6 +12,9 @@ const { getUserSecurityState } = vi.hoisted(() => ({
     passwordChangedAtMs: 0,
   })),
 }));
+const { checkAndTouchSession } = vi.hoisted(() => ({
+  checkAndTouchSession: vi.fn(async () => "ok"),
+}));
 
 vi.mock("../lib/auth", () => ({
   SESSION_COOKIE: "rc_auth",
@@ -23,6 +26,7 @@ vi.mock("../lib/sessionBoundary", () => ({
 vi.mock("../lib/userValidity", () => ({
   getUserSecurityState,
 }));
+vi.mock("../lib/authSessions", () => ({ checkAndTouchSession }));
 vi.mock("../lib/sandbox", () => ({
   isSandboxUser: vi.fn(async () => false),
   sandboxAllowed: vi.fn(() => true),

@@ -13,6 +13,7 @@ import { fmtCountdownParts, fmtNum } from "../../utils";
 import { AUTO_SUPPRESS_MS, TimelineNode, PkgMiniStepper, fmtMS } from "./stationShared";
 import { PackagingSpeedNudgeFeedback } from "../PackagingSpeedNudgeFeedback";
 import { runUnlockedManualSectionAction } from "../../packagingManager";
+import { isPackagingDrainComplete } from "../../linePhases";
 
 export const LivePackagingTabContent = memo(function LivePackagingTabContent() {
   const hx = useHomeTabCtx();
@@ -32,6 +33,39 @@ export const LivePackagingTabContent = memo(function LivePackagingTabContent() {
     speedNudge, speedNudgeStatus, detectPackagingSpeedDrift,
     acceptPackagingSpeedNudge, dismissPackagingSpeedNudge,
   } = useLiveRun();
+
+  const autoAdvancedRunRef = useRef<string | null>(null);
+  useEffect(() => {
+    const nextIndex = dayState.currentIndex + 1;
+    const nextRun = dayState.runs[nextIndex];
+    if (
+      !currentRun ||
+      currentRun.id !== currentRunId ||
+      !nextRun ||
+      nextRun.startedAt ||
+      nextRun.endedAt ||
+      autoAdvancedRunRef.current === currentRunId ||
+      !isPackagingDrainComplete({
+        runStatus,
+        endedAt: currentRun.endedAt,
+        elapsedBatchSec,
+        phases: linePhases,
+      })
+    ) return;
+
+    if (hx.switchToRun(nextIndex, currentRunId)) {
+      autoAdvancedRunRef.current = currentRunId;
+    }
+  }, [
+    currentRun,
+    currentRunId,
+    dayState.currentIndex,
+    dayState.runs,
+    elapsedBatchSec,
+    hx.switchToRun,
+    linePhases,
+    runStatus,
+  ]);
 
   // ── Auto-tick skid/case counter for the prior run draining through the
   // Freeze tunnel while the NEXT run is already active on the form.
@@ -600,7 +634,7 @@ export const LivePackagingTabContent = memo(function LivePackagingTabContent() {
                     </div>
                   </summary>
                   <div className="px-4 pb-4 border-t border-border/20 pt-3 bg-card/60">
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
                       {isCartonedValue(v.cartoned as string) && (
                         <div className="flex flex-col">
                           <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Cartons/Case</span>

@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   RELEASE_EVIDENCE_ALLOWLIST,
+  READINESS_EVIDENCE_PATH,
   RELEASE_CHECKPOINT_REPORT,
   RELEASE_CHECK_API_CONCURRENCY,
   RELEASE_CHECK_DEFAULT_CONCURRENCY,
@@ -35,6 +36,7 @@ import {
   formatReleaseReport,
   parseBrowserDurationRegressions,
   parseSourceLibraryPreflightDiagnostic,
+  publishedReleaseReadinessRequired,
   releaseConcurrencyLimit,
   releaseGateLabelsForMode,
   releaseStepDependencies,
@@ -62,6 +64,11 @@ import {
   DEFAULT_REPORT,
   parseSourceLibraryPreflightDiagnostic as parseStoredSourceLibraryPreflightDiagnostic,
 } from "./verify-source-library-reconciliation.mts";
+import {
+  buildReadinessEvidence,
+  sanitizeReadinessResponse,
+} from "./capture-readiness-recovery.mts";
+import { FULL_BROWSER_EXPECTED_CASES } from "./full-browser-case-contract.mts";
 
 const sourceReportSha256 = createHash("sha256")
   .update(await readFile(new URL(`../../${DEFAULT_REPORT}`, import.meta.url)))
@@ -100,6 +107,33 @@ function sourceEvidence(overrides: Record<string, unknown> = {}) {
     ...evidence,
     evidenceId: computeSourceLibraryEvidenceId(evidence),
   };
+}
+
+function readinessEvidenceFixture() {
+  const capturedAt = new Date(Date.now() - 60_000).toISOString();
+  const sample = sanitizeReadinessResponse({
+    capturedAt,
+    httpStatus: 200,
+    payload: {
+      status: "ok",
+      checks: {
+        process: "ok",
+        startup: "ok",
+        database: "ok",
+        dependencies: "ok",
+        backgroundWorkers: "ok",
+      },
+      diagnostics: { backgroundOperations: {} },
+    },
+  });
+  return buildReadinessEvidence({
+    environment: "release",
+    deploymentId: "published-deployment-fixture",
+    revision: "e".repeat(40),
+    generatedAt: capturedAt,
+    mode: "normal",
+    samples: [sample, sample],
+  });
 }
 
 const aiDigest = "a".repeat(64);
@@ -182,9 +216,10 @@ async function fixture(
   const retainedEvaluationFiles = retainedEvaluationEvidenceInventory().map(
     (entry) => entry.evidencePath,
   );
-  const fixtureFiles = files.includes(IMPORT_CORPUS_EVALUATION_EVIDENCE)
-    ? [...new Set([...files, ...retainedEvaluationFiles])]
-    : files;
+  const filteredFiles = files.filter((file) => file !== READINESS_EVIDENCE_PATH);
+  const fixtureFiles = filteredFiles.includes(IMPORT_CORPUS_EVALUATION_EVIDENCE)
+    ? [...new Set([...filteredFiles, ...retainedEvaluationFiles])]
+    : filteredFiles;
   const retainedSourceByEvidencePath = new Map(
     retainedEvaluationEvidenceInventory().map((entry) => [
       entry.evidencePath,
@@ -343,6 +378,26 @@ async function run(): Promise<void> {
     discoverReleaseRetainedEvaluationPaths(),
     discoverRoutineRetainedEvaluationPaths(),
     "release verification and routine Node preflight must discover the same retained evaluation files",
+  );
+  assert.equal(
+    publishedReleaseReadinessRequired("standard", true),
+    true,
+    "published standard verification must require readiness evidence",
+  );
+  assert.equal(
+    publishedReleaseReadinessRequired("full", true),
+    true,
+    "published full verification must require readiness evidence",
+  );
+  assert.equal(
+    publishedReleaseReadinessRequired("typescript-7-promotion", true),
+    false,
+    "TypeScript promotion verification must retain its separate evidence contract",
+  );
+  assert.equal(
+    publishedReleaseReadinessRequired("standard", false),
+    false,
+    "disposable fixture verification must have an explicit readiness opt-out contract",
   );
   const retainedEvaluationInventory = retainedEvaluationEvidenceInventory();
   const retainedEvidenceFiles = new Set(
@@ -1171,6 +1226,17 @@ async function run(): Promise<void> {
       expectedLabels: validLabels,
     }),
   );
+  assert.throws(
+    () =>
+      validateReleaseReport(validReport, {
+        currentRevision: "current-revision",
+        expectedMode: "standard",
+        expectedLabels: validLabels,
+        requireReadinessEvidence: true,
+      }),
+    /without the retained readiness evidence path/,
+    "a GO report that omits readiness evidence must be rejected",
+  );
   const missingHistory = {
     state: "missing" as const,
     distinctRevisionCount: 1,
@@ -1790,9 +1856,66 @@ async function run(): Promise<void> {
         currentRevision: "current-revision",
         expectedMode: "standard",
         expectedLabels: validLabels,
+        requireReadinessEvidence: false,
       }),
       "an allowlisted evidence set should pass",
     );
+    await assert.rejects(
+      verifyReleaseEvidence(root, {
+        currentRevision: "current-revision",
+        expectedMode: "standard",
+        expectedLabels: validLabels,
+        requireReadinessEvidence: true,
+      }),
+      /requires the expected deployment ID and deployed revision/,
+      "published verification must require readiness identities before checking GO",
+    );
+    await assert.rejects(
+      verifyReleaseEvidence(root, {
+        currentRevision: "current-revision",
+        expectedMode: "standard",
+        expectedLabels: validLabels,
+        expectedReadinessDeploymentId: "published-deployment-fixture",
+        expectedDeployedRevision: "e".repeat(40),
+        requireReadinessEvidence: true,
+      }),
+      /Required release evidence is missing:[\s\S]*readiness-recovery\/readiness-recovery\.json/,
+      "published verification must fail when readiness evidence is missing",
+    );
+    const readinessEvidence = readinessEvidenceFixture();
+    const readinessEvidencePath = join(root, READINESS_EVIDENCE_PATH);
+    await mkdir(join(readinessEvidencePath, ".."), { recursive: true });
+    await writeFile(readinessEvidencePath, `${JSON.stringify(readinessEvidence)}\n`);
+    await writeFile(
+      join(root, "release-check-report.md"),
+      formatReleaseReport(
+        validLabels.map((label) => ({
+          label,
+          status: "PASS" as const,
+          elapsedMs: 100,
+        })),
+        "standard",
+        new Set([...retainedEvidenceFiles, READINESS_EVIDENCE_PATH]),
+        {
+          revision: "current-revision",
+          environment: "disposable release test",
+          decision: "GO",
+        },
+      ),
+      "utf8",
+    );
+    await assert.doesNotReject(
+      verifyReleaseEvidence(root, {
+        currentRevision: "current-revision",
+        expectedMode: "standard",
+        expectedLabels: validLabels,
+        expectedReadinessDeploymentId: "published-deployment-fixture",
+        expectedDeployedRevision: "e".repeat(40),
+        requireReadinessEvidence: true,
+      }),
+      "retained readiness evidence should use explicit published identity",
+    );
+    await rm(readinessEvidencePath);
     const nonCanonicalRetainedEvaluation =
       retainedEvaluationInventory.find(
         (entry) => entry.evidencePath !== IMPORT_CORPUS_EVALUATION_EVIDENCE,
@@ -2037,32 +2160,38 @@ async function run(): Promise<void> {
       "",
       "Revision: current-revision",
       "Result: FAIL",
-      "Expected cases: 159",
-      "Enumerated cases: 159",
+      `Expected cases: ${FULL_BROWSER_EXPECTED_CASES}`,
+      `Enumerated cases: ${FULL_BROWSER_EXPECTED_CASES}`,
       "Completed cases: 0",
       "Passed cases: 0",
       "Skipped cases: 0",
       "Failed cases: 0",
-      "Not-run cases: 159",
+      `Not-run cases: ${FULL_BROWSER_EXPECTED_CASES}`,
       "Coverage: INCOMPLETE",
       "Duration: 0ms",
       "## Per-file duration",
       "",
       "| File | Cases | Completed | Passed | Skipped | Failed | Not run | Duration |",
       "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
-      "| `e2e/example.spec.ts` | 159 | 0 | 0 | 0 | 0 | 159 | 0ms |",
+      `| \`e2e/example.spec.ts\` | ${FULL_BROWSER_EXPECTED_CASES} | 0 | 0 | 0 | 0 | ${FULL_BROWSER_EXPECTED_CASES} | 0ms |`,
       "",
     ].join("\n");
     const invalidPassingBrowserReport = validBrowserReport
       .replace("Result: FAIL", "Result: PASS")
-      .replace("Completed cases: 0", "Completed cases: 159")
+      .replace(
+        "Completed cases: 0",
+        `Completed cases: ${FULL_BROWSER_EXPECTED_CASES}`,
+      )
       .replace("Passed cases: 0", "Passed cases: 111")
       .replace("Failed cases: 0", "Failed cases: 1")
-      .replace("Not-run cases: 159", "Not-run cases: 0")
+      .replace(
+        `Not-run cases: ${FULL_BROWSER_EXPECTED_CASES}`,
+        "Not-run cases: 0",
+      )
       .replace("Coverage: INCOMPLETE", "Coverage: COMPLETE")
       .replace(
-        "| `e2e/example.spec.ts` | 159 | 0 | 0 | 0 | 0 | 159 | 0ms |",
-        "| `e2e/example.spec.ts` | 159 | 159 | 156 | 0 | 1 | 0 | 0ms |",
+        `| \`e2e/example.spec.ts\` | ${FULL_BROWSER_EXPECTED_CASES} | 0 | 0 | 0 | 0 | ${FULL_BROWSER_EXPECTED_CASES} | 0ms |`,
+        `| \`e2e/example.spec.ts\` | ${FULL_BROWSER_EXPECTED_CASES} | ${FULL_BROWSER_EXPECTED_CASES} | ${FULL_BROWSER_EXPECTED_CASES - 1} | 0 | 1 | 0 | 0ms |`,
       );
     assert.throws(
       () => validateFullBrowserReport(invalidPassingBrowserReport, {

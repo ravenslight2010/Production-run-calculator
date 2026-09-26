@@ -11,7 +11,7 @@ import { sql } from "drizzle-orm";
 import express, { type Express } from "express";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import pg from "pg";
-import { signToken } from "../lib/auth";
+import { signLegacyTokenForTests } from "../lib/auth";
 
 type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
@@ -110,7 +110,7 @@ type Alias = {
 function headers(scope: Scope): Record<string, string> {
   return {
     "content-type": "application/json",
-    authorization: `Bearer ${signToken(scope === "sandbox" ? "profile-sandbox" : "profile-live")}`,
+    authorization: `Bearer ${signLegacyTokenForTests(scope === "sandbox" ? "profile-sandbox" : "profile-live")}`,
   };
 }
 

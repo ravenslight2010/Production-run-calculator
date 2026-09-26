@@ -55,3 +55,13 @@ state.
 5. When a change crosses these boundaries, update the owning hook/context first
    and keep Home as the composition root rather than duplicating the state in a
    panel.
+
+## Reliability ordering constraints
+
+Complete-write fencing must preserve adopt-before-publish, reset-fence ordering,
+generation cancellation, auto-track coordination, and the settled-form identity
+guard. Station panels must not introduce independent inventory, import, or QC
+write paths. Those mutations belong behind server transactions or intents with
+their own idempotency and authorization boundaries. See the
+[unified reliability plan](sync-reliability-unified-plan-2026-09-19.md) and
+[additional domain synthesis](../research/additional-domain-research-synthesis-2026-09-19.md).

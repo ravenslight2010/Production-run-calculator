@@ -89,6 +89,24 @@ paths:
         "409":
           description: Username already taken
 
+  /auth/accept-invitation:
+    post:
+      operationId: acceptStaffInvitation
+      tags: [auth]
+      summary: Accept a one-time staff invitation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InvitationAcceptance" }
+      responses:
+        "201":
+          description: Account created and signed in
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthResponse" }
+        "400": { description: Invitation is invalid or unavailable }
+
   /auth/username-available:
     get:
       operationId: checkUsernameAvailable
@@ -517,6 +535,38 @@ paths:
                 $ref: "#/components/schemas/ConsumeResult"
         "400":
           description: Invalid input
+
+  /inventory/consume-day-start:
+    post:
+      operationId: consumeInventoryDayStart
+      tags: [inventory]
+      summary: Deduct the scheduled day's mix components and daily supplies
+      description: Idempotent by production date; retries of the same date have no physical effect.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConsumeInventoryDayStartInput"
+      responses:
+        "200":
+          description: Day-start consumption result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [applied]
+                properties:
+                  applied:
+                    type: boolean
+                  consumed:
+                    type: number
+                  lines:
+                    type: integer
+                  message:
+                    type: string
+        "400":
+          description: Invalid production date
 
   /inventory/merge:
     post:
@@ -3125,6 +3175,99 @@ paths:
         "403":
           description: Missing manager capability
 
+  /audit-logs:
+    get:
+      operationId: listAuditLogs
+      tags: [audit]
+      summary: List private facility-scoped operational audit records
+      description: >-
+        Manager-only, live-scope audit history. Facility scope and actor identity
+        are derived from authentication; scope is never accepted as a query parameter.
+        Records are retained indefinitely and returned through a bounded cursor.
+      parameters:
+        - name: startDate
+          in: query
+          schema: { type: string, format: date-time }
+        - name: endDate
+          in: query
+          schema: { type: string, format: date-time }
+        - name: limit
+          in: query
+          description: Maximum 200 rows per page; defaults to 100.
+          schema: { type: integer }
+        - name: cursor
+          in: query
+          description: Opaque stable cursor, limited to 200 characters.
+          schema: { type: string }
+      responses:
+        "200":
+          description: A bounded audit page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditLogPage"
+        "400": { description: Invalid pagination or date input }
+        "403": { description: Missing manager capability or live scope }
+  /audit-logs/export.csv:
+    get:
+      operationId: exportAuditLogsCsv
+      tags: [audit]
+      summary: Export private facility-scoped audit records as CSV
+      description: >-
+        CSV is intentionally bounded to 5000 rows per request. Audit records
+        are retained indefinitely and are excluded from ordinary
+        reset and purge operations.
+      parameters:
+        - name: startDate
+          in: query
+          schema: { type: string, format: date-time }
+        - name: endDate
+          in: query
+          schema: { type: string, format: date-time }
+        - name: limit
+          in: query
+          description: Maximum 5000 rows per export; defaults to 5000.
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Bounded CSV export
+          content:
+            text/csv: {}
+        "400": { description: Invalid export limit or date range }
+        "403": { description: Missing manager capability or live scope }
+  /audit-logs/export.pdf:
+    get:
+      operationId: exportAuditLogsPdf
+      tags: [audit]
+      summary: Export private facility-scoped audit records as PDF
+      description: >-
+        Produces a paginated PDF containing only the public audit fields. The
+        export is intentionally bounded to 5000 rows per request, uses the same
+        date filters and stable ordering as the CSV export, and is available
+        only to authorized managers in the live scope. Audit records are
+        retained indefinitely and are excluded from ordinary reset and purge
+        operations.
+      parameters:
+        - name: startDate
+          in: query
+          schema: { type: string, format: date-time }
+        - name: endDate
+          in: query
+          schema: { type: string, format: date-time }
+        - name: limit
+          in: query
+          description: Maximum 5000 rows per export; defaults to 5000.
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Bounded paginated PDF export
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "400": { description: Invalid export limit or date range }
+        "403": { description: Missing manager capability or live scope }
   /audit-logs/profile-name-link-cleanup:
     get:
       operationId: getProfileNameLinkCleanupAudit
@@ -4431,6 +4574,51 @@ paths:
         "404":
           description: User not found
 
+  /signup-code/status:
+    get:
+      operationId: getSignupCodeStatus
+      tags: [roles]
+      summary: Read bounded transitional sign-up code counters
+      responses:
+        "200":
+          description: Code status without the code itself
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled, successfulUses, failedUses]
+                properties:
+                  enabled: { type: boolean }
+                  successfulUses: { type: integer }
+                  failedUses: { type: integer }
+                  rotatedAt: { type: [string, "null"], format: date-time }
+    patch:
+      operationId: setSignupCodeStatus
+      tags: [roles]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SignupCodeStatusUpdate"
+      responses:
+        "200": { description: Updated code status }
+  /signup-code/rotate:
+    post:
+      operationId: rotateSignupCode
+      tags: [roles]
+      summary: Rotate transitional sign-up code (secret returned once)
+      responses:
+        "201":
+          description: Replacement secret, shown once
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [secret]
+                properties:
+                  secret: { type: string }
+
   /users/{userId}:
     delete:
       operationId: deleteStaffMember
@@ -4580,7 +4768,7 @@ paths:
               $ref: "#/components/schemas/SyncWriteRequest"
       responses:
         "200":
-          description: Canonical merge, unchanged acknowledgement, or stale reset rejection
+          description: Canonical merge, authoritative stale-base fallback, unchanged acknowledgement, or stale reset rejection
           content:
             application/json:
               schema:
@@ -4592,12 +4780,21 @@ paths:
                   snapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
                   stale: { type: boolean }
                   epoch: { type: integer }
+                  partialFallback:
+                    type: boolean
+                    description: The write was not applied because its snapshot dependency was missing, malformed, or stale; data is authoritative and must be adopted before a bounded replay.
                   canonicalRevision: { type: integer, minimum: 0 }
                   serverTime: { type: integer, minimum: 0 }
                   operationalProjection:
                     oneOf:
                       - $ref: "#/components/schemas/OperationalProjection"
                       - { type: "null" }
+        "409":
+          description: Legacy unversioned complete writes are retired; the write was not applied and data is the authoritative snapshot to adopt before retrying with the current protocol.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncUpgradeRequiredResponse"
 
   /sync/events:
     get:
@@ -4741,6 +4938,73 @@ paths:
         "400":
           description: Invalid cursor
 
+  /import-operations/{operationId}/apply:
+    post:
+      operationId: applyImportOperation
+      tags: [specImport]
+      summary: Atomically apply a reviewed import
+      parameters:
+        - in: path
+          name: operationId
+          required: true
+          schema: { type: string, minLength: 16, maxLength: 120 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImportOperationApplyInput"
+      responses:
+        "200":
+          description: Canonical committed operation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportOperationResponse" }
+        "400": { description: Invalid import operation }
+        "403": { description: Missing importer capability }
+        "409": { description: Stale review or duplicate operation with a different request }
+  /import-operations/{operationId}:
+    get:
+      operationId: getImportOperation
+      tags: [specImport]
+      summary: Read an import operation
+      parameters:
+        - in: path
+          name: operationId
+          required: true
+          schema: { type: string, minLength: 16, maxLength: 120 }
+      responses:
+        "200":
+          description: Import operation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportOperationResponse" }
+        "404": { description: Import operation not found }
+  /import-operations/{operationId}/undo:
+    post:
+      operationId: undoImportOperation
+      tags: [specImport]
+      summary: Guardedly undo an import operation
+      parameters:
+        - in: path
+          name: operationId
+          required: true
+          schema: { type: string, minLength: 16, maxLength: 120 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImportOperationUndoInput"
+      responses:
+        "200":
+          description: Canonical undone operation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportOperationResponse" }
+        "404": { description: Import operation not found }
+        "409": { description: The affected data changed after apply }
+
 components:
   parameters:
     ClientToday:
@@ -4754,6 +5018,52 @@ components:
       required: false
       schema: { type: string, pattern: "^[a-f0-9]{64}$" }
   schemas:
+    ImportOperationApplyInput:
+      type: object
+      required: [importType, sourceLabel, changes]
+      properties:
+        importType: { type: string, maxLength: 40 }
+        sourceKey: { type: string, nullable: true, maxLength: 300 }
+        sourceLabel: { type: string, maxLength: 300 }
+        requestHash: { type: string, nullable: true, pattern: "^[a-f0-9]{64}$" }
+        expectedStateHash: { type: string, nullable: true, pattern: "^[a-f0-9]{64}$" }
+        changes:
+          type: object
+          description: Reviewed entity batches keyed by supported master-data domain.
+          additionalProperties: true
+    ImportOperationUndoInput:
+      type: object
+      properties:
+        expectedResultHash:
+          type: string
+          pattern: "^[a-f0-9]{64}$"
+    ImportOperationResponse:
+      type: object
+      required: [operation]
+      properties:
+        operation:
+          type: object
+          required: [operationId, importType, status, requestHash]
+          properties:
+            operationId: { type: string }
+            importType: { type: string }
+            sourceKey: { type: string, nullable: true }
+            sourceLabel: { type: string }
+            status: { type: string, enum: [applying, applied, undone] }
+            requestHash: { type: string }
+            resultHash: { type: string, nullable: true }
+            affectedEntities: { type: object, additionalProperties: true }
+            result: { type: object, additionalProperties: true }
+            createdAt: { type: integer, format: int64 }
+            updatedAt: { type: integer, format: int64 }
+            undoneAt: { type: integer, format: int64, nullable: true }
+    ConsumeInventoryDayStartInput:
+      type: object
+      properties:
+        date:
+          type: string
+          pattern: "^\\d{4}-\\d{2}-\\d{2}$"
+          description: Production date (defaults to today)
     CompletedRunFinalization:
       type: object
       required: [operationId, runId, date, completedAt, snapshot]
@@ -5290,7 +5600,29 @@ components:
       properties:
         senderId: { type: string }
         snapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
-        payload: { $ref: "#/components/schemas/SyncPayload" }
+        payload:
+          allOf:
+            - $ref: "#/components/schemas/SyncPayload"
+            - type: object
+              description: Protocol-marked complete and partial writes must carry the exact baseSnapshotId most recently adopted from the server. During the measured compatibility window, legacy payloads without completeness receive Deprecation, Sunset, and X-Sync-Upgrade-Required headers; after retirement they receive 409 with the authoritative snapshot and are not applied.
+              properties:
+                syncVersion: { type: integer, enum: [1] }
+                completeness: { type: string, enum: [complete, partial] }
+                baseSnapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
+
+    SyncUpgradeRequiredResponse:
+      type: object
+      required: [ok, data, snapshotId, partialFallback, error, code, recoveryRequired, canonicalRevision, serverTime]
+      properties:
+        ok: { type: boolean, const: true }
+        data: { $ref: "#/components/schemas/SyncPayload" }
+        snapshotId: { type: string, pattern: "^[a-f0-9]{64}$" }
+        partialFallback: { type: boolean, const: true }
+        error: { type: string }
+        code: { type: string, const: SYNC_CLIENT_UPGRADE_REQUIRED }
+        recoveryRequired: { type: boolean, const: true }
+        canonicalRevision: { type: integer, minimum: 0 }
+        serverTime: { type: integer, minimum: 0 }
 
     ProductionRun:
       type: object
@@ -6270,6 +6602,33 @@ components:
                 Facility access code configured server-side (STAFF_SIGNUP_CODE)
                 and shared out of band with legitimate new staff.
 
+    InvitationAcceptance:
+      type: object
+      required:
+        - invitation
+        - username
+        - password
+      properties:
+        invitation:
+          type: string
+          minLength: 20
+          maxLength: 512
+        username:
+          type: string
+          minLength: 3
+          maxLength: 64
+        password:
+          type: string
+          minLength: 6
+          maxLength: 200
+
+    SignupCodeStatusUpdate:
+      type: object
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+
     AuthResponse:
       type: object
       required:
@@ -6400,6 +6759,7 @@ components:
         - floorModeEnabled
         - notificationPrefs
         - sandbox
+        - disabled
         - sandboxCopiedAt
         - sandboxStale
       properties:
@@ -6446,6 +6806,9 @@ components:
             Whether this is the seeded sandbox account, which operates in the
             isolated "sandbox" data scope. Clients show a persistent sandbox
             banner and offer a "Reset sandbox" action when true.
+        disabled:
+          type: boolean
+          description: Whether sign-in is disabled for this account.
         sandboxCopiedAt:
           type: [string, "null"]
           description: >-
@@ -8587,6 +8950,31 @@ components:
                 type: string
                 enum: [dough, sauce, cheeseRecipes, mixes, import, setupProfiles, audit]
 
+    AuditLog:
+      type: object
+      additionalProperties: false
+      required: [id, actor, action, resource, changes, createdAt]
+      properties:
+        id: { type: integer }
+        actor: { type: string, description: Stable server-authenticated actor ID, limited to 200 characters }
+        action: { type: string, description: Allowlisted action name, limited to 100 characters }
+        resource: { type: string, nullable: true, description: Resource identifier, limited to 200 characters }
+        changes:
+          type: object
+          additionalProperties: false
+          description: Allowlisted, redacted evidence object no larger than 8192 bytes.
+        createdAt: { type: string, format: date-time }
+    AuditLogPage:
+      type: object
+      additionalProperties: false
+      required: [logs, count, nextCursor]
+      properties:
+        logs:
+          type: array
+          description: At most 200 records, ordered newest first by server timestamp and ID.
+          items: { $ref: "#/components/schemas/AuditLog" }
+        count: { type: integer, description: Number of records in this page, from 0 through 200 }
+        nextCursor: { type: string, nullable: true, description: Opaque cursor limited to 200 characters }
     ProfileNameLinkCleanupAudit:
       type: object
       required: [id, appliedAt, summary]

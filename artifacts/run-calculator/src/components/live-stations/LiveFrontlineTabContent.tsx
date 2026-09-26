@@ -1,4 +1,4 @@
-import { memo, useCallback } from "react";
+import { memo, useCallback, useEffect, useRef } from "react";
 import { Boxes } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { applyRecipeSubstitutions } from "@workspace/inventory-math";
@@ -7,6 +7,7 @@ import { markRunValuesUpdated } from "../../adapters/browserRunPersistence";
 import { useManualControlLock } from "../../manualSectionLocks";
 import { useHomeTabCtx } from "../../contexts/HomeTabCtx";
 import { useLiveRun } from "../../contexts/LiveRunContext";
+import { isFrontlineDrainComplete } from "../../linePhases";
 import { deriveFrontlineNeedRows } from "../../frontlineRows";
 import { fmtNum, sauceBarrelBreakdown } from "../../utils";
 import { BatchMadeRow } from "./BatchMadeRow";
@@ -14,8 +15,40 @@ import { ReadOnlyRecipeCard, StatRow } from "./stationShared";
 
 export const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
   const hx = useHomeTabCtx();
-  const { v, runStatus, currentRunId, dayState, form, lastLocalEditRef, queueManualCorrection } = hx;
-  const { calc, elapsedBatchSec, autoSuppressUntilRef } = useLiveRun();
+  const { v, runStatus, currentRun, currentRunId, dayState, form, lastLocalEditRef, queueManualCorrection, switchToRun } = hx;
+  const { calc, elapsedBatchSec, linePhases, autoSuppressUntilRef } = useLiveRun();
+  const autoAdvancedRunRef = useRef<string | null>(null);
+  useEffect(() => {
+    const nextIndex = dayState.currentIndex + 1;
+    const nextRun = dayState.runs[nextIndex];
+    if (
+      !currentRun ||
+      currentRun.id !== currentRunId ||
+      !nextRun ||
+      nextRun.startedAt ||
+      nextRun.endedAt ||
+      autoAdvancedRunRef.current === currentRunId ||
+      !isFrontlineDrainComplete({
+        runStatus,
+        endedAt: currentRun.endedAt,
+        elapsedBatchSec,
+        phases: linePhases,
+      })
+    ) return;
+
+    if (switchToRun(nextIndex, currentRunId)) {
+      autoAdvancedRunRef.current = currentRunId;
+    }
+  }, [
+    currentRun,
+    currentRunId,
+    dayState.currentIndex,
+    dayState.runs,
+    elapsedBatchSec,
+    linePhases,
+    runStatus,
+    switchToRun,
+  ]);
   const packagingLock = useManualControlLock(currentRunId, "packaging-skids");
   const appLocks = {
     app1: useManualControlLock(currentRunId, "applicator-1-batches"),
@@ -61,7 +94,7 @@ export const LiveFrontlineTabContent = memo(function LiveFrontlineTabContent() {
             if (row.batchProgressField) {
               const slot = row.station as "app1" | "app2" | "app3" | "app4";
               const made = Math.max(0, Number(v[row.batchProgressField]) || 0);
-              return <BatchMadeRow key={row.key} label={row.label} totalBatches={row.amount} made={made} onIncrement={() => setManualAppProgress(slot, made + 1)} onDecrement={() => setManualAppProgress(slot, made - 1)} isLive={isLive} disabled={!!appLocks[slot]} testId={testId} sub={row.recipeName} pipeline="frontline" />;
+              return <BatchMadeRow key={row.key} label={row.label} totalBatches={row.amount} made={made} onIncrement={() => setManualAppProgress(slot, made + 1)} onDecrement={() => setManualAppProgress(slot, made - 1)} isLive={isLive} disabled={!!appLocks[slot]} disabledReason={appLocks[slot]?.peer ? "Corrections unavailable while another station is editing." : undefined} testId={testId} sub={row.recipeName} pipeline="frontline" />;
             }
             const bd = row.station === "sauce" && row.unit === "batches" ? sauceBarrelBreakdown(row.amount, calc.sauceEffBarrel) : null;
             return <StatRow key={row.key} label={row.label} value={bd ? `${fmtNum(row.amount, 2)} batches · ${bd.totalBarrels} barrels` : `${fmtNum(row.amount, row.unit === "lbs" ? 1 : 2)} ${row.unit}`} testId={testId} highlight={row.amount > 0} sub={row.recipeName} />;

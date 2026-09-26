@@ -114,10 +114,14 @@ export function useRunLifecycleManager(deps: {
     window.setTimeout(poll, 0);
   };
 
-  const switchToRun = useEvent((newIndex: number) => {
-    if (deps.foregroundSyncBarrierRef.current || deps.formHandoffRef.current) return;
+  const switchToRun = useEvent((newIndex: number, expectedCurrentRunId?: string) => {
+    if (deps.foregroundSyncBarrierRef.current || deps.formHandoffRef.current) return false;
     const base = deps.dayStateRef.current;
-    if (newIndex < 0 || newIndex >= base.runs.length) return;
+    if (newIndex < 0 || newIndex >= base.runs.length) return false;
+    if (
+      expectedCurrentRunId &&
+      base.runs[base.currentIndex]?.id !== expectedCurrentRunId
+    ) return false;
     deps.flushFormWrites();
     const ownedRunId = deps.lastFormRunIdRef.current;
     const current = ownedRunId ? base.runs.find((run) => run.id === ownedRunId) : undefined;
@@ -141,6 +145,7 @@ export function useRunLifecycleManager(deps: {
     deps.setDoughSubTab(nextRun.subTab ?? "dough");
     deps.setActiveStopId(nextRun.stoppages?.find((stop) => !stop.endedAt)?.id ?? null);
     deps.setConfirmDeleteStopId(null);
+    return true;
   });
 
   const startRun = useEvent(() => {

@@ -37,6 +37,7 @@ import type {
   ApplyAiRetentionCleanup200,
   ApprovePasswordResetResult,
   AuditAiMemoryHealth200,
+  AuditLogPage,
   AuditProfileDataHealth200,
   AuthCredentials,
   AuthResponse,
@@ -52,6 +53,8 @@ import type {
   CompletedRunFinalization,
   ConfirmFreezerSurplusInput,
   ConsumeInput,
+  ConsumeInventoryDayStart200,
+  ConsumeInventoryDayStartInput,
   ConsumeResult,
   CreateInventoryItemInput,
   CreateInventoryLocationInput,
@@ -75,6 +78,8 @@ import type {
   DieTypeList,
   DownloadCanonicalOperationalReportParams,
   DuplicateReviewList,
+  ExportAuditLogsCsvParams,
+  ExportAuditLogsPdfParams,
   FacilityKnowledgeList,
   FieldCheckIngestResult,
   FieldCheckObservationBatch,
@@ -91,6 +96,7 @@ import type {
   GetProfileDataHealthWorkspace200,
   GetProfileNameLinkCleanupAudit200,
   GetShiftHandoffDigestParams,
+  GetSignupCodeStatus200,
   GetSyncTodayParams,
   HardwareFieldCheckConfirmation,
   HealthStatus,
@@ -100,6 +106,9 @@ import type {
   ImportHistoryInput,
   ImportHistoryList,
   ImportHistoryResponse,
+  ImportOperationApplyInput,
+  ImportOperationResponse,
+  ImportOperationUndoInput,
   Incident,
   IncidentClustersInput,
   IncidentClustersResult,
@@ -112,9 +121,11 @@ import type {
   InventoryLocation,
   InventoryProductLinkInput,
   InventorySettings,
+  InvitationAcceptance,
   LabelVerifyInput,
   LabelVerifyResult,
   ListApplicatorBatchEvidenceParams,
+  ListAuditLogsParams,
   ListCompletedHistoryParams,
   ListDeniedMergesParams,
   ListFinalizedOperationalReportsParams,
@@ -183,6 +194,7 @@ import type {
   RestockInput,
   RoleCapabilitiesUpdate,
   RoleDefinition,
+  RotateSignupCode201,
   RunSuggestionFollowUpInput,
   RunSuggestionsList,
   RunTemplateList,
@@ -226,6 +238,7 @@ import type {
   SetNotificationPrefs,
   ShiftHandoffDigest,
   SignUpCredentials,
+  SignupCodeStatusUpdate,
   SpecImportAliasList,
   SpecReconcileInput,
   SpecReconcileResult,
@@ -240,6 +253,7 @@ import type {
   SyncPeerFrame,
   SyncRecoveryPayload,
   SyncUnchangedResponse,
+  SyncUpgradeRequiredResponse,
   SyncWriteRequest,
   TransferInput,
   UnreviewedIncidentCount,
@@ -465,6 +479,94 @@ export const useSignUp = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getSignUpMutationOptions(options), queryClient);
+    }
+
+export const getAcceptStaffInvitationUrl = () => {
+
+
+
+
+  return `/api/auth/accept-invitation`
+}
+
+/**
+ * @summary Accept a one-time staff invitation
+ */
+export const acceptStaffInvitation = async (invitationAcceptance: InvitationAcceptance, options?: Parameters<typeof customFetch>[1]): Promise<AuthResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<AuthResponse>(getAcceptStaffInvitationUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(invitationAcceptance)
+  }
+);}
+
+
+
+
+
+export const getAcceptStaffInvitationMutationKey = () => ['acceptStaffInvitation'] as const;
+
+export const getAcceptStaffInvitationMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acceptStaffInvitation>>, TError,AcceptStaffInvitationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof acceptStaffInvitation>>, TError,AcceptStaffInvitationMutationVariables, TContext> => {
+
+const mutationKey = getAcceptStaffInvitationMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof acceptStaffInvitation>>, AcceptStaffInvitationMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  acceptStaffInvitation(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AcceptStaffInvitationMutationResult = NonNullable<Awaited<ReturnType<typeof acceptStaffInvitation>>>
+    export type AcceptStaffInvitationMutationBody = BodyType<InvitationAcceptance>
+    export type AcceptStaffInvitationMutationError = ErrorType<void>
+    export type AcceptStaffInvitationMutationVariables = {data: BodyType<InvitationAcceptance>}
+
+    /**
+ * @summary Accept a one-time staff invitation
+ */
+export const useAcceptStaffInvitation = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acceptStaffInvitation>>, TError,AcceptStaffInvitationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof acceptStaffInvitation>>,
+        TError,
+        AcceptStaffInvitationMutationVariables,
+        TContext
+      > => {
+      return useMutation(getAcceptStaffInvitationMutationOptions(options), queryClient);
     }
 
 export const getCheckUsernameAvailableUrl = (params: CheckUsernameAvailableParams,) => {
@@ -2223,6 +2325,95 @@ export const useConsumeInventory = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getConsumeInventoryMutationOptions(options), queryClient);
+    }
+
+export const getConsumeInventoryDayStartUrl = () => {
+
+
+
+
+  return `/api/inventory/consume-day-start`
+}
+
+/**
+ * Idempotent by production date; retries of the same date have no physical effect.
+ * @summary Deduct the scheduled day's mix components and daily supplies
+ */
+export const consumeInventoryDayStart = async (consumeInventoryDayStartInput?: ConsumeInventoryDayStartInput, options?: Parameters<typeof customFetch>[1]): Promise<ConsumeInventoryDayStart200> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ConsumeInventoryDayStart200>(getConsumeInventoryDayStartUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(consumeInventoryDayStartInput)
+  }
+);}
+
+
+
+
+
+export const getConsumeInventoryDayStartMutationKey = () => ['consumeInventoryDayStart'] as const;
+
+export const getConsumeInventoryDayStartMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof consumeInventoryDayStart>>, TError,ConsumeInventoryDayStartMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof consumeInventoryDayStart>>, TError,ConsumeInventoryDayStartMutationVariables, TContext> => {
+
+const mutationKey = getConsumeInventoryDayStartMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof consumeInventoryDayStart>>, ConsumeInventoryDayStartMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  consumeInventoryDayStart(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ConsumeInventoryDayStartMutationResult = NonNullable<Awaited<ReturnType<typeof consumeInventoryDayStart>>>
+    export type ConsumeInventoryDayStartMutationBody = BodyType<ConsumeInventoryDayStartInput> | undefined
+    export type ConsumeInventoryDayStartMutationError = ErrorType<void>
+    export type ConsumeInventoryDayStartMutationVariables = {data?: BodyType<ConsumeInventoryDayStartInput>}
+
+    /**
+ * @summary Deduct the scheduled day's mix components and daily supplies
+ */
+export const useConsumeInventoryDayStart = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof consumeInventoryDayStart>>, TError,ConsumeInventoryDayStartMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof consumeInventoryDayStart>>,
+        TError,
+        ConsumeInventoryDayStartMutationVariables,
+        TContext
+      > => {
+      return useMutation(getConsumeInventoryDayStartMutationOptions(options), queryClient);
     }
 
 export const getMergeInventoryUrl = () => {
@@ -11913,6 +12104,333 @@ export const useUndoProfileDataHealthRepairBatch = <TError = ErrorType<void>,
       return useMutation(getUndoProfileDataHealthRepairBatchMutationOptions(options), queryClient);
     }
 
+export const getListAuditLogsUrl = (params?: ListAuditLogsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/audit-logs?${stringifiedParams}` : `/api/audit-logs`
+}
+
+/**
+ * Manager-only, live-scope audit history. Facility scope and actor identity are derived from authentication; scope is never accepted as a query parameter. Records are retained indefinitely and returned through a bounded cursor.
+ * @summary List private facility-scoped operational audit records
+ */
+export const listAuditLogs = async (params?: ListAuditLogsParams, options?: Parameters<typeof customFetch>[1]): Promise<AuditLogPage> => {
+
+  return customFetch<AuditLogPage>(getListAuditLogsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListAuditLogsQueryKey = (params?: ListAuditLogsParams,) => {
+    return [
+    `/api/audit-logs`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListAuditLogsQueryOptions = <TData = Awaited<ReturnType<typeof listAuditLogs>>, TError = ErrorType<void>>(params?: ListAuditLogsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAuditLogs>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListAuditLogsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAuditLogs>>> = ({ signal }) => listAuditLogs(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listAuditLogs>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListAuditLogsQueryResult = NonNullable<Awaited<ReturnType<typeof listAuditLogs>>>
+export type ListAuditLogsQueryError = ErrorType<void>
+
+
+export function useListAuditLogs<TData = Awaited<ReturnType<typeof listAuditLogs>>, TError = ErrorType<void>>(
+ params: undefined |  ListAuditLogsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAuditLogs>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listAuditLogs>>,
+          TError,
+          Awaited<ReturnType<typeof listAuditLogs>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListAuditLogs<TData = Awaited<ReturnType<typeof listAuditLogs>>, TError = ErrorType<void>>(
+ params?: ListAuditLogsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAuditLogs>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listAuditLogs>>,
+          TError,
+          Awaited<ReturnType<typeof listAuditLogs>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListAuditLogs<TData = Awaited<ReturnType<typeof listAuditLogs>>, TError = ErrorType<void>>(
+ params?: ListAuditLogsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAuditLogs>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List private facility-scoped operational audit records
+ */
+
+export function useListAuditLogs<TData = Awaited<ReturnType<typeof listAuditLogs>>, TError = ErrorType<void>>(
+ params?: ListAuditLogsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAuditLogs>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListAuditLogsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getExportAuditLogsCsvUrl = (params?: ExportAuditLogsCsvParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/audit-logs/export.csv?${stringifiedParams}` : `/api/audit-logs/export.csv`
+}
+
+/**
+ * CSV is intentionally bounded to 5000 rows per request. Audit records are retained indefinitely and are excluded from ordinary reset and purge operations.
+ * @summary Export private facility-scoped audit records as CSV
+ */
+export const exportAuditLogsCsv = async (params?: ExportAuditLogsCsvParams, options?: Parameters<typeof customFetch>[1]): Promise<unknown> => {
+
+  return customFetch<unknown>(getExportAuditLogsCsvUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getExportAuditLogsCsvQueryKey = (params?: ExportAuditLogsCsvParams,) => {
+    return [
+    `/api/audit-logs/export.csv`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getExportAuditLogsCsvQueryOptions = <TData = Awaited<ReturnType<typeof exportAuditLogsCsv>>, TError = ErrorType<void>>(params?: ExportAuditLogsCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogsCsv>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getExportAuditLogsCsvQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof exportAuditLogsCsv>>> = ({ signal }) => exportAuditLogsCsv(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogsCsv>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ExportAuditLogsCsvQueryResult = NonNullable<Awaited<ReturnType<typeof exportAuditLogsCsv>>>
+export type ExportAuditLogsCsvQueryError = ErrorType<void>
+
+
+export function useExportAuditLogsCsv<TData = Awaited<ReturnType<typeof exportAuditLogsCsv>>, TError = ErrorType<void>>(
+ params: undefined |  ExportAuditLogsCsvParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogsCsv>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof exportAuditLogsCsv>>,
+          TError,
+          Awaited<ReturnType<typeof exportAuditLogsCsv>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useExportAuditLogsCsv<TData = Awaited<ReturnType<typeof exportAuditLogsCsv>>, TError = ErrorType<void>>(
+ params?: ExportAuditLogsCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogsCsv>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof exportAuditLogsCsv>>,
+          TError,
+          Awaited<ReturnType<typeof exportAuditLogsCsv>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useExportAuditLogsCsv<TData = Awaited<ReturnType<typeof exportAuditLogsCsv>>, TError = ErrorType<void>>(
+ params?: ExportAuditLogsCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogsCsv>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Export private facility-scoped audit records as CSV
+ */
+
+export function useExportAuditLogsCsv<TData = Awaited<ReturnType<typeof exportAuditLogsCsv>>, TError = ErrorType<void>>(
+ params?: ExportAuditLogsCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogsCsv>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getExportAuditLogsCsvQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getExportAuditLogsPdfUrl = (params?: ExportAuditLogsPdfParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/audit-logs/export.pdf?${stringifiedParams}` : `/api/audit-logs/export.pdf`
+}
+
+/**
+ * Produces a paginated PDF containing only the public audit fields. The export is intentionally bounded to 5000 rows per request, uses the same date filters and stable ordering as the CSV export, and is available only to authorized managers in the live scope. Audit records are retained indefinitely and are excluded from ordinary reset and purge operations.
+ * @summary Export private facility-scoped audit records as PDF
+ */
+export const exportAuditLogsPdf = async (params?: ExportAuditLogsPdfParams, options?: Parameters<typeof customFetch>[1]): Promise<Blob> => {
+
+  return customFetch<Blob>(getExportAuditLogsPdfUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getExportAuditLogsPdfQueryKey = (params?: ExportAuditLogsPdfParams,) => {
+    return [
+    `/api/audit-logs/export.pdf`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getExportAuditLogsPdfQueryOptions = <TData = Awaited<ReturnType<typeof exportAuditLogsPdf>>, TError = ErrorType<void>>(params?: ExportAuditLogsPdfParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogsPdf>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getExportAuditLogsPdfQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof exportAuditLogsPdf>>> = ({ signal }) => exportAuditLogsPdf(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogsPdf>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ExportAuditLogsPdfQueryResult = NonNullable<Awaited<ReturnType<typeof exportAuditLogsPdf>>>
+export type ExportAuditLogsPdfQueryError = ErrorType<void>
+
+
+export function useExportAuditLogsPdf<TData = Awaited<ReturnType<typeof exportAuditLogsPdf>>, TError = ErrorType<void>>(
+ params: undefined |  ExportAuditLogsPdfParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogsPdf>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof exportAuditLogsPdf>>,
+          TError,
+          Awaited<ReturnType<typeof exportAuditLogsPdf>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useExportAuditLogsPdf<TData = Awaited<ReturnType<typeof exportAuditLogsPdf>>, TError = ErrorType<void>>(
+ params?: ExportAuditLogsPdfParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogsPdf>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof exportAuditLogsPdf>>,
+          TError,
+          Awaited<ReturnType<typeof exportAuditLogsPdf>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useExportAuditLogsPdf<TData = Awaited<ReturnType<typeof exportAuditLogsPdf>>, TError = ErrorType<void>>(
+ params?: ExportAuditLogsPdfParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogsPdf>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Export private facility-scoped audit records as PDF
+ */
+
+export function useExportAuditLogsPdf<TData = Awaited<ReturnType<typeof exportAuditLogsPdf>>, TError = ErrorType<void>>(
+ params?: ExportAuditLogsPdfParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportAuditLogsPdf>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getExportAuditLogsPdfQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
 export const getGetProfileNameLinkCleanupAuditUrl = () => {
 
 
@@ -17416,6 +17934,263 @@ export const useResetStaffPassword = <TError = ErrorType<void>,
       return useMutation(getResetStaffPasswordMutationOptions(options), queryClient);
     }
 
+export const getGetSignupCodeStatusUrl = () => {
+
+
+
+
+  return `/api/signup-code/status`
+}
+
+/**
+ * @summary Read bounded transitional sign-up code counters
+ */
+export const getSignupCodeStatus = async ( options?: Parameters<typeof customFetch>[1]): Promise<GetSignupCodeStatus200> => {
+
+  return customFetch<GetSignupCodeStatus200>(getGetSignupCodeStatusUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetSignupCodeStatusQueryKey = () => {
+    return [
+    `/api/signup-code/status`
+    ] as const;
+    }
+
+
+export const getGetSignupCodeStatusQueryOptions = <TData = Awaited<ReturnType<typeof getSignupCodeStatus>>, TError = ErrorType<unknown>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSignupCodeStatus>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetSignupCodeStatusQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSignupCodeStatus>>> = ({ signal }) => getSignupCodeStatus({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getSignupCodeStatus>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetSignupCodeStatusQueryResult = NonNullable<Awaited<ReturnType<typeof getSignupCodeStatus>>>
+export type GetSignupCodeStatusQueryError = ErrorType<unknown>
+
+
+export function useGetSignupCodeStatus<TData = Awaited<ReturnType<typeof getSignupCodeStatus>>, TError = ErrorType<unknown>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSignupCodeStatus>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getSignupCodeStatus>>,
+          TError,
+          Awaited<ReturnType<typeof getSignupCodeStatus>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetSignupCodeStatus<TData = Awaited<ReturnType<typeof getSignupCodeStatus>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSignupCodeStatus>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getSignupCodeStatus>>,
+          TError,
+          Awaited<ReturnType<typeof getSignupCodeStatus>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetSignupCodeStatus<TData = Awaited<ReturnType<typeof getSignupCodeStatus>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSignupCodeStatus>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Read bounded transitional sign-up code counters
+ */
+
+export function useGetSignupCodeStatus<TData = Awaited<ReturnType<typeof getSignupCodeStatus>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getSignupCodeStatus>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetSignupCodeStatusQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSetSignupCodeStatusUrl = () => {
+
+
+
+
+  return `/api/signup-code/status`
+}
+
+export const setSignupCodeStatus = async (signupCodeStatusUpdate: SignupCodeStatusUpdate, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<void>(getSetSignupCodeStatusUrl(),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(signupCodeStatusUpdate)
+  }
+);}
+
+
+
+
+
+export const getSetSignupCodeStatusMutationKey = () => ['setSignupCodeStatus'] as const;
+
+export const getSetSignupCodeStatusMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setSignupCodeStatus>>, TError,SetSignupCodeStatusMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof setSignupCodeStatus>>, TError,SetSignupCodeStatusMutationVariables, TContext> => {
+
+const mutationKey = getSetSignupCodeStatusMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setSignupCodeStatus>>, SetSignupCodeStatusMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  setSignupCodeStatus(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetSignupCodeStatusMutationResult = NonNullable<Awaited<ReturnType<typeof setSignupCodeStatus>>>
+    export type SetSignupCodeStatusMutationBody = BodyType<SignupCodeStatusUpdate>
+    export type SetSignupCodeStatusMutationError = ErrorType<unknown>
+    export type SetSignupCodeStatusMutationVariables = {data: BodyType<SignupCodeStatusUpdate>}
+
+    export const useSetSignupCodeStatus = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setSignupCodeStatus>>, TError,SetSignupCodeStatusMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof setSignupCodeStatus>>,
+        TError,
+        SetSignupCodeStatusMutationVariables,
+        TContext
+      > => {
+      return useMutation(getSetSignupCodeStatusMutationOptions(options), queryClient);
+    }
+
+export const getRotateSignupCodeUrl = () => {
+
+
+
+
+  return `/api/signup-code/rotate`
+}
+
+/**
+ * @summary Rotate transitional sign-up code (secret returned once)
+ */
+export const rotateSignupCode = async ( options?: Parameters<typeof customFetch>[1]): Promise<RotateSignupCode201> => {
+
+  return customFetch<RotateSignupCode201>(getRotateSignupCodeUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getRotateSignupCodeMutationKey = () => ['rotateSignupCode'] as const;
+
+export const getRotateSignupCodeMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rotateSignupCode>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof rotateSignupCode>>, TError,void, TContext> => {
+
+const mutationKey = getRotateSignupCodeMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof rotateSignupCode>>, void> = () => {
+
+
+          return  rotateSignupCode(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RotateSignupCodeMutationResult = NonNullable<Awaited<ReturnType<typeof rotateSignupCode>>>
+
+    export type RotateSignupCodeMutationError = ErrorType<unknown>
+
+
+    /**
+ * @summary Rotate transitional sign-up code (secret returned once)
+ */
+export const useRotateSignupCode = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rotateSignupCode>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof rotateSignupCode>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getRotateSignupCodeMutationOptions(options), queryClient);
+    }
+
 export const getDeleteStaffMemberUrl = (userId: string,) => {
 
 
@@ -18041,7 +18816,7 @@ return customFetch<PutSyncToday200>(getPutSyncTodayUrl(params),
 
 export const getPutSyncTodayMutationKey = () => ['putSyncToday'] as const;
 
-export const getPutSyncTodayMutationOptions = <TError = ErrorType<unknown>,
+export const getPutSyncTodayMutationOptions = <TError = ErrorType<SyncUpgradeRequiredResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putSyncToday>>, TError,PutSyncTodayMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof putSyncToday>>, TError,PutSyncTodayMutationVariables, TContext> => {
 
@@ -18070,13 +18845,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type PutSyncTodayMutationResult = NonNullable<Awaited<ReturnType<typeof putSyncToday>>>
     export type PutSyncTodayMutationBody = BodyType<SyncWriteRequest>
-    export type PutSyncTodayMutationError = ErrorType<unknown>
+    export type PutSyncTodayMutationError = ErrorType<SyncUpgradeRequiredResponse>
     export type PutSyncTodayMutationVariables = {data: BodyType<SyncWriteRequest>;params?: PutSyncTodayParams}
 
     /**
  * @summary Merge the client-local current-day sync snapshot
  */
-export const usePutSyncToday = <TError = ErrorType<unknown>,
+export const usePutSyncToday = <TError = ErrorType<SyncUpgradeRequiredResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putSyncToday>>, TError,PutSyncTodayMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof putSyncToday>>,
@@ -18585,3 +19360,288 @@ export function useListOperationalIntentReceipts<TData = Awaited<ReturnType<type
 
   return withQueryKey(query, queryOptions.queryKey);
 }
+
+
+
+
+
+
+
+export const getApplyImportOperationUrl = (operationId: string,) => {
+
+
+
+
+  return `/api/import-operations/${operationId}/apply`
+}
+
+/**
+ * @summary Atomically apply a reviewed import
+ */
+export const applyImportOperation = async (operationId: string,
+    importOperationApplyInput: ImportOperationApplyInput, options?: Parameters<typeof customFetch>[1]): Promise<ImportOperationResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ImportOperationResponse>(getApplyImportOperationUrl(operationId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(importOperationApplyInput)
+  }
+);}
+
+
+
+
+
+export const getApplyImportOperationMutationKey = () => ['applyImportOperation'] as const;
+
+export const getApplyImportOperationMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof applyImportOperation>>, TError,ApplyImportOperationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof applyImportOperation>>, TError,ApplyImportOperationMutationVariables, TContext> => {
+
+const mutationKey = getApplyImportOperationMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof applyImportOperation>>, ApplyImportOperationMutationVariables> = (props) => {
+          const {operationId,data} = props ?? {};
+
+          return  applyImportOperation(operationId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ApplyImportOperationMutationResult = NonNullable<Awaited<ReturnType<typeof applyImportOperation>>>
+    export type ApplyImportOperationMutationBody = BodyType<ImportOperationApplyInput>
+    export type ApplyImportOperationMutationError = ErrorType<void>
+    export type ApplyImportOperationMutationVariables = {operationId: string;data: BodyType<ImportOperationApplyInput>}
+
+    /**
+ * @summary Atomically apply a reviewed import
+ */
+export const useApplyImportOperation = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof applyImportOperation>>, TError,ApplyImportOperationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof applyImportOperation>>,
+        TError,
+        ApplyImportOperationMutationVariables,
+        TContext
+      > => {
+      return useMutation(getApplyImportOperationMutationOptions(options), queryClient);
+    }
+
+export const getGetImportOperationUrl = (operationId: string,) => {
+
+
+
+
+  return `/api/import-operations/${operationId}`
+}
+
+/**
+ * @summary Read an import operation
+ */
+export const getImportOperation = async (operationId: string, options?: Parameters<typeof customFetch>[1]): Promise<ImportOperationResponse> => {
+
+  return customFetch<ImportOperationResponse>(getGetImportOperationUrl(operationId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetImportOperationQueryKey = (operationId: string,) => {
+    return [
+    `/api/import-operations/${operationId}`
+    ] as const;
+    }
+
+
+export const getGetImportOperationQueryOptions = <TData = Awaited<ReturnType<typeof getImportOperation>>, TError = ErrorType<void>>(operationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportOperation>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetImportOperationQueryKey(operationId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getImportOperation>>> = ({ signal }) => getImportOperation(operationId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: operationId !== null && operationId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getImportOperation>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetImportOperationQueryResult = NonNullable<Awaited<ReturnType<typeof getImportOperation>>>
+export type GetImportOperationQueryError = ErrorType<void>
+
+
+export function useGetImportOperation<TData = Awaited<ReturnType<typeof getImportOperation>>, TError = ErrorType<void>>(
+ operationId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportOperation>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getImportOperation>>,
+          TError,
+          Awaited<ReturnType<typeof getImportOperation>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetImportOperation<TData = Awaited<ReturnType<typeof getImportOperation>>, TError = ErrorType<void>>(
+ operationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportOperation>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getImportOperation>>,
+          TError,
+          Awaited<ReturnType<typeof getImportOperation>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetImportOperation<TData = Awaited<ReturnType<typeof getImportOperation>>, TError = ErrorType<void>>(
+ operationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportOperation>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Read an import operation
+ */
+
+export function useGetImportOperation<TData = Awaited<ReturnType<typeof getImportOperation>>, TError = ErrorType<void>>(
+ operationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getImportOperation>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetImportOperationQueryOptions(operationId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUndoImportOperationUrl = (operationId: string,) => {
+
+
+
+
+  return `/api/import-operations/${operationId}/undo`
+}
+
+/**
+ * @summary Guardedly undo an import operation
+ */
+export const undoImportOperation = async (operationId: string,
+    importOperationUndoInput: ImportOperationUndoInput, options?: Parameters<typeof customFetch>[1]): Promise<ImportOperationResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ImportOperationResponse>(getUndoImportOperationUrl(operationId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(importOperationUndoInput)
+  }
+);}
+
+
+
+
+
+export const getUndoImportOperationMutationKey = () => ['undoImportOperation'] as const;
+
+export const getUndoImportOperationMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof undoImportOperation>>, TError,UndoImportOperationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof undoImportOperation>>, TError,UndoImportOperationMutationVariables, TContext> => {
+
+const mutationKey = getUndoImportOperationMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof undoImportOperation>>, UndoImportOperationMutationVariables> = (props) => {
+          const {operationId,data} = props ?? {};
+
+          return  undoImportOperation(operationId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UndoImportOperationMutationResult = NonNullable<Awaited<ReturnType<typeof undoImportOperation>>>
+    export type UndoImportOperationMutationBody = BodyType<ImportOperationUndoInput>
+    export type UndoImportOperationMutationError = ErrorType<void>
+    export type UndoImportOperationMutationVariables = {operationId: string;data: BodyType<ImportOperationUndoInput>}
+
+    /**
+ * @summary Guardedly undo an import operation
+ */
+export const useUndoImportOperation = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof undoImportOperation>>, TError,UndoImportOperationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof undoImportOperation>>,
+        TError,
+        UndoImportOperationMutationVariables,
+        TContext
+      > => {
+      return useMutation(getUndoImportOperationMutationOptions(options), queryClient);
+    }

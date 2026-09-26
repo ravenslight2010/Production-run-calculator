@@ -152,6 +152,154 @@ async function seedRun(page: Page, runId: string): Promise<void> {
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
 }
 
+type SwitchoverFixture = {
+  date: string;
+  runId: string;
+  nextRunId: string;
+};
+
+function localDate(): string {
+  const now = new Date();
+  return [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+async function seedRunningSwitchoverRun(
+  page: Page,
+  runId: string,
+  nextRunId: string,
+): Promise<SwitchoverFixture> {
+  const date = localDate();
+  const seedStamp = Date.now();
+  const values = {
+    casesNeeded: 200,
+    pizzasPerCase: 12,
+    casesPerSkid: 20,
+    skidsCompleted: 9,
+    casesOnCurrentSkid: 8,
+    crustsPerCycle: 10,
+    cycleSpeed: 1,
+    speedAdjustment: 1,
+    freezerTime: 10,
+    app1Type: "",
+    app2Type: "",
+    app3Type: "",
+    app4Type: "",
+    pep1Type: "",
+    pep2Type: "",
+    pep1TypeB: "",
+    pep2TypeB: "",
+  };
+  const payload = {
+    dayState: {
+      date,
+      runs: [
+        {
+          id: runId,
+          brand: "Warehouse E2E",
+          flavor: "Switchover",
+          startedAt: seedStamp,
+          metaUpdatedAt: seedStamp,
+        },
+        {
+          id: nextRunId,
+          brand: "Next Brand",
+          flavor: "Next Flavor",
+          metaUpdatedAt: seedStamp,
+        },
+      ],
+      currentIndex: 0,
+      currentRunId: runId,
+      resetAt: 0,
+    },
+    runValues: {
+      [runId]: values,
+      [nextRunId]: {
+        casesNeeded: 100,
+        pizzasPerCase: 12,
+        casesPerSkid: 20,
+        app1Type: "",
+        app2Type: "",
+        app3Type: "",
+        app4Type: "",
+        pep1Type: "",
+        pep2Type: "",
+        pep1TypeB: "",
+        pep2TypeB: "",
+      },
+    },
+    runValuesUpdatedAt: {
+      [runId]: seedStamp,
+      [nextRunId]: seedStamp,
+    },
+  };
+
+  await page.context().setOffline(true);
+  try {
+    await page.evaluate(() => {
+      for (const key of Array.from({ length: localStorage.length }, (_, index) =>
+        localStorage.key(index),
+      )) {
+        if (key?.startsWith("run-calc")) localStorage.removeItem(key);
+      }
+    });
+    const db = new Client({ connectionString: requireIsolatedTestDatabase("Warehouse switchover fixture") });
+    try {
+      await db.connect();
+      await db.query(
+        `INSERT INTO daily_sync (date, scope, data, updated_at)
+         VALUES ($1, 'live', $2::jsonb, NOW())
+         ON CONFLICT (date, scope) DO UPDATE
+           SET data = $2::jsonb, updated_at = NOW()`,
+        [date, JSON.stringify(payload)],
+      );
+    } finally {
+      await db.end().catch(() => {});
+    }
+  } finally {
+    await page.context().setOffline(false);
+  }
+
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  await expect(page.getByRole("button", { name: /pause run/i })).toBeVisible();
+  return { date, runId, nextRunId };
+}
+
+async function removeSwitchoverFixture(fixture: SwitchoverFixture): Promise<void> {
+  const db = new Client({ connectionString: requireIsolatedTestDatabase("remove Warehouse switchover fixture") });
+  try {
+    await db.connect();
+    await db.query(
+      `UPDATE daily_sync
+       SET data = jsonb_set(
+         jsonb_set(
+           data,
+           '{dayState,runs}',
+           COALESCE((
+             SELECT jsonb_agg(run)
+             FROM jsonb_array_elements(COALESCE(data->'dayState'->'runs', '[]'::jsonb)) AS run
+             WHERE run->>'id' NOT IN ($1, $2)
+           ), '[]'::jsonb)
+         ),
+         '{runValues}',
+         COALESCE((
+           SELECT jsonb_object_agg(key, value)
+           FROM jsonb_each(COALESCE(data->'runValues', '{}'::jsonb))
+           WHERE key NOT IN ($1, $2)
+         ), '{}'::jsonb)
+       )
+       WHERE date = $3 AND scope = 'live'`,
+      [fixture.runId, fixture.nextRunId, fixture.date],
+    );
+  } finally {
+    await db.end().catch(() => {});
+  }
+}
+
 async function seedInventory(db: Client): Promise<void> {
   const onsite = await db.query<{ id: number }>(
     "SELECT id FROM inventory_locations WHERE scope = 'live' AND is_onsite = true ORDER BY id LIMIT 1",
@@ -547,5 +695,72 @@ test("keeps capped offsite transfer guidance readable on a tablet", async ({
     expect(browserErrors).toEqual([]);
   } finally {
     await db.end().catch(() => {});
+  }
+});
+
+test("shows the Warehouse switchover handoff through real tab navigation", async ({
+  page,
+}, testInfo) => {
+  const runId = uniqueTestId("warehouse_switchover_run");
+  const nextRunId = uniqueTestId("warehouse_switchover_next");
+  const browserErrors: string[] = [];
+  let switchoverFixture: SwitchoverFixture | undefined;
+  page.on("pageerror", (error) => browserErrors.push(error.message));
+  page.on("response", (response) => {
+    if (response.status() >= 500) {
+      browserErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+    }
+  });
+
+  try {
+    await openAuthenticated(page, managerToken);
+    switchoverFixture = await seedRunningSwitchoverRun(page, runId, nextRunId);
+
+    const banner = page.getByTestId("banner-warehouse-switchover");
+    await expect(banner).toBeHidden();
+
+    await page.getByTestId("tab-warehouse").click();
+    await expect(page.getByTestId("warehouse-page-heading")).toBeVisible();
+    await expect(banner).toBeVisible();
+    await expect(banner).toContainText(
+      "0.6 skids to switchover — stage packaging for the next run",
+    );
+    await expect(banner).toContainText(
+      "frontline should already be staged; packaging goes now",
+    );
+    await expect(banner).toContainText("12 cases left at the press");
+    await expect(banner).toContainText(/press stops ~\d{1,2}:\d{2}/);
+    await expect(banner).toContainText(/line clear ~\d{1,2}:\d{2}/);
+    await expect(banner).toContainText("Next up: Next Brand – Next Flavor.");
+    await page.screenshot({
+      path: testInfo.outputPath("warehouse-switchover-handoff.png"),
+      fullPage: true,
+    });
+
+    await page.getByTestId("tab-run").click();
+    await expect(banner).toBeHidden();
+
+    const stopButton = page.getByRole("button", { name: "STOP RUN", exact: true });
+    await expect(stopButton).toBeVisible();
+    await stopButton.click();
+    await expect(stopButton).toBeHidden({ timeout: 15_000 });
+    await expect.poll(
+      () =>
+        page.evaluate((id) => {
+          const day = JSON.parse(localStorage.getItem("run-calc-day") ?? "{}") as {
+            runs?: Array<{ id?: string; endedAt?: number }>;
+          };
+          return day.runs?.find((run) => run.id === id)?.endedAt ?? null;
+        }, runId),
+      { timeout: 15_000 },
+    ).toBeTruthy();
+
+    await page.getByTestId("tab-warehouse").click();
+    await expect(banner).toBeHidden();
+    expect(browserErrors).toEqual([]);
+  } finally {
+    if (switchoverFixture) {
+      await removeSwitchoverFixture(switchoverFixture);
+    }
   }
 });

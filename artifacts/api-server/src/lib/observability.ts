@@ -2,8 +2,9 @@ import type { NextFunction, Request, Response } from "express";
 import type { Logger } from "pino";
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, gte, lt, notInArray, sql } from "drizzle-orm";
-import { cacheMaintenanceEventsTable, db } from "@workspace/db";
+import { cacheMaintenanceEventsTable, db, pool } from "@workspace/db";
 import { logger } from "./logger";
+import { installPoolTelemetry } from "./capacityTelemetry";
 import { createSharedDiagnosticPersistence } from "./sharedDiagnosticPersistence";
 import type { StartupHealthSnapshot } from "./startupHealth";
 
@@ -17,6 +18,8 @@ type CacheMaintenanceLogger = {
 };
 
 export { recordCostLimitEvent } from "./costLimitTelemetry";
+
+installPoolTelemetry(pool);
 
 const MAX_CACHE_MAINTENANCE_WAIT_MS = 7 * 24 * 60 * 60 * 1000;
 export const CACHE_MAINTENANCE_FAILURE_THRESHOLD = 3;

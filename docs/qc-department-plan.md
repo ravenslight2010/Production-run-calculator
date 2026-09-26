@@ -1,5 +1,11 @@
 # QC Department — Comprehensive Plan
 
+**Status:** Planning; existing quality, incident, downtime, substitution, and basic lot surfaces are inputs, not proof that the durable QC system is built
+**Updated:** 2026-09-19
+**Related:** [Idea backlog](idea-backlog.md#2-qc-department-comprehensive), [import plan](import-system-plan.md), [allergen plan](allergen-tracking-plan.md), [additional domain synthesis](../research/additional-domain-research-synthesis-2026-09-19.md)
+
+QC is a durable follow-on product track, not a sync-protocol prerequisite. New QC actions require explicit capabilities, server-generated audit identity, reset/purge survival, and stable ingredient identity for lot and allergen rollups.
+
 ## Critical Requirements
 
 ### Daily Reset: Archive Yesterday, Show Only Today
@@ -51,6 +57,15 @@ QC audit records must be:
 - Add a `qc_audit_log` table that fires on INSERT to any QC table (PostgreSQL trigger or application-level)
 - Audit log has its own retention policy: never deleted, ever
 - API routes for audit export: `GET /api/qc/audit?from=&to=&type=&ingredient=`
+
+**Privacy and authorization guardrails before implementation**:
+- Derive facility scope from the authenticated request and enforce the live-scope fence; a query parameter must never choose the authorization scope
+- Store stable user IDs and server timestamps; do not default to raw usernames, IP addresses, user agents, request bodies, or unrestricted JSON
+- Define an allowlisted, size-bounded event schema for each QC action
+- Resolve the relationship between indefinite compliance retention and privacy/redaction requirements before creating tables
+- Paginate and capability-gate every read/export path
+- If an operation requires an audit record for compliance, persist both atomically or fail explicitly rather than swallowing the audit failure
+- Follow the retained [operational audit design boundaries](idea-backlog.md#17-residual-observability--resilience-ideas)
 
 ## Current State
 ### Move All Existing QC Features into the QC Department

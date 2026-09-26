@@ -103,7 +103,9 @@ An authenticated probe should retain only status, allowlisted headers, time to h
 
 ### Decision
 
-Treat current deployment compatibility as a high-priority evidence gap, not a confirmed outage. Do not change heartbeat cadence or add proxy-specific headers until a live probe shows the need. Evaluate either shared fanout with snapshot recovery or a topology whose single-server/always-on behavior is explicit. Reserved VM is a documented candidate, not an automatic fix. [[13]](https://docs.replit.com/references/publishing/reserved-vm-deployments)
+The 2026-09-20 sanitized published probe observed prompt complete baselines, prompt peer frames for two concurrent streams, a roughly 14.2-second heartbeat gap, and complete reconnect recovery in 146 ms. It did not expose instance identity or force cross-instance routing. A deterministic two-process fixture then proved that a process-B stream misses a process-A write while a reconnect to process B recovers the complete canonical snapshot from the shared database. See [SSE scale verification](sse-scale-verification-2026-09-20.md).
+
+Therefore, if Autoscale remains able to serve from more than one process, shared fanout is required for prompt peer updates. Complete initial/reconnect recovery must remain authoritative even with shared fanout. The alternatives are a verified single-serving-process constraint or an always-on single-server topology. The probe found no reason to change heartbeat cadence or add proxy-specific headers.
 
 ## Finding 4: pool defaults are defensible, but production capacity is unknown
 
@@ -177,7 +179,7 @@ Changing deployment type, adding Pub/Sub, raising pool size, adopting JSON Patch
 
 ## Limitations
 
-No authenticated production SSE probe, production database query, provider outage exercise, or production payload analysis was performed. Deployment metadata proved only target/build/visibility. The research did not establish active instance count, affinity, proxy buffering, stream timeout, database connection capacity, production pool override, pooler presence, actual payload distributions, or historical incident causality.
+An authenticated production SSE probe was performed on 2026-09-20 under the evidence boundary documented in [SSE scale verification](sse-scale-verification-2026-09-20.md). It did not retain production payloads or records and could not establish active instance count, affinity, forced cross-instance routing, a platform stream-duration guarantee, database connection capacity, production pool override, pooler presence, actual payload distributions, or historical incident causality.
 
 External Replit documentation establishes Autoscale scale-out/scale-to-zero and Reserved VM’s always-on model, but it does not explicitly guarantee or prohibit SSE, sticky sessions, buffering, or stream duration. Those facts remain testable deployment properties rather than documentation claims.
 

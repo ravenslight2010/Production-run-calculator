@@ -92,6 +92,27 @@ The existing tests use disposable databases and synthetic data. They can prove s
 6. **Defer JSON Patch unless measurements show sparse-map coverage is insufficient.** If adopted later, apply it to a reconstructed candidate before the existing merge/protection pipeline, require a snapshot precondition, and retain complete fallback. Do not patch inside `protectRunValues`.
 7. **Use low-cardinality telemetry.** No payload content, IDs, dates, recipes, user/device labels, or raw request/SSE bodies. Counters and histograms are enough to answer adoption and economics questions.
 
+## Implemented measurement boundary
+
+The API now retains process-local, bounded histogram samples and emits one aggregate
+`capacity_telemetry` event per minute when observations exist. The report contains
+only counters; p50, p95, p99, and maximum values; bounded run-count buckets; and
+the latest pool total/idle/waiting counts. It separates complete, partial,
+fallback, and unchanged PUT observations, and complete versus partial SSE frame
+observations. Pool acquisition and protected sync transaction duration are
+separate distributions. Body-parser and sanitizer rejections are counted without
+retaining their error text or body.
+
+The sample reservoir is capped per metric. Labels do not include snapshots,
+dates, run IDs, recipes, users, devices, facilities, request bodies, frame
+content, or arbitrary errors. These process-window reports are production
+telemetry inputs, not retained proof by themselves; any later capacity decision
+must bind exported aggregate evidence to its deployment and revision.
+
+Fixture benchmarks now cover empty, 1-run, 32-run, 50-run, near-cap, stale-base,
+and same-base race cases. They remain deterministic repository evidence and do
+not claim to describe production traffic distributions.
+
 ## Gaps
 
 - No production payload distribution, partial-adoption rate, fallback rate, parser-413 count, or SSE frame percentile is present in the repository evidence reviewed.

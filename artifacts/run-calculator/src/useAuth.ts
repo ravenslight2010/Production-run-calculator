@@ -24,6 +24,7 @@ export type AuthContextValue = {
     password: string,
     accessCode: string,
   ) => Promise<void>;
+  acceptInvitation: (invitation: string, username: string, password: string) => Promise<void>;
   // Shortcut that signs in as the seeded sandbox account ("test"/"test"), which
   // operates in the isolated sandbox data scope.
   signInAsTest: () => Promise<void>;

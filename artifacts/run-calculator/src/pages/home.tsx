@@ -7,6 +7,7 @@ import {
   useHomeFormLifecycle,
 } from "../hooks/useHomeFormLifecycle";
 import { useRunLifecycleManager } from "../hooks/useRunLifecycleManager";
+import { useScreenWakeLock } from "../hooks/useScreenWakeLock";
 import {
   coordinateForegroundAdoption,
   createForegroundSyncTodayRequest,
@@ -311,12 +312,15 @@ import {
 import { isolatePendingRunPackagingProgress } from "../runProgressIsolation";
 import {
   consumeSyncWriteResponse,
+  shouldReplaySyncWrite,
   isCanonicalRecoverySyncPayload,
   isUnchangedSyncResponse,
   isValidSyncSnapshotId,
+  mergeSparseServerRunMap,
   persistedSyncPayload,
   reconstructPartialSyncPayload,
   syncPayloadMatchesSnapshot,
+  syncWriteFieldCheck,
 } from "../syncWriteResponse";
 import {
   canonicalProfileKey,
@@ -467,6 +471,7 @@ import { describeSubstitution } from "../components/SubstitutionsManager";
 import MixReconcilePanel from "../components/MixReconcilePanel";
 import ImportHistoryPanel from "../components/ImportHistoryPanel";
 import { recordImportHistory, setImportHistoryIdentity, type ImportHistoryImportType, type ImportHistoryItem, type ImportHistoryReopenRequest } from "../importHistory";
+import { createImportOperationId } from "../importOperations";
 import { resetSandboxRequest, reportUnauthorized } from "../inventoryShared";
 import {
   fetchIngredientBatchWeights,
@@ -2707,6 +2712,9 @@ function LiveRunHandoffGuard() {
 }
 
 export default function Home() {
+  const specImportOperationRef = useRef<string | null>(null);
+  const premixImportOperationRef = useRef<string | null>(null);
+  const cheeseImportOperationRef = useRef<string | null>(null);
   const visibleTabScheduler = useMemo(() => new VisibleTabScheduler(), []);
   useEffect(() => {
     visibleTabScheduler.start();
@@ -7174,6 +7182,12 @@ export default function Home() {
       return;
     }
     try {
+      const scheduleBase = await fetchSchedulePayload(scheduleEditorDate);
+      if (!scheduleBase.available || !scheduleBase.snapshotId) {
+        setScheduleError("Couldn't load the latest plan before saving. Check your connection and try again.");
+        setScheduleSaving(false);
+        return;
+      }
       const runs: RunMeta[] = scheduleEditorRuns.map(r => ({ id: r.id, brand: r.brand, flavor: r.flavor }));
       const runValues: Record<string, FormValues> = {};
       for (const r of scheduleEditorRuns) {
@@ -7186,6 +7200,9 @@ export default function Home() {
         runValues[r.id] = backfillFromProfile({ ...base, casesNeeded: r.casesNeeded }, r.brand, r.flavor);
       }
       const payload: SyncPayload = {
+        syncVersion: 1,
+        completeness: "complete",
+        baseSnapshotId: scheduleBase.snapshotId,
         dayState: { runs, date: scheduleEditorDate, resetAt: writeDayResetAt(scheduleEditorDate, todayStr(), undefined, dayStateRef.current.resetAt, Date.now()), breaks: normalizeDayBreaks(scheduleEditorBreaks) },
         runValues,
         brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
@@ -7221,7 +7238,11 @@ export default function Home() {
       setScheduleDeleteConfirm(null);
     } catch {}
   }
-  async function fetchSchedulePayload(date: string): Promise<{ payload: SyncPayload | null; available: boolean }> {
+  async function fetchSchedulePayload(date: string): Promise<{
+    payload: SyncPayload | null;
+    available: boolean;
+    snapshotId?: string;
+  }> {
     try {
       const res = date === todayStr()
         ? await fetchWithTimeout(`/api/sync/today?today=${todayStr()}`, { cache: "no-store" }, 10_000)
@@ -7231,6 +7252,7 @@ export default function Home() {
       return {
         payload: payload?.dayState ? payload : null,
         available: true,
+        snapshotId: res.headers.get("X-Sync-Snapshot") ?? undefined,
       };
     } catch {
       return { payload: null, available: false };
@@ -7256,12 +7278,12 @@ export default function Home() {
       setScheduleError("Choose a future scheduled day and today or a future date.");
       return false;
     }
-    const sourceResult = await fetchSchedulePayload(fromDate);
-    if (!sourceResult.available) {
+    const sourceFetch = await fetchSchedulePayload(fromDate);
+    if (!sourceFetch.available) {
       setScheduleError("Couldn't load the source day. Check your connection and try again.");
       return false;
     }
-    const src = sourceResult.payload;
+    const src = sourceFetch.payload;
     if (!src?.dayState) {
       setScheduleError("That scheduled day is no longer available. Refresh and try again.");
       return false;
@@ -7326,7 +7348,7 @@ export default function Home() {
       // between the read and this write.
       syncVersion: 1,
       completeness: "complete",
-      baseSnapshotId: undefined,
+      baseSnapshotId: targetResult.snapshotId,
       dayState: {
         ...(base.dayState ?? src.dayState),
         runs: target,
@@ -7394,7 +7416,7 @@ export default function Home() {
           },
           syncVersion: 1,
           completeness: "complete",
-          baseSnapshotId: undefined,
+          baseSnapshotId: sourceFetch.snapshotId,
           runValues: vals.source,
           runValuesUpdatedAt: stamps.source,
           packagingProgress: packaging.source,
@@ -9038,10 +9060,14 @@ export default function Home() {
         }
         // Adopt server-computed summary stats when available (offline fallback: compute locally)
         if (msg.summaryStats && typeof msg.summaryStats === "object") {
-          serverSummaryStatsRef.current = msg.summaryStats;
+          serverSummaryStatsRef.current = msg.completeness === "partial"
+            ? mergeSparseServerRunMap(serverSummaryStatsRef.current, msg.summaryStats)
+            : msg.summaryStats;
         }
         if (msg.runLines && typeof msg.runLines === "object") {
-          serverRunLinesRef.current = msg.runLines;
+          serverRunLinesRef.current = msg.completeness === "partial"
+            ? mergeSparseServerRunMap(serverRunLinesRef.current, msg.runLines)
+            : msg.runLines;
         }
         if (msg.initial) {
           // An initial frame is also the reconnect baseline: refresh every
@@ -9724,15 +9750,15 @@ export default function Home() {
       epoch: getStoredResetEpoch(),
     });
     let result = await consumeCanonicalSyncWriteResponse(res, true);
-    // A stale partial snapshot can return successful transport with no
-    // canonical data. The local change is not acknowledged in that case.
-    // The response consumer clears the unusable snapshot identity, so replay
-    // the current local state as a complete write before reporting success.
+    // A stale base can return successful transport with the authoritative
+    // canonical snapshot instead of applying this write. Adopt it first, then
+    // rebuild once from the reconciled local state so only edits still eligible
+    // after canonical adoption are replayed against the new exact base.
     const partialFallbackBody = result.body as
       | { partialFallback?: boolean; data?: unknown }
       | null
       | undefined;
-    if (partialFallbackBody?.partialFallback && partialFallbackBody.data === null) {
+    if (shouldReplaySyncWrite(partialFallbackBody)) {
       const recoveryPayload = buildSyncPayload(dayStateRef.current);
       res = await writeToday({
         payload: recoveryPayload,
@@ -9822,7 +9848,7 @@ export default function Home() {
           "Sync needs attention before this change can be shared",
           String(res.status),
           currentRunId,
-          { checkName: "sync-acknowledgment", outcome: "failure" },
+          syncWriteFieldCheck(res),
         );
         syncPushQueueRef.current.finish({ drainQueued: false });
         setSyncRetryWaiting(false);
@@ -9841,16 +9867,14 @@ export default function Home() {
         () => generation === syncPushGenerationRef.current,
       );
       if (generation !== syncPushGenerationRef.current) return;
-      // A stale partial snapshot is successful transport, but it did not
-      // persist this local change. The response consumer clears the stale
-      // snapshot identity; replay the latest local state as a complete write
-      // so lifecycle changes cannot leave another run absent until a timer
-      // happens to repair it.
+      // A stale base is successful transport, but it did not persist this
+      // local change. Canonical response consumption runs first; rebuild from
+      // that reconciled state and replay once against its exact snapshot.
       const partialFallbackBody = canonicalResult.body as
         | { partialFallback?: boolean; data?: unknown }
         | null
         | undefined;
-      if (partialFallbackBody?.partialFallback && partialFallbackBody.data === null) {
+      if (shouldReplaySyncWrite(partialFallbackBody)) {
         const recoveryPayload = buildSyncPayload(dayStateRef.current);
         res = await writeToday({
           payload: recoveryPayload,
@@ -9883,7 +9907,7 @@ export default function Home() {
           "Server rejected the write after a reset; local change is retained",
           "reset-stale",
           undefined,
-          { checkName: "sync-acknowledgment", outcome: "failure" },
+          syncWriteFieldCheck({ ...res, stale: true }),
         );
         syncPushQueueRef.current.finish({ drainQueued: false });
         setSyncRetryWaiting(false);
@@ -9923,7 +9947,7 @@ export default function Home() {
         "Server acknowledged the local change",
         "200",
         currentRunId,
-        { checkName: "sync-acknowledgment", outcome: "success" },
+        syncWriteFieldCheck(res),
       );
       // Record the synced signature ONLY after a successful PUT, so a failed
       // push is never treated as synced (which would block its retry).
@@ -9962,7 +9986,7 @@ export default function Home() {
           "Server did not acknowledge the change; local change is retained",
           "network",
           undefined,
-          { checkName: "sync-acknowledgment", outcome: "failure" },
+          syncWriteFieldCheck({ ok: false, status: 0, retriesExhausted: true }),
         );
         syncPushQueueRef.current.finish({ drainQueued: false });
         setSyncRetryWaiting(false);
@@ -10051,7 +10075,7 @@ export default function Home() {
     return {
       syncVersion: 1,
       completeness: canSendPartial ? "partial" : "complete",
-      ...(canSendPartial ? { baseSnapshotId: syncSnapshotIdRef.current } : {}),
+      baseSnapshotId: syncSnapshotIdRef.current,
       dayState: { runs: fencePendingEndSnapshots(overlayRunMetaStamps(pushRuns)), shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [], substitutionLog: ds.substitutionLog ?? [], stagedItems: ds.stagedItems ?? {}, prepPhase: ds.prepPhase, breaks: normalizeDayBreaks(ds.breaks) },
       runValues: fenceActiveManualSectionValues(fencePendingOperationalValues(runValues)),
       runValuesUpdatedAt,
@@ -10434,7 +10458,10 @@ export default function Home() {
         if (!(day.runs ?? []).some(matches)) continue;
         const payloadResult = await fetchSchedulePayload(day.date);
         const payload = payloadResult.payload;
-        if (!payloadResult.available || !payload?.dayState?.runs) { allOk = false; continue; }
+        if (!payloadResult.available || !payloadResult.snapshotId || !payload?.dayState?.runs) {
+          allOk = false;
+          continue;
+        }
         const rv = { ...(payload.runValues ?? {}) };
         const stamps = { ...(payload.runValuesUpdatedAt ?? {}) };
         let dayChanged = false;
@@ -10453,14 +10480,24 @@ export default function Home() {
           {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ payload: { ...payload, runValues: rv, runValuesUpdatedAt: stamps } }),
+            body: JSON.stringify({
+              payload: {
+                ...payload,
+                syncVersion: 1,
+                completeness: "complete",
+                baseSnapshotId: payloadResult.snapshotId,
+                runValues: rv,
+                runValuesUpdatedAt: stamps,
+              },
+            }),
           },
           10_000,
         );
         if (res.status === 401) { reportUnauthorized(); return; }
         if (!res.ok) { allOk = false; continue; }
-        const { stale } = await consumeCanonicalSyncWriteResponse(res, false);
-        if (stale) { allOk = false; continue; }
+        const result = await consumeCanonicalSyncWriteResponse(res, false);
+        const fallback = result.body as { partialFallback?: boolean } | null;
+        if (result.stale || fallback?.partialFallback) { allOk = false; continue; }
         updatedAny = true;
       }
       if (updatedAny) void refreshScheduledDays();
@@ -12532,6 +12569,7 @@ export default function Home() {
     const abortController = new AbortController();
     specImportAbortRef.current = abortController;
     setSpecImportPrepared(null);
+    specImportOperationRef.current = null;
     setSpecImportError(null);
     setSpecImportProgress(files.length > 1 ? { done: 0, total: files.length } : null);
     setSpecImportLoading(true);
@@ -12759,9 +12797,11 @@ export default function Home() {
     // Capture the pre-import local state so the existing undo trail can restore
     // a workbook replacement when a manager decides it was not intended.
     const importRollbackBefore = captureMasterDataSnapshot();
+    const operationId = specImportOperationRef.current ?? createImportOperationId();
+    specImportOperationRef.current = operationId;
     try {
-      const { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes, touchedProfiles, crustProfiles, appliedParsed, finalImportReview, aliasSaveFailed } =
-        await (await loadWorkbookWorkflow()).specImport.commitSpecImport(toCommit, forceUpdateProfileKeys, acceptedNewMixIngredientNames);
+      const { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes, touchedProfiles, crustProfiles, appliedParsed, finalImportReview, aliasSaveFailed, resultHash } =
+        await (await loadWorkbookWorkflow()).specImport.commitSpecImport(toCommit, forceUpdateProfileKeys, acceptedNewMixIngredientNames, operationId);
       if (commitStartedAt !== null && typeof performance !== "undefined")
         recordPerformance("import-spec-commit", performance.now() - commitStartedAt, "api");
       recordMasterDataChange(
@@ -12775,7 +12815,8 @@ export default function Home() {
         const key = deriveSourceKey(toCommit.sourceNames ?? []);
         specSnapshotId = saved.find((s) => key && s.sourceKey === key)?.id ?? saved[0]?.id ?? null;
       } catch { /* history still records without the optional snapshot reference */ }
-      void recordImportHistory({
+      if (!resultHash) void recordImportHistory({
+        operationId,
         importType: "spec",
         sourceKey: deriveSourceKey(toCommit.sourceNames ?? []),
         sourceLabel: (toCommit.sourceNames ?? []).join(", ") || "Spec sheet",
@@ -13159,8 +13200,9 @@ export default function Home() {
           mixNote +
           cheeseNote +
           updatedNote +
-          autoLinkedNote,
+        autoLinkedNote,
       });
+      specImportOperationRef.current = null;
     } catch (err) {
       if (err instanceof Error && err.name === "ImportReviewReconfirmationError") {
         const reconfirmation = err as Error & {
@@ -13219,6 +13261,7 @@ export default function Home() {
     const abortController = new AbortController();
     premixImportAbortRef.current = abortController;
     setPremixImportPrepared(null);
+    premixImportOperationRef.current = null;
     setPremixImportError(null);
     setPremixImportProgress(files.length > 1 ? { done: 0, total: files.length } : null);
     setPremixImportLoading(true);
@@ -13301,6 +13344,8 @@ export default function Home() {
     }
     setPremixImportApplying(true);
     const commitStartedAt = typeof performance === "undefined" ? null : performance.now();
+    const operationId = premixImportOperationRef.current ?? createImportOperationId();
+    premixImportOperationRef.current = operationId;
     try {
       const result = await (await loadWorkbookWorkflow()).premixImport.commitPremixImport(
         premixImportPrepared,
@@ -13308,10 +13353,12 @@ export default function Home() {
         freezerPulls,
         newAliases,
         mixesToRemove,
+        operationId,
       );
       if (commitStartedAt !== null && typeof performance !== "undefined")
         recordPerformance("import-premix-commit", performance.now() - commitStartedAt, "api");
-      void recordImportHistory({
+      if (!operationId) void recordImportHistory({
+        operationId,
         importType: "premix",
         sourceKey: deriveSourceKey(premixImportPrepared.sourceNames ?? []),
         sourceLabel: (premixImportPrepared.sourceNames ?? []).join(", ") || "Premix sheet",
@@ -13354,6 +13401,7 @@ export default function Home() {
           snapshotId: result.snapshotId ?? null,
         },
       }).catch(() => {});
+      premixImportOperationRef.current = null;
       // Refresh the shared mixes query so imported mixes appear immediately in
       // the Mixes view and feed the make-day plan without waiting for polling.
       void invalidateMasterDataSlice(cycleCountQc, "mixes");
@@ -13697,6 +13745,7 @@ export default function Home() {
     const abortController = new AbortController();
     cheeseImportAbortRef.current = abortController;
     setCheeseImportPrepared(null);
+    cheeseImportOperationRef.current = null;
     setCheeseImportError(null);
     setCheeseImportProgress(files.length > 1 ? { done: 0, total: files.length } : null);
     setCheeseImportLoading(true);
@@ -13737,6 +13786,7 @@ export default function Home() {
           followUp: ["Retry the original source files. Nothing was applied."],
         },
       }).catch(() => {});
+      cheeseImportOperationRef.current = null;
       setCheeseImportError(
         err instanceof Error ? err.message : "Could not read or interpret that workbook.",
       );
@@ -13775,8 +13825,10 @@ export default function Home() {
     setCheeseImportApplying(true);
     const commitStartedAt = typeof performance === "undefined" ? null : performance.now();
     const importRollbackBefore = captureMasterDataSnapshot();
+    const operationId = cheeseImportOperationRef.current ?? createImportOperationId();
+    cheeseImportOperationRef.current = operationId;
     try {
-      const result = await (await loadWorkbookWorkflow()).cheeseImport.commitCheeseImport(cheeseImportPrepared, recipesToApply, newAliases, recipesToRemove);
+      const result = await (await loadWorkbookWorkflow()).cheeseImport.commitCheeseImport(cheeseImportPrepared, recipesToApply, newAliases, recipesToRemove, operationId);
       if (commitStartedAt !== null && typeof performance !== "undefined")
         recordPerformance("import-cheese-commit", performance.now() - commitStartedAt, "api");
       noteChange(
@@ -13786,7 +13838,8 @@ export default function Home() {
           : `Cheese recipe import: ${(cheeseImportPrepared.sourceNames ?? []).join(", ") || "workbook"}`,
         importRollbackBefore,
       );
-      void recordImportHistory({
+      if (!operationId) void recordImportHistory({
+        operationId,
         importType: "cheese",
         sourceKey: deriveSourceKey(cheeseImportPrepared.sourceNames ?? []),
         sourceLabel: (cheeseImportPrepared.sourceNames ?? []).join(", ") || "Cheese recipe sheet",
@@ -13921,10 +13974,24 @@ export default function Home() {
     // dropping any existing run metadata (started/ended times, stoppages,
     // actuals) or other day-level fields (shiftNotes, recipe presets, etc.).
     let existing: SyncPayload | null = null;
+    let existingSnapshotId: string | undefined;
     try {
-      const res = await fetch(`/api/sync/${date}`);
-      if (res.ok) existing = (await res.json()) as SyncPayload | null;
+      const res = await fetch(`/api/sync/${date}?today=${todayStr()}`);
+      if (res.ok) {
+        existingSnapshotId = res.headers.get("X-Sync-Snapshot") ?? undefined;
+        existing = (await res.json()) as SyncPayload | null;
+      }
     } catch {}
+    if (!existingSnapshotId) {
+      setShowImportDialog(false);
+      setImportResult(null);
+      toast({
+        variant: "destructive",
+        title: "Schedule was not saved",
+        description: "The latest plan could not be loaded. Check your connection and import the file again.",
+      });
+      return;
+    }
     const existingDayState = existing?.dayState ?? { runs: [] as RunMeta[] };
     const existingRuns: RunMeta[] = existingDayState.runs ?? [];
     const existingRunValues: Record<string, FormValues> = existing?.runValues ?? {};
@@ -13941,6 +14008,9 @@ export default function Home() {
     const runValues = { ...existingRunValues, ...newRunValues };
     const outPayload: SyncPayload = {
       ...(existing ?? {}),
+      syncVersion: 1,
+      completeness: "complete",
+      baseSnapshotId: existingSnapshotId,
       dayState: { ...existingDayState, runs, date, resetAt: writeDayResetAt(date, todayStr(), existingDayState.resetAt, dayStateRef.current.resetAt, Date.now()) },
       runValues,
       brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
@@ -14054,10 +14124,21 @@ export default function Home() {
     for (const day of byDate) {
       const date = day.date;
       let existing: SyncPayload | null = null;
+      let existingSnapshotId: string | undefined;
       try {
-        const res = await fetch(`/api/sync/${date}`);
-        if (res.ok) existing = (await res.json()) as SyncPayload | null;
+        const res = await fetch(`/api/sync/${date}?today=${todayStr()}`);
+        if (res.ok) {
+          existingSnapshotId = res.headers.get("X-Sync-Snapshot") ?? undefined;
+          existing = (await res.json()) as SyncPayload | null;
+        }
       } catch {}
+      if (!existingSnapshotId) {
+        failed++;
+        done++;
+        lastErrorDetail = `Couldn't load the latest ${date} plan before saving it.`;
+        setImportProgress({ done, total: byDate.length });
+        continue;
+      }
       const existingDayState = existing?.dayState ?? { runs: [] as RunMeta[] };
       const existingRuns: RunMeta[] = existingDayState.runs ?? [];
       const existingRunValues: Record<string, FormValues> = existing?.runValues ?? {};
@@ -14107,6 +14188,9 @@ export default function Home() {
       const runValues = { ...keptRunValues, ...newRunValues };
       const outPayload: SyncPayload = {
         ...(existing ?? {}),
+        syncVersion: 1,
+        completeness: "complete",
+        baseSnapshotId: existingSnapshotId,
         dayState: { ...existingDayState, runs, date, resetAt: writeDayResetAt(date, todayStr(), existingDayState.resetAt, dayStateRef.current.resetAt, Date.now()) },
         runValues,
         brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
@@ -14376,6 +14460,8 @@ export default function Home() {
 
 
   // ── Idle screen-saver: auto-activate floor mode after 3 min of no activity ──
+  useScreenWakeLock(showFloorMode);
+
   useEffect(() => {
     if (!floorModeEnabled) return; // Floor Mode disabled — never auto-activate
     const IDLE_MS = 3 * 60 * 1000;
@@ -16207,6 +16293,12 @@ export default function Home() {
                         <p className="text-[11px] text-muted-foreground">
                           Add one or more clear pages. They will be transcribed and shown in the same two-step review before anything is changed.
                         </p>
+                        {canUseAiTools && (
+                          <p className="text-[11px] text-muted-foreground" data-testid="spec-photo-ai-disclosure">
+                            Selected photos are sent to the configured AI provider for transcription.
+                            Credentials, logs, unrelated production records, and user details are not included.
+                          </p>
+                        )}
                         <CameraFilePicker
                           accept="image/*"
                           multiple
@@ -16254,10 +16346,17 @@ export default function Home() {
                       </div>
                     )}
                     {canImportSpec && (
-                      <button type="button" onClick={() => { noteBreadcrumb("Import Spec Sheet clicked (picker opening)"); specImportInputRef.current?.click(); }}
-                        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90">
-                        <Upload className="w-4 h-4" /> Import Spec Sheet
-                      </button>
+                      <div className="space-y-2">
+                        <p className="text-[11px] text-muted-foreground" data-testid="spec-workbook-ai-disclosure">
+                          Selected workbook rows, bounded saved-name candidates, and confirmed name
+                          corrections are sent to the configured AI provider for a reviewable import.
+                          Credentials, logs, unrelated recipes, and user details are not included.
+                        </p>
+                        <button type="button" onClick={() => { noteBreadcrumb("Import Spec Sheet clicked (picker opening)"); specImportInputRef.current?.click(); }}
+                          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90">
+                          <Upload className="w-4 h-4" /> Import Spec Sheet
+                        </button>
+                      </div>
                     )}
                     {canImportProfileGuide && (
                       <button type="button" onClick={() => { noteBreadcrumb("Import Shipping Guide clicked (picker opening)"); shippingImportInputRef.current?.click(); }}
@@ -16623,7 +16722,7 @@ export default function Home() {
         )}
 
         {/* Header */}
-        <header className="responsive-row flex items-center justify-between gap-2 print:mb-4">
+        <header className="responsive-shell-header responsive-row flex items-center justify-between gap-3 print:mb-4">
           <div className="flex items-center gap-2 min-w-0">
             <div className="w-8 h-8 sm:w-9 sm:h-9 rounded bg-primary text-primary-foreground flex items-center justify-center shrink-0 print:hidden">
               <Factory className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -16638,7 +16737,7 @@ export default function Home() {
               </p>
             </div>
           </div>
-          <div className="responsive-row print:hidden flex items-center gap-1.5 shrink-0">
+          <div className="responsive-utility-row print:hidden flex items-center gap-1.5 shrink-0">
             <SyncStatusPopover
               status={syncStatus}
               connected={syncConnected}
@@ -16661,7 +16760,7 @@ export default function Home() {
               type="button"
               onClick={() => setShowScreensDialog(true)}
               title="Cast to other screens"
-              className="flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+              className="responsive-icon-button flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
             >
               <Monitor className="w-4 h-4" />
             </button>
@@ -16671,7 +16770,7 @@ export default function Home() {
                 type="button"
                 onClick={() => setShowFloorMode(true)}
                 title="Floor mode — big numbers, status color"
-                className="flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+                className="responsive-icon-button flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
               >
                 <Layers className="w-4 h-4" />
               </button>
@@ -16681,7 +16780,7 @@ export default function Home() {
               type="button"
               onClick={toggleFullscreen}
               title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen / kiosk mode"}
-              className="flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+              className="responsive-icon-button flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
             >
               {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
             </button>
@@ -16700,7 +16799,7 @@ export default function Home() {
                 }
               }}
               title={isManager ? "Manager — full access" : isSupervisor ? "Click to exit supervisor mode" : "Click to enter supervisor mode"}
-              className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs font-semibold border transition-colors ${
+              className={`min-h-11 flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs font-semibold border transition-colors ${
                 isSupervisor
                   ? "border-primary/40 text-primary bg-primary/10 hover:bg-primary/20"
                   : "border-border text-muted-foreground bg-muted/30 hover:bg-muted/60"
@@ -16727,7 +16826,7 @@ export default function Home() {
                       ? `More — ${managerAttentionTotal} manager action${managerAttentionTotal === 1 ? "" : "s"} need attention`
                       : "More"
                   }
-                  className="relative flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+                  className="responsive-icon-button relative flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
                 >
                   <Menu className="w-4 h-4" />
                   {managerAttentionTotal > 0 && (
@@ -16997,25 +17096,25 @@ export default function Home() {
               <ManagementDepartment staff={<DeferredStaffManagementSurface />} />
 
               <TabsList className="station-nav fixed bottom-0 left-0 right-0 z-50 grid grid-cols-6 w-full rounded-none border-t border-border bg-background/95 backdrop-blur-sm print:hidden">
-                <TabsTrigger value="run" data-testid="tab-run" className="flex flex-col items-center gap-0.5 px-1">
+                <TabsTrigger value="run" data-testid="tab-run" className="min-h-11 flex flex-col items-center gap-0.5 px-1">
                   <Activity className="w-4 h-4 shrink-0" />
-                  <span className="text-[10px] truncate">Run</span>
+                  <span className="text-xs truncate">Run</span>
                 </TabsTrigger>
-                <TabsTrigger value="dough" data-testid="tab-dough" className="flex flex-col items-center gap-0.5 px-1">
+                <TabsTrigger value="dough" data-testid="tab-dough" className="min-h-11 flex flex-col items-center gap-0.5 px-1">
                   <Layers className="w-4 h-4 shrink-0" />
-                  <span className="text-[10px] truncate">Dough</span>
+                  <span className="text-xs truncate">Dough</span>
                 </TabsTrigger>
-                <TabsTrigger value="sauce" data-testid="tab-sauce" className="flex flex-col items-center gap-0.5 px-1">
+                <TabsTrigger value="sauce" data-testid="tab-sauce" className="min-h-11 flex flex-col items-center gap-0.5 px-1">
                   <Droplets className="w-4 h-4 shrink-0" />
-                  <span className="text-[10px] truncate">Sauce</span>
+                  <span className="text-xs truncate">Sauce</span>
                 </TabsTrigger>
-                <TabsTrigger value="frontline" data-testid="tab-frontline" className="flex flex-col items-center gap-0.5 px-1">
+                <TabsTrigger value="frontline" data-testid="tab-frontline" className="min-h-11 flex flex-col items-center gap-0.5 px-1">
                   <Boxes className="w-4 h-4 shrink-0" />
-                  <span className="text-[10px] truncate">Front</span>
+                  <span className="text-xs truncate">Front</span>
                 </TabsTrigger>
-                <TabsTrigger value="packaging" data-testid="tab-packaging" className="flex flex-col items-center gap-0.5 px-1">
+                <TabsTrigger value="packaging" data-testid="tab-packaging" className="min-h-11 flex flex-col items-center gap-0.5 px-1">
                   <Package className="w-4 h-4 shrink-0" />
-                  <span className="text-[10px] truncate">Pack</span>
+                  <span className="text-xs truncate">Pack</span>
                 </TabsTrigger>
                 <TabsTrigger
                   value="warehouse"
@@ -17023,10 +17122,10 @@ export default function Home() {
                   aria-label="Warehouse"
                   onPointerEnter={preloadWarehouseInventorySurface}
                   onFocus={preloadWarehouseInventorySurface}
-                  className="flex min-w-0 flex-col items-center gap-0 px-0 sm:gap-0.5 sm:px-1"
+                  className="min-h-11 flex min-w-0 flex-col items-center gap-0 px-0 sm:gap-0.5 sm:px-1"
                 >
                   <Warehouse className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />
-                  <span className="whitespace-nowrap text-[9px] leading-tight sm:text-[10px]">Warehouse</span>
+                  <span className="whitespace-nowrap text-xs leading-tight">Warehouse</span>
                 </TabsTrigger>
               </TabsList>
 

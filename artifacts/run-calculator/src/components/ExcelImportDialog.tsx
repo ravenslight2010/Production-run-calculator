@@ -486,14 +486,14 @@ export default function ExcelImportDialog({
     <div
       // No close-on-backdrop-click: the review step holds unsaved date/run
       // edits — a stray tap would silently discard them. Close is explicit only.
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
+      className="responsive-dialog-overlay fixed inset-x-0 top-0 z-[60] flex h-[100dvh] min-h-0 items-center justify-center overflow-y-auto bg-black/60"
     >
       <div
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="excel-import-dialog-title"
-        className="w-full max-w-lg h-[90vh] max-h-[90vh] min-h-0 flex flex-col rounded-xl border border-border bg-background shadow-xl"
+        className="responsive-dialog-card flex flex-col rounded-xl border border-border bg-background shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="shrink-0 flex items-center justify-between px-5 py-4 border-b border-border">
@@ -501,7 +501,7 @@ export default function ExcelImportDialog({
             <Upload className="w-4 h-4 text-primary" />
             <span id="excel-import-dialog-title" className="text-base font-semibold text-foreground">Import Excel</span>
           </div>
-          <button type="button" aria-label="Close import review" onClick={onClose} className="text-muted-foreground hover:text-foreground" data-testid="button-excel-import-close">
+          <button type="button" aria-label="Close import review" onClick={onClose} className="responsive-icon-button flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground" data-testid="button-excel-import-close">
             <X className="w-5 h-5" />
           </button>
         </div>

@@ -28,7 +28,12 @@ import {
 } from "../lib/users";
 import { invalidateUserSessions } from "../lib/userValidity";
 import { createResetRequest, resetPasswordWithCode } from "../lib/passwordResets";
+import { recordSession, revokeSession } from "../lib/authSessions";
+import { consumeInvitation } from "../lib/invitations";
+import { validSignupCode, hasSignupCode } from "../lib/signupAccessCode";
 import { createRoleForNewUser, getStaffMember } from "../lib/roles";
+import { db, rolesTable, userRolesTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
 import { requireAuth } from "../middlewares/requireAuth";
 import { rateLimit } from "../middlewares/rateLimit";
 import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
@@ -81,10 +86,12 @@ function timingSafeCodeMatches(supplied: string, expected: string | undefined): 
 // isDesignatedInitialManager in lib/roles.ts) — the intended first
 // administrator only needs to know their own bootstrap code, not the
 // general-staff one, to get past this gate.
-function accessCodeMatches(supplied: string): boolean {
+async function accessCodeMatches(supplied: string): Promise<boolean> {
+  if (await hasSignupCode()) return validSignupCode(supplied);
   return (
     timingSafeCodeMatches(supplied, process.env.STAFF_SIGNUP_CODE) ||
-    timingSafeCodeMatches(supplied, process.env.INITIAL_MANAGER_ACCESS_CODE)
+    timingSafeCodeMatches(supplied, process.env.INITIAL_MANAGER_ACCESS_CODE) ||
+    await validSignupCode(supplied)
   );
 }
 
@@ -118,7 +125,7 @@ router.post("/auth/sign-up", authRateLimit, async (req, res): Promise<void> => {
     return;
   }
   const { username, password, accessCode } = parsed.data;
-  if (!accessCodeMatches(accessCode)) {
+  if (!(await accessCodeMatches(accessCode))) {
     res.status(403).json({ error: "Incorrect facility code." });
     return;
   }
@@ -129,6 +136,39 @@ router.post("/auth/sign-up", authRateLimit, async (req, res): Promise<void> => {
   }
   await createRoleForNewUser(created.user.id, username, accessCode);
   const token = signToken(created.user.id);
+  await recordSession(created.user.id, token);
+  setSessionCookie(res, token);
+  res.status(201).json({ token, user: await getStaffMember(created.user.id) });
+});
+
+// Invitation acceptance deliberately uses POST body only. Invalid, expired,
+// consumed, and revoked invitations share one response so the endpoint cannot
+// be used to enumerate staff onboarding state.
+router.post("/auth/accept-invitation", authRateLimit, async (req, res): Promise<void> => {
+  const { invitation, username, password } = req.body ?? {};
+  if (typeof invitation !== "string" || invitation.length < 20 ||
+      typeof username !== "string" || typeof password !== "string" ||
+      username.trim().length < 3 || password.length < 6) {
+    res.status(400).json({ error: "Invitation is invalid or unavailable." });
+    return;
+  }
+  const result = await db.transaction(async (tx) => {
+    const claimed = await consumeInvitation(invitation, tx);
+    if (!claimed.ok) return claimed;
+    const created = await createUser(username, password, tx);
+    if (!created.ok) return { ok: false as const, status: 400, error: "Invitation is invalid or unavailable." };
+    const [role] = await tx.select({ name: rolesTable.name }).from(rolesTable).where(eq(rolesTable.name, claimed.role));
+    if (!role) return { ok: false as const, status: 400, error: "Invitation is invalid or unavailable." };
+    await tx.insert(userRolesTable).values({ userId: created.user.id, role: role.name });
+    return { ok: true as const, user: created.user };
+  });
+  if (!result.ok) {
+    res.status(result.status).json({ error: result.error });
+    return;
+  }
+  const created = result;
+  const token = signToken(created.user.id);
+  await recordSession(created.user.id, token);
   setSessionCookie(res, token);
   res.status(201).json({ token, user: await getStaffMember(created.user.id) });
 });
@@ -171,7 +211,7 @@ router.post("/auth/sign-in", authRateLimit, async (req, res): Promise<void> => {
   }
   const { username, password } = parsed.data;
   const user = await findUserByUsername(username);
-  if (!user || !verifyPassword(password, user.passwordHash)) {
+  if (!user || user.disabled || !verifyPassword(password, user.passwordHash)) {
     res.status(401).json({ error: "Invalid username or password." });
     return;
   }
@@ -184,13 +224,20 @@ router.post("/auth/sign-in", authRateLimit, async (req, res): Promise<void> => {
     return;
   }
   const token = signToken(user.id);
+  await recordSession(user.id, token);
   setSessionCookie(res, token);
   res.json({ token, user: await getStaffMember(user.id) });
 });
 
 // Sign out — clears the web session cookie. Mobile simply discards its stored
 // token; the stateless token naturally expires.
-router.post("/auth/sign-out", (_req, res): void => {
+router.post("/auth/sign-out", (req, res): void => {
+  const bearer = req.headers.authorization?.startsWith("Bearer ")
+    ? req.headers.authorization.slice(7).trim()
+    : undefined;
+  const cookie = (req.cookies as Record<string, string> | undefined)?.[SESSION_COOKIE];
+  const token = bearer || cookie;
+  if (token) void revokeSession(token);
   res.clearCookie(SESSION_COOKIE, { path: "/" });
   res.status(204).end();
 });
@@ -223,6 +270,7 @@ router.post(
     await updateUserPassword(user.id, newPassword);
     invalidateUserSessions(user.id);
     const token = signToken(user.id);
+    await recordSession(user.id, token);
     setSessionCookie(res, token);
     res.json({ token, user: await getStaffMember(user.id) });
   },

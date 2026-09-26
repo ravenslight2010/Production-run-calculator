@@ -55,6 +55,7 @@ import { fetchCheeseRecipes } from "./cheeseRecipes";
 import { requestMatchPremix } from "./premixMatch";
 import { saveAiCorrections } from "./aiCorrections";
 import { savePremixSheet, buildPremixSheetLabel, deriveSourceKey } from "./savedPremixSheets";
+import { applyImportOperation } from "./importOperations";
 
 export type PremixImportPrepared = {
   /** Ready-to-apply mixes (grounded, AI-matched, deterministic ids). */
@@ -311,6 +312,7 @@ export type PremixCommitResult = {
   /** Non-fatal problem worth surfacing (the mixes themselves applied fine). */
   warning?: string;
   snapshotId?: number;
+  resultHash?: string;
 };
 
 /**
@@ -328,6 +330,7 @@ export async function commitPremixImport(
   freezerPulls: ReadonlyArray<PremixFreezerPull> = [],
   extraAliases: ReadonlyArray<SpecImportAlias> = [],
   mixesToRemove: ReadonlyArray<string> = [],
+  operationId?: string,
 ): Promise<PremixCommitResult> {
   // The review may be assembled by an older client or by a caller other than
   // the current dialog. Re-apply the boundary guard here so an empty normalized
@@ -345,7 +348,40 @@ export async function commitPremixImport(
   // A premix sheet can be entirely prep/pull-early rows (no per-pizza mixes).
   // In that case there are no mixes to save, but its pull-note reminders below
   // must still persist — so only the mix write is gated on having mixes.
-  if (mixesToApply.length > 0 || mixesToRemove.length > 0) {
+  let atomicApplied = false;
+  let resultHash: string | undefined;
+  let atomicPullUpserts: ReturnType<typeof buildFreezerPullUpserts> = [];
+  let existingForAtomic: Mix[] = [];
+  if (operationId) {
+    existingForAtomic = await fetchMixes();
+    const removeSet = new Set(mixesToRemove);
+    const afterRemoval = mixesToRemove.length > 0
+      ? existingForAtomic.filter((m) => !removeSet.has(m.id))
+      : existingForAtomic;
+    const merged = mixesToApply.length > 0
+      ? mergePremixIntoMixes(afterRemoval, mixesToApply)
+      : afterRemoval;
+    const importedIds = new Set(mixesToApply.map((mix) => mix.id));
+    const atomicMixUpserts = merged.filter((mix) => importedIds.has(mix.id));
+    const existingItems = await fetchFreezerPullItems();
+    atomicPullUpserts = freezerPulls.length > 0
+      ? buildFreezerPullUpserts(existingItems, [...freezerPulls])
+      : [];
+    const aliases = [...prepared.newAliases, ...extraAliases];
+    const committed = await applyImportOperation(operationId, {
+      importType: "premix",
+      sourceKey: deriveSourceKey(prepared.sourceNames ?? []),
+      sourceLabel: (prepared.sourceNames ?? []).join(", ") || "Premix sheet",
+      changes: {
+        mixes: { upsert: atomicMixUpserts, delete: mixesToRemove },
+        ...(atomicPullUpserts.length ? { freezerPullItems: { upsert: atomicPullUpserts } } : {}),
+        ...(aliases.length ? { specImportAliases: { upsert: aliases } } : {}),
+      },
+    });
+    atomicApplied = true;
+    resultHash = committed.resultHash;
+  }
+  if (!atomicApplied && (mixesToApply.length > 0 || mixesToRemove.length > 0)) {
     // Re-read current mixes right before writing so we merge onto the freshest
     // list (another manager may have edited mixes since prepare).
     const existing = await fetchMixes();
@@ -366,6 +402,11 @@ export async function commitPremixImport(
   let freezerPullCount = 0;
   let warning: string | undefined;
   let snapshotId: number | undefined;
+  if (atomicApplied) {
+    freezerPullCount = new Set(
+      freezerPulls.map((p) => p.ingredient.trim().toLowerCase()).filter(Boolean),
+    ).size;
+  }
   // Retain the complete parsed source, not the manager's last selection. A
   // source remains useful for a later repair even when individual rows were
   // skipped during the original reviewed commit.
@@ -383,7 +424,7 @@ export async function commitPremixImport(
   } catch {
     warning = "The import was applied, but its retained repair source could not be saved.";
   }
-  if (freezerPulls.length > 0) {
+  if (!atomicApplied && freezerPulls.length > 0) {
     try {
       const existingItems = await fetchFreezerPullItems();
       const upserts = buildFreezerPullUpserts(existingItems, [...freezerPulls]);
@@ -400,7 +441,7 @@ export async function commitPremixImport(
   // Persist learned name mappings: the grounding pass's brand/flavor aliases
   // plus any "use existing mix" picks the review dialog collected (blend-name
   // "appType" aliases). Best-effort: the import already applied.
-  let aliasesToSave = [...prepared.newAliases, ...extraAliases];
+  let aliasesToSave = atomicApplied ? [] : [...prepared.newAliases, ...extraAliases];
   if (aliasesToSave.length) {
     // A reviewed redirect can correct an older redirect for the same workbook
     // label. Compare against the server aliases before upserting so the stale
@@ -492,7 +533,7 @@ export async function commitPremixImport(
     }
   }
 
-  return { freezerPullCount, ...(warning ? { warning } : {}), ...(snapshotId != null ? { snapshotId } : {}) };
+  return { freezerPullCount, ...(resultHash ? { resultHash } : {}), ...(warning ? { warning } : {}), ...(snapshotId != null ? { snapshotId } : {}) };
 }
 
 export { premixId };

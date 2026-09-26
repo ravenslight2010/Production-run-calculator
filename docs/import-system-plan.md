@@ -1,5 +1,11 @@
 # Import System — Comprehensive Plan
 
+**Status:** Foundation built; spec, premix, and cheese multi-entity applies are transactional and support guarded recovery
+**Updated:** 2026-09-21
+**Related:** [Idea backlog](idea-backlog.md#15-import-system-improvements), [additional domain synthesis](../research/additional-domain-research-synthesis-2026-09-19.md)
+
+Spec, premix, and cheese now apply server-owned master-data changes through one operation identity and transaction. The server retains bounded before/after snapshots, returns a canonical result for idempotent retries, and permits undo only while affected rows still match that result. Saved review snapshots remain source-review artifacts, not rollback snapshots. Local-only shipping, sauce-guide, dough-guide, and schedule projections retain their existing sync boundaries.
+
 ## Current State
 
 ### The 7 Importer Types
@@ -22,11 +28,12 @@
 - **Snapshots** — saved review state for spec/premix/cheese (reopen without re-parsing)
 - **Audit recovery** — pending audit records retried when they fail to save
 - **Import access gates** — capability-based (canImportSpec, canImportProfileGuide, etc.)
+- **Atomic apply and guarded undo** — spec, premix, and cheese commit server-owned changes and history together; retries reuse the same operation
 
 ### What's Missing (from earlier ideas + new insights)
 
 1. **No QC approval gate** — imports apply immediately, no "unverified" state (planned in QC dept)
-2. **No rollback/undo** — a bad import is permanent (no undo of last import)
+2. **Guarded undo is limited to atomic importers** — local-only guide and schedule projections retain their existing recovery paths
 3. **No structured preview diff** — review is inside dialog but no "what will CHANGE" diff view
 4. **No batch import** — one file at a time only
 5. **No template download** — can't generate a blank Excel to fill by hand
@@ -53,15 +60,14 @@
 
 **Dependency note**: This item is NOT in the import plan's build order. It is owned by the QC department plan (Phase 3: Import approval queue). The import plan's Phases are standalone and can proceed before QC exists.
 
-### 2. Rollback / Undo (new)
-**What**: Undo the last applied import (or any import with a snapshot).
+### 2. Rollback / Undo (implemented for atomic multi-entity imports)
+**What**: Undo an applied spec, premix, or cheese import while its affected rows remain unchanged.
 
 **How**:
-- Every import commit already writes a bounded change manifest (`ImportHistorySummary.changes`)
-- Before applying, capture an **undo snapshot** of everything the import will touch (profiles, recipes, mixes, packaging settings)
-- "Undo last import" → restore from snapshot, log a ledger entry "import rolled back"
-- Available from Import History panel: "Rollback" button per import item
-- Guard: rollback of an import whose data was later modified by ANOTHER import → show conflict, require manual review (don't blindly overwrite newer edits)
+- The apply transaction captures bounded before/after snapshots of affected rows and writes import history under the same operation identity
+- "Undo guarded import" compares current affected rows with the committed result, then restores the before snapshot in one transaction
+- Available from the Import History panel for atomic import records
+- Guard: later edits to affected rows return a conflict and require manual review; unrelated edits do not block undo
 
 ### 3. Structured Preview Diff (new)
 **What**: Before applying, show exactly what will change in the factory data.

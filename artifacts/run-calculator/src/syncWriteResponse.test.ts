@@ -4,14 +4,46 @@ import {
   consumeSyncWriteResponse,
   isCanonicalRecoverySyncPayload,
   isUnchangedSyncResponse,
+  mergeSparseServerRunMap,
   persistedSyncPayload,
   readCurrentRecoveryJson,
   reconstructPartialSyncPayload,
+  syncWriteFieldCheck,
+  shouldReplaySyncWrite,
   syncPayloadMatchesSnapshot,
   syncPayloadSnapshotId,
 } from "./syncWriteResponse";
 
 describe("consumeSyncWriteResponse", () => {
+  it.each([
+    ["authorization rejection", { ok: false, status: 403 }],
+    ["reset-stale rejection", { ok: true, status: 200, stale: true }],
+    ["exhausted retry", { ok: false, status: 0, retriesExhausted: true }],
+  ])("classifies %s as a failed sync acknowledgment", (_label, input) => {
+    expect(syncWriteFieldCheck(input)).toEqual({
+      checkName: "sync-acknowledgment",
+      outcome: "failure",
+    });
+  });
+
+  it("classifies a successful local write as a successful sync acknowledgment", () => {
+    expect(syncWriteFieldCheck({ ok: true, status: 200 })).toEqual({
+      checkName: "sync-acknowledgment",
+      outcome: "success",
+    });
+  });
+
+  it("does not classify non-terminal diagnostics as a sync acknowledgment", () => {
+    expect(syncWriteFieldCheck({ ok: false, status: 503 })).toBeUndefined();
+  });
+
+  it("replays stale-base fallbacks after canonical adoption but not ordinary acknowledgements", () => {
+    expect(shouldReplaySyncWrite({ partialFallback: true, data: { runValues: {} } })).toBe(true);
+    expect(shouldReplaySyncWrite({ partialFallback: true })).toBe(true);
+    expect(shouldReplaySyncWrite({ data: { runValues: {} } })).toBe(false);
+    expect(shouldReplaySyncWrite(null)).toBe(false);
+  });
+
   it("immediately self-applies the server canonical payload on a successful write", async () => {
     const applyCanonical = vi.fn();
     const canonical = {
@@ -211,7 +243,6 @@ describe("consumeSyncWriteResponse", () => {
       completeness: "partial",
       baseSnapshotId: baseId,
       snapshotId: targetId,
-      resultingSnapshotId: targetId,
       data: { runValues: { r1: { casesNeeded: 12 } } },
     })).resolves.toEqual(target);
     await expect(reconstructPartialSyncPayload(base as any, "b".repeat(64), {
@@ -222,6 +253,34 @@ describe("consumeSyncWriteResponse", () => {
       resultingSnapshotId: targetId,
       data: { runValues: { r1: { casesNeeded: 12 } } },
     })).resolves.toBeNull();
+  });
+
+  it("retains unchanged run totals while updating and removing changed entries", () => {
+    const currentSummaryStats = {
+      unchanged: { total: 1 },
+      changed: { total: 2 },
+      removed: { total: 3 },
+    };
+    const currentRunLines = {
+      unchanged: [{ itemKey: "cheese", qty: 1 }],
+      changed: [{ itemKey: "pepperoni", qty: 2 }],
+      removed: [{ itemKey: "sauce", qty: 3 }],
+    };
+
+    expect(mergeSparseServerRunMap(currentSummaryStats, {
+      changed: { total: 4 },
+      removed: null,
+    })).toEqual({
+      unchanged: { total: 1 },
+      changed: { total: 4 },
+    });
+    expect(mergeSparseServerRunMap(currentRunLines, {
+      changed: [{ itemKey: "pepperoni", qty: 5 }],
+      removed: null,
+    })).toEqual({
+      unchanged: [{ itemKey: "cheese", qty: 1 }],
+      changed: [{ itemKey: "pepperoni", qty: 5 }],
+    });
   });
 
   it("applies sparse peer map tombstones without dropping omitted values", async () => {

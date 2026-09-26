@@ -9,6 +9,7 @@ import {
   releaseGateLabelsForMode,
 } from "./release-check.mts";
 import { computeSourceLibraryEvidenceId } from "./verify-source-library-reconciliation.mts";
+import { FULL_BROWSER_EXPECTED_CASES } from "./full-browser-case-contract.mts";
 
 type FixtureStep = {
   label: string;
@@ -1944,10 +1945,10 @@ async function runFullModeScenario(): Promise<void> {
     "",
     `Revision: ${revision}`,
     "Result: PASS",
-    "Expected cases: 159",
-    "Enumerated cases: 159",
-    "Completed cases: 159",
-    "Passed cases: 159",
+    `Expected cases: ${FULL_BROWSER_EXPECTED_CASES}`,
+    `Enumerated cases: ${FULL_BROWSER_EXPECTED_CASES}`,
+    `Completed cases: ${FULL_BROWSER_EXPECTED_CASES}`,
+    `Passed cases: ${FULL_BROWSER_EXPECTED_CASES}`,
     "Skipped cases: 0",
     "Failed cases: 0",
     "Not-run cases: 0",
@@ -1957,7 +1958,7 @@ async function runFullModeScenario(): Promise<void> {
     "",
     "| File | Cases | Completed | Passed | Skipped | Failed | Not run | Duration |",
     "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
-    "| `e2e/example.spec.ts` | 159 | 159 | 159 | 0 | 0 | 0 | 1ms |",
+    `| \`e2e/example.spec.ts\` | ${FULL_BROWSER_EXPECTED_CASES} | ${FULL_BROWSER_EXPECTED_CASES} | ${FULL_BROWSER_EXPECTED_CASES} | 0 | 0 | 0 | 1ms |`,
     "",
   ].join("\n");
   const fullBrowserScript = [

@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, ShieldCheck, RefreshCw } from "lucide-react";
+import { exportAuditLogsPdf } from "@workspace/api-client-react";
+import { FileDown, Loader2, ShieldCheck, RefreshCw } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { toast } from "@/hooks/use-toast";
 
 interface AuditLogEntry {
   id: number;
@@ -70,12 +72,29 @@ function defaultEndDate(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+function exportDate(value: string, endOfDay = false): string | undefined {
+  if (!value) return undefined;
+  return `${value}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}Z`;
+}
+
+function pdfDownloadError(error: unknown): string {
+  const status = error && typeof error === "object" && "status" in error
+    ? Number((error as { status?: unknown }).status)
+    : undefined;
+
+  if (status === 401) return "Your session has expired. Sign in again and retry the PDF download.";
+  if (status === 403) return "PDF export requires manager access in the live facility.";
+  if (status === 400) return "The selected audit filters are invalid. Update them and retry the download.";
+  return "The audit PDF could not be downloaded. Check your connection and retry.";
+}
+
 // Manager-only read-only audit log viewer.
 // Reads from GET /api/audit-logs with optional date-range and limit filters.
 export default function AuditLogCard() {
   const [startDate, setStartDate] = useState(defaultStartDate);
   const [endDate, setEndDate] = useState(defaultEndDate);
   const [limit, setLimit] = useState(100);
+  const [isDownloading, setIsDownloading] = useState(false);
 
   // Committed filter state — only update on explicit Apply
   const [committedStart, setCommittedStart] = useState(startDate);
@@ -106,6 +125,33 @@ export default function AuditLogCard() {
     setCommittedStart(startDate);
     setCommittedEnd(endDate);
     setCommittedLimit(limit);
+  }
+
+  async function downloadPdf() {
+    setIsDownloading(true);
+    try {
+      const pdf = await exportAuditLogsPdf({
+        startDate: exportDate(committedStart),
+        endDate: exportDate(committedEnd, true),
+        limit: Math.min(Math.max(1, committedLimit), 5000),
+      });
+      const url = URL.createObjectURL(pdf);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `audit-logs${committedStart ? `-${committedStart}` : ""}${committedEnd ? `-to-${committedEnd}` : ""}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch (error) {
+      toast({
+        title: "Audit PDF download failed",
+        description: pdfDownloadError(error),
+        variant: "destructive",
+      });
+    } finally {
+      setIsDownloading(false);
+    }
   }
 
   const logs = data?.logs ?? [];
@@ -174,6 +220,20 @@ export default function AuditLogCard() {
             title="Refresh"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} />
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs"
+            onClick={() => void downloadPdf()}
+            disabled={isDownloading}
+            title="Download filtered audit log as PDF"
+          >
+            {isDownloading
+              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              : <FileDown className="h-3.5 w-3.5" />}
+            {isDownloading ? "Downloading…" : "PDF"}
           </Button>
         </div>
 

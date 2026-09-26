@@ -67,13 +67,40 @@ describe("server web-push alert candidates", () => {
   it("uses pause-aware shared elapsed time for batches and changes identity for a replacement run", () => {
     mocks.elapsed.mockReturnValue(2_000);
     mocks.calc.mockReturnValue({ runId: "first", calc: { ppm: 20, adjustedTimeSec: 2_000, pressDone: false, timePerBatchSec: 1, pressCasesLeft: 99 } });
-    const first = { dayState: { currentIndex: 0, runs: [{ id: "first", startedAt: 1 }] }, runValues: { first: { freezerTime: 0 } } };
+    const first = { dayState: { currentIndex: 0, runs: [{ id: "first", startedAt: 1, autoTrackDisabled: true }] }, runValues: { first: { freezerTime: 0 } } };
     expect(alertCandidates(first, "2026-01-01", 100_000).some((a) => a.kind === "batchDue")).toBe(true);
     expect(mocks.elapsed).toHaveBeenCalled();
     expect(alertCandidates({ ...first, dayState: { currentIndex: 0, runs: [{ id: "first", startedAt: 1, pausedAt: 50_000 }] } }, "2026-01-01", 100_000)).toEqual([]);
     const old = { dayState: { currentIndex: 1, runs: [{ id: "first", endedAt: 1 }, { id: "second", startedAt: 2 }] }, runValues: { first: { freezerTime: 1 } } };
     const replacement = { ...old, dayState: { currentIndex: 1, runs: [{ id: "replacement", endedAt: 1 }, { id: "second", startedAt: 2 }] }, runValues: { replacement: { freezerTime: 1 } } };
     expect(freezerCandidates(old, "2026-01-01", 61_000)[0]!.id).not.toEqual(freezerCandidates(replacement, "2026-01-01", 61_000)[0]!.id);
+  });
+
+  it("suppresses dough batch pushes while canonical automatic tracking is enabled", () => {
+    mocks.elapsed.mockReturnValue(2_000);
+    mocks.calc.mockReturnValue({
+      runId: "auto",
+      calc: {
+        ppm: 20,
+        adjustedTimeSec: 2_000,
+        pressDone: false,
+        timePerBatchSec: 1,
+        pressCasesLeft: 99,
+      },
+    });
+    const data = {
+      dayState: {
+        currentIndex: 0,
+        runs: [{ id: "auto", startedAt: 1, autoTrackDisabled: false }],
+      },
+      runValues: { auto: { freezerTime: 0 } },
+    };
+
+    expect(
+      alertCandidates(data, "2026-01-01", 100_000)
+        .some((candidate) => candidate.kind === "batchDue"),
+    ).toBe(false);
+    expect(mocks.elapsed).not.toHaveBeenCalled();
   });
 
   it("finds a freezer-empty milestone for an ended non-current run", () => {

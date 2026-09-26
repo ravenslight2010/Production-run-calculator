@@ -12,6 +12,11 @@ cp "$repo_root/lib/api-client-react/src/custom-fetch.ts" \
 ORVAL_CHECK_OUTPUT_ROOT="$generated_root" \
   pnpm exec orval --config ./orval.config.ts
 
+GENERATED_ZOD_SOURCE_ROOT="$generated_root/api-zod/generated" \
+  pnpm --filter @workspace/api-zod exec vitest run \
+    src/generated.contract.test.ts \
+    --testNamePattern "declares scalar constraints before validators"
+
 if ! diff -ru \
   "$generated_root/api-client-react/generated" \
   "$repo_root/lib/api-client-react/src/generated" >/dev/null ||

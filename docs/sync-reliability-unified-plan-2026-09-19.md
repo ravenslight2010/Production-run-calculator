@@ -1,7 +1,8 @@
 # Sync Reliability Unified Plan
 
 **Date:** 2026-09-19  
-**Status:** Research synthesis and implementation plan  
+**Status:** Active reliability authority; complete-write snapshot fencing, provider-key alignment, safe measurements, and deterministic multi-process SSE verification are implemented in the repository
+**Reconciled:** 2026-09-21
 **Inputs:** [sync contract](sync-deep-dive-2026-09-19.md), [reconnect research](reconnect-reliability-deep-dive-2026-09-19.md), [server research](server-research-deep-dive-2026-09-19.md), [existing improvements plan](sync-system-improvements-plan.md), [operations deep dive](../research/sync-reliability-operations-deep-dive-2026-09-19.md), [integrated continuation](../research/deep-dive-research-continuation-2026-09-19.md), and [additional domain synthesis](../research/additional-domain-research-synthesis-2026-09-19.md)
 
 ## 1. Purpose
@@ -22,14 +23,14 @@ It does not attribute a historical incident to clock skew, declare Autoscale inc
 | Area | Consolidated finding |
 |---|---|
 | Partial writes | `baseSnapshotId` is checked against the locked canonical row; mismatch returns complete fallback without applying |
-| Complete writes | No equivalent snapshot or revision precondition is enforced |
+| Complete writes | Maintained clients send `baseSnapshotId`; the server validates it under lock and returns canonical no-write fallback on mismatch |
 | Run conflicts | Per-run LWW compares client-authored numeric stamps |
 | Wake recovery | Baseline gating, generation fencing, adopt-before-publish, cancellation discard, and single-flight queuing are established protections |
 | Revision | Increment behavior is route-specific; operational intents increment while ordinary day-state PUT retains the current revision |
-| Payloads | The sparse contract materially saves bytes in fixtures; production distributions are unknown |
-| SSE | Same-process streaming and recovery behavior are implemented; cross-instance fanout is not established |
+| Payloads | Privacy-safe wire and pool telemetry is implemented; current production distributions still require revision-bound evidence |
+| SSE | Same-process streaming and recovery plus deterministic two-process isolation behavior are implemented; current published topology still requires revision-bound evidence |
 | Pooling | Default per-process pool maximum is 10 with a 900 ms acquisition timeout; production capacity inputs are unknown |
-| Readiness | Provider-key detection does not match the active Gemini adapter |
+| Readiness | Provider-key detection is aligned with the active Gemini adapter; hard-versus-soft dependency policy remains separate |
 | AI policy | Whether AI should block global readiness is an owner decision, not a repository fact |
 
 ### Corrections and superseded claims
@@ -38,16 +39,16 @@ It does not attribute a historical incident to clock skew, declare Autoscale inc
 |---|---|
 | Every day-state write has optimistic revision locking | Incorrect; ordinary day-state writes retain `canonicalRevision` and do not enforce it as a universal base |
 | A partial write can overwrite across a stale base | Incorrect; stale-base partial writes fall back without applying |
-| A stale complete write cannot overwrite because revision protects it | Incorrect; complete writes have no universal revision precondition |
+| A stale complete write cannot overwrite because revision protects it | Incorrect rationale; protection now comes from an under-lock snapshot precondition, not universal revision locking |
 | A larger wall-clock stamp proves causal freshness | Unsupported |
 | Replit officially prohibits SSE on Autoscale | Unsupported by the reviewed official documentation |
 | Peer broadcasts reach every deployed instance | Unsupported; the registry is process-local |
 | 512 KiB is a wire-performance target | Incorrect; it is a sanitized application-document ceiling |
-| Any configured AI key proves the active provider is usable | Incorrect; readiness and adapter key contracts differ |
+| Any configured AI key proves the active provider is usable | Incorrect; readiness now follows the active adapter's provider-key contract |
 
 ## 3. Decisions
 
-1. Fix complete-write causality before expanding partial encoding.
+1. Preserve complete-write causality before expanding partial encoding.
 2. Use explicit canonical-base validation; do not use timestamp clamping as the primary safeguard.
 3. Design snapshot and revision changes together:
    - `baseSnapshotId` is the established immediate precondition;
@@ -56,7 +57,7 @@ It does not attribute a historical incident to clock skew, declare Autoscale inc
 5. Measure current wire behavior before adopting JSON Patch, compression, selective sync, or broader sparse sections.
 6. Verify published SSE behavior before changing deployment topology, heartbeat cadence, or proxy headers.
 7. Keep the database pool conservative until capacity and instance-count inputs are known.
-8. Correct readiness provider detection independently of the AI hard-versus-soft dependency policy.
+8. Keep readiness provider detection aligned independently of the AI hard-versus-soft dependency policy.
 9. Preserve auto-track claim coordination, packaging progress, and atomic sauce-barrel inventory effects while changing the day-state protocol.
 10. Treat factory data's five-minute timestamp clamp as optional defense-in-depth, not as a substitute for canonical-base validation.
 11. Do not block the complete-write protocol fix on an SSE topology decision; database locking and canonical fallback remain valid under either topology.
@@ -75,7 +76,7 @@ It does not attribute a historical incident to clock skew, declare Autoscale inc
 
 **Exit:** Every later phase has explicit evidence fields and sanitization rules.
 
-### Phase 1 — Prove and close complete-write causality
+### Phase 1 — Prove and close complete-write causality — implemented in repository
 
 **Goal:** Prevent an unfenced stale complete body from winning through a larger client stamp.
 
@@ -202,6 +203,8 @@ Owner decision:
 - **Alternative:** keep AI as a hard readiness dependency only if specific retained AI workflows are contractually mandatory for all production operation.
 
 Provider calls should have bounded timeout, selective retry, and circuit-breaker behavior regardless of the readiness policy.
+
+Implement these controls around the active Gemini adapter, with one bounded half-open probe and content-free metrics for duration, outcome, retry count, and bounded token/cost totals. Do not log prompts, responses, users, or operational payloads. The retained design boundaries are cataloged in [Idea Backlog §17](idea-backlog.md#17-residual-observability--resilience-ideas).
 
 **Exit:** The policy is documented, tested, and reflected consistently in health endpoints and user-facing failures.
 

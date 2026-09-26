@@ -26,7 +26,7 @@ import { eq, sql } from "drizzle-orm";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import pg from "pg";
-import { signToken, verifyPassword } from "../lib/auth";
+import { signLegacyTokenForTests, verifyPassword } from "../lib/auth";
 import type { Capability } from "../lib/roles";
 
 // The complete capability set, mirrored locally so the test never statically
@@ -254,7 +254,7 @@ async function req(
 ): Promise<Response> {
   const headers: Record<string, string> = {};
   if (body !== undefined) headers["content-type"] = "application/json";
-  if (userId) headers["authorization"] = `Bearer ${signToken(userId)}`;
+  if (userId) headers["authorization"] = `Bearer ${signLegacyTokenForTests(userId)}`;
   return fetch(`${baseUrl}${pathname}`, {
     method,
     headers,
@@ -1655,23 +1655,23 @@ describe("staff security actions are visible in the Audit Log", () => {
 
     const grantLog = result.logs.find((log) => log.action === "role_granted");
     expect(grantLog).toMatchObject({
-      actor: "manager",
+      actor: "manager-1",
       action: "role_granted",
-      resource: "user:operator",
+      resource: "user:operator-1",
       changes: {
-        targetUsername: "operator",
-        role: { from: "operator", to: "warehouse" },
+        outcome: "success",
+        targetId: "operator-1",
       },
     });
 
     const revokeLog = result.logs.find((log) => log.action === "role_revoked");
     expect(revokeLog).toMatchObject({
-      actor: "manager",
+      actor: "manager-1",
       action: "role_revoked",
-      resource: "user:operator",
+      resource: "user:operator-1",
       changes: {
-        targetUsername: "operator",
-        role: { from: "warehouse", to: "operator" },
+        outcome: "success",
+        targetId: "operator-1",
       },
     });
 
@@ -1679,11 +1679,10 @@ describe("staff security actions are visible in the Audit Log", () => {
       (log) => log.action === "password_reset_approved",
     );
     expect(approvalLog).toMatchObject({
-      actor: "manager",
+      actor: "manager-1",
       action: "password_reset_approved",
-      resource: "user:operator",
+      resource: `reset_request:${resetRequestId}`,
       changes: {
-        targetUsername: "operator",
         requestId: resetRequestId,
       },
     });
@@ -2521,7 +2520,7 @@ describe("public auth endpoints are rate-limited", () => {
     let lastStatus = 0;
     // The cap is generous (20/60s) so real users retyping a password never
     // trip it; comfortably exceed it here to observe the 429.
-    for (let i = 0; i < 25; i++) {
+    for (let i = 0; i < 60; i++) {
       const res = await req(
         null,
         "GET",

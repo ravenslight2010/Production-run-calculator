@@ -1194,7 +1194,7 @@ export const LiveRunTabContent = memo(function LiveRunTabContent() {
                     </button>
                   )}
                   {runStatus === "running" && (
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <button
                         type="button"
                         onClick={pauseRun}
@@ -1685,7 +1685,7 @@ export const LiveRunTabContent = memo(function LiveRunTabContent() {
                     <div className="bg-muted/30 px-4 py-3 border-b border-border/60">
                       <span className="text-sm font-bold uppercase tracking-wider text-foreground">Line Details</span>
                     </div>
-                    <div className="grid grid-cols-2 divide-x divide-y divide-border/60">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-border/60">
                       <div className="p-3 flex items-center justify-between gap-2">
                         <span className="text-xs text-muted-foreground font-medium">Cases Left to Run</span>
                         <span className="text-sm font-bold text-foreground tabular-nums" data-testid="output-crust-cases-left">{fmtNum(Math.max(0, calc.casesLeftToRun), 0)}</span>
@@ -1735,7 +1735,7 @@ export const LiveRunTabContent = memo(function LiveRunTabContent() {
                     <div className="bg-muted/30 px-4 py-3 border-b border-border/60">
                       <span className="text-sm font-bold uppercase tracking-wider text-foreground">Line Details</span>
                     </div>
-                    <div className="grid grid-cols-2 divide-x divide-y divide-border/60">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-border/60">
                       <div className="p-3 flex items-center justify-between gap-2">
                         <span className="text-xs text-muted-foreground font-medium">Cases Left to Run</span>
                         <span className="text-sm font-bold text-foreground tabular-nums" data-testid="output-dough-cases-left">{fmtNum(Math.max(0, calc.casesLeftToRun), 0)}</span>
@@ -1786,7 +1786,7 @@ export const LiveRunTabContent = memo(function LiveRunTabContent() {
                       Clear All
                     </button>
                   </div>
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     {([
                       { name: "tempFreezerTime" as const, label: "Freeze Tunnel Time", setup: Number(v.freezerTime) > 0 ? fmtNum(Number(v.freezerTime), 0) : null, step: "1", testId: "input-temp-freezer-time" },
                       { name: "tempCrustsPerCycle" as const, label: "Crusts/Cycle", setup: Number(v.crustsPerCycle) > 0 ? fmtNum(Number(v.crustsPerCycle), 0) : null, step: "1", testId: "input-temp-crusts-per-cycle" },
@@ -2146,7 +2146,7 @@ export const LiveRunTabContent = memo(function LiveRunTabContent() {
                           step="0.1"
                         />
                       ) : (
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <NumField
                             control={form.control}
                             name="crustsPerCycle"
@@ -2160,7 +2160,7 @@ export const LiveRunTabContent = memo(function LiveRunTabContent() {
                           />
                         </div>
                       )}
-                      <div className="grid grid-cols-2 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <NumField
                           control={form.control}
                           name="speedAdjustment"
@@ -2172,7 +2172,7 @@ export const LiveRunTabContent = memo(function LiveRunTabContent() {
                           label="Freeze tunnel time (min)"
                         />
                       </div>
-                      <div className="grid grid-cols-2 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <NumField
                           control={form.control}
                           name="preTunnelMin"
@@ -2201,7 +2201,7 @@ export const LiveRunTabContent = memo(function LiveRunTabContent() {
                         );
                       })()}
                       <Separator className="opacity-30" />
-                      <div className="grid grid-cols-2 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <NumField
                           control={form.control}
                           name="pizzasPerCase"
@@ -2215,7 +2215,7 @@ export const LiveRunTabContent = memo(function LiveRunTabContent() {
                           step="1"
                         />
                       </div>
-                      <div className="grid grid-cols-2 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <NumField
                           control={form.control}
                           name="casesPerLayer"

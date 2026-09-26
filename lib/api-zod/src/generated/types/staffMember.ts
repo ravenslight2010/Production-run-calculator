@@ -28,6 +28,8 @@ export interface StaffMember {
   notificationPrefs: StaffMemberNotificationPrefs;
   /** Whether this is the seeded sandbox account, which operates in the isolated "sandbox" data scope. Clients show a persistent sandbox banner and offer a "Reset sandbox" action when true. */
   sandbox: boolean;
+  /** Whether sign-in is disabled for this account. */
+  disabled: boolean;
   /**
      * ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as "Sandbox copied from live at …".
      * @nullable

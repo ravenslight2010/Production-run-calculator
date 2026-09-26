@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useRetryCountdown } from "@/hooks/useRetryCountdown";
 import {
   Boxes,
   Package,
@@ -1564,17 +1565,10 @@ function QualityCheckCard() {
   const [preparing, setPreparing] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [retryIn, setRetryIn] = useState(0);
+  const [retryIn, setRetryIn] = useRetryCountdown();
   const [result, setResult] = useState<QualityCheckResult | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
-
-  const counting = retryIn > 0;
-  useEffect(() => {
-    if (!counting) return;
-    const t = setInterval(() => setRetryIn((s) => (s <= 1 ? 0 : s - 1)), 1000);
-    return () => clearInterval(t);
-  }, [counting]);
 
   async function analyze(imageBase64: string) {
     lastImageRef.current = imageBase64;
@@ -1802,15 +1796,8 @@ function ProductionSheetCard() {
   const [preparing, setPreparing] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [retryIn, setRetryIn] = useState(0);
+  const [retryIn, setRetryIn] = useRetryCountdown();
   const [result, setResult] = useState<ProductionSheetPhotoResult | null>(null);
-
-  const counting = retryIn > 0;
-  useEffect(() => {
-    if (!counting) return;
-    const t = setInterval(() => setRetryIn((s) => (s <= 1 ? 0 : s - 1)), 1000);
-    return () => clearInterval(t);
-  }, [counting]);
 
   async function analyze(imageBase64: string) {
     lastImageRef.current = imageBase64;
@@ -1882,6 +1869,10 @@ function ProductionSheetCard() {
           <p className="text-xs text-muted-foreground">
             Photograph a paper run sheet to transcribe its rows. This is advisory only — review the
             results and add the runs you want through the schedule yourself. Nothing is saved.
+          </p>
+          <p className="text-[11px] text-muted-foreground" data-testid="production-sheet-ai-disclosure">
+            The selected photo and optional notes are sent to the configured AI provider. Credentials,
+            logs, unrelated recipes, and user details are not included.
           </p>
           <Input
             placeholder="Optional context (e.g. Line 2 sheet, covers tomorrow)"
@@ -1986,15 +1977,8 @@ function LabelVerifyCard() {
   const [preparing, setPreparing] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [retryIn, setRetryIn] = useState(0);
+  const [retryIn, setRetryIn] = useRetryCountdown();
   const [result, setResult] = useState<LabelVerifyResult | null>(null);
-
-  const counting = retryIn > 0;
-  useEffect(() => {
-    if (!counting) return;
-    const t = setInterval(() => setRetryIn((s) => (s <= 1 ? 0 : s - 1)), 1000);
-    return () => clearInterval(t);
-  }, [counting]);
 
   function buildExpected(): LabelExpected {
     const exp: LabelExpected = {};
@@ -2169,15 +2153,8 @@ function WasteInsightCard() {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [retryIn, setRetryIn] = useState(0);
+  const [retryIn, setRetryIn] = useRetryCountdown();
   const [result, setResult] = useState<WasteInsightResult | null>(null);
-
-  const counting = retryIn > 0;
-  useEffect(() => {
-    if (!counting) return;
-    const t = setInterval(() => setRetryIn((s) => (s <= 1 ? 0 : s - 1)), 1000);
-    return () => clearInterval(t);
-  }, [counting]);
 
   async function run() {
     setError(null);
@@ -2327,7 +2304,7 @@ function PhotoIntakeCard({
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeProgress, setAnalyzeProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [retryIn, setRetryIn] = useState(0);
+  const [retryIn, setRetryIn] = useRetryCountdown();
   const [rows, setRows] = useState<ReviewRow[]>([]);
   const [noResults, setNoResults] = useState(false);
   const [committingId, setCommittingId] = useState<string | null>(null);
@@ -2336,13 +2313,6 @@ function PhotoIntakeCard({
 
   // Count down the rate-limit (429) cooldown so the retry button re-enables
   // exactly when the server will accept another request.
-  const counting = retryIn > 0;
-  useEffect(() => {
-    if (!counting) return;
-    const t = setInterval(() => setRetryIn((s) => (s <= 1 ? 0 : s - 1)), 1000);
-    return () => clearInterval(t);
-  }, [counting]);
-
   const candByKey = useMemo(() => {
     const m = new Map<string, CandidateItem>();
     for (const c of candidates) m.set(c.key, c);
@@ -2556,6 +2526,10 @@ function PhotoIntakeCard({
           <p className="text-xs text-muted-foreground">
             Take or upload a photo of incoming stock. We'll identify the items and pre-fill
             restock entries for you to confirm.
+          </p>
+          <p className="text-[11px] text-muted-foreground" data-testid="inventory-photo-ai-disclosure">
+            The selected photo and bounded inventory-item candidates are sent to the configured AI
+            provider. Credentials, logs, unrelated production records, and user details are not included.
           </p>
           <CameraFilePicker multiple disabled={preparing || analyzing} onFiles={(files) => void onPick(files)} />
           <BarcodeScanner

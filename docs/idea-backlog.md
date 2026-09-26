@@ -2,26 +2,45 @@
 
 Master list of improvement ideas for the Production Run Calculator. Each idea includes what it is, why it matters, and key code references.
 
-**Prioritized research synthesis (2026-09-18):** see [improvement-research-2026-09-18.md](improvement-research-2026-09-18.md) for ordered phases (stabilize → inventory truth → floor UX → QC/allergen → AI portfolio → reporting), status corrections, and explicit non-priorities. Prefer that document when choosing *what to build next*; keep this file as the catalog of ideas and detailed notes.
+**Current ordering authority (2026-09-19):** use the [Sync Reliability Unified Plan](sync-reliability-unified-plan-2026-09-19.md) for sync and operations sequencing and the [Additional Domain Research Synthesis](../research/additional-domain-research-synthesis-2026-09-19.md) for inventory, import, QC, and cross-domain dependencies. The earlier [improvement research](improvement-research-2026-09-18.md) remains useful historical context. Keep this file as the catalog of built foundations, remaining work, and product ideas.
+
+**Capability reconciliation (2026-09-21):** statuses below describe repository capability, not production deployment or operator acceptance.
+
+| Capability | Current status | Evidence boundary / remaining work |
+|---|---|---|
+| Sync | **Partial** | Complete/partial snapshot fencing, SSE, protected merge, wake recovery, measurements, and server projections are built; repeated-offline convergence, operator visibility, and current deployment evidence remain open. |
+| Server calculations | **Done for live projected surfaces** | Slices 1–7 are implemented with local offline/unsaved-edit fallbacks; this is not proof of production freshness. |
+| Inventory | **Partial** | Actual-case, packaging, surplus, prep-mix, freezer, and sauce physical-event accounting exist; final totals still need a completion-time freeze and waste/returns remain open. |
+| Mixes | **Partial** | Server mix-made deduction and surplus/carry exist; operational reconciliation and broader planning remain open. |
+| Freezer | **Partial** | Dated surplus lots and allocations exist; unified lookahead and physical reconciliation remain open. |
+| Warehouse | **Partial** | Server snapshots, staging, needs, and switchover support exist; unified multi-day capacity/conflict planning remains open. |
+| Imports | **Partial** | Seven importer flows, review, aliases, history, and audit recovery exist; atomic apply, guarded undo, deterministic-first parsing, and provenance remain open. |
+| QC | **Open beyond thin foundations** | Existing quality, incident, downtime, substitution, and lot fields are inputs; the durable QC department and audit model are not built. |
+| Allergens | **Partial** | Run labels, normalization, and sequence warnings exist; ingredient mapping, verification, cleaning gates, declarations, and reporting remain open. |
+| Reporting | **Partial** | Day/week summaries, completed history, and authoritative operational reports exist; automation, exports, costs, and advanced comparisons remain open. |
+| Downtime | **Partial** | Logging, aggregation, trends, and stall nudges exist; live alerts, classification, cost, recurrence, and correlations remain open. |
+| Battery/performance | **Partial** | Visibility-aware clock/timer consolidation and Floor Mode Wake Lock are built; controlled real-device battery evidence remains open. |
 
 ### Recommended build order (summary)
 
 | Phase | Focus | Priority |
 |-------|--------|----------|
-| **A** | Delta sync (flagged), blank-template lockstep, per-device sync health, conflict visibility, wake/recovery productization | Highest |
-| **B** | Inventory truth: actual cases / overproduction, mix-made deduction, freezer double-count, packaging completeness | High |
-| **C** | Station-first UX, line map, unified multi-day prep checklist | High |
-| **D** | QC Phase 1, allergen tracking | High (food safety) |
-| **E** | AI portfolio per value audit (keep extraction; simplify/retire broad surfaces) | Medium |
-| **F** | Production reporting, downtime analytics | Medium |
+| **A** | Reliability correctness: repeated-offline convergence and remaining reset/auto-track regressions after complete-write fencing | Highest |
+| **B** | Operational evidence: current published identity/readiness, production database capacity budget, and AI dependency policy | High |
+| **C** | Inventory truth: actual cases, overproduction, prep-mix events, freezer movement, packaging completeness | High |
+| **D** | Import safety, durable QC ownership, allergen controls | High |
+| **E** | Station-first UX, unified multi-day preparation, AI portfolio decisions | Medium |
+| **F** | Reporting, downtime analytics, and evidence-triggered sync optimizations | Medium |
+
+Phases A and B are the reliability program. Inventory, import, QC, and allergen work are adjacent product tracks, not prerequisites for complete-write fencing. JSON Patch, compression, selective sync, and timestamp policy remain conditional on measurements.
 
 ---
 
 ## 1. Mix Plan & Prep Mix Inventory
 
-**Status**: Partially done — verify surplus ledger vs remaining gaps (see inventory plans)
+**Status**: Partially built — planning math, physical mix-production deduction, and surplus/carry ownership exist; broader reconciliation and planning remain
 **Priority**: High — same root issue as overproduction inventory gap
-**Research note (2026-09-18):** Status line previously said Done while summary still described advisory-only mix plan. Treat as **partial**: confirm what shipped (surplus ledger / daily deduction) against code before closing residual work.
+**Reconciled note (2026-09-21):** server physical-event accounting and a mix-surplus ledger are implemented. Keep this capability **partial** because operator reconciliation, unified lookahead, and production evidence remain open.
 
 ### Summary
 Mix plan must move stock when prep mixes are made, track leftovers, and allocate into later runs. Residual work if any of the following still apply:
@@ -38,7 +57,8 @@ Mix plan must move stock when prep mixes are made, track leftovers, and allocate
 ### Proposed Solution
 
 **A. Deduction on Mix-Made**
-- When "Already Made" is entered (or a new mix-made action is added) → deduct component ingredients from inventory
+- "Already Made" is an offset to fresh mix need, not a deduction trigger
+- A separate, idempotent "mix made" event must deduct component ingredients when physical production occurs
 - Same mechanism as `consume-run`: look up mix components → compute lbs needed → call `planDrawDown`
 - Audit-logged: "Prep mix made: {mix name} → deducted {qty} {ingredient} from inventory"
 
@@ -79,7 +99,7 @@ Mix plan must move stock when prep mixes are made, track leftovers, and allocate
 
 ## 2. QC Department (Comprehensive)
 
-**Status**: Planning
+**Status**: Open beyond thin foundations
 **Full plan**: [docs/qc-department-plan.md](qc-department-plan.md)
 **Priority**: High — Phase 1 first
 
@@ -128,7 +148,7 @@ CRUD for each check type, dashboard/aggregation, audit/compliance, import approv
 
 ## 3. Overproduction & Surplus Management
 
-**Status**: Planning
+**Status**: Partially built — actual-case consumption and freezer surplus assets exist; live detection, broader disposition, and analytics remain
 **Full plan**: [docs/overproduction-surplus-plan.md](overproduction-surplus-plan.md)
 **Priority**: Medium
 
@@ -161,10 +181,12 @@ Surplus system currently only handles freezer overproduction AFTER a run ends. E
 
 ## 4. Inventory System Gap Fixes
 
-**Status**: Analysis + plan complete
+**Status**: Partially built — actual-case, surplus, prep-mix, freezer movement, packaging, and sauce accounting exist; final-total freezing, waste/returns, and field reconciliation remain
 **Full plan**: [docs/inventory-autodeduction-plan.md](inventory-autodeduction-plan.md)
 **Analysis**: [docs/inventory-gap-analysis.md](inventory-gap-analysis.md)
 **Priority**: High — foundational for all other systems
+
+**Current dependency rule:** inventory changes must use one server-authoritative, idempotent transaction or intent per physical event. They must not add a parallel client stock-write path. See the [additional domain synthesis](../research/additional-domain-research-synthesis-2026-09-19.md).
 
 ### Summary
 Inventory consumption is a single-point event (run-end) rather than continuous. 8 gaps identified. Comprehensive plan covers all critical + medium + non-ingredient packaging gaps.
@@ -218,7 +240,7 @@ Inventory consumption is a single-point event (run-end) rather than continuous. 
 
 ## 5. Allergen Tracking
 
-**Status**: Planning
+**Status**: Foundation built; safety improvements planned
 **Full plan**: [docs/allergen-tracking-plan.md](allergen-tracking-plan.md)
 **Priority**: High — food safety
 
@@ -243,7 +265,7 @@ Basic allergen field exists per run. Need ingredient-level allergen mapping, QC 
 
 ## 6. Production Reporting
 
-**Status**: Planning
+**Status**: Partially built — day/week summaries, completed history, and authoritative operational reports exist; automation, export, cost, and comparison work remain
 **Full plan**: [docs/production-reporting-plan.md](production-reporting-plan.md)
 **Priority**: Medium
 
@@ -268,7 +290,7 @@ Day/week summary exists with AI narration. Need automated end-of-day reports, PD
 
 ## 7. Stoppage & Downtime Analytics
 
-**Status**: Planning
+**Status**: Partially built — logging, aggregation, trends, and stall nudges exist; live alerting, classification, cost, recurrence, and correlation work remain
 **Full plan**: [docs/stoppage-analytics-plan.md](stoppage-analytics-plan.md)
 **Priority**: Medium
 
@@ -405,7 +427,8 @@ Add dedicated tracking for physical stations currently missing from the app.
 
 ## 12. Battery & Performance
 
-**Status**: Ideas only
+**Status**: Repository implementation built — visibility-aware timer consolidation and Floor Mode Wake Lock exist; controlled real-device evidence remains
+**Research**: [battery-performance-research.md](battery-performance-research.md)
 **Priority**: Medium
 
 ### Summary
@@ -518,7 +541,7 @@ Fix layout issues on phones (too large) and tablets (too small). Prevent overlap
 
 ## 15. Import System Improvements
 
-**Status**: Planning
+**Status**: Partially built — importer foundations are substantial; apply atomicity, guarded undo, deterministic-first parsing, provenance, and QC approval remain open
 **Full plan**: [docs/import-system-plan.md](import-system-plan.md)
 **Redesign plan**: [docs/importer-redesign-plan.md](importer-redesign-plan.md)
 **Priority**: High — QC is the primary source for imports
@@ -542,6 +565,8 @@ More accurate, more automatic, more verifiable, less AI:
 - Audit recovery for pending records
 - Capability gates (canImportSpec, etc.)
 
+Current apply behavior is multi-step across authoritative domains rather than one transaction. History and saved review snapshots do not yet provide general transactional rollback.
+
 ### What's Planned
 | # | Improvement | Status |
 |---|------------|--------|
@@ -557,7 +582,7 @@ More accurate, more automatic, more verifiable, less AI:
 | 10 | Data versioning (re-import diff) | Planned |
 
 ### Build Order
-1. Rollback + preview diff + templates (Phase 1 — standalone)
+1. Structured preview + progress/transaction identity + pre-apply snapshot and guarded undo (Phase 1 — standalone)
 2. Validation + cross-import health + inventory impact (Phase 2)
 3. Batch import + versioning (Phase 3)
 4. **QC approval gate** — after QC department is built (Phase 4)
@@ -575,29 +600,35 @@ More accurate, more automatic, more verifiable, less AI:
 
 ## 16. Sync System Improvements
 
-**Status**: Partially built — delta sync and device visibility still missing
+**Status**: Snapshot-fenced complete/partial sync foundation built; repeated-offline convergence, current production evidence, and operator visibility remain
 **Priority**: **High** (raised 2026-09-18; was Medium)
 **Full plan:** [sync-system-improvements-plan.md](sync-system-improvements-plan.md)
-**Research:** [improvement-research-2026-09-18.md](improvement-research-2026-09-18.md) §3 Phase A
+**Ordering authority:** [sync-reliability-unified-plan-2026-09-19.md](sync-reliability-unified-plan-2026-09-19.md)
 
 ### Summary
-Cross-device sync is already stronger than older backlog text credited. Remaining work is payload size, observability, and operator trust—not greenfield LWW.
+Cross-device sync is already stronger than older backlog text credited. Complete and partial writes now use snapshot preconditions. The immediate remaining work is repeated-offline convergence, current deployment evidence, and operator visibility—not greenfield delta sync.
 
 ### Already built (do not re-propose as ideas)
-- **Optimistic locking / LWW** — `canonicalRevision`; additive/tombstone merges (`upsertProtected`)
+- **Protected merge / route-specific revision** — additive/tombstone merges exist, but ordinary day-state PUT retains `canonicalRevision` and does not enforce it as a universal precondition
 - **Conflict-safe merge** — `protectRunValues` + blank-over-populated guard
 - **Live push** — SSE broadcasts on accepted writes
 - **Offline queue** — `syncPushQueue` + operational mutation cursor
 - **Daily-reset session fence** — facility-local boundary force-expires stale sessions
 - **Server-authoritative live calc / auto-track projection** on the sync stream
 - **Wake-recovery timing diagnostics** in Sync Activity
+- **Partial PUT** with under-lock `baseSnapshotId` validation and complete authoritative fallback
+- **Complete PUT snapshot fence** with under-lock base validation and `wrote=false` canonical fallback
+- **Conditional partial peer SSE** with complete initial/recovery frames
+- **Privacy-safe sync and pool-pressure measurements** plus deterministic multi-process SSE verification
 
 ### Still missing (build these)
-1. **Delta sync** (top priority) — JSON Patch against shadow keyed by `canonicalRevision`; full-state fallback; feature-flagged. Evidence: production body-limit incident in `.agents/memory/sync-body-limit.md`
-2. **Complete per-device sync health** — wake timing already exists; add manager-visible last seen, queue depth, and revision lag for each device
-3. **Field-specific conflict visibility** — rejected writes are already signaled; add a non-blocking explanation when a successful server merge keeps another device's value
-4. **Selective sync** — deferred until delta sync is measured
-5. **Compression** — likely lower priority if deltas shrink payloads enough
+1. **Repeated-offline convergence** — confirm multiple edits and retries rebase cleanly after complete-snapshot conflicts
+2. **Current production identity/readiness evidence** — bind live recovery and stream observations to the exact published revision
+3. **Database capacity budget** — size connection limits from measured production pressure and deployment concurrency
+4. **AI dependency policy** — provider-key detection is corrected; hard-versus-soft readiness remains an explicit product/operations decision
+5. **Complete per-device sync health** — manager-visible last seen, queue depth, and lag
+6. **Field-specific conflict visibility** — explain when another device's value is retained
+7. **Conditional optimization** — broader sparse coverage, JSON Patch, selective sync, compression, or timestamp policy only when measurements justify them
 
 ### Resolved guardrail
 - Client and server blank templates now both include `cartonSize: 1`, with mirrored regression coverage. Keep the lockstep test mandatory whenever defaults change (research §2.1).
@@ -609,4 +640,44 @@ Cross-device sync is already stronger than older backlog text credited. Remainin
 - `artifacts/run-calculator/src/syncPushQueue.ts` — offline queue
 - `.agents/memory/sync-body-limit.md` — payload growth incident
 - `artifacts/api-server/src/routes/sync.convergence.integration.test.ts` — sync convergence coverage
+
+---
+
+## 17. Residual Observability & Resilience Ideas
+
+**Status**: Design items retained after review; the historical branch implementation was rejected
+**Priority**: Medium — build only against current architecture and measured need
+
+### A. Privacy-safe operational audit trail
+
+Preserve the goal of durable, authorized operational evidence without retaining arbitrary request or state payloads.
+
+**Required boundaries**:
+- Derive facility/scope from the authenticated request; never accept caller-selected scope as authorization
+- Use immutable, allowlisted event schemas with server-generated actor identity and timestamps
+- Store bounded identifiers, counts, outcomes, and reason codes—not recipes, day-state bodies, prompts, credentials, raw IP addresses, or unrestricted JSON
+- Define retention, redaction, export, pagination, and purge behavior before adding tables
+- Gate reads with the correct capability and live-scope fence
+- Keep high-stakes audit writes in the same durable transaction or fail the operation explicitly; do not silently swallow missing compliance records
+- Add schema migration, OpenAPI, generated-client, authorization, isolation, and retention tests
+
+**Owner plans**: [QC Department](qc-department-plan.md) for compliance records; domain-specific operational plans for non-QC events.
+
+### B. Provider-native AI resilience
+
+Retained AI extraction workloads need bounded failure behavior implemented around the active Gemini adapter.
+
+**Required boundaries**:
+- Explicit request timeout and cancellation
+- Selective retry only for transient, safe failures; honor `Retry-After` where available
+- Single-probe circuit-breaker recovery with bounded cooldown
+- Capability-specific health and user-facing degradation; do not silently change global readiness policy
+- Safe metrics for duration, outcome, retry count, and bounded token/cost totals without prompts, responses, users, or operational payloads
+- Provider-key detection and resilience tests must use the same adapter contract
+
+**Owner plans**: [Sync Reliability Unified Plan](sync-reliability-unified-plan-2026-09-19.md) Phase 6 and the [AI value audit](ai-feature-value-audit-2026-09-05.md).
+
+### Rejected implementation boundary
+
+Do not reuse the historical `improvements/observability-resilience` branch. Its query monkey-patching, caller-selected audit scope, raw diagnostic exposure, unrestricted telemetry, obsolete OpenAI client, unapplied patch files, and unbudgeted pool increase are not implementation templates.
 

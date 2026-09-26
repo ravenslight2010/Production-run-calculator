@@ -13,11 +13,13 @@ import {
   DEFAULT_MANAGER_CAPABILITIES,
   type E2ECapability,
 } from "./isolation";
+import type { FormValues } from "../src/types";
 
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 const PASSWORD = "TestPass123!";
 const API_BASE = process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
 let authorizedFixtures: AuthorizedBrowserFixtures;
+let inventoryFixtureItems: Array<{ id: number; token: string }> = [];
 
 test.beforeAll(async ({ playwright }) => {
   authorizedFixtures = await AuthorizedBrowserFixtures.create(
@@ -33,6 +35,15 @@ test.beforeEach(async () => {
   ]);
 });
 
+test.afterEach(async ({ request }) => {
+  for (const item of inventoryFixtureItems) {
+    await request.delete(`/api/inventory/items/${item.id}`, {
+      headers: { Cookie: `rc_auth=${item.token}` },
+    });
+  }
+  inventoryFixtureItems = [];
+});
+
 test.afterAll(async () => {
   await authorizedFixtures?.cleanup({
     syncDates: [new Date().toISOString().slice(0, 10)],
@@ -45,6 +56,7 @@ function uid(): string {
 
 async function createAuthorizedServerFixture(
   username: string,
+  valueOverrides: Partial<FormValues> = {},
 ): Promise<{ token: string; brand: string; flavor: string; runId: string; startedAt: number }> {
   const auth = await authorizedFixtures.createAccount({
     username,
@@ -85,6 +97,7 @@ async function createAuthorizedServerFixture(
     app1BatchesMade: 0,
     app1BatchAnchorNetSec: 0,
     app1BatchCorrectionGeneration: 0,
+    ...valueOverrides,
   };
   await authorizedFixtures.seedBrandProfile(auth, {
     key,
@@ -129,7 +142,7 @@ async function runAuthoritativeAutoTrackTick(
   page: Page,
   nowMs: number,
   options: { rearm?: boolean } = {},
-): Promise<void> {
+): Promise<{ accepted?: number; outcomes?: Record<string, number> }> {
   const response = await page.request.post("/api/sync/e2e/auto-track-tick", {
     data: { nowMs, ...(options.rearm ? { rearm: true } : {}) },
   });
@@ -137,6 +150,29 @@ async function runAuthoritativeAutoTrackTick(
     response.ok(),
     `authoritative auto-track fixture tick failed: ${response.status()}`,
   ).toBe(true);
+  return await response.json() as { accepted?: number; outcomes?: Record<string, number> };
+}
+
+async function seedInventoryItem(
+  page: Page,
+  token: string,
+  name: string,
+): Promise<void> {
+  const response = await page.request.post("/api/inventory/items", {
+    headers: { Cookie: `rc_auth=${token}` },
+    data: {
+      key: `ingredient:${name}:lbs`,
+      category: "ingredient",
+      name,
+      unit: "lbs",
+    },
+  });
+  expect(
+    response.ok(),
+    `inventory fixture creation failed: ${response.status()}`,
+  ).toBe(true);
+  const body = await response.json() as { id: number };
+  inventoryFixtureItems.push({ id: body.id, token });
 }
 
 async function openAsAuthorizedFixture(
@@ -259,6 +295,74 @@ test("Sauce and Dough live cards work at a phone viewport", async ({ page }) => 
 
   await page.getByTestId("tab-dough").click();
   await expect(page.getByTestId("text-target-ball-weight")).toHaveText("10 oz");
+});
+
+test("Sauce automatic supply stays accurate after the final partial unit", async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.setViewportSize({ width: 390, height: 844 });
+  const username = uid();
+  const sauceName = `Fixture Sauce ${username}`;
+  const fixture = await createAuthorizedServerFixture(username, {
+    // 10 × 32 oz plus the 30 lb buffer = 50 lb = 2.5 barrels. The short
+    // cadence lets this browser fixture claim the final physical barrel while
+    // the rendered demand remains fractional.
+    casesNeeded: 10,
+    crustsPerCycle: 1,
+    cycleSpeed: 1,
+    speedAdjustment: 1,
+    freezerTime: 0,
+    sauceOzPerPizza: 32,
+    sauceBarrelLbs: 20,
+    frontlineRecipeName: sauceName,
+    sauceBarrelsMade: 2,
+    sauceBarrelAnchorNetSec: 0,
+    sauceBarrelCorrectionGeneration: 0,
+  });
+  await seedInventoryItem(page, fixture.token, sauceName);
+  await page.context().addCookies([{
+    name: "rc_auth",
+    value: fixture.token,
+    url: API_BASE,
+  }]);
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  await expect(page.getByRole("button", { name: /pause.?run/i })).toBeVisible();
+  await page.getByTestId("tab-sauce").click();
+
+  const sauceOutput = page.getByTestId("output-sauce-batches");
+  const sauceCard = sauceOutput.locator("xpath=../..");
+  await expect(sauceOutput).toContainText("0.00 barrels still to make");
+  await expect(sauceCard).toContainText("Total 2.50 · consumed 2.00");
+  await expect(sauceCard).toContainText("On line 0.50 · ready 0.00 · being made 0.00");
+
+  // With a 20 lb barrel, 32 oz/pizza, and 1 ppm, the authoritative Sauce
+  // cadence is 600 net seconds. The fixture starts at two consumed barrels so
+  // this claim is the final physical barrel and must clamp to the fractional
+  // 2.5-barrel requirement rather than overshooting the displayed total.
+  const tick = await runAuthoritativeAutoTrackTick(page, fixture.startedAt + 600_000);
+  expect(tick.accepted, JSON.stringify(tick)).toBeGreaterThan(0);
+  await page.waitForTimeout(250);
+
+  const expectCompletedSauceCard = async () => {
+    await expect(sauceOutput).toContainText("0.00 barrels still to make · done ✓");
+    await expect(sauceCard).toContainText("Total 2.50 · consumed 2.50");
+    await expect(sauceCard).toContainText("On line 0.00 · ready 0.00 · being made 0.00");
+    await expect(page.getByText(/start new barrel soon|barrel exhausted/i)).toHaveCount(0);
+    await expect(page.getByTestId("button-dismiss-barrel-alert")).toHaveCount(0);
+  };
+
+  await expectCompletedSauceCard();
+
+  // Tabs unmount inactive content. The canonical progress must reconstruct the
+  // same completed summary rather than relying on a tab-local barrel counter.
+  await page.getByTestId("tab-dough").click();
+  await page.getByTestId("tab-sauce").click();
+  await expectCompletedSauceCard();
+
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByTestId("tab-sauce").waitFor({ state: "attached", timeout: 25_000 });
+  await page.getByTestId("tab-sauce").click();
+  await expectCompletedSauceCard();
 });
 
 test("Dough and Sauce phone quick checks share line-speed feedback across tab switches", async ({ page }) => {

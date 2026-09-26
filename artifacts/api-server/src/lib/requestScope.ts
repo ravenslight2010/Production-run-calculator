@@ -14,12 +14,17 @@ import { AsyncLocalStorage } from "node:async_hooks";
 // preserves the original, scope-unaware behavior exactly.
 export type Scope = "live" | "sandbox";
 
-const als = new AsyncLocalStorage<Scope>();
+type RequestContext = { scope: Scope; actorId: string };
+const als = new AsyncLocalStorage<RequestContext>();
 
-export function runWithScope<T>(scope: Scope, fn: () => T): T {
-  return als.run(scope, fn);
+export function runWithScope<T>(scope: Scope, fn: () => T, actorId = "system"): T {
+  return als.run({ scope, actorId }, fn);
 }
 
 export function currentScope(): Scope {
-  return als.getStore() ?? "live";
+  return als.getStore()?.scope ?? "live";
+}
+
+export function currentActorId(): string {
+  return als.getStore()?.actorId ?? "system";
 }

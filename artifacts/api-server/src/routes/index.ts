@@ -118,7 +118,7 @@ export const readAuthorizationInventory: readonly ReadAuthorization[] = [
     "/inventory/quality-checks",
   ]),
   ...reads(["manage-profiles", "manage-inventory"], "any", "scoped", [
-    "/import-history",
+    "/import-history", "/import-operations/:operationId",
   ]),
   ...reads(["manage-factory-settings"], "all", "scoped", ["/factory-data"]),
   ...reads(["review-incidents"], "all", "scoped", [
@@ -129,13 +129,16 @@ export const readAuthorizationInventory: readonly ReadAuthorization[] = [
     "/reports/operational/finalized/proof-key-health",
     "/reports/operational/finalized/:id", "/reports/operational/finalized/:id/export",
   ]),
-  ...reads(["manage-staff"], "all", "live-only", ["/roles", "/users"]),
+  ...reads(["manage-staff"], "all", "live-only", [
+    "/roles", "/users", "/signup-code/status", "/staff-invitations",
+  ]),
   ...reads(["approve-password-resets"], "all", "live-only", ["/password-reset-requests"]),
   ...reads(["manage-profiles"], "all", "scoped", [
     "/master-data/health", "/master-data/health/history",
   ]),
   ...reads(["manage-staff"], "all", "live-only", [
-    "/audit-logs/profile-name-link-cleanup", "/audit-logs",
+    "/audit-logs/profile-name-link-cleanup", "/audit-logs", "/audit-logs/export.csv",
+    "/audit-logs/export.pdf",
   ]),
   ...reads(["use-ai-tools"], "all", "scoped", ["/ai-memory/facility"]),
   ...reads(["use-ai-tools"], "all", "scoped", ["/ai-corrections"]),
@@ -199,6 +202,7 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
   ...writes("public", "live-only", "denied", undefined, [
     "POST /auth/sign-up", "POST /auth/sign-in", "POST /auth/sign-out",
     "POST /auth/forgot-password", "POST /auth/reset-password",
+    "POST /auth/accept-invitation",
   ]),
   ...writes("per-user", "per-user", "allowed", undefined, [
     // Password changes update only the authenticated caller's account row.
@@ -265,6 +269,9 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
   ...writes("manager-only", "live-only", "denied", "manage-staff", [
     "POST /roles", "PUT /roles/:name", "DELETE /roles/:name", "PUT /users/:userId/role",
     "PUT /users/:userId/password", "DELETE /users/:userId",
+    "PATCH /users/:userId/status", "POST /users/:userId/revoke-sessions",
+    "POST /staff-invitations", "DELETE /staff-invitations/:id",
+    "PATCH /signup-code/status", "POST /signup-code/rotate",
   ]),
   ...writes("capability-gated", "live-only", "denied", "approve-password-resets", [
     "POST /password-reset-requests/:id/approve", "POST /password-reset-requests/:id/decline",
@@ -276,6 +283,14 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
   ]),
   {
     method: "POST", path: "/import-history", ownership: "capability-gated", scope: "scoped", sandbox: "allowed",
+    capabilities: ["manage-profiles", "manage-inventory"], capabilityMatch: "any",
+  },
+  {
+    method: "POST", path: "/import-operations/:operationId/apply", ownership: "capability-gated", scope: "scoped", sandbox: "allowed",
+    capabilities: ["manage-profiles", "manage-inventory"], capabilityMatch: "any",
+  },
+  {
+    method: "POST", path: "/import-operations/:operationId/undo", ownership: "capability-gated", scope: "scoped", sandbox: "allowed",
     capabilities: ["manage-profiles", "manage-inventory"], capabilityMatch: "any",
   },
   ...writes("capability-gated", "scoped", "allowed", "use-ai-tools", [

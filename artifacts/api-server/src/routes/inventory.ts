@@ -79,6 +79,7 @@ import {
   buildCountPrompt,
   sanitizeCountDraft,
 } from "./countObservation";
+import { AI_ROUTE_BOUNDARIES, validateAiRequestBoundary } from "../lib/aiDataBoundary";
 import {
   applyRunConsumption,
   planDrawDown,
@@ -640,6 +641,11 @@ function registerCountObservationRoute(
     }),
     options.countObservationCostLimit ?? aiCostLimit,
     async (req, res): Promise<void> => {
+      const boundary = validateAiRequestBoundary(AI_ROUTE_BOUNDARIES.inventoryCountObservation, req.body);
+      if (!boundary.ok) {
+        res.status(boundary.status).json({ error: boundary.error });
+        return;
+      }
       const parsed = CountObservationBody.safeParse(req.body);
       if (!parsed.success) {
         res.status(400).json({ error: "Attach one to three valid photos." });
@@ -810,6 +816,11 @@ router.post(
     store: photoRateStore,
   }),
   async (req, res): Promise<void> => {
+  const boundary = validateAiRequestBoundary(AI_ROUTE_BOUNDARIES.identifyInventoryPhoto, req.body);
+  if (!boundary.ok) {
+    res.status(boundary.status).json({ error: boundary.error });
+    return;
+  }
   const validation = validateIdentifyPhotoBody(req.body);
   if (!validation.ok) {
     res.status(validation.status).json({ error: validation.error });
@@ -971,6 +982,11 @@ router.post(
     store: productionSheetRateStore,
   }),
   async (req, res): Promise<void> => {
+    const boundary = validateAiRequestBoundary(AI_ROUTE_BOUNDARIES.productionSheetPhoto, req.body);
+    if (!boundary.ok) {
+      res.status(boundary.status).json({ error: boundary.error });
+      return;
+    }
     const validation = validateProductionSheetBody(req.body);
     if (!validation.ok) {
       res.status(validation.status).json({ error: validation.error });
@@ -1428,6 +1444,7 @@ export async function consumeRunInTransaction(
   tx: InventoryExecutor,
   runId: string,
   lines: ConsumeLine[],
+  claimAlreadyAcquired = false,
 ): Promise<{ applied: boolean; consumed: number }> {
   const scope = currentScope();
   // Production only ever pulls from onsite/line stock. Resolve this through the
@@ -1440,6 +1457,7 @@ export async function consumeRunInTransaction(
   return applyRunConsumption(
       {
         claimRun: async (rid) => {
+           if (claimAlreadyAcquired) return true;
           const [claim] = await tx
             .insert(inventoryConsumedRunsTable)
             .values({ runId: rid, scope })
@@ -2196,37 +2214,52 @@ function todayStr(): string {
 router.post(
   "/inventory/consume-day-start",
   requireCapability("manage-inventory"),
-  async (req, res): Promise<void> => {
-    const dateStr = (req.body && typeof req.body === "object"
+  (req, res) => consumeDayStart(req, res),
+);
+
+export async function consumeDayStart(
+  req: Request,
+  res: Response,
+  options: { failAfterClaim?: boolean; failBeforeCommit?: boolean } = {},
+): Promise<void> {
+    const requestedDate = req.body && typeof req.body === "object"
       ? (req.body as { date?: string }).date
-      : undefined) || todayStr();
+      : undefined;
+    const dateStr = requestedDate === undefined ? todayStr() : requestedDate;
+    if (typeof dateStr !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      res.status(400).json({ error: "date must be YYYY-MM-DD" });
+      return;
+    }
+    const parsedDate = new Date(`${dateStr}T00:00:00Z`);
+    if (Number.isNaN(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== dateStr) {
+      res.status(400).json({ error: "date must be a valid calendar date" });
+      return;
+    }
     const runId = `day-start:${dateStr}`;
     const scope = currentScope();
 
+    const result = await db.transaction(async (tx) => {
     // ── Idempotency gate ──────────────────────────────────────────────────
-    const [existingClaim] = await db
-      .select({ runId: inventoryConsumedRunsTable.runId })
-      .from(inventoryConsumedRunsTable)
-      .where(
-        and(
-          eq(inventoryConsumedRunsTable.runId, runId),
-          eq(inventoryConsumedRunsTable.scope, scope),
-        ),
-      )
-      .limit(1);
-    if (existingClaim) {
-      res.json({ applied: false, message: "Day-start already consumed for this date" });
-      return;
-    }
+    const [claim] = await tx.insert(inventoryConsumedRunsTable)
+      .values({ runId, scope })
+      .onConflictDoNothing({
+        target: [inventoryConsumedRunsTable.runId, inventoryConsumedRunsTable.scope],
+      })
+      .returning();
+    if (!claim) return { applied: false, consumed: 0, lines: 0 };
+    if (options.failAfterClaim) throw new Error("test day-start failpoint");
 
     const lines: ConsumeLine[] = [];
 
     // ── Feature B: Fresh mix components ────────────────────────────────────
     // Build MixScheduledRun[] from all day-state runs matching `dateStr`.
-    const rows = await db
+    const rows = await tx
       .select({ data: dailySyncTable.data })
       .from(dailySyncTable)
-      .where(eq(dailySyncTable.scope, scope));
+        .where(and(
+          eq(dailySyncTable.scope, scope),
+          eq(dailySyncTable.date, dateStr),
+        ));
     const scheduledRuns: MixScheduledRun[] = [];
     for (const row of rows) {
       const data = row.data as {
@@ -2254,10 +2287,11 @@ router.post(
     }
     if (scheduledRuns.length > 0) {
       // Fetch mixes for scope
-      const mixRows = await db
+      const mixRows = await tx
         .select()
         .from(mixesTable)
-        .where(eq(mixesTable.scope, scope));
+        .where(eq(mixesTable.scope, scope))
+        .for("update");
       const mixes: Mix[] = mixRows
         .map((r) => normalizeMix({ ...r, components: r.components }))
         .filter((m): m is Mix => m !== null);
@@ -2312,7 +2346,7 @@ router.post(
         // Persist surplus carry-forwards (update amountAlreadyMade on each mix)
         if (mixesToUpdate.length > 0) {
           for (const upd of mixesToUpdate) {
-            await db
+            await tx
               .update(mixesTable)
               .set({ amountAlreadyMade: upd.amountAlreadyMade, updatedAt: new Date() })
               .where(eq(mixesTable.id, upd.id));
@@ -2329,7 +2363,7 @@ router.post(
         for (const r of mixRows) actualMadeByMixId[r.id] = Number(r.amountActualMade) || 0;
         const surplusRecording = buildMixSurplusRecording(plan, actualMadeByMixId);
         if (surplusRecording.length > 0) {
-          const existingLots = await db
+          const existingLots = await tx
             .select()
             .from(mixSurplusLotsTable)
             .where(
@@ -2353,7 +2387,7 @@ router.post(
             const key = `${row.mixId}|${dateStr}`;
             const existing = lotByKey.get(key);
             if (existing) {
-              await db
+              await tx
                 .update(mixSurplusLotsTable)
                 .set({
                   amountMade: Math.round((existing.amountMade + row.amountMade) * 100) / 100,
@@ -2362,7 +2396,7 @@ router.post(
                 })
                 .where(eq(mixSurplusLotsTable.id, existing.id));
             } else {
-              await db.insert(mixSurplusLotsTable).values({
+              await tx.insert(mixSurplusLotsTable).values({
                 id: randomUUID(),
                 scope,
                 mixId: row.mixId,
@@ -2389,21 +2423,16 @@ router.post(
 
     // ── Deduct ─────────────────────────────────────────────────────────────
     if (lines.length === 0) {
-      await db
-        .insert(inventoryConsumedRunsTable)
-        .values({ runId, scope })
-        .onConflictDoNothing({
-          target: [inventoryConsumedRunsTable.runId, inventoryConsumedRunsTable.scope],
-        });
-      res.json({ applied: true, consumed: 0, message: "No mix components or supplies to deduct" });
-      return;
+      return { applied: true, consumed: 0, lines: 0 };
     }
-    const result = await consumeRun(runId, lines);
-    if (result.applied) {
-      broadcast(headerSenderId(req), scope);
-    }
-    res.json({ applied: result.applied, consumed: result.consumed, lines: lines.length });
-  },
-);
+    const consumption = await consumeRunInTransaction(tx, runId, lines, true);
+    if (options.failBeforeCommit) throw new Error("test day-start pre-commit failpoint");
+    return { ...consumption, lines: lines.length };
+    });
+    if (result.applied) broadcast(headerSenderId(req), scope);
+    res.json(result.applied
+      ? { applied: true, consumed: result.consumed, lines: result.lines }
+      : { applied: false, message: "Day-start already consumed for this date" });
+}
 
 export default router;

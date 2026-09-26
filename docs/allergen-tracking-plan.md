@@ -1,5 +1,9 @@
 # Allergen Tracking — Plan
 
+**Status:** Baseline run labels and sequence warnings built; ingredient mapping, QC verification, cleaning gates, declarations, and reporting remain planned
+**Updated:** 2026-09-19
+**Dependencies:** stable ingredient identity and durable QC ownership must precede automatic rollups or production-blocking cleaning controls. See the [QC plan](qc-department-plan.md) and [additional domain synthesis](../research/additional-domain-research-synthesis-2026-09-19.md).
+
 ## Current State
 
 | Feature | File | What It Does |

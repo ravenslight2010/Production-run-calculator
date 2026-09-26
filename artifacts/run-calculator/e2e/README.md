@@ -196,7 +196,9 @@ rerun the suite only after confirming the disposable database boundary. The
 global reset removes today’s live-day row before the next run, while per-suite
 cleanup removes tracked accounts and entity fixtures.
 
-The main config enumerates 160 cases and retains
+The main config enumerates the case count declared by
+[`full-browser-case-contract.mts`](../../../scripts/src/full-browser-case-contract.mts)
+and retains
 `release-evidence/browser-full/FINAL-REPORT.md` after a real full-suite run.
 The report includes the revision, completion counts, total duration, and
 per-file test-result durations. Discovery (`--list`) and focused runs do not
@@ -224,10 +226,10 @@ This debug command is destructive and keeps the same disposable-database guard,
 serial worker, Chromium project, suite exclusions, global setup, and local
 server factory as the full release lane. It uses separate
 `test-results/release-debug` and `playwright-report/release-debug` directories
-and does not load the 160-case release reporter, even if
+and does not load the full-browser release reporter, even if
 `PLAYWRIGHT_RELEASE_REPORT_PATH` is set. Its result is never release evidence.
-The full `test:e2e` lane remains the only command that enforces exactly 160
-cases and may retain `release-evidence/browser-full/FINAL-REPORT.md`.
+The full `test:e2e` lane remains the only command that enforces the shared case
+contract and may retain `release-evidence/browser-full/FINAL-REPORT.md`.
 The command does not set the approved-mode variables itself: a remote database
 whose name lacks an `e2e`, `test`, or `tmp` marker is rejected before cleanup.
 

@@ -49,7 +49,7 @@ export default defineConfig({
   testIgnore: ["calendar.spec.ts", "release-webkit-smoke.spec.ts"],
   // Physical Android checks run through the dedicated device lane. Keep the
   // three phone-layout checks, the process-restart-only sync check, and
-  // focused-only regressions outside the 159-case Chromium contract. The
+  // focused-only regressions outside the full-browser Chromium contract. The
   // exclusions live here so focused suites still run them without relying on
   // an operator CLI grep flag.
   grepInvert:

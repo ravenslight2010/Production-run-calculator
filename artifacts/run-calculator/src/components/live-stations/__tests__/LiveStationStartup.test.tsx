@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { type ReactNode, useEffect, useMemo, useRef } from "react";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { FormProvider, useForm, useWatch } from "react-hook-form";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HomeCtx } from "../../../contexts/HomeCtx";
@@ -34,6 +34,7 @@ vi.mock("../../../useRole", () => ({
 vi.mock("../../../hooks/useNotifications");
 
 const RUN_ID = "station-startup-run";
+const SWITCHED_RUN_ID = "station-switched-run";
 const RUNNING_RUN: RunMeta = {
   id: RUN_ID,
   brand: "Startup Brand",
@@ -45,6 +46,26 @@ const PENDING_RUN: RunMeta = {
   id: RUN_ID,
   brand: "Startup Brand",
   flavor: "Startup Flavor",
+  stoppages: [],
+};
+const ENDED_RUN: RunMeta = {
+  id: RUN_ID,
+  brand: "Startup Brand",
+  flavor: "Startup Flavor",
+  startedAt: Date.now() - 60 * 60_000,
+  endedAt: Date.now() - 20 * 60_000,
+  stoppages: [],
+};
+const NEXT_RUN: RunMeta = {
+  id: SWITCHED_RUN_ID,
+  brand: "Next Brand",
+  flavor: "Next Flavor",
+  stoppages: [],
+};
+const MANUALLY_SELECTED_RUN: RunMeta = {
+  id: "station-manually-selected-run",
+  brand: "Selected Brand",
+  flavor: "Selected Flavor",
   stoppages: [],
 };
 
@@ -72,16 +93,29 @@ const STATION_VALUES: FormValues = {
 
 function StationProviders({
   status,
+  runId = RUN_ID,
+  values = STATION_VALUES,
+  runs,
+  switchToRun = vi.fn(() => true),
   children,
 }: {
-  status: "pending" | "running";
+  status: "pending" | "running" | "paused" | "ended";
+  runId?: string;
+  values?: FormValues;
+  runs?: RunMeta[];
+  switchToRun?: (newIndex: number, expectedCurrentRunId?: string) => boolean;
   children: ReactNode;
 }) {
-  const form = useForm<FormValues>({ defaultValues: STATION_VALUES });
-  const currentRun = status === "running" ? RUNNING_RUN : PENDING_RUN;
+  const form = useForm<FormValues>({ defaultValues: values });
+  const currentRun = useMemo(() => {
+    if (runs?.[0]) return runs[0];
+    const base = status === "ended" ? ENDED_RUN : status === "running" ? RUNNING_RUN : PENDING_RUN;
+    return { ...base, id: runId };
+  }, [runId, runs, status]);
+  const dayRuns = useMemo(() => runs ?? [currentRun], [currentRun, runs]);
   const dayState = useMemo<DayState>(
-    () => ({ runs: [currentRun], currentIndex: 0 }),
-    [currentRun],
+    () => ({ runs: dayRuns, currentIndex: 0 }),
+    [dayRuns],
   );
   const dayStateRef = useRef(dayState);
   const autoSuppressUntilRef = useRef(0);
@@ -102,7 +136,7 @@ function StationProviders({
     autoSuppressUntilRef,
     confirmRunSurplus: vi.fn().mockResolvedValue(undefined),
     currentRun,
-    currentRunId: RUN_ID,
+    currentRunId: runId,
     dayState,
     dayStateRef,
     doughSubTab: "dough",
@@ -124,9 +158,10 @@ function StationProviders({
     setDayState: noop,
     setRunToTime: noop,
     setWriteError: noop,
+    switchToRun,
     updateDrainingRunValues: noop,
-    v: STATION_VALUES,
-    ve: STATION_VALUES,
+    v: values,
+    ve: values,
   };
 
   return (
@@ -134,11 +169,11 @@ function StationProviders({
       <HomeTabCtx.Provider value={homeValue}>
         <FormProvider {...form}>
           <LiveRunProvider
-            v={STATION_VALUES}
-            ve={STATION_VALUES}
+            v={values}
+            ve={values}
             runStatus={status}
             currentRun={currentRun}
-            currentRunId={RUN_ID}
+            currentRunId={runId}
             form={form}
             dayState={dayState}
             doughSubTab="dough"
@@ -181,6 +216,32 @@ const STATIONS = [
     pendingSelector: { text: "Active Skid Building" },
     runningSelector: { text: "Active Skid Building" },
   },
+] as const;
+
+const FRONTLINE_APPLICATOR_VALUES: FormValues = {
+  ...STATION_VALUES,
+  app2Type: "Cheese",
+  app2OzPerPizza: 2,
+  app2BatchLbs: 25,
+  app2CheeseRecipeName: "House Cheese 2",
+  app2CheeseRecipe: [{ ingredient: "Mozzarella", lbs: 25 }],
+  app3Type: "Cheese",
+  app3OzPerPizza: 2,
+  app3BatchLbs: 25,
+  app3CheeseRecipeName: "House Cheese 3",
+  app3CheeseRecipe: [{ ingredient: "Mozzarella", lbs: 25 }],
+  app4Type: "Cheese",
+  app4OzPerPizza: 2,
+  app4BatchLbs: 25,
+  app4CheeseRecipeName: "House Cheese 4",
+  app4CheeseRecipe: [{ ingredient: "Mozzarella", lbs: 25 }],
+};
+
+const FRONTLINE_APPLICATOR_LOCK_CASES = [
+  { slot: "app1", label: "App 1 — Cheese" },
+  { slot: "app2", label: "App 2 — Cheese" },
+  { slot: "app3", label: "App 3 — Cheese" },
+  { slot: "app4", label: "App 4 — Cheese" },
 ] as const;
 
 function expectSelector(
@@ -268,25 +329,164 @@ describe("live station startup", () => {
     expect(controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(false);
   });
 
-  it("keeps Frontline correction controls disabled while a peer owns the applicator section, then restores them", () => {
-    claimManualSectionLock(RUN_ID, "app1", "peer-device", 30_000, true);
+  it.each(FRONTLINE_APPLICATOR_LOCK_CASES)(
+    "keeps $slot Frontline correction controls disabled while a peer owns the applicator section, then restores them",
+    ({ slot, label }) => {
+      claimManualSectionLock(RUN_ID, slot, "peer-device", 30_000, true);
+      render(
+        <StationProviders status="running" values={FRONTLINE_APPLICATOR_VALUES}>
+          <LiveFrontlineTabContent />
+        </StationProviders>,
+      );
+
+      const controls = within(screen.getByText(label).parentElement!).getAllByRole("button", { name: /consumed batches correction/ });
+      expect(controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(true);
+
+      act(() => {
+        releaseManualSectionLock(RUN_ID, slot, "peer-device");
+      });
+
+      expect(controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(false);
+    },
+  );
+
+  it("keeps simultaneous peer locks scoped to their matching Frontline correction rows", () => {
+    claimManualSectionLock(RUN_ID, "app1", "peer-app1", 30_000, true);
+    claimManualSectionLock(RUN_ID, "app2", "peer-app2", 30_000, true);
     render(
-      <StationProviders status="running">
+      <StationProviders status="running" values={FRONTLINE_APPLICATOR_VALUES}>
         <LiveFrontlineTabContent />
       </StationProviders>,
     );
 
-    const controls = screen.getAllByRole("button", { name: /consumed batches correction/ });
-    expect(controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(true);
+    const app1Controls = within(screen.getByText("App 1 — Cheese").parentElement!).getAllByRole("button", { name: /consumed batches correction/ });
+    const app2Controls = within(screen.getByText("App 2 — Cheese").parentElement!).getAllByRole("button", { name: /consumed batches correction/ });
+    expect(app1Controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(true);
+    expect(app2Controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(true);
 
     act(() => {
-      releaseManualSectionLock(RUN_ID, "app1", "peer-device");
+      releaseManualSectionLock(RUN_ID, "app1", "peer-app1");
     });
 
-    expect(controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(false);
+    expect(app1Controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(false);
+    expect(app2Controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(true);
   });
-});
 
+  it("advances Frontline once when its ended run has cleared Stage 1", () => {
+    const switchToRun = vi.fn(() => true);
+    const view = render(
+      <StationProviders status="ended" runs={[ENDED_RUN, NEXT_RUN]} switchToRun={switchToRun}>
+        <LiveFrontlineTabContent />
+      </StationProviders>,
+    );
+
+    expect(switchToRun).toHaveBeenCalledTimes(1);
+    expect(switchToRun).toHaveBeenCalledWith(1, RUN_ID);
+    view.rerender(
+      <StationProviders status="ended" runs={[ENDED_RUN, NEXT_RUN]} switchToRun={switchToRun}>
+        <LiveFrontlineTabContent />
+      </StationProviders>,
+    );
+    expect(switchToRun).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps an ended station run selected when there is no queued next run", () => {
+    const switchToRun = vi.fn(() => true);
+    render(
+      <StationProviders status="ended" runs={[ENDED_RUN]} switchToRun={switchToRun}>
+        <LiveFrontlineTabContent />
+      </StationProviders>,
+    );
+
+    expect(switchToRun).not.toHaveBeenCalled();
+  });
+
+  it("does not advance Packaging during Frontline or Freeze tunnel drain", () => {
+    const switchToRun = vi.fn(() => true);
+    const stillDraining = { ...ENDED_RUN, endedAt: Date.now() - 5 * 60_000 };
+    render(
+      <StationProviders status="ended" runs={[stillDraining, NEXT_RUN]} switchToRun={switchToRun}>
+        <LivePackagingTabContent />
+      </StationProviders>,
+    );
+
+    expect(switchToRun).not.toHaveBeenCalled();
+  });
+
+  it("advances Packaging once when the ended run is fully drained, including on mount", () => {
+    const switchToRun = vi.fn(() => true);
+    const fullyDrained = { ...ENDED_RUN, endedAt: Date.now() - 40 * 60_000 };
+    render(
+      <StationProviders status="ended" runs={[fullyDrained, NEXT_RUN]} switchToRun={switchToRun}>
+        <LivePackagingTabContent />
+      </StationProviders>,
+    );
+
+    expect(switchToRun).toHaveBeenCalledTimes(1);
+    expect(switchToRun).toHaveBeenCalledWith(1, RUN_ID);
+  });
+
+  it.each([
+    { name: "Frontline", Component: LiveFrontlineTabContent },
+    { name: "Packaging", Component: LivePackagingTabContent },
+  ])(
+    "does not skip the queued run when a foreground selection races $name drain completion",
+    ({ Component }) => {
+      const fullyDrained = { ...ENDED_RUN, endedAt: Date.now() - 40 * 60_000 };
+      const runs = [fullyDrained, NEXT_RUN, MANUALLY_SELECTED_RUN];
+      const selectedRunId = { current: MANUALLY_SELECTED_RUN.id };
+      const switchToRun = vi.fn(
+        (newIndex: number, expectedCurrentRunId?: string) => {
+          // Model the real lifecycle manager's expected-run fence. The
+          // foreground/manual selection has already won before this stale
+          // station effect tries to advance the old draining run.
+          if (
+            expectedCurrentRunId &&
+            selectedRunId.current !== expectedCurrentRunId
+          ) {
+            return false;
+          }
+          selectedRunId.current = runs[newIndex]?.id ?? selectedRunId.current;
+          return true;
+        },
+      );
+
+      render(
+        <StationProviders
+          status="ended"
+          runs={runs}
+          switchToRun={switchToRun}
+        >
+          <Component />
+        </StationProviders>,
+      );
+
+      expect(switchToRun).toHaveBeenCalledTimes(1);
+      expect(switchToRun).toHaveBeenCalledWith(1, RUN_ID);
+      expect(selectedRunId.current).toBe(MANUALLY_SELECTED_RUN.id);
+      expect(selectedRunId.current).not.toBe(NEXT_RUN.id);
+    },
+  );
+
+  it.each(FRONTLINE_APPLICATOR_LOCK_CASES.filter(({ slot }) => slot !== "app1"))(
+    "keeps $slot Frontline correction controls usable after switching away from the peer-locked run",
+    ({ slot, label }) => {
+      claimManualSectionLock(RUN_ID, slot, "peer-device", 30_000, true);
+      render(
+        <StationProviders
+          status="running"
+          runId={SWITCHED_RUN_ID}
+          values={FRONTLINE_APPLICATOR_VALUES}
+        >
+          <LiveFrontlineTabContent />
+        </StationProviders>,
+      );
+
+      const controls = within(screen.getByText(label).parentElement!).getAllByRole("button", { name: /consumed batches correction/ });
+      expect(controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(false);
+    },
+  );
+});
 /**
  * These are intentionally component-level regressions rather than more
  * packaging-manager unit tests. The production stations call their handlers
@@ -442,7 +642,6 @@ describe("live station edits and stamped browser persistence", () => {
     );
     expect(acceptsStalePeer).toBe(false);
 
-    // Mirror the receive guard: only an accepted peer snapshot is written.
     if (acceptsStalePeer) saveRunValues(RUN_ID, stalePeerValues);
     expect(loadRunValues(RUN_ID).casesOnCurrentSkid).toBe(4);
   });

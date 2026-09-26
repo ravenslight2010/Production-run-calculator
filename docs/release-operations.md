@@ -4,6 +4,13 @@ This guide is the operating contract for the repository's release checks. A
 release check is successful only when the command exits zero **and** the
 retained evidence verifier passes for the same git revision.
 
+For reliability work, also follow the release gates in the
+[Sync Reliability Unified Plan](sync-reliability-unified-plan-2026-09-19.md#6-release-gates).
+Complete-write protocol changes require causality, convergence, reset, auto-track,
+packaging-progress, and atomic inventory-side-effect evidence. SSE topology or
+pool-size changes require sanitized deployment and capacity evidence. AI
+provider-key tests must not silently change the hard-versus-soft readiness policy.
+
 ## Release commands
 
 ```bash
@@ -60,12 +67,14 @@ config retains `browser-full/FINAL-REPORT.md` automatically. These are separate
 evidence paths: the bounded smoke and accessibility gates cannot overwrite the
 full-suite report.
 It records the run revision, total/complete/pass/skip/fail/not-run counts,
-wall-clock duration, and a sorted per-file duration table. The report is generated from
-Playwright's completed test results; a `GO` report requires all 159 cases to be
-enumerated and completed. The main config remains serial with `workers: 1`,
-with no retries or reduced test-match coverage. The release report also records
-total wall-clock time and per-stage wall-clock durations so the scheduler's
-speedup can be compared with the existing per-gate timings.
+wall-clock duration, and a sorted per-file duration table. The report is
+generated from Playwright's completed test results; a `GO` report requires
+every case declared by the
+[`full-browser-case-contract.mts`](../scripts/src/full-browser-case-contract.mts)
+contract to be enumerated and completed. The main config remains serial with
+`workers: 1`, with no retries or reduced test-match coverage. The release report
+also records total wall-clock time and per-stage wall-clock durations so the
+scheduler's speedup can be compared with the existing per-gate timings.
 
 Each complete, passing full-suite run compares matching file paths with the
 prior complete, passing retained full-suite report before replacing it. An
@@ -91,8 +100,8 @@ as regressions.
   failure, never a pass.
 - A browser duration alert is an operational review signal, not a coverage or
   serial-execution bypass. It is copied into the release summary for
-  investigation; the full suite still must complete all 159 cases and pass the
-  revision-bound evidence verifier.
+  investigation; the full suite still must complete the shared case contract
+  and pass the revision-bound evidence verifier.
 
 Without an explicit `RELEASE_EVIDENCE_DIR`, standard and full checks retain
 their reports, logs, checkpoints, and browser artifacts independently under

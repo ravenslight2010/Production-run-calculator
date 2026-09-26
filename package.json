@@ -22,6 +22,7 @@
     "check:typescript-api-v6": "pnpm --filter @workspace/typescript-api-v6 run check",
     "check:editor-typescript": "pnpm --filter @workspace/scripts run check:editor-typescript",
     "check:workflows": "pnpm --filter @workspace/scripts run check:workflows",
+    "check:audit-protection-config": "pnpm --filter @workspace/scripts run check:audit-protection-config",
     "check:release-concurrency": "pnpm --filter @workspace/scripts run check:release-concurrency",
     "check:shell-inventory": "bash ./scripts/src/check-shell-inventory.sh && bash ./lib/api-spec/check-generated.test.sh --shell-inventory-only",
     "push:main": "bash ./scripts/src/push-main.sh",

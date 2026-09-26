@@ -126,7 +126,7 @@ shared databases, applies the canonical Drizzle schema, and only then starts
 the development API. Leave it running and execute `test:e2e:department` from a
 second shell; no separate schema command is required.
 
-Required env for the API: `DATABASE_URL`. Security-relevant env: `STAFF_SIGNUP_CODE` (gates public sign-up, fails closed), `INITIAL_MANAGER_USERNAME` + `INITIAL_MANAGER_ACCESS_CODE` (bootstrap the first manager, fails closed).
+Required env for the API: `DATABASE_URL`. Security-relevant env: `STAFF_SIGNUP_CODE` (transitional sign-up code until a manager rotates or disables it), `INITIAL_MANAGER_USERNAME` + `INITIAL_MANAGER_ACCESS_CODE` (bootstrap the first manager, fails closed), `SESSION_TTL_SEC` (absolute session lifetime, default 30 days), and `SESSION_IDLE_TIMEOUT_SEC` (idle lifetime, default 12 hours). Managers can issue one-time invitations, rotate or disable the transitional code, disable accounts, and revoke sessions.
 
 ## Verification
 

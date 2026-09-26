@@ -2,9 +2,14 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { HealthCheckResponse } from "@workspace/api-zod";
+import { isGeminiProviderConfigured } from "@workspace/integrations-openai-ai-server";
 import { logger } from "../lib/logger";
 import { getCacheMaintenanceDiagnostics } from "../lib/observability";
 import { getStartupHealth } from "../lib/startupHealth";
+import {
+  getAuditLogProtectionCheck,
+  type AuditProtectionCheck,
+} from "../lib/health";
 import {
   backgroundOperationsDegraded,
   getBackgroundOperationDiagnostics,
@@ -25,6 +30,7 @@ async function readiness(req: Request, res: Response): Promise<void> {
     process: { status: "ok" },
     startup: { status: startup.phase === "ready" ? "ok" : "error" },
     database: { status: "pending" },
+    auditProtection: { status: "pending" },
     dependencies: { status: "pending" },
     backgroundWorkers: { status: "pending" },
   };
@@ -41,13 +47,23 @@ async function readiness(req: Request, res: Response): Promise<void> {
     try {
       await db.execute(sql`SELECT 1`);
       checks.database = { status: "ok" };
+      const auditProtection = await getAuditLogProtectionCheck();
+      checks.auditProtection = auditProtection;
+      res.locals.auditProtection = auditProtection;
     } catch {
       checks.database = { status: "error", detail: "database_unreachable" };
+      const auditProtection: AuditProtectionCheck = {
+        status: "error",
+        detail: "database_unreachable",
+      };
+      checks.auditProtection = auditProtection;
+      res.locals.auditProtection = auditProtection;
     }
 
-    const aiConfigured = Boolean(
-      process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.OPENAI_API_KEY,
-    );
+    // AI remains a hard readiness dependency under the existing operational
+    // policy. Only its credential detection is delegated to the active Gemini
+    // adapter so this probe cannot drift to unrelated provider keys.
+    const aiConfigured = isGeminiProviderConfigured();
     checks.dependencies = aiConfigured
       ? { status: "ok" }
       : { status: "error", detail: "ai_provider_not_configured" };
@@ -68,6 +84,7 @@ async function readiness(req: Request, res: Response): Promise<void> {
     startup.phase === "ready"
       ? {
         cacheMaintenance: await getCacheMaintenanceDiagnostics(),
+        auditProtection: res.locals.auditProtection,
         backgroundOperations: res.locals.backgroundOperationDiagnostics,
       }
       : undefined;

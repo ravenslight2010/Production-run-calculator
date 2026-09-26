@@ -1,6 +1,6 @@
 # Sync System Improvements — Plan
 
-**Updated:** 2026-09-19 (aligned with current partial-sync implementation)
+**Updated:** 2026-09-21 (reconciled after complete-write snapshot fencing and measurement work)
 **Related:** [unified reliability plan](sync-reliability-unified-plan-2026-09-19.md), [sync-deep-dive-2026-09-19.md](sync-deep-dive-2026-09-19.md), [reconnect-reliability-deep-dive-2026-09-19.md](reconnect-reliability-deep-dive-2026-09-19.md), [improvement-research-2026-09-18.md](improvement-research-2026-09-18.md), [idea-backlog.md](idea-backlog.md) §16
 
 ## Current State
@@ -13,27 +13,28 @@ The sync system (`artifacts/api-server/src/routes/sync.ts`) is considerably more
 - **Conflict-safe merge** — `protectRunValues` + `capMergedResult` guard against a blank/stale push clobbering real data (the "I entered it, it vanished" invariant)
 - **Live push** — SSE (`GET /sync/events`) broadcasts canonical state on every accepted write (`broadcast`, `broadcastMasterDataChanged`, `broadcastReset`, `broadcastRollover`)
 - **Partial PUT** — sparse writes carry `syncVersion: 1` + `baseSnapshotId`; the base is validated under lock and stale/malformed/raced dependencies return complete `partialFallback` without applying the sparse write
+- **Complete PUT snapshot fence** — maintained complete writes carry `baseSnapshotId`; the base is validated under the row lock and mismatch returns complete canonical fallback with `wrote=false`
 - **Conditional partial peer SSE** — peers receive a partial frame when the delta is safe and materially smaller; complete initial/recovery and fallback frames remain available
 - **Snapshot unchanged short-circuit** — matching snapshot requests avoid retransmitting the document
 - **Offline queue** — `syncPushQueue` (web) queues mutations while offline and drains on reconnect; `operationalMutationCursor` tracks replay position
 - **Daily-reset session fence** — `sessionBoundary.ts` force-expires stale tokens at the facility-local reset boundary (`applyResetBoundary`, `resetBoundaryAt`)
 - **Server-authoritative live-calc** — auto-track ticks, wall-clock claims, and the operational projection are computed server-side and streamed, not trusted from clients
-- **Resilience** — bounded pool acquisition, idle-client recovery, `/healthz` stays responsive under pool exhaustion (`lib/resilience.ts`)
+- **Resilience and measurement** — bounded pool acquisition, idle-client recovery, privacy-safe sync/pool-pressure telemetry, and `/healthz` responsiveness under pool exhaustion
 
 ### What's Genuinely Still Missing
 
-1. **No measured partial-adoption baseline** — success/fallback rates and complete-vs-partial wire percentiles are not retained as production evidence
-2. **Partial coverage remains coarse** — expand only for measured hot paths; JSON Patch is optional, not prerequisite
-3. **No complete per-device sync health view** — `GET /sync/health` and aggregate conflict stats exist, but managers still cannot compare every device's last-seen time, queue depth, and revision lag
-4. **No field-specific conflict reconciliation UI** — server conflict logging/stats exist, but a device whose value loses a successful merge still lacks a direct explanation
-5. **Reconnect causality remains incomplete** — ordinary partial writes use snapshot bases, but complete-write revision preconditions and future client-stamp policy are not established
+1. **No current production adoption baseline** — telemetry exists, but retained results still need exact published revision and deployment identity
+2. **Repeated-offline convergence needs explicit confirmation** — complete conflicts are fenced, but repeated queued edits and retries need bounded regression evidence
+3. **Partial coverage remains coarse** — expand only for measured hot paths; JSON Patch is optional, not prerequisite
+4. **No complete per-device sync health view** — `GET /sync/health` and aggregate conflict stats exist, but managers still cannot compare every device's last-seen time, queue depth, and revision lag
+5. **No field-specific conflict reconciliation UI** — server conflict logging/stats exist, but a device whose value loses a successful merge still lacks a direct explanation
 6. **No selective sync** — partial wire frames are not the same as per-run read scope
 
 ---
 
-## Why Partial-Sync Measurement and Expansion Remain a Priority
+## Why Complete-Write Causality and Measurement Are the Priority
 
-`.agents/memory/sync-body-limit.md` documents a production **413** when real day-state payloads outgrew Express's default parser limit. The parser now accepts up to 10 MB, while sanitized sync documents are capped at 512 KB. Current partial PUT and conditional partial peer SSE address eligible wire growth, but their real adoption and fallback rates must be measured before deciding whether broader sparse sections or JSON Patch are justified.
+`.agents/memory/sync-body-limit.md` documents a production **413** when real day-state payloads outgrew Express's default parser limit. The parser now accepts up to 10 MB, while sanitized sync documents are capped at 512 KB. Current partial PUT, complete-write snapshot fencing, and conditional partial peer SSE address causal and eligible wire-growth risks. Current production measurements and repeated-offline convergence evidence are still required before broader sparse sections or JSON Patch are considered.
 
 **Standard approaches:**
 
@@ -97,24 +98,27 @@ Client `DEFAULT_VALUES` and server `CURRENT_BLANK_RUN_VALUE` are currently field
 
 ## Build Order
 
-### Phase 1: Foundation
+### Phase 1: Correctness — implemented in repository
 
-1. Measure complete/partial PUTs, `partialFallback`, and complete/partial peer SSE frames
-2. Prove under-lock stale-base fallback against convergence and large-day tests
-3. Audit reconnect entry points and complete-write causality
-4. Expand sparse coverage only for proven hot paths
-5. Preserve the existing **blank-template lockstep** test whenever client defaults change
+1. Maintain the future-stamped stale-complete regression and audit every complete-write entry point
+2. Keep trusted complete-write base validation and canonical no-write fallback
+3. Preserve reset, wake, auto-track, packaging, inventory side-effect, tombstone, and blank-protection invariants
+4. Keep readiness provider-key detection aligned with the active adapter independently of AI dependency policy
+5. Retain evidence-safe complete/partial/fallback/SSE and pool measurements
 
-### Phase 2: Visibility
+### Phase 2: Deployment Evidence and Visibility
 
-6. **Per-device sync health** panel using the existing read-only health and conflict evidence
-7. **Conflict visibility** toast
+6. Refresh the authenticated published SSE probe for the exact release; retain the deterministic two-process fanout test
+7. Compute the database pool budget from capacity and maximum-instance inputs
+8. **Per-device sync health** panel using the existing read-only health and conflict evidence
+9. **Conflict visibility** toast
 
 ### Phase 3: Deferred
 
-8. Optional JSON Patch encoding
-9. Selective sync
-10. Payload compression (gzip/brotli) if profiling still shows need
+10. Expand sparse coverage only for proven hot paths
+11. Optional JSON Patch encoding
+12. Selective sync
+13. Payload compression or timestamp policy if profiling still shows need
 
 ---
 

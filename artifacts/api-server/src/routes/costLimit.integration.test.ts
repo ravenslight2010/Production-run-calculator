@@ -30,7 +30,7 @@ import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import pg from "pg";
 import { eq, sql } from "drizzle-orm";
-import { signToken } from "../lib/auth";
+import { signLegacyTokenForTests } from "../lib/auth";
 
 const provider = vi.hoisted(() => ({
   calls: 0,
@@ -199,7 +199,7 @@ async function insertManager(userId: string): Promise<void> {
 }
 
 function auth(userId: string): Record<string, string> {
-  return { authorization: `Bearer ${signToken(userId)}` };
+  return { authorization: `Bearer ${signLegacyTokenForTests(userId)}` };
 }
 
 // Fire an AI request whose route 403s on the missing capability AFTER the cost

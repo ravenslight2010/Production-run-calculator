@@ -248,7 +248,7 @@ test.describe("intentional visual regression baselines", () => {
     });
     // The review dialog's close control is icon-only; scope the click to the
     // modal so unrelated page buttons cannot be selected.
-    await page.locator("div.fixed.inset-0").filter({ hasText: "Import Excel" })
+    await page.locator(".responsive-dialog-overlay").filter({ hasText: "Import Excel" })
       .locator("button").first().click();
 
     await page.locator('[data-testid="tab-run"]').click();

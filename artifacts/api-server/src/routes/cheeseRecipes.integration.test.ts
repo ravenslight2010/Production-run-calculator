@@ -26,7 +26,7 @@ import { eq, sql } from "drizzle-orm";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import pg from "pg";
-import { signToken } from "../lib/auth";
+import { signLegacyTokenForTests } from "../lib/auth";
 
 type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
@@ -173,7 +173,7 @@ async function post(items: ApiRecipe[]): Promise<ApiRecipe[]> {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${signToken(MANAGER)}`,
+      authorization: `Bearer ${signLegacyTokenForTests(MANAGER)}`,
     },
     body: JSON.stringify({ items: fencedItems }),
   });
@@ -239,7 +239,7 @@ describe("POST /cheese-recipes freshness fence", () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        authorization: `Bearer ${signToken(MANAGER)}`,
+        authorization: `Bearer ${signLegacyTokenForTests(MANAGER)}`,
       },
       body: JSON.stringify({ items }),
     });

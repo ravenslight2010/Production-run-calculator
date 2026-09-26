@@ -61,6 +61,15 @@ import {
 import { applyOperationalIntent, parseOperationalIntent } from "../lib/operationalIntents";
 import { consumeRunInTransaction, consumeSauceBarrelInTransaction } from "./inventory";
 import { logger } from "../lib/logger";
+import {
+  recordSseFrame,
+  recordLegacySyncWrite,
+  recordSyncPut,
+  recordSyncTransaction,
+  legacySyncReadinessSnapshot,
+  syncRunCountBucket,
+  type SyncPutMode,
+} from "../lib/capacityTelemetry";
 import { runBackgroundOperation } from "../lib/backgroundOperations";
 import {
   SYNC_SNAPSHOT_ID_RE,
@@ -96,6 +105,7 @@ import { appendAutomaticApplicatorEvidence } from "./applicatorBatchEvidence";
 import {
   MANUAL_SECTION_FIELDS,
   isManualSection,
+  isSyncRecord,
   type ManualSection,
 } from "@workspace/sync-contract";
 export { dateInTimeZone, facilityTimeZone } from "../lib/facilityTime";
@@ -182,7 +192,44 @@ type ProtectedUpsertResult = {
   canonicalRevision: number;
   serverTime: number;
   staleEpoch?: number;
+  legacyRejected?: boolean;
 };
+
+const LEGACY_SYNC_SUNSET = "Wed, 21 Oct 2026 00:00:00 GMT";
+
+function isLegacyUnversionedComplete(payload: unknown): boolean {
+  return !!payload
+    && typeof payload === "object"
+    && !Array.isArray(payload)
+    && (payload as Record<string, unknown>).completeness === undefined;
+}
+
+function legacyCompleteWritesRejected(): boolean {
+  return process.env.SYNC_LEGACY_COMPLETE_WRITES === "reject";
+}
+
+function setLegacySyncUpgradeHeaders(res: Response): void {
+  res.setHeader("Deprecation", "true");
+  res.setHeader("Sunset", LEGACY_SYNC_SUNSET);
+  res.setHeader("X-Sync-Upgrade-Required", "syncVersion=1; completeness=complete; baseSnapshotId");
+}
+
+function sendLegacySyncRecovery(res: Response, result: ProtectedUpsertResult): void {
+  const data = result.data;
+  const snapshotId = data === null ? undefined : syncSnapshotId(data);
+  const envelope = buildSyncWriteEnvelope(data, { partialFallback: true });
+  res.setHeader("X-Sync-Response", "legacy-rejected");
+  res.setHeader("X-Sync-Convergence", "fallback");
+  if (snapshotId) res.setHeader("X-Sync-Snapshot", snapshotId);
+  res.status(409).json({
+    ...envelope,
+    error: "This tablet must refresh before it can save shared production data.",
+    code: "SYNC_CLIENT_UPGRADE_REQUIRED",
+    recoveryRequired: true,
+    canonicalRevision: result.canonicalRevision,
+    serverTime: result.serverTime,
+  });
+}
 
 function unchangedResponse(
   res: Response,
@@ -380,6 +427,24 @@ export function buildAutoTrackSchedule(
 const serverCalcCache = new Map<string, ServerCalcResult>();
 const CACHE_MAX_SIZE = 128;
 
+/**
+ * Day-level inputs shared by every run's summaryStats and runLines derivation.
+ * Keep this as the single dependency contract for both calculation and compact
+ * SSE projection so adding a shared input cannot leave unchanged runs stale.
+ */
+export const DERIVED_RUN_MAP_SHARED_DAY_STATE_FIELDS = ["pepTypes"] as const;
+
+function sharedDerivedRunInputs(dayState: Record<string, unknown> | undefined) {
+  const sharedInputs = Object.fromEntries(
+    DERIVED_RUN_MAP_SHARED_DAY_STATE_FIELDS.map((field) => [field, dayState?.[field]]),
+  ) as Record<(typeof DERIVED_RUN_MAP_SHARED_DAY_STATE_FIELDS)[number], unknown>;
+  return {
+    pepTypes: Array.isArray(sharedInputs.pepTypes)
+      ? sharedInputs.pepTypes.filter((value: unknown): value is string => typeof value === "string")
+      : SERVER_DEFAULT_PEP_TYPES,
+  };
+}
+
 function computeServerLiveState(
   data: unknown,
   nowMs = Date.now(),
@@ -437,9 +502,7 @@ function computeServerLiveState(
     const runLinesMap: Record<string, Array<{ itemKey: string; qty: number }>> = {};
     if (payload?.dayState?.runs && payload?.runValues) {
       const ds = payload.dayState as Record<string, unknown> | undefined;
-      const pepTypes = Array.isArray(ds?.pepTypes)
-        ? (ds.pepTypes as unknown[]).filter((value: unknown): value is string => typeof value === "string")
-        : SERVER_DEFAULT_PEP_TYPES;
+      const { pepTypes } = sharedDerivedRunInputs(ds);
       for (const run of payload.dayState.runs) {
         const rid = run.id;
         if (typeof rid !== "string") continue;
@@ -523,6 +586,9 @@ function broadcast(
         resultingSnapshotId: deltaResultingSnapshotId,
         ...deltaData
       } = delta ?? {};
+      const partialLiveState = delta
+        ? compactPeerLiveState(liveState, deltaData)
+        : liveState;
       const frame = delta && syncWireBytes(delta) < syncWireBytes(complete) * 0.8
         ? {
             data: deltaData,
@@ -533,13 +599,21 @@ function broadcast(
             syncVersion: deltaSyncVersion,
             snapshotId: deltaResultingSnapshotId,
             baseSnapshotId: deltaBaseSnapshotId,
-            resultingSnapshotId: deltaResultingSnapshotId,
             canonicalRevision: meta.canonicalRevision ?? liveState.calculationRevision,
-            ...liveState,
+            ...partialLiveState,
           }
         : complete;
+      const frameText = `data: ${JSON.stringify(frame)}\n\n`;
+      const frameMode = frame.completeness;
+      const frameStartedAt = performance.now();
       try {
-        client.res.write(`data: ${JSON.stringify(frame)}\n\n`);
+        client.res.write(frameText);
+        recordSseFrame({
+          mode: frameMode,
+          frameBytes: Buffer.byteLength(frameText),
+          durationMs: performance.now() - frameStartedAt,
+          outcome: "sent",
+        });
         // Advance only after the write succeeds. A failed stream must not
         // poison its baseline and cause the next recipient delta to be
         // generated against data the peer never received.
@@ -547,9 +621,43 @@ function broadcast(
           client.lastData = data;
           client.lastCanonicalRevision = meta.canonicalRevision ?? liveState.calculationRevision;
         }
-      } catch {}
+      } catch {
+        recordSseFrame({
+          mode: frameMode,
+          frameBytes: Buffer.byteLength(frameText),
+          durationMs: performance.now() - frameStartedAt,
+          outcome: "write_failed",
+        });
+      }
     }
   }
+}
+
+function compactPeerLiveState(
+  liveState: ReturnType<typeof computeServerLiveState>,
+  deltaData: Record<string, unknown>,
+) {
+  // These maps are derived from runValues. Sending every run on each peer
+  // update erased most of the savings from the canonical sparse delta.
+  // Any shared dependency change needs complete derived maps.
+  const changedDayState = isSyncRecord(deltaData.dayState) ? deltaData.dayState : null;
+  if (
+    changedDayState
+    && DERIVED_RUN_MAP_SHARED_DAY_STATE_FIELDS.some((field) => Object.hasOwn(changedDayState, field))
+  ) {
+    return liveState;
+  }
+  const changedValues = deltaData.runValues;
+  if (!isSyncRecord(changedValues)) {
+    return { ...liveState, summaryStats: {}, runLines: {} };
+  }
+  const summaryStats: Record<string, SummaryStats | null> = {};
+  const runLines: Record<string, Array<{ itemKey: string; qty: number }> | null> = {};
+  for (const runId of Object.keys(changedValues)) {
+    summaryStats[runId] = liveState.summaryStats[runId] ?? null;
+    runLines[runId] = liveState.runLines[runId] ?? null;
+  }
+  return { ...liveState, summaryStats, runLines };
 }
 
 // Master data is facility-wide rather than date-scoped. Reuse the authenticated
@@ -1127,11 +1235,15 @@ async function upsertProtected(
   clientTodayDate: string,
   expectedEpoch: number,
   clientIp?: string,
+  rejectLegacyComplete = false,
 ): Promise<ProtectedUpsertResult> {
   for (let attempt = 0; ; attempt++) {
     try {
       let existingData: unknown = undefined;
-      const merged = await db.transaction(async (tx) => {
+      const transactionStartedAt = performance.now();
+      let merged: ProtectedUpsertResult;
+      try {
+        merged = await db.transaction(async (tx) => {
         const serverTime = Date.now();
         // Scope reset fence is always acquired before the daily document,
         // matching /sync/reset and operational intents.
@@ -1157,6 +1269,45 @@ async function upsertProtected(
           .for("update");
         const canonicalExisting = completeSyncData(existing?.data);
         existingData = canonicalExisting;
+        const currentSnapshotId = canonicalExisting === undefined
+          ? undefined
+          : syncSnapshotId(canonicalExisting);
+        const completeBaseSnapshotId = syncSnapshotId(
+          canonicalExisting ?? completeSyncData(emptySyncData(date)),
+        );
+        if (rejectLegacyComplete && isLegacyUnversionedComplete(payload)) {
+          return {
+            data: canonicalExisting ?? completeSyncData(emptySyncData(date)),
+            wrote: false,
+            partialFallback: true,
+            retries: attempt,
+            canonicalRevision: existing?.canonicalRevision ?? 0,
+            serverTime,
+            legacyRejected: true,
+          };
+        }
+        // Complete protocol writes are also causally tied to the exact snapshot
+        // the client adopted. A future-skewed per-run timestamp must not let an
+        // offline client overwrite a canonical edit it never observed.
+        if (
+          payload
+          && typeof payload === "object"
+          && !Array.isArray(payload)
+          && (payload as Record<string, unknown>).completeness === "complete"
+          && (
+            !SYNC_SNAPSHOT_ID_RE.test(String((payload as Record<string, unknown>).baseSnapshotId ?? ""))
+            || (payload as Record<string, unknown>).baseSnapshotId !== completeBaseSnapshotId
+          )
+        ) {
+          return {
+            data: canonicalExisting ?? completeSyncData(emptySyncData(date)),
+            wrote: false,
+            partialFallback: true,
+            retries: attempt,
+            canonicalRevision: existing?.canonicalRevision ?? 0,
+            serverTime,
+          };
+        }
         // A partial payload is a delta over the exact locked snapshot. Inherit
         // omitted cold sections (such as history) from that snapshot before the
         // normal per-run/LWW protection runs.
@@ -1167,9 +1318,6 @@ async function upsertProtected(
         // Otherwise another writer could change the row between validation and
         // merge, making the client's base snapshot unsafe.
         if (isPartialSyncPayload(payload)) {
-          const currentSnapshotId = canonicalExisting === undefined
-            ? undefined
-            : syncSnapshotId(canonicalExisting);
           if (
             !isValidPartialSyncContract(payload) ||
             typeof currentSnapshotId !== "string" ||
@@ -1197,25 +1345,34 @@ async function upsertProtected(
         }))) as Record<string, any>;
         canonicalizePepNames(m);
         applyResetBoundary(m, existing?.data, date === clientTodayDate);
-        if (existing) {
+        const changed = currentSnapshotId !== syncSnapshotId(m);
+        const canonicalRevision = (existing?.canonicalRevision ?? 0) + (changed ? 1 : 0);
+        if (existing && changed) {
           await tx
             .update(dailySyncTable)
-            .set({ data: m as any, updatedAt: new Date() })
+            .set({ data: m as any, canonicalRevision, updatedAt: new Date() })
             .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)));
-        } else {
+        } else if (!existing) {
           await tx
             .insert(dailySyncTable)
-            .values({ date, scope, data: m as any, updatedAt: new Date() });
+            .values({ date, scope, data: m as any, canonicalRevision, updatedAt: new Date() });
         }
         return {
           data: m,
+          // An accepted merge may intentionally preserve the canonical
+          // document (for example, the blank-over-populated guard). Keep the
+          // accepted signal true so conflict evidence and peer convergence
+          // behavior remain intact; canonicalRevision advances only on change.
           wrote: true,
           partialFallback: false,
           retries: attempt,
-          canonicalRevision: existing?.canonicalRevision ?? 0,
+          canonicalRevision,
           serverTime,
         };
-      });
+        });
+      } finally {
+        recordSyncTransaction(performance.now() - transactionStartedAt);
+      }
       if (!merged.wrote) return merged;
       // Conflict detection and logging happen outside the transaction so a
       // logging failure can never roll back the actual sync write.
@@ -1310,6 +1467,7 @@ router.get("/sync/reset-epoch", async (_req: Request, res: Response): Promise<vo
 });
 
 router.put("/sync/today", async (req: Request, res: Response): Promise<void> => {
+  const telemetryStartedAt = performance.now();
   const { senderId = "", payload, snapshotId: requestedId, syncMeta } = req.body as {
     senderId?: string;
     payload: unknown;
@@ -1319,18 +1477,64 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
   const today = clientToday(req);
     const scope = currentScope();
 
+  const requestWireBytes = Buffer.byteLength(JSON.stringify(req.body ?? {}));
+  const incomingMode: SyncPutMode = isPartialSyncPayload(payload) ? "partial" : "complete";
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+    recordSyncPut({
+      mode: incomingMode,
+      outcome: "rejected",
+      runsBucket: "0",
+      sanitizedBytes: 0,
+      wireBytes: requestWireBytes,
+      durationMs: performance.now() - telemetryStartedAt,
+      parserRejected: true,
+    });
     res.status(400).json({ error: "payload must be a JSON object" }); return;
   }
   const sanitized = sanitizeSyncPayload(payload);
-  if (isSyncPayloadTooLarge(sanitized)) { res.status(400).json({ error: "Payload too large" }); return; }
+  if (isSyncPayloadTooLarge(sanitized)) {
+    recordSyncPut({
+      mode: incomingMode,
+      outcome: "rejected",
+      runsBucket: syncRunCountBucket(payload),
+      sanitizedBytes: 0,
+      wireBytes: requestWireBytes,
+      durationMs: performance.now() - telemetryStartedAt,
+      parserRejected: true,
+    });
+    res.status(400).json({ error: "Payload too large" }); return;
+  }
+  const sanitizedBytes = Buffer.byteLength(JSON.stringify(sanitized));
+  const legacyUnversionedComplete = isLegacyUnversionedComplete(sanitized);
+  if (legacyUnversionedComplete) setLegacySyncUpgradeHeaders(res);
   const staleEpoch = await isStaleResetPush(req, scope);
   if (staleEpoch !== null) { res.setHeader("X-Sync-Response", "stale"); res.json(await staleEpochResponse(scope, staleEpoch)); return; }
   const expectedEpoch = await getResetEpoch(scope);
-  const result = await upsertProtected(today, scope, sanitized, today, expectedEpoch, req.ip);
+  const result = await upsertProtected(
+    today,
+    scope,
+    sanitized,
+    today,
+    expectedEpoch,
+    req.ip,
+    legacyCompleteWritesRejected(),
+  );
   if (result.staleEpoch !== undefined) {
     res.setHeader("X-Sync-Response", "stale");
     res.json(await staleEpochResponse(scope, result.staleEpoch));
+    return;
+  }
+  if (result.legacyRejected) {
+    recordLegacySyncWrite("rejected");
+    recordSyncPut({
+      mode: "fallback",
+      outcome: "rejected",
+      runsBucket: syncRunCountBucket(sanitized),
+      sanitizedBytes,
+      wireBytes: requestWireBytes,
+      durationMs: performance.now() - telemetryStartedAt,
+    });
+    sendLegacySyncRecovery(res, result);
     return;
   }
   const merged = result.data;
@@ -1349,6 +1553,20 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
     partialFallback: result.partialFallback,
   });
   res.setHeader("X-Sync-Response-Bytes", String(Buffer.byteLength(JSON.stringify(responseBody))));
+  const telemetryMode: SyncPutMode = result.partialFallback
+    ? "fallback"
+    : !result.partialFallback && snapshotId !== undefined && requestedId === snapshotId
+      ? "unchanged"
+      : incomingMode;
+  recordSyncPut({
+    mode: telemetryMode,
+    outcome: "accepted",
+    runsBucket: syncRunCountBucket(sanitized),
+    sanitizedBytes,
+    wireBytes: requestWireBytes,
+    durationMs: performance.now() - telemetryStartedAt,
+  });
+  if (legacyUnversionedComplete) recordLegacySyncWrite("accepted");
   const liveState = merged
     ? computeServerLiveState(merged, result.serverTime, result.canonicalRevision)
     : null;
@@ -2245,7 +2463,7 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
   const requested = requestedSnapshot(req);
   const initialServerTime = Date.now();
   const liveState = computeServerLiveState(data, initialServerTime, row?.canonicalRevision ?? 0);
-  res.write(`data: ${JSON.stringify({
+  const initialFrame = `data: ${JSON.stringify({
     ...(requested && requested === snapshotId
       ? { unchanged: true, snapshotId }
       : { data, snapshotId }),
@@ -2257,7 +2475,25 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
       ? { [initialResetState.rollover ? "rollover" : "reset"]: true, resetEpoch: initialResetState.epoch }
       : {}),
     ...liveState,
-  })}\n\n`);
+  })}\n\n`;
+  const initialFrameStartedAt = performance.now();
+  try {
+    res.write(initialFrame);
+    recordSseFrame({
+      mode: "complete",
+      frameBytes: Buffer.byteLength(initialFrame),
+      durationMs: performance.now() - initialFrameStartedAt,
+      outcome: "sent",
+    });
+  } catch {
+    recordSseFrame({
+      mode: "complete",
+      frameBytes: Buffer.byteLength(initialFrame),
+      durationMs: performance.now() - initialFrameStartedAt,
+      outcome: "write_failed",
+    });
+    return;
+  }
 
   // Record the client's local date so broadcasts only reach peers on the SAME
   // calendar day (see broadcast). Matches the initial-row lookup above.
@@ -2473,7 +2709,13 @@ router.get(
       (req as Request & { correlationId?: string }).correlationId ?? req.id ?? "sync-health",
     );
     try {
-      const report = await buildSyncHealthReport(db, currentScope(), date);
+      const report = await buildSyncHealthReport(
+        db,
+        currentScope(),
+        date,
+        new Date(),
+        legacySyncReadinessSnapshot(legacyCompleteWritesRejected() ? "reject" : "accept"),
+      );
       logger.info({
         event: "sync_health_check",
         correlationId,
@@ -2516,7 +2758,10 @@ router.get("/sync/:date", async (req: Request<{ date: string }>, res: Response):
   res.setHeader("X-Sync-Canonical-Revision", String(row?.canonicalRevision ?? 0));
   res.setHeader("X-Sync-Server-Time", String(Date.now()));
   if (unchangedResponse(res, data, requestedSnapshot(req))) return;
-  if (data) res.setHeader("X-Sync-Snapshot", syncSnapshotId(data));
+  res.setHeader(
+    "X-Sync-Snapshot",
+    syncSnapshotId(completeSyncData(data ?? emptySyncData(date))),
+  );
   res.json(data);
 });
 
@@ -2543,13 +2788,28 @@ router.put(
   }
   const sanitized = sanitizeSyncPayload(payload);
   if (isSyncPayloadTooLarge(sanitized)) { res.status(400).json({ error: "Payload too large" }); return; }
+  const legacyUnversionedComplete = isLegacyUnversionedComplete(sanitized);
+  if (legacyUnversionedComplete) setLegacySyncUpgradeHeaders(res);
   const staleEpoch = await isStaleResetPush(req, scope);
   if (staleEpoch !== null) { res.setHeader("X-Sync-Response", "stale"); res.json(await staleEpochResponse(scope, staleEpoch)); return; }
   const expectedEpoch = await getResetEpoch(scope);
-  const result = await upsertProtected(date, scope, sanitized, clientToday(req), expectedEpoch, req.ip);
+  const result = await upsertProtected(
+    date,
+    scope,
+    sanitized,
+    clientToday(req),
+    expectedEpoch,
+    req.ip,
+    legacyCompleteWritesRejected(),
+  );
   if (result.staleEpoch !== undefined) {
     res.setHeader("X-Sync-Response", "stale");
     res.json(await staleEpochResponse(scope, result.staleEpoch));
+    return;
+  }
+  if (result.legacyRejected) {
+    recordLegacySyncWrite("rejected");
+    sendLegacySyncRecovery(res, result);
     return;
   }
   const merged = result.data;
@@ -2570,6 +2830,7 @@ router.put(
     partialFallback: result.partialFallback,
   });
   res.setHeader("X-Sync-Response-Bytes", String(Buffer.byteLength(JSON.stringify(responseBody))));
+  if (legacyUnversionedComplete) recordLegacySyncWrite("accepted");
     res.json(responseBody);
   },
 );
@@ -2598,7 +2859,6 @@ router.post(
   requireCapability("manage-staff"),
   async (_req: Request, res: Response): Promise<void> => {
     const scope = currentScope();
-    const actor = (_req as any).user?.username || "unknown";
     const epoch = await db.transaction(async (tx) => {
       // Every writer locks this scope fence before a daily row. Establish it
       // first so reset cannot deadlock with an intent's daily-row lock.
@@ -2612,18 +2872,9 @@ router.post(
         .set({ epoch: sql`${dataResetTable.epoch} + 1`, resetAt: new Date() })
         .where(eq(dataResetTable.scope, scope))
         .returning();
-      return row?.epoch ?? 0;
+       await logAuditEvent(scope, "", "factory_reset", "daily_sync", { outcome: "success" }, undefined, undefined, tx);
+       return row?.epoch ?? 0;
     });
-    // Best-effort audit log — never fails the reset
-    void logAuditEvent(
-      scope,
-      actor,
-      "factory_reset",
-      "daily_sync",
-      { scope },
-      _req.ip,
-      _req.headers["user-agent"] as string | undefined,
-    );
     broadcastReset(scope, epoch);
     res.json({ ok: true, epoch });
   },
