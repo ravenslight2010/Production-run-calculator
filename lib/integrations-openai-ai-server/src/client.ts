@@ -39,6 +39,12 @@ interface CreateParamsStream extends CreateParamsBase {
 
 interface ChatResponse {
   choices: Array<{ message: { content: string | null } }>;
+  /**
+   * The model that actually produced the content — differs from the requested
+   * model when a fallback served the call, so callers that cache results can
+   * avoid filing fallback output under the primary model's key.
+   */
+  model: string;
 }
 interface ChatChunk {
   choices: Array<{ delta: { content: string | null } }>;
@@ -134,6 +140,7 @@ function toGemini(messages: ChatMessage[]): {
 function buildConfig(
   params: CreateParamsBase,
   systemInstruction?: string,
+  abortSignal?: AbortSignal,
 ): GenerateContentConfig {
   const config: GenerateContentConfig = {
     // Lower reasoning effort: Gemini 3.x models draw thoughts from the same
@@ -144,6 +151,10 @@ function buildConfig(
     // restored now that gemini-3.6-flash is active.
     thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
   };
+  // Cancels the in-flight provider request when the caller aborts or the
+  // route's timeout fires (abortable() below still guarantees a prompt
+  // rejection if the SDK ignores the signal).
+  if (abortSignal) config.abortSignal = abortSignal;
   if (systemInstruction) config.systemInstruction = systemInstruction;
   if (params.response_format?.type === "json_object") {
     config.responseMimeType = "application/json";
@@ -170,6 +181,64 @@ function abortable<T>(promise: Promise<T>, options?: CreateRequestOptions): Prom
   });
 }
 
+// One signal for the whole model chain: the caller's cancellation plus the
+// adapter's timeout deadline, handed to the SDK so an abandoned import stops
+// the provider request instead of leaving it running.
+function requestSignal(options?: CreateRequestOptions): {
+  signal: AbortSignal | undefined;
+  dispose: () => void;
+} {
+  if (!options?.signal && !options?.timeoutMs) {
+    return { signal: undefined, dispose: () => {} };
+  }
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (options.signal?.aborted) controller.abort();
+  else options.signal?.addEventListener("abort", abort, { once: true });
+  const timer = options.timeoutMs ? setTimeout(abort, options.timeoutMs) : undefined;
+  return {
+    signal: controller.signal,
+    dispose: () => {
+      if (timer) clearTimeout(timer);
+      options.signal?.removeEventListener("abort", abort);
+    },
+  };
+}
+
+// A blocked prompt (safety filter) is a definitive answer, not a transient
+// failure: surface the empty result on the first model instead of re-asking
+// the same prompt against every fallback.
+function isBlockedResponse(response: {
+  promptFeedback?: { blockReason?: string | null } | null;
+  candidates?: Array<{ finishReason?: string | null } | null> | null;
+}): boolean {
+  if (response.promptFeedback?.blockReason) return true;
+  return (response.candidates ?? []).some((candidate) => candidate?.finishReason === "SAFETY");
+}
+
+// Only provider-side transients earn a second model: quota 429, capacity
+// 500/502/503/504, and a 404 for a model this key can no longer serve (the
+// shape a retirement takes on the direct Gemini API). Cancellation, timeouts,
+// and 400/401/403 credential-or-request errors are deterministic — another
+// model cannot fix them, so they rethrow on the first attempt.
+function isFallbackWorthyError(err: unknown): boolean {
+  const candidate = err as { status?: unknown; name?: unknown; message?: unknown } | null;
+  if (candidate?.name === "AbortError") return false;
+  const message = typeof candidate?.message === "string" ? candidate.message : "";
+  if (message.includes("AI provider request timed out")) return false;
+  if (message.includes("AI provider request was cancelled")) return false;
+  const status = Number(candidate?.status);
+  if (status === 429 || status === 500 || status === 502 || status === 503 || status === 504) return true;
+  if (status === 404) return true;
+  return (
+    /\b(429|500|502|503|504)\b/.test(message) ||
+    message.includes("UNAVAILABLE") ||
+    message.includes("RESOURCE_EXHAUSTED") ||
+    message.includes("high demand") ||
+    message.includes("not found for API version")
+  );
+}
+
 async function create(params: CreateParamsStream, options?: CreateRequestOptions): Promise<AsyncIterable<ChatChunk>>;
 async function create(params: CreateParamsSync, options?: CreateRequestOptions): Promise<ChatResponse>;
 async function create(
@@ -178,47 +247,60 @@ async function create(
 ): Promise<ChatResponse | AsyncIterable<ChatChunk>> {
   const { systemInstruction, contents } = toGemini(params.messages);
   // Ordered model chain: primary first, then the fallback models. Provider
-  // failures (quota 429s, capacity 503s, retired-model 404s) and empty-content
+  // transients (quota 429s, capacity 503s, retired-model 404s) and empty-content
   // responses (3.x flash can burn its whole output budget on hidden thoughts
   // and still return HTTP 200 with no text) move on to the next model instead
   // of 502'ing the route or surfacing a hollow "0 specs / 0 recipes" parse.
   // Bounded: primary + configured fallbacks (default 3 calls worst case).
   const models = modelChain(params.model);
+  const { signal, dispose } = requestSignal(options);
   let lastError: unknown;
 
-  for (const model of models) {
-    const config = buildConfig(params, systemInstruction);
-    try {
-      const ai = client();
-      if (params.stream) {
-        const stream = await abortable(ai.models.generateContentStream({
+  try {
+    for (const model of models) {
+      const config = buildConfig(params, systemInstruction, signal);
+      try {
+        const ai = client();
+        if (params.stream) {
+          const stream = await abortable(ai.models.generateContentStream({
+            model,
+            contents,
+            config,
+          }), options);
+          return (async function* () {
+            try {
+              for await (const chunk of stream) {
+                yield { choices: [{ delta: { content: chunk.text ?? null } }] };
+              }
+            } finally {
+              dispose();
+            }
+          })();
+        }
+
+        const response = await abortable(ai.models.generateContent({
           model,
           contents,
           config,
         }), options);
-        return (async function* () {
-          for await (const chunk of stream) {
-            yield { choices: [{ delta: { content: chunk.text ?? null } }] };
-          }
-        })();
+        const content = response.text ?? null;
+        if (isBlockedResponse(response)) {
+          return { choices: [{ message: { content: null } }], model };
+        }
+        if (content === null || content.trim() === "") {
+          lastError = new Error(`AI provider returned empty content from ${model}`);
+          continue;
+        }
+        return { choices: [{ message: { content } }], model };
+      } catch (err) {
+        if (!isFallbackWorthyError(err)) throw err;
+        lastError = err;
       }
-
-      const response = await abortable(ai.models.generateContent({
-        model,
-        contents,
-        config,
-      }), options);
-      const content = response.text ?? null;
-      if (content === null || content.trim() === "") {
-        lastError = new Error(`AI provider returned empty content from ${model}`);
-        continue;
-      }
-      return { choices: [{ message: { content } }] };
-    } catch (err) {
-      lastError = err;
     }
+    throw lastError;
+  } finally {
+    dispose();
   }
-  throw lastError;
 }
 
 // OpenAI-compatible surface consumed across the server.

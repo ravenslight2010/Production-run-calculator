@@ -1345,6 +1345,12 @@ In that state the sauce/applicator effects `return`/`continue` BEFORE the local 
 
 **Why it was needed:** A single hard-coded model keeps breaking Render imports whenever Google retires / quota-limits / capacity-spikes it (2.5-flash retired, 3.6-flash quota-exhausted). The fallback chain keeps the route working through capacity spikes instead of 502ing or returning hollow parses.
 
-**Verification:** `tsc --build lib/integrations-openai-ai-server/tsconfig.json` clean. Live replay of the exact parse call (prompt builder + client adapter + Render key) returns valid JSON (2 profiles / 1 recipe) through the chain. Model availability on the key is volatile — re-verify per incident.
+**Review hardening (CodeRabbit on #82):**
+- Safety-blocked responses (`promptFeedback.blockReason` or candidate `finishReason: "SAFETY"`) return the empty result on the FIRST model — a blocked prompt is definitive, not transient, so it must not be re-asked against every fallback.
+- Fallback now applies only to provider transients (429/500/502/503/504 and 404 "not found for API version" for a retired model). Cancellation, timeouts, and 400/401/403 rethrow immediately — another model cannot fix them.
+- Caller signal + timeout are combined into one AbortSignal and passed as `config.abortSignal`, so a cancelled import (server-job cancellation path) actually stops the in-flight provider request instead of only abandoning the await.
+- `ChatResponse` now carries the effective `model`; the two cached AI routes (match-import, match-premix) mark results `cacheable: false` when a fallback served the call, so fallback output is never filed under the primary model's fingerprint (the cache already had a `cacheable` escape hatch for exactly this).
+
+**Verification:** `tsc --build` clean for `lib/integrations-openai-ai-server` and `artifacts/api-server`. Live replays of the exact parse call (prompt builder + client adapter + Render key): with the default primary → valid JSON (2 profiles / 1 recipe); with `AI_MODEL_FULL=gemini-3.6-flash` (dead model) pinned → the chain still returned a full parse in 4.6s. Model availability on the key is volatile — re-verify per incident.
 
 **Deploy:** after PR merge + CI image publish, user flips the Render dashboard Image tag to the new sha (the API can't change it).

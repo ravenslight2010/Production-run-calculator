@@ -495,6 +495,10 @@ router.post(
           value.pepTypeMatches.every(isObject) &&
           (value.aiStatus === "enriched" || value.aiStatus === "unavailable"),
         load: async () => {
+          // The client may serve this call from a fallback model; results that
+          // did not come from the requested model are not cached under its
+          // fingerprint (they would be misattributed and outlive the outage).
+          let effectiveModel = model;
           const result = await fetchModelJsonWithRetry({
             label: "ai-match-import",
             log: req.log,
@@ -508,6 +512,7 @@ router.post(
                   { role: "user", content: userPrompt },
                 ],
               });
+              effectiveModel = response.model;
               return response.choices[0]?.message?.content ?? "";
             },
           });
@@ -558,7 +563,7 @@ router.post(
             aiStatus: "enriched",
             ...(note ? { note } : {}),
           };
-          return { value, cacheable: rawIsValidShape };
+          return { value, cacheable: rawIsValidShape && effectiveModel === model };
         },
           });
           return {
@@ -862,6 +867,9 @@ router.post(
           value.matches.every(isObject) &&
           (value.aiStatus === "enriched" || value.aiStatus === "unavailable"),
         load: async () => {
+          // See the match-import load: a fallback-model result must not be
+          // cached under the requested model's fingerprint.
+          let effectiveModel = model;
           const result = await fetchModelJsonWithRetry({
             label: "ai-match-premix",
             log: req.log,
@@ -875,6 +883,7 @@ router.post(
                   { role: "user", content: userPrompt },
                 ],
               });
+              effectiveModel = response.model;
               return response.choices[0]?.message?.content ?? "";
             },
           });
@@ -895,7 +904,7 @@ router.post(
             matches,
             aiStatus: "enriched",
           };
-          return { value, cacheable: rawIsValidShape };
+          return { value, cacheable: rawIsValidShape && effectiveModel === model };
         },
           });
           return {
