@@ -46,6 +46,14 @@ jobs:
       SESSION_SECRET: release-check-ci-session
       STAFF_SIGNUP_CODE: release-check-ci
       NODE_ENV: test
+      # /api/readyz reports `dependencies: error` until an AI provider key is
+      # configured, because a production instance without one cannot run
+      # imports. Playwright's release web servers wait on that endpoint and
+      # the clean-start smoke asserts it, so without a key present those gates
+      # time out waiting for a server that is healthy but deliberately
+      # degraded. No release gate calls the provider; this only has to be
+      # configured, the way Render configures it in production.
+      GOOGLE_API_KEY: release-check-ci-unused-provider-key
       E2E_TEST_DB: "1"
       E2E_APPROVED_DESTRUCTIVE_MODE: "1"
       # A fresh service database cannot prove the retained production repair
@@ -157,6 +165,14 @@ jobs:
       SESSION_SECRET: release-check-ci-session
       STAFF_SIGNUP_CODE: release-check-ci
       NODE_ENV: test
+      # /api/readyz reports `dependencies: error` until an AI provider key is
+      # configured, because a production instance without one cannot run
+      # imports. Playwright's release web servers wait on that endpoint and
+      # the clean-start smoke asserts it, so without a key present those gates
+      # time out waiting for a server that is healthy but deliberately
+      # degraded. No release gate calls the provider; this only has to be
+      # configured, the way Render configures it in production.
+      GOOGLE_API_KEY: release-check-ci-unused-provider-key
       E2E_TEST_DB: "1"
       E2E_APPROVED_DESTRUCTIVE_MODE: "1"
       # See the standard job: this excludes unavailable production history,
