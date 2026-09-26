@@ -15,6 +15,12 @@ An existing configured push URL can take precedence over a process-local push UR
 
 **How to apply:** Distinguish credential selection errors from token-scope failures before asking for another secret. Check the effective remote and verify the exact remote tip after any successful push; do not infer success from an API permission field.
 
+For review-only CodeRabbit scans of a long-lived branch, split an oversized diff into stacked PRs at existing ancestor commits rather than merging into the default branch. The default CodeRabbit auto-review setting may skip PRs whose base is not the default branch; a manual `@coderabbitai full review` comment can request those reviews without changing repository-wide settings.
+
+**Why:** Staying below the per-PR file limit solved the size rejection, but the non-default-base pieces were then skipped automatically. CodeRabbit acknowledged manual full-review requests for those pieces.
+
+**How to apply:** Verify each PR's GitHub changed-file count is below the review limit, keep every part marked review-only, and verify the bot accepted manual requests. Do not mistake an acknowledgment for a completed review.
+
 Task-agent merge commits may be unsigned even after GitHub enables required signed
 commits. Configuring signing only affects future commits; delivery must re-sign
 or recreate the local-only history (or create one signed release snapshot) before
