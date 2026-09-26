@@ -1330,3 +1330,26 @@ In that state the sauce/applicator effects `return`/`continue` BEFORE the local 
 **Why it was needed:** Render healthchecks against `/api/readyz`; without this, even a successful redeploy of `main` would stay red when the env uses `GOOGLE_API_KEY`.
 
 **Verification:** `vitest run src/routes/health.test.ts` — 6/6 pass; api-server typecheck clean.
+
+## 2026-09-22 — Render recovery: Drizzle schema migration completed; readiness fix promoted to main (PR #79)
+
+**File(s):** production DB (Render Postgres `runcalc-db`), `.github/workflows/ci.yml` (unchanged), `artifacts/api-server/src/routes/health.ts` (+test) via PR #79.
+
+**What was wrong:** Render's Postgres was never migrated (image deploys skip the preDeploy `drizzle push`). Startup failed at `data_heals_failed:data-heal-result-backfill-v1` (missing `data_heals.result` JSONB) and the `ingredients_active_name_scope_idx` unique index could not build while live duplicates existed. Readiness additionally rejected Render's `GOOGLE_API_KEY`.
+
+**What was done:**
+- Verified Render DB reachable via external host `dpg-daa6ajtg1s2s73c9d2bg-a.oregon-postgres.render.com` (the env `DATABASE_URL` bare host only resolves inside Render's VPC).
+- `scope` column pre-applied and obsolete `id` PK/column dropped on `proactive_alert_settings` (documented `push-force` blockers), then `pnpm --filter @workspace/db run push-force` completed: `data_heals.result` present, 78 tables, `ingredients_active_name_scope_idx` created (duplicate groups had since reduced to 0). Repeated push reports `[✓] Changes applied` (benign drizzle no-op) — no prompts or errors.
+- Promoted the GOOGLE_API_KEY readiness fix to `main` via PR #79 (cherry-pick of `6971c4bd` + CodeRabbit-requested test hardening): merged `6a8f5f89`, CI publish run `35685637153` success, artifact digest `sha256:b2746e...`, image `ghcr.io/ravenslight2010/runcalc-api:6a8f5f89...`.
+
+**Live verification:** `/api/livez` 200; `/api/readyz` now reports `startup: ok`, `database: ok` (was failing) — the only red check left is `dependencies` because Render still runs the pre-fix `:latest` image. Render API ignored all PATCH imagePath shapes and rejects env-var updates, so pointing the service at the sha tag needs a dashboard click (Settings → Image) unless CI starts publishing `:latest`.
+
+**Watch items:** `runcalc-db` is free tier and **expires 2026-09-29**. Nightly CI still lacks a `DATABASE_URL` Actions secret.
+
+## 2026-09-22 (later) — Render fully green; image switched to immutable sha tag
+
+**What was done:** User changed the service image tag in the Render dashboard (Settings → Image) to `ghcr.io/ravenslight2010/runcalc-api:6a8f5f89cdf213e573866660c61b9ca35dea9687` and redeployed. The Render API cannot change the image path for image services (all PATCH `imagePath` shapes, deploy-with-image bodies, and env-var writes are accepted-but-ignored or 400/405), so the dashboard is the only non-code path.
+
+**Verification (2026-09-22 ~23:12 UTC):** `https://runcalc.onrender.com/api/readyz` → HTTP 200 with `process/startup/database/dependencies/backgroundWorkers` all `ok`; `/api/healthz` 200; `/api/livez` 200. Live deploy image ref is the sha tag (digest `caf0787b…` platform manifest; evidence index digest for the same publish is `fff67f56…`).
+
+**Outstanding watch items:** `runcalc-db` (free tier) expires **2026-09-29**; nightly CI still has no `DATABASE_URL` Actions secret.
