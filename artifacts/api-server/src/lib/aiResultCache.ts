@@ -72,6 +72,22 @@ export function fingerprintAiOperation(input: {
 type InFlightValue = Promise<AiCacheResult<unknown>>;
 const inFlight = new Map<string, InFlightValue>();
 
+let inFlightJoinObserver: ((lockKey: string) => void) | null = null;
+
+/**
+ * Test hook: observe the moment a call JOINS an existing in-flight load for the
+ * same scope/operation/fingerprint. Single-flight tests can await that real
+ * condition instead of sleeping a guessed interval, which is what made the
+ * cost-limit waiter race flaky on loaded runners. Returns the previous observer.
+ */
+export function setInFlightJoinObserverForTests(
+  observer: ((lockKey: string) => void) | null,
+): ((lockKey: string) => void) | null {
+  const previous = inFlightJoinObserver;
+  inFlightJoinObserver = observer;
+  return previous;
+}
+
 export type AiResultCacheStore = {
   read: (scope: Scope, key: string) => Promise<{ value: unknown; expiresAt: Date } | null>;
   remove: (scope: Scope, key: string) => Promise<void>;
@@ -320,7 +336,10 @@ export async function getOrCreateAiResult<T>(opts: {
 }): Promise<AiCacheResult<T>> {
   const lockKey = `${currentScope()}:${AI_RESULT_CACHE_NAMESPACE}:${opts.key}`;
   const existing = inFlight.get(lockKey);
-  if (existing) return (await existing) as AiCacheResult<T>;
+  if (existing) {
+    inFlightJoinObserver?.(lockKey);
+    return (await existing) as AiCacheResult<T>;
+  }
 
   const promise = executeCache({
     ...opts,

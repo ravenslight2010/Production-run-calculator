@@ -364,14 +364,26 @@ describe("POST /api/ai/* — aiCostLimit is wired onto the /ai router", () => {
 
     const owner = callMatch();
     await started;
+    let signalJoined!: () => void;
+    const waiterJoined = new Promise<void>((resolve) => {
+      signalJoined = resolve;
+    });
+    // Dynamic import: a static one would pull @workspace/db (and its pool)
+    // into the module graph before beforeAll points DATABASE_URL at the
+    // throwaway test database.
+    const { setInFlightJoinObserverForTests } = await import("../lib/aiResultCache");
+    setInFlightJoinObserverForTests(() => signalJoined());
     const waiter = callMatch();
-    // The waiter has to JOIN the owner's in-flight entry. Releasing the
-    // provider in the same tick as firing the waiter used to race the waiter's
-    // arrival: on a loaded runner the owner completed first, the waiter became
-    // a fresh owner, and — with one unit of budget left — that second charge
-    // answered 429. Settle briefly so the waiter is registered as the
-    // in-flight waiter before the owner is released.
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    // Await the REAL condition this test asserts — the waiter joining the
+    // owner's in-flight load. Releasing the provider earlier raced the
+    // waiter's arrival: the owner could finish first, the waiter then became a
+    // fresh owner, and with one unit of budget left that second charge
+    // answered 429.
+    try {
+      await waiterJoined;
+    } finally {
+      setInFlightJoinObserverForTests(null);
+    }
     provider.release?.();
     const [ownerResponse, waiterResponse] = await Promise.all([owner, waiter]);
     expect(ownerResponse.status).toBe(200);
