@@ -70,6 +70,13 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          # The scripts suite asserts that the current attached-asset report
+          # detects the symlink-bearing archives. Those archives are LFS
+          # objects, so without this they check out as 133-byte pointers,
+          # inventory_archives reports `malformed_zip` with no symlinks, and
+          # test_current_report_symlink_archives_are_detected_without_opening_members
+          # fails. ci.yml already checks out with LFS for the same reason.
+          lfs: true
 
       - name: Set up pnpm
         uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
@@ -188,6 +195,13 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          # The scripts suite asserts that the current attached-asset report
+          # detects the symlink-bearing archives. Those archives are LFS
+          # objects, so without this they check out as 133-byte pointers,
+          # inventory_archives reports `malformed_zip` with no symlinks, and
+          # test_current_report_symlink_archives_are_detected_without_opening_members
+          # fails. ci.yml already checks out with LFS for the same reason.
+          lfs: true
 
       - name: Set up pnpm
         uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4

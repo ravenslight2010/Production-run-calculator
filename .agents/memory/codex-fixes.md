@@ -1420,6 +1420,23 @@ without the fix); `check:workflows` (actionlint 1.7.12) clean over all 8 workflo
 corpus-harness typecheck clean; `test:release-stopped-summary` passes. Corpus and reviewer evidence tests
 now differ ONLY on `node` (24 in CI vs 22 in an arm64/Node-22 sandbox), which is the expected local delta.
 
+**6. release-check.yml checked out without Git LFS -> model-bump check (found only after #2 was fixed).**
+The scripts `test` chain dies at its first failure, so this was masked by the reviewer-benchmark
+failure. `scripts/test_zip_asset_inventory.py::test_current_report_symlink_archives_are_detected_without_opening_members`
+asserts that the current attached-asset report finds five symlink-bearing archives by exact
+filename, but three of them (`CyberStrike-main`, `agent-teams-ai-main`, `agentic-awesome-skills-main`)
+are LFS objects. Without `lfs: true` they check out as 133-byte pointer files, so
+`inspect_archive` reports `malformed_zip` / `status: error` / `symlink_count: 0` and the test sees
+only two of the five. `ci.yml` already uses `lfs: true` on checkout for exactly this reason;
+`release-check.yml` did not. Fix: `lfs: true` on both release-check checkouts.
+
+**CI result for the pushed commit (34aac8f2)**: `Unit tests (web + libs)`, `API tests (Postgres)`,
+`Typecheck` and the Docker/build checks all pass. Inside the release job, five previously-failing
+gates now pass and `API release shards` went 6/7 -> 7/7: TypeScript 7 advisory comparison, API unit
+tests shard 1/7, run calculator tests (125s against its 150s budget once isolated), corpus tests,
+and model-bump check up to the LFS failure. Still failing, both for want of a `workflow`-scoped
+token to push: clean-start smoke + the three browser gates (item 1) and model-bump check (item 6).
+
 **Sandbox caveat**: this agent machine is `linux/arm64` on Node 22 while the repo requires Node >=24, and
 `git push` to a local bare remote fails there ("unpack should have generated ..."), so local pushes cannot
 reproduce CI's git behavior. CI remains the authority for these gates.
