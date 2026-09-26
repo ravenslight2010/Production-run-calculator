@@ -154,6 +154,17 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/**
+ * True only when the client reports a DIFFERENT model than the one requested:
+ * a fallback model served the call, so the result must not be cached under the
+ * requested model's fingerprint. An adapter that does not report a model (older
+ * stub, non-Gemini transport) is treated as "not a fallback" so caching keeps
+ * working instead of silently turning off.
+ */
+function servedByFallback(effectiveModel: string | undefined, requestedModel: string): boolean {
+  return typeof effectiveModel === "string" && effectiveModel.length > 0 && effectiveModel !== requestedModel;
+}
+
 async function cachedAiResponse<T>(
   req: Request,
   res: Response,
@@ -498,7 +509,7 @@ router.post(
           // The client may serve this call from a fallback model; results that
           // did not come from the requested model are not cached under its
           // fingerprint (they would be misattributed and outlive the outage).
-          let effectiveModel = model;
+          let effectiveModel: string | undefined = model;
           const result = await fetchModelJsonWithRetry({
             label: "ai-match-import",
             log: req.log,
@@ -563,7 +574,7 @@ router.post(
             aiStatus: "enriched",
             ...(note ? { note } : {}),
           };
-          return { value, cacheable: rawIsValidShape && effectiveModel === model };
+          return { value, cacheable: rawIsValidShape && !servedByFallback(effectiveModel, model) };
         },
           });
           return {
@@ -869,7 +880,7 @@ router.post(
         load: async () => {
           // See the match-import load: a fallback-model result must not be
           // cached under the requested model's fingerprint.
-          let effectiveModel = model;
+          let effectiveModel: string | undefined = model;
           const result = await fetchModelJsonWithRetry({
             label: "ai-match-premix",
             log: req.log,
@@ -904,7 +915,7 @@ router.post(
             matches,
             aiStatus: "enriched",
           };
-          return { value, cacheable: rawIsValidShape && effectiveModel === model };
+          return { value, cacheable: rawIsValidShape && !servedByFallback(effectiveModel, model) };
         },
           });
           return {

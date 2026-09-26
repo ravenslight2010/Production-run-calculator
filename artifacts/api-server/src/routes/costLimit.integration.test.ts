@@ -46,7 +46,7 @@ vi.mock("@workspace/integrations-openai-ai-server", () => {
     openai: {
       chat: {
         completions: {
-          create: async (args: { messages?: Array<{ content?: unknown }> }) => {
+          create: async (args: { model?: string; messages?: Array<{ content?: unknown }> }) => {
             void args;
             provider.calls += 1;
             provider.started?.();
@@ -57,6 +57,9 @@ vi.mock("@workspace/integrations-openai-ai-server", () => {
               await provider.gate;
             }
             return {
+              // The real adapter always reports the model that served the
+              // call; the cache keys fallback results off that field.
+              model: args.model,
               choices: [{
                 message: {
                   content: JSON.stringify({
