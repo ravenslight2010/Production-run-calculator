@@ -33,6 +33,22 @@ export * from "./corpus.js";
 
 const NO_MIXES: ReadonlySet<string> = new Set();
 
+/**
+ * The Node major recorded in retained evaluation provenance.
+ *
+ * Only the major is recorded. CI pins just the major (`node-version: "24"`,
+ * engines `>=24`), so recording a minor or patch made an otherwise unchanged
+ * gate fail every time GitHub shipped a new 24.x — the corpus manifest and
+ * the second-pass reviewer benchmark both broke on the same 24.20 -> 24.21
+ * runner bump and had to be re-baselined by hand each time. The major is the
+ * compatibility boundary this evidence actually depends on; a major bump is a
+ * deliberate, reviewable event that should require regenerating it. Exact
+ * versions stay available in CI logs via `node --version`.
+ */
+function nodeProvenanceMajor(): string {
+  return process.versions.node.split(".")[0] ?? process.versions.node;
+}
+
 function hashSourceDirectories(directories: string[]): string {
   const hash = createHash("sha256");
   const visit = (directory: string, base: string) => {
@@ -257,7 +273,7 @@ export function buildCorpusEvaluationManifest(): EvaluationManifest {
       maximumGridSanityIssues: 0,
     },
     dependencies: {
-      node: process.versions.node,
+      node: nodeProvenanceMajor(),
       pnpmLockSha256: lockfileSha256,
       xlsx: "npm:@e965/xlsx@^0.20.3",
       vitest: "^4.1.9",

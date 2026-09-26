@@ -179,10 +179,10 @@
       "minimumUniqueMaterialCatches": 5
     },
     "dependencies": {
-      "node": "24.20.0",
+      "node": "24",
       "pnpmLockSha256": "40a1ce559dd9f805a52343d5f595b3773db8c5e07bda08a9beae129476ff2c6b",
       "benchmarkReporter": "1",
-      "benchmarkReporterSha256": "b9810c0b72d4dbbd2155f2ba552da6218d630c82ce63fa609835c6811155ec39"
+      "benchmarkReporterSha256": "1794a6f93d625e3268627491c9938bca09fe1df911db96d1938d3fddadf3a2e4"
     },
     "provider": {
       "identityState": "identified",

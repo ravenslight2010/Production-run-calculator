@@ -3,6 +3,22 @@ import fs from "node:fs";
 import path from "node:path";
 import { validateEvaluationManifest } from "@workspace/ai-evaluation";
 
+/**
+ * The Node major recorded in retained evaluation provenance.
+ *
+ * Only the major is recorded. CI pins just the major (`node-version: "24"`,
+ * engines `>=24`), so recording a minor or patch made an otherwise unchanged
+ * gate fail every time GitHub shipped a new 24.x — the corpus manifest and
+ * the second-pass reviewer benchmark both broke on the same 24.20 -> 24.21
+ * runner bump and had to be re-baselined by hand each time. The major is the
+ * compatibility boundary this evidence actually depends on; a major bump is a
+ * deliberate, reviewable event that should require regenerating it. Exact
+ * versions stay available in CI logs via `node --version`.
+ */
+function nodeProvenanceMajor(): string {
+  return process.versions.node.split(".")[0] ?? process.versions.node;
+}
+
 type FindingName =
   | "wrongQuantities"
   | "missingComponents"
@@ -301,7 +317,7 @@ export function buildReviewerBenchmark(root = repositoryRoot()) {
     },
     thresholds: ACCEPTANCE,
     dependencies: {
-      node: process.versions.node,
+      node: nodeProvenanceMajor(),
       pnpmLockSha256: createHash("sha256")
         .update(fs.readFileSync(path.join(root, "pnpm-lock.yaml")))
         .digest("hex"),

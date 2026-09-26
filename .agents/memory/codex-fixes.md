@@ -1330,3 +1330,96 @@ In that state the sauce/applicator effects `return`/`continue` BEFORE the local 
 **Why it was needed:** Render healthchecks against `/api/readyz`; without this, even a successful redeploy of `main` would stay red when the env uses `GOOGLE_API_KEY`.
 
 **Verification:** `vitest run src/routes/health.test.ts` — 6/6 pass; api-server typecheck clean.
+
+## 2026-09-23 (later) — Import AI model fallback: 3.6-flash quota-exhausted on Render key; switch to 3.8-flash + lite fallbacks
+
+**File(s):** `lib/integrations-openai-ai-server/src/models.ts`, `lib/integrations-openai-ai-server/src/client.ts`, `artifacts/run-calculator/src/specImport.ts` (SPEC_PARSE_VERSION 40→41).
+
+**What was wrong:** After the 77e54c01 deploy, spec imports "tried" but returned 0 specs / 0 recipes (or provider errors). Root cause: gemini-3.6-flash (the PR #81 default) is quota-exhausted and capacity-starved on Render's GOOGLE_API_KEY — live probes returned repeated 429 "You exceeded your current quota" and 503 "high demand" across the 3.x flash line (9 consecutive 503s then 429 on the parse-sized prompt, 2026-09-23). The single-model pin has no ops override, and thrown provider errors 502 the route (or surface as empty parses after the malformed-retry path).
+
+**What the fix was:**
+- Primary model for both tiers → `gemini-3.8-flash` (verified on the full parse prompt: valid JSON with profiles + recipes).
+- Ordered fallback chain in `client.ts` create (models.ts `aiModelFallbacks` + `modelChain`): provider failures (429/503/404) AND empty-content responses (3.x flash MAX_TOKENS-without-text) fall through to the next model — `gemini-3.5-flash-lite`, then `gemini-3.1-flash-lite` (both verified returning complete JSON on the real Brand fixture). Bounded: primary + 2 fallbacks.
+- Env overrides `AI_MODEL_FULL` / `AI_MODEL_CHEAP` / `AI_MODEL_FALLBACKS` so re-pinning no longer needs a code deploy + Render image switch.
+- `SPEC_PARSE_VERSION` 40→41 (the check-model-version-bump gate requires it for model changes; PR #81's 3.6 switch shipped without one).
+
+**Why it was needed:** A single hard-coded model keeps breaking Render imports whenever Google retires / quota-limits / capacity-spikes it (2.5-flash retired, 3.6-flash quota-exhausted). The fallback chain keeps the route working through capacity spikes instead of 502ing or returning hollow parses.
+
+**Review hardening (CodeRabbit on #82):**
+- Safety-blocked responses (`promptFeedback.blockReason` or candidate `finishReason: "SAFETY"`) return the empty result on the FIRST model — a blocked prompt is definitive, not transient, so it must not be re-asked against every fallback.
+- Fallback now applies only to provider transients (429/500/502/503/504 and 404 "not found for API version" for a retired model). Cancellation, timeouts, and 400/401/403 rethrow immediately — another model cannot fix them.
+- Caller signal + timeout are combined into one AbortSignal and passed as `config.abortSignal`, so a cancelled import (server-job cancellation path) actually stops the in-flight provider request instead of only abandoning the await.
+- `ChatResponse` now carries the effective `model`; the two cached AI routes (match-import, match-premix) mark results `cacheable: false` when a fallback served the call, so fallback output is never filed under the primary model's fingerprint (the cache already had a `cacheable` escape hatch for exactly this).
+
+**Verification:** `tsc --build` clean for `lib/integrations-openai-ai-server` and `artifacts/api-server`. Live replays of the exact parse call (prompt builder + client adapter + Render key): with the default primary → valid JSON (2 profiles / 1 recipe); with `AI_MODEL_FULL=gemini-3.6-flash` (dead model) pinned → the chain still returned a full parse in 4.6s. Model availability on the key is volatile — re-verify per incident.
+
+**Deploy:** after PR merge + CI image publish, user flips the Render dashboard Image tag to the new sha (the API can't change it).
+
+**Cache-guard footgun (self-inflicted, fixed in the same PR):** the two cached routes originally marked results `cacheable: false` whenever `response.model !== requestedModel`. The real adapter always reports the model, but test stubs that don't made every result non-cacheable — `costLimit.integration.test.ts`'s later cache HIT then missed and 429'd against the exhausted budget. Fix: `servedByFallback()` only treats a KNOWN, non-empty, different model as a fallback, and the costLimit provider stub now reports `model: args.model` like the real adapter. Lesson: any new field on the adapter's response must be honored defensively at call sites, and stubs must mirror the contract.
+
+**Flaky required check fixed properly (costLimit single-flight race):** a fixed settle delay was CodeRabbit's first suggestion and was rejected as a guessed interval; the test now awaits the REAL condition via `setInFlightJoinObserverForTests()` in `artifacts/api-server/src/lib/aiResultCache.ts` — a test hook (same `*ForTests` convention as the file's other hooks) that fires when a call joins an existing in-flight load. The test dynamically imports it so `@workspace/db` is not pulled into the module graph before beforeAll points DATABASE_URL at the throwaway test DB.
+
+**Flaky required check fixed (costLimit single-flight race):** `API tests (Postgres)` failed 4x on PR #82 at `costLimit.integration.test.ts` "charges one cache-miss owner, not its concurrent waiter or later cache hit" — the test released the provider in the same tick it fired the waiter, so on a loaded CI runner the owner finished first, the waiter became a fresh owner, and the second charge against a 1-unit budget answered 429 (the job log also showed "terminating connection due to administrator command" Postgres flapping). Not caused by the model-chain change: the previous commit on the same branch was green, and `main`'s own recent runs are red on the live-Gemini jobs ("Gemini failure streak is 20" — CI has no usable Gemini key/quota). Fix: settle ~150 ms after firing the waiter and before `provider.release?.()` so the waiter is registered as the in-flight waiter. If this test flakes again on unrelated branches, check this race first.
+
+## 2026-09-26 — Release check: 8 failing gates on PR #82, traced to 5 pre-existing root causes
+
+**Branch**: `codex/fix-import-model-fallback` (PR #82) -> `main`. The `Release check` workflow's
+`release-check-standard` job was BLOCKED with 8 of 36 gates failing. None were caused by the
+model-fallback change; all reproduced on `main`.
+
+**File(s)**: `.github/workflows/release-check.yml`, `lib/corpus-harness/src/index.ts`,
+`lib/corpus-harness/snapshots/evaluation-manifest.json`, `scripts/src/second-pass-reviewer-benchmark.mts`,
+`docs/second-pass-reviewer-benchmark-2026-09-05.json`, `artifacts/api-server/src/routes/masterDataBootstrap.test.ts`,
+`scripts/src/release-check.mts`, `docs/evidence/typescript-7-comparison-2026-09-15.json`,
+`docs/typescript-7-migration-research.md`
+
+**1. No AI provider key in release-check env -> 4 gates (clean-start smoke, browser smoke, browser
+accessibility, browser WebKit smoke).** `/api/readyz` reports `dependencies: error` until an AI key
+is configured (the 2026-09-20 fix above made Render's `GOOGLE_API_KEY` count). Playwright's release
+web servers (`playwright.release-servers.ts`) wait on exactly that endpoint, so all three browser
+gates died with `Timed out waiting 120000ms from config.webServer`, and the clean-start smoke failed
+on the same 503. Fix: `GOOGLE_API_KEY: release-check-ci-unused-provider-key` in both job env blocks.
+No gate calls the provider; this only has to be configured the way Render configures it.
+
+**2. Retained evaluation evidence pinned the exact Node patch -> 2 gates (corpus tests, model-bump check).**
+GitHub moved the floating `node-version: "24"` pin from 24.20.0 to 24.21.0 and both
+`lib/corpus-harness/snapshots/evaluation-manifest.json` and
+`docs/second-pass-reviewer-benchmark-2026-09-05.json` failed on `dependencies.node`. This is the THIRD
+time this pair has been re-baselined by hand (see the 2026-09-16 round-3 entry). Fix: both builders
+now record only the Node major via a local `nodeProvenanceMajor()`; the major is what CI pins and what
+`engines.node: ">=24"` requires, so a major bump stays a deliberate reviewable event while patch/minor
+bumps stop breaking unchanged gates. Kept local to each package on purpose — `lib/ai-evaluation` is
+deliberately runtime-agnostic (no `@types/node`) and is the wrong home for a `process` helper.
+Both evidence files were regenerated; the only fields that moved are `node` and the
+source-binding digests (`evaluator.sha256`, `benchmarkReporterSha256`) that necessarily follow the edit.
+
+**3. `masterDataBootstrap.test.ts` "invalidates only the mutated scope" -> API unit tests shard 1/7.**
+`masterDataBootstrap.ts` sets `CACHE_TTL_MS = process.env.E2E_TEST_DB === "1" ? 0 : 5_000`, and
+release-check exports `E2E_TEST_DB=1` job-wide, so the transport cache never hit. The test's final
+step asserts a cache HIT (scope-b revalidated after scope-a's rows were mutated), so with no cache it
+recomputed against scope-a's rows and returned 200 instead of 304. `ci.yml` does not set the flag,
+which is why main stayed green. Fix: the suite now `vi.stubEnv("E2E_TEST_DB", "0")` and dynamically
+imports the router in `beforeAll`, so the cache assertions hold in every workflow instead of depending
+on ambient job env. No assertion was weakened.
+
+**4. Calculator wall-clock budget measured under contention -> run calculator tests.** All 2700 tests
+passed; the run took 224.4s against its 150.0s budget because `test:budget` shared 4 CPUs with three
+concurrent `release-tests` gates. Fix: moved to its own `calculator-suite` stage so the regression guard
+measures the suite rather than the runner's co-scheduling.
+
+**5. Stale retained TypeScript migration summary -> TypeScript 7 advisory comparison.** Ten declaration
+files were added to the tree since the 2026-09-15 capture, so `docs/evidence/typescript-7-comparison-2026-09-15.json`
+(719/719/204, db 60) no longer matched. Re-captured to 729/729/205, db 61, and the three enforced lines in
+`docs/typescript-7-migration-research.md` were updated to match. The comparison only runs on an approved
+runner (`linux/x64` — `typescript-7-native-contract.mts` refuses arm64), so the numbers were harvested
+from the failed run's retained evidence artifact rather than recomputed locally; the run reported
+`ADVISORY_DRIFT` with `authoritativeOutputsChanged: false` and `diagnosticsEqual: true`.
+
+**Verification**: `masterDataBootstrap.test.ts` 5/5 with `E2E_TEST_DB=1` (and confirmed failing 200-vs-304
+without the fix); `check:workflows` (actionlint 1.7.12) clean over all 8 workflows; scripts +
+corpus-harness typecheck clean; `test:release-stopped-summary` passes. Corpus and reviewer evidence tests
+now differ ONLY on `node` (24 in CI vs 22 in an arm64/Node-22 sandbox), which is the expected local delta.
+
+**Sandbox caveat**: this agent machine is `linux/arm64` on Node 22 while the repo requires Node >=24, and
+`git push` to a local bare remote fails there ("unpack should have generated ..."), so local pushes cannot
+reproduce CI's git behavior. CI remains the authority for these gates.
