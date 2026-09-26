@@ -95,16 +95,16 @@
     }
   ],
   "declarations": {
-    "baselineFileCount": 719,
-    "candidateFileCount": 719,
-    "textuallyChangedFileCount": 204,
+    "baselineFileCount": 729,
+    "candidateFileCount": 729,
+    "textuallyChangedFileCount": 205,
     "removedLineCount": 2664,
     "addedLineCount": 2664,
     "fullDiffLineCount": 13723,
     "changedFilesByPackage": {
       "api-client-react": 2,
       "api-zod": 142,
-      "db": 60,
+      "db": 61,
       "other": 0
     }
   },

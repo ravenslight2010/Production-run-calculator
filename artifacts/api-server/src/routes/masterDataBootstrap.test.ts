@@ -40,7 +40,11 @@ vi.mock("../lib/requestScope", () => ({
 }));
 
 import { noStoreMiddleware } from "../lib/cacheControl";
-import router, { invalidateMasterDataBootstrapCache } from "./masterDataBootstrap";
+
+type MasterDataBootstrapModule = typeof import("./masterDataBootstrap");
+
+let router: MasterDataBootstrapModule["default"];
+let invalidateMasterDataBootstrapCache: MasterDataBootstrapModule["invalidateMasterDataBootstrapCache"];
 
 const initialRows = {
   ingredients: [{ id: "i1", name: "Flour" }],
@@ -54,6 +58,17 @@ let server: Server;
 let baseUrl: string;
 
 beforeAll(async () => {
+  // This suite asserts cache-hit semantics, so it must run with the cache
+  // enabled. `E2E_TEST_DB=1` sets CACHE_TTL_MS to 0 (see
+  // masterDataBootstrap.ts) so E2E runs always read fresh rows, and the
+  // release workflow exports that flag job-wide. Loading the router with the
+  // flag set would silently turn "invalidates only the mutated scope" into a
+  // no-op that always recomputes and then fails on a stale validator. Pin the
+  // flag off before the module is evaluated, so the suite tests the cache in
+  // every workflow rather than depending on ambient job env.
+  vi.stubEnv("E2E_TEST_DB", "0");
+  ({ default: router, invalidateMasterDataBootstrapCache } = await import("./masterDataBootstrap"));
+
   const app = express();
   app.use(noStoreMiddleware);
   app.use(router);
@@ -72,6 +87,7 @@ beforeEach(() => {
 });
 
 afterAll(async () => {
+  vi.unstubAllEnvs();
   server.closeAllConnections?.();
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });

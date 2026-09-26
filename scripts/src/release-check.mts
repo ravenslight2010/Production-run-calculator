@@ -1333,7 +1333,12 @@ const steps: ReleaseStep[] = [
   {
     label: "run calculator tests",
     args: ["--filter", "@workspace/run-calculator", "run", "test:budget"],
-    stage: "release-tests",
+    // Its own stage on purpose. `test:budget` is a wall-clock regression
+    // guard, and it measures the runner as much as the suite: sharing four
+    // CPUs with three concurrent release-tests gates pushed a fully green
+    // 2700-test run to 224.4s against its 150.0s budget. Run alone, the same
+    // suite measures what the budget is meant to bound.
+    stage: "calculator-suite",
   },
   {
     label: "production rules tests",

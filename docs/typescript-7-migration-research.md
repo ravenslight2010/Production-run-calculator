@@ -340,15 +340,25 @@ semantic drift.
 | Corpus harness library `--noEmit` | Pass, 0.80s | Pass, 0.16s |
 | Generated API client/Zod forced build | Pass | Pass |
 | Diagnostic count in checks above | 0 | 0 |
-| Declaration file count | 719 | 719 |
-| Declaration files with textual differences | baseline | 204 |
+| Declaration file count | 729 | 729 |
+| Declaration files with textual differences | baseline | 205 |
 | Declaration contract comparison | baseline | Pass (195 formatting-only, 9 approved semantic, 0 unexplained) |
 
 The declaration differences break down as:
 
 - 2 `api-client-react` generated declarations,
 - 142 `api-zod` generated declarations, and
-- 60 database schema declarations.
+- 61 database schema declarations.
+
+The declaration totals above were re-captured on 2026-09-26 from the Release check's
+retained evidence (`release-evidence/typescript-7-comparison.json`, revision
+`da7cbf567f2ab34ca33e05bfdbc13554798167ea`) after ten declaration files were added to
+the tree since the original 2026-09-15 capture, which made the retained summary stale
+and failed the `TypeScript 7 advisory comparison` gate. The comparison itself is
+advisory: it reported `ADVISORY_DRIFT` with `authoritativeOutputsChanged: false` and
+`diagnosticsEqual: true`, and it can only be produced on an approved runner
+(`linux/x64`), so the numbers are always harvested from CI rather than recomputed
+locally.
 
 There were 2,664 removed and 2,664 added diff lines. Inspected database differences were
 double-quote to single-quote changes in string literal types. Generated API declarations
