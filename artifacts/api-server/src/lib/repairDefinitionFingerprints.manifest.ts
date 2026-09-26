@@ -16,7 +16,8 @@ export const RELEASED_AUTOMATIC_REPAIR_FINGERPRINTS: Readonly<Record<string, str
   "crb-dough-family-consolidation-v1": "473ff746f3679b28f4b9b6da4b880450f033b099eb03897b4d398160d43b5df1",
   "cheese-import-poison-cleanup-v1": "7b3e8525f4ea343bdf4549b5ba7fdeccb9da2913a84023c319f4b138c6cb6a24",
   "spec-alias-hygiene-purge-v1": "49ebe339e9959179e30e2b73d66642d2e28e6707b3b5f58b24a8d46b3b29bf56",
-  "cheese-recipe-name-dedupe-v1": "3633c81b25d3b682dfe64dec90fcd4c8fba1784ec125b8c30e9e4cd46f659daf",
+  "spec-alias-context-hygiene-v1": "b8c951cb32bddb1550aeb529af1fa90c259fe27cd180384536054581180eedf9",
+  "cheese-recipe-name-dedupe-v1": "50004eeaf8d8e1c28cc59d0c38542b75c7adcff9ce6aeefcb967965f79f1eb60",
   "generic-mix-poison-purge-v2": "1f47fa5c13e8c3ed928bfaa5411ae47bd585825bd765438c45101afcdd477261",
   "cheese-named-mix-crossover-purge-v1": "9f6e06bebe3d777fa9d8279fb8e1d4f2ae0ec053ee5294ca9726ce1ac78187fd",
   "cheese-share-backfill-v1": "9598c0669803f5ae5d2ab39f12c5e2eb2b2c91af7a9c5c0c958a6413627cdce0",
@@ -63,4 +64,5 @@ export const RELEASED_AUTOMATIC_REPAIR_FINGERPRINTS: Readonly<Record<string, str
   "source-library-reconciliation-2026-08-26-v1": "c50e15136b8b5a42733ff9761c00d189887ccfd54aa4568352cafe0cd4a7fc13",
   "source-library-reconciliation-2026-08-26-v2": "e016e3e92c621193bbe1fb79e1e615eadeca5eff1aed588e2a9dad6e28afe318",
   "speed-adjustment-baseline-v1": "b953e8ae40fde2a7db3accb73258b58ba325279bcc6037e9781e70adecf3d7e2",
+  "recipe-customer-metadata-cleanup-v1": "943f3364667c2587fff6acfc3c4f19b27a3e4ffe667af579f4bb03162dbba7a4",
 });

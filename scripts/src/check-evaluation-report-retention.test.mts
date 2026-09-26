@@ -91,6 +91,29 @@ fs.writeFileSync("report.json", serialized);
   );
 });
 
+test("allows the audit-maintenance CLI only when explicitly classified as a non-reporter", () => {
+  const source = "process.stdout.write(JSON.stringify({ ok: true }));";
+  const sources = { "maintain-audit-log.mts": source };
+  const nonReporter = {
+    source: "maintain-audit-log.mts",
+    reason:
+      "Operational audit-log redaction/deletion CLI; it does not evaluate, retain, or emit provider/evaluation artifacts.",
+  };
+
+  withSources(sources, [], (directory) => {
+    assert.match(
+      checkEvaluationReportRetention(directory)[0]?.reason ?? "",
+      /must be registered/,
+    );
+  });
+  withSources(
+    sources,
+    [],
+    (directory) => assert.deepEqual(checkEvaluationReportRetention(directory), []),
+    [nonReporter],
+  );
+});
+
 for (const [description, serialization] of [
   ["direct", "JSON.stringify(providerResponse)"],
   ["aliased", "JSON.stringify(payload)"],

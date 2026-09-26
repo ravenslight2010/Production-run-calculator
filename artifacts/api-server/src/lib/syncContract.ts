@@ -67,9 +67,14 @@ export type SyncWriteEnvelope<T> =
 
 export function buildSyncWriteEnvelope<T>(
   data: T,
-  options: { requestedSnapshotId?: unknown; partialFallback?: boolean },
+  options: {
+    requestedSnapshotId?: unknown;
+    partialFallback?: boolean;
+    snapshotIdOverride?: string;
+  },
 ): SyncWriteEnvelope<T> {
-  const snapshotId = data === null || data === undefined ? undefined : syncSnapshotId(data);
+  const snapshotId = options.snapshotIdOverride
+    ?? (data === null || data === undefined ? undefined : syncSnapshotId(data));
   if (!options.partialFallback && snapshotId && options.requestedSnapshotId === snapshotId) {
     return { ok: true, unchanged: true, snapshotId };
   }

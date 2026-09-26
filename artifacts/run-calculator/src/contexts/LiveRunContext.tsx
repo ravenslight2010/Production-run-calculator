@@ -140,6 +140,7 @@ export interface LiveRunProviderProps {
   externalAutoSuppressRef?: React.MutableRefObject<number>;
   externalDoughAutoSuppressRef?: React.MutableRefObject<number>;
   onPackagingProgressAutoAdvance?: (
+    runId: string,
     skidsCompleted: number,
     casesOnCurrentSkid: number,
   ) => boolean;
@@ -148,6 +149,11 @@ export interface LiveRunProviderProps {
   autoTrackWakeRebaseReason?: AutoTrackWakeRebaseReason | null;
   autoTrackWakeAcknowledgement?: number;
   claimAutoTrackEvent?: (claim: AutoTrackEventClaim) => Promise<AutoTrackEventResult>;
+  onAutomaticClaimFailure?: (claim: AutoTrackEventClaim) => void;
+  onAutomaticClaimSuccess?: (
+    claim: AutoTrackEventClaim,
+    outcome: AutoTrackEventResult["outcome"],
+  ) => void;
   onAutoTrackProgressChange?: (enabled: boolean) => void;
   operationalSnapshotReceipt?: OperationalSnapshotReceipt | null;
   operationalServerCalc?: Calc | null;
@@ -189,6 +195,8 @@ export function LiveRunProvider({
   autoTrackWakeRebaseReason = null,
   autoTrackWakeAcknowledgement = 0,
   claimAutoTrackEvent,
+  onAutomaticClaimFailure,
+  onAutomaticClaimSuccess,
   onAutoTrackProgressChange,
   operationalSnapshotReceipt = null,
   operationalServerCalc = null,
@@ -370,16 +378,22 @@ export function LiveRunProvider({
   ]);
   const packagingDrainActive =
     runStatus === "paused" && lineHasPackagingDrain(linePhases);
+  const pausedOccupancyConfirmed =
+    runStatus === "paused" && confirmedProjection?.facts.runStatus === "paused";
   const operationalCalc =
     confirmedProjection?.calc
       ? {
           // The server frame remains authoritative for production counters,
-          // but occupancy is a time-relative display value. Rebase both
-          // windows onto the current clock so a wake/reload can drain stale
-          // freezer contents without waiting for another server frame.
+          // but running/draining occupancy is time-relative. A paused run's
+          // occupancy is fixed at its pause point: the confirmed server frame
+          // must not be replaced with a stale local pre-wake calculation.
           ...confirmedProjection.calc,
-          casesOnLine: calc.casesOnLine,
-          casesInFreezer: calc.casesInFreezer,
+          casesOnLine: pausedOccupancyConfirmed
+            ? confirmedProjection.calc.casesOnLine
+            : calc.casesOnLine,
+          casesInFreezer: pausedOccupancyConfirmed
+            ? confirmedProjection.calc.casesInFreezer
+            : calc.casesInFreezer,
         }
       : (adoptServerCalc
         ? operationalServerCalc
@@ -521,6 +535,8 @@ export function LiveRunProvider({
       autoTrackWakeRebaseReason,
       autoTrackWakeAcknowledgement,
       claimAutoTrackEvent,
+      onAutomaticClaimFailure,
+      onAutomaticClaimSuccess,
       authoritativeServerAutoTrack: true,
       autoTrackProgressEnabled: currentRun?.autoTrackDisabled !== true,
       nextRunPrepActive,

@@ -439,8 +439,8 @@ test("applies photographed review edits to the authenticated profile and recipe 
     };
   }, { timeout: 20_000 }).toEqual({
     profile: {
-      brand: EDITED_BRAND.toLowerCase(),
-      flavor: RAW_FLAVOR.toLowerCase(),
+      brand: EDITED_BRAND,
+      flavor: RAW_FLAVOR,
     },
     recipe: { name: EDITED_RECIPE },
   });

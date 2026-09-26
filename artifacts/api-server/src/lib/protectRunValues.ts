@@ -532,9 +532,10 @@ function preserveAndInvalidateAutoTrackCoordination(
 export function protectRunValues(
   incoming: unknown,
   existing: unknown,
-  options: { allowRunListReplacement?: boolean } = {},
+  options: { allowRunListReplacement?: boolean; nowMs?: number } = {},
 ): unknown {
   if (!isPlainObject(incoming)) return incoming;
+  const nowMs = Number.isFinite(options.nowMs) ? Number(options.nowMs) : Date.now();
   // Nothing stored yet (first write for this scope+date): the payload was
   // already sanitized by the route, but still canonicalize the legacy
   // runValues pair from packagingProgress before storing/returning it.
@@ -942,6 +943,7 @@ export function protectRunValues(
     (incoming as Record<string, unknown>).packagingProgress,
     exData.packagingProgress,
     tombstoned,
+    nowMs,
   );
   if (mergedProgress) {
     // Overlay winning counters into canonical runValues after the whole-value merge.
@@ -959,6 +961,8 @@ export function protectRunValues(
 // Each entry records live packaging counters for one run:
 //   { skidsCompleted, casesOnCurrentSkid, correctionGeneration, updatedAt, manualOverrideUntil }
 // Precedence rules (independent of runValues LWW stamps):
+//   - An unexpired server-owned manual override preserves the stored entry
+//     against ordinary sync snapshots.
 //   - Higher correctionGeneration always wins regardless of updatedAt.
 //   - Same generation: higher updatedAt wins.
 //   - Exact tie (same generation AND same updatedAt): keep stored entry.
@@ -1003,10 +1007,15 @@ function sanitizePackagingProgressEntry(v: unknown): PackagingProgressEntry | nu
 function mergePackagingEntry(
   incoming: PackagingProgressEntry | null,
   stored: PackagingProgressEntry | null,
+  nowMs: number,
 ): PackagingProgressEntry | null {
   if (!incoming && !stored) return null;
   if (!incoming) return stored;
   if (!stored) return incoming;
+  // Accepted manual corrections establish a short server-owned hold. Ordinary
+  // snapshots may carry a newer client generation or clock, but cannot
+  // overwrite the operator's canonical pair before clients converge.
+  if (stored.manualOverrideUntil > nowMs) return stored;
   // Higher correctionGeneration always wins.
   if (incoming.correctionGeneration > stored.correctionGeneration) return incoming;
   if (stored.correctionGeneration > incoming.correctionGeneration) return stored;
@@ -1023,6 +1032,7 @@ function mergePackagingProgress(
   incoming: unknown,
   stored: unknown,
   tombstoned: Set<string>,
+  nowMs = Date.now(),
 ): Record<string, PackagingProgressEntry> | undefined {
   const inMap = isPlainObject(incoming) ? incoming : null;
   const exMap = isPlainObject(stored) ? stored : null;
@@ -1042,7 +1052,7 @@ function mergePackagingProgress(
     const exEntry = exMap ? sanitizePackagingProgressEntry(exMap[id]) : null;
     // Missing incoming metadata cannot clobber established stored metadata:
     // if incoming has no entry for this id but stored does, keep stored.
-    const winner = mergePackagingEntry(inEntry, exEntry);
+    const winner = mergePackagingEntry(inEntry, exEntry, nowMs);
     if (winner) out[id] = winner;
   }
 

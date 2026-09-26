@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   normalizeCheeseRecipe,
+  normalizeCheeseRecipeCustomerMetadata,
   normalizeCheeseRecipes,
   normalizeCheeseComponent,
   cheeseRecipeTotalLbs,
@@ -55,6 +56,17 @@ describe("normalizeCheeseComponent", () => {
 });
 
 describe("normalizeCheeseRecipe", () => {
+  it("normalizes customer metadata to the blank-safe representation", () => {
+    expect(normalizeCheeseRecipeCustomerMetadata({
+      brand: " Bobo ",
+      flavors: ["All Varieties", " Pepperoni ", "pepperoni", null],
+    })).toEqual({ brand: "Bobo", flavors: ["Pepperoni"] });
+    expect(normalizeCheeseRecipeCustomerMetadata({
+      brand: null,
+      flavors: ["Stray"],
+    })).toEqual({ brand: "", flavors: [] });
+  });
+
   it("requires a name, defaults enabled true, de-dups flavors case-insensitively", () => {
     const r = normalizeCheeseRecipe({
       id: "x",
@@ -492,6 +504,16 @@ describe("repointCheeseRecipesForBrandMerge", () => {
       expect(renameCheeseRecipesBrand(recipes, "   ", "Beta")).toEqual([]);
       expect(renameCheeseRecipesBrand(recipes, "Alpha", "Alpha")).toEqual([]);
     });
+
+    it("skips malformed brand values while renaming valid rows", () => {
+      const recipes = [
+        make({ id: "valid", brand: "Alpha" }),
+        make({ id: "malformed", brand: null as unknown as string }),
+      ];
+      expect(renameCheeseRecipesBrand(recipes, "Alpha", "Beta")).toEqual([
+        { ...recipes[0], brand: "Beta" },
+      ]);
+    });
   });
 
   describe("flavor merge re-pointing", () => {
@@ -548,6 +570,16 @@ describe("cheeseRecipeMatchesQuery", () => {
     expect(cheeseRecipeMatchesQuery(r, "pepp")).toBe(true);
     expect(cheeseRecipeMatchesQuery(r, "zzz")).toBe(false);
   });
+
+  it("ignores malformed brand and flavor values", () => {
+    const malformed = make({
+      brand: null as unknown as string,
+      flavors: [null, { label: "bad" }] as unknown as string[],
+    });
+    expect(() => cheeseRecipeMatchesQuery(malformed, "whole")).not.toThrow();
+    expect(cheeseRecipeMatchesQuery(malformed, "whole")).toBe(true);
+    expect(cheeseRecipeMatchesQuery(malformed, "missing")).toBe(false);
+  });
 });
 
 describe("groupCheeseRecipesByBrand", () => {
@@ -561,6 +593,16 @@ describe("groupCheeseRecipesByBrand", () => {
     expect(groups.map((g) => g.brand)).toEqual(["Alpha", "Zeta", ""]);
     expect(groups[0].recipes.map((r) => r.name)).toEqual(["A1", "A2"]);
     expect(groups[0].shredderSetting).toBe("5");
+  });
+
+  it("puts malformed brands in the no-brand group without affecting valid groups", () => {
+    const groups = groupCheeseRecipesByBrand([
+      make({ id: "valid", name: "Valid", brand: "Alpha" }),
+      make({ id: "malformed", name: "Legacy", brand: { bad: true } as unknown as string }),
+    ]);
+    expect(groups.map((g) => g.brand)).toEqual(["Alpha", ""]);
+    expect(groups[0].recipes.map((r) => r.name)).toEqual(["Valid"]);
+    expect(groups[1].recipes.map((r) => r.name)).toEqual(["Legacy"]);
   });
 });
 

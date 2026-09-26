@@ -160,6 +160,7 @@ test.beforeEach(async () => {
   try {
     await db.connect();
     await db.query("DELETE FROM daily_sync WHERE date = $1", [today()]);
+    await db.query("DELETE FROM completed_run_history WHERE date = $1", [today()]);
   } finally {
     await db.end().catch(() => {});
   }
@@ -172,6 +173,7 @@ test.afterAll(async () => {
     await db.connect();
     await cleanupTestUsers(db, testUsernames);
     await db.query("DELETE FROM daily_sync WHERE date = $1", [today()]);
+    await db.query("DELETE FROM completed_run_history WHERE date = $1", [today()]);
   } finally {
     await db.end().catch(() => {});
   }
@@ -246,10 +248,18 @@ test("manager can preview an authoritative operational report", async ({ page })
   const username = uniqueTestId("e2e_webkit_report");
   testUsernames.add(username);
   await signUp(page, username);
-  await seedPendingRun(page);
+  const runId = await seedPendingRun(page);
   await promoteToManager(username);
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+
+  const operationalView = await page.request.get(
+    `/api/reports/operational-view?date=${today()}&runId=${encodeURIComponent(runId)}`,
+  );
+  expect(
+    operationalView.status(),
+    `Operational view fixture returned ${operationalView.status()}: ${(await operationalView.text()).slice(0, 2_000)}`,
+  ).toBe(200);
 
   await page.getByTitle("More").click();
   await page.getByRole("menuitem", { name: "Summary", exact: true }).click();
@@ -266,7 +276,12 @@ test("manager can preview an authoritative operational report", async ({ page })
       candidate.request().method() === "POST",
   );
   await report.getByRole("button", { name: "Preview report", exact: true }).click();
-  expect((await response).status()).toBe(200);
+  const reportResponse = await response;
+  const reportBody = await reportResponse.text();
+  expect(
+    reportResponse.status(),
+    `Operational report preview returned ${reportResponse.status()}: ${reportBody.slice(0, 2_000)}`,
+  ).toBe(200);
   await expect(report.getByText("CONFIRMED CANONICAL REPORT", { exact: true })).toBeVisible();
   await expect(report.getByText("Report ready. Statistics are authoritative and deterministic.", { exact: true })).toBeVisible();
 });

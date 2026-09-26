@@ -420,7 +420,10 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                               disabled={!!doughLock}
                               onSuggest={() => { const baseline = { traysOnLine: Number(form.getValues("traysOnLine")) || 0, batchesReady: Number(form.getValues("batchesReady")) || 0 }; const next = suggestedTrays ?? v.traysOnLine; markRunValuesUpdated(currentRunId, Date.now()); form.setValue("traysOnLine", next, { shouldDirty: true }); onManual({ traysOnLine: next }, baseline); }}
                               onManualChange={(next, previous) => {
-                                onManual({ traysOnLine: next }, { traysOnLine: previous, batchesReady: Number(v.batchesReady) || 0 });
+                                onManual({ traysOnLine: next }, {
+                                  traysOnLine: previous,
+                                  batchesReady: Number(form.getValues("batchesReady")) || 0,
+                                });
                               }}
                             />
                             {doughSubTab !== "crusts" && (
@@ -474,7 +477,10 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                                 suggestion={!batchAutoActive ? suggestedBatches : null}
                               onSuggest={() => { const baseline = { traysOnLine: Number(form.getValues("traysOnLine")) || 0, batchesReady: Number(form.getValues("batchesReady")) || 0 }; const next = suggestedBatches ?? v.batchesReady; markRunValuesUpdated(currentRunId, Date.now()); form.setValue("batchesReady", next, { shouldDirty: true }); onManual({ batchesReady: next }, baseline); }}
                               onManualChange={(next, previous) => {
-                                onManual({ batchesReady: next }, { traysOnLine: Number(v.traysOnLine) || 0, batchesReady: previous });
+                                 onManual({ batchesReady: next }, {
+                                   traysOnLine: Number(form.getValues("traysOnLine")) || 0,
+                                   batchesReady: previous,
+                                 });
                               }}
                               disabled={!!doughLock}
                               />
@@ -529,8 +535,11 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                             skidsCompleted: packedSkids,
                             casesOnCurrentSkid: packedCasesOnSkid,
                             casesPerSkid: cps,
-                            applyProgress: (nextSkids, nextCases) => {
-                              persistManualPackagingProgress(currentRunId, nextSkids, nextCases);
+                            applyProgress: (nextSkids, nextCases, previousSkids, previousCases) => {
+                              persistManualPackagingProgress(currentRunId, nextSkids, nextCases, undefined, {
+                                skidsCompleted: previousSkids,
+                                casesOnCurrentSkid: previousCases,
+                              });
                               form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
                               form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
                             },
@@ -622,8 +631,22 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                             name="skidsCompleted"
                             label={autoTrackProgress && s && !suppressed ? "Total Skids Completed · Auto" : "Total Skids Completed"}
                             suggestion={!autoTrackProgress && s && s.skids !== v.skidsCompleted ? s.skids : null}
-                            onSuggest={() => { persistManualPackagingProgress(currentRunId, s!.skids, s!.casesOnSkid); form.setValue("skidsCompleted", s!.skids, { shouldDirty: true }); form.setValue("casesOnCurrentSkid", s!.casesOnSkid, { shouldDirty: true }); }}
-                            onManualChange={(nextSkids) => { persistManualPackagingProgress(currentRunId, nextSkids, Number(v.casesOnCurrentSkid) || 0); }}
+                            onSuggest={() => {
+                              const before = {
+                                skidsCompleted: Number(form.getValues("skidsCompleted")) || 0,
+                                casesOnCurrentSkid: Number(form.getValues("casesOnCurrentSkid")) || 0,
+                              };
+                              persistManualPackagingProgress(currentRunId, s!.skids, s!.casesOnSkid, undefined, before);
+                              form.setValue("skidsCompleted", s!.skids, { shouldDirty: true });
+                              form.setValue("casesOnCurrentSkid", s!.casesOnSkid, { shouldDirty: true });
+                            }}
+                            onManualChange={(nextSkids, previousSkids) => {
+                              const casesOnCurrentSkid = Number(form.getValues("casesOnCurrentSkid")) || 0;
+                              persistManualPackagingProgress(currentRunId, nextSkids, casesOnCurrentSkid, undefined, {
+                                skidsCompleted: previousSkids,
+                                casesOnCurrentSkid,
+                              });
+                            }}
                              disabled={!!packagingLock}
                           />
                           <StepperField
@@ -632,8 +655,21 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                             label={autoTrackProgress && s && !suppressed ? "Cases on Current Skid · Auto" : "Cases on Current Skid"}
                             max={v.casesPerSkid > 0 ? v.casesPerSkid : undefined}
                             suggestion={!autoTrackProgress && s && s.casesOnSkid !== v.casesOnCurrentSkid ? s.casesOnSkid : null}
-                            onSuggest={() => { persistManualPackagingProgress(currentRunId, Number(v.skidsCompleted) || 0, s!.casesOnSkid); form.setValue("casesOnCurrentSkid", s!.casesOnSkid, { shouldDirty: true }); }}
-                            onManualChange={(nextCases) => { persistManualPackagingProgress(currentRunId, Number(v.skidsCompleted) || 0, nextCases); }}
+                            onSuggest={() => {
+                              const before = {
+                                skidsCompleted: Number(form.getValues("skidsCompleted")) || 0,
+                                casesOnCurrentSkid: Number(form.getValues("casesOnCurrentSkid")) || 0,
+                              };
+                              persistManualPackagingProgress(currentRunId, Number(v.skidsCompleted) || 0, s!.casesOnSkid, undefined, before);
+                              form.setValue("casesOnCurrentSkid", s!.casesOnSkid, { shouldDirty: true });
+                            }}
+                            onManualChange={(nextCases, previousCases) => {
+                              const skidsCompleted = Number(form.getValues("skidsCompleted")) || 0;
+                              persistManualPackagingProgress(currentRunId, skidsCompleted, nextCases, undefined, {
+                                skidsCompleted,
+                                casesOnCurrentSkid: previousCases,
+                              });
+                            }}
                              disabled={!!packagingLock}
                           />
                         </div>

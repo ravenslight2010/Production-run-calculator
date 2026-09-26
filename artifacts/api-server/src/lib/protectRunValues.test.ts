@@ -1143,6 +1143,48 @@ describe("packagingProgress merge (Task 974)", () => {
     expect(rv.casesOnCurrentSkid).toBe(3);
   });
 
+  it("an active server manual hold preserves Packaging over newer snapshot registers", () => {
+    const storedProgress = mkProgress(1, 24, 1, 4_000, 5_000);
+    const stored = basePayload(
+      ["r1"],
+      { r1: storedProgress },
+      { r1: { casesNeeded: 100, skidsCompleted: 1, casesOnCurrentSkid: 24 } },
+    );
+    const incoming = {
+      ...basePayload(
+        ["r1"],
+        { r1: mkProgress(0, 44, 99, 9_000, 0) },
+        { r1: { casesNeeded: 200, skidsCompleted: 0, casesOnCurrentSkid: 44 } },
+      ),
+      runValuesUpdatedAt: { r1: 9_000 },
+    };
+
+    const out = protectRunValues(incoming, stored, { nowMs: 4_500 }) as Record<string, unknown>;
+    const progress = out.packagingProgress as Record<string, ProgressEntry>;
+    const values = (out.runValues as Record<string, Record<string, unknown>>).r1;
+
+    expect(progress.r1).toEqual(storedProgress);
+    expect(values).toMatchObject({
+      casesNeeded: 200,
+      skidsCompleted: 1,
+      casesOnCurrentSkid: 24,
+    });
+  });
+
+  it("newer Packaging progress wins once the server manual hold expires", () => {
+    const stored = basePayload(["r1"], { r1: mkProgress(1, 24, 1, 4_000, 5_000) });
+    const incoming = basePayload(["r1"], { r1: mkProgress(0, 44, 99, 9_000, 0) });
+
+    const out = protectRunValues(incoming, stored, { nowMs: 5_000 }) as Record<string, unknown>;
+    const progress = out.packagingProgress as Record<string, ProgressEntry>;
+
+    expect(progress.r1).toMatchObject({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 44,
+      correctionGeneration: 99,
+    });
+  });
+
   it("reset path: retains only incoming run IDs but still applies precedence for shared runs", () => {
     // Stored has runs a, b; incoming reset has only run a with lower gen.
     // Run b should be dropped; run a should keep stored entry (higher gen).

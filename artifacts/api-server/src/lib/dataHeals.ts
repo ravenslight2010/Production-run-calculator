@@ -21,6 +21,7 @@ import * as aug19Profile from "./repairs/aug19SavedSpecProfileRepair";
 import * as aug19ProfileV2 from "./repairs/aug19SavedSpecProfileRepairV2";
 import * as sourceReconciliation from "./repairs/sourceLibraryReconciliationRepair";
 import * as speedAdjustmentBaseline from "./repairs/speedAdjustmentBaselineRepair";
+import * as recipeCustomerMetadata from "./repairs/recipeCustomerMetadataRepair";
 
 export {
   pickMixDuplicateLosers,
@@ -47,6 +48,7 @@ export const AUTOMATIC_DATA_HEAL_IDS = Object.freeze([
   "crb-dough-family-consolidation-v1",
   "cheese-import-poison-cleanup-v1",
   "spec-alias-hygiene-purge-v1",
+  "spec-alias-context-hygiene-v1",
   "cheese-recipe-name-dedupe-v1",
   "generic-mix-poison-purge-v2",
   "cheese-named-mix-crossover-purge-v1",
@@ -94,6 +96,7 @@ export const AUTOMATIC_DATA_HEAL_IDS = Object.freeze([
   "source-library-reconciliation-2026-08-26-v1",
   "source-library-reconciliation-2026-08-26-v2",
   "speed-adjustment-baseline-v1",
+  "recipe-customer-metadata-cleanup-v1",
 ] as const);
 
 const modules = [
@@ -101,6 +104,7 @@ const modules = [
   cheeseNormalization, remainingCheeseNormalization, mixDough, doughMerge,
   historicalProfiles, augustImports, remainingAugustImports, profileStub,
   aug19Profile, aug19ProfileV2, sourceReconciliation, speedAdjustmentBaseline,
+  recipeCustomerMetadata,
 ] as const;
 
 function isDefinition(value: unknown): value is RepairDefinition<RepairTransaction> {
@@ -169,3 +173,5 @@ export const runSourceLibraryReconciliationHeal = () =>
   runById("source-library-reconciliation-2026-08-26-v1");
 export const runSourceLibraryReconciliationHealV2 = () =>
   runById("source-library-reconciliation-2026-08-26-v2");
+export const runSpecAliasContextHygieneRepair = () =>
+  runById("spec-alias-context-hygiene-v1");

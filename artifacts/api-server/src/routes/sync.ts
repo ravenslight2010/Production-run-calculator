@@ -1342,6 +1342,7 @@ async function upsertProtected(
         const serverOwnedPayload = capPackagingManualOverrideUntil(payloadForMerge, serverTime);
         const m = completeSyncData(capMergedResult(protectRunValues(serverOwnedPayload, canonicalExisting, {
           allowRunListReplacement: date > clientTodayDate,
+          nowMs: serverTime,
         }))) as Record<string, any>;
         canonicalizePepNames(m);
         applyResetBoundary(m, existing?.data, date === clientTodayDate);
@@ -1551,6 +1552,9 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
   const responseBody = buildSyncWriteEnvelope(merged, {
     requestedSnapshotId: requestedId,
     partialFallback: result.partialFallback,
+    ...(merged === null
+      ? { snapshotIdOverride: syncSnapshotId(completeSyncData(emptySyncData(today))) }
+      : {}),
   });
   res.setHeader("X-Sync-Response-Bytes", String(Buffer.byteLength(JSON.stringify(responseBody))));
   const telemetryMode: SyncPutMode = result.partialFallback
@@ -1661,7 +1665,34 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
     }
     const next = JSON.parse(JSON.stringify(current)) as Record<string, any>;
     next.runValues = { ...(next.runValues ?? {}), [runId]: { ...(next.runValues?.[runId] ?? {}), ...values } };
-    next.runValuesUpdatedAt = { ...(next.runValuesUpdatedAt ?? {}), [runId]: Date.now() };
+    next.runValuesUpdatedAt = { ...(next.runValuesUpdatedAt ?? {}), [runId]: serverTime };
+    if (section === "packaging") {
+      const progressMap = current.packagingProgress
+        && typeof current.packagingProgress === "object"
+        && !Array.isArray(current.packagingProgress)
+        ? current.packagingProgress as Record<string, any>
+        : {};
+      const previousProgress = progressMap[runId];
+      const previousGeneration =
+        Number.isSafeInteger(previousProgress?.correctionGeneration)
+        && previousProgress.correctionGeneration >= 0
+          ? previousProgress.correctionGeneration as number
+          : 0;
+      const correctionGeneration = Math.min(Number.MAX_SAFE_INTEGER, previousGeneration + 1);
+      const canonicalValues = next.runValues[runId] ?? {};
+      const canonicalCounter = (value: unknown) =>
+        typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
+      next.packagingProgress = {
+        ...progressMap,
+        [runId]: {
+          skidsCompleted: canonicalCounter(canonicalValues.skidsCompleted),
+          casesOnCurrentSkid: canonicalCounter(canonicalValues.casesOnCurrentSkid),
+          correctionGeneration,
+          updatedAt: serverTime,
+          manualOverrideUntil: serverTime + MAX_PACKAGING_MANUAL_OVERRIDE_MS,
+        },
+      };
+    }
     const revision = currentRevision + 1;
     if (existing) {
       await tx.update(dailySyncTable).set({ data: next, canonicalRevision: revision, updatedAt: new Date() })
@@ -2624,7 +2655,9 @@ router.post("/sync/e2e/auto-track-tick", async (req: Request, res: Response): Pr
       ));
     });
   }
-  const summary = await runAutoTrackServerTicks({ nowMs, scope, date });
+  const summary = req.body?.skipAutoTrack === true
+    ? { examinedDates: 0, builtClaims: 0, accepted: 0, outcomes: {} }
+    : await runAutoTrackServerTicks({ nowMs, scope, date });
   // A deterministic E2E clock step is also an authoritative projection frame.
   // Production heartbeats publish this frame even when no counter cadence is
   // due; without it, a test step inside the freezer-fill window would leave the
@@ -2648,6 +2681,7 @@ router.post("/sync/e2e/auto-track-tick", async (req: Request, res: Response): Pr
     canonicalRevision: row?.canonicalRevision ?? 0,
     serverTime: nowMs,
     projected: !!row,
+    snapshotId: row ? syncSnapshotId(row.data) : undefined,
     autoTrackSchedule: authoritative?.autoTrackSchedule ?? null,
     operationalProjection: authoritative?.operationalProjection ?? null,
   });
@@ -2828,6 +2862,9 @@ router.put(
   const responseBody = buildSyncWriteEnvelope(merged, {
     requestedSnapshotId: requestedId,
     partialFallback: result.partialFallback,
+    ...(merged === null
+      ? { snapshotIdOverride: syncSnapshotId(completeSyncData(emptySyncData(date))) }
+      : {}),
   });
   res.setHeader("X-Sync-Response-Bytes", String(Buffer.byteLength(JSON.stringify(responseBody))));
   if (legacyUnversionedComplete) recordLegacySyncWrite("accepted");

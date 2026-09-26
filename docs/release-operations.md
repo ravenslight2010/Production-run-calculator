@@ -33,6 +33,23 @@ execution budget, not a retry or an evidence-validation bypass: all 159
 enumerated cases still need to complete and the retained report must pass the
 same revision-bound evidence verifier.
 
+For compatibility work, or as the bounded pre-release browser-engine check, run:
+
+```bash
+pnpm --filter @workspace/run-calculator run test:e2e:compatibility
+```
+
+This serialized lane reuses the isolated staff lifecycle smoke on desktop,
+phone, tablet portrait, and tablet landscape Chromium, then runs the lifecycle
+and report cases from the isolated WebKit release smoke at phone and tablet
+sizes. The dedicated WebKit command remains the owner of the full WebKit
+contract, including failed-pull/reconnect recovery. The compatibility lane
+retains traces and failure-only screenshots under
+`artifacts/run-calculator/test-results/compatibility` and an HTML report under
+`artifacts/run-calculator/playwright-report/compatibility`. The lane is
+separate from the existing smoke, accessibility, visual, PWA, WebKit,
+physical-device, and full-release commands; it does not replace them.
+
 The GitHub Actions standard and full jobs install WebKit and the Linux runtime
 dependencies required by its browser bundle before running the release gates:
 
@@ -98,6 +115,29 @@ as regressions.
 - A missing gate in the report is an incomplete run, never a pass.
 - A missing, empty, stale-revision, or unexpected evidence file is an evidence
   failure, never a pass.
+- The compatibility lane's Chromium and WebKit projects are responsive browser
+  emulations. They are not proof of physical Android Chrome or iOS Safari/PWA
+  behavior. Run physical Android Chrome through the dedicated device command
+  and any available iOS Safari/PWA service through its separate device lane.
+  If a required device endpoint is unavailable, record the check as `BLOCKED`
+  or `NOT RUN` with the environment reason; never report emulation as a
+  physical-device pass.
+- The iOS Safari/PWA lane is separate from responsive browser and PWA
+  service-worker evidence:
+
+  ```bash
+  pnpm --filter @workspace/run-calculator run check:e2e:ios:pwa:device
+  pnpm --filter @workspace/run-calculator run test:e2e:ios:pwa:device
+  ```
+
+  It requires `PLAYWRIGHT_REAL_IOS_SAFARI_WS_ENDPOINT`, retains its own
+  `test-results/ios-safari-pwa` and `playwright-report/ios-safari-pwa`
+  directories, and verifies that the connected runtime identifies as iOS with
+  touch support. The lane covers physical web/PWA behavior only; it does not
+  imply native iOS application coverage. Missing device services are a
+  fail-closed `BLOCKED` readiness result (exit status 2); release records may
+  classify an unavailable optional run as `NOT RUN` with the actionable
+  environment reason.
 - A browser duration alert is an operational review signal, not a coverage or
   serial-execution bypass. It is copied into the release summary for
   investigation; the full suite still must complete the shared case contract
@@ -167,26 +207,30 @@ retained evidence are mandatory.
 
 ### Bind production reconciliation evidence to the deployed build
 
-Set `RELEASE_REVISION` on the controlled deployment to the full 40-character
-Git commit SHA that was deployed. The operational report exposes that value at
-`evidence.release.revision`; malformed or absent revision metadata is reported
-as `unknown` and is not valid release proof. `REPLIT_GIT_COMMIT` and
-`GIT_COMMIT` remain compatibility fallbacks, but operators should not depend on
-either being supplied automatically by the deployment platform.
+The controlled deployment must provide a current published-deployment handoff
+with the full 40-character Git commit SHA that was deployed. The
+provider-neutral handoff has this bounded shape:
+`{schemaVersion, kind, deploymentId, deployedRevision, issuedAt, expiresAt}`.
+The operational report may expose the same value at
+`evidence.release.revision`; malformed, absent, or expired revision metadata is
+not valid release proof. `REPLIT_GIT_COMMIT` and `GIT_COMMIT` remain
+compatibility fallbacks for development-only checks, but production source
+evidence never falls back to repository `HEAD`.
 
-Capture and import production reconciliation evidence with the exact revision
-returned by the deployed operational report. Run this from the deployment
-environment that owns the production `DATABASE_URL`; the capture mode refuses
-fixture query input, requires the explicit release environment and deployed
-revision, and runs one PostgreSQL `READ ONLY` transaction. Its stdout contains
-only the bounded verifier result, so it can be piped directly to the importer:
+Capture and import production reconciliation evidence with the revision in that
+handoff. Run this from the deployment environment that owns the production
+`DATABASE_URL`; the capture mode validates the handoff before querying,
+refuses fixture query input, requires the explicit release environment, and
+runs one PostgreSQL `READ ONLY` transaction. Its stdout contains only the
+bounded verifier result, so it can be piped directly to the importer:
 
 ```bash
+HANDOFF=/secure/path/published-deployment-handoff.json
 pnpm --silent --filter @workspace/scripts exec tsx \
   ./src/verify-source-library-reconciliation.mts \
   --capture-production \
   --environment release \
-  --revision <deployed-40-character-sha> \
+  --deployment-handoff "$HANDOFF" \
   --report attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json \
 | pnpm --filter @workspace/scripts exec tsx \
   ./src/import-source-library-reconciliation-evidence.mts \
@@ -194,7 +238,7 @@ pnpm --silent --filter @workspace/scripts exec tsx \
   --report attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json \
   --heal-id source-library-reconciliation-2026-08-26-v2 \
   --from-date 2026-08-26 \
-  --revision <deployed-40-character-sha> \
+  --deployment-handoff "$HANDOFF" \
   --output /secure/path/source-library-reconciliation.json
 ```
 
@@ -203,26 +247,29 @@ If a file handoff is required, add `--output
 regular file as `--input` to the importer. Do not export query results,
 database dumps, or development fixtures.
 
-Import the retained bounded file into a release run with the same explicit
-revision:
+Import the retained bounded file into a release run with the same validated
+handoff:
 
 ```bash
-SOURCE_LIBRARY_RECONCILIATION_REVISION=<deployed-40-character-sha> \
 pnpm run release:check -- \
   --source-library-environment release \
-  --source-library-revision <deployed-40-character-sha> \
+  --source-library-deployment-handoff /secure/path/published-deployment-handoff.json \
   --source-library-evidence /secure/path/source-library-reconciliation.json
 ```
 
 Release captures and imports reject a missing, malformed, `unknown`, or
-different revision. The production revision must come from the controlled
+stale handoff, and reject an explicit `--revision` that differs from the
+handoff. The production revision must come from the controlled
 deployment/report path; never substitute the current repository `HEAD`. The
-retained release report records both `Source-library evidence revision` and
-`Deployed revision`; for release evidence those values must match the SHA
-returned by the deployed operational report. The release runner passes that SHA
-explicitly to the source verifier's preflight and full verification/import
-steps, so an older release-state file or an omitted preflight value cannot
-silently qualify.
+handoff is read only for its bounded deployment identity and SHA and is not
+copied into retained evidence; recipe rows, aliases, database responses, and
+credentials are never retained. The retained release report records both
+`Source-library evidence revision` and `Deployed revision`; for release
+evidence those values must match the SHA returned by the controlled
+deployment/report path. The release runner validates and passes that SHA
+through the source verifier's preflight and full verification/import steps, so
+an older release-state file or an omitted preflight value cannot silently
+qualify.
 
 When a job stops before all gates complete, the workflow writes a separate
 NO-GO summary with the uploaded checkpoint-artifact link, the matching resume

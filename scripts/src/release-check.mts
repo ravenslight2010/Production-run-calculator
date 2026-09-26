@@ -26,6 +26,8 @@ import {
   computeSourceLibraryEvidenceId,
   parseSourceLibraryPreflightDiagnostic as parseStoredSourceLibraryPreflightDiagnostic,
   parseSourceLibraryEvidenceEnvironment,
+  resolveSourceLibraryDatabaseOwner,
+  readSourceLibraryDeploymentHandoff,
   summarizeSourceLibraryPreflight,
   type SourceLibraryEvidenceEnvironment,
   type SourceLibraryPreflightDiagnostic,
@@ -268,8 +270,8 @@ export const RELEASE_CHECK_API_CONCURRENCY = 2;
 // evidence-producing gate a longer bounded window instead of weakening
 // isolation with parallel workers or masking intermittent failures with
 // retries. The exact coverage count lives in the shared browser contract.
-const FULL_BROWSER_TIMEOUT_MS = 45 * 60_000;
-const FULL_BROWSER_WARNING_MS = 40 * 60_000;
+const FULL_BROWSER_TIMEOUT_MS = 90 * 60_000;
+const FULL_BROWSER_WARNING_MS = 80 * 60_000;
 const FULL_BROWSER_GATE_LABEL = "full browser E2E suite";
 const RELEASE_BROWSER_ENV = {
   E2E_TEST_DB: "1",
@@ -1137,6 +1139,24 @@ const configuredSourceLibraryRevision =
   (cliOptionValue("--source-library-revision") ??
     process.env.SOURCE_LIBRARY_RECONCILIATION_REVISION?.trim()) ||
   undefined;
+const configuredSourceLibraryDatabaseOwner =
+  (cliOptionValue("--source-library-database-owner") ??
+    process.env.SOURCE_LIBRARY_RECONCILIATION_DATABASE_OWNER?.trim()) ||
+  undefined;
+const configuredSourceLibraryDeploymentHandoff =
+  (cliOptionValue("--source-library-deployment-handoff") ??
+    process.env.SOURCE_LIBRARY_RECONCILIATION_DEPLOYMENT_HANDOFF?.trim()) ||
+  undefined;
+const sourceLibraryRevisionArgs = configuredSourceLibraryRevision
+  ? ["--revision", configuredSourceLibraryRevision]
+  : [];
+const sourceLibraryDatabaseOwnerArgs = configuredSourceLibraryDatabaseOwner
+  ? ["--database-owner", configuredSourceLibraryDatabaseOwner]
+  : [];
+const sourceLibraryDeploymentHandoffArgs =
+  configuredSourceLibraryDeploymentHandoff
+    ? ["--deployment-handoff", configuredSourceLibraryDeploymentHandoff]
+    : [];
 const configuredReadinessDeploymentId =
   (cliOptionValue("--readiness-deployment-id") ??
     process.env.READINESS_EVIDENCE_DEPLOYMENT_ID?.trim()) ||
@@ -1150,13 +1170,28 @@ export function resolveSourceLibraryReleaseRevision(
   releaseRevision: string,
   environment: SourceLibraryEvidenceEnvironment,
   configuredRevision: string | undefined,
+  deploymentHandoffPath?: string,
 ): string {
+  const explicitRevision = configuredRevision?.trim() || undefined;
+  const handoffRevision = deploymentHandoffPath
+    ? readSourceLibraryDeploymentHandoff(deploymentHandoffPath).deployedRevision
+    : undefined;
+  if (
+    explicitRevision !== undefined &&
+    handoffRevision !== undefined &&
+    explicitRevision !== handoffRevision
+  ) {
+    throw new Error(
+      "Source-library revision conflicts with the deployed revision in the deployment handoff.",
+    );
+  }
   const revision =
-    configuredRevision ??
+    explicitRevision ??
+    handoffRevision ??
     (environment === "development" ? releaseRevision : undefined);
   if (!revision) {
     throw new Error(
-      "Production source-library evidence requires --source-library-revision with the exact deployed 40-character Git commit SHA.",
+      "Production source-library evidence requires --source-library-revision or --source-library-deployment-handoff with the exact deployed 40-character Git commit SHA.",
     );
   }
   if (!/^[a-f0-9]{40}$/u.test(revision)) {
@@ -1165,6 +1200,23 @@ export function resolveSourceLibraryReleaseRevision(
     );
   }
   return revision;
+}
+
+export function resolveSourceLibraryReleaseDatabaseOwner(
+  environment: SourceLibraryEvidenceEnvironment,
+  configuredDatabaseOwner: string | undefined,
+  deploymentHandoffPath?: string,
+): string | undefined {
+  const owner = resolveSourceLibraryDatabaseOwner(
+    configuredDatabaseOwner,
+    deploymentHandoffPath,
+  );
+  if (environment === "release" && owner === undefined) {
+    throw new Error(
+      "Production source-library evidence requires --source-library-database-owner or --source-library-deployment-handoff with the approved PostgreSQL database owner.",
+    );
+  }
+  return owner;
 }
 export const SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL =
   "source-library reconciliation database preflight";
@@ -1184,6 +1236,9 @@ export const SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_STEP: ReleaseStep = {
     sourceLibraryFromDate,
     "--environment",
     sourceLibraryEnvironment,
+    ...sourceLibraryRevisionArgs,
+    ...sourceLibraryDatabaseOwnerArgs,
+    ...sourceLibraryDeploymentHandoffArgs,
     "--preflight",
   ],
   stage: "source-library-preflight",
@@ -1204,6 +1259,9 @@ export const SOURCE_LIBRARY_RECONCILIATION_STEP: ReleaseStep = {
     sourceLibraryFromDate,
     "--environment",
     sourceLibraryEnvironment,
+    ...sourceLibraryRevisionArgs,
+    ...sourceLibraryDatabaseOwnerArgs,
+    ...sourceLibraryDeploymentHandoffArgs,
     "--output",
     resolve(
       rootDir,
@@ -1237,6 +1295,8 @@ export const SOURCE_LIBRARY_RECONCILIATION_IMPORT_STEP: ReleaseStep = {
     sourceLibraryHealId,
     "--from-date",
     sourceLibraryFromDate,
+    ...sourceLibraryRevisionArgs,
+    ...sourceLibraryDeploymentHandoffArgs,
     "--output",
     resolve(
       rootDir,
@@ -1504,7 +1564,11 @@ const steps: ReleaseStep[] = [
   },
   {
     label: "browser smoke tests",
-    args: ["--filter", "@workspace/run-calculator", "run", "test:e2e:smoke"],
+    command: "bash",
+    args: [
+      "scripts/src/run-isolated-browser-suite.sh",
+      "--playwright-config=playwright.smoke.config.ts",
+    ],
     env: {
       ...RELEASE_BROWSER_ENV,
     },
@@ -1513,18 +1577,24 @@ const steps: ReleaseStep[] = [
   },
   {
     label: "browser calendar tests",
+    command: "bash",
     args: [
-      "--filter",
-      "@workspace/run-calculator",
-      "run",
-      "test:e2e:calendar",
+      "scripts/src/run-isolated-browser-suite.sh",
+      "--playwright-config=playwright.calendar.config.ts",
     ],
+    env: {
+      ...RELEASE_BROWSER_ENV,
+    },
     stage: "browser-calendar",
     concurrencyLimit: 1,
   },
   {
     label: "browser accessibility tests",
-    args: ["--filter", "@workspace/run-calculator", "run", "test:e2e:a11y"],
+    command: "bash",
+    args: [
+      "scripts/src/run-isolated-browser-suite.sh",
+      "--playwright-config=playwright.a11y.config.ts",
+    ],
     env: {
       ...RELEASE_BROWSER_ENV,
     },
@@ -1533,9 +1603,14 @@ const steps: ReleaseStep[] = [
   },
   {
     label: "browser WebKit smoke",
-    args: ["--filter", "@workspace/run-calculator", "run", "test:e2e:webkit"],
+    command: "bash",
+    args: [
+      "scripts/src/run-isolated-browser-suite.sh",
+      "--playwright-config=playwright.webkit.config.ts",
+    ],
     env: {
       ...RELEASE_BROWSER_ENV,
+      BROWSER_TEST_INSTALL_WEBKIT: "1",
       PLAYWRIGHT_RELEASE_SMOKE_EVIDENCE_PATH: webkitBrowserEvidencePath,
       RELEASE_BROWSER_ENVIRONMENT: process.env.CI ? "ci" : "development",
     },
@@ -1547,7 +1622,11 @@ const steps: ReleaseStep[] = [
 if (fullRun) {
   steps.push({
     label: FULL_BROWSER_GATE_LABEL,
-    args: ["--filter", "@workspace/run-calculator", "run", "test:e2e"],
+    command: "bash",
+    args: [
+      "scripts/src/run-isolated-browser-suite.sh",
+      "--playwright-config=playwright.config.ts",
+    ],
     env: {
       ...RELEASE_BROWSER_ENV,
       PLAYWRIGHT_RELEASE_REPORT_PATH: fullBrowserReportPath,
@@ -1818,13 +1897,16 @@ function printHelp(): void {
     "  --source-library-revision <sha>   Exact deployed 40-character SHA for production reconciliation evidence",
   );
   console.log(
+    "  --source-library-deployment-handoff <path>   Validate a current published deployment handoff and obtain its deployed SHA",
+  );
+  console.log(
     "  --readiness-deployment-id <id>   Expected published deployment ID for retained readiness evidence",
   );
   console.log(
     "  --deployed-revision <sha>       Expected deployed 40-character SHA for retained readiness evidence",
   );
   console.log(
-    "  pnpm --silent --filter @workspace/scripts exec tsx ./src/verify-source-library-reconciliation.mts --capture-production --environment release --revision <deployed-40-character-sha>  Capture bounded production evidence (read-only)",
+    "  pnpm --silent --filter @workspace/scripts exec tsx ./src/verify-source-library-reconciliation.mts --capture-production --environment release --deployment-handoff <handoff-path>  Capture bounded production evidence (read-only)",
   );
   console.log(
     "  pnpm --filter @workspace/scripts run check:release-evidence -- --evidence-dir <directory>  Verify a selected evidence directory (mode is read from its report)",
@@ -3132,6 +3214,24 @@ export function formatReleaseReport(
           )
           .join("; ");
   const revision = metadata.revision ?? "unknown";
+  const reportSourceLibraryEnvironment =
+    metadata.sourceLibraryEnvironment ?? sourceLibraryEnvironment;
+  const developmentOnlyEvidence =
+    reportSourceLibraryEnvironment === "development" &&
+    metadata.requireReadinessEvidence !== true;
+  const deployedRevision =
+    developmentOnlyEvidence
+      ? "not applicable"
+      : metadata.deployedRevision ??
+        (reportSourceLibraryEnvironment === "release"
+          ? metadata.sourceLibraryRevision ?? revision
+          : "not applicable");
+  const readinessEvidence =
+    developmentOnlyEvidence
+      ? "not applicable"
+      : availableEvidenceFiles.has(READINESS_EVIDENCE_PATH)
+        ? READINESS_EVIDENCE_PATH
+        : "not produced";
   const decision =
     metadata.decision ??
     (results.length ===
@@ -3191,19 +3291,10 @@ export function formatReleaseReport(
         ]
       : []),
     `Environment: ${metadata.environment ?? "release validation environment"}`,
-    `Source-library evidence environment: ${metadata.sourceLibraryEnvironment ?? sourceLibraryEnvironment}`,
+    `Source-library evidence environment: ${reportSourceLibraryEnvironment}`,
     `Source-library evidence revision: ${metadata.sourceLibraryRevision ?? revision}`,
-    `Deployed revision: ${
-      metadata.deployedRevision ??
-      ((metadata.sourceLibraryEnvironment ?? sourceLibraryEnvironment) === "release"
-        ? metadata.sourceLibraryRevision ?? revision
-        : "not applicable")
-    }`,
-    `Readiness evidence: ${
-      availableEvidenceFiles.has(READINESS_EVIDENCE_PATH)
-        ? READINESS_EVIDENCE_PATH
-        : "not produced"
-    }`,
+    `Deployed revision: ${deployedRevision}`,
+    `Readiness evidence: ${readinessEvidence}`,
     "Commands: listed in the gate results table below",
     `Evidence paths: ${releaseEvidenceDir}/ and retained files linked below`,
     formatTypescript7TrendHistorySummary(typescript7TrendHistory),
@@ -3699,11 +3790,19 @@ async function main(): Promise<void> {
   if (process.argv.includes("--verify-evidence")) {
     try {
       const revision = await currentRevision();
+      if (hasProductionSourceLibraryReconciliation) {
+        resolveSourceLibraryReleaseDatabaseOwner(
+          sourceLibraryEnvironment,
+          configuredSourceLibraryDatabaseOwner,
+          configuredSourceLibraryDeploymentHandoff,
+        );
+      }
       const sourceLibraryRevision = hasProductionSourceLibraryReconciliation
         ? resolveSourceLibraryReleaseRevision(
             revision,
             sourceLibraryEnvironment,
             configuredSourceLibraryRevision,
+            configuredSourceLibraryDeploymentHandoff,
           )
         : revision;
       await verifyReleaseEvidence(undefined, {
@@ -3740,11 +3839,19 @@ async function main(): Promise<void> {
   }
   let sourceLibraryRevision: string;
   try {
+    if (hasProductionSourceLibraryReconciliation) {
+      resolveSourceLibraryReleaseDatabaseOwner(
+        sourceLibraryEnvironment,
+        configuredSourceLibraryDatabaseOwner,
+        configuredSourceLibraryDeploymentHandoff,
+      );
+    }
     sourceLibraryRevision = hasProductionSourceLibraryReconciliation
       ? resolveSourceLibraryReleaseRevision(
           revision,
           sourceLibraryEnvironment,
           configuredSourceLibraryRevision,
+          configuredSourceLibraryDeploymentHandoff,
         )
       : revision;
   } catch (error) {

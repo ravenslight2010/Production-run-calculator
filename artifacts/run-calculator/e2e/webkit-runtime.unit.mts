@@ -5,11 +5,13 @@ const previousConfigured = process.env.PLAYWRIGHT_WEBKIT_LIBRARY_PATH;
 const previousLibraryPath = process.env.LD_LIBRARY_PATH;
 const previousHostValidation =
   process.env.PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS;
+const previousCi = process.env.CI;
 
 try {
   process.env.PLAYWRIGHT_WEBKIT_LIBRARY_PATH =
     "  /configured/webkit:/configured/extra  ";
   process.env.LD_LIBRARY_PATH = "/existing/lib";
+  process.env.CI = "true";
   delete process.env.PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS;
 
   const options = webkitLaunchOptions();
@@ -50,6 +52,11 @@ try {
   } else {
     process.env.PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS =
       previousHostValidation;
+  }
+  if (previousCi === undefined) {
+    delete process.env.CI;
+  } else {
+    process.env.CI = previousCi;
   }
 }
 

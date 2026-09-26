@@ -15,14 +15,33 @@
 // warning hidden behind another branch fails loudly instead of silently
 // dead-ending staff.
 
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import { CheesePickCard } from "./pages/home";
 import { ReadOnlyRecipeCard } from "./components/live-stations/stationShared";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 const noop = () => {};
+
+beforeEach(() => {
+  vi.stubGlobal(
+    "matchMedia",
+    (query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }),
+  );
+});
 
 describe("CheesePickCard — missing-cheese warning render", () => {
   it("shows the amber 'No matching cheese recipe found' warning when the picked name is not in the pool", () => {

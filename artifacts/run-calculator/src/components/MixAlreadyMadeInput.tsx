@@ -47,6 +47,8 @@ export function MixAlreadyMadeInput({
       const saved = await saveMixes([nextMix]);
       onSaveAcknowledged(nextMix, saved);
     } catch {
+      if (field === "already") alreadyFailedRef.current = value;
+      else actualFailedRef.current = value;
       toast({
         variant: "destructive",
         title: field === "already" ? "Couldn't save already made amount" : "Couldn't save made today amount",

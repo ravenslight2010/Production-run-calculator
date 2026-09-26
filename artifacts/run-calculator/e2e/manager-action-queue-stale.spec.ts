@@ -6,9 +6,19 @@
  * refresh before retrying rather than seeing a false success.
  */
 
-import { expect, test, type Browser, type Page, type TestInfo } from "@playwright/test";
+import {
+  expect,
+  test,
+  type Browser,
+  type Page,
+  type TestInfo,
+} from "@playwright/test";
 import { Client } from "pg";
-import { cleanupTestUsers, requireIsolatedTestDatabase, uniqueTestId } from "./isolation";
+import {
+  cleanupTestUsers,
+  requireIsolatedTestDatabase,
+  uniqueTestId,
+} from "./isolation";
 import {
   dismissOnboardingIfPresent,
   signUpAndHandleOnboarding,
@@ -29,7 +39,14 @@ let incidentQueueFixtureId: number | null = null;
 const LARGE_HISTORY_COUNT = 750;
 let largeHistoryPrefix = "";
 
-async function dismissWelcomeIfPresent(page: Page, timeout = 1_500): Promise<void> {
+// Queue tests install response routes to exercise stale writes. Do not let a
+// service worker satisfy those API requests outside Playwright's route handler.
+test.use({ serviceWorkers: "block" });
+
+async function dismissWelcomeIfPresent(
+  page: Page,
+  timeout = 1_500,
+): Promise<void> {
   // The shell mounts before the onboarding query resolves. Checking
   // isVisible() immediately after tab-run is therefore racy: the dialog can
   // appear after the check and intercept the next header-menu interaction.
@@ -39,27 +56,46 @@ async function dismissWelcomeIfPresent(page: Page, timeout = 1_500): Promise<voi
 async function signUp(page: Page, username: string): Promise<void> {
   await signUpAndHandleOnboarding(page, username, PASSWORD, {
     signupCode: SIGNUP_CODE,
-    onboarding: { visibilityTimeout: 5_000 },
+    // The queue scenarios promote the account and reload immediately. Mark
+    // onboarding in the same fixture transaction instead of spending a
+    // browser timeout on a first-login POST while the release DB is busy.
+    onboarding: false,
   });
 }
 
 async function signIn(page: Page, username: string): Promise<void> {
-  await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
-  await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
+  // Direct API sign-out does not clear the already-mounted React auth query.
+  // A same-page navigation can therefore be redirected back to `/` by the
+  // old in-memory identity even after the cookie is gone. Recreate the
+  // document first so sign-in starts from the server's unauthenticated state.
+  await page.context().clearCookies({ name: "rc_auth" });
+  if (page.url() !== "about:blank") {
+    await page.reload({ waitUntil: "domcontentloaded" });
+  }
+  if (!(await page.locator("#username").isVisible().catch(() => false))) {
+    await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
+  }
+  await page
+    .locator("#username")
+    .waitFor({ state: "visible", timeout: 20_000 });
   await page.locator("#username").fill(username);
   await page.locator("#password").fill(PASSWORD);
   // The sign-in page also exposes a "Log in as test user (sandbox)" button.
   // Use the exact real-submit name so this helper cannot accidentally choose
   // the sandbox shortcut when both controls are available.
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  await page
+    .getByTestId("tab-run")
+    .waitFor({ state: "attached", timeout: 25_000 });
 }
 
 async function promoteToManager(username: string): Promise<void> {
   const db = new Client({ connectionString: process.env.DATABASE_URL });
   try {
     await db.connect();
-    const user = await db.query("SELECT id FROM users WHERE username = $1", [username]);
+    const user = await db.query("SELECT id FROM users WHERE username = $1", [
+      username,
+    ]);
     expect(user.rows).toHaveLength(1);
     await db.query(
       `INSERT INTO user_roles (user_id, role) VALUES ($1, 'manager')
@@ -72,16 +108,22 @@ async function promoteToManager(username: string): Promise<void> {
     // journeys below.
     await db.query(
       "UPDATE roles SET capabilities = $1::jsonb WHERE name = 'manager'",
-      [JSON.stringify([
-        "manage-staff",
-        "manage-inventory",
-        "edit-production-rules",
-        "approve-password-resets",
-        "review-incidents",
-        "use-ai-tools",
-        "manage-factory-settings",
-        "manage-profiles",
-      ])],
+      [
+        JSON.stringify([
+          "manage-staff",
+          "manage-inventory",
+          "edit-production-rules",
+          "approve-password-resets",
+          "review-incidents",
+          "use-ai-tools",
+          "manage-factory-settings",
+          "manage-profiles",
+        ]),
+      ],
+    );
+    await db.query(
+      "UPDATE users SET onboarding_seen = true WHERE username = $1",
+      [username],
     );
   } finally {
     await db.end().catch(() => {});
@@ -89,17 +131,32 @@ async function promoteToManager(username: string): Promise<void> {
 }
 
 async function openQueue(page: Page): Promise<void> {
-  if (await page.getByTestId("manager-action-queue").isVisible().catch(() => false)) return;
+  if (
+    await page
+      .getByTestId("manager-action-queue")
+      .isVisible()
+      .catch(() => false)
+  )
+    return;
   await page.getByRole("button", { name: /more/i }).click();
-  await page.getByRole("menuitem", { name: "Manager action queue", exact: true }).click();
+  await page
+    .getByRole("menuitem", { name: "Manager action queue", exact: true })
+    .click();
   await expect(page.getByTestId("manager-action-queue")).toBeVisible();
 }
 
 async function revealHistoryItem(page: Page, title: string): Promise<void> {
   const itemStatus = page.getByLabel(`Status for ${title}`);
   const itemTitle = page.getByText(title, { exact: true });
-  for (let pageNumber = 0; pageNumber < 12 && (await itemTitle.count()) === 0; pageNumber += 1) {
-    const loadOlder = page.getByRole("button", { name: "Load older history", exact: true });
+  for (
+    let pageNumber = 0;
+    pageNumber < 12 && (await itemTitle.count()) === 0;
+    pageNumber += 1
+  ) {
+    const loadOlder = page.getByRole("button", {
+      name: "Load older history",
+      exact: true,
+    });
     if (!(await loadOlder.isVisible().catch(() => false))) break;
     await loadOlder.click();
   }
@@ -131,15 +188,17 @@ function scopeQueueBody(body: string): string {
   };
   payload.items = payload.items.filter((item) => item.category === "report");
   payload.counts = Object.fromEntries(
-    ["open", "in_progress", "deferred", "resolved"]
-      .map((status) => [status, payload.items.filter((item) => item.status === status).length]),
+    ["open", "in_progress", "deferred", "resolved"].map((status) => [
+      status,
+      payload.items.filter((item) => item.status === status).length,
+    ]),
   );
   return JSON.stringify(payload);
 }
 
 test.beforeAll(async () => {
   await requireIsolatedTestDatabase("manager action queue stale-write e2e");
-    const db = new Client({ connectionString: process.env.DATABASE_URL });
+  const db = new Client({ connectionString: process.env.DATABASE_URL });
   fixtureDedupKey = `e2e:${uniqueTestId("manager_queue_stale")}`;
   try {
     await db.connect();
@@ -158,7 +217,9 @@ test.beforeAll(async () => {
        VALUES ($1, 'live', 'user_report', 'Queue fixture manager', 'manager', 'Run', 'web', $2, $3, $4, 'new', 'high', 'new', '[]', '[]')`,
       [
         incidentFixtureId,
-        JSON.stringify({ description: `Unique incident review ${incidentFixtureId}` }),
+        JSON.stringify({
+          description: `Unique incident review ${incidentFixtureId}`,
+        }),
         "Queue fixture diagnosis",
         "Queue fixture workaround",
       ],
@@ -168,7 +229,13 @@ test.beforeAll(async () => {
         (scope, dedup_key, category, severity, title, description, source_type, source_id, source_path, status, version)
         VALUES ($1, $2, 'sync', 'warning', $3, $4, 'sync', $5, '#sync-diagnostics', 'open', 1)
        RETURNING id`,
-      ["live", fixtureDedupKey, `Stale queue item ${fixtureDedupKey}`, "Two managers must recover this stale update.", fixtureDedupKey],
+      [
+        "live",
+        fixtureDedupKey,
+        `Stale queue item ${fixtureDedupKey}`,
+        "Two managers must recover this stale update.",
+        fixtureDedupKey,
+      ],
     );
     fixtureId = result.rows[0].id as number;
     const resolvedSync = await db.query(
@@ -178,14 +245,16 @@ test.beforeAll(async () => {
        VALUES ('live', '2026-09-06', $1::jsonb, 6, 'server-wins',
          'e2e-client-hash', 'e2e-server-hash', 'e2e-merged-hash')
        RETURNING id`,
-      [JSON.stringify([
-        "runValues:r1",
-        "runValues:r2",
-        "runValues:r3",
-        "packagingProgress:r1",
-        "packagingProgress:r2",
-        "dayState.runs.meta:r3",
-      ])],
+      [
+        JSON.stringify([
+          "runValues:r1",
+          "runValues:r2",
+          "runValues:r3",
+          "packagingProgress:r1",
+          "packagingProgress:r2",
+          "dayState.runs.meta:r3",
+        ]),
+      ],
     );
     resolvedSyncConflictFixtureId = resolvedSync.rows[0].id as number;
     resolvedSyncDedupKey = `sync:${resolvedSyncConflictFixtureId}`;
@@ -254,7 +323,7 @@ test.beforeAll(async () => {
 // journey so later navigation checks do not depend on test order.
 test.beforeEach(async () => {
   if (staleWriteFixtureId === null || !process.env.DATABASE_URL) return;
-    const db = new Client({ connectionString: process.env.DATABASE_URL });
+  const db = new Client({ connectionString: process.env.DATABASE_URL });
   try {
     await db.connect();
     await db.query(
@@ -268,18 +337,39 @@ test.beforeEach(async () => {
 
 test.afterAll(async () => {
   if (!process.env.DATABASE_URL) return;
-    const db = new Client({ connectionString: process.env.DATABASE_URL });
+  const db = new Client({ connectionString: process.env.DATABASE_URL });
   try {
     await db.connect();
-    if (fixtureId !== null) await db.query("DELETE FROM action_items WHERE id = $1", [fixtureId]);
-    if (staleWriteFixtureId !== null) await db.query("DELETE FROM action_items WHERE id = $1", [staleWriteFixtureId]);
-    if (resolvedSyncQueueFixtureId !== null) await db.query("DELETE FROM action_items WHERE id = $1", [resolvedSyncQueueFixtureId]);
-    if (resolvedSyncConflictFixtureId !== null) await db.query("DELETE FROM sync_conflict_logs WHERE id = $1", [resolvedSyncConflictFixtureId]);
-    if (incidentQueueFixtureId !== null) await db.query("DELETE FROM action_items WHERE id = $1", [incidentQueueFixtureId]);
-    if (largeHistoryPrefix) await db.query("DELETE FROM action_items WHERE dedup_key LIKE $1", [`${largeHistoryPrefix}:%`]);
+    if (fixtureId !== null)
+      await db.query("DELETE FROM action_items WHERE id = $1", [fixtureId]);
+    if (staleWriteFixtureId !== null)
+      await db.query("DELETE FROM action_items WHERE id = $1", [
+        staleWriteFixtureId,
+      ]);
+    if (resolvedSyncQueueFixtureId !== null)
+      await db.query("DELETE FROM action_items WHERE id = $1", [
+        resolvedSyncQueueFixtureId,
+      ]);
+    if (resolvedSyncConflictFixtureId !== null)
+      await db.query("DELETE FROM sync_conflict_logs WHERE id = $1", [
+        resolvedSyncConflictFixtureId,
+      ]);
+    if (incidentQueueFixtureId !== null)
+      await db.query("DELETE FROM action_items WHERE id = $1", [
+        incidentQueueFixtureId,
+      ]);
+    if (largeHistoryPrefix)
+      await db.query("DELETE FROM action_items WHERE dedup_key LIKE $1", [
+        `${largeHistoryPrefix}:%`,
+      ]);
     if (incidentFixtureId) {
-      await db.query("DELETE FROM action_items WHERE source_type = 'incident' AND source_id = $1", [incidentFixtureId]);
-      await db.query("DELETE FROM incidents WHERE id = $1", [incidentFixtureId]);
+      await db.query(
+        "DELETE FROM action_items WHERE source_type = 'incident' AND source_id = $1",
+        [incidentFixtureId],
+      );
+      await db.query("DELETE FROM incidents WHERE id = $1", [
+        incidentFixtureId,
+      ]);
     }
     await cleanupTestUsers(db, testUsernames);
   } finally {
@@ -287,7 +377,9 @@ test.afterAll(async () => {
   }
 });
 
-test("loads the active view without hiding large queue history", async ({ page }, testInfo: TestInfo) => {
+test("loads the active view without hiding large queue history", async ({
+  page,
+}, testInfo: TestInfo) => {
   // Rendering and paging the intentionally large history fixture is a bounded
   // performance scenario, not a unit-sized interaction. Keep the timeout
   // explicit so the release gate does not fail at Playwright's generic 60s
@@ -299,14 +391,18 @@ test("loads the active view without hiding large queue history", async ({ page }
   page.on("pageerror", (error) => browserErrors.push(error.message));
   page.on("response", (response) => {
     if (response.status() >= 500) {
-      browserErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+      browserErrors.push(
+        `${response.status()} ${response.request().method()} ${response.url()}`,
+      );
     }
   });
 
   await signUp(page, username);
   await promoteToManager(username);
   await page.reload({ waitUntil: "domcontentloaded" });
-  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  await page
+    .getByTestId("tab-run")
+    .waitFor({ state: "attached", timeout: 25_000 });
 
   const initialResponse = page.waitForResponse(
     (response) =>
@@ -314,13 +410,21 @@ test("loads the active view without hiding large queue history", async ({ page }
       !response.url().includes("status=all"),
   );
   await openQueue(page);
-  const initialPayload = await (await initialResponse).json() as {
+  const initialPayload = (await (await initialResponse).json()) as {
     items: Array<{ status: string; title: string }>;
     counts: Record<string, number>;
   };
-  expect(initialPayload.items.every((item) => item.status === "open")).toBe(true);
-  expect(initialPayload.items.some((item) => item.title.startsWith("Historical queue item"))).toBe(false);
-  expect(initialPayload.counts.resolved).toBeGreaterThanOrEqual(LARGE_HISTORY_COUNT);
+  expect(initialPayload.items.every((item) => item.status === "open")).toBe(
+    true,
+  );
+  expect(
+    initialPayload.items.some((item) =>
+      item.title.startsWith("Historical queue item"),
+    ),
+  ).toBe(false);
+  expect(initialPayload.counts.resolved).toBeGreaterThanOrEqual(
+    LARGE_HISTORY_COUNT,
+  );
   const resolvedOption = page
     .getByLabel("Filter action status")
     .locator("option[value='resolved']");
@@ -330,9 +434,13 @@ test("loads the active view without hiding large queue history", async ({ page }
   );
   expect(resolvedOptionCount).toBeGreaterThanOrEqual(LARGE_HISTORY_COUNT);
   await expect(
-    page.getByTestId("manager-action-queue").locator('[data-testid^="attention-state-"]'),
+    page
+      .getByTestId("manager-action-queue")
+      .locator('[data-testid^="attention-state-"]'),
   ).toHaveCount(initialPayload.items.length);
-  await page.screenshot({ path: testInfo.outputPath("queue-large-history-default.png") });
+  await page.screenshot({
+    path: testInfo.outputPath("queue-large-history-default.png"),
+  });
 
   const allResponse = page.waitForResponse(
     (response) =>
@@ -340,58 +448,82 @@ test("loads the active view without hiding large queue history", async ({ page }
       !new URL(response.url()).searchParams.has("status"),
   );
   await page.getByLabel("Filter action status").selectOption("all");
-  const allPayload = await (await allResponse).json() as {
+  const allPayload = (await (await allResponse).json()) as {
     items: Array<{ status: string }>;
     counts: Record<string, number>;
     nextCursor: string | null;
   };
   expect(allPayload.items.length).toBeLessThan(LARGE_HISTORY_COUNT);
   expect(allPayload.nextCursor).toBeTruthy();
-  expect(allPayload.counts.resolved).toBeGreaterThanOrEqual(LARGE_HISTORY_COUNT);
+  expect(allPayload.counts.resolved).toBeGreaterThanOrEqual(
+    LARGE_HISTORY_COUNT,
+  );
   await expect(
-    page.getByText(`Historical queue item ${LARGE_HISTORY_COUNT}`, { exact: true }),
+    page.getByText(`Historical queue item ${LARGE_HISTORY_COUNT}`, {
+      exact: true,
+    }),
   ).toBeVisible();
-  await expect(page.getByText("Historical queue item 1", { exact: true })).toHaveCount(0);
-  const oldestHistoryItem = page.getByText("Historical queue item 1", { exact: true });
+  await expect(
+    page.getByText("Historical queue item 1", { exact: true }),
+  ).toHaveCount(0);
+  const oldestHistoryItem = page.getByText("Historical queue item 1", {
+    exact: true,
+  });
   // Visibility is viewport-dependent: after a page append the oldest row can
   // already be mounted just below the viewport while the paging button has
   // correctly disappeared. Check attachment to decide whether another cursor
   // request is needed, then keep the actual visibility assertion below.
-  for (let pageNumber = 0; pageNumber < 10 && (await oldestHistoryItem.count()) === 0; pageNumber += 1) {
-    const nextPageResponse = page.waitForResponse(
-      (response) => {
-        const url = new URL(response.url());
-        return (
-          response.request().method() === "GET" &&
-          url.pathname.endsWith("/api/manager-action-queue") &&
-          url.searchParams.has("cursor")
-        );
-      },
-    );
-    await page.getByRole("button", { name: "Load older history", exact: true }).click();
+  for (
+    let pageNumber = 0;
+    pageNumber < 10 && (await oldestHistoryItem.count()) === 0;
+    pageNumber += 1
+  ) {
+    const nextPageResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return (
+        response.request().method() === "GET" &&
+        url.pathname.endsWith("/api/manager-action-queue") &&
+        url.searchParams.has("cursor")
+      );
+    });
+    await page
+      .getByRole("button", { name: "Load older history", exact: true })
+      .click();
     await expect((await nextPageResponse).ok()).toBe(true);
     // The click starts an async cursor request. Do not issue the next click
     // while this one is disabled: on the final page the button is removed as
     // soon as item 1 mounts, which can strand a pending Playwright click.
-    await expect.poll(async () => {
-      if (await oldestHistoryItem.count() > 0) return "item-loaded";
-      const button = page.getByRole("button", { name: "Load older history", exact: true });
-      if (await button.count() === 0) return "button-missing";
-      return await button.isEnabled() ? "ready" : "loading";
-    }, { timeout: 10_000 }).toMatch(/^(item-loaded|ready)$/);
+    await expect
+      .poll(
+        async () => {
+          if ((await oldestHistoryItem.count()) > 0) return "item-loaded";
+          const button = page.getByRole("button", {
+            name: "Load older history",
+            exact: true,
+          });
+          if ((await button.count()) === 0) return "button-missing";
+          return (await button.isEnabled()) ? "ready" : "loading";
+        },
+        { timeout: 10_000 },
+      )
+      .toMatch(/^(item-loaded|ready)$/);
   }
   await oldestHistoryItem.scrollIntoViewIfNeeded();
   await expect(oldestHistoryItem).toBeVisible();
-  await page.screenshot({ path: testInfo.outputPath("queue-large-history-all.png") });
+  await page.screenshot({
+    path: testInfo.outputPath("queue-large-history-all.png"),
+  });
   expect(browserErrors).toEqual([]);
 });
 
-test("shows a stale update error, then refreshes and safely retries", async ({ browser }: { browser: Browser }, testInfo: TestInfo) => {
+test("shows a stale update error, then refreshes and safely retries", async ({
+  browser,
+}: { browser: Browser }, testInfo: TestInfo) => {
   test.setTimeout(120_000);
   const username = uniqueTestId("e2e_manager_sync_reload");
   testUsernames.add(username);
-  const firstContext = await browser.newContext();
-  const secondContext = await browser.newContext();
+  const firstContext = await browser.newContext({ serviceWorkers: "block" });
+  const secondContext = await browser.newContext({ serviceWorkers: "block" });
   const first = await firstContext.newPage();
   const second = await secondContext.newPage();
   const browserErrors: string[] = [];
@@ -399,7 +531,9 @@ test("shows a stale update error, then refreshes and safely retries", async ({ b
     page.on("pageerror", (error) => browserErrors.push(error.message));
     page.on("response", (response) => {
       if (response.status() >= 500) {
-        browserErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+        browserErrors.push(
+          `${response.status()} ${response.request().method()} ${response.url()}`,
+        );
       }
     });
   }
@@ -410,13 +544,18 @@ test("shows a stale update error, then refreshes and safely retries", async ({ b
     // A full reload re-reads the promoted role from /me without spending
     // another sign-out/sign-in cycle. Sign-up already marked onboarding seen.
     await first.reload({ waitUntil: "domcontentloaded" });
-    await first.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    await first
+      .getByTestId("tab-run")
+      .waitFor({ state: "attached", timeout: 25_000 });
     await signIn(second, username);
     const queueRoute = "**/api/manager-action-queue";
     let initialQueueBody: string | undefined;
     await first.route(queueRoute, async (route) => {
       const response = await route.fetch();
-      await route.fulfill({ response, body: scopeQueueBody(await response.text()) });
+      await route.fulfill({
+        response,
+        body: scopeQueueBody(await response.text()),
+      });
     });
     await second.route(queueRoute, async (route) => {
       const response = await route.fetch();
@@ -449,7 +588,9 @@ test("shows a stale update error, then refreshes and safely retries", async ({ b
     const secondOwner = second.getByLabel(`Owner for ${title}`);
     await expect(firstOwner).toHaveValue("");
     await expect(secondOwner).toHaveValue("");
-    await first.screenshot({ path: testInfo.outputPath("queue-before-stale.png") });
+    await first.screenshot({
+      path: testInfo.outputPath("queue-before-stale.png"),
+    });
     const firstUpdate = first.waitForResponse(
       (response) =>
         response.url().includes("/api/manager-action-queue/") &&
@@ -464,46 +605,73 @@ test("shows a stale update error, then refreshes and safely retries", async ({ b
     const refreshedFirstStatus = first.getByLabel(`Status for ${title}`);
     await expect(refreshedFirstStatus).toHaveValue("in_progress");
     await secondStatus.selectOption("resolved");
-    await second.getByLabel(`Note for ${title}`).fill("Completed by the second manager");
-    await second.getByRole("button", { name: "Confirm resolved", exact: true }).click();
+    await second
+      .getByLabel(`Note for ${title}`)
+      .fill("Completed by the second manager");
+    await second
+      .getByRole("button", { name: "Confirm resolved", exact: true })
+      .click();
 
-    await expect(second.getByRole("alert")).toContainText("changed; refresh and try again");
-    await second.screenshot({ path: testInfo.outputPath("queue-stale-error.png") });
+    await expect(second.getByRole("alert")).toContainText(
+      "changed; refresh and try again",
+    );
+    await second.screenshot({
+      path: testInfo.outputPath("queue-stale-error.png"),
+    });
     await expect(secondStatus).toHaveValue("open");
-    await expect(second.getByText("Refresh queue", { exact: true })).toBeVisible();
-    await expect(first.getByLabel(`Status for ${title}`)).toHaveValue("in_progress");
+    await expect(
+      second.getByText("Refresh queue", { exact: true }),
+    ).toBeVisible();
+    await expect(first.getByLabel(`Status for ${title}`)).toHaveValue(
+      "in_progress",
+    );
 
     await second.unroute(queueRoute);
-    await second.getByRole("button", { name: "Refresh queue", exact: true }).click();
+    await second
+      .getByRole("button", { name: "Refresh queue", exact: true })
+      .click();
     await second.reload({ waitUntil: "domcontentloaded" });
     await openQueue(second);
     await second.getByLabel("Filter action category").selectOption("report");
     await second.getByLabel("Filter action status").selectOption("in_progress");
     await openQueueItemDetails(second, title);
-    await expect(second.getByLabel(`Status for ${title}`)).toHaveValue("in_progress");
+    await expect(second.getByLabel(`Status for ${title}`)).toHaveValue(
+      "in_progress",
+    );
     const retryUpdate = second.waitForResponse(
       (response) =>
         response.url().includes("/api/manager-action-queue/") &&
         response.request().method() === "PATCH",
     );
     await second.getByLabel(`Status for ${title}`).selectOption("resolved");
-    await second.getByLabel(`Note for ${title}`).fill("Completed after refreshing");
-    await second.getByRole("button", { name: "Confirm resolved", exact: true }).click();
+    await second
+      .getByLabel(`Note for ${title}`)
+      .fill("Completed after refreshing");
+    await second
+      .getByRole("button", { name: "Confirm resolved", exact: true })
+      .click();
     await expect((await retryUpdate).status()).toBe(200);
     await expect(second.getByRole("alert")).toHaveCount(0);
-    await second.screenshot({ path: testInfo.outputPath("queue-recovered.png") });
+    await second.screenshot({
+      path: testInfo.outputPath("queue-recovered.png"),
+    });
     await second.reload({ waitUntil: "domcontentloaded" });
     await openQueue(second);
     await second.getByLabel("Filter action category").selectOption("report");
     await second.getByLabel("Filter action status").selectOption("resolved");
     await revealHistoryItem(second, title);
-    await expect(second.getByLabel(`Status for ${title}`)).toHaveValue("resolved");
+    await expect(second.getByLabel(`Status for ${title}`)).toHaveValue(
+      "resolved",
+    );
     await expect(second.getByLabel(`Owner for ${title}`)).toHaveValue("");
 
     const db = new Client({ connectionString: process.env.DATABASE_URL });
     try {
       await db.connect();
-      const row = await db.query("SELECT status, version FROM action_items WHERE id = $1", [staleWriteFixtureId]);
+      const row = await db.query(
+        "SELECT status, version FROM action_items WHERE id = $1",
+        [staleWriteFixtureId],
+      );
       expect(row.rows[0]).toEqual({ status: "resolved", version: 3 });
     } finally {
       await db.end().catch(() => {});
@@ -526,14 +694,18 @@ test("opens a scoped sync queue item in the sync diagnostics workflow", async ({
   page.on("pageerror", (error) => browserErrors.push(error.message));
   page.on("response", (response) => {
     if (response.status() >= 500) {
-      browserErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+      browserErrors.push(
+        `${response.status()} ${response.request().method()} ${response.url()}`,
+      );
     }
   });
 
   await signUp(page, username);
   await promoteToManager(username);
   await page.reload({ waitUntil: "domcontentloaded" });
-  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  await page
+    .getByTestId("tab-run")
+    .waitFor({ state: "attached", timeout: 25_000 });
   await openQueue(page);
   await page.getByLabel("Filter action category").selectOption("sync");
   await page.getByLabel("Filter action status").selectOption("resolved");
@@ -546,9 +718,13 @@ test("opens a scoped sync queue item in the sync diagnostics workflow", async ({
   const item = page.getByText(title, { exact: true });
   await expect(item).toBeVisible();
   await expect(page.getByTestId("manager-action-queue")).toContainText("Sync");
-  await page.screenshot({ path: testInfo.outputPath("queue-source-before.png") });
+  await page.screenshot({
+    path: testInfo.outputPath("queue-source-before.png"),
+  });
 
-  const visibleQueue = page.getByTestId("manager-action-queue").filter({ visible: true });
+  const visibleQueue = page
+    .getByTestId("manager-action-queue")
+    .filter({ visible: true });
   const syncHeader = visibleQueue
     .getByText(title, { exact: true })
     .locator("xpath=../../..");
@@ -557,13 +733,21 @@ test("opens a scoped sync queue item in the sync diagnostics workflow", async ({
   // The source link must select the Summary tab and expose the actual sync
   // workflow, rather than only updating the URL hash or invoking a callback.
   await expect(page).toHaveURL(/#sync-diagnostics$/);
-  await expect(page.locator('button[title="Sync connected"], button[title^="Sync:"]')).toBeVisible();
+  await expect(
+    page.locator('button[title="Sync connected"], button[title^="Sync:"]'),
+  ).toBeVisible();
   // The source link selects the diagnostics workflow; the download action is
   // inside the status popover, so open that user-facing control before checking
   // its action rather than relying on hidden DOM content.
-  await page.locator('button[title="Sync connected"], button[title^="Sync:"]').click();
-  await expect(page.getByRole("button", { name: "Download sync diagnostics" })).toBeVisible();
-  await page.screenshot({ path: testInfo.outputPath("queue-source-sync-workflow.png") });
+  await page
+    .locator('button[title="Sync connected"], button[title^="Sync:"]')
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Download sync diagnostics" }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath("queue-source-sync-workflow.png"),
+  });
   expect(browserErrors).toEqual([]);
 });
 
@@ -576,14 +760,18 @@ test("keeps a completed sync merge in resolved review history", async ({
   page.on("pageerror", (error) => browserErrors.push(error.message));
   page.on("response", (response) => {
     if (response.status() >= 500) {
-      browserErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+      browserErrors.push(
+        `${response.status()} ${response.request().method()} ${response.url()}`,
+      );
     }
   });
 
   await signUp(page, username);
   await promoteToManager(username);
   await page.reload({ waitUntil: "domcontentloaded" });
-  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  await page
+    .getByTestId("tab-run")
+    .waitFor({ state: "attached", timeout: 25_000 });
   await openQueue(page);
   await page.getByLabel("Filter action category").selectOption("sync");
   await page.getByLabel("Filter action status").selectOption("resolved");
@@ -594,12 +782,16 @@ test("keeps a completed sync merge in resolved review history", async ({
   const itemCard = itemTitle.locator(
     "xpath=ancestor::div[.//button[normalize-space(.)='Details']][1]",
   );
-  await expect(itemCard.getByTestId(`attention-state-${resolvedSyncQueueFixtureId}`)).toHaveText("Required review");
+  await expect(
+    itemCard.getByTestId(`attention-state-${resolvedSyncQueueFixtureId}`),
+  ).toHaveText("Required review");
   await expect(itemCard).toContainText("Protected sync merge completed");
   await expect(itemCard).toContainText("Review sync history");
   await expect(itemCard).toContainText("not an active unsent-write failure");
   await expect(itemCard).toContainText("Next: Review sync history");
-  await page.screenshot({ path: testInfo.outputPath("queue-resolved-sync-review.png") });
+  await page.screenshot({
+    path: testInfo.outputPath("queue-resolved-sync-review.png"),
+  });
   expect(browserErrors).toEqual([]);
 });
 
@@ -612,21 +804,37 @@ test("opens an incident queue item in the matching incident review surface", asy
   page.on("pageerror", (error) => browserErrors.push(error.message));
   page.on("response", (response) => {
     if (response.status() >= 500) {
-      browserErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+      browserErrors.push(
+        `${response.status()} ${response.request().method()} ${response.url()}`,
+      );
     }
   });
 
   await signUp(page, username);
   await promoteToManager(username);
-  await page.evaluate(() => fetch("/api/auth/sign-out", { method: "POST" }));
+  await page.request.post("/api/auth/sign-out");
+  // The API request shares the browser context, but the already-mounted app
+  // can still hold the pre-sign-out identity query while the navigation to
+  // the sign-in route starts. Clear the revoked cookie before navigating so
+  // the auth observer cannot bounce the sign-in document back to the app.
+  await page.context().clearCookies({ name: "rc_auth" });
   await signIn(page, username);
   await openQueue(page);
 
-  await expect(page.getByText(`Incident source ${incidentFixtureId}`, { exact: true })).toBeVisible();
-  await expect(page.getByTestId("manager-action-queue")).toContainText("Incident");
-  await page.screenshot({ path: testInfo.outputPath("incident-queue-source-before.png"), fullPage: true });
+  await expect(
+    page.getByText(`Incident source ${incidentFixtureId}`, { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByTestId("manager-action-queue")).toContainText(
+    "Incident",
+  );
+  await page.screenshot({
+    path: testInfo.outputPath("incident-queue-source-before.png"),
+    fullPage: true,
+  });
 
-  const visibleQueue = page.getByTestId("manager-action-queue").filter({ visible: true });
+  const visibleQueue = page
+    .getByTestId("manager-action-queue")
+    .filter({ visible: true });
   const incidentHeader = visibleQueue
     .getByText(`Incident source ${incidentFixtureId}`, { exact: true })
     .locator("xpath=../../..");
@@ -635,44 +843,67 @@ test("opens an incident queue item in the matching incident review surface", asy
   // Assert the rendered review surface and the selected incident's content,
   // not merely the hash that the source link wrote.
   await expect(page).toHaveURL(new RegExp(`#incidents/${incidentFixtureId}$`));
-  await expect(page.getByText("Reported issues", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("Reported issues", { exact: true }),
+  ).toBeVisible();
   const selectedIncident = page
     .getByText(`Unique incident review ${incidentFixtureId}`, { exact: true })
     .first();
   await expect(selectedIncident).toBeVisible();
   const selectedIncidentCard = selectedIncident.locator("xpath=../../..");
-  await expect(selectedIncidentCard).toContainText("Queue fixture manager (manager)");
-  await expect(selectedIncidentCard.getByText("Diagnostic reference:", { exact: true })).toBeVisible();
+  await expect(selectedIncidentCard).toContainText(
+    "Queue fixture manager (manager)",
+  );
   await expect(
-    selectedIncidentCard.getByRole("button", { name: "Mark reviewed", exact: true }),
+    selectedIncidentCard.getByText("Diagnostic reference:", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    selectedIncidentCard.getByRole("button", {
+      name: "Mark reviewed",
+      exact: true,
+    }),
   ).toBeVisible();
 
   await page.reload({ waitUntil: "domcontentloaded" });
   await expect(page).toHaveURL(new RegExp(`#incidents/${incidentFixtureId}$`));
-  await expect(page.getByText("Reported issues", { exact: true })).toBeVisible();
-  await expect(selectedIncident).toBeVisible();
-  await expect(selectedIncidentCard).toContainText("Queue fixture manager (manager)");
-  await expect(selectedIncidentCard.getByText("Diagnostic reference:", { exact: true })).toBeVisible();
   await expect(
-    selectedIncidentCard.getByRole("button", { name: "Mark reviewed", exact: true }),
+    page.getByText("Reported issues", { exact: true }),
+  ).toBeVisible();
+  await expect(selectedIncident).toBeVisible();
+  await expect(selectedIncidentCard).toContainText(
+    "Queue fixture manager (manager)",
+  );
+  await expect(
+    selectedIncidentCard.getByText("Diagnostic reference:", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    selectedIncidentCard.getByRole("button", {
+      name: "Mark reviewed",
+      exact: true,
+    }),
   ).toBeVisible();
   expect(browserErrors).toEqual([]);
 });
 
-test("keeps a direct sync diagnostics panel focused after reload", async ({ page }, testInfo: TestInfo) => {
+test("keeps a direct sync diagnostics panel focused after reload", async ({
+  page,
+}, testInfo: TestInfo) => {
   const username = uniqueTestId("e2e_manager_sync_reload");
   testUsernames.add(username);
   const browserErrors: string[] = [];
   page.on("pageerror", (error) => browserErrors.push(error.message));
   page.on("response", (response) => {
     if (response.status() >= 500) {
-      browserErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+      browserErrors.push(
+        `${response.status()} ${response.request().method()} ${response.url()}`,
+      );
     }
   });
 
   await signUp(page, username);
   await promoteToManager(username);
-  await page.evaluate(() => fetch("/api/auth/sign-out", { method: "POST" }));
+  await page.request.post("/api/auth/sign-out");
+  await page.context().clearCookies({ name: "rc_auth" });
   await signIn(page, username);
 
   const incidentUrl = `/#incidents/${encodeURIComponent(incidentFixtureId)}`;
@@ -682,51 +913,82 @@ test("keeps a direct sync diagnostics panel focused after reload", async ({ page
   directPage.on("pageerror", (error) => browserErrors.push(error.message));
   directPage.on("response", (response) => {
     if (response.status() >= 500) {
-      browserErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+      browserErrors.push(
+        `${response.status()} ${response.request().method()} ${response.url()}`,
+      );
     }
   });
   await directPage.goto(incidentUrl, { waitUntil: "domcontentloaded" });
-  await expect(directPage).toHaveURL(new RegExp(`#incidents/${incidentFixtureId}$`));
-  await expect(directPage.getByText("Reported issues", { exact: true })).toBeVisible();
+  await expect(directPage).toHaveURL(
+    new RegExp(`#incidents/${incidentFixtureId}$`),
+  );
+  await expect(
+    directPage.getByText("Reported issues", { exact: true }),
+  ).toBeVisible();
   const selectedIncident = directPage
     .getByText(`Unique incident review ${incidentFixtureId}`, { exact: true })
     .first();
   await expect(selectedIncident).toBeVisible();
   const selectedIncidentCard = selectedIncident.locator("xpath=../../..");
-  await expect(selectedIncidentCard).toContainText("Queue fixture manager (manager)");
-  await expect(selectedIncidentCard.getByText("Diagnostic reference:", { exact: true })).toBeVisible();
+  await expect(selectedIncidentCard).toContainText(
+    "Queue fixture manager (manager)",
+  );
   await expect(
-    selectedIncidentCard.getByRole("button", { name: "Mark reviewed", exact: true }),
+    selectedIncidentCard.getByText("Diagnostic reference:", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    selectedIncidentCard.getByRole("button", {
+      name: "Mark reviewed",
+      exact: true,
+    }),
   ).toBeVisible();
 
   await directPage.reload({ waitUntil: "domcontentloaded" });
-  await expect(directPage).toHaveURL(new RegExp(`#incidents/${incidentFixtureId}$`));
-  await expect(directPage.getByText("Reported issues", { exact: true })).toBeVisible();
-  await expect(selectedIncident).toBeVisible();
-  await expect(selectedIncidentCard).toContainText("Queue fixture manager (manager)");
-  await expect(selectedIncidentCard.getByText("Diagnostic reference:", { exact: true })).toBeVisible();
+  await expect(directPage).toHaveURL(
+    new RegExp(`#incidents/${incidentFixtureId}$`),
+  );
   await expect(
-    selectedIncidentCard.getByRole("button", { name: "Mark reviewed", exact: true }),
+    directPage.getByText("Reported issues", { exact: true }),
   ).toBeVisible();
-  await directPage.screenshot({ path: testInfo.outputPath("incident-direct-link-reload.png"), fullPage: true });
+  await expect(selectedIncident).toBeVisible();
+  await expect(selectedIncidentCard).toContainText(
+    "Queue fixture manager (manager)",
+  );
+  await expect(
+    selectedIncidentCard.getByText("Diagnostic reference:", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    selectedIncidentCard.getByRole("button", {
+      name: "Mark reviewed",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await directPage.screenshot({
+    path: testInfo.outputPath("incident-direct-link-reload.png"),
+    fullPage: true,
+  });
   await directPage.close();
   expect(browserErrors).toEqual([]);
 });
 
-test("keeps a direct sync diagnostics link focused after reload", async ({ page }, testInfo: TestInfo) => {
+test("keeps a direct sync diagnostics link focused after reload", async ({
+  page,
+}, testInfo: TestInfo) => {
   const username = uniqueTestId("e2e_manager_sync_reload");
   testUsernames.add(username);
   const browserErrors: string[] = [];
   page.on("pageerror", (error) => browserErrors.push(error.message));
   page.on("response", (response) => {
     if (response.status() >= 500) {
-      browserErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+      browserErrors.push(
+        `${response.status()} ${response.request().method()} ${response.url()}`,
+      );
     }
   });
 
   await signUp(page, username);
   await promoteToManager(username);
-  await page.evaluate(() => fetch("/api/auth/sign-out", { method: "POST" }));
+  await page.request.post("/api/auth/sign-out");
   await signIn(page, username);
 
   // Use a new page in the authenticated context so this is a true direct
@@ -735,28 +997,50 @@ test("keeps a direct sync diagnostics link focused after reload", async ({ page 
   directPage.on("pageerror", (error) => browserErrors.push(error.message));
   directPage.on("response", (response) => {
     if (response.status() >= 500) {
-      browserErrors.push(`${response.status()} ${response.request().method()} ${response.url()}`);
+      browserErrors.push(
+        `${response.status()} ${response.request().method()} ${response.url()}`,
+      );
     }
   });
 
   try {
-    await directPage.goto("/#sync-diagnostics", { waitUntil: "domcontentloaded" });
+    await directPage.goto("/#sync-diagnostics", {
+      waitUntil: "domcontentloaded",
+    });
     await expect(directPage).toHaveURL(/#sync-diagnostics$/);
     await expect(directPage.getByTestId("summary-tools-header")).toBeVisible();
-    await expect(directPage.locator('button[title="Sync connected"], button[title^="Sync:"]')).toBeVisible();
-    await directPage.locator('button[title="Sync connected"], button[title^="Sync:"]').click();
-    await expect(directPage.getByRole("button", { name: "Download sync diagnostics" })).toBeVisible();
+    await expect(
+      directPage.locator(
+        'button[title="Sync connected"], button[title^="Sync:"]',
+      ),
+    ).toBeVisible();
+    await directPage
+      .locator('button[title="Sync connected"], button[title^="Sync:"]')
+      .click();
+    await expect(
+      directPage.getByRole("button", { name: "Download sync diagnostics" }),
+    ).toBeVisible();
 
     await directPage.reload({ waitUntil: "domcontentloaded" });
     await expect(directPage).toHaveURL(/#sync-diagnostics$/);
     await expect(directPage.getByTestId("summary-tools-header")).toBeVisible();
-    await expect(directPage.locator('button[title="Sync connected"], button[title^="Sync:"]')).toBeVisible();
-    await directPage.locator('button[title="Sync connected"], button[title^="Sync:"]').click();
-    await expect(directPage.getByRole("button", { name: "Download sync diagnostics" })).toBeVisible();
+    await expect(
+      directPage.locator(
+        'button[title="Sync connected"], button[title^="Sync:"]',
+      ),
+    ).toBeVisible();
+    await directPage
+      .locator('button[title="Sync connected"], button[title^="Sync:"]')
+      .click();
+    await expect(
+      directPage.getByRole("button", { name: "Download sync diagnostics" }),
+    ).toBeVisible();
     // Summary includes a large, live operations surface. A viewport capture
     // retains the visible diagnostics evidence without spending the test
     // budget rasterizing its full scroll height.
-    await directPage.screenshot({ path: testInfo.outputPath("sync-diagnostics-direct-link-reload.png") });
+    await directPage.screenshot({
+      path: testInfo.outputPath("sync-diagnostics-direct-link-reload.png"),
+    });
     expect(browserErrors).toEqual([]);
   } finally {
     await directPage.close();

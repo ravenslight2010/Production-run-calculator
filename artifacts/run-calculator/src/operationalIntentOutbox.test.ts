@@ -11,16 +11,118 @@ import {
   retryOperationalIntent,
   discardOperationalIntent,
   setOperationalIntentIdentity,
+  setOperationalIntentCanonicalAdopter,
+  submitManualSection,
 } from "./operationalIntentOutbox";
 
 describe("operational intent outbox", () => {
   beforeEach(() => setOperationalIntentIdentity({ scope: "live", userId: "operator-1" }));
   afterEach(() => {
+    setOperationalIntentCanonicalAdopter(undefined);
     setOperationalIntentIdentity(null);
     localStorage.clear();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     vi.useRealTimers();
+  });
+
+  it("rebases queued same-section deltas from a conflict response without a canonical adopter", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const requests: Array<Record<string, any>> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as Record<string, any>;
+      requests.push(body);
+      const cases = Number(body.values.casesOnCurrentSkid);
+      const canonicalCases = requests.length === 1 ? 24 : cases;
+      return {
+        ok: requests.length > 1,
+        status: requests.length === 1 ? 409 : 200,
+        json: async () => ({
+          outcome: requests.length === 1 ? "conflicted" : "accepted",
+          data: {
+            runValues: {
+              "run-1": { skidsCompleted: 0, casesOnCurrentSkid: canonicalCases },
+            },
+          },
+        }),
+      };
+    }));
+    const base = { skidsCompleted: 0, casesOnCurrentSkid: 30 };
+    await Promise.all([
+      submitManualSection({
+        runId: "run-1", section: "packaging",
+        values: { ...base, casesOnCurrentSkid: 29 }, baseValues: base,
+        observedGeneration: "run-1:1",
+      }),
+      submitManualSection({
+        runId: "run-1", section: "packaging",
+        values: { ...base, casesOnCurrentSkid: 28 }, baseValues: { ...base, casesOnCurrentSkid: 29 },
+        observedGeneration: "run-1:1",
+      }),
+      submitManualSection({
+        runId: "run-1", section: "packaging",
+        values: { ...base, casesOnCurrentSkid: 27 }, baseValues: { ...base, casesOnCurrentSkid: 28 },
+        observedGeneration: "run-1:1",
+      }),
+    ]);
+    expect(requests.map((request) => request.values.casesOnCurrentSkid)).toEqual([29, 23, 22]);
+    expect(requests.map((request) => request.baseValues.casesOnCurrentSkid)).toEqual([30, 24, 23]);
+  });
+
+  it("preserves untouched Dough fields when a manual edit supplies only one field", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const requests: Array<Record<string, any>> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      requests.push(JSON.parse(String(init.body)) as Record<string, any>);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ outcome: "accepted" }),
+      };
+    }));
+
+    await submitManualSection({
+      runId: "dough-run", section: "dough",
+      values: { batchesReady: 1 },
+      baseValues: { traysOnLine: 5, batchesReady: 0 },
+      observedGeneration: "dough-run:1",
+    });
+
+    expect(requests[0]).toMatchObject({
+      values: { traysOnLine: 5, batchesReady: 1 },
+      baseValues: { traysOnLine: 5, batchesReady: 0 },
+    });
+  });
+
+  it("uses a newer supplied baseline after the prior section chain drains", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const requests: Array<Record<string, any>> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as Record<string, any>;
+      requests.push(body);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          outcome: "accepted",
+          data: { runValues: { "run-1": { skidsCompleted: 0, casesOnCurrentSkid: body.values.casesOnCurrentSkid } } },
+        }),
+      };
+    }));
+    await submitManualSection({
+      runId: "run-1", section: "packaging",
+      values: { skidsCompleted: 0, casesOnCurrentSkid: 29 },
+      baseValues: { skidsCompleted: 0, casesOnCurrentSkid: 30 },
+      observedGeneration: "run-1:1",
+    });
+    await submitManualSection({
+      runId: "run-1", section: "packaging",
+      values: { skidsCompleted: 0, casesOnCurrentSkid: 49 },
+      baseValues: { skidsCompleted: 0, casesOnCurrentSkid: 50 },
+      observedGeneration: "run-1:2",
+    });
+    expect(requests.map((request) => request.baseValues.casesOnCurrentSkid)).toEqual([30, 50]);
+    expect(requests.map((request) => request.values.casesOnCurrentSkid)).toEqual([29, 49]);
   });
   it("persists the exact correction and retains it for retry until canonical outcome", async () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });

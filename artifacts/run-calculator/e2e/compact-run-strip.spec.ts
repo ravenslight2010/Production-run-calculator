@@ -33,6 +33,15 @@ function uid(): string {
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "Welcome2Lucias!";
 const testUsernames = new Set<string>();
 
+function localDate(): string {
+  const now = new Date();
+  return [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
 test.afterAll(async () => {
   if (!process.env.DATABASE_URL || testUsernames.size === 0) return;
   const db = new Client({ connectionString: process.env.DATABASE_URL });
@@ -75,22 +84,25 @@ async function resetTodayRunFixture(page: Page): Promise<void> {
   const db = new Client({
     connectionString: requireIsolatedTestDatabase("CompactRunStrip fixture reset"),
   });
+  const today = localDate();
+  const runId = `compact-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const seedStamp = Date.now();
   await page.context().setOffline(true);
   try {
-    const today = new Date().toISOString().slice(0, 10);
-    const runId = `compact-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-    const seedStamp = Date.now();
     await page.evaluate(() => {
       for (const key of Object.keys(localStorage)) {
         if (key.startsWith("run-calc")) localStorage.removeItem(key);
       }
     });
+    await page.goto("about:blank");
     await db.connect();
     await db.query(
+      "DELETE FROM daily_sync WHERE date = $1 AND scope = 'live'",
+      [today],
+    );
+    await db.query(
       `INSERT INTO daily_sync (date, scope, data, updated_at)
-       VALUES ($1, 'live', $2::jsonb, NOW())
-       ON CONFLICT (date, scope) DO UPDATE
-         SET data = $2::jsonb, updated_at = NOW()`,
+       VALUES ($1, 'live', $2::jsonb, NOW())`,
       [today, JSON.stringify({
         dayState: {
           runs: [{ id: runId, brand: "", flavor: "", seeded: false, metaUpdatedAt: seedStamp }],
@@ -107,7 +119,7 @@ async function resetTodayRunFixture(page: Page): Promise<void> {
     await db.end().catch(() => {});
     await page.context().setOffline(false);
   }
-  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.goto("/", { waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 20_000 });
   await page.locator('[title="Sync connected"]').waitFor({
     state: "visible",
@@ -116,7 +128,7 @@ async function resetTodayRunFixture(page: Page): Promise<void> {
 }
 
 async function waitForCanonicalStartedRun(page: Page): Promise<void> {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localDate();
   await expect.poll(async () => {
     const response = await page.request.get(`/api/sync/today?today=${today}`, {
       failOnStatusCode: false,

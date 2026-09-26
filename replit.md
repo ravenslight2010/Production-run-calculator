@@ -75,6 +75,15 @@ This section is the project-specific application of the shared task-scope rule i
 
 - Generate one durable task per work objective. The owning task includes investigation, implementation, integration and persistence impacts, regression coverage, final verification, and all in-scope repair work. Do not create a new task for each symptom, test failure, fixture repair, or sub-outcome inside the same objective.
 - Before starting, capture the task's scope, affected surfaces, expected owner, applicable specialist safety checks, and validation matrix. Search the task board for overlap and dependencies; do not duplicate an existing task.
+- Before creating another task, complete this decision checklist:
+  1. Name the parent or owning task.
+  2. Search current draft and active tasks for overlap and route the finding to an existing matching task when one exists.
+  3. State independent acceptance criteria for a separately completable user outcome.
+  4. Name the approved exception: a genuinely independent outcome, an explicitly deferred user outcome, or an out-of-scope safety, security, data-integrity, or release blocker.
+  5. Document why the work cannot remain in the owning task.
+  If any item is missing, do not create a follow-up; record the finding in the owning task's progress or failure ledger.
+- Every web-facing task must include a compatibility applicability matrix for desktop, phone, tablet portrait/landscape, Chromium/Chrome, and WebKit/Safari. Record an explicit `not applicable`, `blocked`, or `not run` reason for each check that is not a pass.
+- Responsive browser emulation is automated evidence, not physical Android Chrome or iOS Safari/PWA evidence. Real-device checks are a separate environment-dependent lane when required; this remains a web-only product with no native-mobile requirement.
 - Use one task when the work has one objective and shared ownership. A separate project task is allowed only when it has a genuinely independent outcome with separate acceptance criteria, is an explicitly deferred user outcome, or is an out-of-scope safety, security, data-integrity, or release blocker that cannot responsibly remain in the owning task.
 - Ask a question only for a genuine product decision, missing access or secret, or destructive action. Otherwise follow existing project patterns and choose the smallest safe behavior.
 
@@ -85,7 +94,9 @@ This section is the project-specific application of the shared task-scope rule i
 - A genuinely out-of-scope failure must be de-duplicated against the task board. Keep a non-blocking observation in the owning task's progress or failure ledger unless it meets the separate-task rule above; if it does, capture a bounded Draft with an owner, evidence, and next action. Bring it into the current task when it blocks required validation or creates a safety, security, data-integrity, or release risk.
 - Keep newly discovered in-scope failures in the owning task's failure ledger and close them before completion. A new project task requires a genuinely independent objective, an explicitly deferred user outcome, or an out-of-scope safety, security, data-integrity, or release blocker that cannot responsibly be absorbed.
 - Do not create recursive or speculative “one more task” work. A separate task must have independent acceptance criteria, an owner, and a documented reason it cannot remain in the current objective.
+- Completion review must retain the owning task's full failure ledger and resolve every in-scope `FAIL`, `BLOCKED`, `NOT REACHED`, and `MISSING` result. Test failures, fixture repairs, cleanup, validation work, and other in-scope sub-outcomes stay in the owner and must not become recursive tasks.
 - Completion evidence must name the changed surface, focused checks, broader affected checks, known failures, data/authorization/sync implications where applicable, and the exact remaining action for anything not completed.
+- Web-facing completion evidence must include the compatibility applicability matrix and separate emulated Chromium/WebKit results from physical Android Chrome and iOS Safari/PWA results. Missing device services are `blocked` or `not run`, never a pass.
 
 ### Long-running task progress
 
@@ -105,6 +116,16 @@ This section is the project-specific application of the shared task-scope rule i
 - For genuinely separate project tasks, add explicit dependencies when they share a surface, need a prior migration/heal, consume another task's output, or would otherwise race. Avoid creating project-task dependencies just to organize in-scope work.
 - Prefer one durable end-to-end task over many implementation fragments. Parallelize only concrete work that can be safely owned and validated without expanding the objective boundary.
 - Never claim success by weakening assertions, skipping applicable tests, masking secrets, using unsafe destructive data, treating missing evidence as a pass, or relabeling a timeout as success.
+
+### Current task ownership audit
+
+This audit preserves every current draft and active task as a separate work item. It does not merge, cancel, rename, re-scope, accept, start, assign, or change the lifecycle or acceptance criteria of any task.
+
+- **Release evidence objective:** “Restore complete full-mode release evidence after browser regressions are fixed” owns the final release-evidence rerun and decision. “Stabilize Mix Plan browser coverage for full release” owns Mix Plan browser reliability. “Automate the deployed revision handoff for source evidence” owns revision handoff automation. “Add a production-binding contract test for source reconciliation” owns the production-binding regression contract. New findings return to the matching existing owner rather than creating recursive follow-ups.
+- **Incomplete-name data-safety objective:** “Keep manager recipe libraries safe with incomplete names” owns manager-library runtime safety. “Confirm every setup recipe picker keeps valid choices after bad master data” owns picker regression evidence. “Prevent incomplete learned aliases from being saved again” owns write-path prevention. “Repair legacy learned aliases before they reach manager screens” owns legacy-data repair. New findings return to the matching existing owner rather than creating recursive follow-ups.
+- **Task-scope policy objective:** “Enforce task scope policy” owns the intake, closure, and policy-drift enforcement described here.
+
+Future current-task reviews use the same rule: preserve each task's existing scope and lifecycle, identify its owning objective, de-duplicate against existing work, and route any in-scope finding back to the matching owner.
 
 ### Production and release branch
 

@@ -17,6 +17,7 @@ import AuditLogCard from "./AuditLogCard";
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.useRealTimers();
   exportAuditLogsPdf.mockReset();
   toast.mockReset();
 });
@@ -57,7 +58,11 @@ describe("AuditLogCard PDF export", () => {
 
     renderAuditLogCard();
     await screen.findByText("role_changed");
+    await userEvent.click(screen.getByRole("button", { name: "PDF" }));
+
     const dateInputs = document.querySelectorAll<HTMLInputElement>('input[type="date"]');
+
+    const startDate = dateInputs[0]?.value;
     const limitInput = document.querySelector<HTMLInputElement>('input[type="number"]');
     expect(dateInputs).toHaveLength(2);
     expect(limitInput).toBeTruthy();
@@ -81,20 +86,18 @@ describe("AuditLogCard PDF export", () => {
   });
 
   it("downloads a PDF using the committed date range and row limit", async () => {
+    // Freeze Date only for this rolling-range test; do not couple it to the
+    // calendar date on which the suite happens to run.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-21T12:00:00.000Z"));
     vi.stubGlobal("fetch", vi.fn(async () => auditResponse()));
     const createObjectURL = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob: audit");
     const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     const pdf = new Blob(["%PDF-1.4"], { type: "application/pdf" });
-    exportAuditLogsPdf.mockResolvedValueOnce(pdf);
-
-    renderAuditLogCard();
-    await screen.findByText("role_changed");
-    await userEvent.click(screen.getByRole("button", { name: "PDF" }));
-
     await waitFor(() => expect(exportAuditLogsPdf).toHaveBeenCalledWith({
-      startDate: "2026-08-22T00:00:00.000Z",
-      endDate: "2026-09-21T23:59:59.999Z",
+      startDate: `${startDate}T00:00:00.000Z`,
+      endDate: `${endDate}T23:59:59.999Z`,
       limit: 100,
     }));
     expect(createObjectURL).toHaveBeenCalledWith(pdf);
@@ -121,3 +124,5 @@ describe("AuditLogCard PDF export", () => {
     expect((screen.getByRole("button", { name: "PDF" }) as HTMLButtonElement).disabled).toBe(false);
   });
 });
+
+    const endDate = dateInputs[1]?.value;

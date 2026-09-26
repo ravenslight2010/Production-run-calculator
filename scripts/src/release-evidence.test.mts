@@ -25,6 +25,7 @@ import {
   SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_STEP,
   SOURCE_LIBRARY_RECONCILIATION_STEP,
   resolveSourceLibraryEvidenceEnvironment,
+  resolveSourceLibraryReleaseDatabaseOwner,
   resolveSourceLibraryReleaseRevision,
   sourceLibraryReconciliationPreflightEnabled,
   assertUniqueReleaseSteps,
@@ -616,6 +617,70 @@ async function run(): Promise<void> {
     () => resolveSourceLibraryReleaseRevision("a".repeat(40), "release", undefined),
     /requires --source-library-revision/,
   );
+  const handoffDirectory = await mkdtemp(
+    join(tmpdir(), "release-source-handoff-"),
+  );
+  try {
+    const issuedAt = new Date(Date.now() - 1_000).toISOString();
+    const handoffPath = join(handoffDirectory, "deployment-handoff.json");
+    await writeFile(
+      handoffPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        kind: "published-deployment-handoff",
+        deploymentId: "published-release-test",
+        deployedRevision: "c".repeat(40),
+        databaseOwner: "approved_source_owner",
+        issuedAt,
+        expiresAt: new Date(
+          Date.parse(issuedAt) + 60 * 60 * 1_000,
+        ).toISOString(),
+      }),
+    );
+    assert.equal(
+      resolveSourceLibraryReleaseRevision(
+        "a".repeat(40),
+        "release",
+        undefined,
+        handoffPath,
+      ),
+      "c".repeat(40),
+    );
+    assert.equal(
+      resolveSourceLibraryReleaseDatabaseOwner(
+        "release",
+        undefined,
+        handoffPath,
+      ),
+      "approved_source_owner",
+    );
+    assert.throws(
+      () =>
+        resolveSourceLibraryReleaseDatabaseOwner(
+          "release",
+          "different_source_owner",
+          handoffPath,
+        ),
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message ===
+          "Source-library database owner conflicts with the database owner in the deployment handoff." &&
+        !error.message.includes("approved_source_owner") &&
+        !error.message.includes("different_source_owner"),
+    );
+    assert.throws(
+      () =>
+        resolveSourceLibraryReleaseRevision(
+          "a".repeat(40),
+          "release",
+          "d".repeat(40),
+          handoffPath,
+        ),
+      /conflicts with the deployed revision/,
+    );
+  } finally {
+    await rm(handoffDirectory, { recursive: true, force: true });
+  }
   assert.deepEqual(
     configuredKeyrings,
     [
@@ -1680,6 +1745,55 @@ async function run(): Promise<void> {
     /Source-library reconciliation evidence: not produced/,
     "release reports must link the retained source-library evidence",
   );
+  const developmentRevision = "c".repeat(40);
+  const developmentLabels = ["development gate one"];
+  const developmentReport = formatReleaseReport(
+    developmentLabels.map((label) => ({
+      label,
+      status: "PASS" as const,
+      elapsedMs: 100,
+    })),
+    "standard",
+    new Set([READINESS_EVIDENCE_PATH]),
+    {
+      revision: developmentRevision,
+      environment: "development release validation",
+      sourceLibraryEnvironment: "development",
+      sourceLibraryRevision: developmentRevision,
+      deployedRevision: "d".repeat(40),
+      decision: "NO-GO",
+      expectedLabels: developmentLabels,
+    },
+  );
+  assert.match(
+    developmentReport,
+    /^Deployed revision: not applicable$/m,
+    "development evidence must not retain a supplied deployed revision",
+  );
+  assert.match(
+    developmentReport,
+    /^Readiness evidence: not applicable$/m,
+    "development evidence must mark readiness as not applicable",
+  );
+  assert.doesNotMatch(
+    developmentReport,
+    new RegExp(
+      `^Readiness evidence: ${READINESS_EVIDENCE_PATH.replaceAll("/", "\\/")}$`,
+      "m",
+    ),
+    "a stale readiness path must be ignored for development evidence",
+  );
+  assert.doesNotThrow(
+    () =>
+      validateReleaseReport(developmentReport, {
+        currentRevision: developmentRevision,
+        expectedMode: "standard",
+        expectedLabels: developmentLabels,
+        expectedSourceLibraryEnvironment: "development",
+        expectedSourceLibraryRevision: developmentRevision,
+      }),
+    "the validator must accept explicit development N/A fields",
+  );
   assert.doesNotThrow(() =>
     validateReleaseReport(alertingReleaseReport, {
       currentRevision: "current-revision",
@@ -1899,6 +2013,9 @@ async function run(): Promise<void> {
         {
           revision: "current-revision",
           environment: "disposable release test",
+          sourceLibraryEnvironment: "development",
+          deployedRevision: "e".repeat(40),
+          requireReadinessEvidence: true,
           decision: "GO",
         },
       ),

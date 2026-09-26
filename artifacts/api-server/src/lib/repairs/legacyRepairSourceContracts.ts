@@ -7,6 +7,7 @@ import {
   SEA_SALT_MIX_TARGETS,
   SEA_SALT_SAUCE_TARGETS,
 } from "../seaSaltHeal";
+import { SPEC_ALIAS_CONTEXT_HYGIENE_REPAIR_ID } from "./remainingMarkerResultImportHygieneRepairs";
 import type { RepairFingerprintSource } from "../repairDefinitionFingerprint";
 
 function freezeSource<T>(value: T): T {
@@ -51,6 +52,15 @@ export const LEGACY_REPAIR_SOURCE_CONTRACTS: Readonly<
   "spec-alias-hygiene-purge-v1": {
     predicate: "sanitize-spec-aliases-per-scope",
     fields: ["kind", "externalName", "canonicalName", "context"],
+  },
+  [SPEC_ALIAS_CONTEXT_HYGIENE_REPAIR_ID]: {
+    predicate: "required-context-by-alias-kind",
+    requiredContext: {
+      flavor: "non-empty",
+      recipeName: ["dough", "sauce"],
+      crossFamilyRouting: ["cheese", "mix"],
+    },
+    result: "count-only",
   },
   "cheese-recipe-name-dedupe-v1": {
     grouping: "scope-and-trimmed-case-insensitive-name",
@@ -319,5 +329,11 @@ export const LEGACY_REPAIR_SOURCE_CONTRACTS: Readonly<
     predicate: { status: "resolved", workflowStateNot: "resolved" },
     writes: { workflowState: "resolved" },
     excludedFields: ["ownership", "notes", "priority", "timestamps"],
+  },
+  "recipe-customer-metadata-cleanup-v1": {
+    tables: ["dough_recipes", "sauce_recipes", "cheese_recipes", "mixes"],
+    normalizers: ["brand-trim", "flavor-trim", "flavor-dedupe", "blank-brand-clears-flavors"],
+    nestedDoughField: "doughballVariants.customers",
+    writes: ["brand", "flavors", "flavor", "doughballVariants.customers", "updatedAt"],
   },
 });

@@ -237,32 +237,29 @@ async function seedRunningSwitchoverRun(
     },
   };
 
-  await page.context().setOffline(true);
+  const db = new Client({ connectionString: requireIsolatedTestDatabase("Warehouse switchover fixture") });
   try {
-    await page.evaluate(() => {
-      for (const key of Array.from({ length: localStorage.length }, (_, index) =>
-        localStorage.key(index),
-      )) {
-        if (key?.startsWith("run-calc")) localStorage.removeItem(key);
-      }
-    });
-    const db = new Client({ connectionString: requireIsolatedTestDatabase("Warehouse switchover fixture") });
-    try {
-      await db.connect();
-      await db.query(
-        `INSERT INTO daily_sync (date, scope, data, updated_at)
-         VALUES ($1, 'live', $2::jsonb, NOW())
-         ON CONFLICT (date, scope) DO UPDATE
-           SET data = $2::jsonb, updated_at = NOW()`,
-        [date, JSON.stringify(payload)],
-      );
-    } finally {
-      await db.end().catch(() => {});
-    }
+    await db.connect();
+    await db.query(
+      `INSERT INTO daily_sync (date, scope, data, updated_at)
+       VALUES ($1, 'live', $2::jsonb, NOW())
+       ON CONFLICT (date, scope) DO UPDATE
+         SET data = $2::jsonb, updated_at = NOW()`,
+      [date, JSON.stringify(payload)],
+    );
   } finally {
-    await page.context().setOffline(false);
+    await db.end().catch(() => {});
   }
 
+  await page.addInitScript((marker) => {
+    if (location.origin === "null" || sessionStorage.getItem(marker) === "1") return;
+    sessionStorage.setItem(marker, "1");
+    for (const key of Array.from({ length: localStorage.length }, (_, index) =>
+      localStorage.key(index),
+    )) {
+      if (key?.startsWith("run-calc")) localStorage.removeItem(key);
+    }
+  }, `warehouse-switchover-cleanup-${runId}`);
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
   await expect(page.getByRole("button", { name: /pause run/i })).toBeVisible();

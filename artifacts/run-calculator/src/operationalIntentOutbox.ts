@@ -24,6 +24,11 @@ let adoptCanonical: ((data: unknown, intent: OperationalIntent, outcome: Operati
 const activeManualSections = new Map<string, { owner: string; runId: string; section: string; values: Record<string, number> }>();
 const manualRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const manualRetryKey = (owner: string, id: string) => `${owner}:${id}`;
+// A section is one protected unit on the server.  Keep same-device edits to
+// that unit in order as well: otherwise every rapid click submits the same
+// base and all but the first request become a false peer conflict.
+const manualSectionChains = new Map<string, Promise<unknown>>();
+const manualSectionCanonical = new Map<string, Record<string, number>>();
 const MANUAL_SECTION_PENDING_KEY = "run-calculator:manual-section-pending:v1";
 export type PendingManualSection = {
   id: string; runId: string; section: string; date: string; resetEpoch: number;
@@ -103,6 +108,8 @@ export function setOperationalIntentIdentity(identity: { scope: "live" | "sandbo
     for (const timer of manualRetryTimers.values()) clearTimeout(timer);
     manualRetryTimers.clear();
     activeManualSections.clear();
+    manualSectionChains.clear();
+    manualSectionCanonical.clear();
     clearManualSectionLocks();
   }
   activeOwner = nextOwner;
@@ -362,7 +369,7 @@ export function queueOperationalIntent(input: Omit<OperationalIntent, "version" 
 }
 
 /** Sends an online protected correction through the section transaction. */
-export async function submitManualSection(input: {
+async function submitManualSectionNow(input: {
   runId: string;
   section: string;
   values: Record<string, number>;
@@ -426,10 +433,17 @@ export async function submitManualSection(input: {
     let body: { data?: unknown; outcome?: string; canonicalRevision?: number; serverTime?: number; snapshotId?: string } = {};
     try { body = await response.json(); } catch {}
     if (capturedOwner !== activeOwner) return "identity-mismatch";
-    if (body.data && adoptCanonical) {
+    if (body.data) {
       if (capturedOwner !== activeOwner) return "identity-mismatch";
       const canonicalServerTime = Number.isFinite(body.serverTime) ? body.serverTime : undefined;
       const canonicalValues = (body.data as any)?.runValues?.[input.runId] ?? {};
+      const canonicalSectionValues = restoreManualSectionValues(
+        input.section as any,
+        canonicalValues,
+      ) as Record<string, number>;
+      if (Object.values(canonicalSectionValues).some((value) => Number.isFinite(Number(value)))) {
+        manualSectionCanonical.set(`${capturedOwner}:${input.runId}:${input.section}`, canonicalSectionValues);
+      }
       const intent = {
         version: 1 as const, id, date: pendingRecord.date, runId: input.runId, observedGeneration: input.observedGeneration,
         resetEpoch: immutableResetEpoch, effectiveAt: Date.now(), action: "correction" as const,
@@ -439,7 +453,9 @@ export async function submitManualSection(input: {
         ...(canonicalServerTime !== undefined ? { serverTime: canonicalServerTime, serverTimeOffsetMs: canonicalServerTime - Date.now() } : {}),
         ...(typeof body.snapshotId === "string" ? { snapshotId: body.snapshotId } : {}),
       };
-      await adoptCanonical(body.data, intent, body.outcome === "conflicted" ? "conflicted" : "accepted");
+      if (adoptCanonical) {
+        await adoptCanonical(body.data, intent, body.outcome === "conflicted" ? "conflicted" : "accepted");
+      }
       if (capturedOwner !== activeOwner) return "identity-mismatch";
     }
     if (response.status === 409 || body.outcome === "conflicted") {
@@ -474,6 +490,92 @@ export async function submitManualSection(input: {
     activeManualSections.delete(activeToken);
     if (timer !== undefined) window.clearTimeout(timer);
   }
+}
+
+/**
+ * Serialize edits for one run/section and replay each edit as a delta from the
+ * preceding canonical acknowledgement.  The UI can therefore remain
+ * responsive for rapid clicks without turning same-device intent into a
+ * conflict with itself.  Different runs/sections retain independent ordering
+ * and genuine peer conflicts still resolve through submitManualSectionNow.
+ */
+export function submitManualSection(input: {
+  runId: string;
+  section: string;
+  values: Record<string, number>;
+  baseValues: Record<string, number>;
+  observedGeneration: string;
+  baseRevision?: number;
+  date?: string;
+  id?: string;
+  resetEpoch?: number;
+  owner?: string;
+  onPersistenceFailure?: (baseValues: Record<string, number>) => boolean | void | Promise<boolean | void>;
+}): Promise<"accepted" | "conflicted" | "offline" | "persistence-failed" | "identity-mismatch"> {
+  const sectionFields = MANUAL_SECTION_FIELDS[
+    input.section as keyof typeof MANUAL_SECTION_FIELDS
+  ];
+  if (!sectionFields) throw new Error(`Unknown manual section: ${input.section}`);
+  const allowedFields = new Set<string>(sectionFields);
+  const unexpectedFields = Object.keys(input.values).filter((field) => !allowedFields.has(field));
+  if (unexpectedFields.length) {
+    throw new Error(`Manual ${input.section} edit contains fields outside its section`);
+  }
+  const baseValues = Object.fromEntries(sectionFields.map((field) => [
+    field,
+    Number(input.baseValues[field]) || 0,
+  ]));
+  const values = Object.fromEntries(sectionFields.map((field) => [
+    field,
+    Object.prototype.hasOwnProperty.call(input.values, field)
+      ? Number(input.values[field]) || 0
+      : Number(baseValues[field]) || 0,
+  ]));
+  const owner = input.owner ?? activeOwner;
+  const completeInput = { ...input, values, baseValues, owner };
+  const key = owner ? `${owner}:${input.runId}:${input.section}` : `${input.runId}:${input.section}`;
+  const previous = manualSectionChains.get(key) ?? Promise.resolve();
+  const delta = sectionFields.reduce<Record<string, number>>((result, field) => {
+    result[field] = (Number(values[field]) || 0) - (Number(baseValues[field]) || 0);
+    return result;
+    }, {});
+  const submit = async (): Promise<"accepted" | "conflicted" | "offline" | "persistence-failed" | "identity-mismatch"> => {
+    // Bind the account at enqueue time. A queued section edit must never be
+    // rebound to whichever account is active when an earlier request settles.
+    if (!owner || owner !== activeOwner) return "identity-mismatch";
+    const base = manualSectionCanonical.get(key) ?? baseValues;
+    const nextValues = sectionFields.reduce<Record<string, number>>((result, field) => {
+      result[field] = (Number(base[field]) || 0) + (Number(delta[field]) || 0);
+      return result;
+      }, {});
+    const result = await submitManualSectionNow({
+      ...completeInput,
+      values: nextValues,
+      baseValues: base,
+      owner,
+    });
+    return result;
+  };
+  // Start a new owner's head request immediately. The identity may change in
+  // the same turn; delaying the first dispatch to a microtask would suppress
+  // that request before its response can be safely fenced. Later edits remain
+  // serialized behind the preceding canonical acknowledgement.
+  const run = manualSectionChains.has(key)
+    ? previous.catch(() => {}).then(submit)
+    : submit();
+  manualSectionChains.set(key, run);
+  void run.then(() => {
+    if (manualSectionChains.get(key) === run) {
+      manualSectionChains.delete(key);
+      manualSectionCanonical.delete(key);
+    }
+  }, () => {
+    if (manualSectionChains.get(key) === run) {
+      manualSectionChains.delete(key);
+      manualSectionCanonical.delete(key);
+    }
+  });
+  return run;
 }
 function scheduleManualRetry(record: PendingManualSection & { attempts?: number }): void {
   if (typeof navigator !== "undefined" && !navigator.onLine) return;

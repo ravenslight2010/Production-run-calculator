@@ -57,7 +57,7 @@ export const HOME_TAB_CTX_DEP_FIELDS = [
   "staleCleanupSuggestions", "stopNotes", "stopReason", "stopReasonsList", "strictViolations",
   "swipeCue", "syncConnected", "syncPushFailed",
   "templatesLoaded", "undoBusy", "unifiedIngredientUniverse", "unreviewedIncidentCount",
-  "upcomingRunLabels", "v", "ve", "writeError",
+  "upcomingRunLabels", "v", "ve", "writeError", "sauceAutoTrackFailure",
 ] as const;
 
 export type HomeTabCtxDepField = (typeof HOME_TAB_CTX_DEP_FIELDS)[number];

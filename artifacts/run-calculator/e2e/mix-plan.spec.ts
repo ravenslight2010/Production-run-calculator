@@ -130,6 +130,7 @@ async function signUpAndDismissOnboarding(
         }));
         localStorage.setItem(`run-calc-run-${runId}`, JSON.stringify({}));
       }, username);
+      await dbSeedCanonicalDayFromPage(currentPage);
     },
   });
 }
@@ -168,22 +169,30 @@ async function waitForTodayMixPlanCard(page: Page, today: string): Promise<Locat
  * app is mounted and then reloading races the first SSE baseline: the server
  * can replace the just-written local day before Mix Plan renders it.
  */
-async function seedLiveRunBeforeAppLoad(
+type SeedLiveRun = {
+  runId: string;
+  brand: string;
+  ingredient: string;
+  runOz: number;
+  casesNeeded: number;
+  pizzasPerCase: number;
+  casesPerLayer: number;
+};
+
+async function seedLiveRunsBeforeAppLoad(
   page: Page,
-  opts: {
-    runId: string;
-    brand: string;
-    ingredient: string;
-    runOz: number;
-    casesNeeded: number;
-    pizzasPerCase: number;
-    casesPerLayer: number;
-  },
+  seeds: SeedLiveRun[],
+  currentIndex = 0,
 ): Promise<void> {
-  await page.addInitScript((seed) => {
+  await page.addInitScript(({ seeds: initSeeds, currentIndex: initCurrentIndex }) => {
     localStorage.setItem("run-calc-day", JSON.stringify({
-      runs: [{ id: seed.runId, brand: seed.brand, flavor: "", seeded: false }],
-      currentIndex: 0,
+      runs: initSeeds.map((seed) => ({
+        id: seed.runId,
+        brand: seed.brand,
+        flavor: "",
+        seeded: false,
+      })),
+      currentIndex: initCurrentIndex,
       date: new Date().toISOString().slice(0, 10),
       // Keep a test-local seed ahead of any blank baseline left by a prior
       // authenticated startup. The run is intentionally not a pristine seed,
@@ -202,13 +211,6 @@ async function seedLiveRunBeforeAppLoad(
         prepCarriedOver: false,
       },
     }));
-    localStorage.setItem(`run-calc-run-${seed.runId}`, JSON.stringify({
-      pep1Type: seed.ingredient,
-      pep1OzPerPizza: seed.runOz,
-      casesNeeded: seed.casesNeeded,
-      pizzasPerCase: seed.pizzasPerCase,
-      casesPerLayer: seed.casesPerLayer,
-    }));
     const updated = (() => {
       try {
         return JSON.parse(localStorage.getItem("run-calc-runvalues-updated") ?? "{}");
@@ -216,9 +218,25 @@ async function seedLiveRunBeforeAppLoad(
         return {};
       }
     })();
-    updated[seed.runId] = Date.now() + 60_000;
+    for (const seed of initSeeds) {
+      localStorage.setItem(`run-calc-run-${seed.runId}`, JSON.stringify({
+        pep1Type: seed.ingredient,
+        pep1OzPerPizza: seed.runOz,
+        casesNeeded: seed.casesNeeded,
+        pizzasPerCase: seed.pizzasPerCase,
+        casesPerLayer: seed.casesPerLayer,
+      }));
+      updated[seed.runId] = Date.now() + 60_000;
+    }
     localStorage.setItem("run-calc-runvalues-updated", JSON.stringify(updated));
-  }, opts);
+  }, { seeds, currentIndex });
+}
+
+async function seedLiveRunBeforeAppLoad(
+  page: Page,
+  opts: SeedLiveRun,
+): Promise<void> {
+  await seedLiveRunsBeforeAppLoad(page, [opts]);
 }
 
 /**
@@ -234,8 +252,32 @@ async function stampLocalFixtureForReload(page: Page): Promise<void> {
       key === "run-calc-runvalues-updated" ||
       key.startsWith("run-calc-run-"),
     );
-    return Object.fromEntries(keys.map((key) => [key, localStorage.getItem(key)]));
+    const saved = Object.fromEntries(keys.map((key) => [key, localStorage.getItem(key)]));
+    const now = Date.now() + 60_000;
+    try {
+      const rawDay = localStorage.getItem("run-calc-day");
+      const day = rawDay
+        ? JSON.parse(rawDay) as { runs?: Array<{ id: string; metaUpdatedAt?: number }> }
+        : {};
+      if (Array.isArray(day.runs)) {
+        day.runs = day.runs.map((run) => ({ ...run, metaUpdatedAt: now }));
+        // resetAt is the server's daily auth boundary, not a generic LWW
+        // freshness stamp. Today's fixture must never advance it.
+        day.resetAt = typeof day.resetAt === "number" ? day.resetAt : 0;
+        localStorage.setItem("run-calc-day", JSON.stringify(day));
+        const updated = JSON.parse(localStorage.getItem("run-calc-runvalues-updated") ?? "{}") as Record<string, number>;
+        for (const run of day.runs) updated[run.id] = now;
+        localStorage.setItem("run-calc-runvalues-updated", JSON.stringify(updated));
+      }
+    } catch {}
+    return Object.fromEntries(
+      keys.map((key) => [key, localStorage.getItem(key)]),
+    );
   });
+  // The server-authoritative Mix Plan endpoint reads the canonical daily
+  // snapshot, not the browser's localStorage. Persist the same stamped fixture
+  // before a reload or a live Mixes assertion can ask for a fresh snapshot.
+  await dbSeedCanonicalDayFromPage(page);
   await page.addInitScript((saved) => {
     // Seed before React/auth/sync boot. Startup may reconcile and clear an
     // authenticated blank baseline before a normal evaluate() can win.
@@ -261,6 +303,45 @@ async function stampLocalFixtureForReload(page: Page): Promise<void> {
       }
     } catch {}
   }, fixture);
+}
+
+async function waitForLocalRunEnded(page: Page, runId: string): Promise<void> {
+  await expect.poll(
+    () => page.evaluate((id) => {
+      const day = JSON.parse(localStorage.getItem("run-calc-day") ?? "{}") as {
+        runs?: Array<{ id?: string; endedAt?: number }>;
+      };
+      return day.runs?.find((run) => run.id === id)?.endedAt ?? null;
+    }, runId),
+    { timeout: 15_000 },
+  ).toBeTruthy();
+}
+
+async function waitForLocalRunStarted(page: Page, runId: string): Promise<void> {
+  await expect.poll(
+    () => page.evaluate((id) => {
+      const day = JSON.parse(localStorage.getItem("run-calc-day") ?? "{}") as {
+        runs?: Array<{ id?: string; startedAt?: number; endedAt?: number }>;
+      };
+      const run = day.runs?.find((candidate) => candidate.id === id);
+      return run && run.startedAt && !run.endedAt ? run.startedAt : null;
+    }, runId),
+    { timeout: 15_000 },
+  ).toBeTruthy();
+}
+
+async function waitForCanonicalRunField(
+  runId: string,
+  field: "startedAt" | "endedAt",
+): Promise<void> {
+  await expect.poll(async () => {
+    const result = await db.query<{ data: { dayState?: { runs?: Array<{ id?: string; startedAt?: number; endedAt?: number }> } } }>(
+      "SELECT data FROM daily_sync WHERE date = $1 AND scope = 'live'",
+      [todayStr()],
+    );
+    const runs = result.rows[0]?.data?.dayState?.runs ?? [];
+    return Boolean(runs.find((run) => run.id === runId)?.[field]);
+  }, { timeout: 20_000 }).toBeTruthy();
 }
 
 async function dbCreateMix(
@@ -334,6 +415,91 @@ async function dbSeedProfile(
       Date.now(),
     ],
   );
+}
+
+/**
+ * Give the server-authoritative Mix Plan endpoint a complete baseline for the
+ * browser fixture. New accounts normally begin with a partial sync, which is
+ * intentionally not materialized when no canonical daily row exists. Without
+ * this baseline, tests that edit localStorage and reload can only exercise the
+ * offline plan even though the browser is online.
+ */
+async function dbSeedCanonicalDayFromPage(page: Page): Promise<void> {
+  const fixture = await page.evaluate(() => {
+    const rawDay = localStorage.getItem("run-calc-day");
+    const dayState = rawDay ? JSON.parse(rawDay) : { runs: [] };
+    const runValues = Object.fromEntries(
+      (Array.isArray(dayState.runs) ? dayState.runs : []).map((run: { id?: string }) => {
+        if (!run.id) return [String(run.id ?? ""), {}];
+        try {
+          return [run.id, JSON.parse(localStorage.getItem(`run-calc-run-${run.id}`) ?? "{}")];
+        } catch {
+          return [run.id, {}];
+        }
+      }).filter(([id]) => Boolean(id)),
+    );
+    return { dayState, runValues };
+  });
+  await db.query(
+    `INSERT INTO daily_sync (date, scope, data, updated_at)
+     VALUES ($1, 'live', $2::jsonb, NOW())
+     ON CONFLICT (date, scope) DO UPDATE
+       SET data = $2::jsonb, updated_at = NOW()`,
+    [
+      todayStr(),
+      JSON.stringify({
+        ...fixture,
+        completeness: "complete",
+        syncVersion: 1,
+      }),
+    ],
+  );
+}
+
+async function seedLiveRunsAfterAppLoad(
+  page: Page,
+  seeds: SeedLiveRun[],
+  currentIndex = 0,
+): Promise<void> {
+  await page.evaluate(({ seeds: initSeeds, currentIndex: initCurrentIndex }) => {
+    localStorage.setItem("run-calc-day", JSON.stringify({
+      runs: initSeeds.map((seed) => ({
+        id: seed.runId,
+        brand: seed.brand,
+        flavor: "",
+        seeded: false,
+      })),
+      currentIndex: initCurrentIndex,
+      date: new Date().toISOString().slice(0, 10),
+      resetAt: 0,
+      substitutions: [],
+      substitutionLog: [],
+      stagedItems: {},
+      prepPhase: {
+        prepStartedAt: null,
+        prepBatchesDough: 0,
+        prepBatchesSauce: 0,
+        prepCarriedOver: false,
+      },
+    }));
+    const updated: Record<string, number> = {};
+    for (const seed of initSeeds) {
+      localStorage.setItem(`run-calc-run-${seed.runId}`, JSON.stringify({
+        pep1Type: seed.ingredient,
+        pep1OzPerPizza: seed.runOz,
+        casesNeeded: seed.casesNeeded,
+        pizzasPerCase: seed.pizzasPerCase,
+        casesPerLayer: seed.casesPerLayer,
+      }));
+      updated[seed.runId] = Date.now() + 60_000;
+    }
+    localStorage.setItem("run-calc-runvalues-updated", JSON.stringify(updated));
+  }, { seeds, currentIndex });
+  await dbSeedCanonicalDayFromPage(page);
+  await stampLocalFixtureForReload(page);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
+  await closeOnboardingIfVisible(page);
 }
 
 /** Format a Date as YYYY-MM-DD using the local calendar (matches app ?today= keying). */
@@ -448,6 +614,8 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
     const brand1 = `BrandA_${suffix}`;
     const brand2 = `BrandB_${suffix}`;
     const today = todayStr();
+    const runId1 = `run-a-${suffix}`;
+    const runId2 = `run-b-${suffix}`;
 
     try {
       // Create two mixes — one per brand — so each run's active status drives its
@@ -471,32 +639,34 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         batchSize: 10,
       });
 
+      // Seed both branded runs and their durable values before app hydration.
+      // signUpAndDismissOnboarding materializes the same fixture into the
+      // canonical daily row before the post-auth reload.
+      await seedLiveRunsBeforeAppLoad(page, [
+        {
+          runId: runId1,
+          brand: brand1,
+          ingredient: component1,
+          runOz: 2,
+          casesNeeded: 1,
+          pizzasPerCase: 8,
+          casesPerLayer: 0,
+        },
+        {
+          runId: runId2,
+          brand: brand2,
+          ingredient: component2,
+          runOz: 2,
+          casesNeeded: 1,
+          pizzasPerCase: 8,
+          casesPerLayer: 0,
+        },
+      ], 1);
       await signUpAndDismissOnboarding(page, username, "TestPass123!");
-      await page.waitForTimeout(1_000);
-
-      // Set brand on run 1
-      await page.locator('[data-testid="tab-run"]').click();
-      const brandInput = page.locator('input[placeholder="Brand…"]').first();
-      await brandInput.waitFor({ state: "visible", timeout: 10_000 });
-      await brandInput.click();
-      await brandInput.fill(brand1);
-      await brandInput.press("Enter");
-
-      // Allow setRunBrandFlavor to persist brand1 on run 1 before we add run 2.
-      await page.waitForTimeout(800);
-
-      // Add run 2 and set brand2
-      const newRunBtn = page.getByRole("button", { name: /new run/i });
-      await newRunBtn.waitFor({ state: "visible", timeout: 8_000 });
-      await newRunBtn.click();
-      await page.waitForTimeout(800);
-
-      const brandInput2 = page.locator('input[placeholder="Brand…"]').first();
-      await brandInput2.waitFor({ state: "visible", timeout: 10_000 });
-      await brandInput2.click();
-      await brandInput2.fill(brand2);
-      await brandInput2.press("Enter");
-      await page.waitForTimeout(800);
+      // The auth form transitions to "/" without a document reload. Re-enter
+      // the app route so the init-script seed is read before React hydration.
+      await page.goto("/", { waitUntil: "domcontentloaded" });
+      await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
 
       // Both mix cards must appear on the Mixes tab
       await goToMixes(page);
@@ -520,10 +690,28 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       // Stop run 1
       const stopBtn = page.getByRole("button", { name: /stop run/i });
       await stopBtn.waitFor({ state: "visible", timeout: 10_000 });
+      // Starting a run first queues a canonical write. Wait for that write to
+      // settle before stopping; otherwise endRun can correctly defer behind
+      // the foreground sync barrier and the test may navigate away while the
+      // stop is still only queued.
+      await expect(page.getByText("Synchronized", { exact: true })).toBeVisible({
+        timeout: 15_000,
+      });
       await stopBtn.click();
 
-      // Allow endRun() to write endedAt on run-1 before we navigate away.
-      await page.waitForTimeout(800);
+      // endRun() advances to run 2, so the start control is the visible
+      // transition signal. Also verify the actual persisted local lifecycle
+      // field before checking the server-backed Mix Plan.
+      await expect(startBtn).toBeVisible({ timeout: 15_000 });
+      await expect.poll(
+        () => page.evaluate((id) => {
+          const day = JSON.parse(localStorage.getItem("run-calc-day") ?? "{}") as {
+            runs?: Array<{ id?: string; endedAt?: number }>;
+          };
+          return day.runs?.find((run) => run.id === id)?.endedAt ?? null;
+        }, runId1),
+        { timeout: 15_000 },
+      ).toBeTruthy();
 
       // Verify run-2's mix is still visible; run-1's mix is gone
       await goToMixes(page);
@@ -548,6 +736,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
     } finally {
       await db.query("DELETE FROM mixes WHERE id = $1", [mixId1]).catch(() => {});
       await db.query("DELETE FROM mixes WHERE id = $1", [mixId2]).catch(() => {});
+      await db.query("DELETE FROM daily_sync WHERE date = $1 AND scope = 'live'", [today]).catch(() => {});
       await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
     }
   });
@@ -618,11 +807,27 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       const startBtn = page.locator('[data-testid="button-start-run"]');
       await startBtn.waitFor({ state: "visible", timeout: 8_000 });
       await startBtn.click();
+      await waitForCanonicalRunField(
+        (await page.evaluate(() => {
+          const day = JSON.parse(localStorage.getItem("run-calc-day") ?? "{}") as {
+            runs?: Array<{ id?: string }>;
+          };
+          return day.runs?.[0]?.id ?? "";
+        })),
+        "startedAt",
+      );
 
       const stopBtn = page.getByRole("button", { name: /stop run/i });
       await stopBtn.waitFor({ state: "visible", timeout: 10_000 });
       await stopBtn.click();
-      await page.waitForTimeout(800);
+      const runId = await page.evaluate(() => {
+        const day = JSON.parse(localStorage.getItem("run-calc-day") ?? "{}") as {
+          runs?: Array<{ id?: string }>;
+        };
+        return day.runs?.[0]?.id ?? "";
+      });
+      await waitForLocalRunEnded(page, runId);
+      await waitForCanonicalRunField(runId, "endedAt");
 
       await goToMixes(page);
       await expect(
@@ -811,6 +1016,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
           casesPerLayer: 0,
         }));
       }, { ingredient });
+      await stampLocalFixtureForReload(page);
       await page.getByRole("button", { name: /next/i }).click();
       await page.waitForTimeout(1_000);
 
@@ -2416,6 +2622,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         { brand, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
       );
 
+      await stampLocalFixtureForReload(page);
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
       await page.getByRole("button", { name: /^get.?started$/i })
@@ -2987,6 +3194,9 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
 
       const stopBtn1 = page.getByRole("button", { name: /stop run/i });
       await stopBtn1.waitFor({ state: "visible", timeout: 10_000 });
+      await expect(page.getByText("Synchronized", { exact: true })).toBeVisible({
+        timeout: 15_000,
+      });
       await stopBtn1.click();
       await page.waitForTimeout(800);
 
@@ -3007,11 +3217,25 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       const startBtn2 = page.locator('[data-testid="button-start-run"]');
       await startBtn2.waitFor({ state: "visible", timeout: 8_000 });
       await startBtn2.click();
+      const run2Id = await page.evaluate(() => {
+        const day = JSON.parse(localStorage.getItem("run-calc-day") ?? "{}") as {
+          runs?: Array<{ id?: string }>;
+          currentIndex?: number;
+        };
+        return day.runs?.[day.currentIndex ?? 0]?.id ?? "";
+      });
 
       const stopBtn2 = page.getByRole("button", { name: /stop run/i });
       await stopBtn2.waitFor({ state: "visible", timeout: 10_000 });
+      await expect(page.getByText("Synchronized", { exact: true })).toBeVisible({
+        timeout: 15_000,
+      });
       await stopBtn2.click();
-      await page.waitForTimeout(800);
+      await waitForLocalRunEnded(page, run2Id);
+      await waitForCanonicalRunField(run2Id, "endedAt");
+      await expect(page.getByText("Synchronized", { exact: true })).toBeVisible({
+        timeout: 15_000,
+      });
 
       // Both runs ended → plan must be empty
       await goToMixes(page);
@@ -3107,6 +3331,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         { brand, ingredient, runOz: RUN_OZ, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
       );
 
+      await stampLocalFixtureForReload(page);
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
       await page.getByRole("button", { name: /^get.?started$/i })
@@ -3229,6 +3454,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         { brand, qualifiedIngredient, runOz: RUN_OZ, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
       );
 
+      await stampLocalFixtureForReload(page);
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
       await page.getByRole("button", { name: /^get.?started$/i })
@@ -3326,6 +3552,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         { brand, qualifiedIngredient, runOz: RUN_OZ, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
       );
 
+      await stampLocalFixtureForReload(page);
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
       await page.getByRole("button", { name: /^get.?started$/i })
@@ -3423,6 +3650,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         { brand, qualifiedIngredient, runOz: RUN_OZ, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
       );
 
+      await stampLocalFixtureForReload(page);
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
       await page.getByRole("button", { name: /^get.?started$/i })
@@ -3521,6 +3749,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         { brand, baseIngredient, runOz: RUN_OZ, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
       );
 
+      await stampLocalFixtureForReload(page);
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
       await page.getByRole("button", { name: /^get.?started$/i })
@@ -3619,6 +3848,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
         { brand, baseIngredient, runOz: RUN_OZ, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
       );
 
+      await stampLocalFixtureForReload(page);
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
       await page.getByRole("button", { name: /^get.?started$/i })
@@ -3671,7 +3901,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
     const mixName = `SlashRevPrepMix ${suffix}`;
 
     const baseIngredient = `Herb_${suffix}`;
-    const qualifiedComponent = `${baseIngredient}/Fresh`;
+     const qualifiedComponent = `${baseIngredient}/Fresh`;
     const brand = `Brand_${suffix}`;
     const today = todayStr();
 
@@ -3714,10 +3944,11 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
             casesNeeded, pizzasPerCase, casesPerLayer: 0,
           }));
         },
-        { brand, baseIngredient, runOz: RUN_OZ, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
-      );
+       { brand, baseIngredient, runOz: RUN_OZ, casesNeeded: CASES_NEEDED, pizzasPerCase: PIZZAS_PER_CASE },
+     );
 
-      await page.reload({ waitUntil: "domcontentloaded" });
+     await stampLocalFixtureForReload(page);
+     await page.reload({ waitUntil: "domcontentloaded" });
       await page.locator('[data-testid="tab-run"]').waitFor({ state: "attached", timeout: 25_000 });
       await page.getByRole("button", { name: /^get.?started$/i })
         .waitFor({ state: "visible", timeout: 5_000 }).then((b) => b.click()).catch(() => {});
@@ -3774,6 +4005,9 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
   test("empty state is preserved after a page reload when all runs are ended", async ({
     page,
   }) => {
+    // This two-run start/stop/reload journey can exceed the suite's 60-second
+    // default under full-run load; keep a bounded, case-local budget.
+    test.setTimeout(90_000);
     const suffix = uid();
     const username = `user_${suffix}`;
     const mixId1 = `reload-ended-mix-a-${suffix}`;
@@ -3785,6 +4019,8 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
     const brand1 = `ReloadEndedBrandA_${suffix}`;
     const brand2 = `ReloadEndedBrandB_${suffix}`;
     const today = todayStr();
+    const runId1 = `reload-ended-run-a-${suffix}`;
+    const runId2 = `reload-ended-run-b-${suffix}`;
 
     try {
       await dbCreateMix(db, {
@@ -3807,29 +4043,26 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       });
 
       await signUpAndDismissOnboarding(page, username, "TestPass123!");
-      await page.waitForTimeout(1_000);
-
-      // Set brand on run 1
-      await page.locator('[data-testid="tab-run"]').click();
-      const brandInput = page.locator('input[placeholder="Brand…"]').first();
-      await brandInput.waitFor({ state: "visible", timeout: 10_000 });
-      await brandInput.click();
-      await brandInput.fill(brand1);
-      await brandInput.press("Enter");
-      await page.waitForTimeout(800);
-
-      // Add run 2 and set brand2
-      const newRunBtn = page.getByRole("button", { name: /new run/i });
-      await newRunBtn.waitFor({ state: "visible", timeout: 8_000 });
-      await newRunBtn.click();
-      await page.waitForTimeout(800);
-
-      const brandInput2 = page.locator('input[placeholder="Brand…"]').first();
-      await brandInput2.waitFor({ state: "visible", timeout: 10_000 });
-      await brandInput2.click();
-      await brandInput2.fill(brand2);
-      await brandInput2.press("Enter");
-      await page.waitForTimeout(800);
+      await seedLiveRunsAfterAppLoad(page, [
+        {
+          runId: runId1,
+          brand: brand1,
+          ingredient: component1,
+          runOz: 2,
+          casesNeeded: 1,
+          pizzasPerCase: 8,
+          casesPerLayer: 0,
+        },
+        {
+          runId: runId2,
+          brand: brand2,
+          ingredient: component2,
+          runOz: 2,
+          casesNeeded: 1,
+          pizzasPerCase: 8,
+          casesPerLayer: 0,
+        },
+      ], 1);
 
       // Both cards visible before any run is stopped
       await goToMixes(page);
@@ -3849,29 +4082,29 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       const startBtn1 = page.locator('[data-testid="button-start-run"]');
       await startBtn1.waitFor({ state: "visible", timeout: 8_000 });
       await startBtn1.click();
+      await waitForLocalRunStarted(page, runId1);
+      await waitForCanonicalRunField(runId1, "startedAt");
 
-      const stopBtn1 = page.getByRole("button", { name: /stop run/i });
-      await stopBtn1.waitFor({ state: "visible", timeout: 10_000 });
-      await stopBtn1.click();
-      await page.waitForTimeout(800);
-
-      // Stopping run 1 advances selection to the remaining run. Older builds
-      // kept run 1 selected, so only use Next when that legacy state remains.
+      // Starting the next run is the supported transition between runs: it
+      // auto-ends the active run, avoiding a second START during the first
+      // stop's foreground-adoption fence.
       const nextBtn = page.getByRole("button", { name: /next/i });
-      if (await nextBtn.isVisible().catch(() => false)) {
-        await nextBtn.click();
-        await page.waitForTimeout(600);
-      }
+      await nextBtn.waitFor({ state: "visible", timeout: 8_000 });
+      await nextBtn.click();
+      await page.waitForTimeout(600);
 
       const startBtn2 = page.locator('[data-testid="button-start-run"]');
       await startBtn2.waitFor({ state: "visible", timeout: 8_000 });
       await startBtn2.click();
+      await waitForLocalRunStarted(page, runId2);
+      await waitForCanonicalRunField(runId2, "startedAt");
+      await waitForLocalRunEnded(page, runId1);
+      await waitForCanonicalRunField(runId1, "endedAt");
 
       const stopBtn2 = page.getByRole("button", { name: /stop run/i });
       await stopBtn2.waitFor({ state: "visible", timeout: 10_000 });
       await stopBtn2.click();
-      // Allow endRun() to persist endedAt to localStorage before reloading.
-      await page.waitForTimeout(1_000);
+      await waitForLocalRunEnded(page, runId2);
 
       // ── Full page reload ──────────────────────────────────────────────────────
       // This exercises the localStorage → loadDayState() → React hydration path.
@@ -3899,6 +4132,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
     } finally {
       await db.query("DELETE FROM mixes WHERE id = $1", [mixId1]).catch(() => {});
       await db.query("DELETE FROM mixes WHERE id = $1", [mixId2]).catch(() => {});
+      await db.query("DELETE FROM daily_sync WHERE date = $1 AND scope = 'live'", [today]).catch(() => {});
       await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
     }
   });
@@ -3925,6 +4159,8 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
     const brand1 = `ColdReloadEndedBrandA_${suffix}`;
     const brand2 = `ColdReloadEndedBrandB_${suffix}`;
     const today = todayStr();
+    const runId1 = `cold-reload-ended-run-a-${suffix}`;
+    const runId2 = `cold-reload-ended-run-b-${suffix}`;
 
     try {
       await dbCreateMix(db, {
@@ -3947,31 +4183,29 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       });
 
       await signUpAndDismissOnboarding(page, username, "TestPass123!");
-      await page.waitForTimeout(1_000);
+      await seedLiveRunsAfterAppLoad(page, [
+        {
+          runId: runId1,
+          brand: brand1,
+          ingredient: component1,
+          runOz: 2,
+          casesNeeded: 1,
+          pizzasPerCase: 8,
+          casesPerLayer: 0,
+        },
+        {
+          runId: runId2,
+          brand: brand2,
+          ingredient: component2,
+          runOz: 2,
+          casesNeeded: 1,
+          pizzasPerCase: 8,
+          casesPerLayer: 0,
+        },
+      ], 1);
 
-      // Set brand on run 1 without ever opening the Mixes tab.
-      await page.locator('[data-testid="tab-run"]').click();
-      const brandInput = page.locator('input[placeholder="Brand…"]').first();
-      await brandInput.waitFor({ state: "visible", timeout: 10_000 });
-      await brandInput.click();
-      await brandInput.fill(brand1);
-      await brandInput.press("Enter");
-      await page.waitForTimeout(800);
-
-      // Add run 2 and set its brand, still without visiting Mixes.
-      const newRunBtn = page.getByRole("button", { name: /new run/i });
-      await newRunBtn.waitFor({ state: "visible", timeout: 8_000 });
-      await newRunBtn.click();
-      await page.waitForTimeout(800);
-
-      const brandInput2 = page.locator('input[placeholder="Brand…"]').first();
-      await brandInput2.waitFor({ state: "visible", timeout: 10_000 });
-      await brandInput2.click();
-      await brandInput2.fill(brand2);
-      await brandInput2.press("Enter");
-      await page.waitForTimeout(800);
-
-      // Stop run 1.
+      // Complete both runs without visiting Mixes. The cold reload below must
+      // be followed by this browser's first Mixes visit.
       const prevBtn = page.getByRole("button", { name: /prev/i });
       await prevBtn.waitFor({ state: "visible", timeout: 8_000 });
       await prevBtn.click();
@@ -3980,26 +4214,29 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       const startBtn1 = page.locator('[data-testid="button-start-run"]');
       await startBtn1.waitFor({ state: "visible", timeout: 8_000 });
       await startBtn1.click();
-      const stopBtn1 = page.getByRole("button", { name: /stop run/i });
-      await stopBtn1.waitFor({ state: "visible", timeout: 10_000 });
-      await stopBtn1.click();
-      await page.waitForTimeout(800);
+      await waitForLocalRunStarted(page, runId1);
+      await waitForCanonicalRunField(runId1, "startedAt");
+      await expect(page.getByText("Synchronized", { exact: true })).toBeVisible({
+        timeout: 15_000,
+      });
 
-      // Stopping run 1 advances selection to the remaining run. Older builds
-      // kept run 1 selected, so only use Next when that legacy state remains.
       const nextBtn = page.getByRole("button", { name: /next/i });
-      if (await nextBtn.isVisible().catch(() => false)) {
-        await nextBtn.click();
-        await page.waitForTimeout(600);
-      }
+      await nextBtn.waitFor({ state: "visible", timeout: 8_000 });
+      await nextBtn.click();
+      await page.waitForTimeout(600);
 
       const startBtn2 = page.locator('[data-testid="button-start-run"]');
       await startBtn2.waitFor({ state: "visible", timeout: 8_000 });
       await startBtn2.click();
+      await waitForLocalRunStarted(page, runId2);
+      await waitForCanonicalRunField(runId2, "startedAt");
+      await waitForLocalRunEnded(page, runId1);
+
       const stopBtn2 = page.getByRole("button", { name: /stop run/i });
       await stopBtn2.waitFor({ state: "visible", timeout: 10_000 });
       await stopBtn2.click();
-      await page.waitForTimeout(1_000);
+      await waitForLocalRunEnded(page, runId2);
+      await waitForCanonicalRunField(runId2, "endedAt");
 
       // Reload before the first Mixes visit in this browser session.
       await page.reload({ waitUntil: "domcontentloaded" });
@@ -4026,6 +4263,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
     } finally {
       await db.query("DELETE FROM mixes WHERE id = $1", [mixId1]).catch(() => {});
       await db.query("DELETE FROM mixes WHERE id = $1", [mixId2]).catch(() => {});
+      await db.query("DELETE FROM daily_sync WHERE date = $1 AND scope = 'live'", [today]).catch(() => {});
       await db.query("DELETE FROM users WHERE username = $1", [username]).catch(() => {});
     }
   });

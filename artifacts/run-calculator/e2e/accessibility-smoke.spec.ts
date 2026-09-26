@@ -865,6 +865,7 @@ test.describe("accessibility smoke", () => {
       name: "Choose production date",
     });
     await expect(scheduleDateTrigger).toBeVisible();
+    const initialDate = await scheduleDateTrigger.getAttribute("data-date-value");
     await scheduleDateTrigger.focus();
     await page.keyboard.press("Enter");
     const scheduleCalendar = page.locator('[data-slot="calendar"]');
@@ -872,10 +873,29 @@ test.describe("accessibility smoke", () => {
     await scan(page, "schedule calendar", [], '[data-slot="calendar"]');
     const selectedDay = scheduleCalendar.locator('button[data-selected-single="true"]');
     await expect(selectedDay).toBeVisible();
+    const selectedDate = await selectedDay.getAttribute("data-day");
+    expect(selectedDate).toBeTruthy();
     await selectedDay.focus();
     await page.keyboard.press("ArrowRight");
+    // React Day Picker moves focus asynchronously. Enter before the new day
+    // receives focus can activate the old day (or no day) and leave the
+    // calendar open while the test appears to have exercised its keyboard path.
+    await expect.poll(() => page.evaluate((previousDate) => {
+      const focused = document.activeElement;
+      return focused instanceof HTMLButtonElement
+        && focused.matches('button[data-day]:not([disabled])')
+        && focused.getAttribute("data-day") !== previousDate;
+    }, selectedDate)).toBe(true);
     await page.keyboard.press("Enter");
+    await expect(scheduleDateTrigger).not.toHaveAttribute(
+      "data-date-value",
+      initialDate ?? "",
+    );
+    await expect(scheduleEditor).toBeVisible();
     await expect(scheduleCalendar).toBeHidden();
+    await page.locator("#replit-dev-banner").evaluateAll((nodes) => {
+      for (const node of nodes) node.remove();
+    });
     await scheduleEditor.getByRole("button", { name: "Close schedule editor" }).click();
     await expect(scheduleEditor).toBeHidden();
   });
@@ -892,11 +912,13 @@ test.describe("accessibility smoke", () => {
         if (key?.startsWith("run-calc")) localStorage.removeItem(key);
       }
     });
-    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.goto("/", { waitUntil: "domcontentloaded" });
     await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
 
     await page.getByRole("button", { name: "More" }).click();
-    await page.getByRole("menuitem", { name: "Schedule", exact: true }).click();
+    const scheduleMenuItem = page.getByRole("menuitem", { name: "Schedule", exact: true });
+    await expect(scheduleMenuItem).toBeVisible();
+    await scheduleMenuItem.click();
     const scheduledDaysDialog = page.getByRole("dialog", { name: "Scheduled Days" });
     await expect(scheduledDaysDialog).toBeVisible();
     await scheduledDaysDialog
@@ -907,6 +929,15 @@ test.describe("accessibility smoke", () => {
     const scheduleEditor = page.getByRole("dialog", { name: /Plan for/ });
     const breakEditor = scheduleEditor.getByTestId("schedule-breaks");
     await expect(breakEditor).toContainText("Each planned break is fixed at 30 minutes.");
+    // Phone layouts intentionally collapse the editable planner behind the
+    // summary toggle; expand it before asserting the same break-slot contract
+    // exercised directly on desktop.
+    const breakToggle = breakEditor.getByTestId("schedule-break-toggle");
+    if (await breakToggle.isVisible()) {
+      await expect(breakToggle).toHaveText("Add breaks");
+      await breakToggle.click();
+      await expect(breakToggle).toHaveText("Hide breaks");
+    }
     await expect(breakEditor.getByText("Break 1", { exact: true })).toBeVisible();
     await expect(breakEditor.getByText("Break 2", { exact: true })).toBeVisible();
     await expect(breakEditor.getByText("Break 3", { exact: true })).toBeVisible();
@@ -948,6 +979,12 @@ test.describe("accessibility smoke", () => {
       .click();
     const reloadedEditor = page.getByRole("dialog", { name: /Plan for/ });
     const reloadedBreakEditor = reloadedEditor.getByTestId("schedule-breaks");
+    await expect(reloadedBreakEditor).toContainText("Each planned break is fixed at 30 minutes.");
+    const reloadedBreakToggle = reloadedBreakEditor.getByTestId("schedule-break-toggle");
+    if (await reloadedBreakToggle.isVisible()) {
+      await reloadedBreakToggle.click();
+      await expect(reloadedBreakToggle).toHaveText("Hide breaks");
+    }
     for (const [slot, time] of [[1, "06:30"], [2, "08:00"], [3, "09:30"]] as const) {
       await expect(
         reloadedBreakEditor.getByRole("combobox", { name: `Break ${slot} placement` }),
@@ -990,6 +1027,96 @@ test.describe("accessibility smoke", () => {
     await operatorPage.close();
   });
 
+  test("Android-sized PWA schedule editor exposes the break planner and preserves placements", async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await page.setViewportSize({ width: 412, height: 915 });
+    await signUp(page);
+    await seedBreakSchedule();
+    await page.evaluate(() => {
+      for (const key of Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))) {
+        if (key?.startsWith("run-calc")) localStorage.removeItem(key);
+      }
+    });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+
+    const openScheduleEditor = async (): Promise<Locator> => {
+      await page.getByRole("button", { name: "More" }).click();
+      const scheduleMenuItem = page.getByRole("menuitem", { name: "Schedule", exact: true });
+      await expect(scheduleMenuItem).toBeVisible();
+      await scheduleMenuItem.click();
+      const scheduledDaysDialog = page.getByRole("dialog", { name: "Scheduled Days" });
+      await scheduledDaysDialog
+        .getByTestId("schedule-today-card")
+        .getByRole("button", { name: "Edit", exact: true })
+        .click();
+      return page.getByRole("dialog", { name: /Plan for/ });
+    };
+
+    const scheduleEditor = await openScheduleEditor();
+    const breakEditor = scheduleEditor.getByTestId("schedule-breaks");
+    const breakToggle = breakEditor.getByTestId("schedule-break-toggle");
+    await expect(breakToggle).toBeVisible();
+    await expect(breakToggle).toHaveText("Add breaks");
+    await expect(breakEditor.getByTestId("schedule-break-summary")).toContainText("Break 1");
+    await expect(
+      breakEditor.getByRole("combobox", { name: "Break 1 placement" }),
+    ).toBeHidden();
+
+    await breakToggle.click();
+    await expect(breakToggle).toHaveText("Hide breaks");
+    for (const slot of [1, 2, 3]) {
+      await expect(breakEditor.getByText(`Break ${slot}`, { exact: true })).toBeVisible();
+    }
+    for (const [slot, time] of [[1, "06:30"], [2, "08:00"], [3, "09:30"]] as const) {
+      await breakEditor
+        .getByRole("combobox", { name: `Break ${slot} placement` })
+        .selectOption("at-time");
+      await breakEditor.getByLabel(`Break ${slot} time`).fill(time);
+    }
+
+    const saveResponse = page.waitForResponse(
+      (response) =>
+        response.url().includes("/api/sync/today") &&
+        response.request().method() === "PUT",
+    );
+    await scheduleEditor.getByRole("button", { name: "Save Schedule", exact: true }).click();
+    expect((await saveResponse).ok()).toBe(true);
+
+    // Closing the document and opening a new page models an installed PWA
+    // relaunch while retaining the authenticated cookie and persisted plan.
+    const context = page.context();
+    await page.close();
+    const reopened = await context.newPage();
+    await reopened.setViewportSize({ width: 412, height: 915 });
+    await reopened.goto("/", { waitUntil: "domcontentloaded" });
+    await reopened.getByTestId("tab-run").waitFor({ state: "attached", timeout: 30_000 });
+    await reopened.getByRole("button", { name: "More" }).click();
+    await reopened.getByRole("menuitem", { name: "Schedule", exact: true }).click();
+    const reopenedScheduledDays = reopened.getByRole("dialog", { name: "Scheduled Days" });
+    await reopenedScheduledDays
+      .getByTestId("schedule-today-card")
+      .getByRole("button", { name: "Edit", exact: true })
+      .click();
+
+    const reopenedEditor = reopened.getByRole("dialog", { name: /Plan for/ });
+    const reopenedBreakEditor = reopenedEditor.getByTestId("schedule-breaks");
+    await expect(reopenedBreakEditor.getByTestId("schedule-break-toggle")).toHaveText("Add breaks");
+    await expect(reopenedBreakEditor.getByTestId("schedule-break-summary")).toContainText(
+      "Break 1 · 06:30 · Break 2 · 08:00 · Break 3 · 09:30",
+    );
+    await reopenedBreakEditor.getByTestId("schedule-break-toggle").click();
+    for (const [slot, time] of [[1, "06:30"], [2, "08:00"], [3, "09:30"]] as const) {
+      await expect(
+        reopenedBreakEditor.getByRole("combobox", { name: `Break ${slot} placement` }),
+      ).toHaveValue("at-time");
+      await expect(reopenedBreakEditor.getByLabel(`Break ${slot} time`)).toHaveValue(time);
+    }
+    await reopened.close();
+  });
+
   test("authorized supervisors can save all break slots without manager-only controls", async ({
     page,
   }) => {
@@ -1001,7 +1128,7 @@ test.describe("accessibility smoke", () => {
         if (key?.startsWith("run-calc")) localStorage.removeItem(key);
       }
     });
-    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.goto("/", { waitUntil: "domcontentloaded" });
     await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
 
     await page.getByRole("button", { name: "More" }).click();
@@ -1017,6 +1144,17 @@ test.describe("accessibility smoke", () => {
       .click();
     const scheduleEditor = page.getByRole("dialog", { name: /Plan for/ });
     const breakEditor = scheduleEditor.getByTestId("schedule-breaks");
+    await expect(breakEditor).toContainText("Each planned break is fixed at 30 minutes.");
+    const breakToggle = breakEditor.getByTestId("schedule-break-toggle");
+    if (await breakToggle.isVisible()) {
+      await expect(breakToggle).toHaveText("Add breaks");
+      await breakToggle.click();
+      await expect(breakToggle).toHaveText("Hide breaks");
+    } else {
+      await expect(
+        breakEditor.getByRole("combobox", { name: "Break 1 placement" }),
+      ).toBeVisible();
+    }
     for (const [slot, time] of [[1, "07:00"], [2, "09:00"], [3, "11:00"]] as const) {
       await breakEditor
         .getByRole("combobox", { name: `Break ${slot} placement` })
@@ -1033,7 +1171,7 @@ test.describe("accessibility smoke", () => {
     expect((await saveResponse).ok()).toBe(true);
     await expect(scheduledDaysDialog.getByTestId("schedule-today-card")).toBeVisible();
 
-    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.goto("/", { waitUntil: "domcontentloaded" });
     await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
     await page.getByRole("button", { name: "More" }).click();
     await expect(page.getByRole("menuitem", { name: "Staff roster", exact: true })).toHaveCount(0);

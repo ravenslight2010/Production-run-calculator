@@ -56,7 +56,13 @@ export function useRunLifecycleManager(deps: {
     runId: string; skidsCompleted: number; casesOnCurrentSkid: number;
     manualOverrideUntil: number; now: number;
   }) => void;
-  persistManualPackagingProgress: (runId: string, skids: number, cases: number) => void;
+  persistManualPackagingProgress: (
+    runId: string,
+    skids: number,
+    cases: number,
+    manualOverrideUntil?: number,
+    beforeOverride?: Record<string, number>,
+  ) => void;
   calcTotalTimeSec: () => number;
   initialFinishTimestampRef: MutableRefObject<number>;
   summarizeCarriedInCases: (run: RunMeta, originalTarget: number) => number;
@@ -76,32 +82,38 @@ export function useRunLifecycleManager(deps: {
   operationalAdoptionInFlightRef?: MutableRefObject<number>;
   operationalCanonicalRevisionRef?: MutableRefObject<number>;
   operationalIntentBlocksLifecycle?: (runId: string) => boolean;
+  syncWritePending?: () => boolean;
 }) {
   const [pauseDecisionRunId, setPauseDecisionRunId] = useState<string | null>(null);
   const pauseDecisionPauseIdRef = useRef<string | null>(null);
   const deferredLifecycleRef = useRef<{
     runId: string;
-    action: "start" | "pause" | "resume";
+    action: "start" | "pause" | "resume" | "end";
   } | null>(null);
   const startRunRef = useRef<() => void>(() => {});
   const pauseRunRef = useRef<() => void>(() => {});
   const resumeRunRef = useRef<() => void>(() => {});
+  const endRunRef = useRef<(expectedRunId?: string) => void>(() => {});
   const lifecycleBlocked = (runId: string, waitForAdoption = true) =>
     (waitForAdoption && (deps.operationalAdoptionInFlightRef?.current ?? 0) > 0) ||
-    (deps.operationalIntentBlocksLifecycle?.(runId) ?? false);
+    (deps.operationalIntentBlocksLifecycle?.(runId) ?? false) ||
+    (deps.syncWritePending?.() ?? false);
   const canonicalRevision = () => deps.operationalCanonicalRevisionRef?.current ?? 0;
-  const deferUntilAdoptionSettles = (runId: string, action: "start" | "pause" | "resume") => {
-    if (
-      (!deps.operationalAdoptionInFlightRef && !deps.operationalIntentBlocksLifecycle) ||
-      deferredLifecycleRef.current
-    ) return;
+  const deferUntilAdoptionSettles = (
+    runId: string,
+    action: "start" | "pause" | "resume" | "end",
+  ) => {
+    if (deferredLifecycleRef.current) return;
     deferredLifecycleRef.current = { runId, action };
     const poll = () => {
       const deferred = deferredLifecycleRef.current;
       if (!deferred || deferred.runId !== runId || deferred.action !== action) return;
       if (
+        deps.foregroundSyncBarrierRef.current ||
+        deps.formHandoffRef.current ||
         (deps.operationalAdoptionInFlightRef?.current ?? 0) > 0 ||
-        (deps.operationalIntentBlocksLifecycle?.(runId) ?? false)
+        (deps.operationalIntentBlocksLifecycle?.(runId) ?? false) ||
+        (deps.syncWritePending?.() ?? false)
       ) {
         window.setTimeout(poll, 25);
         return;
@@ -109,7 +121,8 @@ export function useRunLifecycleManager(deps: {
       deferredLifecycleRef.current = null;
       if (action === "start") startRunRef.current();
       else if (action === "pause") pauseRunRef.current();
-      else resumeRunRef.current();
+      else if (action === "resume") resumeRunRef.current();
+      else endRunRef.current(runId);
     };
     window.setTimeout(poll, 0);
   };
@@ -149,11 +162,14 @@ export function useRunLifecycleManager(deps: {
   });
 
   const startRun = useEvent(() => {
-    if (deps.foregroundSyncBarrierRef.current || deps.formHandoffRef.current) return;
     const base = deps.dayStateRef.current;
     const index = base.currentIndex;
     const activeRun = base.runs[index];
     if (!activeRun) return;
+    if (deps.foregroundSyncBarrierRef.current || deps.formHandoffRef.current) {
+      deferUntilAdoptionSettles(activeRun.id, "start");
+      return;
+    }
     if (lifecycleBlocked(activeRun.id)) {
       deferUntilAdoptionSettles(activeRun.id, "start");
       return;
@@ -204,7 +220,10 @@ export function useRunLifecycleManager(deps: {
       const cases = casesPerSkid > 0 ? carried % casesPerSkid : carried;
       deps.form.setValue("skidsCompleted", skids, { shouldDirty: true });
       deps.form.setValue("casesOnCurrentSkid", cases, { shouldDirty: true });
-      deps.persistManualPackagingProgress(activeRunId, skids, cases);
+      deps.persistManualPackagingProgress(activeRunId, skids, cases, undefined, {
+        skidsCompleted: Number(openingValues.skidsCompleted) || 0,
+        casesOnCurrentSkid: Number(openingValues.casesOnCurrentSkid) || 0,
+      });
       deps.saveRunValues(activeRunId, deps.form.getValues());
     }
     const prep = base.prepPhase;
@@ -327,7 +346,14 @@ export function useRunLifecycleManager(deps: {
     const index = base.currentIndex;
     const activeRun = base.runs[index];
     if (deps.formHandoffRef.current) return;
-    if (activeRun && lifecycleBlocked(activeRun.id)) return;
+    if (activeRun && lifecycleBlocked(activeRun.id)) {
+      // A Start/Pause/Resume adoption can still be applying the canonical
+      // snapshot when the operator presses Stop. Do not drop that command;
+      // replay it after the adoption so the visible run cannot remain active
+      // merely because the first click raced the sync fence.
+      deferUntilAdoptionSettles(activeRun.id, "end");
+      return;
+    }
     if (deps.foregroundSyncBarrierRef.current && !fromForegroundRecovery) {
       if (activeRun?.startedAt && !activeRun.endedAt && (!deps.foregroundStopIntentRef.current || deps.foregroundStopIntentRef.current.runId === activeRun.id)) {
         deps.foregroundStopIntentRef.current = { action: "stop", runId: activeRun.id };
@@ -378,6 +404,7 @@ export function useRunLifecycleManager(deps: {
     deps.setConfirmDeleteStopId(null);
     deps.schedulePush(next, 0);
   });
+  endRunRef.current = endRun;
 
   useEffect(() => {
     if (!pauseDecisionRunId) return;

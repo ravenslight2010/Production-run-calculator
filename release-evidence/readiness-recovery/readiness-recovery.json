@@ -1,0 +1,149 @@
+{
+  "schemaVersion": 1,
+  "kind": "readiness-recovery",
+  "environment": "release",
+  "deploymentId": "411f3a0b-be0f-499a-9b85-b35deec43e5d",
+  "revision": "eb6f2bafa48dab5d184e700e28980ae21699fd56",
+  "generatedAt": "2026-09-24T02:43:21.766Z",
+  "expiresAt": "2026-10-01T02:43:21.766Z",
+  "retention": {
+    "maxSamples": 60,
+    "maxAgeMs": 604800000
+  },
+  "target": {
+    "probe": "readyz"
+  },
+  "samples": [
+    {
+      "capturedAt": "2026-09-24T02:43:10.742Z",
+      "httpStatus": 200,
+      "outcome": "healthy",
+      "checks": {
+        "process": "ok",
+        "startup": "ok",
+        "database": "ok",
+        "dependencies": "ok",
+        "backgroundWorkers": "ok"
+      },
+      "workers": [
+        {
+          "operation": "daily-rollover",
+          "status": "ok",
+          "recentFailureCount": 0,
+          "threshold": 3
+        },
+        {
+          "operation": "server-job-run",
+          "status": "ok",
+          "recentFailureCount": 0,
+          "threshold": 3
+        },
+        {
+          "operation": "server-job-prune",
+          "status": "ok",
+          "recentFailureCount": 0,
+          "threshold": 3
+        },
+        {
+          "operation": "web-push-schedule",
+          "status": "ok",
+          "recentFailureCount": 1,
+          "threshold": 3,
+          "lastFailureAt": "2026-09-24T02:42:34.232Z"
+        }
+      ]
+    },
+    {
+      "capturedAt": "2026-09-24T02:43:16.238Z",
+      "httpStatus": 200,
+      "outcome": "healthy",
+      "checks": {
+        "process": "ok",
+        "startup": "ok",
+        "database": "ok",
+        "dependencies": "ok",
+        "backgroundWorkers": "ok"
+      },
+      "workers": [
+        {
+          "operation": "daily-rollover",
+          "status": "ok",
+          "recentFailureCount": 0,
+          "threshold": 3
+        },
+        {
+          "operation": "server-job-run",
+          "status": "ok",
+          "recentFailureCount": 0,
+          "threshold": 3
+        },
+        {
+          "operation": "server-job-prune",
+          "status": "ok",
+          "recentFailureCount": 0,
+          "threshold": 3
+        },
+        {
+          "operation": "web-push-schedule",
+          "status": "ok",
+          "recentFailureCount": 1,
+          "threshold": 3,
+          "lastFailureAt": "2026-09-24T02:42:34.232Z"
+        }
+      ]
+    },
+    {
+      "capturedAt": "2026-09-24T02:43:21.512Z",
+      "httpStatus": 200,
+      "outcome": "healthy",
+      "checks": {
+        "process": "ok",
+        "startup": "ok",
+        "database": "ok",
+        "dependencies": "ok",
+        "backgroundWorkers": "ok"
+      },
+      "workers": [
+        {
+          "operation": "daily-rollover",
+          "status": "ok",
+          "recentFailureCount": 0,
+          "threshold": 3
+        },
+        {
+          "operation": "server-job-run",
+          "status": "ok",
+          "recentFailureCount": 0,
+          "threshold": 3
+        },
+        {
+          "operation": "server-job-prune",
+          "status": "ok",
+          "recentFailureCount": 0,
+          "threshold": 3
+        },
+        {
+          "operation": "web-push-schedule",
+          "status": "ok",
+          "recentFailureCount": 1,
+          "threshold": 3,
+          "lastFailureAt": "2026-09-24T02:42:34.232Z"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "normal200Samples": 3,
+    "workerIncident503Samples": 0,
+    "recovery200Samples": 0,
+    "observedStates": [
+      "normal_200"
+    ],
+    "finalState": "normal"
+  },
+  "verification": {
+    "mode": "normal",
+    "passed": true,
+    "reason": "sustained HTTP 200 readiness"
+  }
+}

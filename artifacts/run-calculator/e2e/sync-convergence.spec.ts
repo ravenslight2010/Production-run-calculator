@@ -253,13 +253,28 @@ async function putToday(page: Page, payload: SyncPayload): Promise<{
   responseStatus: number;
 }> {
   return page.evaluate(async ({ date, payload }) => {
-    const epochResponse = await fetch("/api/sync/reset-epoch", { cache: "no-store" });
+    const [epochResponse, baselineResponse] = await Promise.all([
+      fetch("/api/sync/reset-epoch", { cache: "no-store" }),
+      fetch(`/api/sync/today?today=${date}`, { cache: "no-store" }),
+    ]);
+    if (!epochResponse.ok || !baselineResponse.ok) {
+      throw new Error("sync fixture baseline request failed");
+    }
     const epochBody = await epochResponse.json() as { epoch?: number };
     const epoch = typeof epochBody.epoch === "number" ? epochBody.epoch : 0;
+    const snapshotId = baselineResponse.headers.get("X-Sync-Snapshot");
+    if (!snapshotId) throw new Error("sync fixture snapshot identity is missing");
+    const payloadToSend = payload.completeness === "complete"
+      ? { ...payload, baseSnapshotId: payload.baseSnapshotId ?? snapshotId }
+      : payload;
     const response = await fetch(`/api/sync/today?today=${date}&epoch=${epoch}`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ senderId: "sync-matrix", payload }),
+      body: JSON.stringify({
+        senderId: "sync-matrix",
+        payload: payloadToSend,
+        snapshotId,
+      }),
     });
     const body = (await response.json()) as Record<string, unknown>;
     if (typeof body.snapshotId !== "string") {
@@ -322,10 +337,17 @@ test(
     let blocked = true;
     let syncWriteAttempts = 0;
     let blockedWrites = 0;
+    let completeWritesAfterRecovery = 0;
     await page.route("**/api/sync/today**", async (route) => {
       const request = route.request();
       if (request.method() === "PUT") {
         syncWriteAttempts += 1;
+        const body = request.postDataJSON() as {
+          payload?: { completeness?: string };
+        };
+        if (!blocked && body.payload?.completeness === "complete") {
+          completeWritesAfterRecovery += 1;
+        }
       }
       if (request.method() === "PUT" && blocked) {
         blockedWrites += 1;
@@ -371,6 +393,7 @@ test(
     // only after the server acknowledges the write.
     blocked = false;
     await expect.poll(() => syncWriteAttempts, { timeout: 15_000 }).toBeGreaterThan(1);
+    await expect.poll(() => completeWritesAfterRecovery, { timeout: 15_000 }).toBeGreaterThan(0);
     await expect(page.getByText(
       "Your latest changes are retained on this device, but the server has not acknowledged them. Other devices cannot see them until sync succeeds.",
       { exact: true },
@@ -830,13 +853,18 @@ test(
     const unchanged = await page.evaluate(async ({ date, payload, snapshotId }) => {
       const epochResponse = await fetch("/api/sync/reset-epoch", { cache: "no-store" });
       const epoch = (await epochResponse.json() as { epoch?: number }).epoch ?? 0;
+      const completePayload = { ...payload, baseSnapshotId: snapshotId };
       const response = await fetch(`/api/sync/today?today=${date}&epoch=${epoch}`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ senderId: "unchanged-wake", payload, snapshotId }),
+        body: JSON.stringify({ senderId: "unchanged-wake", payload: completePayload, snapshotId }),
       });
       return { status: response.status, body: await response.json() as Record<string, unknown> };
-    }, { date: today(), payload: seeded, snapshotId: firstSnapshot });
+    }, {
+      date: today(),
+      payload: { ...seeded, baseSnapshotId: firstSnapshot },
+      snapshotId: firstSnapshot,
+    });
     expect(unchanged.status).toBe(200);
     expect(unchanged.body).toMatchObject({ unchanged: true, snapshotId: firstSnapshot });
     expect(unchanged.body.data).toBeUndefined();

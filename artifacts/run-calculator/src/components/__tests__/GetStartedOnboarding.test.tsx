@@ -130,11 +130,79 @@ describe("useGetStartedOverview latch", () => {
     expect(markSeen).toHaveBeenCalledTimes(1);
   });
 
+  it("does not send duplicate acknowledgements when dismiss callbacks race", () => {
+    const markSeen = vi.fn();
+    const { result } = renderHook(() =>
+      useGetStartedOverview({ onboardingSeen: false }, markSeen),
+    );
+
+    act(() => {
+      result.current.dismiss();
+      result.current.dismiss();
+    });
+
+    expect(markSeen).toHaveBeenCalledTimes(1);
+  });
+
   it("never auto-opens when the user has already seen it", () => {
     const markSeen = vi.fn();
     const { result } = renderHook(() =>
       useGetStartedOverview({ onboardingSeen: true }, markSeen),
     );
     expect(result.current.open).toBe(false);
+  });
+
+  it("acknowledges the user whose unseen state opened the dialog after a same-user refresh", () => {
+    const markSeen = vi.fn();
+    const { result, rerender } = renderHook(
+      ({ me }) => useGetStartedOverview(me, markSeen),
+      {
+        initialProps: {
+          me: { userId: "staff-one", onboardingSeen: false },
+        },
+      },
+    );
+
+    expect(result.current.open).toBe(true);
+    rerender({ me: { userId: "staff-one", onboardingSeen: true } });
+    act(() => result.current.dismiss());
+
+    expect(markSeen).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not carry a pending acknowledgement to a different user", () => {
+    const markSeen = vi.fn();
+    const { result, rerender } = renderHook(
+      ({ me }) => useGetStartedOverview(me, markSeen),
+      {
+        initialProps: {
+          me: { userId: "staff-one", onboardingSeen: false },
+        },
+      },
+    );
+
+    expect(result.current.open).toBe(true);
+    rerender({ me: { userId: "staff-two", onboardingSeen: true } });
+    expect(result.current.open).toBe(false);
+    act(() => result.current.dismiss());
+
+    expect(markSeen).not.toHaveBeenCalled();
+  });
+
+  it("applies the unseen state when a different user becomes active", () => {
+    const markSeen = vi.fn();
+    const { result, rerender } = renderHook(
+      ({ me }) => useGetStartedOverview(me, markSeen),
+      {
+        initialProps: {
+          me: { userId: "staff-one", onboardingSeen: true },
+        },
+      },
+    );
+
+    expect(result.current.open).toBe(false);
+    rerender({ me: { userId: "staff-two", onboardingSeen: false } });
+
+    expect(result.current.open).toBe(true);
   });
 });

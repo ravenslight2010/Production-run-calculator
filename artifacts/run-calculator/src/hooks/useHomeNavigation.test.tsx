@@ -32,6 +32,27 @@ describe("useHomeNavigation performance diagnostics", () => {
     expect(localStorage.getItem(ACTIVE_TAB_STORAGE_KEY)).toBe("quality");
   });
 
+  it("resets only the page scroll when the selected tab changes", () => {
+    const { result } = renderHook(() => useHomeNavigation());
+
+    document.documentElement.scrollTop = 480;
+    act(() => {
+      result.current.setActiveTab("run");
+    });
+    expect(document.documentElement.scrollTop).toBe(480);
+
+    act(() => {
+      result.current.setActiveTab("quality");
+    });
+    expect(document.documentElement.scrollTop).toBe(0);
+
+    document.documentElement.scrollTop = 320;
+    act(() => {
+      result.current.setActiveTab("quality");
+    });
+    expect(document.documentElement.scrollTop).toBe(320);
+  });
+
   it.each([
     ["#incidents", "incidents"],
     ["#incidents/incident-123", "incidents"],

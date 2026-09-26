@@ -26,3 +26,15 @@ For fresh isolated databases, seed an explicit complete empty today document bef
 **Why:** The server treats a partial payload without an existing canonical row as a fallback, not as the initial daily document, so Start Run state can remain local-only and browser evidence fails before the recovery journey.
 
 **How to apply:** Use the authorized fixture API to create the empty complete row, then let the real Home bootstrap and write path run normally; do not bypass the sync protocol with direct browser storage.
+
+For sequential same-date station scenarios, remove the disposable today snapshot and close the prior page/SSE stream before reseeding the next scenario.
+
+**Why:** Today-state sync is additive, and an open live stream can reapply the previous scenario after the database row is cleared, leaving stale runs selected during the next reload.
+
+**How to apply:** Clear browser storage, navigate away from the app, remove the isolated date row, seed the replacement document, then navigate back to the app.
+
+For cold-reload journey tests, finish and canonically confirm lifecycle setup before reloading, then make the tested destination the first post-reload navigation.
+
+**Why:** Starting another run after reload exercises a separate hydration and adoption path, which can obscure whether the cold destination itself restored the expected state.
+
+**How to apply:** Complete the relevant lifecycle transitions before reload, wait for canonical start/end fields for each target run, reload once, then navigate directly to the surface under test.

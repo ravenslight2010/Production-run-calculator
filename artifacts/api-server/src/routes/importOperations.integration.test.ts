@@ -7,6 +7,7 @@ import express from "express";
 import pg from "pg";
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { recordSession } from "../lib/authSessions";
 import { signToken } from "../lib/auth";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
@@ -20,6 +21,7 @@ let baseUrl: string;
 let tables: typeof import("@workspace/db");
 let route: typeof import("./importOperations");
 let seedRoles: () => Promise<void>;
+const sessionTokens = new Map<string, string>();
 
 beforeAll(async () => {
   originalUrl = process.env.DATABASE_URL;
@@ -59,7 +61,7 @@ afterAll(async () => {
 }, 120_000);
 
 beforeEach(async () => {
-  await db.execute(sql`TRUNCATE ${tables.importOperationsTable}, ${tables.importHistoryTable}, ${tables.mixesTable}, ${tables.specImportAliasesTable}, ${tables.userRolesTable}, ${tables.usersTable} RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE ${tables.importOperationsTable}, ${tables.importHistoryTable}, ${tables.mixesTable}, ${tables.specImportAliasesTable}, ${tables.authSessionsTable}, ${tables.userRolesTable}, ${tables.usersTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
   await db.insert(tables.usersTable).values([
     { id: "inventory", username: "inventory", passwordHash: "x" },
@@ -71,10 +73,18 @@ beforeEach(async () => {
     { userId: "profiles", role: "operator" },
     { userId: "sandbox", role: "manager" },
   ]);
+  sessionTokens.clear();
+  for (const user of ["inventory", "profiles", "sandbox"]) {
+    const token = signToken(user);
+    sessionTokens.set(user, token);
+    await recordSession(user, token);
+  }
 });
 
 function headers(user = "inventory") {
-  return { "content-type": "application/json", authorization: `Bearer ${signToken(user)}` };
+  const token = sessionTokens.get(user);
+  if (!token) throw new Error(`No test session established for ${user}`);
+  return { "content-type": "application/json", authorization: `Bearer ${token}` };
 }
 function change(id = "mix-atomic") {
   return {
@@ -124,7 +134,7 @@ describe("atomic import operations", () => {
     expect(firstUndo.status).toBe(200);
     expect(await db.select().from(tables.mixesTable)).toHaveLength(0);
 
-    const second = await (await apply("undo-refuse-000001", change("affected"))).json() as any;
+    const second = await (await apply("undo-refuse-000001", change("unrelated-target"))).json() as any;
     await db.insert(tables.mixesTable).values({ id: "unrelated", scope: "live", name: "Unrelated", brand: "", flavor: "", batchSize: 1, daysEarly: 0, notes: "", amountAlreadyMade: 0, components: [], isPrep: false, enabled: true });
     expect((await fetch(`${baseUrl}/api/import-operations/undo-refuse-000001/undo`, { method: "POST", headers: headers(), body: JSON.stringify({ expectedResultHash: second.operation.resultHash }) })).status).toBe(200);
     expect(await db.select().from(tables.mixesTable).where(eq(tables.mixesTable.id, "unrelated"))).toHaveLength(1);

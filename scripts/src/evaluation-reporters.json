@@ -16,8 +16,16 @@
       "reason": "Deterministic startup-health evidence; it does not evaluate or retain AI/provider results."
     },
     {
+      "source": "maintain-audit-log.mts",
+      "reason": "Operational audit-log redaction/deletion CLI; it does not evaluate, retain, or emit provider/evaluation artifacts."
+    },
+    {
       "source": "compare-ai-evaluations.mts",
       "reason": "Deterministic comparison utility; it reads existing manifests and does not create or retain provider evaluation results."
+    },
+    {
+      "source": "maintain-audit-log.mts",
+      "reason": "Privileged audit-log maintenance applies an approved database change and does not evaluate or retain AI/provider results."
     }
   ]
 }

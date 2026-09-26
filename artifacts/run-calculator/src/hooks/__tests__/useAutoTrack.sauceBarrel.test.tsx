@@ -77,6 +77,29 @@ describe("useAutoTrack sauce barrel coordination", () => {
     expect(claim.mock.calls[1][0].eventId).toBe(claim.mock.calls[0][0].eventId);
   });
 
+  it("reports Sauce failures and successful recovery using the same automatic barrel identity", async () => {
+    const claim = vi.fn()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({
+        outcome: "accepted",
+        state: { generation: "sauce-auto:started", sequence: 1, nextDueAt: 20 },
+        values: {},
+      });
+    const onFailure = vi.fn();
+    const onSuccess = vi.fn();
+    const { rerender } = renderHook((p) => useAutoTrack(p), {
+      initialProps: props(10, claim, {}, { onAutomaticClaimFailure: onFailure, onAutomaticClaimSuccess: onSuccess }),
+    });
+
+    await waitFor(() => expect(onFailure).toHaveBeenCalledTimes(1));
+    rerender(props(11, claim, {}, { onAutomaticClaimFailure: onFailure, onAutomaticClaimSuccess: onSuccess }));
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
+
+    expect(onFailure.mock.calls[0][0].channel).toBe("sauce-barrel");
+    expect(onSuccess.mock.calls[0][0].channel).toBe("sauce-barrel");
+    expect(onSuccess.mock.calls[0][0].eventId).toBe(onFailure.mock.calls[0][0].eventId);
+  });
+
   it.each([
     ["paused", { runStatus: "paused" }],
     ["completed", { calc: { ...props(10, null).calc, pressDone: true } }],

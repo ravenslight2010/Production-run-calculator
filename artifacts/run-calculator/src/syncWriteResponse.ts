@@ -62,24 +62,34 @@ interface ConsumeSyncWriteResponseOptions<T> {
 export async function consumeSyncWriteResponse<T>(
   response: Response,
   options: ConsumeSyncWriteResponseOptions<T> = {},
-): Promise<{ body: SyncWriteResponseBody<T> | null; stale: boolean }> {
+): Promise<{ body: SyncWriteResponseBody<T> | null; stale: boolean; malformed: boolean }> {
   const parsed = await response.clone().json().catch(() => null);
   const body =
     parsed && typeof parsed === "object" && !Array.isArray(parsed)
       ? parsed as SyncWriteResponseBody<T>
       : null;
   if (options.shouldConsume && !options.shouldConsume()) {
-    return { body, stale: false };
+    return { body, stale: false, malformed: false };
   }
+  const hasData = body !== null && Object.prototype.hasOwnProperty.call(body, "data");
+  const validEnvelope = body !== null && (
+    body.stale === true
+      || isUnchangedSyncResponse(body)
+      || hasData
+  );
+  const malformed = response.ok && !validEnvelope;
   const stale = body?.stale === true;
 
-  if (stale) {
+  if (malformed) {
+    // A successful transport with no sync envelope is not an acknowledgment.
+    // Callers keep their retry/fence state until a canonical response arrives.
+  } else if (stale) {
     await options.onStale?.(body);
-  } else if (response.ok && body?.data !== undefined) {
+  } else if (response.ok && body?.data !== undefined && body.data !== null) {
     await options.applyCanonical?.(body.data);
   }
 
-  return { body, stale };
+  return { body, stale, malformed };
 }
 
 /** Removes server-owned read models that are transported beside, but not hashed into, the canonical document. */

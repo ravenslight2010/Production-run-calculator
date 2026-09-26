@@ -53,7 +53,69 @@ describe("packaging manager", () => {
     expect(vibrate).not.toHaveBeenCalled();
     locked = false;
     adapter.completeSkid();
-    expect(applyProgress).toHaveBeenCalledWith(2, 0);
+    expect(applyProgress).toHaveBeenCalledWith(2, 0, 1, 2);
+  });
+  it("passes every rapid Packaging action its exact preceding counts", () => {
+    const transitions: number[][] = [];
+    const adapter = createPackagingControlAdapter({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 36,
+      casesPerSkid: 48,
+      applyProgress: (...counts) => transitions.push(counts),
+      reportCorrection: vi.fn(),
+    });
+
+    for (let i = 0; i < 12; i++) adapter.decrementCases();
+
+    expect(transitions).toEqual(
+      Array.from({ length: 12 }, (_, i) => [0, 35 - i, 0, 36 - i]),
+    );
+  });
+  it("keeps rapid corrections cumulative when the UI recreates its adapter", () => {
+    const transitions: number[][] = [];
+    let current = { skidsCompleted: 0, casesOnCurrentSkid: 36 };
+
+    for (let i = 0; i < 12; i++) {
+      const adapter = createPackagingControlAdapter({
+        skidsCompleted: 0,
+        casesOnCurrentSkid: 36,
+        casesPerSkid: 48,
+        getProgress: () => current,
+        applyProgress: (skidsCompleted, casesOnCurrentSkid, previousSkids, previousCases) => {
+          transitions.push([
+            skidsCompleted,
+            casesOnCurrentSkid,
+            previousSkids,
+            previousCases,
+          ]);
+          current = { skidsCompleted, casesOnCurrentSkid };
+        },
+        reportCorrection: vi.fn(),
+      });
+      adapter.decrementCases();
+    }
+
+    expect(current).toEqual({ skidsCompleted: 0, casesOnCurrentSkid: 24 });
+    expect(transitions).toEqual(
+      Array.from({ length: 12 }, (_, i) => [0, 35 - i, 0, 36 - i]),
+    );
+  });
+  it("uses the producer's before-snapshot for manual correction evidence", () => {
+    const values = {
+      current: { ...DEFAULT_VALUES, casesOnCurrentSkid: 36 },
+    };
+    const { manager, dependencies } = makeManager(values);
+
+    manager.persistManualProgress("current", 0, 24, undefined, {
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 25,
+    });
+
+    expect(dependencies.queueManualCorrection).toHaveBeenCalledWith(
+      "current",
+      { skidsCompleted: 0, casesOnCurrentSkid: 24 },
+      { skidsCompleted: 0, casesOnCurrentSkid: 25 },
+    );
   });
   it("runs guarded manual actions only after the peer lock releases", () => {
     let locked = true;
@@ -116,16 +178,27 @@ describe("packaging manager", () => {
         skidsCompleted: 2,
         casesOnCurrentSkid: 45,
       },
+      current: {
+        ...DEFAULT_VALUES,
+        casesNeeded: 400,
+        casesPerSkid: 100,
+        skidsCompleted: 7,
+        casesOnCurrentSkid: 12,
+      },
     };
     const { manager, saveRunValues } = makeManager(values);
     const entry = { run: run("prior", 900_000), values: values.prior };
 
-    manager.advanceDrainingRun(entry, 20);
+    manager.advanceDrainingRun(entry.run.id, entry.values, 20);
 
     expect(saveRunValues).toHaveBeenCalledWith(
       "prior",
       expect.objectContaining({ skidsCompleted: 2, casesOnCurrentSkid: 50 }),
     );
+    expect(values.current).toMatchObject({
+      skidsCompleted: 7,
+      casesOnCurrentSkid: 12,
+    });
   });
 
   it("does not persist an automatic write rejected by the progress register", () => {
@@ -137,6 +210,23 @@ describe("packaging manager", () => {
 
     expect(saveRunValues).not.toHaveBeenCalled();
     expect(dependencies.schedulePush).not.toHaveBeenCalled();
+  });
+
+  it("persists a draining run by ID without applying it to a newly selected form", () => {
+    const values = {
+      prior: { ...DEFAULT_VALUES, casesPerSkid: 100 },
+    };
+    const { manager, dependencies } = makeManager(values);
+
+    expect(manager.persistAutomaticProgress("prior", 2, 14)).toBe(false);
+    expect(dependencies.recordAutomaticProgress).toHaveBeenCalledWith({
+      runId: "prior",
+      skidsCompleted: 2,
+      casesOnCurrentSkid: 14,
+    });
+
+    dependencies.currentRunIdRef.current = "prior";
+    expect(manager.persistAutomaticProgress("prior", 2, 15)).toBe(true);
   });
 
   it("records manual correction ownership and shares the suppression deadline", () => {

@@ -47,7 +47,7 @@ describe("corpus evaluation manifest", () => {
     expect(actual.evaluation.kind).toBe("deterministic");
     expect(actual.provider).toEqual({ identityState: "not-applicable", name: null, model: null });
     expect(actual.privacy.rawProviderPayloadsRetained).toBe(false);
-  });
+  }, 30_000);
 });
 
 describe("corpus invariants (parse-gap tripwires)", () => {

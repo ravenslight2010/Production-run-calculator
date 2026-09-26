@@ -3,11 +3,17 @@ name: GitHub Git push authentication
 description: The distinction between the authorized GitHub API integration and authenticated Git protocol pushes from the workspace.
 ---
 
-The installed GitHub API connection can read and modify GitHub REST resources, but it does not make the local shell's HTTPS `git push` authenticated and cannot update a ref to a commit whose Git objects have not been uploaded. Workspace Git pushes need a secure `GIT_URL` secret containing the authenticated repository URL.
+The installed GitHub API connection can read and modify GitHub REST resources, but it does not make the local shell's HTTPS `git push` authenticated and cannot update a ref to a commit whose Git objects have not been uploaded. Workspace Git pushes need a secure push credential, supplied as an authenticated repository URL or assembled from a token only within the pushing process.
 
 **Why:** A REST ref update alone cannot transfer a local commit graph, and the shell's unauthenticated remote rejects password/token-less pushes.
 
 **How to apply:** Use the secure secret flow for `GIT_URL`; never print or request its value in chat. Prefer `--force-with-lease` with an explicitly verified expected remote SHA when replacing a diverged branch.
+
+An existing configured push URL can take precedence over a process-local push URL for the same remote, even when the latter appears in Git's config. Verify the effective push URL structurally without printing it; use a separate temporary remote if necessary, and remove it afterward. An API response that reports the account has push permission does not prove that a fine-grained token has repository Contents write permission for Git pushes.
+
+**Why:** A stale push URL masked a newly supplied valid token; once Git used that token, the server denied the push with 403 even though authenticated REST reads succeeded and the account reported push permission.
+
+**How to apply:** Distinguish credential selection errors from token-scope failures before asking for another secret. Check the effective remote and verify the exact remote tip after any successful push; do not infer success from an API permission field.
 
 Task-agent merge commits may be unsigned even after GitHub enables required signed
 commits. Configuring signing only affects future commits; delivery must re-sign

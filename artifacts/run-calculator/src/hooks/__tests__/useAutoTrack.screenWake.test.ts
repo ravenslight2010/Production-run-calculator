@@ -565,7 +565,11 @@ describe("useAutoTrack — post-screen-wake / long-timeout counter correctness",
       onPackagingProgressAutoAdvance,
     }));
 
-    expect(onPackagingProgressAutoAdvance).toHaveBeenCalled();
+    expect(onPackagingProgressAutoAdvance).toHaveBeenCalledWith(
+      "manual-deadline-race-6",
+      expect.any(Number),
+      expect.any(Number),
+    );
     expect(store.skidsCompleted * 10 + store.casesOnCurrentSkid).toBe(0);
   });
 
@@ -687,5 +691,99 @@ describe("useAutoTrack — post-screen-wake / long-timeout counter correctness",
       ));
     });
     expect(store.skidsCompleted * 10 + store.casesOnCurrentSkid).toBe(16);
+  });
+
+  it("9. persists an old drain tick by run ID without clobbering the newly selected run", () => {
+    const { form, store } = makeFakeForm({
+      skidsCompleted: 3,
+      casesOnCurrentSkid: 1,
+    });
+    const selectedRunIdRef = { current: "drain-run-9" };
+    const persisted: Record<string, number> = {};
+    const onPackagingProgressAutoAdvance = vi.fn((
+      runId: string,
+      skidsCompleted: number,
+      casesOnCurrentSkid: number,
+    ) => {
+      persisted[runId] = skidsCompleted * BASE_V.casesPerSkid + casesOnCurrentSkid;
+      // Model a foreground/manual selection landing between the old run's
+      // calculation and its shared-form write.
+      selectedRunIdRef.current = "selected-run-9";
+      store.skidsCompleted = 7;
+      store.casesOnCurrentSkid = 4;
+      return runId === selectedRunIdRef.current;
+    });
+
+    type Props = Parameters<typeof useAutoTrack>[0];
+    const props = (
+      nowMs: number,
+      elapsedSec: number,
+      overrides: Partial<Props> = {},
+    ): Props => ({
+      runId: "drain-run-9",
+      runStatus: "running",
+      nowTime: ms(nowMs),
+      elapsedBatchSec: elapsedSec,
+      calc: BASE_CALC,
+      v: { ...BASE_V, traysOnLine: store.traysOnLine, batchesReady: store.batchesReady },
+      form,
+      onPackagingProgressAutoAdvance,
+      ...overrides,
+    });
+
+    const { rerender } = renderHook(
+      (p: Props) => useAutoTrack(p),
+      { initialProps: props(T0, 780) },
+    );
+
+    const baselineAt = T0 + 500;
+    act(() => {
+      vi.setSystemTime(baselineAt);
+      rerender(props(baselineAt, 780));
+    });
+
+    const wakeAt = baselineAt + 20 * 60_000;
+    const elapsedAtWake = 780 + 20 * 60;
+    const foregroundBarrierRef = { current: true };
+    act(() => {
+      vi.setSystemTime(wakeAt);
+      rerender(props(wakeAt, elapsedAtWake, {
+        autoTrackBlocked: true,
+        autoTrackBlockedRef: foregroundBarrierRef,
+        autoTrackWakeRebaseReason: "manual-packaging-ownership",
+      }));
+    });
+
+    foregroundBarrierRef.current = false;
+    act(() => {
+      rerender(props(wakeAt, elapsedAtWake, {
+        autoTrackBlocked: false,
+        autoTrackBlockedRef: foregroundBarrierRef,
+        autoTrackWakeRebaseReason: "manual-packaging-ownership",
+        autoTrackWakeAcknowledgement: 1,
+      }));
+    });
+
+    const nextTick = wakeAt + CASE_PERIOD_MS + 1;
+    act(() => {
+      vi.setSystemTime(nextTick);
+      rerender(props(nextTick, elapsedAtWake + CASE_PERIOD_MS / 1000 + 1, {
+        autoTrackBlocked: false,
+        autoTrackBlockedRef: foregroundBarrierRef,
+        autoTrackWakeRebaseReason: "manual-packaging-ownership",
+        autoTrackWakeAcknowledgement: 1,
+      }));
+    });
+
+    expect(onPackagingProgressAutoAdvance).toHaveBeenCalledWith(
+      "drain-run-9",
+      expect.any(Number),
+      expect.any(Number),
+    );
+    expect(persisted["drain-run-9"]).toBeGreaterThan(0);
+    // The selected run's handoff value is still present; the old drain tick
+    // was persisted independently and rejected at the shared-form boundary.
+    expect(store.skidsCompleted * BASE_V.casesPerSkid + store.casesOnCurrentSkid).toBe(74);
+    expect(selectedRunIdRef.current).toBe("selected-run-9");
   });
 });

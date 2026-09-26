@@ -47,6 +47,24 @@ export function comparePackagingProgress(
   return 0;
 }
 
+/**
+ * Return the durable winner only when an inbound register is an equal-version
+ * echo for this run. Equal versions are intentionally not "accepted" by the
+ * LWW merge, but the active form may still have drifted from its durable copy.
+ */
+export function getEqualPackagingProgress(
+  local: Record<string, PackagingProgress>,
+  remote: Record<string, PackagingProgress> | undefined,
+  runId: string,
+): PackagingProgress | undefined {
+  const current = local[runId];
+  const candidate = normalizePackagingProgress(remote?.[runId]);
+  if (!current || !candidate || comparePackagingProgress(candidate, current) !== 0) {
+    return undefined;
+  }
+  return current;
+}
+
 export function loadPackagingProgress(): Record<string, PackagingProgress> {
   try {
     const raw = localStorage.getItem(PACKAGING_PROGRESS_KEY);
@@ -155,4 +173,18 @@ export function overlayPackagingProgress(
     skidsCompleted: progress.skidsCompleted,
     casesOnCurrentSkid: progress.casesOnCurrentSkid,
   };
+}
+
+/**
+ * Apply only the progress register owned by this run. Run values are stored
+ * independently from the register, so callers that hydrate a form after a
+ * reload must never look up progress from the currently selected run or from
+ * another run's snapshot.
+ */
+export function overlayPackagingProgressForRun(
+  runId: string,
+  values: FormValues,
+  progressByRun: Record<string, PackagingProgress> = loadPackagingProgress(),
+): FormValues {
+  return overlayPackagingProgress(values, progressByRun[runId]);
 }

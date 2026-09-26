@@ -79,12 +79,21 @@ export default function NamedRecipesManager({
   const label = kind === "dough" ? "Dough" : "Sauce";
   const queryKey = kind === "dough" ? "doughRecipes" : "sauceRecipes";
 
+  const validItems = useMemo(
+    () =>
+      items.flatMap((recipe) => {
+        const normalized = normalizeNamedRecipe(recipe);
+        return normalized ? [normalized] : [];
+      }),
+    [items],
+  );
+
   const filtered = useMemo(
     () =>
       sortNamedRecipesByName(
-        items.filter((r) => namedRecipeMatchesQuery(r, query)),
+        validItems.filter((r) => namedRecipeMatchesQuery(r, query)),
       ),
-    [items, query],
+    [validItems, query],
   );
 
   function toggleRecipe(id: string) {
@@ -159,7 +168,7 @@ export default function NamedRecipesManager({
           <p className="text-xs text-muted-foreground">
             Loading {label.toLowerCase()} recipes…
           </p>
-        ) : items.length === 0 ? (
+        ) : validItems.length === 0 ? (
           <p className="text-xs text-muted-foreground">
             No {label.toLowerCase()} recipes yet. Add one below.
           </p>
