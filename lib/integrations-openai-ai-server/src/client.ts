@@ -255,6 +255,11 @@ async function create(
   const models = modelChain(params.model);
   const { signal, dispose } = requestSignal(options);
   let lastError: unknown;
+  // The stream branch hands the signal off to the generator it returns, which
+  // disposes it only when iteration ends — disposing in the outer finally
+  // would strip the caller's abort listener and clear the timeout before the
+  // first chunk is ever pulled.
+  let signalHandedOff = false;
 
   try {
     for (const model of models) {
@@ -267,6 +272,7 @@ async function create(
             contents,
             config,
           }), options);
+          signalHandedOff = true;
           return (async function* () {
             try {
               for await (const chunk of stream) {
@@ -299,7 +305,7 @@ async function create(
     }
     throw lastError;
   } finally {
-    dispose();
+    if (!signalHandedOff) dispose();
   }
 }
 
