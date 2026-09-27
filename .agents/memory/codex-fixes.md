@@ -1542,3 +1542,84 @@ Next diagnostic should retain the browser-smoke per-test traces/`error-context.m
 single spec against a disposable local Postgres with the API's request log at debug level, to see
 whether the intent is never flushed, is flushed and 400'd, or is flushed and applied to a different
 scope than `readCanonicalRun` reads.
+
+## 2026-09-27 — Release check: root-caused the three WebKit/cross-device failures left after the harness fixes
+
+**Branch**: `codex/fix-import-model-fallback` (PR #82). Direct continuation of the two entries above.
+Once the WebKit gate could actually execute, its three cases and the two `cross-device-smoke` cases
+failed for real reasons rather than provisioning faults.
+
+**File(s)**: `artifacts/run-calculator/e2e/isolation.ts`,
+`artifacts/run-calculator/e2e/release-webkit-smoke.spec.ts`,
+`artifacts/run-calculator/e2e/cross-device-smoke.spec.ts`, `.github/workflows/release-check.yml`
+
+**1. A run seeded only into localStorage can never be started server-side -> 3 cases
+(`cross-device-smoke` startedAt, WebKit `resume-run`, and the WebKit sync-recovery timeout behind
+them).** `seedPendingRun` in both specs wrote the run straight into `localStorage["run-calc-day"]` and
+reloaded, so the run existed in the client day but had NEVER reached the server's row. That is not a
+state the product can reach: a real run is created in the UI, which pushes the day first.
+
+The consequence is a silent wedge. `applyOperationalIntent`
+(`artifacts/api-server/src/lib/operationalIntents.ts`) resolves its target with
+`runList.findIndex((r) => r?.id === intent.runId)` against the SERVER-stored day state, and when the
+index is `< 0` the outcome stays at its initialiser `"review-required"` with nothing applied. The
+client treats that as terminal AND blocking: `operationalIntentBlocksLifecycle` lists
+`review-required` among `pending|sending|blocked|permanently-rejected|conflicted|review-required`, so
+the very first lifecycle click blocks every later one for that run. The UI still looks correct — the
+optimistic local start flips the button to "pause run" — so the only visible symptom is that the
+canonical row never gains `startedAt` (cross-device `:172`) and `resume-run` never appears (WebKit
+`:143`). Note this also means the intent POST is NOT the 400 date guard firing: the client sends
+`?today=${item.date}` from the same `item.date` it puts in the intent, so `clientToday(req)` and
+`intent.date` agree by construction.
+
+Fix: seed the run into the canonical row as well, so both sides hold the same run — the state a real
+run creation produces. Added `seedCanonicalDailyRuns` to `e2e/isolation.ts` (merges into
+`dayState.runs`, de-duping by id, `ON CONFLICT (date, scope)` matching the
+`daily_sync_date_scope_idx` unique index) and called it from both `seedPendingRun` helpers before the
+reload. Scope is `'live'` because `currentScope()` is a single global scope, which is also why every
+spec's `beforeEach` deletes the whole row for today.
+
+**2. WebKit report preview: the panel is behind a closed `<details>`, and the API needs a complete
+canonical snapshot -> `:201`.** Two independent defects. First, `OperationalReportPanel` is rendered
+inside `<details data-testid="summary-report-details">` in `SummaryToolsContent.tsx`, and the test
+never opened it. A closed `<details>` gives its contents no layout box, so Playwright reported
+`Received: hidden` (with `13 x locator resolved to <div aria-busy="false" ...>`) rather than a
+missing element — the element was in the DOM the whole time. Second, the authoritative report derives
+from the canonical server row and answers `409 canonical-snapshot-invalid` when that row is missing
+or does not derive cleanly (`operationalReports.integration.test.ts` has a dedicated case for the
+missing row). The spec seeded nothing, so even with the disclosure open the preview could not have
+returned 200. This is exactly what `.agents/memory/webkit-operational-report-fixture.md` prescribes.
+
+Fix: open the disclosure and assert the `open` attribute, then seed AFTER hydration — added
+`seedCanonicalDailySnapshot` and `clearCompletedRunHistory` to `e2e/isolation.ts` and a
+`seedReportSnapshot` helper that clears same-day `completed_run_history` (the report's second
+canonical input) and writes a complete `dayState` + `runValues` + `packagingProgress` snapshot for a
+finished run, matching the shape the API integration test proves returns 200. Seeding after
+hydration matters: the signed-in client pushes its own day on mount and would otherwise replace the
+fixture.
+
+**3. Browser failure diagnostics were never uploaded -> both remaining failures undiagnosable.**
+`release-check.yml` uploaded only `release-evidence`, and `check:release-evidence` recursively
+rejects unexpected files, so Playwright's `retain-on-failure` traces under
+`artifacts/run-calculator/test-results` were generated and then thrown away. A browser gate failing
+on a bare timeout reported no trace, no screenshot and no `error-context.md`, which is why items 1
+and 2 could not be confirmed from CI alone. Fix: a separate `if: failure()` artifact upload for that
+directory, deliberately kept out of `release-evidence` so the evidence allowlist stays intact.
+
+**Still unresolved.** `release-webkit-smoke.spec.ts:154` (sync-pull recovery) times out at 75 s with
+no assertion error, and `accessibility-smoke.spec.ts:818` (`scheduleCalendar` expected hidden)
+FAILED in run 36292981047 after PASSING 220 s in run 36291877709. The a11y one is a suspected flake:
+`home.tsx` does call `setScheduleCalendarOpen(false)` in the calendar `onSelect`, so the assertion is
+correct and the 5 s default just lost the race on a loaded runner — but the repo has previously
+rejected a "guessed interval" settle delay, so it needs the trace before anyone bumps a timeout. The
+sync-recovery one has a plausible race (a backoff retry can consume the recovery pull between
+`unroute` and the `online` dispatch, leaving `recoveredPull` waiting on a request that never comes)
+but that is a hypothesis, not a finding. Both are blocked on the item 3 diagnostics upload.
+
+**Verification**: `check:e2e:syntax` passes (33 files); `check:workflows` (actionlint) clean over all
+8 files; the two changed specs plus `isolation.ts` typecheck clean under a standalone strict `tsc`
+(the e2e tree is outside the package `tsconfig.json` `include`, so CI does not cover it — this caught
+a real `QueryResult` destructuring error in the first draft of `seedCanonicalDailyRuns`). Prettier
+reports drift in all four files, but it reports the same drift at HEAD and no workflow runs it, so
+the files were left alone rather than reformatted. Not run locally: `E2E_TEST_DB=1` specs need
+Postgres, which this sandbox does not have. CI is the authority.

@@ -12,6 +12,9 @@ import {
   cleanupTestUsers,
   requireIsolatedTestDatabase,
   uniqueTestId,
+  seedCanonicalDailyRuns,
+  seedCanonicalDailySnapshot,
+  clearCompletedRunHistory,
   DEFAULT_MANAGER_CAPABILITIES,
 } from "./isolation";
 import { dismissOnboardingIfPresent, signUpAndHandleOnboarding } from "./onboarding";
@@ -61,8 +64,79 @@ async function promoteToManager(username: string): Promise<void> {
   }
 }
 
+/**
+ * Publish the seeded run into the canonical server-side day row.
+ *
+ * A run that exists only in localStorage is not a state the product can
+ * reach: applyOperationalIntent resolves its target out of the SERVER day
+ * state and answers "review-required" without applying anything when the run
+ * is missing, which the client then treats as permanently blocking for
+ * pause/resume. Seeding the row keeps both sides on the same run.
+ */
+async function seedCanonicalRun(runId: string): Promise<void> {
+  const db = new Client({
+    connectionString: requireIsolatedTestDatabase("seed WebKit canonical run"),
+  });
+  try {
+    await db.connect();
+    await seedCanonicalDailyRuns(db, today(), "live", [
+      { id: runId, brand: "WebKit", flavor: "Release Smoke" },
+    ]);
+  } finally {
+    await db.end().catch(() => {});
+  }
+}
+
+/**
+ * Seed the authoritative report fixture.
+ *
+ * The report derives its numbers from the canonical server-side day row and
+ * answers 409 canonical-snapshot-invalid when that row is missing or does not
+ * derive cleanly, so the fixture must be a COMPLETE snapshot (day state plus
+ * run values plus packaging progress), not a run appended to an empty day.
+ * completed_run_history is the second canonical input, so same-day completion
+ * rows are cleared to keep the day unambiguous.
+ */
+async function seedReportSnapshot(date: string): Promise<void> {
+  const db = new Client({
+    connectionString: requireIsolatedTestDatabase("seed WebKit report snapshot"),
+  });
+  try {
+    await db.connect();
+    const runId = uniqueTestId("webkit_report_run");
+    const endedAt = Date.now() - 60_000;
+    const startedAt = endedAt - 7_200_000;
+    await clearCompletedRunHistory(db, date, "live");
+    await seedCanonicalDailySnapshot(db, date, "live", {
+      dayState: {
+        date,
+        resetAt: 10,
+        runs: [{ id: runId, brand: "WebKit", flavor: "Report Smoke", startedAt, endedAt }],
+      },
+      runValues: {
+        [runId]: {
+          pizzasPerCase: 10,
+          casesPerSkid: 20,
+          casesNeeded: 100,
+          crustsPerCycle: 4,
+          cycleSpeed: 10,
+          speedAdjustment: 1,
+          freezerTime: 10,
+          tempFreezerTime: 30,
+          tempCrustsPerCycle: 5,
+          tempCycleSpeed: 12,
+        },
+      },
+      packagingProgress: { [runId]: { skidsCompleted: 2, casesOnCurrentSkid: 3 } },
+    });
+  } finally {
+    await db.end().catch(() => {});
+  }
+}
+
 async function seedPendingRun(page: Page): Promise<string> {
   const runId = uniqueTestId("webkit_run");
+  await seedCanonicalRun(runId);
   await page.evaluate((id) => {
     for (const key of Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))) {
       if (key?.startsWith("run-calc-run-")) localStorage.removeItem(key);
@@ -197,6 +271,19 @@ test("manager can preview an authoritative operational report", async ({ page })
 
   await page.getByTitle("More").click();
   await page.getByRole("menuitem", { name: "Summary", exact: true }).click();
+
+  // The panel sits behind the "Reports and trends" <details> disclosure. A
+  // closed <details> gives its contents no layout box, so Playwright reports
+  // the panel as hidden rather than missing even though it is in the DOM.
+  const details = page.getByTestId("summary-report-details");
+  await details.locator("summary").click();
+  await expect(details).toHaveAttribute("open", "");
+
+  // Seed AFTER hydration: the signed-in client pushes its own day once it
+  // mounts, and that write would otherwise replace the authoritative fixture
+  // the preview is about to read.
+  await seedReportSnapshot(today());
+
   const report = page.getByTestId("operational-report");
   await expect(report).toBeVisible();
 

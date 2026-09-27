@@ -9,7 +9,11 @@
 
 import { expect, test, type Page } from "@playwright/test";
 import { Client } from "pg";
-import { cleanupTestUsers, requireIsolatedTestDatabase } from "./isolation";
+import {
+  cleanupTestUsers,
+  requireIsolatedTestDatabase,
+  seedCanonicalDailyRuns,
+} from "./isolation";
 import {
   dismissOnboardingIfPresent,
   signUpAndHandleOnboarding,
@@ -57,15 +61,39 @@ async function dismissOnboarding(page: Page): Promise<void> {
   await dismissOnboardingIfPresent(page);
 }
 
+/**
+ * Publish the seeded run into the canonical server-side day row.
+ *
+ * Seeding localStorage alone builds a state the product cannot reach:
+ * applyOperationalIntent resolves its target run out of the SERVER day state
+ * and returns "review-required" without applying anything when the run is
+ * absent, so the run never gains a canonical startedAt even though the UI
+ * shows it running. Seeding the row keeps both sides on the same run.
+ */
+async function seedCanonicalRun(runId: string): Promise<void> {
+  const db = new Client({
+    connectionString: requireIsolatedTestDatabase("seed cross-device canonical run"),
+  });
+  try {
+    await db.connect();
+    await seedCanonicalDailyRuns(db, new Date().toISOString().slice(0, 10), "live", [
+      { id: runId, brand: "Smoke", flavor: "Lifecycle" },
+    ]);
+  } finally {
+    await db.end().catch(() => {});
+  }
+}
+
 async function seedPendingRun(page: Page): Promise<void> {
-  await page.evaluate(() => {
+  const runId = `smoke-run-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  await seedCanonicalRun(runId);
+  await page.evaluate((id) => {
     const dayKey = "run-calc-day";
     const day = JSON.parse(localStorage.getItem(dayKey) ?? "{}") as {
       date?: string;
       runs?: Array<Record<string, unknown>>;
       currentIndex?: number;
     };
-    const id = `smoke-run-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const today = new Date().toISOString().slice(0, 10);
     localStorage.setItem(
       dayKey,
@@ -76,7 +104,7 @@ async function seedPendingRun(page: Page): Promise<void> {
         currentIndex: 0,
       }),
     );
-  });
+  }, runId);
   // Home reads the day state during mount, so reload after seeding rather than
   // trying to mutate React state from the fixture.
   await page.reload({ waitUntil: "domcontentloaded" });

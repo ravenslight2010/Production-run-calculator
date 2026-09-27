@@ -225,6 +225,92 @@ export async function cleanupDailySync(
   );
 }
 
+/**
+ * Seed runs into the CANONICAL server-side day row for lifecycle smoke specs.
+ *
+ * A spec that seeds a run only into localStorage builds a state the product can
+ * never reach. `applyOperationalIntent` resolves its target run out of the
+ * SERVER stored day state, and when the run is absent it returns
+ * `review-required` without applying anything. The client then treats that as
+ * terminal-and-blocking: `operationalIntentBlocksLifecycle` lists
+ * `review-required` among the states that block pause/resume for the run, so
+ * the first lifecycle click wedges every later one and the run never starts on
+ * the server even though the UI looks correct.
+ *
+ * Seeding both sides keeps the fixture honest: the run exists in the client day
+ * and in the row the server reads, which is the state a real run creation
+ * produces. Existing runs and sibling payload keys are preserved so this can
+ * layer onto a row another helper already wrote.
+ */
+export async function seedCanonicalDailyRuns(
+  db: Client,
+  date: string,
+  scope: string,
+  runs: readonly Record<string, unknown>[],
+): Promise<void> {
+  if (runs.length === 0) return;
+  const existing = await db.query<{ data?: Record<string, unknown> }>(
+    "SELECT data FROM daily_sync WHERE date = $1 AND scope = $2",
+    [date, scope],
+  );
+  const previous = (existing.rows[0]?.data ?? {}) as Record<string, unknown>;
+  const dayState = (previous.dayState ?? {}) as Record<string, unknown>;
+  const previousRuns = Array.isArray(dayState.runs) ? dayState.runs : [];
+  const merged = [...previousRuns, ...runs].filter(
+    (run, index, all) => all.findIndex((candidate) => (candidate as { id?: string }).id === (run as { id?: string }).id) === index,
+  );
+  // The SQL text is constant and pg sends the payload separately as bind $3.
+  // nosemgrep: javascript.express.db.pg-express.pg-express
+  await db.query(
+    `INSERT INTO daily_sync (date, scope, data)
+     VALUES ($1, $2, $3::jsonb)
+     ON CONFLICT (date, scope) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()`,
+    [date, scope, JSON.stringify({ ...previous, dayState: { ...dayState, runs: merged } })],
+  );
+}
+
+/**
+ * Replace the canonical server-side day row with an explicit snapshot.
+ *
+ * The authoritative operational report refuses to label a day it cannot derive
+ * from the SERVER row: a missing row, or one whose runs do not derive cleanly,
+ * answers 409 canonical-snapshot-invalid. Use this when a spec needs a complete,
+ * known-good snapshot rather than a single run appended to whatever is there.
+ */
+export async function seedCanonicalDailySnapshot(
+  db: Client,
+  date: string,
+  scope: string,
+  data: Record<string, unknown>,
+): Promise<void> {
+  // The SQL text is constant and pg sends the payload separately as bind $3.
+  // nosemgrep: javascript.express.db.pg-express.pg-express
+  await db.query(
+    `INSERT INTO daily_sync (date, scope, data)
+     VALUES ($1, $2, $3::jsonb)
+     ON CONFLICT (date, scope) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()`,
+    [date, scope, JSON.stringify(data)],
+  );
+}
+
+/**
+ * Remove same-day completed-run history so it cannot contradict a fixture.
+ *
+ * completed_run_history is the second canonical input to an authoritative
+ * report, so a leftover row from an earlier case can make a freshly seeded
+ * snapshot ambiguous.
+ */
+export async function clearCompletedRunHistory(
+  db: Client,
+  date: string,
+  scope: string,
+): Promise<void> {
+  await db.query(
+    "DELETE FROM completed_run_history WHERE date = $1 AND scope = $2",
+    [date, scope],
+  );
+}
+
 export async function cleanupCheeseRecipes(
   db: Client,
   ids: readonly string[],

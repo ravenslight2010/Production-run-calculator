@@ -123,6 +123,20 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      # Playwright keeps a trace per failed case (retain-on-failure), but the
+      # evidence allowlist deliberately rejects unexpected files, so the
+      # diagnostics live in their own artifact rather than polluting
+      # release-evidence. Without these, a browser gate that fails on a
+      # timeout reports no trace, no snapshot and no error context.
+      - name: Upload browser failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: browser-failure-diagnostics-${{ github.run_id }}
+          path: artifacts/run-calculator/test-results
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Summarize stopped standard release check
         if: always()
         env:
