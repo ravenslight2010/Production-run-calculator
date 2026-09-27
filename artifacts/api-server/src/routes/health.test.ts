@@ -42,6 +42,8 @@ vi.mock("../lib/logger", () => ({
 let server: Server;
 let baseUrl: string;
 let previousOpenAiKey: string | undefined;
+let previousGeminiKey: string | undefined;
+let previousGoogleKey: string | undefined;
 
 beforeAll(async () => {
   const routerModule = await import("./health");
@@ -56,10 +58,20 @@ beforeAll(async () => {
 afterAll(async () => {
   if (server)
     await new Promise<void>((resolve) => server.close(() => resolve()));
+  if (previousGeminiKey === undefined) {
+    delete process.env.AI_INTEGRATIONS_GEMINI_API_KEY;
+  } else {
+    process.env.AI_INTEGRATIONS_GEMINI_API_KEY = previousGeminiKey;
+  }
   if (previousOpenAiKey === undefined) {
     delete process.env.OPENAI_API_KEY;
   } else {
     process.env.OPENAI_API_KEY = previousOpenAiKey;
+  }
+  if (previousGoogleKey === undefined) {
+    delete process.env.GOOGLE_API_KEY;
+  } else {
+    process.env.GOOGLE_API_KEY = previousGoogleKey;
   }
 });
 
@@ -69,8 +81,12 @@ beforeEach(async () => {
   resetStartupHealthForTests();
   mocks.execute.mockClear();
   mocks.info.mockClear();
+  previousGeminiKey = process.env.AI_INTEGRATIONS_GEMINI_API_KEY;
+  delete process.env.AI_INTEGRATIONS_GEMINI_API_KEY;
   previousOpenAiKey = process.env.OPENAI_API_KEY;
   process.env.OPENAI_API_KEY = "configured-for-test";
+  previousGoogleKey = process.env.GOOGLE_API_KEY;
+  delete process.env.GOOGLE_API_KEY;
 });
 
 describe("GET /healthz cache maintenance diagnostics", () => {
@@ -143,6 +159,36 @@ describe("GET /healthz background operation diagnostics", () => {
     expect(response.status).toBe(200);
     expect(body.checks.backgroundWorkers).toBe("ok");
     vi.useRealTimers();
+  });
+});
+
+describe("readiness AI provider dependency", () => {
+  it("accepts GOOGLE_API_KEY as a configured provider", async () => {
+    delete process.env.AI_INTEGRATIONS_GEMINI_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+    process.env.GOOGLE_API_KEY = "direct-gemini-key";
+
+    const response = await fetch(`${baseUrl}/readyz`);
+    const body = (await response.json()) as {
+      checks: Record<string, string>;
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.checks.dependencies).toBe("ok");
+  });
+
+  it("flags a missing AI provider as degraded", async () => {
+    delete process.env.AI_INTEGRATIONS_GEMINI_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.GOOGLE_API_KEY;
+
+    const response = await fetch(`${baseUrl}/readyz`);
+    const body = (await response.json()) as {
+      checks: Record<string, string>;
+    };
+
+    expect(response.status).toBe(503);
+    expect(body.checks.dependencies).toBe("error");
   });
 });
 
