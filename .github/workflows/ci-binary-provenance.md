@@ -34,6 +34,12 @@ registry tag cannot change the runner environment between workflow runs:
 | ----- | --------------------- |
 | `postgres:16` | `sha256:f1c3376c26f2609ab9f29f71f824103fe2fcd8ee0346485cb6122a4f93df6f94` |
 | `postgres:16-alpine` | `sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685` |
+| `ollama/ollama` (0.34.4) | `sha256:8262851b2846b87c649eddf3e76beb270c52f4d1bc94559f47efde16b0841551` |
+
+The `local-ai-smoke` workflow runs the Ollama model server from the
+digest-pinned `ollama/ollama` image above and pulls the model *inside* that
+container. It intentionally performs no `curl`/`tar` binary or archive download,
+so it does not require a GitHub artifact-attestation gate.
 
 ## Audit scope
 

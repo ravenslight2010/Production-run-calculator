@@ -1,0 +1,75 @@
+# ---------------------------------------------------------------------------
+# Optional overlay: run a self-hosted OpenAI-compatible model server (Ollama)
+# alongside the stack, so the API performs inference locally with NO external
+# API key and NO per-token billing.
+#
+# Usage (recommended):
+#   docker compose -f docker-compose.yml -f docker-compose.local-ai.yml up -d
+#
+# This overlay:
+#   1. Starts an Ollama server and pulls the configured models once (the
+#      `ollama-pull` one-shot service), then
+#   2. Points the API at Ollama's OpenAI-compatible endpoint
+#      (http://ollama:11434/v1) and waits for the models to finish pulling.
+#
+# The base `docker compose up` is completely unaffected: without this overlay
+# the API keeps using Gemini exactly as before.
+#
+# Hardware: the default models are Qwen3 14B (full tier) and Qwen3 4B (cheap
+# tier). The 14B model needs roughly 10 GB of RAM/VRAM; override
+# LOCAL_MODEL_FULL / LOCAL_MODEL_CHEAP (e.g. to qwen3:4b) on smaller hosts.
+# ---------------------------------------------------------------------------
+
+services:
+  ollama:
+    # Pinned to a stable release. Bump deliberately; `latest` is avoided so
+    # deployments are reproducible.
+    image: ollama/ollama:0.34.4
+    restart: unless-stopped
+    volumes:
+      - ollama-models:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 10s
+
+  # One-shot: pulls the configured models into the shared volume, then exits.
+  # `api` waits for this to complete so the first request never races a cold
+  # model download. Re-running `up` re-checks the pull (a no-op once cached).
+  ollama-pull:
+    image: ollama/ollama:0.34.4
+    restart: "no"
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        ollama pull "${LOCAL_MODEL_FULL:-qwen3:14b}" &&
+        ollama pull "${LOCAL_MODEL_CHEAP:-qwen3:4b}"
+
+  api:
+    environment:
+      # Point the adapter at the local server. Overridable from the shell or
+      # .env; defaults to the Ollama service defined above.
+      LOCAL_AI_BASE_URL: ${LOCAL_AI_BASE_URL:-http://ollama:11434/v1}
+      # Ollama ignores the key, but the OpenAI SDK requires a non-empty value.
+      LOCAL_AI_API_KEY: ${LOCAL_AI_API_KEY:-ollama}
+      LOCAL_MODEL_FULL: ${LOCAL_MODEL_FULL:-qwen3:14b}
+      LOCAL_MODEL_CHEAP: ${LOCAL_MODEL_CHEAP:-qwen3:4b}
+      # Opt in to retrying Gemini only on transport-level local failures.
+      LOCAL_AI_FALLBACK_TO_GEMINI: ${LOCAL_AI_FALLBACK_TO_GEMINI:-false}
+      # Fail readiness when the local model host is unreachable.
+      LOCAL_AI_STRICT_READINESS: ${LOCAL_AI_STRICT_READINESS:-false}
+    depends_on:
+      ollama:
+        condition: service_healthy
+      ollama-pull:
+        condition: service_completed_successfully
+
+volumes:
+  ollama-models:

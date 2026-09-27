@@ -1,16 +1,35 @@
-// Gemini-backed adapter that preserves the OpenAI chat-completions surface the
-// rest of the server is written against. Works with either the Replit AI
-// Integrations proxy (AI_INTEGRATIONS_GEMINI_BASE_URL / API key) or a direct
-// Gemini API key (GOOGLE_API_KEY from aistudio.google.com) — the client picks
-// whichever is configured.
+// Local-first OpenAI-compatible AI adapter.
 //
-// Only the small slice of the OpenAI API the app actually uses is implemented:
+// Preserves the exact surface the rest of the server is written against:
+//
 //   openai.chat.completions.create({ model, messages, response_format,
 //                                    max_completion_tokens, stream? })
-// returning either { choices: [{ message: { content } }] } (non-stream) or an
-// async iterable of { choices: [{ delta: { content } }] } (stream). Vision is
-// supported via `image_url` data-URI parts. Everything else in the app (routes,
-// prompts, parsing) stays byte-for-byte unchanged.
+//   → { choices: [{ message: { content } }] }                (non-stream)
+//   → async iterable of { choices: [{ delta: { content } }] } (stream)
+//
+// Provider selection (all lazy — importing this module never throws):
+//   1. LOCAL_AI_BASE_URL set → self-hosted OpenAI-compatible server
+//      (Ollama / llama.cpp). apiKey is a placeholder; most local servers
+//      ignore it, but LOCAL_AI_API_KEY can satisfy a keyed reverse proxy.
+//   2. Otherwise → Gemini (Replit AI Integrations proxy or direct
+//      GOOGLE_API_KEY), fully preserved — including the resilience layer
+//      (per-call timeout, cancellation, bounded retry, circuit breaker and
+//      bounded telemetry) that the server relies on.
+//
+// Per-call fallback: when LOCAL_AI is configured AND
+// LOCAL_AI_FALLBACK_TO_GEMINI=true, a *transport-level* local failure
+// (connection refused, DNS, timeout, 5xx) retries once against Gemini.
+// Validation errors (4xx, malformed output) and caller cancellation never
+// fall back — retrying a deterministic failure against a different model
+// just doubles the noise.
+//
+// Test contract (DO NOT BREAK): every vi.mock factory for this module must
+// keep working. Exports are { openai, isGeminiProviderConfigured,
+// GeminiProviderUnavailableError, resetGeminiResilienceForTests,
+// setGeminiMetricsObserver, type GeminiRequestMetrics, type
+// GeminiRequestOutcome, type GeminiProviderEnvironment } plus the chat types
+// declared below.
+import OpenAI from "openai";
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import type {
   Content,
@@ -18,10 +37,16 @@ import type {
   GenerateContentResponse,
   Part,
 } from "@google/genai";
+import type { Stream } from "openai/streaming";
+import type {
+  ChatCompletion,
+  ChatCompletionChunk,
+  ChatCompletionMessageParam,
+} from "openai/resources/chat/completions";
 
 type TextPart = { type: "text"; text: string };
 type ImagePart = { type: "image_url"; image_url: { url: string } };
-type ChatContent = string | Array<TextPart | ImagePart> | null;
+export type ChatContent = string | Array<TextPart | ImagePart> | null;
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
@@ -41,14 +66,18 @@ interface CreateParamsStream extends CreateParamsBase {
   stream: true;
 }
 
-interface ChatResponse {
+export interface ChatResponse {
   choices: Array<{ message: { content: string | null } }>;
 }
-interface ChatChunk {
+export interface ChatChunk {
   choices: Array<{ delta: { content: string | null } }>;
 }
 
-let _client: GoogleGenAI | null = null;
+export type CreateRequestOptions = { signal?: AbortSignal; timeoutMs?: number };
+
+// ---------------------------------------------------------------------------
+// Resilience primitives (shared by the Gemini path)
+// ---------------------------------------------------------------------------
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 120_000;
@@ -125,6 +154,112 @@ export function isGeminiProviderConfigured(
     env.AI_INTEGRATIONS_GEMINI_API_KEY || env.GOOGLE_API_KEY,
   );
 }
+
+// ---------------------------------------------------------------------------
+// Local (OpenAI-compatible) backend
+// ---------------------------------------------------------------------------
+
+let _local: OpenAI | null = null;
+
+function localClient(): OpenAI {
+  if (_local) return _local;
+  const baseURL = process.env.LOCAL_AI_BASE_URL;
+  if (!baseURL) throw new Error("LOCAL_AI_BASE_URL is not set");
+  _local = new OpenAI({
+    baseURL,
+    apiKey: process.env.LOCAL_AI_API_KEY ?? "local",
+    // Local servers hang onto connections; keep this generous and let the
+    // caller's timeoutMs govern the real budget.
+    timeout: 10 * 60 * 1000,
+  });
+  return _local;
+}
+
+function isTransportError(err: unknown): boolean {
+  // A caller cancellation must never trigger a cross-provider retry.
+  if (err instanceof GeminiRequestCancelledError) return false;
+  // 4xx (validation / auth / schema) are deterministic — never fall back.
+  if (err instanceof OpenAI.APIError) return err.status >= 500;
+  // Connection refused / DNS / socket hang-up surface as plain TypeError or
+  // fetch errors in the SDK, not APIError. Treat timeouts as transport too.
+  return err instanceof GeminiRequestTimeoutError
+    || err instanceof TypeError
+    || err instanceof Error;
+}
+
+// Native OpenAI message shape: system stays system, image_url data URIs pass
+// straight through — no Gemini-era translation on the local path.
+function toOpenAIMessages(messages: ChatMessage[]): ChatCompletionMessageParam[] {
+  return messages.map((msg) => {
+    const content =
+      typeof msg.content === "string" || msg.content === null
+        ? msg.content ?? ""
+        : msg.content.map((part) =>
+            part.type === "text"
+              ? { type: "text" as const, text: part.text }
+              : { type: "image_url" as const, image_url: { url: part.image_url.url } },
+          );
+    // The adapter's simplified ChatMessage maps 1:1 onto the OpenAI wire
+    // shape. system/assistant turns only ever carry text in practice, so the
+    // image_url branch is meaningful for user turns; the cast collapses the
+    // per-role content unions that TypeScript cannot narrow from a shared
+    // { role, content } object literal.
+    return { role: msg.role, content } as ChatCompletionMessageParam;
+  });
+}
+
+async function createLocal(
+  params: CreateParamsBase,
+  options?: CreateRequestOptions,
+): Promise<ChatResponse> {
+  const res: ChatCompletion = await localClient().chat.completions.create(
+    {
+      model: params.model,
+      messages: toOpenAIMessages(params.messages),
+      ...(params.response_format
+        ? { response_format: { type: params.response_format.type } }
+        : {}),
+      ...(typeof params.max_completion_tokens === "number"
+        ? { max_tokens: params.max_completion_tokens }
+        : {}),
+      stream: false,
+    },
+    { signal: options?.signal },
+  );
+  return { choices: [{ message: { content: res.choices[0]?.message.content ?? null } }] };
+}
+
+async function createLocalStream(
+  params: CreateParamsBase,
+  options?: CreateRequestOptions,
+): Promise<AsyncIterable<ChatChunk>> {
+  const stream: Stream<ChatCompletionChunk> =
+    await localClient().chat.completions.create(
+      {
+        model: params.model,
+        messages: toOpenAIMessages(params.messages),
+        ...(params.response_format
+          ? { response_format: { type: params.response_format.type } }
+          : {}),
+        ...(typeof params.max_completion_tokens === "number"
+          ? { max_tokens: params.max_completion_tokens }
+          : {}),
+        stream: true,
+      },
+      { signal: options?.signal },
+    );
+  return (async function* () {
+    for await (const chunk of stream) {
+      yield { choices: [{ delta: { content: chunk.choices[0]?.delta?.content ?? null } }] };
+    }
+  })();
+}
+
+// ---------------------------------------------------------------------------
+// Gemini backend (retained fallback path)
+// ---------------------------------------------------------------------------
+
+let _client: GoogleGenAI | null = null;
 
 // Lazily construct the client so merely importing this module (e.g. in a
 // non-AI context or a mocked test) never throws on a missing env var.
@@ -234,8 +369,6 @@ function buildConfig(
   }
   return config;
 }
-
-type CreateRequestOptions = { signal?: AbortSignal; timeoutMs?: number };
 
 function boundedInteger(value: unknown, maximum: number): number {
   return typeof value === "number" && Number.isFinite(value)
@@ -383,9 +516,65 @@ function observeMetrics(metrics: GeminiRequestMetrics): void {
   }
 }
 
-async function create(params: CreateParamsStream, options?: CreateRequestOptions): Promise<AsyncIterable<ChatChunk>>;
-async function create(params: CreateParamsSync, options?: CreateRequestOptions): Promise<ChatResponse>;
-async function create(
+// ---------------------------------------------------------------------------
+// Provider dispatch
+// ---------------------------------------------------------------------------
+
+const useLocal = () => Boolean(process.env.LOCAL_AI_BASE_URL);
+const fallbackToGemini = () => process.env.LOCAL_AI_FALLBACK_TO_GEMINI === "true";
+
+// Abort/timeout wrapper for the local path. Reuses the typed cancellation and
+// timeout errors so callers (and telemetry) see one consistent failure model.
+function abortable<T>(promise: Promise<T>, options?: CreateRequestOptions): Promise<T> {
+  if (!options?.signal && !options?.timeoutMs) return promise;
+  return new Promise<T>((resolve, reject) => {
+    const timer = options?.timeoutMs
+      ? setTimeout(() => reject(new GeminiRequestTimeoutError()), options.timeoutMs)
+      : undefined;
+    const abort = () => reject(new GeminiRequestCancelledError());
+    if (options?.signal?.aborted) {
+      if (timer) clearTimeout(timer);
+      abort();
+      return;
+    }
+    options?.signal?.addEventListener("abort", abort, { once: true });
+    promise.then(resolve, reject).finally(() => {
+      if (timer) clearTimeout(timer);
+      options?.signal?.removeEventListener("abort", abort);
+    });
+  });
+}
+
+async function createLocalWithMetrics(
+  params: CreateParamsBase & { stream?: boolean },
+  options?: CreateRequestOptions,
+): Promise<ChatResponse | AsyncIterable<ChatChunk>> {
+  const startedAt = performance.now();
+  let outcome: GeminiRequestOutcome = "provider_error";
+  try {
+    const result = params.stream
+      ? await abortable(createLocalStream(params, options), options)
+      : await abortable(createLocal(params, options), options);
+    outcome = "success";
+    return result;
+  } catch (error) {
+    outcome = error instanceof GeminiRequestCancelledError
+      ? "cancelled"
+      : error instanceof GeminiRequestTimeoutError
+        ? "timeout"
+        : "provider_error";
+    throw error;
+  } finally {
+    observeMetrics({
+      durationMs: boundedInteger(performance.now() - startedAt, MAX_TIMEOUT_MS * 2),
+      outcome,
+      retryCount: 0,
+      ...usageMetrics(),
+    });
+  }
+}
+
+async function createGeminiResilient(
   params: CreateParamsBase & { stream?: boolean },
   options?: CreateRequestOptions,
 ): Promise<ChatResponse | AsyncIterable<ChatChunk>> {
@@ -481,8 +670,27 @@ async function create(
   }
 }
 
+async function create(params: CreateParamsStream, options?: CreateRequestOptions): Promise<AsyncIterable<ChatChunk>>;
+async function create(params: CreateParamsSync, options?: CreateRequestOptions): Promise<ChatResponse>;
+async function create(
+  params: CreateParamsBase & { stream?: boolean },
+  options?: CreateRequestOptions,
+): Promise<ChatResponse | AsyncIterable<ChatChunk>> {
+  if (useLocal()) {
+    try {
+      return await createLocalWithMetrics(params, options);
+    } catch (err) {
+      // Only a transport-level failure, and only when explicitly opted in,
+      // falls through to the Gemini path. Everything else is rethrown as-is.
+      if (!fallbackToGemini() || !isTransportError(err)) throw err;
+    }
+  }
+  return createGeminiResilient(params, options);
+}
+
 export function resetGeminiResilienceForTests(): void {
   _client = null;
+  _local = null;
   metricsObserver = () => {};
   consecutiveTransientFailures = 0;
   circuitOpenedAt = 0;

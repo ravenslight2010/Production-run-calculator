@@ -56,6 +56,8 @@
     "check:retired-db-pool": "bash ./src/check-retired-db-pool.sh",
     "check:shell": "shellcheck ./gemini_failure_alert.sh ./post-merge.sh ./run-large-spec-harness.sh ./src/check-ci-binary-provenance.sh ./src/check-github-signed-commit-policy.sh ./src/check-github-signed-commit-policy.test.sh ./src/check-model-version-bump.sh ./src/check-model-version-bump.test.sh ./src/check-retired-db-pool.sh ./src/check-retired-db-pool.test.sh ./src/check-scripts-test-command.test.sh ./src/check-shell-inventory.sh ./src/check-shell-inventory.test.sh ./src/check-workflows.test.sh ./src/check-workflows.sh ./src/fetch-release-concurrency-history.sh ./src/fetch-typescript-7-history.sh ./src/fetch-typescript-7-history.test.sh ./src/push-main.sh ./src/push-main.test.sh ./src/release-stopped-summary.sh ./src/run-isolated-browser-suite.sh ./src/run-large-spec-harness.test.sh ./src/run-release-node.sh ./src/run-release-node.test.sh ./src/verify-container-promotion.sh ./src/verify-container-promotion.test.sh ./src/verify-published-container-provenance.sh ./src/verify-published-container-provenance.test.sh ./src/verify-typescript-7-resource-approval.sh ./src/webkit-runtime.test.sh",
     "check:workflows": "bash ./src/check-workflows.sh",
+    "check:local-ai": "tsx ./src/check-local-ai.mts",
+    "test:local-ai": "tsx --test ./src/check-local-ai.test.mts",
     "check:skill-catalog": "tsx ./src/skill-catalog.mts",
     "check:release-evidence": "tsx ./src/release-check.mts --verify-evidence",
     "check:typescript-7": "tsx ./src/compare-typescript-7.mts",
@@ -73,6 +75,7 @@
     "typecheck": "node ../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@workspace/integrations-openai-ai-server": "workspace:*",
     "@workspace/typescript-api-v6": "workspace:*",
     "@workspace/db": "workspace:*",
     "@workspace/spec-export": "workspace:*",
