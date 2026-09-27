@@ -1447,33 +1447,53 @@ reproduce CI's git behavior. CI remains the authority for these gates.
 placeholder-AI-key fix (item 1 there) let the three browser gates actually boot, which exposed two
 new failures that had been masked behind `Timed out waiting 120000ms from config.webServer`.
 
-**File(s)**: `artifacts/run-calculator/package.json` (`scripts.test:e2e:webkit`)
+**File(s)**: `artifacts/run-calculator/package.json` (`scripts.test:e2e:webkit`),
+`artifacts/run-calculator/playwright.webkit.config.ts`
 
-**1. WebKit downloaded its browser but never its OS libraries -> all 3 `browser WebKit smoke` cases.**
-Every Chromium-backed e2e script deliberately runs the SYSTEM chromium
-(`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=$(command -v chromium)`), which the runner image already ships
-with its dependencies. `test:e2e:webkit` was the only gate that installed its own browser, and it ran
-bare `playwright install webkit` — the browser bundle without the OS packages. All three cases in
-`e2e/release-webkit-smoke.spec.ts` therefore died in ~24 ms each on:
+**1. `browser WebKit smoke` had TWO independent provisioning faults; the first masked the
+second. Both are harness bugs, not application defects — no assertion in this gate had ever run.**
 
-    Error: browserType.launch: Host system is missing dependencies to run browsers.
-    Missing libraries: libgtk-4.so.1, libgraphene-1.0.so.0, libevent-2.1.so.7, libopus.so.0,
-    libgstallocators-1.0.so.0, ... libflite.so.1, libavif.so.16, libhyphen.so.0, libmanette-0.2.so.0,
-    libsecret-1.so.0, libx264.so, libwayland-server.so.0
+*(a) The browser was installed without its OS libraries.* Every Chromium-backed e2e script
+deliberately runs the SYSTEM chromium (`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=$(command -v
+chromium)`), which the runner image already ships with its dependencies. `test:e2e:webkit` was
+the only gate that installed its own browser, and it ran bare `playwright install webkit` — the
+bundle without the OS packages. All three cases died in ~24 ms each on `browserType.launch`:
+missing `libgtk-4.so.1`, `libgraphene-1.0.so.0`, `libevent-2.1.so.7`, `libopus.so.0`, the whole
+`libgst*` set, `libflite.so.1`, `libavif.so.16`, `libhyphen.so.0`, `libmanette-0.2.so.0`,
+`libsecret-1.so.0`, `libx264.so`, `libwayland-server.so.0`. `release-check.yml` installs no
+browser dependencies and `install-deps` appears nowhere in the repo, so this script was the only
+place that could supply them. Fix: `playwright install --with-deps webkit` — OS packages and
+browser in the one step the script already owned.
 
-This is a test-harness provisioning gap, not an application defect: the assertions never ran.
-`.github/workflows/release-check.yml` installs no browser dependencies at all, and `install-deps`
-appears nowhere in the repo, so the WebKit gate was the only place that could have supplied them.
-Fix: `playwright install --with-deps webkit`, which installs the OS packages and then the browser in
-the one step the script already owned. Keeping it in the script (rather than the workflow) preserves
-the existing convention that each browser gate is self-contained.
+*(b) The config pointed at a local server that nothing in its own run starts.*
+`RELEASE_BROWSER_ENV` sets `PLAYWRIGHT_BASE_URL: "http://127.0.0.1:18084"` for every browser
+gate, but `playwright.webkit.config.ts` was the only release config with NO `webServer` entry
+AND it computed `baseURL` inline instead of via `releaseBrowserBaseUrl()`. It therefore
+inherited the local base URL while starting no servers, so once the browser actually launched every
+case failed on `page.goto: Could not connect to 127.0.0.1: Connection refused`. Every other
+release config (`smoke`, `a11y`, `calendar`, `release-debug`, `wake-retry`, and the default
+`playwright.config.ts`) already used `webServer: releaseBrowserWebServers()`. Fix: adopt the
+same pair in `playwright.webkit.config.ts`. Verified WebKit was the ONLY release gate missing
+this — checked every config referenced by a release-check gate.
+
+**CI result for run 36291877709 (fix (a) only)**: confirms (a) and exposes (b). The WebKit gate went
+from dying in <1 s to running 36 s, i.e. the browser now launches; the three cases then failed on
+`Connection refused` instead. `browser accessibility` (220 s), `browser calendar` (7 s) and
+clean-start smoke all PASS. The `cross-device-smoke` failure below is unchanged — same assertion,
+same `Received: undefined`.
 
 **Verification**: `playwright install --with-deps --dry-run webkit` against the pinned Playwright
-(1.63.0) lists the 298 packages the fix would add, covering every family CI reported missing
+(1.63.0) lists the 298 packages the fix adds, covering every family CI reported missing
 (gstreamer1.0-*, dbus, adwaita-icon-theme, plus the gtk/flite/avif/hyphen/manette/secret/wayland
-set). `--with-deps` is present in this Playwright version's `install` options. The flag needs
-passwordless sudo on the runner, which ubuntu-latest provides. Not executed locally: this sandbox is
-`linux/arm64` and installing the deps would mutate the host image. CI is the authority for the gate.
+set); `--with-deps` is present in that version's `install` options and needs the passwordless
+sudo ubuntu-latest provides. For (b), loading the patched config through `tsx` shows
+`webServer` absent and `baseURL` untouched when `RELEASE_BROWSER_LOCAL_SERVERS` is unset (local
+runs against REPLIT_DEV_DOMAIN are unaffected), and two servers — API on 18083 gated on
+`/api/readyz`, web on 18084 — with `baseURL http://127.0.0.1:18084` when it is set, matching the
+passing gates. `check:e2e:syntax` passes (33 files). Not run locally: this sandbox is `linux/arm64`
+and the web `pretypecheck` still stops at the documented `lightningcss-linux-x64-gnu` lockfile pin,
+and the playwright configs are outside the package tsconfig `include` (`src/**/*`). CI is the
+authority for the gate.
 
 **2. `cross-device-smoke` `startedAt` never reaches the canonical day row -> 2 cases, UNRESOLVED.**
 `e2e/cross-device-smoke.spec.ts:172` polls `(await readCanonicalRun(page, runId))?.startedAt` for
