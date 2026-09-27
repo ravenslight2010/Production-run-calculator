@@ -1623,3 +1623,61 @@ a real `QueryResult` destructuring error in the first draft of `seedCanonicalDai
 reports drift in all four files, but it reports the same drift at HEAD and no workflow runs it, so
 the files were left alone rather than reformatted. Not run locally: `E2E_TEST_DB=1` specs need
 Postgres, which this sandbox does not have. CI is the authority.
+
+## 2026-09-27 — Outbox stranded an accepted server action, wedging every later lifecycle op (PRODUCT BUG)
+
+**Branch**: `codex/fix-import-model-fallback` (PR #82). Found by reading the Playwright trace that
+the previous entry's diagnostics upload finally made available; then reproduced and fixed in a unit
+test.
+
+**File(s)**: `artifacts/run-calculator/src/operationalIntentOutbox.ts` (delivery loop),
+`artifacts/run-calculator/src/operationalIntentOutbox.test.ts` (regression),
+`artifacts/run-calculator/e2e/release-webkit-smoke.spec.ts`, `artifacts/run-calculator/e2e/accessibility-smoke.spec.ts`
+
+**Symptom.** WebKit case 1 died on `resume-run` not found while the accessibility snapshot read
+"Provisional — awaiting server confirmation" next to a visible PAUSE RUN button. The trace settled
+it. `POST /api/sync/operational-intents` was called THREE times with the SAME intent id
+(`offline:dbe99f06-…`), all `action=lifecycle lifecycle=start`, all `observedGeneration=<runId>:0`.
+The server answered 200 `accepted` the first time and `accepted, duplicate=true` after that, and had
+already written `startedAt` + `metaUpdatedAt`. The PAUSE intent was never sent at all. So the server
+was correct and idempotent, and the client was the thing stuck.
+
+**Root cause.** In the delivery loop the accepted branch was
+`if (adoptCanonical && body.data) await adoptCanonical(...)` followed by `terminalize(...)`. The
+server has ALREADY applied the command at that point; the await only installs the payload in the
+UI. Any throw from the adopter escapes the loop, `terminalize` never runs, and the action is
+stranded as a live outbox record. `operationalIntentBlocksLifecycle` counts `pending`/`sending` as
+blocking, so every later pause/resume for that run defers forever, and each flush replays the same
+intent (hence the duplicate responses). The run can never leave "provisional".
+
+Reproduced in `operationalIntentOutbox.test.ts` with an adopter that throws: before the fix the
+record stayed `pending`, `accepted` count 0, `operationalIntentBlocksLifecycle` true, one fetch. Fix:
+catch the adoption failure and terminalize regardless. A missed payload is recovered by the next
+canonical pull; a stranded receipt is not recoverable at all.
+
+**1. WebKit sync-pull recovery (`:154`) timed out at 75 s with no assertion error.** The trace shows
+exactly ONE `/api/sync/today` GET in the whole run, during initial mount, returning 200 — the abort
+route never fired because no second pull was ever attempted. `VisibleTabScheduler.onFocus` is
+`if (!document.hidden) this.queueForeground()` and `queueForeground` drops any signal within 500 ms
+of the last one. The test dispatched a synthetic `focus` right after mount, inside that debounce, so
+it was swallowed. Fix: re-dispatch `focus` inside `expect.poll` until the app actually issues the
+request, and likewise re-dispatch `online` until a canonical pull completes (the wake guard coalesces
+the first one). Both wait on the real condition instead of sleeping for a guessed interval.
+
+**2. Accessibility `scheduleCalendar` (`:818`) — flake mitigation, not a root cause.** It PASSED
+220 s in the previous run and failed here, and `home.tsx` does call `setScheduleCalendarOpen(false)`
+in the calendar `onSelect`, so the assertion is correct. The `scan()` (axe-core) immediately before
+the keyboard interaction can move focus, and react-day-picker only handles arrow/Enter on a focused
+grid; a keypress on a re-rendered grid selects nothing and the popover never closes. The a11y
+project retains no trace, so the focus-loss mechanism is inferred from the ordering, not proven.
+Fix: drive the same arrow+Enter interaction inside a bounded `expect(...).toPass()` that re-asserts
+the calendar is hidden. The condition is unchanged — a genuine regression still fails.
+
+**Verification**: the new regression test fails on the old code and passes on the new;
+`operationalIntentOutbox.test.ts` is 17/17 (16 pre-existing plus the new one) and is the only test
+file touching this module; `check:e2e:syntax` (33 files) and actionlint over all 8 workflows are
+clean; the three changed specs typecheck clean under a standalone strict `tsc`. A full
+`tsc -p tsconfig.json` reports 56 errors here, all TS6305 (unbuilt `lib/*` project references) and
+their downstream implicit-any fallout — none in `operationalIntentOutbox.ts`; CI builds the full
+reference graph. `E2E_TEST_DB=1` browser specs still need Postgres, so the end-to-end effect of the
+outbox fix is CI-confirmed only.

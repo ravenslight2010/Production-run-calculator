@@ -529,7 +529,22 @@ async function flushWithStorageLock(senderId: string): Promise<void> {
              // Older server responses may omit data for a duplicate outcome.
              // There is nothing to install in that case; retain the receipt and
              // let the idempotent command terminalize normally.
-             if (adoptCanonical && body.data) await adoptCanonical(body.data, receiptIntent, outcome);
+             if (adoptCanonical && body.data) {
+               // The server has ALREADY applied this command; this await only
+               // installs the canonical payload in the UI. Letting a throw escape
+               // skipped terminalize(), which stranded an accepted action as a
+               // live outbox record: operationalIntentBlocksLifecycle() treats any
+               // non-terminal record as blocking, so every later pause/resume for
+               // that run was deferred forever while the same intent was replayed
+               // on each flush (the server answering "duplicate"). Capture the
+               // adoption failure and terminalize regardless — a missed payload is
+               // recovered by the next canonical pull, a stranded receipt is not.
+               try {
+                 await adoptCanonical(body.data, receiptIntent, outcome);
+               } catch {
+                 // Intentionally swallowed; see above.
+               }
+             }
             if (item.deferredOffline) {
               window.dispatchEvent(new CustomEvent("calculator-field-check-signal", {
                 detail: { checkName: "offline-queue-replay", outcome: "success" },

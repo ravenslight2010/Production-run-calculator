@@ -10,12 +10,15 @@ import {
   readOperationalIntentOutbox,
   retryOperationalIntent,
   discardOperationalIntent,
+  operationalIntentBlocksLifecycle,
+  setOperationalIntentCanonicalAdopter,
   setOperationalIntentIdentity,
 } from "./operationalIntentOutbox";
 
 describe("operational intent outbox", () => {
   beforeEach(() => setOperationalIntentIdentity({ scope: "live", userId: "operator-1" }));
   afterEach(() => {
+    setOperationalIntentCanonicalAdopter(undefined);
     setOperationalIntentIdentity(null);
     localStorage.clear();
     vi.unstubAllGlobals();
@@ -253,6 +256,34 @@ describe("operational intent outbox", () => {
     await flushOperationalIntentOutbox();
     expect(operationalIntentSummary().accepted).toBe(1);
     expect(fetch).toHaveBeenCalledTimes(2);
+  });
+  it("terminalizes an accepted action even when canonical adoption throws", async () => {
+    // A server-accepted command is already applied. If the UI adoption throws and
+    // that escapes the delivery loop, terminalize() never runs and the action is
+    // stranded as a live outbox record: operationalIntentBlocksLifecycle treats
+    // any non-terminal record as blocking, so every later pause/resume for the run
+    // defers forever while the same intent is replayed on each flush (the server
+    // answering "duplicate"). Seen in the wild as a run stuck on "Provisional —
+    // awaiting server confirmation" with its start never confirmed and pause never sent.
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const fetch = vi.fn().mockResolvedValue({
+      ok: true, status: 200, headers: { get: () => null },
+      json: async () => ({
+        outcome: "accepted",
+        canonicalRevision: 1,
+        snapshotId: "snapshot-1",
+        data: { dayState: { runs: [{ id: "run-1", startedAt: 5, metaUpdatedAt: 5 }] }, runValues: {} },
+      }),
+    });
+    vi.stubGlobal("fetch", fetch);
+    setOperationalIntentCanonicalAdopter(async () => { throw new Error("adoption failed"); });
+
+    queueOperationalIntent({ runId: "run-1", observedGeneration: "run-1:0", effectiveAt: 1, action: "lifecycle", lifecycle: "start" });
+    await flushOperationalIntentOutbox();
+
+    expect(operationalIntentSummary().accepted).toBe(1);
+    expect(operationalIntentBlocksLifecycle("run-1")).toBe(false);
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
   it("pauses on token expiry and resumes only after explicit auth retry", async () => {
     Object.defineProperty(navigator, "onLine", { configurable: true, value: true });

@@ -247,16 +247,43 @@ test("recovers a failed sync pull after the browser reconnects", async ({ page }
     await route.continue();
   });
 
-  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  // Home's scheduler debounces foreground passes by 500ms and DROPS any signal
+  // inside that window. A single synthetic "focus" dispatched right after mount
+  // therefore lands in the debounce and no pull is ever attempted, so the abort
+  // route never fires. Re-dispatch until the app actually issues the request we
+  // are about to fail — this waits on the real condition, not a guessed sleep.
+  await expect
+    .poll(
+      async () => {
+        await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+        return failedPull;
+      },
+      { timeout: 20_000, intervals: [200, 400, 800] },
+    )
+    .toBe(true);
   await failedPullObserved;
   await page.unroute("**/api/sync/today?*");
-  const recoveredPull = page.waitForResponse(
-    (response) =>
-      response.request().method() === "GET" &&
-      response.url().includes("/api/sync/today"),
-  );
-  await page.evaluate(() => window.dispatchEvent(new Event("online")));
-  await recoveredPull;
+
+  let recovered = 0;
+  const countRecovered = (response: { request(): { method(): string }; url(): string }): void => {
+    if (response.request().method() === "GET" && response.url().includes("/api/sync/today")) {
+      recovered += 1;
+    }
+  };
+  page.on("response", countRecovered);
+  // "online" is the app's reconnect signal, but the wake guard coalesces bursts,
+  // so the first dispatch can be absorbed by a reconciliation still in flight.
+  await expect
+    .poll(
+      async () => {
+        await page.evaluate(() => window.dispatchEvent(new Event("online")));
+        return recovered;
+      },
+      { timeout: 20_000, intervals: [200, 400, 800] },
+    )
+    .toBeGreaterThan(0);
+  page.off("response", countRecovered);
+
   await expect(page.locator('[title="Sync connected"]')).toBeVisible();
   expect(failedPull).toBe(true);
 });

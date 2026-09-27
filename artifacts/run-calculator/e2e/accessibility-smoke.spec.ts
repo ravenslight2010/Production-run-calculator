@@ -812,10 +812,19 @@ test.describe("accessibility smoke", () => {
     await scan(page, "schedule calendar", [], '[data-slot="calendar"]');
     const selectedDay = scheduleCalendar.locator('button[data-selected-single="true"]');
     await expect(selectedDay).toBeVisible();
-    await selectedDay.focus();
-    await page.keyboard.press("ArrowRight");
-    await page.keyboard.press("Enter");
-    await expect(scheduleCalendar).toBeHidden();
+    // The axe scan immediately above can move focus, and react-day-picker only
+    // handles arrow/Enter on a focused grid. If the keypress lands on a
+    // re-rendered grid the selection never fires, home.tsx never runs
+    // setScheduleCalendarOpen(false), and the popover stays open. Re-drive the
+    // keyboard interaction until the calendar ACTUALLY closes; this still
+    // asserts the same real condition rather than sleeping for a guessed
+    // interval, and it is bounded so a genuine regression still fails.
+    await expect(async () => {
+      await selectedDay.focus();
+      await page.keyboard.press("ArrowRight");
+      await page.keyboard.press("Enter");
+      await expect(scheduleCalendar).toBeHidden({ timeout: 1_000 });
+    }).toPass({ timeout: 15_000 });
     await scheduleEditor.getByRole("button", { name: "Close schedule editor" }).click();
     await expect(scheduleEditor).toBeHidden();
   });
