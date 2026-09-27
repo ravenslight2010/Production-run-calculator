@@ -1440,3 +1440,74 @@ token to push: clean-start smoke + the three browser gates (item 1) and model-bu
 **Sandbox caveat**: this agent machine is `linux/arm64` on Node 22 while the repo requires Node >=24, and
 `git push` to a local bare remote fails there ("unpack should have generated ..."), so local pushes cannot
 reproduce CI's git behavior. CI remains the authority for these gates.
+
+## 2026-09-27 — Release check: browser WebKit smoke could not launch the browser (missing OS deps)
+
+**Branch**: `codex/fix-import-model-fallback` (PR #82). Follow-up to the 2026-09-26 entry; the
+placeholder-AI-key fix (item 1 there) let the three browser gates actually boot, which exposed two
+new failures that had been masked behind `Timed out waiting 120000ms from config.webServer`.
+
+**File(s)**: `artifacts/run-calculator/package.json` (`scripts.test:e2e:webkit`)
+
+**1. WebKit downloaded its browser but never its OS libraries -> all 3 `browser WebKit smoke` cases.**
+Every Chromium-backed e2e script deliberately runs the SYSTEM chromium
+(`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=$(command -v chromium)`), which the runner image already ships
+with its dependencies. `test:e2e:webkit` was the only gate that installed its own browser, and it ran
+bare `playwright install webkit` — the browser bundle without the OS packages. All three cases in
+`e2e/release-webkit-smoke.spec.ts` therefore died in ~24 ms each on:
+
+    Error: browserType.launch: Host system is missing dependencies to run browsers.
+    Missing libraries: libgtk-4.so.1, libgraphene-1.0.so.0, libevent-2.1.so.7, libopus.so.0,
+    libgstallocators-1.0.so.0, ... libflite.so.1, libavif.so.16, libhyphen.so.0, libmanette-0.2.so.0,
+    libsecret-1.so.0, libx264.so, libwayland-server.so.0
+
+This is a test-harness provisioning gap, not an application defect: the assertions never ran.
+`.github/workflows/release-check.yml` installs no browser dependencies at all, and `install-deps`
+appears nowhere in the repo, so the WebKit gate was the only place that could have supplied them.
+Fix: `playwright install --with-deps webkit`, which installs the OS packages and then the browser in
+the one step the script already owned. Keeping it in the script (rather than the workflow) preserves
+the existing convention that each browser gate is self-contained.
+
+**Verification**: `playwright install --with-deps --dry-run webkit` against the pinned Playwright
+(1.63.0) lists the 298 packages the fix would add, covering every family CI reported missing
+(gstreamer1.0-*, dbus, adwaita-icon-theme, plus the gtk/flite/avif/hyphen/manette/secret/wayland
+set). `--with-deps` is present in this Playwright version's `install` options. The flag needs
+passwordless sudo on the runner, which ubuntu-latest provides. Not executed locally: this sandbox is
+`linux/arm64` and installing the deps would mutate the host image. CI is the authority for the gate.
+
+**2. `cross-device-smoke` `startedAt` never reaches the canonical day row -> 2 cases, UNRESOLVED.**
+`e2e/cross-device-smoke.spec.ts:172` polls `(await readCanonicalRun(page, runId))?.startedAt` for
+25 s after clicking start and gets `undefined` for the whole window, on both `desktop-chromium` and
+`phone-chromium`. The UI assertions before it PASS — the button becomes "pause run" and
+`readSelectedRun(page).id` still equals the seeded run id — so the start lands in local state and
+never reaches the server's day row. This gate has no green baseline yet: the two earlier
+release-check runs failed this gate at the 121-122 s `webServer` timeout, so this is the first run in
+which the assertion actually executed.
+
+Ruled out with evidence: the GET and PUT `/sync/today` handlers and the POST
+`/sync/operational-intents` handler all resolve their date through the same `clientToday(req)`, so
+read and write cannot disagree on the date key; `playwright.release-servers.ts` starts the API
+without overriding `DATABASE_URL`, so the app and the spec's `beforeEach` delete share one database;
+and `sanitizeSyncPayload` passes `dayState.runs` through with only a count cap, so `startedAt` is not
+being stripped server-side.
+
+The remaining lead is the client's outbox. `startRun` in `artifacts/run-calculator/src/hooks/useRunLifecycleManager.ts`
+does not push a snapshot — it calls `queueOperationalIntent({ ... lifecycle: "start" ... })` then
+`flushOperationalIntentOutbox()`, and it EARLY-RETURNS (deferring via a 25 ms poll) when
+`foregroundSyncBarrierRef`, `formHandoffRef`, `operationalAdoptionInFlightRef > 0`, or
+`operationalIntentBlocksLifecycle(runId)` is set. Note the spec seeds its run straight into
+localStorage and never syncs it, so the run is un-adopted by construction. Server-side,
+`POST /sync/operational-intents` hard-rejects with 400 when `intent.date !== clientToday(req)`.
+`FACILITY_TIME_ZONE` is unset in release-check, so `facilityTimeZone()` falls back to
+`America/Chicago`; the failing run executed 23:55-23:56Z, where the Chicago date still equals the
+UTC date, so that guard is not this failure — but it IS a latent daily flake for roughly the 5-6
+hours a day when UTC's calendar date has run ahead of the facility's, which is the same hazard
+`clientToday`'s comment already documents for the snapshot path. Worth a follow-up.
+
+Not yet root-caused. This sandbox has no Postgres and no Docker, so `E2E_TEST_DB=1` specs cannot run
+locally, and the failing run did not retain `test-results/**/error-context.md` (the release artifact
+carries only the clean-start evidence, `release-check.log`, the checkpoint and the TS7 comparison).
+Next diagnostic should retain the browser-smoke per-test traces/`error-context.md`, or reproduce the
+single spec against a disposable local Postgres with the API's request log at debug level, to see
+whether the intent is never flushed, is flushed and 400'd, or is flushed and applied to a different
+scope than `readCanonicalRun` reads.
