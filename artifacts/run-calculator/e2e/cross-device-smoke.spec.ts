@@ -200,6 +200,10 @@ test("staff lifecycle recovers across desktop and phone layouts", async ({
   ).toBeTruthy();
 
   await page.getByRole("button", { name: /pause run/i }).click();
+  // Pausing opens the stop-tunnel decision prompt. This helper was written for
+  // exactly this and was never called here, so the pause never completed and
+  // the canonical pausedAt never landed.
+  await dismissPauseDecision(page);
   await expect.poll(
     async () => (await readCanonicalRun(page, runId))?.pausedAt,
     { timeout: 25_000 },

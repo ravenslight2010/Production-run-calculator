@@ -212,8 +212,12 @@ test("authenticates and preserves current-run start, pause, resume, and reload",
   await expect.poll(async () => (await selectedRun(page)).id).toBe(runId);
 
   await page.getByRole("button", { name: /pause run/i }).click();
-  const stopTunnelNo = page.getByTestId("pause-stop-tunnel-no");
-  if (await stopTunnelNo.isVisible().catch(() => false)) await stopTunnelNo.click();
+  // The stop-tunnel prompt is short-lived and can resolve to its safe default
+  // mid-click, so an isVisible() probe followed by an unbounded click waits on
+  // an element that is already gone. A bounded click matches the pattern the
+  // cross-device spec documents: the persisted pausedAt poll below is the
+  // authoritative assertion, and a vanished prompt is harmless.
+  await page.getByTestId("pause-stop-tunnel-no").click({ timeout: 1_000 }).catch(() => {});
   await expect(page.getByTestId("resume-run")).toBeVisible();
   await expect.poll(async () => (await selectedRun(page)).pausedAt).toBeTruthy();
 

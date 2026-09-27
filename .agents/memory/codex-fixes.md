@@ -1681,3 +1681,37 @@ clean; the three changed specs typecheck clean under a standalone strict `tsc`. 
 their downstream implicit-any fallout — none in `operationalIntentOutbox.ts`; CI builds the full
 reference graph. `E2E_TEST_DB=1` browser specs still need Postgres, so the end-to-end effect of the
 outbox fix is CI-confirmed only.
+
+## 2026-09-27 — Release check: the pause stop-tunnel prompt was never dismissed in cross-device (TEST BUG)
+
+**Branch**: `codex/fix-import-model-fallback` (PR #82). Direct continuation of the outbox entry
+above. After that fix the release gate was down to exactly two failures, both the same mistake in
+two specs.
+
+**File(s)**: `artifacts/run-calculator/e2e/cross-device-smoke.spec.ts`,
+`artifacts/run-calculator/e2e/release-webkit-smoke.spec.ts`
+
+**1. `cross-device-smoke` — `dismissPauseDecision` was defined but never called.** Pausing a run
+opens the `pause-stop-tunnel` decision prompt. The spec defines `dismissPauseDecision` at line 169
+to handle exactly that, then clicked "pause run" and went straight to polling for the canonical
+`pausedAt` — without ever calling it. The poll therefore timed out at 25 s with
+`Received: undefined`, on both `desktop-chromium` and `phone-chromium`. The helper was dead code
+carrying the correct intent; only the call was missing. It is now called after the pause click.
+
+**2. `release-webkit-smoke` — an `isVisible()` probe followed by an unbounded click raced the
+prompt.** This spec had the same intent written inline: probe for `pause-stop-tunnel-no`, and click
+it only if visible. The prompt is short-lived and can resolve to its safe default mid-click, so
+between the probe resolving `true` and the click being dispatched the element is already gone.
+Playwright then waits the full 75 s test budget for an element that will never return, which is the
+observed `locator.click: Test timeout of 75000ms exceeded` — a click timeout with no assertion
+error anywhere in the trace. Replaced with the bounded-click pattern the cross-device helper
+already documents: `click({ timeout: 1_000 }).catch(() => {})`.
+
+Both call sites now use the identical shape, and the authoritative assertion in each spec is
+unchanged: the persisted `pausedAt` poll. A prompt that vanishes is harmless because the run
+still has to reach a real paused state; a genuine pause regression still fails the poll.
+
+**Verification**: `check:e2e:syntax` valid across all 33 browser spec files; both changed specs
+typecheck clean under a standalone strict `tsc` (again necessary because the e2e tree sits outside
+the package `tsconfig.json` `include`, so CI does not typecheck it). Not run locally: `E2E_TEST_DB=1`
+specs need Postgres, which this sandbox does not have, so the gate result is CI-confirmed only.
