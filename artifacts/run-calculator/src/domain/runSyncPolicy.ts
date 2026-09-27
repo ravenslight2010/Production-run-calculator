@@ -113,6 +113,63 @@ export function adoptStrictlyNewerRemoteLifecycles(localDay: DayState, remoteRun
   return { dayState: { ...localDay, runs, currentIndex: currentIndex >= 0 ? currentIndex : Math.max(0, Math.min(localDay.currentIndex, runs.length - 1)) }, adoptedRunIds };
 }
 
+/**
+ * Fold an ACCEPTED operational intent's canonical run lifecycle into the local
+ * day synchronously, so the very next lifecycle command is built against the
+ * server's generation rather than the pre-adoption local one.
+ *
+ * The ordinary inbound sync merge reaches the day through a `setDayState`
+ * updater, so it cannot run before the next command is built — React defers the
+ * updater, and `useRunLifecycleManager` reads `dayStateRef.current`
+ * synchronously. The server stamps `metaUpdatedAt` with its OWN clock when it
+ * accepts an intent, so a command issued right after an accepted one used to be
+ * built from the optimistic local stamp, failed the server's `exactGeneration`
+ * check, and came back `conflicted`. `conflicted` is a TERMINAL outbox state, so
+ * the pause was silently dropped, every later lifecycle command for that run
+ * conflicted the same way, and the run sat on "Provisional — awaiting server
+ * confirmation" with nothing actually pending.
+ *
+ * Only the lifecycle fields and the stamp are taken from the canonical copy;
+ * every other local field (notes, stoppages, per-run switches, …) is preserved,
+ * because an intent response describes the command, not the whole run. A
+ * strictly newer LOCAL stamp means a newer local edit is already in flight, so
+ * the ordinary LWW merge keeps ownership of that case.
+ */
+export function adoptAcceptedIntentRunLifecycle(
+  localDay: DayState,
+  canonicalRuns: RunMeta[] | undefined,
+  intentRunId: string,
+): { dayState: DayState; adopted: boolean } {
+  const canonical = canonicalRuns?.find((run) => run.id === intentRunId);
+  if (!canonical) return { dayState: localDay, adopted: false };
+  const index = localDay.runs.findIndex((run) => run.id === intentRunId);
+  if (index < 0) return { dayState: localDay, adopted: false };
+  const local = localDay.runs[index];
+  const stamp = canonical.metaUpdatedAt ?? 0;
+  if (stamp <= 0 || (local.metaUpdatedAt ?? 0) > stamp) return { dayState: localDay, adopted: false };
+  // A field the canonical copy omits was cleared server-side (a Resume deletes
+  // pausedAt/pausedStoppageId), so an absent value has to delete, not persist.
+  const merged: RunMeta = { ...local, metaUpdatedAt: stamp };
+  if (canonical.startedAt === undefined) delete merged.startedAt;
+  else merged.startedAt = canonical.startedAt;
+  if (canonical.pausedAt === undefined) delete merged.pausedAt;
+  else merged.pausedAt = canonical.pausedAt;
+  if (canonical.pausedStoppageId === undefined) delete merged.pausedStoppageId;
+  else merged.pausedStoppageId = canonical.pausedStoppageId;
+  if (canonical.endedAt === undefined) delete merged.endedAt;
+  else merged.endedAt = canonical.endedAt;
+  const unchanged = merged.startedAt === local.startedAt
+    && merged.pausedAt === local.pausedAt
+    && merged.pausedStoppageId === local.pausedStoppageId
+    && merged.endedAt === local.endedAt
+    && merged.metaUpdatedAt === local.metaUpdatedAt;
+  if (unchanged) return { dayState: localDay, adopted: false };
+  const runs = [...localDay.runs];
+  runs[index] = merged;
+  // Replaced in place, so the selected run keeps its position.
+  return { dayState: { ...localDay, runs }, adopted: true };
+}
+
 export function stampDayStateMeta(dayState: DayState, stored: DayState, now: number): DayState {
   const previous = new Map(stored.runs.map((run) => [run.id, run]));
   let changed = false;

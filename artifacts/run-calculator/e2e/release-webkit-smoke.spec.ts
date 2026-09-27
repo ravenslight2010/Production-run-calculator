@@ -172,6 +172,20 @@ async function selectedRun(page: Page): Promise<{
   });
 }
 
+async function readCanonicalRun(
+  page: Page,
+  runId: string,
+): Promise<{ id: string; startedAt?: number; pausedAt?: number } | undefined> {
+  const today = new Date().toISOString().slice(0, 10);
+  const response = await page.request.get(`/api/sync/today?today=${today}`, {
+    failOnStatusCode: true,
+  });
+  const body = await response.json() as {
+    dayState?: { runs?: Array<{ id: string; startedAt?: number; pausedAt?: number }> };
+  };
+  return body.dayState?.runs?.find((run) => run.id === runId);
+}
+
 test.beforeAll(async () => {
   requireIsolatedTestDatabase("WebKit release smoke");
 });
@@ -210,6 +224,14 @@ test("authenticates and preserves current-run start, pause, resume, and reload",
   await page.getByTestId("button-start-run").click();
   await expect(page.getByRole("button", { name: /pause run/i })).toBeVisible();
   await expect.poll(async () => (await selectedRun(page)).id).toBe(runId);
+  // selectedRun reads localStorage, which is only this device's optimistic
+  // projection. Pause is a generation-checked command, so issuing it before the
+  // server has confirmed the start races the server's own metaUpdatedAt stamp.
+  // Wait for the canonical startedAt, as cross-device-smoke already does.
+  await expect.poll(
+    async () => (await readCanonicalRun(page, runId))?.startedAt,
+    { timeout: 25_000 },
+  ).toBeTruthy();
 
   await page.getByRole("button", { name: /pause run/i }).click();
   // The stop-tunnel prompt is short-lived and can resolve to its safe default

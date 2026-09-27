@@ -120,6 +120,7 @@ import {
 } from "./domain/runSyncPolicy";
 export {
   acceptRemoteRunValueOnSync,
+  adoptAcceptedIntentRunLifecycle,
   adoptStrictlyNewerRemoteLifecycles,
   createSyncBaselineGate,
   deepEqual,

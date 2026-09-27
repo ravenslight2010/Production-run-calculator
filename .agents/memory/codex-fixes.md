@@ -1715,3 +1715,71 @@ still has to reach a real paused state; a genuine pause regression still fails t
 typecheck clean under a standalone strict `tsc` (again necessary because the e2e tree sits outside
 the package `tsconfig.json` `include`, so CI does not typecheck it). Not run locally: `E2E_TEST_DB=1`
 specs need Postgres, which this sandbox does not have, so the gate result is CI-confirmed only.
+
+## 2026-09-27 — A command issued right after an accepted one was silently dropped as `conflicted` (PRODUCT BUG)
+
+**Branch**: `codex/fix-import-model-fallback` (PR #82). Found from the Playwright trace the
+previous entry's diagnostics upload produced for release-check run 36321562061. That entry's fix
+was correct but addressed the wrong failure: dismissing the stop-tunnel prompt was necessary, not
+sufficient, and `pausedAt` still never landed.
+
+**File(s)**: `artifacts/run-calculator/src/domain/runSyncPolicy.ts`,
+`artifacts/run-calculator/src/pages/home.tsx`, `artifacts/run-calculator/src/storage.ts`,
+`artifacts/run-calculator/src/foregroundLifecycleAdoption.test.ts`,
+`artifacts/run-calculator/e2e/release-webkit-smoke.spec.ts`
+
+**What the trace showed.** The pause was never blocked by the prompt. It was sent and answered:
+
+```
+13:30:45.638  POST /api/sync/operational-intents  200  outcome: "accepted"    (start)
+13:30:45.894  POST /api/sync/operational-intents  200  outcome: "conflicted"  (pause)
+```
+
+The pause response carried canonical state with `startedAt` set and no `pausedAt`, and after it the
+app made zero network calls for the remaining ~11 s, leaving the run on "Provisional — awaiting
+server confirmation" still showing PAUSE RUN. Same story on `desktop-chromium` and
+`phone-chromium`.
+
+**Root cause.** Both sides gate a lifecycle command on an exact generation string — server
+`generation()` in `artifacts/api-server/src/lib/operationalIntents.ts:74` and the client at
+`useRunLifecycleManager.ts:237`, both `${run.id}:${metaUpdatedAt ?? startedAt ?? 0}`. The client
+sent `...:1790515845594`, its own optimistic stamp from `saveDayState` after pressing Start. The
+server had stamped `metaUpdatedAt: 1790515845643` with ITS clock when it accepted the start. The
+mismatch took the `else` branch in `applyOperationalIntent`, and because the command was not
+already applied and was not a resume rebase, the answer was `conflicted`.
+
+The start's canonical response arrived 256 ms before the pause was built, so the stamp should have
+been in hand. It was not: `applySyncCallbackRef` reaches the day through a `setDayState` updater,
+which React defers, while `useRunLifecycleManager` reads `dayStateRef.current` synchronously. The
+adoption could not land before the next command was built, so every command issued immediately
+after an accepted one carried the pre-adoption generation. `conflicted` is a TERMINAL outbox state
+(`operationalIntentOutbox.ts:512`), so the command was dropped with no retry and no rebase, and
+every later lifecycle command for that run conflicted identically.
+
+This is the same family as the stranded-outbox entry above, but a different branch: that fix
+handled "adoption throws". This is "the server legitimately said conflicted", which the client
+treated as done.
+
+**Fix.** `adoptAcceptedIntentRunLifecycle` folds the accepted run's canonical lifecycle and stamp
+into `dayStateRef.current` and localStorage synchronously, in the same step as the receipt, before
+the ordinary merge. Only `startedAt` / `pausedAt` / `pausedStoppageId` / `endedAt` / `metaUpdatedAt`
+are taken from the canonical copy — an intent response describes the command, not the whole run, so
+notes, stoppages and per-run switches stay local. A field the canonical copy omits is deleted
+rather than persisted, because a Resume clears `pausedAt`/`pausedStoppageId` server-side. A
+strictly newer LOCAL stamp means a newer local edit is already in flight, so that case is left to
+the ordinary LWW merge. Conflict semantics are unchanged: the fix closes the self-inflicted window
+where this device's own accepted response had not landed yet, not the deliberate cross-device guard.
+
+**Test-side.** `release-webkit-smoke` waited on `selectedRun`, which reads localStorage — this
+device's optimistic projection, not the server. It now waits for the canonical `startedAt` via
+`/api/sync/today`, as `cross-device-smoke` already did, so the spec no longer races the start
+confirmation.
+
+**Verification**: 10/10 in `foregroundLifecycleAdoption.test.ts` (5 new, using the exact run id and
+stamps from the trace) and 17/17 in `operationalIntentOutbox.test.ts`; full
+`tsc -p tsconfig.json --noEmit` for `@workspace/run-calculator` clean; `check:e2e:syntax` valid
+across all 33 browser spec files; the changed spec typechecks clean under a standalone strict
+`tsc`. Not run locally: `E2E_TEST_DB=1` specs need Postgres, so the browser result is CI-confirmed
+only. `pnpm run typecheck` at the repo root cannot complete on this ARM sandbox — its
+`pretypecheck` step dies on `Cannot find module '../lightningcss.linux-arm64-gnu.node'`, which is
+the pre-existing stripped-native limitation, unrelated to this change.

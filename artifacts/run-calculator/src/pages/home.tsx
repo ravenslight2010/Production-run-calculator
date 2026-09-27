@@ -268,6 +268,7 @@ import {
 } from "../adapters/browserRunPersistence";
 import {
   acceptRemoteRunValueOnSync,
+  adoptAcceptedIntentRunLifecycle,
   adoptStrictlyNewerRemoteLifecycles,
   deepEqual,
   freshDayState,
@@ -7986,6 +7987,23 @@ export default function Home() {
       const acceptedFinalization =
         outcome === "accepted" && intent.action === "lifecycle" && intent.lifecycle === "end";
       if (outcome === "accepted" && !acceptedFinalization) {
+        // Fold the server's authoritative generation for THIS run in now, before
+        // the ordinary merge below. applySyncCallbackRef reaches the day through
+        // a setDayState updater, so it cannot land before the next lifecycle
+        // command is built, and useRunLifecycleManager reads dayStateRef
+        // synchronously. Without this the operator's next command carried the
+        // pre-adoption local stamp, failed the server's exactGeneration check,
+        // and came back "conflicted" — terminal, so the command was silently
+        // dropped and the run never left "Provisional".
+        const acceptedLifecycle = adoptAcceptedIntentRunLifecycle(
+          dayStateRef.current,
+          payload.dayState?.runs,
+          intent.runId,
+        );
+        if (acceptedLifecycle.adopted) {
+          saveDayState(acceptedLifecycle.dayState, { stampMeta: false });
+          dayStateRef.current = acceptedLifecycle.dayState;
+        }
         applySyncCallbackRef.current(payload);
         adoptReceipt();
         adoptionSucceeded = true;

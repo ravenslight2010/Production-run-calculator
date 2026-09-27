@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DayState, RunMeta } from "./types";
 import {
+  adoptAcceptedIntentRunLifecycle,
   adoptStrictlyNewerRemoteLifecycles,
   selectInboundRunLifecycles,
   shouldKeepLocalRunLifecycle,
@@ -137,5 +138,100 @@ describe("foreground lifecycle adoption", () => {
 
     expect(result.adoptedRunIds).toEqual([]);
     expect(result.dayState).toBe(local);
+  });
+});
+
+// Mirrors the server's generation() in artifacts/api-server/src/lib/operationalIntents.ts.
+function serverGeneration(run: RunMeta): string {
+  return `${run.id}:${String(run.metaUpdatedAt ?? run.startedAt ?? 0)}`.slice(0, 160);
+}
+
+describe("accepted operational intent adoption", () => {
+  // Real numbers from the WebKit release-gate trace: the client pressed Start
+  // (optimistic startedAt 1790515845593, saveDayState stamped metaUpdatedAt
+  // ...594) and Pause 274ms later. The server accepted the start and stamped
+  // metaUpdatedAt with its OWN clock (1790515845643), so the pause's
+  // observedGeneration no longer matched and the server answered "conflicted"
+  // — a terminal outbox state, which silently dropped the pause.
+  const RUN_ID = "webkit_run_mujuwjpg_kqfxjxod";
+
+  it("makes the next command's generation match the server after an accepted start", () => {
+    const afterLocalStart = day([
+      {
+        id: RUN_ID,
+        brand: "WebKit",
+        flavor: "Release Smoke",
+        startedAt: 1790515845593,
+        metaUpdatedAt: 1790515845594,
+      },
+    ]);
+    // The accepted start's canonical response, as the server returned it.
+    const canonical = [{
+      id: RUN_ID,
+      brand: "WebKit",
+      flavor: "Release Smoke",
+      startedAt: 1790515845643,
+      metaUpdatedAt: 1790515845643,
+    }];
+
+    // Before adoption the pause would have been built from the stale local
+    // generation, which is exactly what the server rejected.
+    expect(serverGeneration(afterLocalStart.runs[0])).not.toBe(
+      serverGeneration(canonical[0]),
+    );
+
+    const result = adoptAcceptedIntentRunLifecycle(afterLocalStart, canonical, RUN_ID);
+
+    expect(result.adopted).toBe(true);
+    // The generation the next lifecycle command is built from now matches.
+    expect(serverGeneration(result.dayState.runs[0])).toBe(serverGeneration(canonical[0]));
+  });
+
+  it("clears a lifecycle field the canonical copy dropped", () => {
+    const local = day([{
+      id: RUN_ID, brand: "W", flavor: "R",
+      startedAt: 100, pausedAt: 200, pausedStoppageId: "s-1", metaUpdatedAt: 300,
+    }]);
+    const result = adoptAcceptedIntentRunLifecycle(local, [{
+      id: RUN_ID, brand: "W", flavor: "R", startedAt: 100, metaUpdatedAt: 400,
+    }], RUN_ID);
+
+    expect(result.adopted).toBe(true);
+    expect(result.dayState.runs[0].pausedAt).toBeUndefined();
+    expect(result.dayState.runs[0].pausedStoppageId).toBeUndefined();
+    expect(result.dayState.runs[0].metaUpdatedAt).toBe(400);
+  });
+
+  it("preserves local fields an intent response does not describe", () => {
+    const local = day([{
+      id: RUN_ID, brand: "W", flavor: "R",
+      startedAt: 100, notes: "operator note", subTab: "dough", metaUpdatedAt: 300,
+    }]);
+    const result = adoptAcceptedIntentRunLifecycle(local, [{
+      id: RUN_ID, brand: "W", flavor: "R", startedAt: 100, metaUpdatedAt: 400,
+    }], RUN_ID);
+
+    expect(result.adopted).toBe(true);
+    expect(result.dayState.runs[0].notes).toBe("operator note");
+    expect(result.dayState.runs[0].subTab).toBe("dough");
+  });
+
+  it("leaves a strictly newer local edit to the ordinary LWW merge", () => {
+    const local = day([{ id: RUN_ID, brand: "W", flavor: "R", startedAt: 100, metaUpdatedAt: 500 }]);
+    const result = adoptAcceptedIntentRunLifecycle(local, [{
+      id: RUN_ID, brand: "W", flavor: "R", startedAt: 100, metaUpdatedAt: 400,
+    }], RUN_ID);
+
+    expect(result.adopted).toBe(false);
+    expect(result.dayState).toBe(local);
+  });
+
+  it("is a no-op for an unknown run, a missing stamp, or identical state", () => {
+    const local = day([{ id: RUN_ID, brand: "W", flavor: "R", startedAt: 100, metaUpdatedAt: 300 }]);
+    expect(adoptAcceptedIntentRunLifecycle(local, [], RUN_ID).adopted).toBe(false);
+    expect(adoptAcceptedIntentRunLifecycle(local, undefined, RUN_ID).adopted).toBe(false);
+    expect(adoptAcceptedIntentRunLifecycle(local, [{ id: "other", brand: "W", flavor: "R", metaUpdatedAt: 900 }], RUN_ID).adopted).toBe(false);
+    expect(adoptAcceptedIntentRunLifecycle(local, [{ id: RUN_ID, brand: "W", flavor: "R", startedAt: 100 }], RUN_ID).adopted).toBe(false);
+    expect(adoptAcceptedIntentRunLifecycle(local, [{ id: RUN_ID, brand: "W", flavor: "R", startedAt: 100, metaUpdatedAt: 300 }], RUN_ID).adopted).toBe(false);
   });
 });
