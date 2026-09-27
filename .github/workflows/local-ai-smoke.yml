@@ -8,10 +8,18 @@ name: Local AI smoke check
 # WHY: The adapter dispatches to a self-hosted server when LOCAL_AI_BASE_URL is
 # set and to Gemini otherwise (see lib/integrations-openai-ai-server/src/
 # client.ts and models.ts). The routine test suite only exercises the mock path
-# so it stays fast and offline. This workflow closes that gap by booting a real
-# llama.cpp server on the runner, pointing the adapter at it, and running the
-# same smoke check in real mode. It is workflow_dispatch-only because it
-# downloads a model server and model weights, which is too heavy for every PR.
+# so it stays fast and offline. This workflow closes that gap by running a real
+# OpenAI-compatible server on the runner, pointing the adapter at it, and
+# running the same smoke check in real mode. It is workflow_dispatch-only
+# because it pulls a container image and model weights, which is too heavy for
+# every PR.
+#
+# PROVENANCE: This workflow deliberately does NOT download any executable or
+# archive. Per .github/workflows/ci-binary-provenance.md, a direct CI binary
+# download requires a verifiable GitHub artifact attestation, which the model
+# server and model publishers do not provide. Instead the server runs from a
+# digest-pinned container image and the model is pulled inside that container,
+# matching the repository's pinned-service-image policy.
 #
 # The check itself lives in scripts/src/check-local-ai.mts and is also run
 # locally via `pnpm --filter @workspace/scripts run check:local-ai`.
@@ -19,18 +27,10 @@ name: Local AI smoke check
 on:
   workflow_dispatch:
     inputs:
-      llama_version:
-        description: 'llama.cpp release tag for the prebuilt server (e.g. b11221)'
+      model:
+        description: 'Ollama model tag to serve (e.g. qwen2.5:0.5b)'
         required: false
-        default: 'b11221'
-      model_url:
-        description: 'Direct URL to a GGUF model file'
-        required: false
-        default: 'https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf'
-      model_name:
-        description: 'Model identifier reported to the adapter (llama.cpp ignores it)'
-        required: false
-        default: 'qwen2.5-0.5b'
+        default: 'qwen2.5:0.5b'
 
 permissions:
   contents: read
@@ -47,15 +47,17 @@ jobs:
     permissions:
       contents: read
     env:
-      LLAMA_VERSION: ${{ inputs.llama_version || 'b11221' }}
-      MODEL_URL: ${{ inputs.model_url || 'https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf' }}
-      MODEL_NAME: ${{ inputs.model_name || 'qwen2.5-0.5b' }}
-      # Point the adapter at the llama.cpp server started below. LOCAL_AI_BASE_URL
-      # is the switch that selects the self-hosted backend over Gemini.
+      # Digest-pinned Ollama image (see the provenance inventory). Never
+      # override this with an unpinned tag: the image is the trust boundary.
+      OLLAMA_IMAGE: ollama/ollama@sha256:8262851b2846b87c649eddf3e76beb270c52f4d1bc94559f47efde16b0841551
+      OLLAMA_CONTAINER: local-ai-ollama
+      MODEL: ${{ inputs.model || 'qwen2.5:0.5b' }}
+      # Point the adapter at the container started below. LOCAL_AI_BASE_URL is
+      # the switch that selects the self-hosted backend over Gemini.
       LOCAL_AI_BASE_URL: http://127.0.0.1:11434/v1
-      LOCAL_AI_API_KEY: local
-      LOCAL_MODEL_FULL: ${{ inputs.model_name || 'qwen2.5-0.5b' }}
-      LOCAL_MODEL_CHEAP: ${{ inputs.model_name || 'qwen2.5-0.5b' }}
+      LOCAL_AI_API_KEY: ollama
+      LOCAL_MODEL_FULL: ${{ inputs.model || 'qwen2.5:0.5b' }}
+      LOCAL_MODEL_CHEAP: ${{ inputs.model || 'qwen2.5:0.5b' }}
       # Force the transport-failure path to surface instead of silently falling
       # back to Gemini, so a broken local server fails the job loudly.
       LOCAL_AI_FALLBACK_TO_GEMINI: 'false'
@@ -79,71 +81,60 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Download prebuilt llama-server
+      - name: Start Ollama server (digest-pinned container)
         run: |
           set -euo pipefail
-          mkdir -p /tmp/llama
-          archive_url="https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_VERSION}/llama-${LLAMA_VERSION}-bin-ubuntu-x64.tar.gz"
-          echo "Downloading ${archive_url}"
-          curl --fail --location --silent --show-error \
-            --output /tmp/llama/llama.tar.gz \
-            "${archive_url}"
-          tar --extract --gzip --file /tmp/llama/llama.tar.gz --directory /tmp/llama
-          test -x "/tmp/llama/llama-${LLAMA_VERSION}/llama-server"
+          docker run --detach \
+            --name "$OLLAMA_CONTAINER" \
+            --publish 11434:11434 \
+            --env OLLAMA_HOST=0.0.0.0:11434 \
+            "$OLLAMA_IMAGE"
 
-      - name: Download GGUF model
+      - name: Wait for Ollama server
         run: |
           set -euo pipefail
-          echo "Downloading ${MODEL_URL}"
-          curl --fail --location --silent --show-error \
-            --output /tmp/llama/model.gguf \
-            "${MODEL_URL}"
-          ls -lh /tmp/llama/model.gguf
-
-      - name: Start llama-server (background)
-        run: |
-          set -euo pipefail
-          cd "/tmp/llama/llama-${LLAMA_VERSION}"
-          LD_LIBRARY_PATH="$PWD" ./llama-server \
-            --model /tmp/llama/model.gguf \
-            --host 127.0.0.1 \
-            --port 11434 \
-            --ctx-size 2048 \
-            --threads 2 \
-            > /tmp/llama/server.log 2>&1 &
-          echo "LLAMA_SERVER_PID=$!" >> "$GITHUB_ENV"
-
-      - name: Wait for llama-server
-        run: |
-          set -euo pipefail
-          echo "Waiting for llama-server on port 11434…"
+          echo "Waiting for Ollama on port 11434…"
           for attempt in $(seq 1 60); do
             if curl --silent --fail http://127.0.0.1:11434/v1/models > /dev/null 2>&1; then
-              echo "llama-server ready (attempt ${attempt})."
+              echo "Ollama ready (attempt ${attempt})."
               exit 0
             fi
             sleep 2
           done
-          echo "ERROR: llama-server did not become ready within 120 s."
-          echo "--- llama-server log ---"
-          cat /tmp/llama/server.log
+          echo "ERROR: Ollama did not become ready within 120 s."
+          docker logs "$OLLAMA_CONTAINER" || true
+          exit 1
+
+      - name: Pull the model inside the container
+        run: |
+          set -euo pipefail
+          echo "Pulling ${MODEL} inside the container…"
+          for attempt in $(seq 1 3); do
+            if docker exec "$OLLAMA_CONTAINER" ollama pull "$MODEL"; then
+              exit 0
+            fi
+            echo "Pull attempt ${attempt} failed; retrying…"
+            sleep 5
+          done
+          echo "ERROR: could not pull ${MODEL} after 3 attempts."
           exit 1
 
       - name: Run local AI adapter smoke check (real mode)
         run: pnpm --filter @workspace/scripts run check:local-ai
 
-      - name: Upload llama-server log on failure
+      - name: Capture Ollama server log
+        if: always()
+        run: docker logs "$OLLAMA_CONTAINER" > /tmp/ollama-server.log 2>&1 || true
+
+      - name: Upload Ollama server log on failure
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: llama-server-log-${{ github.run_id }}
-          path: /tmp/llama/server.log
+          name: ollama-server-log-${{ github.run_id }}
+          path: /tmp/ollama-server.log
           if-no-files-found: warn
           retention-days: 7
 
-      - name: Stop llama-server
+      - name: Stop Ollama server
         if: always()
-        run: |
-          if [ -n "${LLAMA_SERVER_PID:-}" ]; then
-            kill "${LLAMA_SERVER_PID}" 2>/dev/null || true
-          fi
+        run: docker rm --force "$OLLAMA_CONTAINER" || true
