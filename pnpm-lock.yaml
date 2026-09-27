@@ -1285,6 +1285,9 @@ importers:
       '@workspace/db':
         specifier: workspace:*
         version: link:../lib/db
+      '@workspace/integrations-openai-ai-server':
+        specifier: workspace:*
+        version: link:../lib/integrations-openai-ai-server
       '@workspace/name-match':
         specifier: workspace:*
         version: link:../lib/name-match
