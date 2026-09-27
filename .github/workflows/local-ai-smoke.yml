@@ -1,0 +1,149 @@
+name: Local AI smoke check
+
+# Manual-only verification that the local-first AI adapter
+# (lib/integrations-openai-ai-server) works against a REAL self-hosted
+# OpenAI-compatible server, not just the in-process mock used by the routine
+# `pnpm --filter @workspace/scripts run test` gate.
+#
+# WHY: The adapter dispatches to a self-hosted server when LOCAL_AI_BASE_URL is
+# set and to Gemini otherwise (see lib/integrations-openai-ai-server/src/
+# client.ts and models.ts). The routine test suite only exercises the mock path
+# so it stays fast and offline. This workflow closes that gap by booting a real
+# llama.cpp server on the runner, pointing the adapter at it, and running the
+# same smoke check in real mode. It is workflow_dispatch-only because it
+# downloads a model server and model weights, which is too heavy for every PR.
+#
+# The check itself lives in scripts/src/check-local-ai.mts and is also run
+# locally via `pnpm --filter @workspace/scripts run check:local-ai`.
+
+on:
+  workflow_dispatch:
+    inputs:
+      llama_version:
+        description: 'llama.cpp release tag for the prebuilt server (e.g. b11221)'
+        required: false
+        default: 'b11221'
+      model_url:
+        description: 'Direct URL to a GGUF model file'
+        required: false
+        default: 'https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf'
+      model_name:
+        description: 'Model identifier reported to the adapter (llama.cpp ignores it)'
+        required: false
+        default: 'qwen2.5-0.5b'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: local-ai-smoke-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  local-ai-smoke:
+    name: Real-mode local AI adapter smoke check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      LLAMA_VERSION: ${{ inputs.llama_version || 'b11221' }}
+      MODEL_URL: ${{ inputs.model_url || 'https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf' }}
+      MODEL_NAME: ${{ inputs.model_name || 'qwen2.5-0.5b' }}
+      # Point the adapter at the llama.cpp server started below. LOCAL_AI_BASE_URL
+      # is the switch that selects the self-hosted backend over Gemini.
+      LOCAL_AI_BASE_URL: http://127.0.0.1:11434/v1
+      LOCAL_AI_API_KEY: local
+      LOCAL_MODEL_FULL: ${{ inputs.model_name || 'qwen2.5-0.5b' }}
+      LOCAL_MODEL_CHEAP: ${{ inputs.model_name || 'qwen2.5-0.5b' }}
+      # Force the transport-failure path to surface instead of silently falling
+      # back to Gemini, so a broken local server fails the job loudly.
+      LOCAL_AI_FALLBACK_TO_GEMINI: 'false'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Download prebuilt llama-server
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/llama
+          archive_url="https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_VERSION}/llama-${LLAMA_VERSION}-bin-ubuntu-x64.tar.gz"
+          echo "Downloading ${archive_url}"
+          curl --fail --location --silent --show-error \
+            --output /tmp/llama/llama.tar.gz \
+            "${archive_url}"
+          tar --extract --gzip --file /tmp/llama/llama.tar.gz --directory /tmp/llama
+          test -x "/tmp/llama/llama-${LLAMA_VERSION}/llama-server"
+
+      - name: Download GGUF model
+        run: |
+          set -euo pipefail
+          echo "Downloading ${MODEL_URL}"
+          curl --fail --location --silent --show-error \
+            --output /tmp/llama/model.gguf \
+            "${MODEL_URL}"
+          ls -lh /tmp/llama/model.gguf
+
+      - name: Start llama-server (background)
+        run: |
+          set -euo pipefail
+          cd "/tmp/llama/llama-${LLAMA_VERSION}"
+          LD_LIBRARY_PATH="$PWD" ./llama-server \
+            --model /tmp/llama/model.gguf \
+            --host 127.0.0.1 \
+            --port 11434 \
+            --ctx-size 2048 \
+            --threads 2 \
+            > /tmp/llama/server.log 2>&1 &
+          echo "LLAMA_SERVER_PID=$!" >> "$GITHUB_ENV"
+
+      - name: Wait for llama-server
+        run: |
+          set -euo pipefail
+          echo "Waiting for llama-server on port 11434…"
+          for attempt in $(seq 1 60); do
+            if curl --silent --fail http://127.0.0.1:11434/v1/models > /dev/null 2>&1; then
+              echo "llama-server ready (attempt ${attempt})."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "ERROR: llama-server did not become ready within 120 s."
+          echo "--- llama-server log ---"
+          cat /tmp/llama/server.log
+          exit 1
+
+      - name: Run local AI adapter smoke check (real mode)
+        run: pnpm --filter @workspace/scripts run check:local-ai
+
+      - name: Upload llama-server log on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: llama-server-log-${{ github.run_id }}
+          path: /tmp/llama/server.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Stop llama-server
+        if: always()
+        run: |
+          if [ -n "${LLAMA_SERVER_PID:-}" ]; then
+            kill "${LLAMA_SERVER_PID}" 2>/dev/null || true
+          fi
