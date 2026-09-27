@@ -1,0 +1,242 @@
+{
+  "ai-readiness-01-kubernetes-probes": {
+    "title": "Liveness, Readiness, and Startup Probes | Kubernetes",
+    "url": "https://kubernetes.io/docs/concepts/configuration/liveness-readiness-startup-probes/",
+    "publicationDate": "not shown",
+    "accessed": "2026-09-19",
+    "tier": 1,
+    "evidencePath": "research/sources/ai-readiness-01-kubernetes-probes.md"
+  },
+  "ai-readiness-02-aws-graceful-degradation": {
+    "title": "REL05-BP01 Implement graceful degradation to transform applicable hard dependencies into soft dependencies - AWS Well-Architected Framework",
+    "url": "https://docs.aws.amazon.com/wellarchitected/latest/framework/rel_mitigate_interaction_failure_graceful_degradation.html",
+    "publicationDate": "not shown",
+    "accessed": "2026-09-19",
+    "tier": 1,
+    "evidencePath": "research/sources/ai-readiness-02-aws-graceful-degradation.md"
+  },
+  "ai-readiness-04-microsoft-circuit-breaker": {
+    "title": "Circuit Breaker Pattern - Azure Architecture Center | Microsoft Learn",
+    "url": "https://learn.microsoft.com/en-us/azure/architecture/patterns/circuit-breaker",
+    "publicationDate": "not shown",
+    "accessed": "2026-09-19",
+    "tier": 1,
+    "evidencePath": "research/sources/ai-readiness-04-microsoft-circuit-breaker.md"
+  },
+  "ai-readiness-05-openai-errors": {
+    "title": "Error codes | OpenAI API",
+    "url": "https://platform.openai.com/docs/guides/error-codes",
+    "publicationDate": "not shown",
+    "accessed": "2026-09-19",
+    "tier": 1,
+    "evidencePath": "research/sources/ai-readiness-05-openai-errors.md"
+  },
+  "ai-readiness-06-google-sre-slos": {
+    "title": "Google SRE - Defining slo: service level objective meaning",
+    "url": "https://sre.google/sre-book/service-level-objectives/",
+    "publicationDate": "not shown",
+    "accessed": "2026-09-19",
+    "tier": 1,
+    "evidencePath": "research/sources/ai-readiness-06-google-sre-slos.md"
+  },
+  "gapfill-replit-01-deployment-types": {
+    "title": "Deployment types - Replit",
+    "url": "https://docs.replit.com/features/publishing/deployment-types",
+    "publicationDate": "not shown",
+    "accessed": "2026-09-19",
+    "tier": 1,
+    "evidencePath": "research/sources/gapfill-replit-01-deployment-types.md"
+  },
+  "gapfill-replit-02-autoscale": {
+    "title": "Deployment types - Replit",
+    "url": "https://docs.replit.com/references/publishing/autoscale-deployments",
+    "publicationDate": "not shown",
+    "accessed": "2026-09-19",
+    "tier": 1,
+    "evidencePath": "research/sources/gapfill-replit-02-autoscale.md"
+  },
+  "gapfill-replit-03-reserved-vm": {
+    "title": "Deployment types - Replit",
+    "url": "https://docs.replit.com/references/publishing/reserved-vm-deployments",
+    "publicationDate": "not shown",
+    "accessed": "2026-09-19",
+    "tier": 1,
+    "evidencePath": "research/sources/gapfill-replit-03-reserved-vm.md"
+  },
+  "payload-01-rfc6902": {
+    "title": "Fetched: 2026-09-19T16:07:25.168Z",
+    "url": "https://www.rfc-editor.org/rfc/rfc6902.html",
+    "publicationDate": "not shown",
+    "accessed": "2026-09-19",
+    "tier": 1,
+    "evidencePath": "research/sources/payload-01-rfc6902.md"
+  },
+  "payload-02-rfc7396": {
+    "title": "RFC 7396 - JSON Merge Patch",
+    "url": "https://datatracker.ietf.org/doc/html/rfc7396",
+    "publicationDate": "not shown",
+    "accessed": "2026-09-19",
+    "tier": 1,
+    "evidencePath": "research/sources/payload-02-rfc7396.md"
+  },
+  "payload-03-http-compression": {
+    "title": "Compression in HTTP - HTTP | MDN",
+    "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Compression",
+    "publicationDate": "not shown",
+    "accessed": "2026-09-19",
+    "tier": 1,
+    "evidencePath": "research/sources/payload-03-http-compression.md"
+  },
+  "payload-04-sse-standard": {
+    "title": "HTML Standard",
+    "url": "https://html.spec.whatwg.org/multipage/server-sent-events.html",
+    "publicationDate": "not shown",
+    "accessed": "2026-09-19",
+    "tier": 1,
+    "evidencePath": "research/sources/payload-04-sse-standard.md"
+  },
+  "payload-05-google-sre-percentiles": {
+    "title": "Google SRE - Monitoring Systems with Advanced Analytics",
+    "url": "https://sre.google/workbook/monitoring/",
+    "publicationDate": "not shown",
+    "accessed": "2026-09-19",
+    "tier": 2,
+    "evidencePath": "research/sources/payload-05-google-sre-percentiles.md"
+  },
+  "payload-06-otel-metrics": {
+    "title": "Metrics Data Model | OpenTelemetry",
+    "url": "https://opentelemetry.io/docs/specs/otel/metrics/data-model/",
+    "publicationDate": "not shown",
+    "accessed": "2026-09-19",
+    "tier": 1,
+    "evidencePath": "research/sources/payload-06-otel-metrics.md"
+  },
+  "pool-01-node-postgres-sizing": {
+    "title": "node-postgres",
+    "url": "https://node-postgres.com/guides/pool-sizing",
+    "publicationDate": "not shown",
+    "accessed": "2026-09-19",
+    "tier": 2,
+    "evidencePath": "research/sources/pool-01-node-postgres-sizing.md"
+  },
+  "pool-04-pgbouncer-usage": {
+    "title": "PgBouncer command-line usage",
+    "url": "https://www.pgbouncer.org/usage.html",
+    "publicationDate": "not shown",
+    "accessed": "2026-09-19",
+    "tier": 2,
+    "evidencePath": "research/sources/pool-04-pgbouncer-usage.md"
+  },
+  "pool-05-pgbouncer-config": {
+    "title": "PgBouncer config",
+    "url": "https://www.pgbouncer.org/config.html",
+    "publicationDate": "not shown",
+    "accessed": "2026-09-19",
+    "tier": 2,
+    "evidencePath": "research/sources/pool-05-pgbouncer-config.md"
+  },
+  "pool-06-node-postgres-api": {
+    "title": "node-postgres",
+    "url": "https://node-postgres.com/apis/pool",
+    "publicationDate": "not shown",
+    "accessed": "2026-09-19",
+    "tier": 2,
+    "evidencePath": "research/sources/pool-06-node-postgres-api.md"
+  },
+  "pool-07-postgresql-connections": {
+    "title": "PostgreSQL: Documentation: 18: 19.3. Connections and Authentication",
+    "url": "https://www.postgresql.org/docs/current/runtime-config-connection.html",
+    "publicationDate": "not shown",
+    "accessed": "2026-09-19",
+    "tier": 1,
+    "evidencePath": "research/sources/pool-07-postgresql-connections.md"
+  },
+  "pool-09-postgresql-limits": {
+    "title": "PostgreSQL: Documentation: 18: Appendix K. PostgreSQL Limits",
+    "url": "https://www.postgresql.org/docs/current/limits.html",
+    "publicationDate": "not shown",
+    "accessed": "2026-09-19",
+    "tier": 1,
+    "evidencePath": "research/sources/pool-09-postgresql-limits.md"
+  },
+  "pool-10-node-postgres-github": {
+    "title": "node-postgres/docs/pages/guides/pool-sizing.md at master · brianc/node-postgres · GitHub",
+    "url": "https://github.com/brianc/node-postgres/blob/master/docs/pages/guides/pool-sizing.md",
+    "publicationDate": "not shown",
+    "accessed": "2026-09-19",
+    "tier": 2,
+    "evidencePath": "research/sources/pool-10-node-postgres-github.md"
+  },
+  "reconnect-01-rfc9110": {
+    "title": "RFC 9110: HTTP Semantics",
+    "url": "https://www.rfc-editor.org/rfc/rfc9110.html",
+    "publicationDate": "not shown",
+    "accessed": "2026-09-19",
+    "tier": 1,
+    "evidencePath": "research/sources/reconnect-01-rfc9110.md"
+  },
+  "reconnect-02-azure-concurrency": {
+    "title": "Manage concurrency in Blob Storage - Azure Storage | Microsoft Learn",
+    "url": "https://learn.microsoft.com/en-us/azure/storage/blobs/concurrency-manage",
+    "publicationDate": "not shown",
+    "accessed": "2026-09-19",
+    "tier": 1,
+    "evidencePath": "research/sources/reconnect-02-azure-concurrency.md"
+  },
+  "reconnect-03-hlc-usenix": {
+    "title": "Fetched: 2026-09-19T16:08:03.135Z",
+    "url": "https://www.usenix.org/system/files/conference/hotcloud15/hotcloud15-demirbas.pdf",
+    "publicationDate": "not shown",
+    "accessed": "2026-09-19",
+    "tier": 1,
+    "evidencePath": "research/sources/reconnect-03-hlc-usenix.md"
+  },
+  "reconnect-04-lamport-clocks": {
+    "title": "Fetched: 2026-09-19T16:08:06.284Z",
+    "url": "https://www.cs.cornell.edu/courses/cs614/2002sp/Clocks.Lamport.1.pdf",
+    "publicationDate": "not shown",
+    "accessed": "2026-09-19",
+    "tier": 1,
+    "evidencePath": "research/sources/reconnect-04-lamport-clocks.md"
+  },
+  "sse-03-mdn-using-sse": {
+    "title": "Using server-sent events - Web APIs | MDN",
+    "url": "https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events",
+    "publicationDate": "not shown",
+    "accessed": "2026-09-19",
+    "tier": 2,
+    "evidencePath": "research/sources/sse-03-mdn-using-sse.md"
+  },
+  "sse-04-nginx-proxy-module": {
+    "title": "Module ngx_http_proxy_module",
+    "url": "https://nginx.org/en/docs/http/ngx_http_proxy_module.html",
+    "publicationDate": "not shown",
+    "accessed": "2026-09-19",
+    "tier": 1,
+    "evidencePath": "research/sources/sse-04-nginx-proxy-module.md"
+  },
+  "sse-05-node-http": {
+    "title": "HTTP | Node.js v26.9.0 Documentation",
+    "url": "https://nodejs.org/api/http.html#class-httpserverresponse",
+    "publicationDate": "not shown",
+    "accessed": "2026-09-19",
+    "tier": 1,
+    "evidencePath": "research/sources/sse-05-node-http.md"
+  },
+  "sse-06-redis-pubsub": {
+    "title": "Redis Pub/sub | Docs",
+    "url": "https://redis.io/docs/latest/develop/pubsub/",
+    "publicationDate": "not shown",
+    "accessed": "2026-09-19",
+    "tier": 1,
+    "evidencePath": "research/sources/sse-06-redis-pubsub.md"
+  },
+  "sse-07-w3c-eventsource": {
+    "title": "HTML Standard",
+    "url": "https://www.w3.org/TR/eventsource/",
+    "publicationDate": "not shown",
+    "accessed": "2026-09-19",
+    "tier": 1,
+    "evidencePath": "research/sources/sse-07-w3c-eventsource.md"
+  }
+}

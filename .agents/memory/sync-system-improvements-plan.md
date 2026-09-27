@@ -1,5 +1,20 @@
 # Sync System Improvements — Plan
 
+**Superseded, 2026-09-21**: `docs/sync-reliability-unified-plan-2026-09-19.md` is now the
+current sync authority — it consolidates deeper research (`docs/sync-deep-dive-2026-09-19.md`,
+`docs/reconnect-reliability-deep-dive-2026-09-19.md`, `docs/server-research-deep-dive-2026-09-19.md`,
+`research/sync-reliability-operations-deep-dive-2026-09-19.md`) and explicitly corrects
+several assumptions this doc's delta-sync proposal rested on. In particular: **"Measure
+current wire behavior before adopting JSON Patch, compression, selective sync, or broader
+sparse sections"** is now the decision — this doc's Priority-1 recommendation to build
+delta sync outright, without first measuring production payload distributions, is
+superseded by that more disciplined sequencing. Also corrected: `canonicalRevision` is
+**not** universal optimistic-locking on every day-state write (it's route-specific —
+operational intents increment it, ordinary day-state PUT does not) — the shadow/diff
+design below assumed a more uniform versioning scheme than actually exists. **Defer to
+the unified plan for what to build next in this area; treat what follows as historical
+context for how the delta-sync idea originated, not current direction.**
+
 **Updated**: 2026-09-18 — merged with an independent research pass (`improvement-research-2026-09-18.md`,
 `idea-backlog.md` §16) that reached the same delta-sync conclusion and added the
 blank-template-lockstep item (§5 below).
