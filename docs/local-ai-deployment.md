@@ -84,6 +84,18 @@ mock mode) asserts that a transport failure surfaces as an error rather than a
 silent success. It is also wired into the `@workspace/scripts` test chain, so
 CI gates the local path on every run.
 
+## Running the check in CI
+
+The routine `@workspace/scripts` test chain only exercises the **mock** path so
+it stays fast and offline. To verify the **real** path automatically, run the
+manual **Local AI smoke check** workflow
+(`.github/workflows/local-ai-smoke.yml`) from the Actions tab
+(`workflow_dispatch`). It boots a prebuilt llama.cpp server on the runner,
+downloads a small GGUF model, points the adapter at it via `LOCAL_AI_BASE_URL`,
+and runs `check:local-ai` in real mode. It is manual-only because it downloads a
+model server and model weights; the inputs let you override the llama.cpp
+release tag, the model URL, and the model name.
+
 ## Rolling back
 
 Unset `LOCAL_AI_BASE_URL` (or simply omit the overlay) and the API reverts to
