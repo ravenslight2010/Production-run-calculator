@@ -19,6 +19,33 @@ const router: IRouter = Router();
 
 type CheckStatus = "ok" | "error" | "pending";
 
+// Optional live probe of a self-hosted OpenAI-compatible model server
+// (Ollama / llama.cpp). Env-config presence is the deploy gate; the live probe
+// only runs when LOCAL_AI_STRICT_READINESS=true so that a slow cold-start
+// tunnel or model load does not block platform rollouts by default. The
+// fail-closed AI behavior per the deterministic-AI-gates policy already covers
+// the runtime path.
+async function probeLocalModelHost(): Promise<CheckStatus> {
+  const base = process.env.LOCAL_AI_BASE_URL;
+  if (!base || process.env.LOCAL_AI_STRICT_READINESS !== "true") return "ok";
+  const probeUrl = `${base.replace(/\/$/, "")}/models`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 1500);
+  try {
+    const res = await fetch(probeUrl, {
+      signal: controller.signal,
+      headers: process.env.LOCAL_AI_API_KEY
+        ? { authorization: `Bearer ${process.env.LOCAL_AI_API_KEY}` }
+        : undefined,
+    });
+    return res.ok ? "ok" : "error";
+  } catch {
+    return "error";
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function readiness(req: Request, res: Response): Promise<void> {
   const startup = getStartupHealth();
   const correlationId = String(
@@ -61,12 +88,26 @@ async function readiness(req: Request, res: Response): Promise<void> {
     }
 
     // AI remains a hard readiness dependency under the existing operational
-    // policy. Only its credential detection is delegated to the active Gemini
-    // adapter so this probe cannot drift to unrelated provider keys.
-    const aiConfigured = isGeminiProviderConfigured();
+    // policy. Credential detection is delegated to the active Gemini adapter
+    // (so this probe cannot drift to unrelated provider keys) OR satisfied by a
+    // configured self-hosted LOCAL_AI_BASE_URL. An unrelated OPENAI_API_KEY is
+    // intentionally NOT accepted. When a local host is configured, an optional
+    // strict probe (LOCAL_AI_STRICT_READINESS=true) can fail readiness if the
+    // model server is unreachable.
+    const aiConfigured =
+      isGeminiProviderConfigured() || Boolean(process.env.LOCAL_AI_BASE_URL);
     checks.dependencies = aiConfigured
       ? { status: "ok" }
       : { status: "error", detail: "ai_provider_not_configured" };
+    if (aiConfigured && process.env.LOCAL_AI_BASE_URL) {
+      const probeStatus = await probeLocalModelHost();
+      if (probeStatus !== "ok") {
+        checks.dependencies = {
+          status: "error",
+          detail: "local_model_host_unreachable",
+        };
+      }
+    }
     const backgroundOperationDiagnostics = await getBackgroundOperationDiagnostics();
     checks.backgroundWorkers = backgroundOperationsDegraded(backgroundOperationDiagnostics)
       ? { status: "error", detail: "sustained_background_worker_failures" }
