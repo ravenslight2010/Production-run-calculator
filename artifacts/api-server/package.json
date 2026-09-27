@@ -22,7 +22,7 @@
     "test:release:concurrency": "timeout 180s sh -c 'pnpm exec vitest run src/routes/inventory.integration.test.ts --testNamePattern=\"concurrent|parallel|same run twice\" && pnpm exec vitest run src/routes/sync.integration.test.ts --testNamePattern=\"concurrent|burst under pool pressure|repeated first-write burst\"'"
   },
   "dependencies": {
-    "@google/genai": "^2.22.0",
+    "@google/genai": "^2.23.0",
     "@workspace/ai-memory": "workspace:*",
     "@workspace/anomaly": "workspace:*",
     "@workspace/api-zod": "workspace:*",
