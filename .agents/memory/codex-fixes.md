@@ -1482,6 +1482,17 @@ from dying in <1 s to running 36 s, i.e. the browser now launches; the three cas
 clean-start smoke all PASS. The `cross-device-smoke` failure below is unchanged — same assertion,
 same `Received: undefined`.
 
+**CI result for run 36292981047 (fixes (a) + (b))**: the WebKit gate now runs 159 s and the
+three cases execute for real, so both harness faults are confirmed fixed. What remains are
+GENUINE test failures, not provisioning: `release-webkit-smoke.spec.ts:143` (`resume-run` not
+found after pause), `:154` (sync-pull recovery, 1.3 m = timeout) and `:201` (report locator
+hidden). These have never run before, so treat them as newly-visible rather than newly-broken, and
+budget real debugging for each. `browser calendar` still passes (7 s). `browser accessibility`
+FAILED this run (23 passed / 1 failed, `accessibility-smoke.spec.ts:818` expecting
+`scheduleCalendar` hidden but visible) after PASSING 220 s in the previous run — treat as
+suspected flake and confirm before chasing. `cross-device-smoke` is unchanged, still
+`Received: undefined` at line 172.
+
 **Verification**: `playwright install --with-deps --dry-run webkit` against the pinned Playwright
 (1.63.0) lists the 298 packages the fix adds, covering every family CI reported missing
 (gstreamer1.0-*, dbus, adwaita-icon-theme, plus the gtk/flite/avif/hyphen/manette/secret/wayland
