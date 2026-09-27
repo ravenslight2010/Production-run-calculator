@@ -7,6 +7,13 @@ vi.mock("@google/genai", () => ({
   GoogleGenAI: class {
     models = { generateContent, generateContentStream };
   },
+  ThinkingLevel: {
+    THINKING_LEVEL_UNSPECIFIED: "THINKING_LEVEL_UNSPECIFIED",
+    MINIMAL: "MINIMAL",
+    LOW: "LOW",
+    MEDIUM: "MEDIUM",
+    HIGH: "HIGH",
+  },
 }));
 
 import {
