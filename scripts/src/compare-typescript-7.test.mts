@@ -55,6 +55,13 @@ test("lockfile native inventory is complete and unsupported runners fail closed"
     "utf8",
   );
   const packages = typescript7NativePackagesFromLockfile(lockfile, "7.0.2");
+  assert.deepEqual(
+    typescript7NativePackagesFromLockfile(
+      `---\nlockfileVersion: '9.0'\npackages:\n  'ignored@1.0.0': {}\nsnapshots:\n  'ignored@1.0.0': {}\n---\n${lockfile}`,
+      "7.0.2",
+    ),
+    packages,
+  );
   assert.equal(packages.length, 20);
   assert.ok(packages.includes("@typescript/typescript-linux-x64"));
   assert.deepEqual(approvedTypescript7Runner("linux", "x64"), {
