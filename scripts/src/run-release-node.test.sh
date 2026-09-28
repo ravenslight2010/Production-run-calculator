@@ -46,8 +46,15 @@ make_workspace() {
 set -euo pipefail
 
 printf 'child-node=%s\n' "$(node --version)" >>"$RUN_LOG"
+pnpm --filter @workspace/scripts exec node --version
 EOF
-  chmod +x "${workspace}/bin/release-child"
+  cat >"${workspace}/bin/pnpm" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+printf 'package-child-node=%s\n' "$(node --version)" >>"$RUN_LOG"
+EOF
+  chmod +x "${workspace}/bin/release-child" "${workspace}/bin/pnpm"
 
   printf '%s\n' "$workspace"
 }
@@ -217,6 +224,7 @@ test_matching_node_skips_npx() {
   events=$(cat "$log_path")
   assert_contains "$events" "preflight-node=v${REQUIRED_NODE_VERSION}"
   assert_contains "$events" "child-node=v${REQUIRED_NODE_VERSION}"
+  assert_contains "$events" "package-child-node=v${REQUIRED_NODE_VERSION}"
   assert_not_contains "$events" "npx-invoked"
   echo "PASS: matching Node path runs preflight, skips npx, and preserves Node for the child"
 }
@@ -243,6 +251,7 @@ test_mismatching_node_uses_npx() {
   assert_contains "$events" "npx-invoked"
   assert_contains "$events" "preflight-node=v${REQUIRED_NODE_VERSION}"
   assert_contains "$events" "child-node=v${REQUIRED_NODE_VERSION}"
+  assert_contains "$events" "package-child-node=v${REQUIRED_NODE_VERSION}"
   echo "PASS: mismatching Node path invokes npx, runs preflight, and preserves pinned Node for the child"
 }
 
@@ -272,6 +281,7 @@ test_wrong_fallback_node_version_fails_before_release_commands() {
   assert_contains "$events" "npx-invoked"
   assert_not_contains "$events" "preflight-node="
   assert_not_contains "$events" "child-node="
+  assert_not_contains "$events" "package-child-node="
   echo "PASS: wrong fallback Node version fails before preflight or child execution"
 }
 
