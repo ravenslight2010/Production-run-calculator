@@ -545,14 +545,21 @@ function broadcast(
   senderId: string,
   scope: Scope,
   date: string,
-  meta: { canonicalRevision?: number; serverTime?: number } = {},
+  meta: {
+    canonicalRevision?: number;
+    serverTime?: number;
+    operationalProjection?: ReturnType<typeof computeServerLiveState>["operationalProjection"];
+  } = {},
 ): void {
   data = completeSyncData(data);
-  const liveState = computeServerLiveState(
+  const computedLiveState = computeServerLiveState(
     data,
     meta.serverTime ?? Date.now(),
     meta.canonicalRevision ?? 0,
   );
+  const liveState = Object.prototype.hasOwnProperty.call(meta, "operationalProjection")
+    ? { ...computedLiveState, operationalProjection: meta.operationalProjection ?? null }
+    : computedLiveState;
   for (const client of clients) {
     if (client.scope === scope && client.watchDate === date) {
       if (client.clientId === senderId) {
@@ -1410,14 +1417,16 @@ router.get("/sync/today", async (req: Request, res: Response): Promise<void> => 
   const serverTime = Date.now();
   res.setHeader("X-Sync-Canonical-Revision", String(canonicalRevision));
   res.setHeader("X-Sync-Server-Time", String(serverTime));
+  const liveState = computeServerLiveState(data, serverTime, canonicalRevision);
   if (unchangedResponse(res, data, requestedSnapshot(req), {
     resetEpoch: resetState.epoch,
     rollover: resetState.rollover,
     canonicalRevision,
+    serverTime,
+    operationalProjection: liveState.operationalProjection,
   })) return;
   res.setHeader("X-Sync-Response", "complete");
   if (data) res.setHeader("X-Sync-Snapshot", syncSnapshotId(data));
-  const liveState = computeServerLiveState(data, serverTime, canonicalRevision);
   if (!liveState.operationalProjection) {
     // Preserve the empty-baseline response shape for clients that have no
     // selected run yet. The server-time headers still provide the anchor.
@@ -2658,32 +2667,39 @@ router.post("/sync/e2e/auto-track-tick", async (req: Request, res: Response): Pr
   const summary = req.body?.skipAutoTrack === true
     ? { examinedDates: 0, builtClaims: 0, accepted: 0, outcomes: {} }
     : await runAutoTrackServerTicks({ nowMs, scope, date });
-  // A deterministic E2E clock step is also an authoritative projection frame.
-  // Production heartbeats publish this frame even when no counter cadence is
-  // due; without it, a test step inside the freezer-fill window would leave the
-  // browser displaying the projection captured at the previous server beat.
-  // Keep this fixture scoped exactly like the normal SSE path.
+  // Compute counters at the fixture clock, but timestamp the read model at the
+  // real server clock. This keeps deterministic elapsed-time tests from
+  // manufacturing a future server timestamp that a later wake cannot adopt.
   const [row] = await db.select().from(dailySyncTable).where(and(
     eq(dailySyncTable.scope, scope),
     eq(dailySyncTable.date, date),
   ));
-  if (row) {
-    broadcast(row.data, "server:e2e-clock", scope, date, {
-      canonicalRevision: row.canonicalRevision ?? 0,
-      serverTime: nowMs,
-    });
-  }
+  const serverTime = Date.now();
   const authoritative = row
     ? computeServerLiveState(row.data, nowMs, row.canonicalRevision ?? 0)
     : null;
+  const operationalProjection = authoritative?.operationalProjection
+    ? {
+        ...authoritative.operationalProjection,
+        serverTimeMs: serverTime,
+        capturedAtServerMs: serverTime,
+      }
+    : null;
+  if (row) {
+    broadcast(row.data, "server:e2e-clock", scope, date, {
+      canonicalRevision: row.canonicalRevision ?? 0,
+      serverTime,
+      operationalProjection,
+    });
+  }
   res.json({
     ...summary,
     canonicalRevision: row?.canonicalRevision ?? 0,
-    serverTime: nowMs,
+    serverTime,
     projected: !!row,
     snapshotId: row ? syncSnapshotId(row.data) : undefined,
     autoTrackSchedule: authoritative?.autoTrackSchedule ?? null,
-    operationalProjection: authoritative?.operationalProjection ?? null,
+    operationalProjection,
   });
 });
 

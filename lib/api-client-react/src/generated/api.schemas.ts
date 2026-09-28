@@ -1075,6 +1075,9 @@ export interface SyncUnchangedResponse {
   rollover: boolean;
   /** @minimum 0 */
   canonicalRevision?: number;
+  /** @minimum 0 */
+  serverTime?: number;
+  operationalProjection?: OperationalProjection | null;
 }
 
 export type SyncRecoveryPayload = SyncPayload & {

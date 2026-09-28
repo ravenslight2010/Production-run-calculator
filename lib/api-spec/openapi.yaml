@@ -5584,6 +5584,11 @@ components:
         resetEpoch: { type: integer, minimum: 0 }
         rollover: { type: boolean }
         canonicalRevision: { type: integer, minimum: 0 }
+        serverTime: { type: integer, minimum: 0 }
+        operationalProjection:
+          oneOf:
+            - $ref: "#/components/schemas/OperationalProjection"
+            - { type: "null" }
 
     SyncRecoveryPayload:
       allOf:

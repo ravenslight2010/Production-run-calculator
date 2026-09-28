@@ -17,6 +17,7 @@ export interface SyncWriteResponseBody<T> {
   snapshotId?: string;
   partialFallback?: boolean;
   operationalProjection?: OperationalProjection | null;
+  serverTime?: number;
 }
 
 export type PartialSyncEnvelope = {

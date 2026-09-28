@@ -1,6 +1,10 @@
 import type { FormValues, PackagingProgress } from "./types";
 
 const PACKAGING_PROGRESS_KEY = "run-calc-packaging-progress";
+// Older clients incorrectly used epoch milliseconds as correction generations.
+// The API assigns small per-run ordinals, so normalize those legacy values
+// before comparing them with canonical server progress.
+const LEGACY_TIMESTAMP_GENERATION_THRESHOLD = 1_000_000_000;
 
 function finiteNonNegative(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) && value >= 0
@@ -28,7 +32,9 @@ export function normalizePackagingProgress(value: unknown): PackagingProgress | 
   return {
     skidsCompleted: Math.floor(skidsCompleted),
     casesOnCurrentSkid: Math.round(casesOnCurrentSkid),
-    correctionGeneration,
+    correctionGeneration: correctionGeneration >= LEGACY_TIMESTAMP_GENERATION_THRESHOLD
+      ? 0
+      : Math.floor(correctionGeneration),
     updatedAt,
     manualOverrideUntil,
   };
@@ -91,6 +97,13 @@ function nextTimestamp(now: number, previous: number | undefined): number {
   return Math.max(now, (previous ?? 0) + 1);
 }
 
+function nextCorrectionGeneration(previous: number | undefined): number {
+  const generation = previous ?? 0;
+  return generation >= Number.MAX_SAFE_INTEGER
+    ? Number.MAX_SAFE_INTEGER
+    : Math.floor(generation) + 1;
+}
+
 export function recordManualPackagingProgress(args: {
   runId: string;
   skidsCompleted: number;
@@ -104,7 +117,7 @@ export function recordManualPackagingProgress(args: {
   const progress: PackagingProgress = {
     skidsCompleted: Math.max(0, Math.floor(Number(args.skidsCompleted) || 0)),
     casesOnCurrentSkid: Math.max(0, Math.round(Number(args.casesOnCurrentSkid) || 0)),
-    correctionGeneration: nextTimestamp(now, previous?.correctionGeneration),
+    correctionGeneration: nextCorrectionGeneration(previous?.correctionGeneration),
     updatedAt: nextTimestamp(now, previous?.updatedAt),
     manualOverrideUntil: Math.max(now, args.manualOverrideUntil),
   };

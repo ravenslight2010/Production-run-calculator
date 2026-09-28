@@ -14,3 +14,24 @@ starting local servers alone does not redirect fixture setup requests.
 
 **How to apply:** Use the local API URL for focused release-debug runs, then
 investigate any remaining UI failure separately from fixture startup.
+
+## Deterministic browser clocks and server projections
+
+When a browser test mocks `Date` but the API process keeps real time, keep the
+projection's calculation time separate from its server capture time. Fixture
+counters may be calculated at simulated time, but each synthetic projection
+must be stamped with the current server time. For server-owned lifecycle
+commands, do not assume that advancing only the browser clock also advances the
+canonical run timeline; make any nonzero drain projection an explicit,
+consistent fixture and verify real server drain math separately.
+
+**Why:** A future synthetic server timestamp can hide stale-frame ordering
+problems, while the API's periodic frames continue on wall time and may replace
+a fixture-time calculation after the browser clock is restored.
+
+**How to apply:** Keep screen-off/wake browser clock jumps independent from
+server timestamps. Before the final wake after a simulated future interval,
+restore the browser clock to current server time, capture the wake GET's
+projection, and compare the visible calculation with that response. Do not
+publish a future synthetic frame, loosen counter assertions, or let client
+progress replace canonical server state.

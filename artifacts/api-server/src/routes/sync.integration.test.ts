@@ -1886,6 +1886,125 @@ describe("/sync snapshot conditionals", () => {
     expect(body.data).toBeUndefined();
   });
 
+  it("includes a fresh operational projection in an unchanged foreground read", async () => {
+    const startedAt = Date.now() - 60_000;
+    const activePayload = {
+      dayState: {
+        date: DATE,
+        currentIndex: 0,
+        runs: [{
+          id: "wake-projection-run",
+          brand: "Acme",
+          flavor: "Pep",
+          startedAt,
+        }],
+      },
+      runValues: { "wake-projection-run": { casesNeeded: 240 } },
+      runValuesUpdatedAt: { "wake-projection-run": 1 },
+    };
+    const write = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "wake-projection-writer", payload: activePayload }),
+    });
+    const written = await write.json() as { snapshotId?: string };
+    expect(write.ok).toBe(true);
+    expect(written.snapshotId).toMatch(/^[a-f0-9]{64}$/);
+
+    const response = await fetch(
+      `${baseUrl}/api/sync/today?today=${DATE}&snapshot=${written.snapshotId}`,
+      { headers: authHeaders() },
+    );
+    const body = await response.json() as {
+      unchanged?: boolean;
+      snapshotId?: string;
+      canonicalRevision?: number;
+      serverTime?: number;
+      operationalProjection?: {
+        runId?: string;
+        serverTimeMs?: number;
+        facts?: { runStatus?: string };
+      } | null;
+    };
+    expect(response.headers.get("X-Sync-Response")).toBe("unchanged");
+    expect(body).toMatchObject({
+      unchanged: true,
+      snapshotId: written.snapshotId,
+      operationalProjection: {
+        runId: "wake-projection-run",
+        facts: { runStatus: "running" },
+      },
+    });
+    expect(body.canonicalRevision).toEqual(expect.any(Number));
+    expect(body.serverTime).toEqual(expect.any(Number));
+    expect(body.operationalProjection?.serverTimeMs).toBe(body.serverTime);
+  });
+
+  it("returns nonzero draining occupancy from an unchanged read of an ended run", async () => {
+    const now = Date.now();
+    const startedAt = now - 10 * 60_000;
+    const endedAt = now - 1_000;
+    const endedPayload = {
+      dayState: {
+        date: DATE,
+        currentIndex: 0,
+        runs: [{
+          id: "wake-draining-run",
+          brand: "Acme",
+          flavor: "Pep",
+          startedAt,
+          endedAt,
+        }],
+      },
+      runValues: {
+        "wake-draining-run": {
+          casesNeeded: 240,
+          cycleSpeed: 30,
+          crustsPerCycle: 2,
+          speedAdjustment: 1,
+          pizzasPerCase: 6,
+          freezerTime: 5,
+        },
+      },
+      runValuesUpdatedAt: { "wake-draining-run": 1 },
+    };
+    const write = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "wake-drain-writer", payload: endedPayload }),
+    });
+    const written = await write.json() as { snapshotId?: string };
+    expect(write.ok).toBe(true);
+    expect(written.snapshotId).toMatch(/^[a-f0-9]{64}$/);
+
+    const response = await fetch(
+      `${baseUrl}/api/sync/today?today=${DATE}&snapshot=${written.snapshotId}`,
+      { headers: authHeaders() },
+    );
+    const body = await response.json() as {
+      unchanged?: boolean;
+      snapshotId?: string;
+      serverTime?: number;
+      operationalProjection?: {
+        runId?: string;
+        serverTimeMs?: number;
+        counters?: { casesOnLine?: number };
+        facts?: { runStatus?: string };
+      } | null;
+    };
+    expect(response.headers.get("X-Sync-Response")).toBe("unchanged");
+    expect(body).toMatchObject({
+      unchanged: true,
+      snapshotId: written.snapshotId,
+      operationalProjection: {
+        runId: "wake-draining-run",
+        facts: { runStatus: "ended" },
+      },
+    });
+    expect(body.operationalProjection?.counters?.casesOnLine).toBeGreaterThan(0);
+    expect(body.operationalProjection?.serverTimeMs).toBe(body.serverTime);
+  });
+
   it("persists a changed explicit-date PUT even when it carries the prior snapshot ID", async () => {
     const scheduledDate = "2030-08-23";
     const first = await fetch(`${baseUrl}/api/sync/${scheduledDate}?today=${DATE}`, {

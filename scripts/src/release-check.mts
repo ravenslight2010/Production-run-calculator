@@ -876,6 +876,7 @@ export const RELEASE_EVIDENCE_ALLOWLIST = [
   "clean-start/startup-web.log",
   "clean-start/startup-mockup.log",
   "browser-full/FINAL-REPORT.md",
+  "screen-off-wake/FINAL-REPORT.md",
   "browser-smoke/webkit-result.json",
   SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
   IMPORT_CORPUS_EVALUATION_EVIDENCE,

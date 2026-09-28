@@ -40,6 +40,53 @@ describe("packaging progress register", () => {
     expect(result.rejectedRemoteIds.has("run1")).toBe(true);
   });
 
+  it("uses ordinal correction generations and separate monotonic update timestamps", () => {
+    const first = recordManualPackagingProgress({
+      runId: "run1",
+      skidsCompleted: 1,
+      casesOnCurrentSkid: 24,
+      manualOverrideUntil: 1_100,
+      now: 100,
+    });
+    const second = recordManualPackagingProgress({
+      runId: "run1",
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 45,
+      manualOverrideUntil: 1_100,
+      now: 100,
+    });
+
+    expect(first).toMatchObject({ correctionGeneration: 1, updatedAt: 100 });
+    expect(second).toMatchObject({ correctionGeneration: 2, updatedAt: 101 });
+  });
+
+  it("normalizes legacy timestamp generations so canonical API ordinals can be adopted", () => {
+    localStorage.setItem("run-calc-packaging-progress", JSON.stringify({
+      run1: {
+        skidsCompleted: 0,
+        casesOnCurrentSkid: 45,
+        correctionGeneration: 1_700_000_000_000,
+        updatedAt: 1_700_000_000_000,
+        manualOverrideUntil: 0,
+      },
+    }));
+
+    const legacyLocal = loadPackagingProgress();
+    expect(legacyLocal.run1.correctionGeneration).toBe(0);
+
+    const canonical = {
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 45,
+      correctionGeneration: 1,
+      updatedAt: 1_700_000_000_100,
+      manualOverrideUntil: 1_700_000_060_100,
+    };
+    const adopted = reconcilePackagingProgress(legacyLocal, { run1: canonical });
+
+    expect(adopted.acceptedRemoteIds.has("run1")).toBe(true);
+    expect(adopted.merged.run1).toEqual(canonical);
+  });
+
   it("accepts same-generation automatic advancement after adoption", () => {
     const result = reconcilePackagingProgress(
       {

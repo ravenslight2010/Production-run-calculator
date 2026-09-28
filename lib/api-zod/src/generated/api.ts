@@ -237,6 +237,8 @@ export const getSyncTodayResponseOneTwoResetEpochMin = 0;
 export const getSyncTodayResponseTwoSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
 export const getSyncTodayResponseTwoResetEpochMin = 0;
 export const getSyncTodayResponseTwoCanonicalRevisionMin = 0;
+export const getSyncTodayResponseTwoServerTimeMin = 0;
+export const getSyncTodayResponseTwoOperationalProjectionOneCalculationRevisionMin = 0;
 export const putSyncTodayQueryEpochMin = 0;
 export const putSyncTodayBodySnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
 export const putSyncTodayBodyPayloadTwoBaseSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
@@ -6506,6 +6508,8 @@ export const GetSyncTodayQueryParams = zod.object({
 
 
 
+
+
 export const GetSyncTodayResponse = zod.union([zod.object({
   "dayState": zod.record(zod.string(), zod.unknown()),
   "runValues": zod.record(zod.string(), zod.unknown())
@@ -6517,7 +6521,57 @@ export const GetSyncTodayResponse = zod.union([zod.object({
   "snapshotId": zod.string().regex(getSyncTodayResponseTwoSnapshotIdRegExp),
   "resetEpoch": zod.int().min(getSyncTodayResponseTwoResetEpochMin),
   "rollover": zod.boolean(),
-  "canonicalRevision": zod.int().min(getSyncTodayResponseTwoCanonicalRevisionMin).optional()
+  "canonicalRevision": zod.int().min(getSyncTodayResponseTwoCanonicalRevisionMin).optional(),
+  "serverTime": zod.int().min(getSyncTodayResponseTwoServerTimeMin).optional(),
+  "operationalProjection": zod.union([zod.object({
+  "version": zod.literal(1),
+  "runId": zod.string(),
+  "lifecycleGeneration": zod.string(),
+  "serverTimeMs": zod.number(),
+  "capturedAtServerMs": zod.number(),
+  "calculationRevision": zod.int().min(getSyncTodayResponseTwoOperationalProjectionOneCalculationRevisionMin),
+  "effectiveElapsedSec": zod.number(),
+  "timers": zod.object({
+  "nextBatchInSec": zod.number(),
+  "pressRemainingSec": zod.number(),
+  "freezerElapsedSec": zod.number(),
+  "freezerRemainingSec": zod.number()
+}),
+  "counters": zod.object({
+  "casesCompleted": zod.number(),
+  "casesInFreezer": zod.number(),
+  "casesOnLine": zod.number(),
+  "casesLeftToRun": zod.number(),
+  "pressCasesLeft": zod.number(),
+  "traysOnLine": zod.number(),
+  "batchesReady": zod.number(),
+  "sauceBarrelsMade": zod.number(),
+  "app1BatchesMade": zod.number(),
+  "app2BatchesMade": zod.number(),
+  "app3BatchesMade": zod.number(),
+  "app4BatchesMade": zod.number()
+}),
+  "facts": zod.object({
+  "runStatus": zod.enum(['pending', 'running', 'paused', 'ended']),
+  "pressDone": zod.boolean(),
+  "paceStatus": zod.union([zod.enum(['on-pace', 'ahead', 'behind']),zod.null()]),
+  "paceDelta": zod.number()
+}),
+  "calc": zod.record(zod.string(), zod.unknown()),
+  "due": zod.object({
+  "runId": zod.string(),
+  "generation": zod.string(),
+  "atMs": zod.number(),
+  "entries": zod.array(zod.object({
+  "channel": zod.string(),
+  "dueAt": zod.number(),
+  "dueNow": zod.boolean(),
+  "nextDueAt": zod.number(),
+  "canonical": zod.boolean(),
+  "sequence": zod.number().optional()
+}))
+})
+}).describe('Server-owned live operational read model returned beside the canonical sync snapshot.'),zod.null()]).optional()
 })])
 
 

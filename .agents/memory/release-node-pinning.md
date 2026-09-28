@@ -10,3 +10,5 @@ Release validation records the Node runtime from the `node` executable used by p
 **How to apply:** For release validation, prepend the pinned Node directory (or a pinned `node` shim) to PATH before invoking pnpm, then verify both `node --version` and a package-script invocation before trusting evidence.
 
 Replit's Node major module does not guarantee the evidence-bound patch, including after a workflow restart. **Why:** The workspace can expose an older patch than the retained evidence and CI pin despite declaring the correct major. **How to apply:** Select the exact patch at each validation or setup entry point and fail closed when it cannot be obtained; do not assume a fresh terminal inherited the workflow's PATH.
+
+On a fresh workspace, Corepack may prompt to download the pinned pnpm package on its first invocation, which can stall non-interactive validation before any child command starts. **Why:** The Node pin and package-manager cache are independent. **How to apply:** Resolve the configured package manager once (for example, with `pnpm --version`) before starting a parallel validation batch.

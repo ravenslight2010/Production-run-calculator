@@ -513,8 +513,22 @@ async function installOperationalProjectionOverride(
               listener.call(source, event);
               return;
             }
+            const frameServerTime = frame.serverTime;
+            const refreshedProjection = replacement
+              && typeof replacement === "object"
+              && typeof frameServerTime === "number"
+              && Number.isFinite(frameServerTime)
+              ? {
+                  ...(replacement as Record<string, unknown>),
+                  serverTimeMs: frameServerTime,
+                  capturedAtServerMs: frameServerTime,
+                }
+              : replacement;
             listener.call(source, new MessageEvent(event.type, {
-              data: JSON.stringify({ ...frame, operationalProjection: replacement }),
+              data: JSON.stringify({
+                ...frame,
+                operationalProjection: refreshedProjection,
+              }),
               origin: event.origin,
               lastEventId: event.lastEventId,
             }));
@@ -532,9 +546,20 @@ async function installOperationalProjectionOverride(
     }
     const response = await route.fetch();
     const body = await response.json() as Record<string, unknown>;
+    const responseServerTime = body.serverTime;
+    const refreshedProjection = projection
+      && typeof projection === "object"
+      && typeof responseServerTime === "number"
+      && Number.isFinite(responseServerTime)
+      ? {
+          ...(projection as Record<string, unknown>),
+          serverTimeMs: responseServerTime,
+          capturedAtServerMs: responseServerTime,
+        }
+      : projection;
     await route.fulfill({
       response,
-      json: { ...body, operationalProjection: projection },
+      json: { ...body, operationalProjection: refreshedProjection },
     });
   });
   return async (nextProjection) => {
@@ -1312,6 +1337,13 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         endProjection.operationalProjection?.counters?.casesOnLine,
       );
 
+      // Lifecycle commands are server-timestamped. Return the browser fixture
+      // clock to live wall time before End so its optimistic lifecycle stamp
+      // cannot be newer than the server's canonical end timestamp.
+      const stopAtMs = Date.now();
+      await page.evaluate((ms) => {
+        (window as unknown as Record<string, unknown>).__testFakeMs = ms;
+      }, stopAtMs);
       await page.getByRole("button", { name: /stop.?run/i }).first().click();
       let endedAt = 0;
       await expect.poll(async () => {
@@ -1319,13 +1351,47 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         return endedAt > 0;
       }, { timeout: 15_000 }).toBe(true);
 
-      const drainProjection = await mockDateNow(page, endedAt + 3 * 60_000);
-      await setOperationalProjection(drainProjection.operationalProjection);
+      // Suppress the fixture tick's SSE projection so this leg verifies that
+      // foreground recovery adopts the canonical GET, not a pre-wake heartbeat.
+      await setOperationalProjection(null);
+      const drainProjection = await mockDateNow(page, endedAt + 5_000);
+      const serverProjection = drainProjection.operationalProjection;
+      if (!serverProjection) {
+        throw new Error("the post-End fixture tick returned no operational projection");
+      }
+      // Stop is server-timestamped, while this browser scenario advances its
+      // calculation clock without waiting 15 real minutes. Use a deterministic
+      // one-case draining read model so the test still exercises nonzero
+      // post-End occupancy; the API integration test verifies the real server
+      // projection for a canonical ended run.
+      const expectedDrainingCases = computeCasesOnLine({
+        startedAt: endedAt - 6_000,
+        endedAt,
+        now: endedAt + 1_000,
+        ...occupancy,
+      });
+      expect(expectedDrainingCases, "the post-End fixture must contain one draining case")
+        .toBe(1);
+      const drainingProjection = {
+        ...serverProjection,
+        counters: {
+          ...serverProjection.counters,
+          casesOnLine: expectedDrainingCases,
+        },
+        calc: {
+          ...serverProjection.calc,
+          casesOnLine: expectedDrainingCases,
+        },
+      };
+      await setOperationalProjection(drainingProjection);
       await simulateScreenOff(page);
+      // Move the browser wall clock back while hidden; foreground recovery
+      // must adopt the fresh server-time projection despite that local rollback.
+      await page.evaluate((ms) => {
+        (window as unknown as Record<string, unknown>).__testFakeMs = ms;
+      }, stopAtMs);
       await simulateOnlineWake(page);
-      await expect.poll(() => readCasesOnLine(page)).toBe(
-        drainProjection.operationalProjection?.counters?.casesOnLine,
-      );
+      await expect.poll(() => readCasesOnLine(page)).toBe(expectedDrainingCases);
     },
   );
 
@@ -1847,6 +1913,17 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       }
     };
     page.on("request", recordWakeClaim);
+    // Hidden-time fixtures advance the browser clock ahead of wall time.
+    // Re-anchor it to the current server clock before the final wake so the
+    // fresh projection assertion doesn't race later real-time calc frames.
+    const realWakeAt = Date.now();
+    expect(realWakeAt).toBeLessThan(nextVisibleIntervalAt);
+    await mockDateNow(page, realWakeAt, { tick: false });
+    const finalWakeResponsePromise = page.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" &&
+        new URL(response.url()).pathname === "/api/sync/today",
+    );
     await simulateScreenOff(page);
     await simulateWake(page);
     await expect
@@ -1872,6 +1949,38 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         batches: authoritativeBatches,
       });
     page.off("request", recordWakeClaim);
+    const finalWakeResponse = await finalWakeResponsePromise;
+    expect(finalWakeResponse.ok()).toBe(true);
+    const finalWakePayload = (await finalWakeResponse.json()) as {
+      operationalProjection?: {
+        runId?: string;
+        counters?: {
+          traysOnLine?: number;
+          batchesReady?: number;
+          casesCompleted?: number;
+        };
+        calc?: {
+          casesOnLine?: number;
+          batchesNeeded?: number;
+          traysNeeded?: number;
+        };
+      } | null;
+      data?: {
+        operationalProjection?: {
+          runId?: string;
+          counters?: {
+            traysOnLine?: number;
+            batchesReady?: number;
+            casesCompleted?: number;
+          };
+          calc?: {
+            casesOnLine?: number;
+            batchesNeeded?: number;
+            traysNeeded?: number;
+          };
+        } | null;
+      };
+    };
 
     const snapshot = await readLiveRunSnapshot(page);
     const values = snapshot.values;
@@ -1890,13 +1999,13 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
     expect(values.speedAdjustment).toBe(0.5);
     expect(values.traysOnLine).toBe(authoritativeTrays);
     expect(values.batchesReady).toBe(authoritativeBatches);
-    // The second wake can replace the earlier time-relative calculation.
-    // Publish one final authoritative frame at the frozen fixture clock so
-    // the server response and the browser receive the same post-wake frame.
-    const postWakeBeat = await mockDateNow(page, nextVisibleIntervalAt);
+    // The second wake adopts a fresh server-time projection after the fixture
+    // clock has moved backward from its simulated cadence time.
     const postWakeSnapshot = await readLiveRunSnapshot(page);
     const postWakeValues = postWakeSnapshot.values;
-    const currentProjection = postWakeBeat.operationalProjection;
+    const currentProjection =
+      finalWakePayload.operationalProjection ??
+      finalWakePayload.data?.operationalProjection;
     expect(currentProjection?.runId).toBe(postWakeSnapshot.runId);
     expect(currentProjection?.counters?.traysOnLine).toBe(postWakeValues.traysOnLine);
     expect(currentProjection?.counters?.batchesReady).toBe(postWakeValues.batchesReady);
@@ -1915,7 +2024,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       .waitFor({ state: "visible" });
     await expect(page.getByTestId("output-batches-needed")).toHaveText(
       confirmedCalc!.batchesNeeded!.toFixed(2),
-      { timeout: 20_000 },
+      { timeout: 5_000 },
     );
     await expect(page.getByTestId("output-trays-needed")).toHaveText(
       confirmedCalc!.traysNeeded!.toFixed(0),
@@ -1951,7 +2060,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
           minute: "2-digit",
           hour12: true,
         }),
-      nextVisibleIntervalAt + adjustedFinishSec * 1000,
+      realWakeAt + adjustedFinishSec * 1000,
     );
     const finishPanels = await page
       .getByText("Est. Finish", { exact: true })
@@ -3344,6 +3453,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
   }) => {
     test.slow();
     const safeBaseMs = await setupAndStartRun(page, "48");
+    const correctedCases = 24;
     // Stay comfortably inside the 36-case bucket rather than exactly on its
     // opening millisecond; browser/start timestamp ordering can otherwise
     // leave floating-point elapsed time a fraction below 3.6 minutes.

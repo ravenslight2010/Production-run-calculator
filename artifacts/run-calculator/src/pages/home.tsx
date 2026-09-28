@@ -9604,6 +9604,12 @@ export default function Home() {
             isCurrent: isCurrentRecovery,
             adoptUnchanged: (body) => {
               adoptOperationalRevision(body.canonicalRevision);
+              if (body.operationalProjection) {
+                adoptOperationalProjection(
+                  body.operationalProjection,
+                  body.snapshotId,
+                );
+              }
               syncSnapshotIdRef.current = body.snapshotId;
               pushAcknowledgedRef.current = true;
             },

@@ -784,6 +784,10 @@ async function run(): Promise<void> {
     "WebKit smoke evidence must be retained through the release allowlist",
   );
   assert.ok(
+    RELEASE_EVIDENCE_ALLOWLIST.includes("screen-off-wake/FINAL-REPORT.md"),
+    "focused screen-off/wake evidence must be retained through the release allowlist",
+  );
+  assert.ok(
     releaseGateLabelsForMode("standard").includes(
       "source-library reconciliation verification",
     ),
