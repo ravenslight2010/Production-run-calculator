@@ -34,6 +34,45 @@ make_workspace_with_declarations() {
 
   mkdir -p "${workspace}/scripts/src" "${workspace}/.github/workflows"
   cp "$CHECK_SCRIPT" "${workspace}/scripts/src/check-workflows.sh"
+  cat > "${workspace}/.replit" <<'EOF'
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "release:standard"
+
+[[workflows.workflow]]
+name = "release:standard"
+
+[[workflows.workflow]]
+name = "release:full"
+
+[[workflows.workflow]]
+name = "test"
+
+[[workflows.workflow]]
+name = "test:client"
+
+[[workflows.workflow]]
+name = "typecheck"
+
+[[workflows.workflow]]
+name = "security:prod"
+
+[[workflows.workflow]]
+name = "check:clean-start"
+
+[[workflows.workflow]]
+name = "evidence:release"
+
+[[workflows.workflow]]
+name = "browser-full-159"
+EOF
   cat > "${workspace}/scripts/package.json" <<EOF
 {
   "devDependencies": {
@@ -820,6 +859,69 @@ test_accepts_matching_versions() {
   assert_contains "$CHECK_OUTPUT" "local wrapper (scripts/package.json): 1.7.12"
   assert_contains "$CHECK_OUTPUT" "CI workflow (.github/workflows/workflow-lint.yml): 1.7.12"
   echo "PASS: accepts matching actionlint versions"
+}
+
+test_accepts_staged_project_run_workflow() {
+  local workspace
+  workspace=$(make_workspace staged-project 1.7.12 1.7.12)
+  run_check "$workspace"
+  [[ "$CHECK_STATUS" -eq 0 ]] || {
+    printf 'Expected staged Project workflow to pass. Output:\n%s\n' \
+      "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" \
+    "GitHub Actions workflow syntax and expressions are valid."
+  echo "PASS: accepts a single staged Project release workflow"
+}
+
+test_rejects_parallel_project_children() {
+  local workspace
+  workspace=$(make_workspace parallel-project 1.7.12 1.7.12)
+  awk '
+    {
+      print
+      if ($0 == "args = \"release:standard\"") {
+        print ""
+        print "[[workflows.workflow.tasks]]"
+        print "task = \"workflow.run\""
+        print "args = \"test\""
+      }
+    }
+  ' "$workspace/.replit" >"$workspace/.replit.new"
+  mv "$workspace/.replit.new" "$workspace/.replit"
+
+  run_check "$workspace"
+  [[ "$CHECK_STATUS" -ne 0 ]] || {
+    printf 'Expected parallel Project children to fail. Output:\n%s\n' \
+      "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" \
+    "the Project run button must launch only"
+  [[ ! -e "$FAKE_ACTIONLINT_MARKER" ]] || {
+    printf 'Expected Project workflow failure before actionlint.\n' >&2
+    return 1
+  }
+  echo "PASS: rejects parallel Project validation children"
+}
+
+test_rejects_full_release_as_project_default() {
+  local workspace
+  workspace=$(make_workspace full-project-default 1.7.12 1.7.12)
+  sed -i \
+    's/args = "release:standard"/args = "release:full"/' \
+    "$workspace/.replit"
+
+  run_check "$workspace"
+  [[ "$CHECK_STATUS" -ne 0 ]] || {
+    printf 'Expected full release as the default to fail. Output:\n%s\n' \
+      "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" \
+    "the Project run button must launch only"
+  echo "PASS: keeps the full release explicit"
 }
 
 test_accepts_quoted_ci_version_with_inline_comment() {
