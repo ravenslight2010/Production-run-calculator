@@ -155,3 +155,4 @@
 - [Declaration compatibility dependencies](declaration-compatibility-dependencies.md) — mirror package-local links, resolve direct imports, then ignore unrelated dependency-library diagnostics.
 - [API route typecheck isolation](api-route-typecheck-isolation.md) — focused route diagnostics use last-successful API Zod declarations; the full package check remains authoritative.
 - [Secret refresh for shell operations](secret-refresh-shell.md) — newly confirmed workspace secrets may be absent from shell commands until a relevant workflow refreshes the environment.
+- [Replit config edits](replit-config-validator.md) — stage a full `.replit` candidate and replace it with `verifyAndReplaceDotReplit`; direct edits are blocked.
