@@ -64,3 +64,9 @@ When a root pnpm command forwards user arguments to a package-level script, acco
 **Why:** Nested `pnpm run` commands can pass the separator through as an extra literal argument, making an otherwise standard documented invocation fail before the script parses its options.
 
 **How to apply:** Test the exact root command users will run, not only the underlying package script, whenever adding a forwarded Git workflow command.
+
+A workspace Git credential may be a token-only value rather than an authenticated URL. Do not treat a URL-format mismatch as proof that the credential is invalid.
+
+**Why:** A valid token-only credential was skipped while an expired authenticated URL was retried.
+
+**How to apply:** Detect the format only inside the credential-consuming process, never print it, and build any temporary authenticated URL for the independently verified destination repository. Keep credentials in process-local configuration rather than persistent remotes.
