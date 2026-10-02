@@ -677,7 +677,7 @@ test.describe("accessibility smoke", () => {
     await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
     await page.locator("#username").waitFor({ state: "visible", timeout: 20_000 });
     await page.evaluate((fixtures) => {
-        const root = document.querySelector<HTMLElement>("#operational-contrast-audit");
+      const root = document.createElement("div");
       root.id = "operational-contrast-audit";
       root.innerHTML = fixtures
         .map(
@@ -725,14 +725,25 @@ test.describe("accessibility smoke", () => {
     await expect(stoppageLog.getByText("Stop", { exact: true }).first()).toBeVisible();
     await expect(stoppageLog.getByText("Manual", { exact: true })).toBeVisible();
     await expect(stoppageLog.getByText("Pause", { exact: true })).toBeVisible();
-    const stoppageContrast = await new AxeBuilder({ page })
-      .include('[data-testid="stoppage-log"]')
-      .withRules(["color-contrast"])
-      .analyze();
-    expect(
-      stoppageContrast.violations,
-      "Rendered stoppage log color contrast audit",
-    ).toEqual([]);
+    const originalDarkTheme = await page.evaluate(() =>
+      document.documentElement.classList.contains("dark"),
+    );
+    for (const theme of ["dark", "light"] as const) {
+      await page.evaluate((activeTheme) => {
+        document.documentElement.classList.toggle("dark", activeTheme === "dark");
+      }, theme);
+      const stoppageContrast = await new AxeBuilder({ page })
+        .include('[data-testid="stoppage-log"]')
+        .withRules(["color-contrast"])
+        .analyze();
+      expect(
+        stoppageContrast.violations,
+        `Rendered stoppage log color contrast audit (${theme} theme)`,
+      ).toEqual([]);
+    }
+    await page.evaluate((darkTheme) => {
+      document.documentElement.classList.toggle("dark", darkTheme);
+    }, originalDarkTheme);
     await page.getByTestId("tab-run").click();
     await scan(page, "live run", ["button-name", "color-contrast", "heading-order"]);
     await assertTargets(page, "live run");
@@ -882,8 +893,7 @@ test.describe("accessibility smoke", () => {
     await page.getByRole("menuitem", { name: "Schedule", exact: true }).click();
     const scheduledDaysDialog = page.getByRole("dialog", { name: "Scheduled Days" });
     await scheduledDaysDialog
-      .getByTestId("schedule-today-card")
-      .getByRole("button", { name: "Edit", exact: true })
+      .getByRole("button", { name: "Schedule New Day", exact: true })
       .click();
     const scheduleEditor = page.getByRole("dialog", { name: /Plan for/ });
     await assertDialogContract(page, scheduleEditor, "schedule editor");
@@ -1076,7 +1086,7 @@ test.describe("accessibility smoke", () => {
       return page.getByRole("dialog", { name: /Plan for/ });
     };
 
-    const scheduleEditor = page.getByRole("dialog", { name: /Plan for/ });
+    const scheduleEditor = await openScheduleEditor();
     const breakEditor = scheduleEditor.getByTestId("schedule-breaks");
     const breakToggle = breakEditor.getByTestId("schedule-break-toggle");
     if (await breakToggle.isVisible()) {
@@ -1094,6 +1104,7 @@ test.describe("accessibility smoke", () => {
         .selectOption("at-time");
       await breakEditor.getByLabel(`Break ${slot} time`).fill(time);
     }
+    await scan(page, "Android schedule break planner", [], '[data-testid="schedule-breaks"]');
 
     const saveResponse = page.waitForResponse(
       (response) =>
@@ -1123,10 +1134,10 @@ test.describe("accessibility smoke", () => {
     const reopenedBreakEditor = reopenedEditor.getByTestId("schedule-breaks");
     await expect(reopenedBreakEditor.getByTestId("schedule-break-toggle")).toHaveText("Add breaks");
     await expect(reopenedBreakEditor.getByTestId("schedule-break-summary")).toContainText(
-      "Break 1 · 06:30 · Break 2 · 08:00 · Break 3 · 09:30",
+      "Break 1 · 07:00 · Break 2 · 09:00 · Break 3 · 11:00",
     );
     await reopenedBreakEditor.getByTestId("schedule-break-toggle").click();
-    for (const [slot, time] of [[1, "06:30"], [2, "08:00"], [3, "09:30"]] as const) {
+    for (const [slot, time] of [[1, "07:00"], [2, "09:00"], [3, "11:00"]] as const) {
       await expect(
         reopenedBreakEditor.getByRole("combobox", { name: `Break ${slot} placement` }),
       ).toHaveValue("at-time");
