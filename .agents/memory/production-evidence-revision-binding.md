@@ -21,6 +21,12 @@ For retained browser and timing reports, pass `RELEASE_REVISION` as the same fil
 
 **How to apply:** Set `RELEASE_REVISION` for standard and full test-only release checks, then verify browser reports and the release report agree on the source revision.
 
+CI artifact handoffs must use the same filtered full revision selected by the release runner rather than assuming checkout HEAD is equivalent.
+
+**Why:** Evidence-only commits are intentionally excluded from release identity; a handoff bound to checkout HEAD could label valid retained evidence stale or misidentify the run.
+
+**How to apply:** Keep the standard and full CI handoff revision selector aligned with `releaseRevisionGitArgs`, and preserve the explicit mode/revision checks.
+
 Bounded release handoffs must treat the explicit mode and full Git revision as part of evidence identity. A newer same-mode, same-revision checkpoint supersedes the retained report only as an incomplete attempt; it never replaces retained evidence. Keep test evidence separate from production-bound proof, and never let the summary itself issue a production GO.
 
 **Why:** Old retained reports and incomplete retries can both look positive when viewed without their revision and generation order, while development results do not establish deployed behavior.

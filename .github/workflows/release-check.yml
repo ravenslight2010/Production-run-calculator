@@ -102,6 +102,68 @@ jobs:
         if: always()
         run: pnpm --filter @workspace/scripts run check:release-evidence
 
+      - name: Generate standard release evidence handoff
+        if: always()
+        continue-on-error: true
+        env:
+          HANDOFF_MODE: standard
+          HANDOFF_EVIDENCE_DIR: release-evidence
+        run: |
+          mkdir -p "$HANDOFF_EVIDENCE_DIR"
+          handoff_path="$HANDOFF_EVIDENCE_DIR/release-evidence-handoff.md"
+          if revision="$(git log -1 --format=%H -- . \
+            ':(exclude)release-evidence' \
+            ':(exclude)release-evidence/**' \
+            ':(exclude)release-evidence-full' \
+            ':(exclude)release-evidence-full/**')"; then
+            :
+          else
+            revision=""
+          fi
+          handoff_status=127
+          if [[ "$revision" =~ ^[a-f0-9]{40}$ ]]; then
+            if bash scripts/src/run-release-node.sh \
+              pnpm --filter @workspace/scripts exec tsx \
+              ./src/release-evidence-handoff.mts \
+              --mode "$HANDOFF_MODE" \
+              --revision "$revision" \
+              --evidence-dir "$HANDOFF_EVIDENCE_DIR" \
+              > "$handoff_path" 2>/dev/null; then
+              handoff_status=0
+            else
+              handoff_status=$?
+            fi
+          fi
+          if [[ "$handoff_status" -eq 0 ]] \
+            && grep -Fqx "# Release Evidence Handoff" "$handoff_path" \
+            && grep -Fqx "Requested mode: **$HANDOFF_MODE**" "$handoff_path" \
+            && grep -Fqx "Requested revision: \`$revision\`" "$handoff_path" \
+            && grep -Fqx "Test evidence status: **PASS**" "$handoff_path" \
+            && grep -Fq "Production GO: NOT CLAIMED" "$handoff_path"; then
+            exit 0
+          fi
+          if [[ "$handoff_status" -ne 0 ]] \
+            && grep -Fqx "# Release Evidence Handoff" "$handoff_path" \
+            && grep -Fqx "Requested mode: **$HANDOFF_MODE**" "$handoff_path" \
+            && grep -Fqx "Requested revision: \`$revision\`" "$handoff_path" \
+            && grep -Eq '^Test evidence status: \*\*(FAIL|NO-GO|MISSING|STALE|INCOMPLETE|INCOMPLETE CHECKPOINT)\*\*$' "$handoff_path" \
+            && grep -Fq "Production GO: NOT CLAIMED" "$handoff_path"; then
+            exit 0
+          fi
+          requested_revision="${revision:-unavailable}"
+          cat > "$handoff_path" <<EOF
+          # Release Evidence Handoff
+
+          Requested mode: **$HANDOFF_MODE**
+          Requested revision: \`$requested_revision\`
+          Test evidence status: **INCOMPLETE**
+          Handoff generation: **FAILED**
+
+          The revision-bound handoff could not be generated or validated. Review the retained report and checkpoint separately; this status is not a release pass.
+
+          **Production GO: NOT CLAIMED by this handoff.**
+          EOF
+
       - name: Upload standard release evidence
         if: always()
         id: upload-standard-release-evidence
@@ -215,6 +277,68 @@ jobs:
       - name: Verify full release evidence allowlist
         if: always()
         run: pnpm run release:check:full -- --verify-evidence
+
+      - name: Generate full release evidence handoff
+        if: always()
+        continue-on-error: true
+        env:
+          HANDOFF_MODE: full
+          HANDOFF_EVIDENCE_DIR: release-evidence-full
+        run: |
+          mkdir -p "$HANDOFF_EVIDENCE_DIR"
+          handoff_path="$HANDOFF_EVIDENCE_DIR/release-evidence-handoff.md"
+          if revision="$(git log -1 --format=%H -- . \
+            ':(exclude)release-evidence' \
+            ':(exclude)release-evidence/**' \
+            ':(exclude)release-evidence-full' \
+            ':(exclude)release-evidence-full/**')"; then
+            :
+          else
+            revision=""
+          fi
+          handoff_status=127
+          if [[ "$revision" =~ ^[a-f0-9]{40}$ ]]; then
+            if bash scripts/src/run-release-node.sh \
+              pnpm --filter @workspace/scripts exec tsx \
+              ./src/release-evidence-handoff.mts \
+              --mode "$HANDOFF_MODE" \
+              --revision "$revision" \
+              --evidence-dir "$HANDOFF_EVIDENCE_DIR" \
+              > "$handoff_path" 2>/dev/null; then
+              handoff_status=0
+            else
+              handoff_status=$?
+            fi
+          fi
+          if [[ "$handoff_status" -eq 0 ]] \
+            && grep -Fqx "# Release Evidence Handoff" "$handoff_path" \
+            && grep -Fqx "Requested mode: **$HANDOFF_MODE**" "$handoff_path" \
+            && grep -Fqx "Requested revision: \`$revision\`" "$handoff_path" \
+            && grep -Fqx "Test evidence status: **PASS**" "$handoff_path" \
+            && grep -Fq "Production GO: NOT CLAIMED" "$handoff_path"; then
+            exit 0
+          fi
+          if [[ "$handoff_status" -ne 0 ]] \
+            && grep -Fqx "# Release Evidence Handoff" "$handoff_path" \
+            && grep -Fqx "Requested mode: **$HANDOFF_MODE**" "$handoff_path" \
+            && grep -Fqx "Requested revision: \`$revision\`" "$handoff_path" \
+            && grep -Eq '^Test evidence status: \*\*(FAIL|NO-GO|MISSING|STALE|INCOMPLETE|INCOMPLETE CHECKPOINT)\*\*$' "$handoff_path" \
+            && grep -Fq "Production GO: NOT CLAIMED" "$handoff_path"; then
+            exit 0
+          fi
+          requested_revision="${revision:-unavailable}"
+          cat > "$handoff_path" <<EOF
+          # Release Evidence Handoff
+
+          Requested mode: **$HANDOFF_MODE**
+          Requested revision: \`$requested_revision\`
+          Test evidence status: **INCOMPLETE**
+          Handoff generation: **FAILED**
+
+          The revision-bound handoff could not be generated or validated. Review the retained report and checkpoint separately; this status is not a release pass.
+
+          **Production GO: NOT CLAIMED by this handoff.**
+          EOF
 
       - name: Upload full release evidence
         if: always()

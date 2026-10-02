@@ -574,6 +574,31 @@ async function run(): Promise<void> {
         job.source!.indexOf(job.runner),
       `${job.name} WebKit dependency installation must precede its release runner`,
     );
+    const handoffName = `Generate ${job.name} release evidence handoff`;
+    const handoffStart = job.source!.indexOf(`- name: ${handoffName}`);
+    const uploadStart = job.source!.indexOf(`- name: Upload ${job.name} release evidence`);
+    assert.ok(handoffStart >= 0, `${job.name} job must generate a handoff`);
+    assert.ok(
+      uploadStart > handoffStart,
+      `${job.name} evidence upload must include its generated handoff`,
+    );
+    const handoffBlock = job.source!.slice(handoffStart, uploadStart);
+    assert.match(handoffBlock, /if: always\(\)/);
+    assert.match(handoffBlock, /continue-on-error: true/);
+    assert.match(handoffBlock, new RegExp(`HANDOFF_MODE: ${job.name}`));
+    assert.match(
+      handoffBlock,
+      new RegExp(`HANDOFF_EVIDENCE_DIR: release-evidence${job.name === "full" ? "-full" : ""}`),
+    );
+    assert.match(handoffBlock, /git log -1 --format=%H -- \./);
+    assert.match(handoffBlock, /release-evidence-full\/\*\*/);
+    assert.match(
+      handoffBlock,
+      /run-release-node\.sh\s+\\\s+pnpm --filter @workspace\/scripts exec tsx\s+\\\s+\.\/src\/release-evidence-handoff\.mts/u,
+    );
+    assert.match(handoffBlock, /--revision "\$revision"/);
+    assert.match(handoffBlock, /--evidence-dir "\$HANDOFF_EVIDENCE_DIR"/);
+    assert.match(handoffBlock, /Handoff generation: \*\*FAILED\*\*/);
   }
   assert.equal(
     configuredKeyrings.length,

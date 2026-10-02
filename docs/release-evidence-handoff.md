@@ -35,9 +35,18 @@ pnpm --filter @workspace/scripts run check:release-evidence -- \
 | Browser isolation and disposable database requirements | [Test matrix isolation contract](test-release-matrix.md#isolation-and-fixture-contract) and [release checklist](../.agents/skills/release-checklist/SKILL.md#full-browser-e2e) |
 | Local retained reports, logs, checkpoints, and browser artifacts | `release-evidence/` for standard; `release-evidence-full/` for full |
 | Retained evaluations | The report's **Retained evaluations** section and the linked files beneath the selected evidence directory |
-| CI-run evidence artifacts | [Release-check workflow](../.github/workflows/release-check.yml); the matching workflow run contains separate standard/full uploads described in [release operations](release-operations.md#github-actions-evidence) |
+| CI-run evidence artifacts | [Release-check workflow](../.github/workflows/release-check.yml); each standard/full upload includes `release-evidence-handoff.md` generated for that job's mode and release-selected revision |
 | Production reconciliation and deployed-revision binding | [Production reconciliation instructions](release-operations.md#bind-production-reconciliation-evidence-to-the-deployed-build) |
 | Recovery after a stopped run | [Resume and fresh-run instructions](release-operations.md#how-to-interpret-a-result) |
+
+The workflow uses the same full Git revision selector as the release runner,
+excluding commits that only update either retained evidence directory. The
+handoff is generated after allowlist verification and before upload, alongside
+the retained report and checkpoint; it does not replace or edit either record.
+If generation fails, the artifact contains an explicit **INCOMPLETE** handoff
+note. That diagnostic step does not change the release gate result. Missing,
+stale, incomplete, or failing evidence remains non-passing in the generated
+handoff.
 
 Standard and full evidence directories are separate. A report for one mode or
 revision cannot satisfy another. The checkpoint is a separate, incomplete
