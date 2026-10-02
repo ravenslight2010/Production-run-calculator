@@ -66,6 +66,31 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 function asNumber(v: unknown): number {
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
 }
+const MAX_BREAK_STAMP_SKEW_MS = 5 * 60 * 1000;
+function validBreakStamp(value: unknown, nowMs = Date.now()): number {
+  const stamp = asNumber(value);
+  return stamp > 0 && stamp <= nowMs + MAX_BREAK_STAMP_SKEW_MS ? stamp : 0;
+}
+function mergeBreakSchedule(
+  incomingDay: unknown,
+  existingDay: unknown,
+  nowMs: number,
+): Record<string, unknown> {
+  const incoming = isPlainObject(incomingDay) ? incomingDay : undefined;
+  const existing = isPlainObject(existingDay) ? existingDay : undefined;
+  const hasIncomingBreaks = !!incoming && Object.prototype.hasOwnProperty.call(incoming, "breaks");
+  const hasExistingBreaks = !!existing && Object.prototype.hasOwnProperty.call(existing, "breaks");
+  const incomingStamp = validBreakStamp(incoming?.breaksUpdatedAt, nowMs);
+  const existingStamp = validBreakStamp(existing?.breaksUpdatedAt, nowMs);
+
+  if (hasIncomingBreaks && (!hasExistingBreaks || incomingStamp > existingStamp)) {
+    return { breaks: incoming!.breaks, breaksUpdatedAt: incomingStamp };
+  }
+  if (hasExistingBreaks) {
+    return { breaks: existing!.breaks, breaksUpdatedAt: existingStamp };
+  }
+  return {};
+}
 
 function asArray(v: unknown): unknown[] {
   return Array.isArray(v) ? v : [];
@@ -648,6 +673,7 @@ export function protectRunValues(
     }
     const base: Record<string, unknown> = {
       ...(incoming as Record<string, unknown>),
+      ...(inDay ? { dayState: { ...inDay, ...mergeBreakSchedule(inDay, exDay, nowMs) } } : {}),
       runValues: outVals,
       runValuesUpdatedAt: outUpd,
     };
@@ -844,7 +870,14 @@ export function protectRunValues(
     };
   })();
   const outDay = base
-    ? { ...base, runs: mergedRuns, ...(mergedPrepPhase ? { prepPhase: mergedPrepPhase } : {}) }
+    ? {
+      ...base,
+      runs: mergedRuns,
+      ...(mergedPrepPhase ? { prepPhase: mergedPrepPhase } : {}),
+      // Live payloads may omit this cold section.  Never let that omission
+      // erase an operator's configured break schedule.
+      ...mergeBreakSchedule(inDay, exDay, nowMs),
+    }
     : undefined;
 
   const out: Record<string, unknown> = {
@@ -1176,6 +1209,7 @@ const KNOWN_DAYSTATE_KEYS = new Set<string>([
   "stagedItems",
   "prepPhase",
   "breaks",
+  "breaksUpdatedAt",
 ]);
 
 function sanitizeBreakSlots(value: unknown): unknown[] {
@@ -1271,6 +1305,13 @@ export function sanitizeSyncPayload(payload: unknown): unknown {
             ds[dsk] = asArray(val[dsk]).slice(0, MAX_RUNS);
           } else if (dsk === "breaks") {
             ds[dsk] = sanitizeBreakSlots(val[dsk]);
+          } else if (dsk === "breaksUpdatedAt") {
+            const stamp = asNumber(val[dsk]);
+            // Reject malformed/future clocks rather than allowing an
+            // untrusted payload to win the schedule register.
+            if (stamp > 0 && stamp <= Date.now() + MAX_BREAK_STAMP_SKEW_MS) {
+              ds[dsk] = Math.min(stamp, Date.now() + MAX_BREAK_STAMP_SKEW_MS);
+            }
           } else {
             ds[dsk] = val[dsk];
           }

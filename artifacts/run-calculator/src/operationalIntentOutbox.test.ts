@@ -249,6 +249,67 @@ describe("operational intent outbox", () => {
     await flushOperationalIntentOutbox();
     expect(readOperationalIntentOutbox().find((x) => x.id === auth.id)).toMatchObject({ state: "permanently-rejected", failure: "validation" });
   });
+  it.each([
+    [400, "permanently-rejected", "validation"],
+    [403, "blocked", "permission"],
+  ] as const)("does not retry or discard a %s validation/authorization failure", async (status, state, failure) => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const fetch = vi.fn().mockResolvedValue({
+      ok: false, status, headers: { get: () => null },
+      // A failed response must never be adopted as canonical data.
+      json: async () => ({ outcome: "accepted", data: { runValues: { bad: { casesNeeded: 999 } } } }),
+    });
+    const adopt = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    setOperationalIntentCanonicalAdopter(adopt);
+    const intent = queueOperationalIntent({ runId: "failure", observedGeneration: "failure:1", effectiveAt: 1, action: "pause" });
+
+    await flushOperationalIntentOutbox();
+
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(adopt).not.toHaveBeenCalled();
+    expect(readOperationalIntentOutbox()).toEqual([expect.objectContaining({ id: intent.id, state, failure })]);
+    expect(retryOperationalIntent(intent.id)).toBe(true);
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+  it("keeps transient 5xx responses queued for backoff", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const fetch = vi.fn().mockResolvedValue({
+      ok: false, status: 503, headers: { get: () => null },
+      json: async () => ({ outcome: "accepted", data: { invalid: true } }),
+    });
+    const adopt = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    setOperationalIntentCanonicalAdopter(adopt);
+    const intent = queueOperationalIntent({ runId: "server", observedGeneration: "server:1", effectiveAt: 1, action: "pause" });
+
+    await flushOperationalIntentOutbox();
+
+    expect(adopt).not.toHaveBeenCalled();
+    const [pending] = readOperationalIntentOutbox();
+    expect([pending]).toEqual([expect.objectContaining({
+      id: intent.id, state: "pending", failure: "server", attempts: 1,
+    })]);
+    expect(pending?.nextRetryAt).toBeGreaterThan(Date.now());
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+  it("adopts canonical data only for the documented 409 conflict response", async () => {
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const canonical = { runValues: { "run-1": { casesNeeded: 12 } } };
+    const fetch = vi.fn().mockResolvedValue({
+      ok: false, status: 409, headers: { get: () => null },
+      json: async () => ({ outcome: "conflicted", data: canonical, canonicalRevision: 3 }),
+    });
+    const adopt = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    setOperationalIntentCanonicalAdopter(adopt);
+    const intent = queueOperationalIntent({ runId: "run-1", observedGeneration: "run-1:1", effectiveAt: 1, action: "pause" });
+
+    await flushOperationalIntentOutbox();
+
+    expect(adopt).toHaveBeenCalledWith(canonical, expect.objectContaining({ id: intent.id, canonicalRevision: 3 }), "conflicted");
+    expect(readOperationalIntentOutbox()).toEqual([expect.objectContaining({ id: intent.id, state: "conflicted" })]);
+  });
   it("keeps blocked and rejected Ends fenced until explicit discard", () => {
     const base = {
       version: 1 as const,

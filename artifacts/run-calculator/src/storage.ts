@@ -3490,7 +3490,7 @@ export type SpecImportProjection = {
     values: Record<string, unknown>;
     crustValues: Record<string, unknown>;
   }>;
-  storageChanges: Array<{ key: string; value: string | null }>;
+  storageChanges: Array<{ key: string; before: string | null; value: string | null }>;
 };
 
 function memoryStorage(entries: ReadonlyArray<[string, string]>): BrowserKeyValueStorage {
@@ -3563,7 +3563,7 @@ export function projectSpecImport(
   const changedKeys = new Set([...before.keys(), ...after.keys()]);
   const storageChanges = [...changedKeys]
     .filter((key) => before.get(key) !== after.get(key))
-    .map((key) => ({ key, value: after.get(key) ?? null }));
+    .map((key) => ({ key, before: before.get(key) ?? null, value: after.get(key) ?? null }));
   return {
     ...applied,
     nameCorrections: out.nameCorrections ?? [],
@@ -3575,6 +3575,10 @@ export function projectSpecImport(
 export function adoptSpecImportProjection(projection: SpecImportProjection): void {
   for (const change of projection.storageChanges) {
     if (profileCacheIsActive() && change.key.startsWith("run-calc-profile-cache-v1:")) continue;
+    // The projection was calculated against a snapshot.  A local edit made
+    // while the server commit was in flight wins; never clobber it with the
+    // stale projected value (or delete it).
+    if ((localStorage.getItem(change.key) ?? null) !== change.before) continue;
     if (change.value === null) localStorage.removeItem(change.key);
     else localStorage.setItem(change.key, change.value);
   }

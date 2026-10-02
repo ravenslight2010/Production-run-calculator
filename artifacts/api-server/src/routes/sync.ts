@@ -2905,7 +2905,7 @@ router.delete("/sync/:date", requireCapability("manage-factory-settings"), async
 router.post(
   "/sync/reset",
   requireCapability("manage-staff"),
-  async (_req: Request, res: Response): Promise<void> => {
+  async (req: Request, res: Response): Promise<void> => {
     const scope = currentScope();
     const epoch = await db.transaction(async (tx) => {
       // Every writer locks this scope fence before a daily row. Establish it
@@ -2920,7 +2920,7 @@ router.post(
         .set({ epoch: sql`${dataResetTable.epoch} + 1`, resetAt: new Date() })
         .where(eq(dataResetTable.scope, scope))
         .returning();
-       await logAuditEvent(scope, "", "factory_reset", "daily_sync", { outcome: "success" }, undefined, undefined, tx);
+       await logAuditEvent(scope, req.userId ?? "", "factory_reset", "daily_sync", { outcome: "success" }, undefined, undefined, tx);
        return row?.epoch ?? 0;
     });
     broadcastReset(scope, epoch);

@@ -95,15 +95,15 @@ describe("AuditLogCard PDF export", () => {
     const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     const pdf = new Blob(["%PDF-1.4"], { type: "application/pdf" });
+    const startDate = "2026-08-22";
+    const endDate = "2026-09-21";
     exportAuditLogsPdf.mockResolvedValueOnce(pdf);
-
     renderAuditLogCard();
     await screen.findByText("role_changed");
     await userEvent.click(screen.getByRole("button", { name: "PDF" }));
-
     await waitFor(() => expect(exportAuditLogsPdf).toHaveBeenCalledWith({
-      startDate: "2026-08-22T00:00:00.000Z",
-      endDate: "2026-09-21T23:59:59.999Z",
+      startDate: `${startDate}T00:00:00.000Z`,
+      endDate: `${endDate}T23:59:59.999Z`,
       limit: 100,
     }));
     expect(createObjectURL).toHaveBeenCalledWith(pdf);

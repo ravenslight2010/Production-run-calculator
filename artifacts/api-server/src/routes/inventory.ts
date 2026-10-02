@@ -2349,7 +2349,7 @@ export async function consumeDayStart(
             await tx
               .update(mixesTable)
               .set({ amountAlreadyMade: upd.amountAlreadyMade, updatedAt: new Date() })
-              .where(eq(mixesTable.id, upd.id));
+               .where(and(eq(mixesTable.id, upd.id), eq(mixesTable.scope, scope)));
           }
         }
 
@@ -2394,7 +2394,7 @@ export async function consumeDayStart(
                   amountRemaining: Math.round((existing.amountRemaining + row.amountRemaining) * 100) / 100,
                   updatedAt: now,
                 })
-                .where(eq(mixSurplusLotsTable.id, existing.id));
+                .where(and(eq(mixSurplusLotsTable.id, existing.id), eq(mixSurplusLotsTable.scope, scope)));
             } else {
               await tx.insert(mixSurplusLotsTable).values({
                 id: randomUUID(),

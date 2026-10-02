@@ -86,6 +86,12 @@ function ids(value: unknown): string[] {
 function capability(importType: string): "manage-profiles" | "manage-inventory" {
   return ["premix", "cheese"].includes(importType) ? "manage-inventory" : "manage-profiles";
 }
+function entityCapability(entity: string): "manage-profiles" | "manage-inventory" {
+  return ["mixes", "cheeseRecipes"].includes(entity) ? "manage-inventory" : "manage-profiles";
+}
+function snapshotCapabilities(snapshot: Record<string, unknown[]>): Set<"manage-profiles" | "manage-inventory"> {
+  return new Set(Object.keys(snapshot).filter((key) => key !== "specImportAliasKeys").map(entityCapability));
+}
 function requireOperationCapability(req: Request, res: Response, importType: string): boolean {
   const needed = capability(importType);
   if (!(req.capabilities ?? []).includes(needed)) {
@@ -363,9 +369,15 @@ router.post("/import-operations/:operationId/apply", requireAnyCapability(["mana
   const scope = currentScope();
   const required = capability(importType);
   const capabilities = req.capabilities ?? [];
-  if (!capabilities.includes(required)) {
-    res.status(403).json({ error: `Missing capability: ${required}` }); return;
-  }
+   if (!capabilities.includes(required)) {
+     res.status(403).json({ error: `Missing capability: ${required}` }); return;
+   }
+   for (const entity of Object.keys(changes)) {
+     const needed = entityCapability(entity);
+     if (!capabilities.includes(needed)) {
+       res.status(403).json({ error: `Missing capability: ${needed}` }); return;
+     }
+   }
   try {
     const operation = await db.transaction(async (tx) => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${"import-operation:" + scope}, 0))`);
@@ -450,7 +462,11 @@ router.post("/import-operations/:operationId/undo", requireAnyCapability(["manag
       )).limit(1);
       if (!found[0]) { const e = new Error("NOT_FOUND"); (e as any).code = "NOT_FOUND"; throw e; }
       const op = found[0];
-      if (!(req.capabilities ?? []).includes(capability(op.importType))) {
+       const needed = new Set([
+         ...snapshotCapabilities(op.beforeSnapshot as Record<string, unknown[]>),
+         ...snapshotCapabilities(op.afterSnapshot as Record<string, unknown[]>),
+       ]);
+       if ([...needed].some((entry) => !(req.capabilities ?? []).includes(entry))) {
         const e = new Error("FORBIDDEN"); (e as any).code = "FORBIDDEN"; throw e;
       }
       if (op.status === "undone") return op;

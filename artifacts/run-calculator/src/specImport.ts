@@ -2872,6 +2872,10 @@ export async function commitSpecImport(
   }
 
   let resultHash: string | undefined;
+  // Sanitize aliases before constructing the atomic server payload.  The
+  // payload is the commit boundary; sanitizing only after it would still
+  // persist poisoned aliases on an otherwise successful atomic import.
+  const savableAliases = sanitizeSpecAliases(prepared.newAliases);
   if (operationId) {
     const committedProjection = projection!;
     const profiles = touchedProfiles.map((profile) => ({
@@ -2892,8 +2896,8 @@ export async function commitSpecImport(
       cheeseRecipes: { upsert: atomicCheeseRecipes },
       doughRecipes: { upsert: atomicNamedRecipes.dough },
       sauceRecipes: { upsert: atomicNamedRecipes.sauce },
-      ...((prepared.newAliases.length || correctingAliasDeletes.length)
-        ? { specImportAliases: { upsert: prepared.newAliases, delete: correctingAliasDeletes } }
+      ...((savableAliases.length || correctingAliasDeletes.length)
+        ? { specImportAliases: { upsert: savableAliases, delete: correctingAliasDeletes } }
         : {}),
     });
     const committed = await applyImportOperation(operationId, {
@@ -2936,7 +2940,6 @@ export async function commitSpecImport(
   // produced them (canonicalize tracking, review links/renames, match
   // aliases), never save poisoned pairs — generic "Mix"/"cheese" names,
   // digit mismatches, cycles. Applies to the corrections mirror too.
-  const savableAliases = sanitizeSpecAliases(prepared.newAliases);
   // Surface (don't just swallow) a failed alias save: the import itself already
   // applied, but losing the learned aliases means the next re-import of this
   // sheet won't remember the user's renames / "use existing" picks. The caller
@@ -2962,7 +2965,7 @@ export async function commitSpecImport(
     );
   }
 
-  return { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes: autoLinkedOut.count, touchedProfiles, crustProfiles, appliedParsed: applyParsed, finalImportReview, aliasSaveFailed };
+  return { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes: autoLinkedOut.count, touchedProfiles, crustProfiles, appliedParsed: applyParsed, finalImportReview, aliasSaveFailed, ...(resultHash ? { resultHash } : {}) };
 }
 
 /** Build the server changes envelope without mutating local state or doing I/O. */

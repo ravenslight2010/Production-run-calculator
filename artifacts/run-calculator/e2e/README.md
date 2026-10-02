@@ -73,6 +73,11 @@ guard. It only permits:
 production or a shared operational database. A rejected run fails before a
 connection or delete is attempted.
 
+Authorized browser fixtures must also use `PLAYWRIGHT_API_BASE_URL` pointing to
+the local API process started with the isolated `DATABASE_URL`. Do not fall back
+to `PLAYWRIGHT_BASE_URL` or `REPLIT_DEV_DOMAIN` for fixture signup: those can
+target a remote database that the local cleanup cannot reach.
+
 ## Test data lifecycle
 
 Browser-created users are unique per test and are tracked for cleanup. Tests

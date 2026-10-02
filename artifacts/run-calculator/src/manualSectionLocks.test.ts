@@ -12,7 +12,7 @@ import {
   USED_MANUAL_SECTION_CONTROL_IDS,
   sectionForManualControl,
 } from "./manualSectionLocks";
-import { fencePendingOperationalValues, fenceActiveManualSectionValues, retryPendingManualSections } from "./operationalIntentOutbox";
+import { fencePendingOperationalValues, fenceActiveManualSectionValues, retryPendingManualSections, retryPendingManualSection } from "./operationalIntentOutbox";
 import { setOperationalIntentIdentity, submitManualSection, setOperationalIntentCanonicalAdopter } from "./operationalIntentOutbox";
 
 describe("manual section locks", () => {
@@ -141,6 +141,79 @@ describe("manual section locks", () => {
     expect(adopted.outcome).toBe("conflicted");
     expect(adopted.intent.values).toEqual({ skidsCompleted: 9, casesOnCurrentSkid: 8 });
     expect(getManualSectionConflict("run-conflict", "packaging")).toContain("saved this section first");
+  });
+
+  it.each([400, 422])("rejects manual validation status %s without retrying or adopting failed data", async (status) => {
+    setOperationalIntentIdentity({ scope: "live", userId: "manual-errors" });
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const adopter = vi.fn();
+    setOperationalIntentCanonicalAdopter(adopter);
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      outcome: "accepted", data: { runValues: { "manual-validation": { skidsCompleted: 99 } } },
+    }), { status }));
+    const result = await submitManualSection({
+      id: `manual-${status}`, runId: "manual-validation", section: "packaging",
+      values: { skidsCompleted: 2 }, baseValues: { skidsCompleted: 1, casesOnCurrentSkid: 0 },
+      observedGeneration: "manual-validation:1",
+    });
+    expect(result).toBe("validation-rejected");
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(adopter).not.toHaveBeenCalled();
+    expect(fencePendingOperationalValues({ "manual-validation": { skidsCompleted: 2, casesOnCurrentSkid: 4 } })["manual-validation"])
+      .toEqual({ skidsCompleted: 2, casesOnCurrentSkid: 4 });
+  });
+
+  it.each([
+    [401, "authentication-required", "authentication"],
+    [403, "permission-denied", "permission"],
+  ] as const)("preserves manual data and fence for explicit retry after %s", async (status, resultState, failure) => {
+    setOperationalIntentIdentity({ scope: "live", userId: "manual-auth" });
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { runValues: { bad: { skidsCompleted: 99 } } } }), { status }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ outcome: "accepted", data: {} }), { status: 200 }));
+    const id = `manual-auth-${status}`;
+    const result = await submitManualSection({
+      id, runId: "manual-auth-run", section: "packaging",
+      values: { skidsCompleted: 2 }, baseValues: { skidsCompleted: 1, casesOnCurrentSkid: 0 },
+      observedGeneration: "manual-auth-run:1",
+    });
+    expect(result).toBe(resultState);
+    const pendingKey = `run-calculator:manual-section-pending:v1:live:manual-auth:${id}`;
+    expect(JSON.parse(localStorage.getItem(pendingKey)!)).toMatchObject({ id, deliveryState: "auth-required", failure });
+    expect(fencePendingOperationalValues({ "manual-auth-run": { skidsCompleted: 2, casesOnCurrentSkid: 4 } }))
+      .toEqual({});
+    await retryPendingManualSections();
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(await retryPendingManualSection(id)).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(localStorage.getItem(pendingKey)).toBeNull();
+  });
+
+  it("retries a manual 429 after Retry-After and keeps the section fenced until accepted", async () => {
+    vi.useFakeTimers();
+    setOperationalIntentIdentity({ scope: "live", userId: "manual-rate" });
+    Object.defineProperty(navigator, "onLine", { configurable: true, value: true });
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { runValues: { bad: {} } } }), {
+        status: 429, headers: { "Retry-After": "1" },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ outcome: "accepted", data: {} }), { status: 200 }));
+    const result = await submitManualSection({
+      id: "manual-rate-id", runId: "manual-rate-run", section: "packaging",
+      values: { skidsCompleted: 2 }, baseValues: { skidsCompleted: 1, casesOnCurrentSkid: 0 },
+      observedGeneration: "manual-rate-run:1",
+    });
+    const pendingKey = "run-calculator:manual-section-pending:v1:live:manual-rate:manual-rate-id";
+    expect(result).toBe("offline");
+    expect(localStorage.getItem(pendingKey)).not.toBeNull();
+    expect(fencePendingOperationalValues({ "manual-rate-run": { skidsCompleted: 2, casesOnCurrentSkid: 4 } }))
+      .toEqual({});
+    await vi.advanceTimersByTimeAsync(999);
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1);
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+    expect(localStorage.getItem(pendingKey)).toBeNull();
   });
 
   it("rolls back while fenced when pending storage persistence fails", async () => {

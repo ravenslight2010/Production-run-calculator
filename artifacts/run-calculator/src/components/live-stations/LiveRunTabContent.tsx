@@ -1214,7 +1214,7 @@ export const LiveRunTabContent = memo(function LiveRunTabContent() {
                         <button
                           type="button"
                           onClick={endStop}
-                          className="col-span-2 bg-orange-600 hover:bg-orange-500 text-white font-bold text-sm py-3.5 rounded-xl flex items-center justify-center gap-2 transition-colors animate-pulse"
+                          className="sm:col-span-2 bg-orange-600 hover:bg-orange-500 text-white font-bold text-sm py-3.5 rounded-xl flex items-center justify-center gap-2 transition-colors animate-pulse"
                         >
                           <CircleDot className="w-4 h-4" /> END STOP
                         </button>
@@ -1223,7 +1223,7 @@ export const LiveRunTabContent = memo(function LiveRunTabContent() {
                           type="button"
                           data-testid="button-log-stoppage"
                           onClick={() => { setStopReason(""); setStopNotes(""); setShowStopDialog(true); }}
-                          className="col-span-2 border border-orange-700/60 text-orange-400 hover:bg-orange-950/40 font-bold text-sm py-3.5 rounded-xl flex items-center justify-center gap-2 transition-colors"
+                          className="sm:col-span-2 border border-orange-700/60 text-orange-400 hover:bg-orange-950/40 font-bold text-sm py-3.5 rounded-xl flex items-center justify-center gap-2 transition-colors"
                         >
                           <OctagonX className="w-4 h-4" /> LOG STOPPAGE
                         </button>
@@ -1702,7 +1702,7 @@ export const LiveRunTabContent = memo(function LiveRunTabContent() {
                         <span className="text-xs text-muted-foreground font-medium">Cases on Last Skid</span>
                         <span className="text-sm font-bold text-foreground tabular-nums">{fmtNum(calc.casesOnLastSkid, 0)}</span>
                       </div>
-                      <div className="p-3 flex items-center justify-between gap-2 col-span-2">
+                      <div className="p-3 flex items-center justify-between gap-2 sm:col-span-2">
                         <span className="text-xs text-muted-foreground font-medium">Crust Supply</span>
                         {calc.doughShortCases > 0 ? (
                           <span className="text-sm font-bold text-red-400 bg-red-400/10 px-2 py-0.5 rounded border border-red-400/20">SHORT {fmtNum(calc.doughShortCases, 1)} cases</span>
@@ -1744,7 +1744,7 @@ export const LiveRunTabContent = memo(function LiveRunTabContent() {
                         <span className="text-xs text-muted-foreground font-medium">Approx. Cases on Line</span>
                         <span className="text-sm font-bold text-foreground tabular-nums" data-testid="cases-on-line-value">{fmtNum(calc.casesOnLine, 0)}</span>
                       </div>
-                      <div className="p-3 flex items-center justify-between gap-2 col-span-2" data-testid="output-dough-status">
+                      <div className="p-3 flex items-center justify-between gap-2 sm:col-span-2" data-testid="output-dough-status">
                         <span className="text-xs text-muted-foreground font-medium">Dough Status</span>
                         {calc.doughShortCases > 0 ? (
                           <span className="text-sm font-bold text-red-400 bg-red-400/10 px-2 py-0.5 rounded border border-red-400/20">SHORT {fmtNum(calc.doughShortCases, 1)} cases</span>
@@ -1754,7 +1754,7 @@ export const LiveRunTabContent = memo(function LiveRunTabContent() {
                           <span className="text-sm font-bold text-muted-foreground bg-muted/40 px-2 py-0.5 rounded border border-border/50">Balanced</span>
                         )}
                       </div>
-                      <div className="p-3 flex items-center justify-between gap-2 col-span-2">
+                      <div className="p-3 flex items-center justify-between gap-2 sm:col-span-2">
                         <span className="text-xs text-muted-foreground font-medium">Cases on Last Skid</span>
                         <span className="text-sm font-bold text-foreground tabular-nums" data-testid="output-last-skid-cases">{fmtNum(calc.casesOnLastSkid, 0)}</span>
                       </div>

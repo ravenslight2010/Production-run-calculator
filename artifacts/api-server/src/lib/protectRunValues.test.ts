@@ -185,6 +185,61 @@ const CURRENT_BLANK = {
 };
 
 describe("protectRunValues", () => {
+  it.each([
+    ["omitted", undefined, "stored"],
+    ["stale", 1000, "stored"],
+    ["equal", 2000, "stored"],
+    ["newer", 3000, "incoming"],
+  ])("arbitrates breaks on %s clock", (_label, stamp, winner) => {
+    const existing = {
+      dayState: { runs: [], breaks: [{ slot: 1, enabled: true }], breaksUpdatedAt: 2000 },
+      runValues: {}, runValuesUpdatedAt: {},
+    };
+    const incoming = {
+      dayState: {
+        runs: [],
+        ...(stamp === undefined ? {} : { breaks: [{ slot: 1, enabled: false }], breaksUpdatedAt: stamp }),
+      },
+      runValues: {}, runValuesUpdatedAt: {},
+    };
+    const out = protectRunValues(incoming, existing, { nowMs: 4000 }) as typeof existing;
+    expect(out.dayState.breaks?.[0]?.enabled).toBe(winner === "incoming" ? false : true);
+  });
+
+  it("applies a newer rollover reset's breaks but rejects a stale reset payload", () => {
+    const existing = {
+      dayState: { runs: [], resetAt: 100, breaks: [{ slot: 1, enabled: true }], breaksUpdatedAt: 2000 },
+      runValues: {}, runValuesUpdatedAt: {},
+    };
+    const newer = {
+      dayState: { runs: [], resetAt: 200, breaks: [{ slot: 1, enabled: false }], breaksUpdatedAt: 3000 },
+      runValues: {}, runValuesUpdatedAt: {},
+    };
+    const stale = {
+      dayState: { runs: [], resetAt: 50, breaks: [{ slot: 1, enabled: false }], breaksUpdatedAt: 1000 },
+      runValues: {}, runValuesUpdatedAt: {},
+    };
+    expect((protectRunValues(newer, existing, { allowRunListReplacement: true, nowMs: 4000 }) as any).dayState.breaks[0].enabled).toBe(false);
+    expect((protectRunValues(stale, existing, { allowRunListReplacement: true, nowMs: 4000 }) as any).dayState.breaks[0].enabled).toBe(true);
+  });
+
+  it("preserves the stored break schedule when a newer reset omits it", () => {
+    const existing = {
+      dayState: { runs: [], resetAt: 100, breaks: [{ slot: 1, enabled: true }], breaksUpdatedAt: 2000 },
+      runValues: {}, runValuesUpdatedAt: {},
+    };
+    const incoming = {
+      dayState: { runs: [], resetAt: 200 },
+      runValues: {}, runValuesUpdatedAt: {},
+    };
+    const out = protectRunValues(incoming, existing, {
+      allowRunListReplacement: true,
+      nowMs: 4000,
+    }) as typeof existing;
+    expect(out.dayState.breaks).toEqual(existing.dayState.breaks);
+    expect(out.dayState.breaksUpdatedAt).toBe(2000);
+  });
+
   it("retains cold history when a hot live payload omits it", () => {
     const existing = {
       runValues: { r1: POP },

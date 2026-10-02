@@ -74,6 +74,31 @@ describe("TouchSelect", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("supports legacy MediaQueryList listeners used by older Safari", async () => {
+    const addListener = vi.fn();
+    const removeListener = vi.fn();
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: vi.fn((query: string) => ({
+        matches: query === "(pointer: coarse)",
+        media: query,
+        onchange: null,
+        addListener,
+        removeListener,
+      })),
+    });
+    Object.defineProperty(navigator, "maxTouchPoints", {
+      configurable: true,
+      value: 1,
+    });
+
+    const { unmount } = renderSelect();
+    await waitFor(() => expect(screen.queryByRole("combobox")).toBeNull());
+    expect(addListener).toHaveBeenCalledTimes(3);
+    unmount();
+    expect(removeListener).toHaveBeenCalledTimes(3);
+  });
+
   it("routes a coarse touch device to a named dialog and returns focus after selection", async () => {
     installPointerCapabilities({
       coarse: true,
@@ -94,6 +119,7 @@ describe("TouchSelect", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "Choose recipe" });
     expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(screen.getByRole("listbox").hasAttribute("aria-activedescendant")).toBe(false);
     expect(
       screen.getByRole("option", { name: "House recipe" }).getAttribute("aria-selected"),
     ).toBe("false");

@@ -52,6 +52,7 @@ const OTHER_LIVE_ACTOR = "route-job-other-live-actor";
 const SANDBOX_ACTOR = "route-job-sandbox-actor";
 const OTHER_SANDBOX_ACTOR = "route-job-other-sandbox-actor";
 const IDEMPOTENCY_KEY = "route-job-confirmation-lost";
+const SENSITIVE_IDEMPOTENCY_KEY = "job-sensitive-input-001";
 const JOB_BODY = {
   type: "workbook-parse",
   idempotencyKey: IDEMPOTENCY_KEY,
@@ -337,11 +338,11 @@ describe("server job route idempotency", () => {
       idempotentReplay: true,
     });
 
-      const jobs = await db.select().from(serverJobsTable).where(and(
-        eq(serverJobsTable.scope, "live"),
-        eq(serverJobsTable.actorId, ACTOR),
-        eq(serverJobsTable.idempotencyKey, IDEMPOTENCY_KEY),
-      ));
+    const jobs = await db.select().from(serverJobsTable).where(and(
+      eq(serverJobsTable.scope, "live"),
+      eq(serverJobsTable.actorId, ACTOR),
+      eq(serverJobsTable.idempotencyKey, IDEMPOTENCY_KEY),
+    ));
     expect(jobs).toHaveLength(1);
     expect(jobs[0]).toMatchObject({
       id: retryBody.id,
@@ -388,7 +389,7 @@ describe("server job route idempotency", () => {
   it("rejects sensitive workbook job input before it is queued", async () => {
     const response = await submitJob(ACTOR, {
       ...JOB_BODY,
-      idempotencyKey: "job-sensitive-input-001",
+      idempotencyKey: SENSITIVE_IDEMPOTENCY_KEY,
       input: {
         workbookText: "Brand\tFlavor",
         logs: ["Bearer must-not-leave"],
@@ -398,11 +399,11 @@ describe("server job route idempotency", () => {
     expect(await response.json()).toEqual({
       error: "Sensitive or unrelated fields are not allowed in AI requests",
     });
-      const jobs = await db.select().from(serverJobsTable).where(and(
-        eq(serverJobsTable.scope, "live"),
-        eq(serverJobsTable.actorId, ACTOR),
-        eq(serverJobsTable.idempotencyKey, IDEMPOTENCY_KEY),
-      ));
+    const jobs = await db.select().from(serverJobsTable).where(and(
+      eq(serverJobsTable.scope, "live"),
+      eq(serverJobsTable.actorId, ACTOR),
+      eq(serverJobsTable.idempotencyKey, SENSITIVE_IDEMPOTENCY_KEY),
+    ));
     expect(jobs).toHaveLength(0);
   });
 

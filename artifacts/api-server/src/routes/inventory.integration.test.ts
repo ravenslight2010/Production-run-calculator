@@ -26,6 +26,7 @@ import {
 } from "vitest";
 import pg from "pg";
 import express, { type Express } from "express";
+import { runWithScope } from "../lib/requestScope";
 
 // Filled in by beforeAll once the throwaway DB exists and the module is loaded.
 type DbModule = typeof import("@workspace/db");
@@ -1388,6 +1389,64 @@ describe("day-start physical inventory event against a real database", () => {
     expect(surplus).toHaveLength(1);
     const [mix] = await db.select().from(mixesTable);
     expect(mix.amountAlreadyMade).toBeGreaterThan(0);
+  });
+
+  it("keeps same-ID mix and surplus updates inside the active scope", async () => {
+    const onionId = await makeItem("ingredient:ScopedOnion:lbs");
+    await addLot(onionId, 100);
+    const mixBase = {
+      id: "scope-isolated-mix",
+      name: "Scoped Mix",
+      brand: "Test",
+      flavor: "Scope",
+      batchSize: 40,
+      daysEarly: 1,
+      notes: "",
+      amountAlreadyMade: 0,
+      amountActualMade: 50,
+      components: [{ ingredient: "ScopedOnion", perPizza: 2 }],
+      isPrep: false,
+      enabled: true,
+    };
+    await db.insert(mixesTable).values([
+      { ...mixBase, scope: "live" },
+      { ...mixBase, scope: "sandbox", amountAlreadyMade: 7 },
+    ]);
+    await db.insert(mixSurplusLotsTable).values([
+      {
+        id: "scope-isolated-surplus", scope: "live", mixId: mixBase.id,
+        name: "Scoped Mix", brand: "Test", flavor: "Scope", productionDate: "2026-07-05",
+        amountMade: 3, amountUsed: 0, amountRemaining: 3, location: "freezer",
+      },
+      {
+        id: "scope-isolated-surplus", scope: "sandbox", mixId: mixBase.id,
+        name: "Scoped Mix", brand: "Test", flavor: "Scope", productionDate: "2026-07-05",
+        amountMade: 9, amountUsed: 2, amountRemaining: 7, location: "freezer",
+      },
+    ]);
+    await db.insert(dailySyncTable).values({
+      date: "2026-07-05",
+      scope: "live",
+      data: {
+        dayState: {
+          date: "2026-07-05",
+          runs: [{ id: "scope-run", brand: "Test", flavor: "Scope" }],
+        },
+        runValues: { "scope-run": { casesNeeded: 10, pizzasPerCase: 10 } },
+      },
+    });
+
+    const result = await runWithScope("live", () => callDayStart("2026-07-05"));
+    expect(result.body).toMatchObject({ applied: true });
+    const [liveMix] = await db.select().from(mixesTable).where(sql`${mixesTable.scope} = 'live'`);
+    const [sandboxMix] = await db.select().from(mixesTable).where(sql`${mixesTable.scope} = 'sandbox'`);
+    expect(liveMix.amountAlreadyMade).toBeGreaterThan(0);
+    expect(sandboxMix.amountAlreadyMade).toBe(7);
+    const surplus = await db.select().from(mixSurplusLotsTable);
+    const liveSurplus = surplus.find((row) => row.scope === "live");
+    const sandboxSurplus = surplus.find((row) => row.scope === "sandbox");
+    expect(liveSurplus?.amountMade).toBeGreaterThan(3);
+    expect(sandboxSurplus).toMatchObject({ amountMade: 9, amountUsed: 2, amountRemaining: 7 });
   });
 
   it("rolls back every effect on failure and lets the same event retry once", async () => {

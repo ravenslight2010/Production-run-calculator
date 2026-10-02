@@ -2144,6 +2144,8 @@ export async function verifyReleaseEvidence(
       {
         expectedDeploymentId: options.expectedReadinessDeploymentId,
         expectedRevision: options.expectedDeployedRevision,
+        expectedEnvironment: "release",
+        expectedModes: ["normal", "recovery"],
       },
     );
   }
@@ -2179,9 +2181,15 @@ export async function verifyReleaseEvidence(
         await importCorpusEvaluationRequirements(),
       );
     } else {
-      const manifest = evaluationManifestFromEvidence(
-        JSON.parse(evidence.toString("utf8")),
-      );
+      let parsedEvidence: unknown;
+      try {
+        parsedEvidence = JSON.parse(evidence.toString("utf8"));
+      } catch {
+        throw new Error(
+          `Retained evaluation evidence is malformed JSON: ${entry.evidencePath}`,
+        );
+      }
+      const manifest = evaluationManifestFromEvidence(parsedEvidence);
       if (manifest === undefined) {
         throw new Error(
           `Retained evaluation evidence has no supported manifest envelope: ${entry.evidencePath}`,
@@ -3777,6 +3785,8 @@ async function publishedReadinessEvidenceIsCurrent(): Promise<boolean> {
       {
         expectedDeploymentId: configuredReadinessDeploymentId,
         expectedRevision: configuredDeployedRevision,
+        expectedEnvironment: "release",
+        expectedModes: ["normal", "recovery"],
       },
     );
     return true;

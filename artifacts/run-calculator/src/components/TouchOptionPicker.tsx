@@ -167,7 +167,6 @@ export function TouchOptionPicker({
         <div
           role="listbox"
           aria-label={title}
-          aria-activedescendant={selected ? `${id ?? "touch-option"}-${selectedIndex}` : undefined}
           className="min-h-0 max-h-[min(60vh,28rem)] overflow-y-auto overscroll-contain px-3 py-2"
           data-testid={dataTestId ? `${dataTestId}-options` : "touch-option-picker-options"}
         >

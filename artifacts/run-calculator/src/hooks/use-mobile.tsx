@@ -2,6 +2,27 @@ import * as React from "react"
 
 const MOBILE_BREAKPOINT = 768
 
+type MediaQueryListWithLegacyListeners = MediaQueryList & {
+  addListener?: (listener: (event: MediaQueryListEvent) => void) => void;
+  removeListener?: (listener: (event: MediaQueryListEvent) => void) => void;
+};
+
+function addMediaQueryListener(
+  query: MediaQueryListWithLegacyListeners,
+  listener: (event: MediaQueryListEvent) => void,
+): void {
+  if (typeof query.addEventListener === "function") query.addEventListener("change", listener);
+  else query.addListener?.(listener);
+}
+
+function removeMediaQueryListener(
+  query: MediaQueryListWithLegacyListeners,
+  listener: (event: MediaQueryListEvent) => void,
+): void {
+  if (typeof query.removeEventListener === "function") query.removeEventListener("change", listener);
+  else query.removeListener?.(listener);
+}
+
 function matchesMedia(query: string): boolean {
   return typeof window.matchMedia === "function"
     ? window.matchMedia(query).matches
@@ -18,9 +39,9 @@ export function useIsMobile() {
     const onChange = () => {
       setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
     }
-    mql?.addEventListener("change", onChange)
+    if (mql) addMediaQueryListener(mql, onChange)
     setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
-    return () => mql?.removeEventListener("change", onChange)
+    return () => { if (mql) removeMediaQueryListener(mql, onChange) }
   }, [])
 
   return !!isMobile
@@ -58,12 +79,12 @@ export function useIsTouchDevice(): boolean {
         ]
       : [];
     const update = () => setIsTouchDevice(canUseTouchInput());
-    mediaQueries.forEach((query) => query.addEventListener("change", update));
+    mediaQueries.forEach((query) => addMediaQueryListener(query, update));
     window.addEventListener("touchstart", update, { passive: true });
     update();
 
     return () => {
-      mediaQueries.forEach((query) => query.removeEventListener("change", update));
+      mediaQueries.forEach((query) => removeMediaQueryListener(query, update));
       window.removeEventListener("touchstart", update);
     };
   }, []);

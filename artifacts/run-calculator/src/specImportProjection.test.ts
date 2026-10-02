@@ -87,4 +87,18 @@ describe("spec import projection", () => {
       .toMatchObject({ frontlineRecipeName: "Old Sauce", sauceOzPerPizza: 4 });
     unsubscribe();
   });
+
+  it("does not adopt a projection over a browser edit made after review", () => {
+    const key = "run-calc-profile-acme__cheese";
+    const projection = projectSpecImport(parsed);
+    const interveningEdit = {
+      sauceOzPerPizza: 9,
+      frontlineRecipeName: "Manager Edit",
+    };
+    localStorage.setItem(key, JSON.stringify(interveningEdit));
+
+    adoptSpecImportProjection(projection);
+
+    expect(JSON.parse(localStorage.getItem(key) ?? "{}")).toEqual(interveningEdit);
+  });
 });

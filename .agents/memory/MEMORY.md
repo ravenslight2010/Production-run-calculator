@@ -13,7 +13,7 @@
 - [Frontline is sauce](frontline-is-sauce.md) + [ready-made](ready-made-sauce.md) — "frontline" IS the UI Sauce Recipe; sauce w/o rows (BBQ) = bought as-is, consume ingredient lbs not Sauce batches.
 - [Web-only product](web-mobile-parity.md) + [Cast-to-Screens](cast-screens.md) + [Web+mobile live sync](live-sync-web-mobile.md) — responsive web app remains web-only for station displays; shared `/api/sync` uses non-clobber merges and a 10mb JSON limit.
 - [Profile/autosave clobber guards](autosave-edit-attribution.md) + [Open form clobbers profiles](open-form-profile-clobber.md) — save only attributed data and reload open forms after out-of-band profile rewrites.
-- [Daily reset trigger](daily-reset-trigger.md) — reset is client-driven at LOCAL midnight; both apps need a live timer+foreground check, not just on-load, or a device left open never resets.
+- [Daily reset trigger](daily-reset-trigger.md) — server-owned facility rollover advances the reset epoch; clients adopt the canonical current-day baseline and must not manufacture rollover state at local midnight.
 - [Web auth identity cache](auth-identity-cache.md) — set ["me"] directly on sign-in/up/out; never qc.clear() it (its observer refetch races and bounces the user).
 - [Account lifecycle sessions](account-lifecycle-sessions.md) — new tokens require server session rows; invitations are one-time and role-bounded; cookie and Bearer share every revocation fence.
 - [Ingredient merge](ingredient-merge.md) — user-driven merge of ingredient names across web+mobile+server; inventory-first-or-abort invariant; recipe rows renamed not combined.

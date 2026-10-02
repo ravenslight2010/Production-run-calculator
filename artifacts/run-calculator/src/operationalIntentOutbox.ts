@@ -3,6 +3,7 @@ import { todayStr } from "./utils";
 import { getStoredResetEpoch } from "./adapters/browserResetPersistence";
 import { MANUAL_SECTION_FIELDS, manualSectionForField } from "@workspace/sync-contract";
 import { clearManualSectionLocks, restoreManualSectionValues, setManualSectionConflict } from "./manualSectionLocks";
+import { emitManualSectionError } from "./manualSectionErrors";
 
 export const OPERATIONAL_INTENT_OUTBOX_EVENT = "run-calculator:operational-intent-outbox";
 const KEY = "run-calculator:operational-intent-outbox:v1";
@@ -33,7 +34,9 @@ const MANUAL_SECTION_PENDING_KEY = "run-calculator:manual-section-pending:v1";
 export type PendingManualSection = {
   id: string; runId: string; section: string; date: string; resetEpoch: number;
   values: Record<string, number>; baseValues: Record<string, number>;
-  observedGeneration: string; baseRevision?: number; owner?: string; deliveryState?: "retry-exhausted";
+  observedGeneration: string; baseRevision?: number; owner?: string;
+  deliveryState?: "retry-exhausted" | "auth-required";
+  failure?: "authentication" | "permission";
 };
 type OperationalIntentStorageFailure = "corrupt" | "unavailable" | "write";
 const storageHealth = {
@@ -381,7 +384,7 @@ async function submitManualSectionNow(input: {
   resetEpoch?: number;
   owner?: string;
   onPersistenceFailure?: (baseValues: Record<string, number>) => boolean | void | Promise<boolean | void>;
-}): Promise<"accepted" | "conflicted" | "offline" | "persistence-failed" | "identity-mismatch"> {
+}): Promise<"accepted" | "conflicted" | "offline" | "persistence-failed" | "identity-mismatch" | "validation-rejected" | "authentication-required" | "permission-denied"> {
   const id = input.id ?? `online:${crypto.randomUUID()}`;
   const immutableResetEpoch = input.resetEpoch ?? getStoredResetEpoch();
   const capturedOwner = input.owner ?? activeOwner;
@@ -433,7 +436,8 @@ async function submitManualSectionNow(input: {
     let body: { data?: unknown; outcome?: string; canonicalRevision?: number; serverTime?: number; snapshotId?: string } = {};
     try { body = await response.json(); } catch {}
     if (capturedOwner !== activeOwner) return "identity-mismatch";
-    if (body.data) {
+    const canonicalConflict = response.status === 409 && body.outcome === "conflicted";
+    if ((response.ok || canonicalConflict) && body.data) {
       if (capturedOwner !== activeOwner) return "identity-mismatch";
       const canonicalServerTime = Number.isFinite(body.serverTime) ? body.serverTime : undefined;
       const canonicalValues = (body.data as any)?.runValues?.[input.runId] ?? {};
@@ -458,7 +462,7 @@ async function submitManualSectionNow(input: {
       }
       if (capturedOwner !== activeOwner) return "identity-mismatch";
     }
-    if (response.status === 409 || body.outcome === "conflicted") {
+    if (canonicalConflict) {
       if (capturedOwner !== activeOwner) return "identity-mismatch";
       const retryKey = manualRetryKey(capturedOwner, id);
       const retry = manualRetryTimers.get(retryKey); if (retry) clearTimeout(retry);
@@ -477,7 +481,44 @@ async function submitManualSectionNow(input: {
       return "accepted";
     }
     if (capturedOwner !== activeOwner) return "identity-mismatch";
-    scheduleManualRetry(pendingRecord);
+    if (response.status === 400 || response.status === 422) {
+      // Invalid commands cannot become valid through a retry. Remove the
+      // pending fence, but surface a durable error so the caller can restore
+      // the optimistic values and ask the user to correct the input.
+      localStorage.removeItem(`${MANUAL_SECTION_PENDING_KEY}:${capturedOwner}:${id}`);
+      emitManualSectionError({
+        runId: input.runId, section: input.section, failure: "validation",
+        message: "This correction was rejected as invalid. Review the values and try again.",
+      });
+      return "validation-rejected";
+    }
+    if (response.status === 401 || response.status === 403) {
+      // Keep the exact command durable and fenced, but do not retry it while
+      // credentials or authorization are unavailable. Re-authentication must
+      // be followed by an explicit retry.
+      const failure = response.status === 401 ? "authentication" : "permission";
+      localStorage.setItem(`${MANUAL_SECTION_PENDING_KEY}:${capturedOwner}:${id}`, JSON.stringify({
+        ...pendingRecord, deliveryState: "auth-required", failure,
+      }));
+      emitManualSectionError({
+        runId: input.runId, section: input.section, failure,
+        message: response.status === 401
+          ? "Sign in again, then retry this correction."
+          : "You do not have permission to save this correction. Ask a manager, then retry.",
+      });
+      return response.status === 401 ? "authentication-required" : "permission-denied";
+    }
+    if (response.status === 429 || response.status >= 500) {
+      scheduleManualRetry(pendingRecord, response.status === 429 ? retryAfter(response) : undefined);
+      return "offline";
+    }
+    // Other non-OK statuses are not transient; retain the command and fence
+    // it rather than silently converting an unknown failure into a retry.
+    localStorage.setItem(`${MANUAL_SECTION_PENDING_KEY}:${capturedOwner}:${id}`, JSON.stringify(pendingRecord));
+    emitManualSectionError({
+      runId: input.runId, section: input.section,
+      message: `Correction failed (${response.status}). Review and retry.`,
+    });
     return "offline";
   } catch {
     if (capturedOwner !== activeOwner) return "identity-mismatch";
@@ -511,7 +552,7 @@ export function submitManualSection(input: {
   resetEpoch?: number;
   owner?: string;
   onPersistenceFailure?: (baseValues: Record<string, number>) => boolean | void | Promise<boolean | void>;
-}): Promise<"accepted" | "conflicted" | "offline" | "persistence-failed" | "identity-mismatch"> {
+}): Promise<"accepted" | "conflicted" | "offline" | "persistence-failed" | "identity-mismatch" | "validation-rejected" | "authentication-required" | "permission-denied"> {
   const sectionFields = MANUAL_SECTION_FIELDS[
     input.section as keyof typeof MANUAL_SECTION_FIELDS
   ];
@@ -539,7 +580,7 @@ export function submitManualSection(input: {
     result[field] = (Number(values[field]) || 0) - (Number(baseValues[field]) || 0);
     return result;
     }, {});
-  const submit = async (): Promise<"accepted" | "conflicted" | "offline" | "persistence-failed" | "identity-mismatch"> => {
+  const submit = async (): Promise<"accepted" | "conflicted" | "offline" | "persistence-failed" | "identity-mismatch" | "validation-rejected" | "authentication-required" | "permission-denied"> => {
     // Bind the account at enqueue time. A queued section edit must never be
     // rebound to whichever account is active when an earlier request settles.
     if (!owner || owner !== activeOwner) return "identity-mismatch";
@@ -577,7 +618,7 @@ export function submitManualSection(input: {
   });
   return run;
 }
-function scheduleManualRetry(record: PendingManualSection & { attempts?: number }): void {
+function scheduleManualRetry(record: PendingManualSection & { attempts?: number }, wait?: number): void {
   if (typeof navigator !== "undefined" && !navigator.onLine) return;
   if (!record.owner || record.owner !== activeOwner) return;
   const retryKey = manualRetryKey(record.owner, record.id);
@@ -588,12 +629,14 @@ function scheduleManualRetry(record: PendingManualSection & { attempts?: number 
       localStorage.setItem(`${MANUAL_SECTION_PENDING_KEY}:${activeOwner ?? "anonymous"}:${record.id}`,
         JSON.stringify({ ...record, attempts: MAX_MANUAL_SECTION_RETRY_ATTEMPTS, deliveryState: "retry-exhausted" }));
     } catch {}
-    window.dispatchEvent(new CustomEvent("calculator-manual-section-error", {
-      detail: { runId: record.runId, section: record.section, message: "This correction is still pending on this device. Keep this device online and retry it when storage and connectivity are available." },
-    }));
+    emitManualSectionError({
+      runId: record.runId,
+      section: record.section,
+      message: "This correction is still pending on this device. Keep this device online and retry it when storage and connectivity are available.",
+    });
     return;
   }
-  const delay = Math.min(30_000, 500 * (2 ** Math.min(attempt - 1, 6)));
+  const delay = wait === undefined ? Math.min(30_000, 500 * (2 ** Math.min(attempt - 1, 6))) : Math.min(RETRY_AFTER_MAX_MS, wait);
   manualRetryTimers.set(retryKey, setTimeout(() => {
     manualRetryTimers.delete(retryKey);
     void submitManualSection({ ...record, attempts: attempt } as any);
@@ -607,7 +650,20 @@ export async function retryPendingManualSections(): Promise<void> {
     if (!key?.startsWith(`${MANUAL_SECTION_PENDING_KEY}:${activeOwner}:`)) continue;
     try { pending.push(JSON.parse(localStorage.getItem(key) ?? "null")); } catch {}
   }
-  for (const item of pending) if (item?.id && item.deliveryState !== "retry-exhausted") await submitManualSection(item as any);
+  for (const item of pending) if (item?.id && !["retry-exhausted", "auth-required"].includes(item.deliveryState)) await submitManualSection(item as any);
+}
+/** Explicitly retries a manual section after the user restores auth/access. */
+export async function retryPendingManualSection(id: string): Promise<boolean> {
+  if (typeof localStorage === "undefined" || !activeOwner) return false;
+  try {
+    const key = `${MANUAL_SECTION_PENDING_KEY}:${activeOwner}:${id}`;
+    const item = JSON.parse(localStorage.getItem(key) ?? "null") as PendingManualSection | null;
+    if (!item || item.id !== id || item.owner !== activeOwner || item.deliveryState === "retry-exhausted") return false;
+    const result = await submitManualSection({ ...item, deliveryState: undefined, failure: undefined } as any);
+    return result === "accepted" || result === "conflicted";
+  } catch {
+    return false;
+  }
 }
 export function retryOperationalIntent(id: string): boolean {
   const terminalKey = `${TERMINAL_PREFIX}${id}`;
@@ -817,7 +873,12 @@ async function flushWithStorageLock(senderId: string): Promise<void> {
            }) });
            let body: { outcome?: string; data?: unknown; cursor?: number; canonicalRevision?: number; serverTime?: number; snapshotId?: string } = {}; try { body = await res.json(); } catch { /* status classification still applies */ }
           if (activeOwner !== ownerAtStart || !currentDeliveryMatches(item)) continue;
-          if (res.ok && ["accepted", "superseded", "rebased", "conflicted", "review-required"].includes(body.outcome ?? "")) {
+           // A 409 is the one documented non-OK response that carries
+           // authoritative canonical data: it represents a conflict, not a
+           // transient server failure.  Every other non-OK response must be
+           // classified below before any response data can be adopted.
+           const canonicalConflict = res.status === 409 && body.outcome === "conflicted";
+           if ((res.ok || canonicalConflict) && ["accepted", "superseded", "rebased", "conflicted", "review-required"].includes(body.outcome ?? "")) {
             const outcome = body.outcome as "accepted" | "superseded" | "rebased" | "conflicted" | "review-required";
              const receipt: OperationalIntentCanonicalReceipt = {
                ...(Number.isSafeInteger(body.cursor) ? { cursor: body.cursor } : {}),

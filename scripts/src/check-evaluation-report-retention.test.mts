@@ -114,6 +114,36 @@ test("allows the audit-maintenance CLI only when explicitly classified as a non-
   );
 });
 
+test("rejects duplicate classifications instead of masking them with a Set", () => {
+  const source = "maintain-audit-log.mts";
+  const body = "process.stdout.write(JSON.stringify({ ok: true }));";
+  const classifications = [
+    {
+      source,
+      reason: "Operational audit maintenance; no provider or evaluation output is retained.",
+    },
+    {
+      source,
+      reason: "Approved privileged database maintenance; no AI evaluation report is written.",
+    },
+  ];
+  withSources(
+    { [source]: body },
+    [],
+    (directory) => {
+      assert.ok(
+        checkEvaluationReportRetention(directory).some(
+          (failure) =>
+            failure.file === "evaluation-reporters.json" &&
+            failure.reason.includes("maintain-audit-log.mts") &&
+            failure.reason.includes("more than once"),
+        ),
+      );
+    },
+    classifications,
+  );
+});
+
 for (const [description, serialization] of [
   ["direct", "JSON.stringify(providerResponse)"],
   ["aliased", "JSON.stringify(payload)"],

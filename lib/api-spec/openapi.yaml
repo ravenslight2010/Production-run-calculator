@@ -5441,7 +5441,7 @@ components:
         completeness: { type: string, enum: [complete, partial] }
         syncVersion: { type: integer, enum: [1] }
         data:
-          oneOf:
+          anyOf:
             - $ref: "#/components/schemas/SyncPayload"
             - { type: object, additionalProperties: true }
             - { type: "null" }

@@ -45,6 +45,10 @@ import { ForegroundRecoveryStatus } from "../components/ForegroundRecoveryStatus
 import { VisibleTabScheduler } from "../visibleTabScheduler";
 import { incrementFloorCaseCount } from "../floorPackagingCorrection";
 import {
+  emitManualSectionError,
+  subscribeToManualSectionErrors,
+} from "../manualSectionErrors";
+import {
   hasAutomaticUpdateReloadBlockingSurface,
   isAutomaticUpdateReloadSafe,
   reportAutomaticUpdateReloadSafety,
@@ -2999,7 +3003,11 @@ export default function Home() {
         window.dispatchEvent(new CustomEvent("calculator-manual-section-pending", { detail: { runId, section } }));
       }
       if (result === "persistence-failed") {
-        window.dispatchEvent(new CustomEvent("calculator-manual-section-error", { detail: { runId, section, message: "This correction could not be saved on this device. Your counts were restored; please try again." } }));
+        emitManualSectionError({
+          runId,
+          section,
+          message: "This correction could not be saved on this device. Your counts were restored; please try again.",
+        });
       }
     });
   }, []);
@@ -5421,6 +5429,7 @@ export default function Home() {
   // failure modes and surface a clear, dismissible banner + a red status dot.
   const [syncPushFailed, setSyncPushFailed] = useState(false);
   const [writeError, setWriteError] = useState<string | null>(null);
+  useEffect(() => subscribeToManualSectionErrors(setWriteError), []);
   const [sauceAutoTrackFailure, setSauceAutoTrackFailure] = useState<SauceAutoTrackFailure | null>(null);
   const reportSauceAutoTrackFailure = useCallback((claim: AutoTrackEventClaim) => {
     setSauceAutoTrackFailure((current) =>
@@ -7389,7 +7398,7 @@ export default function Home() {
         }
         const prevCurId = freshestDayState.runs[freshestDayState.currentIndex]?.id;
         const newIndex = Math.max(0, newRuns.findIndex(r => r.id === prevCurId));
-        const newDs = { ...freshestDayState, runs: newRuns, currentIndex: newIndex, breaks: normalizeDayBreaks(scheduleEditorBreaks) };
+        const newDs = { ...freshestDayState, runs: newRuns, currentIndex: newIndex, breaks: normalizeDayBreaks(scheduleEditorBreaks), breaksUpdatedAt: now };
         setDayState(newDs);
         saveDayState(newDs);
         // Re-load the form if the current run's stored values changed (or the
@@ -7432,7 +7441,7 @@ export default function Home() {
         syncVersion: 1,
         completeness: "complete",
         baseSnapshotId: scheduleBase.snapshotId,
-        dayState: { runs, date: scheduleEditorDate, resetAt: writeDayResetAt(scheduleEditorDate, todayStr(), undefined, dayStateRef.current.resetAt, Date.now()), breaks: normalizeDayBreaks(scheduleEditorBreaks) },
+        dayState: { runs, date: scheduleEditorDate, resetAt: writeDayResetAt(scheduleEditorDate, todayStr(), undefined, dayStateRef.current.resetAt, Date.now()), breaks: normalizeDayBreaks(scheduleEditorBreaks), breaksUpdatedAt: Date.now() },
         runValues,
         brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
         brandFlavors: loadBrandFlavors(),
@@ -8636,9 +8645,17 @@ export default function Home() {
             : mergePrepPhaseClient(prev.prepPhase, remotePrepPhase);
           const remoteBreaks = normalizeDayBreaks((payload.dayState as Record<string, unknown>).breaks);
           const localBreaks = normalizeDayBreaks(prev.breaks);
-          const mergedBreaks: DayBreaks = isReset
-            ? remoteBreaks
-            : (Object.prototype.hasOwnProperty.call(payload.dayState, "breaks") ? remoteBreaks : localBreaks);
+          const remoteBreakStamp = Number((payload.dayState as Record<string, unknown>).breaksUpdatedAt);
+          const localBreakStamp = Number((prev as Record<string, unknown>).breaksUpdatedAt);
+          const remoteBreaksAreNewer = Number.isFinite(remoteBreakStamp)
+            && remoteBreakStamp > 0
+            && remoteBreakStamp > (Number.isFinite(localBreakStamp) ? localBreakStamp : 0);
+          const mergedBreaks: DayBreaks = isReset || remoteBreaksAreNewer ? remoteBreaks : localBreaks;
+          const mergedBreaksUpdatedAt = isReset
+            ? (remoteBreakStamp > 0 ? remoteBreakStamp : undefined)
+            : remoteBreaksAreNewer
+            ? remoteBreakStamp
+            : (Number.isFinite(localBreakStamp) && localBreakStamp > 0 ? localBreakStamp : undefined);
           const newDs = {
             ...prev,
             runs: newRuns,
@@ -8651,6 +8668,7 @@ export default function Home() {
             stagedItems: mergedStaged,
             prepPhase: mergedPrepPhase,
             breaks: mergedBreaks,
+            ...(mergedBreaksUpdatedAt ? { breaksUpdatedAt: mergedBreaksUpdatedAt } : {}),
           };
           // Skip the re-render when nothing actually changed (sync echoes its own
           // pushes ~every 10s); a fresh object every time reset open-menu scroll.
@@ -10510,7 +10528,7 @@ export default function Home() {
       syncVersion: 1,
       completeness: canSendPartial ? "partial" : "complete",
       baseSnapshotId: syncSnapshotIdRef.current,
-      dayState: { runs: fencePendingEndSnapshots(overlayRunMetaStamps(pushRuns)), shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [], substitutionLog: ds.substitutionLog ?? [], stagedItems: ds.stagedItems ?? {}, prepPhase: ds.prepPhase, breaks: normalizeDayBreaks(ds.breaks) },
+      dayState: { runs: fencePendingEndSnapshots(overlayRunMetaStamps(pushRuns)), shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [], substitutionLog: ds.substitutionLog ?? [], stagedItems: ds.stagedItems ?? {}, prepPhase: ds.prepPhase, breaks: normalizeDayBreaks(ds.breaks), breaksUpdatedAt: ds.breaksUpdatedAt },
       runValues: fenceActiveManualSectionValues(fencePendingOperationalValues(runValues)),
       runValuesUpdatedAt,
       ...(() => {

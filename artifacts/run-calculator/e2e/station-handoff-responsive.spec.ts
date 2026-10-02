@@ -13,14 +13,17 @@ import {
   requireIsolatedTestDatabase,
   uniqueTestId,
 } from "./isolation";
+import { requireLocalFixtureApiOrigin } from "./isolatedApiOrigin";
 import { DEFAULT_VALUES } from "../src/types";
 
 test.use({ viewport: { width: 390, height: 844 } });
 
 const PASSWORD = "TestPass123!";
-const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "Welcome2Lucias!";
-const API_BASE =
-  process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
+const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE;
+if (!SIGNUP_CODE) {
+  throw new Error("STAFF_SIGNUP_CODE is required for station handoff fixtures");
+}
+const API_BASE = requireLocalFixtureApiOrigin("station handoff responsive fixtures");
 
 let authorizedFixtures: AuthorizedBrowserFixtures;
 
@@ -165,7 +168,7 @@ async function clearBrowserState(page: Page): Promise<void> {
 }
 
 test.beforeAll(async ({ playwright }) => {
-  await requireIsolatedTestDatabase();
+  requireIsolatedTestDatabase("station handoff responsive fixtures");
   authorizedFixtures = await AuthorizedBrowserFixtures.create(
     playwright,
     API_BASE,
@@ -269,4 +272,86 @@ test("keeps Frontline and Packaging handoffs selected once on a phone-sized view
     path: testInfo.outputPath("packaging-handoff-after-reload.png"),
     fullPage: true,
   });
+});
+
+test("Summary card keeps an uncommitted note focused across a live timer tick", async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  const suffix = uniqueTestId("summary-live-edit");
+  const account = await authorizedFixtures.createAccount({
+    username: `manager_${suffix}`,
+    password: PASSWORD,
+    capabilities: DEFAULT_MANAGER_CAPABILITIES,
+  });
+  const runId = `summary-live-edit-run-${suffix}`;
+  const brand = `Summary Live Edit ${suffix}`;
+  const date = localDate();
+  const now = Date.now();
+
+  await authorizedFixtures.removeTodaySync([date]);
+  await authorizedFixtures.seedTodaySync({
+    token: account.token,
+    senderId: `summary-live-edit-${suffix}`,
+    date,
+    payload: {
+      dayState: {
+        date,
+        runs: [{
+          id: runId,
+          brand,
+          flavor: "Current",
+          startedAt: now - 2 * 60_000,
+          metaUpdatedAt: now,
+          seeded: false,
+        }],
+        currentIndex: 0,
+        resetAt: 0,
+        substitutions: [],
+        substitutionLog: [],
+        stagedItems: {},
+        prepPhase: {
+          prepStartedAt: null,
+          prepBatchesDough: 0,
+          prepBatchesSauce: 0,
+          prepCarriedOver: false,
+        },
+      },
+      runValues: {
+        [runId]: {
+          ...DEFAULT_VALUES,
+          casesNeeded: 150,
+          pizzasPerCase: 8,
+          approxLineSpeed: 60,
+        },
+      },
+      runValuesUpdatedAt: { [runId]: now },
+      packagingProgress: {},
+    },
+  });
+
+  await openAsManager(page, account.token);
+  await expect.poll(() => readCurrentRunId(page), { timeout: 15_000 }).toBe(runId);
+  await page.getByRole("button", { name: "More" }).click();
+  await page.getByRole("menuitem", { name: "Summary", exact: true }).click();
+
+  const summaryCard = page.getByTestId(`run-summary-${runId}`);
+  await expect(summaryCard).toBeVisible();
+  await expect(summaryCard.getByText("Time Left", { exact: true })).toBeVisible();
+  const notes = summaryCard.getByPlaceholder(
+    "Shift notes, line issues, observations…",
+  );
+  const draft = `Uncommitted note ${suffix}`;
+
+  await notes.fill(draft);
+  await expect(notes).toBeFocused();
+  await expect(notes).toHaveValue(draft);
+  // useClock updates active runs every second. Summary's Time Left is a
+  // remaining-work estimate, not an elapsed clock, so wait beyond one cadence
+  // and verify the uncommitted editor survives the context update.
+  await page.waitForTimeout(1_250);
+  await expect(notes).toBeFocused();
+  await expect(notes).toHaveValue(draft);
 });

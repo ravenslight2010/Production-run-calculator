@@ -16,6 +16,7 @@ import { getSauceBarrelEntry, mirrorSauceBarrelProgress } from "../../sauceBarre
 import { markRunValuesUpdated } from "../../adapters/browserRunPersistence";
 import { createPackagingControlAdapter } from "../../packagingManager";
 import { fmtNum } from "../../utils";
+import { shouldSeedCarriedOverSauce } from "./sauceCarryoverSeed";
 
 export const LiveSauceTabContent = memo(function LiveSauceTabContent() {
   const hx = useHomeTabCtx();
@@ -37,6 +38,7 @@ export const LiveSauceTabContent = memo(function LiveSauceTabContent() {
   const [sauceMade, setSauceMadeRaw] = useState(
     () => Math.max(0, Number(v.sauceBarrelsMade) || getSauceBarrelEntry(currentRunId).barrelsMade),
   );
+  const seededRunIdRef = useRef<string | null>(null);
 
   // Anchor in net-production elapsed seconds when the current barrel started.
   // 0 means "since run start".  No wall-clock timestamp involved.
@@ -95,16 +97,23 @@ export const LiveSauceTabContent = memo(function LiveSauceTabContent() {
   }, [currentRunId, runStatus]);
   // Seed sauceMade from prep batches when run first starts (guarded by prepCarriedOver).
   useEffect(() => {
-    if (runStatus === "running" && prep.prepCarriedOver && prep.prepBatchesSauce > 0) {
-      if ((Number(v.sauceBarrelsMade) || 0) === 0) {
-        applyManualSauceProgress(prep.prepBatchesSauce, elapsedBatchSec);
-      }
+    if (shouldSeedCarriedOverSauce({
+      currentRunId,
+      seededRunId: seededRunIdRef.current,
+      runStatus,
+      prepCarriedOver: prep.prepCarriedOver,
+      prepBatchesSauce: prep.prepBatchesSauce,
+      sauceBarrelsMade: v.sauceBarrelsMade,
+    })) {
+      seededRunIdRef.current = currentRunId;
+      applyManualSauceProgress(prep.prepBatchesSauce, elapsedBatchSec);
     }
   }, [
     applyManualSauceProgress,
     elapsedBatchSec,
     prep.prepBatchesSauce,
     prep.prepCarriedOver,
+    currentRunId,
     runStatus,
     v.sauceBarrelsMade,
   ]);

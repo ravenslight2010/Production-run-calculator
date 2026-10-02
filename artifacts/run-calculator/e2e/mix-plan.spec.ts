@@ -330,6 +330,19 @@ async function waitForLocalRunStarted(page: Page, runId: string): Promise<void> 
   ).toBeTruthy();
 }
 
+async function waitForCurrentRun(page: Page, runId: string): Promise<void> {
+  await expect.poll(
+    () => page.evaluate((id) => {
+      const day = JSON.parse(localStorage.getItem("run-calc-day") ?? "{}") as {
+        currentIndex?: number;
+        runs?: Array<{ id?: string }>;
+      };
+      return day.runs?.[day.currentIndex ?? 0]?.id ?? null;
+    }, runId),
+    { timeout: 15_000 },
+  ).toBe(runId);
+}
+
 async function waitForCanonicalRunField(
   runId: string,
   field: "startedAt" | "endedAt",
@@ -681,7 +694,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       const prevBtn = page.getByRole("button", { name: /prev/i });
       await prevBtn.waitFor({ state: "visible", timeout: 8_000 });
       await prevBtn.click();
-      await page.waitForTimeout(600);
+      await waitForCurrentRun(page, runId1);
 
       const startBtn = page.locator('[data-testid="button-start-run"]');
       await startBtn.waitFor({ state: "visible", timeout: 8_000 });
@@ -3159,6 +3172,14 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       await brandInput.fill(brand1);
       await brandInput.press("Enter");
       await page.waitForTimeout(800);
+      const runId1 = await page.evaluate(() => {
+        const day = JSON.parse(localStorage.getItem("run-calc-day") ?? "{}") as {
+          runs?: Array<{ id?: string }>;
+          currentIndex?: number;
+        };
+        return day.runs?.[day.currentIndex ?? 0]?.id ?? "";
+      });
+      expect(runId1).toBeTruthy();
 
       // Add run 2 and set brand2
       const newRunBtn = page.getByRole("button", { name: /new run/i });
@@ -3186,7 +3207,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       const prevBtn = page.getByRole("button", { name: /prev/i });
       await prevBtn.waitFor({ state: "visible", timeout: 8_000 });
       await prevBtn.click();
-      await page.waitForTimeout(600);
+      await waitForCurrentRun(page, runId1);
 
       const startBtn1 = page.locator('[data-testid="button-start-run"]');
       await startBtn1.waitFor({ state: "visible", timeout: 8_000 });
@@ -4091,7 +4112,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       const nextBtn = page.getByRole("button", { name: /next/i });
       await nextBtn.waitFor({ state: "visible", timeout: 8_000 });
       await nextBtn.click();
-      await page.waitForTimeout(600);
+      await waitForCurrentRun(page, runId2);
 
       const startBtn2 = page.locator('[data-testid="button-start-run"]');
       await startBtn2.waitFor({ state: "visible", timeout: 8_000 });
@@ -4209,7 +4230,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       const prevBtn = page.getByRole("button", { name: /prev/i });
       await prevBtn.waitFor({ state: "visible", timeout: 8_000 });
       await prevBtn.click();
-      await page.waitForTimeout(600);
+      await waitForCurrentRun(page, runId1);
 
       const startBtn1 = page.locator('[data-testid="button-start-run"]');
       await startBtn1.waitFor({ state: "visible", timeout: 8_000 });
@@ -4223,7 +4244,7 @@ test.describe("Mix Plan — prep card suppression and ended-run removal", () => 
       const nextBtn = page.getByRole("button", { name: /next/i });
       await nextBtn.waitFor({ state: "visible", timeout: 8_000 });
       await nextBtn.click();
-      await page.waitForTimeout(600);
+      await waitForCurrentRun(page, runId2);
 
       const startBtn2 = page.locator('[data-testid="button-start-run"]');
       await startBtn2.waitFor({ state: "visible", timeout: 8_000 });

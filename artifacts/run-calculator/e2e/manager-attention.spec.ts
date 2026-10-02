@@ -6,12 +6,9 @@ import {
   requireIsolatedTestDatabase,
   uniqueTestId,
 } from "./isolation";
+import { requireLocalFixtureApiOrigin } from "./isolatedApiOrigin";
 import { assertRecipePickerContract } from "./recipe-picker-contract";
-
-const API_BASE =
-  process.env.PLAYWRIGHT_API_BASE_URL
-  ?? process.env.PLAYWRIGHT_BASE_URL
-  ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
+const API_BASE = requireLocalFixtureApiOrigin("manager attention fixtures");
 const PASSWORD = "TestPass123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 
@@ -173,7 +170,6 @@ test("manager setup stays usable when recipe names are incomplete", async ({
     await fixtures.cleanup();
   }
 });
-
 test("live and setup profile recipe pickers keep the shared selector contract", async ({
   page,
   playwright,
@@ -192,6 +188,7 @@ test("live and setup profile recipe pickers keep the shared selector contract", 
     const flavor = uniqueTestId("RecipeRoundTripFlavor");
 
     const oldCheeseName = uniqueTestId("RecipeRoundTripOldCheese");
+    const oldMixName = uniqueTestId("RecipeRoundTripOldMix");
     const doughName = uniqueTestId("PickerContractDough");
     const sauceName = uniqueTestId("PickerContractSauce");
     const cheeseName = uniqueTestId("PickerContractCheese");
@@ -413,7 +410,6 @@ test("live and setup profile recipe pickers keep the shared selector contract", 
     await fixtures.cleanup();
   }
 });
-
 test("manager attention remains stable across dialog and destination transitions", async ({
   page,
   playwright,
@@ -605,37 +601,3 @@ test("manager attention remains stable across dialog and destination transitions
     await fixtures.cleanup();
   }
 });
-
-    const newCheeseName = uniqueTestId("RecipeRoundTripNewCheese");
-
-    const oldMixName = uniqueTestId("RecipeRoundTripOldMix");
-
-    const newMixName = uniqueTestId("RecipeRoundTripNewMix");
-
-    const chooseIdentity = async (profileSurface: Locator) => {
-      const chooseExisting = async (pickerName: string, value: string) => {
-        await profileSurface.getByRole("button", { name: pickerName, exact: true }).click();
-        await page.getByPlaceholder("Search or add…").fill(value);
-        const existing = page.getByRole("button", { name: value, exact: true });
-        if (await existing.count()) {
-          await existing.last().click();
-        } else {
-          await page.getByRole("button", { name: `Add "${value}"`, exact: true }).click();
-        }
-      };
-      await chooseExisting("Pick or add a brand…", brand);
-      await chooseExisting("Pick or add a flavor…", flavor);
-    };
-
-    const chooseMixRecipe = async (
-      profileSurface: Locator,
-      testId: string,
-      recipeName: string,
-    ) => {
-      const picker = profileSurface.getByTestId(testId);
-      await picker.click();
-      const dropdown = page.getByPlaceholder("Search or add…").locator("..");
-      await expect(dropdown.getByRole("button", { name: recipeName, exact: true })).toBeVisible();
-      await dropdown.getByRole("button", { name: recipeName, exact: true }).click();
-      await expect(picker).toContainText(recipeName);
-    };

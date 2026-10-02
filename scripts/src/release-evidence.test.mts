@@ -68,6 +68,7 @@ import {
 import {
   buildReadinessEvidence,
   sanitizeReadinessResponse,
+  validateReadinessEvidence,
 } from "./capture-readiness-recovery.mts";
 import { FULL_BROWSER_EXPECTED_CASES } from "./full-browser-case-contract.mts";
 
@@ -135,6 +136,79 @@ function readinessEvidenceFixture() {
     mode: "normal",
     samples: [sample, sample],
   });
+}
+
+function verifyReadinessEvidenceVerificationIsRecomputed(): void {
+  const valid = readinessEvidenceFixture();
+  const failedSamples = valid.samples.map((sample) => ({
+    ...sample,
+    outcome: "probe_error" as const,
+  }));
+  const inconsistent = buildReadinessEvidence({
+    environment: "release",
+    deploymentId: valid.deploymentId,
+    revision: valid.revision,
+    generatedAt: valid.generatedAt,
+    mode: "normal",
+    samples: failedSamples,
+  });
+  const forged = {
+    ...inconsistent,
+    verification: {
+      mode: "normal" as const,
+      passed: true,
+      reason: "sustained HTTP 200 readiness",
+    },
+  };
+  assert.throws(
+    () => validateReadinessEvidence(forged, {
+      expectedDeploymentId: valid.deploymentId,
+      expectedRevision: valid.revision,
+      expectedEnvironment: "release",
+      expectedModes: ["normal", "recovery"],
+    }),
+    /verification does not match its samples/,
+  );
+}
+
+function verifyPublishedReadinessEvidenceRejectsObserveMode(): void {
+  const valid = readinessEvidenceFixture();
+  const observe = buildReadinessEvidence({
+    environment: "release",
+    deploymentId: valid.deploymentId,
+    revision: valid.revision,
+    generatedAt: valid.generatedAt,
+    mode: "observe",
+    samples: valid.samples,
+  });
+  assert.throws(
+    () => validateReadinessEvidence(observe, {
+      expectedDeploymentId: valid.deploymentId,
+      expectedRevision: valid.revision,
+      expectedEnvironment: "release",
+      expectedModes: ["normal", "recovery"],
+    }),
+    /mode is not permitted/,
+  );
+}
+
+function verifyPublishedReadinessEvidenceRejectsDevelopmentEnvironment(): void {
+  const valid = readinessEvidenceFixture();
+  assert.throws(
+    () => validateReadinessEvidence({ ...valid, environment: "development" }, {
+      expectedDeploymentId: valid.deploymentId,
+      expectedRevision: valid.revision,
+      expectedEnvironment: "release",
+      expectedModes: ["normal", "recovery"],
+    }),
+    /environment does not match/,
+  );
+}
+
+function verifyReadinessEvidenceValidation(): void {
+  verifyReadinessEvidenceVerificationIsRecomputed();
+  verifyPublishedReadinessEvidenceRejectsObserveMode();
+  verifyPublishedReadinessEvidenceRejectsDevelopmentEnvironment();
 }
 
 const aiDigest = "a".repeat(64);
@@ -2476,4 +2550,5 @@ async function run(): Promise<void> {
   );
 }
 
+verifyReadinessEvidenceValidation();
 await run();

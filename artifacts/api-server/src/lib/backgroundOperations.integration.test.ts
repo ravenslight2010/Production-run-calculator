@@ -1027,10 +1027,12 @@ describe("background operation PostgreSQL reconnection", () => {
   });
 
   it("fences retained shared failures after a successful replacement-process pass", async () => {
-    const recoveredAt = Date.now();
-    // The module (and therefore this process epoch) was initialized less than
-    // a minute ago in this fixture; these rows represent its predecessor.
-    const failedAt = recoveredAt - 60_000;
+    const { getBackgroundOperationProcessEpochForTests } = await import("./backgroundOperations");
+    const epoch = getBackgroundOperationProcessEpochForTests();
+    // Straddle the actual module epoch rather than assuming test startup is
+    // less than one minute old.
+    const failedAt = epoch - 1;
+    const recoveredAt = epoch + 1;
     await db.insert(backgroundOperationEventsTable).values(Array.from(
       { length: BACKGROUND_OPERATION_FAILURE_THRESHOLD },
       () => ({

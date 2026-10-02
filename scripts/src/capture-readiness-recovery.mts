@@ -100,6 +100,9 @@ export type ReadinessEvidence = {
 export type ReadinessEvidenceValidationOptions = {
   expectedDeploymentId: string;
   expectedRevision: string;
+  /** Published release gates must bind to release evidence and an active proof mode. */
+  expectedEnvironment?: "development" | "release";
+  expectedModes?: ReadinessCaptureMode[];
   now?: Date;
 };
 
@@ -385,6 +388,9 @@ export function validateReadinessEvidence(
   if (evidence.environment !== "development" && evidence.environment !== "release") {
     throw new Error("Readiness evidence environment is malformed");
   }
+  if (options.expectedEnvironment !== undefined && evidence.environment !== options.expectedEnvironment) {
+    throw new Error("Readiness evidence environment does not match the expected release environment");
+  }
   const generatedAtMs = requireTimestamp(evidence.generatedAt, "generatedAt");
   const expiresAtMs = requireTimestamp(evidence.expiresAt, "expiresAt");
   const nowMs = (options.now ?? new Date()).getTime();
@@ -492,6 +498,24 @@ export function validateReadinessEvidence(
     !verification.passed
   ) {
     throw new Error("Readiness evidence verification is not a passing proof");
+  }
+  if (
+    options.expectedModes !== undefined &&
+    !options.expectedModes.includes(verification.mode as ReadinessCaptureMode)
+  ) {
+    throw new Error("Readiness evidence verification mode is not permitted for this published call site");
+  }
+  const expectedVerification = verificationFor(
+    verification.mode as ReadinessCaptureMode,
+    evidence.samples as ReadinessSample[],
+    workerIncident503Samples,
+    recovery200Samples,
+  );
+  if (
+    verification.passed !== expectedVerification.passed ||
+    verification.reason !== expectedVerification.reason
+  ) {
+    throw new Error("Readiness evidence verification does not match its samples");
   }
   return evidence as ReadinessEvidence;
 }

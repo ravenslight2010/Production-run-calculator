@@ -223,15 +223,16 @@ export type StaffMember = {
 // The sandbox account is always a manager but must never count as the
 // "already have an admin" signal — otherwise the first real user can never
 // become manager on a fresh database.
-async function manageStaffHolders(): Promise<string[]> {
-  const all = await userIdsWithCapability("manage-staff");
-  if (all.length === 0) return [];
-  const rows = await db
+async function manageStaffHolders(
+  executor: Pick<typeof db, "select"> = db,
+): Promise<string[]> {
+  const rows = await executor
     .select({ id: usersTable.id })
     .from(usersTable)
-    .where(eq(usersTable.sandbox, false));
-  const nonSandboxIds = new Set(rows.map((r) => r.id));
-  return all.filter((id) => nonSandboxIds.has(id));
+    .innerJoin(userRolesTable, eq(userRolesTable.userId, usersTable.id))
+    .innerJoin(rolesTable, eq(rolesTable.name, userRolesTable.role))
+    .where(sql`${usersTable.sandbox} = false AND ${rolesTable.capabilities} ? 'manage-staff'`);
+  return rows.map((row) => row.id);
 }
 
 // Arbitrary fixed key for a Postgres transaction-scoped advisory lock guarding
@@ -548,7 +549,7 @@ export async function setUserRole(
   // Last-admin guard: if this change would leave nobody with manage-staff,
   // refuse. Compute the holder set after the hypothetical change.
   if (!def.capabilities.includes("manage-staff")) {
-    const holders = await manageStaffHolders();
+    const holders = await manageStaffHolders(executor);
     const remaining = holders.filter((id) => id !== targetUserId);
     if (remaining.length === 0) {
       return {

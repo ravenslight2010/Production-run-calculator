@@ -3,9 +3,22 @@ import {
   SYNC_DELTA_MAP_SECTIONS,
   applySyncDeltaData,
   buildSyncDeltaData,
+  canonicalSyncJson,
 } from "./index";
 
 describe("sync delta shape contract", () => {
+  it("serializes object keys in locale-independent code-unit order", () => {
+    expect(canonicalSyncJson({ "ä": 1, a: 2, A: 3 })).toBe(
+      '{"A":3,"a":2,"ä":1}',
+    );
+  });
+
+  it("round-trips deletion of an entire map section", () => {
+    const before = { runValues: { a: { casesNeeded: 1 } } };
+    const delta = buildSyncDeltaData(before, {});
+    expect(applySyncDeltaData(before, delta)).toEqual({});
+  });
+
   it.each(SYNC_DELTA_MAP_SECTIONS)(
     "builds and applies sparse changes and tombstones for %s",
     (section) => {

@@ -19,8 +19,9 @@ caller to execute its safe fallback. Verify both prompt response and zero
 pending waiters under full checkout contention.
 
 Background operations may retry the exact node-postgres acquisition message
-`timeout exceeded when trying to connect` as a transient failure. Keep this
-allowlist exact; generic execution or provider timeouts must remain final.
+`timeout exceeded when trying to connect` only when the whole pass is
+idempotent/transactional and protected by a durable lease. Keep this allowlist
+exact; generic execution or provider timeouts must remain final.
 
 **Why:** Production can emit the acquisition timeout without an error code or
 connection wording, so a classifier limited to PostgreSQL/network codes misses

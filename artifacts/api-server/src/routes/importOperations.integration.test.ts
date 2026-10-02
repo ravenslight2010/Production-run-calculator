@@ -7,8 +7,6 @@ import express from "express";
 import pg from "pg";
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { recordSession } from "../lib/authSessions";
-import { signToken } from "../lib/auth";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 let db: typeof import("@workspace/db").db;
@@ -21,6 +19,8 @@ let baseUrl: string;
 let tables: typeof import("@workspace/db");
 let route: typeof import("./importOperations");
 let seedRoles: () => Promise<void>;
+let recordSession: typeof import("../lib/authSessions")["recordSession"];
+let signLegacyTokenForTests: typeof import("../lib/auth")["signLegacyTokenForTests"];
 const sessionTokens = new Map<string, string>();
 
 beforeAll(async () => {
@@ -35,6 +35,8 @@ beforeAll(async () => {
   });
   if (pushed.status !== 0) throw new Error(`${pushed.stdout}\n${pushed.stderr}`);
   process.env.DATABASE_URL = url.toString();
+  ({ signLegacyTokenForTests } = await import("../lib/auth"));
+  ({ recordSession } = await import("../lib/authSessions"));
   tables = await import("@workspace/db");
   db = tables.db; pool = tables.pool;
   route = await import("./importOperations");
@@ -75,7 +77,7 @@ beforeEach(async () => {
   ]);
   sessionTokens.clear();
   for (const user of ["inventory", "profiles", "sandbox"]) {
-    const token = signToken(user);
+    const token = signLegacyTokenForTests(user);
     sessionTokens.set(user, token);
     await recordSession(user, token);
   }
@@ -216,5 +218,74 @@ describe("atomic import operations", () => {
     const sandbox = await apply("sandbox-operation-0001", change("sandbox-id"), "sandbox");
     expect(sandbox.status).toBe(200);
     expect(await db.select().from(tables.mixesTable).where(eq(tables.mixesTable.scope, "live"))).toHaveLength(0);
+  });
+
+  it("requires every changed entity capability for apply and undo", async () => {
+    await db.update(tables.rolesTable)
+      .set({ capabilities: ["manage-profiles"] })
+      .where(eq(tables.rolesTable.name, "operator"));
+
+    const mixedBody = {
+      importType: "premix",
+      sourceLabel: "mixed-capability.xlsx",
+      changes: {
+        mixes: {
+          upsert: [{
+            id: "mixed-capability-mix",
+            name: "Mixed Capability Mix",
+            brand: "",
+            flavor: "",
+            batchSize: 1,
+            daysEarly: 0,
+            notes: "",
+            amountAlreadyMade: 0,
+            components: [],
+            isPrep: false,
+            enabled: true,
+          }],
+        },
+        specImportAliases: {
+          upsert: [{
+            kind: "brand",
+            externalName: "Mixed Capability",
+            canonicalName: "Canonical",
+            context: null,
+          }],
+        },
+      },
+    };
+
+    const rejectedApply = await apply(
+      "mixed-capability-apply-0001",
+      { ...mixedBody, importType: "spec" },
+      "profiles",
+    );
+    expect(rejectedApply.status).toBe(403);
+    expect(await db.select().from(tables.mixesTable)).toHaveLength(0);
+    expect(await db.select().from(tables.importOperationsTable)).toHaveLength(0);
+
+    const applied = await apply("mixed-capability-undo-0001", mixedBody);
+    expect(applied.status).toBe(200);
+    const rejectedUndo = await fetch(
+      `${baseUrl}/api/import-operations/mixed-capability-undo-0001/undo`,
+      {
+        method: "POST",
+        headers: headers("profiles"),
+        body: JSON.stringify({}),
+      },
+    );
+    expect(rejectedUndo.status).toBe(403);
+    expect(
+      await db.select().from(tables.mixesTable)
+        .where(eq(tables.mixesTable.id, "mixed-capability-mix")),
+    ).toHaveLength(1);
+    expect(
+      await db.select().from(tables.specImportAliasesTable)
+        .where(eq(tables.specImportAliasesTable.externalName, "Mixed Capability")),
+    ).toHaveLength(1);
+    expect(
+      (await db.select().from(tables.importOperationsTable))
+        .find((row) => row.id === "mixed-capability-undo-0001")?.status,
+    ).toBe("applied");
   });
 });

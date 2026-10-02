@@ -4108,6 +4108,16 @@ describe("/sync/events — date-scoped broadcasts", () => {
       run.id,
       {
         casesNeeded: 200 + index,
+        pizzasPerCase: 10,
+        casesPerLayer: 0,
+        ...(index === 0
+          ? {
+              pep1Type: "Pepperoni",
+              pep1OzPerPizza: 1,
+              pep1Sticks: 0,
+              pep1BatchLbs: 10,
+            }
+          : {}),
         doughRecipe: Array.from({ length: 8 }, (_, ingredient) => ({
           ingredient: `Ingredient ${ingredient}`,
           lbs: ingredient + index + 1,
@@ -4116,6 +4126,7 @@ describe("/sync/events — date-scoped broadcasts", () => {
     ]));
     const baselinePayload = {
       dayState: { date, runs },
+      pepTypes: ["Sausage"],
       runValues,
       runValuesUpdatedAt: Object.fromEntries(runs.map((run, index) => [run.id, 1_000 + index])),
       packagingProgress: Object.fromEntries(runs.map((run, index) => [
@@ -4275,9 +4286,13 @@ describe("/sync/events — date-scoped broadcasts", () => {
     for (const field of derivedRunMapSharedInputFields) {
       const senderId = `peer-shared-${field}`;
       const currentValue = sharedInputPayload[field];
-      const changedValue = Array.isArray(currentValue)
-        ? [...currentValue, `changed-${field}`]
-        : [`changed-${field}`];
+      // A nonempty valid list is required: empty pepTypes are normalized back
+      // to defaults. Adding Pepperoni changes its projection from batches to lbs.
+      const changedValue = field === "pepTypes"
+        ? [...(Array.isArray(currentValue) ? currentValue : []), "Pepperoni"]
+        : Array.isArray(currentValue)
+          ? [...currentValue, `changed-${field}`]
+          : [`changed-${field}`];
       sharedInputPayload = {
         ...sharedInputPayload,
         [field]: changedValue,
@@ -4323,6 +4338,16 @@ describe("/sync/events — date-scoped broadcasts", () => {
       }
       expect(Object.keys(sharedInputFrame.frame.summaryStats).sort()).toEqual(remainingRunIds);
       expect(Object.keys(sharedInputFrame.frame.runLines).sort()).toEqual(remainingRunIds);
+      if (field === "pepTypes") {
+        expect(sharedInputFrame.frame.runLines[runs[0].id]).toContainEqual({
+          itemKey: "ingredient:Pepperoni:lbs",
+          qty: 125,
+        });
+        expect(sharedInputFrame.frame.runLines[runs[0].id]).not.toContainEqual({
+          itemKey: "ingredient:Pepperoni:batches",
+          qty: 12.5,
+        });
+      }
       const sharedInputWireBytes = Buffer.byteLength(`data: ${sharedInputFrame.raw}\n\n`, "utf8");
       expect(
         sharedInputWireBytes,

@@ -1507,8 +1507,8 @@ export const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                             )}
                             {/* Run card */}
                             {isCurrentRun
-                              ? <SummaryCard run={run} isCurrent onShowDetail={() => setIngredientDetailRunId(run.id)} />
-                              : <SummaryCard run={run} readOnly={isUpcoming ? false : undefined} onShowDetail={() => setIngredientDetailRunId(run.id)} />
+                              ? SummaryCard({ run, isCurrent: true, onShowDetail: () => setIngredientDetailRunId(run.id) })
+                              : SummaryCard({ run, readOnly: isUpcoming ? false : undefined, onShowDetail: () => setIngredientDetailRunId(run.id) })
                             }
                           </div>
                         );
@@ -1574,12 +1574,12 @@ export const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                                 <div className="px-4 pb-4 space-y-3 border-t border-border/20 pt-3">
                                   {day.runs.map((run: any) => (
                                     <div key={run.id} className="space-y-2">
-                                      <SummaryCard
-                                        run={run}
-                                        readOnly
-                                        runVals={day.runValues[run.id] as FormValues | undefined}
-                                        onShowDetail={() => setIngredientDetailRunId(run.id)}
-                                      />
+                                      {SummaryCard({
+                                        run,
+                                        readOnly: true,
+                                        runVals: day.runValues[run.id] as FormValues | undefined,
+                                        onShowDetail: () => setIngredientDetailRunId(run.id),
+                                      })}
                                       <ApplicatorEvidenceReview
                                         day={day}
                                         run={run}

@@ -150,7 +150,8 @@ async function startIsolatedSyncProcess(): Promise<{ child: ChildProcess; baseUr
     env: {
       ...process.env,
       DATABASE_URL: testDatabaseUrl,
-      AUTO_TRACK_HEARTBEAT_MS: "1000",
+      // Keep synthetic keep-alive frames outside the 400ms no-data assertion.
+      AUTO_TRACK_HEARTBEAT_MS: "5000",
     },
     stdio: ["ignore", "ignore", "ignore", "ipc"],
   });

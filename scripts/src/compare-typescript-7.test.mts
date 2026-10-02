@@ -476,6 +476,30 @@ test("runner fingerprints retain only bounded non-sensitive labels", () => {
   }
 });
 
+test("runner fingerprint refuses to capture evidence without an image identity", () => {
+  const previous = {
+    explicit: process.env.TYPESCRIPT_7_RUNNER_IMAGE,
+    os: process.env.ImageOS,
+    version: process.env.ImageVersion,
+  };
+  try {
+    delete process.env.TYPESCRIPT_7_RUNNER_IMAGE;
+    delete process.env.ImageOS;
+    delete process.env.ImageVersion;
+    assert.throws(
+      () => typescript7RunnerFingerprint(),
+      /runner image identity is unavailable/,
+    );
+  } finally {
+    if (previous.explicit === undefined) delete process.env.TYPESCRIPT_7_RUNNER_IMAGE;
+    else process.env.TYPESCRIPT_7_RUNNER_IMAGE = previous.explicit;
+    if (previous.os === undefined) delete process.env.ImageOS;
+    else process.env.ImageOS = previous.os;
+    if (previous.version === undefined) delete process.env.ImageVersion;
+    else process.env.ImageVersion = previous.version;
+  }
+});
+
 test("retained comparison evidence is revision-bound and advisory", () => {
   const checks = [
     "build",
