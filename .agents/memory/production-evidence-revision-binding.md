@@ -33,6 +33,12 @@ A GitHub push SHA proves which source commit was pushed, not which commit a prod
 
 **How to apply:** Require both the exact deployed SHA and deployment ID from the trusted publish context before collecting or accepting production evidence; re-check current platform interfaces for a supported binding mechanism.
 
+Do not assume the Replit Enterprise Admin API supplies deployment identity. Its published API reference reviewed on 2026-10-02 listed workspaces, members, groups, usage, and projects, but no deployment or publish-event operations; a documentation search summary had overstated this capability.
+
+**Why:** Search summaries can describe deployment metadata that is not present in the authoritative API schema, leading to an unsafe implementation based on a nonexistent endpoint.
+
+**How to apply:** Verify the current published API operations or a documented event contract before treating the Admin API as a trusted deployment source. Keep production evidence blocked until such an authenticated source is actually available.
+
 Bounded release handoffs must treat the explicit mode and full Git revision as part of evidence identity. A newer same-mode, same-revision checkpoint supersedes the retained report only as an incomplete attempt; it never replaces retained evidence. Keep test evidence separate from production-bound proof, and never let the summary itself issue a production GO.
 
 **Why:** Old retained reports and incomplete retries can both look positive when viewed without their revision and generation order, while development results do not establish deployed behavior.
