@@ -5,6 +5,7 @@ import {
   releaseBrowserWebServers,
 } from "./playwright.release-servers";
 import { validateBrowserSpecSyntaxDirectory } from "./e2e/validate-browser-spec-syntax";
+import { FULL_BROWSER_EXCLUDED_CASE_PATTERN } from "../../scripts/src/full-browser-case-contract.mjs";
 
 const baseURL = releaseBrowserBaseUrl(
   process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`,
@@ -59,8 +60,7 @@ export default defineConfig({
   // live-timer focus regression. The two narrow-landscape sign-in checks remain
   // included, while physical Android suspension/restart journeys stay in the
   // real-mobile-chromium lane.
-  grepInvert:
-    /@focused-only|@real-mobile-browser (?:physical Android Chrome|queued Target Cases edit (?:recovers after Android Chrome suspension|survives an Android Chrome process restart))/,
+  grepInvert: FULL_BROWSER_EXCLUDED_CASE_PATTERN,
   projects: [
     {
       name: "chromium",

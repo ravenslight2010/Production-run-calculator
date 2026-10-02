@@ -6,7 +6,7 @@
 - [Safe operational observability](observability-safe-events.md) — events carry correlation, timing, outcomes, and bounded counts; never copy request or recipe payloads into logs.
 - [Audit-log scope boundary](audit-log-scope-boundary.md) — manager capability alone is not enough for audit reads; keep compliance records behind the live-scope fence.
 - [Shared recipe refresh identity](shared-recipe-refresh-run-identity.md) — async profile fan-out must capture the originating run ID; eligibility alone cannot protect a newly selected pending run.
-- [Dough families and variants](dough-family-collapse.md) + [customer matching](doughball-variant-customers-matching.md) — one family recipe; specific-flavor matching must beat catch-all and may override a wrong stored weight.
+- [Dough families and weight](dough-family-collapse.md) + [customer matching](doughball-variant-customers-matching.md) + [pool weight](dough-weight-server-pool.md) — match specific flavors first; weight backfill fills only unset values.
 - [Near-dup scan perf](near-dup-scan-perf.md) + [Recipe print/share](recipe-print-share.md) — dup scans build ONE matcher (excludeSelf), O(n²) rebuilds froze the page; AbortError=shared (never clipboard-clobber).
 - [AI JSON bounded retry](ai-json-retry.md) — AI routes must use the shared 2-attempt retry helper; retry malformed JSON + free 429 rejections (backoff→friendly 429), never other provider throws.
 - [Die size/source and defaults](die-size-source.md) + [master heal](die-type-master-heal.md) + [die defaults](die-defaults-switch-aware.md) + [picker names](die-picker-e2e-names.md) — dieType comes from the CRUST row; purchased crusts get no die; explicit picks are switch-aware and imports stay blank-fill-only.
@@ -101,7 +101,7 @@
 - [Cross-channel auto-track claims](cross-channel-auto-track-claims.md) — shared run stamps require queued deltas to distinguish peer auto accepts from manual edits before rebasing.
 - [GitHub release proof](github-git-push.md) + [cancelled summaries](github-actions-job-summary-visibility.md) + [external forks](github-external-fork-verification.md) — pushes need secure remotes; cancelled Markdown may hide; live fork checks need another owner.
 - [Deterministic AI gates](deterministic-ai-gates.md) + [evaluation governance](ai-evaluation-framework-boundary.md) — re-run local resolution; keep model evidence offline, bounded, and independently checked.
-- [Browser fixtures and reloads](browser-fixture-seeding.md) + [disposable E2E DBs](browser-e2e-disposable-database.md) — wait for confirmed server baselines before seeded-state actions/reloads; use isolated databases.
+- [Browser fixtures/reloads](browser-fixture-seeding.md) + [disposable DBs](browser-e2e-disposable-database.md) + [list mode](playwright-list-discovery.md) — seed after baselines; listing still imports spec modules.
 - [Data Health undo coverage](data-health-undo-coverage.md) — verify persisted repair records include future-run snapshots before expecting guarded undo to restore them.
 - [String-reference purge safety](string-reference-purge-safety.md) — recipe stub purges must scan profiles and every historical/current run snapshot before deleting text-linked master data.
 - [Wake and offline command safety](wake-sync-claim-fence.md) + [intents](offline-operational-intents.md) + [receipts](offline-command-receipts.md) — fence stale claims and adopt canonical outcomes before terminalizing.
