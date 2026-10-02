@@ -42,6 +42,7 @@
     "test:report-key-rotation": "tsx ./src/report-key-rotation-preflight.test.mts",
     "test:release-resume": "tsx ./src/release-resume.integration.test.mts",
     "test:release-stopped-summary": "RELEASE_STOPPED_SUMMARY_ONLY=1 tsx ./src/release-resume.integration.test.mts",
+    "test:webkit-case-contract": "tsx ./src/webkit-case-contract.test.mts",
     "check:release-concurrency": "tsx ./src/release-concurrency-stress.mts",
     "test:release-concurrency": "tsx ./src/release-concurrency-stress.test.mts",
     "audit:recovery": "tsx ./src/recovery-audit.mts",

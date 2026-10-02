@@ -1098,6 +1098,21 @@ export const PRODUCTION_DEPENDENCY_AUDIT_STEP: ReleaseStep = {
   stage: "prerequisites",
 };
 
+export const WEBKIT_IDENTITY_CONTRACT_STEP: ReleaseStep = {
+  label: "WebKit identity contracts",
+  args: [
+    "--filter",
+    "@workspace/scripts",
+    "run",
+    "test:webkit-case-contract",
+  ],
+  // The contract uses Playwright --list against the dedicated release and
+  // compatibility configs; it must stay a bounded discovery check, not a
+  // browser run.
+  timeoutMs: 2 * 60_000,
+  stage: "browser-guard",
+};
+
 const sourceLibraryReport = resolve(
   rootDir,
   cliOptionValue("--source-library-report") ??
@@ -1563,6 +1578,7 @@ const steps: ReleaseStep[] = [
     ],
     stage: "browser-guard",
   },
+  WEBKIT_IDENTITY_CONTRACT_STEP,
   {
     label: "browser smoke tests",
     command: "bash",

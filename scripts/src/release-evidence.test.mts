@@ -24,6 +24,7 @@ import {
   SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL,
   SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_STEP,
   SOURCE_LIBRARY_RECONCILIATION_STEP,
+  WEBKIT_IDENTITY_CONTRACT_STEP,
   resolveSourceLibraryEvidenceEnvironment,
   resolveSourceLibraryReleaseDatabaseOwner,
   resolveSourceLibraryReleaseRevision,
@@ -604,6 +605,9 @@ async function run(): Promise<void> {
   const rootPackage = JSON.parse(
     await readFile(new URL("../../package.json", import.meta.url), "utf8"),
   ) as { scripts?: Record<string, string> };
+  const scriptsPackage = JSON.parse(
+    await readFile(new URL("../package.json", import.meta.url), "utf8"),
+  ) as { scripts?: Record<string, string> };
   const ciWorkflow = await readFile(
     new URL("../../.github/workflows/ci.yml", import.meta.url),
     "utf8",
@@ -808,6 +812,26 @@ async function run(): Promise<void> {
     "pnpm run audit:prod:release",
     "the configured production security workflow must retain its fail-closed compatibility command",
   );
+  assert.equal(
+    scriptsPackage.scripts?.["test:webkit-case-contract"],
+    "tsx ./src/webkit-case-contract.test.mts",
+    "the WebKit identity contract must have a focused release-check command",
+  );
+  assert.deepEqual(
+    WEBKIT_IDENTITY_CONTRACT_STEP.args,
+    [
+      "--filter",
+      "@workspace/scripts",
+      "run",
+      "test:webkit-case-contract",
+    ],
+    "the standard release gate must execute only the focused WebKit identity contract",
+  );
+  assert.equal(
+    WEBKIT_IDENTITY_CONTRACT_STEP.timeoutMs,
+    2 * 60_000,
+    "the WebKit identity discovery gate must remain bounded",
+  );
   assert.match(
     ciWorkflow,
     /name: Security audit \(prod deps\)[\s\S]*continue-on-error: true[\s\S]*run: pnpm run audit:prod:ci/,
@@ -877,6 +901,22 @@ async function run(): Promise<void> {
   assert.ok(
     releaseGateLabelsForMode("standard").includes("browser WebKit smoke"),
     "standard release checks must include the bounded WebKit browser smoke",
+  );
+  assert.equal(
+    releaseGateLabelsForMode("standard").filter(
+      (label) => label === "WebKit identity contracts",
+    ).length,
+    1,
+    "standard release checks must run the WebKit release and compatibility identity contracts exactly once",
+  );
+  assert.ok(
+    releaseGateLabelsForMode("full").includes("WebKit identity contracts"),
+    "full release checks must retain the standard WebKit identity contract",
+  );
+  assert.match(
+    releaseJobs[0]!.source!,
+    /run: pnpm run release:check$/m,
+    "the standard GitHub release job must enter through the release checker that owns the WebKit identity gate",
   );
   assert.ok(
     RELEASE_EVIDENCE_ALLOWLIST.includes("browser-smoke/webkit-result.json"),
