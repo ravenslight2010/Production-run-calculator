@@ -97,47 +97,59 @@ beforeEach(async () => {
   setProviderEnv({ AI_INTEGRATIONS_GEMINI_API_KEY: "test-replit-gemini-key" });
 });
 
-describe("GET /readyz Gemini provider configuration", () => {
+describe("GET /readyz optional AI capability", () => {
   it.each([
     {
       name: "Replit Gemini credentials",
       env: { AI_INTEGRATIONS_GEMINI_API_KEY: "test-replit-gemini-key" },
       expectedStatus: 200,
       expectedDependency: "ok",
+      expectedAiStatus: "configured",
     },
     {
       name: "a direct Gemini credential",
       env: { GOOGLE_API_KEY: "test-direct-gemini-key" },
       expectedStatus: 200,
       expectedDependency: "ok",
+      expectedAiStatus: "configured",
     },
     {
       name: "only an unused OpenAI credential",
       env: { OPENAI_API_KEY: "test-unused-openai-key" },
-      expectedStatus: 503,
-      expectedDependency: "error",
+      expectedStatus: 200,
+      expectedDependency: "warning",
+      expectedAiStatus: "not_configured",
     },
     {
       name: "no AI credential",
       env: {},
-      expectedStatus: 503,
-      expectedDependency: "error",
+      expectedStatus: 200,
+      expectedDependency: "warning",
+      expectedAiStatus: "not_configured",
     },
   ])("classifies $name", async ({
     env,
     expectedStatus,
     expectedDependency,
+    expectedAiStatus,
   }) => {
     setProviderEnv(env);
 
     const response = await fetch(`${baseUrl}/readyz`);
     const body = (await response.json()) as {
       checks: Record<string, string>;
+      capabilities: { ai: { status: string; detail?: string } };
     };
 
     expect(response.status).toBe(expectedStatus);
     expect(body.checks.dependencies).toBe(expectedDependency);
+    expect(body.capabilities.ai.status).toBe(expectedAiStatus);
+    if (expectedAiStatus === "not_configured") {
+      expect(body.capabilities.ai.detail).toBe("ai_provider_not_configured");
+      expect(body.checks.dependencies).toBe("warning");
+    }
     expect(JSON.stringify(body)).not.toContain("test-");
+    expect(JSON.stringify(mocks.info.mock.calls)).not.toContain("test-");
   });
 });
 
@@ -184,7 +196,7 @@ describe("GET /healthz cache maintenance diagnostics", () => {
 });
 
 describe("GET /healthz background operation diagnostics", () => {
-  it("returns 503 after sustained failures and recovers after a successful pass", async () => {
+  it("reports sustained failures without blocking core readiness and recovers after success", async () => {
     for (let i = 0; i < BACKGROUND_OPERATION_FAILURE_THRESHOLD; i += 1) {
       await expect(runBackgroundOperation("daily-rollover", async () => {
         throw Object.assign(new Error("connection refused"), { code: "ECONNREFUSED" });
@@ -193,11 +205,13 @@ describe("GET /healthz background operation diagnostics", () => {
 
     let response = await fetch(`${baseUrl}/readyz`);
     let body = (await response.json()) as {
+      status: string;
       checks: Record<string, string>;
       diagnostics: { backgroundOperations: Record<string, { status: string; recentFailureCount: number }> };
     };
-    expect(response.status).toBe(503);
-    expect(body.checks.backgroundWorkers).toBe("error");
+    expect(response.status).toBe(200);
+    expect(body.status).toBe("ok");
+    expect(body.checks.backgroundWorkers).toBe("warning");
     expect(body.diagnostics.backgroundOperations["daily-rollover"]).toMatchObject({
       status: "warning",
       recentFailureCount: BACKGROUND_OPERATION_FAILURE_THRESHOLD,
@@ -211,6 +225,33 @@ describe("GET /healthz background operation diagnostics", () => {
     expect(response.status).toBe(200);
     expect(body.checks.backgroundWorkers).toBe("ok");
     vi.useRealTimers();
+  });
+});
+
+describe("core readiness gates", () => {
+  it("returns 503 when the database is unavailable without exposing its error", async () => {
+    const rawDatabaseError = "private database connection string";
+    mocks.execute.mockRejectedValueOnce(
+      Object.assign(new Error(rawDatabaseError), { code: "ECONNREFUSED" }),
+    );
+
+    const response = await fetch(`${baseUrl}/readyz`);
+    const body = (await response.json()) as {
+      status: string;
+      checks: Record<string, string>;
+      diagnostics: { auditProtection: { status: string; detail?: string } };
+    };
+
+    expect(response.status).toBe(503);
+    expect(body.status).toBe("degraded");
+    expect(body.checks.database).toBe("error");
+    expect(body.checks.auditProtection).toBe("error");
+    expect(body.diagnostics.auditProtection).toEqual({
+      status: "error",
+      detail: "database_unreachable",
+    });
+    expect(JSON.stringify(body)).not.toContain(rawDatabaseError);
+    expect(JSON.stringify(mocks.info.mock.calls)).not.toContain(rawDatabaseError);
   });
 });
 
@@ -263,6 +304,7 @@ describe("startup probes", () => {
     let body = (await response.json()) as {
       status: string;
       checks: Record<string, string>;
+      capabilities: { ai: { status: string } };
       startup: {
         phase: string;
         stage: string | null;
@@ -277,8 +319,11 @@ describe("startup probes", () => {
       checks: {
         startup: "error",
         database: "pending",
+        auditProtection: "pending",
         dependencies: "pending",
+        backgroundWorkers: "pending",
       },
+      capabilities: { ai: { status: "pending" } },
       startup: { phase: "starting", stage: null },
     });
     expect(body.correlationId).toBeTruthy();
@@ -292,8 +337,11 @@ describe("startup probes", () => {
       checks: {
         startup: "error",
         database: "pending",
+        auditProtection: "pending",
         dependencies: "pending",
+        backgroundWorkers: "pending",
       },
+      capabilities: { ai: { status: "pending" } },
       startup: {
         phase: "failed",
         stage: "data_heals",

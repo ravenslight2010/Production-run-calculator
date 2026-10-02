@@ -358,12 +358,67 @@ export const undoImportOperationBodyExpectedResultHashRegExp = new RegExp('^[a-f
 
 
 /**
- * Returns server health status
+ * Reports core API readiness and optional capability degradation. Startup completion, database reachability, and required audit-log protection are hard readiness gates. An unavailable AI credential or degraded background workers are reported as warnings and do not by themselves make the core API unready. The AI signal reports credential configuration only; it does not probe the remote provider.
  * @summary Health check
  */
 export const HealthCheckResponse = zod.object({
-  "status": zod.string()
-})
+  "status": zod.enum(['ok', 'starting', 'degraded']).describe('`ok` means core-ready; `starting` or `degraded` means a hard readiness gate failed.'),
+  "checks": zod.object({
+  "process": zod.enum(['ok', 'warning', 'error', 'pending']),
+  "startup": zod.enum(['ok', 'warning', 'error', 'pending']),
+  "database": zod.enum(['ok', 'warning', 'error', 'pending']),
+  "auditProtection": zod.enum(['ok', 'warning', 'error', 'pending']),
+  "dependencies": zod.enum(['ok', 'warning', 'error', 'pending']),
+  "backgroundWorkers": zod.enum(['ok', 'warning', 'error', 'pending'])
+}).describe('Statuses for core gates and optional dependencies. A warning on dependencies or backgroundWorkers does not block HTTP 200.'),
+  "capabilities": zod.object({
+  "ai": zod.object({
+  "status": zod.enum(['configured', 'not_configured', 'pending']),
+  "detail": zod.enum(['ai_provider_not_configured']).optional()
+}).describe('AI credential configuration, not remote provider reachability.')
+}),
+  "startup": zod.object({
+  "phase": zod.enum(['starting', 'ready', 'failed']),
+  "stage": zod.string().nullable(),
+  "durationMs": zod.number(),
+  "errorCode": zod.string().optional()
+}).optional(),
+  "diagnostics": zod.record(zod.string(), zod.unknown()).optional().describe('Bounded operational diagnostics; excludes provider credentials and request payloads.'),
+  "correlationId": zod.string(),
+  "timestamp": zod.coerce.date()
+}).describe('Readiness response. HTTP 200 means startup, database, and required audit protection are ready, even when optional checks report warnings. HTTP 503 is reserved for a failed core readiness gate.')
+
+
+/**
+ * Canonical readiness probe. Returns 503 only while startup, database, or required audit-log protection is not ready. AI credential and background-worker degradation are non-blocking warnings.
+ * @summary Core API readiness
+ */
+export const ReadinessCheckResponse = zod.object({
+  "status": zod.enum(['ok', 'starting', 'degraded']).describe('`ok` means core-ready; `starting` or `degraded` means a hard readiness gate failed.'),
+  "checks": zod.object({
+  "process": zod.enum(['ok', 'warning', 'error', 'pending']),
+  "startup": zod.enum(['ok', 'warning', 'error', 'pending']),
+  "database": zod.enum(['ok', 'warning', 'error', 'pending']),
+  "auditProtection": zod.enum(['ok', 'warning', 'error', 'pending']),
+  "dependencies": zod.enum(['ok', 'warning', 'error', 'pending']),
+  "backgroundWorkers": zod.enum(['ok', 'warning', 'error', 'pending'])
+}).describe('Statuses for core gates and optional dependencies. A warning on dependencies or backgroundWorkers does not block HTTP 200.'),
+  "capabilities": zod.object({
+  "ai": zod.object({
+  "status": zod.enum(['configured', 'not_configured', 'pending']),
+  "detail": zod.enum(['ai_provider_not_configured']).optional()
+}).describe('AI credential configuration, not remote provider reachability.')
+}),
+  "startup": zod.object({
+  "phase": zod.enum(['starting', 'ready', 'failed']),
+  "stage": zod.string().nullable(),
+  "durationMs": zod.number(),
+  "errorCode": zod.string().optional()
+}).optional(),
+  "diagnostics": zod.record(zod.string(), zod.unknown()).optional().describe('Bounded operational diagnostics; excludes provider credentials and request payloads.'),
+  "correlationId": zod.string(),
+  "timestamp": zod.coerce.date()
+}).describe('Readiness response. HTTP 200 means startup, database, and required audit protection are ready, even when optional checks report warnings. HTTP 503 is reserved for a failed core readiness gate.')
 
 
 /**

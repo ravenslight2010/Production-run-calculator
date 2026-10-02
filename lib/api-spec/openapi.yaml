@@ -49,10 +49,45 @@ paths:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
+      description: >-
+        Reports core API readiness and optional capability degradation.
+        Startup completion, database reachability, and required audit-log
+        protection are hard readiness gates. An unavailable AI credential or
+        degraded background workers are reported as warnings and do not by
+        themselves make the core API unready. The AI signal reports credential
+        configuration only; it does not probe the remote provider.
       responses:
         "200":
-          description: Healthy
+          description: Core API is ready; optional AI or background work may be degraded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+        "503":
+          description: Startup, database, or required audit-log protection is not ready.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /readyz:
+    get:
+      operationId: readinessCheck
+      tags: [health]
+      summary: Core API readiness
+      description: >-
+        Canonical readiness probe. Returns 503 only while startup, database,
+        or required audit-log protection is not ready. AI credential and
+        background-worker degradation are non-blocking warnings.
+      responses:
+        "200":
+          description: Core API is ready; optional capabilities may be degraded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+        "503":
+          description: Startup, database, or required audit-log protection is not ready.
           content:
             application/json:
               schema:
@@ -5419,11 +5454,62 @@ components:
 
     HealthStatus:
       type: object
+      description: >-
+        Readiness response. HTTP 200 means startup, database, and required
+        audit protection are ready, even when optional checks report warnings.
+        HTTP 503 is reserved for a failed core readiness gate.
       properties:
         status:
           type: string
+          enum: [ok, starting, degraded]
+          description: "`ok` means core-ready; `starting` or `degraded` means a hard readiness gate failed."
+        checks:
+          type: object
+          description: >-
+            Statuses for core gates and optional dependencies. A warning on
+            dependencies or backgroundWorkers does not block HTTP 200.
+          properties:
+            process: { type: string, enum: [ok, warning, error, pending] }
+            startup: { type: string, enum: [ok, warning, error, pending] }
+            database: { type: string, enum: [ok, warning, error, pending] }
+            auditProtection: { type: string, enum: [ok, warning, error, pending] }
+            dependencies: { type: string, enum: [ok, warning, error, pending] }
+            backgroundWorkers: { type: string, enum: [ok, warning, error, pending] }
+          required: [process, startup, database, auditProtection, dependencies, backgroundWorkers]
+          additionalProperties:
+            type: string
+            enum: [ok, warning, error, pending]
+        capabilities:
+          type: object
+          required: [ai]
+          properties:
+            ai:
+              type: object
+              description: AI credential configuration, not remote provider reachability.
+              required: [status]
+              properties:
+                status: { type: string, enum: [configured, not_configured, pending] }
+                detail: { type: string, enum: [ai_provider_not_configured] }
+        startup:
+          type: object
+          properties:
+            phase: { type: string, enum: [starting, ready, failed] }
+            stage: { type: [string, "null"] }
+            durationMs: { type: number }
+            errorCode: { type: string }
+          required: [phase, stage, durationMs]
+        diagnostics:
+          type: object
+          description: Bounded operational diagnostics; excludes provider credentials and request payloads.
+          additionalProperties: true
+        correlationId: { type: string }
+        timestamp: { type: string, format: date-time }
       required:
         - status
+        - checks
+        - capabilities
+        - correlationId
+        - timestamp
 
     SyncPayload:
       type: object

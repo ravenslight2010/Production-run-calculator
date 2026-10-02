@@ -889,8 +889,156 @@ export interface OperationalIntentReceipt {
   snapshot?: SyncPayload | null;
 }
 
+/**
+ * `ok` means core-ready; `starting` or `degraded` means a hard readiness gate failed.
+ */
+export type HealthStatusStatus = typeof HealthStatusStatus[keyof typeof HealthStatusStatus];
+
+
+export const HealthStatusStatus = {
+  ok: 'ok',
+  starting: 'starting',
+  degraded: 'degraded',
+} as const;
+
+export type HealthStatusChecksProcess = typeof HealthStatusChecksProcess[keyof typeof HealthStatusChecksProcess];
+
+
+export const HealthStatusChecksProcess = {
+  ok: 'ok',
+  warning: 'warning',
+  error: 'error',
+  pending: 'pending',
+} as const;
+
+export type HealthStatusChecksStartup = typeof HealthStatusChecksStartup[keyof typeof HealthStatusChecksStartup];
+
+
+export const HealthStatusChecksStartup = {
+  ok: 'ok',
+  warning: 'warning',
+  error: 'error',
+  pending: 'pending',
+} as const;
+
+export type HealthStatusChecksDatabase = typeof HealthStatusChecksDatabase[keyof typeof HealthStatusChecksDatabase];
+
+
+export const HealthStatusChecksDatabase = {
+  ok: 'ok',
+  warning: 'warning',
+  error: 'error',
+  pending: 'pending',
+} as const;
+
+export type HealthStatusChecksAuditProtection = typeof HealthStatusChecksAuditProtection[keyof typeof HealthStatusChecksAuditProtection];
+
+
+export const HealthStatusChecksAuditProtection = {
+  ok: 'ok',
+  warning: 'warning',
+  error: 'error',
+  pending: 'pending',
+} as const;
+
+export type HealthStatusChecksDependencies = typeof HealthStatusChecksDependencies[keyof typeof HealthStatusChecksDependencies];
+
+
+export const HealthStatusChecksDependencies = {
+  ok: 'ok',
+  warning: 'warning',
+  error: 'error',
+  pending: 'pending',
+} as const;
+
+export type HealthStatusChecksBackgroundWorkers = typeof HealthStatusChecksBackgroundWorkers[keyof typeof HealthStatusChecksBackgroundWorkers];
+
+
+export const HealthStatusChecksBackgroundWorkers = {
+  ok: 'ok',
+  warning: 'warning',
+  error: 'error',
+  pending: 'pending',
+} as const;
+
+/**
+ * Statuses for core gates and optional dependencies. A warning on dependencies or backgroundWorkers does not block HTTP 200.
+ */
+export type HealthStatusChecks = {
+  process: HealthStatusChecksProcess;
+  startup: HealthStatusChecksStartup;
+  database: HealthStatusChecksDatabase;
+  auditProtection: HealthStatusChecksAuditProtection;
+  dependencies: HealthStatusChecksDependencies;
+  backgroundWorkers: HealthStatusChecksBackgroundWorkers;
+  [key: string]: unknown;
+};
+
+export type HealthStatusCapabilitiesAiStatus = typeof HealthStatusCapabilitiesAiStatus[keyof typeof HealthStatusCapabilitiesAiStatus];
+
+
+export const HealthStatusCapabilitiesAiStatus = {
+  configured: 'configured',
+  not_configured: 'not_configured',
+  pending: 'pending',
+} as const;
+
+export type HealthStatusCapabilitiesAiDetail = typeof HealthStatusCapabilitiesAiDetail[keyof typeof HealthStatusCapabilitiesAiDetail];
+
+
+export const HealthStatusCapabilitiesAiDetail = {
+  ai_provider_not_configured: 'ai_provider_not_configured',
+} as const;
+
+/**
+ * AI credential configuration, not remote provider reachability.
+ */
+export type HealthStatusCapabilitiesAi = {
+  status: HealthStatusCapabilitiesAiStatus;
+  detail?: HealthStatusCapabilitiesAiDetail;
+};
+
+export type HealthStatusCapabilities = {
+  /** AI credential configuration, not remote provider reachability. */
+  ai: HealthStatusCapabilitiesAi;
+};
+
+export type HealthStatusStartupPhase = typeof HealthStatusStartupPhase[keyof typeof HealthStatusStartupPhase];
+
+
+export const HealthStatusStartupPhase = {
+  starting: 'starting',
+  ready: 'ready',
+  failed: 'failed',
+} as const;
+
+export type HealthStatusStartup = {
+  phase: HealthStatusStartupPhase;
+  /** @nullable */
+  stage: string | null;
+  durationMs: number;
+  errorCode?: string;
+};
+
+/**
+ * Bounded operational diagnostics; excludes provider credentials and request payloads.
+ */
+export type HealthStatusDiagnostics = { [key: string]: unknown };
+
+/**
+ * Readiness response. HTTP 200 means startup, database, and required audit protection are ready, even when optional checks report warnings. HTTP 503 is reserved for a failed core readiness gate.
+ */
 export interface HealthStatus {
-  status: string;
+  /** `ok` means core-ready; `starting` or `degraded` means a hard readiness gate failed. */
+  status: HealthStatusStatus;
+  /** Statuses for core gates and optional dependencies. A warning on dependencies or backgroundWorkers does not block HTTP 200. */
+  checks: HealthStatusChecks;
+  capabilities: HealthStatusCapabilities;
+  startup?: HealthStatusStartup;
+  /** Bounded operational diagnostics; excludes provider credentials and request payloads. */
+  diagnostics?: HealthStatusDiagnostics;
+  correlationId: string;
+  timestamp: string;
 }
 
 export type SyncPeerFrameCompleteness = typeof SyncPeerFrameCompleteness[keyof typeof SyncPeerFrameCompleteness];
