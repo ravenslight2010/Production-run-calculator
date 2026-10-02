@@ -2,6 +2,7 @@ import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {
   calculateQloraPromotionPower,
+  compareQloraPromotionResultManifests,
   compareEvaluationManifests,
   evaluateConditionalQloraPromotion,
   QLORA_PROMOTION_POWER_METHOD,
@@ -810,5 +811,145 @@ describe("conditional QLoRA promotion evaluator", () => {
       reasonCodes: ["PAIRED_EVIDENCE_INVALID"],
       agreements: null,
     });
+  });
+});
+
+describe("QLoRA result manifest comparison", () => {
+  it("reports identical validated manifests as comparable with no changes", () => {
+    const input = qloraInput();
+    const result = evaluateConditionalQloraPromotion(input);
+    const comparisonInput = {
+      manifest: result.manifest,
+      bindings: input,
+    };
+
+    const comparison = compareQloraPromotionResultManifests(
+      comparisonInput,
+      comparisonInput,
+    );
+
+    expect(comparison).toMatchObject({
+      format: "qlora-promotion-result-comparison",
+      formatVersion: 1,
+      compatible: true,
+      limitations: [],
+      identityChanges: [],
+      powerAnalysisChanges: [],
+      bootstrapChanges: [],
+      aggregateMetricChanges: [],
+      safetyGateChanges: [],
+      decisionChanges: [],
+      summary: "No changes: QLoRA result manifests are identical and comparable.",
+    });
+  });
+
+  it("marks changed frozen identities as incompatible and still reports the changes", () => {
+    const baselineInput = qloraInput();
+    const candidateInput = qloraInput();
+    candidateInput.identities.candidate.modelSha256 = "9".repeat(64);
+    const baseline = evaluateConditionalQloraPromotion(baselineInput);
+    const candidate = evaluateConditionalQloraPromotion(candidateInput);
+
+    const comparison = compareQloraPromotionResultManifests(
+      { manifest: baseline.manifest, bindings: baselineInput },
+      { manifest: candidate.manifest, bindings: candidateInput },
+    );
+
+    expect(comparison.compatible).toBe(false);
+    expect(comparison.identityChanges.map(({ path }) => path)).toContain(
+      "identities.candidate.modelSha256",
+    );
+    expect(comparison.limitations).toContain(
+      "frozen QLoRA identities differ; aggregate metrics are not directly comparable",
+    );
+    expect(comparison.summary).toContain("not directly comparable");
+    expect(() => compareQloraPromotionResultManifests(
+      { manifest: baseline.manifest, bindings: baselineInput },
+      {
+        manifest: {
+          ...candidate.manifest,
+          identities: baseline.manifest?.identities,
+        },
+        bindings: candidateInput,
+      },
+    )).toThrow(/identities do not match/);
+  });
+
+  it("reports changed aggregate metrics separately when the frozen contract matches", () => {
+    const baselineInput = qloraInput();
+    const candidateInput = qloraInput(qloraRows(12, {
+      candidate: 95,
+      promptedBase: 80,
+      gemini: 92,
+    }));
+    const baseline = evaluateConditionalQloraPromotion(baselineInput);
+    const candidate = evaluateConditionalQloraPromotion(candidateInput);
+
+    const comparison = compareQloraPromotionResultManifests(
+      { manifest: baseline.manifest, bindings: baselineInput },
+      { manifest: candidate.manifest, bindings: candidateInput },
+    );
+
+    expect(comparison.compatible).toBe(true);
+    expect(comparison.identityChanges).toEqual([]);
+    expect(comparison.powerAnalysisChanges).toEqual([]);
+    expect(comparison.bootstrapChanges).toEqual([]);
+    expect(comparison.aggregateMetricChanges.map(({ path }) => path)).toContain(
+      "gains.overall.estimatePercentagePoints",
+    );
+    expect(comparison.safetyGateChanges).toEqual([]);
+    expect(comparison.decisionChanges).toEqual([]);
+  });
+
+  it("separates power, bootstrap, safety-gate, and decision changes", () => {
+    const baselineInput = qloraInput();
+    const changedPowerInput = qloraInput();
+    changedPowerInput.powerAnalysis.developmentEvidenceSha256 = "0".repeat(64);
+    const changedBootstrapInput = qloraInput();
+    changedBootstrapInput.bootstrapSeed += 1;
+    const failedGateResults = qloraRows(12, {
+      candidate: 90,
+      promptedBase: 80,
+      gemini: 92,
+    });
+    failedGateResults.candidate[0] = qloraRow(
+      "case-0",
+      "brand-0",
+      promotionFields.slice(0, 90),
+      { blankPoison: true },
+    );
+    const changedGateInput = qloraInput(failedGateResults);
+    const baseline = evaluateConditionalQloraPromotion(baselineInput);
+    const changedPower = evaluateConditionalQloraPromotion(changedPowerInput);
+    const changedBootstrap = evaluateConditionalQloraPromotion(changedBootstrapInput);
+    const changedGate = evaluateConditionalQloraPromotion(changedGateInput);
+
+    const powerComparison = compareQloraPromotionResultManifests(
+      { manifest: baseline.manifest, bindings: baselineInput },
+      { manifest: changedPower.manifest, bindings: changedPowerInput },
+    );
+    const bootstrapComparison = compareQloraPromotionResultManifests(
+      { manifest: baseline.manifest, bindings: baselineInput },
+      { manifest: changedBootstrap.manifest, bindings: changedBootstrapInput },
+    );
+    const gateComparison = compareQloraPromotionResultManifests(
+      { manifest: baseline.manifest, bindings: baselineInput },
+      { manifest: changedGate.manifest, bindings: changedGateInput },
+    );
+
+    expect(powerComparison.compatible).toBe(false);
+    expect(powerComparison.powerAnalysisChanges.map(({ path }) => path)).toContain(
+      "powerAnalysis.developmentEvidenceSha256",
+    );
+    expect(bootstrapComparison.compatible).toBe(false);
+    expect(bootstrapComparison.bootstrapChanges.map(({ path }) => path)).toContain(
+      "bootstrap.seed",
+    );
+    expect(gateComparison.safetyGateChanges.map(({ path }) => path)).toContain(
+      "safetyGates.zeroBlankPoisonCases",
+    );
+    expect(gateComparison.decisionChanges.map(({ path }) => path)).toContain(
+      "decision",
+    );
   });
 });

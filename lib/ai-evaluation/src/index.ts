@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 export const EVALUATION_MANIFEST_VERSION = 1 as const;
 
 export type EvaluationState = "passed" | "failed" | "unavailable";
@@ -461,6 +463,11 @@ function compareValues(
   after: unknown,
   path: string,
 ): EvaluationManifestChange[] {
+  if (Array.isArray(before) && Array.isArray(after)) {
+    return Array.from({ length: Math.max(before.length, after.length) }, (_, index) =>
+      compareValues(before[index], after[index], `${path}[${index}]`)
+    ).flat();
+  }
   if (
     before !== null
     && after !== null
@@ -774,6 +781,10 @@ export type QloraPromotionResultManifestBindings = {
   bootstrapSeed: number;
 };
 
+export type QloraPromotionResultComparisonInput = {
+  manifest: unknown;
+  bindings: QloraPromotionResultManifestBindings;
+};
 export type QloraPromotionEvaluation = QloraPromotionEvaluationSummary & {
   format: "qlora-promotion-evaluation";
   formatVersion: 1;
@@ -1053,9 +1064,15 @@ function normalizeQloraPowerAnalysis(
   onlyKeys(power, [
     "state",
     "developmentEvidenceSha256",
+    "method",
+    "seed",
     "confidenceLevel",
+    "minimumPower",
     "overallTargetMarginPercentagePoints",
     "criticalTargetMarginPercentagePoints",
+    "developmentCaseCount",
+    "developmentBrandClusterCount",
+    "simulationReplicates",
     "plannedBrandClusters",
     "overallPower",
     "criticalPower",
@@ -1063,9 +1080,15 @@ function normalizeQloraPowerAnalysis(
   return {
     state: "qualified",
     developmentEvidenceSha256: power.developmentEvidenceSha256 as string,
+    method: power.method as typeof QLORA_PROMOTION_POWER_METHOD,
+    seed: power.seed as number,
     confidenceLevel: power.confidenceLevel as number,
+    minimumPower: power.minimumPower as number,
     overallTargetMarginPercentagePoints: power.overallTargetMarginPercentagePoints as number,
     criticalTargetMarginPercentagePoints: power.criticalTargetMarginPercentagePoints as number,
+    developmentCaseCount: power.developmentCaseCount as number,
+    developmentBrandClusterCount: power.developmentBrandClusterCount as number,
+    simulationReplicates: power.simulationReplicates as number,
     plannedBrandClusters: power.plannedBrandClusters as number,
     overallPower: power.overallPower as number,
     criticalPower: power.criticalPower as number,
@@ -1471,6 +1494,113 @@ export function validateQloraPromotionResultManifest(
   };
 }
 
+/**
+ * Compare two detached QLoRA result manifests after binding each to its own
+ * caller-supplied frozen identities, power analysis, and bootstrap seed.
+ * Changed comparison contracts are reported explicitly and make the aggregate
+ * metrics incompatible for direct improvement claims.
+ */
+export function compareQloraPromotionResultManifests(
+  baselineInput: QloraPromotionResultComparisonInput,
+  candidateInput: QloraPromotionResultComparisonInput,
+): QloraPromotionResultManifestComparison {
+  const baseline = validateQloraPromotionResultManifest(
+    baselineInput.manifest,
+    baselineInput.bindings,
+  );
+  const candidate = validateQloraPromotionResultManifest(
+    candidateInput.manifest,
+    candidateInput.bindings,
+  );
+
+  const identityChanges = compareValues(
+    baseline.identities,
+    candidate.identities,
+    "identities",
+  );
+  const powerAnalysisChanges = compareValues(
+    baseline.powerAnalysis,
+    candidate.powerAnalysis,
+    "powerAnalysis",
+  );
+  const bootstrapChanges = compareValues(
+    baseline.bootstrap,
+    candidate.bootstrap,
+    "bootstrap",
+  );
+  const aggregateMetricChanges = compareValues(
+    {
+      caseCount: baseline.caseCount,
+      brandClusterCount: baseline.brandClusterCount,
+      agreements: baseline.agreements,
+      gains: baseline.gains,
+    },
+    {
+      caseCount: candidate.caseCount,
+      brandClusterCount: candidate.brandClusterCount,
+      agreements: candidate.agreements,
+      gains: candidate.gains,
+    },
+    "",
+  );
+  const safetyGateChanges = compareValues(
+    baseline.safetyGates,
+    candidate.safetyGates,
+    "safetyGates",
+  );
+  const decisionChanges = compareValues(
+    {
+      decision: baseline.decision,
+      reasonCodes: baseline.reasonCodes,
+      reasons: baseline.reasons,
+    },
+    {
+      decision: candidate.decision,
+      reasonCodes: candidate.reasonCodes,
+      reasons: candidate.reasons,
+    },
+    "",
+  );
+
+  const limitations = [
+    identityChanges.length > 0
+      ? "frozen QLoRA identities differ; aggregate metrics are not directly comparable"
+      : null,
+    powerAnalysisChanges.length > 0
+      ? "pre-holdout power analysis differs; promotion evidence is not directly comparable"
+      : null,
+    bootstrapChanges.length > 0
+      ? "bootstrap contract or seed differs; confidence-bound evidence is not directly comparable"
+      : null,
+  ].filter((entry): entry is string => entry !== null);
+  const compatible = limitations.length === 0;
+  const changeCounts = [
+    identityChanges.length,
+    powerAnalysisChanges.length,
+    bootstrapChanges.length,
+    aggregateMetricChanges.length,
+    safetyGateChanges.length,
+    decisionChanges.length,
+  ];
+  const total = changeCounts.reduce((sum, count) => sum + count, 0);
+  const summary = total === 0
+    ? "No changes: QLoRA result manifests are identical and comparable."
+    : `${total} change${total === 1 ? "" : "s"}: ${identityChanges.length} identity, ${powerAnalysisChanges.length} power analysis, ${bootstrapChanges.length} bootstrap, ${aggregateMetricChanges.length} aggregate metric, ${safetyGateChanges.length} safety gate, ${decisionChanges.length} decision${compatible ? "." : "; not directly comparable."}`;
+
+  return {
+    format: "qlora-promotion-result-comparison",
+    formatVersion: 1,
+    compatible,
+    limitations,
+    identityChanges,
+    powerAnalysisChanges,
+    bootstrapChanges,
+    aggregateMetricChanges,
+    safetyGateChanges,
+    decisionChanges,
+    summary,
+  };
+}
 function isStringList(value: unknown): value is string[] {
   return Array.isArray(value) && value.every(isNonEmptyString);
 }
@@ -2251,4 +2381,18 @@ type QloraPowerAtSize = {
   overallPower: number;
   criticalPower: number;
   qualified: boolean;
+};
+
+export type QloraPromotionResultManifestComparison = {
+  format: "qlora-promotion-result-comparison";
+  formatVersion: 1;
+  compatible: boolean;
+  limitations: string[];
+  identityChanges: EvaluationManifestChange[];
+  powerAnalysisChanges: EvaluationManifestChange[];
+  bootstrapChanges: EvaluationManifestChange[];
+  aggregateMetricChanges: EvaluationManifestChange[];
+  safetyGateChanges: EvaluationManifestChange[];
+  decisionChanges: EvaluationManifestChange[];
+  summary: string;
 };
