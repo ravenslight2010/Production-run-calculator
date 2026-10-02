@@ -1,0 +1,283 @@
+{
+  "revision": "1111ac3e56d146c85f82696aab9a8d6d0a633976",
+  "sourceLibraryRevision": "1111ac3e56d146c85f82696aab9a8d6d0a633976",
+  "mode": "standard",
+  "results": [
+    {
+      "label": "audit protection publish configuration",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 1288
+    },
+    {
+      "label": "operational report signing-key rotation preflight",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 2587
+    },
+    {
+      "label": "blocking release security audit (high severity; registry required)",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 1367
+    },
+    {
+      "label": "source-library reconciliation verifier fixture tests",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 7424
+    },
+    {
+      "label": "shell lint inventory",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 395
+    },
+    {
+      "label": "generated API client freshness",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 39160
+    },
+    {
+      "label": "shared library typechecks",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 2131
+    },
+    {
+      "label": "API server typecheck",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 28695
+    },
+    {
+      "label": "run calculator typecheck",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 61304
+    },
+    {
+      "label": "mockup sandbox typecheck",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 16643
+    },
+    {
+      "label": "scripts typecheck",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 13105
+    },
+    {
+      "label": "TypeScript 7 advisory comparison",
+      "passed": false,
+      "status": "FAIL",
+      "elapsedMs": 36889
+    },
+    {
+      "label": "recovery evidence audit",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 1671
+    },
+    {
+      "label": "clean-start smoke",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 37041
+    },
+    {
+      "label": "Render image smoke",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 160454
+    },
+    {
+      "label": "API unit tests (release shard 1/7)",
+      "passed": false,
+      "status": "FAIL",
+      "elapsedMs": 123170
+    },
+    {
+      "label": "API integration tests (release shard 2/7)",
+      "passed": false,
+      "status": "FAIL",
+      "elapsedMs": 168916
+    },
+    {
+      "label": "API integration tests (release shard 3/7)",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 114899
+    },
+    {
+      "label": "API integration tests (release shard 4/7)",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 95718
+    },
+    {
+      "label": "API role/capability tests (release shard 5/7)",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 15720
+    },
+    {
+      "label": "API sync tests (release shard 6/7)",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 15704
+    },
+    {
+      "label": "API sync SSE tests (release shard 7/7)",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 17707
+    },
+    {
+      "label": "run calculator tests",
+      "passed": false,
+      "status": "FAIL",
+      "elapsedMs": 157682
+    },
+    {
+      "label": "production rules tests",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 1201
+    },
+    {
+      "label": "inventory math tests",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 1471
+    },
+    {
+      "label": "spec reconcile tests",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 1068
+    },
+    {
+      "label": "spec import tests",
+      "passed": false,
+      "status": "FAIL",
+      "elapsedMs": 60883
+    },
+    {
+      "label": "scheduled recipe check tests",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 1950
+    },
+    {
+      "label": "spec export tests",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 2488
+    },
+    {
+      "label": "corpus tests",
+      "passed": false,
+      "status": "FAIL",
+      "elapsedMs": 41829
+    },
+    {
+      "label": "model-bump check",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 143913
+    },
+    {
+      "label": "operational evidence check",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 847
+    },
+    {
+      "label": "onboarding bypass guard",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 3373
+    },
+    {
+      "label": "browser smoke tests",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 68404
+    },
+    {
+      "label": "browser calendar tests",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 15376
+    },
+    {
+      "label": "browser accessibility tests",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 430696
+    },
+    {
+      "label": "browser WebKit smoke",
+      "passed": true,
+      "status": "PASS",
+      "elapsedMs": 122255
+    }
+  ],
+  "timing": {
+    "totalElapsedMs": 1260854,
+    "stages": [
+      {
+        "stage": "prerequisites",
+        "elapsedMs": 40549
+      },
+      {
+        "stage": "shared-output",
+        "elapsedMs": 2134
+      },
+      {
+        "stage": "consumer-typechecks",
+        "elapsedMs": 61310
+      },
+      {
+        "stage": "typescript-7-advisory",
+        "elapsedMs": 36890
+      },
+      {
+        "stage": "clean-start",
+        "elapsedMs": 37042
+      },
+      {
+        "stage": "container-smoke",
+        "elapsedMs": 160456
+      },
+      {
+        "stage": "release-tests",
+        "elapsedMs": 282357
+      },
+      {
+        "stage": "browser-guard",
+        "elapsedMs": 3374
+      },
+      {
+        "stage": "browser-smoke",
+        "elapsedMs": 68405
+      },
+      {
+        "stage": "browser-calendar",
+        "elapsedMs": 15379
+      },
+      {
+        "stage": "browser-accessibility",
+        "elapsedMs": 430701
+      },
+      {
+        "stage": "browser-webkit",
+        "elapsedMs": 122257
+      }
+    ]
+  },
+  "updatedAt": "2026-10-02T03:39:33.510Z"
+}
