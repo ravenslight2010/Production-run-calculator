@@ -56,6 +56,7 @@ const providerEnvKeys = [
   "AI_INTEGRATIONS_GEMINI_API_KEY",
   "GOOGLE_API_KEY",
   "OPENAI_API_KEY",
+  "LOCAL_AI_BASE_URL",
 ] as const;
 const previousProviderEnv = Object.fromEntries(
   providerEnvKeys.map((key) => [key, process.env[key]]),
@@ -116,6 +117,13 @@ describe("GET /readyz optional AI capability", () => {
     {
       name: "only an unused OpenAI credential",
       env: { OPENAI_API_KEY: "test-unused-openai-key" },
+      expectedStatus: 200,
+      expectedDependency: "warning",
+      expectedAiStatus: "not_configured",
+    },
+    {
+      name: "only a proposed local endpoint",
+      env: { LOCAL_AI_BASE_URL: "http://127.0.0.1:11434/v1" },
       expectedStatus: 200,
       expectedDependency: "warning",
       expectedAiStatus: "not_configured",

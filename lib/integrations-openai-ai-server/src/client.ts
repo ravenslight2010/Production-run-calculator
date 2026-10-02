@@ -389,6 +389,7 @@ async function create(
   let retryCount = 0;
   let responseForMetrics: GenerateContentResponse | undefined;
   let outcome: GeminiRequestOutcome = "provider_error";
+  let deferStreamCleanup = false;
   let circuitMode: "closed" | "half_open";
   try {
     circuitMode = acquireCircuit();
@@ -425,11 +426,79 @@ async function create(
         };
         if (params.stream) {
           const stream = await ai.models.generateContentStream(requestConfig);
-          outcome = "success";
-          releaseCircuit(circuitMode, "success");
+          // Stream creation only confirms that response headers arrived. Keep
+          // the timeout/cancellation signal and defer success metrics until the
+          // iterator has been consumed without an error.
+          deferStreamCleanup = true;
+          let streamSettled = false;
+          let onStreamAbort = () => {};
+          const finishStream = (
+            streamOutcome: GeminiRequestOutcome,
+            circuitResult: "success" | "transient_failure" | "other_failure",
+          ) => {
+            if (streamSettled) return;
+            streamSettled = true;
+            request.signal.removeEventListener("abort", onStreamAbort);
+            request.dispose();
+            outcome = streamOutcome;
+            releaseCircuit(circuitMode, circuitResult);
+            observeMetrics({
+              durationMs: boundedInteger(
+                performance.now() - startedAt,
+                MAX_TIMEOUT_MS * 2,
+              ),
+              outcome,
+              retryCount,
+              ...usageMetrics(responseForMetrics),
+            });
+          };
+          onStreamAbort = () => {
+            const timedOut = request.timedOut();
+            finishStream(
+              timedOut ? "timeout" : "cancelled",
+              timedOut ? "transient_failure" : "other_failure",
+            );
+          };
+          request.signal.addEventListener("abort", onStreamAbort, { once: true });
+          if (request.signal.aborted) onStreamAbort();
           return (async function* () {
-            for await (const chunk of stream) {
-              yield { choices: [{ delta: { content: chunk.text ?? null } }] };
+            try {
+              for await (const chunk of stream) {
+                yield { choices: [{ delta: { content: chunk.text ?? null } }] };
+              }
+              if (request.timedOut()) throw new GeminiRequestTimeoutError();
+              if (options?.signal?.aborted) {
+                throw new GeminiRequestCancelledError();
+              }
+              finishStream("success", "success");
+            } catch (error) {
+              const normalized = request.timedOut()
+                ? new GeminiRequestTimeoutError()
+                : options?.signal?.aborted
+                  ? new GeminiRequestCancelledError()
+                  : error;
+              const transient = isTransientProviderError(normalized);
+              outcome = normalized instanceof GeminiRequestCancelledError
+                ? "cancelled"
+                : normalized instanceof GeminiRequestTimeoutError
+                  ? "timeout"
+                  : "provider_error";
+              finishStream(
+                outcome,
+                transient ? "transient_failure" : "other_failure",
+              );
+              if (normalized instanceof GeminiRequestCancelledError) {
+                throw normalized;
+              }
+              throw new GeminiProviderUnavailableError(undefined, {
+                cause: normalized,
+              });
+            } finally {
+              if (!streamSettled) {
+                // A consumer can stop reading an otherwise healthy stream.
+                // Treat that as incomplete, not as provider success.
+                finishStream("cancelled", "other_failure");
+              }
             }
           })();
         }
@@ -464,16 +533,18 @@ async function create(
         if (normalized instanceof GeminiRequestCancelledError) throw normalized;
         throw new GeminiProviderUnavailableError(undefined, { cause: normalized });
       } finally {
-        request.dispose();
+        if (!deferStreamCleanup) request.dispose();
       }
     }
   } finally {
-    observeMetrics({
-      durationMs: boundedInteger(performance.now() - startedAt, MAX_TIMEOUT_MS * 2),
-      outcome,
-      retryCount,
-      ...usageMetrics(responseForMetrics),
-    });
+    if (!deferStreamCleanup) {
+      observeMetrics({
+        durationMs: boundedInteger(performance.now() - startedAt, MAX_TIMEOUT_MS * 2),
+        outcome,
+        retryCount,
+        ...usageMetrics(responseForMetrics),
+      });
+    }
   }
 }
 
