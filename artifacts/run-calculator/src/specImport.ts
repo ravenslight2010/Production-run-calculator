@@ -125,7 +125,11 @@ import {
 } from "./parseSpecSheet";
 import { requestMatchImport } from "./matchImport";
 import { fetchMergeAliases } from "./mergeSuggest";
-import { saveAiCorrections } from "./aiCorrections";
+import {
+  logCorrectionWriteFailure,
+  saveAiCorrections,
+  type AiCorrection,
+} from "./aiCorrections";
 import { fetchMixes, saveMixes } from "./mixes";
 import { fetchCheeseRecipes, saveCheeseRecipes } from "./cheeseRecipes";
 import { addNamedRecipesToServerIfAbsent, fetchNamedRecipes, saveNamedRecipes } from "./namedRecipes";
@@ -334,13 +338,40 @@ export function buildAliasLinkSuggestions(aliases: SpecImportAlias[]): Record<st
   return out;
 }
 
-// Map a learned spec-import alias kind to a shared-corrections domain.
-function aliasKindToDomain(kind: SpecAliasKind): string {
-  if (kind === "brand") return "brand";
-  if (kind === "flavor") return "flavor";
-  if (kind === "appType" || kind === "pepType" || kind === "recipeName") return "item";
-  // dough/sauce/cheese ingredient kinds
-  return "ingredient";
+// Only mirror alias kinds that represent a name correction, and map each
+// explicitly. In particular, routing choices are not ingredient corrections.
+function aliasKindToDomain(kind: SpecAliasKind): string | null {
+  switch (kind) {
+    case "brand":
+      return "brand";
+    case "flavor":
+      return "flavor";
+    case "appType":
+    case "pepType":
+    case "recipeName":
+      return "item";
+    case "cheeseIngredient":
+    case "doughIngredient":
+    case "sauceIngredient":
+      return "ingredient";
+    case "dieType":
+      return "die";
+    case "crossFamilyRouting":
+    default:
+      return null;
+  }
+}
+
+export function mapSpecAliasToAiCorrection(
+  alias: SpecImportAlias,
+): AiCorrection | null {
+  const domain = aliasKindToDomain(alias.kind);
+  if (!domain) return null;
+  return {
+    domain,
+    fromText: alias.externalName,
+    toText: alias.canonicalName,
+  };
 }
 
 /** Read an .xlsx File/Blob into flat sheet grids (string cells). */
@@ -2952,17 +2983,20 @@ export async function commitSpecImport(
       // Best-effort: the import already applied; learning is a bonus — but
       // report it so the UI can warn instead of failing silently.
       aliasSaveFailed = true;
+      logCorrectionWriteFailure({
+        store: "spec-import-aliases",
+        failure: "request",
+        correctionCount: savableAliases.length,
+      });
     }
     // Mirror each learned name mapping into the factory-wide corrections pool
     // (additive — alongside the spec-import aliases above) so every other
     // name-resolving AI helper honors it too.
-    void saveAiCorrections(
-      savableAliases.map((a) => ({
-        domain: aliasKindToDomain(a.kind),
-        fromText: a.externalName,
-        toText: a.canonicalName,
-      })),
-    );
+    const sharedCorrections = savableAliases.flatMap((alias) => {
+      const correction = mapSpecAliasToAiCorrection(alias);
+      return correction ? [correction] : [];
+    });
+    if (sharedCorrections.length > 0) void saveAiCorrections(sharedCorrections);
   }
 
   return { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes: autoLinkedOut.count, touchedProfiles, crustProfiles, appliedParsed: applyParsed, finalImportReview, aliasSaveFailed, ...(resultHash ? { resultHash } : {}) };

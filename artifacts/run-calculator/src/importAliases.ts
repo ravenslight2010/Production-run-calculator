@@ -6,8 +6,8 @@
 // and auto-apply remembered matches BEFORE falling back to AI/fuzzy matching —
 // no AI call needed, and works for operators too.
 //
-// Best-effort: on any failure (sync disabled, network) the dialog silently
-// proceeds without learned aliases. Mirrors the mobile glue in
+// Best-effort: on any failure (sync disabled, network) the dialog warns the user
+// and proceeds without learned aliases. Mirrors the mobile glue in
 // artifacts/run-calculator-mobile/context/importAliases.ts (replit.md parity).
 
 import { inventoryClientId } from "./inventoryShared";

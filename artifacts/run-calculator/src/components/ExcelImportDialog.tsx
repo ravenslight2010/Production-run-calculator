@@ -3,7 +3,10 @@ import { X, Upload, Sparkles, History } from "lucide-react";
 import { exactMatch, fuzzyMatch, mergeImportRuns, collectImportAliases, type ImportParseResult } from "@/runExcelReview";
 import { requestMatchImport } from "@/matchImport";
 import { fetchImportAliases, saveImportAliases } from "@/importAliases";
-import { saveAiCorrections } from "@/aiCorrections";
+import {
+  notifyCorrectionWriteFailure,
+  saveAiCorrections,
+} from "@/aiCorrections";
 import { useAccessibleDialog } from "./useAccessibleDialog";
 import AiStatusNotice from "./AiStatusNotice";
 import type { AiStatus } from "../aiStatus";
@@ -413,7 +416,13 @@ export default function ExcelImportDialog({
       create: CREATE,
     });
     if (aliases.length > 0) {
-      void saveImportAliases(aliases).catch(() => {});
+      void saveImportAliases(aliases).catch(() => {
+        notifyCorrectionWriteFailure({
+          store: "schedule-import-aliases",
+          failure: "request",
+          correctionCount: aliases.length,
+        });
+      });
       // Also record each confirmed name fix in the factory-wide corrections pool
       // (additive — alongside the import-specific aliases above) so every other
       // name-resolving AI helper honors it too. Brand/flavor domains.

@@ -4,6 +4,7 @@ import { db, specImportAliasesTable, type SpecImportAlias as SpecImportAliasRow 
 import { SaveSpecImportAliasesBody, DeleteSpecImportAliasesBody } from "@workspace/api-zod";
 import { currentScope } from "../lib/requestScope";
 import { requireCapability } from "../middlewares/requireCapability";
+import { safeAiErrorMetadata } from "../lib/aiDataBoundary";
 import {
   SPEC_ALIAS_KINDS,
   specAliasKey,
@@ -74,7 +75,7 @@ router.get("/spec-import-aliases", async (req: Request, res: Response) => {
     const aliases = await listAll();
     res.json({ aliases });
   } catch (err) {
-    req.log.error({ err }, "failed to list spec-import aliases");
+    req.log.error(safeAiErrorMetadata(err), "failed to list spec-import aliases");
     res.status(500).json({ error: "Failed to list spec-import aliases" });
   }
 });
@@ -175,7 +176,7 @@ router.post("/spec-import-aliases", requireCapability("manage-profiles"), async 
     broadcastMasterDataChanged(req.header("x-client-id") ?? "", scope, "name-links");
     res.json({ aliases });
   } catch (err) {
-    req.log.error({ err }, "failed to save spec-import aliases");
+    req.log.error(safeAiErrorMetadata(err), "failed to save spec-import aliases");
     res.status(500).json({ error: "Failed to save spec-import aliases" });
   }
 });
@@ -248,7 +249,7 @@ router.post("/spec-import-aliases/delete", requireCapability("manage-profiles"),
     broadcastMasterDataChanged(req.header("x-client-id") ?? "", scope, "name-links");
     res.json({ aliases });
   } catch (err) {
-    req.log.error({ err }, "failed to delete spec-import aliases");
+    req.log.error(safeAiErrorMetadata(err), "failed to delete spec-import aliases");
     res.status(500).json({ error: "Failed to delete spec-import aliases" });
   }
 });

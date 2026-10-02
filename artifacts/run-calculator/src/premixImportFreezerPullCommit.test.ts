@@ -12,6 +12,7 @@ const fetchSpecImportAliases = vi.fn(async () => []);
 const saveSpecImportAliases = vi.fn(async () => {});
 const deleteSpecImportAliases = vi.fn(async () => {});
 const saveAiCorrections = vi.fn(async () => {});
+const logCorrectionWriteFailure = vi.fn();
 const fetchFreezerPullItems = vi.fn(async () => [] as unknown[]);
 const saveFreezerPullItems = vi.fn(async () => {});
 
@@ -38,6 +39,7 @@ vi.mock("./savedPremixSheets", () => ({
 }));
 vi.mock("./aiCorrections", () => ({
   saveAiCorrections: (...a: unknown[]) => saveAiCorrections(...(a as [])),
+  logCorrectionWriteFailure: (...a: unknown[]) => logCorrectionWriteFailure(...a),
 }));
 vi.mock("./premixMatch", () => ({ requestMatchPremix: async () => ({ matches: [] }) }));
 vi.mock("./storage", () => ({ loadSpecImportKnown: async () => null }));
@@ -239,5 +241,25 @@ describe("commitPremixImport freezer-pull application", () => {
     ]);
 
     expect(deleteSpecImportAliases).not.toHaveBeenCalled();
+  });
+
+  it("keeps the imported mix and warns when reviewed aliases fail to save", async () => {
+    saveSpecImportAliases.mockRejectedValueOnce(new Error("do not expose correction text"));
+
+    const result = await commitPremixImport(prepared, [mix], [], [
+      {
+        kind: "appType",
+        externalName: "Reviewed mix label",
+        canonicalName: "Canonical mix",
+      },
+    ]);
+
+    expect(saveMixes).toHaveBeenCalledTimes(1);
+    expect(result.warning).toMatch(/name mappings were not saved/i);
+    expect(logCorrectionWriteFailure).toHaveBeenCalledWith({
+      store: "spec-import-aliases",
+      failure: "request",
+      correctionCount: 1,
+    });
   });
 });
