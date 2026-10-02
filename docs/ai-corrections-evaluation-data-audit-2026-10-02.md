@@ -46,7 +46,7 @@ Client diagnostics use an allowlisted store and failure category, a correction c
 - Thresholds: at least 51 files, zero dropped prompt rows outside schedules, and zero grid-sanity issues.
 - Privacy: metadata-only; no evaluation content or raw provider payloads retained. Provider identity is not applicable. Token counts and p95 latency are unavailable for this deterministic test; measured provider cost is zero.
 
-The manifest had a stale lockfile digest and an outdated hard-coded Vitest version. The digest now matches the current lockfile, and the harness reads XLSX and Vitest versions from its package manifest so future dependency changes are reflected. The deterministic importer outputs in the other corpus snapshots are regression expectations, not independent gold labels for AI extraction. `SPEC_PARSE_VERSION` remains `40`; this audit changes correction mirroring and evaluation metadata, not model prompts or parser output.
+The manifest had a stale lockfile digest and an outdated hard-coded Vitest version. The digest now matches the current lockfile, and the harness reads XLSX and Vitest versions from its package manifest so future dependency changes are reflected. The deterministic importer outputs in the other corpus snapshots are regression expectations, not independent gold labels for AI extraction. At the time this audit was prepared, `SPEC_PARSE_VERSION` was `40`; the follow-up prompt correction and version `41` are recorded in [the local spec-import benchmark blocker report](evidence/local-spec-import-benchmark-blocker-2026-10-02.md). The corpus snapshots remain unrelated to prompt text.
 
 ### Historical second-pass reviewer benchmark
 

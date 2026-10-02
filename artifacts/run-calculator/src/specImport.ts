@@ -1454,6 +1454,8 @@ async function sha256Hex(bytes: ArrayBuffer | Uint8Array): Promise<string> {
  * parses invented the same descriptive flavor (e.g. "Cheese") for every code
  * block, collapsing distinct products into one profile; those parses must not
  * be reused.
+ * v40→v41: remove the accidental unary-plus coercion that appended literal
+ * "NaN" to the production parse system prompt.
  * v14→v15: snap-to-existing link passes no longer silently rename imported
  * recipes onto merely SIMILAR pool names (word reorder / single typo / family
  * fold) — those become declinable review suggestions; only exact loose-key
@@ -1461,7 +1463,7 @@ async function sha256Hex(bytes: ArrayBuffer | Uint8Array): Promise<string> {
  * cross-linked names (prod evidence: Basha's Ultra Thin 5 Cheese mix saved as
  * "Lowe's/Hannaford 5Cheese Mix"); those parses must not be reused.
  */
-export const SPEC_PARSE_VERSION = "40";
+export const SPEC_PARSE_VERSION = "41";
 
 /**
  * Content fingerprint for an import's uploaded file bytes: the per-file
