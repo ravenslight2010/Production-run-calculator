@@ -688,6 +688,18 @@ test.describe("accessibility smoke", () => {
       document.body.append(root);
     }, OPERATIONAL_CONTRAST_FIXTURES);
 
+    for (const fixture of OPERATIONAL_CONTRAST_FIXTURES) {
+      const label = page.locator(`#${fixture.theme}-${fixture.id} > span`);
+      await expect(
+        label,
+        `${fixture.theme} ${fixture.id} contrast label should be rendered`,
+      ).toHaveCount(1);
+      await expect(
+        label,
+        `${fixture.theme} ${fixture.id} contrast label should retain its text`,
+      ).toHaveText(fixture.text);
+    }
+
     const violations: string[] = [];
     for (const theme of ["dark", "light"] as const) {
       await page.evaluate((activeTheme) => {
