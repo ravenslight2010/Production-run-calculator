@@ -1903,7 +1903,7 @@ export const GetOperationalRunViewResponse = zod.object({
 }),
   "pace": zod.object({
   "ppm": zod.number(),
-  "paceStatus": zod.enum(['on-pace', 'ahead', 'behind']).nullable(),
+  "paceStatus": zod.union([zod.literal('on-pace'),zod.literal('ahead'),zod.literal('behind'),zod.literal(null)]).nullable(),
   "paceDelta": zod.number(),
   "catchUpPpm": zod.union([zod.number(),zod.null()])
 }),
@@ -2732,7 +2732,7 @@ export const ConfirmFreezerSurplusResponse = zod.object({
   "productKey": zod.string(),
   "cases": zod.int().min(1)
 })),
-  "createdLot": zod.object({
+  "createdLot": zod.union([zod.object({
   "id": zod.string(),
   "brand": zod.string(),
   "flavor": zod.string(),
@@ -2740,7 +2740,7 @@ export const ConfirmFreezerSurplusResponse = zod.object({
   "productionDate": zod.coerce.date(),
   "totalCases": zod.int().min(1),
   "remainingCases": zod.int().min(confirmFreezerSurplusResponseCreatedLotOneRemainingCasesMin)
-}).nullish()
+}),zod.null()]).optional()
 })
 
 
@@ -2798,7 +2798,7 @@ export const ReplaceFreezerSurplusAllocationResponse = zod.object({
   "productKey": zod.string(),
   "cases": zod.int().min(1)
 })),
-  "createdLot": zod.object({
+  "createdLot": zod.union([zod.object({
   "id": zod.string(),
   "brand": zod.string(),
   "flavor": zod.string(),
@@ -2806,7 +2806,7 @@ export const ReplaceFreezerSurplusAllocationResponse = zod.object({
   "productionDate": zod.coerce.date(),
   "totalCases": zod.int().min(1),
   "remainingCases": zod.int().min(replaceFreezerSurplusAllocationResponseCreatedLotOneRemainingCasesMin)
-}).nullish()
+}),zod.null()]).optional()
 })
 
 
@@ -2910,7 +2910,7 @@ export const RecordMixSurplusResponse = zod.object({
   "lbs": zod.number().min(recordMixSurplusResponseBalancesItemLbsMin),
   "productionDates": zod.array(zod.coerce.date())
 })),
-  "createdLot": zod.object({
+  "createdLot": zod.union([zod.object({
   "id": zod.string(),
   "mixId": zod.string(),
   "name": zod.string(),
@@ -2922,7 +2922,7 @@ export const RecordMixSurplusResponse = zod.object({
   "amountMade": zod.number().min(recordMixSurplusResponseCreatedLotOneAmountMadeMin),
   "amountUsed": zod.number().min(recordMixSurplusResponseCreatedLotOneAmountUsedMin),
   "amountRemaining": zod.number().min(recordMixSurplusResponseCreatedLotOneAmountRemainingMin)
-}).nullish()
+}),zod.null()]).optional()
 })
 
 
@@ -2988,7 +2988,7 @@ export const ReplaceMixSurplusAllocationsResponse = zod.object({
   "lbs": zod.number().min(replaceMixSurplusAllocationsResponseBalancesItemLbsMin),
   "productionDates": zod.array(zod.coerce.date())
 })),
-  "createdLot": zod.object({
+  "createdLot": zod.union([zod.object({
   "id": zod.string(),
   "mixId": zod.string(),
   "name": zod.string(),
@@ -3000,7 +3000,7 @@ export const ReplaceMixSurplusAllocationsResponse = zod.object({
   "amountMade": zod.number().min(replaceMixSurplusAllocationsResponseCreatedLotOneAmountMadeMin),
   "amountUsed": zod.number().min(replaceMixSurplusAllocationsResponseCreatedLotOneAmountUsedMin),
   "amountRemaining": zod.number().min(replaceMixSurplusAllocationsResponseCreatedLotOneAmountRemainingMin)
-}).nullish()
+}),zod.null()]).optional()
 })
 
 
@@ -3056,7 +3056,7 @@ export const VoidMixSurplusLotResponse = zod.object({
   "lbs": zod.number().min(voidMixSurplusLotResponseBalancesItemLbsMin),
   "productionDates": zod.array(zod.coerce.date())
 })),
-  "createdLot": zod.object({
+  "createdLot": zod.union([zod.object({
   "id": zod.string(),
   "mixId": zod.string(),
   "name": zod.string(),
@@ -3068,7 +3068,7 @@ export const VoidMixSurplusLotResponse = zod.object({
   "amountMade": zod.number().min(voidMixSurplusLotResponseCreatedLotOneAmountMadeMin),
   "amountUsed": zod.number().min(voidMixSurplusLotResponseCreatedLotOneAmountUsedMin),
   "amountRemaining": zod.number().min(voidMixSurplusLotResponseCreatedLotOneAmountRemainingMin)
-}).nullish()
+}),zod.null()]).optional()
 })
 
 
@@ -4397,7 +4397,7 @@ export const GetProfileDataHealthWorkspaceResponse = zod.object({
   "protectedValue": zod.boolean(),
   "source": zod.enum(['profile-health', 'master-data', 'saved-spec', 'cleanup']),
   "sourceRoute": zod.string(),
-  "reconciliationCategory": zod.enum(['pool-mismatch', 'alias-gap', 'stale-profile-link', 'stale-pending-run-link', 'protected-stub', 'unexpected-stub']).nullish(),
+  "reconciliationCategory": zod.union([zod.literal('pool-mismatch'),zod.literal('alias-gap'),zod.literal('stale-profile-link'),zod.literal('stale-pending-run-link'),zod.literal('protected-stub'),zod.literal('unexpected-stub'),zod.literal(null)]).nullish(),
   "preview": zod.record(zod.string(), zod.unknown()).nullish()
 })),
   "safeRepairs": zod.array(zod.object({
@@ -4572,7 +4572,7 @@ export const ExportAuditLogsPdfResponse = zod.unknown()
  * @summary View the completed name-link cleanup result
  */
 export const GetProfileNameLinkCleanupAuditResponse = zod.object({
-  "heal": zod.object({
+  "heal": zod.union([zod.object({
   "id": zod.string(),
   "appliedAt": zod.coerce.date(),
   "summary": zod.object({
@@ -4586,7 +4586,7 @@ export const GetProfileNameLinkCleanupAuditResponse = zod.object({
   "mix": zod.int()
 })
 })
-}).nullable()
+}),zod.null()])
 })
 
 

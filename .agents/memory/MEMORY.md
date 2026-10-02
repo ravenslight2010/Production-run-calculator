@@ -1,6 +1,6 @@
 - [Policy evidence anchors](policy-evidence-anchors.md) — operational policy prose is checked by stable regex anchors; preserve required phrases when clarifying task rules.
 - [Drizzle generator evaluation](drizzle-generator-evaluation.md) — compare SQL while ignoring run-specific snapshot IDs and timestamps; pass schema and dialect explicitly.
-- [Orval Zod declaration order](orval-zod-declaration-order.md) — generated scalar constraints must be normalized ahead of validators after Orval generation.
+- [Orval Zod declaration order](orval-zod-declaration-order.md) — normalize generated scalars before validators; declare smoke-tested toolchain packages directly, not via Orval peers.
 - [Post-merge lockfile recovery](post-merge-setup.md) — repair stale peer-resolution entries non-frozen, prove frozen install, then rerun the strict post-merge hook.
 - [pnpm 12 lockfile provenance](pnpm12-lockfile-provenance.md) — read app dependencies from the last document; keep optional-peer normalization resolver-consistent and historical reports unchanged.
 - [Safe operational observability](observability-safe-events.md) — events carry correlation, timing, outcomes, and bounded counts; never copy request or recipe payloads into logs.

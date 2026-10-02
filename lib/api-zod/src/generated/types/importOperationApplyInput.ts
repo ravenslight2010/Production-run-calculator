@@ -10,13 +10,22 @@ import type { ImportOperationApplyInputChanges } from './importOperationApplyInp
 export interface ImportOperationApplyInput {
   /** @maxLength 40 */
   importType: string;
-  /** @maxLength 300 */
+  /**
+     * @maxLength 300
+     * @nullable
+     */
   sourceKey?: string | null;
   /** @maxLength 300 */
   sourceLabel: string;
-  /** @pattern ^[a-f0-9]{64}$ */
+  /**
+     * @nullable
+     * @pattern ^[a-f0-9]{64}$
+     */
   requestHash?: string | null;
-  /** @pattern ^[a-f0-9]{64}$ */
+  /**
+     * @nullable
+     * @pattern ^[a-f0-9]{64}$
+     */
   expectedStateHash?: string | null;
   /** Reviewed entity batches keyed by supported master-data domain. */
   changes: ImportOperationApplyInputChanges;

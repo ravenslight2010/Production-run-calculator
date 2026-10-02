@@ -13,13 +13,22 @@ export type ImportOperationApplyInputChanges = { [key: string]: unknown };
 export interface ImportOperationApplyInput {
   /** @maxLength 40 */
   importType: string;
-  /** @maxLength 300 */
+  /**
+     * @maxLength 300
+     * @nullable
+     */
   sourceKey?: string | null;
   /** @maxLength 300 */
   sourceLabel: string;
-  /** @pattern ^[a-f0-9]{64}$ */
+  /**
+     * @nullable
+     * @pattern ^[a-f0-9]{64}$
+     */
   requestHash?: string | null;
-  /** @pattern ^[a-f0-9]{64}$ */
+  /**
+     * @nullable
+     * @pattern ^[a-f0-9]{64}$
+     */
   expectedStateHash?: string | null;
   /** Reviewed entity batches keyed by supported master-data domain. */
   changes: ImportOperationApplyInputChanges;
@@ -46,15 +55,18 @@ export type ImportOperationResponseOperationResult = { [key: string]: unknown };
 export type ImportOperationResponseOperation = {
   operationId: string;
   importType: string;
+  /** @nullable */
   sourceKey?: string | null;
   sourceLabel?: string;
   status: ImportOperationResponseOperationStatus;
   requestHash: string;
+  /** @nullable */
   resultHash?: string | null;
   affectedEntities?: ImportOperationResponseOperationAffectedEntities;
   result?: ImportOperationResponseOperationResult;
   createdAt?: number;
   updatedAt?: number;
+  /** @nullable */
   undoneAt?: number | null;
 };
 
@@ -1665,8 +1677,11 @@ export interface QualityCheckRecord {
   confidence: number;
   summary: string;
   issues: QualityIssue[];
+  /** @nullable */
   notes?: string | null;
+  /** @nullable */
   thumbnail?: string | null;
+  /** @nullable */
   reviewerName?: string | null;
   /** ISO-8601 timestamp the check was recorded */
   createdAt: string;
@@ -1981,9 +1996,15 @@ export interface SavedSpecSheetData {
 export interface SavedSpecSheet {
   id: number;
   label: string;
-  /** Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots. */
+  /**
+     * Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.
+     * @nullable
+     */
   sourceKey?: string | null;
-  /** SHA-256 content fingerprint of the imported file bytes (per-file hashes sorted and re-hashed for multi-file imports). A re-import of the exact same file reuses this snapshot's parse instead of re-running the AI. Null for legacy snapshots. */
+  /**
+     * SHA-256 content fingerprint of the imported file bytes (per-file hashes sorted and re-hashed for multi-file imports). A re-import of the exact same file reuses this snapshot's parse instead of re-running the AI. Null for legacy snapshots.
+     * @nullable
+     */
   sourceHash?: string | null;
   /** Epoch milliseconds the snapshot was saved */
   createdAt: number;
@@ -2033,9 +2054,15 @@ export interface SavedShippingGuideData {
 export interface SavedShippingGuide {
   id: number;
   label: string;
-  /** Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots. */
+  /**
+     * Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.
+     * @nullable
+     */
   sourceKey?: string | null;
-  /** SHA-256 content fingerprint of the imported file bytes. Null for legacy snapshots. */
+  /**
+     * SHA-256 content fingerprint of the imported file bytes. Null for legacy snapshots.
+     * @nullable
+     */
   sourceHash?: string | null;
   /** Epoch milliseconds the snapshot was saved */
   createdAt: number;
@@ -2159,7 +2186,10 @@ export type SavedPremixSheetData = SavedMix[];
 export interface SavedPremixSheet {
   id: number;
   label: string;
-  /** Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots. */
+  /**
+     * Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.
+     * @nullable
+     */
   sourceKey?: string | null;
   /** Epoch milliseconds the snapshot was saved */
   createdAt: number;
@@ -2192,7 +2222,10 @@ export interface SavedCheeseRecipe {
 export interface SavedCheeseSheet {
   id: number;
   label: string;
-  /** Stable per-file identity; retention keeps two versions per source key. */
+  /**
+     * Stable per-file identity; retention keeps two versions per source key.
+     * @nullable
+     */
   sourceKey?: string | null;
   /** Epoch milliseconds the snapshot was saved */
   createdAt: number;
@@ -2483,6 +2516,9 @@ export const OperationalReportInventoryAvailability = {
   unavailable: 'unavailable',
 } as const;
 
+/**
+ * @nullable
+ */
 export type OperationalReportQualityValue = {
   checks?: number;
   issues?: number;
@@ -2492,10 +2528,14 @@ export type OperationalReportQualityValue = {
 
 export type OperationalReportQuality = {
   availability: OperationalReportQualityAvailability;
+  /** @nullable */
   value: OperationalReportQualityValue;
   note?: string;
 };
 
+/**
+ * @nullable
+ */
 export type OperationalReportIncidentsValue = {
   total?: number;
   unresolved?: number;
@@ -2503,16 +2543,21 @@ export type OperationalReportIncidentsValue = {
 
 export type OperationalReportIncidents = {
   availability: OperationalReportIncidentsAvailability;
+  /** @nullable */
   value: OperationalReportIncidentsValue;
   note?: string;
 };
 
+/**
+ * @nullable
+ */
 export type OperationalReportInventoryValue = {
   flaggedItems?: number;
 } | null;
 
 export type OperationalReportInventory = {
   availability: OperationalReportInventoryAvailability;
+  /** @nullable */
   value: OperationalReportInventoryValue;
   note?: string;
 };
@@ -2619,6 +2664,9 @@ export type OperationalRunViewElapsed = {
   phase: OperationalRunViewElapsedPhase;
 };
 
+/**
+ * @nullable
+ */
 export type OperationalRunViewPacePaceStatus = typeof OperationalRunViewPacePaceStatus[keyof typeof OperationalRunViewPacePaceStatus] | null;
 
 
@@ -2630,6 +2678,7 @@ export const OperationalRunViewPacePaceStatus = {
 
 export type OperationalRunViewPace = {
   ppm: number;
+  /** @nullable */
   paceStatus: OperationalRunViewPacePaceStatus;
   paceDelta: number;
   catchUpPpm: number | null;
@@ -2791,8 +2840,11 @@ export interface ShiftHandoffItem {
   status: ShiftHandoffItemStatus;
   title: string;
   detail: string;
+  /** @nullable */
   affectedRun: string | null;
+  /** @nullable */
   affectedProduct: string | null;
+  /** @nullable */
   occurredAt: string | null;
   sourcePath: string;
   historical: boolean;
@@ -3105,7 +3157,10 @@ export interface ImportAlias {
   externalName: string;
   /** The saved name the imported name resolves to */
   canonicalName: string;
-  /** For flavor aliases, the canonical parent brand the flavor belongs to; null/omitted for brand aliases. */
+  /**
+     * For flavor aliases, the canonical parent brand the flavor belongs to; null/omitted for brand aliases.
+     * @nullable
+     */
   brandContext?: string | null;
 }
 
@@ -3124,6 +3179,7 @@ export interface ImportHistorySummary {
   unresolved?: string[];
   skipped?: string[];
   followUp?: string[];
+  /** @nullable */
   snapshotId?: number | null;
   [key: string]: unknown;
  }
@@ -3154,12 +3210,16 @@ export const ImportHistoryStatus = {
 export interface ImportHistory {
   id: number;
   importType: ImportHistoryImportType;
+  /** @nullable */
   sourceKey?: string | null;
   sourceLabel: string;
+  /** @nullable */
   customerScope?: string | null;
   status: ImportHistoryStatus;
   summary: ImportHistorySummary;
+  /** @nullable */
   snapshotId?: number | null;
+  /** @nullable */
   operationId?: string | null;
   /** Epoch milliseconds */
   createdAt: number;
@@ -3339,6 +3399,7 @@ export interface FacilityKnowledge {
 
 export type FacilityKnowledgeHealthFindingEntry = FacilityKnowledge & ({
   id: number;
+  /** @nullable */
   source?: string | null;
 });
 
@@ -3456,12 +3517,16 @@ export interface ProfileDataHealthApplyResult {
   before: ProfileDataHealthReport;
   after: ProfileDataHealthReport;
   applied: ProfileDataHealthRepair[];
+  /** @nullable */
   batchId?: string | null;
   summary: ProfileDataHealthApplyResultSummary;
 }
 
 export type ProfileDataHealthWorkspaceSummary = {[key: string]: number};
 
+/**
+ * @nullable
+ */
 export type ProfileDataHealthWorkspaceCleanupHistory = { [key: string]: unknown } | null;
 
 export type ProfileDataHealthWorkspaceRepairBatchesItem = { [key: string]: unknown };
@@ -3493,6 +3558,9 @@ export const DataHealthFindingSource = {
   cleanup: 'cleanup',
 } as const;
 
+/**
+ * @nullable
+ */
 export type DataHealthFindingReconciliationCategory = typeof DataHealthFindingReconciliationCategory[keyof typeof DataHealthFindingReconciliationCategory] | null;
 
 
@@ -3505,6 +3573,9 @@ export const DataHealthFindingReconciliationCategory = {
   'unexpected-stub': 'unexpected-stub',
 } as const;
 
+/**
+ * @nullable
+ */
 export type DataHealthFindingPreview = { [key: string]: unknown } | null;
 
 export interface DataHealthFinding {
@@ -3521,7 +3592,9 @@ export interface DataHealthFinding {
   protectedValue: boolean;
   source: DataHealthFindingSource;
   sourceRoute: string;
+  /** @nullable */
   reconciliationCategory?: DataHealthFindingReconciliationCategory;
+  /** @nullable */
   preview?: DataHealthFindingPreview;
 }
 
@@ -3679,6 +3752,7 @@ export type SourceLibraryReconciliationStatusHealResult = {
 export type SourceLibraryReconciliationStatusHeal = {
   id: string;
   fromDate: string;
+  /** @nullable */
   appliedAt: string | null;
   markerValid: boolean;
   result: SourceLibraryReconciliationStatusHealResult;
@@ -3730,6 +3804,7 @@ export interface ProfileDataHealthWorkspace {
   findings: DataHealthFinding[];
   safeRepairs: ProfileDataHealthRepair[];
   summary: ProfileDataHealthWorkspaceSummary;
+  /** @nullable */
   cleanupHistory: ProfileDataHealthWorkspaceCleanupHistory;
   repairBatches: ProfileDataHealthWorkspaceRepairBatchesItem[];
   aiRetention: AiRetentionReport;
@@ -3747,7 +3822,10 @@ export interface AuditLog {
   actor: string;
   /** Allowlisted action name */
   action: string;
-  /** Resource identifier */
+  /**
+     * Resource identifier
+     * @nullable
+     */
   resource: string | null;
   /** Allowlisted, redacted evidence object no larger than 8192 bytes. */
   changes: AuditLogChanges;
@@ -3759,7 +3837,10 @@ export interface AuditLogPage {
   logs: AuditLog[];
   /** Number of records in this page */
   count: number;
-  /** Opaque cursor limited to 200 characters */
+  /**
+     * Opaque cursor limited to 200 characters
+     * @nullable
+     */
   nextCursor: string | null;
 }
 
@@ -3953,21 +4034,45 @@ export interface ProductionRule {
   type: ProductionRuleType;
   enforcement: ProductionRuleEnforcement;
   enabled: boolean;
-  /** Run field key (required-field, numeric-range) */
+  /**
+     * Run field key (required-field, numeric-range)
+     * @nullable
+     */
   field?: string | null;
-  /** Inclusive lower bound (numeric-range) */
+  /**
+     * Inclusive lower bound (numeric-range)
+     * @nullable
+     */
   min?: number | null;
-  /** Inclusive upper bound (numeric-range) */
+  /**
+     * Inclusive upper bound (numeric-range)
+     * @nullable
+     */
   max?: number | null;
-  /** Run attribute key for the transition (sequence) */
+  /**
+     * Run attribute key for the transition (sequence)
+     * @nullable
+     */
   attribute?: string | null;
-  /** Disallowed preceding attribute value (sequence) */
+  /**
+     * Disallowed preceding attribute value (sequence)
+     * @nullable
+     */
   before?: string | null;
-  /** Disallowed following attribute value (sequence) */
+  /**
+     * Disallowed following attribute value (sequence)
+     * @nullable
+     */
   after?: string | null;
-  /** Exceptions: when the current run matches any of these conditions the rule is waived entirely (no warning, no block). Applies to any type. */
+  /**
+     * Exceptions: when the current run matches any of these conditions the rule is waived entirely (no warning, no block). Applies to any type.
+     * @nullable
+     */
   bypass?: RuleBypassCondition[] | null;
-  /** Exceptions: ordered step labels a manager attaches to a (strict) rule. When the rule is violated and not bypassed, the operator must acknowledge every step before Start unblocks for that run. */
+  /**
+     * Exceptions: ordered step labels a manager attaches to a (strict) rule. When the rule is violated and not bypassed, the operator must acknowledge every step before Start unblocks for that run.
+     * @nullable
+     */
   checklist?: string[] | null;
 }
 
@@ -4140,10 +4245,7 @@ export interface RecordMixSurplusInput {
      */
   mixId: string;
   productionDate: string;
-  /**
-     * @minimum 0.1
-     * @exclusiveMinimum
-     */
+  /** @exclusiveMinimum 0.1 */
   amountMade: number;
 }
 
@@ -4191,9 +4293,15 @@ export interface DieLineDefaultsEntry {
   freezerTime: number;
   /** "Extra Case Buffer" in the UI */
   casesPerLayer: number;
-  /** Pre-tunnel dwell time override in minutes. Absent = use the app's built-in per-die-size default (3.5 min for 7", 2.0 min for 12"). */
+  /**
+     * Pre-tunnel dwell time override in minutes. Absent = use the app's built-in per-die-size default (3.5 min for 7", 2.0 min for 12").
+     * @nullable
+     */
   preTunnelMin?: number | null;
-  /** Post-tunnel dwell time override in minutes. Absent = use the app's built-in per-die-size default (3.0 min for 7", 2.0 min for 12"). */
+  /**
+     * Post-tunnel dwell time override in minutes. Absent = use the app's built-in per-die-size default (3.0 min for 7", 2.0 min for 12").
+     * @nullable
+     */
   postTunnelMin?: number | null;
 }
 
@@ -4486,7 +4594,10 @@ export interface Ingredient {
   /** Current display name */
   name: string;
   categories: IngredientCategory[];
-  /** When set, this ingredient was merged into another ingredient's id; resolve display name by following this pointer. */
+  /**
+     * When set, this ingredient was merged into another ingredient's id; resolve display name by following this pointer.
+     * @nullable
+     */
   mergedInto?: string | null;
   /** false = soft-deleted (kept so old rows still resolve) */
   enabled: boolean;
@@ -4695,7 +4806,10 @@ export interface CycleCountSchedule {
   section: string;
   /** How many days may elapse between counts (default 7) */
   cadenceDays: number;
-  /** Date last counted (YYYY-MM-DD), or null if never counted */
+  /**
+     * Date last counted (YYYY-MM-DD), or null if never counted
+     * @nullable
+     */
   lastCountedAt: string | null;
   enabled: boolean;
 }
@@ -4748,7 +4862,10 @@ export interface SpecImportAlias {
   externalName: string;
   /** The saved canonical name the label resolves to */
   canonicalName: string;
-  /** Disambiguator within a kind (e.g. the canonical brand for a flavor alias); null/omitted otherwise. */
+  /**
+     * Disambiguator within a kind (e.g. the canonical brand for a flavor alias); null/omitted otherwise.
+     * @nullable
+     */
   context?: string | null;
 }
 

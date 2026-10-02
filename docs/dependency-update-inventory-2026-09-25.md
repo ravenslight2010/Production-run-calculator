@@ -156,3 +156,41 @@ Validation passed:
 The full workspace audit still exits non-zero with 20 findings (4 low,
 8 moderate, 8 high) in unrelated dependencies. Those findings were not changed
 as part of this paired evaluation and remain separate work.
+
+## Generated API tooling evaluation — 2026-10-02
+
+Evaluated Orval and Zod independently against the workspace's 1,440-minute
+release-age requirement, then adopted each stage separately. Orval 8.39.0 was
+published on 2026-09-30. Its Node `>=22.18.0` requirement is satisfied by
+Node 24.20.0; its optional TypeDoc `^0.28.19`, TypeDoc Markdown
+`^4.10.0`, and Prettier `>=3` peers are satisfied by the existing pins.
+Zod 4.6.5 was published on 2026-09-13 and declares no peer or engine
+constraints. The workspace catalog now resolves Zod 4.6.5.
+
+Orval 8.39.0's generated output was reviewed against `lib/api-spec/openapi.yaml`.
+The contract source and intended HTTP behavior are unchanged. The reviewed
+generator differences are nullability annotations in generated TypeScript,
+normalized JSDoc for an exclusive numeric minimum, and equivalent Zod forms
+for nullable/optional schemas (for example, `.nullish()` rendered as a
+nullable union plus `.optional()`). No generated output was hand-edited.
+Because Orval no longer supplies the coverage plugin through its dependency
+graph, `typedoc-plugin-coverage` is now an explicit API-spec dev dependency so
+the existing TypeDoc compatibility check remains reproducible from a frozen
+install.
+
+The full workspace audit initially found high-severity advisories in the
+existing `fast-uri`, `undici`, and `brace-expansion` overrides. Their patched
+versions were published more than a day before adoption, so the overrides were
+updated to `fast-uri` 3.1.7, `undici` 7.29.1, and `brace-expansion` 2.1.6 /
+5.0.12. After these targeted pin updates, the high-threshold workspace audit
+passes with three remaining low/moderate findings; the production audit reports
+no known vulnerabilities.
+
+Validation passed after the Orval stage and again after the Zod stage:
+
+- API generation, toolchain smoke check, generated-output freshness, API Zod
+  tests, and API client/Zod TypeScript build (`pnpm run check:api-generated`).
+- Generated-client concurrency and stale-output isolation tests.
+- API-server typecheck and focused spec-import alias contract tests.
+- `pnpm install --frozen-lockfile`.
+- Workspace and production audits at the high severity threshold.

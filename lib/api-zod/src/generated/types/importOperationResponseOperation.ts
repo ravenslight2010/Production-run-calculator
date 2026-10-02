@@ -12,14 +12,17 @@ import type { ImportOperationResponseOperationStatus } from './importOperationRe
 export type ImportOperationResponseOperation = {
   operationId: string;
   importType: string;
+  /** @nullable */
   sourceKey?: string | null;
   sourceLabel?: string;
   status: ImportOperationResponseOperationStatus;
   requestHash: string;
+  /** @nullable */
   resultHash?: string | null;
   affectedEntities?: ImportOperationResponseOperationAffectedEntities;
   result?: ImportOperationResponseOperationResult;
   createdAt?: bigint;
   updatedAt?: bigint;
+  /** @nullable */
   undoneAt?: bigint | null;
 };

@@ -10,7 +10,10 @@ import type { SavedCheeseRecipe } from './savedCheeseRecipe';
 export interface SavedCheeseSheet {
   id: number;
   label: string;
-  /** Stable per-file identity; retention keeps two versions per source key. */
+  /**
+     * Stable per-file identity; retention keeps two versions per source key.
+     * @nullable
+     */
   sourceKey?: string | null;
   /** Epoch milliseconds the snapshot was saved */
   createdAt: number;
