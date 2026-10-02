@@ -15,6 +15,10 @@ const validDocuments: Record<string, string> = {
     "Keep discoveries for the same objective in the owning task's progress updates and failure ledger. Fix every in-scope finding before completion.",
     "A separate project task is allowed only for a genuinely independent outcome with separate acceptance criteria, an explicitly deferred user outcome, or an out-of-scope safety, security, data-integrity, or release blocker.",
     "Before creating another task, name the parent or owning task, search active and draft work for overlap, state independent acceptance criteria, name the approved exception, and document why the work cannot remain in the owning task.",
+    "Finish every in-scope finding in its owning task; do not create child tasks for symptoms, test failures, fixture repairs, or other sub-outcomes. High- and medium-priority independent outcomes may be submitted as child tasks. Low-priority outcomes may be submitted only when the plan states a concrete benefit and bounded scope. Optional work is not categorically excluded; physical-device-only work is excluded.",
+    "Every eligible child plan must state its parent, evidence, explicit priority and rationale, separate acceptance criteria, why it cannot remain in the owning task, and the result of checking current work for overlap.",
+    "Each generated child depends on every unfinished accepted task present when it is created, and later generated siblings wait behind earlier generated siblings. Unapproved drafts do not block it; tasks added later are not retroactively added as dependencies.",
+    "Platform settings determine whether a submitted task immediately becomes Active or remains a Draft. Priority is recorded in the plan, not enforced as native task metadata; the repository checker validates policy wording, not runtime task creation.",
     "Applying this rule to current draft and active tasks must not merge, cancel, or re-scope them. New in-scope findings return to the matching existing owner.",
     "Completion review must retain the owning task's failure ledger and resolve every in-scope FAIL. Test failures, fixture repairs, cleanup, validation work, and other sub-outcomes must not become recursive tasks.",
     "For every web-facing task, record a compatibility applicability matrix covering desktop, phone, tablet portrait/landscape, Chromium/Chrome, and WebKit/Safari. Each check must have an explicit not applicable, blocked, or not run reason when it is not a pass.",
@@ -26,12 +30,70 @@ const validDocuments: Record<string, string> = {
     "Keep newly discovered in-scope failures in the owning task's failure ledger and close them before completion.",
     "A separate project task requires a genuinely independent outcome with separate acceptance criteria, an explicitly deferred user outcome, or an out-of-scope safety, security, data-integrity, or release blocker.",
     "Before creating another task, name the parent or owning task, search current draft and active tasks for overlap, state independent acceptance criteria, name the approved exception, and document why the work cannot remain in the owning task.",
+    "Finish in-scope work in the owning task; child tasks are for distinct outcomes with independent acceptance criteria, not symptoms, test failures, fixture repairs, or other sub-outcomes. High- and medium-priority independent outcomes may be submitted as child tasks. Low-priority outcomes may be submitted only when the plan states a concrete benefit and bounded scope. Optional work is not categorically excluded; physical-device-only work is excluded.",
+    "Every eligible child plan must state its parent, evidence, explicit priority and rationale, separate acceptance criteria, why it cannot remain in the owning task, and the result of checking current work for overlap.",
+    "Each generated child depends on every unfinished accepted task present when it is created, and later generated siblings wait behind earlier generated siblings. Unapproved drafts do not block it; tasks added later are not retroactively added as dependencies.",
+    "Platform settings determine whether a submitted task immediately becomes Active or remains a Draft. Priority is recorded in the plan, not enforced as native task metadata; the repository checker validates policy wording, not runtime task creation.",
     "This audit preserves current draft and active tasks and does not merge, cancel, or re-scope them. New in-scope findings return to the matching existing owner.",
     "Completion review must retain the owning task's failure ledger and resolve every in-scope FAIL. Test failures, fixture repairs, cleanup, validation work, and other sub-outcomes must not become recursive tasks.",
     "Every web-facing task must include a compatibility applicability matrix for desktop, phone, tablet portrait/landscape, Chromium/Chrome, and WebKit/Safari. Record an explicit not applicable, blocked, or not run reason for each check that is not a pass.",
     "Responsive browser emulation is automated evidence, not physical Android Chrome or iOS Safari/PWA evidence; this remains a web-only product with no native-mobile requirement.",
   ].join("\n"),
 };
+
+const newPolicyRules = [
+  {
+    label: "follow-up priority gate",
+    omissions: [
+      "High- and medium-priority independent outcomes may be submitted as child tasks.",
+      "Low-priority outcomes may be submitted only when the plan states a concrete benefit and bounded scope.",
+    ],
+    contradictions: [
+      "Low-priority outcomes may be submitted without a concrete benefit and bounded scope.",
+    ],
+  },
+  {
+    label: "optional-work category gate",
+    omissions: ["Optional work is not categorically excluded"],
+    contradictions: [
+      "Optional work is categorically excluded.",
+    ],
+  },
+  {
+    label: "physical-device-only exclusion",
+    omissions: ["physical-device-only work is excluded."],
+    contradictions: ["Physical-device-only work is allowed."],
+  },
+  {
+    label: "follow-up child-plan evidence requirement",
+    omissions: [
+      "Every eligible child plan must state its parent, evidence, explicit priority and rationale, separate acceptance criteria, why it cannot remain in the owning task, and the result of checking current work for overlap.",
+    ],
+    contradictions: [],
+  },
+  {
+    label: "follow-up dependency rule",
+    omissions: [
+      "Each generated child depends on every unfinished accepted task present when it is created, and later generated siblings wait behind earlier generated siblings. Unapproved drafts do not block it; tasks added later are not retroactively added as dependencies.",
+    ],
+    contradictions: [
+      "Unapproved drafts do block generated children.",
+      "Tasks added later are retroactively added as dependencies.",
+      "Later generated siblings do not wait behind earlier generated siblings.",
+    ],
+  },
+  {
+    label: "task-platform and checker limitation",
+    omissions: [
+      "Platform settings determine whether a submitted task immediately becomes Active or remains a Draft. Priority is recorded in the plan, not enforced as native task metadata; the repository checker validates policy wording, not runtime task creation.",
+    ],
+    contradictions: [
+      "Priority is enforced as native task metadata.",
+      "The repository checker enforces runtime task creation.",
+      "Repository policy determines whether a submitted task immediately becomes Active or remains a Draft.",
+    ],
+  },
+];
 
 type CheckResult = {
   exitCode: number | null;
@@ -204,4 +266,43 @@ for (const driftCase of [
       await rm(root, { recursive: true, force: true });
     }
   });
+}
+
+for (const relativePath of Object.keys(validDocuments)) {
+  for (const rule of newPolicyRules) {
+    for (const omission of rule.omissions) {
+      test(`${relativePath} fails when ${rule.label} is omitted`, async () => {
+        const root = await createFixture({
+          [relativePath]: validDocuments[relativePath].replace(omission, ""),
+        });
+
+        try {
+          const result = await runChecker(root);
+          assert.equal(result.exitCode, 1);
+          assert.match(result.stderr, new RegExp(`${relativePath}: missing ${rule.label}`));
+        } finally {
+          await rm(root, { recursive: true, force: true });
+        }
+      });
+    }
+
+    for (const contradiction of rule.contradictions) {
+      test(`${relativePath} fails when ${rule.label} is contradicted`, async () => {
+        const root = await createFixture({
+          [relativePath]: `${validDocuments[relativePath]}\n${contradiction}\n`,
+        });
+
+        try {
+          const result = await runChecker(root);
+          assert.equal(result.exitCode, 1);
+          assert.match(
+            result.stderr,
+            new RegExp(`${relativePath}: contradicts ${rule.label}`),
+          );
+        } finally {
+          await rm(root, { recursive: true, force: true });
+        }
+      });
+    }
+  }
 }
