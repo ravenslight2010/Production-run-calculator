@@ -691,20 +691,25 @@ export type QloraPromotionSafetyGates = {
   noSystematicMissingRequiredFields: boolean;
 };
 
-export type QloraPromotionEvaluation = {
-  format: "qlora-promotion-evaluation";
-  formatVersion: 1;
-  decision: "promotion-recommended" | "no-go" | "inconclusive";
+export type QloraPromotionDecision =
+  | "promotion-recommended"
+  | "no-go"
+  | "inconclusive";
+
+export type QloraPromotionBootstrap = {
+  method: "seeded-brand-cluster-percentile";
+  confidenceLevel: typeof QLORA_PROMOTION_POLICY.confidenceLevel;
+  replicates: typeof QLORA_PROMOTION_POLICY.bootstrapReplicates;
+  seed: number | null;
+};
+
+export type QloraPromotionEvaluationSummary = {
+  decision: QloraPromotionDecision;
   reasonCodes: string[];
   reasons: string[];
   caseCount: number;
   brandClusterCount: number;
-  bootstrap: {
-    method: "seeded-brand-cluster-percentile";
-    confidenceLevel: typeof QLORA_PROMOTION_POLICY.confidenceLevel;
-    replicates: typeof QLORA_PROMOTION_POLICY.bootstrapReplicates;
-    seed: number | null;
-  };
+  bootstrap: QloraPromotionBootstrap;
   agreements: {
     candidate: QloraPromotionAgreement;
     promptedBase: QloraPromotionAgreement;
@@ -715,6 +720,41 @@ export type QloraPromotionEvaluation = {
     critical: QloraPromotionGainBounds;
   } | null;
   safetyGates: QloraPromotionSafetyGates | null;
+};
+
+export type QloraPromotionIdentifiedSystems = Extract<
+  QloraPromotionIdentities,
+  { state: "identified" }
+>;
+
+export type QloraPromotionQualifiedPowerAnalysis = Extract<
+  QloraPromotionPowerAnalysis,
+  { state: "qualified" }
+>;
+
+export type QloraPromotionResultManifest = QloraPromotionEvaluationSummary & {
+  format: "qlora-promotion-result-manifest";
+  formatVersion: 1;
+  privacy: {
+    mode: "metadata-only";
+    rawProviderPayloadsRetained: false;
+    retainedEvaluationContent: "none";
+  };
+  identities: QloraPromotionIdentifiedSystems;
+  powerAnalysis: QloraPromotionQualifiedPowerAnalysis;
+};
+
+export type QloraPromotionResultManifestBindings = {
+  identities: QloraPromotionIdentities;
+  powerAnalysis: QloraPromotionPowerAnalysis;
+  bootstrapSeed: number;
+};
+
+export type QloraPromotionEvaluation = QloraPromotionEvaluationSummary & {
+  format: "qlora-promotion-evaluation";
+  formatVersion: 1;
+  /** Null when identity, power, or bootstrap preconditions are unavailable. */
+  manifest: QloraPromotionResultManifest | null;
 };
 
 type PairedQloraCase = {
@@ -747,15 +787,17 @@ function qloraInconclusive(
   reasonCode: string,
   reason: string,
   seed: number | null,
+  counts: { caseCount?: number; brandClusterCount?: number } = {},
 ): QloraPromotionEvaluation {
   return {
     format: "qlora-promotion-evaluation",
     formatVersion: 1,
+    manifest: null,
     decision: "inconclusive",
     reasonCodes: [reasonCode],
     reasons: [reason],
-    caseCount: 0,
-    brandClusterCount: 0,
+    caseCount: counts.caseCount ?? 0,
+    brandClusterCount: counts.brandClusterCount ?? 0,
     bootstrap: {
       method: "seeded-brand-cluster-percentile",
       confidenceLevel: QLORA_PROMOTION_POLICY.confidenceLevel,
@@ -871,6 +913,516 @@ function validateQloraPowerAnalysis(value: unknown): string | null {
   return null;
 }
 
+function onlyKeys(
+  value: Record<string, unknown>,
+  allowed: readonly string[],
+  label: string,
+): void {
+  const unexpected = Object.keys(value).filter((key) => !allowed.includes(key));
+  if (unexpected.length > 0) {
+    throw new Error(`${label} contains unsupported metadata fields`);
+  }
+}
+
+function normalizeQloraPromotionIdentities(
+  value: unknown,
+  label: string,
+): QloraPromotionIdentifiedSystems {
+  const error = validateQloraIdentities(value);
+  if (error) throw new Error(`${label} are invalid: ${error}`);
+  const root = value as Record<string, unknown>;
+  onlyKeys(root, [
+    "state",
+    "sourceRevisionSha256",
+    "promptParseCacheSha256",
+    "outputSchemaSha256",
+    "sanitizerSha256",
+    "caseInputManifestSha256",
+    "goldLabelManifestSha256",
+    "fieldScoringRulesSha256",
+    "scoringImplementationSha256",
+    "expectedCases",
+    "candidate",
+    "promptedBase",
+    "gemini",
+  ], label);
+  const normalizeSystem = (
+    systemValue: unknown,
+    systemLabel: string,
+  ): QloraPromotionSystemIdentity => {
+    const system = record(systemValue, systemLabel);
+    onlyKeys(system, [
+      "modelSha256",
+      "tokenizerSha256",
+      "generationSettingsSha256",
+      "retryPolicySha256",
+    ], systemLabel);
+    return {
+      modelSha256: system.modelSha256 as string,
+      tokenizerSha256: system.tokenizerSha256 as string,
+      generationSettingsSha256: system.generationSettingsSha256 as string,
+      retryPolicySha256: system.retryPolicySha256 as string,
+    };
+  };
+  const candidate = normalizeSystem(root.candidate, `${label}.candidate`);
+  const promptedBase = normalizeSystem(root.promptedBase, `${label}.promptedBase`);
+  const gemini = record(root.gemini, `${label}.gemini`);
+  onlyKeys(gemini, [
+    "provider",
+    "model",
+    "generationSettingsSha256",
+    "retryPolicySha256",
+  ], `${label}.gemini`);
+  return {
+    state: "identified",
+    sourceRevisionSha256: root.sourceRevisionSha256 as string,
+    promptParseCacheSha256: root.promptParseCacheSha256 as string,
+    outputSchemaSha256: root.outputSchemaSha256 as string,
+    sanitizerSha256: root.sanitizerSha256 as string,
+    caseInputManifestSha256: root.caseInputManifestSha256 as string,
+    goldLabelManifestSha256: root.goldLabelManifestSha256 as string,
+    fieldScoringRulesSha256: root.fieldScoringRulesSha256 as string,
+    scoringImplementationSha256: root.scoringImplementationSha256 as string,
+    expectedCases: root.expectedCases as number,
+    candidate,
+    promptedBase,
+    gemini: {
+      provider: gemini.provider as string,
+      model: gemini.model as string,
+      generationSettingsSha256: gemini.generationSettingsSha256 as string,
+      retryPolicySha256: gemini.retryPolicySha256 as string,
+    },
+  };
+}
+
+function normalizeQloraPowerAnalysis(
+  value: unknown,
+  label: string,
+): QloraPromotionQualifiedPowerAnalysis {
+  const error = validateQloraPowerAnalysis(value);
+  if (error) throw new Error(`${label} is invalid: ${error}`);
+  const power = record(value, label);
+  onlyKeys(power, [
+    "state",
+    "developmentEvidenceSha256",
+    "confidenceLevel",
+    "overallTargetMarginPercentagePoints",
+    "criticalTargetMarginPercentagePoints",
+    "plannedBrandClusters",
+    "overallPower",
+    "criticalPower",
+  ], label);
+  return {
+    state: "qualified",
+    developmentEvidenceSha256: power.developmentEvidenceSha256 as string,
+    confidenceLevel: power.confidenceLevel as number,
+    overallTargetMarginPercentagePoints: power.overallTargetMarginPercentagePoints as number,
+    criticalTargetMarginPercentagePoints: power.criticalTargetMarginPercentagePoints as number,
+    plannedBrandClusters: power.plannedBrandClusters as number,
+    overallPower: power.overallPower as number,
+    criticalPower: power.criticalPower as number,
+  };
+}
+
+function validateQloraRate(value: unknown, label: string): number {
+  if (
+    typeof value !== "number"
+    || !Number.isFinite(value)
+    || value < 0
+    || value > 1
+  ) {
+    throw new Error(`${label} must be a finite rate from zero to one`);
+  }
+  return value;
+}
+
+function validateQloraAgreement(
+  value: unknown,
+  label: string,
+): QloraPromotionAgreement {
+  const agreement = record(value, label);
+  onlyKeys(agreement, ["overall", "critical"], label);
+  return {
+    overall: validateQloraRate(agreement.overall, `${label}.overall`),
+    critical: validateQloraRate(agreement.critical, `${label}.critical`),
+  };
+}
+
+function validateQloraGain(
+  value: unknown,
+  label: string,
+): QloraPromotionGainBounds {
+  const gain = record(value, label);
+  onlyKeys(gain, [
+    "estimatePercentagePoints",
+    "lowerBoundPercentagePoints",
+    "upperBoundPercentagePoints",
+  ], label);
+  const estimatePercentagePoints = finite(
+    gain.estimatePercentagePoints,
+    `${label}.estimatePercentagePoints`,
+  ) as number;
+  const lowerBoundPercentagePoints = finite(
+    gain.lowerBoundPercentagePoints,
+    `${label}.lowerBoundPercentagePoints`,
+  ) as number;
+  const upperBoundPercentagePoints = finite(
+    gain.upperBoundPercentagePoints,
+    `${label}.upperBoundPercentagePoints`,
+  ) as number;
+  if (
+    lowerBoundPercentagePoints > estimatePercentagePoints
+    || estimatePercentagePoints > upperBoundPercentagePoints
+  ) {
+    throw new Error(`${label} confidence bounds must contain the estimate`);
+  }
+  return {
+    estimatePercentagePoints,
+    lowerBoundPercentagePoints,
+    upperBoundPercentagePoints,
+  };
+}
+
+function validateQloraGates(value: unknown): QloraPromotionSafetyGates {
+  const gates = record(value, "manifest.safetyGates");
+  const keys: (keyof QloraPromotionSafetyGates)[] = [
+    "schemaValidity",
+    "criticalFieldAgreement",
+    "criticalFieldHardFailure",
+    "overallFieldAgreement",
+    "zeroBlankPoisonCases",
+    "emptyOutputRate",
+    "noSystematicMissingRequiredFields",
+  ];
+  onlyKeys(gates, keys, "manifest.safetyGates");
+  for (const key of keys) {
+    if (typeof gates[key] !== "boolean") {
+      throw new Error(`manifest.safetyGates.${key} must be boolean`);
+    }
+  }
+  return Object.fromEntries(keys.map((key) => [key, gates[key]])) as QloraPromotionSafetyGates;
+}
+
+function qloraDecisionReason(
+  summary: QloraPromotionEvaluationSummary,
+): string {
+  if (summary.reasonCodes.length !== 1) {
+    throw new Error("manifest must contain exactly one decision reason code");
+  }
+  const [reasonCode] = summary.reasonCodes;
+  switch (reasonCode) {
+    case "PAIRED_EVIDENCE_INVALID":
+      return "paired case evidence did not satisfy the frozen case and metadata contract";
+    case "POWER_ANALYSIS_CLUSTER_COUNT_NOT_MET":
+      return "scored evidence has fewer brand clusters than the pre-holdout power analysis requires";
+    case "SAFETY_GATE_FAILED": {
+      if (!summary.safetyGates) throw new Error("safety-gate decision requires gate outcomes");
+      const failed = Object.entries(summary.safetyGates)
+        .filter(([name, passed]) => name !== "criticalFieldHardFailure" && passed === false)
+        .map(([name]) => name);
+      if (failed.length === 0) throw new Error("safety-gate decision requires a failed gate");
+      return `non-compensatory safety gate(s) failed: ${failed.join(", ")}`;
+    }
+    case "REQUIRED_GAIN_RULED_OUT": {
+      if (!summary.gains) throw new Error("gain decision requires confidence bounds");
+      const ruledOut = [
+        summary.gains.overall.upperBoundPercentagePoints
+          <= QLORA_PROMOTION_POLICY.overallGainMarginPercentagePoints
+          ? "overall"
+          : null,
+        summary.gains.critical.upperBoundPercentagePoints
+          <= QLORA_PROMOTION_POLICY.criticalGainMarginPercentagePoints
+          ? "critical-field"
+          : null,
+      ].filter((entry): entry is string => entry !== null);
+      if (ruledOut.length === 0) throw new Error("gain decision must rule out a required gain");
+      return `the upper confidence bound rules out the required gain for ${ruledOut.join(" and ")}`;
+    }
+    case "ALL_PROMOTION_GATES_PASSED":
+      return "both one-sided 95% lower confidence bounds strictly exceed their approved margins and every safety gate passed";
+    case "REQUIRED_GAIN_NOT_ESTABLISHED": {
+      if (!summary.gains) throw new Error("gain decision requires confidence bounds");
+      const crossing = [
+        summary.gains.overall.lowerBoundPercentagePoints
+          <= QLORA_PROMOTION_POLICY.overallGainMarginPercentagePoints
+          ? "overall"
+          : null,
+        summary.gains.critical.lowerBoundPercentagePoints
+          <= QLORA_PROMOTION_POLICY.criticalGainMarginPercentagePoints
+          ? "critical-field"
+          : null,
+      ].filter((entry): entry is string => entry !== null);
+      if (crossing.length === 0) throw new Error("inconclusive decision must name a margin not established");
+      return `the lower confidence bound does not strictly clear the required margin for ${crossing.join(" and ")}`;
+    }
+    default:
+      throw new Error("manifest decision reason code is unsupported");
+  }
+}
+
+function validateQloraPromotionSummary(value: unknown): QloraPromotionEvaluationSummary {
+  const summary = record(value, "manifest");
+  if (
+    summary.decision !== "promotion-recommended"
+    && summary.decision !== "no-go"
+    && summary.decision !== "inconclusive"
+  ) {
+    throw new Error("manifest.decision is unsupported");
+  }
+  if (!Array.isArray(summary.reasonCodes) || summary.reasonCodes.some((code) => !isNonEmptyString(code))) {
+    throw new Error("manifest.reasonCodes must contain non-empty codes");
+  }
+  if (!Array.isArray(summary.reasons) || summary.reasons.length !== 1 || !isNonEmptyString(summary.reasons[0])) {
+    throw new Error("manifest.reasons must contain one non-empty aggregate explanation");
+  }
+  const caseCount = summary.caseCount;
+  const brandClusterCount = summary.brandClusterCount;
+  if (
+    typeof caseCount !== "number"
+    || !Number.isSafeInteger(caseCount)
+    || caseCount < 0
+    || typeof brandClusterCount !== "number"
+    || !Number.isSafeInteger(brandClusterCount)
+    || brandClusterCount < 0
+    || brandClusterCount > caseCount
+  ) {
+    throw new Error("manifest case and brand-cluster counts are invalid");
+  }
+  const bootstrap = record(summary.bootstrap, "manifest.bootstrap");
+  onlyKeys(bootstrap, ["method", "confidenceLevel", "replicates", "seed"], "manifest.bootstrap");
+  if (
+    bootstrap.method !== "seeded-brand-cluster-percentile"
+    || bootstrap.confidenceLevel !== QLORA_PROMOTION_POLICY.confidenceLevel
+    || bootstrap.replicates !== QLORA_PROMOTION_POLICY.bootstrapReplicates
+    || typeof bootstrap.seed !== "number"
+    || !Number.isSafeInteger(bootstrap.seed)
+    || bootstrap.seed < 0
+    || bootstrap.seed > 0xffff_ffff
+  ) {
+    throw new Error("manifest.bootstrap does not match the frozen bootstrap contract");
+  }
+
+  let agreements: QloraPromotionEvaluationSummary["agreements"] = null;
+  if (summary.agreements !== null) {
+    const input = record(summary.agreements, "manifest.agreements");
+    onlyKeys(input, ["candidate", "promptedBase", "gemini"], "manifest.agreements");
+    agreements = {
+      candidate: validateQloraAgreement(input.candidate, "manifest.agreements.candidate"),
+      promptedBase: validateQloraAgreement(input.promptedBase, "manifest.agreements.promptedBase"),
+      gemini: validateQloraAgreement(input.gemini, "manifest.agreements.gemini"),
+    };
+  }
+
+  let gains: QloraPromotionEvaluationSummary["gains"] = null;
+  if (summary.gains !== null) {
+    const input = record(summary.gains, "manifest.gains");
+    onlyKeys(input, ["overall", "critical"], "manifest.gains");
+    gains = {
+      overall: validateQloraGain(input.overall, "manifest.gains.overall"),
+      critical: validateQloraGain(input.critical, "manifest.gains.critical"),
+    };
+  }
+
+  const safetyGates = summary.safetyGates === null
+    ? null
+    : validateQloraGates(summary.safetyGates);
+  const validated: QloraPromotionEvaluationSummary = {
+    decision: summary.decision,
+    reasonCodes: [...summary.reasonCodes] as string[],
+    reasons: [...summary.reasons] as string[],
+    caseCount,
+    brandClusterCount,
+    bootstrap: {
+      method: "seeded-brand-cluster-percentile",
+      confidenceLevel: QLORA_PROMOTION_POLICY.confidenceLevel,
+      replicates: QLORA_PROMOTION_POLICY.bootstrapReplicates,
+      seed: bootstrap.seed,
+    },
+    agreements,
+    gains,
+    safetyGates,
+  };
+  if (validated.reasons[0] !== qloraDecisionReason(validated)) {
+    throw new Error("manifest decision reason does not match its aggregate outcome");
+  }
+  return validated;
+}
+
+/**
+ * Validate a detached QLoRA result manifest and bind it to the caller's
+ * frozen identities and pre-holdout power evidence. Only allowlisted metadata
+ * is returned; case rows, case identifiers, and provider payloads are rejected.
+ */
+export function validateQloraPromotionResultManifest(
+  value: unknown,
+  expected: QloraPromotionResultManifestBindings,
+): QloraPromotionResultManifest {
+  const root = record(value, "QLoRA result manifest");
+  onlyKeys(root, [
+    "format",
+    "formatVersion",
+    "privacy",
+    "identities",
+    "powerAnalysis",
+    "decision",
+    "reasonCodes",
+    "reasons",
+    "caseCount",
+    "brandClusterCount",
+    "bootstrap",
+    "agreements",
+    "gains",
+    "safetyGates",
+  ], "QLoRA result manifest");
+  if (root.format !== "qlora-promotion-result-manifest" || root.formatVersion !== 1) {
+    throw new Error("unsupported QLoRA result manifest format or version");
+  }
+  const privacy = record(root.privacy, "manifest.privacy");
+  onlyKeys(privacy, [
+    "mode",
+    "rawProviderPayloadsRetained",
+    "retainedEvaluationContent",
+  ], "manifest.privacy");
+  if (
+    privacy.mode !== "metadata-only"
+    || privacy.rawProviderPayloadsRetained !== false
+    || privacy.retainedEvaluationContent !== "none"
+  ) {
+    throw new Error("QLoRA result manifest must be metadata-only and retain no provider payloads");
+  }
+
+  const identities = normalizeQloraPromotionIdentities(root.identities, "manifest.identities");
+  const expectedIdentities = normalizeQloraPromotionIdentities(expected?.identities, "expected identities");
+  if (JSON.stringify(identities) !== JSON.stringify(expectedIdentities)) {
+    throw new Error("QLoRA result manifest identities do not match the frozen identities");
+  }
+  const powerAnalysis = normalizeQloraPowerAnalysis(root.powerAnalysis, "manifest.powerAnalysis");
+  const expectedPowerAnalysis = normalizeQloraPowerAnalysis(
+    expected?.powerAnalysis,
+    "expected pre-holdout power analysis",
+  );
+  if (JSON.stringify(powerAnalysis) !== JSON.stringify(expectedPowerAnalysis)) {
+    throw new Error("QLoRA result manifest power analysis does not match the frozen evidence");
+  }
+
+  const summary = validateQloraPromotionSummary(root);
+  if (
+    !Number.isSafeInteger(expected?.bootstrapSeed)
+    || expected.bootstrapSeed < 0
+    || expected.bootstrapSeed > 0xffff_ffff
+    || summary.bootstrap.seed !== expected.bootstrapSeed
+  ) {
+    throw new Error("QLoRA result manifest bootstrap seed does not match the frozen input");
+  }
+  if (
+    summary.reasonCodes[0] === "PAIRED_EVIDENCE_INVALID"
+    && (
+      summary.decision !== "inconclusive"
+      || summary.caseCount !== 0
+      || summary.brandClusterCount !== 0
+      || summary.agreements !== null
+      || summary.gains !== null
+      || summary.safetyGates !== null
+    )
+  ) {
+    throw new Error("invalid paired evidence must not contain aggregate scores");
+  }
+  if (
+    summary.reasonCodes[0] === "POWER_ANALYSIS_CLUSTER_COUNT_NOT_MET"
+    && (
+      summary.decision !== "inconclusive"
+      || summary.caseCount !== identities.expectedCases
+      || summary.brandClusterCount >= powerAnalysis.plannedBrandClusters
+      || summary.agreements !== null
+      || summary.gains !== null
+      || summary.safetyGates !== null
+    )
+  ) {
+    throw new Error("cluster-count decision does not match its pre-holdout power requirement");
+  }
+  if (
+    summary.reasonCodes[0] === "SAFETY_GATE_FAILED"
+    && (
+      summary.decision !== "no-go"
+      || summary.caseCount !== identities.expectedCases
+      || summary.brandClusterCount < powerAnalysis.plannedBrandClusters
+      || !summary.agreements
+      || !summary.gains
+      || !summary.safetyGates
+    )
+  ) {
+    throw new Error("safety-gate no-go must include complete aggregate evidence");
+  }
+  if (
+    summary.reasonCodes[0] === "REQUIRED_GAIN_RULED_OUT"
+    && (
+      summary.decision !== "no-go"
+      || summary.caseCount !== identities.expectedCases
+      || summary.brandClusterCount < powerAnalysis.plannedBrandClusters
+      || !summary.agreements
+      || !summary.gains
+      || !summary.safetyGates
+      || summary.safetyGates.criticalFieldHardFailure
+      || Object.entries(summary.safetyGates).some(([name, passed]) =>
+        name !== "criticalFieldHardFailure" && passed === false,
+      )
+    )
+  ) {
+    throw new Error("ruled-out gain decision must include complete aggregate evidence");
+  }
+  if (
+    summary.reasonCodes[0] === "ALL_PROMOTION_GATES_PASSED"
+    && (
+      summary.decision !== "promotion-recommended"
+      || summary.caseCount !== identities.expectedCases
+      || summary.brandClusterCount < powerAnalysis.plannedBrandClusters
+      || !summary.agreements
+      || !summary.gains
+      || !summary.safetyGates
+      || summary.safetyGates.criticalFieldHardFailure
+      || Object.entries(summary.safetyGates).some(([name, passed]) =>
+        name !== "criticalFieldHardFailure" && passed === false,
+      )
+      || summary.gains.overall.lowerBoundPercentagePoints
+        <= QLORA_PROMOTION_POLICY.overallGainMarginPercentagePoints
+      || summary.gains.critical.lowerBoundPercentagePoints
+        <= QLORA_PROMOTION_POLICY.criticalGainMarginPercentagePoints
+    )
+  ) {
+    throw new Error("promotion recommendation does not satisfy every frozen gate and gain margin");
+  }
+  if (
+    summary.reasonCodes[0] === "REQUIRED_GAIN_NOT_ESTABLISHED"
+    && (
+      summary.decision !== "inconclusive"
+      || summary.caseCount !== identities.expectedCases
+      || summary.brandClusterCount < powerAnalysis.plannedBrandClusters
+      || !summary.agreements
+      || !summary.gains
+      || !summary.safetyGates
+      || summary.safetyGates.criticalFieldHardFailure
+      || Object.entries(summary.safetyGates).some(([name, passed]) =>
+        name !== "criticalFieldHardFailure" && passed === false,
+      )
+    )
+  ) {
+    throw new Error("inconclusive gain decision must include complete aggregate evidence");
+  }
+
+  return {
+    format: "qlora-promotion-result-manifest",
+    formatVersion: 1,
+    privacy: {
+      mode: "metadata-only",
+      rawProviderPayloadsRetained: false,
+      retainedEvaluationContent: "none",
+    },
+    identities,
+    powerAnalysis,
+    ...summary,
+  };
+}
+
 function isStringList(value: unknown): value is string[] {
   return Array.isArray(value) && value.every(isNonEmptyString);
 }
@@ -954,7 +1506,7 @@ function pairQloraRuns(
         || !sameStringSet(row.eligibleFields, candidate.eligibleFields)
         || !sameStringSet(row.criticalFields, candidate.criticalFields)
       ) {
-        return { cases: [], error: `paired case metadata does not match for case ${caseId}` };
+        return { cases: [], error: "paired case metadata does not match the frozen contract" };
       }
     }
     paired.push({ candidate, promptedBase, gemini });
@@ -1093,6 +1645,7 @@ function finishQloraEvaluation(
   return {
     format: "qlora-promotion-evaluation",
     formatVersion: 1,
+    manifest: null,
     decision,
     reasonCodes,
     reasons,
@@ -1108,6 +1661,59 @@ function finishQloraEvaluation(
     gains,
     safetyGates,
   };
+}
+
+function summarizeQloraEvaluation(
+  evaluation: QloraPromotionEvaluation,
+): QloraPromotionEvaluationSummary {
+  return {
+    decision: evaluation.decision,
+    reasonCodes: [...evaluation.reasonCodes],
+    reasons: [...evaluation.reasons],
+    caseCount: evaluation.caseCount,
+    brandClusterCount: evaluation.brandClusterCount,
+    bootstrap: { ...evaluation.bootstrap },
+    agreements: evaluation.agreements
+      ? {
+        candidate: { ...evaluation.agreements.candidate },
+        promptedBase: { ...evaluation.agreements.promptedBase },
+        gemini: { ...evaluation.agreements.gemini },
+      }
+      : null,
+    gains: evaluation.gains
+      ? {
+        overall: { ...evaluation.gains.overall },
+        critical: { ...evaluation.gains.critical },
+      }
+      : null,
+    safetyGates: evaluation.safetyGates
+      ? { ...evaluation.safetyGates }
+      : null,
+  };
+}
+
+function attachQloraResultManifest(
+  evaluation: QloraPromotionEvaluation,
+  identities: QloraPromotionIdentifiedSystems,
+  powerAnalysis: QloraPromotionQualifiedPowerAnalysis,
+): QloraPromotionEvaluation {
+  const manifest = validateQloraPromotionResultManifest({
+    format: "qlora-promotion-result-manifest",
+    formatVersion: 1,
+    privacy: {
+      mode: "metadata-only",
+      rawProviderPayloadsRetained: false,
+      retainedEvaluationContent: "none",
+    },
+    identities,
+    powerAnalysis,
+    ...summarizeQloraEvaluation(evaluation),
+  }, {
+    identities,
+    powerAnalysis,
+    bootstrapSeed: evaluation.bootstrap.seed as number,
+  });
+  return { ...evaluation, manifest };
 }
 
 /**
@@ -1134,7 +1740,7 @@ export function evaluateConditionalQloraPromotion(
       seed,
     );
   }
-  const identities = input.identities as Extract<QloraPromotionIdentities, { state: "identified" }>;
+  const identities = input.identities as QloraPromotionIdentifiedSystems;
 
   const powerError = validateQloraPowerAnalysis(input?.powerAnalysis);
   if (powerError) {
@@ -1153,18 +1759,25 @@ export function evaluateConditionalQloraPromotion(
     );
   }
 
-  const power = input.powerAnalysis as Extract<QloraPromotionPowerAnalysis, { state: "qualified" }>;
+  const power = input.powerAnalysis as QloraPromotionQualifiedPowerAnalysis;
+  const withManifest = (evaluation: QloraPromotionEvaluation) =>
+    attachQloraResultManifest(evaluation, identities, power);
   const paired = pairQloraRuns(input.results, identities.expectedCases);
   if (paired.error) {
-    return qloraInconclusive("PAIRED_EVIDENCE_INVALID", paired.error, seed);
+    return withManifest(qloraInconclusive(
+      "PAIRED_EVIDENCE_INVALID",
+      "paired case evidence did not satisfy the frozen case and metadata contract",
+      seed,
+    ));
   }
   const brandClusterCount = new Set(paired.cases.map((item) => item.candidate.brandClusterId)).size;
   if (brandClusterCount < power.plannedBrandClusters) {
-    return qloraInconclusive(
+    return withManifest(qloraInconclusive(
       "POWER_ANALYSIS_CLUSTER_COUNT_NOT_MET",
-      `scored evidence has ${brandClusterCount} brand clusters but the pre-holdout power analysis requires ${power.plannedBrandClusters}`,
+      "scored evidence has fewer brand clusters than the pre-holdout power analysis requires",
       seed,
-    );
+      { caseCount: paired.cases.length, brandClusterCount },
+    ));
   }
 
   const evaluation = finishQloraEvaluation(
@@ -1179,12 +1792,12 @@ export function evaluateConditionalQloraPromotion(
     .filter(([name, passed]) => name !== "criticalFieldHardFailure" && passed === false)
     .map(([name]) => name);
   if (failedGates.length > 0) {
-    return {
+    return withManifest({
       ...evaluation,
       decision: "no-go",
       reasonCodes: ["SAFETY_GATE_FAILED"],
       reasons: [`non-compensatory safety gate(s) failed: ${failedGates.join(", ")}`],
-    };
+    });
   }
 
   const overallRuledOut =
@@ -1198,12 +1811,12 @@ export function evaluateConditionalQloraPromotion(
       overallRuledOut ? "overall" : null,
       criticalRuledOut ? "critical-field" : null,
     ].filter((entry): entry is string => entry !== null);
-    return {
+    return withManifest({
       ...evaluation,
       decision: "no-go",
       reasonCodes: ["REQUIRED_GAIN_RULED_OUT"],
       reasons: [`the upper confidence bound rules out the required gain for ${ruledOut.join(" and ")}`],
-    };
+    });
   }
 
   const overallClears =
@@ -1213,23 +1826,23 @@ export function evaluateConditionalQloraPromotion(
     evaluation.gains!.critical.lowerBoundPercentagePoints
     > QLORA_PROMOTION_POLICY.criticalGainMarginPercentagePoints;
   if (overallClears && criticalClears) {
-    return {
+    return withManifest({
       ...evaluation,
       decision: "promotion-recommended",
       reasonCodes: ["ALL_PROMOTION_GATES_PASSED"],
       reasons: [
         "both one-sided 95% lower confidence bounds strictly exceed their approved margins and every safety gate passed",
       ],
-    };
+    });
   }
   const crossing = [
     !overallClears ? "overall" : null,
     !criticalClears ? "critical-field" : null,
   ].filter((entry): entry is string => entry !== null);
-  return {
+  return withManifest({
     ...evaluation,
     decision: "inconclusive",
     reasonCodes: ["REQUIRED_GAIN_NOT_ESTABLISHED"],
     reasons: [`the lower confidence bound does not strictly clear the required margin for ${crossing.join(" and ")}`],
-  };
+  });
 }

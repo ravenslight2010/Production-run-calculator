@@ -4,6 +4,7 @@ import {
   evaluateConditionalQloraPromotion,
   readEvaluationManifest,
   validateEvaluationManifest,
+  validateQloraPromotionResultManifest,
   type EvaluationManifest,
   type QloraPromotionCaseResult,
   type QloraPromotionInput,
@@ -320,6 +321,43 @@ describe("conditional QLoRA promotion evaluator", () => {
     });
     expect(result.caseCount).toBe(12);
     expect(result.brandClusterCount).toBe(12);
+    expect(result.manifest).toMatchObject({
+      format: "qlora-promotion-result-manifest",
+      formatVersion: 1,
+      privacy: {
+        mode: "metadata-only",
+        rawProviderPayloadsRetained: false,
+        retainedEvaluationContent: "none",
+      },
+      identities: qloraIdentity(12),
+      powerAnalysis: qloraInput().powerAnalysis,
+      decision: "promotion-recommended",
+      reasonCodes: ["ALL_PROMOTION_GATES_PASSED"],
+      bootstrap: {
+        method: "seeded-brand-cluster-percentile",
+        confidenceLevel: 0.95,
+        replicates: 10_000,
+        seed: 20261002,
+      },
+      caseCount: 12,
+      brandClusterCount: 12,
+      agreements: result.agreements,
+      gains: result.gains,
+      safetyGates: result.safetyGates,
+    });
+    expect(result.manifest?.reasons).toEqual(result.reasons);
+    expect(JSON.stringify(result.manifest)).not.toContain("case-0");
+    expect(JSON.stringify(result.manifest)).not.toContain("field-0");
+    expect(JSON.stringify(result.manifest)).not.toContain("fieldCorrectness");
+    expect(validateQloraPromotionResultManifest(result.manifest, {
+      identities: qloraInput().identities,
+      powerAnalysis: qloraInput().powerAnalysis,
+      bootstrapSeed: qloraInput().bootstrapSeed,
+    })).toEqual(result.manifest);
+    expect(validateQloraPromotionResultManifest(
+      JSON.parse(JSON.stringify(result.manifest)) as unknown,
+      qloraInput(),
+    )).toEqual(result.manifest);
   });
 
   it("returns no-go when any non-compensatory safety gate fails", () => {
@@ -336,6 +374,99 @@ describe("conditional QLoRA promotion evaluator", () => {
     expect(result.decision).toBe("no-go");
     expect(result.safetyGates?.zeroBlankPoisonCases).toBe(false);
     expect(result.reasonCodes).toContain("SAFETY_GATE_FAILED");
+    expect(result.manifest?.decision).toBe("no-go");
+    expect(result.manifest?.reasonCodes).toEqual(result.reasonCodes);
+  });
+
+  it("rejects missing, changed, or unexpected manifest identity data", () => {
+    const input = qloraInput();
+    const result = evaluateConditionalQloraPromotion(input);
+    const resultManifest = result.manifest!;
+    const changedIdentities = qloraIdentity(12);
+    changedIdentities.candidate.tokenizerSha256 = "9".repeat(64);
+
+    expect(() => validateQloraPromotionResultManifest(
+      { ...resultManifest, identities: undefined },
+      input,
+    )).toThrow(/identities are invalid/);
+    expect(() => validateQloraPromotionResultManifest(
+      {
+        ...resultManifest,
+        identities: {
+          ...resultManifest.identities,
+          candidate: { ...resultManifest.identities.candidate, tokenizerSha256: "9".repeat(64) },
+        },
+      },
+      input,
+    )).toThrow(/identities do not match/);
+    expect(() => validateQloraPromotionResultManifest(
+      resultManifest,
+      { ...input, identities: changedIdentities },
+    )).toThrow(/identities do not match/);
+    expect(() => validateQloraPromotionResultManifest(
+      { ...resultManifest, caseResults: input.results },
+      input,
+    )).toThrow(/unsupported metadata fields/);
+    expect(() => validateQloraPromotionResultManifest(
+      resultManifest,
+      {
+        ...input,
+        powerAnalysis: {
+          ...input.powerAnalysis,
+          developmentEvidenceSha256: "9".repeat(64),
+        },
+      },
+    )).toThrow(/power analysis does not match/);
+    expect(() => validateQloraPromotionResultManifest(
+      { ...resultManifest, bootstrap: { ...resultManifest.bootstrap, seed: 20261003 } },
+      input,
+    )).toThrow(/bootstrap seed does not match/);
+  });
+
+  it("retains a metadata-only manifest for paired-evidence failures but none for unbound inputs", () => {
+    const unmatched = qloraInput();
+    unmatched.results.gemini[0] = {
+      ...unmatched.results.gemini[0],
+      caseId: "private-case-identifier",
+    };
+    const invalidPairs = evaluateConditionalQloraPromotion(unmatched);
+    expect(invalidPairs).toMatchObject({
+      decision: "inconclusive",
+      reasonCodes: ["PAIRED_EVIDENCE_INVALID"],
+      manifest: {
+        decision: "inconclusive",
+        agreements: null,
+        gains: null,
+        safetyGates: null,
+      },
+    });
+    expect(JSON.stringify(invalidPairs.manifest)).not.toContain("private-case-identifier");
+
+    const unavailable = qloraInput();
+    unavailable.identities = {
+      state: "unavailable",
+      reason: "candidate model digest was not retained",
+    };
+    expect(evaluateConditionalQloraPromotion(unavailable).manifest).toBeNull();
+
+    const undersampled = qloraInput();
+    undersampled.powerAnalysis = {
+      ...undersampled.powerAnalysis,
+      plannedBrandClusters: 13,
+    };
+    expect(evaluateConditionalQloraPromotion(undersampled)).toMatchObject({
+      decision: "inconclusive",
+      reasonCodes: ["POWER_ANALYSIS_CLUSTER_COUNT_NOT_MET"],
+      caseCount: 12,
+      brandClusterCount: 12,
+      manifest: {
+        caseCount: 12,
+        brandClusterCount: 12,
+        agreements: null,
+        gains: null,
+        safetyGates: null,
+      },
+    });
   });
 
   it("enforces each independent Gemini safety gate without compensation", () => {
