@@ -333,7 +333,13 @@ test("Summary card keeps an uncommitted note focused across a live timer tick", 
   });
 
   await openAsManager(page, account.token);
-  await expect.poll(() => readCurrentRunId(page), { timeout: 15_000 }).toBe(runId);
+  // The app can finish a startup navigation after the tab first attaches.
+  // Wait for the active run UI instead of evaluating storage in a document
+  // that may be getting replaced.
+  await expect(page.getByTestId("tab-run")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "STOP RUN", exact: true }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "More" }).click();
   await page.getByRole("menuitem", { name: "Summary", exact: true }).click();
 
