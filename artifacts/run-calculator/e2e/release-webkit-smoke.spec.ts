@@ -20,6 +20,36 @@ const PASSWORD = "TestPass123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 const testUsernames = new Set<string>();
 
+test.afterEach(async ({ page }, testInfo) => {
+  if (testInfo.status === testInfo.expectedStatus) return;
+
+  try {
+    const screenshot = await page.screenshot({
+      animations: "disabled",
+      caret: "hide",
+      mask: [
+        page.locator("input, textarea, select"),
+        page.locator(
+          [
+            "[data-testid*='account' i]",
+            "[data-testid*='user' i]",
+            "[aria-label*='account' i]",
+            "[aria-label*='user' i]",
+          ].join(", "),
+        ),
+      ],
+      maskColor: "#000000",
+      timeout: 3_000,
+    });
+    await testInfo.attach("masked-failure-screenshot", {
+      body: screenshot,
+      contentType: "image/png",
+    });
+  } catch {
+    // A broken or closed page must not hide the original journey failure.
+  }
+});
+
 function today(): string {
   return new Date().toISOString().slice(0, 10);
 }

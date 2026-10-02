@@ -39,12 +39,15 @@ export default defineConfig({
       "./e2e/release-browser-evidence-reporter.ts",
       { requireConfiguredPath: true },
     ],
+    ["./e2e/compatibility-debug-reporter.ts"],
   ],
   use: {
     baseURL,
     headless: true,
     trace: "retain-on-failure",
-    screenshot: "only-on-failure",
+    // Raw Playwright screenshots stay out of uploadable test attachments. The
+    // spec's afterEach hook creates a masked screenshot for the safe reporter.
+    screenshot: "off",
     video: "off",
     launchOptions: {
       executablePath: resolveChromiumExecutable(),

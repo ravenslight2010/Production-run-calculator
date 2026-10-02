@@ -643,6 +643,45 @@ async function run(): Promise<void> {
     new URL("../../.github/workflows/release-check.yml", import.meta.url),
     "utf8",
   );
+  const responsiveWebKitConfig = await readFile(
+    new URL(
+      "../../artifacts/run-calculator/playwright.compatibility.config.ts",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const responsiveWebKitSpec = await readFile(
+    new URL(
+      "../../artifacts/run-calculator/e2e/release-webkit-smoke.spec.ts",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.match(
+    responsiveWebKitConfig,
+    /trace:\s*"retain-on-failure"/u,
+    "raw Playwright traces must remain failure-only local inputs to the sanitizer",
+  );
+  assert.match(
+    responsiveWebKitConfig,
+    /screenshot:\s*"off"/u,
+    "raw built-in screenshots must not become uploadable test attachments",
+  );
+  assert.match(
+    responsiveWebKitConfig,
+    /compatibility-debug-reporter\.ts/u,
+    "the responsive compatibility run must use the sanitizing reporter",
+  );
+  assert.match(
+    responsiveWebKitSpec,
+    /test\.afterEach[\s\S]*?page\.screenshot\([\s\S]*?mask:/u,
+    "failure screenshots must be captured with masks",
+  );
+  assert.match(
+    responsiveWebKitSpec,
+    /page\.locator\("input, textarea, select"\)/u,
+    "failure screenshots must mask entered form values",
+  );
   const configuredKeyrings = [...releaseWorkflow.matchAll(
     /OPERATIONAL_REPORT_SIGNING_KEYS:\s*'([^']+)'/g,
   )].map((match) => parseReportSigningKeyring(match[1]));
@@ -705,6 +744,78 @@ async function run(): Promise<void> {
     assert.match(handoffBlock, /--evidence-dir "\$HANDOFF_EVIDENCE_DIR"/);
     assert.match(handoffBlock, /Handoff generation: \*\*FAILED\*\*/);
   }
+  const standardReleaseJob = releaseJobs.find((job) => job.name === "standard");
+  const fullReleaseJob = releaseJobs.find((job) => job.name === "full");
+  assert.ok(standardReleaseJob?.source);
+  assert.ok(fullReleaseJob?.source);
+  assert.doesNotMatch(
+    standardReleaseJob.source,
+    /PLAYWRIGHT_COMPATIBILITY_DEBUG_DIR|responsive-webkit-debug/u,
+    "standard release checks must not configure the full-only debug artifact",
+  );
+  assert.match(
+    fullReleaseJob.source,
+    /PLAYWRIGHT_COMPATIBILITY_DEBUG_DIR:\s*\$\{\{\s*runner\.temp\s*\}\}\/responsive-webkit-debug-\$\{\{\s*github\.run_id\s*\}\}-\$\{\{\s*github\.run_attempt\s*\}\}/u,
+    "full-run browser diagnostics must be staged under a unique runner-temp path",
+  );
+  const diagnosticsCheckStart = fullReleaseJob.source.indexOf(
+    "- name: Check for sanitized responsive WebKit diagnostics",
+  );
+  const diagnosticsUploadStart = fullReleaseJob.source.indexOf(
+    "- name: Upload sanitized responsive WebKit failure diagnostics",
+  );
+  const stoppedSummaryStart = fullReleaseJob.source.indexOf(
+    "- name: Summarize stopped full release check",
+  );
+  assert.ok(diagnosticsCheckStart >= 0);
+  assert.ok(diagnosticsUploadStart > diagnosticsCheckStart);
+  assert.ok(stoppedSummaryStart > diagnosticsUploadStart);
+  const diagnosticsBlock = fullReleaseJob.source.slice(
+    diagnosticsUploadStart,
+    stoppedSummaryStart,
+  );
+  assert.match(
+    diagnosticsBlock,
+    /if: always\(\) && steps\.responsive-webkit-debug-artifact\.outputs\.available == 'true'/u,
+    "the separate debug upload must require an emitted sanitized manifest",
+  );
+  assert.match(diagnosticsBlock, /retention-days: 3/u);
+  assert.match(
+    diagnosticsBlock,
+    /path: \$\{\{\s*runner\.temp\s*\}\}\/responsive-webkit-debug-\$\{\{\s*github\.run_id\s*\}\}-\$\{\{\s*github\.run_attempt\s*\}\}/u,
+  );
+  assert.match(
+    diagnosticsBlock,
+    /name: responsive-webkit-debug-\$\{\{\s*github\.run_id\s*\}\}-\$\{\{\s*github\.run_attempt\s*\}\}/u,
+    "separate attempts of one workflow run must retain distinct debug artifacts",
+  );
+  assert.doesNotMatch(
+    diagnosticsBlock,
+    /release-evidence-full/u,
+    "debug artifacts must remain separate from canonical full evidence",
+  );
+  const canonicalFullUploadStart = fullReleaseJob.source.indexOf(
+    "- name: Upload full release evidence",
+  );
+  assert.ok(canonicalFullUploadStart >= 0);
+  assert.ok(
+    diagnosticsCheckStart > canonicalFullUploadStart,
+    "the debug artifact probe must not alter the canonical full-evidence upload",
+  );
+  const canonicalUploadEnd = fullReleaseJob.source.indexOf(
+    "- name: Check for sanitized responsive WebKit diagnostics",
+    canonicalFullUploadStart,
+  );
+  const canonicalUploadBlock = fullReleaseJob.source.slice(
+    canonicalFullUploadStart,
+    canonicalUploadEnd,
+  );
+  assert.match(canonicalUploadBlock, /path:\s*release-evidence-full/u);
+  assert.doesNotMatch(
+    canonicalUploadBlock,
+    /responsive-webkit-debug|runner\.temp/u,
+    "raw or sanitized browser diagnostics must not enter the canonical artifact",
+  );
   assert.equal(
     configuredKeyrings.length,
     2,
@@ -993,6 +1104,13 @@ async function run(): Promise<void> {
       "browser-compatibility/webkit-result.json",
     ),
     "responsive WebKit evidence must be retained through the release allowlist",
+  );
+  assert.equal(
+    RELEASE_EVIDENCE_ALLOWLIST.some((path) =>
+      path.includes("responsive-webkit-debug"),
+    ),
+    false,
+    "browser-debug files must remain outside the canonical release-evidence allowlist",
   );
   assert.ok(
     RELEASE_EVIDENCE_ALLOWLIST.includes("screen-off-wake/FINAL-REPORT.md"),
