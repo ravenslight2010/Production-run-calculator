@@ -328,6 +328,190 @@ function qloraDevelopmentPowerInput(
   };
 }
 
+type QloraPowerReferenceBrand = {
+  caseCount: number;
+  overallFieldGainsPerCase: number;
+  criticalFieldGainCases: number;
+};
+
+type QloraPowerReferenceVector = {
+  name: string;
+  brands: QloraPowerReferenceBrand[];
+  referenceMinimumBrandClusters: number;
+  minimumBrandClusterTolerance: number;
+  referencePowerByBrandCount: Record<number, { overall: number; critical: number }>;
+  powerAbsoluteTolerance: number;
+};
+
+const qloraPowerReferenceFields = Array.from({ length: 100 }, (_, index) => `field-${index}`);
+const qloraPowerReferenceCriticalFields = qloraPowerReferenceFields.slice(0, 20);
+
+function qloraPowerReferenceInput(brands: QloraPowerReferenceBrand[]) {
+  const candidate: QloraPromotionCaseResult[] = [];
+  const promptedBase: QloraPromotionCaseResult[] = [];
+  brands.forEach((brand, brandIndex) => {
+    for (let caseIndex = 0; caseIndex < brand.caseCount; caseIndex += 1) {
+      const criticalGain = caseIndex < brand.criticalFieldGainCases ? 1 : 0;
+      const correctFields = new Set<string>();
+      if (criticalGain) correctFields.add(qloraPowerReferenceCriticalFields[0]);
+      for (
+        let fieldIndex = 0;
+        fieldIndex < brand.overallFieldGainsPerCase - criticalGain;
+        fieldIndex += 1
+      ) {
+        correctFields.add(qloraPowerReferenceFields[20 + fieldIndex]);
+      }
+      const row: QloraPromotionCaseResult = {
+        caseId: `synthetic-case-${brandIndex}-${caseIndex}`,
+        brandClusterId: `synthetic-brand-${brandIndex}`,
+        eligibleFields: qloraPowerReferenceFields,
+        criticalFields: qloraPowerReferenceCriticalFields,
+        fieldCorrectness: Object.fromEntries([...correctFields].map((field) => [field, true])),
+        schemaValid: true,
+        blankPoison: false,
+        emptyOutput: false,
+        systematicMissingRequiredFields: false,
+      };
+      candidate.push(row);
+      promptedBase.push({ ...row, fieldCorrectness: {} });
+    }
+  });
+  return {
+    evidenceScope: "development-only" as const,
+    seed: 20261002,
+    results: { candidate, promptedBase },
+  };
+}
+
+const qloraPowerReferenceVectors: QloraPowerReferenceVector[] = [
+  {
+    name: "balanced brands with low variance and gains comfortably above both margins",
+    brands: [
+      { caseCount: 10, overallFieldGainsPerCase: 7, criticalFieldGainCases: 8 },
+      { caseCount: 10, overallFieldGainsPerCase: 8, criticalFieldGainCases: 9 },
+      { caseCount: 10, overallFieldGainsPerCase: 9, criticalFieldGainCases: 10 },
+      { caseCount: 10, overallFieldGainsPerCase: 7, criticalFieldGainCases: 9 },
+      { caseCount: 10, overallFieldGainsPerCase: 8, criticalFieldGainCases: 8 },
+      { caseCount: 10, overallFieldGainsPerCase: 9, criticalFieldGainCases: 9 },
+      { caseCount: 10, overallFieldGainsPerCase: 7, criticalFieldGainCases: 10 },
+      { caseCount: 10, overallFieldGainsPerCase: 8, criticalFieldGainCases: 9 },
+      { caseCount: 10, overallFieldGainsPerCase: 9, criticalFieldGainCases: 8 },
+      { caseCount: 10, overallFieldGainsPerCase: 7, criticalFieldGainCases: 9 },
+      { caseCount: 10, overallFieldGainsPerCase: 8, criticalFieldGainCases: 10 },
+      { caseCount: 10, overallFieldGainsPerCase: 9, criticalFieldGainCases: 9 },
+      { caseCount: 10, overallFieldGainsPerCase: 7, criticalFieldGainCases: 8 },
+      { caseCount: 10, overallFieldGainsPerCase: 8, criticalFieldGainCases: 9 },
+      { caseCount: 10, overallFieldGainsPerCase: 9, criticalFieldGainCases: 10 },
+      { caseCount: 10, overallFieldGainsPerCase: 8, criticalFieldGainCases: 9 },
+    ],
+    referenceMinimumBrandClusters: 2,
+    minimumBrandClusterTolerance: 0,
+    referencePowerByBrandCount: {
+      2: { overall: 1, critical: 1 },
+    },
+    powerAbsoluteTolerance: 0.03,
+  },
+  {
+    name: "uneven low-variance brands with gains close to both margins",
+    brands: [
+      { caseCount: 10, overallFieldGainsPerCase: 5, criticalFieldGainCases: 6 },
+      { caseCount: 10, overallFieldGainsPerCase: 6, criticalFieldGainCases: 7 },
+      { caseCount: 10, overallFieldGainsPerCase: 6, criticalFieldGainCases: 7 },
+      { caseCount: 10, overallFieldGainsPerCase: 7, criticalFieldGainCases: 8 },
+      { caseCount: 10, overallFieldGainsPerCase: 6, criticalFieldGainCases: 7 },
+      { caseCount: 10, overallFieldGainsPerCase: 7, criticalFieldGainCases: 8 },
+      { caseCount: 10, overallFieldGainsPerCase: 5, criticalFieldGainCases: 7 },
+      { caseCount: 10, overallFieldGainsPerCase: 6, criticalFieldGainCases: 7 },
+      { caseCount: 20, overallFieldGainsPerCase: 5, criticalFieldGainCases: 12 },
+      { caseCount: 20, overallFieldGainsPerCase: 6, criticalFieldGainCases: 14 },
+      { caseCount: 20, overallFieldGainsPerCase: 6, criticalFieldGainCases: 13 },
+      { caseCount: 20, overallFieldGainsPerCase: 7, criticalFieldGainCases: 15 },
+      { caseCount: 20, overallFieldGainsPerCase: 6, criticalFieldGainCases: 14 },
+      { caseCount: 20, overallFieldGainsPerCase: 7, criticalFieldGainCases: 15 },
+      { caseCount: 20, overallFieldGainsPerCase: 5, criticalFieldGainCases: 13 },
+      { caseCount: 20, overallFieldGainsPerCase: 6, criticalFieldGainCases: 14 },
+    ],
+    referenceMinimumBrandClusters: 4,
+    minimumBrandClusterTolerance: 1,
+    referencePowerByBrandCount: {
+      3: { overall: 0.68549, critical: 0.842909 },
+      4: { overall: 0.818911, critical: 0.948178 },
+      5: { overall: 0.907079, critical: 0.985595 },
+    },
+    powerAbsoluteTolerance: 0.03,
+  },
+  {
+    name: "balanced high-variance brands with both gains close to their margins",
+    brands: [
+      { caseCount: 10, overallFieldGainsPerCase: 1, criticalFieldGainCases: 10 },
+      { caseCount: 10, overallFieldGainsPerCase: 12, criticalFieldGainCases: 10 },
+      { caseCount: 10, overallFieldGainsPerCase: 2, criticalFieldGainCases: 10 },
+      { caseCount: 10, overallFieldGainsPerCase: 11, criticalFieldGainCases: 10 },
+      { caseCount: 10, overallFieldGainsPerCase: 3, criticalFieldGainCases: 10 },
+      { caseCount: 10, overallFieldGainsPerCase: 10, criticalFieldGainCases: 10 },
+      { caseCount: 10, overallFieldGainsPerCase: 1, criticalFieldGainCases: 10 },
+      { caseCount: 10, overallFieldGainsPerCase: 12, criticalFieldGainCases: 10 },
+      { caseCount: 10, overallFieldGainsPerCase: 2, criticalFieldGainCases: 10 },
+      { caseCount: 10, overallFieldGainsPerCase: 11, criticalFieldGainCases: 10 },
+      { caseCount: 10, overallFieldGainsPerCase: 3, criticalFieldGainCases: 10 },
+      { caseCount: 10, overallFieldGainsPerCase: 10, criticalFieldGainCases: 10 },
+      { caseCount: 10, overallFieldGainsPerCase: 1, criticalFieldGainCases: 0 },
+      { caseCount: 10, overallFieldGainsPerCase: 12, criticalFieldGainCases: 0 },
+      { caseCount: 10, overallFieldGainsPerCase: 2, criticalFieldGainCases: 2 },
+      { caseCount: 10, overallFieldGainsPerCase: 11, criticalFieldGainCases: 2 },
+      { caseCount: 10, overallFieldGainsPerCase: 3, criticalFieldGainCases: 3 },
+      { caseCount: 10, overallFieldGainsPerCase: 10, criticalFieldGainCases: 3 },
+      { caseCount: 10, overallFieldGainsPerCase: 1, criticalFieldGainCases: 5 },
+      { caseCount: 10, overallFieldGainsPerCase: 12, criticalFieldGainCases: 5 },
+    ],
+    referenceMinimumBrandClusters: 99,
+    minimumBrandClusterTolerance: 3,
+    referencePowerByBrandCount: {
+      96: { overall: 0.934344, critical: 0.80359 },
+      97: { overall: 0.936478, critical: 0.807214 },
+      98: { overall: 0.938455, critical: 0.810958 },
+      99: { overall: 0.940603, critical: 0.814192 },
+      100: { overall: 0.942351, critical: 0.817034 },
+      101: { overall: 0.944454, critical: 0.820333 },
+      102: { overall: 0.946149, critical: 0.823415 },
+    },
+    powerAbsoluteTolerance: 0.03,
+  },
+  {
+    name: "uneven high-variance brands with gains close to both margins",
+    brands: [
+      { caseCount: 5, overallFieldGainsPerCase: 12, criticalFieldGainCases: 4 },
+      { caseCount: 5, overallFieldGainsPerCase: 11, criticalFieldGainCases: 5 },
+      { caseCount: 5, overallFieldGainsPerCase: 12, criticalFieldGainCases: 3 },
+      { caseCount: 5, overallFieldGainsPerCase: 11, criticalFieldGainCases: 4 },
+      { caseCount: 5, overallFieldGainsPerCase: 12, criticalFieldGainCases: 5 },
+      { caseCount: 5, overallFieldGainsPerCase: 11, criticalFieldGainCases: 3 },
+      { caseCount: 5, overallFieldGainsPerCase: 12, criticalFieldGainCases: 4 },
+      { caseCount: 5, overallFieldGainsPerCase: 11, criticalFieldGainCases: 5 },
+      { caseCount: 5, overallFieldGainsPerCase: 12, criticalFieldGainCases: 3 },
+      { caseCount: 5, overallFieldGainsPerCase: 11, criticalFieldGainCases: 4 },
+      { caseCount: 20, overallFieldGainsPerCase: 5, criticalFieldGainCases: 14 },
+      { caseCount: 20, overallFieldGainsPerCase: 5, criticalFieldGainCases: 15 },
+      { caseCount: 20, overallFieldGainsPerCase: 5, criticalFieldGainCases: 13 },
+      { caseCount: 20, overallFieldGainsPerCase: 5, criticalFieldGainCases: 14 },
+      { caseCount: 20, overallFieldGainsPerCase: 5, criticalFieldGainCases: 15 },
+      { caseCount: 20, overallFieldGainsPerCase: 5, criticalFieldGainCases: 13 },
+      { caseCount: 20, overallFieldGainsPerCase: 5, criticalFieldGainCases: 14 },
+      { caseCount: 20, overallFieldGainsPerCase: 5, criticalFieldGainCases: 15 },
+      { caseCount: 20, overallFieldGainsPerCase: 5, criticalFieldGainCases: 13 },
+      { caseCount: 20, overallFieldGainsPerCase: 5, criticalFieldGainCases: 14 },
+    ],
+    referenceMinimumBrandClusters: 10,
+    minimumBrandClusterTolerance: 1,
+    referencePowerByBrandCount: {
+      9: { overall: 0.746016, critical: 0.999988 },
+      10: { overall: 0.828271, critical: 0.999996 },
+      11: { overall: 0.886587, critical: 1 },
+    },
+    powerAbsoluteTolerance: 0.03,
+  },
+];
+
 describe("conditional QLoRA pre-holdout power analysis", () => {
   it("calculates a reproducible, metadata-only minimum brand sample from paired development evidence", () => {
     const input = qloraDevelopmentPowerInput();
@@ -372,6 +556,30 @@ describe("conditional QLoRA pre-holdout power analysis", () => {
     expect(result.reason).toMatch(/did not reach 80%/);
     expect(result.overallPower).toBeLessThan(0.8);
   });
+
+  it.each(qloraPowerReferenceVectors)(
+    "matches the independent offline statistical reference for $name",
+    (vector) => {
+      const input = qloraPowerReferenceInput(vector.brands);
+      const result = calculateQloraPromotionPower(input);
+
+      expect(result.state).toBe("qualified");
+      if (result.state !== "qualified") throw new Error("expected qualified power analysis");
+      const expectedCaseCount = vector.brands.reduce((sum, brand) => sum + brand.caseCount, 0);
+      expect(result.developmentCaseCount).toBe(expectedCaseCount);
+      expect(result.developmentBrandClusterCount).toBe(vector.brands.length);
+      expect(
+        Math.abs(result.plannedBrandClusters - vector.referenceMinimumBrandClusters),
+      ).toBeLessThanOrEqual(vector.minimumBrandClusterTolerance);
+
+      const referencePower = vector.referencePowerByBrandCount[result.plannedBrandClusters];
+      expect(referencePower).toBeDefined();
+      expect(Math.abs(result.overallPower - referencePower.overall))
+        .toBeLessThanOrEqual(vector.powerAbsoluteTolerance);
+      expect(Math.abs(result.criticalPower - referencePower.critical))
+        .toBeLessThanOrEqual(vector.powerAbsoluteTolerance);
+    },
+  );
 
   it("fails closed for missing, holdout-scoped, and malformed development evidence", () => {
     expect(calculateQloraPromotionPower(undefined)).toMatchObject({

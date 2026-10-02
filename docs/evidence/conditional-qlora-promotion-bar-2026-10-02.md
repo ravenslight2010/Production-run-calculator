@@ -37,6 +37,21 @@ The frozen method identifier is `seeded-empirical-brand-cluster-simulation-norma
 
 This power-analysis method is separate from the seeded brand-cluster percentile bootstrap used for final holdout confidence bounds. Passing the preflight does not establish a promotion result or authorize opening the holdout.
 
+### Synthetic reference check
+
+The preflight’s reported minimum brand count and both powers are checked against an independent offline C++17 Monte Carlo reference, using `std::mt19937_64` seeded with `20261002 + total synthetic cases` and 1,000,000 draws per synthetic vector. The reference draws whole brands with replacement and computes the case-weighted mean and cluster-normal lower bound directly from each brand’s case and gain totals; it does not call the TypeScript preflight or share its seeded random generator. The reference minimum is the first count whose estimated power, projected to 5,000 trials, has a 95% Wilson lower bound of at least 80% for both measures.
+
+Each vector uses 100 synthetic eligible fields, 20 of them critical. Candidate-only correct fields encode the paired gains; there are no customer records or provider calls. The predeclared comparison tolerances are an absolute power difference of at most 0.03 for each measure and the per-vector brand-count tolerance below.
+
+| Synthetic profile | Brands / cases | Mean overall / critical gain | Reference minimum (count tolerance) | Reference overall / critical power at minimum |
+| --- | ---: | ---: | ---: | ---: |
+| Balanced, low variance, comfortably above margins | 16 / 160 | 8.00 / 4.50 pp | 2 (±0) | 1.000000 / 1.000000 |
+| Uneven, low variance, near margins | 16 / 240 | 6.00 / 3.48 pp | 4 (±1) | 0.818911 / 0.948178 |
+| Balanced, high variance, near margins | 20 / 200 | 6.50 / 3.50 pp | 99 (±3) | 0.940603 / 0.814192 |
+| Uneven, high variance, near margins | 20 / 250 | 6.30 / 3.60 pp | 10 (±1) | 0.828271 / 0.999996 |
+
+These vectors check estimation behavior only. They do not provide development evidence, establish a real sample-size requirement, or change the holdout restriction.
+
 ## Decision rules
 
 - **Promotion recommendation:** Both paired lower confidence bounds are strictly above +5 and +3 percentage points, respectively, and every safety gate below passes. This is a recommendation for review, not an automatic production change.
