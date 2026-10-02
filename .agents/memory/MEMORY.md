@@ -157,3 +157,4 @@
 - [GitHub Actions evidence extraction](github-actions-evidence-extraction.md) — shared handoffs must retain exact CI/task-run reports with full run and revision identity, not summaries alone.
 - [Declaration types](declaration-compatibility-dependencies.md) + [API route typecheck](api-route-typecheck-isolation.md) — mirror package links and use last-successful API declarations; ignore unrelated dependency errors.
 - [Workspace operations](secret-refresh-shell.md) + [Replit config edits](replit-config-validator.md) — refreshed secrets may lag in shell; stage a full `.replit` candidate and validate replacement.
+- [Task-platform evidence limits](task-platform-evidence-limits.md) — verify generated dependencies and assignment from live records; policy wording and public lifecycle docs are not runtime proof.
