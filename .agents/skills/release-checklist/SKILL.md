@@ -425,6 +425,11 @@ Skip steps that don't apply (e.g. no schema change) — don't re-run unrelated s
 
 ## Mechanical release evidence
 
+For a bounded status summary of reports and checkpoints for an explicit mode
+and revision, use the [Release evidence handoff](../../../docs/release-evidence-handoff.md).
+It is read-only and does not replace this checklist, the release runner, or the
+retained-evidence verifier.
+
 The release runner is the source of the retained release record. A successful
 standard or full run must write `release-evidence/release-check-report.md` and
 the clean-start evidence files, then validate that record before returning

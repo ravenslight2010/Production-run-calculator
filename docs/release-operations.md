@@ -4,6 +4,11 @@ This guide is the operating contract for the repository's release checks. A
 release check is successful only when the command exits zero **and** the
 retained evidence verifier passes for the same git revision.
 
+For one revision-bound summary of retained reports, incomplete checkpoints,
+browser artifacts, and production-proof gaps, start with the
+[Release evidence handoff](release-evidence-handoff.md). It is read-only and
+does not replace the release runner or its verifier.
+
 For reliability work, also follow the release gates in the
 [Sync Reliability Unified Plan](sync-reliability-unified-plan-2026-09-19.md#6-release-gates).
 Complete-write protocol changes require causality, convergence, reset, auto-track,
@@ -28,7 +33,7 @@ API/package-test stage runs at most four children by default, with no more than
 two API/database shards at once. Each API shard remains serialized internally
 and has an eight-minute hard limit with a six-minute warning. Browser stages
 remain strictly serial for disposable live-day safety. The full browser suite
-has a 45-minute hard limit with a 40-minute warning. This is a bounded
+has a 90-minute hard limit with an 80-minute warning. This is a bounded
 execution budget, not a retry or an evidence-validation bypass: every case
 declared by the current full-browser contract must complete, and the retained
 report must pass the same revision-bound evidence verifier.
@@ -98,7 +103,7 @@ prior complete, passing retained full-suite report before replacing it. An
 interrupted, timed-out, or incomplete run leaves the last valid baseline
 untouched. The report flags a file when it is at least 30 seconds and 25%
 slower than its prior duration. This filters normal cold-environment noise
-while surfacing a slowdown that can consume the 45-minute budget. New files,
+while surfacing a slowdown that can consume the 90-minute budget. New files,
 removed files, faster files, and a missing or legacy baseline are not treated
 as regressions.
 

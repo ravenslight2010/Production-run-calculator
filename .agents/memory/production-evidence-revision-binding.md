@@ -20,3 +20,9 @@ For retained browser and timing reports, pass `RELEASE_REVISION` as the same fil
 **Why:** Release evidence files are excluded from source revision selection, but browser reporters may otherwise identify the newer evidence-only HEAD.
 
 **How to apply:** Set `RELEASE_REVISION` for standard and full test-only release checks, then verify browser reports and the release report agree on the source revision.
+
+Bounded release handoffs must treat the explicit mode and full Git revision as part of evidence identity. A newer same-mode, same-revision checkpoint supersedes the retained report only as an incomplete attempt; it never replaces retained evidence. Keep test evidence separate from production-bound proof, and never let the summary itself issue a production GO.
+
+**Why:** Old retained reports and incomplete retries can both look positive when viewed without their revision and generation order, while development results do not establish deployed behavior.
+
+**How to apply:** Require reviewers to select a mode and full revision, display report and checkpoint separately, and show production binding gaps independently from local/CI gate status.
