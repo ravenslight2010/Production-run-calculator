@@ -55,11 +55,10 @@ export default defineConfig({
   // three phone-layout checks, the two Android-only sync checks, and
   // focused-only regressions outside the full-browser Chromium contract. The
   // exclusions live here so focused suites still run them without relying on
-  // an operator CLI grep flag. The current 169-case contract restores two
-  // narrow-landscape sign-in checks omitted from the intermediate 167-case
-  // contract. Compared with the earlier 170-case target, the queued Target
-  // Cases suspension-recovery journey moved to the real-mobile-chromium lane
-  // because it requires physical Android background/resume.
+  // an operator CLI grep flag. The 170-case contract includes the Summary-card
+  // live-timer focus regression. The two narrow-landscape sign-in checks remain
+  // included, while physical Android suspension/restart journeys stay in the
+  // real-mobile-chromium lane.
   grepInvert:
     /@focused-only|@real-mobile-browser (?:physical Android Chrome|queued Target Cases edit (?:recovers after Android Chrome suspension|survives an Android Chrome process restart))/,
   projects: [

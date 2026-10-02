@@ -23,6 +23,13 @@ assert.doesNotThrow(() =>
   assertFullBrowserCaseContract(FULL_BROWSER_EXPECTED_CASES),
 );
 assert.throws(
+  () => assertFullBrowserCaseContract(FULL_BROWSER_EXPECTED_CASES - 1),
+  new RegExp(
+    `discovered ${FULL_BROWSER_EXPECTED_CASES - 1} cases; expected exactly ${FULL_BROWSER_EXPECTED_CASES}`,
+  ),
+  "a stale lower case count must fail with the discovered and configured counts",
+);
+assert.throws(
   () => assertFullBrowserCaseContract(FULL_BROWSER_EXPECTED_CASES + 1),
   new RegExp(
     `discovered ${FULL_BROWSER_EXPECTED_CASES + 1} cases; expected exactly ${FULL_BROWSER_EXPECTED_CASES}`,
