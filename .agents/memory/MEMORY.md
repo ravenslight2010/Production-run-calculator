@@ -139,7 +139,7 @@
 - [WebKit operational-report fixture](webkit-operational-report-fixture.md) — authoritative report smoke needs an isolated canonical snapshot and a sync-write fence after hydration.
 - [Factory baseline ownership](factory-baseline-ownership.md) — cross-service runtime defaults use dependency-free shared constants; historical blank sentinels remain explicit compatibility values.
 - [Release evidence and recovery](production-evidence-revision-binding.md) + [CI pinning](ci-pinned-evidence.md) + [runtime](release-node-pinning.md) + [execution](webkit-nix-launch.md) + [retry](release-finalization-retry.md) + [workspace](workspace-lock-refresh-pruning.md) + [browser](full-release-browser-refresh.md) — keep evidence revision-bound and recover without accepting incomplete gates.
-- [Release-run cancellation](release-run-cancellation.md) — stopping the tracked shell wrapper may leave its active gate child running; verify processes and evidence state before resuming.
+- [Release-run lifecycle](release-run-cancellation.md) + [nested pnpm exits](nested-pnpm-exit-codes.md) — check child/evidence state after cancellation; wrappers may normalize nested exit codes, so assert structured outcomes and side effects.
 - [Local release browser fixtures](local-release-browser-fixture-base.md) — focused local-server runs must point fixture API requests at the local API port, not the external dev domain.
 - [Section-scoped online edits](section-scoped-online-edits.md) — transient peer locks are UX only; correctness uses row serialization, complete baselines, and durable snapshot fencing.
 - [Automatic staged supply](automatic-staged-supply.md) — active Sauce/Frontline caps are pipeline limits, not lifetime production caps; derive stages from canonical cumulative progress.
@@ -155,5 +155,4 @@
 - [Revision trend attribution](revision-trend-attribution.md) — classify each historical revision from its own measurements; inherited aggregate failures poison later trend samples.
 - [GitHub Actions evidence extraction](github-actions-evidence-extraction.md) — shared handoffs must retain exact CI/task-run reports with full run and revision identity, not summaries alone.
 - [Declaration types](declaration-compatibility-dependencies.md) + [API route typecheck](api-route-typecheck-isolation.md) — mirror package links and use last-successful API declarations; ignore unrelated dependency errors.
-- [Secret refresh for shell operations](secret-refresh-shell.md) — newly confirmed workspace secrets may be absent from shell commands until a relevant workflow refreshes the environment.
-- [Replit config edits](replit-config-validator.md) — stage a full `.replit` candidate and replace it with `verifyAndReplaceDotReplit`; direct edits are blocked.
+- [Workspace operations](secret-refresh-shell.md) + [Replit config edits](replit-config-validator.md) — refreshed secrets may lag in shell; stage a full `.replit` candidate and validate replacement.
