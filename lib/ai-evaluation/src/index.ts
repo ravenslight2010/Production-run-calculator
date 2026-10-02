@@ -602,6 +602,8 @@ export const QLORA_PROMOTION_POLICY = {
   bootstrapReplicates: 10_000,
 } as const;
 
+export const QLORA_PROMOTION_POWER_METHOD =
+  "seeded-empirical-brand-cluster-simulation-normal-bound-v1" as const;
 export type QloraPromotionSystemIdentity = {
   modelSha256: string;
   tokenizerSha256: string;
@@ -632,20 +634,42 @@ export type QloraPromotionIdentities =
     }
   | { state: "unavailable"; reason: string };
 
+type QloraPromotionPowerMetadata = {
+  developmentEvidenceSha256: string;
+  method: typeof QLORA_PROMOTION_POWER_METHOD;
+  seed: number;
+  confidenceLevel: number;
+  minimumPower: number;
+  overallTargetMarginPercentagePoints: number;
+  criticalTargetMarginPercentagePoints: number;
+  developmentCaseCount: number;
+  developmentBrandClusterCount: number;
+  simulationReplicates: number;
+};
 export type QloraPromotionPowerAnalysis =
-  | {
+  | (QloraPromotionPowerMetadata & {
       state: "qualified";
-      developmentEvidenceSha256: string;
-      confidenceLevel: number;
-      overallTargetMarginPercentagePoints: number;
-      criticalTargetMarginPercentagePoints: number;
       plannedBrandClusters: number;
       overallPower: number;
       criticalPower: number;
-    }
-  | { state: "insufficient"; reason: string }
+    })
+  | (QloraPromotionPowerMetadata & {
+      state: "insufficient";
+      reason: string;
+      maximumEvaluatedBrandClusters: number;
+      overallPower: number;
+      criticalPower: number;
+    })
   | { state: "unavailable"; reason: string };
 
+export type QloraPromotionDevelopmentPowerInput = {
+  evidenceScope: "development-only";
+  seed: number;
+  results: {
+    candidate: QloraPromotionCaseResult[];
+    promptedBase: QloraPromotionCaseResult[];
+  };
+};
 export type QloraPromotionCaseResult = {
   caseId: string;
   brandClusterId: string;
@@ -883,13 +907,35 @@ function validateQloraPowerAnalysis(value: unknown): string | null {
     return "development-only power-analysis evidence hash is unavailable or invalid";
   }
   if (
+    value.method !== QLORA_PROMOTION_POWER_METHOD
+    || typeof value.seed !== "number"
+    || !Number.isSafeInteger(value.seed)
+    || value.seed < 0
+    || value.seed > 0xffff_ffff
+  ) {
+    return "pre-holdout power analysis method or seed is unavailable or invalid";
+  }
+  if (
     value.confidenceLevel !== QLORA_PROMOTION_POLICY.confidenceLevel
+    || value.minimumPower !== QLORA_PROMOTION_POLICY.minimumPower
     || value.overallTargetMarginPercentagePoints
       !== QLORA_PROMOTION_POLICY.overallGainMarginPercentagePoints
     || value.criticalTargetMarginPercentagePoints
       !== QLORA_PROMOTION_POLICY.criticalGainMarginPercentagePoints
   ) {
     return "power analysis does not use the frozen confidence level and both approved gain margins";
+  }
+  if (
+    typeof value.developmentCaseCount !== "number"
+    || !Number.isSafeInteger(value.developmentCaseCount)
+    || value.developmentCaseCount < 2
+    || typeof value.developmentBrandClusterCount !== "number"
+    || !Number.isSafeInteger(value.developmentBrandClusterCount)
+    || value.developmentBrandClusterCount < 2
+    || value.developmentCaseCount < value.developmentBrandClusterCount
+    || value.simulationReplicates !== QLORA_POWER_SIMULATION_REPLICATES
+  ) {
+    return "pre-holdout power analysis development sample metadata is invalid";
   }
   if (
     typeof value.plannedBrandClusters !== "number"
@@ -901,8 +947,10 @@ function validateQloraPowerAnalysis(value: unknown): string | null {
   if (
     typeof value.overallPower !== "number"
     || !Number.isFinite(value.overallPower)
+    || value.overallPower < 0
     || typeof value.criticalPower !== "number"
     || !Number.isFinite(value.criticalPower)
+    || value.criticalPower < 0
     || value.overallPower < QLORA_PROMOTION_POLICY.minimumPower
     || value.criticalPower < QLORA_PROMOTION_POLICY.minimumPower
     || value.overallPower > 1
@@ -1514,6 +1562,10 @@ function pairQloraRuns(
   return { cases: paired, error: null };
 }
 
+type PairedQloraDevelopmentCase = {
+  candidate: QloraPromotionCaseResult;
+  promptedBase: QloraPromotionCaseResult;
+};
 function scoreQloraCase(row: QloraPromotionCaseResult): QloraCaseScores {
   const correct = (field: string): number => row.fieldCorrectness[field] === true ? 1 : 0;
   return {
@@ -1846,3 +1898,357 @@ export function evaluateConditionalQloraPromotion(
     reasons: [`the lower confidence bound does not strictly clear the required margin for ${crossing.join(" and ")}`],
   });
 }
+
+function simulateQloraPowerCurve(
+  clusters: QloraPowerCluster[],
+  maximumBrandCount: number,
+  seed: number,
+): QloraPowerAtSize[] {
+  const overallSuccesses = new Array<number>(maximumBrandCount + 1).fill(0);
+  const criticalSuccesses = new Array<number>(maximumBrandCount + 1).fill(0);
+  for (let replicate = 0; replicate < QLORA_POWER_SIMULATION_REPLICATES; replicate += 1) {
+    const random = seededQloraRandom(
+      (seed ^ Math.imul(replicate + 1, 0x9e3779b1)) >>> 0,
+    );
+    let cases = 0;
+    let overallGain = 0;
+    let overallGainSquared = 0;
+    let overallGainCases = 0;
+    let criticalGain = 0;
+    let criticalGainSquared = 0;
+    let criticalGainCases = 0;
+    let caseSquared = 0;
+
+    for (let brandCount = 1; brandCount <= maximumBrandCount; brandCount += 1) {
+      const cluster = clusters[Math.floor(random() * clusters.length)];
+      const overallCases = cluster.cases;
+      const criticalCases = cluster.cases;
+      cases += cluster.cases;
+      overallGain += cluster.overallGainSum;
+      overallGainSquared += cluster.overallGainSum * cluster.overallGainSum;
+      overallGainCases += cluster.overallGainSum * overallCases;
+      criticalGain += cluster.criticalGainSum;
+      criticalGainSquared += cluster.criticalGainSum * cluster.criticalGainSum;
+      criticalGainCases += cluster.criticalGainSum * criticalCases;
+      caseSquared += cluster.cases * cluster.cases;
+
+      if (brandCount < 2) continue;
+      const overallLowerBound = clusterNormalLowerBound(
+        overallGain,
+        overallGainSquared,
+        overallGainCases,
+        caseSquared,
+        cases,
+        brandCount,
+      );
+      const criticalLowerBound = clusterNormalLowerBound(
+        criticalGain,
+        criticalGainSquared,
+        criticalGainCases,
+        caseSquared,
+        cases,
+        brandCount,
+      );
+      if (
+        overallLowerBound * 100
+        > QLORA_PROMOTION_POLICY.overallGainMarginPercentagePoints + QLORA_RATE_EPSILON
+      ) {
+        overallSuccesses[brandCount] += 1;
+      }
+      if (
+        criticalLowerBound * 100
+        > QLORA_PROMOTION_POLICY.criticalGainMarginPercentagePoints + QLORA_RATE_EPSILON
+      ) {
+        criticalSuccesses[brandCount] += 1;
+      }
+    }
+  }
+
+  const curve = new Array<QloraPowerAtSize>(maximumBrandCount + 1);
+  for (let brandCount = 2; brandCount <= maximumBrandCount; brandCount += 1) {
+    curve[brandCount] = {
+      overallPower: overallSuccesses[brandCount] / QLORA_POWER_SIMULATION_REPLICATES,
+      criticalPower: criticalSuccesses[brandCount] / QLORA_POWER_SIMULATION_REPLICATES,
+      qualified:
+        wilsonLowerBound(overallSuccesses[brandCount], QLORA_POWER_SIMULATION_REPLICATES)
+          >= QLORA_PROMOTION_POLICY.minimumPower
+        && wilsonLowerBound(criticalSuccesses[brandCount], QLORA_POWER_SIMULATION_REPLICATES)
+          >= QLORA_PROMOTION_POLICY.minimumPower,
+    };
+  }
+  return curve;
+}
+
+/**
+ * Calculate the minimum planned independent brand count from paired,
+ * development-only case results. The result contains metadata and a hash only;
+ * this function makes no provider calls and never accepts holdout data.
+ */
+export function calculateQloraPromotionPower(
+  input: unknown,
+): QloraPromotionPowerAnalysis {
+  if (!isObjectRecord(input)) {
+    return unavailableQloraPower("development-only power input is missing or malformed");
+  }
+  if (input.evidenceScope !== "development-only") {
+    return unavailableQloraPower("power input must be explicitly scoped to development-only evidence");
+  }
+  if (
+    typeof input.seed !== "number"
+    || !Number.isSafeInteger(input.seed)
+    || input.seed < 0
+    || input.seed > 0xffff_ffff
+  ) {
+    return unavailableQloraPower("development-only power analysis requires an unsigned 32-bit seed");
+  }
+  const seed = input.seed as number;
+
+  const paired = pairQloraDevelopmentRuns(input.results);
+  if (paired.error) return unavailableQloraPower(paired.error);
+  const clusters = qloraPowerClusters(paired.cases);
+  const metadata: QloraPromotionPowerMetadata = {
+    developmentEvidenceSha256: qloraDevelopmentEvidenceHash(paired.cases),
+    method: QLORA_PROMOTION_POWER_METHOD,
+    seed,
+    confidenceLevel: QLORA_PROMOTION_POLICY.confidenceLevel,
+    minimumPower: QLORA_PROMOTION_POLICY.minimumPower,
+    overallTargetMarginPercentagePoints: QLORA_PROMOTION_POLICY.overallGainMarginPercentagePoints,
+    criticalTargetMarginPercentagePoints: QLORA_PROMOTION_POLICY.criticalGainMarginPercentagePoints,
+    developmentCaseCount: paired.cases.length,
+    developmentBrandClusterCount: clusters.length,
+    simulationReplicates: QLORA_POWER_SIMULATION_REPLICATES,
+  };
+
+  if (clusters.length < 2) {
+    return unavailableQloraPower(
+      "at least two independent development brand clusters are required for power analysis",
+    );
+  }
+
+  const approximateN = Math.max(
+    2,
+    estimatedQloraRequiredClusters(
+      clusters,
+      "overallGainSum",
+      QLORA_PROMOTION_POLICY.overallGainMarginPercentagePoints,
+    ),
+    estimatedQloraRequiredClusters(
+      clusters,
+      "criticalGainSum",
+      QLORA_PROMOTION_POLICY.criticalGainMarginPercentagePoints,
+    ),
+  );
+  let horizon = Number.isFinite(approximateN)
+    ? Math.min(QLORA_POWER_MAX_BRAND_CLUSTERS, approximateN)
+    : QLORA_POWER_MAX_BRAND_CLUSTERS;
+  let powerCurve = simulateQloraPowerCurve(clusters, horizon, seed);
+  let plannedBrandClusters: number | null = null;
+  while (true) {
+    for (let brandCount = 2; brandCount <= horizon; brandCount += 1) {
+      if (powerCurve[brandCount].qualified) {
+        plannedBrandClusters = brandCount;
+        break;
+      }
+    }
+    if (plannedBrandClusters !== null || horizon === QLORA_POWER_MAX_BRAND_CLUSTERS) break;
+    horizon = Math.min(QLORA_POWER_MAX_BRAND_CLUSTERS, horizon * 2);
+    powerCurve = simulateQloraPowerCurve(clusters, horizon, seed);
+  }
+
+  if (plannedBrandClusters === null) {
+    const maximumPower = powerCurve[QLORA_POWER_MAX_BRAND_CLUSTERS];
+    return {
+      ...metadata,
+      state: "insufficient",
+      reason:
+        `both approved gains did not reach ${Math.round(QLORA_PROMOTION_POLICY.minimumPower * 100)}% ` +
+        `estimated power by ${QLORA_POWER_MAX_BRAND_CLUSTERS} planned brand clusters`,
+      maximumEvaluatedBrandClusters: QLORA_POWER_MAX_BRAND_CLUSTERS,
+      overallPower: maximumPower.overallPower,
+      criticalPower: maximumPower.criticalPower,
+    };
+  }
+
+  const minimumPower = powerCurve[plannedBrandClusters];
+  return {
+    ...metadata,
+    state: "qualified",
+    plannedBrandClusters,
+    overallPower: minimumPower.overallPower,
+    criticalPower: minimumPower.criticalPower,
+  };
+}
+
+const QLORA_POWER_80_Z = 0.8416212335729143;
+
+function qloraPowerClusters(cases: PairedQloraDevelopmentCase[]): QloraPowerCluster[] {
+  const clusters = new Map<string, QloraPowerCluster>();
+  for (const { candidate, promptedBase } of cases) {
+    const candidateScore = scoreQloraCase(candidate);
+    const baseScore = scoreQloraCase(promptedBase);
+    const cluster = clusters.get(candidate.brandClusterId) ?? {
+      cases: 0,
+      overallGainSum: 0,
+      criticalGainSum: 0,
+    };
+    cluster.cases += 1;
+    cluster.overallGainSum += candidateScore.overall - baseScore.overall;
+    cluster.criticalGainSum += candidateScore.critical - baseScore.critical;
+    clusters.set(candidate.brandClusterId, cluster);
+  }
+  return [...clusters.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([, cluster]) => cluster);
+}
+
+function unavailableQloraPower(reason: string): QloraPromotionPowerAnalysis {
+  return { state: "unavailable", reason };
+}
+
+type QloraPowerCluster = {
+  cases: number;
+  overallGainSum: number;
+  criticalGainSum: number;
+};
+
+const QLORA_POWER_SIMULATION_REPLICATES = 5_000;
+
+const QLORA_POWER_MONTE_CARLO_Z = 1.959963984540054;
+
+function pairQloraDevelopmentRuns(
+  value: unknown,
+): { cases: PairedQloraDevelopmentCase[]; error: string | null } {
+  if (!isObjectRecord(value)) {
+    return { cases: [], error: "development paired results are missing or malformed" };
+  }
+  const names = ["candidate", "promptedBase"] as const;
+  const runs = {} as Record<(typeof names)[number], QloraPromotionCaseResult[]>;
+  for (const name of names) {
+    const run = value[name];
+    if (!Array.isArray(run) || run.some((row) => !validateQloraCaseResult(row))) {
+      return { cases: [], error: `${name} development case results are missing or malformed` };
+    }
+    if (run.length === 0) {
+      return { cases: [], error: `${name} development case results are empty` };
+    }
+    const ids = run.map((row) => row.caseId);
+    if (new Set(ids).size !== ids.length) {
+      return { cases: [], error: `${name} development results contain duplicate case identities` };
+    }
+    runs[name] = run;
+  }
+
+  const caseMaps = Object.fromEntries(
+    names.map((name) => [name, new Map(runs[name].map((row) => [row.caseId, row]))]),
+  ) as Record<(typeof names)[number], Map<string, QloraPromotionCaseResult>>;
+  const referenceIds = [...caseMaps.candidate.keys()].sort();
+  if (!sameStringSet(referenceIds, [...caseMaps.promptedBase.keys()])) {
+    return { cases: [], error: "candidate and prompted base did not score the same development cases" };
+  }
+
+  const paired: PairedQloraDevelopmentCase[] = [];
+  for (const caseId of referenceIds) {
+    const candidate = caseMaps.candidate.get(caseId) as QloraPromotionCaseResult;
+    const promptedBase = caseMaps.promptedBase.get(caseId) as QloraPromotionCaseResult;
+    if (
+      promptedBase.brandClusterId !== candidate.brandClusterId
+      || !sameStringSet(promptedBase.eligibleFields, candidate.eligibleFields)
+      || !sameStringSet(promptedBase.criticalFields, candidate.criticalFields)
+    ) {
+      return { cases: [], error: "paired development case metadata does not match" };
+    }
+    paired.push({ candidate, promptedBase });
+  }
+  return { cases: paired, error: null };
+}
+
+function wilsonLowerBound(successes: number, trials: number): number {
+  const z = QLORA_POWER_MONTE_CARLO_Z;
+  const observed = successes / trials;
+  const zSquared = z * z;
+  const denominator = 1 + zSquared / trials;
+  const center = observed + zSquared / (2 * trials);
+  const margin = z * Math.sqrt(
+    (observed * (1 - observed) / trials) + (zSquared / (4 * trials * trials)),
+  );
+  return (center - margin) / denominator;
+}
+
+function qloraDevelopmentEvidenceHash(cases: PairedQloraDevelopmentCase[]): string {
+  const pairedCases = cases.map(({ candidate, promptedBase }) => {
+    const eligibleFields = [...candidate.eligibleFields].sort();
+    const criticalFields = [...candidate.criticalFields].sort();
+    return {
+      caseId: candidate.caseId,
+      brandClusterId: candidate.brandClusterId,
+      eligibleFields,
+      criticalFields,
+      candidateCorrectness: eligibleFields.map((field) => candidate.fieldCorrectness[field] === true),
+      promptedBaseCorrectness: eligibleFields.map((field) => promptedBase.fieldCorrectness[field] === true),
+    };
+  });
+  return createHash("sha256")
+    .update(JSON.stringify({
+      format: "qlora-development-paired-power-evidence",
+      version: 1,
+      evidenceScope: "development-only",
+      pairedCases,
+    }))
+    .digest("hex");
+}
+
+const QLORA_POWER_MAX_BRAND_CLUSTERS = 1_000;
+
+function clusterNormalLowerBound(
+  gainSum: number,
+  gainSquaredSum: number,
+  gainCaseProductSum: number,
+  caseSquaredSum: number,
+  caseCount: number,
+  sampledBrandCount: number,
+): number {
+  const estimate = gainSum / caseCount;
+  const residualSumSquares = Math.max(
+    0,
+    gainSquaredSum
+      - 2 * estimate * gainCaseProductSum
+      + estimate * estimate * caseSquaredSum,
+  );
+  const residualVariance = residualSumSquares / Math.max(1, sampledBrandCount - 1);
+  const standardError = Math.sqrt(
+    (sampledBrandCount * residualVariance) / (caseCount * caseCount),
+  );
+  return estimate - QLORA_POWER_ONE_SIDED_95_Z * standardError;
+}
+
+function estimatedQloraRequiredClusters(
+  clusters: QloraPowerCluster[],
+  metric: "overallGainSum" | "criticalGainSum",
+  targetPercentagePoints: number,
+): number {
+  const brandCount = clusters.length;
+  const totalCases = clusters.reduce((total, cluster) => total + cluster.cases, 0);
+  const totalGain = clusters.reduce((total, cluster) => total + cluster[metric], 0);
+  const estimatedGain = totalGain / totalCases;
+  const target = targetPercentagePoints / 100;
+  const difference = estimatedGain - target;
+  if (difference * 100 <= QLORA_RATE_EPSILON) return Number.POSITIVE_INFINITY;
+
+  const meanCasesPerBrand = totalCases / brandCount;
+  const influenceVariance = clusters.reduce((total, cluster) => {
+    const influence = cluster[metric] - estimatedGain * cluster.cases;
+    return total + influence * influence;
+  }, 0) / brandCount;
+  const standardErrorAtOneBrand = Math.sqrt(influenceVariance) / meanCasesPerBrand;
+  const targetN =
+    ((QLORA_POWER_ONE_SIDED_95_Z + QLORA_POWER_80_Z) * standardErrorAtOneBrand / difference) ** 2;
+  return Number.isFinite(targetN) ? Math.max(2, Math.ceil(targetN)) : Number.POSITIVE_INFINITY;
+}
+
+const QLORA_POWER_ONE_SIDED_95_Z = 1.6448536269514722;
+
+type QloraPowerAtSize = {
+  overallPower: number;
+  criticalPower: number;
+  qualified: boolean;
+};

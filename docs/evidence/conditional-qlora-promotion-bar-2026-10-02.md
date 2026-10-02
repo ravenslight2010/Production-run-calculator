@@ -29,6 +29,14 @@ This decision sets a future promotion bar only. It does not authorize training, 
 4. **Account for brand clustering.** Estimate one-sided 95% lower confidence bounds for the paired overall and critical-field gains using a predeclared cluster bootstrap that resamples whole brands, not individual fields. Pin the bootstrap implementation and random seed in the run manifest. Both lower bounds must be strictly greater than their respective approved margins.
 5. **Establish sample sufficiency without holdout results.** Before unsealing the holdout, use development-only estimates in an a priori paired, brand-clustered power analysis. Require at least 80% power to detect both approved margins at the stated confidence level with the planned number of independent brand groups. Record the calculation and required sample size before accessing holdout outcomes. If the available verified holdout cannot meet this requirement, do not open it for scoring; obtain more independently verified, appropriately separated cases or leave the result inconclusive.
 
+### Offline power preflight method
+
+The project-owned `calculateQloraPromotionPower` preflight accepts paired candidate and prompted-base case results only when the input is explicitly scoped as development-only. It validates exact case pairing, brand identity, and field sets, then hashes a canonical representation of the paired correctness evidence. It makes no provider calls and returns metadata only; case rows, case IDs, brand IDs, and field correctness are not included in the result.
+
+The frozen method identifier is `seeded-empirical-brand-cluster-simulation-normal-bound-v1`. It resamples complete development brand clusters with replacement, uses a one-sided 95% cluster-normal lower bound for each simulated sample, and requires the 95% Wilson lower bound of the Monte Carlo power estimate to reach 80% for both margins. It uses 5,000 simulations per planned size and searches for the smallest qualifying count, up to a bounded maximum of 1,000 brands. The development-evidence hash, seed, method, targets, sample counts, and resulting powers are retained in the returned metadata. If the input is missing, malformed, not explicitly development-only, or cannot establish both targets within the bound, the result is unavailable or insufficient and cannot qualify the promotion evaluator.
+
+This power-analysis method is separate from the seeded brand-cluster percentile bootstrap used for final holdout confidence bounds. Passing the preflight does not establish a promotion result or authorize opening the holdout.
+
 ## Decision rules
 
 - **Promotion recommendation:** Both paired lower confidence bounds are strictly above +5 and +3 percentage points, respectively, and every safety gate below passes. This is a recommendation for review, not an automatic production change.
@@ -54,7 +62,7 @@ The evidence available for the 2026-10-02 decision records zero independently ve
 
 - No training or model evaluation is authorized by this record.
 - The never-look holdout has not been opened and must remain untouched until verified-data, endpoint, compute, and evaluation-identity prerequisites are satisfied.
-- No holdout sample size or power result is claimed; it must be established from development-only data before unsealing.
+- The preflight calculation method is available, but no sample-size or power result is claimed until valid paired development-only evidence is available and evaluated.
 - Production routing and import review remain unchanged.
 
 ## Related evidence

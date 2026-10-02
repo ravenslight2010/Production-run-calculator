@@ -1,7 +1,10 @@
+import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {
+  calculateQloraPromotionPower,
   compareEvaluationManifests,
   evaluateConditionalQloraPromotion,
+  QLORA_PROMOTION_POWER_METHOD,
   readEvaluationManifest,
   validateEvaluationManifest,
   validateQloraPromotionResultManifest,
@@ -288,9 +291,15 @@ function qloraInput(
     powerAnalysis: {
       state: "qualified",
       developmentEvidenceSha256: "f".repeat(64),
+      method: QLORA_PROMOTION_POWER_METHOD,
+      seed: 20261002,
       confidenceLevel: 0.95,
+      minimumPower: 0.8,
       overallTargetMarginPercentagePoints: 5,
       criticalTargetMarginPercentagePoints: 3,
+      developmentCaseCount: 12,
+      developmentBrandClusterCount: 12,
+      simulationReplicates: 5000,
       plannedBrandClusters: 10,
       overallPower: 0.85,
       criticalPower: 0.84,
@@ -300,7 +309,137 @@ function qloraInput(
   };
 }
 
+function qloraDevelopmentPowerInput(
+  results: QloraPromotionInput["results"] = qloraRows(12, {
+    candidate: 90,
+    promptedBase: 80,
+    gemini: 92,
+  }),
+  seed = 20261002,
+) {
+  return {
+    evidenceScope: "development-only" as const,
+    seed,
+    results: {
+      candidate: results.candidate,
+      promptedBase: results.promptedBase,
+    },
+  };
+}
+
+describe("conditional QLoRA pre-holdout power analysis", () => {
+  it("calculates a reproducible, metadata-only minimum brand sample from paired development evidence", () => {
+    const input = qloraDevelopmentPowerInput();
+    const result = calculateQloraPromotionPower(input);
+
+    expect(result).toMatchObject({
+      state: "qualified",
+      developmentEvidenceSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+      method: QLORA_PROMOTION_POWER_METHOD,
+      seed: 20261002,
+      confidenceLevel: 0.95,
+      minimumPower: 0.8,
+      overallTargetMarginPercentagePoints: 5,
+      criticalTargetMarginPercentagePoints: 3,
+      plannedBrandClusters: expect.any(Number),
+      overallPower: expect.any(Number),
+      criticalPower: expect.any(Number),
+      simulationReplicates: 5000,
+    });
+    if (result.state !== "qualified") throw new Error("expected qualified power analysis");
+    expect(result.plannedBrandClusters).toBe(2);
+    expect(result.overallPower).toBeGreaterThanOrEqual(0.8);
+    expect(result.criticalPower).toBeGreaterThanOrEqual(0.8);
+    expect(JSON.stringify(result)).not.toContain("case-0");
+    expect(JSON.stringify(result)).not.toContain("brand-0");
+    expect(JSON.stringify(calculateQloraPromotionPower(input))).toBe(JSON.stringify(result));
+  });
+
+  it("returns insufficient power when a development gain does not clear its target", () => {
+    const input = qloraDevelopmentPowerInput(
+      qloraRows(12, { candidate: 85, promptedBase: 80, gemini: 92 }),
+    );
+    const result = calculateQloraPromotionPower(input);
+
+    expect(result).toMatchObject({
+      state: "insufficient",
+      developmentEvidenceSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+      method: QLORA_PROMOTION_POWER_METHOD,
+      maximumEvaluatedBrandClusters: 1000,
+    });
+    if (result.state !== "insufficient") throw new Error("expected insufficient power");
+    expect(result.reason).toMatch(/did not reach 80%/);
+    expect(result.overallPower).toBeLessThan(0.8);
+  });
+
+  it("fails closed for missing, holdout-scoped, and malformed development evidence", () => {
+    expect(calculateQloraPromotionPower(undefined)).toMatchObject({
+      state: "unavailable",
+      reason: expect.stringMatching(/missing or malformed/),
+    });
+    expect(calculateQloraPromotionPower({
+      ...qloraDevelopmentPowerInput(),
+      evidenceScope: "holdout",
+    })).toMatchObject({
+      state: "unavailable",
+      reason: expect.stringMatching(/development-only/),
+    });
+
+    const malformed = qloraDevelopmentPowerInput();
+    malformed.results.promptedBase = malformed.results.promptedBase.slice(1);
+    expect(calculateQloraPromotionPower(malformed)).toMatchObject({
+      state: "unavailable",
+      reason: expect.stringMatching(/same development cases/),
+    });
+  });
+
+  it("keeps the evidence digest and calculated power invariant to input row ordering", () => {
+    const input = qloraDevelopmentPowerInput();
+    const baseline = calculateQloraPromotionPower(input);
+    fc.assert(
+      fc.property(
+        fc.shuffledSubarray(input.results.candidate, {
+          minLength: input.results.candidate.length,
+          maxLength: input.results.candidate.length,
+        }),
+        (candidate) => {
+          const permuted = calculateQloraPromotionPower({
+            ...input,
+            results: { ...input.results, candidate },
+          });
+          expect(permuted).toEqual(baseline);
+        },
+      ),
+      { numRuns: 8 },
+    );
+  });
+
+  it("is reproducible for generated unsigned seeds", () => {
+    const base = qloraDevelopmentPowerInput();
+    fc.assert(
+      fc.property(fc.integer({ min: 0, max: 0xffff_ffff }), (seed) => {
+        const input = { ...base, seed };
+        expect(calculateQloraPromotionPower(input)).toEqual(
+          calculateQloraPromotionPower(input),
+        );
+      }),
+      { numRuns: 12 },
+    );
+  });
+});
+
 describe("conditional QLoRA promotion evaluator", () => {
+  it("accepts the metadata-only result of the development power preflight", () => {
+    const powerAnalysis = calculateQloraPromotionPower(qloraDevelopmentPowerInput());
+    if (powerAnalysis.state !== "qualified") {
+      throw new Error("expected synthetic development evidence to qualify");
+    }
+    const input = qloraInput();
+    input.powerAnalysis = powerAnalysis;
+
+    expect(evaluateConditionalQloraPromotion(input).decision).toBe("promotion-recommended");
+  });
+
   it("recommends only when both brand-clustered lower bounds and all safety gates pass", () => {
     const result = evaluateConditionalQloraPromotion(qloraInput());
 
@@ -562,9 +701,15 @@ describe("conditional QLoRA promotion evaluator", () => {
     input.powerAnalysis = {
       state: "qualified",
       developmentEvidenceSha256: "f".repeat(64),
+      method: QLORA_PROMOTION_POWER_METHOD,
+      seed: 20261002,
       confidenceLevel: 0.95,
+      minimumPower: 0.8,
       overallTargetMarginPercentagePoints: 5,
       criticalTargetMarginPercentagePoints: 3,
+      developmentCaseCount: 10,
+      developmentBrandClusterCount: 10,
+      simulationReplicates: 5000,
       plannedBrandClusters: 10,
       overallPower: 0.85,
       criticalPower: 0.84,
@@ -629,9 +774,15 @@ describe("conditional QLoRA promotion evaluator", () => {
     input.powerAnalysis = {
       state: "qualified",
       developmentEvidenceSha256: "f".repeat(64),
+      method: QLORA_PROMOTION_POWER_METHOD,
+      seed: 20261002,
       confidenceLevel: 0.95,
+      minimumPower: 0.8,
       overallTargetMarginPercentagePoints: 5,
       criticalTargetMarginPercentagePoints: 3,
+      developmentCaseCount: 2,
+      developmentBrandClusterCount: 2,
+      simulationReplicates: 5000,
       plannedBrandClusters: 2,
       overallPower: 0.8,
       criticalPower: 0.8,

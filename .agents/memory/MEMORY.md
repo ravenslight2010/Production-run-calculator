@@ -100,7 +100,7 @@
 - [Importer audit recovery](importer-audit-recovery.md) — retryable audit writes must be user/scope-bound and server-idempotent; never replay source imports automatically.
 - [Cross-channel auto-track claims](cross-channel-auto-track-claims.md) — shared run stamps require queued deltas to distinguish peer auto accepts from manual edits before rebasing.
 - [GitHub release proof](github-git-push.md) + [cancelled summaries](github-actions-job-summary-visibility.md) + [external forks](github-external-fork-verification.md) — pushes need secure remotes; cancelled Markdown may hide; live fork checks need another owner.
-- [Deterministic AI gates](deterministic-ai-gates.md) + [evaluation governance](ai-evaluation-framework-boundary.md) — re-run local resolution; keep model evidence offline, bounded, and independently checked.
+- [AI eval gates](deterministic-ai-gates.md) + [framework](ai-evaluation-framework-boundary.md) + [QLoRA margins](qlora-power-margin-boundary.md) — keep evidence offline; exact-threshold gains never pass strict bounds.
 - [Browser fixtures/reloads](browser-fixture-seeding.md) + [disposable DBs](browser-e2e-disposable-database.md) + [list mode](playwright-list-discovery.md) — seed after baselines; listing still imports spec modules.
 - [Data Health undo coverage](data-health-undo-coverage.md) — verify persisted repair records include future-run snapshots before expecting guarded undo to restore them.
 - [String-reference purge safety](string-reference-purge-safety.md) — recipe stub purges must scan profiles and every historical/current run snapshot before deleting text-linked master data.
