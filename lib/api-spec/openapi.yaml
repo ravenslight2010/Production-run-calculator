@@ -7996,6 +7996,34 @@ components:
                       adjustmentEvents: { type: integer }
                   note: { type: string }
             note: { type: string }
+        evidence:
+          type: object
+          properties:
+            release:
+              type: object
+              description: Runtime-reported identity is informational only and is not provider-verified release proof.
+              required: [version, revision, environment]
+              properties:
+                version: { type: string }
+                revision: { type: string }
+                environment: { type: string }
+                deploymentId: { type: string, nullable: true, maxLength: 128 }
+                deployedRevision:
+                  type: string
+                  nullable: true
+                  pattern: "^[a-f0-9]{40}$"
+                identityStatus:
+                  type: string
+                  enum: [reported-unverified, incomplete, unavailable]
+                identitySource:
+                  type: string
+                  enum: [runtime-environment, unavailable]
+            recovery:
+              type: object
+              properties:
+                generatedAt: { type: string, format: date-time }
+                source: { type: string }
+                complete: { type: boolean }
 
     ShiftHandoffItem:
       type: object

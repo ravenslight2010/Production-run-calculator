@@ -2664,6 +2664,23 @@ export const OperationalReportInventoryAvailability = {
   unavailable: 'unavailable',
 } as const;
 
+export type OperationalReportEvidenceReleaseIdentityStatus = typeof OperationalReportEvidenceReleaseIdentityStatus[keyof typeof OperationalReportEvidenceReleaseIdentityStatus];
+
+
+export const OperationalReportEvidenceReleaseIdentityStatus = {
+  'reported-unverified': 'reported-unverified',
+  incomplete: 'incomplete',
+  unavailable: 'unavailable',
+} as const;
+
+export type OperationalReportEvidenceReleaseIdentitySource = typeof OperationalReportEvidenceReleaseIdentitySource[keyof typeof OperationalReportEvidenceReleaseIdentitySource];
+
+
+export const OperationalReportEvidenceReleaseIdentitySource = {
+  'runtime-environment': 'runtime-environment',
+  unavailable: 'unavailable',
+} as const;
+
 /**
  * @nullable
  */
@@ -2710,6 +2727,39 @@ export type OperationalReportInventory = {
   note?: string;
 };
 
+/**
+ * Runtime-reported identity is informational only and is not provider-verified release proof.
+ */
+export type OperationalReportEvidenceRelease = {
+  version: string;
+  revision: string;
+  environment: string;
+  /**
+     * @maxLength 128
+     * @nullable
+     */
+  deploymentId?: string | null;
+  /**
+     * @nullable
+     * @pattern ^[a-f0-9]{40}$
+     */
+  deployedRevision?: string | null;
+  identityStatus?: OperationalReportEvidenceReleaseIdentityStatus;
+  identitySource?: OperationalReportEvidenceReleaseIdentitySource;
+};
+
+export type OperationalReportEvidenceRecovery = {
+  generatedAt?: string;
+  source?: string;
+  complete?: boolean;
+};
+
+export type OperationalReportEvidence = {
+  /** Runtime-reported identity is informational only and is not provider-verified release proof. */
+  release?: OperationalReportEvidenceRelease;
+  recovery?: OperationalReportEvidenceRecovery;
+};
+
 export interface OperationalReport {
   scope: OperationalReportScope;
   date: string;
@@ -2720,6 +2770,7 @@ export interface OperationalReport {
   quality: OperationalReportQuality;
   incidents: OperationalReportIncidents;
   inventory: OperationalReportInventory;
+  evidence?: OperationalReportEvidence;
 }
 
 export type FinalizedOperationalReport = FinalizedOperationalReportSummary & {

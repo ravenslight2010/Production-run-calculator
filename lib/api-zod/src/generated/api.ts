@@ -42,9 +42,15 @@ export const wasteInsightBodyPlannedItemsItemCategoryMax = 100;
 export const wasteInsightBodyPlannedItemsItemNameMax = 200;
 export const wasteInsightBodyPlannedItemsItemUnitMax = 50;
 export const exportOperationalReportBodyRunsMax = 600;
+export const exportOperationalReportResponseEvidenceReleaseDeploymentIdMax = 128;
+export const exportOperationalReportResponseEvidenceReleaseDeployedRevisionRegExp = new RegExp('^[a-f0-9]{40}$');
 export const finalizeOperationalReportBodyRunsMax = 600;
+export const finalizeOperationalReportResponseTwoReportEvidenceReleaseDeploymentIdMax = 128;
+export const finalizeOperationalReportResponseTwoReportEvidenceReleaseDeployedRevisionRegExp = new RegExp('^[a-f0-9]{40}$');
 export const searchFinalizedOperationalReportsQueryLimitDefault = 100;
 export const searchFinalizedOperationalReportsQueryLimitMax = 100;
+export const getFinalizedOperationalReportResponseTwoReportEvidenceReleaseDeploymentIdMax = 128;
+export const getFinalizedOperationalReportResponseTwoReportEvidenceReleaseDeployedRevisionRegExp = new RegExp('^[a-f0-9]{40}$');
 export const aiParseSpecSheetResponseProfilesItemTargetDoughballWeightExclusiveMin = 0;
 export const aiParseSpecSheetResponseProfilesItemApplicatorsItemSlotMax = 4;
 export const listDuplicateReviewsResponseGroupsItemGroupKeyMax = 500;
@@ -1595,6 +1601,9 @@ export const ExportOperationalReportBody = zod.object({
 }).describe('One run as shaped by the client for the production summary.')).max(exportOperationalReportBodyRunsMax).optional().describe('Legacy compatibility input. Ignored; canonical daily-sync snapshots are the sole production source.')
 })
 
+
+
+
 export const ExportOperationalReportResponse = zod.object({
   "scope": zod.enum(['day', 'week']),
   "date": zod.string(),
@@ -1644,7 +1653,23 @@ export const ExportOperationalReportResponse = zod.object({
   "flaggedItems": zod.int().optional()
 }).nullable(),
   "note": zod.string().optional()
-})
+}),
+  "evidence": zod.object({
+  "release": zod.object({
+  "version": zod.string(),
+  "revision": zod.string(),
+  "environment": zod.string(),
+  "deploymentId": zod.string().max(exportOperationalReportResponseEvidenceReleaseDeploymentIdMax).nullish(),
+  "deployedRevision": zod.string().regex(exportOperationalReportResponseEvidenceReleaseDeployedRevisionRegExp).nullish(),
+  "identityStatus": zod.enum(['reported-unverified', 'incomplete', 'unavailable']).optional(),
+  "identitySource": zod.enum(['runtime-environment', 'unavailable']).optional()
+}).optional().describe('Runtime-reported identity is informational only and is not provider-verified release proof.'),
+  "recovery": zod.object({
+  "generatedAt": zod.coerce.date().optional(),
+  "source": zod.string().optional(),
+  "complete": zod.boolean().optional()
+}).optional()
+}).optional()
 })
 
 
@@ -1668,6 +1693,9 @@ export const FinalizeOperationalReportBody = zod.object({
   "stoppageCount": zod.number().describe('Number of discrete stoppages on the run')
 }).describe('One run as shaped by the client for the production summary.')).max(finalizeOperationalReportBodyRunsMax).optional().describe('Legacy compatibility input. Ignored; canonical daily-sync snapshots are the sole production source.')
 })
+
+
+
 
 export const FinalizeOperationalReportResponse = zod.object({
   "id": zod.uuid(),
@@ -1735,7 +1763,23 @@ export const FinalizeOperationalReportResponse = zod.object({
   "flaggedItems": zod.int().optional()
 }).nullable(),
   "note": zod.string().optional()
-})
+}),
+  "evidence": zod.object({
+  "release": zod.object({
+  "version": zod.string(),
+  "revision": zod.string(),
+  "environment": zod.string(),
+  "deploymentId": zod.string().max(finalizeOperationalReportResponseTwoReportEvidenceReleaseDeploymentIdMax).nullish(),
+  "deployedRevision": zod.string().regex(finalizeOperationalReportResponseTwoReportEvidenceReleaseDeployedRevisionRegExp).nullish(),
+  "identityStatus": zod.enum(['reported-unverified', 'incomplete', 'unavailable']).optional(),
+  "identitySource": zod.enum(['runtime-environment', 'unavailable']).optional()
+}).optional().describe('Runtime-reported identity is informational only and is not provider-verified release proof.'),
+  "recovery": zod.object({
+  "generatedAt": zod.coerce.date().optional(),
+  "source": zod.string().optional(),
+  "complete": zod.boolean().optional()
+}).optional()
+}).optional()
 })
 }))
 
@@ -1806,6 +1850,9 @@ export const GetFinalizedOperationalReportParams = zod.object({
   "id": zod.uuid()
 })
 
+
+
+
 export const GetFinalizedOperationalReportResponse = zod.object({
   "id": zod.uuid(),
   "reportScope": zod.enum(['day', 'week']),
@@ -1872,7 +1919,23 @@ export const GetFinalizedOperationalReportResponse = zod.object({
   "flaggedItems": zod.int().optional()
 }).nullable(),
   "note": zod.string().optional()
-})
+}),
+  "evidence": zod.object({
+  "release": zod.object({
+  "version": zod.string(),
+  "revision": zod.string(),
+  "environment": zod.string(),
+  "deploymentId": zod.string().max(getFinalizedOperationalReportResponseTwoReportEvidenceReleaseDeploymentIdMax).nullish(),
+  "deployedRevision": zod.string().regex(getFinalizedOperationalReportResponseTwoReportEvidenceReleaseDeployedRevisionRegExp).nullish(),
+  "identityStatus": zod.enum(['reported-unverified', 'incomplete', 'unavailable']).optional(),
+  "identitySource": zod.enum(['runtime-environment', 'unavailable']).optional()
+}).optional().describe('Runtime-reported identity is informational only and is not provider-verified release proof.'),
+  "recovery": zod.object({
+  "generatedAt": zod.coerce.date().optional(),
+  "source": zod.string().optional(),
+  "complete": zod.boolean().optional()
+}).optional()
+}).optional()
 })
 }))
 

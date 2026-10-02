@@ -226,6 +226,14 @@ not valid release proof. `REPLIT_GIT_COMMIT` and `GIT_COMMIT` remain
 compatibility fallbacks for development-only checks, but production source
 evidence never falls back to repository `HEAD`.
 
+Operational reports also expose `evidence.release.deploymentId`,
+`evidence.release.deployedRevision`, `identityStatus`, and `identitySource`.
+These fields report bounded runtime-environment values only. An
+`identityStatus` of `reported-unverified` is informational and is not a
+provider-verified deployment handoff; `incomplete` or `unavailable` means the
+identity values were absent or invalid. Production release checks must continue
+to require the current, validated published-deployment handoff described below.
+
 Capture and import production reconciliation evidence with the revision in that
 handoff. Run this from the deployment environment that owns the production
 `DATABASE_URL`; the capture mode validates the handoff before querying,
