@@ -427,15 +427,28 @@ async function readIngredientDetail(
   page: Page,
   runId: string,
 ): Promise<string> {
-  await openSummary(page);
-  const card = page.getByTestId(`run-summary-${runId}`);
-  await card.getByRole("button", { name: "Ingredient Detail" }).click();
-  const detail = page.getByRole("dialog", { name: /Ingredient Detail/ });
-  await expect(detail).toBeVisible();
+  const detail = await openRunIngredientDetailDialog(page, runId);
   const text = (await detail.textContent()) ?? "";
   await page.keyboard.press("Escape");
   await expect(detail).toBeHidden();
   return text;
+}
+
+async function openRunIngredientDetailDialog(page: Page, runId: string) {
+  await openSummary(page);
+  const button = page
+    .getByTestId(`run-summary-${runId}`)
+    .getByRole("button", { name: "Ingredient Detail" });
+  await expect(button).toBeVisible();
+  // Center the control before clicking so the fixed phone navigation bar
+  // cannot cover it. Keep a normal pointer click to preserve the real journey.
+  await button.evaluate((element) =>
+    element.scrollIntoView({ block: "center", inline: "nearest" }),
+  );
+  await button.click();
+  const detail = page.getByRole("dialog", { name: /Ingredient Detail/ });
+  await expect(detail).toBeVisible();
+  return detail;
 }
 
 async function expectIngredientDetailChanged(
@@ -443,11 +456,7 @@ async function expectIngredientDetailChanged(
   runId: string,
   previous: string,
 ): Promise<string> {
-  await openSummary(page);
-  const card = page.getByTestId(`run-summary-${runId}`);
-  await card.getByRole("button", { name: "Ingredient Detail" }).click();
-  const detail = page.getByRole("dialog", { name: /Ingredient Detail/ });
-  await expect(detail).toBeVisible();
+  const detail = await openRunIngredientDetailDialog(page, runId);
   await expect
     .poll(async () => (await detail.textContent()) ?? "", { timeout: 20_000 })
     .not.toBe(previous);
@@ -462,11 +471,7 @@ async function expectIngredientDetailStable(
   runId: string,
   expected: string,
 ): Promise<void> {
-  await openSummary(page);
-  const card = page.getByTestId(`run-summary-${runId}`);
-  await card.getByRole("button", { name: "Ingredient Detail" }).click();
-  const detail = page.getByRole("dialog", { name: /Ingredient Detail/ });
-  await expect(detail).toBeVisible();
+  const detail = await openRunIngredientDetailDialog(page, runId);
   await expect
     .poll(async () => (await detail.textContent()) ?? "", { timeout: 20_000 })
     .toBe(expected);
@@ -1537,6 +1542,11 @@ for (const scenario of sharedRecipeFreezeScenarios) {
       expect(peerPendingAfterFirstEdit).toBe(pendingAfterFirstEdit);
 
       await page.getByTestId("tab-run").click();
+      const runOneSummary = page.getByText("Run 1 of 2", { exact: true });
+      if (!(await runOneSummary.isVisible())) {
+        await page.getByRole("button", { name: "Select run 1", exact: true }).click();
+      }
+      await expect(runOneSummary).toBeVisible();
       const startRun = page.getByTestId("button-start-run");
       await startRun.click();
       await expect(startRun).toBeHidden({ timeout: 20_000 });
@@ -1732,13 +1742,19 @@ for (const scenario of sharedRecipeFreezeScenarios) {
     await page
       .context()
       .addCookies([{ name: "rc_auth", value: account.token, url: API_BASE }]);
+    const initialBrandProfilesLoad = page.waitForResponse((response) =>
+      response.request().method() === "GET" &&
+      new URL(response.url()).pathname.endsWith("/api/brand-profiles"),
+    );
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await page
       .getByTestId("tab-run")
       .waitFor({ state: "attached", timeout: 25_000 });
+    await initialBrandProfilesLoad;
 
     const originalBefore = await readIngredientDetail(page, originalRunId);
     const switchedBefore = await readIngredientDetail(page, switchedRunId);
+    const originalServerBefore = await readServerRunValue(page, originalRunId);
     const switchedServerBefore = await readServerRunValue(page, switchedRunId);
     let saveGate:
       { observed: Promise<void>; release: () => Promise<void> } | undefined;
@@ -1758,9 +1774,25 @@ for (const scenario of sharedRecipeFreezeScenarios) {
       } else {
         throw new Error(`Unsupported recipe kind: ${scenario.kind}`);
       }
-      // Named dough refresh always hydrates profiles before fan-out. Some
-      // already-current profiles need no POST, so hold that GET instead.
-      // Sauce/mix changes still exercise the profile write boundary.
+      if (scenario.kind === "mixes") {
+        edit = setMixPerPizza(page, recipeName, scenario.firstLbs, false);
+      } else {
+        edit = setNamedRecipeLbs(
+          page,
+          scenario.kind,
+          recipeName,
+          scenario.firstLbs,
+          false,
+        );
+      }
+
+      await waitForGateObserved(
+        saveGate,
+        `POST /api/${scenario.kind === "mixes" ? "mixes" : `${scenario.kind}-recipes`}`,
+      );
+      // Arm the profile gate only after the recipe save is held. That excludes
+      // startup/bootstrap reads: the next profile request can only be caused
+      // by this acknowledged recipe save.
       const refreshMethod = scenario.kind === "dough" ? "GET" : "POST";
       refreshGate = await holdNextDelayedCompletion(
         page,
@@ -1785,23 +1817,6 @@ for (const scenario of sharedRecipeFreezeScenarios) {
           );
         },
       );
-
-      if (scenario.kind === "mixes") {
-        edit = setMixPerPizza(page, recipeName, scenario.firstLbs, false);
-      } else {
-        edit = setNamedRecipeLbs(
-          page,
-          scenario.kind,
-          recipeName,
-          scenario.firstLbs,
-          false,
-        );
-      }
-
-      await waitForGateObserved(
-        saveGate,
-        `POST /api/${scenario.kind === "mixes" ? "mixes" : `${scenario.kind}-recipes`}`,
-      );
       await saveGate.release();
       await waitForGateObserved(
         refreshGate,
@@ -1816,10 +1831,13 @@ for (const scenario of sharedRecipeFreezeScenarios) {
 
       await refreshGate.release();
       await edit;
-      // Let the acknowledged profile response finish its pending-run fan-out
-      // before the server-backed detail assertions begin.
-      await page.waitForTimeout(250);
 
+      await expect
+        .poll(() => readServerRunValue(page, originalRunId), {
+          timeout: 20_000,
+          message: "The acknowledged recipe refresh did not update its original run",
+        })
+        .not.toBe(originalServerBefore);
       await expectIngredientDetailChanged(page, originalRunId, originalBefore);
       await expect
         .poll(() => readServerRunValue(page, switchedRunId), {
@@ -2113,6 +2131,11 @@ test("remembered plain ingredient batch weights survive a fresh sign-in", async 
     senderId: `batch-weight-sign-in-${username}`,
     date: TODAY,
     payload: {
+      brands: [activeBrand, pendingBrand],
+      brandFlavors: {
+        [activeBrand]: [activeFlavor],
+        [pendingBrand]: [pendingFlavor],
+      },
       dayState: {
         date: TODAY,
         runs: [
@@ -2332,6 +2355,11 @@ test("manager weight edits acknowledge, propagate, clear, and remain retryable a
     senderId: `weight-sync-${account.username}`,
     date: TODAY,
     payload: {
+      // The peer context has isolated localStorage and runs orphan-profile
+      // cleanup on startup, so keep the synthetic profile's master data in
+      // the canonical sync snapshot it hydrates from.
+      brands: [brand],
+      brandFlavors: { [brand]: [flavor] },
       dayState: {
         date: TODAY,
         runs: [
@@ -2438,12 +2466,22 @@ test("manager weight edits acknowledge, propagate, clear, and remain retryable a
   await page
     .getByTestId("tab-run")
     .waitFor({ state: "attached", timeout: 25_000 });
-  // A mounted Run tab is not proof that today's seeded snapshot was adopted.
-  // Weight propagation scans the loaded runs, so wait for both fixture runs
-  // before initiating the first edit rather than racing the initial sync.
+  await page.getByTestId("tab-run").click();
+  // The tab and run count can appear before today's canonical run values have
+  // been adopted. Weight propagation scans loaded runs, so wait for the
+  // confirmed server baseline and both fixture runs before the first edit.
+  await expect(page.getByTestId("operational-state-badge")).toHaveText(
+    "Confirmed server baseline",
+    { timeout: 15_000 },
+  );
   await expect(
-    page.getByText("Run 1 of 2", { exact: true }),
+    page.getByText(/Run [12] of 2/),
   ).toBeVisible({ timeout: 25_000 });
+  const runOneSummary = page.getByText("Run 1 of 2", { exact: true });
+  if (!(await runOneSummary.isVisible())) {
+    await page.getByRole("button", { name: "Select run 1", exact: true }).click();
+  }
+  await expect(runOneSummary).toBeVisible();
 
   const activeBefore = await readServerRunValue(page, activeRunId);
   const futureStartedBefore = await readScheduledRunValues(
@@ -2467,6 +2505,53 @@ test("manager weight edits acknowledge, propagate, clear, and remain retryable a
   await dialog
     .getByRole("button", { name: "Close settings", exact: true })
     .click();
+
+  const savedWeightToast = page
+    .getByRole("region", { name: /Notifications/ })
+    .getByText("Batch weight saved", { exact: true });
+  await expect(savedWeightToast).toBeVisible();
+  const toastBox = await savedWeightToast
+    .locator("xpath=ancestor::li[1]")
+    .boundingBox();
+  const moreButton = page.getByRole("button", { name: /^More/ });
+  const moreBox = await moreButton.boundingBox();
+  const stationNav = page.locator(".station-nav");
+  await expect(stationNav).toBeVisible();
+  const stationNavBox = await stationNav.boundingBox();
+  expect(toastBox).not.toBeNull();
+  expect(moreBox).not.toBeNull();
+  expect(stationNavBox).not.toBeNull();
+  if (!toastBox || !moreBox || !stationNavBox) {
+    throw new Error(
+      "Expected visible save toast, More button, and station navigation geometry",
+    );
+  }
+  const toastOverlapsMore =
+    toastBox.x < moreBox.x + moreBox.width &&
+    toastBox.x + toastBox.width > moreBox.x &&
+    toastBox.y < moreBox.y + moreBox.height &&
+    toastBox.y + toastBox.height > moreBox.y;
+  expect(
+    toastOverlapsMore,
+    "the successful save toast must not cover the More menu control",
+  ).toBe(false);
+  const toastOverlapsStationNav =
+    toastBox.x < stationNavBox.x + stationNavBox.width &&
+    toastBox.x + toastBox.width > stationNavBox.x &&
+    toastBox.y < stationNavBox.y + stationNavBox.height &&
+    toastBox.y + toastBox.height > stationNavBox.y;
+  expect(
+    toastOverlapsStationNav,
+    `the successful save toast must not cover the fixed bottom station navigation; toast=${JSON.stringify(toastBox)}, nav=${JSON.stringify(stationNavBox)}`,
+  ).toBe(false);
+  await moreButton.click();
+  const setupMenuItem = page.getByRole("menuitem", {
+    name: "Setup",
+    exact: true,
+  });
+  await expect(setupMenuItem).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(setupMenuItem).toBeHidden();
 
   await expect
     .poll(() => readServerIngredientBatchWeight(page, ingredient), {

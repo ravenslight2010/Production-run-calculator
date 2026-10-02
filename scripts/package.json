@@ -15,6 +15,7 @@
     "test:source-manifest": "tsx ./src/source-library-manifest.test.mts",
     "test:source-reconcile": "tsx ./src/reconcile-source-library.test.mts",
     "test:source-heal-verify": "tsx ./src/verify-source-library-reconciliation.test.mts",
+    "test:api-unit-isolated": "tsx ./src/run-api-unit-tests-isolated.mts",
     "test:source-heal-plan": "tsx ./src/generate-source-library-heal-plan.mts --check",
     "benchmark:second-pass-reviewer": "tsx ./src/second-pass-reviewer-benchmark.mts",
     "benchmark:compare": "tsx ./src/compare-ai-evaluations.mts",

@@ -95,14 +95,20 @@ describe("AuditLogCard PDF export", () => {
     const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     const pdf = new Blob(["%PDF-1.4"], { type: "application/pdf" });
+    exportAuditLogsPdf.mockResolvedValueOnce(pdf);
+
+    renderAuditLogCard();
+    await screen.findByText("role_changed");
+    await userEvent.click(screen.getByRole("button", { name: "PDF" }));
+
     await waitFor(() => expect(exportAuditLogsPdf).toHaveBeenCalledWith({
-      startDate: `${startDate}T00:00:00.000Z`,
-      endDate: `${endDate}T23:59:59.999Z`,
+      startDate: "2026-08-22T00:00:00.000Z",
+      endDate: "2026-09-21T23:59:59.999Z",
       limit: 100,
     }));
     expect(createObjectURL).toHaveBeenCalledWith(pdf);
     expect(click).toHaveBeenCalled();
-    expect(revokeObjectURL).toHaveBeenCalledWith("blob: audit");
+    await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith("blob: audit"));
     expect(toast).not.toHaveBeenCalled();
   });
 
@@ -124,5 +130,3 @@ describe("AuditLogCard PDF export", () => {
     expect((screen.getByRole("button", { name: "PDF" }) as HTMLButtonElement).disabled).toBe(false);
   });
 });
-
-    const endDate = dateInputs[1]?.value;

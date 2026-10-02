@@ -9,11 +9,11 @@ Browser tests that reload the app must seed master-data names through the server
 
 **How to apply:** Prefer API/DB fixtures for saved sheets and master data. If the test only needs an existing mapping, use a stable built-in name and keep unique IDs/labels for the records under test.
 
-For authenticated accessibility journeys that intentionally seed local day-state, intercept the canonical today-state GET during the reload and clear the isolated fixture row between viewport projects; otherwise startup hydration or prior projects can replace or duplicate the rows under test.
+For authenticated accessibility journeys that intentionally seed local day-state, use the browser-local date and write a complete canonical today document through authenticated `/api/sync/today` with the current reset epoch. Leave the real GET/bootstrap and normal sync-write paths enabled; do not intercept the canonical GET or broadly delete `daily_sync` rows.
 
-**Why:** The live sync path reconciles local state and writes it back during a multi-viewport run, so a local-only fixture can disappear on the first reload or accumulate across projects even when each page has a fresh browser context.
+**Why:** Intercepting canonical reads or deleting shared day rows bypasses reset-epoch and sync reconciliation behavior, so a fixture can appear stable while the real hydration path is broken.
 
-**How to apply:** Keep the interception limited to the test’s canonical GET, preserve normal writes, and only clear today’s row in the explicitly isolated browser-test database.
+**How to apply:** Seed through the authenticated fixture API before mounting the page, then let the app hydrate and sync normally. Keep test runs isolated with the disposable database and assert the browser-local day that was seeded.
 
 For recipe snapshot tests, do not treat an exact live remaining-quantity value as immutable after Start. The quantity legitimately changes with production progress even when the recipe rows are frozen.
 
@@ -38,3 +38,21 @@ For cold-reload journey tests, finish and canonically confirm lifecycle setup be
 **Why:** Starting another run after reload exercises a separate hydration and adoption path, which can obscure whether the cold destination itself restored the expected state.
 
 **How to apply:** Complete the relevant lifecycle transitions before reload, wait for canonical start/end fields for each target run, reload once, then navigate directly to the surface under test.
+
+For multi-context tests that seed a brand profile directly, also seed its brand and flavor in the canonical master-data snapshot consumed by each fresh context; keep orphan-profile cleanup enabled.
+
+**Why:** A fresh browser context has independent localStorage, and startup cleanup tombstones profiles whose brands are absent from the hydrated master list.
+
+**How to apply:** Include the brand and its flavor in the canonical sync fixture before opening the secondary context. Do not bypass cleanup with a marker or weaken profile persistence assertions.
+
+For browser actions over seeded live-day runs, wait for the explicit confirmed
+server baseline before changing values whose fan-out depends on the canonical
+run snapshot; a mounted Run tab or visible run count is not sufficient.
+
+**Why:** Under the full serial browser workload, the run list can render before
+server run values are adopted. A manager weight write can be acknowledged and
+update its shared profile while a pending-run snapshot remains stale.
+
+**How to apply:** After mounting the Run tab, assert the operational state badge
+shows `Confirmed server baseline` before the first edit, then separately assert
+the fixture run selection/count. Avoid fixed sleeps.

@@ -66,7 +66,8 @@ Production projection calculation is out of scope.
 3. Keep coverage that a different peer owner remains locked and that stale
    server baselines still produce a conflict.
 4. Rerun the 15-case focused screen-off/wake suite, then the fresh full
-   170-case browser contract.
+   169-case browser contract. Keep physical-device coverage in its separate
+   Android lane.
 5. Create development-only full-mode evidence only through an explicitly
    supported checker path. Do not publish, invent deployment metadata, or
    change readiness/deployed fields from N/A. If the checker has no supported
@@ -74,3 +75,17 @@ Production projection calculation is out of scope.
 
 No click delays, weakened assertions, API contract changes, or production
 readiness-gate relaxations are included.
+
+## Full-browser case-count reconciliation
+
+The current full-browser contract contains 169 cases, enforced by
+`scripts/src/full-browser-case-contract.mts`. The historical 170-case target
+included a physical-device scenario that belongs to a separate Android lane,
+not the default browser run. The default Playwright configuration filters
+physical-device cases; `test:e2e:phone:device` runs them through the dedicated
+real-device configuration when its device connection is available. Therefore
+169 is the current full-browser contract, not a relaxed substitute for missing
+cases. Keep physical-device results classified separately and require the
+full-browser runner to enumerate all 169 cases. This count does not claim that
+the device lane was executed; report its result separately as `PASS`, `BLOCKED`,
+or `NOT RUN` with the supporting evidence.

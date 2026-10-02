@@ -15,20 +15,35 @@ Detached, best-effort diagnostics must be tested as bounded telemetry, not lossl
 
 **How to apply:** Keep strict assertions on request availability and local alerts; require shared diagnostics to recover with a bounded subset, then drain the bounded background work before teardown or the next test.
 
-Browser-backed release gates also need a process/thread budget, not only a
-duration budget. In a shared Replit task environment, concurrent Vite, Vitest,
-Playwright, and release workflows can approach the cgroup PID ceiling; Chromium
-then fails with `pthread_create: Resource temporarily unavailable` even though
-the target app and available memory are healthy.
+Release gates also need a process/thread budget, not only a duration budget. In
+a shared Replit task environment, concurrent Vite, Vitest, Playwright, and
+release workflows can approach the cgroup PID ceiling; Chromium can fail with
+`pthread_create: Resource temporarily unavailable`, and Rust-backed `pnpm`
+recursion during database setup can fail to create its runtime thread before
+test assertions execute. Dependent Vitest suites are then skipped, not passed.
 
 **Why:** Treating this as a browser or routing regression leads to repeated,
-misleading retries and can make resource pressure worse.
+misleading retries and can make resource pressure worse; an integration shard
+that failed during setup is not passing evidence.
 
 **How to apply:** Check `pids.current` against `pids.max` when Chromium exits
-during launch. Keep lightweight checks to one browser page and minimize
-simultaneous preview servers. Validate independent HTTP and browser portions
-separately if unrelated workflows occupy the remaining process budget, then run
-the combined gate when the workspace is quiet.
+during launch or a runtime thread cannot be created. Keep lightweight checks to
+one browser page and minimize simultaneous preview servers. Validate independent
+HTTP and browser portions separately if unrelated workflows occupy the remaining
+process budget, then run the combined gate when the workspace is quiet.
+
+When a constrained workspace shows process or database pressure during release
+validation, set `RELEASE_CHECK_MAX_CONCURRENCY=1` to serialize release gates,
+including API/database shards. This does not change Vitest's own worker limits
+or concurrency created inside a test.
+
+**Why:** Default gate fan-out can overlap database-backed checks and
+browser/process-heavy workflows; failures under pressure do not establish that
+the application assertions are wrong.
+
+**How to apply:** Use the setting after stopping unrelated test workflows. Keep
+the same disposable database and complete test inventory; do not remove tests
+or extend timeouts to hide process pressure.
 
 Read-only release preflights that share a database with concurrent prerequisite
 gates should use a small bounded acquisition retry, while still failing closed

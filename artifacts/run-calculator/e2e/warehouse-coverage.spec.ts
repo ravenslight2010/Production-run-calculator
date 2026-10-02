@@ -168,7 +168,8 @@ function localDate(): string {
 }
 
 async function seedRunningSwitchoverRun(
-  page: Page,
+  request: APIRequestContext,
+  token: string,
   runId: string,
   nextRunId: string,
 ): Promise<SwitchoverFixture> {
@@ -241,28 +242,41 @@ async function seedRunningSwitchoverRun(
   try {
     await db.connect();
     await db.query(
-      `INSERT INTO daily_sync (date, scope, data, updated_at)
-       VALUES ($1, 'live', $2::jsonb, NOW())
-       ON CONFLICT (date, scope) DO UPDATE
-         SET data = $2::jsonb, updated_at = NOW()`,
-      [date, JSON.stringify(payload)],
+      "DELETE FROM daily_sync WHERE date = $1 AND scope = 'live'",
+      [date],
     );
   } finally {
     await db.end().catch(() => {});
   }
 
-  await page.addInitScript((marker) => {
-    if (location.origin === "null" || sessionStorage.getItem(marker) === "1") return;
-    sessionStorage.setItem(marker, "1");
-    for (const key of Array.from({ length: localStorage.length }, (_, index) =>
-      localStorage.key(index),
-    )) {
-      if (key?.startsWith("run-calc")) localStorage.removeItem(key);
-    }
-  }, `warehouse-switchover-cleanup-${runId}`);
-  await page.reload({ waitUntil: "domcontentloaded" });
-  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
-  await expect(page.getByRole("button", { name: /pause run/i })).toBeVisible();
+  // Seed the fixture through the sync API so the server publishes the
+  // canonical baseline/projection to the new browser session. Directly
+  // inserting daily_sync bypasses that handoff and can leave the UI
+  // provisional even though the row is visible in PostgreSQL.
+  const headers = { Cookie: `rc_auth=${token}` };
+  const epochResponse = await request.get(`${API_BASE}/api/sync/reset-epoch`, {
+    headers,
+  });
+  expect(
+    epochResponse.ok(),
+    `Warehouse switchover reset epoch failed (${epochResponse.status()})`,
+  ).toBe(true);
+  const { epoch = 0 } = await epochResponse.json() as { epoch?: number };
+  const seedResponse = await request.put(
+    `${API_BASE}/api/sync/today?today=${date}&epoch=${epoch}`,
+    {
+      headers,
+      data: {
+        senderId: uniqueTestId("warehouse-switchover-seed"),
+        payload,
+      },
+    },
+  );
+  expect(
+    seedResponse.ok(),
+    `Warehouse switchover sync seed failed (${seedResponse.status()})`,
+  ).toBe(true);
+
   return { date, runId, nextRunId };
 }
 
@@ -697,6 +711,7 @@ test("keeps capped offsite transfer guidance readable on a tablet", async ({
 
 test("shows the Warehouse switchover handoff through real tab navigation", async ({
   page,
+  request,
 }, testInfo) => {
   const runId = uniqueTestId("warehouse_switchover_run");
   const nextRunId = uniqueTestId("warehouse_switchover_next");
@@ -710,8 +725,27 @@ test("shows the Warehouse switchover handoff through real tab navigation", async
   });
 
   try {
+    switchoverFixture = await seedRunningSwitchoverRun(
+      request,
+      managerToken,
+      runId,
+      nextRunId,
+    );
+    await page.addInitScript((marker) => {
+      if (location.origin === "null" || sessionStorage.getItem(marker) === "1") return;
+      sessionStorage.setItem(marker, "1");
+      for (const key of Array.from({ length: localStorage.length }, (_, index) =>
+        localStorage.key(index),
+      )) {
+        if (key?.startsWith("run-calc")) localStorage.removeItem(key);
+      }
+    }, `warehouse-switchover-cleanup-${runId}`);
     await openAuthenticated(page, managerToken);
-    switchoverFixture = await seedRunningSwitchoverRun(page, runId, nextRunId);
+    await expect(page.getByTestId("operational-state-badge")).toHaveText(
+      "Confirmed server baseline",
+      { timeout: 15_000 },
+    );
+    await expect(page.getByRole("button", { name: /pause run/i })).toBeVisible();
 
     const banner = page.getByTestId("banner-warehouse-switchover");
     await expect(banner).toBeHidden();

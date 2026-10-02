@@ -2127,7 +2127,10 @@ export async function verifyReleaseEvidence(
         .join("\n")}`,
     );
   }
-  if (files.includes(READINESS_EVIDENCE_PATH)) {
+  if (
+    requiresReadinessEvidence &&
+    files.includes(READINESS_EVIDENCE_PATH)
+  ) {
     if (
       options.expectedReadinessDeploymentId === undefined ||
       options.expectedDeployedRevision === undefined

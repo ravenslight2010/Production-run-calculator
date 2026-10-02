@@ -35,3 +35,13 @@ restore the browser clock to current server time, capture the wake GET's
 projection, and compare the visible calculation with that response. Do not
 publish a future synthetic frame, loosen counter assertions, or let client
 progress replace canonical server state.
+
+Do not make lifecycle timestamps future-dated relative to the API clock by
+advancing only browser `Date`.
+
+**Why:** The server can retain a future pause timestamp and require manager
+review before the run can resume.
+
+**How to apply:** Keep lifecycle commands on the server's time base; when a
+test needs synthetic elapsed time, mock projections separately from canonical
+run transitions.

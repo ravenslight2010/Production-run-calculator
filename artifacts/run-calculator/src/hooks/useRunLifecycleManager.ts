@@ -90,6 +90,8 @@ export function useRunLifecycleManager(deps: {
     runId: string;
     action: "start" | "pause" | "resume" | "end";
   } | null>(null);
+  const deferredLifecycleTimerRef = useRef<number | null>(null);
+  const lifecycleMountedRef = useRef(true);
   const startRunRef = useRef<() => void>(() => {});
   const pauseRunRef = useRef<() => void>(() => {});
   const resumeRunRef = useRef<() => void>(() => {});
@@ -99,11 +101,19 @@ export function useRunLifecycleManager(deps: {
     (deps.operationalIntentBlocksLifecycle?.(runId) ?? false) ||
     (deps.syncWritePending?.() ?? false);
   const canonicalRevision = () => deps.operationalCanonicalRevisionRef?.current ?? 0;
+  const scheduleDeferredLifecyclePoll = (poll: () => void, delayMs: number) => {
+    if (!lifecycleMountedRef.current) return;
+    deferredLifecycleTimerRef.current = window.setTimeout(() => {
+      deferredLifecycleTimerRef.current = null;
+      if (!lifecycleMountedRef.current) return;
+      poll();
+    }, delayMs);
+  };
   const deferUntilAdoptionSettles = (
     runId: string,
     action: "start" | "pause" | "resume" | "end",
   ) => {
-    if (deferredLifecycleRef.current) return;
+    if (!lifecycleMountedRef.current || deferredLifecycleRef.current) return;
     deferredLifecycleRef.current = { runId, action };
     const poll = () => {
       const deferred = deferredLifecycleRef.current;
@@ -115,7 +125,7 @@ export function useRunLifecycleManager(deps: {
         (deps.operationalIntentBlocksLifecycle?.(runId) ?? false) ||
         (deps.syncWritePending?.() ?? false)
       ) {
-        window.setTimeout(poll, 25);
+        scheduleDeferredLifecyclePoll(poll, 25);
         return;
       }
       deferredLifecycleRef.current = null;
@@ -124,8 +134,20 @@ export function useRunLifecycleManager(deps: {
       else if (action === "resume") resumeRunRef.current();
       else endRunRef.current(runId);
     };
-    window.setTimeout(poll, 0);
+    scheduleDeferredLifecyclePoll(poll, 0);
   };
+
+  useEffect(() => {
+    lifecycleMountedRef.current = true;
+    return () => {
+      lifecycleMountedRef.current = false;
+      if (deferredLifecycleTimerRef.current !== null) {
+        window.clearTimeout(deferredLifecycleTimerRef.current);
+        deferredLifecycleTimerRef.current = null;
+      }
+      deferredLifecycleRef.current = null;
+    };
+  }, []);
 
   const switchToRun = useEvent((newIndex: number, expectedCurrentRunId?: string) => {
     if (deps.foregroundSyncBarrierRef.current || deps.formHandoffRef.current) return false;
@@ -146,18 +168,28 @@ export function useRunLifecycleManager(deps: {
         void deps.propagateProfileToPendingRuns(current.brand, current.flavor);
       }
     }
-    const next = { ...base, currentIndex: newIndex };
-    deps.dayStateRef.current = next;
-    deps.setDayState(next);
-    deps.saveDayState(next);
     const nextRun = base.runs[newIndex];
-    const nextValues = deps.loadRunValues(nextRun.id);
-    deps.lastFormRunIdRef.current = nextRun.id;
-    deps.form.reset(nextValues);
-    deps.resetFieldArrays(nextValues);
-    deps.setDoughSubTab(nextRun.subTab ?? "dough");
-    deps.setActiveStopId(nextRun.stoppages?.find((stop) => !stop.endedAt)?.id ?? null);
-    deps.setConfirmDeleteStopId(null);
+    const changesRunIdentity = base.runs[base.currentIndex]?.id !== nextRun.id;
+    // Flush while writes are still allowed, then fence watch emissions until
+    // the new run's form identity has committed.
+    deps.formHandoffRef.current = true;
+    try {
+      const next = { ...base, currentIndex: newIndex };
+      deps.dayStateRef.current = next;
+      deps.setDayState(next);
+      deps.saveDayState(next);
+      const nextValues = deps.loadRunValues(nextRun.id);
+      deps.lastFormRunIdRef.current = nextRun.id;
+      deps.form.reset(nextValues);
+      deps.resetFieldArrays(nextValues);
+      deps.setDoughSubTab(nextRun.subTab ?? "dough");
+      deps.setActiveStopId(nextRun.stoppages?.find((stop) => !stop.endedAt)?.id ?? null);
+      deps.setConfirmDeleteStopId(null);
+    } finally {
+      // A real selection change releases after the post-commit identity effect;
+      // a same-run reset has no identity effect to release it.
+      if (!changesRunIdentity) deps.formHandoffRef.current = false;
+    }
     return true;
   });
 
@@ -346,14 +378,9 @@ export function useRunLifecycleManager(deps: {
     const index = base.currentIndex;
     const activeRun = base.runs[index];
     if (deps.formHandoffRef.current) return;
-    if (activeRun && lifecycleBlocked(activeRun.id)) {
-      // A Start/Pause/Resume adoption can still be applying the canonical
-      // snapshot when the operator presses Stop. Do not drop that command;
-      // replay it after the adoption so the visible run cannot remain active
-      // merely because the first click raced the sync fence.
-      deferUntilAdoptionSettles(activeRun.id, "end");
-      return;
-    }
+    // The foreground barrier owns tap queueing. Record a Stop against the
+    // displayed run before a generic lifecycle/write fence can defer it behind
+    // the same recovery barrier and leave the operator without feedback.
     if (deps.foregroundSyncBarrierRef.current && !fromForegroundRecovery) {
       if (activeRun?.startedAt && !activeRun.endedAt && (!deps.foregroundStopIntentRef.current || deps.foregroundStopIntentRef.current.runId === activeRun.id)) {
         deps.foregroundStopIntentRef.current = { action: "stop", runId: activeRun.id };
@@ -361,6 +388,14 @@ export function useRunLifecycleManager(deps: {
         deps.showForegroundRecoveryNotice("recovering", "Stop requested. Checking the current run state before applying it…");
         deps.recordSyncEvent("local", "Stop request queued behind foreground recovery", undefined, activeRun.id);
       }
+      return;
+    }
+    if (activeRun && lifecycleBlocked(activeRun.id)) {
+      // A Start/Pause/Resume adoption can still be applying the canonical
+      // snapshot when the operator presses Stop. Do not drop that command;
+      // replay it after the adoption so the visible run cannot remain active
+      // merely because the first click raced the sync fence.
+      deferUntilAdoptionSettles(activeRun.id, "end");
       return;
     }
     if (!activeRun?.startedAt || activeRun.endedAt) return;

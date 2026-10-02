@@ -892,12 +892,20 @@ test(
 
       // The stale device must reconcile the new epoch on wake, not republish
       // its pre-reset run.  Failed/reset-stale responses are safe no-ops.
+      const resetNavigation = peer.waitForEvent("framenavigated", {
+        predicate: (frame) => frame === peer.mainFrame(),
+        timeout: 20_000,
+      });
       await peerContext.setOffline(false);
-      await peer.waitForTimeout(1_000);
+      await resetNavigation;
+      await peer.waitForLoadState("domcontentloaded");
+      await peer.getByTestId("tab-run").waitFor({
+        state: "attached",
+        timeout: 20_000,
+      });
       await expect.poll(async () => (await localRuns(peer)).some((run) => run.id === runId), {
         timeout: 15_000,
       }).toBe(false);
-      await peer.waitForLoadState("domcontentloaded").catch(() => {});
       await peer.reload({ waitUntil: "domcontentloaded" });
       await peer.getByTestId("tab-run").waitFor({ state: "attached", timeout: 20_000 });
       expect((await localRuns(peer)).some((run) => run.id === runId)).toBe(false);

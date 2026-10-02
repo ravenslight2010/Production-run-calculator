@@ -2908,7 +2908,7 @@ export function deleteProfileEntry(brand: string, flavor: string): void {
   markProfileDeleted(canonicalProfileKey(brand, flavor));
 }
 
-const PURGE_ORPHANED_PROFILES_KEY = "run-calc-purge-orphaned-profiles-v1";
+const PURGE_ORPHANED_PROFILES_KEY = "run-calc-purge-orphaned-profiles-v2";
 
 /**
  * One-time cleanup: remove saved brand/flavor profiles (dough + crust) whose
@@ -2916,18 +2916,24 @@ const PURGE_ORPHANED_PROFILES_KEY = "run-calc-purge-orphaned-profiles-v1";
  * per-profile localStorage entries behind (see deleteProfilesForBrand); those
  * orphans were re-broadcast on every sync and could resurrect stale/scrambled
  * data. This heals installs that already accumulated orphans before the deletion
- * fix landed. Guarded by a version marker AND only runs once the Brands list is
- * populated, so a transient empty list (e.g. before seeds/sync) can't nuke every
- * profile. If the list is still empty the marker is left unset so it retries on
- * a later load.
+ * fix landed. The caller must pass the merged Brands list only after adopting a
+ * validated canonical sync snapshot that included Brands. A non-empty local
+ * cache alone is not proof that its list is complete: deleting against a stale
+ * partial list can remove valid server profiles. The versioned marker is written
+ * only after a usable baseline has been supplied and cleanup completes.
  */
-export function purgeOrphanedProfilesIfNeeded(): void {
-  if (typeof localStorage === "undefined") return;
-  if (localStorage.getItem(PURGE_ORPHANED_PROFILES_KEY)) return;
+export function purgeOrphanedProfilesIfNeeded(
+  adoptedBrands: readonly string[] | null | undefined,
+): boolean {
+  if (!adoptedBrands?.length || typeof localStorage === "undefined") return false;
+  if (localStorage.getItem(PURGE_ORPHANED_PROFILES_KEY)) return true;
   try {
-    const brands = loadList(BRANDS_KEY, []);
-    if (brands.length === 0) return; // defer until brands are seeded/loaded
-    const known = new Set(brands.map((b) => b.toLowerCase().trim()));
+    const known = new Set(
+      adoptedBrands
+        .map((brand) => brand.toLowerCase().trim())
+        .filter(Boolean),
+    );
+    if (known.size === 0) return false;
     const orphans = new Set<string>();
     for (const entry of profileBlobEntries()) {
       const sep = entry.key.indexOf("__");
@@ -2942,7 +2948,11 @@ export function purgeOrphanedProfilesIfNeeded(): void {
     }
     for (const key of orphans) markProfileDeleted(key);
     localStorage.setItem(PURGE_ORPHANED_PROFILES_KEY, "1");
-  } catch {}
+    return true;
+  } catch {
+    // Leave the marker unset so a later adopted baseline can retry safely.
+    return false;
+  }
 }
 
 /**

@@ -2004,6 +2004,39 @@ async function run(): Promise<void> {
     const readinessEvidencePath = join(root, READINESS_EVIDENCE_PATH);
     await mkdir(join(readinessEvidencePath, ".."), { recursive: true });
     await writeFile(readinessEvidencePath, `${JSON.stringify(readinessEvidence)}\n`);
+    const developmentOnlyReport = formatReleaseReport(
+      validLabels.map((label) => ({
+        label,
+        status: "PASS" as const,
+        elapsedMs: 100,
+      })),
+      "standard",
+      new Set([...retainedEvidenceFiles, READINESS_EVIDENCE_PATH]),
+      {
+        revision: "current-revision",
+        environment: "disposable release test",
+        sourceLibraryEnvironment: "development",
+        requireReadinessEvidence: false,
+        decision: "NO-GO",
+      },
+    );
+    assert.match(developmentOnlyReport, /^Deployed revision: not applicable$/m);
+    assert.match(developmentOnlyReport, /^Readiness evidence: not applicable$/m);
+    await writeFile(
+      join(root, "release-check-report.md"),
+      developmentOnlyReport,
+      "utf8",
+    );
+    await assert.doesNotReject(
+      verifyReleaseEvidence(root, {
+        currentRevision: "current-revision",
+        expectedMode: "standard",
+        expectedLabels: validLabels,
+        expectedSourceLibraryEnvironment: "development",
+        requireReadinessEvidence: false,
+      }),
+      "development verification should ignore retained published-readiness evidence",
+    );
     await writeFile(
       join(root, "release-check-report.md"),
       formatReleaseReport(

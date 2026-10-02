@@ -56,6 +56,7 @@ import {
   type Browser,
   type Page,
   type Request,
+  type Response,
 } from "@playwright/test";
 import {
   computeCasesInFreezer,
@@ -366,9 +367,12 @@ async function simulateOnlineWake(page: Page): Promise<void> {
 async function mockDateNow(
   page: Page,
   fakeMs: number,
-  options: { tick?: boolean; skipAutoTrack?: boolean } = {},
+  options: { tick?: boolean; skipAutoTrack?: boolean; rearm?: boolean } = {},
 ): Promise<{
   autoTrackSchedule?: unknown;
+  builtClaims?: number;
+  accepted?: number;
+  outcomes?: Record<string, number>;
   operationalProjection?: {
     runId?: string;
     counters?: {
@@ -421,6 +425,7 @@ async function mockDateNow(
       data: {
         nowMs: fakeMs + 1,
         ...(options.skipAutoTrack ? { skipAutoTrack: true } : {}),
+        ...(options.rearm ? { rearm: true } : {}),
       },
     },
   );
@@ -437,10 +442,20 @@ async function mockDateNow(
 async function installDateProxyBeforeNavigation(
   page: Page,
   fakeMs: number,
+  resetEpoch: number,
 ): Promise<void> {
   await page.addInitScript(
-    ({ fakeMs: initialFakeMs }) => {
+    ({ fakeMs: initialFakeMs, resetEpoch: initialResetEpoch }) => {
       const w = window as unknown as Record<string, unknown>;
+      // A fresh browser context has no remembered reset epoch. Seed the
+      // disposable fixture's current epoch before the app's boot check runs;
+      // otherwise its intentional reset-and-reload races the wake setup.
+      if (window.location.origin !== "null") {
+        window.localStorage.setItem(
+          "run-calc-reset-epoch",
+          JSON.stringify(initialResetEpoch),
+        );
+      }
       let reloadMs = 0;
       try {
         reloadMs = Number(sessionStorage.getItem("__screenOffWakeReloadMs"));
@@ -470,7 +485,7 @@ async function installDateProxyBeforeNavigation(
         },
       }) as unknown as typeof Date;
     },
-    { fakeMs },
+    { fakeMs, resetEpoch },
   );
 }
 
@@ -690,9 +705,27 @@ async function readDoughCounters(page: Page): Promise<{
   });
 }
 
+type LiveOperationalProjection = {
+  runId?: string;
+  serverTimeMs?: number;
+  capturedAtServerMs?: number;
+  counters?: {
+    traysOnLine?: number;
+    batchesReady?: number;
+    casesCompleted?: number;
+  };
+  calc?: {
+    casesOnLine?: number;
+    batchesNeeded?: number;
+    traysNeeded?: number;
+  };
+} | null;
+
 async function readLiveRunSnapshot(page: Page): Promise<{
   runId: string;
   values: Record<string, number | string | boolean | null | undefined>;
+  operationalProjection: LiveOperationalProjection;
+  formDoughCounters: { trays: number; batches: number };
 }> {
   return page.evaluate(async () => {
     const today = new Date().toISOString().slice(0, 10);
@@ -708,6 +741,8 @@ async function readLiveRunSnapshot(page: Page): Promise<{
         string,
         Record<string, number | string | boolean | null | undefined>
       >;
+      operationalProjection?: LiveOperationalProjection;
+      data?: { operationalProjection?: LiveOperationalProjection };
     };
     const runId =
       body.dayState?.currentRunId ??
@@ -715,8 +750,121 @@ async function readLiveRunSnapshot(page: Page): Promise<{
     if (!runId || !body.runValues?.[runId]) {
       throw new Error("current run is missing from the live run payload");
     }
-    return { runId, values: body.runValues[runId] };
+    return {
+      runId,
+      values: body.runValues[runId],
+      operationalProjection:
+        body.operationalProjection ?? body.data?.operationalProjection ?? null,
+      formDoughCounters: {
+        trays: Number(
+          document.querySelector<HTMLInputElement>('input[name="traysOnLine"]')
+            ?.value ?? 0,
+        ),
+        batches: Number(
+          document.querySelector<HTMLInputElement>('input[name="batchesReady"]')
+            ?.value ?? 0,
+        ),
+      },
+    };
   });
+}
+
+/**
+ * Let the form's 600 ms debounce enqueue before checking that sync has fully
+ * acknowledged its writes. A fake-clock jump while an earlier write is
+ * debounced can stamp that stale snapshot with the operator edit's timestamp.
+ */
+async function waitForSyncWritesToDrain(page: Page): Promise<void> {
+  const syncHttpEvents: string[] = [];
+  const syncWritePath = (request: Request): string | null => {
+    const method = request.method();
+    const pathname = new URL(request.url()).pathname;
+    return pathname.startsWith("/api/sync/") && method !== "GET" && method !== "HEAD"
+      ? `${method} ${pathname}`
+      : null;
+  };
+  const recordSyncHttpEvent = (event: string) => {
+    syncHttpEvents.push(event);
+    if (syncHttpEvents.length > 20) syncHttpEvents.shift();
+  };
+  const onSyncRequest = (request: Request) => {
+    const path = syncWritePath(request);
+    if (path) recordSyncHttpEvent(`${path} started`);
+  };
+  const onSyncResponse = (response: Response) => {
+    const path = syncWritePath(response.request());
+    if (path) recordSyncHttpEvent(`${path} responded ${response.status()}`);
+  };
+  const onSyncRequestFailed = (request: Request) => {
+    const path = syncWritePath(request);
+    if (path) {
+      recordSyncHttpEvent(
+        `${path} failed ${request.failure()?.errorText ?? "unknown network error"}`,
+      );
+    }
+  };
+  page.on("request", onSyncRequest);
+  page.on("response", onSyncResponse);
+  page.on("requestfailed", onSyncRequestFailed);
+  try {
+    await page.waitForTimeout(750);
+    const syncStatusButton = page.locator(
+      'button[title="Sync connected"], button[title^="Sync:"]',
+    ).first();
+    await expect(syncStatusButton).toBeVisible({ timeout: 10_000 });
+
+    const pendingWrites = page.getByText("Pending writes", { exact: true });
+    const failedWrites = page.getByText("Failed writes", { exact: true });
+    const alreadyOpen = await pendingWrites.isVisible().catch(() => false);
+    if (!alreadyOpen) await syncStatusButton.click();
+
+    await expect(pendingWrites).toBeVisible();
+    await expect(failedWrites).toBeVisible();
+    const readPendingCount = async () =>
+      Number(await pendingWrites.evaluate(
+        (element) => element.nextElementSibling?.textContent?.trim() ?? "NaN",
+      ));
+    try {
+      await expect.poll(readPendingCount, {
+        timeout: 15_000,
+        message: "pending sync writes did not drain",
+      }).toBe(0);
+    } catch (error) {
+      const [pending, failed, activity] = await Promise.all([
+        readPendingCount().catch(() => Number.NaN),
+        failedWrites.evaluate(
+          (element) => Number(element.nextElementSibling?.textContent?.trim() ?? "NaN"),
+        ).catch(() => Number.NaN),
+        page.locator('[data-testid^="sync-activity-"]').allTextContents()
+          .then((entries) => entries.slice(0, 8).map((entry) =>
+            entry.replace(/\s+· Run [A-Za-z0-9_-]+$/, ""),
+          ))
+          .catch(() => [] as string[]),
+      ]);
+      const cause = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `${cause}\nSync state at timeout: pending=${pending}, failed=${failed}; `
+        + `recent activity: ${activity.join(" | ") || "none recorded"}; `
+        + `recent sync HTTP: ${syncHttpEvents.slice(-12).join(" | ") || "none recorded"}`,
+      );
+    }
+    await expect.poll(
+      async () =>
+        Number(await failedWrites.evaluate(
+          (element) => element.nextElementSibling?.textContent?.trim() ?? "NaN",
+        )),
+      {
+        timeout: 15_000,
+        message: "sync writes failed instead of being acknowledged",
+      },
+    ).toBe(0);
+
+    if (!alreadyOpen) await syncStatusButton.click();
+  } finally {
+    page.off("request", onSyncRequest);
+    page.off("response", onSyncResponse);
+    page.off("requestfailed", onSyncRequestFailed);
+  }
 }
 
 async function readPersistedRunValues(
@@ -737,6 +885,7 @@ async function readLiveRunMeta(page: Page): Promise<{
   startedAt?: number;
   pausedAt?: number;
   endedAt?: number;
+  metaUpdatedAt?: number;
 }> {
   return page.evaluate(async () => {
     const today = new Date().toISOString().slice(0, 10);
@@ -754,6 +903,7 @@ async function readLiveRunMeta(page: Page): Promise<{
           startedAt?: number;
           pausedAt?: number;
           endedAt?: number;
+          metaUpdatedAt?: number;
         }>;
       };
     };
@@ -776,31 +926,65 @@ async function chooseRunningTunnelIfPrompted(page: Page): Promise<void> {
   }
 }
 
-/** Set visible dough inventory through the same form events as an operator. */
+/** Set one visible dough counter through the same form events as an operator. */
+async function writeDoughCounter(
+  page: Page,
+  name: "traysOnLine" | "batchesReady",
+  value: number,
+  settleMs = 350,
+): Promise<void> {
+  // Use the real controlled input rather than mutating DOM values behind
+  // React Hook Form. Each correction must settle before the next section edit
+  // so its baseline cannot be rebased from stale local state.
+  const input = page.locator(`input[name="${name}"]`);
+  await expect(input).toBeVisible();
+  await input.fill(String(value));
+  await input.blur();
+  if (settleMs > 0) await page.waitForTimeout(settleMs);
+}
+
+/** Set both visible dough counters through the operator form. */
 async function writeDoughCounters(
   page: Page,
   counters: { trays: number; batches: number },
 ): Promise<void> {
-  // Use the real controlled inputs rather than mutating DOM values behind
-  // React Hook Form. Each correction must settle before the next section edit
-  // so its baseline cannot be rebased from stale local state.
   for (const [name, value] of [
     ["batchesReady", counters.batches],
     ["traysOnLine", counters.trays],
   ] as const) {
-    const input = page.locator(`input[name="${name}"]`);
-    await expect(input).toBeVisible();
-    await input.fill(String(value));
-    await input.blur();
-    await page.waitForTimeout(350);
+    await writeDoughCounter(page, name, value);
   }
+}
+
+async function waitForDoughCountersAcknowledged(
+  page: Page,
+  counters: { trays: number; batches: number },
+): Promise<void> {
+  await expect.poll(() => readDoughCounters(page), {
+    timeout: 15_000,
+    message: "dough inventory did not update in the form",
+  }).toEqual(counters);
+  await expect.poll(async () => {
+    const { values } = await readLiveRunSnapshot(page);
+    return {
+      trays: Number(values.traysOnLine ?? 0),
+      batches: Number(values.batchesReady ?? 0),
+    };
+  }, {
+    timeout: 15_000,
+    message: "dough inventory correction was not acknowledged by the server",
+  }).toEqual(counters);
 }
 
 /** Seed dough inventory and wait for both UI and server acknowledgement. */
 async function seedDoughCounters(
   page: Page,
   counters: { trays: number; batches: number },
-  options: { pauseWhileSeeding?: boolean } = {},
+  options: {
+    pauseWhileSeeding?: boolean;
+    resumeAtMs?: number;
+    drainSyncBeforeResume?: boolean;
+  } = {},
 ): Promise<void> {
   if (options.pauseWhileSeeding) {
     await page.locator('[data-testid="tab-run"]').click();
@@ -821,28 +1005,28 @@ async function seedDoughCounters(
     await page.locator('[data-testid="tab-dough"]').click();
   }
   await writeDoughCounters(page, counters);
-  await expect.poll(() => readDoughCounters(page), {
-    timeout: 15_000,
-    message: "dough inventory did not update in the form",
-  }).toEqual(counters);
-  await expect.poll(async () => {
-    const { values } = await readLiveRunSnapshot(page);
-    return {
-      trays: Number(values.traysOnLine ?? 0),
-      batches: Number(values.batchesReady ?? 0),
-    };
-  }, {
-    timeout: 15_000,
-    message: "dough inventory correction was not acknowledged by the server",
-  }).toEqual(counters);
+  await waitForDoughCountersAcknowledged(page, counters);
   if (options.pauseWhileSeeding) {
     await page.locator('[data-testid="tab-run"]').click();
     const resume = page.getByRole("button", { name: /resume.?run/i });
     await expect(resume).toBeVisible();
-    // A machine-time edit immediately before this helper can still be
-    // draining through the shared foreground write fence. Let it settle
-    // before resuming the lifecycle.
-    await page.waitForTimeout(1_000);
+    // Lifecycle actions are deliberately deferred while an ordinary sync
+    // write is unacknowledged. The speed-adjustment case opts into checking
+    // that boundary here, before Resume (not as a post-wake prerequisite).
+    if (options.drainSyncBeforeResume) {
+      await waitForSyncWritesToDrain(page);
+    } else {
+      await page.waitForTimeout(1_000);
+    }
+    const canonicalMeta = await readLiveRunMeta(page);
+    const resumeAtMs = Math.max(
+      options.resumeAtMs ?? 0,
+      (canonicalMeta.pausedAt ?? 0) + 1,
+      (canonicalMeta.metaUpdatedAt ?? 0) + 1,
+    );
+    if (options.resumeAtMs !== undefined) {
+      await mockDateNow(page, resumeAtMs, { tick: false });
+    }
     await resume.click();
     await expect
       .poll(async () => (await readLiveRunMeta(page)).pausedAt ?? 0, {
@@ -924,6 +1108,23 @@ async function setupAndStartRun(
       completeness: "complete",
     },
   });
+  const resetEpochResponse = await page.request.get(
+    `${API_BASE}/api/sync/reset-epoch`,
+    { headers: { Cookie: `rc_auth=${account.token}` } },
+  );
+  if (!resetEpochResponse.ok()) {
+    throw new Error(
+      `Fixture reset epoch lookup failed with HTTP ${resetEpochResponse.status()}`,
+    );
+  }
+  const resetEpochBody = await resetEpochResponse.json() as { epoch?: unknown };
+  if (
+    typeof resetEpochBody.epoch !== "number" ||
+    !Number.isSafeInteger(resetEpochBody.epoch) ||
+    resetEpochBody.epoch < 0
+  ) {
+    throw new Error("Fixture reset epoch lookup returned an invalid epoch");
+  }
   // Install the controlled clock before the first application script runs.
   // The daily-reset watcher can otherwise reload the page while the fixture
   // is still filling the setup form when the real wall clock is near a
@@ -933,7 +1134,7 @@ async function setupAndStartRun(
     safeBase.setUTCHours(21, 0, 0, 0);
   }
   const safeBaseMs = safeBase.getTime();
-  await installDateProxyBeforeNavigation(page, safeBaseMs);
+  await installDateProxyBeforeNavigation(page, safeBaseMs, resetEpochBody.epoch);
   await page.context().addCookies([
     {
       name: "rc_auth",
@@ -1540,9 +1741,33 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         page,
         "10",
         [],
-        { initialDoughCounters: { trays: 6, batches: 2 } },
+        // The controlled 3/3 inventory below is the scenario baseline. Keep
+        // startup paused instead of preloading stock that the startup tick can
+        // legitimately adjust before this test establishes that baseline.
+        { pauseBeforeReturn: true },
       );
       const initialCases = await readCaseTotal(page);
+      await page.locator('[data-testid="tab-dough"]').click();
+      await page.getByText("Machine Times", { exact: true }).waitFor({ state: "visible" });
+      // Establish the target inventory while paused so the first running beat
+      // cannot seed it. Keep the counters within the operator-facing 3-batch
+      // limit.
+      await setMachineTimes(page, {
+        "input-mixerLowSec": "600",
+        "input-mixerHighSec": "600",
+        "input-hopperSec": "600",
+      });
+      await seedDoughCounters(page, { trays: 3, batches: 3 });
+      await page.locator('[data-testid="tab-run"]').click();
+      const setupResume = page.getByRole("button", { name: /resume.?run/i });
+      await expect(setupResume).toBeVisible();
+      await setupResume.click();
+      await expect
+        .poll(async () => (await readLiveRunMeta(page)).pausedAt ?? 0)
+        .toBe(0);
+      await expect(
+        page.getByRole("button", { name: /pause.?run/i }),
+      ).toBeVisible();
       await page.locator('[data-testid="tab-dough"]').click();
       await page.getByText("Machine Times", { exact: true }).waitFor({ state: "visible" });
       await setMachineTimes(page);
@@ -1550,20 +1775,44 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       //   2 doughballs/tray → tray cadence = 2 s at 60 ppm
       //   4 doughballs/batch and hopper=2 s → quarter-batch cadence = 1 s
       //   mixer=2 s → batch production cadence = 2 s
-      // Start with both sources present so every write path is observable.
-      await seedDoughCounters(page, { trays: 3, batches: 3 });
+      // Change one counter and inspect the banner before another form edit or
+      // server acknowledgment. Its one-tray-cadence suppression window is
+      // intentionally short; those later waits can outlast the visible action.
+      const beforeFirstCorrection = await readDoughCounters(page);
+      const firstBatchTarget = beforeFirstCorrection.batches > 0
+        ? beforeFirstCorrection.batches - 1
+        : beforeFirstCorrection.batches + 1;
+      await writeDoughCounter(page, "batchesReady", firstBatchTarget, 0);
+      const firstAutoResume = page.getByRole("button", { name: /resume auto tracking/i });
+      await expect(firstAutoResume).toBeVisible();
+      await firstAutoResume.click();
       await page.waitForTimeout(400);
+      const firstCorrection = {
+        trays: beforeFirstCorrection.trays,
+        batches: firstBatchTarget,
+      };
+      expect(await readDoughCounters(page), "first Auto Resume must not write immediately").toEqual(
+        firstCorrection,
+      );
+      await waitForDoughCountersAcknowledged(page, firstCorrection);
+
+      await writeDoughCounter(page, "traysOnLine", 3);
+      await writeDoughCounter(page, "batchesReady", 3, 0);
+      const finalAutoResume = page.getByRole("button", { name: /resume auto tracking/i });
+      await expect(finalAutoResume).toBeVisible();
       const beforeAutoResume = await readDoughCounters(page);
+      expect(beforeAutoResume).toEqual({ trays: 3, batches: 3 });
       // Counter edits follow the real operator path and temporarily suppress
       // auto tracking. Resume it before asserting the live countdowns or the
       // batch-production labels are correctly hidden by the UI.
-      await page.getByRole("button", { name: /resume auto tracking/i }).click();
+      await finalAutoResume.click();
       // Resume must re-arm the dough clocks from their full configured
       // intervals. A 300ms window is safely below the shortest one-second
       // batch cadence; an immediate due-time reset would already have changed
       // the populated batch counter here.
       await page.waitForTimeout(300);
       expect(await readDoughCounters(page), "Auto Resume must not write immediately").toEqual(beforeAutoResume);
+      await waitForDoughCountersAcknowledged(page, beforeAutoResume);
 
       // These are the three visible dough stages plus both corresponding
       // machine/line countdowns. Their values are rendered from tickDueRefs,
@@ -1702,6 +1951,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
           // This scenario reseeds and asserts its exact 10/2 baseline below;
           // the first zero-arm rearm beat may consume from this helper seed.
           verifyInitialDoughCounters: false,
+          pauseBeforeReturn: true,
         },
       );
 
@@ -1762,11 +2012,12 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         batchesReady: 2,
       });
 
+      await waitForSyncWritesToDrain(page);
       // This is the operator action under test: slow the line while it is
       // already running. A 12-second hidden interval is long enough to expose
       // stale due timestamps at the new 30 PPM speed, but remains inside the
       // five-minute freezer window so the case count stays at zero.
-      const speedEditedAt = Math.max(safeBaseMs + 1_000, Date.now() + 60_000);
+      const speedEditedAt = Math.max(safeBaseMs + 1_000, Date.now());
       // Establish the operator's edit instant without running an authoritative
       // auto-track beat first. The beat stamps the canonical run at
       // speedEditedAt + 1 ms, which would make the immediately-following
@@ -1779,6 +2030,32 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         const snapshot = await readLiveRunSnapshot(page);
         return snapshot.values.speedAdjustment;
       }, { timeout: 15_000 }).toBe(0.5);
+      await waitForSyncWritesToDrain(page);
+
+      // Pause/resume writes must be newer than the speed edit under the
+      // server's run-value LWW fence. Advance only the browser clock; do not
+      // run an authoritative auto-track beat before reseeding.
+      await mockDateNow(page, speedEditedAt + 1, { tick: false });
+      const pause = page.getByRole("button", { name: /pause.?run/i });
+      await expect(pause).toBeVisible();
+      await pause.click();
+      await chooseRunningTunnelIfPrompted(page);
+      const resume = page.getByRole("button", { name: /resume.?run/i });
+      await expect(resume).toBeVisible();
+      await expect
+        .poll(async () => (await readLiveRunMeta(page)).pausedAt ?? 0)
+        .toBeGreaterThan(0);
+
+      const canonicalPausedMeta = await readLiveRunMeta(page);
+      await mockDateNow(
+        page,
+        Math.max(
+          speedEditedAt + 1,
+          (canonicalPausedMeta.pausedAt ?? 0) + 1,
+          Date.now(),
+        ),
+        { tick: false },
+      );
 
       // Keep this journey focused on line-speed cadence. Zero measured machine
       // times prevent a separate mixer completion from adding a full batch at
@@ -1790,9 +2067,13 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         "input-mixerHighSec": "0",
         "input-hopperSec": "0",
       });
-      await seedDoughCounters(page, { trays: 10, batches: 2 });
+      await seedDoughCounters(page, { trays: 10, batches: 2 }, {
+        pauseWhileSeeding: true,
+        drainSyncBeforeResume: true,
+      });
       await resumeDoughTrackingIfVisible(page);
       await page.locator('[data-testid="tab-run"]').click();
+      await waitForSyncWritesToDrain(page);
 
       await page.screenshot({
         path: testInfo.outputPath("speed-adjustment-before-wake.png"),
@@ -1804,13 +2085,27 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       fullPage: true,
     });
 
+    const beforeWakeProjection =
+      (await readLiveRunSnapshot(page)).operationalProjection;
+    const wakeBaseMs = beforeWakeProjection?.serverTimeMs;
+    expect(wakeBaseMs).toEqual(expect.any(Number));
+    if (typeof wakeBaseMs !== "number") {
+      throw new Error("server projection is missing its capture time before wake");
+    }
+    const wakeAt = wakeBaseMs + 12_000;
+
     let heldWakePulls = 0;
+    let awaitingWakePull = false;
     let releaseWakePull!: () => void;
     const wakePullReleased = new Promise<void>((resolve) => {
       releaseWakePull = resolve;
     });
     await page.route("**/api/sync/today**", async (route) => {
-      if (route.request().method() === "GET" && heldWakePulls === 0) {
+      if (
+        route.request().method() === "GET" &&
+        awaitingWakePull &&
+        heldWakePulls === 0
+      ) {
         heldWakePulls += 1;
         await wakePullReleased;
       }
@@ -1818,8 +2113,10 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
     });
 
     await simulateScreenOff(page);
-    const wakeAt = speedEditedAt + 12_000;
-    await mockDateNow(page, wakeAt);
+    // Re-arm at the wake instant without processing hidden-time claims. The
+    // next fixture beat is one visible interval after this baseline.
+    await mockDateNow(page, wakeAt, { rearm: true });
+    awaitingWakePull = true;
     await simulateWake(page);
     const recoveryStatus = page.getByTestId("foreground-recovery-status");
     await expect.poll(() => heldWakePulls, { timeout: 10_000 }).toBe(1);
@@ -1849,14 +2146,54 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
     // legitimately consume a fractional quarter-batch while the foreground
     // reconciliation is settling, so assert the bounded staged range rather
     // than assuming that no visible tick can land during recovery.
-    await expect
-      .poll(async () => {
-        const counters = await readDoughCounters(page);
-        return counters.trays >= 9 && counters.trays <= 10 &&
-          counters.batches > 0 && counters.batches <= 2;
-      }, { timeout: 10_000, message: "wake replayed hidden dough time" })
-      .toBe(true);
-    const postWakeDough = await readDoughCounters(page);
+    // Read the form and canonical run values in one browser evaluation. A
+    // server-owned visible beat may land between separate reads, so wait for
+    // both views to agree instead of comparing a stale DOM sample to a later
+    // server snapshot.
+    let postWakeDough: { trays: number; batches: number } | null = null;
+    let lastWakeProjectionCounters:
+      | NonNullable<LiveOperationalProjection>["counters"]
+      | null = null;
+    try {
+      await expect
+        .poll(
+          async () => {
+            const current = await readLiveRunSnapshot(page);
+            lastWakeProjectionCounters = current.operationalProjection?.counters ?? null;
+            const trays = Number(current.values.traysOnLine);
+            const batches = Number(current.values.batchesReady);
+            const formCounters = current.formDoughCounters;
+            const withinWakeBounds =
+              trays >= 9 && trays <= 10 && batches > 0 && batches <= 2;
+            const formMatchesCanonical =
+              formCounters.trays === trays && formCounters.batches === batches;
+            if (
+              current.values.speedAdjustment === 0.5 &&
+              withinWakeBounds &&
+              formMatchesCanonical
+            ) {
+              postWakeDough = { trays, batches };
+              return true;
+            }
+            return false;
+          },
+          {
+            timeout: 10_000,
+            message:
+              "wake replayed hidden dough time or the form did not adopt canonical counters",
+          },
+        )
+        .toBe(true);
+    } catch (error) {
+      const cause = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `${cause}\nLast server operational projection counters: `
+        + `${JSON.stringify(lastWakeProjectionCounters)}`,
+      );
+    }
+    if (!postWakeDough) {
+      throw new Error("Wake counters did not converge to the canonical run snapshot");
+    }
     // One visible production beat may consume a tray as recovery settles;
     // multiple hidden-time tray decrements are still forbidden.
     expect(postWakeDough.trays).toBeGreaterThanOrEqual(9);
@@ -1864,29 +2201,16 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
     expect(postWakeDough.batches).toBeGreaterThan(0);
     expect(postWakeDough.batches).toBeLessThanOrEqual(2);
 
-    await expect
-      .poll(
-        async () => {
-          const current = await readLiveRunSnapshot(page);
-          return {
-            speedAdjustment: current.values.speedAdjustment,
-            traysOnLine: current.values.traysOnLine,
-            batchesReady: current.values.batchesReady,
-          };
-        },
-        { timeout: 10_000 },
-      )
-      .toEqual({
-        speedAdjustment: 0.5,
-        traysOnLine: postWakeDough.trays,
-        batchesReady: postWakeDough.batches,
-      });
-
     // The foreground beat re-arms the changed generation. One full edited
     // tray interval later, production and consumption pair to net zero while
     // quarter-batch consumption fires once.
     const nextVisibleIntervalAt = wakeAt + 4_100;
     const cadenceBeat = await mockDateNow(page, nextVisibleIntervalAt);
+    expect(
+      cadenceBeat.accepted,
+      `edited-speed cadence beat did not accept a canonical claim: ${JSON.stringify(cadenceBeat.outcomes)}`,
+    ).toEqual(expect.any(Number));
+    expect(cadenceBeat.accepted ?? 0).toBeGreaterThan(0);
     const authoritativeTrays =
       cadenceBeat.operationalProjection?.counters?.traysOnLine;
     const authoritativeBatches =
@@ -1913,12 +2237,22 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       }
     };
     page.on("request", recordWakeClaim);
-    // Hidden-time fixtures advance the browser clock ahead of wall time.
-    // Re-anchor it to the current server clock before the final wake so the
-    // fresh projection assertion doesn't race later real-time calc frames.
-    const realWakeAt = Date.now();
-    expect(realWakeAt).toBeLessThan(nextVisibleIntervalAt);
-    await mockDateNow(page, realWakeAt, { tick: false });
+    // Let the server clock catch up with the fixture interval before the final
+    // wake. Then the GET projection is captured at current server time rather
+    // than comparing a future synthetic frame with an older real-time sample.
+    let finalWakeAt = 0;
+    await expect
+      .poll(async () => {
+        const current = await readLiveRunSnapshot(page);
+        finalWakeAt = Number(current.operationalProjection?.serverTimeMs ?? 0);
+        return finalWakeAt;
+      }, {
+        timeout: 30_000,
+        message: "server clock did not catch up to the simulated visible interval",
+      })
+      .toBeGreaterThan(nextVisibleIntervalAt);
+    expect(finalWakeAt).toBeGreaterThan(nextVisibleIntervalAt);
+    await mockDateNow(page, finalWakeAt, { tick: false });
     const finalWakeResponsePromise = page.waitForResponse(
       (response) =>
         response.request().method() === "GET" &&
@@ -1948,6 +2282,9 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         trays: authoritativeTrays,
         batches: authoritativeBatches,
       });
+    // The foreground-sync acknowledgment is the wake boundary. Verify the
+    // authoritative server snapshot below instead of waiting on a secondary
+    // local snapshot push after the wake.
     page.off("request", recordWakeClaim);
     const finalWakeResponse = await finalWakeResponsePromise;
     expect(finalWakeResponse.ok()).toBe(true);
@@ -1999,13 +2336,22 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
     expect(values.speedAdjustment).toBe(0.5);
     expect(values.traysOnLine).toBe(authoritativeTrays);
     expect(values.batchesReady).toBe(authoritativeBatches);
-    // The second wake adopts a fresh server-time projection after the fixture
-    // clock has moved backward from its simulated cadence time.
+    // The final wake adopts a fresh server-time projection without rewinding
+    // the fixture clock from its simulated cadence time.
     const postWakeSnapshot = await readLiveRunSnapshot(page);
     const postWakeValues = postWakeSnapshot.values;
-    const currentProjection =
+    const wakeProjection =
       finalWakePayload.operationalProjection ??
       finalWakePayload.data?.operationalProjection;
+    expect(wakeProjection?.runId).toBe(postWakeSnapshot.runId);
+    expect(wakeProjection?.counters?.traysOnLine).toBe(authoritativeTrays);
+    expect(wakeProjection?.counters?.batchesReady).toBe(authoritativeBatches);
+    expect(wakeProjection?.counters?.casesCompleted).toBe(
+      Number(postWakeValues.skidsCompleted ?? 0) * Number(postWakeValues.casesPerSkid ?? 0) +
+        Number(postWakeValues.casesOnCurrentSkid ?? 0),
+    );
+    expect(postWakeValues.speedAdjustment).toBe(0.5);
+    const currentProjection = postWakeSnapshot.operationalProjection;
     expect(currentProjection?.runId).toBe(postWakeSnapshot.runId);
     expect(currentProjection?.counters?.traysOnLine).toBe(postWakeValues.traysOnLine);
     expect(currentProjection?.counters?.batchesReady).toBe(postWakeValues.batchesReady);
@@ -2013,7 +2359,6 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       Number(postWakeValues.skidsCompleted ?? 0) * Number(postWakeValues.casesPerSkid ?? 0) +
         Number(postWakeValues.casesOnCurrentSkid ?? 0),
     );
-    expect(postWakeValues.speedAdjustment).toBe(0.5);
     const confirmedCalc = currentProjection?.calc;
     expect(confirmedCalc?.casesOnLine).toEqual(expect.any(Number));
     expect(confirmedCalc?.batchesNeeded).toEqual(expect.any(Number));
@@ -2060,7 +2405,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
           minute: "2-digit",
           hour12: true,
         }),
-      realWakeAt + adjustedFinishSec * 1000,
+      finalWakeAt + adjustedFinishSec * 1000,
     );
     const finishPanels = await page
       .getByText("Est. Finish", { exact: true })
@@ -2121,6 +2466,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       }
       const speedInput = page.getByTestId("input-speedAdjustment").filter({ visible: true }).first();
       await expect(speedInput).toBeVisible();
+      await waitForSyncWritesToDrain(page);
       const speedEditedAt = Math.max(safeBaseMs + 1_000, Date.now() + 60_000);
       await mockDateNow(page, speedEditedAt, { tick: false });
       await speedInput.fill("0.5");
@@ -2129,6 +2475,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         const snapshot = await readLiveRunSnapshot(page);
         return snapshot.values.speedAdjustment;
       }, { timeout: 15_000 }).toBe(0.5);
+      await waitForSyncWritesToDrain(page);
 
       await page.locator('[data-testid="tab-dough"]').click();
       await page.getByText("Machine Times", { exact: true }).waitFor({ state: "visible" });
@@ -2140,6 +2487,8 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       await seedDoughCounters(page, { trays: 10, batches: 2 });
       await resumeDoughTrackingIfVisible(page);
       await page.locator('[data-testid="tab-run"]').click();
+      // The direct server snapshot below acknowledges these values; do not
+      // add a separate queue-idle prerequisite to the reconnect scenario.
       await expect.poll(async () => {
         const snapshot = await readLiveRunSnapshot(page);
         return {
@@ -2217,7 +2566,8 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
     // server result through the foreground barrier.
     await page.context().setOffline(true);
     await simulateScreenOff(page);
-    const wakeAt = safeBaseMs + 2_100;
+      // Keep the fake clock monotonic after the later speed edit.
+      const wakeAt = speedEditedAt + 2_100;
     await mockDateNow(page, wakeAt);
     await simulateWake(page);
     await expect(recoveryStatus).toContainText(
@@ -2367,8 +2717,15 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       const body = request.postDataJSON() as { claim?: { channel?: string } };
       if (body.claim?.channel) observedClaims.push(body.claim.channel);
     };
+    let blockedSyncEventStreamConnections = 0;
 
     try {
+      // Install before navigation: routing after EventSource opens does not
+      // terminate an already-established stream or prevent a queued frame.
+      await sleepingPage.route("**/api/sync/events**", async (route) => {
+        blockedSyncEventStreamConnections += 1;
+        await route.abort();
+      });
       await sleepingPage.goto("/", { waitUntil: "domcontentloaded" });
       await sleepingPage
         .getByTestId("tab-run")
@@ -2377,6 +2734,12 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         .getByRole("button", { name: /stop.?run/i })
         .first()
         .waitFor({ state: "visible", timeout: 15_000 });
+      await expect
+        .poll(() => blockedSyncEventStreamConnections, {
+          timeout: 10_000,
+          message: "the sleeping peer's sync event stream was not blocked",
+        })
+        .toBeGreaterThan(0);
       await installHiddenMock(sleepingPage);
       const stale = await readLiveRunSnapshot(sleepingPage);
       const staleOperational = {
@@ -2386,11 +2749,18 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         batchesReady: stale.values.batchesReady,
       };
       sleepingPage.on("request", recordClaim);
-      await sleepingPage.route("**/api/sync/events**", (route) =>
-        route.abort(),
-      );
       await simulateScreenOff(sleepingPage);
       await peer.setOffline(true);
+      const persistedBeforeOfflineRecovery = await readPersistedRunValues(
+        sleepingPage,
+        stale.runId,
+      );
+      const persistedBeforeOfflineRecoveryOperational = {
+        skidsCompleted: persistedBeforeOfflineRecovery.skidsCompleted,
+        casesOnCurrentSkid: persistedBeforeOfflineRecovery.casesOnCurrentSkid,
+        traysOnLine: persistedBeforeOfflineRecovery.traysOnLine,
+        batchesReady: persistedBeforeOfflineRecovery.batchesReady,
+      };
 
       const advancedAt = safeBaseMs + 16 * 60_000;
       await mockDateNow(page, advancedAt);
@@ -2441,13 +2811,8 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
           traysOnLine: stillFenced.traysOnLine,
           batchesReady: stillFenced.batchesReady,
         },
-        "failed recovery must not apply hidden-time Packaging or Dough progress",
-      ).toEqual({
-        skidsCompleted: canonicalAfterAdvance.values.skidsCompleted,
-        casesOnCurrentSkid: canonicalAfterAdvance.values.casesOnCurrentSkid,
-        traysOnLine: canonicalAfterAdvance.values.traysOnLine,
-        batchesReady: canonicalAfterAdvance.values.batchesReady,
-      });
+        "failed recovery changed the sleeping peer's persisted Packaging or Dough progress",
+      ).toEqual(persistedBeforeOfflineRecoveryOperational);
       expect(
         observedClaims,
         "offline recovery emitted automatic claims",
@@ -3707,6 +4072,25 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       });
       await expect(primaryCases).toHaveText(String(correctedCases));
       await expect(peerCases).toHaveText(String(correctedCases));
+      // The canonical Packaging pair is correct after the stale write. Verify
+      // the Run summary also invalidates its older operational-calculation
+      // receipt instead of continuing to display the pre-correction count.
+      await page.locator('[data-testid="tab-run"]').click();
+      await peerPage.locator('[data-testid="tab-run"]').click();
+      await expect
+        .poll(() => readCaseTotal(page), {
+          timeout: 15_000,
+          message: "Run summary should use the corrected Packaging count",
+        })
+        .toBe(correctedCases);
+      await expect
+        .poll(() => readCaseTotal(peerPage), {
+          timeout: 15_000,
+          message: "peer Run summary should use the corrected Packaging count",
+        })
+        .toBe(correctedCases);
+      await page.locator('[data-testid="tab-packaging"]').click();
+      await peerPage.locator('[data-testid="tab-packaging"]').click();
 
       const serverState = await page.evaluate(
         async ({ id }) => {
@@ -3805,6 +4189,7 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
     });
     const sleepingPage = await peer.newPage();
     const observedClaims: string[] = [];
+    let blockedSyncEventStreamConnections = 0;
     const recordClaim = (request: Request) => {
       if (
         request.method() !== "POST" ||
@@ -3815,12 +4200,27 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
       if (body.claim?.channel) observedClaims.push(body.claim.channel);
     };
     let recoveryStarted = false;
+    let recoveryPullAborted = false;
+    let trackRecoveryPushes = false;
+    let recoveryPutCount = 0;
     let releaseRecovery: (() => void) | undefined;
     const recoveryHeld = new Promise<void>((resolve) => {
       releaseRecovery = resolve;
     });
+    const recordRecoveryPut = (request: Request) => {
+      if (!trackRecoveryPushes || request.method() !== "PUT") return;
+      if (new URL(request.url()).pathname === "/api/sync/today") {
+        recoveryPutCount += 1;
+      }
+    };
 
     try {
+      // Block the stream before it is created, so cancellation is not tested
+      // against an already-delivered peer update.
+      await sleepingPage.route("**/api/sync/events**", async (route) => {
+        blockedSyncEventStreamConnections += 1;
+        await route.abort();
+      });
       await sleepingPage.goto("/", { waitUntil: "domcontentloaded" });
       await sleepingPage
         .getByTestId("tab-run")
@@ -3829,23 +4229,24 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         .getByRole("button", { name: /stop.?run/i })
         .first()
         .waitFor({ state: "visible", timeout: 15_000 });
+      await expect
+        .poll(() => blockedSyncEventStreamConnections, {
+          timeout: 10_000,
+          message: "the sleeping peer's sync event stream was not blocked",
+        })
+        .toBeGreaterThan(0);
       await installHiddenMock(sleepingPage);
       const stale = await readLiveRunSnapshot(sleepingPage);
-      const staleOperational = {
-        skidsCompleted: stale.values.skidsCompleted,
-        casesOnCurrentSkid: stale.values.casesOnCurrentSkid,
-        traysOnLine: stale.values.traysOnLine,
-        batchesReady: stale.values.batchesReady,
-      };
+      const cycleSpeedBeforeQueuedEdit = stale.values.cycleSpeed;
+      expect(cycleSpeedBeforeQueuedEdit).toEqual(expect.any(Number));
+      expect(cycleSpeedBeforeQueuedEdit).not.toBe(31);
       sleepingPage.on("request", recordClaim);
-      await sleepingPage.route("**/api/sync/events**", (route) =>
-        route.abort(),
-      );
+      sleepingPage.on("request", recordRecoveryPut);
       await simulateScreenOff(sleepingPage);
       await peer.setOffline(true);
 
-      // Leave a real queued edit behind the wake fence. A cancelled owner
-      // must discard it instead of replaying the pre-wake snapshot later.
+      // Keep the user edit locally durable while offline. Cancellation must
+      // discard this owner's pending push, not erase the user's edit.
       await sleepingPage
         .locator('[data-testid="input-cycleSpeed"]')
         .evaluate((el) => {
@@ -3859,6 +4260,13 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
           input.dispatchEvent(new Event("change", { bubbles: true }));
         });
       await sleepingPage.waitForTimeout(900);
+      await expect
+        .poll(
+          async () =>
+            (await readPersistedRunValues(sleepingPage, stale.runId)).cycleSpeed,
+          { timeout: 5_000, message: "offline cycle-speed edit was not saved locally" },
+        )
+        .toBe(31);
 
       await sleepingPage.route("**/api/sync/today**", async (route) => {
         if (route.request().method() !== "GET" || recoveryStarted) {
@@ -3868,7 +4276,9 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         recoveryStarted = true;
         await recoveryHeld;
         await route.abort("aborted").catch(() => {});
+        recoveryPullAborted = true;
       });
+      trackRecoveryPushes = true;
       await peer.setOffline(false);
       await sleepingPage.evaluate(() =>
         window.dispatchEvent(new Event("online")),
@@ -3887,12 +4297,34 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         recoveryStarted,
         "wake recovery did not reach the held canonical pull",
       ).toBe(true);
+      await sleepingPage.waitForTimeout(750);
+      expect(
+        recoveryPutCount,
+        "a sync PUT escaped while the canonical wake pull was held",
+      ).toBe(0);
 
       // Navigation unmounts the real Home effect while its pull is pending.
       // Release the route afterward so the cancelled request cannot linger.
       await sleepingPage.goto("about:blank", { waitUntil: "domcontentloaded" });
       releaseRecovery?.();
+      await expect
+        .poll(() => recoveryPullAborted, {
+          timeout: 5_000,
+          message: "cancelled recovery pull did not terminate",
+        })
+        .toBe(true);
       await sleepingPage.unroute("**/api/sync/today**");
+      await sleepingPage.waitForTimeout(750);
+      expect(
+        recoveryPutCount,
+        "the cancelled recovery owner published its pending sync write",
+      ).toBe(0);
+      const canonicalBeforeRemount = await readLiveRunSnapshot(page);
+      expect(canonicalBeforeRemount.values.cycleSpeed).toBe(
+        cycleSpeedBeforeQueuedEdit,
+      );
+      trackRecoveryPushes = false;
+      sleepingPage.off("request", recordRecoveryPut);
       await sleepingPage.goto("/", { waitUntil: "domcontentloaded" });
       await sleepingPage
         .getByTestId("tab-run")
@@ -3902,26 +4334,24 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
         .first()
         .waitFor({ state: "visible", timeout: 15_000 });
 
-      // The new mounted Home has no stranded foreground fence, and the
-      // cancelled owner's queued write never becomes an auto-track claim.
+      // The new Home has no stranded foreground fence, and the offline edit
+      // remains durable locally. Only the cancelled owner is forbidden from
+      // publishing its queued snapshot.
       await expect
         .poll(
           async () => {
-            const snapshot = await readLiveRunSnapshot(sleepingPage);
-            return {
-              skidsCompleted: snapshot.values.skidsCompleted,
-              casesOnCurrentSkid: snapshot.values.casesOnCurrentSkid,
-              traysOnLine: snapshot.values.traysOnLine,
-              batchesReady: snapshot.values.batchesReady,
-            };
+            const values = await readPersistedRunValues(
+              sleepingPage,
+              stale.runId,
+            );
+            return values.cycleSpeed;
           },
           {
             timeout: 15_000,
-            message:
-              "cancelled recovery replayed hidden-time operational progress",
+            message: "the offline cycle-speed edit was not retained across remount",
           },
         )
-        .toEqual(staleOperational);
+        .toBe(31);
       expect(
         observedClaims,
         "cancelled recovery replayed a queued auto-track write",
@@ -3941,7 +4371,8 @@ test.describe("screen-off / wake — case counter lifecycle", () => {
             device: "phone-sleeping",
             cancelledRecoveryVisible: true,
             trackingFenceClearedAfterRemount: true,
-            preWakeWriteReplayed: false,
+            cancelledOwnerPutCount: recoveryPutCount,
+            offlineEditRetainedAfterRemount: true,
             autoTrackClaims: 0,
           },
           null,

@@ -1,4 +1,4 @@
-export const FULL_BROWSER_EXPECTED_CASES = 167;
+export const FULL_BROWSER_EXPECTED_CASES = 169;
 
 export function assertFullBrowserCaseContract(discoveredCases: number): void {
   if (discoveredCases === FULL_BROWSER_EXPECTED_CASES) return;

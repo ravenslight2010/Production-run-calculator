@@ -920,9 +920,9 @@ test.describe("phone layout smoke", () => {
       await page.getByRole("menuitem", { name: "Alerts & Floor Mode" }).click();
       const floorSwitch = page.getByTestId("switch-floor-mode");
       await expect(floorSwitch).toBeVisible();
-      if (!(await floorSwitch.isChecked())) await floorSwitch.tap();
+      if (!(await floorSwitch.isChecked())) await floorSwitch.click();
       await page.keyboard.press("Escape");
-      await page.getByTitle("Floor mode — big numbers, status color").tap();
+      await page.getByTitle("Floor mode — big numbers, status color").click();
 
       const overlay = page.getByTestId("floor-mode-overlay");
       await expect(overlay).toBeVisible();
@@ -985,8 +985,9 @@ test.describe("phone layout smoke", () => {
       await page.waitForTimeout(1_000);
       await expect(overlay).toHaveCSS("opacity", "1");
 
-      // Verify pointer/touch-style activation, then keyboard activation and
-      // the return to the calculator from both paths.
+      // This Desktop Chrome project has no touch capability, so verify pointer
+      // activation here. The physical-device lane covers real touch dispatch.
+      // Also verify keyboard activation and return to the calculator.
       // The Replit preview banner is browser chrome outside the app and can
       // intercept a synthetic click at the top edge; installed/full-screen
       // station displays do not render it.
@@ -1429,6 +1430,58 @@ test.describe("phone layout smoke", () => {
     });
   }
 
+  test(`sign-in is usable without overflow in narrow landscape at ${LANDSCAPE_VIEWPORT.width}x${LANDSCAPE_VIEWPORT.height}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(LANDSCAPE_VIEWPORT);
+    await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
+    await page
+      .locator("#username")
+      .waitFor({ state: "visible", timeout: 20_000 });
+
+    await assertPhoneLayout(page, "narrow landscape sign-in");
+    await expect(
+      page.getByRole("heading", { name: /sign in to run calculator/i }),
+    ).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Username" })).toBeEditable();
+    await expect(page.getByRole("textbox", { name: "Password" })).toBeEditable();
+    await expect(
+      page.getByRole("button", { name: /^sign in$/i }),
+    ).toBeVisible();
+  });
+
+  test("focused sign-in fields stay reachable when the virtual keyboard reduces the viewport", async ({
+    page,
+  }) => {
+    await page.setViewportSize(LANDSCAPE_VIEWPORT);
+    await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
+    await page
+      .locator("#username")
+      .waitFor({ state: "visible", timeout: 20_000 });
+
+    await assertFocusedFieldIsKeyboardSafe(
+      page,
+      page.getByRole("textbox", { name: "Username" }),
+      "Username",
+    );
+
+    // Desktop Chromium has no on-screen keyboard. Reducing the viewport after
+    // the first focus models the visualViewport resize that mobile browsers
+    // perform when the keyboard opens.
+    await page.setViewportSize({
+      width: LANDSCAPE_VIEWPORT.width,
+      height: 220,
+    });
+    await assertPhoneLayout(page, "keyboard-safe username field");
+
+    await assertFocusedFieldIsKeyboardSafe(
+      page,
+      page.getByRole("textbox", { name: "Password" }),
+      "Password",
+    );
+    await assertPhoneLayout(page, "keyboard-safe password field");
+  });
+
   test("@real-mobile-browser physical Android Chrome dismisses first-login onboarding before Run interactions", async ({
     page,
   }) => {
@@ -1789,6 +1842,43 @@ test.describe("phone layout smoke", () => {
         await scheduleDialog.getByRole("button", { name: "Schedule New Day", exact: true }).click();
         await expect(scheduleDialog.getByRole("button", { name: "Add Run", exact: true })).toBeVisible();
         await scheduleDialog.getByRole("button", { name: "Add Run", exact: true }).click();
+
+        const scheduleDate = await page.evaluate(() => {
+          const date = new Date();
+          date.setDate(date.getDate() + 1);
+          const day = date.getDate();
+          const suffix = day % 100 >= 11 && day % 100 <= 13
+            ? "th"
+            : day % 10 === 1
+              ? "st"
+              : day % 10 === 2
+                ? "nd"
+                : day % 10 === 3
+                  ? "rd"
+                  : "th";
+          return {
+            value: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+            calendarDay: `${date.getMonth() + 1}/${day}/${date.getFullYear()}`,
+            dayLabel: `${day}${suffix}, ${date.getFullYear()}`,
+          };
+        });
+        if (viewport.name === "phone") {
+          // The calendar stacking regression is specific to 375×812. Restore
+          // the existing phone-picker viewport afterward so its keyboard
+          // dismissal contract remains covered at the original size.
+          await page.setViewportSize({ width: 375, height: 812 });
+        }
+        const dateTrigger = scheduleDialog.getByTestId("schedule-date-trigger");
+        await dateTrigger.tap();
+        const nextDay = page
+          .getByRole("button", { name: new RegExp(`${scheduleDate.dayLabel}$`) })
+          .and(page.locator(`[data-day="${scheduleDate.calendarDay}"]`));
+        await expect(nextDay).toBeVisible();
+        await nextDay.tap();
+        await expect(dateTrigger).toHaveAttribute("data-date-value", scheduleDate.value);
+        if (viewport.name === "phone") {
+          await page.setViewportSize({ width: viewport.width, height: viewport.height });
+        }
 
         const brandTrigger = scheduleDialog.getByRole("button", {
           name: "Schedule brand",

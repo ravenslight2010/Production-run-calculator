@@ -29,9 +29,9 @@ two API/database shards at once. Each API shard remains serialized internally
 and has an eight-minute hard limit with a six-minute warning. Browser stages
 remain strictly serial for disposable live-day safety. The full browser suite
 has a 45-minute hard limit with a 40-minute warning. This is a bounded
-execution budget, not a retry or an evidence-validation bypass: all 159
-enumerated cases still need to complete and the retained report must pass the
-same revision-bound evidence verifier.
+execution budget, not a retry or an evidence-validation bypass: every case
+declared by the current full-browser contract must complete, and the retained
+report must pass the same revision-bound evidence verifier.
 
 For compatibility work, or as the bounded pre-release browser-engine check, run:
 

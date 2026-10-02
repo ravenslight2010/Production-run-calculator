@@ -13,4 +13,20 @@ A passing case in the full Chromium inventory does not replace a failing dedicat
 
 A workspace restart can interrupt a background full run while leaving checkpoint state but losing its log or checkpoint report. Treat that as incomplete, never as retained evidence. After repeated interruptions, resume only a checkpoint verified against the exact current revision and its completed gate statuses; the browser gate must still start on a fresh disposable database. `E2E_TEST_DB=1` isolates the browser gate, not other database-backed preflights, so give those preflights a disposable database too when the development database is unavailable.
 
+Case-count changes are not coverage evidence by themselves. Compare the removed and added case identities, verify that every moved scenario has a destination lane, and restore deterministic cases that otherwise have no owner before changing the expected count. **Why:** an exact-count guard detects enumeration drift but cannot distinguish a legitimate lane move from an accidental deletion. **How to apply:** diff the previous and current Playwright case lists, record each intentional move and its destination, then set the contract to the adjudicated inventory.
+
+Focused browser runs must disable the full-inventory reporter without bypassing
+the isolated server lifecycle. **Why:** a filtered run can correctly fail the
+full case-count guard, while a narrow test config that assumes an existing dev
+server can fail during fixture setup before any browser assertion runs.
+**How to apply:** use the isolated runner with a focused config that starts its
+local servers, or another explicit local-server setup; treat the result as
+focused evidence only, never as a replacement for the complete contract run.
+
 Playwright's `browserContext.close: ENOENT` for a missing temporary `recording.trace` can mask a case reaching its test timeout; it does not establish that the preceding UI assertion failed. **Why:** a long reload journey exhausted the 60-second budget during a full run, and trace cleanup replaced the useful timeout diagnostic. **How to apply:** compare elapsed time to that case's configured timeout and inspect the trace/case journey before changing product behavior or accepting a screenshot baseline.
+
+In one workspace run, clean-start Chromium navigation exited with Node code 13 while preview workflows were active; standalone and subsequent release reruns passed with those workflows paused. This is an observed correlation, not a proven cause. **Why:** resource contention can resemble an application regression, but the available evidence does not isolate which process interaction caused the failure. **How to apply:** pause existing preview workflows during resource-sensitive clean-start and full-browser release gates when contention is observed. Preserve the original failure classification; only accept the gate after a complete isolated rerun passes.
+
+During a separate clean-start failure, an orphaned Chromium process group from a completed app-preview screenshot was identified; after stopping that specific group, the resumed clean-start passed. **Why:** browser processes can outlive the action that spawned them and exhaust thread resources, making infrastructure failure look like an application defect. **How to apply:** inspect process ancestry when Chromium cannot create threads, stop only the confirmed orphaned preview process group, and accept the gate only after a complete isolated rerun passes.
+
+Stopping a background shell did not reliably stop descendants of the isolated browser runner: its Playwright and disposable PostgreSQL processes remained active, and a later schema push aborted until the confirmed runner group was stopped. **Why:** a stopped task wrapper can leave test descendants holding CPU, ports, and database resources. **How to apply:** after stopping a long browser run, verify its process group and disposable database have exited before retrying; stop only descendants confirmed to belong to that test run, then clean its generated database directory only after PostgreSQL has exited.

@@ -132,3 +132,37 @@ pending-write badge.
 
 No retained release report, checkpoint, or browser snapshot is to be edited by
 hand.
+
+## Follow-up regressions found during full-mode verification
+
+The current 169-case run exposed two additional blockers that are separate from
+the four original scenarios above. Keep this work within the same release
+objective; do not weaken browser assertions or treat a diagnostic filtered run
+as complete evidence.
+
+### Freezer-aware legacy timer recovery
+
+The server still needs to adopt legacy case-timer bookkeeping, but an overdue
+legacy arm must not manufacture a completed case or advance beyond the
+freezer-aware expected-case calculation. Keep the existing timer and claim
+lifecycle fences. Base case output on the canonical freezer-aware suggestion,
+and cover both a legacy arm before freezer exit (no case mutation) and one after
+eligibility (normal authorized progress remains intact).
+
+### Phone toast placement
+
+The successful batch-weight toast is valid feedback, but its full-width
+top-of-screen placement can cover the manager's More control on a phone. Reposition
+the narrow-screen toast stack so it avoids both the fixed header actions and the
+bottom navigation/safe-area. Preserve interactive toast behavior and desktop
+placement; do not suppress pointer events, remove the notification, or force-click
+the obscured control. Add a browser assertion that More remains unobscured and
+usable while the save confirmation is visible.
+
+### Additional validation
+
+Run the focused server legacy-arm tests and the unchanged speed-adjustment wake
+browser test, then the full screen-off/wake file. Run the manager weight-save
+browser case with the success toast visible, and finally regenerate the complete
+169-case release evidence on one clean revision. The four original scenarios,
+their screenshots, and all existing assertions remain required.

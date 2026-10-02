@@ -4132,6 +4132,8 @@ export default function Home() {
   // manage-profiles can save profiles without full manager rights — matching
   // the server's POST/DELETE /brand-profiles gate exactly.
   const canManageProfiles = hasCapability("manage-profiles");
+  const [adoptedBrandsForProfilePurge, setAdoptedBrandsForProfilePurge] =
+    useState<string[] | null>(null);
   // Flip the central storage-level profile-write gate in lockstep: it stops
   // EVERY profile-writing helper (saveProfile, rename/merge fan-outs,
   // Move-to-Mixes relinks, packaging import patches, delete helpers) from
@@ -4152,8 +4154,20 @@ export default function Home() {
     profileBootHealsRef.current = true;
     applyMixSlotRecategorizeIfNeeded();
     applyProfileCleanupIfNeeded();
-    purgeOrphanedProfilesIfNeeded();
   }, [canManageProfiles]);
+  // Orphan cleanup can write profile tombstones back to the server. Do not
+  // treat a populated local Brands cache as authoritative: wait until the
+  // accepted sync merge has persisted its canonical Brands snapshot.
+  useEffect(() => {
+    if (
+      !canManageProfiles ||
+      !adoptedBrandsForProfilePurge ||
+      adoptedBrandsForProfilePurge.length === 0
+    ) {
+      return;
+    }
+    purgeOrphanedProfilesIfNeeded(adoptedBrandsForProfilePurge);
+  }, [canManageProfiles, adoptedBrandsForProfilePurge]);
   const canEditRules = hasCapability("edit-production-rules");
   const canManageInventory = hasCapability("manage-inventory");
   const canManageStaff = hasCapability("manage-staff");
@@ -7730,6 +7744,7 @@ export default function Home() {
         initialSnapshot?: boolean;
         peerReceivedAt?: number;
         peerResponseBytes?: number;
+        allowForegroundCanonicalFormReset?: boolean;
       },
     ) => void
   >(() => {});
@@ -8256,6 +8271,7 @@ export default function Home() {
         initialSnapshot?: boolean;
         peerReceivedAt?: number;
         peerResponseBytes?: number;
+        allowForegroundCanonicalFormReset?: boolean;
       },
     ) => {
       publishAutoTrackCoordination(payload);
@@ -8692,6 +8708,7 @@ export default function Home() {
         const curRemoteTs = currentId ? (remoteUpd[currentId] ?? 0) : 0;
         const adoptedPackaging =
           !!currentId && packagingMerge.acceptedRemoteIds.has(currentId);
+        const localEditQuietMs = Date.now() - lastLocalEditRef.current;
         const equalPackagingEcho =
           !!currentId &&
           !adoptedPackaging &&
@@ -8707,15 +8724,35 @@ export default function Home() {
             progress?.manualOverrideUntil ?? 0,
           );
         }
-        if (currentId && (payload.runValues[currentId] || adoptedPackaging) && (adoptedPackaging || (
-          curLocalTs <= curRemoteTs &&
-          Date.now() - lastLocalEditRef.current > 2000 &&
-          pushAcknowledgedRef.current
-        ))
-          // Never blank the live form by resetting it to an all-default remote
-          // value while our stored copy is still populated (the same
-          // empty-over-populated corruption guarded on the run-values loop above).
-          && !isEmptyOverPopulated(payload.runValues[currentId] as FormValues, loadRunValues(currentId))) {
+        const currentRunValues = currentId
+          ? payload.runValues[currentId] as FormValues | undefined
+          : undefined;
+        const emptyOverPopulatedFormReset =
+          !!currentId &&
+          !!currentRunValues &&
+          isEmptyOverPopulated(currentRunValues, loadRunValues(currentId));
+        const canResetLiveForm = Boolean(
+          currentId &&
+          (currentRunValues || adoptedPackaging) &&
+          (
+            adoptedPackaging ||
+            (
+              curLocalTs <= curRemoteTs &&
+              // A successful foreground pull has already resolved this run's
+              // LWW merge. Its canonical value may bypass the ordinary quiet/
+              // acknowledgment guard, but a strictly newer local edit remains.
+              (
+                options?.allowForegroundCanonicalFormReset ||
+                (
+                  localEditQuietMs > 2000 &&
+                  pushAcknowledgedRef.current
+                )
+              )
+            )
+          ) &&
+          !emptyOverPopulatedFormReset,
+        );
+        if (canResetLiveForm) {
           // Read the already-reconciled durable copy rather than the raw payload:
           // the whole-run LWW and packaging register may have selected different
           // sides, and the form must adopt that combined result atomically.
@@ -8799,6 +8836,9 @@ export default function Home() {
         const merged = dropDeleted(preDrop, deletedMap, "brands").sort((a, b) => a.localeCompare(b));
         saveList(BRANDS_KEY, merged);
         setBrands(prev => (arraysEqual(prev, merged) ? prev : merged));
+        setAdoptedBrandsForProfilePurge((current) =>
+          current && arraysEqual(current, merged) ? current : merged,
+        );
       }
 
       // ── Brand flavors ──
@@ -9675,7 +9715,9 @@ export default function Home() {
                 lastSyncSigRef.current = "";
               },
               applyGeneralMerge: (canonicalPayload) => {
-                applySyncCallbackRef.current(canonicalPayload);
+                applySyncCallbackRef.current(canonicalPayload, {
+                  allowForegroundCanonicalFormReset: true,
+                });
               },
               reconcileProfiles: reconcileProfilesFromServerDetailed,
               applyProfiles: (profileResult) => {
@@ -10513,11 +10555,30 @@ export default function Home() {
       syncApplyPushPendingRef.current = true;
       return;
     }
-    if (formHandoffRef.current) return;
+    if (formHandoffRef.current) {
+      return;
+    }
     // Automatic pushes (open/reconnect, interval, visibility, and local edits)
     // may occur before SSE has told us whether today's server row exists. Keep
     // one pending recovery push instead of letting any of them race that read.
-    if (!requestBaselinePush()) return;
+    if (!requestBaselinePush()) {
+      return;
+    }
+    const currentSignature = JSON.stringify(
+      buildSyncPayload(dayStateRef.current),
+    );
+    if (
+      pushAcknowledgedRef.current
+      && currentSignature === lastSyncSigRef.current
+    ) {
+      if (pushTimerRef.current) {
+        clearTimeout(pushTimerRef.current);
+        pushTimerRef.current = null;
+      }
+      syncPushTimingRef.current = null;
+      setSyncPendingCount(0);
+      return;
+    }
     if (pushTimerRef.current) clearTimeout(pushTimerRef.current);
     if (!syncPushTimingRef.current) {
       syncPushTimingRef.current = {
@@ -18801,7 +18862,10 @@ export default function Home() {
                             <CalendarDays className="w-4 h-4 text-muted-foreground" />
                           </Button>
                         </PopoverTrigger>
-                        <PopoverContent align="start" className="z-[71] w-auto p-0">
+                        <PopoverContent
+                          align="start"
+                          className="z-[71] max-h-[var(--radix-popover-content-available-height)] w-auto overflow-y-auto overscroll-contain p-0"
+                        >
                           <Calendar
                             mode="single"
                             selected={scheduleEditorDate ? new Date(`${scheduleEditorDate}T12:00:00`) : undefined}

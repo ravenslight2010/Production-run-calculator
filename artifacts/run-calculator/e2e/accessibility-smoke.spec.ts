@@ -419,18 +419,17 @@ test.beforeAll(async () => {
 
 async function seedPendingRun(page: Page): Promise<string> {
   const runId = uniqueTestId("a11y_run");
-  const date = new Date().toISOString().slice(0, 10);
-  const now = Date.now();
-  const db = new Client({ connectionString: process.env.DATABASE_URL });
-  try {
-    await db.connect();
-    await db.query(
-      "DELETE FROM daily_sync WHERE date = $1 AND scope = 'live'",
-      [date],
-    );
-  } finally {
-    await db.end().catch(() => {});
-  }
+  const { date, now } = await page.evaluate(() => {
+    const current = new Date();
+    return {
+      date: [
+        current.getFullYear(),
+        String(current.getMonth() + 1).padStart(2, "0"),
+        String(current.getDate()).padStart(2, "0"),
+      ].join("-"),
+      now: current.getTime(),
+    };
+  });
   const stoppages = [
     {
       id: `${runId}-active`,
@@ -499,21 +498,44 @@ async function seedPendingRun(page: Page): Promise<string> {
     }
     localStorage.setItem("run-calc-day", JSON.stringify(seed.payload.dayState));
   }, { payload, runId });
-  await page.route("**/api/sync/today**", async (route) => {
-    if (route.request().method() !== "GET") {
-      await route.continue();
-      return;
-    }
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      headers: {
-        "X-Sync-Canonical-Revision": "1",
-        "X-Sync-Server-Time": String(now),
-      },
-      body: JSON.stringify(payload),
+  // Seed the canonical server snapshot as well as browser storage. The app's
+  // initial SSE reconciliation can otherwise replace this local-only fixture
+  // with the server's empty day state before the workflow reaches its checks.
+  const serverSeed = await page.evaluate(async ({ date, payload, senderId }) => {
+    const epochResponse = await fetch("/api/sync/reset-epoch", {
+      credentials: "same-origin",
     });
-  });
+    if (!epochResponse.ok) {
+      return {
+        ok: false,
+        step: "reading the sync reset epoch",
+        status: epochResponse.status,
+        body: await epochResponse.text(),
+      };
+    }
+
+    const { epoch = 0 } = await epochResponse.json() as { epoch?: number };
+    const response = await fetch(
+      `/api/sync/today?today=${encodeURIComponent(date)}&epoch=${encodeURIComponent(String(epoch))}`,
+      {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ senderId, payload }),
+      },
+    );
+    return {
+      ok: response.ok,
+      step: "writing the canonical today sync snapshot",
+      status: response.status,
+      body: response.ok ? "" : await response.text(),
+    };
+  }, { date, payload, senderId: `a11y-${runId}` });
+  if (!serverSeed.ok) {
+    throw new Error(
+      `Fixture ${serverSeed.step} failed (HTTP ${serverSeed.status}): ${serverSeed.body.slice(0, 300)}`,
+    );
+  }
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
   await expect

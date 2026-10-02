@@ -675,7 +675,12 @@ useEffect(() => {
     // cleared so the first completed interval cannot replay paused elapsed time.
     doughTimerPausedRef.current = 0;
     doughTimerResumeAtRef.current = 0;
-    doughAutoSuppressUntilRef.current = 0;
+    // A cadence rebase must not cancel an in-progress manual correction.
+    // Explicit Resume clears this deadline before rearming, while run changes
+    // clear it in resetBookkeeping(). Here only discard an expired deadline.
+    if (doughAutoSuppressUntilRef.current <= nowMs) {
+      doughAutoSuppressUntilRef.current = 0;
+    }
     setIsDoughTimerPaused(false);
     trayProdNextDueMsRef.current = timing.trayProductionMs > 0 ? nowMs + timing.trayProductionMs : 0;
     batchProdNextDueMsRef.current = timing.batchProductionMs > 0 ? nowMs + timing.batchProductionMs : 0;

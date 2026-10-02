@@ -25,6 +25,15 @@ reported gap, not evidence of coverage.
 | Import lifecycle integrity | Import-family parser/apply tests, merge-backfill libraries, reconciliation libraries, and saved-source API routes | `docs/import-lifecycle-integrity-audit-2026-09-06.md` and the focused suites listed there | Required when changing recipe-row identity, replacement/union rules, merge backfill, source snapshot retention, or re-import resurrection guards |
 | Startup and preview health | Workflow startup and clean-start harness | `check:clean-start` | Required before browser evidence and for run-command, proxy, or workflow changes |
 
+The full Chromium contract currently enumerates 169 cases. The earlier 170-case
+count included an Android-only queued Target Cases recovery journey; that journey
+is excluded from desktop Chromium and remains in the dedicated physical Android
+lane. The intermediate 167-case contract also omitted two narrow-landscape
+sign-in checks; both have since been restored to the full lane, yielding the
+current 169-case contract. The virtual-keyboard-resize check is also part of that
+lane. A missing physical-device endpoint is not replaced by desktop emulation
+evidence.
+
 ## Required release sets by change category
 
 Run the smallest row that crosses the changed boundary, then run the standard

@@ -47,7 +47,7 @@ let runDataHeals: () => Promise<void>;
 let runAutoTrackServerTicks: typeof import("./sync")["runAutoTrackServerTicks"];
 let setManualSectionFailureHookForTest: typeof import("./sync")["setManualSectionFailureHookForTest"];
 let setManualSectionBarrierHookForTest: typeof import("./sync")["setManualSectionBarrierHookForTest"];
-let derivedRunMapSharedDayStateFields: typeof import("./sync")["DERIVED_RUN_MAP_SHARED_DAY_STATE_FIELDS"];
+let derivedRunMapSharedInputFields: typeof import("./sync")["DERIVED_RUN_MAP_SHARED_INPUT_FIELDS"];
 
 let adminPool: pg.Pool;
 let testDbName: string;
@@ -107,7 +107,7 @@ beforeAll(async () => {
   runAutoTrackServerTicks = syncMod.runAutoTrackServerTicks;
   setManualSectionFailureHookForTest = syncMod.setManualSectionFailureHookForTest;
   setManualSectionBarrierHookForTest = syncMod.setManualSectionBarrierHookForTest;
-  derivedRunMapSharedDayStateFields = syncMod.DERIVED_RUN_MAP_SHARED_DAY_STATE_FIELDS;
+  derivedRunMapSharedInputFields = syncMod.DERIVED_RUN_MAP_SHARED_INPUT_FIELDS;
 
   const app: Express = express();
   app.use(express.json({ limit: "10mb" }));
@@ -4272,19 +4272,15 @@ describe("/sync/events — date-scoped broadcasts", () => {
     // maps for every run, while remaining a small bounded SSE message rather
     // than drifting toward the 10 MiB sync-write safety ceiling.
     const sharedSetupRefreshFrameBudgetBytes = 128 * 1024;
-    for (const field of derivedRunMapSharedDayStateFields) {
+    for (const field of derivedRunMapSharedInputFields) {
       const senderId = `peer-shared-${field}`;
-      const sharedDayState = sharedInputPayload.dayState as Record<string, unknown>;
-      const currentValue = sharedDayState[field];
+      const currentValue = sharedInputPayload[field];
       const changedValue = Array.isArray(currentValue)
         ? [...currentValue, `changed-${field}`]
         : [`changed-${field}`];
       sharedInputPayload = {
         ...sharedInputPayload,
-        dayState: {
-          ...sharedDayState,
-          [field]: changedValue,
-        } as unknown as typeof sharedInputPayload.dayState,
+        [field]: changedValue,
       };
       delete (sharedInputPayload as Record<string, unknown>).syncVersion;
       delete (sharedInputPayload as Record<string, unknown>).completeness;
@@ -4316,7 +4312,7 @@ describe("/sync/events — date-scoped broadcasts", () => {
         .map((run: { id: string }) => run.id)
         .sort();
       expect(["partial", "complete"]).toContain(sharedInputFrame.frame.completeness);
-      expect(sharedInputFrame.frame.data.dayState[field]).toEqual(changedValue);
+      expect(sharedInputFrame.frame.data[field]).toEqual(changedValue);
       if (sharedInputFrame.frame.completeness === "partial") {
         expect(sharedInputFrame.frame).toMatchObject({
           syncVersion: 1,
