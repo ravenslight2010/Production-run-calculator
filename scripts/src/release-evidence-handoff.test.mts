@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { FULL_BROWSER_EXPECTED_CASES } from "./full-browser-case-contract.mts";
+import { WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES } from "./webkit-case-contract.mts";
 import { releaseGateLabelsForMode } from "./release-check.mts";
 import { buildReleaseEvidenceHandoff } from "./release-evidence-handoff.mts";
 
@@ -67,6 +68,31 @@ function passingBrowserReport(revision = REVISION): string {
   ].join("\n");
 }
 
+function passingResponsiveWebkitEvidence(revision = REVISION): string {
+  const cases = WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES.map((identity) => {
+    const [file = "", projectAndTitle = ""] = identity.split(" :: ");
+    const [projectName = "", ...titleParts] = projectAndTitle.split(" › ");
+    return {
+      file,
+      projectName,
+      title: titleParts.join(" › "),
+      status: "passed",
+      durationMs: 100,
+    };
+  });
+  return `${JSON.stringify({
+    schemaVersion: 1,
+    browser: "webkit",
+    revision,
+    environment: "ci",
+    result: "passed",
+    caseCount: cases.length,
+    completedCount: cases.length,
+    failureCount: 0,
+    cases,
+  })}\n`;
+}
+
 async function writeEvidenceFile(
   evidenceRoot: string,
   path: string,
@@ -108,6 +134,11 @@ async function makeCompleteEvidence(
       "browser-full/FINAL-REPORT.md",
       passingBrowserReport(revision),
     );
+    await writeEvidenceFile(
+      evidenceRoot,
+      "browser-compatibility/webkit-result.json",
+      passingResponsiveWebkitEvidence(revision),
+    );
   }
 }
 
@@ -124,11 +155,16 @@ test("complete full evidence is revision-bound and never claims production GO", 
     assert.equal(handoff.exitCode, 0);
     assert.equal(handoff.browserEvidence.status, "PASS");
     assert.equal(handoff.webkitEvidence.status, "PASS");
+    assert.equal(handoff.webkitCompatibilityEvidence.status, "PASS");
     assert.equal(handoff.productionBinding, "GAP");
     assert.match(handoff.markdown, /Production GO: NOT CLAIMED/u);
     assert.match(
       handoff.markdown,
       new RegExp(`${FULL_BROWSER_EXPECTED_CASES}/${FULL_BROWSER_EXPECTED_CASES} passed`),
+    );
+    assert.match(
+      handoff.markdown,
+      /Responsive WebKit compatibility: \*\*PASS\*\*/u,
     );
     assert.match(
       handoff.markdown,
@@ -152,6 +188,55 @@ test("complete standard evidence uses the standard gate and artifact contract", 
     assert.equal(handoff.exitCode, 0);
     assert.equal(handoff.browserEvidence.status, "MISSING");
     assert.equal(handoff.webkitEvidence.status, "PASS");
+    assert.equal(handoff.webkitCompatibilityEvidence.status, "MISSING");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("missing responsive WebKit evidence prevents a passing full handoff", async () => {
+  const root = await mkdtemp(join(tmpdir(), "release-handoff-missing-responsive-webkit-"));
+  try {
+    await makeCompleteEvidence(root, "full");
+    await rm(
+      join(
+        root,
+        "release-evidence-full",
+        "browser-compatibility/webkit-result.json",
+      ),
+    );
+    const handoff = await buildReleaseEvidenceHandoff({
+      mode: "full",
+      revision: REVISION,
+      repositoryRoot: root,
+    });
+    assert.equal(handoff.report.status, "PASS");
+    assert.equal(handoff.webkitCompatibilityEvidence.status, "MISSING");
+    assert.equal(handoff.testEvidenceStatus, "MISSING");
+    assert.equal(handoff.exitCode, 2);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("responsive WebKit evidence from another revision cannot support a full pass", async () => {
+  const root = await mkdtemp(join(tmpdir(), "release-handoff-stale-responsive-webkit-"));
+  try {
+    await makeCompleteEvidence(root, "full");
+    await writeEvidenceFile(
+      join(root, "release-evidence-full"),
+      "browser-compatibility/webkit-result.json",
+      passingResponsiveWebkitEvidence(OTHER_REVISION),
+    );
+    const handoff = await buildReleaseEvidenceHandoff({
+      mode: "full",
+      revision: REVISION,
+      repositoryRoot: root,
+    });
+    assert.equal(handoff.report.status, "PASS");
+    assert.equal(handoff.webkitCompatibilityEvidence.status, "STALE");
+    assert.equal(handoff.testEvidenceStatus, "STALE");
+    assert.equal(handoff.exitCode, 2);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

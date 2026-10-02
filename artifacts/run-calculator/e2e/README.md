@@ -189,10 +189,15 @@ E2E_TEST_DB=1 E2E_APPROVED_DESTRUCTIVE_MODE=1 \
 
 WebKit is intentionally not included by `playwright.config.ts` and does not
 inherit `global-setup.ts`. It is a release signal for the highest-risk
-cross-browser journeys, not a duplicate of every Chromium test. The reporter
-writes `release-evidence/browser-smoke/webkit-result.json` (or the path supplied
-by `PLAYWRIGHT_RELEASE_SMOKE_EVIDENCE_PATH`) with the revision, environment,
-per-test status, and failure classification.
+cross-browser journeys, not a duplicate of every Chromium test. The standard
+reporter writes `release-evidence/browser-smoke/webkit-result.json` (or the path
+supplied by `PLAYWRIGHT_RELEASE_SMOKE_EVIDENCE_PATH`) with the revision,
+environment, per-test status, and failure classification. Full release also
+runs only `phone-webkit` and `tablet-webkit` from the compatibility config and
+retains their evidence separately at
+`browser-compatibility/webkit-result.json`; Chromium projects in that config
+are excluded. Compatibility runs write evidence only when the release harness
+supplies an evidence path.
 
 The GitHub Actions release jobs install the WebKit browser and its Linux
 runtime dependencies with Playwright's `--with-deps` option before running any

@@ -57,6 +57,22 @@ function collectWebKitCaseIdentities(
   return identities.sort();
 }
 
+function collectProjectNames(suites: PlaywrightListSuite[]): string[] {
+  const projectNames: string[] = [];
+
+  function visit(currentSuites: PlaywrightListSuite[]): void {
+    for (const suite of currentSuites) {
+      for (const spec of suite.specs ?? []) {
+        for (const test of spec.tests) projectNames.push(test.projectName);
+      }
+      visit(suite.suites ?? []);
+    }
+  }
+
+  visit(suites);
+  return [...new Set(projectNames)].sort();
+}
+
 const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
 const discoveryJson = execFileSync(
   "pnpm",
@@ -208,6 +224,54 @@ assert.equal(
 );
 assert.doesNotThrow(() =>
   assertWebKitCompatibilityCaseIdentityContract(compatibilityIdentities),
+);
+
+const selectedCompatibilityJson = execFileSync(
+  "pnpm",
+  [
+    "--filter",
+    "@workspace/run-calculator",
+    "exec",
+    "playwright",
+    "test",
+    "--config",
+    "playwright.compatibility.config.ts",
+    "--list",
+    "--reporter=json",
+    "--project=phone-webkit",
+    "--project=tablet-webkit",
+  ],
+  {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PLAYWRIGHT_BASE_URL: "http://127.0.0.1:18082",
+      PLAYWRIGHT_API_BASE_URL: "http://127.0.0.1:18081",
+    },
+    maxBuffer: 30 * 1024 * 1024,
+  },
+);
+const selectedCompatibilityReport = JSON.parse(selectedCompatibilityJson) as {
+  errors: Array<{ message: string }>;
+  suites: PlaywrightListSuite[];
+};
+assert.deepEqual(
+  selectedCompatibilityReport.errors,
+  [],
+  "the selected WebKit compatibility projects must discover without errors",
+);
+assert.deepEqual(
+  collectProjectNames(selectedCompatibilityReport.suites),
+  ["phone-webkit", "tablet-webkit"],
+  "the WebKit release invocation must exclude all Chromium compatibility projects",
+);
+assertWebKitCompatibilityCaseIdentityContract(
+  collectWebKitCaseIdentities(
+    selectedCompatibilityReport.suites,
+    new Set(["phone-webkit", "tablet-webkit"]),
+    true,
+  ),
 );
 
 const addedCompatibilityIdentity =

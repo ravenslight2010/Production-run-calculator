@@ -15,6 +15,19 @@ selectors that did not match the rendered UI contract.
 `data-testid`; use exact text only when the target element's full text is known to
 contain no nested controls.
 
+For responsive browser journeys that navigate through a menu before using a
+native `<details>` disclosure, wait for the destination surface to become
+visible and assert that the disclosure is open before checking its contents.
+
+**Why:** A tablet WebKit report journey intermittently reached the disclosure
+before the Summary surface had settled; checking the destination and open state
+stabilized the user interaction without changing the UI or adding retries.
+
+**How to apply:** After menu navigation, wait on a visible heading or stable
+surface selector, activate the disclosure normally, then assert its `open`
+state before interacting with nested controls. Avoid fixed sleeps or forcing
+the disclosure open through script evaluation.
+
 For setup recipe picker coverage, wait for the canonical master-data bootstrap
 before opening the editor. Treat the dough, sauce, and mix controls as custom
 dropdowns, but use `selectOption` and option-level assertions for the cheese

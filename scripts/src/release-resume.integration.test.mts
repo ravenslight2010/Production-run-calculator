@@ -11,6 +11,7 @@ import {
 } from "./release-check.mts";
 import { computeSourceLibraryEvidenceId } from "./verify-source-library-reconciliation.mts";
 import { FULL_BROWSER_EXPECTED_CASES } from "./full-browser-case-contract.mts";
+import { WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES } from "./webkit-case-contract.mts";
 import {
   TYPESCRIPT_7_RESOURCE_BUDGETS,
   typescript7MeasuredCheckNames,
@@ -2067,6 +2068,27 @@ async function runFullModeScenario(): Promise<void> {
     `| \`e2e/example.spec.ts\` | ${FULL_BROWSER_EXPECTED_CASES} | ${FULL_BROWSER_EXPECTED_CASES} | ${FULL_BROWSER_EXPECTED_CASES} | 0 | 0 | 0 | 1ms |`,
     "",
   ].join("\n");
+  const responsiveWebkitCases =
+    WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES.map((identity) => {
+      const [file = "", projectAndTitle = ""] = identity.split(" :: ");
+      const [projectName = "", ...titleParts] =
+        projectAndTitle.split(" › ");
+      return {
+        file,
+        projectName,
+        title: titleParts.join(" › "),
+        status: "passed",
+        durationMs: 1,
+      };
+    });
+  const responsiveWebkitEvidence = `${JSON.stringify({
+    schemaVersion: 1,
+    browser: "webkit",
+    revision,
+    environment: "disposable full-mode resume fixture",
+    result: "passed",
+    cases: responsiveWebkitCases,
+  })}\n`;
   const fullBrowserScript = [
     "const fs = require('node:fs');",
     "const marker = process.env.RELEASE_RESUME_MARKER;",
@@ -2112,6 +2134,7 @@ async function runFullModeScenario(): Promise<void> {
       "clean-start/startup-web.log",
       "clean-start/startup-mockup.log",
       "browser-full/FINAL-REPORT.md",
+      "browser-compatibility/webkit-result.json",
     ]) {
       const path = join(evidenceDir, file);
       await mkdir(join(path, ".."), { recursive: true });
@@ -2119,6 +2142,8 @@ async function runFullModeScenario(): Promise<void> {
         path,
         file === "browser-full/FINAL-REPORT.md"
           ? browserReport
+          : file === "browser-compatibility/webkit-result.json"
+            ? responsiveWebkitEvidence
           : "fixture evidence\n",
         { encoding: "utf8" },
       );

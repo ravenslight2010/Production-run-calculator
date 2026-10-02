@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       run_full:
-        description: Run the full browser release suite and retain full evidence
+        description: Run the full browser and phone/tablet WebKit release journeys and retain full evidence
         required: true
         default: false
         type: boolean

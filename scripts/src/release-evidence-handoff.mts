@@ -6,7 +6,9 @@ import {
   READINESS_EVIDENCE_PATH,
   releaseGateLabelsForMode,
   validateReleaseReport,
+  validateWebKitBrowserEvidence,
 } from "./release-check.mts";
+import { WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES } from "./webkit-case-contract.mts";
 
 export type HandoffMode = "standard" | "full";
 export type EvidenceStatus =
@@ -52,6 +54,7 @@ export type ReleaseEvidenceHandoff = {
   checkpoint: ParsedDocument;
   browserEvidence: ParsedDocument;
   webkitEvidence: ParsedDocument;
+  webkitCompatibilityEvidence: ParsedDocument;
   productionBinding: "MATCHING METADATA" | "GAP";
   supportingFiles: SupportingFile[];
   retainedEvaluationPaths: string[];
@@ -228,11 +231,11 @@ function parseDocument(
 
 function gateStatus(
   content: string | undefined,
-  kind: "browser" | "webkit",
+  kind: "browser" | "webkit" | "webkit-compatibility",
   requestedRevision: string,
 ): { status: EvidenceStatus; reason?: string } {
   if (!content) return { status: "MISSING", reason: "file is missing or unreadable" };
-  if (kind === "webkit") {
+  if (kind === "webkit" || kind === "webkit-compatibility") {
     let result: Record<string, unknown>;
     try {
       result = JSON.parse(content) as Record<string, unknown>;
@@ -248,8 +251,24 @@ function gateStatus(
     if (result.result !== "passed") {
       return {
         status: "FAIL",
-        reason: `WebKit result is ${result.result === "failed" ? "failed" : "not passing"}`,
+        reason: `${kind === "webkit-compatibility" ? "Responsive WebKit" : "WebKit"} result is ${result.result === "failed" ? "failed" : "not passing"}`,
       };
+    }
+    if (kind === "webkit-compatibility") {
+      try {
+        validateWebKitBrowserEvidence(Buffer.from(content), {
+          currentRevision: requestedRevision,
+          requirePass: true,
+          expectedCaseIdentities:
+            WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES,
+        });
+      } catch {
+        return {
+          status: "INCOMPLETE",
+          reason:
+            "responsive WebKit evidence does not match the reviewed project inventory",
+        };
+      }
     }
     return { status: "PASS" };
   }
@@ -359,7 +378,10 @@ function markdownForHandoff(
     `- Checkpoint: **${handoff.checkpoint.status}** — ${evidenceLink(handoff.checkpoint.path)}${handoff.checkpoint.reason ? ` (${handoff.checkpoint.reason})` : ""}`,
     `- WebKit smoke: **${handoff.webkitEvidence.status}** — ${evidenceLink(handoff.webkitEvidence.path)}${handoff.webkitEvidence.reason ? ` (${handoff.webkitEvidence.reason})` : ""}`,
     ...(handoff.mode === "full"
-      ? [`- Full browser contract: **${handoff.browserEvidence.status}** — ${evidenceLink(handoff.browserEvidence.path)}${handoff.browserEvidence.reason ? ` (${handoff.browserEvidence.reason})` : ""}`]
+      ? [
+          `- Responsive WebKit compatibility: **${handoff.webkitCompatibilityEvidence.status}** — ${evidenceLink(handoff.webkitCompatibilityEvidence.path)}${handoff.webkitCompatibilityEvidence.reason ? ` (${handoff.webkitCompatibilityEvidence.reason})` : ""}`,
+          `- Full browser contract: **${handoff.browserEvidence.status}** — ${evidenceLink(handoff.browserEvidence.path)}${handoff.browserEvidence.reason ? ` (${handoff.browserEvidence.reason})` : ""}`,
+        ]
       : []),
     "",
     `Report generated: ${handoff.report.generated ?? "not recorded"}`,
@@ -470,12 +492,21 @@ export async function buildReleaseEvidenceHandoff(options: {
   const checkpointPath = "release-check-checkpoint.md";
   const browserPath = "browser-full/FINAL-REPORT.md";
   const webkitPath = "browser-smoke/webkit-result.json";
-  const [reportContent, checkpointContent, browserContent, webkitContent] =
-    await Promise.all([
+  const responsiveWebkitPath = "browser-compatibility/webkit-result.json";
+  const [
+    reportContent,
+    checkpointContent,
+    browserContent,
+    webkitContent,
+    responsiveWebkitContent,
+  ] = await Promise.all([
       readEvidenceFile(evidenceRoot, reportPath),
       readEvidenceFile(evidenceRoot, checkpointPath),
       mode === "full" ? readEvidenceFile(evidenceRoot, browserPath) : undefined,
       readEvidenceFile(evidenceRoot, webkitPath),
+      mode === "full"
+        ? readEvidenceFile(evidenceRoot, responsiveWebkitPath)
+        : undefined,
     ]);
 
   const report = parseDocument(reportPath, reportContent, mode, revision, "report");
@@ -504,6 +535,17 @@ export async function buildReleaseEvidenceHandoff(options: {
   browserEvidence.reason = gateStatus(browserContent, "browser", revision).reason;
   webkitEvidence.status = gateStatus(webkitContent, "webkit", revision).status;
   webkitEvidence.reason = gateStatus(webkitContent, "webkit", revision).reason;
+  const responsiveWebkitStatus = gateStatus(
+    responsiveWebkitContent,
+    "webkit-compatibility",
+    revision,
+  );
+  const webkitCompatibilityEvidence: ParsedDocument = {
+    path: responsiveWebkitPath,
+    gates: [],
+    status: responsiveWebkitStatus.status,
+    reason: responsiveWebkitStatus.reason,
+  };
 
   const checkpointSupersedesReport = checkpointIsNewer(
     checkpoint,
@@ -528,7 +570,12 @@ export async function buildReleaseEvidenceHandoff(options: {
     "source-library-reconciliation.json",
     "typescript-7-comparison.json",
   ];
-  if (mode === "full") requiredPaths.push("browser-full/FINAL-REPORT.md");
+  if (mode === "full") {
+    requiredPaths.push(
+      "browser-full/FINAL-REPORT.md",
+      responsiveWebkitPath,
+    );
+  }
   const optionalPaths = [
     "release-check.log",
     "clean-start/preview-home.png",
@@ -560,6 +607,12 @@ export async function buildReleaseEvidenceHandoff(options: {
     && browserEvidence.status !== "PASS"
   ) {
     testEvidenceStatus = browserEvidence.status;
+  } else if (
+    report.status === "PASS"
+    && mode === "full"
+    && webkitCompatibilityEvidence.status !== "PASS"
+  ) {
+    testEvidenceStatus = webkitCompatibilityEvidence.status;
   } else if (report.status === "PASS" && (supportMissing || missing.length > 0)) {
     testEvidenceStatus = "INCOMPLETE";
   }
@@ -587,6 +640,7 @@ export async function buildReleaseEvidenceHandoff(options: {
     checkpoint,
     browserEvidence,
     webkitEvidence,
+    webkitCompatibilityEvidence,
     productionBinding,
     supportingFiles,
     retainedEvaluationPaths,

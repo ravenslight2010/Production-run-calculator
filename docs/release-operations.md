@@ -84,10 +84,14 @@ To run the full mode locally:
 pnpm run release:check:full
 ```
 
-The WebKit config retains `browser-smoke/webkit-result.json`; the full browser
-config retains `browser-full/FINAL-REPORT.md` automatically. These are separate
-evidence paths: the bounded smoke and accessibility gates cannot overwrite the
-full-suite report.
+The standard WebKit config retains `browser-smoke/webkit-result.json`. Full
+mode additionally runs only the `phone-webkit` and `tablet-webkit` projects
+from the compatibility config and retains their revision-bound results in
+`browser-compatibility/webkit-result.json`; its case identities are checked
+against the reviewed inventory. The full browser config retains
+`browser-full/FINAL-REPORT.md` automatically. These are separate evidence
+paths: bounded smoke, compatibility, and accessibility gates cannot overwrite
+the full-suite report.
 It records the run revision, total/complete/pass/skip/fail/not-run counts,
 wall-clock duration, and a sorted per-file duration table. The report is
 generated from Playwright's completed test results; a `GO` report requires

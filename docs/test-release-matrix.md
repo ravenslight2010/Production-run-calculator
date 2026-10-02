@@ -71,11 +71,12 @@ test gates are `run-calculator`, `production-rules`, `inventory-math`,
 - Main, accessibility, visual, phone, performance, department, sync, and PWA
   projects use separate configs where their setup boundaries differ. This
   prevents a destructive live-day reset from leaking into isolated checks.
-- The minimum cross-browser release contract is Chromium smoke plus the
-  single-project WebKit smoke. The compatibility lane's WebKit projects cover
-  authentication, current-run lifecycle, and manager report preview; the
-  dedicated WebKit smoke additionally owns failed-pull/reconnect recovery. It
-  does not duplicate the full Chromium inventory.
+- The standard cross-browser release contract is Chromium smoke plus the
+  single-project WebKit smoke. Full release additionally runs the compatibility
+  lane's phone and tablet WebKit projects for authentication, current-run
+  lifecycle, and manager report preview. That WebKit-only invocation explicitly
+  selects those two projects and excludes compatibility Chromium projects; the
+  dedicated WebKit smoke additionally owns failed-pull/reconnect recovery.
 - The WebKit fixture uses unique accounts, a disposable database guard, one
   worker, no inherited destructive global setup, and teardown cleanup. Its
   `browser-smoke/webkit-result.json` artifact records revision, environment,
@@ -87,8 +88,11 @@ test gates are `run-calculator`, `production-rules`, `inventory-math`,
 ## Evidence and failure classification
 
 The release harness retains the allowlisted clean-start evidence and report.
-The WebKit lane additionally retains its own revision-bound JSON evidence; it
-must never write the full-browser report path.
+The standard WebKit lane retains revision-bound JSON evidence in
+`browser-smoke/webkit-result.json`. Full release also retains the phone/tablet
+WebKit journeys in `browser-compatibility/webkit-result.json`, validated against
+their exact project and case identities. Neither result can overwrite the
+full-browser report path.
 Visual failures retain expected/actual/diff artifacts in Playwright output;
 baseline updates must use an explicit local `--update-snapshots` invocation
 and be reviewed, never enabled in CI. Accessibility output identifies the

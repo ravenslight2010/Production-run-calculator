@@ -16,6 +16,9 @@ import {
   RELEASE_CHECKPOINT_REPORT,
   RELEASE_CHECK_API_CONCURRENCY,
   RELEASE_CHECK_DEFAULT_CONCURRENCY,
+  FULL_RESPONSIVE_WEBKIT_GATE_LABEL,
+  FULL_RESPONSIVE_WEBKIT_GATE_STEP,
+  FULL_RESPONSIVE_WEBKIT_TIMEOUT_MS,
   IMPORT_CORPUS_EVALUATION_EVIDENCE,
   SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
   TYPESCRIPT_7_COMPARISON_EVIDENCE,
@@ -72,6 +75,7 @@ import {
   validateReadinessEvidence,
 } from "./capture-readiness-recovery.mts";
 import { FULL_BROWSER_EXPECTED_CASES } from "./full-browser-case-contract.mts";
+import { WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES } from "./webkit-case-contract.mts";
 
 const sourceReportSha256 = createHash("sha256")
   .update(await readFile(new URL(`../../${DEFAULT_REPORT}`, import.meta.url)))
@@ -324,6 +328,29 @@ async function fixture(
                 durationMs: 100,
               }],
             })}\n`
+          : file === "browser-compatibility/webkit-result.json"
+            ? `${JSON.stringify({
+                schemaVersion: 1,
+                browser: "webkit",
+                revision: "current-revision",
+                environment: "disposable release test",
+                result: "passed",
+                cases: WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES.map(
+                  (identity) => {
+                    const [caseFile = "", projectAndTitle = ""] =
+                      identity.split(" :: ");
+                    const [projectName = "", ...titleParts] =
+                      projectAndTitle.split(" › ");
+                    return {
+                      file: caseFile,
+                      projectName,
+                      title: titleParts.join(" › "),
+                      status: "passed",
+                      durationMs: 100,
+                    };
+                  },
+                ),
+              })}\n`
         : file === "report-key-rotation-preflight.json"
           ? `${JSON.stringify({
               verifier: "report-key-rotation-preflight",
@@ -903,6 +930,45 @@ async function run(): Promise<void> {
     "standard release checks must include the bounded WebKit browser smoke",
   );
   assert.equal(
+    releaseGateLabelsForMode("standard").includes(
+      FULL_RESPONSIVE_WEBKIT_GATE_LABEL,
+    ),
+    false,
+    "standard release checks must not add the full-only responsive WebKit gate",
+  );
+  assert.equal(
+    releaseGateLabelsForMode("full").includes(
+      FULL_RESPONSIVE_WEBKIT_GATE_LABEL,
+    ),
+    true,
+    "full release checks must include the phone/tablet WebKit gate",
+  );
+  assert.equal(
+    FULL_RESPONSIVE_WEBKIT_GATE_STEP.timeoutMs,
+    FULL_RESPONSIVE_WEBKIT_TIMEOUT_MS,
+    "responsive WebKit must have a fixed outer gate timeout",
+  );
+  assert.equal(
+    FULL_RESPONSIVE_WEBKIT_TIMEOUT_MS,
+    20 * 60_000,
+    "the full-only responsive WebKit gate timeout must remain fixed at 20 minutes",
+  );
+  assert.deepEqual(
+    FULL_RESPONSIVE_WEBKIT_GATE_STEP.args.slice(1),
+    [
+      "--playwright-config=playwright.compatibility.config.ts",
+      "--project=phone-webkit",
+      "--project=tablet-webkit",
+    ],
+    "the full compatibility gate must select only the phone and tablet WebKit projects",
+  );
+  assert.ok(
+    FULL_RESPONSIVE_WEBKIT_GATE_STEP.env?.PLAYWRIGHT_RELEASE_SMOKE_EVIDENCE_PATH?.endsWith(
+      "/browser-compatibility/webkit-result.json",
+    ),
+    "responsive WebKit must retain a separate evidence file",
+  );
+  assert.equal(
     releaseGateLabelsForMode("standard").filter(
       (label) => label === "WebKit identity contracts",
     ).length,
@@ -921,6 +987,12 @@ async function run(): Promise<void> {
   assert.ok(
     RELEASE_EVIDENCE_ALLOWLIST.includes("browser-smoke/webkit-result.json"),
     "WebKit smoke evidence must be retained through the release allowlist",
+  );
+  assert.ok(
+    RELEASE_EVIDENCE_ALLOWLIST.includes(
+      "browser-compatibility/webkit-result.json",
+    ),
+    "responsive WebKit evidence must be retained through the release allowlist",
   );
   assert.ok(
     RELEASE_EVIDENCE_ALLOWLIST.includes("screen-off-wake/FINAL-REPORT.md"),
@@ -1629,6 +1701,83 @@ async function run(): Promise<void> {
       ),
     /revision is stale/,
     "stale WebKit evidence must not be accepted",
+  );
+  const responsiveWebkitCases =
+    WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES.map((identity) => {
+      const [file = "", projectAndTitle = ""] = identity.split(" :: ");
+      const [projectName = "", ...titleParts] =
+        projectAndTitle.split(" › ");
+      return {
+        file,
+        projectName,
+        title: titleParts.join(" › "),
+        status: "passed",
+        durationMs: 100,
+      };
+    });
+  const responsiveWebkitEvidence = {
+    schemaVersion: 1,
+    browser: "webkit",
+    revision: "current-revision",
+    environment: "disposable release test",
+    result: "passed",
+    cases: responsiveWebkitCases,
+  };
+  assert.doesNotThrow(() =>
+    validateWebKitBrowserEvidence(
+      Buffer.from(JSON.stringify(responsiveWebkitEvidence)),
+      {
+        currentRevision: "current-revision",
+        requirePass: true,
+        expectedCaseIdentities:
+          WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES,
+      },
+    ),
+    "revision-bound evidence must match every reviewed phone/tablet journey",
+  );
+  assert.throws(
+    () =>
+      validateWebKitBrowserEvidence(
+        Buffer.from(
+          JSON.stringify({
+            ...responsiveWebkitEvidence,
+            cases: responsiveWebkitCases.map((testCase, index) =>
+              index === 0
+                ? { ...testCase, projectName: "phone-chromium" }
+                : testCase,
+            ),
+          }),
+        ),
+        {
+          currentRevision: "current-revision",
+          requirePass: true,
+          expectedCaseIdentities:
+            WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES,
+        },
+      ),
+    /reviewed phone\/tablet project inventory/u,
+    "Chromium cases must not satisfy the responsive WebKit evidence contract",
+  );
+  assert.throws(
+    () =>
+      validateWebKitBrowserEvidence(
+        Buffer.from(
+          JSON.stringify({
+            ...responsiveWebkitEvidence,
+            cases: responsiveWebkitCases.map((testCase, index) =>
+              index === 0 ? { ...testCase, status: "skipped" } : testCase,
+            ),
+          }),
+        ),
+        {
+          currentRevision: "current-revision",
+          requirePass: true,
+          expectedCaseIdentities:
+            WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES,
+        },
+      ),
+    /unless every phone\/tablet journey passed/u,
+    "skipped compatibility journeys must not satisfy a full release pass",
   );
   assert.doesNotThrow(() =>
     validateSourceLibraryReconciliationEvidence(

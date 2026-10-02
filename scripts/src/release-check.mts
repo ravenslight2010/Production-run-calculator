@@ -62,6 +62,7 @@ import {
 } from "./retained-evaluation-contract.mjs";
 import { validateReadinessEvidence } from "./capture-readiness-recovery.mts";
 import { FULL_BROWSER_EXPECTED_CASES } from "./full-browser-case-contract.mts";
+import { WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES } from "./webkit-case-contract.mts";
 export { TYPESCRIPT_7_SUPPORTED_RUNNERS } from "./typescript-7-native-contract.mts";
 
 export type ReleaseStep = {
@@ -273,6 +274,9 @@ export const RELEASE_CHECK_API_CONCURRENCY = 2;
 const FULL_BROWSER_TIMEOUT_MS = 90 * 60_000;
 const FULL_BROWSER_WARNING_MS = 80 * 60_000;
 const FULL_BROWSER_GATE_LABEL = "full browser E2E suite";
+export const FULL_RESPONSIVE_WEBKIT_TIMEOUT_MS = 20 * 60_000;
+export const FULL_RESPONSIVE_WEBKIT_GATE_LABEL =
+  "browser phone/tablet WebKit compatibility";
 const RELEASE_BROWSER_ENV = {
   E2E_TEST_DB: "1",
   E2E_APPROVED_DESTRUCTIVE_MODE: "1",
@@ -409,6 +413,11 @@ const webkitBrowserEvidencePath = resolve(
   rootDir,
   releaseEvidenceDir,
   "browser-smoke/webkit-result.json",
+);
+const responsiveWebKitEvidencePath = resolve(
+  rootDir,
+  releaseEvidenceDir,
+  "browser-compatibility/webkit-result.json",
 );
 export const SOURCE_LIBRARY_RECONCILIATION_EVIDENCE =
   "source-library-reconciliation.json";
@@ -876,6 +885,7 @@ export const RELEASE_EVIDENCE_ALLOWLIST = [
   "clean-start/startup-web.log",
   "clean-start/startup-mockup.log",
   "browser-full/FINAL-REPORT.md",
+  "browser-compatibility/webkit-result.json",
   "screen-off-wake/FINAL-REPORT.md",
   "browser-smoke/webkit-result.json",
   SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
@@ -1636,7 +1646,28 @@ const steps: ReleaseStep[] = [
   },
 ];
 
+export const FULL_RESPONSIVE_WEBKIT_GATE_STEP: ReleaseStep = {
+  label: FULL_RESPONSIVE_WEBKIT_GATE_LABEL,
+  command: "bash",
+  args: [
+    "scripts/src/run-isolated-browser-suite.sh",
+    "--playwright-config=playwright.compatibility.config.ts",
+    "--project=phone-webkit",
+    "--project=tablet-webkit",
+  ],
+  env: {
+    ...RELEASE_BROWSER_ENV,
+    BROWSER_TEST_INSTALL_WEBKIT: "1",
+    PLAYWRIGHT_RELEASE_SMOKE_EVIDENCE_PATH: responsiveWebKitEvidencePath,
+    RELEASE_BROWSER_ENVIRONMENT: process.env.CI ? "ci" : "development",
+  },
+  timeoutMs: FULL_RESPONSIVE_WEBKIT_TIMEOUT_MS,
+  stage: "browser-responsive-webkit",
+  concurrencyLimit: 1,
+};
+
 if (fullRun) {
+  steps.push(FULL_RESPONSIVE_WEBKIT_GATE_STEP);
   steps.push({
     label: FULL_BROWSER_GATE_LABEL,
     command: "bash",
@@ -1657,7 +1688,12 @@ if (fullRun) {
 
 export function releaseGateLabelsForMode(mode: ReleaseMode): string[] {
   const labels = steps
-    .filter((step) => mode === "full" || step.label !== FULL_BROWSER_GATE_LABEL)
+    .filter(
+      (step) =>
+        mode === "full" ||
+        (step.label !== FULL_BROWSER_GATE_LABEL &&
+          step.label !== FULL_RESPONSIVE_WEBKIT_GATE_LABEL),
+    )
     .map((step) => {
       if (
         mode === "typescript-7-promotion" &&
@@ -1678,10 +1714,19 @@ export function releaseGateLabelsForMode(mode: ReleaseMode): string[] {
   // from the command that happened to launch verification.
   if (
     mode === "full" &&
-    process.env.RELEASE_CHECK_FIXTURE_STEPS === undefined &&
-    !labels.includes(FULL_BROWSER_GATE_LABEL)
+    process.env.RELEASE_CHECK_FIXTURE_STEPS === undefined
   ) {
-    labels.push(FULL_BROWSER_GATE_LABEL);
+    if (!labels.includes(FULL_RESPONSIVE_WEBKIT_GATE_LABEL)) {
+      const fullBrowserIndex = labels.indexOf(FULL_BROWSER_GATE_LABEL);
+      if (fullBrowserIndex === -1) {
+        labels.push(FULL_RESPONSIVE_WEBKIT_GATE_LABEL);
+      } else {
+        labels.splice(fullBrowserIndex, 0, FULL_RESPONSIVE_WEBKIT_GATE_LABEL);
+      }
+    }
+    if (!labels.includes(FULL_BROWSER_GATE_LABEL)) {
+      labels.push(FULL_BROWSER_GATE_LABEL);
+    }
   }
   return labels;
 }
@@ -1778,6 +1823,12 @@ const RELEASE_STAGE_DEPENDENCIES: Readonly<Record<string, readonly string[]>> =
       "onboarding bypass guard",
     ],
     "browser-webkit": [
+      ...(sourceLibraryPreflightEnabled
+        ? [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL]
+        : []),
+      "onboarding bypass guard",
+    ],
+    "browser-responsive-webkit": [
       ...(sourceLibraryPreflightEnabled
         ? [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL]
         : []),
@@ -2092,6 +2143,9 @@ export async function verifyReleaseEvidence(
     ...(requiresFullBrowserEvidence
       ? ["browser-full/FINAL-REPORT.md" as const]
       : []),
+    ...(requiresFullBrowserEvidence
+      ? ["browser-compatibility/webkit-result.json" as const]
+      : []),
     ...(requiresWebKitEvidence
       ? ["browser-smoke/webkit-result.json" as const]
       : []),
@@ -2239,6 +2293,14 @@ export async function verifyReleaseEvidence(
     });
   }
   if (requiresFullBrowserEvidence) {
+    const responsiveWebKitEvidence = await readFile(
+      resolve(evidenceRoot, "browser-compatibility/webkit-result.json"),
+    );
+    validateWebKitBrowserEvidence(responsiveWebKitEvidence, {
+      currentRevision: revision,
+      requirePass: /^Decision:\s*GO\s*$/m.test(report),
+      expectedCaseIdentities: WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES,
+    });
     const browserReport = await readFile(
       resolve(evidenceRoot, "browser-full/FINAL-REPORT.md"),
       "utf8",
@@ -2362,7 +2424,11 @@ export function validateReportKeyRotationEvidence(
 
 export function validateWebKitBrowserEvidence(
   evidenceBytes: Uint8Array,
-  options: { currentRevision: string; requirePass?: boolean },
+  options: {
+    currentRevision: string;
+    requirePass?: boolean;
+    expectedCaseIdentities?: readonly string[];
+  },
 ): void {
   const MAX_EVIDENCE_BYTES = 64 * 1024;
   if (evidenceBytes.byteLength > MAX_EVIDENCE_BYTES) {
@@ -2429,6 +2495,7 @@ export function validateWebKitBrowserEvidence(
     "infrastructure",
     "optional-environment-gap",
   ]);
+  const discoveredIdentities: string[] = [];
   for (const testCase of record.cases) {
     if (!testCase || typeof testCase !== "object" || Array.isArray(testCase)) {
       throw new Error("WebKit browser evidence contains an invalid test case.");
@@ -2445,12 +2512,44 @@ export function validateWebKitBrowserEvidence(
       );
     }
     if (
+      options.expectedCaseIdentities !== undefined &&
+      options.requirePass === true &&
+      item.status !== "passed"
+    ) {
+      throw new Error(
+        "WebKit compatibility evidence cannot support GO unless every phone/tablet journey passed.",
+      );
+    }
+    if (options.expectedCaseIdentities !== undefined) {
+      if (typeof item.projectName !== "string" || !item.projectName.trim()) {
+        throw new Error(
+          "WebKit browser evidence is missing a project name for a compatibility case.",
+        );
+      }
+      discoveredIdentities.push(
+        `${item.file} :: ${item.projectName} › ${item.title}`,
+      );
+    }
+    if (
       item.failureClassification !== undefined &&
       (typeof item.failureClassification !== "string" ||
         !validClassifications.has(item.failureClassification))
     ) {
       throw new Error(
         "WebKit browser evidence contains an invalid failure classification.",
+      );
+    }
+  }
+  if (options.expectedCaseIdentities !== undefined) {
+    const expected = [...options.expectedCaseIdentities].sort();
+    const discovered = [...discoveredIdentities].sort();
+    if (
+      discovered.length !== expected.length ||
+      new Set(discovered).size !== discovered.length ||
+      discovered.some((identity, index) => identity !== expected[index])
+    ) {
+      throw new Error(
+        "WebKit browser evidence does not match the reviewed phone/tablet project inventory.",
       );
     }
   }
@@ -3370,6 +3469,10 @@ export function formatReleaseReport(
       "browser-smoke/webkit-result.json",
       "WebKit browser smoke evidence",
     ),
+    evidenceLink(
+      "browser-compatibility/webkit-result.json",
+      "Phone/tablet WebKit compatibility evidence",
+    ),
     evidenceLink("browser-full/FINAL-REPORT.md", "Full browser report"),
     evidenceLink(
       SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
@@ -3548,6 +3651,19 @@ async function writeReleaseReport(
   } catch {
     // Full browser evidence validation below reports a missing file when the
     // full release decision requires it.
+  }
+  try {
+    await access(
+      resolve(
+        rootDir,
+        releaseEvidenceDir,
+        "browser-compatibility/webkit-result.json",
+      ),
+    );
+    availableEvidenceFiles.add("browser-compatibility/webkit-result.json");
+  } catch {
+    // Full browser evidence validation below reports a missing compatibility
+    // result when the full release decision requires it.
   }
   try {
     await access(
@@ -4130,6 +4246,7 @@ async function main(): Promise<void> {
               step.label === SOURCE_LIBRARY_RECONCILIATION_STEP.label;
             const effectiveStep =
               step.label === FULL_BROWSER_GATE_LABEL ||
+              step.label === FULL_RESPONSIVE_WEBKIT_GATE_LABEL ||
               step.label === REPORT_KEY_ROTATION_PREFLIGHT_LABEL ||
               isSourceLibraryStep
                 ? {
@@ -4145,7 +4262,8 @@ async function main(): Promise<void> {
                       : {}),
                     env: {
                       ...step.env,
-                      ...(step.label === FULL_BROWSER_GATE_LABEL
+                      ...(step.label === FULL_BROWSER_GATE_LABEL ||
+                      step.label === FULL_RESPONSIVE_WEBKIT_GATE_LABEL
                         ? { RELEASE_REVISION: revision }
                         : step.label === REPORT_KEY_ROTATION_PREFLIGHT_LABEL
                           ? { REPORT_KEY_ROTATION_PREFLIGHT_REVISION: revision }

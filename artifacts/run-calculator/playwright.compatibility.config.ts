@@ -35,6 +35,10 @@ export default defineConfig({
   reporter: [
     ["list"],
     ["html", { outputFolder: "playwright-report/compatibility", open: "never" }],
+    [
+      "./e2e/release-browser-evidence-reporter.ts",
+      { requireConfiguredPath: true },
+    ],
   ],
   use: {
     baseURL,
