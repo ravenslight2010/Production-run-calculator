@@ -36,21 +36,108 @@ readonly DB_NAME="browser_e2e"
 stage="checking the local PostgreSQL runtime"
 pg_bin=""
 pg_data=""
+active_child_pid=""
+
+# shellcheck disable=SC2317
+stop_active_child() {
+  local signal="$1"
+  local process_group="$active_child_pid"
+  local deadline=$((SECONDS + 10))
+
+  [[ -n "$process_group" ]] || return 0
+  kill -s "$signal" -- "-$process_group" 2>/dev/null ||
+    kill -s "$signal" "$process_group" 2>/dev/null ||
+    true
+  while ps -eo sid=,stat= |
+    awk -v session="$process_group" \
+      '$1 == session && $2 !~ /^Z/ { found = 1 } END { exit !found }'; do
+    if (( SECONDS >= deadline )); then
+      kill -KILL -- "-$process_group" 2>/dev/null || true
+      break
+    fi
+    sleep 0.1
+  done
+}
+
+# shellcheck disable=SC2317
+handle_signal() {
+  local signal="$1"
+  local exit_code="$2"
+  local child_signal="$signal"
+
+  trap '' HUP INT TERM
+  if [[ -n "$active_child_pid" ]]; then
+    if [[ "$signal" != INT && "$stage" == "running the isolated browser suite" ]]; then
+      child_signal=INT
+    fi
+    stop_active_child "$child_signal"
+    wait "$active_child_pid" 2>/dev/null || true
+    active_child_pid=""
+  fi
+  exit "$exit_code"
+}
+
+run_isolated_command() {
+  local child_status
+
+  python3 -c '
+import os
+import signal
+import sys
+
+os.setsid()
+signal.signal(signal.SIGINT, signal.SIG_DFL)
+signal.signal(signal.SIGQUIT, signal.SIG_DFL)
+os.execvp(sys.argv[1], sys.argv[1:])
+' "$@" &
+  active_child_pid=$!
+  if wait "$active_child_pid"; then
+    child_status=0
+  else
+    child_status=$?
+  fi
+  active_child_pid=""
+  return "$child_status"
+}
 
 cleanup() {
   local exit_code=$?
-  trap - EXIT
+  local database_stopped=1
+  trap - EXIT HUP INT TERM
+  if [[ -n "$active_child_pid" ]]; then
+    stop_active_child TERM
+    wait "$active_child_pid" 2>/dev/null || true
+    active_child_pid=""
+  fi
   if [[ -n "$pg_data" && -n "$pg_bin" ]]; then
-    "$pg_bin/pg_ctl" -D "$pg_data" -m immediate stop >/dev/null 2>&1 || true
-    rm -rf "$pg_data"
+    if ! "$pg_bin/pg_ctl" -D "$pg_data" -m immediate -w stop >/dev/null 2>&1 &&
+      "$pg_bin/pg_ctl" -D "$pg_data" status >/dev/null 2>&1; then
+      database_stopped=0
+      printf \
+        'Could not stop the disposable PostgreSQL server; preserving its data directory at %s.\n' \
+        "$pg_data" >&2
+      (( exit_code != 0 )) || exit_code=1
+    else
+      rm -rf -- "$pg_data"
+    fi
+  fi
+  if [[ -n "$pg_data" && -e "$pg_data" ]]; then
+    database_stopped=0
   fi
   if (( exit_code != 0 )); then
     printf 'Isolated browser validation failed while %s.\n' "$stage" >&2
-    printf 'The disposable database was cleaned up; no live production records were used. Review the preceding command output, fix that stage, and retry.\n' >&2
+    if (( database_stopped )); then
+      printf 'The disposable database was cleaned up. Review the preceding command output, fix that stage, and retry.\n' >&2
+    else
+      printf 'The disposable database directory was preserved because PostgreSQL may still be using it. Review the preceding command output before retrying.\n' >&2
+    fi
   fi
   exit "$exit_code"
 }
 trap cleanup EXIT
+trap 'handle_signal HUP 129' HUP
+trap 'handle_signal INT 130' INT
+trap 'handle_signal TERM 143' TERM
 
 case "${NODE_ENV:-}:${APP_ENV:-}:${REPLIT_DEPLOYMENT:-}" in
   production:*|prod:*|*:production:*|*:prod:*|*:*:1)
@@ -106,19 +193,21 @@ fi
 
 if [[ "${BROWSER_TEST_INSTALL_WEBKIT:-0}" == "1" ]]; then
   stage="installing the WebKit browser"
-  (
-    cd artifacts/run-calculator
+  # shellcheck disable=SC2016
+  run_isolated_command bash -c \
+    'cd "$1" && shift && exec "$@"' \
+    isolated-browser-install "$PWD/artifacts/run-calculator" \
     pnpm exec playwright install webkit
-  )
 fi
 
 stage="applying the canonical database schema"
-pnpm --filter @workspace/db run push-force
+run_isolated_command pnpm --filter @workspace/db run push-force
 
 stage="running the isolated browser suite"
-(
-  cd artifacts/run-calculator
+# shellcheck disable=SC2016
+run_isolated_command bash -c \
+  'cd "$1" && shift && exec "$@"' \
+  isolated-browser-suite "$PWD/artifacts/run-calculator" \
   pnpm exec playwright test --config="$PLAYWRIGHT_CONFIG" "${playwright_args[@]}"
-)
 
 stage="finishing isolated browser validation"
