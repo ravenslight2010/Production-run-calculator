@@ -1,4 +1,5 @@
 - [Policy evidence anchors](policy-evidence-anchors.md) — operational policy prose is checked by stable regex anchors; preserve required phrases when clarifying task rules.
+- [Drizzle generator evaluation](drizzle-generator-evaluation.md) — compare SQL while ignoring run-specific snapshot IDs and timestamps; pass schema and dialect explicitly.
 - [Orval Zod declaration order](orval-zod-declaration-order.md) — generated scalar constraints must be normalized ahead of validators after Orval generation.
 - [Post-merge lockfile recovery](post-merge-setup.md) — repair stale peer-resolution entries non-frozen, prove frozen install, then rerun the strict post-merge hook.
 - [pnpm 12 lockfile provenance](pnpm12-lockfile-provenance.md) — read app dependencies from the last document; keep optional-peer normalization resolver-consistent and historical reports unchanged.
@@ -153,7 +154,6 @@
 - [Protected background work](background-db-recovery.md) + [job effects](protected-job-effects.md) — retry only safe passes; serialize commit effects and renew long leases.
 - [Revision trend attribution](revision-trend-attribution.md) — classify each historical revision from its own measurements; inherited aggregate failures poison later trend samples.
 - [GitHub Actions evidence extraction](github-actions-evidence-extraction.md) — shared handoffs must retain exact CI/task-run reports with full run and revision identity, not summaries alone.
-- [Declaration compatibility dependencies](declaration-compatibility-dependencies.md) — mirror package-local links, resolve direct imports, then ignore unrelated dependency-library diagnostics.
-- [API route typecheck isolation](api-route-typecheck-isolation.md) — focused route diagnostics use last-successful API Zod declarations; the full package check remains authoritative.
+- [Declaration types](declaration-compatibility-dependencies.md) + [API route typecheck](api-route-typecheck-isolation.md) — mirror package links and use last-successful API declarations; ignore unrelated dependency errors.
 - [Secret refresh for shell operations](secret-refresh-shell.md) — newly confirmed workspace secrets may be absent from shell commands until a relevant workflow refreshes the environment.
 - [Replit config edits](replit-config-validator.md) — stage a full `.replit` candidate and replace it with `verifyAndReplaceDotReplit`; direct edits are blocked.
