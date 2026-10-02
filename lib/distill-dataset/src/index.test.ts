@@ -4,6 +4,7 @@ import {
   assignBrandPartitions,
   assessTrainSafety,
   canonicalJson,
+  createApplyLogCandidate,
   jaccard,
   hashCriticalGoldEvidence,
   hashHumanApplyRecord,
@@ -90,6 +91,64 @@ function applyCandidate(overrides: Record<string, unknown> = {}) {
 }
 
 describe("verified candidate handling", () => {
+  it("creates a verified source-bound candidate only from an authorized completed live Apply", () => {
+    const record = {
+      operationId: "import_1234567890123456",
+      importType: "spec",
+      scope: "live",
+      status: "applied",
+      undoneAt: null,
+      actorCapability: "manage-profiles",
+      actorIdSha256: "b".repeat(64),
+      sourceSha256: sha256(sourceText),
+      appliedAt: "2026-10-02T12:01:00.000Z",
+      sourceText,
+      parseVersion: "41",
+      appliedValues: {
+        brandProfiles: [{ brand: "Alpine Foods", flavor: "Four Cheese", values: { pizzasPerCase: 12 } }],
+      },
+    };
+    const candidate = createApplyLogCandidate(record, {
+      systemPromptSha256: promptHash,
+      currentParseVersion: "41",
+    });
+    expect(candidate?.sourceText).toBe(sourceText);
+    expect(candidate?.humanApply?.appliedValues).toEqual(record.appliedValues);
+    expect(candidate?.humanApply?.sourceSha256).toBe(sha256(sourceText));
+    expect(candidate && verifyCandidate(candidate, {
+      systemPromptSha256: promptHash,
+      currentParseVersion: "41",
+    }).state).toBe("verified");
+  });
+
+  it.each([
+    ["unauthorized capability", { actorCapability: "manage-inventory" }],
+    ["missing source", { sourceText: null }],
+    ["undone", { status: "undone", undoneAt: "2026-10-02T12:02:00.000Z" }],
+    ["pending", { status: "applying" }],
+  ])("rejects Apply export record with %s", (_label, overrides) => {
+    const record = {
+      operationId: "import_1234567890123456",
+      importType: "spec",
+      scope: "live",
+      status: "applied",
+      undoneAt: null,
+      actorCapability: "manage-profiles",
+      actorIdSha256: "b".repeat(64),
+      appliedAt: "2026-10-02T12:01:00.000Z",
+      sourceText,
+      parseVersion: "41",
+      appliedValues: {
+        brandProfiles: [{ brand: "Alpine Foods", flavor: "Four Cheese" }],
+      },
+      ...overrides,
+    };
+    expect(createApplyLogCandidate(record, {
+      systemPromptSha256: promptHash,
+      currentParseVersion: "41",
+    })).toBeNull();
+  });
+
   it("accepts exact deterministic agreement backed by independent source labels", () => {
     const result = verifyCandidate(corpusCandidate(), {
       systemPromptSha256: promptHash,

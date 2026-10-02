@@ -16,6 +16,7 @@ export const importOperationsTable = pgTable(
     status: text("status").notNull().default("applying"),
     beforeSnapshot: jsonb("before_snapshot").notNull().default({}),
     afterSnapshot: jsonb("after_snapshot").notNull().default({}),
+    distillEvidence: jsonb("distill_evidence").notNull().default({}).$type<Record<string, unknown>>(),
     affectedEntities: jsonb("affected_entities").notNull().default({}),
     result: jsonb("result").notNull().default({}),
     undoneAt: timestamp("undone_at", { withTimezone: true }),

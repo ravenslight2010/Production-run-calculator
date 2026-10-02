@@ -77,6 +77,7 @@ import {
   type ImportMergeAlias,
   type ImportMergeAliasMap,
   resolveImportName,
+  SPEC_IMPORT_PARSE_VERSION,
 } from "@workspace/spec-import";
 import {
   buildImportReview,
@@ -232,6 +233,8 @@ export type SpecImportPrepared = {
    * re-running the AI (whose read of the same sheet can drift between calls).
    */
   sourceHash?: string;
+  /** Exact bounded source text used by this review, retained only on Apply. */
+  sourceEvidence?: { sourceText: string; parseVersion: string };
   /**
    * Previously learned "use existing recipe" picks (sheet blend/mix name →
    * existing saved recipe name, lower-cased key). The review dialog uses these
@@ -1463,7 +1466,38 @@ async function sha256Hex(bytes: ArrayBuffer | Uint8Array): Promise<string> {
  * cross-linked names (prod evidence: Basha's Ultra Thin 5 Cheese mix saved as
  * "Lowe's/Hannaford 5Cheese Mix"); those parses must not be reused.
  */
-export const SPEC_PARSE_VERSION = "41";
+export const SPEC_PARSE_VERSION = SPEC_IMPORT_PARSE_VERSION;
+
+const MAX_APPLY_SOURCE_EVIDENCE_CHARS = 100_000;
+const MAX_APPLY_SOURCE_EVIDENCE_BYTES = 100 * 1024;
+
+function fitsApplySourceEvidenceLimit(sourceText: string): boolean {
+  return sourceText.length <= MAX_APPLY_SOURCE_EVIDENCE_CHARS &&
+    new TextEncoder().encode(sourceText).byteLength <= MAX_APPLY_SOURCE_EVIDENCE_BYTES;
+}
+
+function sourceEvidenceFromGrids(grids: SheetGrid[]): { sourceText: string; parseVersion: string } | undefined {
+  if (
+    grids.length > 24 ||
+    grids.some((grid) => grid.rows.length > 1000) ||
+    findTruncatedCells(grids).length > 0 ||
+    findOverflowColumnRows(grids).length > 0
+  ) return undefined;
+  const { chunks, droppedRows } = splitGridsForPrompt(grids);
+  if (!chunks.length || droppedRows > 0) return undefined;
+  const sourceText = chunks.map((chunk) => gridsToPromptText(chunk)).join("\n\n");
+  if (!sourceText.trim() || !fitsApplySourceEvidenceLimit(sourceText)) return undefined;
+  return { sourceText, parseVersion: SPEC_PARSE_VERSION };
+}
+
+function combineSourceEvidence(
+  parts: ReadonlyArray<{ sourceText: string; parseVersion: string } | undefined>,
+): { sourceText: string; parseVersion: string } | undefined {
+  if (!parts.length || parts.some((part) => !part || part.parseVersion !== SPEC_PARSE_VERSION)) return undefined;
+  const sourceText = parts.map((part) => part!.sourceText).join("\n\n");
+  if (!fitsApplySourceEvidenceLimit(sourceText)) return undefined;
+  return { sourceText, parseVersion: SPEC_PARSE_VERSION };
+}
 
 /**
  * Content fingerprint for an import's uploaded file bytes: the per-file
@@ -1858,6 +1892,7 @@ export async function prepareSpecImport(
   // table) even when reusing a cached AI parse. Both are cheap (no AI calls)
   // and must reflect the raw workbook content, not the possibly-stale snapshot.
   const grids = await readWorkbookGrids(data);
+  const sourceEvidence = sourceEvidenceFromGrids(grids);
   const doughCustomerAssignments = parseDoughCustomerAssignmentsFromGrids(grids);
   const doughVariantsFromTable = parseDoughVariantTableFromGrids(grids);
   if (snapshot) {
@@ -1873,6 +1908,7 @@ export async function prepareSpecImport(
     const newMixIngredients = await computeNewMixIngredients(reused.parsed);
     return {
       ...reused,
+      ...(sourceEvidence ? { sourceEvidence } : {}),
       ...(newMixIngredients.length > 0 ? { newMixIngredients } : {}),
       ...(doughCustomerAssignments.length > 0 ? { doughCustomerAssignments } : {}),
       ...(doughVariantsFromTable.length > 0 ? { doughVariantsFromTable } : {}),
@@ -1958,6 +1994,7 @@ export async function prepareSpecImport(
       ...buildAliasLinkSuggestions(aliases),
     },
     ...(sourceHash ? { sourceHash } : {}),
+    ...(sourceEvidence ? { sourceEvidence } : {}),
     ...(aiFallbackGrids ? { aiFallbackGrids } : {}),
     ...(rawParsed.unresolved?.length ? { unresolved: rawParsed.unresolved } : {}),
     ...(note ? { note } : {}),
@@ -2025,13 +2062,23 @@ export async function prepareSpecImportMulti(
   const { sourceHash, snapshot } = await findReusableParse(names ?? [], buffers);
   if (snapshot) {
     onProgress?.(buffers.length, buffers.length);
-    return buildReusedPrepared(
+    const sourceEvidenceParts: Array<{ sourceText: string; parseVersion: string } | undefined> = [];
+    for (let i = 0; i < buffers.length; i++) {
+      sourceEvidenceParts.push(sourceEvidenceFromGrids(await readWorkbookGrids(buffers[i])));
+      buffers[i] = new ArrayBuffer(0);
+    }
+    const reused = await buildReusedPrepared(
       snapshot.data,
       known,
       aliases,
       sourceHash,
       await ingredientMergeAliasesPromise,
     );
+    const sourceEvidence = combineSourceEvidence(sourceEvidenceParts);
+    return {
+      ...reused,
+      ...(sourceEvidence ? { sourceEvidence } : {}),
+    };
   }
 
   const parsedList: ParsedSpecImport[] = [];
@@ -2047,6 +2094,7 @@ export async function prepareSpecImportMulti(
   const allOverflow: OverflowColumnRow[] = [];
   const allUnresolved: SpecImportUnresolved[] = [];
   const allFallbackGrids: SheetGrid[] = [];
+  const sourceEvidenceParts: Array<{ sourceText: string; parseVersion: string } | undefined> = [];
   // Collected deterministic customer assignments from every file's header
   // section (merged across files — a multi-workbook dough import may split
   // the assignment list across sheets).
@@ -2067,6 +2115,7 @@ export async function prepareSpecImportMulti(
       // tab long enough for the browser to kill the page mid-import.
       await new Promise((r) => setTimeout(r, 0));
       const grids = await readWorkbookGrids(buffers[i]);
+      sourceEvidenceParts.push(sourceEvidenceFromGrids(grids));
       // Deterministic customer-section parse — must happen BEFORE the buffer is
       // freed in the finally block below.
       for (const a of parseDoughCustomerAssignmentsFromGrids(grids)) {
@@ -2224,6 +2273,7 @@ export async function prepareSpecImportMulti(
   // Detect new ingredient rows on existing mixes — best-effort, after all
   // other work so it doesn't slow the AI parse path.
   const newMixIngredients = await computeNewMixIngredients(parsed);
+  const sourceEvidence = totalDropped > 0 ? undefined : combineSourceEvidence(sourceEvidenceParts);
 
   return {
     parsed,
@@ -2241,6 +2291,7 @@ export async function prepareSpecImportMulti(
       ...buildAliasLinkSuggestions(aliases),
     },
     ...(sourceHash ? { sourceHash } : {}),
+    ...(sourceEvidence ? { sourceEvidence } : {}),
     ...(note ? { note } : {}),
     ...(profilesRemovedFromWorkbook.length > 0 ? { profilesRemovedFromWorkbook } : {}),
     ...(newMixIngredients.length > 0 ? { newMixIngredients } : {}),
@@ -2938,6 +2989,7 @@ export async function commitSpecImport(
       sourceKey: deriveSourceKey(prepared.sourceNames ?? []),
       sourceLabel: (prepared.sourceNames ?? []).join(", ") || "Spec sheet",
       changes,
+      ...(prepared.sourceEvidence ? { sourceEvidence: prepared.sourceEvidence } : {}),
     });
     resultHash = committed.resultHash;
     // The first pass was a side-effect-free projection. Adopt the exact same

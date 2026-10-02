@@ -6,6 +6,22 @@
  * OpenAPI spec version: 0.1.0
  */
 /**
+ * Exact bounded source text retained privately with a live spec Apply.
+ */
+export type ImportOperationApplyInputSourceEvidence = {
+  /**
+     * @minLength 1
+     * @maxLength 100000
+     */
+  sourceText: string;
+  /**
+     * @minLength 1
+     * @maxLength 24
+     */
+  parseVersion: string;
+};
+
+/**
  * Reviewed entity batches keyed by supported master-data domain.
  */
 export type ImportOperationApplyInputChanges = { [key: string]: unknown };
@@ -30,8 +46,59 @@ export interface ImportOperationApplyInput {
      * @pattern ^[a-f0-9]{64}$
      */
   expectedStateHash?: string | null;
+  /** Exact bounded source text retained privately with a live spec Apply. */
+  sourceEvidence?: ImportOperationApplyInputSourceEvidence;
   /** Reviewed entity batches keyed by supported master-data domain. */
   changes: ImportOperationApplyInputChanges;
+}
+
+export type DistillationApplyEvidenceRecordImportType = typeof DistillationApplyEvidenceRecordImportType[keyof typeof DistillationApplyEvidenceRecordImportType];
+
+
+export const DistillationApplyEvidenceRecordImportType = {
+  spec: 'spec',
+} as const;
+
+export type DistillationApplyEvidenceRecordScope = typeof DistillationApplyEvidenceRecordScope[keyof typeof DistillationApplyEvidenceRecordScope];
+
+
+export const DistillationApplyEvidenceRecordScope = {
+  live: 'live',
+} as const;
+
+export type DistillationApplyEvidenceRecordStatus = typeof DistillationApplyEvidenceRecordStatus[keyof typeof DistillationApplyEvidenceRecordStatus];
+
+
+export const DistillationApplyEvidenceRecordStatus = {
+  applied: 'applied',
+} as const;
+
+export type DistillationApplyEvidenceRecordActorCapability = typeof DistillationApplyEvidenceRecordActorCapability[keyof typeof DistillationApplyEvidenceRecordActorCapability];
+
+
+export const DistillationApplyEvidenceRecordActorCapability = {
+  'manage-profiles': 'manage-profiles',
+} as const;
+
+export type DistillationApplyEvidenceRecordAppliedValues = { [key: string]: unknown };
+
+export interface DistillationApplyEvidenceRecord {
+  operationId: string;
+  importType: DistillationApplyEvidenceRecordImportType;
+  scope: DistillationApplyEvidenceRecordScope;
+  status: DistillationApplyEvidenceRecordStatus;
+  /** @nullable */
+  undoneAt: string | null;
+  actorCapability: DistillationApplyEvidenceRecordActorCapability;
+  /** @pattern ^[a-f0-9]{64}$ */
+  actorIdSha256: string;
+  /** @pattern ^[a-f0-9]{64}$ */
+  sourceSha256: string;
+  appliedAt: string;
+  /** @minLength 1 */
+  sourceText: string;
+  parseVersion: string;
+  appliedValues: DistillationApplyEvidenceRecordAppliedValues;
 }
 
 export interface ImportOperationUndoInput {
@@ -6363,4 +6430,22 @@ export type ListOperationalIntentReceipts200 = {
   cursor: number;
   hasMore: boolean;
   mutations: OperationalIntentReceipt[];
+};
+
+export type ListDistillationApplyEvidenceParams = {
+/**
+ * @minimum 1
+ * @maximum 20
+ */
+limit?: number;
+/**
+ * @maxLength 512
+ */
+cursor?: string;
+};
+
+export type ListDistillationApplyEvidence200 = {
+  records: DistillationApplyEvidenceRecord[];
+  /** @nullable */
+  nextCursor: string | null;
 };

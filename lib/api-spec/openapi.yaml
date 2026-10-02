@@ -4998,6 +4998,35 @@ paths:
         "400": { description: Invalid import operation }
         "403": { description: Missing importer capability }
         "409": { description: Stale review or duplicate operation with a different request }
+  /import-operations/distillation-evidence:
+    get:
+      operationId: listDistillationApplyEvidence
+      tags: [specImport]
+      summary: Read eligible live spec Apply evidence for private export
+      parameters:
+        - in: query
+          name: limit
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 20, default: 20 }
+        - in: query
+          name: cursor
+          required: false
+          schema: { type: string, maxLength: 512 }
+      responses:
+        "200":
+          description: Bounded page of eligible source-backed Apply records
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [records, nextCursor]
+                properties:
+                  records:
+                    type: array
+                    items: { $ref: "#/components/schemas/DistillationApplyEvidenceRecord" }
+                  nextCursor: { type: string, nullable: true }
+        "400": { description: Invalid limit or cursor }
+        "403": { description: Requires live scope and manage-profiles capability }
   /import-operations/{operationId}:
     get:
       operationId: getImportOperation
@@ -5062,10 +5091,46 @@ components:
         sourceLabel: { type: string, maxLength: 300 }
         requestHash: { type: string, nullable: true, pattern: "^[a-f0-9]{64}$" }
         expectedStateHash: { type: string, nullable: true, pattern: "^[a-f0-9]{64}$" }
+        sourceEvidence:
+          type: object
+          description: Exact bounded source text retained privately with a live spec Apply.
+          required: [sourceText, parseVersion]
+          additionalProperties: false
+          properties:
+            sourceText: { type: string, minLength: 1, maxLength: 100000 }
+            parseVersion: { type: string, minLength: 1, maxLength: 24 }
         changes:
           type: object
           description: Reviewed entity batches keyed by supported master-data domain.
           additionalProperties: true
+    DistillationApplyEvidenceRecord:
+      type: object
+      required:
+        - operationId
+        - importType
+        - scope
+        - status
+        - undoneAt
+        - actorCapability
+        - actorIdSha256
+        - sourceSha256
+        - appliedAt
+        - sourceText
+        - parseVersion
+        - appliedValues
+      properties:
+        operationId: { type: string }
+        importType: { type: string, enum: [spec] }
+        scope: { type: string, enum: [live] }
+        status: { type: string, enum: [applied] }
+        undoneAt: { type: string, nullable: true }
+        actorCapability: { type: string, enum: [manage-profiles] }
+        actorIdSha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+        sourceSha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+        appliedAt: { type: string, format: date-time }
+        sourceText: { type: string, minLength: 1 }
+        parseVersion: { type: string }
+        appliedValues: { type: object, additionalProperties: true }
     ImportOperationUndoInput:
       type: object
       properties:

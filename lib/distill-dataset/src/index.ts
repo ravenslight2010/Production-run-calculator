@@ -46,6 +46,26 @@ export type DistillCandidateInput = {
   };
 };
 
+export type ApplyLogExportRecord = {
+  operationId: string;
+  importType: string;
+  scope: string;
+  status: string;
+  undoneAt: string | null;
+  actorCapability: string;
+  actorIdSha256: string;
+  sourceSha256: string;
+  appliedAt: string;
+  sourceText: string | null;
+  parseVersion: string;
+  appliedValues: unknown;
+};
+
+export type ApplyLogExportContract = {
+  systemPromptSha256: string;
+  currentParseVersion: string;
+};
+
 export type VerifiedCandidate = {
   id: string;
   brand: string;
@@ -142,6 +162,94 @@ export function hashHumanApplyRecord(input: Omit<
     sourceSha256: input.sourceSha256,
     appliedValues: input.appliedValues,
   }));
+}
+
+/**
+ * Convert a server-authorized operation export into the supported candidate
+ * format. The caller must supply records from the live, capability-gated
+ * exporter; this function repeats the eligibility checks before any record is
+ * accepted by the dataset verifier.
+ */
+export function createApplyLogCandidate(
+  record: ApplyLogExportRecord,
+  contract: ApplyLogExportContract,
+): DistillCandidateInput | null {
+  if (
+    record.importType !== "spec" ||
+    record.scope !== "live" ||
+    record.status !== "applied" ||
+    record.undoneAt !== null ||
+    record.actorCapability !== "manage-profiles" ||
+    !/^[A-Za-z0-9_-]{16,120}$/.test(record.operationId) ||
+    !isSha256(record.actorIdSha256) ||
+    !isSha256(record.sourceSha256) ||
+    !isIsoDate(record.appliedAt) ||
+    !record.sourceText?.trim() ||
+    record.sourceText.length > 100_000 ||
+    sha256(record.sourceText) !== record.sourceSha256 ||
+    record.parseVersion !== contract.currentParseVersion ||
+    !isRecord(record.appliedValues)
+  ) return null;
+
+  const brandValues = new Map<string, string>();
+  const brandPaths: string[] = [];
+  const flavorPaths: string[] = [];
+  const namePaths: string[] = [];
+  const collectPaths = (value: unknown, path: string): void => {
+    if (Array.isArray(value)) {
+      value.forEach((child, index) => collectPaths(child, path ? `${path}.${index}` : String(index)));
+      return;
+    }
+    if (!isRecord(value)) return;
+    for (const [key, child] of Object.entries(value)) {
+      const childPath = path ? `${path}.${key}` : key;
+      if (typeof child === "string" && child.trim()) {
+        if (key === "brand") {
+          brandValues.set(child, child);
+          brandPaths.push(childPath);
+        } else if (key === "flavor") {
+          flavorPaths.push(childPath);
+        } else if (key === "name") {
+          namePaths.push(childPath);
+        }
+      }
+      collectPaths(child, childPath);
+    }
+  };
+  collectPaths(record.appliedValues, "");
+  if (brandValues.size !== 1 || brandPaths.length === 0) return null;
+  const criticalFields = [
+    brandPaths[0],
+    ...(flavorPaths.length ? [flavorPaths[0]] : namePaths.length ? [namePaths[0]] : []),
+  ];
+  if (criticalFields.length < 2) return null;
+
+  const sourceSha256 = record.sourceSha256;
+  const assistantText = canonicalJson(record.appliedValues);
+  const humanApplyWithoutHash = {
+    operationId: record.operationId,
+    scope: "live" as const,
+    status: "applied" as const,
+    actorCapability: "manage-profiles",
+    actorIdSha256: record.actorIdSha256,
+    appliedAt: new Date(record.appliedAt).toISOString(),
+    sourceSha256,
+    appliedValues: record.appliedValues,
+  };
+  return {
+    source: "applylog",
+    brand: [...brandValues.keys()][0],
+    sourceText: record.sourceText,
+    userContent: record.sourceText,
+    assistantText,
+    criticalFields,
+    parseVersion: record.parseVersion,
+    systemPromptSha256: contract.systemPromptSha256,
+    humanApply: {
+      ...humanApplyWithoutHash,
+      recordSha256: hashHumanApplyRecord(humanApplyWithoutHash),
+    },
+  };
 }
 
 function pathValue(value: unknown, dottedPath: string): unknown | typeof MISSING {

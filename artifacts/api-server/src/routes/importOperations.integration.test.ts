@@ -63,7 +63,7 @@ afterAll(async () => {
 }, 120_000);
 
 beforeEach(async () => {
-  await db.execute(sql`TRUNCATE ${tables.importOperationsTable}, ${tables.importHistoryTable}, ${tables.mixesTable}, ${tables.specImportAliasesTable}, ${tables.authSessionsTable}, ${tables.userRolesTable}, ${tables.usersTable} RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE ${tables.importOperationsTable}, ${tables.importHistoryTable}, ${tables.brandProfilesTable}, ${tables.mixesTable}, ${tables.specImportAliasesTable}, ${tables.authSessionsTable}, ${tables.userRolesTable}, ${tables.usersTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
   await db.insert(tables.usersTable).values([
     { id: "inventory", username: "inventory", passwordHash: "x" },
@@ -101,6 +101,161 @@ async function apply(operationId: string, body: Record<string, unknown>, user = 
 }
 
 describe("atomic import operations", () => {
+  it("exports only completed, live, source-backed spec Applies to a manager", async () => {
+    const sourceEvidence = {
+      sourceText: "=== SHEET: Spec ===\nBrand\tAlpine Foods\nFlavor\tFour Cheese",
+      parseVersion: "41",
+    };
+    const applied = await apply("distill-authorized-0001", {
+      importType: "spec",
+      sourceLabel: "private-source.xlsx",
+      sourceEvidence,
+      changes: {
+        brandProfiles: {
+          upsert: [{
+            key: "alpine foods__four cheese",
+            brand: "Alpine Foods",
+            flavor: "Four Cheese",
+            values: { pizzasPerCase: 12 },
+            crustValues: {},
+            updatedAtMs: 1,
+          }],
+        },
+      },
+    });
+    expect(applied.status).toBe(200);
+    const before = (await db.select().from(tables.importOperationsTable))
+      .find((row) => row.id === "distill-authorized-0001");
+    expect(before?.status).toBe("applied");
+
+    const response = await fetch(`${baseUrl}/api/import-operations/distillation-evidence`, {
+      headers: headers(),
+    });
+    expect(response.status).toBe(200);
+    const page = await response.json() as {
+      records: Array<Record<string, unknown>>;
+      nextCursor: string | null;
+    };
+    expect(page.records).toHaveLength(1);
+    expect(page.records[0]).toMatchObject({
+      operationId: "distill-authorized-0001",
+      scope: "live",
+      status: "applied",
+      actorCapability: "manage-profiles",
+      sourceText: sourceEvidence.sourceText,
+      sourceSha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      parseVersion: "41",
+    });
+    expect(page.records[0]).not.toHaveProperty("actorId");
+    expect(page.records[0]).not.toHaveProperty("sourceLabel");
+    const after = (await db.select().from(tables.importOperationsTable))
+      .find((row) => row.id === "distill-authorized-0001");
+    expect(after).toEqual(before);
+  });
+
+  it("paginates source-backed evidence without repeating or skipping records", async () => {
+    for (const suffix of ["0001", "0002"]) {
+      await apply(`distill-page-${suffix}`, {
+        importType: "spec",
+        sourceLabel: `page-${suffix}.xlsx`,
+        sourceEvidence: { sourceText: `Source ${suffix}`, parseVersion: "41" },
+        changes: {
+          brandProfiles: {
+            upsert: [{
+              key: `brand ${suffix}__flavor`,
+              brand: `Brand ${suffix}`,
+              flavor: "Flavor",
+              values: {},
+              crustValues: {},
+              updatedAtMs: Number(suffix),
+            }],
+          },
+        },
+      });
+    }
+
+    const firstResponse = await fetch(
+      `${baseUrl}/api/import-operations/distillation-evidence?limit=1`,
+      { headers: headers() },
+    );
+    const first = await firstResponse.json() as {
+      records: Array<{ operationId: string }>;
+      nextCursor: string | null;
+    };
+    expect(first.records).toHaveLength(1);
+    expect(first.nextCursor).toBeTruthy();
+    const secondResponse = await fetch(
+      `${baseUrl}/api/import-operations/distillation-evidence?limit=1&cursor=${encodeURIComponent(first.nextCursor!)}`,
+      { headers: headers() },
+    );
+    const second = await secondResponse.json() as {
+      records: Array<{ operationId: string }>;
+      nextCursor: string | null;
+    };
+    expect(second.records).toHaveLength(1);
+    expect(second.nextCursor).toBeNull();
+    expect(new Set([...first.records, ...second.records].map((record) => record.operationId)).size).toBe(2);
+  });
+
+  it("rejects unauthorized readers and actors, missing-source, sandbox, and undone evidence", async () => {
+    const unauthorizedApply = await apply("distill-unauthorized-0001", {
+      importType: "spec",
+      sourceLabel: "unauthorized.xlsx",
+      sourceEvidence: { sourceText: "private", parseVersion: "41" },
+      changes: { brandProfiles: { upsert: [] } },
+    }, "profiles");
+    expect(unauthorizedApply.status).toBe(403);
+
+    expect((await fetch(`${baseUrl}/api/import-operations/distillation-evidence`, {
+      headers: headers("profiles"),
+    })).status).toBe(403);
+    expect((await fetch(`${baseUrl}/api/import-operations/distillation-evidence`, {
+      headers: headers("sandbox"),
+    })).status).toBe(403);
+    expect((await apply("distill-sandbox-source-0001", {
+      importType: "spec",
+      sourceLabel: "sandbox-source.xlsx",
+      sourceEvidence: { sourceText: "Sandbox source", parseVersion: "41" },
+      changes: { brandProfiles: { upsert: [] } },
+    }, "sandbox")).status).toBe(400);
+
+    await apply("distill-missing-source-0001", {
+      importType: "spec",
+      sourceLabel: "legacy-no-source.xlsx",
+      changes: { brandProfiles: { upsert: [] } },
+    });
+    const undone = await (await apply("distill-undone-source-0001", {
+      importType: "spec",
+      sourceLabel: "undone-source.xlsx",
+      sourceEvidence: { sourceText: "Undone source", parseVersion: "41" },
+      changes: {
+        brandProfiles: {
+          upsert: [{
+            key: "undone brand__flavor",
+            brand: "Undone Brand",
+            flavor: "Flavor",
+            values: {},
+            crustValues: {},
+            updatedAtMs: 2,
+          }],
+        },
+      },
+    })).json() as any;
+    const undoResponse = await fetch(`${baseUrl}/api/import-operations/distill-undone-source-0001/undo`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({ expectedResultHash: undone.operation.resultHash }),
+    });
+    expect(undoResponse.status).toBe(200);
+
+    const response = await fetch(`${baseUrl}/api/import-operations/distillation-evidence`, {
+      headers: headers(),
+    });
+    expect(response.status).toBe(200);
+    const page = await response.json() as { records: Array<Record<string, unknown>> };
+    expect(page.records).toHaveLength(0);
+  });
+
   it("rolls back after failures at domain and history stages", async () => {
     for (const stage of ["after-mixes", "after-history"]) {
       route.setImportOperationFailureHookForTest((actual) => { if (actual === stage) throw new Error("injected"); });

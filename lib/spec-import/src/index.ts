@@ -13,6 +13,9 @@ import {
   buildNearDupNameMatcherDetailed,
 } from "@workspace/name-match";
 
+/** Shared by the web parser, API evidence exporter, and distillation validator. */
+export const SPEC_IMPORT_PARSE_VERSION = "41";
+
 // ── Core data shapes ────────────────────────────────────────────────────────
 
 export type RecipeRow = { ingredient: string; lbs: number };

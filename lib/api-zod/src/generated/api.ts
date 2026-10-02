@@ -355,6 +355,13 @@ export const applyImportOperationBodySourceKeyMax = 300;
 export const applyImportOperationBodySourceLabelMax = 300;
 export const applyImportOperationBodyRequestHashRegExp = new RegExp('^[a-f0-9]{64}$');
 export const applyImportOperationBodyExpectedStateHashRegExp = new RegExp('^[a-f0-9]{64}$');
+export const applyImportOperationBodySourceEvidenceSourceTextMax = 100000;
+export const applyImportOperationBodySourceEvidenceParseVersionMax = 24;
+export const listDistillationApplyEvidenceQueryLimitDefault = 20;
+export const listDistillationApplyEvidenceQueryLimitMax = 20;
+export const listDistillationApplyEvidenceQueryCursorMax = 512;
+export const listDistillationApplyEvidenceResponseRecordsItemActorIdSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const listDistillationApplyEvidenceResponseRecordsItemSourceSha256RegExp = new RegExp('^[a-f0-9]{64}$');
 export const getImportOperationPathOperationIdMin = 16;
 export const getImportOperationPathOperationIdMax = 120;
 export const undoImportOperationPathOperationIdMin = 16;
@@ -7215,12 +7222,18 @@ export const ApplyImportOperationParams = zod.object({
 
 
 
+
+
 export const ApplyImportOperationBody = zod.object({
   "importType": zod.string().max(applyImportOperationBodyImportTypeMax),
   "sourceKey": zod.string().max(applyImportOperationBodySourceKeyMax).nullish(),
   "sourceLabel": zod.string().max(applyImportOperationBodySourceLabelMax),
   "requestHash": zod.string().regex(applyImportOperationBodyRequestHashRegExp).nullish(),
   "expectedStateHash": zod.string().regex(applyImportOperationBodyExpectedStateHashRegExp).nullish(),
+  "sourceEvidence": zod.object({
+  "sourceText": zod.string().min(1).max(applyImportOperationBodySourceEvidenceSourceTextMax),
+  "parseVersion": zod.string().min(1).max(applyImportOperationBodySourceEvidenceParseVersionMax)
+}).optional().describe('Exact bounded source text retained privately with a live spec Apply.'),
   "changes": zod.record(zod.string(), zod.unknown()).describe('Reviewed entity batches keyed by supported master-data domain.')
 })
 
@@ -7239,6 +7252,40 @@ export const ApplyImportOperationResponse = zod.object({
   "updatedAt": zod.int().optional(),
   "undoneAt": zod.int().nullish()
 })
+})
+
+
+/**
+ * @summary Read eligible live spec Apply evidence for private export
+ */
+
+
+
+
+export const ListDistillationApplyEvidenceQueryParams = zod.object({
+  "limit": zod.coerce.number().int().min(1).max(listDistillationApplyEvidenceQueryLimitMax).default(listDistillationApplyEvidenceQueryLimitDefault),
+  "cursor": zod.coerce.string().max(listDistillationApplyEvidenceQueryCursorMax).optional()
+})
+
+
+
+
+export const ListDistillationApplyEvidenceResponse = zod.object({
+  "records": zod.array(zod.object({
+  "operationId": zod.string(),
+  "importType": zod.enum(['spec']),
+  "scope": zod.enum(['live']),
+  "status": zod.enum(['applied']),
+  "undoneAt": zod.string().nullable(),
+  "actorCapability": zod.enum(['manage-profiles']),
+  "actorIdSha256": zod.string().regex(listDistillationApplyEvidenceResponseRecordsItemActorIdSha256RegExp),
+  "sourceSha256": zod.string().regex(listDistillationApplyEvidenceResponseRecordsItemSourceSha256RegExp),
+  "appliedAt": zod.coerce.date(),
+  "sourceText": zod.string().min(1),
+  "parseVersion": zod.string(),
+  "appliedValues": zod.record(zod.string(), zod.unknown())
+})),
+  "nextCursor": zod.string().nullable()
 })
 
 

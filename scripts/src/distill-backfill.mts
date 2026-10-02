@@ -19,6 +19,7 @@ import {
   type RedactionConfig,
   type VerifiedCandidate,
 } from "@workspace/distill-dataset";
+import { SPEC_IMPORT_PARSE_VERSION } from "@workspace/spec-import";
 
 export const EXPECTED_PRODUCTION_PROMPT_SHA256 =
   "65196b19789f6f1cc676c45f00e32b14c34320f869766e8f6c711a351e9f9d76";
@@ -851,12 +852,6 @@ export async function runBackfill(
 }
 
 export async function loadProductionContract(repoRoot: string): Promise<ProductionContract> {
-  const versionSource = fs.readFileSync(
-    path.join(repoRoot, "artifacts/run-calculator/src/specImport.ts"),
-    "utf8",
-  );
-  const versionMatch = versionSource.match(/export const SPEC_PARSE_VERSION = ["']([^"']+)["']/u);
-  if (!versionMatch?.[1]) throw new Error("current SPEC_PARSE_VERSION could not be read");
   const promptModulePath = path.join(repoRoot, "artifacts/api-server/src/routes/aiParseSpecSheet.ts");
   const promptModule = await import(pathToFileURL(promptModulePath).href) as {
     buildParseSpecSheetPrompt?: (input: { workbookText: string }) => { system: string };
@@ -871,7 +866,7 @@ export async function loadProductionContract(repoRoot: string): Promise<Producti
       "production system prompt changed; refresh the reviewed benchmark/evaluation evidence before backfill",
     );
   }
-  return { systemPrompt, systemPromptSha256, currentParseVersion: versionMatch[1] };
+  return { systemPrompt, systemPromptSha256, currentParseVersion: SPEC_IMPORT_PARSE_VERSION };
 }
 
 function parseArguments(args: string[], repoRoot: string): RunOptions {

@@ -27,6 +27,29 @@ records or treat their hashes as signatures.
   applied values. Undone, pending, sandbox, or unauthenticated records are
   quarantined.
 
+New spec Applies can retain the bounded parser source text and its server-made
+SHA-256 digest beside the operation record. Only a caller with `manage-profiles`
+in live scope can read eligible records through the API. The export helper
+requires an owner-only cookie file and an owner-only output directory, then
+writes a new owner-only JSONL file outside the repository; it does not call a
+model or change import records. Historical operations without source evidence
+are excluded rather than reconstructed. Stored source evidence remains in the
+operation ledger until a separate retention policy is established.
+
+```sh
+pnpm --filter @workspace/scripts run distill:export-applylog -- \
+  --api-base https://your-app.example \
+  --cookie-file /private/path/manager-cookie.txt \
+  --out /private/path/applylog.jsonl
+```
+
+The cookie file must be an absolute path outside the repository with no group or
+other permissions. The destination must be a new absolute file path outside the
+repository, and its parent directory must also have owner-only permissions. The
+command prints aggregate counts only; it never prints source text, brands, or
+raw actor identity. The private JSONL includes source text and applied values,
+plus a hash of the actor ID rather than the actor ID itself.
+
 Each JSONL record uses the `DistillCandidateInput` shape exported by this
 package. In particular, `sourceText` must be included in `userContent`;
 `systemPromptSha256` must match the current production prompt and `parseVersion`
