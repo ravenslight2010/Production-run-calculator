@@ -3,6 +3,7 @@
 - [Orval Zod declaration order](orval-zod-declaration-order.md) — normalize generated scalars before validators; declare smoke-tested toolchain packages directly, not via Orval peers.
 - [Post-merge lockfile recovery](post-merge-setup.md) — repair stale peer-resolution entries non-frozen, prove frozen install, then rerun the strict post-merge hook.
 - [pnpm 12 lockfile provenance](pnpm12-lockfile-provenance.md) — read app dependencies from the last document; keep optional-peer normalization resolver-consistent and historical reports unchanged.
+- [pnpm outdated scope limits](pnpm-outdated-scope-limits.md) — recursive JSON can omit direct workspace importers and show wanted=current; cross-check declarations against lockfile importers.
 - [Safe operational observability](observability-safe-events.md) — events carry correlation, timing, outcomes, and bounded counts; never copy request or recipe payloads into logs.
 - [Audit-log scope boundary](audit-log-scope-boundary.md) — manager capability alone is not enough for audit reads; keep compliance records behind the live-scope fence.
 - [Shared recipe refresh identity](shared-recipe-refresh-run-identity.md) — async profile fan-out must capture the originating run ID; eligibility alone cannot protect a newly selected pending run.
