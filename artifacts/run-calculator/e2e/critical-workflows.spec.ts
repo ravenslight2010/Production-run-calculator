@@ -307,7 +307,18 @@ async function cleanupFixtures(): Promise<void> {
       await db.query("DELETE FROM data_health_repair_batches WHERE actor = ANY($1::text[])", [
         userIds,
       ]);
-      await db.query("DELETE FROM audit_logs WHERE actor = ANY($1::text[])", [userIds]);
+      await db.query("BEGIN");
+      try {
+        await db.query("SET LOCAL ROLE audit_maintenance");
+        await db.query(
+          "SELECT public.delete_audit_log(id, 'browser_fixture_cleanup') FROM audit_logs WHERE actor = ANY($1::text[])",
+          [userIds],
+        );
+        await db.query("COMMIT");
+      } catch (error) {
+        await db.query("ROLLBACK").catch(() => {});
+        throw error;
+      }
     }
     if (plan.dataHealth) {
       await db.query("DELETE FROM daily_sync WHERE scope = 'live' AND date = $1", [

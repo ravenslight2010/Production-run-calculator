@@ -5,11 +5,11 @@ import {
   releaseBrowserWebServers,
 } from "./playwright.release-servers";
 import { validateBrowserSpecSyntaxDirectory } from "./e2e/validate-browser-spec-syntax";
+import { FULL_BROWSER_EXCLUDED_CASE_PATTERN } from "../../scripts/src/full-browser-case-contract.mjs";
 
 const baseURL = releaseBrowserBaseUrl(
   process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`,
 );
-
 // The main suite's global setup deletes shared disposable-day data before
 // Playwright collects specs. Validate the complete suite first so malformed
 // TypeScript cannot be masked by that database setup.
@@ -46,14 +46,21 @@ export default defineConfig({
   // WebKit and the desktop/phone calendar matrix have isolated standard-release
   // configs. Keep them out of the destructive full suite so that suite retains
   // its existing case/runtime budget instead of duplicating focused coverage.
-  testIgnore: ["calendar.spec.ts", "release-webkit-smoke.spec.ts"],
+  testIgnore: [
+    "calendar.spec.ts",
+    "release-webkit-smoke.spec.ts",
+    // Physical iOS evidence is collected by its dedicated device lane.
+    "ios-safari-pwa-device.spec.ts",
+  ],
   // Physical Android checks run through the dedicated device lane. Keep the
-  // three phone-layout checks, the process-restart-only sync check, and
-  // focused-only regressions outside the 159-case Chromium contract. The
+  // three phone-layout checks, the two Android-only sync checks, and
+  // focused-only regressions outside the full-browser Chromium contract. The
   // exclusions live here so focused suites still run them without relying on
-  // an operator CLI grep flag.
-  grepInvert:
-    /@focused-only|@real-mobile-browser (?:physical Android Chrome|queued Target Cases edit survives an Android Chrome process restart)/,
+  // an operator CLI grep flag. The 170-case contract includes the Summary-card
+  // live-timer focus regression. The two narrow-landscape sign-in checks remain
+  // included, while physical Android suspension/restart journeys stay in the
+  // real-mobile-chromium lane.
+  grepInvert: FULL_BROWSER_EXCLUDED_CASE_PATTERN,
   projects: [
     {
       name: "chromium",

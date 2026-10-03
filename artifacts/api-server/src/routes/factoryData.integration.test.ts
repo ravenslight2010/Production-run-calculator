@@ -12,7 +12,7 @@ import { sql } from "drizzle-orm";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import pg from "pg";
-import { signToken } from "../lib/auth";
+import { signLegacyTokenForTests } from "../lib/auth";
 
 // The router imports AI routes at load time; mock the provider so no real
 // requests are made and pickModel / AI_MODELS remain resolvable.
@@ -125,7 +125,7 @@ async function freshUser(role: "manager" | "operator"): Promise<string> {
 
 async function getFactoryData(userId: string): Promise<Response> {
   return fetch(`${baseUrl}/api/factory-data`, {
-    headers: { authorization: `Bearer ${signToken(userId)}` },
+    headers: { authorization: `Bearer ${signLegacyTokenForTests(userId)}` },
   });
 }
 
@@ -134,7 +134,7 @@ async function putFactoryData(userId: string, key: string, value: unknown): Prom
     method: "PUT",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${signToken(userId)}`,
+      authorization: `Bearer ${signLegacyTokenForTests(userId)}`,
     },
     body: JSON.stringify({ key, value }),
   });
@@ -206,7 +206,7 @@ describe("PUT /factory-data", () => {
       method: "PUT",
       headers: {
         "content-type": "application/json",
-        authorization: `Bearer ${signToken(mgr)}`,
+        authorization: `Bearer ${signLegacyTokenForTests(mgr)}`,
       },
       body: JSON.stringify({ value: { x: 1 } }),
     });

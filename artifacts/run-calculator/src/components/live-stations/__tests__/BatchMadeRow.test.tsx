@@ -39,13 +39,21 @@ describe("BatchMadeRow", () => {
         onDecrement={() => {}}
         isLive
         disabled
+        disabledReason="Corrections unavailable while another station is editing."
         testId="sauce-supply"
         pipeline="sauce"
       />,
     );
 
     expect(getByTestId("sauce-supply").textContent).toContain("barrels still to make");
-    expect((getByLabelText("Increase consumed batches correction") as HTMLButtonElement).disabled).toBe(true);
-    expect((getByLabelText("Decrease consumed batches correction") as HTMLButtonElement).disabled).toBe(true);
+    const increment = getByLabelText("Increase consumed batches correction") as HTMLButtonElement;
+    const decrement = getByLabelText("Decrease consumed batches correction") as HTMLButtonElement;
+    const status = getByTestId("sauce-supply-correction-status");
+    expect(increment.disabled).toBe(true);
+    expect(decrement.disabled).toBe(true);
+    expect(status.textContent).toBe("Corrections unavailable while another station is editing.");
+    expect(status.getAttribute("role")).toBe("status");
+    expect(increment.getAttribute("aria-describedby")).toBe(status.id);
+    expect(decrement.getAttribute("aria-describedby")).toBe(status.id);
   });
 });

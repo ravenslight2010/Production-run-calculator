@@ -7,7 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { sql } from "drizzle-orm";
-import { signToken } from "../lib/auth";
+import { signLegacyTokenForTests } from "../lib/auth";
 
 // Covers the single, reliable data-reset action (POST /api/sync/reset) that
 // replaced the fragile "bump a one-time wipe-marker constant + take the API down"
@@ -26,6 +26,7 @@ let inventoryConsumedRunsTable: DbModule["inventoryConsumedRunsTable"];
 let usersTable: DbModule["usersTable"];
 let userRolesTable: DbModule["userRolesTable"];
 let rolesTable: DbModule["rolesTable"];
+let auditLogsTable: DbModule["auditLogsTable"];
 let seedRoles: () => Promise<void>;
 let runDailyRollover: typeof import("./sync")["runDailyRollover"];
 
@@ -73,6 +74,7 @@ beforeAll(async () => {
   usersTable = dbMod.usersTable;
   userRolesTable = dbMod.userRolesTable;
   rolesTable = dbMod.rolesTable;
+  auditLogsTable = dbMod.auditLogsTable;
   seedRoles = (await import("../lib/roles")).seedRoles;
   runDailyRollover = (await import("./sync")).runDailyRollover;
 
@@ -117,7 +119,7 @@ function dayRow(date: string) {
 
 beforeEach(async () => {
   await db.execute(
-    sql`TRUNCATE ${dailySyncTable}, ${dataResetTable}, ${completedRunHistoryTable}, ${inventoryConsumedRunsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${dailySyncTable}, ${dataResetTable}, ${completedRunHistoryTable}, ${inventoryConsumedRunsTable}, ${auditLogsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
   );
   await seedRoles();
   await db.insert(usersTable).values([
@@ -136,7 +138,7 @@ beforeEach(async () => {
 });
 
 function authHeaders(user: string): Record<string, string> {
-  return { authorization: `Bearer ${signToken(user)}` };
+  return { authorization: `Bearer ${signLegacyTokenForTests(user)}` };
 }
 
 describe("GET /sync/reset-epoch", () => {
@@ -237,6 +239,16 @@ describe("facility-local daily rollover", () => {
 });
 
 describe("POST /sync/reset", () => {
+  it("records the authenticated manager as the factory-reset audit actor", async () => {
+    const res = await fetch(`${baseUrl}/api/sync/reset`, {
+      method: "POST",
+      headers: authHeaders(MANAGER),
+    });
+    expect(res.status).toBe(200);
+    const [entry] = await db.select().from(auditLogsTable);
+    expect(entry).toMatchObject({ action: "factory_reset", actor: MANAGER });
+  });
+
   it("is manager-only (operator is forbidden)", async () => {
     const res = await fetch(`${baseUrl}/api/sync/reset`, {
       method: "POST",

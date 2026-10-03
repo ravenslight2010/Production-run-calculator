@@ -55,6 +55,46 @@ fi
 fallback_marker_dir=$(mktemp -d "${TMPDIR:-/tmp}/run-release-node.XXXXXX")
 fallback_marker="${fallback_marker_dir}/started"
 trap 'rm -rf "$fallback_marker_dir"' EXIT
+active_child_pid=""
+
+# shellcheck disable=SC2317
+stop_active_child() {
+  local signal="$1"
+  local process_group="$active_child_pid"
+  local deadline=$((SECONDS + 10))
+
+  [[ -n "$process_group" ]] || return 0
+  kill -s "$signal" -- "-$process_group" 2>/dev/null ||
+    kill -s "$signal" "$process_group" 2>/dev/null ||
+    true
+  while ps -eo sid=,stat= |
+    awk -v session="$process_group" \
+      '$1 == session && $2 !~ /^Z/ { found = 1 } END { exit !found }'; do
+    if (( SECONDS >= deadline )); then
+      kill -KILL -- "-$process_group" 2>/dev/null || true
+      break
+    fi
+    sleep 0.1
+  done
+}
+
+# shellcheck disable=SC2317
+handle_signal() {
+  local signal="$1"
+  local exit_code="$2"
+
+  trap '' HUP INT TERM
+  if [[ -n "$active_child_pid" ]]; then
+    stop_active_child "$signal"
+    wait "$active_child_pid" 2>/dev/null || true
+    active_child_pid=""
+  fi
+  exit "$exit_code"
+}
+
+trap 'handle_signal HUP 129' HUP
+trap 'handle_signal INT 130' INT
+trap 'handle_signal TERM 143' TERM
 
 npx_bin=""
 if ! npx_bin=$(command -v npx 2>/dev/null); then
@@ -65,8 +105,18 @@ if ! npx_bin=$(command -v npx 2>/dev/null); then
 fi
 
 # shellcheck disable=SC2016
-if RELEASE_NODE_FALLBACK_MARKER="$fallback_marker" \
-  "$npx_bin" --yes --package="node@${required_node_version}" -- bash -c '
+RELEASE_NODE_FALLBACK_MARKER="$fallback_marker" \
+  python3 -c '
+import os
+import signal
+import sys
+
+os.setsid()
+signal.signal(signal.SIGINT, signal.SIG_DFL)
+signal.signal(signal.SIGQUIT, signal.SIG_DFL)
+os.execvp(sys.argv[1], sys.argv[1:])
+' "$npx_bin" \
+  --yes --package="node@${required_node_version}" -- bash -c '
   set -euo pipefail
 
   : >"$RELEASE_NODE_FALLBACK_MARKER"
@@ -86,10 +136,18 @@ if RELEASE_NODE_FALLBACK_MARKER="$fallback_marker" \
   "$node_bin" "$RELEASE_REPO_ROOT/scripts/src/check-routine-node-version.mjs"
 
   exec "$@"
-' release-node-runner "$@"; then
-  exit 0
+' release-node-runner "$@" &
+active_child_pid=$!
+if wait "$active_child_pid"; then
+  npx_status=0
 else
   npx_status=$?
+fi
+active_child_pid=""
+
+if (( npx_status == 0 )); then
+  exit 0
+else
   if [[ ! -e "$fallback_marker" ]]; then
     printf \
       'Release runner could not make pinned Node package node@%s available via npx; refusing to run release command.\n' \

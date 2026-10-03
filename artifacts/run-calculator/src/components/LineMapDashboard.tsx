@@ -104,7 +104,9 @@ export default function LineMapDashboard() {
       if (pressStatus === "active") return "active" as const;
       return "idle" as const;
     })();
-    const frontlineRows = v.sauceOzPerPizza > 0 || v.app1OzPerPizza > 0 || v.app2OzPerPizza > 0
+    const hasConfiguredPep = [v.pep1Type, v.pep1TypeB, v.pep2Type, v.pep2TypeB]
+      .some((type) => typeof type === "string" && type.trim().length > 0);
+    const frontlineRows = v.sauceOzPerPizza > 0 || v.app1OzPerPizza > 0 || v.app2OzPerPizza > 0 || hasConfiguredPep
       ? deriveFrontlineNeedRows(v, {
           productionNeedsAvailable: true,
           sauceLbs: calc.sauceEffBarrel * (v.sauceBarrelsMade || 1),

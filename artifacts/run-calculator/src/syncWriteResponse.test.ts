@@ -4,14 +4,46 @@ import {
   consumeSyncWriteResponse,
   isCanonicalRecoverySyncPayload,
   isUnchangedSyncResponse,
+  mergeSparseServerRunMap,
   persistedSyncPayload,
   readCurrentRecoveryJson,
   reconstructPartialSyncPayload,
+  syncWriteFieldCheck,
+  shouldReplaySyncWrite,
   syncPayloadMatchesSnapshot,
   syncPayloadSnapshotId,
 } from "./syncWriteResponse";
 
 describe("consumeSyncWriteResponse", () => {
+  it.each([
+    ["authorization rejection", { ok: false, status: 403 }],
+    ["reset-stale rejection", { ok: true, status: 200, stale: true }],
+    ["exhausted retry", { ok: false, status: 0, retriesExhausted: true }],
+  ])("classifies %s as a failed sync acknowledgment", (_label, input) => {
+    expect(syncWriteFieldCheck(input)).toEqual({
+      checkName: "sync-acknowledgment",
+      outcome: "failure",
+    });
+  });
+
+  it("classifies a successful local write as a successful sync acknowledgment", () => {
+    expect(syncWriteFieldCheck({ ok: true, status: 200 })).toEqual({
+      checkName: "sync-acknowledgment",
+      outcome: "success",
+    });
+  });
+
+  it("does not classify non-terminal diagnostics as a sync acknowledgment", () => {
+    expect(syncWriteFieldCheck({ ok: false, status: 503 })).toBeUndefined();
+  });
+
+  it("replays stale-base fallbacks after canonical adoption but not ordinary acknowledgements", () => {
+    expect(shouldReplaySyncWrite({ partialFallback: true, data: { runValues: {} } })).toBe(true);
+    expect(shouldReplaySyncWrite({ partialFallback: true })).toBe(true);
+    expect(shouldReplaySyncWrite({ data: { runValues: {} } })).toBe(false);
+    expect(shouldReplaySyncWrite(null)).toBe(false);
+  });
+
   it("immediately self-applies the server canonical payload on a successful write", async () => {
     const applyCanonical = vi.fn();
     const canonical = {
@@ -40,6 +72,26 @@ describe("consumeSyncWriteResponse", () => {
     expect(result.stale).toBe(false);
     expect(applyCanonical).toHaveBeenCalledOnce();
     expect(applyCanonical).toHaveBeenCalledWith(canonical);
+  });
+
+  it("does not apply a null fallback as a canonical payload", async () => {
+    const applyCanonical = vi.fn();
+    const result = await consumeSyncWriteResponse(
+      new Response(JSON.stringify({
+        ok: true,
+        data: null,
+        partialFallback: true,
+        snapshotId: "a".repeat(64),
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+      { applyCanonical },
+    );
+
+    expect(result).toMatchObject({ stale: false, malformed: false });
+    expect(result.body).toMatchObject({ data: null, partialFallback: true });
+    expect(applyCanonical).not.toHaveBeenCalled();
   });
 
   it("handles reset-stale responses without applying their data", async () => {
@@ -211,7 +263,6 @@ describe("consumeSyncWriteResponse", () => {
       completeness: "partial",
       baseSnapshotId: baseId,
       snapshotId: targetId,
-      resultingSnapshotId: targetId,
       data: { runValues: { r1: { casesNeeded: 12 } } },
     })).resolves.toEqual(target);
     await expect(reconstructPartialSyncPayload(base as any, "b".repeat(64), {
@@ -222,6 +273,34 @@ describe("consumeSyncWriteResponse", () => {
       resultingSnapshotId: targetId,
       data: { runValues: { r1: { casesNeeded: 12 } } },
     })).resolves.toBeNull();
+  });
+
+  it("retains unchanged run totals while updating and removing changed entries", () => {
+    const currentSummaryStats = {
+      unchanged: { total: 1 },
+      changed: { total: 2 },
+      removed: { total: 3 },
+    };
+    const currentRunLines = {
+      unchanged: [{ itemKey: "cheese", qty: 1 }],
+      changed: [{ itemKey: "pepperoni", qty: 2 }],
+      removed: [{ itemKey: "sauce", qty: 3 }],
+    };
+
+    expect(mergeSparseServerRunMap(currentSummaryStats, {
+      changed: { total: 4 },
+      removed: null,
+    })).toEqual({
+      unchanged: { total: 1 },
+      changed: { total: 4 },
+    });
+    expect(mergeSparseServerRunMap(currentRunLines, {
+      changed: [{ itemKey: "pepperoni", qty: 5 }],
+      removed: null,
+    })).toEqual({
+      unchanged: [{ itemKey: "cheese", qty: 1 }],
+      changed: [{ itemKey: "pepperoni", qty: 5 }],
+    });
   });
 
   it("applies sparse peer map tombstones without dropping omitted values", async () => {
@@ -349,6 +428,50 @@ describe("consumeSyncWriteResponse", () => {
     expect(peerC.current).toEqual(canonical);
   });
 
+  it("adopts canonical schedule deletions and does not repaint removed runs on stale replay", async () => {
+    const canonical = {
+      syncVersion: 1,
+      completeness: "complete",
+      dayState: {
+        date: "2026-09-21",
+        runs: [{ id: "survivor", brand: "Acme", flavor: "Cheese" }],
+      },
+      runValues: { survivor: { casesNeeded: 10 } },
+      deletedItems: { runs: ["unnamed-1", "unnamed-2"] },
+      deletedStamps: {
+        runs: { "unnamed-1": 100, "unnamed-2": 100 },
+      },
+    };
+    const peer = {
+      current: {
+        ...canonical,
+        dayState: {
+          ...canonical.dayState,
+          runs: [
+            canonical.dayState.runs[0],
+            { id: "unnamed-1", brand: "", flavor: "" },
+            { id: "unnamed-2", brand: "", flavor: "" },
+          ],
+        },
+      } as any,
+    };
+    const response = () => new Response(JSON.stringify({
+      ok: true,
+      partialFallback: true,
+      data: canonical,
+    }), { status: 200 });
+
+    await consumeSyncWriteResponse(response(), {
+      applyCanonical: (data) => { peer.current = data; },
+    });
+    expect(peer.current.dayState.runs.map((run: { id: string }) => run.id)).toEqual(["survivor"]);
+
+    await consumeSyncWriteResponse(response(), {
+      applyCanonical: (data) => { peer.current = data; },
+    });
+    expect(peer.current).toEqual(canonical);
+  });
+
   it("converges Pause and Resume peers on the newer resumed canonical snapshot", async () => {
     const pauseId = "pause-1";
     const baseline = {
@@ -436,6 +559,18 @@ describe("consumeSyncWriteResponse", () => {
       { applyCanonical },
     );
     expect(result.body).toEqual({ data: { runValues: {} } });
+    expect(applyCanonical).not.toHaveBeenCalled();
+  });
+
+  it("does not treat a successful response without a sync envelope as acknowledged", async () => {
+    const applyCanonical = vi.fn();
+    const result = await consumeSyncWriteResponse(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+      { applyCanonical },
+    );
+
+    expect(result.malformed).toBe(true);
+    expect(result.stale).toBe(false);
     expect(applyCanonical).not.toHaveBeenCalled();
   });
 

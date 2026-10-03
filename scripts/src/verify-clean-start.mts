@@ -21,6 +21,11 @@ const startupTimeoutMs = parseDuration(
   process.env.CLEAN_START_TIMEOUT_MS ?? "90000",
   "CLEAN_START_TIMEOUT_MS",
 );
+// The preview browser runs after the API and Vite servers have started. Keep
+// its route budget bounded, but allow cold release environments more than the
+// former 30s navigation / 45s child-process window.
+const browserNavigationTimeoutMs = Math.min(startupTimeoutMs, 45_000);
+const browserProcessTimeoutMs = Math.min(startupTimeoutMs, 60_000);
 const pollIntervalMs = 250;
 const outputLimit = 12_000;
 const responseLimit = 20_000;
@@ -382,9 +387,7 @@ async function runBrowserCheck(): Promise<void> {
             CLEAN_START_WEB_PORT: String(webPort),
             CLEAN_START_MOCKUP_PORT: String(mockupPort),
             CLEAN_START_SCREENSHOT_PATH: outputPath,
-            CLEAN_START_BROWSER_TIMEOUT_MS: String(
-              Math.min(startupTimeoutMs, 30_000),
-            ),
+            CLEAN_START_BROWSER_TIMEOUT_MS: String(browserNavigationTimeoutMs),
           },
           stdio: ["ignore", "pipe", "pipe"],
         },
@@ -398,7 +401,7 @@ async function runBrowserCheck(): Promise<void> {
       });
       const timeout = setTimeout(() => {
         browser.kill("SIGTERM");
-      }, Math.min(startupTimeoutMs, 45_000));
+      }, browserProcessTimeoutMs);
       browser.once("close", (code) => {
         clearTimeout(timeout);
         resolveResult({ code, output });

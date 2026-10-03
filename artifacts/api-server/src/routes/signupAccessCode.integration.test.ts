@@ -25,9 +25,10 @@
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
-import { sql } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import pg from "pg";
@@ -38,6 +39,9 @@ let pool: DbModule["pool"];
 let usersTable: DbModule["usersTable"];
 let userRolesTable: DbModule["userRolesTable"];
 let rolesTable: DbModule["rolesTable"];
+let staffInvitationsTable: DbModule["staffInvitationsTable"];
+let authSessionsTable: DbModule["authSessionsTable"];
+let signupAccessCodesTable: DbModule["signupAccessCodesTable"];
 let seedRoles: () => Promise<void>;
 
 let adminPool: pg.Pool;
@@ -90,9 +94,13 @@ beforeAll(async () => {
   usersTable = dbMod.usersTable;
   userRolesTable = dbMod.userRolesTable;
   rolesTable = dbMod.rolesTable;
+  staffInvitationsTable = dbMod.staffInvitationsTable;
+  authSessionsTable = dbMod.authSessionsTable;
+  signupAccessCodesTable = dbMod.signupAccessCodesTable;
   seedRoles = (await import("../lib/roles")).seedRoles;
 
   const app: Express = express();
+  app.set("trust proxy", true);
   app.use(express.json({ limit: "10mb" }));
   app.use((req, _res, next) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -149,7 +157,7 @@ beforeEach(async () => {
   process.env.INITIAL_MANAGER_USERNAME = MANAGER_USERNAME;
 
   await db.execute(
-    sql`TRUNCATE ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${userRolesTable}, ${usersTable}, ${rolesTable}, ${staffInvitationsTable}, ${authSessionsTable}, ${signupAccessCodesTable} RESTART IDENTITY CASCADE`,
   );
   await seedRoles();
 });
@@ -157,9 +165,10 @@ beforeEach(async () => {
 async function signUp(
   body: Record<string, string>,
 ): Promise<Response> {
+  const source = `198.51.100.${Math.floor(Math.random() * 200) + 1}`;
   return fetch(`${baseUrl}/api/auth/sign-up`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", "x-forwarded-for": source },
     body: JSON.stringify(body),
   });
 }
@@ -292,4 +301,158 @@ describe("other sign-up error paths are unaffected by the gate", () => {
     expect(second.status).toBe(409);
     expect(await second.json()).toEqual({ error: "That username is already taken." });
   });
+});
+
+describe("production account lifecycle routes", () => {
+  async function signIn(username: string, password: string): Promise<{ token: string; cookie: string }> {
+    const res = await fetch(`${baseUrl}/api/auth/sign-in`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { token: string };
+    const cookie = (res.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie?.()[0]?.split(";")[0]
+      ?? res.headers.get("set-cookie")?.split(";")[0] ?? "";
+    return { token: body.token, cookie };
+  }
+
+  async function managerSession(): Promise<{ token: string; cookie: string }> {
+    process.env.INITIAL_MANAGER_USERNAME = MANAGER_USERNAME;
+    process.env.INITIAL_MANAGER_ACCESS_CODE = MANAGER_CODE;
+    const result = await signUp({
+      username: MANAGER_USERNAME,
+      password: "manager-password",
+      accessCode: MANAGER_CODE,
+    });
+    expect(result.status).toBe(201);
+    const body = await result.json() as { token: string };
+    return { token: body.token, cookie: "" };
+  }
+
+  async function createInvite(token: string): Promise<{ secret: string; id: string }> {
+    const res = await fetch(`${baseUrl}/api/staff-invitations`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({ role: "operator" }),
+    });
+    expect(res.status).toBe(201);
+    const body = await res.json() as { secret: string };
+    const [row] = await db.select().from(staffInvitationsTable).orderBy(desc(staffInvitationsTable.createdAt));
+    return { secret: body.secret, id: row.id };
+  }
+
+  it("accepts an invitation once and gives identical generic failures for replay/expiry/revoke", async () => {
+    const manager = await managerSession();
+    const invite = await createInvite(manager.token);
+    const accepted = await fetch(`${baseUrl}/api/auth/accept-invitation`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ invitation: invite.secret, username: "invited-user", password: "password123" }),
+    });
+    expect(accepted.status).toBe(201);
+    const acceptedBody = await accepted.json() as { user: { role: string } };
+    expect(acceptedBody.user.role).toBe("operator");
+    const replay = await fetch(`${baseUrl}/api/auth/accept-invitation`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ invitation: invite.secret, username: "replay-user", password: "password123" }),
+    });
+    expect(replay.status).toBe(400);
+    expect(await replay.json()).toEqual({ error: "Invitation is invalid or unavailable." });
+
+    const expired = await createInvite(manager.token);
+    await db.update(staffInvitationsTable).set({ expiresAt: new Date(Date.now() - 1) })
+      .where(eq(staffInvitationsTable.id, expired.id));
+    const expiredResponse = await fetch(`${baseUrl}/api/auth/accept-invitation`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ invitation: expired.secret, username: "expired-user", password: "password123" }),
+    });
+    expect(expiredResponse.status).toBe(400);
+    expect(await expiredResponse.json()).toEqual({ error: "Invitation is invalid or unavailable." });
+
+    const revoked = await createInvite(manager.token);
+    const revokeResponse = await fetch(`${baseUrl}/api/staff-invitations/${revoked.id}`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${manager.token}` },
+    });
+    expect(revokeResponse.status).toBe(204);
+    const revokedResponse = await fetch(`${baseUrl}/api/auth/accept-invitation`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ invitation: revoked.secret, username: "revoked-user", password: "password123" }),
+    });
+    expect(revokedResponse.status).toBe(400);
+    expect(await revokedResponse.json()).toEqual({ error: "Invitation is invalid or unavailable." });
+  }, 30_000);
+
+  it("rotates and disables the transitional code without affecting existing sign-in", async () => {
+    const manager = await managerSession();
+    const oldCode = STAFF_CODE;
+    const rotated = await fetch(`${baseUrl}/api/signup-code/rotate`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${manager.token}` },
+    });
+    expect(rotated.status).toBe(201);
+    const next = await rotated.json() as { secret: string };
+    expect(next.secret).toBeTruthy();
+    const oldAttempt = await signUp({ username: "old-code-user", password: "password123", accessCode: oldCode });
+    expect(oldAttempt.status).toBe(403);
+    const disable = await fetch(`${baseUrl}/api/signup-code/status`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", authorization: `Bearer ${manager.token}` },
+      body: JSON.stringify({ enabled: false }),
+    });
+    expect(disable.status).toBe(200);
+    const disabledAttempt = await signUp({ username: "disabled-code-user", password: "password123", accessCode: next.secret });
+    expect(disabledAttempt.status).toBe(403);
+    expect((await signIn(MANAGER_USERNAME, "manager-password")).token).toBeTruthy();
+    const status = await fetch(`${baseUrl}/api/signup-code/status`, { headers: { authorization: `Bearer ${manager.token}` } });
+    const counters = await status.json() as { successfulUses: number; failedUses: number };
+    expect(counters.failedUses).toBeGreaterThan(0);
+    expect(counters.successfulUses).toBeGreaterThanOrEqual(0);
+  }, 30_000);
+
+  it("rejects both cookie and Bearer sessions after account disable and explicit revoke", async () => {
+    const manager = await managerSession();
+    const targetUsername = `disable-target-${Date.now()}`;
+    const created = await signUp({ username: targetUsername, password: "password123", accessCode: MANAGER_CODE });
+    expect(created.status).toBe(201);
+    const createdBody = await created.json() as { user: { userId: string } };
+    const target = await signIn(targetUsername, "password123");
+    expect(target.cookie).toMatch(/^rc_auth=/);
+    const meCookie = await fetch(`${baseUrl}/api/me`, { headers: { authorization: `Bearer ${target.token}` } });
+    expect(meCookie.status).toBe(200);
+    const disable = await fetch(`${baseUrl}/api/users/${encodeURIComponent(createdBody.user.userId)}/status`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", authorization: `Bearer ${manager.token}` },
+      body: JSON.stringify({ disabled: true }),
+    });
+    expect(disable.status).toBe(200);
+    expect((await fetch(`${baseUrl}/api/me`, { headers: { authorization: `Bearer ${target.token}` } })).status).toBe(401);
+    expect((await fetch(`${baseUrl}/api/me`, { headers: { cookie: target.cookie } })).status).toBe(401);
+  }, 30_000);
+
+  it("expires an otherwise valid bearer session at the shared-tablet idle boundary", async () => {
+    process.env.SESSION_IDLE_TIMEOUT_SEC = "1";
+    const manager = await managerSession();
+    const session = manager;
+    await db.update(authSessionsTable).set({ lastSeenAt: new Date(Date.now() - 10_000) })
+      .where(eq(authSessionsTable.tokenHash, createHash("sha256").update(session.token).digest("hex")));
+    const response = await fetch(`${baseUrl}/api/me`, { headers: { authorization: `Bearer ${session.token}` } });
+    expect(response.status).toBe(401);
+    delete process.env.SESSION_IDLE_TIMEOUT_SEC;
+  }, 30_000);
+
+  it("fails closed when a new-format jti token has no server session record", async () => {
+    const manager = await managerSession();
+    await db.delete(authSessionsTable).where(
+      eq(authSessionsTable.tokenHash, createHash("sha256").update(manager.token).digest("hex")),
+    );
+    const response = await fetch(`${baseUrl}/api/me`, {
+      headers: { authorization: `Bearer ${manager.token}` },
+    });
+    expect(response.status).toBe(401);
+  }, 30_000);
 });

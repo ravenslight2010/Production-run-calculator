@@ -103,6 +103,21 @@ Compatible version managers such as `fnm` can also read `.nvmrc` (for example,
 `fnm use --install`). Selecting the declared runtime does not regenerate or
 modify retained evidence.
 
+In a Replit terminal, the `nodejs-24` module can resolve an older patch even
+though `.nvmrc` requests 24.20.0. Run ad hoc validation through the same
+fail-closed launcher used by Replit validation workflows and post-merge setup:
+
+```bash
+bash scripts/src/run-release-node.sh pnpm --filter @workspace/scripts run test
+bash scripts/src/run-release-node.sh pnpm run typecheck
+```
+
+The launcher checks the exact evidence-bound version and puts its executable
+first on `PATH` for pnpm and its child scripts. It uses the local runtime when
+it matches, otherwise obtains `node@24.20.0` through npx; if unavailable, the
+command fails rather than running with the wrong version. A bare `node` in a
+new Replit terminal is not necessarily pinned.
+
 ```bash
 pnpm install
 
@@ -126,7 +141,7 @@ shared databases, applies the canonical Drizzle schema, and only then starts
 the development API. Leave it running and execute `test:e2e:department` from a
 second shell; no separate schema command is required.
 
-Required env for the API: `DATABASE_URL`. Security-relevant env: `STAFF_SIGNUP_CODE` (gates public sign-up, fails closed), `INITIAL_MANAGER_USERNAME` + `INITIAL_MANAGER_ACCESS_CODE` (bootstrap the first manager, fails closed).
+Required env for the API: `DATABASE_URL`. Security-relevant env: `STAFF_SIGNUP_CODE` (transitional sign-up code until a manager rotates or disables it), `INITIAL_MANAGER_USERNAME` + `INITIAL_MANAGER_ACCESS_CODE` (bootstrap the first manager, fails closed), `SESSION_TTL_SEC` (absolute session lifetime, default 30 days), and `SESSION_IDLE_TIMEOUT_SEC` (idle lifetime, default 12 hours). Managers can issue one-time invitations, rotate or disable the transitional code, disable accounts, and revoke sessions.
 
 ## Verification
 

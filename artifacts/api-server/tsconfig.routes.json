@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "composite": false,
+    "noEmit": true,
+    "paths": {
+      "@workspace/api-zod": ["../../lib/api-zod/dist/index.d.ts"]
+    }
+  },
+  "include": ["src/routes/**/*.ts"],
+  "references": []
+}

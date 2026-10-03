@@ -144,8 +144,10 @@ export default function AiCorrectionsCard() {
         <p className="text-xs text-muted-foreground mt-1">
           Corrections the AI has learned — whenever a name is renamed or merged, an entry is
           recorded here so every AI feature treats the old name as equal to the new one.
-            Run the health check before removing an entry: it compares correction memory to confirmed
-            merges and current master data. It never includes anyone&apos;s private conversation history.
+          These confirmed name mappings may be sent with relevant import labels to the configured AI
+          provider; credentials, logs, unrelated production records, and private conversation history
+          are excluded. Run the health check before removing an entry: it compares correction memory
+          to confirmed merges and current master data.
         </p>
       </CardHeader>
       <CardContent>

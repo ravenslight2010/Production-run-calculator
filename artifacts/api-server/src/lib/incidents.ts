@@ -247,13 +247,13 @@ export async function updateIncidentWorkflow(
       notes.push(note); set.notes = notes; changes.note = note.text;
     }
     if (Object.keys(changes).length === 0) return toDTO(existing);
-    const action = input.note?.trim() ? "note_added" : "incident_workflow_updated";
+    const action = input.note?.trim() ? "incident_note_added" : "incident_workflow_updated";
     const event: IncidentActivity = { id: newUserId(), action, detail: JSON.stringify(changes), actorName: input.actorName, createdAt: now.toISOString() };
     activity.push(event); set.activity = activity;
     const [row] = await tx.update(incidentsTable).set(set).where(and(eq(incidentsTable.id, id), eq(incidentsTable.scope, scope))).returning();
     await tx.insert(auditLogsTable).values({
-      scope, actor: input.actorId, action: `incident_${action}`, resource: id,
-      changes, userAgent: undefined, ipAddress: undefined,
+      scope, actor: input.actorId, action, resource: id,
+      changes: { outcome: "updated", targetId: id, reasonCode: action },
     });
     return row ? toDTO(row) : toDTO(existing);
   });

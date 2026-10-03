@@ -7,8 +7,16 @@ import { join, resolve } from "node:path";
 import {
   promoteSourceLibraryEvidenceAtPaths,
   releaseGateLabelsForMode,
+  TYPESCRIPT_7_SUPPORTED_RUNNERS,
 } from "./release-check.mts";
 import { computeSourceLibraryEvidenceId } from "./verify-source-library-reconciliation.mts";
+import { FULL_BROWSER_EXPECTED_CASES } from "./full-browser-case-contract.mts";
+import { WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES } from "./webkit-case-contract.mts";
+import {
+  TYPESCRIPT_7_RESOURCE_BUDGETS,
+  typescript7MeasuredCheckNames,
+  typescript7ExpectedMeasurementCommandNames,
+} from "./typescript-7-resource-contract.mts";
 
 type FixtureStep = {
   label: string;
@@ -49,13 +57,14 @@ async function runReleaseCheck(
   args: string[] = [],
   envOverrides: Record<string, string> = {},
 ): Promise<{ code: number; output: string }> {
+  const revision = await getCurrentRevision();
   await writeFile(
     join(evidenceDir, "report-key-rotation-preflight.json"),
     `${JSON.stringify(
       {
         verifier: "report-key-rotation-preflight",
         environment: "disposable-ci",
-        revision: await getCurrentRevision(),
+        revision,
         status: "pass",
         canRotate: true,
         activeKeyId: "fixture-key",
@@ -75,11 +84,110 @@ async function runReleaseCheck(
     )}\n`,
     "utf8",
   );
+  // Fixture runs must be self-contained.  In particular, never borrow the
+  // checkout's retained comparison artifact as release proof: it may belong
+  // to another revision (or be absent in a fresh checkout).
+  const checks = typescript7MeasuredCheckNames();
+  const command = (name: string) => ({
+    name,
+    exitCode: 0,
+    elapsedMs: 1,
+    peakRssKiB: 10,
+    diagnostics: [],
+  });
+  const commands = [
+    command("frozen-install"),
+    command("typescript-6-clean"),
+    ...typescript7ExpectedMeasurementCommandNames().map(command),
+  ];
+  await writeFile(
+    join(evidenceDir, "typescript-7-comparison.json"),
+    `${JSON.stringify(
+      {
+        schemaVersion: 3,
+        sourceRevision: revision,
+        status: "PASS",
+        authoritativeCompiler: "Version 6.0.3",
+        candidateCompiler: "Version 7.0.2",
+        authoritativeOutputsChanged: false,
+        advisory: true,
+        runner: {
+          platform: process.platform,
+          arch: process.arch,
+          supported: true,
+          supportedRunners: TYPESCRIPT_7_SUPPORTED_RUNNERS,
+          nativePackage: TYPESCRIPT_7_SUPPORTED_RUNNERS.find(
+            (item) =>
+              item.platform === process.platform && item.arch === process.arch,
+          )?.nativePackage,
+          nativePackageVersion: "7.0.2",
+          nativeBinary: `node_modules/${
+            TYPESCRIPT_7_SUPPORTED_RUNNERS.find(
+              (item) =>
+                item.platform === process.platform && item.arch === process.arch,
+            )?.nativePackage
+          }/lib/tsc`,
+          nativePackages: [
+            TYPESCRIPT_7_SUPPORTED_RUNNERS.find(
+              (item) =>
+                item.platform === process.platform && item.arch === process.arch,
+            )?.nativePackage,
+          ],
+          image: "release-resume-fixture",
+          hardwareClass: "f".repeat(64),
+          logicalCpuCount: 1,
+          memoryGiB: 1,
+        },
+        commands,
+        performanceComparison: ["cold", "warm"].flatMap((mode) =>
+          checks.map((check) => ({
+            check,
+            mode,
+            elapsedMs: { baseline: 1, candidate: 1, delta: 0, ratio: 1 },
+            peakRssKiB: { baseline: 10, candidate: 10, delta: 0, ratio: 1 },
+          })),
+        ),
+        resourceBudgets: TYPESCRIPT_7_RESOURCE_BUDGETS,
+        trend: {
+          historyLimit: 5,
+          incompatibleRunnerClassSamples: 0,
+          distinctRevisionCount: 1,
+          regressedRevisions: [],
+          revisionSamples: [{ sourceRevision: revision, performanceComparison: [] }],
+        },
+        promotionAssessment: {
+          eligible: false,
+          thresholdApprovalRequired: false,
+          repeatedEvidenceMet: false,
+          resourceBudgetsMet: true,
+          resourceRegressions: [],
+        },
+        diagnosticsEqual: true,
+        declarations: {
+          baseline: [{ path: "lib/fixture/index.d.ts", sha256: "d".repeat(64) }],
+          candidate: [{ path: "lib/fixture/index.d.ts", sha256: "d".repeat(64) }],
+          changedPaths: [],
+        },
+        containment: {
+          beforeStatusSha256: "c".repeat(64),
+          afterStatusSha256: "c".repeat(64),
+        },
+        acceptanceGatesMet: true,
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
   return new Promise((resolveRun, reject) => {
     const child = spawn(process.execPath, [tsxPath, releaseCheck, ...args], {
       cwd: rootDir,
       env: {
         ...process.env,
+        CI: "true",
+        NODE_ENV: "test",
+        E2E_TEST_DB: "1",
+        RELEASE_CHECK_SKIP_PRODUCTION_SOURCE_LIBRARY_RECONCILIATION: "1",
         RELEASE_EVIDENCE_DIR: evidenceDir,
         RELEASE_CHECK_FIXTURE_STEPS: JSON.stringify(steps),
         ...envOverrides,
@@ -1944,10 +2052,10 @@ async function runFullModeScenario(): Promise<void> {
     "",
     `Revision: ${revision}`,
     "Result: PASS",
-    "Expected cases: 159",
-    "Enumerated cases: 159",
-    "Completed cases: 159",
-    "Passed cases: 159",
+    `Expected cases: ${FULL_BROWSER_EXPECTED_CASES}`,
+    `Enumerated cases: ${FULL_BROWSER_EXPECTED_CASES}`,
+    `Completed cases: ${FULL_BROWSER_EXPECTED_CASES}`,
+    `Passed cases: ${FULL_BROWSER_EXPECTED_CASES}`,
     "Skipped cases: 0",
     "Failed cases: 0",
     "Not-run cases: 0",
@@ -1957,9 +2065,30 @@ async function runFullModeScenario(): Promise<void> {
     "",
     "| File | Cases | Completed | Passed | Skipped | Failed | Not run | Duration |",
     "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
-    "| `e2e/example.spec.ts` | 159 | 159 | 159 | 0 | 0 | 0 | 1ms |",
+    `| \`e2e/example.spec.ts\` | ${FULL_BROWSER_EXPECTED_CASES} | ${FULL_BROWSER_EXPECTED_CASES} | ${FULL_BROWSER_EXPECTED_CASES} | 0 | 0 | 0 | 1ms |`,
     "",
   ].join("\n");
+  const responsiveWebkitCases =
+    WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES.map((identity) => {
+      const [file = "", projectAndTitle = ""] = identity.split(" :: ");
+      const [projectName = "", ...titleParts] =
+        projectAndTitle.split(" › ");
+      return {
+        file,
+        projectName,
+        title: titleParts.join(" › "),
+        status: "passed",
+        durationMs: 1,
+      };
+    });
+  const responsiveWebkitEvidence = `${JSON.stringify({
+    schemaVersion: 1,
+    browser: "webkit",
+    revision,
+    environment: "disposable full-mode resume fixture",
+    result: "passed",
+    cases: responsiveWebkitCases,
+  })}\n`;
   const fullBrowserScript = [
     "const fs = require('node:fs');",
     "const marker = process.env.RELEASE_RESUME_MARKER;",
@@ -2005,6 +2134,7 @@ async function runFullModeScenario(): Promise<void> {
       "clean-start/startup-web.log",
       "clean-start/startup-mockup.log",
       "browser-full/FINAL-REPORT.md",
+      "browser-compatibility/webkit-result.json",
     ]) {
       const path = join(evidenceDir, file);
       await mkdir(join(path, ".."), { recursive: true });
@@ -2012,6 +2142,8 @@ async function runFullModeScenario(): Promise<void> {
         path,
         file === "browser-full/FINAL-REPORT.md"
           ? browserReport
+          : file === "browser-compatibility/webkit-result.json"
+            ? responsiveWebkitEvidence
           : "fixture evidence\n",
         { encoding: "utf8" },
       );
@@ -2121,7 +2253,11 @@ async function runFullModeScenario(): Promise<void> {
       "resume must keep the checkpoint revision",
     );
     assert.match(report, /^Mode: full$/m);
-    assert.match(report, /^Decision: GO$/m);
+    assert.match(
+      report,
+      /^Decision: NO-GO$/m,
+      "a disposable fixture run must not present itself as production release proof",
+    );
     for (const label of [
       "fixture gate one",
       "full browser E2E suite",

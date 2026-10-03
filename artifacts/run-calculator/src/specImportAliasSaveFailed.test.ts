@@ -25,6 +25,9 @@ import type { Mix } from "@workspace/mixes";
 const { saveAliasesSpy } = vi.hoisted(() => ({
   saveAliasesSpy: vi.fn<[SpecImportAlias[]], Promise<void>>(async () => {}),
 }));
+const { logCorrectionWriteFailureSpy } = vi.hoisted(() => ({
+  logCorrectionWriteFailureSpy: vi.fn(),
+}));
 
 // ---------------------------------------------------------------------------
 // Module mocks — same collaborator shape as specImportAutoLinkAlias.test.ts
@@ -61,7 +64,10 @@ vi.mock("./matchImport", () => ({
     throw new Error("no AI matcher in tests");
   },
 }));
-vi.mock("./aiCorrections", () => ({ saveAiCorrections: async () => {} }));
+vi.mock("./aiCorrections", () => ({
+  saveAiCorrections: async () => {},
+  logCorrectionWriteFailure: logCorrectionWriteFailureSpy,
+}));
 vi.mock("./namedRecipes", () => ({
   fetchNamedRecipes: async () => {
     throw new Error("no pool in tests");

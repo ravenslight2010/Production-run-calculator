@@ -131,8 +131,11 @@ export async function listRoles(): Promise<RoleDefinition[]> {
   return rows.map(toRoleDefinition);
 }
 
-export async function getRole(name: string): Promise<RoleDefinition | undefined> {
-  const [row] = await db
+export async function getRole(
+  name: string,
+  executor: Pick<typeof db, "select"> = db,
+): Promise<RoleDefinition | undefined> {
+  const [row] = await executor
     .select({
       name: rolesTable.name,
       capabilities: rolesTable.capabilities,
@@ -203,6 +206,7 @@ export type StaffMember = {
   // automatically enabled. Per-user so the choices follow them across devices.
   notificationPrefs: Record<string, boolean>;
   sandbox: boolean;
+  disabled: boolean;
   // ISO timestamp of when the sandbox was last re-copied from live, or null when
   // it has never been copied. Only meaningful for the sandbox account; null for
   // everyone else. Clients show it as "Sandbox copied from live at …".
@@ -219,15 +223,16 @@ export type StaffMember = {
 // The sandbox account is always a manager but must never count as the
 // "already have an admin" signal — otherwise the first real user can never
 // become manager on a fresh database.
-async function manageStaffHolders(): Promise<string[]> {
-  const all = await userIdsWithCapability("manage-staff");
-  if (all.length === 0) return [];
-  const rows = await db
+async function manageStaffHolders(
+  executor: Pick<typeof db, "select"> = db,
+): Promise<string[]> {
+  const rows = await executor
     .select({ id: usersTable.id })
     .from(usersTable)
-    .where(eq(usersTable.sandbox, false));
-  const nonSandboxIds = new Set(rows.map((r) => r.id));
-  return all.filter((id) => nonSandboxIds.has(id));
+    .innerJoin(userRolesTable, eq(userRolesTable.userId, usersTable.id))
+    .innerJoin(rolesTable, eq(rolesTable.name, userRolesTable.role))
+    .where(sql`${usersTable.sandbox} = false AND ${rolesTable.capabilities} ? 'manage-staff'`);
+  return rows.map((row) => row.id);
 }
 
 // Arbitrary fixed key for a Postgres transaction-scoped advisory lock guarding
@@ -314,20 +319,23 @@ async function resolveBootstrapRole(
 // resolve to "operator" once the database already has no path to bootstrap
 // (a prior sign-up already decided that, or none did and this path fails
 // closed too).
-export async function getOrCreateUserRole(userId: string): Promise<{ role: Role }> {
-  const [existing] = await db
+export async function getOrCreateUserRole(
+  userId: string,
+  executor: Pick<typeof db, "select" | "insert"> = db,
+): Promise<{ role: Role }> {
+  const [existing] = await executor
     .select({ role: userRolesTable.role })
     .from(userRolesTable)
     .where(eq(userRolesTable.userId, userId));
   if (existing) return { role: existing.role };
 
-  const [user] = await db
+  const [user] = await executor
     .select({ username: usersTable.username })
     .from(usersTable)
     .where(eq(usersTable.id, userId));
   const role = await resolveBootstrapRole(userId, user?.username ?? "", "");
 
-  const [row] = await db
+  const [row] = await executor
     .select({ role: userRolesTable.role })
     .from(userRolesTable)
     .where(eq(userRolesTable.userId, userId));
@@ -351,10 +359,13 @@ export async function createRoleForNewUser(
   return resolveBootstrapRole(userId, username, suppliedAccessCode);
 }
 
-export async function getStaffMember(userId: string): Promise<StaffMember> {
-  const { role } = await getOrCreateUserRole(userId);
-  const def = await getRole(role);
-  const [user] = await db
+export async function getStaffMember(
+  userId: string,
+  executor: Pick<typeof db, "select" | "insert"> = db,
+): Promise<StaffMember> {
+  const { role } = await getOrCreateUserRole(userId, executor);
+  const def = await getRole(role, executor);
+  const [user] = await executor
     .select({
       username: usersTable.username,
       onboardingSeen: usersTable.onboardingSeen,
@@ -362,6 +373,7 @@ export async function getStaffMember(userId: string): Promise<StaffMember> {
       floorModeEnabled: usersTable.floorModeEnabled,
       notificationPrefs: usersTable.notificationPrefs,
       sandbox: usersTable.sandbox,
+      disabled: usersTable.disabled,
     })
     .from(usersTable)
     .where(eq(usersTable.id, userId));
@@ -379,6 +391,7 @@ export async function getStaffMember(userId: string): Promise<StaffMember> {
     floorModeEnabled: user?.floorModeEnabled ?? false,
     notificationPrefs: user?.notificationPrefs ?? {},
     sandbox: user?.sandbox ?? false,
+    disabled: user?.disabled ?? false,
     sandboxCopiedAt: copiedAt ? copiedAt.toISOString() : null,
     sandboxStale: user?.sandbox ? isSandboxCopyStale(copiedAt) : false,
   };
@@ -471,6 +484,7 @@ export async function listStaff(): Promise<StaffMember[]> {
         floorModeEnabled: usersTable.floorModeEnabled,
         notificationPrefs: usersTable.notificationPrefs,
         sandbox: usersTable.sandbox,
+        disabled: usersTable.disabled,
       })
       .from(userRolesTable)
       .innerJoin(usersTable, eq(usersTable.id, userRolesTable.userId))
@@ -488,6 +502,7 @@ export async function listStaff(): Promise<StaffMember[]> {
     floorModeEnabled: r.floorModeEnabled,
     notificationPrefs: r.notificationPrefs ?? {},
     sandbox: r.sandbox,
+    disabled: r.disabled,
     // The copy timestamp / staleness are only surfaced via the sandbox account's
     // own /me; the roster never needs them, so leave them at their inert values.
     sandboxCopiedAt: null,
@@ -507,8 +522,9 @@ export async function setUserRole(
   targetUserId: string,
   role: Role,
   actorCapabilities: Capability[],
+  executor: Pick<typeof db, "select" | "insert"> = db,
 ): Promise<{ ok: true; row: StaffMember } | { ok: false; status: number; error: string }> {
-  const def = await getRole(role);
+  const def = await getRole(role, executor);
   if (!def) {
     return { ok: false, status: 400, error: "Unknown role" };
   }
@@ -522,7 +538,7 @@ export async function setUserRole(
     };
   }
 
-  const [user] = await db
+  const [user] = await executor
     .select({ id: usersTable.id })
     .from(usersTable)
     .where(eq(usersTable.id, targetUserId));
@@ -533,7 +549,7 @@ export async function setUserRole(
   // Last-admin guard: if this change would leave nobody with manage-staff,
   // refuse. Compute the holder set after the hypothetical change.
   if (!def.capabilities.includes("manage-staff")) {
-    const holders = await manageStaffHolders();
+    const holders = await manageStaffHolders(executor);
     const remaining = holders.filter((id) => id !== targetUserId);
     if (remaining.length === 0) {
       return {
@@ -544,7 +560,7 @@ export async function setUserRole(
     }
   }
 
-  await db
+  await executor
     .insert(userRolesTable)
     .values({ userId: targetUserId, role })
     .onConflictDoUpdate({
@@ -552,7 +568,7 @@ export async function setUserRole(
       set: { role, updatedAt: new Date() },
     });
 
-  return { ok: true, row: await getStaffMember(targetUserId) };
+  return { ok: true, row: await getStaffMember(targetUserId, executor) };
 }
 
 // Reset a staff member's password to a manager-supplied value. Unlike the
@@ -562,6 +578,7 @@ export async function resetUserPassword(
   targetUserId: string,
   newPassword: string,
   actorCapabilities: readonly Capability[],
+  executor: Pick<typeof db, "update"> = db,
 ): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
   const [user] = await db
     .select({ id: usersTable.id })
@@ -582,7 +599,7 @@ export async function resetUserPassword(
       error: "Cannot reset a password for a higher-privileged account",
     };
   }
-  await updateUserPassword(targetUserId, newPassword);
+  await updateUserPassword(targetUserId, newPassword, executor);
   // A password reset is exactly the moment we must assume the old password
   // (and any token minted under it) may be compromised — that's the whole
   // point of a recovery reset. Evict the cache immediately so a session the

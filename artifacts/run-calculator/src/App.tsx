@@ -22,7 +22,7 @@ import { useAuth } from "@/useAuth";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import NotFound from "@/pages/not-found";
 import Landing from "@/pages/landing";
-import { SignInPage, SignUpPage, ForgotPasswordPage } from "@/pages/auth";
+import { SignInPage, SignUpPage, InvitationPage, ForgotPasswordPage } from "@/pages/auth";
 import { startServiceWorkerUpdateChecks } from "@/pwaUpdateChecks";
 import { updateAndReload } from "@/pwaUpdateRecovery";
 import { useRegisterSW } from "virtual:pwa-register/react";
@@ -137,6 +137,7 @@ function AppRoutes() {
         <Route path="/" component={HomeGate} />
         <Route path="/sign-in" component={SignInPage} />
         <Route path="/sign-up" component={SignUpPage} />
+        <Route path="/accept-invitation" component={InvitationPage} />
         <Route path="/forgot-password" component={ForgotPasswordPage} />
         <Route component={NotFound} />
       </Switch>
@@ -256,15 +257,26 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
   const handleAutomaticUpdateAndReload = useCallback(
     (generation: number) => {
       emitFieldCheckSignal("pwa-update-handoff", "success");
-      return updateAndReload(
-        registrationRef.current,
-        activateWaitingWorker,
-        () => window.location.reload(),
-        () =>
-          automaticReloadGenerationRef.current === generation
-          && getAutomaticUpdateReloadSafety()
-          && updateIdleRef.current,
-      );
+      const canReload = () =>
+        automaticReloadGenerationRef.current === generation
+        && getAutomaticUpdateReloadSafety()
+        && updateIdleRef.current;
+      if (!canReload()) return Promise.resolve();
+
+      // This path only runs after the app has already observed an installed
+      // update. Do not perform another update() discovery pass here: some
+      // browsers keep that promise pending while the waiting worker is being
+      // activated, which strands safe-idle handoffs. Activate the known
+      // waiting worker directly, or reload when the browser has already
+      // promoted it to active.
+      const registration = registrationRef.current;
+      if (registration?.waiting) {
+        return activateWaitingWorker(false, canReload).catch(() => {
+          if (canReload()) window.location.reload();
+        });
+      }
+      if (canReload()) window.location.reload();
+      return Promise.resolve();
     },
     [activateWaitingWorker],
   );

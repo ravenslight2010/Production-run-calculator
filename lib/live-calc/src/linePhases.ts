@@ -53,6 +53,51 @@ export function lineHasPackagingDrain(phases: LinePhases): boolean {
   );
 }
 
+export interface StationDrainCompletionArgs {
+  runStatus: string;
+  endedAt?: number | null;
+  /** Pause-excluded production time. A zero value means the line was empty. */
+  elapsedBatchSec: number;
+  phases: LinePhases;
+}
+
+function isEndedRunWithProduct({
+  runStatus,
+  endedAt,
+  elapsedBatchSec,
+}: StationDrainCompletionArgs): boolean {
+  return (
+    runStatus === "ended" &&
+    endedAt != null &&
+    Number.isFinite(endedAt) &&
+    elapsedBatchSec > 0
+  );
+}
+
+/**
+ * True once an ended run's Press/Oven/Frontline segment has drained.
+ *
+ * The product guard deliberately rejects runs ended before any production
+ * occurred, even though the phase model represents those runs as empty.
+ */
+export function isFrontlineDrainComplete(args: StationDrainCompletionArgs): boolean {
+  return isEndedRunWithProduct(args) && args.phases.stage1.state === "empty";
+}
+
+/**
+ * True only after an ended run's complete line has drained through Wrapper /
+ * Packaging. Requiring every phase to be empty prevents Packaging from
+ * advancing during the Frontline or Freeze tunnel portions of the drain.
+ */
+export function isPackagingDrainComplete(args: StationDrainCompletionArgs): boolean {
+  return (
+    isEndedRunWithProduct(args) &&
+    args.phases.stage1.state === "empty" &&
+    args.phases.stage2.state === "empty" &&
+    args.phases.stage3.state === "empty"
+  );
+}
+
 export interface ComputeLinePhasesArgs {
   /** Virtual elapsed time (pause-excluded), in seconds. */
   elapsedBatchSec: number;

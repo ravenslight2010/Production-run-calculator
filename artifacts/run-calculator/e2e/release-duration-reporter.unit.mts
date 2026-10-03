@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
   DURATION_REGRESSION_MIN_INCREASE_MS,
@@ -10,9 +11,174 @@ import {
   parseCompleteFullBrowserBaseline,
   parsePerFileDurations,
 } from "./release-duration-reporter.ts";
+import {
+  FULL_BROWSER_EXCLUDED_CASE_PATTERN,
+  FULL_BROWSER_EXPECTED_CASE_IDENTITIES,
+  FULL_BROWSER_EXPECTED_CASES,
+  assertFullBrowserCaseContract,
+  assertFullBrowserCaseIdentityContract,
+} from "../../../scripts/src/full-browser-case-contract.mts";
 
+type PlaywrightListSuite = {
+  title: string;
+  file?: string;
+  specs?: Array<{
+    file: string;
+    title: string;
+    tests: Array<{ projectName: string }>;
+  }>;
+  suites?: PlaywrightListSuite[];
+};
+
+function collectPlaywrightCaseIdentities(
+  suites: PlaywrightListSuite[],
+): string[] {
+  const identities: string[] = [];
+
+  function visit(
+    currentSuites: PlaywrightListSuite[],
+    parentTitlePath: string[],
+  ): void {
+    for (const suite of currentSuites) {
+      const titlePath =
+        suite.file && suite.title === suite.file
+          ? parentTitlePath
+          : [...parentTitlePath, suite.title];
+
+      for (const spec of suite.specs ?? []) {
+        for (const test of spec.tests) {
+          assert.equal(
+            test.projectName,
+            "chromium",
+            "the full-browser identity inventory only covers Chromium",
+          );
+          identities.push(
+            `artifacts/run-calculator/e2e/${spec.file.replaceAll("\\", "/")} :: ${[
+              ...titlePath,
+              spec.title,
+            ].join(" › ")}`,
+          );
+        }
+      }
+
+      visit(suite.suites ?? [], titlePath);
+    }
+  }
+
+  visit(suites, []);
+  return identities.sort();
+}
+
+const repositoryRoot = fileURLToPath(new URL("../../../", import.meta.url));
 const slowFile = fileURLToPath(new URL("./slow.spec.ts", import.meta.url));
 const quietFile = fileURLToPath(new URL("./quiet.spec.ts", import.meta.url));
+
+assert.equal(EXPECTED_CASES, FULL_BROWSER_EXPECTED_CASES);
+assert.equal(FULL_BROWSER_EXPECTED_CASE_IDENTITIES.length, 170);
+assert.equal(
+  new Set(FULL_BROWSER_EXPECTED_CASE_IDENTITIES).size,
+  FULL_BROWSER_EXPECTED_CASE_IDENTITIES.length,
+  "the reviewed Chromium identity inventory must not contain duplicates",
+);
+assert.doesNotThrow(() =>
+  assertFullBrowserCaseContract(FULL_BROWSER_EXPECTED_CASES),
+);
+assert.throws(
+  () => assertFullBrowserCaseContract(FULL_BROWSER_EXPECTED_CASES - 1),
+  new RegExp(
+    `discovered ${FULL_BROWSER_EXPECTED_CASES - 1} cases; expected exactly ${FULL_BROWSER_EXPECTED_CASES}`,
+  ),
+  "a stale lower case count must fail with the discovered and configured counts",
+);
+assert.throws(
+  () => assertFullBrowserCaseContract(FULL_BROWSER_EXPECTED_CASES + 1),
+  new RegExp(
+    `discovered ${FULL_BROWSER_EXPECTED_CASES + 1} cases; expected exactly ${FULL_BROWSER_EXPECTED_CASES}`,
+  ),
+  "coverage drift must fail with the discovered and configured case counts",
+);
+
+const discoveryJson = execFileSync(
+  "pnpm",
+  [
+    "--filter",
+    "@workspace/run-calculator",
+    "exec",
+    "playwright",
+    "test",
+    "--config",
+    "playwright.config.ts",
+    "--list",
+    "--reporter=json",
+  ],
+  {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PLAYWRIGHT_BASE_URL: "http://127.0.0.1:18082",
+      PLAYWRIGHT_API_BASE_URL: "http://127.0.0.1:18081",
+    },
+    maxBuffer: 30 * 1024 * 1024,
+  },
+);
+const discoveryReport = JSON.parse(discoveryJson) as {
+  config: { projects: Array<{ name: string }> };
+  errors: Array<{ message: string }>;
+  suites: PlaywrightListSuite[];
+};
+assert.deepEqual(
+  discoveryReport.errors,
+  [],
+  "the authoritative full-browser Playwright config must discover without errors",
+);
+assert.deepEqual(
+  discoveryReport.config.projects.map((project) => project.name),
+  ["chromium"],
+  "the full-browser identity set must remain limited to the Chromium project",
+);
+const discoveredIdentities = collectPlaywrightCaseIdentities(
+  discoveryReport.suites,
+);
+assert.equal(discoveredIdentities.length, FULL_BROWSER_EXPECTED_CASES);
+assert.ok(
+  discoveredIdentities.every(
+    (identity) => !FULL_BROWSER_EXCLUDED_CASE_PATTERN.test(identity),
+  ),
+  "focused-only and physical-device cases must stay outside the Chromium identity set",
+);
+assert.doesNotThrow(() =>
+  assertFullBrowserCaseIdentityContract(discoveredIdentities),
+);
+
+const addedIdentity =
+  "artifacts/run-calculator/e2e/new.spec.ts :: new release case";
+assert.throws(
+  () =>
+    assertFullBrowserCaseIdentityContract([
+      ...FULL_BROWSER_EXPECTED_CASE_IDENTITIES,
+      addedIdentity,
+    ]),
+  /Added identities[\s\S]*\+ artifacts\/run-calculator\/e2e\/new\.spec\.ts :: new release case/,
+  "an added case must be listed for review",
+);
+assert.throws(
+  () =>
+    assertFullBrowserCaseIdentityContract(
+      FULL_BROWSER_EXPECTED_CASE_IDENTITIES.slice(1),
+    ),
+  /Removed identities/,
+  "a removed case must be listed for review",
+);
+assert.throws(
+  () =>
+    assertFullBrowserCaseIdentityContract([
+      ...FULL_BROWSER_EXPECTED_CASE_IDENTITIES.slice(1),
+      addedIdentity,
+    ]),
+  /Added identities[\s\S]*Removed identities/,
+  "a same-count substitution must report both the added and removed identities",
+);
 
 const report = formatFullBrowserReport(
   [
@@ -102,7 +268,15 @@ const validBaselineReport = formatFullBrowserReport(
   "prior-revision",
 );
 const validBaseline = parseCompleteFullBrowserBaseline(validBaselineReport);
-assert.deepEqual(validBaseline, new Map([["artifacts/run-calculator/e2e/slow.spec.ts", 160_000]]));
+assert.deepEqual(
+  validBaseline,
+  new Map([
+    [
+      "artifacts/run-calculator/e2e/slow.spec.ts",
+      FULL_BROWSER_EXPECTED_CASES * 1_000,
+    ],
+  ]),
+);
 assert.equal(canRetainFullBrowserReport(completeCases, "passed"), true);
 assert.equal(
   canRetainFullBrowserReport(completeCases.slice(0, -1), "passed"),
@@ -133,7 +307,7 @@ assert.deepEqual(
     [
       {
         file: "artifacts/run-calculator/e2e/slow.spec.ts",
-         durationMs: 200_000,
+         durationMs: FULL_BROWSER_EXPECTED_CASES * 1_000 + 50_000,
       },
     ],
     baselineAfterIncompleteRun!,
@@ -141,10 +315,10 @@ assert.deepEqual(
   [
     {
       file: "artifacts/run-calculator/e2e/slow.spec.ts",
-        durationMs: 200_000,
-       baselineDurationMs: 160_000,
-       increaseMs: 40_000,
-       increasePercent: (40_000 / 160_000) * 100,
+         durationMs: FULL_BROWSER_EXPECTED_CASES * 1_000 + 50_000,
+        baselineDurationMs: FULL_BROWSER_EXPECTED_CASES * 1_000,
+       increaseMs: 50_000,
+        increasePercent: (50_000 / (FULL_BROWSER_EXPECTED_CASES * 1_000)) * 100,
     },
   ],
 );

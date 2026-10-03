@@ -5,7 +5,7 @@ FROM node:24-slim AS builder
 RUN apt-get update \
   && apt-get install -y --no-install-recommends git python3 build-essential \
   && rm -rf /var/lib/apt/lists/*
-RUN npm install -g pnpm@11.5.2  # keep in sync with packageManager in package.json
+RUN npm install -g pnpm@12.6.0  # keep in sync with packageManager in package.json
 WORKDIR /app
 
 # Copy the complete workspace dependency graph before application source. Keep

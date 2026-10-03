@@ -26,6 +26,21 @@ export type HomeTab = (typeof HOME_TABS)[number];
 
 const VALID_TABS = new Set<string>(HOME_TABS);
 
+function resetPageScroll(): void {
+  if (typeof document === "undefined") return;
+  const scrollToTop = () => {
+    const pageScroller = document.scrollingElement ?? document.documentElement;
+    pageScroller.scrollTop = 0;
+  };
+  scrollToTop();
+  // Browser history restoration and tab content reflow can run after the
+  // synchronous transition, so close the same page-level scroll race once the
+  // new panel has had a frame to commit.
+  if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+    window.requestAnimationFrame(scrollToTop);
+  }
+}
+
 function loadHashTab(): HomeTab | null {
   if (typeof window === "undefined") return null;
   if (/^#incidents(?:\/|$)/.test(window.location.hash)) return "incidents";
@@ -80,6 +95,7 @@ export function useHomeNavigation() {
 
   const selectTab = useCallback((tab: HomeTab) => {
     if (tab === activeTabRef.current) return;
+    resetPageScroll();
     navigationStartedAtRef.current = typeof performance === "undefined" ? null : performance.now();
     activeTabRef.current = tab;
     setActiveTab(tab);

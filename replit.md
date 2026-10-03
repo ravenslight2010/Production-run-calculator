@@ -3,6 +3,8 @@
 - `pnpm --filter @workspace/api-server run dev` — run the API server on the artifact-configured local workflow port 8080 (`artifacts/api-server/.replit-artifact/artifact.toml`). This development command applies the development schema first, but refuses a confirmed deployed Replit runtime before schema push. `REPLIT_ENVIRONMENT=production` alone does not trigger the refusal because isolated workspaces can carry it. CI may intentionally override the port with `PORT=5000`; do not use the CI port as local startup guidance.
 - `pnpm --filter @workspace/run-calculator run prepare:e2e:department` — for a fresh isolated browser-test database, fail closed unless the target is disposable, apply the canonical schema, then start the API; run `test:e2e:department` separately while it stays up
 - `pnpm run typecheck` — full typecheck across all packages
+- **Release evidence handoff:** start at [docs/release-evidence-handoff.md](docs/release-evidence-handoff.md) for the standard/full commands, selected-revision report/checkpoint status, CI artifacts, and production-proof boundary
+- `pnpm --filter @workspace/api-server run typecheck:routes` — focused API route check when a generated validator build blocks the full API check; it uses the last successful `@workspace/api-zod` declarations and does not replace the authoritative `typecheck` command
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
@@ -13,7 +15,7 @@
 - **Client validation:** `pnpm --filter @workspace/run-calculator run test` runs the client unit suite; `pnpm --filter @workspace/run-calculator run test:e2e:phone` runs the phone-sized Playwright usability smoke suite against the artifact-managed web app.
 - **Stable branch delivery:** Develop on `Replit`, which tracks `origin/Replit`, and use pull requests to merge into protected `main`. Local `main` tracks `origin/main` for comparison and diverts ordinary pushes to the backup remote. The legacy `pnpm run push:main` helper targets direct `origin/main` and is expected to be rejected by the live branch rule; do not use it for routine delivery. See `.github/repository-policy.md` and `docs/guarded-github-push.md`.
 - Required env: `DATABASE_URL` — Postgres connection string
-- Security-relevant env: `STAFF_SIGNUP_CODE` — shared code gating public sign-up (fails closed if unset); `INITIAL_MANAGER_USERNAME` + `INITIAL_MANAGER_ACCESS_CODE` — BOTH must match (exact username, and the access code supplied at sign-up) for a database with no existing manager to bootstrap that account as manager (fails closed if either is unset, i.e. no auto-manager). `INITIAL_MANAGER_ACCESS_CODE` is also independently accepted in place of `STAFF_SIGNUP_CODE` to pass the basic sign-up gate. See `.agents/memory/signup-bootstrap-hardening.md`.
+- Security-relevant env: `STAFF_SIGNUP_CODE` — transitional code used until a manager rotates or disables it; `INITIAL_MANAGER_USERNAME` + `INITIAL_MANAGER_ACCESS_CODE` — BOTH must match to bootstrap the first manager (fails closed); `SESSION_TTL_SEC` — absolute session lifetime (default 30 days); `SESSION_IDLE_TIMEOUT_SEC` — idle lifetime (default 12 hours). Managers control ongoing onboarding with one-time invitations and can disable accounts or revoke sessions.
 
 ## Stack
 
@@ -38,8 +40,8 @@
 - **Contract-first API.** The OpenAPI spec is authoritative; clients consume generated hooks and the server validates with generated Zod schemas. Heavy shaping (e.g. AI prompt building) lives server-side so both clients stay thin and identical.
 - **Pure logic lives in `lib/*`, not in the app.** Any non-trivial formula or decision belongs in a shared library; the web app keeps only platform glue (storage, UI).
 - **Live day-state sync via `/api/sync`** with additive, non-clobber union merges (echo / lost-update guards). Merges need a synced `mergedAway` tombstone to survive the additive union. Some master-data (production rules, denied merges, change history) is intentionally NOT in sync.
-- **Auth is self-contained username+password** (Clerk removed): the web app uses an httpOnly cookie; `requireAuth` gates all `/api` except `/healthz` and `/auth/*`. First registered user becomes a manager. Roles are DB rows resolved per-request via `requireCapability`.
-- **Sign-up is gated by a facility access code** (`STAFF_SIGNUP_CODE` env var, timing-safe compare, fails closed if unset) — public self-registration otherwise exposes internal factory data. Public auth endpoints are also rate-limited. See `.agents/memory/signup-bootstrap-hardening.md`.
+- **Auth is self-contained username+password** (Clerk removed): the web app uses an httpOnly cookie and other clients may use Bearer authentication; both resolve through the same server-side session, expiry, idle, revocation, password-change, account-disable, and daily-reset fences. Roles are DB rows resolved per request via `requireCapability`.
+- **Production onboarding is manager-controlled.** Managers issue one-time invitations and may rotate or disable the transitional staff sign-up code. The separately designated initial-manager username/code remains the only bootstrap path to manager privileges, and public auth endpoints are rate-limited.
 - **AI features never edit code or auto-write data.** They are advisory/fail-safe: a "fix" is an explanation, suggestions require per-field user confirmation through existing write paths, and AI output is canonicalized/sanitized server-side before use.
 
 ## Product
@@ -51,7 +53,7 @@
 
 - **Fix task-scoped errors immediately.** Any TypeScript, test, or build error within the approved task scope must be fixed before moving on. Bring an unrelated error into the current task when it blocks required validation or creates a safety, security, data-integrity, or release risk; otherwise de-duplicate it and capture a bounded Draft with evidence and a next action. Do not silently lose errors.
 - **Web-only product:** The maintained application is `artifacts/run-calculator`, and it must remain usable in responsive desktop, phone, and tablet browsers.
-- **Automatically preserve future improvements:** When a distinct, actionable feature, upgrade, technical-debt item, or meaningful test gap is discussed but deferred, search the project task board for overlap and create a Draft task immediately if none exists. A Draft records the idea only; never accept, assign, or start it automatically. If the idea matters but is too vague to scope honestly, create a bounded discovery or decision Draft instead of inventing requirements. Do not create tasks for casual speculation, temporary conversation details, secrets, personal information, or ideas already covered by an existing task.
+- **Automatically preserve future improvements:** When a distinct, actionable feature, upgrade, technical-debt item, or meaningful test gap is discussed but deferred, search current work for overlap and submit a task only when no existing task covers it and it meets the follow-up rules below. The task platform's settings determine whether a submitted task immediately becomes Active or remains a Draft; repository guidance does not change those settings. If the idea matters but is too vague to scope honestly, use a bounded discovery or decision plan instead of inventing requirements. Do not create tasks for casual speculation, temporary conversation details, secrets, personal information, or ideas already covered by existing work.
 
 ## Gotchas
 
@@ -74,6 +76,21 @@ This section is the project-specific application of the shared task-scope rule i
 
 - Generate one durable task per work objective. The owning task includes investigation, implementation, integration and persistence impacts, regression coverage, final verification, and all in-scope repair work. Do not create a new task for each symptom, test failure, fixture repair, or sub-outcome inside the same objective.
 - Before starting, capture the task's scope, affected surfaces, expected owner, applicable specialist safety checks, and validation matrix. Search the task board for overlap and dependencies; do not duplicate an existing task.
+- Before creating another task, complete this decision checklist:
+  1. Name the parent or owning task.
+  2. Search current draft and active tasks for overlap and route the finding to an existing matching task when one exists.
+  3. State independent acceptance criteria for a separately completable user outcome.
+  4. Name the approved exception: a genuinely independent outcome, an explicitly deferred user outcome, or an out-of-scope safety, security, data-integrity, or release blocker.
+  5. Document why the work cannot remain in the owning task.
+  If any item is missing, do not create a follow-up; record the finding in the owning task's progress or failure ledger.
+- Finish in-scope work in the owning task; child tasks are for distinct outcomes with independent acceptance criteria, not symptoms, test failures, fixture repairs, or other sub-outcomes. High- and medium-priority independent outcomes may be submitted as child tasks. Low-priority outcomes may be submitted only when the plan states a concrete benefit and bounded scope. Optional work is not categorically excluded; physical-device-only work is excluded.
+- Every eligible child plan must state its parent, evidence, explicit priority and rationale, separate acceptance criteria, why it cannot remain in the owning task, and the result of checking current work for overlap.
+- Each generated child depends on every unfinished accepted task present when it is created, and later generated siblings wait behind earlier generated siblings. Unapproved drafts do not block it; tasks added later are not retroactively added as dependencies.
+- This requirement is not automatically enforced by the observed generated-follow-up path. See [Follow-up dependency submission](docs/follow-up-dependency-submission.md) for dependency-aware manual planning, sequential approval, persisted-record checks, and the remaining platform limitations. Do not treat a parent link or a passing policy checker as proof of compliant ordering.
+- Before acceptance, use the [read-only ordering review](docs/follow-up-ordering-review.md) to separate current missing links, selected sibling ordering, and retained historical evidence. Its warnings cannot stop automatic acceptance or enforce scheduling.
+- Platform settings determine whether a submitted task immediately becomes Active or remains a Draft. Priority is recorded in the plan, not enforced as native task metadata; the repository checker validates policy wording, not runtime task creation.
+- Every web-facing task must include a compatibility applicability matrix for desktop, phone, tablet portrait/landscape, Chromium/Chrome, and WebKit/Safari. Record an explicit `not applicable`, `blocked`, or `not run` reason for each check that is not a pass.
+- Responsive browser emulation is automated evidence, not physical Android Chrome or iOS Safari/PWA evidence. Real-device checks are a separate environment-dependent lane when required; this remains a web-only product with no native-mobile requirement.
 - Use one task when the work has one objective and shared ownership. A separate project task is allowed only when it has a genuinely independent outcome with separate acceptance criteria, is an explicitly deferred user outcome, or is an out-of-scope safety, security, data-integrity, or release blocker that cannot responsibly remain in the owning task.
 - Ask a question only for a genuine product decision, missing access or secret, or destructive action. Otherwise follow existing project patterns and choose the smallest safe behavior.
 
@@ -84,7 +101,9 @@ This section is the project-specific application of the shared task-scope rule i
 - A genuinely out-of-scope failure must be de-duplicated against the task board. Keep a non-blocking observation in the owning task's progress or failure ledger unless it meets the separate-task rule above; if it does, capture a bounded Draft with an owner, evidence, and next action. Bring it into the current task when it blocks required validation or creates a safety, security, data-integrity, or release risk.
 - Keep newly discovered in-scope failures in the owning task's failure ledger and close them before completion. A new project task requires a genuinely independent objective, an explicitly deferred user outcome, or an out-of-scope safety, security, data-integrity, or release blocker that cannot responsibly be absorbed.
 - Do not create recursive or speculative “one more task” work. A separate task must have independent acceptance criteria, an owner, and a documented reason it cannot remain in the current objective.
+- Completion review must retain the owning task's full failure ledger and resolve every in-scope `FAIL`, `BLOCKED`, `NOT REACHED`, and `MISSING` result. Test failures, fixture repairs, cleanup, validation work, and other in-scope sub-outcomes stay in the owner and must not become recursive tasks.
 - Completion evidence must name the changed surface, focused checks, broader affected checks, known failures, data/authorization/sync implications where applicable, and the exact remaining action for anything not completed.
+- Web-facing completion evidence must include the compatibility applicability matrix and separate emulated Chromium/WebKit results from physical Android Chrome and iOS Safari/PWA results. Missing device services are `blocked` or `not run`, never a pass.
 
 ### Long-running task progress
 
@@ -104,6 +123,16 @@ This section is the project-specific application of the shared task-scope rule i
 - For genuinely separate project tasks, add explicit dependencies when they share a surface, need a prior migration/heal, consume another task's output, or would otherwise race. Avoid creating project-task dependencies just to organize in-scope work.
 - Prefer one durable end-to-end task over many implementation fragments. Parallelize only concrete work that can be safely owned and validated without expanding the objective boundary.
 - Never claim success by weakening assertions, skipping applicable tests, masking secrets, using unsafe destructive data, treating missing evidence as a pass, or relabeling a timeout as success.
+
+### Current task ownership audit
+
+This audit preserves every current draft and active task as a separate work item. It does not merge, cancel, rename, re-scope, accept, start, assign, or change the lifecycle or acceptance criteria of any task.
+
+- **Release evidence objective:** “Restore complete full-mode release evidence after browser regressions are fixed” owns the final release-evidence rerun and decision. “Stabilize Mix Plan browser coverage for full release” owns Mix Plan browser reliability. “Automate the deployed revision handoff for source evidence” owns revision handoff automation. “Add a production-binding contract test for source reconciliation” owns the production-binding regression contract. New findings return to the matching existing owner rather than creating recursive follow-ups.
+- **Incomplete-name data-safety objective:** “Keep manager recipe libraries safe with incomplete names” owns manager-library runtime safety. “Confirm every setup recipe picker keeps valid choices after bad master data” owns picker regression evidence. “Prevent incomplete learned aliases from being saved again” owns write-path prevention. “Repair legacy learned aliases before they reach manager screens” owns legacy-data repair. New findings return to the matching existing owner rather than creating recursive follow-ups.
+- **Task-scope policy objective:** “Enforce task scope policy” owns the intake, closure, and policy-drift enforcement described here.
+
+Future current-task reviews use the same rule: preserve each task's existing scope and lifecycle, identify its owning objective, de-duplicate against existing work, and route any in-scope finding back to the matching owner.
 
 ### Production and release branch
 

@@ -146,6 +146,18 @@ export type SyncHealthReport = {
     historyRowsScanned: number;
     historyRowsTruncated: boolean;
   };
+  legacySyncReadiness: {
+    compatibilityMode: "accept" | "reject";
+    status: "ready" | "not-ready" | "rejection-enabled";
+    acceptedLegacyWrites: number;
+    rejectedLegacyWrites: number;
+    requiredAcceptedLegacyWrites: 0;
+    windowMs: number;
+    observedFrom: string;
+    observedUntil: string;
+    fullWindowObserved: boolean;
+    expiresAt: string;
+  };
   correlationId?: string;
 };
 

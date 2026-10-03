@@ -17,6 +17,9 @@ export interface ImportAlias {
   externalName: string;
   /** The saved name the imported name resolves to */
   canonicalName: string;
-  /** For flavor aliases, the canonical parent brand the flavor belongs to; null/omitted for brand aliases. */
+  /**
+     * For flavor aliases, the canonical parent brand the flavor belongs to; null/omitted for brand aliases.
+     * @nullable
+     */
   brandContext?: string | null;
 }

@@ -8,8 +8,9 @@
     "./schema": "./src/schema/index.ts"
   },
   "scripts": {
-    "push": "drizzle-kit push --config ./drizzle.config.ts",
-    "push-force": "drizzle-kit push --force --config ./drizzle.config.ts"
+    "push": "drizzle-kit push --config ./drizzle.config.ts && pnpm run apply-audit-log-protection",
+    "push-force": "drizzle-kit push --force --config ./drizzle.config.ts && pnpm run apply-audit-log-protection",
+    "apply-audit-log-protection": "node ./migrations/apply-audit-log-protection.mjs"
   },
   "dependencies": {
     "@workspace/factory-constants": "workspace:*",
@@ -21,6 +22,6 @@
   "devDependencies": {
     "@types/node": "catalog:",
     "@types/pg": "^8.23.1",
-    "drizzle-kit": "^0.31.10"
+    "drizzle-kit": "^0.31.11"
   }
 }

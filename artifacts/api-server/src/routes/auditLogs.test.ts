@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { profileNameLinkCleanupSummary } from "./auditLogs";
+import { profileNameLinkCleanupSummary, redactAuditChanges } from "./auditLogs";
 
 describe("profileNameLinkCleanupSummary", () => {
   it("keeps a completed cleanup result manager-readable", () => {
@@ -27,5 +27,21 @@ describe("profileNameLinkCleanupSummary", () => {
       skippedStarted: 0,
       removedStubs: { dough: 0, sauce: 3, cheese: 0, mix: 0 },
     });
+  });
+});
+
+describe("operational audit privacy boundary", () => {
+  it("keeps only allowlisted bounded evidence and drops network/payload fields", () => {
+    expect(redactAuditChanges({
+      count: 12,
+      outcome: "success",
+      password: "secret",
+      ipAddress: "192.0.2.1",
+      requestBody: { recipe: "private" },
+    })).toEqual({ count: 12, outcome: "success" });
+  });
+
+  it("bounds string values", () => {
+    expect(redactAuditChanges({ reasonCode: "x".repeat(201) })).toEqual({});
   });
 });

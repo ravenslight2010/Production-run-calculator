@@ -79,6 +79,31 @@ describe("toMixScheduledRun", () => {
     // The whole 8 oz/pizza maps to the single Mozzarella recipe row.
     expect(run.ingredientOzPerPizza["Mozzarella"]).toBeCloseTo(8, 5);
   });
+
+  it("includes pepperoni and alternate pepperoni slots in ingredient oz", () => {
+    const run = toMixScheduledRun({
+      date: "2026-09-12",
+      brand: "Pizza Co",
+      flavor: "Cheese",
+      values: {
+        ...cheeseRunValues,
+        pep1Type: "Pepperoni",
+        pep1OzPerPizza: 2,
+        pep1TypeB: "Pepperoni B",
+        pep1OzPerPizzaB: 1,
+        pep2Type: "Sausage",
+        pep2OzPerPizza: 3,
+        pep2TypeB: "Sausage B",
+        pep2OzPerPizzaB: 4,
+      },
+    });
+    expect(run.ingredientOzPerPizza).toMatchObject({
+      Pepperoni: 2,
+      "Pepperoni B": 1,
+      Sausage: 3,
+      "Sausage B": 4,
+    });
+  });
 });
 
 describe("computeMixPlanSnapshot", () => {

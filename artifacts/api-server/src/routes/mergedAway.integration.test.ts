@@ -25,7 +25,7 @@ import { sql } from "drizzle-orm";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import pg from "pg";
-import { signToken } from "../lib/auth";
+import { signLegacyTokenForTests } from "../lib/auth";
 
 type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
@@ -138,7 +138,7 @@ async function remove(names: string[]): Promise<Response> {
 }
 
 function authHeaders(): Record<string, string> {
-  return { authorization: `Bearer ${signToken("profile-user")}` };
+  return { authorization: `Bearer ${signLegacyTokenForTests("profile-user")}` };
 }
 
 describe("merged-away routes", () => {

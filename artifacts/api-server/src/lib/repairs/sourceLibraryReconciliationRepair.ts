@@ -26,11 +26,35 @@ const SOURCE_LINK_FIELDS = [
 ] as const;
 
 const reconciliationName = (value: unknown) => String(value ?? "").trim().toLowerCase();
+/** Stable comparison for retained JSON evidence versus the locked live row. */
+const canonicalJson = (value: unknown): string => {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value as Record<string, unknown>).sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson((value as Record<string, unknown>)[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "undefined";
+};
+export function buildReviewedReplacementPatch(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+  live: Record<string, unknown>,
+): { patch: Record<string, unknown> } | { conflict: "stale" | "unreviewed" } {
+  const patch: Record<string, unknown> = {};
+  for (const field of Object.keys(after)) {
+    if (field === "id" || field === "name" || field === "sourceName") continue;
+    if (!Object.prototype.hasOwnProperty.call(before, field)) return { conflict: "unreviewed" };
+    if (canonicalJson(live[field]) !== canonicalJson(before[field])) return { conflict: "stale" };
+    patch[field] = after[field];
+  }
+  return { patch };
+}
 const reconciliationZeroComponents = (components: unknown) =>
   Array.isArray(components) && components.every((component) => {
     if (!component || typeof component !== "object") return true;
     const row = component as Record<string, unknown>;
-    return ["lbs", "ozPerPizza", "perPizza"].every((key) => {
+    return ["lbs", "ozPerPizza", "perPizza", "amount"].every((key) => {
       const value = Number(row[key] ?? 0);
       return !Number.isFinite(value) || value === 0;
     });
@@ -93,36 +117,48 @@ export const sourceLibraryReconciliationRepair: RepairDefinition<RepairTransacti
     const rowFor = (rows: any[], proposal: { before: { id: string; name: string } }) =>
       rows.find((row) => row.id === proposal.before.id && row.name === proposal.before.name);
     let replaced = 0;
+    let staleSkips = 0;
+    let unreviewedSkips = 0;
+    const guardedPatch = (proposal: { before: Record<string, unknown>; after: Record<string, unknown> }, row: Record<string, unknown>) => {
+      const result = buildReviewedReplacementPatch(proposal.before, proposal.after, row);
+      if ("conflict" in result) {
+        if (result.conflict === "stale") staleSkips++;
+        else unreviewedSkips++;
+        return null;
+      }
+      return result.patch;
+    };
     for (const proposal of plan.replacements) {
       const after = proposal.after;
       if (proposal.table === "dough_recipes") {
         const row = rowFor(doughRows, proposal); if (!row) continue;
-        await tx.update(doughRecipesTable).set({
-          components: after.components as any, doughballVariants: after.doughballVariants as any,
-          doughballWeightOz: after.doughballWeightOz as number, doughballsPerTray: after.doughballsPerTray as number,
-          updatedAt: new Date(),
-        }).where(and(eq(doughRecipesTable.id, row.id), eq(doughRecipesTable.scope, "live"))); replaced++;
+        const patch = guardedPatch(proposal as any, row); if (!patch) continue;
+        await tx.update(doughRecipesTable).set({ ...patch, updatedAt: new Date() } as any)
+          .where(and(eq(doughRecipesTable.id, row.id), eq(doughRecipesTable.scope, "live"))); replaced++;
       } else if (proposal.table === "sauce_recipes") {
         const row = rowFor(sauceRows, proposal); if (!row) continue;
-        await tx.update(sauceRecipesTable).set({
-          components: after.components as any, updatedAt: new Date(),
-        }).where(and(eq(sauceRecipesTable.id, row.id), eq(sauceRecipesTable.scope, "live"))); replaced++;
+        const patch = guardedPatch(proposal as any, row); if (!patch) continue;
+        await tx.update(sauceRecipesTable).set({ ...patch, updatedAt: new Date() } as any)
+          .where(and(eq(sauceRecipesTable.id, row.id), eq(sauceRecipesTable.scope, "live"))); replaced++;
       } else if (proposal.table === "cheese_recipes") {
         const row = rowFor(cheeseRows, proposal); if (!row) continue;
-        await tx.update(cheeseRecipesTable).set({
-          components: after.components as any, brand: after.brand as string, flavors: after.flavors as string[],
-          shredderSetting: after.shredderSetting as string, cellulose: after.cellulose as string,
-          notes: after.notes as string, updatedAt: new Date(),
-        }).where(and(eq(cheeseRecipesTable.id, row.id), eq(cheeseRecipesTable.scope, "live"))); replaced++;
+        const patch = guardedPatch(proposal as any, row); if (!patch) continue;
+        await tx.update(cheeseRecipesTable).set({ ...patch, updatedAt: new Date() } as any)
+          .where(and(eq(cheeseRecipesTable.id, row.id), eq(cheeseRecipesTable.scope, "live"))); replaced++;
       } else {
         const row = rowFor(mixRows, proposal); if (!row) continue;
-        await tx.update(mixesTable).set({
-          components: after.components as any, brand: after.brand as string, flavor: after.flavor as string,
-          batchSize: after.batchSize as number, daysEarly: after.daysEarly as number,
-          ...(typeof after.notes === "string" ? { notes: after.notes } : {}),
-          updatedAt: new Date(),
-        }).where(and(eq(mixesTable.id, row.id), eq(mixesTable.scope, "live"))); replaced++;
+        const patch = guardedPatch(proposal as any, row); if (!patch) continue;
+        await tx.update(mixesTable).set({ ...patch, updatedAt: new Date() } as any)
+          .where(and(eq(mixesTable.id, row.id), eq(mixesTable.scope, "live"))); replaced++;
       }
+    }
+    // A runner-owned marker is permanent. Never commit it when any approved
+    // replacement was stale or contained an unreviewed field: throwing here
+    // rolls back both the mutation and the marker, leaving the repair retryable.
+    if (staleSkips > 0 || unreviewedSkips > 0) {
+      throw new Error(
+        `Source-library reconciliation conflict: ${staleSkips} stale row(s), ${unreviewedSkips} unreviewed row(s) skipped`,
+      );
     }
 
     const names = new Map<string, string>();
@@ -246,10 +282,17 @@ export const sourceLibraryReconciliationRepair: RepairDefinition<RepairTransacti
       await tx.delete(cheeseRecipesTable).where(and(eq(cheeseRecipesTable.id, row.id), eq(cheeseRecipesTable.scope, "live")));
       deletedStubs++;
     }
-    return { replacements: replaced, aliasesInserted, repointedProfiles, repointedRuns, deletedStubs };
+    return {
+      replacements: replaced,
+      ...(staleSkips || unreviewedSkips ? { staleSkips, unreviewedSkips } : {}),
+      aliasesInserted, repointedProfiles, repointedRuns, deletedStubs,
+    };
   },
-  validateResult: (result) => ["replacements", "aliasesInserted", "repointedProfiles", "repointedRuns", "deletedStubs"]
-    .every((key) => Number.isInteger(result[key]) && Number(result[key]) >= 0),
+  validateResult: (result) =>
+    ["replacements", "aliasesInserted", "repointedProfiles", "repointedRuns", "deletedStubs"]
+      .every((key) => Number.isInteger(result[key]) && Number(result[key]) >= 0) &&
+    (result.staleSkips === undefined || result.staleSkips === 0) &&
+    (result.unreviewedSkips === undefined || result.unreviewedSkips === 0),
 });
 
 /**

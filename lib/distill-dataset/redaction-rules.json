@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "replacement": "[REDACTED]",
+  "sensitiveHeaders": [
+    "supplier",
+    "supplier name",
+    "vendor",
+    "vendor name",
+    "supplier contact",
+    "vendor contact",
+    "contact",
+    "contact name",
+    "contact email",
+    "email",
+    "phone",
+    "contact phone",
+    "address",
+    "supplier address",
+    "vendor address",
+    "price",
+    "unit price",
+    "cost"
+  ],
+  "literalValues": []
+}

@@ -8,7 +8,13 @@
 //   • Normalization (oversized stage times clamped to fit the stored tunnel time)
 
 import { describe, it, expect } from "vitest";
-import { computeLinePhases, pickMostActivePhase, computeEndedRunElapsedSec } from "./linePhases";
+import {
+  computeLinePhases,
+  computeEndedRunElapsedSec,
+  isFrontlineDrainComplete,
+  isPackagingDrainComplete,
+  pickMostActivePhase,
+} from "./linePhases";
 
 const BASE = {
   preTunnelMin: 2.5,
@@ -213,6 +219,83 @@ describe("computeLinePhases — occupancy gates (early-run ended)", () => {
     expect(phases.stage1.state).toBe("empty");
     expect(phases.stage2.state).toBe("empty");
     expect(phases.stage3.state).toBe("empty");
+  });
+});
+
+describe("station auto-advance completion predicates", () => {
+  const ended = (nowMs: number, elapsedBatchSec: number) => computeLinePhases({
+    ...BASE,
+    elapsedBatchSec,
+    runStatus: "ended",
+    nowMs,
+    endedAt: T0,
+  });
+
+  it("allows Frontline to advance after Stage 1 drains", () => {
+    const phases = ended(T0 + 3 * 60000, 10 * 60);
+    expect(phases.stage1.state).toBe("empty");
+    expect(phases.stage2.state).toBe("draining");
+    expect(isFrontlineDrainComplete({
+      runStatus: "ended",
+      endedAt: T0,
+      elapsedBatchSec: 10 * 60,
+      phases,
+    })).toBe(true);
+    expect(isPackagingDrainComplete({
+      runStatus: "ended",
+      endedAt: T0,
+      elapsedBatchSec: 10 * 60,
+      phases,
+    })).toBe(false);
+  });
+
+  it("keeps Packaging selected through Frontline and Freeze tunnel drain", () => {
+    const phases = ended(T0 + 5 * 60000, 10 * 60);
+    expect(phases.stage2.state).toBe("draining");
+    expect(isPackagingDrainComplete({
+      runStatus: "ended",
+      endedAt: T0,
+      elapsedBatchSec: 10 * 60,
+      phases,
+    })).toBe(false);
+  });
+
+  it("allows Packaging to advance only after the full line is empty", () => {
+    const phases = ended(T0 + 20 * 60000, 10 * 60);
+    expect(phases.stage1.state).toBe("empty");
+    expect(phases.stage2.state).toBe("empty");
+    expect(phases.stage3.state).toBe("empty");
+    expect(isPackagingDrainComplete({
+      runStatus: "ended",
+      endedAt: T0,
+      elapsedBatchSec: 10 * 60,
+      phases,
+    })).toBe(true);
+  });
+
+  it.each([
+    ["pending", "pending"],
+    ["paused", "paused"],
+  ] as const)("rejects %s runs and ended runs with no product", (runStatus) => {
+    const phases = computeLinePhases({
+      ...BASE,
+      elapsedBatchSec: 0,
+      runStatus,
+      nowMs: T0 + 30 * 60000,
+      endedAt: T0,
+    });
+    expect(isFrontlineDrainComplete({
+      runStatus,
+      endedAt: T0,
+      elapsedBatchSec: 0,
+      phases,
+    })).toBe(false);
+    expect(isPackagingDrainComplete({
+      runStatus,
+      endedAt: T0,
+      elapsedBatchSec: 0,
+      phases,
+    })).toBe(false);
   });
 });
 

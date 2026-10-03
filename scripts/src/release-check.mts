@@ -26,6 +26,8 @@ import {
   computeSourceLibraryEvidenceId,
   parseSourceLibraryPreflightDiagnostic as parseStoredSourceLibraryPreflightDiagnostic,
   parseSourceLibraryEvidenceEnvironment,
+  resolveSourceLibraryDatabaseOwner,
+  readSourceLibraryDeploymentHandoff,
   summarizeSourceLibraryPreflight,
   type SourceLibraryEvidenceEnvironment,
   type SourceLibraryPreflightDiagnostic,
@@ -58,6 +60,9 @@ import {
   RETAINED_EVALUATION_CANONICAL_RELATIVE_PATH,
   retainedEvaluationDirectories,
 } from "./retained-evaluation-contract.mjs";
+import { validateReadinessEvidence } from "./capture-readiness-recovery.mts";
+import { FULL_BROWSER_EXPECTED_CASES } from "./full-browser-case-contract.mts";
+import { WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES } from "./webkit-case-contract.mts";
 export { TYPESCRIPT_7_SUPPORTED_RUNNERS } from "./typescript-7-native-contract.mts";
 
 export type ReleaseStep = {
@@ -154,6 +159,13 @@ export type ReleaseEvidenceOptions = {
   allowIncompleteCheckpoint?: boolean;
   expectedSourceLibraryEnvironment?: SourceLibraryEvidenceEnvironment;
   expectedSourceLibraryRevision?: string;
+  expectedReadinessDeploymentId?: string;
+  expectedDeployedRevision?: string;
+  /**
+   * Published standard/full verification must opt into the readiness
+   * requirement explicitly. Development and disposable fixtures use false.
+   */
+  requireReadinessEvidence?: boolean;
 };
 
 export function validateReleaseAiEvaluationEvidence(
@@ -254,15 +266,17 @@ export const API_SHARD_WARNING_MS = 6 * 60_000;
 export const RELEASE_CHECK_DEFAULT_CONCURRENCY = 4;
 export const RELEASE_CHECK_API_CONCURRENCY = 2;
 // The main browser suite is intentionally serialized because several tests
-// reset or observe shared disposable live-day state. Its 160 cases can exceed
-// the API shard budget on a cold release environment, so give the complete
+// reset or observe shared disposable live-day state. The suite can exceed the
+// API shard budget on a cold release environment, so give the complete
 // evidence-producing gate a longer bounded window instead of weakening
 // isolation with parallel workers or masking intermittent failures with
-// retries.
-const FULL_BROWSER_TIMEOUT_MS = 45 * 60_000;
-const FULL_BROWSER_WARNING_MS = 40 * 60_000;
-const FULL_BROWSER_EXPECTED_CASES = 160;
+// retries. The exact coverage count lives in the shared browser contract.
+const FULL_BROWSER_TIMEOUT_MS = 90 * 60_000;
+const FULL_BROWSER_WARNING_MS = 80 * 60_000;
 const FULL_BROWSER_GATE_LABEL = "full browser E2E suite";
+export const FULL_RESPONSIVE_WEBKIT_TIMEOUT_MS = 20 * 60_000;
+export const FULL_RESPONSIVE_WEBKIT_GATE_LABEL =
+  "browser phone/tablet WebKit compatibility";
 const RELEASE_BROWSER_ENV = {
   E2E_TEST_DB: "1",
   E2E_APPROVED_DESTRUCTIVE_MODE: "1",
@@ -399,6 +413,11 @@ const webkitBrowserEvidencePath = resolve(
   rootDir,
   releaseEvidenceDir,
   "browser-smoke/webkit-result.json",
+);
+const responsiveWebKitEvidencePath = resolve(
+  rootDir,
+  releaseEvidenceDir,
+  "browser-compatibility/webkit-result.json",
 );
 export const SOURCE_LIBRARY_RECONCILIATION_EVIDENCE =
   "source-library-reconciliation.json";
@@ -851,9 +870,13 @@ export function retainedEvaluationEvidenceInventory(
   );
 }
 const SOURCE_LIBRARY_RECONCILIATION_PENDING_EVIDENCE = `.${SOURCE_LIBRARY_RECONCILIATION_EVIDENCE}.pending`;
+export const READINESS_EVIDENCE_PATH =
+  "readiness-recovery/readiness-recovery.json";
 export const RELEASE_EVIDENCE_ALLOWLIST = [
   "release-check-report.md",
   "release-check-checkpoint.md",
+  "readiness-recovery/README.md",
+  READINESS_EVIDENCE_PATH,
   "report-key-rotation-preflight.json",
   "clean-start/clean-start-evidence.json",
   "clean-start/browser-result.json",
@@ -862,6 +885,8 @@ export const RELEASE_EVIDENCE_ALLOWLIST = [
   "clean-start/startup-web.log",
   "clean-start/startup-mockup.log",
   "browser-full/FINAL-REPORT.md",
+  "browser-compatibility/webkit-result.json",
+  "screen-off-wake/FINAL-REPORT.md",
   "browser-smoke/webkit-result.json",
   SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
   IMPORT_CORPUS_EVALUATION_EVIDENCE,
@@ -1083,6 +1108,21 @@ export const PRODUCTION_DEPENDENCY_AUDIT_STEP: ReleaseStep = {
   stage: "prerequisites",
 };
 
+export const WEBKIT_IDENTITY_CONTRACT_STEP: ReleaseStep = {
+  label: "WebKit identity contracts",
+  args: [
+    "--filter",
+    "@workspace/scripts",
+    "run",
+    "test:webkit-case-contract",
+  ],
+  // The contract uses Playwright --list against the dedicated release and
+  // compatibility configs; it must stay a bounded discovery check, not a
+  // browser run.
+  timeoutMs: 2 * 60_000,
+  stage: "browser-guard",
+};
+
 const sourceLibraryReport = resolve(
   rootDir,
   cliOptionValue("--source-library-report") ??
@@ -1125,18 +1165,59 @@ const configuredSourceLibraryRevision =
   (cliOptionValue("--source-library-revision") ??
     process.env.SOURCE_LIBRARY_RECONCILIATION_REVISION?.trim()) ||
   undefined;
+const configuredSourceLibraryDatabaseOwner =
+  (cliOptionValue("--source-library-database-owner") ??
+    process.env.SOURCE_LIBRARY_RECONCILIATION_DATABASE_OWNER?.trim()) ||
+  undefined;
+const configuredSourceLibraryDeploymentHandoff =
+  (cliOptionValue("--source-library-deployment-handoff") ??
+    process.env.SOURCE_LIBRARY_RECONCILIATION_DEPLOYMENT_HANDOFF?.trim()) ||
+  undefined;
+const sourceLibraryRevisionArgs = configuredSourceLibraryRevision
+  ? ["--revision", configuredSourceLibraryRevision]
+  : [];
+const sourceLibraryDatabaseOwnerArgs = configuredSourceLibraryDatabaseOwner
+  ? ["--database-owner", configuredSourceLibraryDatabaseOwner]
+  : [];
+const sourceLibraryDeploymentHandoffArgs =
+  configuredSourceLibraryDeploymentHandoff
+    ? ["--deployment-handoff", configuredSourceLibraryDeploymentHandoff]
+    : [];
+const configuredReadinessDeploymentId =
+  (cliOptionValue("--readiness-deployment-id") ??
+    process.env.READINESS_EVIDENCE_DEPLOYMENT_ID?.trim()) ||
+  undefined;
+const configuredDeployedRevision =
+  (cliOptionValue("--deployed-revision") ??
+    process.env.READINESS_EVIDENCE_DEPLOYED_REVISION?.trim()) ||
+  undefined;
 
 export function resolveSourceLibraryReleaseRevision(
   releaseRevision: string,
   environment: SourceLibraryEvidenceEnvironment,
   configuredRevision: string | undefined,
+  deploymentHandoffPath?: string,
 ): string {
+  const explicitRevision = configuredRevision?.trim() || undefined;
+  const handoffRevision = deploymentHandoffPath
+    ? readSourceLibraryDeploymentHandoff(deploymentHandoffPath).deployedRevision
+    : undefined;
+  if (
+    explicitRevision !== undefined &&
+    handoffRevision !== undefined &&
+    explicitRevision !== handoffRevision
+  ) {
+    throw new Error(
+      "Source-library revision conflicts with the deployed revision in the deployment handoff.",
+    );
+  }
   const revision =
-    configuredRevision ??
+    explicitRevision ??
+    handoffRevision ??
     (environment === "development" ? releaseRevision : undefined);
   if (!revision) {
     throw new Error(
-      "Production source-library evidence requires --source-library-revision with the exact deployed 40-character Git commit SHA.",
+      "Production source-library evidence requires --source-library-revision or --source-library-deployment-handoff with the exact deployed 40-character Git commit SHA.",
     );
   }
   if (!/^[a-f0-9]{40}$/u.test(revision)) {
@@ -1145,6 +1226,23 @@ export function resolveSourceLibraryReleaseRevision(
     );
   }
   return revision;
+}
+
+export function resolveSourceLibraryReleaseDatabaseOwner(
+  environment: SourceLibraryEvidenceEnvironment,
+  configuredDatabaseOwner: string | undefined,
+  deploymentHandoffPath?: string,
+): string | undefined {
+  const owner = resolveSourceLibraryDatabaseOwner(
+    configuredDatabaseOwner,
+    deploymentHandoffPath,
+  );
+  if (environment === "release" && owner === undefined) {
+    throw new Error(
+      "Production source-library evidence requires --source-library-database-owner or --source-library-deployment-handoff with the approved PostgreSQL database owner.",
+    );
+  }
+  return owner;
 }
 export const SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL =
   "source-library reconciliation database preflight";
@@ -1164,6 +1262,9 @@ export const SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_STEP: ReleaseStep = {
     sourceLibraryFromDate,
     "--environment",
     sourceLibraryEnvironment,
+    ...sourceLibraryRevisionArgs,
+    ...sourceLibraryDatabaseOwnerArgs,
+    ...sourceLibraryDeploymentHandoffArgs,
     "--preflight",
   ],
   stage: "source-library-preflight",
@@ -1184,6 +1285,9 @@ export const SOURCE_LIBRARY_RECONCILIATION_STEP: ReleaseStep = {
     sourceLibraryFromDate,
     "--environment",
     sourceLibraryEnvironment,
+    ...sourceLibraryRevisionArgs,
+    ...sourceLibraryDatabaseOwnerArgs,
+    ...sourceLibraryDeploymentHandoffArgs,
     "--output",
     resolve(
       rootDir,
@@ -1217,6 +1321,8 @@ export const SOURCE_LIBRARY_RECONCILIATION_IMPORT_STEP: ReleaseStep = {
     sourceLibraryHealId,
     "--from-date",
     sourceLibraryFromDate,
+    ...sourceLibraryRevisionArgs,
+    ...sourceLibraryDeploymentHandoffArgs,
     "--output",
     resolve(
       rootDir,
@@ -1270,6 +1376,19 @@ const importsProductionSourceLibraryReconciliation =
 const hasProductionSourceLibraryReconciliation =
   requiresProductionSourceLibraryReconciliation ||
   importsProductionSourceLibraryReconciliation;
+export function publishedReleaseReadinessRequired(
+  mode: ReleaseMode,
+  hasProductionEvidence: boolean,
+): boolean {
+  return (
+    (mode === "standard" || mode === "full") &&
+    hasProductionEvidence
+  );
+}
+const requiresPublishedReadiness = publishedReleaseReadinessRequired(
+  releaseMode,
+  hasProductionSourceLibraryReconciliation,
+);
 const sourceLibraryPreflightEnabled =
   sourceLibraryReconciliationPreflightEnabled(
     requiresProductionSourceLibraryReconciliation,
@@ -1278,6 +1397,11 @@ const sourceLibraryPreflightEnabled =
   );
 
 const steps: ReleaseStep[] = [
+  {
+    label: "audit protection publish configuration",
+    args: ["run", "check:audit-protection-config"],
+    stage: "prerequisites",
+  },
   ...(sourceLibraryPreflightEnabled
     ? [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_STEP]
     : []),
@@ -1464,9 +1588,14 @@ const steps: ReleaseStep[] = [
     ],
     stage: "browser-guard",
   },
+  WEBKIT_IDENTITY_CONTRACT_STEP,
   {
     label: "browser smoke tests",
-    args: ["--filter", "@workspace/run-calculator", "run", "test:e2e:smoke"],
+    command: "bash",
+    args: [
+      "scripts/src/run-isolated-browser-suite.sh",
+      "--playwright-config=playwright.smoke.config.ts",
+    ],
     env: {
       ...RELEASE_BROWSER_ENV,
     },
@@ -1475,18 +1604,24 @@ const steps: ReleaseStep[] = [
   },
   {
     label: "browser calendar tests",
+    command: "bash",
     args: [
-      "--filter",
-      "@workspace/run-calculator",
-      "run",
-      "test:e2e:calendar",
+      "scripts/src/run-isolated-browser-suite.sh",
+      "--playwright-config=playwright.calendar.config.ts",
     ],
+    env: {
+      ...RELEASE_BROWSER_ENV,
+    },
     stage: "browser-calendar",
     concurrencyLimit: 1,
   },
   {
     label: "browser accessibility tests",
-    args: ["--filter", "@workspace/run-calculator", "run", "test:e2e:a11y"],
+    command: "bash",
+    args: [
+      "scripts/src/run-isolated-browser-suite.sh",
+      "--playwright-config=playwright.a11y.config.ts",
+    ],
     env: {
       ...RELEASE_BROWSER_ENV,
     },
@@ -1495,9 +1630,14 @@ const steps: ReleaseStep[] = [
   },
   {
     label: "browser WebKit smoke",
-    args: ["--filter", "@workspace/run-calculator", "run", "test:e2e:webkit"],
+    command: "bash",
+    args: [
+      "scripts/src/run-isolated-browser-suite.sh",
+      "--playwright-config=playwright.webkit.config.ts",
+    ],
     env: {
       ...RELEASE_BROWSER_ENV,
+      BROWSER_TEST_INSTALL_WEBKIT: "1",
       PLAYWRIGHT_RELEASE_SMOKE_EVIDENCE_PATH: webkitBrowserEvidencePath,
       RELEASE_BROWSER_ENVIRONMENT: process.env.CI ? "ci" : "development",
     },
@@ -1506,10 +1646,35 @@ const steps: ReleaseStep[] = [
   },
 ];
 
+export const FULL_RESPONSIVE_WEBKIT_GATE_STEP: ReleaseStep = {
+  label: FULL_RESPONSIVE_WEBKIT_GATE_LABEL,
+  command: "bash",
+  args: [
+    "scripts/src/run-isolated-browser-suite.sh",
+    "--playwright-config=playwright.compatibility.config.ts",
+    "--project=phone-webkit",
+    "--project=tablet-webkit",
+  ],
+  env: {
+    ...RELEASE_BROWSER_ENV,
+    BROWSER_TEST_INSTALL_WEBKIT: "1",
+    PLAYWRIGHT_RELEASE_SMOKE_EVIDENCE_PATH: responsiveWebKitEvidencePath,
+    RELEASE_BROWSER_ENVIRONMENT: process.env.CI ? "ci" : "development",
+  },
+  timeoutMs: FULL_RESPONSIVE_WEBKIT_TIMEOUT_MS,
+  stage: "browser-responsive-webkit",
+  concurrencyLimit: 1,
+};
+
 if (fullRun) {
+  steps.push(FULL_RESPONSIVE_WEBKIT_GATE_STEP);
   steps.push({
     label: FULL_BROWSER_GATE_LABEL,
-    args: ["--filter", "@workspace/run-calculator", "run", "test:e2e"],
+    command: "bash",
+    args: [
+      "scripts/src/run-isolated-browser-suite.sh",
+      "--playwright-config=playwright.config.ts",
+    ],
     env: {
       ...RELEASE_BROWSER_ENV,
       PLAYWRIGHT_RELEASE_REPORT_PATH: fullBrowserReportPath,
@@ -1523,7 +1688,12 @@ if (fullRun) {
 
 export function releaseGateLabelsForMode(mode: ReleaseMode): string[] {
   const labels = steps
-    .filter((step) => mode === "full" || step.label !== FULL_BROWSER_GATE_LABEL)
+    .filter(
+      (step) =>
+        mode === "full" ||
+        (step.label !== FULL_BROWSER_GATE_LABEL &&
+          step.label !== FULL_RESPONSIVE_WEBKIT_GATE_LABEL),
+    )
     .map((step) => {
       if (
         mode === "typescript-7-promotion" &&
@@ -1544,10 +1714,19 @@ export function releaseGateLabelsForMode(mode: ReleaseMode): string[] {
   // from the command that happened to launch verification.
   if (
     mode === "full" &&
-    process.env.RELEASE_CHECK_FIXTURE_STEPS === undefined &&
-    !labels.includes(FULL_BROWSER_GATE_LABEL)
+    process.env.RELEASE_CHECK_FIXTURE_STEPS === undefined
   ) {
-    labels.push(FULL_BROWSER_GATE_LABEL);
+    if (!labels.includes(FULL_RESPONSIVE_WEBKIT_GATE_LABEL)) {
+      const fullBrowserIndex = labels.indexOf(FULL_BROWSER_GATE_LABEL);
+      if (fullBrowserIndex === -1) {
+        labels.push(FULL_RESPONSIVE_WEBKIT_GATE_LABEL);
+      } else {
+        labels.splice(fullBrowserIndex, 0, FULL_RESPONSIVE_WEBKIT_GATE_LABEL);
+      }
+    }
+    if (!labels.includes(FULL_BROWSER_GATE_LABEL)) {
+      labels.push(FULL_BROWSER_GATE_LABEL);
+    }
   }
   return labels;
 }
@@ -1644,6 +1823,12 @@ const RELEASE_STAGE_DEPENDENCIES: Readonly<Record<string, readonly string[]>> =
       "onboarding bypass guard",
     ],
     "browser-webkit": [
+      ...(sourceLibraryPreflightEnabled
+        ? [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL]
+        : []),
+      "onboarding bypass guard",
+    ],
+    "browser-responsive-webkit": [
       ...(sourceLibraryPreflightEnabled
         ? [SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL]
         : []),
@@ -1780,7 +1965,16 @@ function printHelp(): void {
     "  --source-library-revision <sha>   Exact deployed 40-character SHA for production reconciliation evidence",
   );
   console.log(
-    "  pnpm --silent --filter @workspace/scripts exec tsx ./src/verify-source-library-reconciliation.mts --capture-production --environment release --revision <deployed-40-character-sha>  Capture bounded production evidence (read-only)",
+    "  --source-library-deployment-handoff <path>   Validate a current published deployment handoff and obtain its deployed SHA",
+  );
+  console.log(
+    "  --readiness-deployment-id <id>   Expected published deployment ID for retained readiness evidence",
+  );
+  console.log(
+    "  --deployed-revision <sha>       Expected deployed 40-character SHA for retained readiness evidence",
+  );
+  console.log(
+    "  pnpm --silent --filter @workspace/scripts exec tsx ./src/verify-source-library-reconciliation.mts --capture-production --environment release --deployment-handoff <handoff-path>  Capture bounded production evidence (read-only)",
   );
   console.log(
     "  pnpm --filter @workspace/scripts run check:release-evidence -- --evidence-dir <directory>  Verify a selected evidence directory (mode is read from its report)",
@@ -1921,14 +2115,25 @@ export async function verifyReleaseEvidence(
   const requiresSourceLibraryEvidence = expectedGateLabels.includes(
     "source-library reconciliation verification",
   );
+  const requiresReadinessEvidence = options.requireReadinessEvidence === true;
   const requiresWebKitEvidence = expectedGateLabels.includes(
     "browser WebKit smoke",
   );
   const requiresFullBrowserEvidence = evidenceMode === "full";
+  if (
+    requiresReadinessEvidence &&
+    (!options.expectedReadinessDeploymentId ||
+      !options.expectedDeployedRevision)
+  ) {
+    throw new Error(
+      "Published release readiness verification requires the expected deployment ID and deployed revision before GO validation; pass --readiness-deployment-id and --deployed-revision.",
+    );
+  }
   const requiredEvidence = [
     REPORT_KEY_ROTATION_PREFLIGHT_EVIDENCE,
     ...retainedEvaluationEvidencePaths,
     TYPESCRIPT_7_COMPARISON_EVIDENCE,
+    ...(requiresReadinessEvidence ? [READINESS_EVIDENCE_PATH] : []),
     ...RELEASE_EVIDENCE_ALLOWLIST.filter((file) =>
       file.startsWith("clean-start/"),
     ),
@@ -1937,6 +2142,9 @@ export async function verifyReleaseEvidence(
       : []),
     ...(requiresFullBrowserEvidence
       ? ["browser-full/FINAL-REPORT.md" as const]
+      : []),
+    ...(requiresFullBrowserEvidence
+      ? ["browser-compatibility/webkit-result.json" as const]
       : []),
     ...(requiresWebKitEvidence
       ? ["browser-smoke/webkit-result.json" as const]
@@ -1989,6 +2197,28 @@ export async function verifyReleaseEvidence(
         .join("\n")}`,
     );
   }
+  if (
+    requiresReadinessEvidence &&
+    files.includes(READINESS_EVIDENCE_PATH)
+  ) {
+    if (
+      options.expectedReadinessDeploymentId === undefined ||
+      options.expectedDeployedRevision === undefined
+    ) {
+      throw new Error(
+        "Readiness evidence verification requires the expected published deployment ID and deployed revision; pass --readiness-deployment-id and --deployed-revision.",
+      );
+    }
+    validateReadinessEvidence(
+      await readFile(resolve(evidenceRoot, READINESS_EVIDENCE_PATH)),
+      {
+        expectedDeploymentId: options.expectedReadinessDeploymentId,
+        expectedRevision: options.expectedDeployedRevision,
+        expectedEnvironment: "release",
+        expectedModes: ["normal", "recovery"],
+      },
+    );
+  }
   const revision = options.currentRevision ?? (await currentRevision());
   const reportKeyRotationEvidence = await readFile(
     resolve(evidenceRoot, REPORT_KEY_ROTATION_PREFLIGHT_EVIDENCE),
@@ -2008,6 +2238,7 @@ export async function verifyReleaseEvidence(
     currentRevision: revision,
     expectedMode: options.expectedMode,
     expectedLabels: options.expectedLabels,
+    requireReadinessEvidence: requiresReadinessEvidence,
     expectedSourceLibraryEnvironment,
     expectedSourceLibraryRevision,
     expectedTypescript7TrendHistory: typescript7TrendHistory,
@@ -2020,9 +2251,15 @@ export async function verifyReleaseEvidence(
         await importCorpusEvaluationRequirements(),
       );
     } else {
-      const manifest = evaluationManifestFromEvidence(
-        JSON.parse(evidence.toString("utf8")),
-      );
+      let parsedEvidence: unknown;
+      try {
+        parsedEvidence = JSON.parse(evidence.toString("utf8"));
+      } catch {
+        throw new Error(
+          `Retained evaluation evidence is malformed JSON: ${entry.evidencePath}`,
+        );
+      }
+      const manifest = evaluationManifestFromEvidence(parsedEvidence);
       if (manifest === undefined) {
         throw new Error(
           `Retained evaluation evidence has no supported manifest envelope: ${entry.evidencePath}`,
@@ -2056,6 +2293,14 @@ export async function verifyReleaseEvidence(
     });
   }
   if (requiresFullBrowserEvidence) {
+    const responsiveWebKitEvidence = await readFile(
+      resolve(evidenceRoot, "browser-compatibility/webkit-result.json"),
+    );
+    validateWebKitBrowserEvidence(responsiveWebKitEvidence, {
+      currentRevision: revision,
+      requirePass: /^Decision:\s*GO\s*$/m.test(report),
+      expectedCaseIdentities: WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES,
+    });
     const browserReport = await readFile(
       resolve(evidenceRoot, "browser-full/FINAL-REPORT.md"),
       "utf8",
@@ -2179,7 +2424,11 @@ export function validateReportKeyRotationEvidence(
 
 export function validateWebKitBrowserEvidence(
   evidenceBytes: Uint8Array,
-  options: { currentRevision: string; requirePass?: boolean },
+  options: {
+    currentRevision: string;
+    requirePass?: boolean;
+    expectedCaseIdentities?: readonly string[];
+  },
 ): void {
   const MAX_EVIDENCE_BYTES = 64 * 1024;
   if (evidenceBytes.byteLength > MAX_EVIDENCE_BYTES) {
@@ -2246,6 +2495,7 @@ export function validateWebKitBrowserEvidence(
     "infrastructure",
     "optional-environment-gap",
   ]);
+  const discoveredIdentities: string[] = [];
   for (const testCase of record.cases) {
     if (!testCase || typeof testCase !== "object" || Array.isArray(testCase)) {
       throw new Error("WebKit browser evidence contains an invalid test case.");
@@ -2262,12 +2512,44 @@ export function validateWebKitBrowserEvidence(
       );
     }
     if (
+      options.expectedCaseIdentities !== undefined &&
+      options.requirePass === true &&
+      item.status !== "passed"
+    ) {
+      throw new Error(
+        "WebKit compatibility evidence cannot support GO unless every phone/tablet journey passed.",
+      );
+    }
+    if (options.expectedCaseIdentities !== undefined) {
+      if (typeof item.projectName !== "string" || !item.projectName.trim()) {
+        throw new Error(
+          "WebKit browser evidence is missing a project name for a compatibility case.",
+        );
+      }
+      discoveredIdentities.push(
+        `${item.file} :: ${item.projectName} › ${item.title}`,
+      );
+    }
+    if (
       item.failureClassification !== undefined &&
       (typeof item.failureClassification !== "string" ||
         !validClassifications.has(item.failureClassification))
     ) {
       throw new Error(
         "WebKit browser evidence contains an invalid failure classification.",
+      );
+    }
+  }
+  if (options.expectedCaseIdentities !== undefined) {
+    const expected = [...options.expectedCaseIdentities].sort();
+    const discovered = [...discoveredIdentities].sort();
+    if (
+      discovered.length !== expected.length ||
+      new Set(discovered).size !== discovered.length ||
+      discovered.some((identity, index) => identity !== expected[index])
+    ) {
+      throw new Error(
+        "WebKit browser evidence does not match the reviewed phone/tablet project inventory.",
       );
     }
   }
@@ -2619,6 +2901,7 @@ export function validateReleaseReport(
   options: {
     currentRevision: string;
     expectedMode?: ReleaseMode;
+    requireReadinessEvidence?: boolean;
     expectedLabels?: readonly string[];
     expectedSourceLibraryEnvironment?: SourceLibraryEvidenceEnvironment;
     expectedSourceLibraryRevision?: string;
@@ -2649,6 +2932,16 @@ export function validateReleaseReport(
   }
   if (!decision) {
     throw new Error("Release report is malformed: missing GO/NO-GO decision.");
+  }
+  if (
+    decision === "GO" &&
+    options.requireReadinessEvidence === true &&
+    report.match(/^Readiness evidence:\s*(\S+)\s*$/m)?.[1] !==
+      READINESS_EVIDENCE_PATH
+  ) {
+    throw new Error(
+      "Release report cannot record GO without the retained readiness evidence path.",
+    );
   }
   if (options.expectedTypescript7TrendHistory !== undefined) {
     const summaries = [
@@ -2976,6 +3269,7 @@ export function formatReleaseReport(
     sourceLibraryEnvironment?: SourceLibraryEvidenceEnvironment;
     sourceLibraryRevision?: string;
     deployedRevision?: string;
+    requireReadinessEvidence?: boolean;
     decision?: "GO" | "NO-GO";
     browserDurationRegressions?: readonly BrowserDurationRegression[];
     sourceLibraryPreflight?: SourceLibraryPreflightDiagnostic;
@@ -3047,6 +3341,24 @@ export function formatReleaseReport(
           )
           .join("; ");
   const revision = metadata.revision ?? "unknown";
+  const reportSourceLibraryEnvironment =
+    metadata.sourceLibraryEnvironment ?? sourceLibraryEnvironment;
+  const developmentOnlyEvidence =
+    reportSourceLibraryEnvironment === "development" &&
+    metadata.requireReadinessEvidence !== true;
+  const deployedRevision =
+    developmentOnlyEvidence
+      ? "not applicable"
+      : metadata.deployedRevision ??
+        (reportSourceLibraryEnvironment === "release"
+          ? metadata.sourceLibraryRevision ?? revision
+          : "not applicable");
+  const readinessEvidence =
+    developmentOnlyEvidence
+      ? "not applicable"
+      : availableEvidenceFiles.has(READINESS_EVIDENCE_PATH)
+        ? READINESS_EVIDENCE_PATH
+        : "not produced";
   const decision =
     metadata.decision ??
     (results.length ===
@@ -3106,14 +3418,10 @@ export function formatReleaseReport(
         ]
       : []),
     `Environment: ${metadata.environment ?? "release validation environment"}`,
-    `Source-library evidence environment: ${metadata.sourceLibraryEnvironment ?? sourceLibraryEnvironment}`,
+    `Source-library evidence environment: ${reportSourceLibraryEnvironment}`,
     `Source-library evidence revision: ${metadata.sourceLibraryRevision ?? revision}`,
-    `Deployed revision: ${
-      metadata.deployedRevision ??
-      ((metadata.sourceLibraryEnvironment ?? sourceLibraryEnvironment) === "release"
-        ? metadata.sourceLibraryRevision ?? revision
-        : "not applicable")
-    }`,
+    `Deployed revision: ${deployedRevision}`,
+    `Readiness evidence: ${readinessEvidence}`,
     "Commands: listed in the gate results table below",
     `Evidence paths: ${releaseEvidenceDir}/ and retained files linked below`,
     formatTypescript7TrendHistorySummary(typescript7TrendHistory),
@@ -3160,6 +3468,10 @@ export function formatReleaseReport(
     evidenceLink(
       "browser-smoke/webkit-result.json",
       "WebKit browser smoke evidence",
+    ),
+    evidenceLink(
+      "browser-compatibility/webkit-result.json",
+      "Phone/tablet WebKit compatibility evidence",
     ),
     evidenceLink("browser-full/FINAL-REPORT.md", "Full browser report"),
     evidenceLink(
@@ -3243,6 +3555,7 @@ async function writeReleaseReport(
     revision: string;
     sourceLibraryRevision: string;
     deployedRevision?: string;
+    requireReadinessEvidence?: boolean;
     decision: "GO" | "NO-GO";
     expectedLabels?: readonly string[];
     timing?: ReleaseTiming;
@@ -3311,6 +3624,14 @@ async function writeReleaseReport(
   }
   try {
     await access(
+      resolve(rootDir, releaseEvidenceDir, READINESS_EVIDENCE_PATH),
+    );
+    availableEvidenceFiles.add(READINESS_EVIDENCE_PATH);
+  } catch {
+    // Published readiness validation reports a missing artifact when required.
+  }
+  try {
+    await access(
       resolve(
         rootDir,
         releaseEvidenceDir,
@@ -3330,6 +3651,19 @@ async function writeReleaseReport(
   } catch {
     // Full browser evidence validation below reports a missing file when the
     // full release decision requires it.
+  }
+  try {
+    await access(
+      resolve(
+        rootDir,
+        releaseEvidenceDir,
+        "browser-compatibility/webkit-result.json",
+      ),
+    );
+    availableEvidenceFiles.add("browser-compatibility/webkit-result.json");
+  } catch {
+    // Full browser evidence validation below reports a missing compatibility
+    // result when the full release decision requires it.
   }
   try {
     await access(
@@ -3378,6 +3712,7 @@ async function writeReleaseReport(
           (sourceLibraryEnvironment === "release"
             ? metadata.sourceLibraryRevision
             : undefined),
+        requireReadinessEvidence: metadata.requireReadinessEvidence,
         sourceLibraryPreflight: results.find(
           (result) =>
             result.label === SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL,
@@ -3568,6 +3903,30 @@ async function promoteSourceLibraryEvidence(
   });
 }
 
+async function publishedReadinessEvidenceIsCurrent(): Promise<boolean> {
+  if (!requiresPublishedReadiness) return true;
+  if (!configuredReadinessDeploymentId || !configuredDeployedRevision) {
+    return false;
+  }
+  try {
+    await access(resolve(rootDir, releaseEvidenceDir, READINESS_EVIDENCE_PATH));
+    validateReadinessEvidence(
+      await readFile(
+        resolve(rootDir, releaseEvidenceDir, READINESS_EVIDENCE_PATH),
+      ),
+      {
+        expectedDeploymentId: configuredReadinessDeploymentId,
+        expectedRevision: configuredDeployedRevision,
+        expectedEnvironment: "release",
+        expectedModes: ["normal", "recovery"],
+      },
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function main(): Promise<void> {
   if (process.argv.includes("--help") || process.argv.includes("-h")) {
     printHelp();
@@ -3577,11 +3936,19 @@ async function main(): Promise<void> {
   if (process.argv.includes("--verify-evidence")) {
     try {
       const revision = await currentRevision();
+      if (hasProductionSourceLibraryReconciliation) {
+        resolveSourceLibraryReleaseDatabaseOwner(
+          sourceLibraryEnvironment,
+          configuredSourceLibraryDatabaseOwner,
+          configuredSourceLibraryDeploymentHandoff,
+        );
+      }
       const sourceLibraryRevision = hasProductionSourceLibraryReconciliation
         ? resolveSourceLibraryReleaseRevision(
             revision,
             sourceLibraryEnvironment,
             configuredSourceLibraryRevision,
+            configuredSourceLibraryDeploymentHandoff,
           )
         : revision;
       await verifyReleaseEvidence(undefined, {
@@ -3589,6 +3956,9 @@ async function main(): Promise<void> {
         expectedMode:
           releaseMode === "standard" ? undefined : releaseMode,
         expectedSourceLibraryRevision: sourceLibraryRevision,
+        expectedReadinessDeploymentId: configuredReadinessDeploymentId,
+        expectedDeployedRevision: configuredDeployedRevision,
+        requireReadinessEvidence: requiresPublishedReadiness,
       });
       process.exit(0);
     } catch (error) {
@@ -3615,15 +3985,32 @@ async function main(): Promise<void> {
   }
   let sourceLibraryRevision: string;
   try {
+    if (hasProductionSourceLibraryReconciliation) {
+      resolveSourceLibraryReleaseDatabaseOwner(
+        sourceLibraryEnvironment,
+        configuredSourceLibraryDatabaseOwner,
+        configuredSourceLibraryDeploymentHandoff,
+      );
+    }
     sourceLibraryRevision = hasProductionSourceLibraryReconciliation
       ? resolveSourceLibraryReleaseRevision(
           revision,
           sourceLibraryEnvironment,
           configuredSourceLibraryRevision,
+          configuredSourceLibraryDeploymentHandoff,
         )
       : revision;
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
+  if (
+    requiresPublishedReadiness &&
+    (!configuredReadinessDeploymentId || !configuredDeployedRevision)
+  ) {
+    console.error(
+      "Published standard/full release verification requires --readiness-deployment-id and --deployed-revision before GO validation.",
+    );
     process.exit(1);
   }
   const evidenceRoot = resolve(rootDir, releaseEvidenceDir);
@@ -3859,6 +4246,7 @@ async function main(): Promise<void> {
               step.label === SOURCE_LIBRARY_RECONCILIATION_STEP.label;
             const effectiveStep =
               step.label === FULL_BROWSER_GATE_LABEL ||
+              step.label === FULL_RESPONSIVE_WEBKIT_GATE_LABEL ||
               step.label === REPORT_KEY_ROTATION_PREFLIGHT_LABEL ||
               isSourceLibraryStep
                 ? {
@@ -3874,7 +4262,8 @@ async function main(): Promise<void> {
                       : {}),
                     env: {
                       ...step.env,
-                      ...(step.label === FULL_BROWSER_GATE_LABEL
+                      ...(step.label === FULL_BROWSER_GATE_LABEL ||
+                      step.label === FULL_RESPONSIVE_WEBKIT_GATE_LABEL
                         ? { RELEASE_REVISION: revision }
                         : step.label === REPORT_KEY_ROTATION_PREFLIGHT_LABEL
                           ? { REPORT_KEY_ROTATION_PREFLIGHT_REVISION: revision }
@@ -4001,7 +4390,9 @@ async function main(): Promise<void> {
     results.length === steps.length &&
     results.every((result) => result.passed)
   ) {
-    const releaseDecision = hasProductionSourceLibraryReconciliation
+    const releaseDecision =
+      hasProductionSourceLibraryReconciliation &&
+      (await publishedReadinessEvidenceIsCurrent())
       ? "GO"
       : "NO-GO";
     try {
@@ -4015,6 +4406,7 @@ async function main(): Promise<void> {
       const reportPath = await writeReleaseReport(results, {
         revision,
         sourceLibraryRevision,
+        requireReadinessEvidence: requiresPublishedReadiness,
         decision: releaseDecision,
         expectedLabels: releaseGateLabelsForMode(releaseMode),
         timing: {
@@ -4029,6 +4421,9 @@ async function main(): Promise<void> {
         currentRevision: revision,
         expectedMode: releaseMode,
         expectedSourceLibraryRevision: sourceLibraryRevision,
+        expectedReadinessDeploymentId: configuredReadinessDeploymentId,
+        expectedDeployedRevision: configuredDeployedRevision,
+        requireReadinessEvidence: requiresPublishedReadiness,
         allowIncompleteCheckpoint: true,
       });
       await rm(checkpointReportPath, { force: true });

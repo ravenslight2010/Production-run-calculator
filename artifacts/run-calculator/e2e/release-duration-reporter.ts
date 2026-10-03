@@ -10,8 +10,12 @@ import type {
   TestCase,
   TestResult,
 } from "@playwright/test/reporter";
+import {
+  FULL_BROWSER_EXPECTED_CASES,
+  assertFullBrowserCaseContract,
+} from "../../../scripts/src/full-browser-case-contract.mjs";
 
-export const EXPECTED_CASES = 160;
+export { FULL_BROWSER_EXPECTED_CASES as EXPECTED_CASES };
 const repositoryRoot = fileURLToPath(
   new URL("../../../", import.meta.url),
 );
@@ -255,9 +259,9 @@ export function parseCompleteFullBrowserBaseline(
     revision === "unknown" ||
     result !== "PASS" ||
     coverage !== "COMPLETE" ||
-    expectedCases !== EXPECTED_CASES ||
-    enumeratedCases !== EXPECTED_CASES ||
-    completedCases !== EXPECTED_CASES ||
+    expectedCases !== FULL_BROWSER_EXPECTED_CASES ||
+    enumeratedCases !== FULL_BROWSER_EXPECTED_CASES ||
+    completedCases !== FULL_BROWSER_EXPECTED_CASES ||
     !Number.isInteger(passedCases) ||
     !Number.isInteger(skippedCases) ||
     !Number.isInteger(failedCases) ||
@@ -323,7 +327,7 @@ export function canRetainFullBrowserReport(
   return (
     fullResult !== "timedout" &&
     fullResult !== "interrupted" &&
-    allCases.length === EXPECTED_CASES &&
+    allCases.length === FULL_BROWSER_EXPECTED_CASES &&
     allCases.every((testCase) => testCase.completed)
   );
 }
@@ -440,7 +444,8 @@ export function formatFullBrowserReport(
     0,
   );
   const coverage =
-    enumeratedCases === EXPECTED_CASES && completedCases === EXPECTED_CASES
+    enumeratedCases === FULL_BROWSER_EXPECTED_CASES &&
+    completedCases === FULL_BROWSER_EXPECTED_CASES
       ? "COMPLETE"
       : "INCOMPLETE";
 
@@ -450,7 +455,7 @@ export function formatFullBrowserReport(
     `Generated: ${new Date().toISOString()}`,
     `Revision: ${revision}`,
     `Result: ${resultLabel(fullResult)}`,
-    `Expected cases: ${EXPECTED_CASES}`,
+    `Expected cases: ${FULL_BROWSER_EXPECTED_CASES}`,
     `Enumerated cases: ${enumeratedCases}`,
     `Completed cases: ${completedCases}`,
     `Passed cases: ${passedCases}`,
@@ -490,11 +495,7 @@ export default class ReleaseDurationReporter implements Reporter {
   onBegin(_config: FullConfig, suite: Suite): void {
     this.startedAt = Date.now();
     const allTests = suite.allTests();
-    if (allTests.length !== EXPECTED_CASES) {
-      throw new Error(
-        `Full browser release lane discovered ${allTests.length} cases; expected exactly ${EXPECTED_CASES}. Update the release filter or contract before running evidence.`,
-      );
-    }
+    assertFullBrowserCaseContract(allTests.length);
     for (const testCase of allTests) {
       this.cases.set(testCase.id, {
         file: testCase.location.file,
@@ -526,7 +527,7 @@ export default class ReleaseDurationReporter implements Reporter {
     }
     if (!canRetainFullBrowserReport(this.cases.values(), result.status)) {
       console.log(
-        `Retained full browser duration report unchanged: run was not a complete passing ${EXPECTED_CASES}-case suite.`,
+        `Retained full browser duration report unchanged: run was not a complete passing ${FULL_BROWSER_EXPECTED_CASES}-case suite.`,
       );
       return;
     }

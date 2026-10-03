@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { ZodError } from "zod";
 import { safeErrorCode } from "../lib/observability";
+import { recordSyncParserRejection } from "../lib/capacityTelemetry";
 
 /**
  * Enhanced error message handler for common failures.
@@ -28,6 +29,16 @@ export function enhancedErrorMessages(
       : typeof e.statusCode === "number"
         ? e.statusCode
         : 500;
+
+  if (
+    req.path.startsWith("/api/sync") &&
+    (status === 413 || e.type === "entity.parse.failed")
+  ) {
+    const contentLength = Number(req.header("content-length"));
+    recordSyncParserRejection(
+      Number.isFinite(contentLength) && contentLength >= 0 ? contentLength : 0,
+    );
+  }
 
   let message: string;
 

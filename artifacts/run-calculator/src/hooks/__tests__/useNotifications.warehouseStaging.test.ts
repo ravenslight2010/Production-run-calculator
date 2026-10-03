@@ -31,6 +31,7 @@ import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vite
 import { renderHook, act } from "@testing-library/react";
 import { useNotifications } from "../useNotifications";
 import type { RunMeta } from "../../types";
+import { getWarehouseSwitchoverBannerModel } from "../../components/WarehouseSwitchoverBanner";
 
 // Receipt ownership is covered separately. Keep these hook tests isolated from
 // persistent IndexedDB/localStorage claims created by other notification cases.
@@ -101,6 +102,71 @@ function makeParams(nowMs: number, overrides: Partial<Params> = {}): Params {
     ...overrides,
   };
 }
+
+type SwitchoverContractCase = {
+  name: string;
+  casesPerSkid: number;
+  pressCasesLeft: number;
+  casesNeeded: number;
+  ppm: number;
+  expected: {
+    banner: boolean;
+    frontline: boolean;
+    packaging: boolean;
+    shortRun: boolean;
+  };
+};
+
+/**
+ * Keep the Warehouse presentation and background notification eligibility on
+ * one table. These are the boundary cases that must never drift apart:
+ * exactly two skids, exactly one skid, a completed press, missing timing, and
+ * a run whose total need is less than two skids.
+ */
+const PRESS_THRESHOLD_CONTRACT_CASES: SwitchoverContractCase[] = [20, 12].flatMap(
+  (casesPerSkid) => [
+    {
+      name: "exactly two skids remain",
+      casesPerSkid,
+      pressCasesLeft: 2 * casesPerSkid,
+      casesNeeded: 10 * casesPerSkid,
+      ppm: 100,
+      expected: { banner: true, frontline: true, packaging: false, shortRun: false },
+    },
+    {
+      name: "exactly one skid remains",
+      casesPerSkid,
+      pressCasesLeft: casesPerSkid,
+      casesNeeded: 10 * casesPerSkid,
+      ppm: 100,
+      expected: { banner: true, frontline: true, packaging: true, shortRun: false },
+    },
+    {
+      name: "zero cases remain",
+      casesPerSkid,
+      pressCasesLeft: 0,
+      casesNeeded: 10 * casesPerSkid,
+      ppm: 100,
+      expected: { banner: false, frontline: false, packaging: false, shortRun: false },
+    },
+    {
+      name: "timing is missing",
+      casesPerSkid,
+      pressCasesLeft: casesPerSkid,
+      casesNeeded: 10 * casesPerSkid,
+      ppm: 0,
+      expected: { banner: false, frontline: false, packaging: false, shortRun: false },
+    },
+    {
+      name: "the run is shorter than two skids",
+      casesPerSkid,
+      pressCasesLeft: 1.5 * casesPerSkid,
+      casesNeeded: 1.5 * casesPerSkid,
+      ppm: 100,
+      expected: { banner: true, frontline: true, packaging: false, shortRun: true },
+    },
+  ],
+);
 
 // ── vibrate stub ──────────────────────────────────────────────────────────────
 // vibrate is called synchronously inside fireStage (AFTER the Notification
@@ -477,4 +543,58 @@ describe("useNotifications — warehouse-staging effect (no Notification API)", 
     const body = (notifCtor.mock.calls[0][1] as NotificationOptions).body ?? "";
     expect(body).toContain("Run 2 – Cheese");
   });
+});
+
+describe("warehouse switchover threshold contract", () => {
+  it.each(PRESS_THRESHOLD_CONTRACT_CASES)(
+    "keeps the Warehouse banner and notifications aligned when $name at $casesPerSkid cases/skid",
+    async (testCase) => {
+      const bannerModel = getWarehouseSwitchoverBannerModel({
+        currentRun: { endedAt: null },
+        runStatus: "running",
+        casesPerSkid: testCase.casesPerSkid,
+        casesNeeded: testCase.casesNeeded,
+        ppm: testCase.ppm,
+        pressCasesLeft: testCase.pressCasesLeft,
+        adjustedTimeSec: 15 * 60,
+        freezerTimeMin: 10,
+        nowMs: T0,
+        upcomingRunLabels: [],
+      });
+
+      expect(Boolean(bannerModel)).toBe(testCase.expected.banner);
+      expect(bannerModel?.shortRun ?? false).toBe(testCase.expected.shortRun);
+      expect(bannerModel?.packagingStage ?? false).toBe(testCase.expected.packaging);
+
+      // The stub is deliberately installed by this test rather than relying
+      // on whichever Notification implementation the test environment has.
+      const notificationCtor = injectNotificationStub("granted");
+      renderHook((p: Params) => useNotifications(p), {
+        initialProps: makeParams(T0, {
+          calc: {
+            ...makeParams(T0).calc,
+            ppm: testCase.ppm,
+            pressCasesLeft: testCase.pressCasesLeft,
+          },
+          v: {
+            freezerTime: 10,
+            casesNeeded: testCase.casesNeeded,
+            casesPerSkid: testCase.casesPerSkid,
+          },
+        }),
+      });
+
+      const expectedNotificationCount =
+        Number(testCase.expected.frontline) + Number(testCase.expected.packaging);
+      await vi.waitFor(() => {
+        expect(notificationCtor).toHaveBeenCalledTimes(expectedNotificationCount);
+      });
+
+      const titles = notificationCtor.mock.calls.map((call) => call[0]);
+      expect(titles.includes("🚚 Warehouse: stage FRONTLINE for next run"))
+        .toBe(testCase.expected.frontline);
+      expect(titles.includes("🚚 Warehouse: stage PACKAGING for next run"))
+        .toBe(testCase.expected.packaging);
+    },
+  );
 });

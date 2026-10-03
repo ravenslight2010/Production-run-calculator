@@ -23,7 +23,7 @@ import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import pg from "pg";
 import { buildMixPlan, type Mix } from "@workspace/mixes";
-import { signToken } from "../lib/auth";
+import { signLegacyTokenForTests } from "../lib/auth";
 
 // ── DB handles (bound after repointing DATABASE_URL) ────────────────────────
 type DbModule = typeof import("@workspace/db");
@@ -137,7 +137,7 @@ beforeEach(async () => {
 function managerHeaders(): Record<string, string> {
   return {
     "Content-Type": "application/json",
-    Authorization: `Bearer ${signToken(MANAGER)}`,
+    Authorization: `Bearer ${signLegacyTokenForTests(MANAGER)}`,
   };
 }
 
@@ -163,7 +163,7 @@ async function postMixes(items: Partial<Mix>[]): Promise<{ status: number; items
 
 async function getMixes(): Promise<{ status: number; items: Mix[] }> {
   const res = await fetch(`${baseUrl}/api/mixes`, {
-    headers: { Authorization: `Bearer ${signToken(MANAGER)}` },
+    headers: { Authorization: `Bearer ${signLegacyTokenForTests(MANAGER)}` },
   });
   const body = (await res.json()) as { items: Mix[] };
   return { status: res.status, items: body.items ?? [] };

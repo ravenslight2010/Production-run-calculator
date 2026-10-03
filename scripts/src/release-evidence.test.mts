@@ -12,9 +12,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   RELEASE_EVIDENCE_ALLOWLIST,
+  READINESS_EVIDENCE_PATH,
   RELEASE_CHECKPOINT_REPORT,
   RELEASE_CHECK_API_CONCURRENCY,
   RELEASE_CHECK_DEFAULT_CONCURRENCY,
+  FULL_RESPONSIVE_WEBKIT_GATE_LABEL,
+  FULL_RESPONSIVE_WEBKIT_GATE_STEP,
+  FULL_RESPONSIVE_WEBKIT_TIMEOUT_MS,
   IMPORT_CORPUS_EVALUATION_EVIDENCE,
   SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
   TYPESCRIPT_7_COMPARISON_EVIDENCE,
@@ -23,7 +27,9 @@ import {
   SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL,
   SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_STEP,
   SOURCE_LIBRARY_RECONCILIATION_STEP,
+  WEBKIT_IDENTITY_CONTRACT_STEP,
   resolveSourceLibraryEvidenceEnvironment,
+  resolveSourceLibraryReleaseDatabaseOwner,
   resolveSourceLibraryReleaseRevision,
   sourceLibraryReconciliationPreflightEnabled,
   assertUniqueReleaseSteps,
@@ -35,6 +41,7 @@ import {
   formatReleaseReport,
   parseBrowserDurationRegressions,
   parseSourceLibraryPreflightDiagnostic,
+  publishedReleaseReadinessRequired,
   releaseConcurrencyLimit,
   releaseGateLabelsForMode,
   releaseStepDependencies,
@@ -62,6 +69,13 @@ import {
   DEFAULT_REPORT,
   parseSourceLibraryPreflightDiagnostic as parseStoredSourceLibraryPreflightDiagnostic,
 } from "./verify-source-library-reconciliation.mts";
+import {
+  buildReadinessEvidence,
+  sanitizeReadinessResponse,
+  validateReadinessEvidence,
+} from "./capture-readiness-recovery.mts";
+import { FULL_BROWSER_EXPECTED_CASES } from "./full-browser-case-contract.mts";
+import { WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES } from "./webkit-case-contract.mts";
 
 const sourceReportSha256 = createHash("sha256")
   .update(await readFile(new URL(`../../${DEFAULT_REPORT}`, import.meta.url)))
@@ -100,6 +114,106 @@ function sourceEvidence(overrides: Record<string, unknown> = {}) {
     ...evidence,
     evidenceId: computeSourceLibraryEvidenceId(evidence),
   };
+}
+
+function readinessEvidenceFixture() {
+  const capturedAt = new Date(Date.now() - 60_000).toISOString();
+  const sample = sanitizeReadinessResponse({
+    capturedAt,
+    httpStatus: 200,
+    payload: {
+      status: "ok",
+      checks: {
+        process: "ok",
+        startup: "ok",
+        database: "ok",
+        dependencies: "ok",
+        backgroundWorkers: "ok",
+      },
+      diagnostics: { backgroundOperations: {} },
+    },
+  });
+  return buildReadinessEvidence({
+    environment: "release",
+    deploymentId: "published-deployment-fixture",
+    revision: "e".repeat(40),
+    generatedAt: capturedAt,
+    mode: "normal",
+    samples: [sample, sample],
+  });
+}
+
+function verifyReadinessEvidenceVerificationIsRecomputed(): void {
+  const valid = readinessEvidenceFixture();
+  const failedSamples = valid.samples.map((sample) => ({
+    ...sample,
+    outcome: "probe_error" as const,
+  }));
+  const inconsistent = buildReadinessEvidence({
+    environment: "release",
+    deploymentId: valid.deploymentId,
+    revision: valid.revision,
+    generatedAt: valid.generatedAt,
+    mode: "normal",
+    samples: failedSamples,
+  });
+  const forged = {
+    ...inconsistent,
+    verification: {
+      mode: "normal" as const,
+      passed: true,
+      reason: "sustained HTTP 200 readiness",
+    },
+  };
+  assert.throws(
+    () => validateReadinessEvidence(forged, {
+      expectedDeploymentId: valid.deploymentId,
+      expectedRevision: valid.revision,
+      expectedEnvironment: "release",
+      expectedModes: ["normal", "recovery"],
+    }),
+    /verification does not match its samples/,
+  );
+}
+
+function verifyPublishedReadinessEvidenceRejectsObserveMode(): void {
+  const valid = readinessEvidenceFixture();
+  const observe = buildReadinessEvidence({
+    environment: "release",
+    deploymentId: valid.deploymentId,
+    revision: valid.revision,
+    generatedAt: valid.generatedAt,
+    mode: "observe",
+    samples: valid.samples,
+  });
+  assert.throws(
+    () => validateReadinessEvidence(observe, {
+      expectedDeploymentId: valid.deploymentId,
+      expectedRevision: valid.revision,
+      expectedEnvironment: "release",
+      expectedModes: ["normal", "recovery"],
+    }),
+    /mode is not permitted/,
+  );
+}
+
+function verifyPublishedReadinessEvidenceRejectsDevelopmentEnvironment(): void {
+  const valid = readinessEvidenceFixture();
+  assert.throws(
+    () => validateReadinessEvidence({ ...valid, environment: "development" }, {
+      expectedDeploymentId: valid.deploymentId,
+      expectedRevision: valid.revision,
+      expectedEnvironment: "release",
+      expectedModes: ["normal", "recovery"],
+    }),
+    /environment does not match/,
+  );
+}
+
+function verifyReadinessEvidenceValidation(): void {
+  verifyReadinessEvidenceVerificationIsRecomputed();
+  verifyPublishedReadinessEvidenceRejectsObserveMode();
+  verifyPublishedReadinessEvidenceRejectsDevelopmentEnvironment();
 }
 
 const aiDigest = "a".repeat(64);
@@ -182,9 +296,10 @@ async function fixture(
   const retainedEvaluationFiles = retainedEvaluationEvidenceInventory().map(
     (entry) => entry.evidencePath,
   );
-  const fixtureFiles = files.includes(IMPORT_CORPUS_EVALUATION_EVIDENCE)
-    ? [...new Set([...files, ...retainedEvaluationFiles])]
-    : files;
+  const filteredFiles = files.filter((file) => file !== READINESS_EVIDENCE_PATH);
+  const fixtureFiles = filteredFiles.includes(IMPORT_CORPUS_EVALUATION_EVIDENCE)
+    ? [...new Set([...filteredFiles, ...retainedEvaluationFiles])]
+    : filteredFiles;
   const retainedSourceByEvidencePath = new Map(
     retainedEvaluationEvidenceInventory().map((entry) => [
       entry.evidencePath,
@@ -213,6 +328,29 @@ async function fixture(
                 durationMs: 100,
               }],
             })}\n`
+          : file === "browser-compatibility/webkit-result.json"
+            ? `${JSON.stringify({
+                schemaVersion: 1,
+                browser: "webkit",
+                revision: "current-revision",
+                environment: "disposable release test",
+                result: "passed",
+                cases: WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES.map(
+                  (identity) => {
+                    const [caseFile = "", projectAndTitle = ""] =
+                      identity.split(" :: ");
+                    const [projectName = "", ...titleParts] =
+                      projectAndTitle.split(" › ");
+                    return {
+                      file: caseFile,
+                      projectName,
+                      title: titleParts.join(" › "),
+                      status: "passed",
+                      durationMs: 100,
+                    };
+                  },
+                ),
+              })}\n`
         : file === "report-key-rotation-preflight.json"
           ? `${JSON.stringify({
               verifier: "report-key-rotation-preflight",
@@ -344,6 +482,26 @@ async function run(): Promise<void> {
     discoverRoutineRetainedEvaluationPaths(),
     "release verification and routine Node preflight must discover the same retained evaluation files",
   );
+  assert.equal(
+    publishedReleaseReadinessRequired("standard", true),
+    true,
+    "published standard verification must require readiness evidence",
+  );
+  assert.equal(
+    publishedReleaseReadinessRequired("full", true),
+    true,
+    "published full verification must require readiness evidence",
+  );
+  assert.equal(
+    publishedReleaseReadinessRequired("typescript-7-promotion", true),
+    false,
+    "TypeScript promotion verification must retain its separate evidence contract",
+  );
+  assert.equal(
+    publishedReleaseReadinessRequired("standard", false),
+    false,
+    "disposable fixture verification must have an explicit readiness opt-out contract",
+  );
   const retainedEvaluationInventory = retainedEvaluationEvidenceInventory();
   const retainedEvidenceFiles = new Set(
     retainedEvaluationInventory.map((entry) => entry.evidencePath),
@@ -474,6 +632,9 @@ async function run(): Promise<void> {
   const rootPackage = JSON.parse(
     await readFile(new URL("../../package.json", import.meta.url), "utf8"),
   ) as { scripts?: Record<string, string> };
+  const scriptsPackage = JSON.parse(
+    await readFile(new URL("../package.json", import.meta.url), "utf8"),
+  ) as { scripts?: Record<string, string> };
   const ciWorkflow = await readFile(
     new URL("../../.github/workflows/ci.yml", import.meta.url),
     "utf8",
@@ -481,6 +642,45 @@ async function run(): Promise<void> {
   const releaseWorkflow = await readFile(
     new URL("../../.github/workflows/release-check.yml", import.meta.url),
     "utf8",
+  );
+  const responsiveWebKitConfig = await readFile(
+    new URL(
+      "../../artifacts/run-calculator/playwright.compatibility.config.ts",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const responsiveWebKitSpec = await readFile(
+    new URL(
+      "../../artifacts/run-calculator/e2e/release-webkit-smoke.spec.ts",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.match(
+    responsiveWebKitConfig,
+    /trace:\s*"retain-on-failure"/u,
+    "raw Playwright traces must remain failure-only local inputs to the sanitizer",
+  );
+  assert.match(
+    responsiveWebKitConfig,
+    /screenshot:\s*"off"/u,
+    "raw built-in screenshots must not become uploadable test attachments",
+  );
+  assert.match(
+    responsiveWebKitConfig,
+    /compatibility-debug-reporter\.ts/u,
+    "the responsive compatibility run must use the sanitizing reporter",
+  );
+  assert.match(
+    responsiveWebKitSpec,
+    /test\.afterEach[\s\S]*?page\.screenshot\([\s\S]*?mask:/u,
+    "failure screenshots must be captured with masks",
+  );
+  assert.match(
+    responsiveWebKitSpec,
+    /page\.locator\("input, textarea, select"\)/u,
+    "failure screenshots must mask entered form values",
   );
   const configuredKeyrings = [...releaseWorkflow.matchAll(
     /OPERATIONAL_REPORT_SIGNING_KEYS:\s*'([^']+)'/g,
@@ -518,7 +718,104 @@ async function run(): Promise<void> {
         job.source!.indexOf(job.runner),
       `${job.name} WebKit dependency installation must precede its release runner`,
     );
+    const handoffName = `Generate ${job.name} release evidence handoff`;
+    const handoffStart = job.source!.indexOf(`- name: ${handoffName}`);
+    const uploadStart = job.source!.indexOf(`- name: Upload ${job.name} release evidence`);
+    assert.ok(handoffStart >= 0, `${job.name} job must generate a handoff`);
+    assert.ok(
+      uploadStart > handoffStart,
+      `${job.name} evidence upload must include its generated handoff`,
+    );
+    const handoffBlock = job.source!.slice(handoffStart, uploadStart);
+    assert.match(handoffBlock, /if: always\(\)/);
+    assert.match(handoffBlock, /continue-on-error: true/);
+    assert.match(handoffBlock, new RegExp(`HANDOFF_MODE: ${job.name}`));
+    assert.match(
+      handoffBlock,
+      new RegExp(`HANDOFF_EVIDENCE_DIR: release-evidence${job.name === "full" ? "-full" : ""}`),
+    );
+    assert.match(handoffBlock, /git log -1 --format=%H -- \./);
+    assert.match(handoffBlock, /release-evidence-full\/\*\*/);
+    assert.match(
+      handoffBlock,
+      /run-release-node\.sh\s+\\\s+pnpm --filter @workspace\/scripts exec tsx\s+\\\s+\.\/src\/release-evidence-handoff\.mts/u,
+    );
+    assert.match(handoffBlock, /--revision "\$revision"/);
+    assert.match(handoffBlock, /--evidence-dir "\$HANDOFF_EVIDENCE_DIR"/);
+    assert.match(handoffBlock, /Handoff generation: \*\*FAILED\*\*/);
   }
+  const standardReleaseJob = releaseJobs.find((job) => job.name === "standard");
+  const fullReleaseJob = releaseJobs.find((job) => job.name === "full");
+  assert.ok(standardReleaseJob?.source);
+  assert.ok(fullReleaseJob?.source);
+  assert.doesNotMatch(
+    standardReleaseJob.source,
+    /PLAYWRIGHT_COMPATIBILITY_DEBUG_DIR|responsive-webkit-debug/u,
+    "standard release checks must not configure the full-only debug artifact",
+  );
+  assert.match(
+    fullReleaseJob.source,
+    /PLAYWRIGHT_COMPATIBILITY_DEBUG_DIR:\s*\$\{\{\s*runner\.temp\s*\}\}\/responsive-webkit-debug-\$\{\{\s*github\.run_id\s*\}\}-\$\{\{\s*github\.run_attempt\s*\}\}/u,
+    "full-run browser diagnostics must be staged under a unique runner-temp path",
+  );
+  const diagnosticsCheckStart = fullReleaseJob.source.indexOf(
+    "- name: Check for sanitized responsive WebKit diagnostics",
+  );
+  const diagnosticsUploadStart = fullReleaseJob.source.indexOf(
+    "- name: Upload sanitized responsive WebKit failure diagnostics",
+  );
+  const stoppedSummaryStart = fullReleaseJob.source.indexOf(
+    "- name: Summarize stopped full release check",
+  );
+  assert.ok(diagnosticsCheckStart >= 0);
+  assert.ok(diagnosticsUploadStart > diagnosticsCheckStart);
+  assert.ok(stoppedSummaryStart > diagnosticsUploadStart);
+  const diagnosticsBlock = fullReleaseJob.source.slice(
+    diagnosticsUploadStart,
+    stoppedSummaryStart,
+  );
+  assert.match(
+    diagnosticsBlock,
+    /if: always\(\) && steps\.responsive-webkit-debug-artifact\.outputs\.available == 'true'/u,
+    "the separate debug upload must require an emitted sanitized manifest",
+  );
+  assert.match(diagnosticsBlock, /retention-days: 3/u);
+  assert.match(
+    diagnosticsBlock,
+    /path: \$\{\{\s*runner\.temp\s*\}\}\/responsive-webkit-debug-\$\{\{\s*github\.run_id\s*\}\}-\$\{\{\s*github\.run_attempt\s*\}\}/u,
+  );
+  assert.match(
+    diagnosticsBlock,
+    /name: responsive-webkit-debug-\$\{\{\s*github\.run_id\s*\}\}-\$\{\{\s*github\.run_attempt\s*\}\}/u,
+    "separate attempts of one workflow run must retain distinct debug artifacts",
+  );
+  assert.doesNotMatch(
+    diagnosticsBlock,
+    /release-evidence-full/u,
+    "debug artifacts must remain separate from canonical full evidence",
+  );
+  const canonicalFullUploadStart = fullReleaseJob.source.indexOf(
+    "- name: Upload full release evidence",
+  );
+  assert.ok(canonicalFullUploadStart >= 0);
+  assert.ok(
+    diagnosticsCheckStart > canonicalFullUploadStart,
+    "the debug artifact probe must not alter the canonical full-evidence upload",
+  );
+  const canonicalUploadEnd = fullReleaseJob.source.indexOf(
+    "- name: Check for sanitized responsive WebKit diagnostics",
+    canonicalFullUploadStart,
+  );
+  const canonicalUploadBlock = fullReleaseJob.source.slice(
+    canonicalFullUploadStart,
+    canonicalUploadEnd,
+  );
+  assert.match(canonicalUploadBlock, /path:\s*release-evidence-full/u);
+  assert.doesNotMatch(
+    canonicalUploadBlock,
+    /responsive-webkit-debug|runner\.temp/u,
+    "raw or sanitized browser diagnostics must not enter the canonical artifact",
+  );
   assert.equal(
     configuredKeyrings.length,
     2,
@@ -561,6 +858,70 @@ async function run(): Promise<void> {
     () => resolveSourceLibraryReleaseRevision("a".repeat(40), "release", undefined),
     /requires --source-library-revision/,
   );
+  const handoffDirectory = await mkdtemp(
+    join(tmpdir(), "release-source-handoff-"),
+  );
+  try {
+    const issuedAt = new Date(Date.now() - 1_000).toISOString();
+    const handoffPath = join(handoffDirectory, "deployment-handoff.json");
+    await writeFile(
+      handoffPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        kind: "published-deployment-handoff",
+        deploymentId: "published-release-test",
+        deployedRevision: "c".repeat(40),
+        databaseOwner: "approved_source_owner",
+        issuedAt,
+        expiresAt: new Date(
+          Date.parse(issuedAt) + 60 * 60 * 1_000,
+        ).toISOString(),
+      }),
+    );
+    assert.equal(
+      resolveSourceLibraryReleaseRevision(
+        "a".repeat(40),
+        "release",
+        undefined,
+        handoffPath,
+      ),
+      "c".repeat(40),
+    );
+    assert.equal(
+      resolveSourceLibraryReleaseDatabaseOwner(
+        "release",
+        undefined,
+        handoffPath,
+      ),
+      "approved_source_owner",
+    );
+    assert.throws(
+      () =>
+        resolveSourceLibraryReleaseDatabaseOwner(
+          "release",
+          "different_source_owner",
+          handoffPath,
+        ),
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message ===
+          "Source-library database owner conflicts with the database owner in the deployment handoff." &&
+        !error.message.includes("approved_source_owner") &&
+        !error.message.includes("different_source_owner"),
+    );
+    assert.throws(
+      () =>
+        resolveSourceLibraryReleaseRevision(
+          "a".repeat(40),
+          "release",
+          "d".repeat(40),
+          handoffPath,
+        ),
+      /conflicts with the deployed revision/,
+    );
+  } finally {
+    await rm(handoffDirectory, { recursive: true, force: true });
+  }
   assert.deepEqual(
     configuredKeyrings,
     [
@@ -588,6 +949,26 @@ async function run(): Promise<void> {
     rootPackage.scripts?.["audit:prod"],
     "pnpm run audit:prod:release",
     "the configured production security workflow must retain its fail-closed compatibility command",
+  );
+  assert.equal(
+    scriptsPackage.scripts?.["test:webkit-case-contract"],
+    "tsx ./src/webkit-case-contract.test.mts",
+    "the WebKit identity contract must have a focused release-check command",
+  );
+  assert.deepEqual(
+    WEBKIT_IDENTITY_CONTRACT_STEP.args,
+    [
+      "--filter",
+      "@workspace/scripts",
+      "run",
+      "test:webkit-case-contract",
+    ],
+    "the standard release gate must execute only the focused WebKit identity contract",
+  );
+  assert.equal(
+    WEBKIT_IDENTITY_CONTRACT_STEP.timeoutMs,
+    2 * 60_000,
+    "the WebKit identity discovery gate must remain bounded",
   );
   assert.match(
     ciWorkflow,
@@ -659,9 +1040,81 @@ async function run(): Promise<void> {
     releaseGateLabelsForMode("standard").includes("browser WebKit smoke"),
     "standard release checks must include the bounded WebKit browser smoke",
   );
+  assert.equal(
+    releaseGateLabelsForMode("standard").includes(
+      FULL_RESPONSIVE_WEBKIT_GATE_LABEL,
+    ),
+    false,
+    "standard release checks must not add the full-only responsive WebKit gate",
+  );
+  assert.equal(
+    releaseGateLabelsForMode("full").includes(
+      FULL_RESPONSIVE_WEBKIT_GATE_LABEL,
+    ),
+    true,
+    "full release checks must include the phone/tablet WebKit gate",
+  );
+  assert.equal(
+    FULL_RESPONSIVE_WEBKIT_GATE_STEP.timeoutMs,
+    FULL_RESPONSIVE_WEBKIT_TIMEOUT_MS,
+    "responsive WebKit must have a fixed outer gate timeout",
+  );
+  assert.equal(
+    FULL_RESPONSIVE_WEBKIT_TIMEOUT_MS,
+    20 * 60_000,
+    "the full-only responsive WebKit gate timeout must remain fixed at 20 minutes",
+  );
+  assert.deepEqual(
+    FULL_RESPONSIVE_WEBKIT_GATE_STEP.args.slice(1),
+    [
+      "--playwright-config=playwright.compatibility.config.ts",
+      "--project=phone-webkit",
+      "--project=tablet-webkit",
+    ],
+    "the full compatibility gate must select only the phone and tablet WebKit projects",
+  );
+  assert.ok(
+    FULL_RESPONSIVE_WEBKIT_GATE_STEP.env?.PLAYWRIGHT_RELEASE_SMOKE_EVIDENCE_PATH?.endsWith(
+      "/browser-compatibility/webkit-result.json",
+    ),
+    "responsive WebKit must retain a separate evidence file",
+  );
+  assert.equal(
+    releaseGateLabelsForMode("standard").filter(
+      (label) => label === "WebKit identity contracts",
+    ).length,
+    1,
+    "standard release checks must run the WebKit release and compatibility identity contracts exactly once",
+  );
+  assert.ok(
+    releaseGateLabelsForMode("full").includes("WebKit identity contracts"),
+    "full release checks must retain the standard WebKit identity contract",
+  );
+  assert.match(
+    releaseJobs[0]!.source!,
+    /run: pnpm run release:check$/m,
+    "the standard GitHub release job must enter through the release checker that owns the WebKit identity gate",
+  );
   assert.ok(
     RELEASE_EVIDENCE_ALLOWLIST.includes("browser-smoke/webkit-result.json"),
     "WebKit smoke evidence must be retained through the release allowlist",
+  );
+  assert.ok(
+    RELEASE_EVIDENCE_ALLOWLIST.includes(
+      "browser-compatibility/webkit-result.json",
+    ),
+    "responsive WebKit evidence must be retained through the release allowlist",
+  );
+  assert.equal(
+    RELEASE_EVIDENCE_ALLOWLIST.some((path) =>
+      path.includes("responsive-webkit-debug"),
+    ),
+    false,
+    "browser-debug files must remain outside the canonical release-evidence allowlist",
+  );
+  assert.ok(
+    RELEASE_EVIDENCE_ALLOWLIST.includes("screen-off-wake/FINAL-REPORT.md"),
+    "focused screen-off/wake evidence must be retained through the release allowlist",
   );
   assert.ok(
     releaseGateLabelsForMode("standard").includes(
@@ -1171,6 +1624,17 @@ async function run(): Promise<void> {
       expectedLabels: validLabels,
     }),
   );
+  assert.throws(
+    () =>
+      validateReleaseReport(validReport, {
+        currentRevision: "current-revision",
+        expectedMode: "standard",
+        expectedLabels: validLabels,
+        requireReadinessEvidence: true,
+      }),
+    /without the retained readiness evidence path/,
+    "a GO report that omits readiness evidence must be rejected",
+  );
   const missingHistory = {
     state: "missing" as const,
     distinctRevisionCount: 1,
@@ -1355,6 +1819,83 @@ async function run(): Promise<void> {
       ),
     /revision is stale/,
     "stale WebKit evidence must not be accepted",
+  );
+  const responsiveWebkitCases =
+    WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES.map((identity) => {
+      const [file = "", projectAndTitle = ""] = identity.split(" :: ");
+      const [projectName = "", ...titleParts] =
+        projectAndTitle.split(" › ");
+      return {
+        file,
+        projectName,
+        title: titleParts.join(" › "),
+        status: "passed",
+        durationMs: 100,
+      };
+    });
+  const responsiveWebkitEvidence = {
+    schemaVersion: 1,
+    browser: "webkit",
+    revision: "current-revision",
+    environment: "disposable release test",
+    result: "passed",
+    cases: responsiveWebkitCases,
+  };
+  assert.doesNotThrow(() =>
+    validateWebKitBrowserEvidence(
+      Buffer.from(JSON.stringify(responsiveWebkitEvidence)),
+      {
+        currentRevision: "current-revision",
+        requirePass: true,
+        expectedCaseIdentities:
+          WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES,
+      },
+    ),
+    "revision-bound evidence must match every reviewed phone/tablet journey",
+  );
+  assert.throws(
+    () =>
+      validateWebKitBrowserEvidence(
+        Buffer.from(
+          JSON.stringify({
+            ...responsiveWebkitEvidence,
+            cases: responsiveWebkitCases.map((testCase, index) =>
+              index === 0
+                ? { ...testCase, projectName: "phone-chromium" }
+                : testCase,
+            ),
+          }),
+        ),
+        {
+          currentRevision: "current-revision",
+          requirePass: true,
+          expectedCaseIdentities:
+            WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES,
+        },
+      ),
+    /reviewed phone\/tablet project inventory/u,
+    "Chromium cases must not satisfy the responsive WebKit evidence contract",
+  );
+  assert.throws(
+    () =>
+      validateWebKitBrowserEvidence(
+        Buffer.from(
+          JSON.stringify({
+            ...responsiveWebkitEvidence,
+            cases: responsiveWebkitCases.map((testCase, index) =>
+              index === 0 ? { ...testCase, status: "skipped" } : testCase,
+            ),
+          }),
+        ),
+        {
+          currentRevision: "current-revision",
+          requirePass: true,
+          expectedCaseIdentities:
+            WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES,
+        },
+      ),
+    /unless every phone\/tablet journey passed/u,
+    "skipped compatibility journeys must not satisfy a full release pass",
   );
   assert.doesNotThrow(() =>
     validateSourceLibraryReconciliationEvidence(
@@ -1614,6 +2155,55 @@ async function run(): Promise<void> {
     /Source-library reconciliation evidence: not produced/,
     "release reports must link the retained source-library evidence",
   );
+  const developmentRevision = "c".repeat(40);
+  const developmentLabels = ["development gate one"];
+  const developmentReport = formatReleaseReport(
+    developmentLabels.map((label) => ({
+      label,
+      status: "PASS" as const,
+      elapsedMs: 100,
+    })),
+    "standard",
+    new Set([READINESS_EVIDENCE_PATH]),
+    {
+      revision: developmentRevision,
+      environment: "development release validation",
+      sourceLibraryEnvironment: "development",
+      sourceLibraryRevision: developmentRevision,
+      deployedRevision: "d".repeat(40),
+      decision: "NO-GO",
+      expectedLabels: developmentLabels,
+    },
+  );
+  assert.match(
+    developmentReport,
+    /^Deployed revision: not applicable$/m,
+    "development evidence must not retain a supplied deployed revision",
+  );
+  assert.match(
+    developmentReport,
+    /^Readiness evidence: not applicable$/m,
+    "development evidence must mark readiness as not applicable",
+  );
+  assert.doesNotMatch(
+    developmentReport,
+    new RegExp(
+      `^Readiness evidence: ${READINESS_EVIDENCE_PATH.replaceAll("/", "\\/")}$`,
+      "m",
+    ),
+    "a stale readiness path must be ignored for development evidence",
+  );
+  assert.doesNotThrow(
+    () =>
+      validateReleaseReport(developmentReport, {
+        currentRevision: developmentRevision,
+        expectedMode: "standard",
+        expectedLabels: developmentLabels,
+        expectedSourceLibraryEnvironment: "development",
+        expectedSourceLibraryRevision: developmentRevision,
+      }),
+    "the validator must accept explicit development N/A fields",
+  );
   assert.doesNotThrow(() =>
     validateReleaseReport(alertingReleaseReport, {
       currentRevision: "current-revision",
@@ -1790,9 +2380,102 @@ async function run(): Promise<void> {
         currentRevision: "current-revision",
         expectedMode: "standard",
         expectedLabels: validLabels,
+        requireReadinessEvidence: false,
       }),
       "an allowlisted evidence set should pass",
     );
+    await assert.rejects(
+      verifyReleaseEvidence(root, {
+        currentRevision: "current-revision",
+        expectedMode: "standard",
+        expectedLabels: validLabels,
+        requireReadinessEvidence: true,
+      }),
+      /requires the expected deployment ID and deployed revision/,
+      "published verification must require readiness identities before checking GO",
+    );
+    await assert.rejects(
+      verifyReleaseEvidence(root, {
+        currentRevision: "current-revision",
+        expectedMode: "standard",
+        expectedLabels: validLabels,
+        expectedReadinessDeploymentId: "published-deployment-fixture",
+        expectedDeployedRevision: "e".repeat(40),
+        requireReadinessEvidence: true,
+      }),
+      /Required release evidence is missing:[\s\S]*readiness-recovery\/readiness-recovery\.json/,
+      "published verification must fail when readiness evidence is missing",
+    );
+    const readinessEvidence = readinessEvidenceFixture();
+    const readinessEvidencePath = join(root, READINESS_EVIDENCE_PATH);
+    await mkdir(join(readinessEvidencePath, ".."), { recursive: true });
+    await writeFile(readinessEvidencePath, `${JSON.stringify(readinessEvidence)}\n`);
+    const developmentOnlyReport = formatReleaseReport(
+      validLabels.map((label) => ({
+        label,
+        status: "PASS" as const,
+        elapsedMs: 100,
+      })),
+      "standard",
+      new Set([...retainedEvidenceFiles, READINESS_EVIDENCE_PATH]),
+      {
+        revision: "current-revision",
+        environment: "disposable release test",
+        sourceLibraryEnvironment: "development",
+        requireReadinessEvidence: false,
+        decision: "NO-GO",
+      },
+    );
+    assert.match(developmentOnlyReport, /^Deployed revision: not applicable$/m);
+    assert.match(developmentOnlyReport, /^Readiness evidence: not applicable$/m);
+    await writeFile(
+      join(root, "release-check-report.md"),
+      developmentOnlyReport,
+      "utf8",
+    );
+    await assert.doesNotReject(
+      verifyReleaseEvidence(root, {
+        currentRevision: "current-revision",
+        expectedMode: "standard",
+        expectedLabels: validLabels,
+        expectedSourceLibraryEnvironment: "development",
+        requireReadinessEvidence: false,
+      }),
+      "development verification should ignore retained published-readiness evidence",
+    );
+    await writeFile(
+      join(root, "release-check-report.md"),
+      formatReleaseReport(
+        validLabels.map((label) => ({
+          label,
+          status: "PASS" as const,
+          elapsedMs: 100,
+        })),
+        "standard",
+        new Set([...retainedEvidenceFiles, READINESS_EVIDENCE_PATH]),
+        {
+          revision: "current-revision",
+          environment: "disposable release test",
+          sourceLibraryEnvironment: "development",
+          deployedRevision: "e".repeat(40),
+          requireReadinessEvidence: true,
+          decision: "GO",
+        },
+      ),
+      "utf8",
+    );
+    await assert.doesNotReject(
+      verifyReleaseEvidence(root, {
+        currentRevision: "current-revision",
+        expectedMode: "standard",
+        expectedLabels: validLabels,
+        expectedReadinessDeploymentId: "published-deployment-fixture",
+        expectedDeployedRevision: "e".repeat(40),
+        requireReadinessEvidence: true,
+      }),
+      "retained readiness evidence should use explicit published identity",
+    );
+    await rm(readinessEvidencePath);
     const nonCanonicalRetainedEvaluation =
       retainedEvaluationInventory.find(
         (entry) => entry.evidencePath !== IMPORT_CORPUS_EVALUATION_EVIDENCE,
@@ -2037,32 +2720,38 @@ async function run(): Promise<void> {
       "",
       "Revision: current-revision",
       "Result: FAIL",
-      "Expected cases: 159",
-      "Enumerated cases: 159",
+      `Expected cases: ${FULL_BROWSER_EXPECTED_CASES}`,
+      `Enumerated cases: ${FULL_BROWSER_EXPECTED_CASES}`,
       "Completed cases: 0",
       "Passed cases: 0",
       "Skipped cases: 0",
       "Failed cases: 0",
-      "Not-run cases: 159",
+      `Not-run cases: ${FULL_BROWSER_EXPECTED_CASES}`,
       "Coverage: INCOMPLETE",
       "Duration: 0ms",
       "## Per-file duration",
       "",
       "| File | Cases | Completed | Passed | Skipped | Failed | Not run | Duration |",
       "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
-      "| `e2e/example.spec.ts` | 159 | 0 | 0 | 0 | 0 | 159 | 0ms |",
+      `| \`e2e/example.spec.ts\` | ${FULL_BROWSER_EXPECTED_CASES} | 0 | 0 | 0 | 0 | ${FULL_BROWSER_EXPECTED_CASES} | 0ms |`,
       "",
     ].join("\n");
     const invalidPassingBrowserReport = validBrowserReport
       .replace("Result: FAIL", "Result: PASS")
-      .replace("Completed cases: 0", "Completed cases: 159")
+      .replace(
+        "Completed cases: 0",
+        `Completed cases: ${FULL_BROWSER_EXPECTED_CASES}`,
+      )
       .replace("Passed cases: 0", "Passed cases: 111")
       .replace("Failed cases: 0", "Failed cases: 1")
-      .replace("Not-run cases: 159", "Not-run cases: 0")
+      .replace(
+        `Not-run cases: ${FULL_BROWSER_EXPECTED_CASES}`,
+        "Not-run cases: 0",
+      )
       .replace("Coverage: INCOMPLETE", "Coverage: COMPLETE")
       .replace(
-        "| `e2e/example.spec.ts` | 159 | 0 | 0 | 0 | 0 | 159 | 0ms |",
-        "| `e2e/example.spec.ts` | 159 | 159 | 156 | 0 | 1 | 0 | 0ms |",
+        `| \`e2e/example.spec.ts\` | ${FULL_BROWSER_EXPECTED_CASES} | 0 | 0 | 0 | 0 | ${FULL_BROWSER_EXPECTED_CASES} | 0ms |`,
+        `| \`e2e/example.spec.ts\` | ${FULL_BROWSER_EXPECTED_CASES} | ${FULL_BROWSER_EXPECTED_CASES} | ${FULL_BROWSER_EXPECTED_CASES - 1} | 0 | 1 | 0 | 0ms |`,
       );
     assert.throws(
       () => validateFullBrowserReport(invalidPassingBrowserReport, {
@@ -2168,4 +2857,5 @@ async function run(): Promise<void> {
   );
 }
 
+verifyReadinessEvidenceValidation();
 await run();

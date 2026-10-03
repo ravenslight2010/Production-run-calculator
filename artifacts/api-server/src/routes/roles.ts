@@ -21,6 +21,8 @@ import {
   setNotificationPrefs,
   setUserRole,
   updateRoleCapabilities,
+  canManagePasswordResetFor,
+  getUserCapabilities,
   type Capability,
 } from "../lib/roles";
 import {
@@ -28,15 +30,81 @@ import {
   declineResetRequest,
   listPendingResetRequests,
 } from "../lib/passwordResets";
+import { db, rolesTable, userRolesTable, usersTable } from "@workspace/db";
 import { requireCapability, requireLiveScope } from "../middlewares/requireCapability";
 import { getUserById } from "../lib/users";
-import { logAuditEvent } from "./auditLogs";
+import { revokeSessionsForUser } from "../lib/authSessions";
+import { eq, sql } from "drizzle-orm";
+import { createInvitation, listInvitations, revokeInvitation } from "../lib/invitations";
+import { rotateSignupCode, setSignupCodeEnabled, signupCodeStatus } from "../lib/signupAccessCode";
+import { logAuditEvent, writeAuditEvent } from "./auditLogs";
 
 function pathUserId(raw: string | string[] | undefined): string | undefined {
   return Array.isArray(raw) ? raw[0] : raw;
 }
 
 const router: IRouter = Router();
+
+router.get("/signup-code/status", requireLiveScope, requireCapability("manage-staff"), async (_req, res): Promise<void> => {
+  res.json(await signupCodeStatus());
+});
+router.patch("/signup-code/status", requireLiveScope, requireCapability("manage-staff"), async (req, res): Promise<void> => {
+  if (typeof req.body?.enabled !== "boolean") {
+    res.status(400).json({ error: "enabled must be boolean" });
+    return;
+  }
+  await setSignupCodeEnabled(req.body.enabled);
+  res.json(await signupCodeStatus());
+});
+router.post("/signup-code/rotate", requireLiveScope, requireCapability("manage-staff"), async (_req, res): Promise<void> => {
+  const secret = await rotateSignupCode();
+  // The replacement is returned exactly once; only bounded counters/status are
+  // ever suitable for audit or subsequent reads.
+  res.status(201).json({ secret });
+});
+
+router.post("/staff-invitations", requireLiveScope, requireCapability("manage-staff"), async (req, res): Promise<void> => {
+  const role = typeof req.body?.role === "string" ? req.body.role.trim() : "operator";
+  if (!role || role.length > 64) {
+    res.status(400).json({ error: "Invalid invitation role." });
+    return;
+  }
+  const created = await createInvitation(req.userId!, role, req.capabilities ?? []);
+  if (!created.ok) {
+    res.status(created.status).json({ error: created.error });
+    return;
+  }
+  await writeAuditEvent(db, {
+    action: "staff_invitation_created",
+    resource: "staff_invitation",
+    changes: { outcome: "success", role },
+  });
+  // `secret` is intentionally returned only in this one response and is never
+  // persisted or included in audit/log output.
+  res.status(201).json(created);
+});
+router.get("/staff-invitations", requireLiveScope, requireCapability("manage-staff"), async (_req, res): Promise<void> => {
+  res.json(await listInvitations());
+});
+
+router.delete("/staff-invitations/:id", requireLiveScope, requireCapability("manage-staff"), async (req, res): Promise<void> => {
+  const id = pathUserId(req.params.id);
+  if (!id) {
+    res.status(400).json({ error: "Invalid invitation id." });
+    return;
+  }
+  const revoked = await revokeInvitation(id);
+  if (!revoked) {
+    res.status(404).json({ error: "Invitation is invalid or unavailable." });
+    return;
+  }
+  await writeAuditEvent(db, {
+    action: "staff_invitation_revoked",
+    resource: "staff_invitation",
+    changes: { outcome: "success" },
+  });
+  res.status(204).end();
+});
 
 async function auditActor(req: { userId?: string }): Promise<string> {
   if (!req.userId) return "unknown";
@@ -196,6 +264,112 @@ router.get("/users", requireLiveScope, requireCapability("manage-staff"), async 
   res.json(await listStaff());
 });
 
+// Disable/enable is the normal lifecycle operation. It preserves audit history
+// and immediately fences both cookie and bearer sessions without deleting data.
+router.patch("/users/:userId/status", requireLiveScope, requireCapability("manage-staff"), async (req, res): Promise<void> => {
+  const targetUserId = pathUserId(req.params.userId);
+  if (!targetUserId || typeof req.body?.disabled !== "boolean") {
+    res.status(400).json({ error: "A valid user id and disabled boolean are required." });
+    return;
+  }
+  const target = await getUserById(targetUserId);
+  if (!target) {
+    res.status(404).json({ error: "Staff member not found." });
+    return;
+  }
+  const targetCapabilities = await getUserCapabilities(targetUserId);
+  if (!(await canManagePasswordResetFor(targetUserId, (req.capabilities ?? []) as Capability[])) ||
+      (targetUserId !== req.userId && targetCapabilities.includes("manage-staff"))) {
+    res.status(403).json({ error: "Cannot change a higher-privileged account." });
+    return;
+  }
+  if (targetUserId === req.userId && req.body.disabled) {
+    res.status(409).json({ error: "You cannot disable your own account." });
+    return;
+  }
+  const changed = await db.transaction(async (tx) => {
+    // Serialize all staff lifecycle changes, then re-read the enabled
+    // manage-staff holders while holding row locks. This closes the
+    // check-then-disable race between two concurrent manager requests.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended('staff-admin-mutation', 0))`);
+    const [lockedTarget] = await tx.select({ id: usersTable.id, disabled: usersTable.disabled })
+      .from(usersTable).where(eq(usersTable.id, targetUserId)).for("update");
+    if (!lockedTarget) return { ok: false as const, conflict: false };
+    const [currentTargetRole] = await tx.select({ capabilities: rolesTable.capabilities })
+      .from(userRolesTable)
+      .innerJoin(rolesTable, eq(rolesTable.name, userRolesTable.role))
+      .where(eq(userRolesTable.userId, targetUserId));
+    const currentCapabilities = currentTargetRole?.capabilities ?? [];
+    const actorCapabilities = new Set<string>(req.capabilities ?? []);
+    const currentTargetAuthorized = currentCapabilities.every((capability) =>
+      actorCapabilities.has(capability),
+    );
+    if (!currentTargetAuthorized ||
+        (targetUserId !== req.userId && currentCapabilities.includes("manage-staff"))) {
+      return { ok: false as const, conflict: false, forbidden: true };
+    }
+    const targetCurrentlyManagesStaff = currentCapabilities.includes("manage-staff");
+    if (req.body.disabled && targetCurrentlyManagesStaff) {
+      const holders = await tx.select({ id: usersTable.id }).from(usersTable)
+        .innerJoin(userRolesTable, eq(userRolesTable.userId, usersTable.id))
+        .innerJoin(rolesTable, eq(rolesTable.name, userRolesTable.role))
+        .where(sql`${usersTable.disabled} = false AND ${rolesTable.capabilities} ? 'manage-staff'`)
+        .for("update");
+      if (holders.length <= 1) return { ok: false as const, conflict: true };
+    }
+    await tx.update(usersTable).set({
+      disabled: req.body.disabled,
+      disabledAt: req.body.disabled ? new Date() : null,
+    }).where(eq(usersTable.id, targetUserId));
+    await writeAuditEvent(tx, {
+      action: req.body.disabled ? "account_disabled" : "account_enabled",
+      resource: `user:${targetUserId}`,
+      changes: { outcome: "success", targetId: targetUserId },
+    });
+    return { ok: true as const };
+  });
+  if (!changed.ok) {
+    if ("forbidden" in changed && changed.forbidden) {
+      res.status(403).json({ error: "Cannot change a higher-privileged account." });
+      return;
+    }
+    if (changed.conflict) {
+      res.status(409).json({ error: "Cannot disable the last enabled staff manager." });
+      return;
+    }
+    res.status(404).json({ error: "Staff member not found." });
+    return;
+  }
+  if (req.body.disabled) await revokeSessionsForUser(targetUserId);
+  res.json({ disabled: req.body.disabled });
+});
+
+router.post("/users/:userId/revoke-sessions", requireLiveScope, requireCapability("manage-staff"), async (req, res): Promise<void> => {
+  const targetUserId = pathUserId(req.params.userId);
+  if (!targetUserId) {
+    res.status(400).json({ error: "Invalid user id" });
+    return;
+  }
+  const target = await getUserById(targetUserId);
+  if (!target) {
+    res.status(404).json({ error: "Staff member not found." });
+    return;
+  }
+  const targetCapabilities = await getUserCapabilities(targetUserId);
+  if (!(await canManagePasswordResetFor(targetUserId, (req.capabilities ?? []) as Capability[])) ||
+      (targetUserId !== req.userId && targetCapabilities.includes("manage-staff"))) {
+    res.status(403).json({ error: "Cannot revoke sessions for a higher-privileged account." });
+    return;
+  }
+  await revokeSessionsForUser(targetUserId);
+  await writeAuditEvent(db, {
+    action: "sessions_revoked",
+    resource: `user:${targetUserId}`,
+    changes: { outcome: "success", targetId: targetUserId },
+  });
+  res.status(204).end();
+});
+
 // Change a staff member's role — manage-staff only. Refuses to remove the last
 // manage-staff holder so the team can't lock itself out, and refuses to grant a
 // role with capabilities the actor lacks.
@@ -215,38 +389,22 @@ router.put(
     return;
   }
   const previous = await getStaffMember(targetUserId);
-  const result = await setUserRole(
-    targetUserId,
-    parsed.data.role,
-    (req.capabilities ?? []) as Capability[],
-  );
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended('staff-admin-mutation', 0))`);
+    const changed = await setUserRole(targetUserId, parsed.data.role,
+      (req.capabilities ?? []) as Capability[], tx);
+    if (changed.ok && previous.role !== changed.row.role) {
+      const action = previous.role === "operator" && changed.row.role !== "operator"
+        ? "role_granted" : changed.row.role === "operator" && previous.role !== "operator"
+          ? "role_revoked" : "role_changed";
+      await writeAuditEvent(tx, { action, resource: `user:${targetUserId}`,
+        changes: { outcome: "success", targetId: targetUserId } });
+    }
+    return changed;
+  });
   if (!result.ok) {
     res.status(result.status).json({ error: result.error });
     return;
-  }
-  if (previous.role !== result.row.role) {
-    const actor = await auditActor(req);
-    const target = result.row;
-    const metadata = auditRequestMetadata(req);
-    const action =
-      previous.role === "operator" && target.role !== "operator"
-        ? "role_granted"
-        : target.role === "operator" && previous.role !== "operator"
-          ? "role_revoked"
-          : "role_changed";
-    void logAuditEvent(
-      "live",
-      actor,
-      action,
-      `user:${target.name ?? targetUserId}`,
-      {
-        targetUsername: target.name,
-        role: { from: previous.role, to: target.role },
-        capabilities: target.capabilities,
-      },
-      metadata.ipAddress,
-      metadata.userAgent,
-    );
   }
   res.json(result.row);
 });
@@ -268,27 +426,20 @@ router.put(
       res.status(400).json({ error: parsed.error.message });
       return;
     }
-    const result = await resetUserPassword(
-      targetUserId,
-      parsed.data.newPassword,
-      (req.capabilities ?? []) as Capability[],
-    );
+    let result: Awaited<ReturnType<typeof resetUserPassword>>;
+    result = await db.transaction(async (tx) => {
+      const next = await resetUserPassword(targetUserId, parsed.data.newPassword,
+        (req.capabilities ?? []) as Capability[], tx);
+      if (next.ok) {
+        await writeAuditEvent(tx, { action: "password_reset", resource: `user:${targetUserId}`,
+          changes: { outcome: "success", targetId: targetUserId, method: "manager_reset" } });
+      }
+      return next;
+    });
     if (!result.ok) {
       res.status(result.status).json({ error: result.error });
       return;
     }
-    const actor = await auditActor(req);
-    const target = await getUserById(targetUserId);
-    const metadata = auditRequestMetadata(req);
-    void logAuditEvent(
-      "live",
-      actor,
-      "password_reset",
-      `user:${target?.username ?? targetUserId}`,
-      { targetUsername: target?.username ?? targetUserId, method: "manager_reset" },
-      metadata.ipAddress,
-      metadata.userAgent,
-    );
     res.status(204).end();
   },
 );
@@ -316,22 +467,19 @@ router.post(
       res.status(400).json({ error: "Invalid request id" });
       return;
     }
-    const result = await approveResetRequest(id, (req.capabilities ?? []) as Capability[]);
+    const result = await db.transaction(async (tx) => {
+      const approved = await approveResetRequest(id, (req.capabilities ?? []) as Capability[], tx);
+      if (approved.ok) {
+        await writeAuditEvent(tx, { action: "password_reset_approved",
+          resource: `reset_request:${id}`,
+          changes: { outcome: "success", targetId: id, requestId: id } });
+      }
+      return approved;
+    });
     if (!result.ok) {
       res.status(result.status).json({ error: result.error });
       return;
     }
-    const actor = await auditActor(req);
-    const metadata = auditRequestMetadata(req);
-    void logAuditEvent(
-      "live",
-      actor,
-      "password_reset_approved",
-      `user:${result.username}`,
-      { targetUsername: result.username, requestId: id },
-      metadata.ipAddress,
-      metadata.userAgent,
-    );
     res.json({
       username: result.username,
       code: result.code,

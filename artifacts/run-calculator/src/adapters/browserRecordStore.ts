@@ -97,20 +97,46 @@ export const browserRecordStore = createBrowserRecordStore();
  * Raw key/value compatibility surface for bounded legacy migrations.
  * New JSON records should prefer browserRecordStore.record().
  */
+let browserStorageOverride: BrowserKeyValueStorage | null = null;
+
+export function withBrowserStorageOverride<T>(
+  storage: BrowserKeyValueStorage,
+  run: () => T,
+): T {
+  const previous = browserStorageOverride;
+  browserStorageOverride = storage;
+  try {
+    return run();
+  } finally {
+    browserStorageOverride = previous;
+  }
+}
+
 export const browserStorage: BrowserKeyValueStorage = {
   get length() {
+    if (browserStorageOverride) return browserStorageOverride.length;
     return storageAvailable()?.length ?? 0;
   },
   key(index) {
+    if (browserStorageOverride) return browserStorageOverride.key(index);
     try { return storageAvailable()?.key(index) ?? null; } catch { return null; }
   },
   getItem(key) {
+    if (browserStorageOverride) return browserStorageOverride.getItem(key);
     try { return storageAvailable()?.getItem(key) ?? null; } catch { return null; }
   },
   setItem(key, value) {
+    if (browserStorageOverride) {
+      browserStorageOverride.setItem(key, value);
+      return;
+    }
     try { storageAvailable()?.setItem(key, value); } catch {}
   },
   removeItem(key) {
+    if (browserStorageOverride) {
+      browserStorageOverride.removeItem(key);
+      return;
+    }
     try { storageAvailable()?.removeItem(key); } catch {}
   },
 };

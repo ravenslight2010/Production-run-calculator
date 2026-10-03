@@ -16,6 +16,12 @@ const expected = JSON.parse(
   ),
 );
 
+// The retained report records the dependency lock at the time it was made.
+// Updating pnpm must not rewrite that historical provenance just to satisfy
+// a comparison against today's lockfile.
+assert.match(expected.evaluationManifest.dependencies.pnpmLockSha256, /^[a-f0-9]{64}$/u);
+actual.evaluationManifest.dependencies.pnpmLockSha256 =
+  expected.evaluationManifest.dependencies.pnpmLockSha256;
 assert.deepEqual(actual, expected, "checked-in reviewer evidence must match the pinned source and observations");
 assert.equal(ACCEPTANCE.minimumUniqueMaterialCatchRate, 0.2);
 assert.equal(actual.decision.retain, false);

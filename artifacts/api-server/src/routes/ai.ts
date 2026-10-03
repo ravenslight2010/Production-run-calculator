@@ -82,6 +82,7 @@ import {
   appendFacilityMemoryBlock,
   groundPromptWithMemory,
 } from "./aiMemoryContext";
+import { AI_ROUTE_BOUNDARIES, validateAiRequestBoundary } from "../lib/aiDataBoundary";
 
 const router: IRouter = Router();
 
@@ -444,6 +445,11 @@ router.post(
   requireCapability("use-ai-tools"),
   fixedWindowPerUserPolicy("ai-match-import"),
   async (req, res): Promise<void> => {
+    const boundary = validateAiRequestBoundary(AI_ROUTE_BOUNDARIES.matchImport, req.body);
+    if (!boundary.ok) {
+      res.status(boundary.status).json({ error: boundary.error });
+      return;
+    }
     const validation = validateMatchImportBody(req.body);
     if (!validation.ok) {
       res.status(validation.status).json({ error: validation.error });
@@ -474,6 +480,7 @@ router.post(
         enrichUnresolved: async (unresolved) => {
           const { system, user } = buildMatchImportPrompt(unresolved);
           const userPrompt = await groundPromptWithMemory(req.log, user, {
+            includeFacilityKnowledge: false,
             correctionDomains: ["brand", "flavor"],
           });
           const cached = await cachedAiResponse<MatchImportCacheBody>(req, res, {
@@ -615,6 +622,11 @@ router.post(
   requireCapability("use-ai-tools"),
   fixedWindowPerUserPolicy("ai-parse-spec-sheet"),
   async (req, res): Promise<void> => {
+    const boundary = validateAiRequestBoundary(AI_ROUTE_BOUNDARIES.parseSpecSheet, req.body);
+    if (!boundary.ok) {
+      res.status(boundary.status).json({ error: boundary.error });
+      return;
+    }
     const validation = validateParseSpecSheetBody(req.body);
     if (!validation.ok) {
       res.status(validation.status).json({ error: validation.error });
@@ -623,6 +635,7 @@ router.post(
 
     const { system, user } = buildParseSpecSheetPrompt(validation.data);
     const userPrompt = await groundPromptWithMemory(req.log, user, {
+      includeFacilityKnowledge: false,
       correctionDomains: ["brand", "flavor", "die", "ingredient", "recipe"],
     });
 
@@ -703,6 +716,11 @@ router.post(
   requireCapability("use-ai-tools"),
   fixedWindowPerUserPolicy("ai-parse-spec-images"),
   async (req, res): Promise<void> => {
+    const boundary = validateAiRequestBoundary(AI_ROUTE_BOUNDARIES.parseSpecImages, req.body);
+    if (!boundary.ok) {
+      res.status(boundary.status).json({ error: boundary.error });
+      return;
+    }
     const validation = validateParseSpecImagesBody(req.body);
     if (!validation.ok) {
       res.status(validation.status).json({ error: validation.error });
@@ -825,6 +843,11 @@ router.post(
   requireCapability("use-ai-tools"),
   fixedWindowPerUserPolicy("ai-match-premix"),
   async (req, res): Promise<void> => {
+    const boundary = validateAiRequestBoundary(AI_ROUTE_BOUNDARIES.matchPremix, req.body);
+    if (!boundary.ok) {
+      res.status(boundary.status).json({ error: boundary.error });
+      return;
+    }
     const validation = validateMatchPremixBody(req.body);
     if (!validation.ok) {
       res.status(validation.status).json({ error: validation.error });
@@ -849,6 +872,7 @@ router.post(
           const aiInput = { ...validation.data, unmatchedNames: unresolvedNames };
           const { system, user } = buildMatchPremixPrompt(aiInput);
           const userPrompt = await groundPromptWithMemory(req.log, user, {
+            includeFacilityKnowledge: false,
             correctionDomains: ["brand", "flavor"],
           });
           const cached = await cachedAiResponse(req, res, {

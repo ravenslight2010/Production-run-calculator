@@ -1081,6 +1081,7 @@ export type StaffMember = {
   // server owns the staleness cutoff; the client reacts by running the same
   // reset-and-reload flow as the manual "Reset sandbox" button.
   sandboxStale: boolean;
+  disabled: boolean;
 };
 export const fetchMe = (signal?: AbortSignal) =>
   api<StaffMember>("/me", signal ? { signal } : undefined);
@@ -1161,6 +1162,28 @@ export const resetStaffPassword = (userId: string, newPassword: string) =>
   });
 export const deleteStaffMember = (userId: string) =>
   api<null>(`/users/${encodeURIComponent(userId)}`, { method: "DELETE" });
+export const setStaffAccountStatus = (userId: string, disabled: boolean) =>
+  api<{ disabled: boolean }>(`/users/${encodeURIComponent(userId)}/status`, {
+    method: "PATCH", body: JSON.stringify({ disabled }),
+  });
+export const revokeStaffSessions = (userId: string) =>
+  api<null>(`/users/${encodeURIComponent(userId)}/revoke-sessions`, { method: "POST" });
+export const createStaffInvitation = (role: string) =>
+  api<{ id: string; role: string; secret: string; expiresAt: string }>("/staff-invitations", {
+    method: "POST", body: JSON.stringify({ role }),
+  });
+export type StaffInvitation = { id: string; role: string; createdAt: string; expiresAt: string; consumedAt: string | null; revokedAt: string | null };
+export const listStaffInvitations = () => api<StaffInvitation[]>("/staff-invitations");
+export const revokeStaffInvitation = (id: string) =>
+  api<null>(`/staff-invitations/${encodeURIComponent(id)}`, { method: "DELETE" });
+export const fetchSignupCodeStatus = () => api<{ enabled: boolean; successfulUses: number; failedUses: number; rotatedAt: string | null }>("/signup-code/status");
+export const setSignupCodeEnabledRequest = (enabled: boolean) =>
+  api<{ enabled: boolean; successfulUses: number; failedUses: number; rotatedAt: string | null }>("/signup-code/status", { method: "PATCH", body: JSON.stringify({ enabled }) });
+export const rotateSignupCodeRequest = () => api<{ secret: string }>("/signup-code/rotate", { method: "POST" });
+export const acceptStaffInvitation = (invitation: string, username: string, password: string) =>
+  api<AuthResult>("/auth/accept-invitation", {
+    method: "POST", body: JSON.stringify({ invitation, username, password }),
+  });
 
 // Role catalog management (manage-staff). Managers list/create/edit/delete the
 // roles that can be assigned to staff.

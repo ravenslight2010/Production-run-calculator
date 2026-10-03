@@ -26,7 +26,7 @@
 //
 // @workspace/db binds its pool to process.env.DATABASE_URL at import time, so
 // we must create the throwaway DB and repoint DATABASE_URL BEFORE any dynamic
-// import that touches @workspace/db. signToken has no DB dependency and is a
+// import that touches @workspace/db. signLegacyTokenForTests has no DB dependency and is a
 // safe static import.
 import { spawnSync } from "node:child_process";
 import { createHmac } from "node:crypto";
@@ -38,7 +38,7 @@ import { sql, eq } from "drizzle-orm";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import pg from "pg";
-import { signToken, verifyToken } from "../lib/auth";
+import { signLegacyTokenForTests, verifyToken } from "../lib/auth";
 
 type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
@@ -211,7 +211,7 @@ beforeEach(async () => {
   );
   await seedRoles();
 
-  // A sandbox-flagged user. We use a fixed string id so signToken (which needs
+  // A sandbox-flagged user. We use a fixed string id so signLegacyTokenForTests (which needs
   // only the userId) can mint a token before the DB row exists, and we can
   // verify the middleware rejects that token without a round-trip to sign in.
   await db.insert(usersTable).values({
@@ -235,7 +235,7 @@ beforeEach(async () => {
 function authedRequest(userId: string, method: string, path: string): Promise<Response> {
   return fetch(`${baseUrl}${path}`, {
     method,
-    headers: { Authorization: `Bearer ${signToken(userId)}` },
+    headers: { Authorization: `Bearer ${signLegacyTokenForTests(userId)}` },
   });
 }
 
@@ -484,7 +484,7 @@ describe("cold in-process cache after a simulated server restart", () => {
     // reading the DB, this would incorrectly return 200.
     const res = await fetch(`${restartBaseUrl}/api/me`, {
       method: "GET",
-      headers: { Authorization: `Bearer ${signToken(SANDBOX_USER_ID)}` },
+      headers: { Authorization: `Bearer ${signLegacyTokenForTests(SANDBOX_USER_ID)}` },
     });
     expect(res.status).toBe(401);
     const body = (await res.json()) as { error: string };
@@ -499,7 +499,7 @@ describe("cold in-process cache after a simulated server restart", () => {
     // return false and let the request through.
     const res = await fetch(`${restartBaseUrl}/api/me`, {
       method: "GET",
-      headers: { Authorization: `Bearer ${signToken(REGULAR_USER_ID)}` },
+      headers: { Authorization: `Bearer ${signLegacyTokenForTests(REGULAR_USER_ID)}` },
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { userId: string };
@@ -513,14 +513,14 @@ describe("cold in-process cache after a simulated server restart", () => {
     // First request warms the cache entry (sandbox=true from DB).
     const res1 = await fetch(`${restartBaseUrl}/api/me`, {
       method: "GET",
-      headers: { Authorization: `Bearer ${signToken(SANDBOX_USER_ID)}` },
+      headers: { Authorization: `Bearer ${signLegacyTokenForTests(SANDBOX_USER_ID)}` },
     });
     expect(res1.status).toBe(401);
 
     // Second request hits the now-warm cache entry; must still be 401.
     const res2 = await fetch(`${restartBaseUrl}/api/me`, {
       method: "GET",
-      headers: { Authorization: `Bearer ${signToken(SANDBOX_USER_ID)}` },
+      headers: { Authorization: `Bearer ${signLegacyTokenForTests(SANDBOX_USER_ID)}` },
     });
     expect(res2.status).toBe(401);
     const body2 = (await res2.json()) as { error: string };
@@ -728,7 +728,7 @@ describe("cross-environment token replay: verifyToken rejects before sandbox gat
       // A correctly-signed token for the sandbox user. verifyToken will accept
       // it, so requireAuth proceeds past the signature check and MUST call
       // isSandboxUser before deciding to block the request.
-      const validSandboxToken = signToken(SANDBOX_USER_ID);
+      const validSandboxToken = signLegacyTokenForTests(SANDBOX_USER_ID);
       const res = await fetch(`${baseUrl}/api/me`, {
         headers: { Authorization: `Bearer ${validSandboxToken}` },
       });

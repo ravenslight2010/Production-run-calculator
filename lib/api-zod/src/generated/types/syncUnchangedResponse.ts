@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { OperationalProjection } from './operationalProjection';
 
 export interface SyncUnchangedResponse {
   unchanged: true;
@@ -15,4 +16,7 @@ export interface SyncUnchangedResponse {
   rollover: boolean;
   /** @minimum 0 */
   canonicalRevision?: number;
+  /** @minimum 0 */
+  serverTime?: number;
+  operationalProjection?: OperationalProjection | null;
 }

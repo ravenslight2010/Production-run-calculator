@@ -35,7 +35,7 @@ import {
   hashResetCode,
   newResetCode,
   newUserId,
-  signToken,
+  signLegacyTokenForTests,
   verifyPassword,
 } from "../lib/auth";
 
@@ -184,7 +184,7 @@ async function req(
 ): Promise<Response> {
   const headers: Record<string, string> = {};
   if (body !== undefined) headers["content-type"] = "application/json";
-  if (userId) headers["authorization"] = `Bearer ${signToken(userId)}`;
+  if (userId) headers["authorization"] = `Bearer ${signLegacyTokenForTests(userId)}`;
   return fetch(`${baseUrl}${pathname}`, {
     method,
     headers,
@@ -528,7 +528,7 @@ describe("password changes and resets invalidate existing sessions", () => {
       .update(usersTable)
       .set({ passwordHash: hashPassword("old-password") })
       .where(eq(usersTable.id, OPERATOR));
-    const oldToken = signToken(OPERATOR);
+    const oldToken = signLegacyTokenForTests(OPERATOR);
 
     // Confirm the old token works before the change.
     const before = await fetch(`${baseUrl}/api/me`, {
@@ -567,7 +567,7 @@ describe("password changes and resets invalidate existing sessions", () => {
   });
 
   it("a manager-issued password reset (PUT /users/:id/password) revokes the target's existing session", async () => {
-    const oldToken = signToken(OPERATOR);
+    const oldToken = signLegacyTokenForTests(OPERATOR);
     const before = await fetch(`${baseUrl}/api/me`, {
       headers: { authorization: `Bearer ${oldToken}` },
     });
@@ -590,7 +590,7 @@ describe("password changes and resets invalidate existing sessions", () => {
   it("completing a self-serve reset with a code revokes the account's existing session", async () => {
     const code = newResetCode();
     await seedApprovedRequest(code, FUTURE());
-    const oldToken = signToken(OPERATOR);
+    const oldToken = signLegacyTokenForTests(OPERATOR);
     const before = await fetch(`${baseUrl}/api/me`, {
       headers: { authorization: `Bearer ${oldToken}` },
     });

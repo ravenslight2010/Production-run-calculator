@@ -269,19 +269,21 @@ export function buildWallClockServerClaims(raw: unknown, nowMs = Date.now()): { 
     // be replayed as paused Packaging output after reconnect or restart.
     bookkeeping.lastExpectedCases = suggestion?.expectedCasesRaw ?? -1;
   }
-  // Pre-engine records persisted only the six due refs. When adopting one of
-  // those overdue arms, preserve its already-authorized single case beat while
-  // establishing the engine's incremental baseline; subsequent beats use the
-  // normal elapsed/freezer calculation exclusively.
+  // Pre-engine records persisted only the six due refs. An overdue legacy arm
+  // may preserve a case beat only when the freezer-aware suggestion already
+  // authorizes the next case; an expired timer alone is not output evidence.
   const legacyCaseArm = old.lifecycleGeneration === plan.generation
     && typeof old.caseNextDueMs === "number"
     && !Object.prototype.hasOwnProperty.call(old, "lastExpectedCases")
     && old.caseNextDueMs <= nowMs;
-  const legacyExpected = number(values.skidsCompleted) * number(values.casesPerSkid)
-    + number(values.casesOnCurrentSkid) + 1;
-  const expectedCasesRaw = legacyCaseArm
-    ? Math.max(suggestion?.expectedCasesRaw ?? 0, legacyExpected)
-    : suggestion?.expectedCasesRaw ?? 0;
+  const suggestionExpectedCasesRaw = suggestion?.expectedCasesRaw ?? 0;
+  const currentCases = number(values.skidsCompleted) * number(values.casesPerSkid)
+    + number(values.casesOnCurrentSkid);
+  const legacyExpected = currentCases + 1;
+  const legacyCaseAlreadyAuthorized = suggestionExpectedCasesRaw >= legacyExpected;
+  const expectedCasesRaw = legacyCaseArm && legacyCaseAlreadyAuthorized
+    ? Math.max(suggestionExpectedCasesRaw, legacyExpected)
+    : suggestionExpectedCasesRaw;
   const expectedCases = number(values.casesNeeded) > 0
     ? Math.min(number(values.casesNeeded), expectedCasesRaw)
     : expectedCasesRaw;

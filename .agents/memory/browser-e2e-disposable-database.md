@@ -14,6 +14,8 @@ is disposable.
 
 **How to apply:** Before running recipe-refresh or similar browser coverage,
 prepare a dedicated disposable Postgres database through the repository's
-isolation setup, then run the suite with the approved test flags. If only a
-shared database is configured, report the browser run as blocked rather than
-weakening the guard.
+isolation setup, then run the suite with the approved test flags. The browser
+server and any direct SQL fixture helpers must use that same `DATABASE_URL`;
+reusing a healthy server on a different database can create an account in one
+database and promote/seed it in another. If only a shared database is
+configured, report the browser run as blocked rather than weakening the guard.

@@ -26,7 +26,7 @@ import { eq, sql } from "drizzle-orm";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import pg from "pg";
-import { signToken, verifyPassword } from "../lib/auth";
+import { signLegacyTokenForTests, verifyPassword } from "../lib/auth";
 import type { Capability } from "../lib/roles";
 
 // The complete capability set, mirrored locally so the test never statically
@@ -254,7 +254,7 @@ async function req(
 ): Promise<Response> {
   const headers: Record<string, string> = {};
   if (body !== undefined) headers["content-type"] = "application/json";
-  if (userId) headers["authorization"] = `Bearer ${signToken(userId)}`;
+  if (userId) headers["authorization"] = `Bearer ${signLegacyTokenForTests(userId)}`;
   return fetch(`${baseUrl}${pathname}`, {
     method,
     headers,
@@ -1130,6 +1130,75 @@ describe("capability-based access control", () => {
   }
 });
 
+describe("manager action queue manual resolution", () => {
+  it("keeps a resolved derived item out of the active queue after refresh", async () => {
+    const incidentId = `coderabbit-resolution-${Date.now()}`;
+    const dedupKey = `incident:${incidentId}`;
+    await db.execute(sql`
+      INSERT INTO incidents
+        (id, source, screen, app_platform, context, status, priority, workflow_state)
+      VALUES
+        (${incidentId}, 'user_report', 'Run', 'web',
+         '{"description":"Disposable action queue regression fixture"}'::jsonb,
+         'new', 'high', 'new')
+    `);
+
+    try {
+      const initialResponse = await req(
+        MANAGER,
+        "GET",
+        "/api/manager-action-queue?category=incident&status=all",
+      );
+      expect(initialResponse.status).toBe(200);
+      const initial = await initialResponse.json() as {
+        items: Array<{ id: number; dedupKey: string; status: string; version: number }>;
+      };
+      const item = initial.items.find((candidate) => candidate.dedupKey === dedupKey);
+      expect(item).toBeDefined();
+
+      const resolvedResponse = await req(
+        MANAGER,
+        "PATCH",
+        `/api/manager-action-queue/${item!.id}`,
+        {
+          status: "resolved",
+          version: item!.version,
+          resolutionNote: "Verified the incident is resolved.",
+        },
+      );
+      expect(resolvedResponse.status).toBe(200);
+
+      const refreshedResponse = await req(
+        MANAGER,
+        "GET",
+        "/api/manager-action-queue?category=incident&status=all",
+      );
+      expect(refreshedResponse.status).toBe(200);
+      const refreshed = await refreshedResponse.json() as {
+        items: Array<{ id: number; dedupKey: string; status: string }>;
+        counts: { resolved: number };
+      };
+      expect(
+        refreshed.items.find((candidate) => candidate.id === item!.id)?.status,
+      ).toBe("resolved");
+      expect(refreshed.counts.resolved).toBeGreaterThanOrEqual(1);
+
+      const audit = await db.execute<{ changes: Record<string, unknown> }>(sql`
+        SELECT changes FROM audit_logs
+        WHERE scope = 'live'
+          AND resource = ${`action_item:${item!.id}`}
+          AND action = 'manager_action_item_update'
+        ORDER BY id DESC
+        LIMIT 1
+      `);
+      expect(audit.rows[0]?.changes).toMatchObject({ status: "resolved" });
+    } finally {
+      await db.execute(sql`DELETE FROM action_items WHERE scope = 'live' AND dedup_key = ${dedupKey}`);
+      await db.execute(sql`DELETE FROM incidents WHERE id = ${incidentId}`);
+    }
+  });
+});
+
 describe("import history idempotency", () => {
   it("rejects an audit write without an idempotency key", async () => {
     const response = await req(MANAGER, "POST", "/api/import-history", {
@@ -1655,23 +1724,23 @@ describe("staff security actions are visible in the Audit Log", () => {
 
     const grantLog = result.logs.find((log) => log.action === "role_granted");
     expect(grantLog).toMatchObject({
-      actor: "manager",
+      actor: "manager-1",
       action: "role_granted",
-      resource: "user:operator",
+      resource: "user:operator-1",
       changes: {
-        targetUsername: "operator",
-        role: { from: "operator", to: "warehouse" },
+        outcome: "success",
+        targetId: "operator-1",
       },
     });
 
     const revokeLog = result.logs.find((log) => log.action === "role_revoked");
     expect(revokeLog).toMatchObject({
-      actor: "manager",
+      actor: "manager-1",
       action: "role_revoked",
-      resource: "user:operator",
+      resource: "user:operator-1",
       changes: {
-        targetUsername: "operator",
-        role: { from: "warehouse", to: "operator" },
+        outcome: "success",
+        targetId: "operator-1",
       },
     });
 
@@ -1679,11 +1748,10 @@ describe("staff security actions are visible in the Audit Log", () => {
       (log) => log.action === "password_reset_approved",
     );
     expect(approvalLog).toMatchObject({
-      actor: "manager",
+      actor: "manager-1",
       action: "password_reset_approved",
-      resource: "user:operator",
+      resource: `reset_request:${resetRequestId}`,
       changes: {
-        targetUsername: "operator",
         requestId: resetRequestId,
       },
     });
@@ -1926,6 +1994,28 @@ describe("last-manager guard", () => {
       .from(userRolesTable)
       .where(sql`${userRolesTable.userId} = ${"manager-2"}`);
     expect(row.role).toBe("operator");
+  });
+
+  it("serializes concurrent final-manager disable attempts", async () => {
+    await db.insert(usersTable).values({
+      id: "manager-race-2",
+      username: "manager-race-2",
+      passwordHash: "x",
+    });
+    await db.insert(userRolesTable).values({ userId: "manager-race-2", role: "manager" });
+
+    // Equal-privilege targets remain protected, even when requests arrive at
+    // the same time. The target must not be left disabled by either request.
+    const responses = await Promise.all([
+      req(MANAGER, "PATCH", `/api/users/manager-race-2/status`, { disabled: true }),
+      req("manager-race-2", "PATCH", `/api/users/${MANAGER}/status`, { disabled: true }),
+    ]);
+    expect(responses.map((response) => response.status).sort()).toEqual([403, 403]);
+    const rows = await db.select({ id: usersTable.id, disabled: usersTable.disabled })
+      .from(usersTable);
+    const relevant = rows.filter((row) => row.id === MANAGER || row.id === "manager-race-2");
+    expect(relevant).toHaveLength(2);
+    expect(relevant.every((row) => row.disabled === false)).toBe(true);
   });
 
   it("rejects removing the only manager (DELETE /users/:id → 400)", async () => {
@@ -2521,7 +2611,7 @@ describe("public auth endpoints are rate-limited", () => {
     let lastStatus = 0;
     // The cap is generous (20/60s) so real users retyping a password never
     // trip it; comfortably exceed it here to observe the 429.
-    for (let i = 0; i < 25; i++) {
+    for (let i = 0; i < 60; i++) {
       const res = await req(
         null,
         "GET",

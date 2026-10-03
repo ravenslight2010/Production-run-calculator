@@ -55,6 +55,13 @@ test("lockfile native inventory is complete and unsupported runners fail closed"
     "utf8",
   );
   const packages = typescript7NativePackagesFromLockfile(lockfile, "7.0.2");
+  assert.deepEqual(
+    typescript7NativePackagesFromLockfile(
+      `---\nlockfileVersion: '9.0'\npackages:\n  'ignored@1.0.0': {}\nsnapshots:\n  'ignored@1.0.0': {}\n---\n${lockfile}`,
+      "7.0.2",
+    ),
+    packages,
+  );
   assert.equal(packages.length, 20);
   assert.ok(packages.includes("@typescript/typescript-linux-x64"));
   assert.deepEqual(approvedTypescript7Runner("linux", "x64"), {
@@ -466,6 +473,30 @@ test("runner fingerprints retain only bounded non-sensitive labels", () => {
     else process.env.ImageOS = previousImageOs;
     if (previousImageVersion === undefined) delete process.env.ImageVersion;
     else process.env.ImageVersion = previousImageVersion;
+  }
+});
+
+test("runner fingerprint refuses to capture evidence without an image identity", () => {
+  const previous = {
+    explicit: process.env.TYPESCRIPT_7_RUNNER_IMAGE,
+    os: process.env.ImageOS,
+    version: process.env.ImageVersion,
+  };
+  try {
+    delete process.env.TYPESCRIPT_7_RUNNER_IMAGE;
+    delete process.env.ImageOS;
+    delete process.env.ImageVersion;
+    assert.throws(
+      () => typescript7RunnerFingerprint(),
+      /runner image identity is unavailable/,
+    );
+  } finally {
+    if (previous.explicit === undefined) delete process.env.TYPESCRIPT_7_RUNNER_IMAGE;
+    else process.env.TYPESCRIPT_7_RUNNER_IMAGE = previous.explicit;
+    if (previous.os === undefined) delete process.env.ImageOS;
+    else process.env.ImageOS = previous.os;
+    if (previous.version === undefined) delete process.env.ImageVersion;
+    else process.env.ImageVersion = previous.version;
   }
 });
 

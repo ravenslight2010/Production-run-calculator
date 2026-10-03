@@ -19,8 +19,9 @@ caller to execute its safe fallback. Verify both prompt response and zero
 pending waiters under full checkout contention.
 
 Background operations may retry the exact node-postgres acquisition message
-`timeout exceeded when trying to connect` as a transient failure. Keep this
-allowlist exact; generic execution or provider timeouts must remain final.
+`timeout exceeded when trying to connect` only when the whole pass is
+idempotent/transactional and protected by a durable lease. Keep this allowlist
+exact; generic execution or provider timeouts must remain final.
 
 **Why:** Production can emit the acquisition timeout without an error code or
 connection wording, so a classifier limited to PostgreSQL/network codes misses
@@ -29,3 +30,17 @@ it and records an avoidable worker failure after only one checkout attempt.
 **How to apply:** Reuse the existing bounded one-retry wrapper. Do not broaden
 the match to arbitrary timeout text or lengthen the pool deadline without
 re-proving prompt health fallbacks and zero pending pool waiters.
+
+If disposable integration tests time out while creating pool connections,
+consider a smaller pool cap scoped to that test run before changing the pool
+deadline or deployed defaults. Keep concurrency assertions unchanged and rerun
+the complete affected test shards.
+
+**Why:** In a constrained test runner, reducing connection creation pressure
+resolved a checkout timeout that occurred before SQL execution; the same
+integration coverage then passed without weakening write-safety checks.
+
+**How to apply:** Use a test-only pool setting only when diagnostics point to
+connection-establishment pressure, then verify the complete release suite.
+Do not propagate the cap to deployed settings without separate capacity
+evidence.

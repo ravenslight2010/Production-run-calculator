@@ -18,7 +18,7 @@ import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import pg from "pg";
 import type { FreezerPullItem } from "@workspace/freezer-pull";
-import { signToken } from "../lib/auth";
+import { signLegacyTokenForTests } from "../lib/auth";
 
 // ── DB handles (bound after repointing DATABASE_URL) ────────────────────────
 type DbModule = typeof import("@workspace/db");
@@ -132,7 +132,7 @@ beforeEach(async () => {
 function managerHeaders(): Record<string, string> {
   return {
     "Content-Type": "application/json",
-    Authorization: `Bearer ${signToken(MANAGER)}`,
+    Authorization: `Bearer ${signLegacyTokenForTests(MANAGER)}`,
   };
 }
 
@@ -150,7 +150,7 @@ async function postItems(
 
 async function getItems(): Promise<{ status: number; items: FreezerPullItem[] }> {
   const res = await fetch(`${baseUrl}/api/freezer-pull-items`, {
-    headers: { Authorization: `Bearer ${signToken(MANAGER)}` },
+    headers: { Authorization: `Bearer ${signLegacyTokenForTests(MANAGER)}` },
   });
   const body = (await res.json()) as { items: FreezerPullItem[] };
   return { status: res.status, items: body.items ?? [] };
@@ -330,7 +330,7 @@ describe("DELETE /api/freezer-pull-items — auth gate", () => {
       method: "DELETE",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${signToken(OPERATOR)}`,
+        Authorization: `Bearer ${signLegacyTokenForTests(OPERATOR)}`,
       },
       body: JSON.stringify({ ids: ["fpi-cheese-blocks"] }),
     });

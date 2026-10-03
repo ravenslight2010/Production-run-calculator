@@ -1,11 +1,13 @@
-import { renderHook, act } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, cleanup, renderHook } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DayState, FormValues, RunMeta } from "../types";
 import { useRunLifecycleManager } from "./useRunLifecycleManager";
 
 const values = { casesNeeded: 100, casesPerSkid: 10, skidsCompleted: 0, casesOnCurrentSkid: 0, batchesReady: 0 } as FormValues;
 const run = (id: string, extra: Partial<RunMeta> = {}) => ({ id, brand: "Brand", flavor: "Flavor", ...extra }) as RunMeta;
 const day = (runs: RunMeta[], currentIndex = 0) => ({ date: "2026-01-01", runs, currentIndex }) as DayState;
+
+afterEach(cleanup);
 
 function setup(state: DayState) {
   const formValues = { ...values };
@@ -76,6 +78,56 @@ describe("useRunLifecycleManager", () => {
     }
   });
 
+  it("replays a deferred Start after the foreground barrier clears", () => {
+    vi.useFakeTimers();
+    let unmount: (() => void) | undefined;
+    try {
+      const { deps, spies } = setup(day([run("a")]));
+      deps.foregroundSyncBarrierRef.current = true;
+      const hook = renderHook(() => useRunLifecycleManager(deps));
+      unmount = hook.unmount;
+      const { result } = hook;
+
+      act(() => result.current.startRun());
+      expect(spies.queue).not.toHaveBeenCalled();
+
+      act(() => vi.advanceTimersByTime(0));
+      expect(spies.queue).not.toHaveBeenCalled();
+
+      deps.foregroundSyncBarrierRef.current = false;
+      act(() => vi.advanceTimersByTime(25));
+
+      expect(spies.queue).toHaveBeenCalledWith(
+        expect.objectContaining({ runId: "a", lifecycle: "start" }),
+      );
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      unmount?.();
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels a deferred lifecycle action when the manager unmounts", () => {
+    vi.useFakeTimers();
+    try {
+      const { deps, spies } = setup(day([run("a")]));
+      deps.foregroundSyncBarrierRef.current = true;
+      const { result, unmount } = renderHook(() => useRunLifecycleManager(deps));
+
+      act(() => result.current.startRun());
+      expect(vi.getTimerCount()).toBe(1);
+
+      unmount();
+      expect(vi.getTimerCount()).toBe(0);
+
+      deps.foregroundSyncBarrierRef.current = false;
+      act(() => vi.runOnlyPendingTimers());
+      expect(spies.queue).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("blocks every lifecycle command while form ownership is handing off", () => {
     const { deps, spies } = setup(day([run("a", { startedAt: 10, pausedAt: 20 })]));
     deps.formHandoffRef.current = true;
@@ -99,6 +151,66 @@ describe("useRunLifecycleManager", () => {
     act(() => result.current.switchToRun(0));
     expect(deps.saveRunValues).toHaveBeenCalledWith("form-owner", expect.anything());
     expect(deps.saveRunValues).not.toHaveBeenCalledWith("day-current", expect.anything());
+  });
+
+  it("flushes before fencing a run switch and keeps the fence raised through reset", () => {
+    const { deps, form } = setup(day([run("a"), run("b")]));
+    const steps: string[] = [];
+    deps.flushFormWrites.mockImplementation(() => {
+      steps.push(`flush:${deps.formHandoffRef.current}`);
+    });
+    const reset = vi.fn(() => {
+      steps.push(`reset:${deps.formHandoffRef.current}`);
+    });
+    Reflect.set(form as object, "reset", reset);
+    const { result } = renderHook(() => useRunLifecycleManager(deps));
+
+    act(() => result.current.switchToRun(1));
+
+    expect(steps).toEqual(["flush:false", "reset:true"]);
+    expect(deps.lastFormRunIdRef.current).toBe("b");
+    expect(deps.formHandoffRef.current).toBe(true);
+  });
+
+  it("releases the form fence synchronously when resetting the selected run", () => {
+    const { deps } = setup(day([run("a"), run("b")]));
+    const { result } = renderHook(() => useRunLifecycleManager(deps));
+
+    act(() => result.current.switchToRun(0));
+
+    expect(deps.formHandoffRef.current).toBe(false);
+  });
+
+  it("rejects an automatic switch when the selected run changed since the timer render", () => {
+    const { deps, spies } = setup(day([run("a"), run("b")]));
+    const { result } = renderHook(() => useRunLifecycleManager(deps));
+
+    expect(result.current.switchToRun(1, "different-run")).toBe(false);
+    expect(deps.dayStateRef.current.currentIndex).toBe(0);
+    expect(spies.save).not.toHaveBeenCalled();
+    expect(deps.form.reset).not.toHaveBeenCalled();
+  });
+
+  it("keeps a manually or foreground-selected run when drain completion races the stale switch", () => {
+    const { deps, spies } = setup(day([run("draining"), run("queued"), run("selected")]));
+    const { result } = renderHook(() => useRunLifecycleManager(deps));
+
+    // A foreground adoption or manual selection can update the shared day
+    // state after the station effect captured "draining" but before its
+    // auto-advance callback runs. The stale callback must not select "queued".
+    deps.dayStateRef.current = day(
+      [run("draining"), run("queued"), run("selected")],
+      2,
+    );
+
+    act(() => {
+      expect(result.current.switchToRun(1, "draining")).toBe(false);
+    });
+
+    expect(deps.dayStateRef.current.currentIndex).toBe(2);
+    expect(deps.dayStateRef.current.runs[deps.dayStateRef.current.currentIndex]?.id).toBe("selected");
+    expect(spies.save).not.toHaveBeenCalled();
+    expect(deps.form.reset).not.toHaveBeenCalled();
   });
 
   it("uses overlay generations for Start, Pause, Resume, and competing End", () => {

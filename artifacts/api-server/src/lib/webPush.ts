@@ -88,7 +88,7 @@ export function alertCandidates(data: unknown, date: string, nowMs = Date.now())
   const calc = result.calc;
   if (calc.adjustedTimeSec > 0 && calc.adjustedTimeSec <= 900) out.push({ id: `${prefix}:fifteen-min`, kind: "fifteenMin" });
   if (calc.adjustedTimeSec <= 0 && nowMs - started >= 60_000) out.push({ id: `${prefix}:run-complete`, kind: "runComplete" });
-  if (!calc.pressDone && calc.timePerBatchSec > 0) {
+  if (run.autoTrackDisabled === true && !calc.pressDone && calc.timePerBatchSec > 0) {
     // Shared auto-track timing excludes pauses/closed stoppages and therefore
     // keeps a batch boundary from becoming due while the line is stopped.
     const elapsed = computeAutoTrackElapsedMs({ startedAt: started, pausedAt: paused || undefined, nowMs, stoppages: Array.isArray(run.stoppages) ? run.stoppages as never : undefined });

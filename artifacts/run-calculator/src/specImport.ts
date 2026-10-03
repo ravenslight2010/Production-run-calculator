@@ -77,6 +77,7 @@ import {
   type ImportMergeAlias,
   type ImportMergeAliasMap,
   resolveImportName,
+  SPEC_IMPORT_PARSE_VERSION,
 } from "@workspace/spec-import";
 import {
   buildImportReview,
@@ -93,6 +94,8 @@ import {
   importProfileIsTombstoned,
   recipeNameIsTombstoned,
   applySpecImport,
+  projectSpecImport,
+  adoptSpecImportProjection,
   loadCurrentFormulaRecipes,
   isNameDeleted,
   flavorNamespace,
@@ -123,10 +126,15 @@ import {
 } from "./parseSpecSheet";
 import { requestMatchImport } from "./matchImport";
 import { fetchMergeAliases } from "./mergeSuggest";
-import { saveAiCorrections } from "./aiCorrections";
+import {
+  logCorrectionWriteFailure,
+  saveAiCorrections,
+  type AiCorrection,
+} from "./aiCorrections";
 import { fetchMixes, saveMixes } from "./mixes";
 import { fetchCheeseRecipes, saveCheeseRecipes } from "./cheeseRecipes";
 import { addNamedRecipesToServerIfAbsent, fetchNamedRecipes, saveNamedRecipes } from "./namedRecipes";
+import { applyImportOperation } from "./importOperations";
 import { fetchDieLineDefaults, toOverridesMap } from "./dieLineDefaultsServer";
 import type { DieLineDefaultsOverrides } from "./dieDefaults";
 import { parseDoughCustomerSection, parseDoughVariantTable, SPEC_STATIC_CUSTOMER_ASSIGNMENTS, type NamedRecipe as PoolNamedRecipe, type DoughCustomerAssignment, type DoughVariantTableEntry } from "@workspace/named-recipes";
@@ -225,6 +233,8 @@ export type SpecImportPrepared = {
    * re-running the AI (whose read of the same sheet can drift between calls).
    */
   sourceHash?: string;
+  /** Exact bounded source text used by this review, retained only on Apply. */
+  sourceEvidence?: { sourceText: string; parseVersion: string };
   /**
    * Previously learned "use existing recipe" picks (sheet blend/mix name →
    * existing saved recipe name, lower-cased key). The review dialog uses these
@@ -331,13 +341,40 @@ export function buildAliasLinkSuggestions(aliases: SpecImportAlias[]): Record<st
   return out;
 }
 
-// Map a learned spec-import alias kind to a shared-corrections domain.
-function aliasKindToDomain(kind: SpecAliasKind): string {
-  if (kind === "brand") return "brand";
-  if (kind === "flavor") return "flavor";
-  if (kind === "appType" || kind === "pepType" || kind === "recipeName") return "item";
-  // dough/sauce/cheese ingredient kinds
-  return "ingredient";
+// Only mirror alias kinds that represent a name correction, and map each
+// explicitly. In particular, routing choices are not ingredient corrections.
+function aliasKindToDomain(kind: SpecAliasKind): string | null {
+  switch (kind) {
+    case "brand":
+      return "brand";
+    case "flavor":
+      return "flavor";
+    case "appType":
+    case "pepType":
+    case "recipeName":
+      return "item";
+    case "cheeseIngredient":
+    case "doughIngredient":
+    case "sauceIngredient":
+      return "ingredient";
+    case "dieType":
+      return "die";
+    case "crossFamilyRouting":
+    default:
+      return null;
+  }
+}
+
+export function mapSpecAliasToAiCorrection(
+  alias: SpecImportAlias,
+): AiCorrection | null {
+  const domain = aliasKindToDomain(alias.kind);
+  if (!domain) return null;
+  return {
+    domain,
+    fromText: alias.externalName,
+    toText: alias.canonicalName,
+  };
 }
 
 /** Read an .xlsx File/Blob into flat sheet grids (string cells). */
@@ -1420,6 +1457,8 @@ async function sha256Hex(bytes: ArrayBuffer | Uint8Array): Promise<string> {
  * parses invented the same descriptive flavor (e.g. "Cheese") for every code
  * block, collapsing distinct products into one profile; those parses must not
  * be reused.
+ * v40→v41: remove the accidental unary-plus coercion that appended literal
+ * "NaN" to the production parse system prompt.
  * v14→v15: snap-to-existing link passes no longer silently rename imported
  * recipes onto merely SIMILAR pool names (word reorder / single typo / family
  * fold) — those become declinable review suggestions; only exact loose-key
@@ -1427,7 +1466,38 @@ async function sha256Hex(bytes: ArrayBuffer | Uint8Array): Promise<string> {
  * cross-linked names (prod evidence: Basha's Ultra Thin 5 Cheese mix saved as
  * "Lowe's/Hannaford 5Cheese Mix"); those parses must not be reused.
  */
-export const SPEC_PARSE_VERSION = "39";
+export const SPEC_PARSE_VERSION = SPEC_IMPORT_PARSE_VERSION;
+
+const MAX_APPLY_SOURCE_EVIDENCE_CHARS = 100_000;
+const MAX_APPLY_SOURCE_EVIDENCE_BYTES = 100 * 1024;
+
+function fitsApplySourceEvidenceLimit(sourceText: string): boolean {
+  return sourceText.length <= MAX_APPLY_SOURCE_EVIDENCE_CHARS &&
+    new TextEncoder().encode(sourceText).byteLength <= MAX_APPLY_SOURCE_EVIDENCE_BYTES;
+}
+
+function sourceEvidenceFromGrids(grids: SheetGrid[]): { sourceText: string; parseVersion: string } | undefined {
+  if (
+    grids.length > 24 ||
+    grids.some((grid) => grid.rows.length > 1000) ||
+    findTruncatedCells(grids).length > 0 ||
+    findOverflowColumnRows(grids).length > 0
+  ) return undefined;
+  const { chunks, droppedRows } = splitGridsForPrompt(grids);
+  if (!chunks.length || droppedRows > 0) return undefined;
+  const sourceText = chunks.map((chunk) => gridsToPromptText(chunk)).join("\n\n");
+  if (!sourceText.trim() || !fitsApplySourceEvidenceLimit(sourceText)) return undefined;
+  return { sourceText, parseVersion: SPEC_PARSE_VERSION };
+}
+
+function combineSourceEvidence(
+  parts: ReadonlyArray<{ sourceText: string; parseVersion: string } | undefined>,
+): { sourceText: string; parseVersion: string } | undefined {
+  if (!parts.length || parts.some((part) => !part || part.parseVersion !== SPEC_PARSE_VERSION)) return undefined;
+  const sourceText = parts.map((part) => part!.sourceText).join("\n\n");
+  if (!fitsApplySourceEvidenceLimit(sourceText)) return undefined;
+  return { sourceText, parseVersion: SPEC_PARSE_VERSION };
+}
 
 /**
  * Content fingerprint for an import's uploaded file bytes: the per-file
@@ -1822,6 +1892,7 @@ export async function prepareSpecImport(
   // table) even when reusing a cached AI parse. Both are cheap (no AI calls)
   // and must reflect the raw workbook content, not the possibly-stale snapshot.
   const grids = await readWorkbookGrids(data);
+  const sourceEvidence = sourceEvidenceFromGrids(grids);
   const doughCustomerAssignments = parseDoughCustomerAssignmentsFromGrids(grids);
   const doughVariantsFromTable = parseDoughVariantTableFromGrids(grids);
   if (snapshot) {
@@ -1837,6 +1908,7 @@ export async function prepareSpecImport(
     const newMixIngredients = await computeNewMixIngredients(reused.parsed);
     return {
       ...reused,
+      ...(sourceEvidence ? { sourceEvidence } : {}),
       ...(newMixIngredients.length > 0 ? { newMixIngredients } : {}),
       ...(doughCustomerAssignments.length > 0 ? { doughCustomerAssignments } : {}),
       ...(doughVariantsFromTable.length > 0 ? { doughVariantsFromTable } : {}),
@@ -1922,6 +1994,7 @@ export async function prepareSpecImport(
       ...buildAliasLinkSuggestions(aliases),
     },
     ...(sourceHash ? { sourceHash } : {}),
+    ...(sourceEvidence ? { sourceEvidence } : {}),
     ...(aiFallbackGrids ? { aiFallbackGrids } : {}),
     ...(rawParsed.unresolved?.length ? { unresolved: rawParsed.unresolved } : {}),
     ...(note ? { note } : {}),
@@ -1989,13 +2062,23 @@ export async function prepareSpecImportMulti(
   const { sourceHash, snapshot } = await findReusableParse(names ?? [], buffers);
   if (snapshot) {
     onProgress?.(buffers.length, buffers.length);
-    return buildReusedPrepared(
+    const sourceEvidenceParts: Array<{ sourceText: string; parseVersion: string } | undefined> = [];
+    for (let i = 0; i < buffers.length; i++) {
+      sourceEvidenceParts.push(sourceEvidenceFromGrids(await readWorkbookGrids(buffers[i])));
+      buffers[i] = new ArrayBuffer(0);
+    }
+    const reused = await buildReusedPrepared(
       snapshot.data,
       known,
       aliases,
       sourceHash,
       await ingredientMergeAliasesPromise,
     );
+    const sourceEvidence = combineSourceEvidence(sourceEvidenceParts);
+    return {
+      ...reused,
+      ...(sourceEvidence ? { sourceEvidence } : {}),
+    };
   }
 
   const parsedList: ParsedSpecImport[] = [];
@@ -2011,6 +2094,7 @@ export async function prepareSpecImportMulti(
   const allOverflow: OverflowColumnRow[] = [];
   const allUnresolved: SpecImportUnresolved[] = [];
   const allFallbackGrids: SheetGrid[] = [];
+  const sourceEvidenceParts: Array<{ sourceText: string; parseVersion: string } | undefined> = [];
   // Collected deterministic customer assignments from every file's header
   // section (merged across files — a multi-workbook dough import may split
   // the assignment list across sheets).
@@ -2031,6 +2115,7 @@ export async function prepareSpecImportMulti(
       // tab long enough for the browser to kill the page mid-import.
       await new Promise((r) => setTimeout(r, 0));
       const grids = await readWorkbookGrids(buffers[i]);
+      sourceEvidenceParts.push(sourceEvidenceFromGrids(grids));
       // Deterministic customer-section parse — must happen BEFORE the buffer is
       // freed in the finally block below.
       for (const a of parseDoughCustomerAssignmentsFromGrids(grids)) {
@@ -2188,6 +2273,7 @@ export async function prepareSpecImportMulti(
   // Detect new ingredient rows on existing mixes — best-effort, after all
   // other work so it doesn't slow the AI parse path.
   const newMixIngredients = await computeNewMixIngredients(parsed);
+  const sourceEvidence = totalDropped > 0 ? undefined : combineSourceEvidence(sourceEvidenceParts);
 
   return {
     parsed,
@@ -2205,6 +2291,7 @@ export async function prepareSpecImportMulti(
       ...buildAliasLinkSuggestions(aliases),
     },
     ...(sourceHash ? { sourceHash } : {}),
+    ...(sourceEvidence ? { sourceEvidence } : {}),
     ...(note ? { note } : {}),
     ...(profilesRemovedFromWorkbook.length > 0 ? { profilesRemovedFromWorkbook } : {}),
     ...(newMixIngredients.length > 0 ? { newMixIngredients } : {}),
@@ -2225,6 +2312,14 @@ export async function prepareSpecImportMultiWithAi(
   return prepareSpecImportMulti(buffers, onProgress, names, signal, { allowAi: true });
 }
 
+export type SpecImportChangeRows = {
+  brandProfiles?: { upsert?: unknown[]; delete?: string[] };
+  mixes?: { upsert?: unknown[]; delete?: string[] };
+  cheeseRecipes?: { upsert?: unknown[]; delete?: string[] };
+  doughRecipes?: { upsert?: unknown[]; delete?: string[] };
+  sauceRecipes?: { upsert?: unknown[]; delete?: string[] };
+  specImportAliases?: { upsert?: unknown[]; delete?: unknown[] };
+};
 /**
  * Apply a prepared import: write profiles + recipes, persist new aliases, and
  * add any mixes detected in the sheet to the factory-wide Mixes list. Returns
@@ -2245,6 +2340,7 @@ export async function commitSpecImport(
    * that the manager accepted are applied; unchecked ones are skipped silently.
    */
   acceptedNewMixIngredientNames?: ReadonlySet<string>,
+  operationId?: string,
 ): Promise<{
   mixesAdded: number;
   cheeseRecipesAdded: number;
@@ -2286,6 +2382,7 @@ export async function commitSpecImport(
    * instead of letting the loss stay silent.
    */
   aliasSaveFailed: boolean;
+  resultHash?: string;
 }> {
   // Collapse per-weight cheese-blend name variants ("Aldo's Cheese Mix 2.07" /
   // "…1.75") to one clean name up front, so the profile applicator fields and the
@@ -2505,8 +2602,17 @@ export async function commitSpecImport(
     throw new ImportReviewReconfirmationError(finalImportReview);
   }
 
+  const projection = operationId
+    ? projectSpecImport(
+        applyParsed, livePools, dieLineDefaultOverrides, forceUpdateProfileKeys, importMergeAliases,
+      )
+    : null;
   const applyOut: { nameCorrections?: SpecImportNameCorrection[] } = {};
-  const { touchedProfiles, crustProfiles } = applySpecImport(applyParsed, applyOut, livePools, dieLineDefaultOverrides, forceUpdateProfileKeys, importMergeAliases);
+  const applied = projection ?? applySpecImport(
+    applyParsed, applyOut, livePools, dieLineDefaultOverrides, forceUpdateProfileKeys, importMergeAliases,
+  );
+  if (projection) applyOut.nameCorrections = projection.nameCorrections;
+  let { touchedProfiles, crustProfiles } = applied;
 
   // Explicit manager Apply is AUTHORITATIVE: re-mark every profile this
   // import touched as a FORCED upsert, so the server-pool push bypasses the
@@ -2516,14 +2622,16 @@ export async function commitSpecImport(
   // apply — the manager sees "reimport hasn't fixed it" with no explanation
   // (the Hannaford Tikka Masala incident). The LWW guard stays in place for
   // ordinary autosaves; only this deliberate Apply action overrides it.
-  for (const { brand, flavor } of touchedProfiles) {
-    markProfileForceEdited(canonicalProfileKey(brand, flavor));
+  if (!operationId) {
+    for (const { brand, flavor } of touchedProfiles) {
+      markProfileForceEdited(canonicalProfileKey(brand, flavor));
+    }
   }
   // A spec import is an explicit manager repair, not an eventually-consistent
   // autosave. Do not continue into the "Import applied" success path until the
   // server has acknowledged every force-write. Failed ops remain in the queue
   // for retry rather than silently leaving the fix only in this browser.
-  await flushProfileQueueStrict();
+  if (!operationId) await flushProfileQueueStrict();
 
   // ── Bad-alias cleanup after a CORRECTING import ──
   // applySpecImport reported every name this import overwrote with a DIFFERENT
@@ -2538,6 +2646,7 @@ export async function commitSpecImport(
   // mirror included). Deletion is synchronous within the commit but
   // best-effort: the import itself already applied.
   const corrections = applyOut.nameCorrections ?? [];
+  let correctingAliasDeletes: SpecImportAlias[] = [];
   if (corrections.length) {
     // Liveness universes for the "old name is a real recipe" guard. A failed
     // fetch means "unknown" — deletion is skipped for that kind (fail safe).
@@ -2594,12 +2703,14 @@ export async function commitSpecImport(
         canonicalName: c.oldName,
         context: c.kind === "recipeName" ? c.context : null,
       }));
+    correctingAliasDeletes = toDelete;
     if (toDelete.length) {
-      try {
-        await deleteSpecImportAliases(toDelete);
-      } catch {
-        // Best-effort — the import already applied; a surviving bad alias is
-        // caught again by the next correcting re-import.
+      if (!operationId) {
+        try {
+          await deleteSpecImportAliases(toDelete);
+        } catch {
+          // Best-effort for the legacy non-atomic path.
+        }
       }
     }
     // Reverse mapping learned for EVERY correction (live-pool old names too:
@@ -2637,6 +2748,7 @@ export async function commitSpecImport(
   // sheet can't express per-pizza/batch amounts, so they arrive with those at 0
   // for the manager to fill in the editor.
   let mixesAdded = 0;
+  let atomicMixes: Mix[] = [];
   let existingMixes: Mix[];
   try {
     existingMixes = await fetchMixes();
@@ -2659,6 +2771,14 @@ export async function commitSpecImport(
       const compoundKey = `${e.brand.trim().toLowerCase()}\0${e.mixName.trim().toLowerCase()}`;
       return acceptedNewMixIngredientNames?.has(compoundKey);
     });
+    const touchedMixKeys = new Set([
+      ...candidates.map((mix) => `${mix.brand.trim().toLowerCase()}\0${mix.name.trim().toLowerCase()}`),
+      ...acceptedAdditions.map((entry) =>
+        `${entry.brand.trim().toLowerCase()}\0${entry.mixName.trim().toLowerCase()}`),
+    ]);
+    const atomicMixRows = (items: Mix[]): Mix[] => items.filter((mix) =>
+      touchedMixKeys.has(`${mix.brand.trim().toLowerCase()}\0${mix.name.trim().toLowerCase()}`),
+    );
 
     // Working state starts as raw existing mixes; the candidates block advances
     // it through add → tag → perPizza if the pruned parse has mix data.
@@ -2684,6 +2804,7 @@ export async function commitSpecImport(
       const ozRes = applyMixPerPizza(tagRes.next, candidates);
       updated += ozRes.updated;
       workingMixes = ozRes.next;
+      atomicMixes = atomicMixRows(workingMixes);
     }
 
     // Apply accepted new ingredient rows independent of whether candidates is
@@ -2702,11 +2823,13 @@ export async function commitSpecImport(
       tagged += tagRes2.tagged;
       const newCompRes = applyNewMixComponents(tagRes2.next, acceptedAdditions);
       if (added > 0 || tagged > 0 || updated > 0 || newCompRes.applied > 0) {
-        await saveMixes(newCompRes.next);
+        if (!operationId) await saveMixes(newCompRes.next);
+        atomicMixes = atomicMixRows(newCompRes.next);
         mixesAdded = added;
       }
     } else if (added > 0 || tagged > 0 || updated > 0) {
-      await saveMixes(workingMixes);
+      if (!operationId) await saveMixes(workingMixes);
+      atomicMixes = atomicMixRows(workingMixes);
       mixesAdded = added;
     }
   } catch (error) {
@@ -2738,6 +2861,8 @@ export async function commitSpecImport(
       (r.rows?.length ?? 0) > 0,
   );
   let recipesUpdated = 0;
+  const atomicNamedRecipes: { dough: PoolNamedRecipe[]; sauce: PoolNamedRecipe[] } = { dough: [], sauce: [] };
+  let atomicCheeseRecipes: CheeseRecipe[] = [];
 
   let cheeseRecipesAdded = 0;
   let existingMixesForCheese: Mix[];
@@ -2760,7 +2885,11 @@ export async function commitSpecImport(
       // recipe that already has a brand is never re-scoped.
       const tagRes = fillCheeseRecipeTags(merged, drafts);
       if (added > 0 || updated > 0 || tagRes.tagged > 0) {
-        await saveCheeseRecipes(tagRes.next);
+        if (!operationId) await saveCheeseRecipes(tagRes.next);
+        const candidateNames = new Set(candidates.map((recipe) => recipe.name.trim().toLowerCase()));
+        atomicCheeseRecipes = tagRes.next.filter((recipe) =>
+          candidateNames.has(recipe.name.trim().toLowerCase()),
+        );
         cheeseRecipesAdded = added;
       }
     }
@@ -2786,9 +2915,15 @@ export async function commitSpecImport(
         continue;
       }
       const upd = updateRecipePoolComponents(pool, updates);
+      const updateNames = new Set(updates.map((update) => update.name.trim().toLowerCase()));
+      atomicNamedRecipes[kind] = upd.next.filter((recipe) =>
+        updateNames.has(recipe.name.trim().toLowerCase()),
+      );
       if (upd.updated > 0) {
-        const saved = await saveNamedRecipes(kind, upd.next);
-        assertNamedRecipeWriteLanded(saved, updates);
+        if (!operationId) {
+          const saved = await saveNamedRecipes(kind, upd.next);
+          assertNamedRecipeWriteLanded(saved, updates);
+        }
         recipesUpdated += upd.updated;
       } else if (
         typeof window !== "undefined" &&
@@ -2803,7 +2938,8 @@ export async function commitSpecImport(
           brand: "",
           flavors: [],
         }));
-        const result = await addNamedRecipesToServerIfAbsent(
+        atomicNamedRecipes[kind] = [...atomicNamedRecipes[kind], ...candidates];
+        const result = operationId ? { updated: 0 } : await addNamedRecipesToServerIfAbsent(
           kind,
           candidates,
           undefined,
@@ -2817,6 +2953,51 @@ export async function commitSpecImport(
     } catch (error) {
       throw error;
     }
+  }
+
+  let resultHash: string | undefined;
+  // Sanitize aliases before constructing the atomic server payload.  The
+  // payload is the commit boundary; sanitizing only after it would still
+  // persist poisoned aliases on an otherwise successful atomic import.
+  const savableAliases = sanitizeSpecAliases(prepared.newAliases);
+  if (operationId) {
+    const committedProjection = projection!;
+    const profiles = touchedProfiles.map((profile) => ({
+      key: canonicalProfileKey(profile.brand, profile.flavor),
+      brand: profile.brand,
+      flavor: profile.flavor,
+      values: committedProjection.profileRows.find((row) => row.key === canonicalProfileKey(profile.brand, profile.flavor))!.values,
+      crustValues: committedProjection.profileRows.find((row) => row.key === canonicalProfileKey(profile.brand, profile.flavor))!.crustValues,
+      updatedAtMs: Date.now(),
+      force: true,
+    }));
+    const changes = buildSpecImportChanges({
+      brandProfiles: {
+        upsert: profiles,
+        delete: (prepared.profilesMarkedForRemoval ?? []).map((profile) => canonicalProfileKey(profile.brand, profile.flavor)),
+      },
+      mixes: { upsert: atomicMixes },
+      cheeseRecipes: { upsert: atomicCheeseRecipes },
+      doughRecipes: { upsert: atomicNamedRecipes.dough },
+      sauceRecipes: { upsert: atomicNamedRecipes.sauce },
+      ...((savableAliases.length || correctingAliasDeletes.length)
+        ? { specImportAliases: { upsert: savableAliases, delete: correctingAliasDeletes } }
+        : {}),
+    });
+    const committed = await applyImportOperation(operationId, {
+      importType: "spec",
+      sourceKey: deriveSourceKey(prepared.sourceNames ?? []),
+      sourceLabel: (prepared.sourceNames ?? []).join(", ") || "Spec sheet",
+      changes,
+      ...(prepared.sourceEvidence ? { sourceEvidence: prepared.sourceEvidence } : {}),
+    });
+    resultHash = committed.resultHash;
+    // The first pass was a side-effect-free projection. Adopt the exact same
+    // specialized profile semantics only after the server transaction is
+    // durably acknowledged.
+    adoptSpecImportProjection(committedProjection);
+    touchedProfiles = committedProjection.touchedProfiles;
+    crustProfiles = committedProjection.crustProfiles;
   }
 
   // Snapshot this import server-side (factory-wide; only the two most recent are
@@ -2844,7 +3025,6 @@ export async function commitSpecImport(
   // produced them (canonicalize tracking, review links/renames, match
   // aliases), never save poisoned pairs — generic "Mix"/"cheese" names,
   // digit mismatches, cycles. Applies to the corrections mirror too.
-  const savableAliases = sanitizeSpecAliases(prepared.newAliases);
   // Surface (don't just swallow) a failed alias save: the import itself already
   // applied, but losing the learned aliases means the next re-import of this
   // sheet won't remember the user's renames / "use existing" picks. The caller
@@ -2857,18 +3037,37 @@ export async function commitSpecImport(
       // Best-effort: the import already applied; learning is a bonus — but
       // report it so the UI can warn instead of failing silently.
       aliasSaveFailed = true;
+      logCorrectionWriteFailure({
+        store: "spec-import-aliases",
+        failure: "request",
+        correctionCount: savableAliases.length,
+      });
     }
     // Mirror each learned name mapping into the factory-wide corrections pool
     // (additive — alongside the spec-import aliases above) so every other
     // name-resolving AI helper honors it too.
-    void saveAiCorrections(
-      savableAliases.map((a) => ({
-        domain: aliasKindToDomain(a.kind),
-        fromText: a.externalName,
-        toText: a.canonicalName,
-      })),
-    );
+    const sharedCorrections = savableAliases.flatMap((alias) => {
+      const correction = mapSpecAliasToAiCorrection(alias);
+      return correction ? [correction] : [];
+    });
+    if (sharedCorrections.length > 0) void saveAiCorrections(sharedCorrections);
   }
 
-  return { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes: autoLinkedOut.count, touchedProfiles, crustProfiles, appliedParsed: applyParsed, finalImportReview, aliasSaveFailed };
+  return { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes: autoLinkedOut.count, touchedProfiles, crustProfiles, appliedParsed: applyParsed, finalImportReview, aliasSaveFailed, ...(resultHash ? { resultHash } : {}) };
+}
+
+/** Build the server changes envelope without mutating local state or doing I/O. */
+export function buildSpecImportChanges(rows: SpecImportChangeRows): Record<string, unknown> {
+  const changes: Record<string, unknown> = {};
+  for (const key of ["brandProfiles", "mixes", "cheeseRecipes", "doughRecipes", "sauceRecipes", "specImportAliases"] as const) {
+    const value = rows[key];
+    if (!value) continue;
+    const upsert = Array.isArray(value.upsert) ? value.upsert : [];
+    const del = Array.isArray(value.delete) ? value.delete : [];
+    if (upsert.length || del.length) changes[key] = {
+      ...(upsert.length ? { upsert } : {}),
+      ...(del.length ? { delete: del } : {}),
+    };
+  }
+  return changes;
 }

@@ -432,7 +432,7 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "e.g. 'BBQ Sauce (Hoosier Daddy Sweet & Sassy)' names the sauce " +
     "'Hoosier Daddy Sweet & Sassy', not the generic 'BBQ Sauce'. " +
     "Always prefer the parenthetical product name over the generic category label " +
-    "when both are present on the same sauce row. " + +
+    "when both are present on the same sauce row. " +
     "Likewise, when a spec sheet NAMES a specific dough or crust for a product (e.g. " +
     "'Ultra Thin Dough', a 'Dough'/'Crust' row or column naming one), capture that name " +
     "as the profile's `doughName` — even when this workbook carries no dough mixing " +

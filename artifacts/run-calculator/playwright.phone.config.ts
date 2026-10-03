@@ -47,6 +47,8 @@ export default defineConfig({
     // A device service supplies a Playwright/CDP endpoint connected to Android
     // Chrome on a physical device. Do not replace this with a Playwright device
     // descriptor: desktop Chromium emulation cannot open a software keyboard.
+    // Physical iOS Safari/PWA evidence uses playwright.ios-safari-pwa.config.ts
+    // and its separate endpoint/output directory.
     ...(realMobileBrowserWsEndpoint
       ? [
           {

@@ -59,7 +59,9 @@ export function canonicalSyncValue(value: unknown): unknown {
   if (isSyncRecord(value)) {
     return Object.fromEntries(
       Object.entries(value)
-        .sort(([left], [right]) => left.localeCompare(right))
+        // Object-key ordering is part of the wire hash.  Do not use
+        // localeCompare: browser/server locales may produce different orders.
+        .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
         .map(([key, child]) => [key, canonicalSyncValue(child)]),
     );
   }
@@ -108,6 +110,10 @@ export function applySyncDeltaData(
   const merged: Record<string, unknown> = { ...base };
   for (const [key, value] of Object.entries(delta)) {
     if (SYNC_DELTA_MAP_SECTION_SET.has(key)) {
+      if (value === null) {
+        delete merged[key];
+        continue;
+      }
       if (!isSyncRecord(value)) return null;
       const baseSection = base[key];
       const section = { ...(isSyncRecord(baseSection) ? baseSection : {}) };

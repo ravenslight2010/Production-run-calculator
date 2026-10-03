@@ -29,6 +29,7 @@ let generation = 0;
 let version = 0;
 let entries = new Map<string, CachedProfileBlobs>();
 const listeners = new Set<ProfileCacheListener>();
+let notificationsSuppressed = false;
 
 function makeIdentityKey(identity: ProfileCacheIdentity): string {
   return [
@@ -73,8 +74,26 @@ function persist(): void {
 }
 
 function notify(): void {
+  if (notificationsSuppressed) return;
   version += 1;
   for (const listener of listeners) listener();
+}
+
+export function withProfileCacheProjection<T>(run: () => T): T {
+  const savedEntries = entries;
+  const savedVersion = version;
+  const savedSuppression = notificationsSuppressed;
+  entries = new Map(
+    [...savedEntries].map(([key, value]) => [key, { ...value }]),
+  );
+  notificationsSuppressed = true;
+  try {
+    return run();
+  } finally {
+    entries = savedEntries;
+    version = savedVersion;
+    notificationsSuppressed = savedSuppression;
+  }
 }
 
 function importLegacyProfilesOnce(nextIdentityKey: string): Map<string, CachedProfileBlobs> {

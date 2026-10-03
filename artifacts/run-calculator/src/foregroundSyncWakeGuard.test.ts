@@ -538,6 +538,44 @@ describe("foreground wake sync barrier", () => {
     expect(replay).toHaveBeenCalledTimes(1);
   });
 
+  it("adopts canonical breaks before replaying a queued stale snapshot", () => {
+    const canonicalBreaks = [
+      { slot: 1, enabled: true, mode: "at-time", atTime: "08:15", durationMin: 30 },
+      { slot: 2, enabled: false, mode: "after-run", durationMin: 30 },
+      { slot: 3, enabled: true, mode: "after-run", runId: "run-2", durationMin: 30 },
+    ];
+    const staleBreaks = [
+      { slot: 1, enabled: true, mode: "at-time", atTime: "06:00", durationMin: 5 },
+      { slot: 2, enabled: true, mode: "after-run", runId: "run-1", durationMin: 90 },
+    ];
+    let localBreaks = staleBreaks;
+    let queued = true;
+    const order: string[] = [];
+    const replay = vi.fn(() => {
+      order.push("replay");
+      expect(localBreaks).toEqual(canonicalBreaks);
+    });
+
+    releaseForegroundRecovery({
+      releaseFence: () => {
+        order.push("adopt-canonical");
+        localBreaks = canonicalBreaks;
+      },
+      acknowledgeRelease: () => order.push("acknowledge"),
+      takeQueuedWrite: () => {
+        const pending = queued;
+        queued = false;
+        return pending;
+      },
+      replayQueuedWrite: replay,
+    });
+
+    expect(order).toEqual(["adopt-canonical", "acknowledge", "replay"]);
+    expect(replay).toHaveBeenCalledTimes(1);
+    expect(localBreaks).toHaveLength(3);
+    expect(localBreaks.every((breakSlot) => breakSlot.durationMin === 30)).toBe(true);
+  });
+
   it("releases a cancelled completed recovery without replaying its queued write", () => {
     let fenced = true;
     let queued = true;

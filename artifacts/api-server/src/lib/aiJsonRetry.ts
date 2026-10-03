@@ -1,3 +1,5 @@
+import { safeAiErrorMetadata } from "./aiDataBoundary";
+
 // Bounded retry for AI routes that JSON.parse a model reply and fail-safe to
 // an empty result on malformed output. The model occasionally truncates or
 // malforms its JSON mid-response; without a retry, that transient flakiness
@@ -99,7 +101,7 @@ export async function fetchModelJsonWithRetry(opts: {
       if (isAiRateLimitError(err)) {
         if (attempt < AI_JSON_MAX_ATTEMPTS) {
           log.warn(
-            { err, attempt, backoffMs: rateLimitBackoffMs },
+            { ...safeAiErrorMetadata(err), attempt, backoffMs: rateLimitBackoffMs },
             `${label} rate-limited by AI provider; retrying after backoff`,
           );
           if (rateLimitBackoffMs > 0) {
@@ -107,10 +109,10 @@ export async function fetchModelJsonWithRetry(opts: {
           }
           continue;
         }
-        log.error({ err, attempt }, `${label} still rate-limited after retry`);
+        log.error({ ...safeAiErrorMetadata(err), attempt }, `${label} still rate-limited after retry`);
         return { ok: false, reason: "rate-limited", err };
       }
-      log.error({ err, attempt }, `${label} call failed`);
+      log.error({ ...safeAiErrorMetadata(err), attempt }, `${label} call failed`);
       return { ok: false, reason: "provider", err };
     }
     try {
@@ -125,7 +127,6 @@ export async function fetchModelJsonWithRetry(opts: {
           attempt,
           maxAttempts: AI_JSON_MAX_ATTEMPTS,
           contentLength: content.length,
-          content: content.slice(0, 200),
         },
         `${label} non-JSON response`,
       );

@@ -3,7 +3,7 @@ import { AlertTriangle, Blend, ChevronRight } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useMixesTabCtx } from "../contexts/MixesTabCtx";
-import { buildMixPlan } from "@workspace/mixes";
+import { buildMixPlan, type Mix } from "@workspace/mixes";
 import { useMixPlanSnapshot, refreshMixPlanSnapshot } from "../mixPlanSnapshotClient";
 import { computeCheesePerPizzaOz, computeSummaryStats, fmtComma, fmtNum, todayStr } from "../utils";
 import { loadProfile, loadRunValues } from "../storage";
@@ -21,18 +21,84 @@ import { PrepMixMissingAmountsWarning } from "./PrepMixMissingAmountsWarning";
 export default memo(function MixesTabContent() {
   const ctx = useMixesTabCtx();
   const [prepMixExpanded, setPrepMixExpanded] = useState<Set<string>>(new Set());
+  // Keep an inline "already made" edit local to this mounted panel while the
+  // server snapshot catches up. This also makes the visible plan update in
+  // the same render as the controlled input instead of waiting for a master
+  // data observer to publish the optimistic cache patch.
+  const [optimisticMixes, setOptimisticMixes] = useState<Map<string, Mix>>(
+    () => new Map(),
+  );
+  const effectiveMixPlanItems = ctx.mixPlanItems.map(
+    (mix) => optimisticMixes.get(mix.id) ?? mix,
+  );
   // Online: the server pre-computes the make-day plan from canonical runs +
   // the mix pool, so every device sees identical batches/lbs with a single
-  // shared fetch instead of per-device recomputation. Refetch when the make-day
-  // or the canonical mix pool changes (manager saves refresh the pool).
+  // shared fetch instead of per-device recomputation. Refetch when the
+  // make-day, canonical mix pool, or live-run membership changes. The live-run
+  // signature matters because assigning a brand, adding a run, or ending a run
+  // changes which products qualify without changing the mix pool.
   const serverSnap = useMixPlanSnapshot(ctx.mixMakeDay);
-  const mixesSignature = (ctx.mixPlanItems ?? [])
+  const mixesSignature = (effectiveMixPlanItems ?? [])
     .map((m) => `${m.id}:${m.updatedAt ?? ""}:${m.amountAlreadyMade}`)
     .join(",");
+  const liveRunsSignature = JSON.stringify(ctx.dayState.runs.map((run) => {
+    const values = ctx.effectiveValuesForRun(
+      run,
+      run.id === ctx.currentRunId ? ctx.form.getValues() : loadRunValues(run.id),
+    );
+    return {
+      id: run.id,
+      brand: run.brand ?? "",
+      flavor: run.flavor ?? "",
+      startedAt: run.startedAt ?? "",
+      endedAt: run.endedAt ?? "",
+      // Ingredient selection and quantity fields are part of the canonical
+      // snapshot input. Include them so a mounted Mixes tab refetches when a
+      // run is edited without changing its lifecycle metadata.
+      values,
+    };
+  }));
+  const [snapshotRefreshing, setSnapshotRefreshing] = useState(true);
+  const scheduledRunsSignature = ctx.scheduledDays
+    .map((day) => `${day.date}:${(day.runs ?? [])
+      .map((run) => `${run.id ?? ""}:${run.brand ?? ""}:${run.flavor ?? ""}:${run.casesNeeded ?? ""}`)
+      .join(",")}`)
+    .join("|");
   useEffect(() => {
-    void refreshMixPlanSnapshot(ctx.mixMakeDay);
-  }, [ctx.mixMakeDay, mixesSignature]);
-
+    let active = true;
+    setSnapshotRefreshing(true);
+    void refreshMixPlanSnapshot(ctx.mixMakeDay).finally(() => {
+      if (active) {
+        setSnapshotRefreshing(false);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [ctx.mixMakeDay, mixesSignature, liveRunsSignature, scheduledRunsSignature]);
+  const handleOptimisticMixSave = (nextMix: Mix): void => {
+    setOptimisticMixes((current) => {
+      const next = new Map(current);
+      next.set(nextMix.id, nextMix);
+      return next;
+    });
+    ctx.saveMixAlreadyMadeOptimistically(nextMix);
+  };
+  const handleAcknowledgedMixSave = (optimisticMix: Mix, saved: Mix[]): void => {
+    ctx.acknowledgeMixAlreadyMadeSave(optimisticMix, saved);
+    // The signature-triggered refresh can have started before the POST
+    // completed. Refresh again from the acknowledgement so the temporary
+    // overlay is not cleared while the server still returns the old amount.
+    setSnapshotRefreshing(true);
+    void refreshMixPlanSnapshot(ctx.mixMakeDay).finally(() => {
+      setOptimisticMixes((current) => {
+        const next = new Map(current);
+        next.delete(optimisticMix.id);
+        return next;
+      });
+      setSnapshotRefreshing(false);
+    });
+  };
   const [mixSurplusLedger, setMixSurplusLedger] = useState<MixSurplusLedger | null>(null);
   useEffect(() => {
     fetchMixSurplusLedger().then(setMixSurplusLedger).catch(() => {});
@@ -168,9 +234,21 @@ export default memo(function MixesTabContent() {
                           }),
                       ),
                     ];
-                    return buildMixPlan({ runs, mixes: ctx.mixPlanItems, today: ctx.mixMakeDay });
+                    return buildMixPlan({ runs, mixes: effectiveMixPlanItems, today: ctx.mixMakeDay });
                     })();
-                    const plan = serverSnap ? serverSnap.plan : fallbackPlan;
+                    // Keep an optimistic/local edit visible while its
+                    // server-authoritative snapshot is being refreshed. The
+                    // previous snapshot is valid for the old inputs, but
+                    // showing it during a save makes the Mix Plan appear to
+                    // ignore an acknowledged "already made" edit.
+                    const plan = serverSnap
+                      && !snapshotRefreshing
+                      && optimisticMixes.size === 0
+                      && !ctx.dayState.runs.some(
+                        (run) => Boolean(run.brand && run.endedAt),
+                      )
+                      ? serverSnap.plan
+                      : fallbackPlan;
                     if (plan.length === 0) {
                       return (
                         <p className="text-sm text-muted-foreground px-1" data-testid="mix-plan-empty">
@@ -241,13 +319,13 @@ export default memo(function MixesTabContent() {
                                         </div>
                                         {/* Already made — controlled component so state stays stable during saves */}
                                         {(() => {
-                                          const liveMix = ctx.mixPlanItems.find((mx) => mx.id === m.mixId);
+                                           const liveMix = effectiveMixPlanItems.find((mx) => mx.id === m.mixId);
                                           return liveMix ? (
                                             <MixAlreadyMadeInput
                                               mix={liveMix}
                                               saveMixes={saveMixes}
-                                              onOptimisticSave={ctx.saveMixAlreadyMadeOptimistically}
-                                              onSaveAcknowledged={ctx.acknowledgeMixAlreadyMadeSave}
+                                               onOptimisticSave={handleOptimisticMixSave}
+                                               onSaveAcknowledged={handleAcknowledgedMixSave}
                                             />
                                           ) : null;
 
@@ -359,13 +437,13 @@ export default memo(function MixesTabContent() {
                                         </div>
                                       )}
                                       {(() => {
-                                         const liveMix = ctx.mixPlanItems.find((mx) => mx.id === m.mixId);
+                                         const liveMix = effectiveMixPlanItems.find((mx) => mx.id === m.mixId);
                                         return liveMix ? (
                                           <MixAlreadyMadeInput
                                             mix={liveMix}
                                             saveMixes={saveMixes}
-                                            onOptimisticSave={ctx.saveMixAlreadyMadeOptimistically}
-                                            onSaveAcknowledged={ctx.acknowledgeMixAlreadyMadeSave}
+                                             onOptimisticSave={handleOptimisticMixSave}
+                                             onSaveAcknowledged={handleAcknowledgedMixSave}
                                           />
                                         ) : null;
                                       })()}

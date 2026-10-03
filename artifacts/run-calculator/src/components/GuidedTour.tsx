@@ -124,8 +124,8 @@ export default function GuidedTour({
   const isLast = index === steps.length - 1;
   const Icon = step.icon;
   return (
-    <div className="fixed inset-x-0 top-0 z-[60] flex h-[100dvh] min-h-0 items-end justify-center overflow-y-auto bg-black/30 p-4 sm:items-center">
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="guided-tour-dialog-title" className="my-auto max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-xl border border-border bg-background p-5 shadow-2xl">
+    <div className="responsive-dialog-overlay fixed inset-x-0 top-0 z-[60] flex h-[100dvh] min-h-0 items-end justify-center overflow-y-auto bg-black/30 sm:items-center">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="guided-tour-dialog-title" className="responsive-dialog-card my-auto overflow-y-auto rounded-xl border border-border bg-background p-5 shadow-2xl">
         <div className="flex items-start gap-3">
           <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
             <Icon className="h-5 w-5" />
@@ -138,7 +138,7 @@ export default function GuidedTour({
             type="button"
             onClick={onClose}
             aria-label="Close tour"
-            className="text-muted-foreground hover:text-foreground"
+             className="responsive-icon-button flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground"
           >
             <X className="h-4 w-4" />
           </button>
@@ -160,7 +160,7 @@ export default function GuidedTour({
           </span>
         </div>
 
-        <div className="mt-4 flex items-center justify-between gap-2">
+        <div className="responsive-dialog-footer mt-4 justify-between">
           {isFirst ? (
             <Button variant="ghost" size="sm" onClick={onClose}>
               Skip

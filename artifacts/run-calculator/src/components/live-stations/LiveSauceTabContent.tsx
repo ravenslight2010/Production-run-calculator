@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import { Droplets, Timer } from "lucide-react";
+import { AlertTriangle, Droplets, Timer } from "lucide-react";
 import { computeSauceRunRequirement } from "@workspace/live-calc";
 import type { RecipeRow, RunMeta } from "../../types";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
@@ -16,12 +16,14 @@ import { getSauceBarrelEntry, mirrorSauceBarrelProgress } from "../../sauceBarre
 import { markRunValuesUpdated } from "../../adapters/browserRunPersistence";
 import { createPackagingControlAdapter } from "../../packagingManager";
 import { fmtNum } from "../../utils";
+import { shouldSeedCarriedOverSauce } from "./sauceCarryoverSeed";
 
 export const LiveSauceTabContent = memo(function LiveSauceTabContent() {
   const hx = useHomeTabCtx();
   const {
     v, runStatus, currentRunId, currentRun, dayState, dayStateRef, setDayState, schedulePush,
     form, autoSuppressUntilRef, lastLocalEditRef, persistManualPackagingProgress, queueManualCorrection, setWriteError,
+    sauceAutoTrackFailure, dismissSauceAutoTrackFailure,
   } = hx;
   // elapsedBatchSec is pause-aware: it uses currentRun.pausedAt when paused,
   // so it stops growing during a pause — no wall-clock deltas needed downstream.
@@ -36,6 +38,7 @@ export const LiveSauceTabContent = memo(function LiveSauceTabContent() {
   const [sauceMade, setSauceMadeRaw] = useState(
     () => Math.max(0, Number(v.sauceBarrelsMade) || getSauceBarrelEntry(currentRunId).barrelsMade),
   );
+  const seededRunIdRef = useRef<string | null>(null);
 
   // Anchor in net-production elapsed seconds when the current barrel started.
   // 0 means "since run start".  No wall-clock timestamp involved.
@@ -94,16 +97,23 @@ export const LiveSauceTabContent = memo(function LiveSauceTabContent() {
   }, [currentRunId, runStatus]);
   // Seed sauceMade from prep batches when run first starts (guarded by prepCarriedOver).
   useEffect(() => {
-    if (runStatus === "running" && prep.prepCarriedOver && prep.prepBatchesSauce > 0) {
-      if ((Number(v.sauceBarrelsMade) || 0) === 0) {
-        applyManualSauceProgress(prep.prepBatchesSauce, elapsedBatchSec);
-      }
+    if (shouldSeedCarriedOverSauce({
+      currentRunId,
+      seededRunId: seededRunIdRef.current,
+      runStatus,
+      prepCarriedOver: prep.prepCarriedOver,
+      prepBatchesSauce: prep.prepBatchesSauce,
+      sauceBarrelsMade: v.sauceBarrelsMade,
+    })) {
+      seededRunIdRef.current = currentRunId;
+      applyManualSauceProgress(prep.prepBatchesSauce, elapsedBatchSec);
     }
   }, [
     applyManualSauceProgress,
     elapsedBatchSec,
     prep.prepBatchesSauce,
     prep.prepCarriedOver,
+    currentRunId,
     runStatus,
     v.sauceBarrelsMade,
   ]);
@@ -158,6 +168,26 @@ export const LiveSauceTabContent = memo(function LiveSauceTabContent() {
             )}
           </CardContent>
         </Card>
+      )}
+      {sauceAutoTrackFailure && !sauceAutoTrackFailure.dismissed && (
+        <div
+          role="alert"
+          data-testid="sauce-auto-track-failure"
+          className="mb-4 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-100"
+        >
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+          <p className="min-w-0 flex-1">
+            Automatic Sauce barrel tracking is delayed. Inventory was not advanced; the same barrel will retry when the connection is ready.
+          </p>
+          <button
+            type="button"
+            data-testid="button-dismiss-sauce-auto-track-failure"
+            onClick={dismissSauceAutoTrackFailure}
+            className="shrink-0 text-xs font-semibold text-amber-200 hover:text-amber-50"
+          >
+            Dismiss
+          </button>
+        </div>
       )}
       {sauceRequirement.totalUnits > 0 && (
         <Card className="bg-card/60 border-border/50 shadow-md overflow-hidden mb-4">
@@ -238,6 +268,7 @@ export const LiveSauceTabContent = memo(function LiveSauceTabContent() {
               testId="output-sauce-batches"
               pipeline="sauce"
               disabled={!!sauceLock}
+              disabledReason={sauceLock?.peer ? "Corrections unavailable while another station is editing." : undefined}
             />
              {/* Passive countdown only. Automatic staged supply determines the
                  visible on-line, ready, in-production, and still-to-make values. */}
@@ -285,8 +316,11 @@ export const LiveSauceTabContent = memo(function LiveSauceTabContent() {
           skidsCompleted: packedSkids,
           casesOnCurrentSkid: packedCasesOnSkid,
           casesPerSkid: cps,
-          applyProgress: (nextSkids, nextCases) => {
-            persistManualPackagingProgress(currentRunId, nextSkids, nextCases);
+          applyProgress: (nextSkids, nextCases, previousSkids, previousCases) => {
+            persistManualPackagingProgress(currentRunId, nextSkids, nextCases, undefined, {
+              skidsCompleted: previousSkids,
+              casesOnCurrentSkid: previousCases,
+            });
             form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
             form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
           },
@@ -319,7 +353,7 @@ export const LiveSauceTabContent = memo(function LiveSauceTabContent() {
                 </span>
               )}
             </div>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
                 <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Skids done</p>
                 <div className="flex items-center justify-center gap-1.5 mt-0.5">

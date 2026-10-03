@@ -25,7 +25,7 @@ import { sql } from "drizzle-orm";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import pg from "pg";
-import { signToken } from "../lib/auth";
+import { signLegacyTokenForTests } from "../lib/auth";
 import {
   mergeNamedRecipeDoughballVariants,
   normalizeNamedRecipes,
@@ -131,7 +131,7 @@ beforeEach(async () => {
   await db.insert(userRolesTable).values([{ userId: MANAGER, role: "manager" }]);
 });
 
-const AUTH = () => ({ authorization: `Bearer ${signToken(MANAGER)}` });
+const AUTH = () => ({ authorization: `Bearer ${signLegacyTokenForTests(MANAGER)}` });
 
 async function postDoughRecipes(items: NamedRecipe[]): Promise<NamedRecipe[]> {
   const res = await fetch(`${baseUrl}/api/dough-recipes`, {

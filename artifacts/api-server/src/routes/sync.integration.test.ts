@@ -7,8 +7,17 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { and, eq, sql } from "drizzle-orm";
-import { signToken } from "../lib/auth";
+import { signLegacyTokenForTests } from "../lib/auth";
 import { syncSnapshotId } from "../lib/syncContract";
+import { legacySyncReadinessSnapshot } from "../lib/capacityTelemetry";
+
+const emptyCompleteSnapshotId = (date: string) => syncSnapshotId({
+  dayState: { date, runs: [] },
+  runValues: {},
+  runValuesUpdatedAt: {},
+  syncVersion: 1,
+  completeness: "complete",
+});
 
 // Regression guard for the "scheduled day disappears a day early" bug: the app is
 // driven by the CLIENT's local midnight, but the server runs in UTC in
@@ -38,6 +47,7 @@ let runDataHeals: () => Promise<void>;
 let runAutoTrackServerTicks: typeof import("./sync")["runAutoTrackServerTicks"];
 let setManualSectionFailureHookForTest: typeof import("./sync")["setManualSectionFailureHookForTest"];
 let setManualSectionBarrierHookForTest: typeof import("./sync")["setManualSectionBarrierHookForTest"];
+let derivedRunMapSharedInputFields: typeof import("./sync")["DERIVED_RUN_MAP_SHARED_INPUT_FIELDS"];
 
 let adminPool: pg.Pool;
 let testDbName: string;
@@ -97,6 +107,7 @@ beforeAll(async () => {
   runAutoTrackServerTicks = syncMod.runAutoTrackServerTicks;
   setManualSectionFailureHookForTest = syncMod.setManualSectionFailureHookForTest;
   setManualSectionBarrierHookForTest = syncMod.setManualSectionBarrierHookForTest;
+  derivedRunMapSharedInputFields = syncMod.DERIVED_RUN_MAP_SHARED_INPUT_FIELDS;
 
   const app: Express = express();
   app.use(express.json({ limit: "10mb" }));
@@ -255,6 +266,76 @@ describe("POST /sync/manual-section — section ownership contract", () => {
     const retry = await request(body);
     expect(retry.status).toBe(200);
     expect((await retry.json() as { duplicate?: boolean }).duplicate).toBe(true);
+  });
+
+  it("accepted Packaging correction survives a newer stale ordinary snapshot write", async () => {
+    const acceptedResponse = await request({
+      ...edit("packaging-hold"),
+      values: { skidsCompleted: 0, casesOnCurrentSkid: 45 },
+      baseValues: { skidsCompleted: 1, casesOnCurrentSkid: 2 },
+    });
+    expect(acceptedResponse.status).toBe(200);
+    const accepted = await acceptedResponse.json() as {
+      data: Record<string, any>;
+      serverTime: number;
+      snapshotId: string;
+    };
+    const acceptedProgress = accepted.data.packagingProgress["manual-run"];
+    expect(accepted.data.runValues["manual-run"]).toMatchObject({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 45,
+    });
+    expect(acceptedProgress).toMatchObject({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 45,
+      correctionGeneration: 1,
+    });
+    expect(acceptedProgress.manualOverrideUntil).toBeGreaterThan(accepted.serverTime);
+
+    const staleProgress = {
+      skidsCompleted: 1,
+      casesOnCurrentSkid: 44,
+      correctionGeneration: 99,
+      updatedAt: accepted.serverTime + 5_000,
+      manualOverrideUntil: 0,
+    };
+    const stalePayload = {
+      ...accepted.data,
+      syncVersion: 1,
+      completeness: "complete",
+      baseSnapshotId: accepted.snapshotId,
+      runValues: {
+        ...accepted.data.runValues,
+        "manual-run": {
+          ...accepted.data.runValues["manual-run"],
+          skidsCompleted: staleProgress.skidsCompleted,
+          casesOnCurrentSkid: staleProgress.casesOnCurrentSkid,
+        },
+      },
+      runValuesUpdatedAt: { "manual-run": accepted.serverTime + 5_000 },
+      packagingProgress: { "manual-run": staleProgress },
+    };
+    const staleWrite = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "stale-packaging-peer", payload: stalePayload }),
+    });
+    expect(staleWrite.status).toBe(200);
+    const canonical = await staleWrite.json() as {
+      data: {
+        runValues: Record<string, Record<string, number>>;
+        packagingProgress: Record<string, Record<string, number>>;
+      };
+    };
+    expect(canonical.data.runValues["manual-run"]).toMatchObject({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 45,
+    });
+    expect(canonical.data.packagingProgress["manual-run"]).toMatchObject({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 45,
+      correctionGeneration: 1,
+    });
   });
 
   it("same accepted id conflicts after reset epoch bump", async () => {
@@ -419,15 +500,15 @@ describe("POST /sync/manual-section — section ownership contract", () => {
 });
 
 function authHeaders(): Record<string, string> {
-  return { authorization: `Bearer ${signToken(USER)}` };
+  return { authorization: `Bearer ${signLegacyTokenForTests(USER)}` };
 }
 
 function managerAuthHeaders(): Record<string, string> {
-  return { authorization: `Bearer ${signToken(MANAGER)}` };
+  return { authorization: `Bearer ${signLegacyTokenForTests(MANAGER)}` };
 }
 
 function sandboxAuthHeaders(): Record<string, string> {
-  return { authorization: `Bearer ${signToken(SANDBOX)}` };
+  return { authorization: `Bearer ${signLegacyTokenForTests(SANDBOX)}` };
 }
 
 const EVIDENCE_DATE = "2030-03-10";
@@ -742,7 +823,7 @@ describe("POST /sync/operational-intents — atomic run finalization", () => {
     expect(firstBody.outcome).toBe("accepted");
     expect(firstBody.duplicate).toBe(false);
     expect(firstBody.cursor).toBeTypeOf("number");
-    expect(firstBody.canonicalRevision).toBe(1);
+    expect(firstBody.canonicalRevision).toBe(2);
     expect(firstBody.serverTime).toBeTypeOf("number");
     expect(firstBody.data.dayState.runs.find((r: any) => r.id === RUN).endedAt).toBeTypeOf("number");
     expect(firstBody.data.dayState.runs.find((r: any) => r.id === RUN).pausedAt).toBeUndefined();
@@ -766,7 +847,7 @@ describe("POST /sync/operational-intents — atomic run finalization", () => {
       actorId: USER,
       deviceId: "end-client",
       baseRevision: 0,
-      canonicalRevision: 1,
+      canonicalRevision: 2,
     });
     expect(receipt.serverReceivedAt.getTime()).toBe(firstBody.serverTime);
     expect((completion.snapshot as any).dayState.runs.find((r: any) => r.id === RUN).endedAt)
@@ -1035,6 +1116,11 @@ describe("GET /sync/health — read-only scoped sentinel", () => {
 
   it("reports a healthy bounded contract without exposing canonical payloads", async () => {
     await seedHealthyDocument();
+    // Legacy-write telemetry is process-scoped by design.  Other integration
+    // cases may exercise the compatibility path before this sentinel runs, so
+    // assert that the health check does not add an observation rather than
+    // assuming a fresh process-wide counter.
+    const legacyWritesBeforeCheck = legacySyncReadinessSnapshot("accept").acceptedLegacyWrites;
     const response = await getHealth();
     expect(response.status).toBe(200);
     const body = await response.json() as any;
@@ -1049,6 +1135,14 @@ describe("GET /sync/health — read-only scoped sentinel", () => {
         ledgerRowsScanned: 0,
         historyRowsScanned: 0,
       },
+      legacySyncReadiness: {
+        compatibilityMode: "accept",
+        status: "not-ready",
+        acceptedLegacyWrites: legacyWritesBeforeCheck,
+        requiredAcceptedLegacyWrites: 0,
+        fullWindowObserved: false,
+        windowMs: 86_400_000,
+      },
     });
     expect(body.checks.map((check: any) => check.name)).toEqual([
       "canonical-document",
@@ -1059,6 +1153,7 @@ describe("GET /sync/health — read-only scoped sentinel", () => {
     expect(body).not.toHaveProperty("data");
     expect(body).not.toHaveProperty("payload");
     expect(JSON.stringify(body)).not.toContain("health-run");
+    expect(body.legacySyncReadiness.expiresAt).toMatch(/Z$/);
   });
 
   it("reports a representative canonical mismatch as failing and never repairs it", async () => {
@@ -1275,7 +1370,7 @@ describe("POST /sync/auto-track/claim", () => {
     }>;
     expect(bodies.map((body) => body.outcome).sort()).toEqual(["accepted", "stale"]);
     expect(bodies.every((body) => body.values.traysOnLine === 9)).toBe(true);
-    expect(new Set(bodies.map((body) => body.canonicalRevision))).toEqual(new Set([1, 2]));
+    expect(new Set(bodies.map((body) => body.canonicalRevision))).toEqual(new Set([2, 3]));
     expect(bodies.every((body) => typeof body.serverTime === "number")).toBe(true);
     const receipts = await db.select().from(operationalIntentLedgerTable);
     expect(receipts).toHaveLength(2);
@@ -1791,6 +1886,125 @@ describe("/sync snapshot conditionals", () => {
     expect(body.data).toBeUndefined();
   });
 
+  it("includes a fresh operational projection in an unchanged foreground read", async () => {
+    const startedAt = Date.now() - 60_000;
+    const activePayload = {
+      dayState: {
+        date: DATE,
+        currentIndex: 0,
+        runs: [{
+          id: "wake-projection-run",
+          brand: "Acme",
+          flavor: "Pep",
+          startedAt,
+        }],
+      },
+      runValues: { "wake-projection-run": { casesNeeded: 240 } },
+      runValuesUpdatedAt: { "wake-projection-run": 1 },
+    };
+    const write = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "wake-projection-writer", payload: activePayload }),
+    });
+    const written = await write.json() as { snapshotId?: string };
+    expect(write.ok).toBe(true);
+    expect(written.snapshotId).toMatch(/^[a-f0-9]{64}$/);
+
+    const response = await fetch(
+      `${baseUrl}/api/sync/today?today=${DATE}&snapshot=${written.snapshotId}`,
+      { headers: authHeaders() },
+    );
+    const body = await response.json() as {
+      unchanged?: boolean;
+      snapshotId?: string;
+      canonicalRevision?: number;
+      serverTime?: number;
+      operationalProjection?: {
+        runId?: string;
+        serverTimeMs?: number;
+        facts?: { runStatus?: string };
+      } | null;
+    };
+    expect(response.headers.get("X-Sync-Response")).toBe("unchanged");
+    expect(body).toMatchObject({
+      unchanged: true,
+      snapshotId: written.snapshotId,
+      operationalProjection: {
+        runId: "wake-projection-run",
+        facts: { runStatus: "running" },
+      },
+    });
+    expect(body.canonicalRevision).toEqual(expect.any(Number));
+    expect(body.serverTime).toEqual(expect.any(Number));
+    expect(body.operationalProjection?.serverTimeMs).toBe(body.serverTime);
+  });
+
+  it("returns nonzero draining occupancy from an unchanged read of an ended run", async () => {
+    const now = Date.now();
+    const startedAt = now - 10 * 60_000;
+    const endedAt = now - 1_000;
+    const endedPayload = {
+      dayState: {
+        date: DATE,
+        currentIndex: 0,
+        runs: [{
+          id: "wake-draining-run",
+          brand: "Acme",
+          flavor: "Pep",
+          startedAt,
+          endedAt,
+        }],
+      },
+      runValues: {
+        "wake-draining-run": {
+          casesNeeded: 240,
+          cycleSpeed: 30,
+          crustsPerCycle: 2,
+          speedAdjustment: 1,
+          pizzasPerCase: 6,
+          freezerTime: 5,
+        },
+      },
+      runValuesUpdatedAt: { "wake-draining-run": 1 },
+    };
+    const write = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "wake-drain-writer", payload: endedPayload }),
+    });
+    const written = await write.json() as { snapshotId?: string };
+    expect(write.ok).toBe(true);
+    expect(written.snapshotId).toMatch(/^[a-f0-9]{64}$/);
+
+    const response = await fetch(
+      `${baseUrl}/api/sync/today?today=${DATE}&snapshot=${written.snapshotId}`,
+      { headers: authHeaders() },
+    );
+    const body = await response.json() as {
+      unchanged?: boolean;
+      snapshotId?: string;
+      serverTime?: number;
+      operationalProjection?: {
+        runId?: string;
+        serverTimeMs?: number;
+        counters?: { casesOnLine?: number };
+        facts?: { runStatus?: string };
+      } | null;
+    };
+    expect(response.headers.get("X-Sync-Response")).toBe("unchanged");
+    expect(body).toMatchObject({
+      unchanged: true,
+      snapshotId: written.snapshotId,
+      operationalProjection: {
+        runId: "wake-draining-run",
+        facts: { runStatus: "ended" },
+      },
+    });
+    expect(body.operationalProjection?.counters?.casesOnLine).toBeGreaterThan(0);
+    expect(body.operationalProjection?.serverTimeMs).toBe(body.serverTime);
+  });
+
   it("persists a changed explicit-date PUT even when it carries the prior snapshot ID", async () => {
     const scheduledDate = "2030-08-23";
     const first = await fetch(`${baseUrl}/api/sync/${scheduledDate}?today=${DATE}`, {
@@ -1885,6 +2099,7 @@ describe("/sync partial payload contract", () => {
     const complete = {
       syncVersion: 1,
       completeness: "complete",
+      baseSnapshotId: emptyCompleteSnapshotId(DATE),
       dayState: {
         runs: [
           { id: "partial-r1", brand: "Acme", flavor: "Pep" },
@@ -2013,9 +2228,268 @@ describe("/sync partial payload contract", () => {
       }),
     });
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ data: null, partialFallback: true });
+    const fallback = await res.json() as { data: null; partialFallback: true; snapshotId: string };
+    expect(fallback).toMatchObject({
+      data: null,
+      partialFallback: true,
+      snapshotId: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
     const read = await fetch(`${baseUrl}/api/sync/2030-08-25`, { headers: authHeaders() });
     expect(await read.json()).toBeNull();
+
+    const retry = await fetch(`${baseUrl}/api/sync/today?today=2030-08-25`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "missing-row-retry",
+        payload: {
+          syncVersion: 1,
+          completeness: "complete",
+          baseSnapshotId: fallback.snapshotId,
+          dayState: { date: "2030-08-25", runs: [{ id: "must-land" }] },
+          runValues: { "must-land": { casesNeeded: 12 } },
+          runValuesUpdatedAt: { "must-land": 1 },
+        },
+      }),
+    });
+    expect(retry.status).toBe(200);
+    const retryBody = await retry.json() as { data?: { runValues?: Record<string, { casesNeeded?: number }> } };
+    expect(retryBody.data?.runValues?.["must-land"]?.casesNeeded).toBe(12);
+  });
+
+  it("returns the authoritative fallback for a partial write without a canonical row", async () => {
+    const baseline = await fetch(`${baseUrl}/api/sync/today?today=2030-08-26`, {
+      headers: authHeaders(),
+    });
+    expect(baseline.status).toBe(200);
+    const emptySnapshotId = baseline.headers.get("x-sync-snapshot");
+    expect(emptySnapshotId).toMatch(/^[a-f0-9]{64}$/);
+
+    const res = await fetch(`${baseUrl}/api/sync/today?today=2030-08-26`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "empty-baseline-client",
+        payload: {
+          syncVersion: 1,
+          completeness: "partial",
+          baseSnapshotId: emptySnapshotId,
+          dayState: { date: "2030-08-26", runs: [{ id: "bootstrapped-run", brand: "Acme", flavor: "Pep" }] },
+          runValues: { "bootstrapped-run": { casesNeeded: 12 } },
+          runValuesUpdatedAt: { "bootstrapped-run": 1 },
+        },
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as {
+      data?: { dayState?: { runs?: Array<{ id?: string }> }; runValues?: Record<string, { casesNeeded?: number }> };
+      partialFallback?: boolean;
+    };
+    expect(body.partialFallback).toBe(true);
+    expect(body.data).toBeNull();
+  }, 60_000);
+});
+
+describe("/sync/today — complete-write causal fence", () => {
+  const DATE = "2030-04-01";
+
+  function put(payload: Record<string, unknown>, senderId: string) {
+    return fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId, payload }),
+    });
+  }
+
+  function complete(
+    baseSnapshotId: string,
+    casesNeeded: number,
+    stamp: number,
+  ): Record<string, unknown> {
+    return {
+      syncVersion: 1,
+      completeness: "complete",
+      baseSnapshotId,
+      dayState: {
+        date: DATE,
+        runs: [{ id: "complete-fence-run", brand: "Acme", flavor: "Pep" }],
+      },
+      runValues: { "complete-fence-run": { casesNeeded } },
+      runValuesUpdatedAt: { "complete-fence-run": stamp },
+    };
+  }
+
+  it("advances revision for accepted changes and not for idempotent repeats", async () => {
+    const first = await put(complete(emptyCompleteSnapshotId(DATE), 12, 1), "first");
+    expect(first.status).toBe(200);
+    const firstBody = await first.json() as {
+      canonicalRevision: number;
+      snapshotId: string;
+    };
+    expect(firstBody.canonicalRevision).toBe(1);
+
+    const repeat = await put(complete(firstBody.snapshotId, 12, 1), "repeat");
+    expect(repeat.status).toBe(200);
+    const repeatBody = await repeat.json() as { canonicalRevision: number };
+    expect(repeatBody.canonicalRevision).toBe(1);
+  });
+
+  it("returns authoritative state when a future-stamped complete write has a stale base", async () => {
+    const first = await put(complete(emptyCompleteSnapshotId(DATE), 12, 1), "first");
+    const firstBody = await first.json() as { snapshotId: string };
+    const current = await put(complete(firstBody.snapshotId, 24, 2), "current");
+    const currentBody = await current.json() as {
+      canonicalRevision: number;
+      data: { runValues: Record<string, { casesNeeded: number }> };
+    };
+
+    const stale = await put(complete(firstBody.snapshotId, 999, Date.now() + 86_400_000), "stale");
+    expect(stale.status).toBe(200);
+    const staleBody = await stale.json() as {
+      partialFallback?: boolean;
+      canonicalRevision: number;
+      data: { runValues: Record<string, { casesNeeded: number }> };
+    };
+    expect(staleBody.partialFallback).toBe(true);
+    expect(staleBody.canonicalRevision).toBe(currentBody.canonicalRevision);
+    expect(staleBody.data.runValues["complete-fence-run"].casesNeeded).toBe(24);
+  });
+
+  it("serializes concurrent complete writes from the same base with one winner", async () => {
+    const first = await put(complete(emptyCompleteSnapshotId(DATE), 12, 1), "first");
+    const firstBody = await first.json() as { snapshotId: string };
+    const [a, b] = await Promise.all([
+      put(complete(firstBody.snapshotId, 41, 2), "race-a"),
+      put(complete(firstBody.snapshotId, 42, 3), "race-b"),
+    ]);
+    const bodies = await Promise.all([a.json(), b.json()]) as Array<{
+      partialFallback?: boolean;
+      canonicalRevision: number;
+      data: { runValues: Record<string, { casesNeeded: number }> };
+    }>;
+    expect(bodies.filter((body) => body.partialFallback === true)).toHaveLength(1);
+    expect(new Set(bodies.map((body) => body.canonicalRevision))).toEqual(new Set([2]));
+    expect(new Set(bodies.map((body) => body.data.runValues["complete-fence-run"].casesNeeded)).size).toBe(1);
+  });
+
+  it("advertises the compatibility sunset while legacy writes are still accepted", async () => {
+    const legacy = await put({
+      dayState: {
+        date: DATE,
+        runs: [{ id: "legacy-window-run", brand: "Acme", flavor: "Cheese" }],
+      },
+      runValues: { "legacy-window-run": { casesNeeded: 8 } },
+      runValuesUpdatedAt: { "legacy-window-run": 1 },
+    }, "legacy-window");
+
+    expect(legacy.status).toBe(200);
+    expect(legacy.headers.get("Deprecation")).toBe("true");
+    expect(legacy.headers.get("Sunset")).toBe("Wed, 21 Oct 2026 00:00:00 GMT");
+    expect(legacy.headers.get("X-Sync-Upgrade-Required")).toContain("baseSnapshotId");
+  });
+
+  it("rejects retired legacy writes with authoritative recovery state", async () => {
+    const baseline = await put(
+      complete(emptyCompleteSnapshotId(DATE), 24, 10),
+      "retirement-baseline",
+    );
+    const baselineBody = await baseline.json() as {
+      snapshotId: string;
+      canonicalRevision: number;
+    };
+    process.env.SYNC_LEGACY_COMPLETE_WRITES = "reject";
+    try {
+      const rejected = await put({
+        dayState: {
+          date: DATE,
+          runs: [{ id: "complete-fence-run", brand: "Acme", flavor: "Pep" }],
+        },
+        runValues: { "complete-fence-run": { casesNeeded: 999 } },
+        runValuesUpdatedAt: { "complete-fence-run": Date.now() + 86_400_000 },
+      }, "retired-legacy");
+
+      expect(rejected.status).toBe(409);
+      expect(rejected.headers.get("X-Sync-Response")).toBe("legacy-rejected");
+      expect(rejected.headers.get("Deprecation")).toBe("true");
+      expect(await rejected.json()).toMatchObject({
+        code: "SYNC_CLIENT_UPGRADE_REQUIRED",
+        recoveryRequired: true,
+        partialFallback: true,
+        snapshotId: baselineBody.snapshotId,
+        canonicalRevision: baselineBody.canonicalRevision,
+        data: {
+          runValues: {
+            "complete-fence-run": { casesNeeded: 24 },
+          },
+        },
+      });
+    } finally {
+      delete process.env.SYNC_LEGACY_COMPLETE_WRITES;
+    }
+  });
+
+  it("keeps versioned scheduled writes working after legacy retirement", async () => {
+    const scheduledDate = "2030-04-02";
+    const read = await fetch(`${baseUrl}/api/sync/${scheduledDate}?today=${DATE}`, {
+      headers: authHeaders(),
+    });
+    const baseSnapshotId = read.headers.get("X-Sync-Snapshot");
+    expect(baseSnapshotId).toMatch(/^[a-f0-9]{64}$/);
+
+    process.env.SYNC_LEGACY_COMPLETE_WRITES = "reject";
+    try {
+      const accepted = await fetch(`${baseUrl}/api/sync/${scheduledDate}?today=${DATE}`, {
+        method: "PUT",
+        headers: { ...managerAuthHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({
+          payload: {
+            syncVersion: 1,
+            completeness: "complete",
+            baseSnapshotId,
+            dayState: {
+              date: scheduledDate,
+              runs: [{ id: "scheduled-versioned-run", brand: "Acme", flavor: "Cheese" }],
+            },
+            runValues: { "scheduled-versioned-run": { casesNeeded: 16 } },
+            runValuesUpdatedAt: { "scheduled-versioned-run": 1 },
+          },
+        }),
+      });
+      expect(accepted.status).toBe(200);
+      expect(await accepted.json()).toMatchObject({
+        data: {
+          runValues: {
+            "scheduled-versioned-run": { casesNeeded: 16 },
+          },
+        },
+      });
+
+      const legacy = await fetch(`${baseUrl}/api/sync/${scheduledDate}?today=${DATE}`, {
+        method: "PUT",
+        headers: { ...managerAuthHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({
+          payload: {
+            dayState: {
+              date: scheduledDate,
+              runs: [{ id: "scheduled-versioned-run", brand: "Acme", flavor: "Cheese" }],
+            },
+            runValues: { "scheduled-versioned-run": { casesNeeded: 999 } },
+            runValuesUpdatedAt: { "scheduled-versioned-run": 2 },
+          },
+        }),
+      });
+      expect(legacy.status).toBe(409);
+      expect(await legacy.json()).toMatchObject({
+        code: "SYNC_CLIENT_UPGRADE_REQUIRED",
+        data: {
+          runValues: {
+            "scheduled-versioned-run": { casesNeeded: 16 },
+          },
+        },
+      });
+    } finally {
+      delete process.env.SYNC_LEGACY_COMPLETE_WRITES;
+    }
   });
 });
 
@@ -2023,8 +2497,8 @@ describe("/sync large-day complete versus partial measurements", () => {
   const DATE = "2030-08-25";
   type JsonRecord = Record<string, unknown>;
 
-  function largeDayFixture(): JsonRecord {
-    const runs = Array.from({ length: 32 }, (_, index) => ({
+  function largeDayFixture(runCount = 32): JsonRecord {
+    const runs = Array.from({ length: runCount }, (_, index) => ({
       id: `large-day-run-${index + 1}`,
       brand: index % 2 === 0 ? "Acme" : "Northstar",
       flavor: ["Pepperoni", "Cheese", "Supreme", "Veggie"][index % 4],
@@ -2068,6 +2542,7 @@ describe("/sync large-day complete versus partial measurements", () => {
     return {
       syncVersion: 1,
       completeness: "complete",
+      baseSnapshotId: emptyCompleteSnapshotId(DATE),
       dayState: {
         date: DATE,
         resetAt: 1_000,
@@ -2106,7 +2581,11 @@ describe("/sync large-day complete versus partial measurements", () => {
     const responseText = await response.text();
     const responseBytes = Buffer.byteLength(responseText);
     const responseReadAt = performance.now();
-    const parsed = JSON.parse(responseText) as { data?: JsonRecord; snapshotId?: string };
+    const parsed = JSON.parse(responseText) as {
+      data?: JsonRecord;
+      snapshotId?: string;
+      partialFallback?: boolean;
+    };
     // Keep parse plus canonical adoption as a separately visible phase. The
     // test does the same clone a browser performs before storing the response.
     const canonical = parsed.data ? JSON.parse(JSON.stringify(parsed.data)) as JsonRecord : undefined;
@@ -2190,6 +2669,63 @@ describe("/sync large-day complete versus partial measurements", () => {
     console.info("[sync large-day benchmark]", report);
     expect(optimized.requestBytes).toBeLessThan(baseline.requestBytes);
     expect(requestSavingsPercent).toBeGreaterThan(50);
+  }, 30_000);
+
+  it("benchmarks bounded run counts, near-cap input, and stale/raced-base fallbacks", async () => {
+    const fixtureSizes = [0, 1, 32, 50].map((runs) => {
+      const fixture = largeDayFixture(runs);
+      return {
+        runs,
+        sanitizedBytes: Buffer.byteLength(JSON.stringify(fixture)),
+        wireBytes: Buffer.byteLength(JSON.stringify({ senderId: "fixture", payload: fixture })),
+      };
+    });
+    const nearCapFixture = {
+      ...largeDayFixture(50),
+      history: Array.from({ length: 2_500 }, (_, index) => ({
+        at: index,
+        message: "x".repeat(120),
+      })),
+    };
+    const nearCapBytes = Buffer.byteLength(JSON.stringify(nearCapFixture));
+    expect(nearCapBytes).toBeGreaterThan(256 * 1024);
+    expect(nearCapBytes).toBeLessThan(512 * 1024);
+
+    const baseline = await measuredPut(largeDayFixture(32), "fallback-baseline");
+    const baseSnapshotId = baseline.parsed.snapshotId;
+    expect(baseSnapshotId).toMatch(/^[a-f0-9]{64}$/);
+    const changedRunId = "large-day-run-1";
+    const partial = (casesOnCurrentSkid: number): JsonRecord => ({
+      syncVersion: 1,
+      completeness: "partial",
+      baseSnapshotId,
+      runValues: {
+        [changedRunId]: {
+          ...(largeDayFixture(32).runValues as Record<string, JsonRecord>)[changedRunId],
+          casesOnCurrentSkid,
+        },
+      },
+      runValuesUpdatedAt: { [changedRunId]: Date.now() + casesOnCurrentSkid },
+    });
+
+    const [raceA, raceB] = await Promise.all([
+      measuredPut(partial(41), "raced-base-a"),
+      measuredPut(partial(42), "raced-base-b"),
+    ]);
+    const racedFallbacks = [raceA, raceB].filter(({ parsed }) => parsed.partialFallback === true).length;
+    expect(racedFallbacks).toBe(1);
+
+    const stale = await measuredPut(partial(43), "stale-base");
+    expect(stale.parsed.partialFallback).toBe(true);
+    const report = {
+      fixtures: fixtureSizes,
+      nearCap: { runs: 50, sanitizedBytes: nearCapBytes },
+      fallbacks: {
+        staleBase: 1,
+        racedBase: racedFallbacks,
+      },
+    };
+    console.info("[sync capacity fixture benchmark]", report);
   }, 30_000);
 });
 
@@ -2726,12 +3262,21 @@ describe("/sync — additive run-list protection (whole-run loss guard)", () => 
       runValues: { active: { casesNeeded: 40 } },
       runValuesUpdatedAt: { active: 1_000 },
     };
-    const peerPut = (senderId: string, payload: unknown) =>
-      fetch(`${baseUrl}/api/sync/today?today=${conflictDate}`, {
-        method: "PUT",
-        headers: { ...authHeaders(), "content-type": "application/json" },
-        body: JSON.stringify({ senderId, payload }),
-      });
+    const peerPut = async (senderId: string, payload: any): Promise<Response> => {
+      let nextPayload = payload;
+      let response: Response;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        response = await fetch(`${baseUrl}/api/sync/today?today=${conflictDate}`, {
+          method: "PUT",
+          headers: { ...authHeaders(), "content-type": "application/json" },
+          body: JSON.stringify({ senderId, payload: nextPayload }),
+        });
+        const body = await response.clone().json() as { partialFallback?: boolean; snapshotId?: string };
+        if (!body.partialFallback || !body.snapshotId) return response;
+        nextPayload = { ...nextPayload, baseSnapshotId: body.snapshotId };
+      }
+      return response!;
+    };
 
     const seeded = await peerPut("lifecycle-seed", baseline);
     expect(seeded.status).toBe(200);
@@ -2896,12 +3441,21 @@ describe("/sync — additive run-list protection (whole-run loss guard)", () => 
         runValues: { [activeRun.id]: { casesNeeded: 40 } },
         runValuesUpdatedAt: { [activeRun.id]: 1_000 },
       };
-      const peerPut = (senderId: string, payload: unknown) =>
-        fetch(`${baseUrl}/api/sync/today?today=${date}`, {
-          method: "PUT",
-          headers: { ...authHeaders(), "content-type": "application/json" },
-          body: JSON.stringify({ senderId, payload }),
-        });
+      const peerPut = async (senderId: string, payload: any): Promise<Response> => {
+        let nextPayload = payload;
+        let response: Response;
+        for (let attempt = 0; attempt < 4; attempt++) {
+          response = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
+            method: "PUT",
+            headers: { ...authHeaders(), "content-type": "application/json" },
+            body: JSON.stringify({ senderId, payload: nextPayload }),
+          });
+          const body = await response.clone().json() as { partialFallback?: boolean; snapshotId?: string };
+          if (!body.partialFallback || !body.snapshotId) return response;
+          nextPayload = { ...nextPayload, baseSnapshotId: body.snapshotId };
+        }
+        return response!;
+      };
 
       const seeded = await peerPut(`pause-resume-seed-${date}`, baseline);
       expect(seeded.status).toBe(200);
@@ -3470,7 +4024,7 @@ describe("/sync/events — date-scoped broadcasts", () => {
     expect(initial.operationalProjection).toMatchObject({
       version: 1,
       runId: "scheduled-run",
-      calculationRevision: 0,
+      calculationRevision: 1,
       facts: { runStatus: "running", pressDone: false },
     });
     expect(initial.operationalProjection?.serverTimeMs).toBe(initial.serverTime);
@@ -3554,6 +4108,16 @@ describe("/sync/events — date-scoped broadcasts", () => {
       run.id,
       {
         casesNeeded: 200 + index,
+        pizzasPerCase: 10,
+        casesPerLayer: 0,
+        ...(index === 0
+          ? {
+              pep1Type: "Pepperoni",
+              pep1OzPerPizza: 1,
+              pep1Sticks: 0,
+              pep1BatchLbs: 10,
+            }
+          : {}),
         doughRecipe: Array.from({ length: 8 }, (_, ingredient) => ({
           ingredient: `Ingredient ${ingredient}`,
           lbs: ingredient + index + 1,
@@ -3562,6 +4126,7 @@ describe("/sync/events — date-scoped broadcasts", () => {
     ]));
     const baselinePayload = {
       dayState: { date, runs },
+      pepTypes: ["Sausage"],
       runValues,
       runValuesUpdatedAt: Object.fromEntries(runs.map((run, index) => [run.id, 1_000 + index])),
       packagingProgress: Object.fromEntries(runs.map((run, index) => [
@@ -3616,26 +4181,37 @@ describe("/sync/events — date-scoped broadcasts", () => {
         ...baselinePayload.runValuesUpdatedAt,
         [changedRunId]: Date.now() + 1_000,
       },
+      syncVersion: 1,
+      completeness: "partial",
+      baseSnapshotId: seedBody.snapshotId,
     };
     const write = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
       method: "PUT",
       headers: { ...authHeaders(), "content-type": "application/json" },
-      body: JSON.stringify({ senderId: "peer-writer", payload: changedPayload }),
+      // The HTTP snapshot is the complete-write handoff contract.  Supplying
+      // the receiver's baseline explicitly prevents this fixture from relying
+      // on legacy, unanchored-write behavior and makes the broadcast race
+      // deterministic.
+      body: JSON.stringify({
+        senderId: "peer-writer",
+        snapshotId: seedBody.snapshotId,
+        payload: changedPayload,
+      }),
     });
     const writeBody = await write.json() as { data: Record<string, unknown>; snapshotId: string };
     const received = await readFrame((frame) => frame.senderId === "peer-writer");
-    await reader.cancel();
-    ctrl.abort();
 
     expect(received.frame).toMatchObject({
       completeness: "partial",
       syncVersion: 1,
       baseSnapshotId: seedBody.snapshotId,
       snapshotId: writeBody.snapshotId,
-      resultingSnapshotId: writeBody.snapshotId,
     });
+    expect(received.frame).not.toHaveProperty("resultingSnapshotId");
     expect(Object.keys(received.frame.data.runValues)).toEqual([changedRunId]);
     expect(received.frame.data.runValues[changedRunId].casesNeeded).toBe(999);
+    expect(Object.keys(received.frame.summaryStats)).toEqual([changedRunId]);
+    expect(Object.keys(received.frame.runLines)).toEqual([changedRunId]);
     const equivalentComplete: Record<string, any> = {
       ...received.frame,
       completeness: "complete",
@@ -3646,7 +4222,142 @@ describe("/sync/events — date-scoped broadcasts", () => {
     delete equivalentComplete.resultingSnapshotId;
     expect(Buffer.byteLength(received.raw) * 2)
       .toBeLessThan(Buffer.byteLength(JSON.stringify(equivalentComplete)));
-  });
+
+    const removedRunId = runs[23].id;
+    const afterChange = writeBody.data as typeof baselinePayload & {
+      packagingProgress?: Record<string, unknown>;
+      deletedItems?: { runs?: string[] };
+    };
+    const {
+      syncVersion: _syncVersion,
+      completeness: _completeness,
+      baseSnapshotId: _baseSnapshotId,
+      resultingSnapshotId: _resultingSnapshotId,
+      ...legacyRemovalBase
+    } = afterChange as Record<string, unknown>;
+    const removalPayload = {
+      ...legacyRemovalBase,
+      dayState: {
+        ...afterChange.dayState,
+        runs: afterChange.dayState.runs.filter((run) => run.id !== removedRunId),
+      },
+      runValues: Object.fromEntries(
+        Object.entries(afterChange.runValues).filter(([runId]) => runId !== removedRunId),
+      ),
+      runValuesUpdatedAt: Object.fromEntries(
+        Object.entries(afterChange.runValuesUpdatedAt).filter(([runId]) => runId !== removedRunId),
+      ),
+      packagingProgress: Object.fromEntries(
+        Object.entries(afterChange.packagingProgress ?? {}).filter(([runId]) => runId !== removedRunId),
+      ),
+      deletedItems: {
+        ...afterChange.deletedItems,
+        runs: [...(afterChange.deletedItems?.runs ?? []), removedRunId],
+      },
+      syncVersion: 1,
+      completeness: "partial",
+      baseSnapshotId: writeBody.snapshotId,
+    };
+    const removalWrite = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "peer-remover",
+        snapshotId: writeBody.snapshotId,
+        payload: removalPayload,
+      }),
+    });
+    const removalBody = await removalWrite.json() as {
+      data: typeof removalPayload;
+      snapshotId: string;
+    };
+    const removalFrame = await readFrame((frame) => frame.senderId === "peer-remover");
+    expect(removalFrame.frame.completeness).toBe("partial");
+    expect(removalFrame.frame.summaryStats).toEqual({ [removedRunId]: null });
+    expect(removalFrame.frame.runLines).toEqual({ [removedRunId]: null });
+
+    let sharedInputPayload = removalBody.data as Record<string, any>;
+    let sharedSnapshotId = removalBody.snapshotId;
+    // A 32-run day is a representative full shift. Keep each shared-input
+    // refresh within 128 KiB on the wire: large enough for complete derived
+    // maps for every run, while remaining a small bounded SSE message rather
+    // than drifting toward the 10 MiB sync-write safety ceiling.
+    const sharedSetupRefreshFrameBudgetBytes = 128 * 1024;
+    for (const field of derivedRunMapSharedInputFields) {
+      const senderId = `peer-shared-${field}`;
+      const currentValue = sharedInputPayload[field];
+      // A nonempty valid list is required: empty pepTypes are normalized back
+      // to defaults. Adding Pepperoni changes its projection from batches to lbs.
+      const changedValue = field === "pepTypes"
+        ? [...(Array.isArray(currentValue) ? currentValue : []), "Pepperoni"]
+        : Array.isArray(currentValue)
+          ? [...currentValue, `changed-${field}`]
+          : [`changed-${field}`];
+      sharedInputPayload = {
+        ...sharedInputPayload,
+        [field]: changedValue,
+      };
+      delete (sharedInputPayload as Record<string, unknown>).syncVersion;
+      delete (sharedInputPayload as Record<string, unknown>).completeness;
+      delete (sharedInputPayload as Record<string, unknown>).baseSnapshotId;
+      delete (sharedInputPayload as Record<string, unknown>).resultingSnapshotId;
+      const sharedBaseSnapshotId = sharedSnapshotId;
+      const sharedInputWrite = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
+        method: "PUT",
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({
+          senderId,
+          payload: {
+            ...sharedInputPayload,
+            syncVersion: 1,
+            completeness: "partial",
+            baseSnapshotId: sharedBaseSnapshotId,
+          },
+        }),
+      });
+      expect(sharedInputWrite.status).toBe(200);
+      const sharedInputBody = await sharedInputWrite.json() as {
+        data: Record<string, unknown>;
+        snapshotId: string;
+      };
+      sharedInputPayload = sharedInputBody.data;
+      sharedSnapshotId = sharedInputBody.snapshotId;
+      const sharedInputFrame = await readFrame((frame) => frame.senderId === senderId);
+      const remainingRunIds = sharedInputPayload.dayState.runs
+        .map((run: { id: string }) => run.id)
+        .sort();
+      expect(["partial", "complete"]).toContain(sharedInputFrame.frame.completeness);
+      expect(sharedInputFrame.frame.data[field]).toEqual(changedValue);
+      if (sharedInputFrame.frame.completeness === "partial") {
+        expect(sharedInputFrame.frame).toMatchObject({
+          syncVersion: 1,
+          baseSnapshotId: sharedBaseSnapshotId,
+        });
+      } else {
+        expect(sharedInputFrame.frame).not.toHaveProperty("baseSnapshotId");
+      }
+      expect(Object.keys(sharedInputFrame.frame.summaryStats).sort()).toEqual(remainingRunIds);
+      expect(Object.keys(sharedInputFrame.frame.runLines).sort()).toEqual(remainingRunIds);
+      if (field === "pepTypes") {
+        expect(sharedInputFrame.frame.runLines[runs[0].id]).toContainEqual({
+          itemKey: "ingredient:Pepperoni:lbs",
+          qty: 125,
+        });
+        expect(sharedInputFrame.frame.runLines[runs[0].id]).not.toContainEqual({
+          itemKey: "ingredient:Pepperoni:batches",
+          qty: 12.5,
+        });
+      }
+      const sharedInputWireBytes = Buffer.byteLength(`data: ${sharedInputFrame.raw}\n\n`, "utf8");
+      expect(
+        sharedInputWireBytes,
+        `${field} shared setup refresh SSE frame bytes`,
+      ).toBeLessThanOrEqual(sharedSetupRefreshFrameBudgetBytes);
+    }
+
+    await reader.cancel();
+    ctrl.abort();
+  }, 90_000);
 
   it("keeps multi-peer delta savings and convergence through a synthetic full shift", async () => {
     const date = "2030-03-16";
@@ -3671,6 +4382,7 @@ describe("/sync/events — date-scoped broadcasts", () => {
     let canonical: Record<string, any> = {
       syncVersion: 1,
       completeness: "complete",
+      baseSnapshotId: emptyCompleteSnapshotId(date),
       dayState: { date, runs, shiftNotes: "Synthetic full-shift soak fixture" },
       runValues,
       runValuesUpdatedAt: Object.fromEntries(runs.map((run, index) => [run.id, 10_000 + index])),
@@ -3814,6 +4526,7 @@ describe("/sync/events — date-scoped broadcasts", () => {
         const lifecycleKind = lifecycleSteps.get(step);
         let nextPayload: Record<string, any> = {
           ...canonical,
+          baseSnapshotId: syncSnapshotId(canonical),
           runValues: {
             ...canonical.runValues,
             [changedRun]: {

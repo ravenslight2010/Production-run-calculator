@@ -469,6 +469,7 @@ export type DayState = {
   // Exactly three optional, fixed-duration break slots. This is day schedule
   // data, not master data; legacy days may omit it.
   breaks?: DayBreaks;
+  breaksUpdatedAt?: number;
 };
 
 export type SyncPayload = {
@@ -485,7 +486,7 @@ export type SyncPayload = {
   /** Server-owned wake recovery metadata; transported beside the persisted snapshot. */
   resetEpoch?: number;
   rollover?: boolean;
-  dayState: { runs: RunMeta[]; shiftNotes?: string; runToTime?: string; resetAt?: number; date?: string; substitutions?: IngredientSubstitution[]; substitutionLog?: SubstitutionLogEntry[]; stagedItems?: Record<string, boolean>; prepPhase?: PrepPhase; breaks?: DayBreaks };
+  dayState: { runs: RunMeta[]; shiftNotes?: string; runToTime?: string; resetAt?: number; date?: string; substitutions?: IngredientSubstitution[]; substitutionLog?: SubstitutionLogEntry[]; stagedItems?: Record<string, boolean>; prepPhase?: PrepPhase; breaks?: DayBreaks; breaksUpdatedAt?: number };
   runValues: Record<string, FormValues>;
   // Per-run monotonic edit timestamp (run id -> ms). Lets the apply path reject a
   // stale remote that would clobber a fresher local edit (the "click away and my
@@ -521,6 +522,14 @@ export type SyncPayload = {
         updatedAt: number;
       }
     >>>;
+  };
+  /** Server-written ownership proof for authoritative net-time auto-track claims. */
+  autoTrackServerState?: {
+    netOwnership?: Record<string, Record<string, {
+      generation?: string;
+      sequence?: number;
+      updatedAt?: number;
+    }>>;
   };
   doughTimerControls?: Record<string, {
     generation: string;

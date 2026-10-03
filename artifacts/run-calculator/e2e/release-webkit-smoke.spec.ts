@@ -20,6 +20,36 @@ const PASSWORD = "TestPass123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 const testUsernames = new Set<string>();
 
+test.afterEach(async ({ page }, testInfo) => {
+  if (testInfo.status === testInfo.expectedStatus) return;
+
+  try {
+    const screenshot = await page.screenshot({
+      animations: "disabled",
+      caret: "hide",
+      mask: [
+        page.locator("input, textarea, select"),
+        page.locator(
+          [
+            "[data-testid*='account' i]",
+            "[data-testid*='user' i]",
+            "[aria-label*='account' i]",
+            "[aria-label*='user' i]",
+          ].join(", "),
+        ),
+      ],
+      maskColor: "#000000",
+      timeout: 3_000,
+    });
+    await testInfo.attach("masked-failure-screenshot", {
+      body: screenshot,
+      contentType: "image/png",
+    });
+  } catch {
+    // A broken or closed page must not hide the original journey failure.
+  }
+});
+
 function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
@@ -160,6 +190,7 @@ test.beforeEach(async () => {
   try {
     await db.connect();
     await db.query("DELETE FROM daily_sync WHERE date = $1", [today()]);
+    await db.query("DELETE FROM completed_run_history WHERE date = $1", [today()]);
   } finally {
     await db.end().catch(() => {});
   }
@@ -172,6 +203,7 @@ test.afterAll(async () => {
     await db.connect();
     await cleanupTestUsers(db, testUsernames);
     await db.query("DELETE FROM daily_sync WHERE date = $1", [today()]);
+    await db.query("DELETE FROM completed_run_history WHERE date = $1", [today()]);
   } finally {
     await db.end().catch(() => {});
   }
@@ -246,17 +278,26 @@ test("manager can preview an authoritative operational report", async ({ page })
   const username = uniqueTestId("e2e_webkit_report");
   testUsernames.add(username);
   await signUp(page, username);
-  await seedPendingRun(page);
+  const runId = await seedPendingRun(page);
   await promoteToManager(username);
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
 
+  const operationalView = await page.request.get(
+    `/api/reports/operational-view?date=${today()}&runId=${encodeURIComponent(runId)}`,
+  );
+  expect(
+    operationalView.status(),
+    `Operational view fixture returned ${operationalView.status()}: ${(await operationalView.text()).slice(0, 2_000)}`,
+  ).toBe(200);
+
   await page.getByTitle("More").click();
   await page.getByRole("menuitem", { name: "Summary", exact: true }).click();
-  await page
-    .getByTestId("summary-report-details")
-    .locator("summary")
-    .click();
+  await expect(page.getByTestId("summary-tools-header")).toBeVisible();
+  const reportDetails = page.getByTestId("summary-report-details");
+  await expect(reportDetails).toBeVisible();
+  await reportDetails.locator("summary").click();
+  await expect(reportDetails).toHaveAttribute("open", "");
   const report = page.getByTestId("operational-report");
   await expect(report).toBeVisible();
 
@@ -266,7 +307,12 @@ test("manager can preview an authoritative operational report", async ({ page })
       candidate.request().method() === "POST",
   );
   await report.getByRole("button", { name: "Preview report", exact: true }).click();
-  expect((await response).status()).toBe(200);
+  const reportResponse = await response;
+  const reportBody = await reportResponse.text();
+  expect(
+    reportResponse.status(),
+    `Operational report preview returned ${reportResponse.status()}: ${reportBody.slice(0, 2_000)}`,
+  ).toBe(200);
   await expect(report.getByText("CONFIRMED CANONICAL REPORT", { exact: true })).toBeVisible();
   await expect(report.getByText("Report ready. Statistics are authoritative and deterministic.", { exact: true })).toBeVisible();
 });

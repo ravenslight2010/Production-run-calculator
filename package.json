@@ -22,10 +22,12 @@
     "check:typescript-api-v6": "pnpm --filter @workspace/typescript-api-v6 run check",
     "check:editor-typescript": "pnpm --filter @workspace/scripts run check:editor-typescript",
     "check:workflows": "pnpm --filter @workspace/scripts run check:workflows",
+    "check:audit-protection-config": "pnpm --filter @workspace/scripts run check:audit-protection-config",
     "check:release-concurrency": "pnpm --filter @workspace/scripts run check:release-concurrency",
     "check:shell-inventory": "bash ./scripts/src/check-shell-inventory.sh && bash ./lib/api-spec/check-generated.test.sh --shell-inventory-only",
     "push:main": "bash ./scripts/src/push-main.sh",
     "test:gemini": "python3 scripts/test_gemini_skill_trigger_benchmark.py && python3 scripts/test_gemini_failure_alert.py",
+    "release:evidence-handoff": "bash ./scripts/src/run-release-node.sh pnpm --filter @workspace/scripts exec tsx ./src/release-evidence-handoff.mts",
     "release:check": "bash ./scripts/src/run-release-node.sh pnpm --filter @workspace/scripts exec tsx ./src/release-check.mts",
     "release:check:full": "bash ./scripts/src/run-release-node.sh pnpm --filter @workspace/scripts exec tsx ./src/release-check.mts --full",
     "release:check:typescript-7-promotion": "bash ./scripts/src/run-release-node.sh pnpm --filter @workspace/scripts exec tsx ./src/release-check.mts --typescript-7-promotion",
@@ -38,9 +40,9 @@
     "typescript": "~6.0.3",
     "typescript-native": "npm:typescript@7.0.2"
   },
-  "packageManager": "pnpm@11.5.2",
+  "packageManager": "pnpm@12.6.0",
   "engines": {
     "node": ">=24",
-    "pnpm": ">=11"
+    "pnpm": ">=12"
   }
 }

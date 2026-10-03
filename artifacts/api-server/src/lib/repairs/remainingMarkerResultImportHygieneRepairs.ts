@@ -12,7 +12,12 @@ import {
   savedSpecSheetsTable,
   specImportAliasesTable,
 } from "@workspace/db";
-import { sanitizeSpecAliases, type SpecImportAlias as SpecAliasEntry } from "@workspace/spec-import";
+import {
+  SPEC_ALIAS_KINDS,
+  hasRequiredSpecAliasContext,
+  sanitizeSpecAliases,
+  type SpecImportAlias as SpecAliasEntry,
+} from "@workspace/spec-import";
 import {
   BOGUS_CHEESE_MERGE_ALIAS_PAIRS,
   isBogusMergeAlias,
@@ -28,6 +33,7 @@ import type { RepairDefinition, RepairTransaction } from "../repairRegistry";
 
 export const DATA_HEAL_RESULT_BACKFILL_REPAIR_ID = "data-heal-result-backfill-v1";
 export const SPEC_ALIAS_HYGIENE_PURGE_REPAIR_ID = "spec-alias-hygiene-purge-v1";
+export const SPEC_ALIAS_CONTEXT_HYGIENE_REPAIR_ID = "spec-alias-context-hygiene-v1";
 export const BOGUS_MERGE_ALIAS_PURGE_REPAIR_ID = "bogus-merge-alias-purge-v1";
 export const SEA_SALT_ALIAS_UNDO_REPAIR_ID = "sea-salt-alias-undo-v1";
 export const BASHA_HANNAFORD_CROSSLINK_PARSE_PURGE_REPAIR_ID =
@@ -148,6 +154,51 @@ export const specAliasHygienePurgeRepair = automaticRepair({
       deletedRows += deleted.length;
     }
     return { scanned: rows.length, deletedRows };
+  },
+});
+
+/**
+ * The original alias hygiene repair predates context-bearing alias kinds and
+ * is already marker-guarded in released databases. Keep this follow-up
+ * repair separate so it can run exactly once without reprocessing the earlier
+ * cleanup or broadening that released marker's meaning.
+ */
+export const specAliasContextHygieneRepair = automaticRepair({
+  id: SPEC_ALIAS_CONTEXT_HYGIENE_REPAIR_ID,
+  owner: "historical-data-repair",
+  dependencies: [SPEC_ALIAS_HYGIENE_PURGE_REPAIR_ID],
+  eligibility: "Known spec-import aliases whose kind requires a non-empty, valid context.",
+  safety: {
+    affectedScope: "Only flavor, recipeName, and crossFamilyRouting aliases with missing or invalid context in every scope.",
+    excludedScope: "Aliases with optional context and aliases whose required context is valid.",
+    rollback: "Deleted learned aliases require a reviewed re-creation if later proven valid.",
+    evidence: "The shared context contract and released marker id; result contains counts only.",
+  },
+  async execute(tx) {
+    const rows = await tx.select().from(specImportAliasesTable).for("update");
+    const invalidIds: number[] = [];
+    const invalidByKind: Record<string, number> = {};
+    for (const row of rows) {
+      if (!SPEC_ALIAS_KINDS.includes(row.kind as SpecAliasEntry["kind"])) continue;
+      if (hasRequiredSpecAliasContext(row.kind as SpecAliasEntry["kind"], row.context)) continue;
+      invalidIds.push(row.id);
+      invalidByKind[row.kind] = (invalidByKind[row.kind] ?? 0) + 1;
+    }
+
+    let deletedRows = 0;
+    for (const id of invalidIds) {
+      const deleted = await tx
+        .delete(specImportAliasesTable)
+        .where(eq(specImportAliasesTable.id, id))
+        .returning({ id: specImportAliasesTable.id });
+      deletedRows += deleted.length;
+    }
+    return {
+      scanned: rows.length,
+      missingContextRows: invalidIds.length,
+      deletedRows,
+      invalidByKind,
+    };
   },
 });
 

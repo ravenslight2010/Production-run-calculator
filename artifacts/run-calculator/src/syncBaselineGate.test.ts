@@ -241,6 +241,8 @@ describe("SSE sync baseline gate", () => {
     expect(source).toMatch(
       /pushTimerRef\.current = setTimeout\(\(\) => \{\s*if \(document\.hidden\) \{\s*foregroundPushPendingRef\.current = true;/,
     );
+    expect(source).toContain("foregroundSyncBarrierRef.current");
+    expect(source).toContain("const payload = buildSyncPayload(dayStateRef.current);");
     expect(source).toContain("syncMeta: { queuedAt: timing.queuedAtEpoch }");
     expect(source).toContain("X-Sync-Response-Bytes");
   });

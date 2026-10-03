@@ -3,6 +3,7 @@ import { DEFAULT_VALUES, type DayState, type SyncPayload } from "../types";
 import {
   acceptRemoteRunValueOnSync,
   reconcileOperationalIntentCanonical,
+  serverOwnedApp1BatchProgress,
   shouldKeepLocalRunLifecycle,
 } from "./runSyncPolicy";
 
@@ -151,5 +152,95 @@ describe("operational intent forced canonical reconciliation", () => {
     });
     expect(result.lifecycleChanged).toBe(true);
     expect(result.dayState.runs[0]).toMatchObject({ endedAt: 90, metaUpdatedAt: 120 });
+  });
+});
+
+describe("server-owned App 1 batch sync convergence", () => {
+  const canonicalPayload = {
+    runValues: {
+      run1: {
+        ...DEFAULT_VALUES,
+        app1BatchesMade: 3,
+        app1BatchCorrectionGeneration: 2,
+      },
+    },
+    runValuesUpdatedAt: { run1: 40 },
+    autoTrackCoordination: {
+      version: 1 as const,
+      runs: {
+        run1: {
+          "app1-batch": {
+            generation: "run1:10",
+            sequence: 3,
+            nextDueAt: 5_000,
+            acceptedEventId: "srv:wc:app1-batch:accepted",
+            acceptedRunValuesUpdatedAt: 40,
+            updatedAt: 40,
+          },
+        },
+      },
+    },
+    autoTrackServerState: {
+      netOwnership: {
+        run1: { "app1-batch": { generation: "run1:10", sequence: 3, updatedAt: 40 } },
+      },
+    },
+  };
+
+  it("adopts only the verified App 1 counter despite an unrelated newer local edit", () => {
+    const local = {
+      ...DEFAULT_VALUES,
+      app1BatchesMade: 2,
+      app1BatchCorrectionGeneration: 2,
+      cheeseOzPerPizza: 6,
+    };
+    expect(acceptRemoteRunValueOnSync(
+      canonicalPayload.runValues.run1,
+      local,
+      40,
+      50,
+    )).toBe(false);
+
+    const progress = serverOwnedApp1BatchProgress(canonicalPayload, "run1", local);
+    expect(progress).toEqual({ app1BatchesMade: 3 });
+    expect({ ...local, ...progress }).toMatchObject({
+      app1BatchesMade: 3,
+      app1BatchCorrectionGeneration: 2,
+      cheeseOzPerPizza: 6,
+    });
+  });
+
+  it("does not bypass a newer local manual correction or an unproven projection", () => {
+    const correctedLocally = {
+      ...DEFAULT_VALUES,
+      app1BatchesMade: 1,
+      app1BatchCorrectionGeneration: 3,
+    };
+    expect(serverOwnedApp1BatchProgress(
+      canonicalPayload,
+      "run1",
+      correctedLocally,
+    )).toBeNull();
+
+    expect(serverOwnedApp1BatchProgress({
+      ...canonicalPayload,
+      autoTrackServerState: undefined,
+    }, "run1", {
+      ...DEFAULT_VALUES,
+      app1BatchesMade: 2,
+      app1BatchCorrectionGeneration: 2,
+    })).toBeNull();
+    expect(serverOwnedApp1BatchProgress({
+      ...canonicalPayload,
+      autoTrackServerState: {
+        netOwnership: {
+          run1: { "app1-batch": { generation: "run1:10", sequence: 2, updatedAt: 40 } },
+        },
+      },
+    }, "run1", {
+      ...DEFAULT_VALUES,
+      app1BatchesMade: 2,
+      app1BatchCorrectionGeneration: 2,
+    })).toBeNull();
   });
 });

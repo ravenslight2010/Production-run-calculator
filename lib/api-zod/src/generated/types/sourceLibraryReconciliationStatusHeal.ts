@@ -10,6 +10,7 @@ import type { SourceLibraryReconciliationStatusHealResult } from './sourceLibrar
 export type SourceLibraryReconciliationStatusHeal = {
   id: string;
   fromDate: Date;
+  /** @nullable */
   appliedAt: Date | null;
   markerValid: boolean;
   result: SourceLibraryReconciliationStatusHealResult;

@@ -3,3 +3,7 @@
 
 # No need to store the pnpm store twice.
 .local
+
+# Python tooling is development-only; do not send the workspace's
+# incomplete local environment to the deployment builder.
+.pythonlibs

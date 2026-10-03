@@ -151,12 +151,17 @@ import {
   applyResetWipe as wipeBrowserRunCalculator,
   getStoredResetEpoch as readBrowserResetEpoch,
 } from "./adapters/browserResetPersistence";
-import { browserStorage as localStorage } from "./adapters/browserRecordStore";
+import {
+  browserStorage as localStorage,
+  withBrowserStorageOverride,
+  type BrowserKeyValueStorage,
+} from "./adapters/browserRecordStore";
 import {
   cachedProfileKeys,
   deleteCachedProfile,
   profileCacheIsActive,
   readCachedProfileBlobs,
+  withProfileCacheProjection,
   writeCachedProfileBlobs,
 } from "./profileCache";
 
@@ -238,7 +243,12 @@ function writeProfileBlob(key: string, kind: "dough" | "crust", raw: string): vo
 export function loadList(key: string, fallback: string[]): string[] {
   try {
     const raw = localStorage.getItem(key);
-    if (raw) return JSON.parse(raw) as string[];
+    if (raw) {
+      const parsed: unknown = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((value): value is string => typeof value === "string");
+      }
+    }
   } catch {}
   return fallback;
 }
@@ -904,8 +914,11 @@ function rememberProfileSnapshot(key: string, snap: { dough: string; crust: stri
 // pre-resolution window permissive; all interactive paths are ALSO gated at
 // the call site on the same capability).
 let profileWritesAllowed = true;
-export function setProfileWritesAllowed(allowed: boolean): void {
+let profileSyncSuppressed = false;
+export function setProfileWritesAllowed(allowed: boolean): boolean {
+  const previous = profileWritesAllowed;
   profileWritesAllowed = allowed;
+  return previous;
 }
 export function profileWritesEnabled(): boolean {
   return profileWritesAllowed;
@@ -995,8 +1008,10 @@ export function saveProfile(
   const remotelyDeleted = loadRemotelyDeletedProfiles();
   if (remotelyDeleted.delete(key)) saveRemotelyDeletedProfiles(remotelyDeleted);
   loadedProfileSnapshots.set(key, [{ dough, crust }]);
-  if (options.authoritative) markProfileForceEdited(key);
-  else markProfileEdited(key);
+  if (!profileSyncSuppressed) {
+    if (options.authoritative) markProfileForceEdited(key);
+    else markProfileEdited(key);
+  }
   return true;
 }
 
@@ -2893,7 +2908,7 @@ export function deleteProfileEntry(brand: string, flavor: string): void {
   markProfileDeleted(canonicalProfileKey(brand, flavor));
 }
 
-const PURGE_ORPHANED_PROFILES_KEY = "run-calc-purge-orphaned-profiles-v1";
+const PURGE_ORPHANED_PROFILES_KEY = "run-calc-purge-orphaned-profiles-v2";
 
 /**
  * One-time cleanup: remove saved brand/flavor profiles (dough + crust) whose
@@ -2901,18 +2916,24 @@ const PURGE_ORPHANED_PROFILES_KEY = "run-calc-purge-orphaned-profiles-v1";
  * per-profile localStorage entries behind (see deleteProfilesForBrand); those
  * orphans were re-broadcast on every sync and could resurrect stale/scrambled
  * data. This heals installs that already accumulated orphans before the deletion
- * fix landed. Guarded by a version marker AND only runs once the Brands list is
- * populated, so a transient empty list (e.g. before seeds/sync) can't nuke every
- * profile. If the list is still empty the marker is left unset so it retries on
- * a later load.
+ * fix landed. The caller must pass the merged Brands list only after adopting a
+ * validated canonical sync snapshot that included Brands. A non-empty local
+ * cache alone is not proof that its list is complete: deleting against a stale
+ * partial list can remove valid server profiles. The versioned marker is written
+ * only after a usable baseline has been supplied and cleanup completes.
  */
-export function purgeOrphanedProfilesIfNeeded(): void {
-  if (typeof localStorage === "undefined") return;
-  if (localStorage.getItem(PURGE_ORPHANED_PROFILES_KEY)) return;
+export function purgeOrphanedProfilesIfNeeded(
+  adoptedBrands: readonly string[] | null | undefined,
+): boolean {
+  if (!adoptedBrands?.length || typeof localStorage === "undefined") return false;
+  if (localStorage.getItem(PURGE_ORPHANED_PROFILES_KEY)) return true;
   try {
-    const brands = loadList(BRANDS_KEY, []);
-    if (brands.length === 0) return; // defer until brands are seeded/loaded
-    const known = new Set(brands.map((b) => b.toLowerCase().trim()));
+    const known = new Set(
+      adoptedBrands
+        .map((brand) => brand.toLowerCase().trim())
+        .filter(Boolean),
+    );
+    if (known.size === 0) return false;
     const orphans = new Set<string>();
     for (const entry of profileBlobEntries()) {
       const sep = entry.key.indexOf("__");
@@ -2927,7 +2948,11 @@ export function purgeOrphanedProfilesIfNeeded(): void {
     }
     for (const key of orphans) markProfileDeleted(key);
     localStorage.setItem(PURGE_ORPHANED_PROFILES_KEY, "1");
-  } catch {}
+    return true;
+  } catch {
+    // Leave the marker unset so a later adopted baseline can retry safely.
+    return false;
+  }
 }
 
 /**
@@ -3453,6 +3478,119 @@ export type SpecImportNameCorrection = {
   /** The correct name this import wrote. */
   newName: string;
 };
+
+export type SpecImportProjection = {
+  touchedProfiles: Array<{ brand: string; flavor: string }>;
+  crustProfiles: Array<{ brand: string; flavor: string }>;
+  nameCorrections: SpecImportNameCorrection[];
+  profileRows: Array<{
+    key: string;
+    brand: string;
+    flavor: string;
+    values: Record<string, unknown>;
+    crustValues: Record<string, unknown>;
+  }>;
+  storageChanges: Array<{ key: string; before: string | null; value: string | null }>;
+};
+
+function memoryStorage(entries: ReadonlyArray<[string, string]>): BrowserKeyValueStorage {
+  const values = new Map(entries);
+  return {
+    get length() { return values.size; },
+    key(index) { return [...values.keys()][index] ?? null; },
+    getItem(key) { return values.get(key) ?? null; },
+    setItem(key, value) { values.set(key, value); },
+    removeItem(key) { values.delete(key); },
+  };
+}
+
+function storageEntries(storage: BrowserKeyValueStorage): Array<[string, string]> {
+  const entries: Array<[string, string]> = [];
+  for (let index = 0; index < storage.length; index++) {
+    const key = storage.key(index);
+    if (key !== null) entries.push([key, storage.getItem(key) ?? ""]);
+  }
+  return entries;
+}
+
+export function projectSpecImport(
+  parsed: ParsedSpecImport,
+  serverPools?: { dough?: SpecImportServerPoolRecipe[]; sauce?: SpecImportServerPoolRecipe[] },
+  dieLineDefaultOverrides?: DieLineDefaultsOverrides,
+  forceUpdateProfileKeys?: ReadonlySet<string>,
+  importMergeAliases?: ImportMergeAliasMap,
+): SpecImportProjection {
+  const beforeEntries = storageEntries(localStorage);
+  const before = new Map(beforeEntries);
+  const projectedStorage = memoryStorage(beforeEntries);
+  const out: { nameCorrections?: SpecImportNameCorrection[] } = {};
+  const previousSyncSuppressed = profileSyncSuppressed;
+  profileSyncSuppressed = true;
+  let applied: ReturnType<typeof applySpecImport>;
+  let profileRows: SpecImportProjection["profileRows"] = [];
+  try {
+    applied = withBrowserStorageOverride(projectedStorage, () =>
+      withProfileCacheProjection(() => {
+        const result = applySpecImport(
+          parsed,
+          out,
+          serverPools,
+          dieLineDefaultOverrides,
+          forceUpdateProfileKeys,
+          importMergeAliases,
+        );
+        profileRows = result.touchedProfiles.map(({ brand, flavor }) => {
+          const key = canonicalProfileKey(brand, flavor);
+          const parse = (kind: "dough" | "crust"): Record<string, unknown> => {
+            const raw = readProfileBlob(key, kind);
+            return raw ? JSON.parse(raw) as Record<string, unknown> : {};
+          };
+          return {
+            key,
+            brand,
+            flavor,
+            values: parse("dough"),
+            crustValues: parse("crust"),
+          };
+        });
+        return result;
+      }));
+  } finally {
+    profileSyncSuppressed = previousSyncSuppressed;
+  }
+  const afterEntries = storageEntries(projectedStorage);
+  const after = new Map(afterEntries);
+  const changedKeys = new Set([...before.keys(), ...after.keys()]);
+  const storageChanges = [...changedKeys]
+    .filter((key) => before.get(key) !== after.get(key))
+    .map((key) => ({ key, before: before.get(key) ?? null, value: after.get(key) ?? null }));
+  return {
+    ...applied,
+    nameCorrections: out.nameCorrections ?? [],
+    profileRows,
+    storageChanges,
+  };
+}
+
+export function adoptSpecImportProjection(projection: SpecImportProjection): void {
+  for (const change of projection.storageChanges) {
+    if (profileCacheIsActive() && change.key.startsWith("run-calc-profile-cache-v1:")) continue;
+    // The projection was calculated against a snapshot.  A local edit made
+    // while the server commit was in flight wins; never clobber it with the
+    // stale projected value (or delete it).
+    if ((localStorage.getItem(change.key) ?? null) !== change.before) continue;
+    if (change.value === null) localStorage.removeItem(change.key);
+    else localStorage.setItem(change.key, change.value);
+  }
+  if (profileCacheIsActive()) {
+    for (const row of projection.profileRows) {
+      writeCachedProfileBlobs(row.key, {
+        dough: JSON.stringify(row.values),
+        crust: JSON.stringify(row.crustValues),
+      });
+    }
+  }
+}
 
 export function applySpecImport(
   parsed: ParsedSpecImport,

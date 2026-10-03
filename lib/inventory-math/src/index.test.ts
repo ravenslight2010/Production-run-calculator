@@ -380,6 +380,40 @@ describe("aggregateRunDemand", () => {
     expect(shippers?.qty).toBe(15); // 10 + 5 cases
   });
 
+  it("tolerates a partial persisted run snapshot with missing applicator values", () => {
+    const partialRun = {
+      casesNeeded: 10,
+      pizzasPerCase: 6,
+      cartoned: "yes",
+      circles: "12in",
+      cartonsPerCase: 6,
+    } as unknown as RunLinesInput;
+
+    expect(aggregateRunDemand([partialRun], PEP)).toEqual([
+      {
+        key: "packaging:circles:12in",
+        category: "packaging",
+        name: "Circles — 12in",
+        unit: "circles",
+        qty: 60,
+      },
+      {
+        key: "packaging:cartons:cases",
+        category: "packaging",
+        name: "Cartons",
+        unit: "cases",
+        qty: 10,
+      },
+      {
+        key: "packaging:shipper-labels:count",
+        category: "packaging",
+        name: "Shipper Labels",
+        unit: "count",
+        qty: 10,
+      },
+    ]);
+  });
+
   it("returns an empty list for no runs", () => {
     expect(aggregateRunDemand([], PEP)).toEqual([]);
   });

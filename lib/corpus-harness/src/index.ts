@@ -229,6 +229,17 @@ export function buildCorpusEvaluationManifest(): EvaluationManifest {
     && sanityIssues === 0
     && droppedPromptRowsExcludingSchedule === 0;
   const repositoryRoot = path.dirname(path.dirname(corpusRoot()));
+  const corpusPackage = JSON.parse(
+    fs.readFileSync(path.join(repositoryRoot, "lib", "corpus-harness", "package.json"), "utf8"),
+  ) as {
+    dependencies?: Record<string, string>;
+    devDependencies?: Record<string, string>;
+  };
+  const xlsxVersion = corpusPackage.dependencies?.xlsx;
+  const vitestVersion = corpusPackage.devDependencies?.vitest;
+  if (!xlsxVersion || !vitestVersion) {
+    throw new Error("corpus evaluation package must declare xlsx and vitest dependencies");
+  }
   const evaluatorSha256 = hashSourceDirectories(
     ["corpus-harness", "cheese-import", "premix-import", "shipping-import", "spec-import", "name-match"]
       .map((name) => path.join(repositoryRoot, "lib", name, "src")),
@@ -259,8 +270,8 @@ export function buildCorpusEvaluationManifest(): EvaluationManifest {
     dependencies: {
       node: process.versions.node,
       pnpmLockSha256: lockfileSha256,
-      xlsx: "npm:@e965/xlsx@^0.20.3",
-      vitest: "^4.1.9",
+      xlsx: xlsxVersion,
+      vitest: vitestVersion,
     },
     provider: { identityState: "not-applicable", name: null, model: null },
     performance: {

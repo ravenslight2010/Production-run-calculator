@@ -6,7 +6,7 @@ import {
   putFactoryKey,
   resetFactoryDataSyncForTests,
 } from "./factoryDataSync";
-import { SHIFT_START_TIME_KEY } from "./types";
+import { DOUGH_RECIPE_NAMES_KEY, SHIFT_START_TIME_KEY } from "./types";
 import { clearPerformanceDiagnostics, getPerformanceDiagnostics } from "./performanceDiagnostics";
 
 const QUEUE_KEY = "run-calc-fkv-queue-v1";
@@ -133,5 +133,21 @@ describe("factory data durable write queue", () => {
 
     expect(getShiftStartTime()).toBe("07:15");
     expect(localStorage.getItem(QUEUE_KEY)).toBe("[]");
+  });
+
+  it("keeps usable local recipe names when the newer server directory is blank", () => {
+    localStorage.setItem(DOUGH_RECIPE_NAMES_KEY, JSON.stringify([null, "Legacy Dough"]));
+
+    hydrateFromServer({
+      [DOUGH_RECIPE_NAMES_KEY]: {
+        value: [],
+        updatedAt: "2026-08-20T13:00:00.000Z",
+      },
+    });
+
+    expect(JSON.parse(localStorage.getItem(DOUGH_RECIPE_NAMES_KEY) ?? "null")).toEqual([
+      null,
+      "Legacy Dough",
+    ]);
   });
 });

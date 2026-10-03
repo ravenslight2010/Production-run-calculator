@@ -11,4 +11,7 @@ scope parameter or default must never let a sandbox session read live records.
 
 **How to apply:** Keep the live-scope middleware before the manager capability
 middleware on every audit-log read route, and cover both sandbox denial and live
-manager success in integration tests.
+manager success in integration tests. Persist only server-derived stable actor IDs
+and action-specific bounded evidence; never expose the internal scope or network
+metadata in audit responses/exports. Required audit inserts must share the
+business mutation transaction.

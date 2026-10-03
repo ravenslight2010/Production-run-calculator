@@ -16,6 +16,17 @@ import type { SpecAliasKind, SpecImportAlias } from "@workspace/spec-import";
 import { inventoryClientId } from "./inventoryShared";
 import { fetchWithTimeout } from "./fetchWithTimeout";
 
+function isCompleteSpecImportAlias(alias: SpecImportAlias): boolean {
+  const externalName = String(alias?.externalName ?? "").trim();
+  const canonicalName = String(alias?.canonicalName ?? "").trim();
+  const context = String((alias as SpecImportAlias & { context?: string | null })?.context ?? "").trim();
+  if (!externalName || !canonicalName) return false;
+  if (alias.kind === "flavor") return !!context;
+  if (alias.kind === "recipeName") return context.toLowerCase() === "dough" || context.toLowerCase() === "sauce";
+  if (alias.kind === "crossFamilyRouting") return context.toLowerCase() === "cheese" || context.toLowerCase() === "mix";
+  return true;
+}
+
 export async function fetchSpecImportAliases(): Promise<SpecImportAlias[]> {
   // Bounded wait: this is the FIRST request of every spec import. If the
   // deployment is cold-starting it can hang at the edge; the caller treats any
@@ -537,36 +548,40 @@ export function maybeLearnTypeRename(
  * canonicalName match, case-insensitive). Used after a correcting re-import:
  * when the sheet overwrote a wrong stored name, the alias that produced the
  * wrong name must be removed or the next import re-applies the mistake.
- * Entries with a null context match rows under ANY context by default; callers
- * that know the original key can request exact-null matching. A provided
- * context always matches exactly. Callers treat failure as best-effort (the
- * import already applied), mirroring saveSpecImportAliases.
+ * Entries with a null context match rows under ANY context by default for
+ * context-free kinds; context-dependent kinds are omitted unless their
+ * required context is present. Callers that know the original key can request
+ * exact-null matching. A provided context always matches exactly. Callers
+ * treat failure as best-effort (the import already applied), mirroring
+ * saveSpecImportAliases.
  */
 export async function deleteSpecImportAliases(
   aliases: SpecImportAlias[],
   options: { exactContext?: boolean } = {},
 ): Promise<void> {
-  if (aliases.length === 0) return;
+  const validAliases = aliases.filter(isCompleteSpecImportAlias);
+  if (validAliases.length === 0) return;
   const res = await fetch("/api/spec-import-aliases/delete", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "x-client-id": inventoryClientId(),
     },
-    body: JSON.stringify({ aliases, ...(options.exactContext ? { exactContext: true } : {}) }),
+    body: JSON.stringify({ aliases: validAliases, ...(options.exactContext ? { exactContext: true } : {}) }),
   });
   if (!res.ok) throw new Error(`Delete spec-import aliases failed (${res.status})`);
 }
 
 export async function saveSpecImportAliases(aliases: SpecImportAlias[]): Promise<void> {
-  if (aliases.length === 0) return;
+  const validAliases = aliases.filter(isCompleteSpecImportAlias);
+  if (validAliases.length === 0) return;
   const res = await fetch("/api/spec-import-aliases", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "x-client-id": inventoryClientId(),
     },
-    body: JSON.stringify({ aliases }),
+    body: JSON.stringify({ aliases: validAliases }),
   });
   if (!res.ok) throw new Error(`Save spec-import aliases failed (${res.status})`);
 }

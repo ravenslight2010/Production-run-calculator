@@ -111,6 +111,17 @@ export interface RunLinesInput extends SummaryStatsInput {
 
 export type SummaryStats = ReturnType<typeof computeSummaryStats>;
 
+function safeText(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function safeRecipeRows(value: unknown): RecipeRow[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (row): row is RecipeRow => row !== null && typeof row === "object",
+  );
+}
+
 /**
  * Case-based Sauce and Frontline quantities are unavailable when a run requests
  * cases but has no positive package count. Fixed buffers must never appear by
@@ -129,38 +140,42 @@ export function computeSummaryStats(
   const productionNeedsAvailable = caseBasedProductionNeedsAvailable(vals);
   const totalPizzas = vals.casesNeeded * vals.pizzasPerCase;
   const totalPizzasForSauce = totalPizzas + vals.casesPerLayer * vals.pizzasPerCase;
-  const frontlineRecipeLbs = (vals.frontlineRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
+  const frontlineRecipeLbs = safeRecipeRows(vals.frontlineRecipe).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   const sauceEffBarrel = frontlineRecipeLbs > 0 ? frontlineRecipeLbs : vals.sauceBarrelLbs;
   const sauceLbs = productionNeedsAvailable
     ? (totalPizzasForSauce * vals.sauceOzPerPizza) / 16 + 30
     : 0;
   const sauceBatches = sauceEffBarrel > 0 ? sauceLbs / sauceEffBarrel : 0;
-  const app1RecipeLbs = (vals.app1CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
+  const app1Type = safeText(vals.app1Type);
+  const app1RecipeLbs = safeRecipeRows(vals.app1CheeseRecipe).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   const app1Lbs = productionNeedsAvailable
     ? (totalPizzasForSauce * vals.app1OzPerPizza) / 16 + 20
     : 0;
-  const app1IsMix = vals.app1Type.trim().toLowerCase().includes("mix");
+  const app1IsMix = app1Type.trim().toLowerCase().includes("mix");
   const app1EffBatch = app1RecipeLbs > 0 ? app1RecipeLbs : vals.app1BatchLbs;
   const app1Batches = !app1IsMix && app1EffBatch > 0 ? app1Lbs / app1EffBatch : 0;
-  const app2RecipeLbs = (vals.app2CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
+  const app2Type = safeText(vals.app2Type);
+  const app2RecipeLbs = safeRecipeRows(vals.app2CheeseRecipe).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   const app2Lbs = productionNeedsAvailable
     ? (totalPizzasForSauce * vals.app2OzPerPizza) / 16 + 20
     : 0;
-  const app2IsMix = vals.app2Type.trim().toLowerCase().includes("mix");
+  const app2IsMix = app2Type.trim().toLowerCase().includes("mix");
   const app2EffBatch = app2RecipeLbs > 0 ? app2RecipeLbs : vals.app2BatchLbs;
   const app2Batches = !app2IsMix && app2EffBatch > 0 ? app2Lbs / app2EffBatch : 0;
-  const app3RecipeLbs = (vals.app3CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
+  const app3Type = safeText(vals.app3Type);
+  const app3RecipeLbs = safeRecipeRows(vals.app3CheeseRecipe).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   const app3Lbs = productionNeedsAvailable
     ? (totalPizzasForSauce * vals.app3OzPerPizza) / 16 + 20
     : 0;
-  const app3IsMix = vals.app3Type.trim().toLowerCase().includes("mix");
+  const app3IsMix = app3Type.trim().toLowerCase().includes("mix");
   const app3EffBatch = app3RecipeLbs > 0 ? app3RecipeLbs : vals.app3BatchLbs;
   const app3Batches = !app3IsMix && app3EffBatch > 0 ? app3Lbs / app3EffBatch : 0;
-  const app4RecipeLbs = (vals.app4CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
+  const app4Type = safeText(vals.app4Type);
+  const app4RecipeLbs = safeRecipeRows(vals.app4CheeseRecipe).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   const app4Lbs = productionNeedsAvailable
     ? (totalPizzasForSauce * vals.app4OzPerPizza) / 16 + 20
     : 0;
-  const app4IsMix = vals.app4Type.trim().toLowerCase().includes("mix");
+  const app4IsMix = app4Type.trim().toLowerCase().includes("mix");
   const app4EffBatch = app4RecipeLbs > 0 ? app4RecipeLbs : vals.app4BatchLbs;
   const app4Batches = !app4IsMix && app4EffBatch > 0 ? app4Lbs / app4EffBatch : 0;
   // Applicator 1 & 2 combined: one pep type runs through both physical
@@ -168,16 +183,17 @@ export function computeSummaryStats(
   // suppressed. STRICT === true so mobile (never sets the flag) is unaffected.
   const pepCombined = vals.pep1Combined === true;
   const pepStickMult = pepCombined ? 2 : 1;
+  const pep1Type = safeText(vals.pep1Type);
   const pep1Lbs = productionNeedsAvailable
     ? (totalPizzasForSauce * vals.pep1OzPerPizza) / 16 + vals.pep1Sticks * pepStickMult
     : 0;
   const pep1Batches =
-    !defaultPepTypes.includes(vals.pep1Type ?? "") && vals.pep1BatchLbs > 0
+    !defaultPepTypes.includes(pep1Type) && vals.pep1BatchLbs > 0
       ? pep1Lbs / vals.pep1BatchLbs
       : 0;
   // Additional pep type on applicator 1 (only when its type is set). Its stick
   // buffer also doubles when combined (both physical applicators run it too).
-  const pep1TypeBTrim = (vals.pep1TypeB ?? "").trim();
+  const pep1TypeBTrim = safeText(vals.pep1TypeB).trim();
   const pep1LbsB = productionNeedsAvailable && pep1TypeBTrim
     ? (totalPizzasForSauce * (vals.pep1OzPerPizzaB ?? 0)) / 16 + (vals.pep1SticksB ?? 0) * pepStickMult
     : 0;
@@ -189,11 +205,12 @@ export function computeSummaryStats(
   const pep2Lbs = !productionNeedsAvailable || pepCombined
     ? 0
     : (totalPizzasForSauce * vals.pep2OzPerPizza) / 16 + vals.pep2Sticks;
+  const pep2Type = safeText(vals.pep2Type);
   const pep2Batches =
-    !pepCombined && !defaultPepTypes.includes(vals.pep2Type ?? "") && vals.pep2BatchLbs > 0
+    !pepCombined && !defaultPepTypes.includes(pep2Type) && vals.pep2BatchLbs > 0
       ? pep2Lbs / vals.pep2BatchLbs
       : 0;
-  const pep2TypeBTrim = (vals.pep2TypeB ?? "").trim();
+  const pep2TypeBTrim = safeText(vals.pep2TypeB).trim();
   const pep2LbsB =
     productionNeedsAvailable && !pepCombined && pep2TypeBTrim
       ? (totalPizzasForSauce * (vals.pep2OzPerPizzaB ?? 0)) / 16 + (vals.pep2SticksB ?? 0)
@@ -214,12 +231,12 @@ export function computeSummaryStats(
     sauceLbs,
     sauceBatches,
     sauceEffBarrel,
-    app1Lbs, app1Batches, app1Type: vals.app1Type,
-    app2Lbs, app2Batches, app2Type: vals.app2Type,
-    app3Lbs, app3Batches, app3Type: vals.app3Type,
-    app4Lbs, app4Batches, app4Type: vals.app4Type,
-    pep1Lbs, pep1Batches, pep1Type: vals.pep1Type ?? "",
-    pep2Lbs, pep2Batches, pep2Type: vals.pep2Type ?? "",
+    app1Lbs, app1Batches, app1Type,
+    app2Lbs, app2Batches, app2Type,
+    app3Lbs, app3Batches, app3Type,
+    app4Lbs, app4Batches, app4Type,
+    pep1Lbs, pep1Batches, pep1Type,
+    pep2Lbs, pep2Batches, pep2Type,
     pep1LbsB, pep1BatchesB, pep1TypeB: vals.pep1TypeB ?? "",
     pep2LbsB, pep2BatchesB, pep2TypeB: vals.pep2TypeB ?? "",
   };
@@ -301,7 +318,7 @@ export function computeRunLines(
   const s = computeSummaryStats(vals, defaultPepTypes);
 
   // Dough — batches = ceil(totalPizzas / effective yield)
-  const dRecipeLbs = (vals.doughRecipe ?? []).reduce((acc, r) => acc + Number(r.lbs ?? 0), 0);
+  const dRecipeLbs = safeRecipeRows(vals.doughRecipe).reduce((acc, r) => acc + Number(r.lbs ?? 0), 0);
   const effYield =
     dRecipeLbs > 0 && vals.doughballWeightOz > 0
       ? (dRecipeLbs * 16) / vals.doughballWeightOz
@@ -316,8 +333,8 @@ export function computeRunLines(
   // it as-is by name in LBS (spec-sheet oz/pizza drives the total). Otherwise
   // keep the mixed-sauce behavior (generic "Sauce" in batches). The oz/pizza
   // guard keeps the flat +30 lbs buffer from charging a sauce that isn't used.
-  const sauceName = (vals.frontlineRecipeName ?? "").trim();
-  const hasSauceRecipe = (vals.frontlineRecipe ?? []).some(r => Number(r.lbs ?? 0) > 0);
+  const sauceName = safeText(vals.frontlineRecipeName).trim();
+  const hasSauceRecipe = safeRecipeRows(vals.frontlineRecipe).some(r => Number(r.lbs ?? 0) > 0);
   if (sauceName && !hasSauceRecipe && vals.sauceOzPerPizza > 0) {
     add(`ingredient:${sauceName}:lbs`, "ingredient", sauceName, "lbs", s.sauceLbs);
   } else if (s.sauceBatches > 0) {
@@ -384,20 +401,20 @@ export function computeRunLines(
   // Cartoned: full packaging suite (circles, shippers, cartons, pallets, labels, etc.)
   // Labeled: circles + labels (no shippers/cartons)
   // "n-a"/"no": nothing consumed (packaging exemption)
-  const cartonedVal = (vals.cartoned ?? "").trim().toLowerCase();
+  const cartonedVal = safeText(vals.cartoned).trim().toLowerCase();
   const isCartoned = cartonedVal === "cartoned" || cartonedVal === "yes";
   const isLabeled = cartonedVal === "labeled";
 
   if (isCartoned || isLabeled) {
     // Circles: consumed for both cartoned and labeled runs
-    const circle = (vals.circles ?? "").trim();
+    const circle = safeText(vals.circles).trim();
     if (circle && circle.toLowerCase() !== "none" && s.totalPizzas > 0) {
       add(`packaging:circles:${circle}`, "packaging", `Circles — ${circle}`, "circles", s.totalPizzas);
     }
 
     // Cartons: cartoned runs only (with cartonSize support)
     if (isCartoned) {
-      const shipper = (vals.shipper ?? "").trim();
+      const shipper = safeText(vals.shipper).trim();
       if (shipper && shipper.toLowerCase() !== "none" && s.totalCases > 0) {
         add(`packaging:shippers:${shipper}`, "packaging", `Shippers — ${shipper}`, "shippers", s.totalCases);
       }
@@ -415,7 +432,7 @@ export function computeRunLines(
     }
 
     // Slip sheets: 1 per layer (every layer)
-    if ((vals.slipSheets ?? "").trim().toLowerCase() === "yes" && s.totalCases > 0) {
+    if (safeText(vals.slipSheets).trim().toLowerCase() === "yes" && s.totalCases > 0) {
       const casesPerLayer = Number(vals.casesPerLayer) || 0;
       if (casesPerLayer > 0) {
         add("packaging:slip-sheets:count", "packaging", "Slip Sheets", "count",
@@ -424,7 +441,7 @@ export function computeRunLines(
     }
 
     // Grip sheets: per skid (every other layer = ceil(layersPerSkkid/2), 3rd and 5th = 2)
-    const gripVal = (vals.gripSheets ?? "").trim().toLowerCase();
+    const gripVal = safeText(vals.gripSheets).trim().toLowerCase();
     if (gripVal !== "none" && gripVal !== "" && s.totalCases > 0) {
       const casesPerSkid = Number(vals.casesPerSkid) || 0;
       const casesPerLayer = Number(vals.casesPerLayer) || 0;
@@ -441,7 +458,7 @@ export function computeRunLines(
     }
 
     // Labels: 1 per pizza that gets labeled (both = 2 per pizza: top + bottom)
-    const labelPos = (vals.labelPosition ?? "").trim().toLowerCase();
+    const labelPos = safeText(vals.labelPosition).trim().toLowerCase();
     if (labelPos && s.totalPizzas > 0) {
       const topRolls = Number(vals.topLabelsPerRoll) || Number(vals.labelsPerRoll) || 0;
       const botRolls = Number(vals.bottomLabelsPerRoll) || Number(vals.labelsPerRoll) || 0;

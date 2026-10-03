@@ -27,9 +27,9 @@ export type FrontlineNeedRow = {
 
 /**
  * One presentation model for every Frontline operator surface.
- * A configured item with positive demand is always retained. Batches are used
- * only when the calculation has an effective batch weight; otherwise pounds
- * are the honest fallback.
+ * A configured item is always retained. Batches are used only when the
+ * calculation has an effective batch weight; otherwise pounds are the honest
+ * fallback.
  */
 export function deriveFrontlineNeedRows(
   v: FormValues,
@@ -74,7 +74,7 @@ export function deriveFrontlineNeedRows(
     const typeText = typeof type === "string" ? type.trim() : "";
     const lbs = q[`${station}Lbs${suffix}` as keyof FrontlineQuantitySource] as number;
     const batches = q[`${station}Batches${suffix}` as keyof FrontlineQuantitySource] as number;
-    if (!typeText || !(lbs > 0)) return;
+    if (!typeText) return;
     rows.push({
       key: `${station}${suffix.toLowerCase()}`,
       station,

@@ -53,7 +53,10 @@ export const usersTable = pgTable(
       .notNull()
       .default({}),
     sandbox: boolean("sandbox").notNull().default(false),
+    disabled: boolean("disabled").notNull().default(false),
+    disabledAt: timestamp("disabled_at", { withTimezone: true }),
     passwordChangedAt: timestamp("password_changed_at", { withTimezone: true }),
+    sessionRevokedAt: timestamp("session_revoked_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
