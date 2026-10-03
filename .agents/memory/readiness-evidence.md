@@ -24,6 +24,17 @@ report to declare the retained readiness path.
 
 ## Publishing identity discovery
 
+Prefer immutable, build-time source records for automatic version reporting,
+compared with an independently prepared expected record.
+
+**Why:** The owner approved automatic reporting after repeated manual publishing
+lookups; GitHub is only a backup and cannot identify the active published source.
+
+**How to apply:** Capture the actual build inputs and read the sealed artifact
+identity, not a later workspace HEAD or mutable environment label. Keep existing
+controlled handoff and release gates; a source match is not a production GO.
+Do not retroactively assign this identity to an older build.
+
 For this project's release handoffs, look for identity automatically before
 asking the user to transcribe it. GitHub is a backup, not the publish source;
 local Git version identifiers do not require a matching GitHub backup tip.
