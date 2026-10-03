@@ -1,7 +1,24 @@
 ---
 name: GitHub Git push authentication
-description: The distinction between the authorized GitHub API integration and authenticated Git protocol pushes from the workspace.
+description: GitHub is a project backup, not the publishing source; API authorization and Git push authentication remain separate.
 ---
+
+## GitHub's project role
+
+GitHub is a backup location for this project, not the source of the live publish.
+A local Git commit can identify a source version without being pushed to GitHub.
+
+**Why:** The owner explicitly clarified, “Its a backup location for you,” after
+release identity discovery incorrectly emphasized GitHub branch revisions.
+
+**How to apply:** Read accessible local version identifiers automatically and
+verify their relationship to the intended published build separately. Do not
+require a backup push or treat a stale GitHub branch as a release blocker. Use
+remote verification for requested backup pushes or explicitly applicable GitHub
+CI evidence, not as a substitute for published identity. This distinction does
+not waive existing source-version or deployment-binding release checks.
+
+## Git push authentication
 
 The installed GitHub API connection can read and modify GitHub REST resources, but it does not make the local shell's HTTPS `git push` authenticated and cannot update a ref to a commit whose Git objects have not been uploaded. Workspace Git pushes need a secure push credential, supplied as an authenticated repository URL or assembled from a token only within the pushing process.
 

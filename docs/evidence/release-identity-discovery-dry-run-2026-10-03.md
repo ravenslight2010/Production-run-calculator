@@ -28,8 +28,14 @@ not automatically retrieved or verified current deployment identity.
 
 **Git discovery works. Complete automatic published identity discovery remains
 incomplete with the exposed sources tested here.** None of the observed sources
-proves which GitHub commit the intended live publish contains. In particular, the
-workspace revision differs from both remotely verified branch tips.
+proves which local source revision the intended live publish contains.
+
+The owner subsequently clarified that GitHub is a backup location, not the
+publishing source. The GitHub branch lookups above are therefore informational
+backup diagnostics, not release prerequisites. A stale or different backup tip
+is not a release blocker, and no GitHub push is needed merely to obtain the local
+Git version identifier. The unresolved requirement is binding the intended
+published build to the source version under test, independently of GitHub.
 
 The app's operational-report implementation can report runtime identity to
 authorized reviewers, but classifies it as unverified rather than a controlled

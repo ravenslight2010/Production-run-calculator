@@ -25,7 +25,10 @@ report to declare the retained readiness path.
 ## Publishing identity discovery
 
 For this project's release handoffs, look for identity automatically before
-asking the user to transcribe it. The user identified the source as **Publishing
+asking the user to transcribe it. GitHub is a backup, not the publish source;
+local Git version identifiers do not require a matching GitHub backup tip.
+See [GitHub's project role](github-git-push.md) for that scope boundary.
+The user identified the source as **Publishing
 → Logs → select the successful publish**, with `Deployment:` and `Build:` lines
 near the beginning of the build log.
 
