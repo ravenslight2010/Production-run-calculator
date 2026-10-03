@@ -217,6 +217,38 @@ wider `main` check was **not** adopted, since this app's AI layer is
 Gemini-only and widening `isGeminiProviderConfigured()` would also stop the
 Gemini client from throwing on a missing Gemini key.
 
+**Follow-up fix shipped with the port:** `artifacts/api-server/src/lib/
+geminiAdapter.test.ts` mocks `@google/genai` with a hand-written factory that
+exported only `GoogleGenAI`. Restoring `thinkingConfig` made `buildConfig`
+read `ThinkingLevel.LOW`, so the mock's missing export made the read throw a
+plain `Error` — which failed all 10 resilience tests, and (because Vitest
+attributes unhandled rejections to whichever file is running) cascaded into 93
+apparently-failing test files. Fixed by adding `ThinkingLevel` to the mock,
+mirroring the SDK's string-valued enum (`LOW: "LOW"` etc.) rather than stubbing
+a bare object, so the test still asserts against the value actually sent on the
+wire.
+
+**Verification (2026-10-03, ARM box, Node 22.23.1):** `CI=true pnpm run
+typecheck` exits 0 across all five packages. `pnpm --filter @workspace/api-server
+test` — **651 passed, 0 failed**; the 93 failed *files* are all Postgres-backed
+integration suites aborting at import with `DATABASE_URL must be set`, which is
+the expected shape of this box, not a regression. `pnpm --filter
+@workspace/run-calculator exec vitest run src/lib/geminiAdapter.test.ts
+src/routes/health.test.ts` — 21/21.
+
+**Environmental, NOT caused by this port (all reproduce independently):**
+- `lib/corpus-harness` manifest test fails because the committed snapshot pins
+  `node: "24.20.0"` while this box runs **22.23.1**; `package.json` requires
+  `>=24` and no nvm is installed here. Only the `node` field differs — the
+  `pnpmLockSha256` fingerprint matches. Do **not** rebind the manifest to
+  Node 22; that would break the Node 24 CI job.
+- `lib/merge-suggest` `nearDupSuggestions.test.ts` misses its 5000 ms
+  wall-clock budget (~5330 ms), reproducing on the pre-update baseline.
+- `run-calculator` `foregroundSyncWakeGuard` / `useHomeSyncCoordination` day
+  -rollover tests expect `today=2026-09-15` after a simulated midnight wake and
+  get `2026-09-14` under `Etc/UTC`. Neither test imports `App.tsx` or
+  `specImport.ts`, so neither can be affected by this port.
+
 ## 2026-09-14 — Add metadata-only ZIP upload inventory
 
 **File(s):** `scripts/zip_asset_inventory.py`, `scripts/test_zip_asset_inventory.py`, `scripts/package.json`

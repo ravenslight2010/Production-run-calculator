@@ -3,9 +3,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const generateContent = vi.fn();
 const generateContentStream = vi.fn();
 
+// Mirrors the SDK's string-valued ThinkingLevel enum. The adapter reads
+// ThinkingLevel.LOW when building its config, so the mock must supply it or
+// every request fails on an undefined property read instead of on the
+// resilience behaviour these tests actually cover.
 vi.mock("@google/genai", () => ({
   GoogleGenAI: class {
     models = { generateContent, generateContentStream };
+  },
+  ThinkingLevel: {
+    THINKING_LEVEL_UNSPECIFIED: "THINKING_LEVEL_UNSPECIFIED",
+    MINIMAL: "MINIMAL",
+    LOW: "LOW",
+    MEDIUM: "MEDIUM",
+    HIGH: "HIGH",
   },
 }));
 
