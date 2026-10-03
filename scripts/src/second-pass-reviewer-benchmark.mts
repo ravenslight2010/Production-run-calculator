@@ -275,6 +275,14 @@ function repositoryRoot() {
   throw new Error("repository root not found");
 }
 
+/**
+ * Build a benchmark report from retained reconciliation data and provider
+ * observations under root (the repository root by default), without making
+ * provider calls or writing the report. Includes a validated evaluation manifest
+ * with source/observation hashes, reporter and lockfile hashes, and the Node major.
+ * Throws for mismatched source hashes, a missing model, or invalid evidence;
+ * repository lookup, file-read, JSON-parse, and manifest validation errors propagate.
+ */
 export function buildReviewerBenchmark(root = repositoryRoot()) {
   const sourcePath = path.join(
     root,

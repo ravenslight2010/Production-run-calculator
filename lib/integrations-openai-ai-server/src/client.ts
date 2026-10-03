@@ -137,6 +137,11 @@ function toGemini(messages: ChatMessage[]): {
   };
 }
 
+/**
+ * Map chat options to Gemini generation settings with low thinking effort.
+ * Pass through the optional cancellation signal, system instruction, JSON mode,
+ * and completion-token limit; unspecified options retain provider defaults.
+ */
 function buildConfig(
   params: CreateParamsBase,
   systemInstruction?: string,
@@ -181,9 +186,12 @@ function abortable<T>(promise: Promise<T>, options?: CreateRequestOptions): Prom
   });
 }
 
-// One signal for the whole model chain: the caller's cancellation plus the
-// adapter's timeout deadline, handed to the SDK so an abandoned import stops
-// the provider request instead of leaving it running.
+/**
+ * Combine caller cancellation and a timeout in milliseconds into one signal
+ * for the model chain. An omitted or zero timeout adds no deadline; without
+ * either option, the signal is undefined. Dispose removes the listener and
+ * clears the timer without aborting the signal.
+ */
 function requestSignal(options?: CreateRequestOptions): {
   signal: AbortSignal | undefined;
   dispose: () => void;
@@ -205,9 +213,7 @@ function requestSignal(options?: CreateRequestOptions): {
   };
 }
 
-// A blocked prompt (safety filter) is a definitive answer, not a transient
-// failure: surface the empty result on the first model instead of re-asking
-// the same prompt against every fallback.
+/** Identify a prompt block reason or any candidate with a SAFETY finish reason. */
 function isBlockedResponse(response: {
   promptFeedback?: { blockReason?: string | null } | null;
   candidates?: Array<{ finishReason?: string | null } | null> | null;
@@ -216,11 +222,11 @@ function isBlockedResponse(response: {
   return (response.candidates ?? []).some((candidate) => candidate?.finishReason === "SAFETY");
 }
 
-// Only provider-side transients earn a second model: quota 429, capacity
-// 500/502/503/504, and a 404 for a model this key can no longer serve (the
-// shape a retirement takes on the direct Gemini API). Cancellation, timeouts,
-// and 400/401/403 credential-or-request errors are deterministic — another
-// model cannot fix them, so they rethrow on the first attempt.
+/**
+ * Allow fallback for status 404, 429, 500, 502, 503, or 504, or recognized
+ * capacity/quota/model-availability messages even without a matching status.
+ * AbortError and the adapter's timeout/cancellation messages always disallow it.
+ */
 function isFallbackWorthyError(err: unknown): boolean {
   const candidate = err as { status?: unknown; name?: unknown; message?: unknown } | null;
   if (candidate?.name === "AbortError") return false;
@@ -239,6 +245,18 @@ function isFallbackWorthyError(err: unknown): boolean {
   );
 }
 
+/**
+ * Request a completion from the primary model, then eligible fallbacks.
+ * Non-streaming calls retry blank content, return null content for safety
+ * blocks without retrying, and report the model that served the response.
+ * Streaming calls yield text deltas (or null); only stream setup can fall back,
+ * while errors during iteration propagate to the consumer.
+ *
+ * options.signal cancels the request; options.timeoutMs is in milliseconds.
+ * The combined signal remains active until the call or stream iteration ends.
+ * Missing credentials, non-retryable errors, and cancellation/timeout errors
+ * propagate. Exhausting the chain throws the last provider or empty-content error.
+ */
 async function create(params: CreateParamsStream, options?: CreateRequestOptions): Promise<AsyncIterable<ChatChunk>>;
 async function create(params: CreateParamsSync, options?: CreateRequestOptions): Promise<ChatResponse>;
 async function create(

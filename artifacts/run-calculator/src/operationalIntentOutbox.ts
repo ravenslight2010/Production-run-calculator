@@ -463,6 +463,14 @@ function scheduleNextFlush(): void {
     void flushOperationalIntentOutbox();
   }, Math.max(0, next - Date.now()));
 }
+/**
+ * Deliver due pending/sending intents for the active owner under a storage lease,
+ * using senderId to identify this sender to the server. Offline intents are marked
+ * for later replay; an unavailable lease leaves delivery to another flush.
+ * Persist server outcomes and retryable failures, then schedule the next retry.
+ * Canonical adoption errors are swallowed so a received outcome can terminalize;
+ * network failures become pending retries with backoff.
+ */
 async function flushWithStorageLock(senderId: string): Promise<void> {
     if (typeof window === "undefined" || !activeOwner) return;
     if (!navigator.onLine) {

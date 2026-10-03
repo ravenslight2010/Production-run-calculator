@@ -321,9 +321,13 @@ async function executeCache<T>(opts: {
 
 /**
  * Read a validated result, or load/store one on a miss. Calls for the same
- * scope/operation/fingerprint share one promise in this process. Provider
+ * scope and key share one promise in this process; the key must distinguish
+ * operations (the operation label itself is only used for logging). Provider
  * failures propagate so the caller's existing error/fallback contract remains
- * authoritative and no failure is persisted.
+ * authoritative and no failure is persisted. Cache storage failures are
+ * bypassed; ttlMs controls entry lifetime in milliseconds (default 15 minutes).
+ * A load result with cacheable: false is returned without being stored.
+ * hit indicates a stored result, not whether this call joined another loader.
  */
 export async function getOrCreateAiResult<T>(opts: {
   operation: string;

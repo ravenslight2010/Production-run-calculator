@@ -215,6 +215,12 @@ export const SNAPSHOT_BUILDERS = {
 } as const;
 export type SnapshotName = keyof typeof SNAPSHOT_BUILDERS;
 
+/**
+ * Evaluate retained workbooks and return a validated manifest with source,
+ * evaluator, snapshot, and lockfile hashes plus the current Node major.
+ * Threshold failures are recorded in the outcome; file, parser, and manifest
+ * validation errors propagate. Does not call a provider or write snapshots.
+ */
 export function buildCorpusEvaluationManifest(): EvaluationManifest {
   const files = (["specs", "dough", "sauce", "cheese", "premix", "shipping", "schedule"] as CorpusKind[])
     .flatMap((kind) => corpusFiles(kind).map((file) => ({ kind, file })))
