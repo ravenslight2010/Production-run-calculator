@@ -53,3 +53,26 @@ its full Git revision, with the required validity window.
 - A first sandbox HTTP attempt failed because `AbortSignal` was unavailable.
   The replacement Python HTTP probes used explicit 15-second timeouts and
   completed successfully.
+
+## Additional user-supplied publishing screenshots
+
+The subsequent screenshots distinguish the Overview **Current status** log icon
+from **Publish history** entries. Current status says the app was published the
+previous day; the newer selected build log starts at
+`2026-10-02T22:59:08Z`, unlike the earlier September 24 build log.
+
+The newer screenshot visibly reports:
+
+- Deployment ID: `411f3a0b-be0f-499a-9b85-b35deec43e5d`.
+- Build ID: `fa253ab8-7481-41c5-a2fe-b3fcf283b123`.
+
+The Deployment ID matches the older screenshot while the Build ID differs.
+Therefore, the Deployment ID alone cannot distinguish these two builds.
+These are manually supplied screenshot observations, not automatic extraction
+from the deployment service or independent confirmation of the active build.
+Neither screenshot provides a full deployed Git revision.
+
+A follow-up identity-only log query for `2026-10-02T22:58:00Z` through
+`2026-10-02T23:05:00Z` returned no matching logs. The published IDs are now known
+from the user-provided images, but automated retrieval and the controlled
+build-to-Git-revision binding remain unproven.

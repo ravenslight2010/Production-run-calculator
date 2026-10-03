@@ -45,6 +45,20 @@ does not establish current identity. If exposed tools cannot retrieve the build
 log, report that access limitation accurately; do not claim the information is
 absent from Replit or that automatic capture has been implemented.
 
+Prefer the **Tools → Publishing → Overview → Current status → log icon**
+source illustrated by the user when identifying the live build. Distinguish it
+from older **Publish history** entries.
+
+**Why:** The user's newer and older publishing screenshots showed the same
+Deployment ID but different Build IDs and build dates. A deployment UUID alone
+does not distinguish those builds, and an older history entry can supply the
+wrong build for a live release check.
+
+**How to apply:** Check the selected log's date against Current status; preserve
+deployment and build identities separately, then establish the controlled Git
+revision mapping. Screenshot-supplied IDs are manual observations, not proof that
+automatic retrieval works or that the build matches a guessed Git branch tip.
+
 ### Bounded HTTP probes in the execution sandbox
 
 Do not assume the impure execution sandbox exposes the browser `AbortSignal`
