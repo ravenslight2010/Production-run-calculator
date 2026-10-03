@@ -3,6 +3,52 @@ name: Codex fixes log
 description: Running log of every fix Codex has made. Check this BEFORE making changes to avoid duplicate work.
 ---
 
+## 2026-10-03 — Corpus manifest lockfile fingerprint: record pnpm 12 @pnpm/exe and rebind
+
+**File(s):** `pnpm-lock.yaml`, `lib/corpus-harness/snapshots/evaluation-manifest.json`
+
+**Problem:** `pnpm run typecheck` and every other pnpm invocation mutated
+`pnpm-lock.yaml` on this branch, adding the bare `@pnpm/exe@12.6.0` entry that
+pnpm 12 self-provisions. The lockfile carried the platform-specific
+`@pnpm/exe.*` entries but not the parent package, so the committed file was not
+the state pnpm actually produces — the churn was deterministic and purely
+additive (25 lines), just not committed.
+
+That matters beyond tidiness. `lib/corpus-harness/src/index.ts` hashes
+`pnpm-lock.yaml` into the deterministic evaluation manifest and asserts exact
+equality, so `pnpm --filter @workspace/corpus-harness test` failed: the manifest
+recorded `006622ea…` while the workspace lockfile hashed to `08840419…`. This
+was already recorded as a stale-manifest mismatch in
+`release-evidence-task2593-standard-clean/release-speed-analysis.md`, and it
+predates this branch — the same mismatch exists on `origin/Replit` and at the
+merge base, so this was not introduced by the Replit merge.
+
+**Fix:** Committed the lockfile pnpm actually produces (the 25-line
+`@pnpm/exe@12.6.0` addition), then regenerated the corpus snapshots so the
+manifest records `d63d1a58…`, the new lockfile fingerprint. The evaluator hash
+also updates because it covers the manifest's own dependency block.
+
+A manifest-only fix is not possible: any pnpm command mutates the lockfile
+before the manifest reads it, so the manifest can never bind the committed
+lockfile while running under pnpm. Lockfile and manifest must move together.
+
+**Why it was needed:** The corpus snapshot test is a required gate, and the
+mismatch is indistinguishable from real corpus drift unless both hashes are
+compared. Committing the pnpm-produced lockfile also stops the recurring
+`git status` churn that this box reports after every pnpm command.
+
+**Verification:** `pnpm --filter @workspace/corpus-harness test` passes 12/12 —
+including through a real `pnpm` invocation, which previously left the lockfile
+dirty. `CI=true pnpm run typecheck` exits 0 with all five packages `Done` and
+leaves the tree clean. `pnpm install --frozen-lockfile` still passes the
+supply-chain policy gate, and the lockfile is now idempotent under pnpm.
+
+**Scope note:** this rebinds the fingerprint only. It does not re-verify the
+corpus snapshots themselves — those files were unchanged by the regeneration
+(only `evaluation-manifest.json` changed, 2 lines), confirming no importer
+drift. Any importer change still requires a deliberate review of the snapshot
+diff per `lib/corpus-harness/src/regen.mts`.
+
 ## 2026-10-03 — ARM host: add local toolchain memory (extends existing x64-binary note)
 
 **File(s):** `.agents/memory/local-arm64-toolchain.md`, `.agents/memory/MEMORY.md`, `.agents/memory/codex-fixes.md`
