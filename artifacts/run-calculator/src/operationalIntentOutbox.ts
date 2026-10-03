@@ -463,6 +463,14 @@ function scheduleNextFlush(): void {
     void flushOperationalIntentOutbox();
   }, Math.max(0, next - Date.now()));
 }
+/**
+ * Deliver due intents for the active owner in effective-time order while holding
+ * a renewable storage lock. senderId identifies the sending device on requests.
+ * Offline calls mark queued intents for replay; no browser, owner, or available
+ * lock means no delivery. Persist server outcomes and schedule transient failures
+ * for retry, including network errors and delivery timeouts. Errors from the
+ * canonical adopter are swallowed so the server outcome can still be recorded.
+ */
 async function flushWithStorageLock(senderId: string): Promise<void> {
     if (typeof window === "undefined" || !activeOwner) return;
     if (!navigator.onLine) {

@@ -16,6 +16,7 @@ const DEFAULT_FULL_MODEL = "gemini-3.8-flash";
 const DEFAULT_CHEAP_MODEL = "gemini-3.8-flash";
 const DEFAULT_MODEL_FALLBACKS = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"] as const;
 
+/** Read a trimmed environment override, using the fallback when absent or blank. */
 function modelFromEnv(name: string, fallback: string): string {
   const value = process.env[name]?.trim();
   return value ? value : fallback;
@@ -32,8 +33,11 @@ export function pickModel(kind: ModelKind = "full"): string {
   return AI_MODELS[kind];
 }
 
-// Ordered fallback chain for provider failures (quota, capacity 503s, retired
-// models). Configurable via AI_MODEL_FALLBACKS; the primary is never repeated.
+/**
+ * Read AI_MODEL_FALLBACKS on each call as a comma-separated, ordered model list.
+ * An absent or blank override uses the defaults; empty entries are discarded,
+ * so a comma-only override disables fallbacks. Duplicate names are preserved.
+ */
 export function aiModelFallbacks(): readonly string[] {
   const env = process.env.AI_MODEL_FALLBACKS?.trim();
   if (env) {
@@ -42,8 +46,10 @@ export function aiModelFallbacks(): readonly string[] {
   return DEFAULT_MODEL_FALLBACKS;
 }
 
-// The full ordered model chain for a single call: primary first, then each
-// fallback (deduped against the primary so a degraded model isn't retried).
+/**
+ * Return the primary followed by configured fallbacks, excluding exact matches
+ * for the primary. Repeated names among the remaining fallbacks are preserved.
+ */
 export function modelChain(primary: string): readonly string[] {
   return [primary, ...aiModelFallbacks().filter((model) => model !== primary)];
 }

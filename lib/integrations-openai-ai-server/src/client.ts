@@ -137,6 +137,11 @@ function toGemini(messages: ChatMessage[]): {
   };
 }
 
+/**
+ * Map completion options to Gemini settings with low thinking effort.
+ * The token limit includes thinking tokens; JSON mode requests JSON output
+ * without validating it. Pass the supplied abort signal through to the SDK.
+ */
 function buildConfig(
   params: CreateParamsBase,
   systemInstruction?: string,
@@ -181,9 +186,12 @@ function abortable<T>(promise: Promise<T>, options?: CreateRequestOptions): Prom
   });
 }
 
-// One signal for the whole model chain: the caller's cancellation plus the
-// adapter's timeout deadline, handed to the SDK so an abandoned import stops
-// the provider request instead of leaving it running.
+/**
+ * Combine caller cancellation and a timeout in milliseconds into one signal
+ * for the model chain. A missing or zero timeout adds no deadline. Return no
+ * signal when neither option is active. Call dispose to remove the listener
+ * and timer; disposal does not abort the request.
+ */
 function requestSignal(options?: CreateRequestOptions): {
   signal: AbortSignal | undefined;
   dispose: () => void;
@@ -205,9 +213,7 @@ function requestSignal(options?: CreateRequestOptions): {
   };
 }
 
-// A blocked prompt (safety filter) is a definitive answer, not a transient
-// failure: surface the empty result on the first model instead of re-asking
-// the same prompt against every fallback.
+/** Detect a nonempty prompt block reason or any candidate's SAFETY finish reason. */
 function isBlockedResponse(response: {
   promptFeedback?: { blockReason?: string | null } | null;
   candidates?: Array<{ finishReason?: string | null } | null> | null;
@@ -216,11 +222,11 @@ function isBlockedResponse(response: {
   return (response.candidates ?? []).some((candidate) => candidate?.finishReason === "SAFETY");
 }
 
-// Only provider-side transients earn a second model: quota 429, capacity
-// 500/502/503/504, and a 404 for a model this key can no longer serve (the
-// shape a retirement takes on the direct Gemini API). Cancellation, timeouts,
-// and 400/401/403 credential-or-request errors are deterministic — another
-// model cannot fix them, so they rethrow on the first attempt.
+/**
+ * Recognize fallback eligibility from status 404/429/500/502/503/504 or known
+ * provider error messages. AbortError and the adapter's timeout/cancellation
+ * messages always return false, even if they also contain a retryable status.
+ */
 function isFallbackWorthyError(err: unknown): boolean {
   const candidate = err as { status?: unknown; name?: unknown; message?: unknown } | null;
   if (candidate?.name === "AbortError") return false;
@@ -239,7 +245,27 @@ function isFallbackWorthyError(err: unknown): boolean {
   );
 }
 
+/**
+ * Open a Gemini stream, trying configured fallbacks on eligible setup errors.
+ * Yield text deltas, using null when a chunk has no text. Iteration errors
+ * propagate without switching models. Cancellation and the timeout in
+ * milliseconds are passed to the SDK until iteration ends. Signal resources
+ * are released when iteration exits.
+ *
+ * Reject on missing credentials, non-fallback errors, or the last setup error
+ * when the chain is exhausted, including cancellation and timeout failures.
+ */
 async function create(params: CreateParamsStream, options?: CreateRequestOptions): Promise<AsyncIterable<ChatChunk>>;
+/**
+ * Request a completion, trying configured fallbacks on eligible provider errors
+ * or blank text. Return content and the model used; a blocked response returns
+ * null content immediately. JSON mode does not parse or validate the text.
+ *
+ * options.signal cancels the request; options.timeoutMs is in milliseconds.
+ * Reject on missing credentials or non-fallback errors, including cancellation
+ * and timeout failures. If all models fail, throw the last provider error or
+ * the generated empty-content error.
+ */
 async function create(params: CreateParamsSync, options?: CreateRequestOptions): Promise<ChatResponse>;
 async function create(
   params: CreateParamsBase & { stream?: boolean },
