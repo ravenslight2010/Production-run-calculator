@@ -152,3 +152,4 @@
 - [Task-platform evidence limits](task-platform-evidence-limits.md) — verify task assignment and generated dependencies from live records, not policy wording.
 - [Apply-source retention](apply-source-evidence-retention.md) — exact parser text belongs with its authorized live Apply, not reusable snapshots; retention still needs a policy.
 - [PostgreSQL cursor precision](queue-history-cursor-precision.md) — preserve database timestamp precision or use a stable key so keyset cursors cannot skip rows at millisecond boundaries.
+- [Local ARM64 toolchain](local-arm64-toolchain.md) — extends the lockfile x64-binary note with `shellcheck` as a hard prerequisite, why the system Node must not be replaced, and the oxide install asymmetry.
