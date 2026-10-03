@@ -3,6 +3,62 @@ name: Codex fixes log
 description: Running log of every fix Codex has made. Check this BEFORE making changes to avoid duplicate work.
 ---
 
+## 2026-10-03 — Dependency refresh within declared ranges; declare api-spec typedoc peers
+
+**File(s):** `package.json`, `pnpm-workspace.yaml`, `pnpm-lock.yaml`,
+`artifacts/api-server/package.json`, `artifacts/mockup-sandbox/package.json`,
+`artifacts/run-calculator/package.json`, `lib/db/package.json`,
+`lib/integrations-openai-ai-server/package.json`, `scripts/package.json`,
+`lib/api-spec/package.json`,
+`lib/corpus-harness/snapshots/evaluation-manifest.json`
+
+**Problem:** 22 workspace dependencies were behind their declared ranges. A
+separate latent defect surfaced while refreshing them: `lib/api-spec`
+(`check:toolchain.mjs`) resolves `typedoc` and `typedoc-plugin-markdown` through
+`orval`, but declares neither. `typedoc-plugin-coverage` has a **non-optional**
+peer on `typedoc@0.28.x`, so `pnpm peers check` already reported
+"missing peer typedoc" before this change — the old resolution only worked by
+accident of hoisting.
+
+**Fix:** `pnpm update -r` for within-range bumps, then declared the two undeclared
+packages explicitly at the versions already resolved (`typedoc@0.28.20`,
+`typedoc-plugin-markdown@4.13.0`), matching the exact-pin convention in that
+package. Regenerated the corpus evaluation manifest to rebind its lockfile
+fingerprint, per #89's finding that the manifest and lockfile must move together.
+
+**Why it was needed:** Hygiene, per the standing `chore/dep-updates` precedent —
+stay on patched releases and reduce future audit noise. The typedoc declaration
+is the actual root-cause fix: without it the toolchain check resolves only while
+hoisting happens to cooperate, and any peer-graph change breaks
+`check:toolchain` with a misleading "Cannot find module 'typedoc'".
+
+**Bumps:** `@google/genai` 2.25.0→2.26.0, `@tanstack/react-query` 5.102.8→5.104.0,
+`@types/node` 26.5.1→26.6.4, `framer-motion` 13.2.0→13.5.0, `jsdom` 30.0.1→30.1.1,
+`lucide-react` 1.45.0→1.49.0, `openai` 7.25.0→7.27.0, `pg` 8.23.0→8.23.1,
+`prettier` 3.9.6→3.9.9, `react-day-picker` 10.0.1→10.0.2,
+`react-hook-form` 7.88.0→7.89.0, `react-resizable-panels` 4.12.4→4.14.1,
+`tailwind-merge` 3.6.0→3.7.0, `wouter` 3.11.0→3.13.0, `@testing-library/dom`
+10.4.1→10.4.2, `tsx` 4.23.13→4.23.15, `vite` 8.3.0→8.3.2, `vitest` 5.0.0→5.0.3.
+
+**Deliberately not taken:** `typescript` 6.0.3→7.0.2 is the only major in
+`pnpm outdated`, and it stays blocked — `codex-fixes.md` records a TS7 resolution
+bug and lists TS7 among majors needing dedicated migration work. No other major
+was available.
+
+**Verification:** `CI=true pnpm run typecheck` exits 0 with all five packages
+`Done`. `pnpm --filter @workspace/corpus-harness test` passes 12/12.
+`check:toolchain` passes and `pnpm peers check` now reports **no issues**, closing
+the pre-existing warning. The lockfile and the corpus manifest fingerprint agree.
+
+**Not verified / environmental:** `lib/merge-suggest` `nearDupSuggestions.test.ts`
+fails its 5000 ms wall-clock budget on this box (measured ~5330 ms updated,
+~5060 ms on the **pre-update baseline**). It is a timing assertion, not an
+assertion of behaviour, `lib/merge-suggest` has **zero** changed files in this
+commit, and the baseline reproduces the failure — so this is the known
+`libproot` emulation cost, not a regression. Full web suite, Postgres-backed API
+integration tests, and Playwright e2e remain CI-only here, consistent with
+`local-arm64-toolchain.md`.
+
 ## 2026-10-03 — Corpus manifest lockfile fingerprint: record pnpm 12 @pnpm/exe and rebind
 
 **File(s):** `pnpm-lock.yaml`, `lib/corpus-harness/snapshots/evaluation-manifest.json`

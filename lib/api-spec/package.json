@@ -13,7 +13,9 @@
   },
   "devDependencies": {
     "orval": "8.39.0",
+    "typedoc": "0.28.20",
     "typedoc-plugin-coverage": "4.0.3",
+    "typedoc-plugin-markdown": "4.13.0",
     "typescript": "6.0.3"
   }
 }
