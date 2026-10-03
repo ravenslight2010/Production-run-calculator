@@ -1,6 +1,6 @@
 # Verified review defects — development verification
 
-Captured through 2026-10-03T22:07:32Z against base revision
+Initial scoped capture completed at 2026-10-03T22:07:32Z against base revision
 `6a74526efac3119f5d21021b45617b70b3e8ba9b` plus the working-tree changes
 described here. This is development/disposable-fixture evidence, not production
 repair or release approval. No raw workbook, recipe, credential, authenticated
@@ -66,7 +66,7 @@ development database or production database.
 | Initial root typecheck reported the fixture type errors | CLOSED: final complete root typecheck passes |
 | Corpus manifest identity mismatch | CLOSED: reviewed and refreshed measured evaluator/lockfile hashes; semantic corpus checks pass |
 | Guard overlooked the shared version constant | CLOSED: compatible extraction and fail-closed behavior covered by isolated Git regression cases and the actual working-tree check |
-| Task-board completion | BLOCKED: the live task record remains MAIN_PENDING with no dependencies, and completion was rejected because no main task is active. The implemented changes and checks are finished; task activation is still required before formal completion can be recorded |
+| Task-board activation | CLOSED: the initial completion request was rejected while the record was MAIN_PENDING; the platform subsequently assigned the existing task as MAIN_IN_PROGRESS. Formal completion can now be submitted without rebuilding or repeating valid checks |
 
 ## Compatibility applicability
 
@@ -100,3 +100,45 @@ These are a nonblocking, explicitly excluded production-diagnosis observation:
 no production root cause was investigated and this development verification
 does not claim those failures are fixed. Full release gates and production
 readiness were not assessed; this is not a recommendation to publish.
+
+## Separately proposed follow-ups
+
+The assigned-task closing flow proposed two independent, out-of-scope outcomes:
+advisory plausibility review for extreme per-pizza amounts and a bounded
+published-background-job database investigation. Neither proposal authorizes
+execution, production mutation, or publishing; neither overlaps the active
+package-refresh, Apply-source, retention, or QLoRA tasks.
+
+Both proposals were read back as PROPOSED, with parent/category metadata intact.
+Their stored dependency sets were then updated and verified to include the
+current unfinished tasks #2648, #2650, #2651, #2652, #2653, #2654, #2655, #2656,
+#2659, and this parent #2660. They therefore cannot start merely because this
+parent completes. The proposal interface initially supplied only the parent
+dependency; this later update is not proof of an atomic creation-time snapshot
+or automatic acceptance-order enforcement. Earlier unapproved siblings were not
+treated as accepted blockers. Recheck acceptance-order constraints before
+accepting either suggestion.
+
+## Subsequent completion-validation attempt
+
+Formal completion was attempted after assignment. The platform launched the API
+suite, full browser suite, standard/full release gates, audit, typecheck, and
+other checks concurrently. Validation failed; the task is **not marked complete**.
+The scoped passing results above are not a claim that this broader run passed.
+
+| Observation | Current result and next action |
+| --- | --- |
+| Guard shell fixture failed from the scripts workspace | CLOSED: the isolated browser runner now resolves its repository from its own script path, not the caller's working directory. The existing fake-executable regression also runs from an unrelated temporary directory. Serial complete model/parse guard command and ShellCheck PASS |
+| Typecheck and operational-policy checks could not spawn processes | CLOSED: both commands PASS when rerun serially after stopping the failed broad run |
+| Production dependency audit initially aborted | FAIL: the serial audit runs but reports high-severity GHSA-vfj7-8cjw-p6xm in `braces` through API `http-proxy-middleware` → `micromatch`; it reports no patched version. No waiver, suppression, dependency swap, or security-pass claim was made. A supported remediation or explicit security-owner decision is still required |
+| Broad API suite | FAIL: the run reported production-sandbox and cross-process sync failures and did not finish successfully. Concurrent resource pressure prevents treating this as clean regression evidence; no independent baseline was established. Diagnose/recheck affected failures serially rather than assuming they are pre-existing or all environmental |
+| Full browser suite | FAIL: deliberately stopped after the broader run had already failed. Its output records 54 passed, 1 interrupted, and 115 not run; the retained passing duration report was not replaced. This is not a full Chromium or authenticated changed-flow pass |
+| Standard/full release commands | BLOCKED for a valid retry: published-deployment identity and revision prerequisites were not supplied. The concurrent attempts failed, including a resource abort and an explicit missing-identity rejection. Do not invent identity or widen this task into production verification without authorization |
+| Retained release evidence verification | FAIL: an incomplete release checkpoint is not retained passing evidence; the checker left the retained report unchanged. This bug-fix report does not repair or supersede release evidence |
+| Formal task completion | BLOCKED: completion validation did not pass. No automatic validation bypass was used |
+
+The bounded runner correction adds no package, credential, schema, production
+operation, or application UI behavior. It keeps the existing isolated-database
+and process-group cleanup safeguards. Remaining security/API validation blockers
+and production-bound release prerequisites are reported explicitly, not converted
+to passes by the earlier targeted results.

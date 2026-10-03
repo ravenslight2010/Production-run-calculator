@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
+readonly SCRIPT_DIR REPO_ROOT
+cd "$REPO_ROOT"
+
 PLAYWRIGHT_CONFIG="${BROWSER_TEST_PLAYWRIGHT_CONFIG:-playwright.config.ts}"
 declare -a playwright_args=()
 while (($#)); do

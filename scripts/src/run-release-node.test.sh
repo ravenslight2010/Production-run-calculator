@@ -530,7 +530,12 @@ run_isolated_browser_case() {
 test_isolated_browser_status_and_database_cleanup() {
   run_isolated_browser_case 0 0
   run_isolated_browser_case 37 37
+  (
+    cd "$TEST_ROOT"
+    run_isolated_browser_case 0 0
+  )
   echo "PASS: isolated browser runner preserves Playwright status and cleans its disposable database"
+  echo "PASS: isolated browser runner resolves its workspace independently of the caller directory"
 }
 
 test_isolated_browser_interrupt_cleans_database() {
