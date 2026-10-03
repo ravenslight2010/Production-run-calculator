@@ -16,7 +16,7 @@ import {
 // POST /api/sync/purge-all which, in one server transaction, wipes ALL shared
 // data (day-state, profiles, recipes, mixes, ingredients, inventory, saved
 // import sheets, learned aliases, AI memory, incidents, rules, templates,
-// settings) while keeping every user account and role. The server bumps the
+// settings) while keeping QC history and every user account and role. The server bumps the
 // reset epoch and broadcasts it, so every open device wipes its local copy and
 // reloads automatically — including this one.
 export default function FactoryResetCard() {
@@ -60,9 +60,9 @@ export default function FactoryResetCard() {
       </CardHeader>
       <CardContent className="space-y-2">
         <p className="text-xs text-muted-foreground">
-          Erase ALL factory data — runs, schedules, profiles, recipes, mixes,
+          Erase factory setup and production data — runs, schedules, profiles, recipes, mixes,
           ingredients, inventory, imported sheets, AI memory, and incidents —
-          for a completely fresh start. Staff accounts, roles, and passwords
+          for a fresh start. Confirmed QC history, staff accounts, roles, and passwords
           are kept. Every signed-in device is wiped and reloaded automatically.
           This cannot be undone.
         </p>
@@ -77,18 +77,18 @@ export default function FactoryResetCard() {
           }}
           data-testid="button-factory-reset"
         >
-          <Trash2 className="h-4 w-4 mr-1.5" /> Erase all data…
+          <Trash2 className="h-4 w-4 mr-1.5" /> Erase factory data…
         </Button>
       </CardContent>
 
       <Dialog open={open} onOpenChange={(v) => { if (!busy) setOpen(v); }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle className="text-destructive">Erase all factory data?</DialogTitle>
+            <DialogTitle className="text-destructive">Erase factory data?</DialogTitle>
             <DialogDescription>
               This permanently deletes every run, schedule, recipe, profile,
               inventory record, imported sheet, and AI memory for the whole
-              facility. Staff accounts are kept. This cannot be undone.
+              facility. Confirmed QC history and staff accounts are kept. This cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
@@ -117,7 +117,7 @@ export default function FactoryResetCard() {
               data-testid="button-factory-reset-confirm"
             >
               {busy ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <Trash2 className="h-4 w-4 mr-1.5" />}
-              Erase everything
+              Erase factory data
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -14,7 +14,7 @@ import {
 } from "@workspace/name-match";
 
 /** Shared by the web parser, API evidence exporter, and distillation validator. */
-export const SPEC_IMPORT_PARSE_VERSION = "41";
+export const SPEC_IMPORT_PARSE_VERSION = "42";
 
 // ── Core data shapes ────────────────────────────────────────────────────────
 
@@ -229,6 +229,43 @@ export function reviewRecipeRowsUnit(
  * explanation.
  */
 export type SpecImportWarning = { brand: string; flavor: string; message: string };
+
+const WARNING_OVERFLOW_SUFFIX =
+  " additional import warnings are not shown. Review the source workbook for all corrections.";
+
+/** Overflow summaries use the existing warning contract and survive saved reviews. */
+export function specImportOmittedWarningCount(warning: SpecImportWarning): number {
+  if (warning.brand || warning.flavor || !warning.message.endsWith(WARNING_OVERFLOW_SUFFIX)) return 0;
+  const count = Number(warning.message.slice(0, -WARNING_OVERFLOW_SUFFIX.length));
+  return Number.isSafeInteger(count) && count > 0 ? count : 0;
+}
+
+/** Bound details without losing counts from earlier sanitizer/chunk limits.
+ * Counts represent omitted warning occurrences; unseen details cannot be deduplicated. */
+export function limitSpecImportWarnings(
+  warnings: readonly SpecImportWarning[],
+  limit: number,
+): SpecImportWarning[] {
+  const unique = new Map<string, SpecImportWarning>();
+  let omitted = 0;
+  for (const warning of warnings) {
+    const inherited = specImportOmittedWarningCount(warning);
+    if (inherited) {
+      omitted += inherited;
+      continue;
+    }
+    const key = `${warning.brand.trim().toLowerCase()}|${warning.flavor.trim().toLowerCase()}|${warning.message.trim().toLowerCase()}`;
+    if (!unique.has(key)) unique.set(key, warning);
+  }
+  const details = [...unique.values()];
+  if (!omitted && details.length <= limit) return details;
+  const kept = details.slice(0, Math.max(0, limit - 1));
+  return [...kept, {
+    brand: "",
+    flavor: "",
+    message: `${omitted + details.length - kept.length}${WARNING_OVERFLOW_SUFFIX}`,
+  }];
+}
 
 export type ParsedSpecImport = {
   profiles: ParsedProfile[];
@@ -782,7 +819,7 @@ export function mergeParsedSpecImports(
   const profileMap = new Map<string, ParsedProfile>();
   const recipeMap = new Map<string, ParsedRecipe>();
   const notes: string[] = [];
-  const warningMap = new Map<string, SpecImportWarning>();
+  const warnings: SpecImportWarning[] = [];
   // Nameless recipes (kept so the review can rescue them) must not collide on an
   // empty name key, or several distinct ones would collapse into one. Give each
   // a unique synthetic key so they all survive to the review screen.
@@ -809,12 +846,7 @@ export function mergeParsedSpecImports(
       recipeMap.set(key, prev ? mergeRecipePair(prev, r) : r);
     }
     if (item.note && item.note.trim()) notes.push(item.note.trim());
-    for (const w of item.warnings ?? []) {
-      warningMap.set(
-        `${w.brand.trim().toLowerCase()}|${w.flavor.trim().toLowerCase()}|${w.message.trim().toLowerCase()}`,
-        w,
-      );
-    }
+    warnings.push(...(item.warnings ?? []));
   }
   const result: ParsedSpecImport = {
     profiles: [...profileMap.values()],
@@ -822,7 +854,7 @@ export function mergeParsedSpecImports(
   };
   if (notes.length) result.note = notes.join("\n");
   // Bounded so a flood of per-file corrections can't bloat the merged payload.
-  if (warningMap.size) result.warnings = [...warningMap.values()].slice(0, 30);
+  if (warnings.length) result.warnings = limitSpecImportWarnings(warnings, 30);
   return result;
 }
 
@@ -4429,6 +4461,11 @@ export type ProfileFlavorGroundingCtx = {
  * flattened workbook text into per-cell phrases and normalizes the caller's
  * known-name list the same way. Returns undefined when there is no source text
  * to check against. Pure. */
+/** Only exclude labels from fuzzy candidates, not exact grounding or known names. */
+function isNameGroundingLabelCell(value: string): boolean {
+  return /^(?:brand|flavou?r|recipe|ingredients?|product|item|description|size|weight|target weight|applicator|topping|unit|amount|quantity)(?:\s+(?:name|type))?\s*(?::|$)/i.test(value.trim());
+}
+
 function buildNameGroundingCtx(
   sourceText: string | undefined,
   knownNames: string[] | undefined,
@@ -4583,6 +4620,7 @@ export function groundProfileFlavor(
     if (s >= 0.5 && (!best || s + 0.25 > best.score)) best = { flavor: kf, score: s + 0.25 };
   }
   for (const c of ctx.cells) {
+    if (isNameGroundingLabelCell(c.original)) continue;
     const s = score(c.original);
     if (s >= 0.5 && (!best || s > best.score)) best = { flavor: c.original, score: s };
   }
@@ -4675,6 +4713,7 @@ export function groundProfileBrand(
     if (s >= 0.5 && (!best || s + 0.25 > best.score)) best = { flavor: kb, score: s + 0.25 };
   }
   for (const c of ctx.cells) {
+    if (isNameGroundingLabelCell(c.original)) continue;
     const s = score(c.original);
     if (s >= 0.5 && (!best || s > best.score)) {
       const cleaned = stripGenericBrandTrailers(c.original);
@@ -4730,9 +4769,9 @@ const DOUGH_NAME_GROUNDING_OPTS: ProfileKindNameGroundingOpts = {
  * appears in a source cell, or its word tokens (ignoring the kind's generic
  * words) all sit inside a SINGLE cell — the prompt legitimately captures
  * "Hot Buffalo" from the sheet as "Hot Buffalo Sauce". Otherwise snap to the
- * nearest known name or source cell by shared tokens (cells that mention the
- * kind's own word are preferred — they're likelier the actual row); with no
- * confident match it is flagged ungrounded (kept + warned) — never silently
+ * nearest known name or kind-named source cell by shared tokens; unrelated
+ * flavors/headers are not fuzzy candidates. With no confident, unambiguous
+ * match it is flagged ungrounded (kept + warned) — never silently
  * invented. Pure. */
 function groundProfileKindName(
   name: string,
@@ -4779,22 +4818,31 @@ function groundProfileKindName(
   let best: { flavor: string; score: number } | undefined;
   // Known names present in the source are the safest candidates —
   // scoring bonus so they win ties against raw cells.
+  let ambiguous = false;
+  const consider = (flavor: string, candidateScore: number) => {
+    if (!best || candidateScore > best.score) {
+      best = { flavor, score: candidateScore };
+      ambiguous = false;
+    } else if (candidateScore === best.score && normalizePhrase(flavor) !== normalizePhrase(best.flavor)) {
+      ambiguous = true;
+    }
+  };
   for (const ks of ctx.knownInSource) {
     const s = score(ks);
-    if (s >= 0.5 && (!best || s + 0.25 > best.score)) best = { flavor: ks, score: s + 0.25 };
+    if (s >= 0.5) consider(ks, s + 0.25);
   }
   for (const c of ctx.cells) {
+    // A shared token in a flavor/header is not evidence of a sauce/dough identity.
+    // Names without a kind word still ground exactly or via the known-name pass.
+    if (isNameGroundingLabelCell(c.original) || !opts.kindCellRe.test(c.original)) continue;
     // Never snap TO a generic placeholder ("Sauce"/"Pizza Dough") — the
     // sanitizer drops those names outright, so they're not real candidates.
     if (opts.isGenericName(c.original)) continue;
     const base = score(c.original);
     if (base < 0.5) continue;
-    // Cells that mention the kind's own word are likelier the sheet's actual
-    // row than a same-token flavor cell (e.g. "Buffalo Chicken") — prefer them.
-    const s = opts.kindCellRe.test(c.original) ? base + 0.2 : base;
-    if (!best || s > best.score) best = { flavor: c.original, score: s };
+    consider(c.original, base + 0.2);
   }
-  if (best) return { kind: "snapped", flavor: best.flavor };
+  if (best && !ambiguous) return { kind: "snapped", flavor: best.flavor };
   return { kind: "ungrounded" };
 }
 
@@ -5000,7 +5048,14 @@ export function sanitizeParsedSpecImport(
     const o = p as Record<string, unknown>;
     let brand = clampName(o.brand, lim.maxNameChars);
     let flavor = clampName(o.flavor, lim.maxNameChars);
-    if (!brand || !flavor) continue;
+    if (!brand || !flavor) {
+      groundingWarnings.push({
+        brand,
+        flavor,
+        message: `Imported profile "${brand || "(missing brand)"} / ${flavor || "(missing flavor)"}" is missing ${!brand && !flavor ? "brand and flavor" : !brand ? "a brand" : "a flavor"} and will not be saved. Check the source workbook.`,
+      });
+      continue;
+    }
     // Grounding backstop for PROFILE brands: a paraphrased or collapsed brand
     // (e.g. a dropped "Ultra Thin" qualifier) would silently land profiles
     // under a wrong/new brand and create duplicates instead of updating
@@ -5415,16 +5470,7 @@ export function sanitizeParsedSpecImport(
   // payload. Keeping them out of `note` also stops a mere correction from
   // making the pass look "failed" to the chunk-retry rule.
   if (groundingWarnings.length) {
-    const seenW = new Set<string>();
-    const unique: SpecImportWarning[] = [];
-    for (const w of groundingWarnings) {
-      const key = `${w.brand.toLowerCase()}|${w.flavor.toLowerCase()}|${w.message.toLowerCase()}`;
-      if (seenW.has(key)) continue;
-      seenW.add(key);
-      unique.push(w);
-      if (unique.length >= 10) break;
-    }
-    result.warnings = unique;
+    result.warnings = limitSpecImportWarnings(groundingWarnings, 10);
   }
   return result;
 }

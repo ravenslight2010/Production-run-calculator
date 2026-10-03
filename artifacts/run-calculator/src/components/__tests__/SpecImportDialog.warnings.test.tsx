@@ -7,6 +7,7 @@ import type {
   ParsedSpecImport,
   SpecImportWarning,
 } from "@workspace/spec-import";
+import { sanitizeParsedSpecImport } from "@workspace/spec-import";
 import type { SpecImportPrepared } from "@/specImport";
 import SpecImportDialog from "../SpecImportDialog";
 
@@ -76,6 +77,19 @@ function renderDialog(
 }
 
 describe("SpecImportDialog flavor-correction warnings", () => {
+  it("shows incomplete-row warnings and an accurate overflow count from a saved sanitized review", () => {
+    const parsed = sanitizeParsedSpecImport({
+      profiles: Array.from({ length: 30 }, (_, i) => ({ brand: `Brand ${i}`, flavor: "" })),
+      recipes: [{ kind: "sauce", name: "Example Sauce", rows: [{ ingredient: "Tomato", lbs: 1 }] }],
+    });
+    const restored = JSON.parse(JSON.stringify(parsed)) as ParsedSpecImport;
+    renderDialog(makePrepared(restored.profiles, restored.warnings, restored.recipes));
+    const callout = screen.getByTestId("spec-import-warnings");
+    expect(within(callout).getByText("30 items were corrected or flagged")).toBeTruthy();
+    expect(within(callout).getAllByText(/missing a flavor and will not be saved/)).toHaveLength(9);
+    expect(within(callout).getByText(/21 additional import warnings are not shown/)).toBeTruthy();
+    expect(screen.queryByTestId("spec-profile-pk0")).toBeNull();
+  });
   it("renders the top-level amber callout and attaches the per-row callout to the matching profile", () => {
     const prepared = makePrepared(
       [profile("Tombstone", "Pepperoni"), profile("DiGiorno", "Four Cheese")],

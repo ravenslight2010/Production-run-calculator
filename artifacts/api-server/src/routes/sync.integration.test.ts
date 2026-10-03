@@ -38,6 +38,7 @@ let inventoryItemsTable: DbModule["inventoryItemsTable"];
 let inventoryLotsTable: DbModule["inventoryLotsTable"];
 let inventoryLedgerTable: DbModule["inventoryLedgerTable"];
 let inventoryConsumedRunsTable: DbModule["inventoryConsumedRunsTable"];
+let qualityChecksTable: DbModule["qualityChecksTable"];
 let operationalIntentLedgerTable: DbModule["operationalIntentLedgerTable"];
 let completedRunHistoryTable: DbModule["completedRunHistoryTable"];
 let applicatorBatchEvidenceTable: DbModule["applicatorBatchEvidenceTable"];
@@ -98,6 +99,7 @@ beforeAll(async () => {
   inventoryLotsTable = dbMod.inventoryLotsTable;
   inventoryLedgerTable = dbMod.inventoryLedgerTable;
   inventoryConsumedRunsTable = dbMod.inventoryConsumedRunsTable;
+  qualityChecksTable = dbMod.qualityChecksTable;
   operationalIntentLedgerTable = dbMod.operationalIntentLedgerTable;
   completedRunHistoryTable = dbMod.completedRunHistoryTable;
   applicatorBatchEvidenceTable = dbMod.applicatorBatchEvidenceTable;
@@ -510,6 +512,44 @@ function managerAuthHeaders(): Record<string, string> {
 function sandboxAuthHeaders(): Record<string, string> {
   return { authorization: `Bearer ${signLegacyTokenForTests(SANDBOX)}` };
 }
+
+describe("factory purge retains QC history", () => {
+  it.each(["live", "sandbox"] as const)("preserves both QC scopes while purging only %s master data", async (scope) => {
+    await db.delete(qualityChecksTable);
+    await db.insert(qualityChecksTable).values([
+      { scope: "live", productType: "pizza", status: "pass", summary: "Live retained check", reviewerId: MANAGER },
+      { scope: "sandbox", productType: "pizza", status: "review", summary: "Sandbox retained check", reviewerId: SANDBOX },
+    ]);
+    await db.insert(inventoryItemsTable).values([
+      { scope: "live", key: "purge-live-item", category: "ingredient", name: "Live fixture", unit: "lbs" },
+      { scope: "sandbox", key: "purge-sandbox-item", category: "ingredient", name: "Sandbox fixture", unit: "lbs" },
+    ]);
+    const [resetBefore] = await db.select().from(dataResetTable).where(eq(dataResetTable.scope, scope));
+    const res = await fetch(`${baseUrl}/api/sync/purge-all`, {
+      method: "POST", headers: scope === "live" ? managerAuthHeaders() : sandboxAuthHeaders(),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { epoch: number };
+    expect(body.epoch).toBe((resetBefore?.epoch ?? 0) + 1);
+    const [resetAfter] = await db.select().from(dataResetTable).where(eq(dataResetTable.scope, scope));
+    expect(resetAfter.epoch).toBe(body.epoch);
+    const checks = await db.select().from(qualityChecksTable);
+    expect(checks.map((row) => row.summary).sort()).toEqual(["Live retained check", "Sandbox retained check"]);
+    expect(checks.map((row) => row.reviewerId).sort()).toEqual([MANAGER, SANDBOX].sort());
+    const items = await db.select().from(inventoryItemsTable);
+    expect(items.map((row) => row.scope)).toEqual([scope === "live" ? "sandbox" : "live"]);
+  });
+
+  it("does not permit a staff purge or alter retained history on rejection", async () => {
+    await db.insert(qualityChecksTable).values({
+      scope: "live", productType: "pizza", status: "pass", summary: "Staff rejection check",
+    });
+    const before = await db.select().from(qualityChecksTable);
+    const res = await fetch(`${baseUrl}/api/sync/purge-all`, { method: "POST", headers: authHeaders() });
+    expect(res.status).toBe(403);
+    expect(await db.select().from(qualityChecksTable)).toEqual(before);
+  });
+});
 
 const EVIDENCE_DATE = "2030-03-10";
 const EVIDENCE_RUN = "evidence-run";

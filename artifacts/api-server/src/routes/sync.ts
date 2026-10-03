@@ -39,7 +39,6 @@ import {
   inventorySettingsTable,
   sandboxMetaTable,
   productionRunsTable,
-  qualityChecksTable,
   proactiveAlertSettingsTable,
   auditLogsTable,
   syncConflictLogsTable,
@@ -2929,14 +2928,15 @@ router.post(
 );
 
 // ── Full FACTORY purge (admin-only) ──────────────────────────────────────────
-// Wipes EVERYTHING except accounts: all day-state (like /sync/reset) PLUS every
+// Wipes factory setup and day-state, but retains accounts and QC history: every
 // server master-data pool — profiles, recipes (cheese/dough/sauce), mixes,
 // ingredients, learned aliases/corrections, AI memory, incidents, inventory,
 // production rules, templates, saved import sheets, settings. `users`/`roles`/
 // `user_roles` (and pending password-reset requests) are untouched. Scoped
-// tables are cleared for the CALLER's scope only; the few scope-less
-// operational tables (legacy saved runs, quality history, alert settings) are
-// cleared outright. The reset epoch is bumped and broadcast exactly like
+// tables are cleared for the CALLER's scope only; the scope-less tables below
+// retain their existing cleanup behavior. QC/quality history survives both
+// factory purge and daily reset; any QC deletion requires a separate explicitly
+// authorized retention operation. The reset epoch is bumped and broadcast like
 // /sync/reset, so every populated client wipes its local `run-calc*` copy and
 // reloads instead of re-uploading stale data.
 router.post(
@@ -2974,7 +2974,6 @@ router.post(
       cycleCountSchedulesTable,
       // Operational tables that are now scope-isolated.
       productionRunsTable,
-      qualityChecksTable,
       proactiveAlertSettingsTable,
       completedRunHistoryTable,
       // Inventory tables child-first so FK constraints never block the wipe.

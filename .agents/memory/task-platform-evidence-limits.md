@@ -12,3 +12,16 @@ A client-side queue read followed by creation is not an atomic creation-time sna
 **Why:** An audit found generated follow-ups missing dependencies that the repository policy expected, while official lifecycle descriptions and the workspace task-state definitions did not fully align.
 
 **How to apply:** Inspect stored dependency metadata for multiple origins and siblings. Record the exact evidence source for state semantics, and mark assignment/mode claims unverified when event history or task settings are unavailable. Do not infer a universal platform guarantee from the repository checker.
+
+Removing dependency edges does not prove that a queued main task has activated.
+Explicit chat permission for direct work and eligibility for formal task completion
+must be reported separately.
+
+**Why:** A main task remained pending with an empty dependency list after a
+user-approved ordering exception; the completion operation rejected it as having
+no active task. General task lifecycle documentation did not expose that local
+assignment transition.
+
+**How to apply:** Check the live state after a completion rejection. Preserve the
+finished work, report the activation requirement, and do not invent a status-update
+operation or recreate the task.

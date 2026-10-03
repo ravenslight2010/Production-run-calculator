@@ -123,7 +123,42 @@ EOF
   echo "PASS: accepts a sanitizer/type change with a SPEC_PARSE_VERSION bump"
 }
 
+test_shared_version() {
+  local repo="${TEST_ROOT}/shared-$1"
+  local expected_status="$1"
+  local target_version="$2"
+  make_base_repo "${repo}"
+  printf 'export const SPEC_PARSE_VERSION = SPEC_IMPORT_PARSE_VERSION;\n' \
+    > "${repo}/artifacts/run-calculator/src/specImport.ts"
+  printf 'export const SPEC_IMPORT_PARSE_VERSION = "10";\nexport type ParsedRecipe = { name: string };\n' \
+    > "${repo}/lib/spec-import/src/index.ts"
+  git -C "${repo}" add .
+  git -C "${repo}" commit -q --amend -m "shared version base"
+  printf 'export const SPEC_IMPORT_PARSE_VERSION = "%s";\nexport type ParsedRecipe = { name: string; sauceName?: string };\n' "${target_version}" \
+    > "${repo}/lib/spec-import/src/index.ts"
+  git -C "${repo}" add .
+  git -C "${repo}" commit -q -m "shared version sanitizer change"
+  run_guard "${repo}" "${expected_status}"
+  echo "PASS: shared version target ${target_version} returns ${expected_status}"
+}
+
+test_rejects_unreadable_target_version() {
+  local repo="${TEST_ROOT}/missing-version"
+  make_base_repo "${repo}"
+  printf 'export const SPEC_PARSE_VERSION = unknownVersion;\n' \
+    > "${repo}/artifacts/run-calculator/src/specImport.ts"
+  printf 'export const parsePrompt = "changed prompt";\n' \
+    > "${repo}/artifacts/api-server/src/routes/aiParseSpecSheet.ts"
+  git -C "${repo}" add .
+  git -C "${repo}" commit -q -m "prompt change with unreadable version"
+  run_guard "${repo}" 1
+  echo "PASS: unreadable target version fails closed"
+}
+
 test_rejects_prompt_change_without_version_bump
 test_accepts_prompt_change_with_version_bump
 test_rejects_sanitizer_change_without_version_bump
 test_accepts_sanitizer_change_with_version_bump
+test_shared_version 1 10
+test_shared_version 0 11
+test_rejects_unreadable_target_version

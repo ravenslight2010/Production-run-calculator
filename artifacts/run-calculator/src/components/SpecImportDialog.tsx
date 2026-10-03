@@ -17,6 +17,7 @@ import {
   repointProfileNamedRecipes,
   reviewRecipeRowsUnit,
   specImportNameMatchKey,
+  specImportOmittedWarningCount,
   type NamedRecipeRename,
   type ParsedProfile,
   type ParsedRecipe,
@@ -850,6 +851,10 @@ export default function SpecImportDialog({
   // attached to that profile's row. Warnings whose profile row can't be found
   // (edge case) are surfaced in the top-level callout instead — never hidden.
   const specWarnings = prepared?.parsed.warnings ?? [];
+  const warningCount = specWarnings.reduce(
+    (count, warning) => count + (specImportOmittedWarningCount(warning) || 1),
+    0,
+  );
   const warningsByProfile = useMemo(() => {
     const map = new Map<string, string[]>();
     for (const w of prepared?.parsed.warnings ?? []) {
@@ -1021,7 +1026,7 @@ export default function SpecImportDialog({
                   <div className="flex items-center gap-2 text-amber-600">
                     <AlertTriangle className="h-4 w-4" />
                     <span className="text-sm font-medium">
-                      {specWarnings.length} item{specWarnings.length === 1 ? " was" : "s were"}{" "}
+                      {warningCount} item{warningCount === 1 ? " was" : "s were"}{" "}
                       corrected or flagged
                     </span>
                   </div>
