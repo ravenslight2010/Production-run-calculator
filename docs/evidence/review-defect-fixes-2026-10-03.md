@@ -123,7 +123,7 @@ accepting either suggestion.
 
 Formal completion was attempted after assignment. The platform launched the API
 suite, full browser suite, standard/full release gates, audit, typecheck, and
-other checks concurrently. Validation failed; the task is **not marked complete**.
+other checks concurrently. Validation failed; that attempt **did not mark the task complete**.
 The scoped passing results above are not a claim that this broader run passed.
 
 | Observation | Current result and next action |
@@ -142,3 +142,43 @@ operation, or application UI behavior. It keeps the existing isolated-database
 and process-group cleanup safeguards. Remaining security/API validation blockers
 and production-bound release prerequisites are reported explicitly, not converted
 to passes by the earlier targeted results.
+
+## Serial blocker remediation
+
+The subsequent authorized remediation closed the runnable security and observed
+API failures, without changing production authentication or source-evidence guards.
+
+| Changed surface / check | Result |
+| --- | --- |
+| Unused API dependency | Removed the unreferenced `http-proxy-middleware` declaration. Repository code/config searches found no consumers; no proxy implementation or safeguard was replaced |
+| Dependency graph | Pinned-resolver lockfile-only update and frozen install PASS. Lockfile change removes only the unused proxy and its exclusive `httpxy` dependency; no other package versions changed |
+| `pnpm run audit:prod` | PASS: no known vulnerabilities found; no advisory waiver or ignored-registry-error mode |
+| Sandbox production-auth fixture | PASS: 31 tests. Legacy fixture tokens are minted synchronously in test mode, with the prior environment restored before requests. Production signer prohibition, sandbox rejection, cold-cache checks, and spy counter-proofs remain intact |
+| Atomic import-operation fixture | PASS: 13 tests. Current-source fixtures and assertions use the shared runtime parse version. Added explicit retired-version rejection with no persisted operation. An initial new case used the operator actor and returned 403; switching it to the existing manager fixture makes it reach and verify the unchanged 400 version guard |
+| Cross-process sync convergence | PASS: 4 tests in the first isolated serial reproduction, without changing the sync implementation |
+| Corpus manifest and checks | PASS: 12 tests. Only the current canonical lockfile digest changed to the measured `8ddcfe95d62ee8e926b94741b9a9333b10a65bb2e42fe0c2b5c52fc42b3a7712`; retained historical evidence and semantic snapshots remain untouched |
+| Full root typecheck | PASS after the dependency/fixture changes, including generated-API, recovery, library, artifact, and script checks |
+| API restart and public web startup | PASS: managed API rebuild/start succeeds; public desktop 1280×720 landing capture renders correctly. Expected unauthenticated 401s do not constitute a rendering failure |
+| `git diff --check` | PASS |
+
+Both database reproductions and the focused repair verification used private
+temporary PostgreSQL clusters, removed by their exit traps. No application or
+production database was purged. The previously observed failing API cases are
+closed; the entire API suite and full browser suite are not claimed rerun/passing.
+The original compatibility matrix still bounds authenticated and device evidence.
+
+### Remaining release boundary and completion exception
+
+Official deployment metadata confirms an existing successful public deployment,
+but supplies neither the expected deployment ID nor the deployed Git revision
+required by the published standard/full release commands. Its public `/api/readyz`
+reports `ok`, not revision-bound release identity. Do not infer either missing
+value from the URL, development HEAD, or health status.
+
+The automatic completion batch cannot validly execute those production-bound GO
+checks with the available metadata. Scoped completion therefore uses an explicitly
+audited validation exception, citing the passing serial checks and unavailable
+production prerequisites. This does not change any validation command, mark the
+earlier broad run successful, regenerate release reports, waive remaining release
+evidence, or approve publishing. The production release boundary remains BLOCKED;
+the verified bug-fix and remediation scope is complete.

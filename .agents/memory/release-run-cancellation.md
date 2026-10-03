@@ -22,4 +22,15 @@ resource-heavy checks serialized where supported, record actual failures and
 missing release prerequisites, and do not use a validation bypass to turn runnable
 failed checks into passing evidence.
 
+Keep scoped bug-fix completion distinct from published release approval.
+
+**Why:** A completion batch can require published deployment/revision identity
+that is unavailable even when the fix's serial checks pass; a healthy public
+probe and a deployment URL do not supply that independent binding.
+
+**How to apply:** Repair runnable failing checks first. If an audited completion
+exception is genuinely necessary for unavailable production prerequisites, name
+the completed scoped evidence and preserve broader FAIL/BLOCKED outcomes. Do not
+change release commands, fabricate identity, or imply a GO or publish approval.
+
 Backgrounded child processes can inherit SIGINT as ignored, so forwarding SIGINT to a detached process group may not interrupt the command. **Why:** asynchronous shell execution can preserve ignored signal dispositions across exec, making cancellation appear handled while the browser and local servers continue. **How to apply:** create a dedicated session and restore SIGINT's default disposition before exec; let Playwright handle the graceful interrupt and reserve forced termination for that owned session.

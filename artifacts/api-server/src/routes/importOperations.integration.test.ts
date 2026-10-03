@@ -7,6 +7,7 @@ import express from "express";
 import pg from "pg";
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { SPEC_IMPORT_PARSE_VERSION } from "@workspace/spec-import";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 let db: typeof import("@workspace/db").db;
@@ -101,10 +102,24 @@ async function apply(operationId: string, body: Record<string, unknown>, user = 
 }
 
 describe("atomic import operations", () => {
+  it("rejects source evidence from a retired parser without persisting an operation", async () => {
+    const response = await apply("distill-retired-parser-0001", {
+      ...change("retired-parser"),
+      importType: "spec",
+      sourceEvidence: {
+        sourceText: "Retired parser fixture",
+        parseVersion: String(Number(SPEC_IMPORT_PARSE_VERSION) - 1),
+      },
+    });
+    expect(response.status).toBe(400);
+    expect(await db.select().from(tables.importOperationsTable)
+      .where(eq(tables.importOperationsTable.id, "distill-retired-parser-0001"))).toHaveLength(0);
+  });
+
   it("exports only completed, live, source-backed spec Applies to a manager", async () => {
     const sourceEvidence = {
       sourceText: "=== SHEET: Spec ===\nBrand\tAlpine Foods\nFlavor\tFour Cheese",
-      parseVersion: "41",
+      parseVersion: SPEC_IMPORT_PARSE_VERSION,
     };
     const applied = await apply("distill-authorized-0001", {
       importType: "spec",
@@ -144,7 +159,7 @@ describe("atomic import operations", () => {
       actorCapability: "manage-profiles",
       sourceText: sourceEvidence.sourceText,
       sourceSha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
-      parseVersion: "41",
+      parseVersion: SPEC_IMPORT_PARSE_VERSION,
     });
     expect(page.records[0]).not.toHaveProperty("actorId");
     expect(page.records[0]).not.toHaveProperty("sourceLabel");
@@ -158,7 +173,7 @@ describe("atomic import operations", () => {
       await apply(`distill-page-${suffix}`, {
         importType: "spec",
         sourceLabel: `page-${suffix}.xlsx`,
-        sourceEvidence: { sourceText: `Source ${suffix}`, parseVersion: "41" },
+        sourceEvidence: { sourceText: `Source ${suffix}`, parseVersion: SPEC_IMPORT_PARSE_VERSION },
         changes: {
           brandProfiles: {
             upsert: [{
@@ -201,7 +216,7 @@ describe("atomic import operations", () => {
     const unauthorizedApply = await apply("distill-unauthorized-0001", {
       importType: "spec",
       sourceLabel: "unauthorized.xlsx",
-      sourceEvidence: { sourceText: "private", parseVersion: "41" },
+      sourceEvidence: { sourceText: "private", parseVersion: SPEC_IMPORT_PARSE_VERSION },
       changes: { brandProfiles: { upsert: [] } },
     }, "profiles");
     expect(unauthorizedApply.status).toBe(403);
@@ -215,7 +230,7 @@ describe("atomic import operations", () => {
     expect((await apply("distill-sandbox-source-0001", {
       importType: "spec",
       sourceLabel: "sandbox-source.xlsx",
-      sourceEvidence: { sourceText: "Sandbox source", parseVersion: "41" },
+      sourceEvidence: { sourceText: "Sandbox source", parseVersion: SPEC_IMPORT_PARSE_VERSION },
       changes: { brandProfiles: { upsert: [] } },
     }, "sandbox")).status).toBe(400);
 
@@ -227,7 +242,7 @@ describe("atomic import operations", () => {
     const undone = await (await apply("distill-undone-source-0001", {
       importType: "spec",
       sourceLabel: "undone-source.xlsx",
-      sourceEvidence: { sourceText: "Undone source", parseVersion: "41" },
+      sourceEvidence: { sourceText: "Undone source", parseVersion: SPEC_IMPORT_PARSE_VERSION },
       changes: {
         brandProfiles: {
           upsert: [{
