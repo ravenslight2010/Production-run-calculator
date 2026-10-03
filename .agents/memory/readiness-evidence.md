@@ -36,7 +36,10 @@ without first investigating available build-log access.
 **How to apply:** Check official deployment metadata and available publishing
 build-log access, not only runtime logs. Distinguish the deployment UUID, build
 UUID, and full Git revision: a build UUID or its shortened UI label is not proof
-of the deployed commit. Bind any extracted identifiers to the selected successful
+of the deployed commit. Read accessible Git commit identities directly rather
+than asking the user to locate them in the Git UI; the additional release
+requirement is proving which commit the intended publish contains.
+Bind any extracted identifiers to the selected successful
 publish and verify it is the intended/current deployment. A historical screenshot
 does not establish current identity. If exposed tools cannot retrieve the build
 log, report that access limitation accurately; do not claim the information is
