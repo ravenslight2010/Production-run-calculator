@@ -31,6 +31,11 @@ Neither alternative proves an atomic creation-time snapshot. Full automatic
 compliance requires platform-side controls that this repository cannot implement.
 No task settings or existing task dependencies were changed for this outcome.
 
+For repeatable advisory checks before acceptance, use the project-owned
+[read-only ordering review](follow-up-ordering-review.md). It separates current
+missing links, selected sibling ordering, and retained historical evidence;
+it cannot enforce platform scheduling.
+
 ## Dependency-aware manual planning
 
 This procedure is for expressly requested manual planning, **not** a workaround
