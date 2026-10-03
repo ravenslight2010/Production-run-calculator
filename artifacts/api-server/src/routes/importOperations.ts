@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { Router, type IRouter, type Request, type Response } from "express";
-import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import {
   db,
   importHistoryTable,
@@ -14,16 +14,19 @@ import {
   specImportAliasesTable,
 } from "@workspace/db";
 import { currentScope } from "../lib/requestScope";
-import { requireAnyCapability } from "../middlewares/requireCapability";
+import { requireAnyCapability, requireCapability, requireLiveScope } from "../middlewares/requireCapability";
 import { normalizeMix } from "@workspace/mixes";
 import { normalizeCheeseRecipe } from "@workspace/cheese-recipes";
 import { normalizeNamedRecipe } from "@workspace/named-recipes";
 import { normalizeFreezerPullItem } from "@workspace/freezer-pull";
 import { broadcastMasterDataChanged } from "./sync";
+import { SPEC_IMPORT_PARSE_VERSION } from "@workspace/spec-import";
 
 const router: IRouter = Router();
 const MAX_ROWS = 500;
 const MAX_BODY = 512 * 1024;
+const MAX_SOURCE_EVIDENCE_BYTES = 100 * 1024;
+const MAX_EXPORT_PAGE_SIZE = 20;
 const TABLES = {
   mixes: { table: mixesTable, key: "id" },
   cheeseRecipes: { table: cheeseRecipesTable, key: "id" },
@@ -65,6 +68,42 @@ function objectBody(req: Request): Record<string, unknown> | null {
   if (Buffer.byteLength(JSON.stringify(req.body)) > MAX_BODY) return null;
   return req.body as Record<string, unknown>;
 }
+function validateSourceEvidence(
+  value: unknown,
+  importType: string,
+  scope: string,
+  capabilities: readonly string[],
+  actorId: string | undefined,
+): { evidence: Record<string, unknown> | null; error: string | null } {
+  if (value === undefined) return { evidence: null, error: null };
+  if (importType !== "spec" || scope !== "live" || !capabilities.includes("manage-profiles") || !actorId) {
+    return { evidence: null, error: "Source evidence is only accepted for authorized live spec imports" };
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { evidence: null, error: "Invalid source evidence" };
+  }
+  const candidate = value as Record<string, unknown>;
+  if (
+    Object.keys(candidate).sort().join(",") !== "parseVersion,sourceText" ||
+    typeof candidate.sourceText !== "string" ||
+    !candidate.sourceText.trim() ||
+    Buffer.byteLength(candidate.sourceText, "utf8") > MAX_SOURCE_EVIDENCE_BYTES ||
+    candidate.parseVersion !== SPEC_IMPORT_PARSE_VERSION
+  ) {
+    return { evidence: null, error: "Invalid source evidence" };
+  }
+  return {
+    evidence: {
+      format: "spec-apply-source-v1",
+      sourceText: candidate.sourceText,
+      sourceSha256: createHash("sha256").update(candidate.sourceText).digest("hex"),
+      parseVersion: SPEC_IMPORT_PARSE_VERSION,
+      actorCapability: "manage-profiles",
+      actorIdSha256: createHash("sha256").update(actorId).digest("hex"),
+    },
+    error: null,
+  };
+}
 function rows(value: unknown): Record<string, unknown>[] {
   if (!Array.isArray(value)) return [];
   return value.slice(0, MAX_ROWS).filter((row): row is Record<string, unknown> =>
@@ -85,6 +124,12 @@ function ids(value: unknown): string[] {
 }
 function capability(importType: string): "manage-profiles" | "manage-inventory" {
   return ["premix", "cheese"].includes(importType) ? "manage-inventory" : "manage-profiles";
+}
+function entityCapability(entity: string): "manage-profiles" | "manage-inventory" {
+  return ["mixes", "cheeseRecipes"].includes(entity) ? "manage-inventory" : "manage-profiles";
+}
+function snapshotCapabilities(snapshot: Record<string, unknown[]>): Set<"manage-profiles" | "manage-inventory"> {
+  return new Set(Object.keys(snapshot).filter((key) => key !== "specImportAliasKeys").map(entityCapability));
 }
 function requireOperationCapability(req: Request, res: Response, importType: string): boolean {
   const needed = capability(importType);
@@ -363,8 +408,25 @@ router.post("/import-operations/:operationId/apply", requireAnyCapability(["mana
   const scope = currentScope();
   const required = capability(importType);
   const capabilities = req.capabilities ?? [];
-  if (!capabilities.includes(required)) {
-    res.status(403).json({ error: `Missing capability: ${required}` }); return;
+   if (!capabilities.includes(required)) {
+     res.status(403).json({ error: `Missing capability: ${required}` }); return;
+   }
+   for (const entity of Object.keys(changes)) {
+     const needed = entityCapability(entity);
+     if (!capabilities.includes(needed)) {
+       res.status(403).json({ error: `Missing capability: ${needed}` }); return;
+     }
+   }
+  const sourceEvidence = validateSourceEvidence(
+    body.sourceEvidence,
+    importType,
+    scope,
+    capabilities,
+    req.userId,
+  );
+  if (sourceEvidence.error) {
+    res.status(400).json({ error: sourceEvidence.error });
+    return;
   }
   try {
     const operation = await db.transaction(async (tx) => {
@@ -398,6 +460,7 @@ router.post("/import-operations/:operationId/apply", requireAnyCapability(["mana
         actorId: req.userId ?? null, requestHash,
         expectedStateHash: body.expectedStateHash ? String(body.expectedStateHash) : beforeHash,
         resultHash, status: "applied", beforeSnapshot: before, afterSnapshot: after,
+        distillEvidence: sourceEvidence.evidence ?? {},
         affectedEntities: result.affectedEntities, result,
       }).returning();
       await tx.insert(importHistoryTable).values({
@@ -431,6 +494,110 @@ router.post("/import-operations/:operationId/apply", requireAnyCapability(["mana
   }
 });
 
+type ExportCursor = { createdAt: string; id: string };
+function decodeExportCursor(value: unknown): ExportCursor | null | false {
+  if (value === undefined) return null;
+  if (typeof value !== "string" || value.length > 512) return false;
+  try {
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Record<string, unknown>;
+    if (
+      !parsed || typeof parsed !== "object" ||
+      typeof parsed.createdAt !== "string" ||
+      !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z$/u.test(parsed.createdAt) ||
+      !Number.isFinite(Date.parse(parsed.createdAt)) ||
+      typeof parsed.id !== "string" || !/^[A-Za-z0-9_-]{16,120}$/.test(parsed.id)
+    ) return false;
+    return { createdAt: parsed.createdAt, id: parsed.id };
+  } catch {
+    return false;
+  }
+}
+
+router.get(
+  "/import-operations/distillation-evidence",
+  requireLiveScope,
+  requireCapability("manage-profiles"),
+  async (req, res) => {
+    const rawLimit = req.query.limit;
+    const limit = rawLimit === undefined ? MAX_EXPORT_PAGE_SIZE : Number(rawLimit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > MAX_EXPORT_PAGE_SIZE) {
+      res.status(400).json({ error: `Limit must be an integer from 1 to ${MAX_EXPORT_PAGE_SIZE}` });
+      return;
+    }
+    const cursor = decodeExportCursor(req.query.cursor);
+    if (cursor === false) {
+      res.status(400).json({ error: "Invalid export cursor" });
+      return;
+    }
+    const predicates = [
+      eq(importOperationsTable.scope, "live"),
+      eq(importOperationsTable.importType, "spec"),
+      eq(importOperationsTable.status, "applied"),
+      isNull(importOperationsTable.undoneAt),
+      sql`${importOperationsTable.distillEvidence}->>'format' = 'spec-apply-source-v1'`,
+      sql`${importOperationsTable.distillEvidence}->>'actorCapability' = 'manage-profiles'`,
+      sql`${importOperationsTable.distillEvidence}->>'parseVersion' = ${SPEC_IMPORT_PARSE_VERSION}`,
+      sql`length(${importOperationsTable.distillEvidence}->>'sourceText') > 0`,
+    ];
+    if (cursor) {
+      predicates.push(or(
+        sql`${importOperationsTable.createdAt} < ${cursor.createdAt}::timestamptz`,
+        and(
+          sql`${importOperationsTable.createdAt} = ${cursor.createdAt}::timestamptz`,
+          sql`${importOperationsTable.id} < ${cursor.id}`,
+        ),
+      )!);
+    }
+    const rows = await db.select({
+      record: importOperationsTable,
+      cursorCreatedAt: sql<string>`to_char(${importOperationsTable.createdAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
+    }).from(importOperationsTable)
+      .where(and(...predicates))
+      .orderBy(desc(importOperationsTable.createdAt), desc(importOperationsTable.id))
+      .limit(limit + 1);
+    const page = rows.slice(0, limit);
+    const records = page.flatMap(({ record: row }) => {
+      const evidence = row.distillEvidence as Record<string, unknown>;
+      const appliedValues = row.afterSnapshot;
+      if (
+        row.scope !== "live" || row.importType !== "spec" || row.status !== "applied" ||
+        row.undoneAt !== null || !row.actorId ||
+        typeof evidence.sourceText !== "string" || !evidence.sourceText.trim() ||
+        Buffer.byteLength(evidence.sourceText, "utf8") > MAX_SOURCE_EVIDENCE_BYTES ||
+        evidence.format !== "spec-apply-source-v1" ||
+        typeof evidence.sourceSha256 !== "string" || !/^[a-f0-9]{64}$/.test(evidence.sourceSha256) ||
+        createHash("sha256").update(evidence.sourceText).digest("hex") !== evidence.sourceSha256 ||
+        evidence.actorCapability !== "manage-profiles" ||
+        typeof evidence.actorIdSha256 !== "string" || !/^[a-f0-9]{64}$/.test(evidence.actorIdSha256) ||
+        createHash("sha256").update(row.actorId).digest("hex") !== evidence.actorIdSha256 ||
+        evidence.parseVersion !== SPEC_IMPORT_PARSE_VERSION ||
+        !appliedValues || typeof appliedValues !== "object" || Array.isArray(appliedValues) ||
+        !row.resultHash || hash(appliedValues) !== row.resultHash
+      ) return [];
+      return [{
+        operationId: row.id,
+        importType: row.importType,
+        scope: "live" as const,
+        status: "applied" as const,
+        undoneAt: null,
+        actorCapability: "manage-profiles" as const,
+        actorIdSha256: evidence.actorIdSha256,
+        sourceSha256: evidence.sourceSha256,
+        appliedAt: row.createdAt.toISOString(),
+        sourceText: evidence.sourceText,
+        parseVersion: SPEC_IMPORT_PARSE_VERSION,
+        appliedValues,
+      }];
+    });
+    const hasMore = rows.length > limit;
+    const last = page.at(-1);
+    const nextCursor = hasMore && last
+      ? Buffer.from(JSON.stringify({ createdAt: last.cursorCreatedAt, id: last.record.id })).toString("base64url")
+      : null;
+    res.json({ records, nextCursor });
+  },
+);
+
 router.get("/import-operations/:operationId", requireAnyCapability(["manage-profiles", "manage-inventory"]), async (req, res) => {
   const row = await db.select().from(importOperationsTable).where(and(
     eq(importOperationsTable.id, String(req.params.operationId)), eq(importOperationsTable.scope, currentScope()),
@@ -450,7 +617,11 @@ router.post("/import-operations/:operationId/undo", requireAnyCapability(["manag
       )).limit(1);
       if (!found[0]) { const e = new Error("NOT_FOUND"); (e as any).code = "NOT_FOUND"; throw e; }
       const op = found[0];
-      if (!(req.capabilities ?? []).includes(capability(op.importType))) {
+       const needed = new Set([
+         ...snapshotCapabilities(op.beforeSnapshot as Record<string, unknown[]>),
+         ...snapshotCapabilities(op.afterSnapshot as Record<string, unknown[]>),
+       ]);
+       if ([...needed].some((entry) => !(req.capabilities ?? []).includes(entry))) {
         const e = new Error("FORBIDDEN"); (e as any).code = "FORBIDDEN"; throw e;
       }
       if (op.status === "undone") return op;

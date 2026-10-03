@@ -19,8 +19,11 @@ export interface QualityCheckRecord {
   confidence: number;
   summary: string;
   issues: QualityIssue[];
+  /** @nullable */
   notes?: string | null;
+  /** @nullable */
   thumbnail?: string | null;
+  /** @nullable */
   reviewerName?: string | null;
   /** ISO-8601 timestamp the check was recorded */
   createdAt: string;

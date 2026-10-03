@@ -120,6 +120,9 @@ export const readAuthorizationInventory: readonly ReadAuthorization[] = [
   ...reads(["manage-profiles", "manage-inventory"], "any", "scoped", [
     "/import-history", "/import-operations/:operationId",
   ]),
+  ...reads(["manage-profiles"], "all", "live-only", [
+    "/import-operations/distillation-evidence",
+  ]),
   ...reads(["manage-factory-settings"], "all", "scoped", ["/factory-data"]),
   ...reads(["review-incidents"], "all", "scoped", [
     "/incidents", "/incidents/unreviewed-count", "/incidents/actionable-count",

@@ -6,7 +6,7 @@ import {
 } from "./storage";
 import { BRANDS_KEY, PROFILE_KEY, CRUST_PROFILE_KEY } from "./types";
 
-const MARKER = "run-calc-purge-orphaned-profiles-v1";
+const MARKER = "run-calc-purge-orphaned-profiles-v2";
 
 function seedProfile(brand: string, flavor: string) {
   localStorage.setItem(PROFILE_KEY(brand, flavor), JSON.stringify({ brand, flavor }));
@@ -68,7 +68,7 @@ describe("purgeOrphanedProfilesIfNeeded", () => {
     seedProfile("Basha's Original", "Pepperoni"); // orphan — deleted brand
     seedProfile("Basha", "Cheese"); // orphan — legacy namespace
 
-    purgeOrphanedProfilesIfNeeded();
+    purgeOrphanedProfilesIfNeeded(["Basha's Ultra Thin"]);
 
     expect(has("Basha's Ultra Thin", "Cheese")).toBe(true);
     expect(has("Basha's Original", "Pepperoni")).toBe(false);
@@ -77,21 +77,30 @@ describe("purgeOrphanedProfilesIfNeeded", () => {
     expect(localStorage.getItem(MARKER)).toBe("1");
   });
 
-  it("defers (no marker) when the Brands list is empty so it can't nuke everything", () => {
+  it("defers while the canonical Brands baseline is absent or empty", () => {
+    // A non-empty but partial device cache is not proof of a complete server
+    // registry; valid server profiles must survive until canonical adoption.
+    localStorage.setItem(BRANDS_KEY, JSON.stringify(["Partial local list"]));
     seedProfile("Basha's Ultra Thin", "Cheese");
-    purgeOrphanedProfilesIfNeeded();
-    // Brands list empty → skipped, profile survives, retries next load
+    expect(purgeOrphanedProfilesIfNeeded(null)).toBe(false);
+    expect(purgeOrphanedProfilesIfNeeded([])).toBe(false);
     expect(has("Basha's Ultra Thin", "Cheese")).toBe(true);
     expect(localStorage.getItem(MARKER)).toBeNull();
+
+    expect(
+      purgeOrphanedProfilesIfNeeded(["Partial local list", "Basha's Ultra Thin"]),
+    ).toBe(true);
+    expect(has("Basha's Ultra Thin", "Cheese")).toBe(true);
+    expect(localStorage.getItem(MARKER)).toBe("1");
   });
 
   it("runs only once (guarded by version marker)", () => {
     localStorage.setItem(BRANDS_KEY, JSON.stringify(["Known Brand"]));
-    purgeOrphanedProfilesIfNeeded();
+    purgeOrphanedProfilesIfNeeded(["Known Brand"]);
     expect(localStorage.getItem(MARKER)).toBe("1");
     // An orphan added after the marker is set is left untouched.
     seedProfile("Deleted Later", "Cheese");
-    purgeOrphanedProfilesIfNeeded();
+    purgeOrphanedProfilesIfNeeded(["Known Brand"]);
     expect(has("Deleted Later", "Cheese")).toBe(true);
   });
 });

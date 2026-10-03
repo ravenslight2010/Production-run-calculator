@@ -23,7 +23,7 @@ export default defineConfig({
     },
   },
   webServer: {
-    command: `PORT=${port} pnpm exec vite --config e2e/vite-calendar.config.ts`,
+    command: `PORT=${port} exec ./node_modules/.bin/vite --config e2e/vite-calendar.config.ts`,
     url: `${baseURL}/e2e/calendar-fixture.html`,
     reuseExistingServer: !process.env.CI,
     timeout: 30_000,

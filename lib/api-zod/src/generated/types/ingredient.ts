@@ -16,7 +16,10 @@ export interface Ingredient {
   /** Current display name */
   name: string;
   categories: IngredientCategory[];
-  /** When set, this ingredient was merged into another ingredient's id; resolve display name by following this pointer. */
+  /**
+     * When set, this ingredient was merged into another ingredient's id; resolve display name by following this pointer.
+     * @nullable
+     */
   mergedInto?: string | null;
   /** false = soft-deleted (kept so old rows still resolve) */
   enabled: boolean;

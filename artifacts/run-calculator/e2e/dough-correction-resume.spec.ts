@@ -120,17 +120,6 @@ async function configureLineSetup(page: Page): Promise<void> {
   }
 }
 
-async function readDoughNeeds(page: Page): Promise<{ batches: number; trays: number }> {
-  return {
-    batches: parseVisibleNumber(
-      await page.getByTestId("output-batches-needed").textContent(),
-    ),
-    trays: parseVisibleNumber(
-      await page.getByTestId("output-trays-needed").textContent(),
-    ),
-  };
-}
-
 async function readStepperValue(page: Page, testId: string): Promise<number> {
   return parseVisibleNumber(await page.getByTestId(testId).inputValue());
 }
@@ -174,7 +163,8 @@ async function readCanonicalDoughValues(
   page: Page,
   runId: string,
 ): Promise<{ traysOnLine?: number; batchesReady?: number } | null> {
-  const response = await page.request.get("/api/sync/today");
+  const today = new Date().toISOString().slice(0, 10);
+  const response = await page.request.get(`/api/sync/today?today=${today}`);
   if (!response.ok()) return null;
   const body = await response.json() as {
     runValues?: Record<string, { traysOnLine?: number; batchesReady?: number }>;
@@ -252,27 +242,47 @@ test("manager Dough corrections resume without a catch-up write", async ({
   await page.getByTestId("tab-dough").click();
   await expect(page.getByTestId("output-batches-needed")).toBeVisible();
   await expect(page.getByTestId("output-trays-needed")).toBeVisible();
+  // Wait for the live Dough projection instead of assuming it has settled
+  // after an arbitrary delay following Start Run.
+  await expect(page.getByTestId("btn-pause-dough-timers")).toBeVisible({
+    timeout: 15_000,
+  });
 
-  const needsBefore = await readDoughNeeds(page);
+  // Wait for the one-shot authoritative tray seed before deriving a manual
+  // correction. A full tray seed can legitimately leave batches at zero.
+  await expect.poll(async () => {
+    const trays = await readStepperValue(page, "input-traysOnLine");
+    const batches = await readStepperValue(page, "input-batchesReady");
+    const canonical = await readCanonicalDoughValues(page, runId);
+    return trays > 0
+      && canonical?.traysOnLine === trays
+      && canonical?.batchesReady === batches;
+  }, { timeout: 15_000 }).toBe(true);
   const currentTrays = await readStepperValue(page, "input-traysOnLine");
   const currentBatches = await readStepperValue(page, "input-batchesReady");
-  const correctedDough = {
-    traysOnLine: currentTrays > 0 ? currentTrays - 1 : 3,
-    batchesReady: currentBatches > 0 ? currentBatches - 1 : 2,
-  };
 
   await page.screenshot({ path: testInfo.outputPath("dough-before-correction.png") });
 
-  // These are real controlled-input edits. Each edit starts the same timed
-  // Dough-only pause, so the second correction is the pause's final baseline.
-  await setNumberField(page, "input-traysOnLine", String(correctedDough.traysOnLine));
-  await expect(page.getByTestId("manual-override-banner")).toContainText("Dough station");
+  // Use the operator's decrement control. A typed target calculated before
+  // an authoritative server tick can already equal the new displayed value,
+  // which is not a manual edit and correctly starts no Dough timer pause.
+  await page.getByTestId("btn-dec-traysOnLine").click();
+  const correctedTrays = await readStepperValue(page, "input-traysOnLine");
+  expect(correctedTrays).toBeLessThan(currentTrays);
+  const correctedDough = {
+    traysOnLine: correctedTrays,
+    batchesReady: currentBatches > 0 ? currentBatches - 1 : 2,
+  };
   await expect(page.getByTestId("dough-timers-paused-banner")).toBeVisible();
+  // Each edit starts the same timed Dough-only pause. The second correction
+  // becomes its final baseline.
+  expect(correctedDough.batchesReady).not.toBe(currentBatches);
   await setNumberField(page, "input-batchesReady", String(correctedDough.batchesReady));
-  const needsAfter = await readDoughNeeds(page);
-  expect(needsAfter.batches).not.toBe(needsBefore.batches);
-  expect(needsAfter.trays).not.toBe(needsBefore.trays);
-  await expect(page.getByTestId("manual-override-banner")).toContainText(/resumes in ~/);
+  await expect(page.getByTestId("input-batchesReady")).toHaveValue(String(correctedDough.batchesReady));
+  // A full tray seed can satisfy the entire run, so derived needs may stay
+  // zero despite both real counter corrections. Verify the corrected counters
+  // and canonical state instead of requiring demand to change.
+  await expect(page.getByTestId("dough-timers-paused-banner")).toBeVisible();
   await expect
     .poll(
       async () => readCanonicalDoughValues(page, runId),
@@ -282,7 +292,7 @@ test("manager Dough corrections resume without a catch-up write", async ({
   const correctionAcceptedAt = Date.now();
   // The pause is a real tray cadence, not just a transient render state.
   await page.waitForTimeout(500);
-  await expect(page.getByTestId("manual-override-banner")).toBeVisible();
+  await expect(page.getByTestId("dough-timers-paused-banner")).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("dough-correction-paused.png") });
 
   // Packaging must keep advancing while the Dough-specific timer is paused.
@@ -299,10 +309,9 @@ test("manager Dough corrections resume without a catch-up write", async ({
 
   // Wait for the correction's one-tray pause. Expiry should re-arm the Dough
   // timers, not apply elapsed time as a catch-up write.
-  await expect(page.getByTestId("manual-override-banner")).toBeHidden({
+  await expect(page.getByTestId("dough-timers-paused-banner")).toBeHidden({
     timeout: MAX_TRAY_PAUSE_MS,
   });
-  await expect(page.getByTestId("dough-timers-paused-banner")).toBeHidden();
   await expect(page.getByTestId("btn-pause-dough-timers")).toBeVisible();
   await page.waitForTimeout(750);
   expect(await readStepperValue(page, "input-traysOnLine"))

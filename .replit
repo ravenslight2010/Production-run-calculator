@@ -19,71 +19,7 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "test"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "test:client"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "test:rules"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "test:inventory-math"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "test:spec-reconcile"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "test:scheduled-recipe-check"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "test:spec-export"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "test:corpus"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "test:gemini"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "check-model-bump"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "operational-skill-evidence"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "typecheck"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "security:prod"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "evidence:release"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
 args = "release:standard"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "release:full"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "browser-full-159"
 
 [[workflows.workflow]]
 name = "test"
@@ -91,7 +27,7 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "pnpm --filter @workspace/api-server run test"
+args = "bash scripts/src/run-release-node.sh pnpm --filter @workspace/api-server run test"
 
 [workflows.workflow.metadata]
 isValidation = true
@@ -105,7 +41,7 @@ isValidation = true
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "pnpm --filter @workspace/run-calculator run test:budget"
+args = "bash scripts/src/run-release-node.sh pnpm --filter @workspace/run-calculator run test:budget"
 
 [[workflows.workflow]]
 name = "test:rules"
@@ -116,7 +52,7 @@ isValidation = true
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "pnpm --filter @workspace/production-rules run test"
+args = "bash scripts/src/run-release-node.sh pnpm --filter @workspace/production-rules run test"
 
 [[workflows.workflow]]
 name = "test:inventory-math"
@@ -127,7 +63,7 @@ isValidation = true
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "pnpm --filter @workspace/inventory-math run test"
+args = "bash scripts/src/run-release-node.sh pnpm --filter @workspace/inventory-math run test"
 
 [[workflows.workflow]]
 name = "test:spec-reconcile"
@@ -135,7 +71,7 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "pnpm --filter @workspace/spec-reconcile run test"
+args = "bash scripts/src/run-release-node.sh pnpm --filter @workspace/spec-reconcile run test"
 
 [workflows.workflow.metadata]
 outputType = "console"
@@ -149,7 +85,7 @@ isValidation = true
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "pnpm --filter @workspace/scheduled-recipe-check run test"
+args = "bash scripts/src/run-release-node.sh pnpm --filter @workspace/scheduled-recipe-check run test"
 
 [[workflows.workflow]]
 name = "test:spec-export"
@@ -160,7 +96,7 @@ isValidation = true
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "pnpm --filter @workspace/spec-export run test"
+args = "bash scripts/src/run-release-node.sh pnpm --filter @workspace/spec-export run test"
 
 [[workflows.workflow]]
 name = "test:corpus"
@@ -171,7 +107,7 @@ outputType = "console"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "pnpm --filter @workspace/corpus-harness run test"
+args = "bash scripts/src/run-release-node.sh pnpm --filter @workspace/corpus-harness run test"
 
 [[workflows.workflow]]
 name = "test:gemini"
@@ -182,7 +118,7 @@ isValidation = true
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "python3 scripts/test_gemini_skill_trigger_benchmark.py"
+args = "bash scripts/src/run-release-node.sh python3 scripts/test_gemini_skill_trigger_benchmark.py"
 
 [[workflows.workflow]]
 name = "check-model-bump"
@@ -193,7 +129,7 @@ isValidation = true
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "pnpm --filter @workspace/scripts run check-model-bump"
+args = "bash scripts/src/run-release-node.sh pnpm --filter @workspace/scripts run check-model-bump"
 
 [[workflows.workflow]]
 name = "operational-skill-evidence"
@@ -204,7 +140,7 @@ isValidation = true
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "pnpm --filter @workspace/scripts run check-operational-skill-evidence"
+args = "bash scripts/src/run-release-node.sh pnpm --filter @workspace/scripts run check-operational-skill-evidence"
 
 [[workflows.workflow]]
 name = "check:clean-start"
@@ -212,7 +148,7 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "CLEAN_START_API_PORT=18081 CLEAN_START_WEB_PORT=18082 CLEAN_START_MOCKUP_PORT=18180 pnpm run check:clean-start"
+args = "bash scripts/src/run-release-node.sh env CLEAN_START_API_PORT=18081 CLEAN_START_WEB_PORT=18082 CLEAN_START_MOCKUP_PORT=18180 pnpm run check:clean-start"
 
 [[workflows.workflow]]
 name = "typecheck"
@@ -220,7 +156,7 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "pnpm run typecheck"
+args = "bash scripts/src/run-release-node.sh pnpm run typecheck"
 
 [workflows.workflow.metadata]
 isValidation = true
@@ -231,7 +167,7 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "pnpm run audit:prod"
+args = "bash scripts/src/run-release-node.sh pnpm run audit:prod"
 
 [workflows.workflow.metadata]
 isValidation = true
@@ -242,7 +178,7 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "pnpm --filter @workspace/scripts run check:release-evidence"
+args = "bash scripts/src/run-release-node.sh pnpm --filter @workspace/scripts run check:release-evidence"
 
 [workflows.workflow.metadata]
 isValidation = true
@@ -253,7 +189,7 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "pnpm run release:check"
+args = "bash scripts/src/run-release-node.sh pnpm run release:check"
 
 [workflows.workflow.metadata]
 isValidation = true
@@ -264,7 +200,7 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "pnpm run release:check:full"
+args = "bash scripts/src/run-release-node.sh pnpm run release:check:full"
 
 [workflows.workflow.metadata]
 isValidation = true
@@ -275,7 +211,7 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "bash scripts/src/run-isolated-browser-suite.sh"
+args = "bash scripts/src/run-release-node.sh bash scripts/src/run-isolated-browser-suite.sh"
 
 [workflows.workflow.metadata]
 isValidation = true

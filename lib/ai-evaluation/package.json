@@ -11,6 +11,8 @@
     "typecheck": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
+    "@types/node": "catalog:",
+    "fast-check": "^4.10.2",
     "vitest": "^4.1.9"
   }
 }

@@ -6,6 +6,22 @@
  * OpenAPI spec version: 0.1.0
  */
 /**
+ * Exact bounded source text retained privately with a live spec Apply.
+ */
+export type ImportOperationApplyInputSourceEvidence = {
+  /**
+     * @minLength 1
+     * @maxLength 100000
+     */
+  sourceText: string;
+  /**
+     * @minLength 1
+     * @maxLength 24
+     */
+  parseVersion: string;
+};
+
+/**
  * Reviewed entity batches keyed by supported master-data domain.
  */
 export type ImportOperationApplyInputChanges = { [key: string]: unknown };
@@ -13,16 +29,76 @@ export type ImportOperationApplyInputChanges = { [key: string]: unknown };
 export interface ImportOperationApplyInput {
   /** @maxLength 40 */
   importType: string;
-  /** @maxLength 300 */
+  /**
+     * @maxLength 300
+     * @nullable
+     */
   sourceKey?: string | null;
   /** @maxLength 300 */
   sourceLabel: string;
-  /** @pattern ^[a-f0-9]{64}$ */
+  /**
+     * @nullable
+     * @pattern ^[a-f0-9]{64}$
+     */
   requestHash?: string | null;
-  /** @pattern ^[a-f0-9]{64}$ */
+  /**
+     * @nullable
+     * @pattern ^[a-f0-9]{64}$
+     */
   expectedStateHash?: string | null;
+  /** Exact bounded source text retained privately with a live spec Apply. */
+  sourceEvidence?: ImportOperationApplyInputSourceEvidence;
   /** Reviewed entity batches keyed by supported master-data domain. */
   changes: ImportOperationApplyInputChanges;
+}
+
+export type DistillationApplyEvidenceRecordImportType = typeof DistillationApplyEvidenceRecordImportType[keyof typeof DistillationApplyEvidenceRecordImportType];
+
+
+export const DistillationApplyEvidenceRecordImportType = {
+  spec: 'spec',
+} as const;
+
+export type DistillationApplyEvidenceRecordScope = typeof DistillationApplyEvidenceRecordScope[keyof typeof DistillationApplyEvidenceRecordScope];
+
+
+export const DistillationApplyEvidenceRecordScope = {
+  live: 'live',
+} as const;
+
+export type DistillationApplyEvidenceRecordStatus = typeof DistillationApplyEvidenceRecordStatus[keyof typeof DistillationApplyEvidenceRecordStatus];
+
+
+export const DistillationApplyEvidenceRecordStatus = {
+  applied: 'applied',
+} as const;
+
+export type DistillationApplyEvidenceRecordActorCapability = typeof DistillationApplyEvidenceRecordActorCapability[keyof typeof DistillationApplyEvidenceRecordActorCapability];
+
+
+export const DistillationApplyEvidenceRecordActorCapability = {
+  'manage-profiles': 'manage-profiles',
+} as const;
+
+export type DistillationApplyEvidenceRecordAppliedValues = { [key: string]: unknown };
+
+export interface DistillationApplyEvidenceRecord {
+  operationId: string;
+  importType: DistillationApplyEvidenceRecordImportType;
+  scope: DistillationApplyEvidenceRecordScope;
+  status: DistillationApplyEvidenceRecordStatus;
+  /** @nullable */
+  undoneAt: string | null;
+  actorCapability: DistillationApplyEvidenceRecordActorCapability;
+  /** @pattern ^[a-f0-9]{64}$ */
+  actorIdSha256: string;
+  /** @pattern ^[a-f0-9]{64}$ */
+  sourceSha256: string;
+  appliedAt: string;
+  /** @minLength 1 */
+  sourceText: string;
+  parseVersion: string;
+  appliedValues: DistillationApplyEvidenceRecordAppliedValues;
 }
 
 export interface ImportOperationUndoInput {
@@ -46,15 +122,18 @@ export type ImportOperationResponseOperationResult = { [key: string]: unknown };
 export type ImportOperationResponseOperation = {
   operationId: string;
   importType: string;
+  /** @nullable */
   sourceKey?: string | null;
   sourceLabel?: string;
   status: ImportOperationResponseOperationStatus;
   requestHash: string;
+  /** @nullable */
   resultHash?: string | null;
   affectedEntities?: ImportOperationResponseOperationAffectedEntities;
   result?: ImportOperationResponseOperationResult;
   createdAt?: number;
   updatedAt?: number;
+  /** @nullable */
   undoneAt?: number | null;
 };
 
@@ -877,8 +956,156 @@ export interface OperationalIntentReceipt {
   snapshot?: SyncPayload | null;
 }
 
+/**
+ * `ok` means core-ready; `starting` or `degraded` means a hard readiness gate failed.
+ */
+export type HealthStatusStatus = typeof HealthStatusStatus[keyof typeof HealthStatusStatus];
+
+
+export const HealthStatusStatus = {
+  ok: 'ok',
+  starting: 'starting',
+  degraded: 'degraded',
+} as const;
+
+export type HealthStatusChecksProcess = typeof HealthStatusChecksProcess[keyof typeof HealthStatusChecksProcess];
+
+
+export const HealthStatusChecksProcess = {
+  ok: 'ok',
+  warning: 'warning',
+  error: 'error',
+  pending: 'pending',
+} as const;
+
+export type HealthStatusChecksStartup = typeof HealthStatusChecksStartup[keyof typeof HealthStatusChecksStartup];
+
+
+export const HealthStatusChecksStartup = {
+  ok: 'ok',
+  warning: 'warning',
+  error: 'error',
+  pending: 'pending',
+} as const;
+
+export type HealthStatusChecksDatabase = typeof HealthStatusChecksDatabase[keyof typeof HealthStatusChecksDatabase];
+
+
+export const HealthStatusChecksDatabase = {
+  ok: 'ok',
+  warning: 'warning',
+  error: 'error',
+  pending: 'pending',
+} as const;
+
+export type HealthStatusChecksAuditProtection = typeof HealthStatusChecksAuditProtection[keyof typeof HealthStatusChecksAuditProtection];
+
+
+export const HealthStatusChecksAuditProtection = {
+  ok: 'ok',
+  warning: 'warning',
+  error: 'error',
+  pending: 'pending',
+} as const;
+
+export type HealthStatusChecksDependencies = typeof HealthStatusChecksDependencies[keyof typeof HealthStatusChecksDependencies];
+
+
+export const HealthStatusChecksDependencies = {
+  ok: 'ok',
+  warning: 'warning',
+  error: 'error',
+  pending: 'pending',
+} as const;
+
+export type HealthStatusChecksBackgroundWorkers = typeof HealthStatusChecksBackgroundWorkers[keyof typeof HealthStatusChecksBackgroundWorkers];
+
+
+export const HealthStatusChecksBackgroundWorkers = {
+  ok: 'ok',
+  warning: 'warning',
+  error: 'error',
+  pending: 'pending',
+} as const;
+
+/**
+ * Statuses for core gates and optional dependencies. A warning on dependencies or backgroundWorkers does not block HTTP 200.
+ */
+export type HealthStatusChecks = {
+  process: HealthStatusChecksProcess;
+  startup: HealthStatusChecksStartup;
+  database: HealthStatusChecksDatabase;
+  auditProtection: HealthStatusChecksAuditProtection;
+  dependencies: HealthStatusChecksDependencies;
+  backgroundWorkers: HealthStatusChecksBackgroundWorkers;
+  [key: string]: unknown;
+};
+
+export type HealthStatusCapabilitiesAiStatus = typeof HealthStatusCapabilitiesAiStatus[keyof typeof HealthStatusCapabilitiesAiStatus];
+
+
+export const HealthStatusCapabilitiesAiStatus = {
+  configured: 'configured',
+  not_configured: 'not_configured',
+  pending: 'pending',
+} as const;
+
+export type HealthStatusCapabilitiesAiDetail = typeof HealthStatusCapabilitiesAiDetail[keyof typeof HealthStatusCapabilitiesAiDetail];
+
+
+export const HealthStatusCapabilitiesAiDetail = {
+  ai_provider_not_configured: 'ai_provider_not_configured',
+} as const;
+
+/**
+ * AI credential configuration, not remote provider reachability.
+ */
+export type HealthStatusCapabilitiesAi = {
+  status: HealthStatusCapabilitiesAiStatus;
+  detail?: HealthStatusCapabilitiesAiDetail;
+};
+
+export type HealthStatusCapabilities = {
+  /** AI credential configuration, not remote provider reachability. */
+  ai: HealthStatusCapabilitiesAi;
+};
+
+export type HealthStatusStartupPhase = typeof HealthStatusStartupPhase[keyof typeof HealthStatusStartupPhase];
+
+
+export const HealthStatusStartupPhase = {
+  starting: 'starting',
+  ready: 'ready',
+  failed: 'failed',
+} as const;
+
+export type HealthStatusStartup = {
+  phase: HealthStatusStartupPhase;
+  /** @nullable */
+  stage: string | null;
+  durationMs: number;
+  errorCode?: string;
+};
+
+/**
+ * Bounded operational diagnostics; excludes provider credentials and request payloads.
+ */
+export type HealthStatusDiagnostics = { [key: string]: unknown };
+
+/**
+ * Readiness response. HTTP 200 means startup, database, and required audit protection are ready, even when optional checks report warnings. HTTP 503 is reserved for a failed core readiness gate.
+ */
 export interface HealthStatus {
-  status: string;
+  /** `ok` means core-ready; `starting` or `degraded` means a hard readiness gate failed. */
+  status: HealthStatusStatus;
+  /** Statuses for core gates and optional dependencies. A warning on dependencies or backgroundWorkers does not block HTTP 200. */
+  checks: HealthStatusChecks;
+  capabilities: HealthStatusCapabilities;
+  startup?: HealthStatusStartup;
+  /** Bounded operational diagnostics; excludes provider credentials and request payloads. */
+  diagnostics?: HealthStatusDiagnostics;
+  correlationId: string;
+  timestamp: string;
 }
 
 export type SyncPeerFrameCompleteness = typeof SyncPeerFrameCompleteness[keyof typeof SyncPeerFrameCompleteness];
@@ -1075,6 +1302,9 @@ export interface SyncUnchangedResponse {
   rollover: boolean;
   /** @minimum 0 */
   canonicalRevision?: number;
+  /** @minimum 0 */
+  serverTime?: number;
+  operationalProjection?: OperationalProjection | null;
 }
 
 export type SyncRecoveryPayload = SyncPayload & {
@@ -1662,8 +1892,11 @@ export interface QualityCheckRecord {
   confidence: number;
   summary: string;
   issues: QualityIssue[];
+  /** @nullable */
   notes?: string | null;
+  /** @nullable */
   thumbnail?: string | null;
+  /** @nullable */
   reviewerName?: string | null;
   /** ISO-8601 timestamp the check was recorded */
   createdAt: string;
@@ -1978,9 +2211,15 @@ export interface SavedSpecSheetData {
 export interface SavedSpecSheet {
   id: number;
   label: string;
-  /** Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots. */
+  /**
+     * Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.
+     * @nullable
+     */
   sourceKey?: string | null;
-  /** SHA-256 content fingerprint of the imported file bytes (per-file hashes sorted and re-hashed for multi-file imports). A re-import of the exact same file reuses this snapshot's parse instead of re-running the AI. Null for legacy snapshots. */
+  /**
+     * SHA-256 content fingerprint of the imported file bytes (per-file hashes sorted and re-hashed for multi-file imports). A re-import of the exact same file reuses this snapshot's parse instead of re-running the AI. Null for legacy snapshots.
+     * @nullable
+     */
   sourceHash?: string | null;
   /** Epoch milliseconds the snapshot was saved */
   createdAt: number;
@@ -2030,9 +2269,15 @@ export interface SavedShippingGuideData {
 export interface SavedShippingGuide {
   id: number;
   label: string;
-  /** Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots. */
+  /**
+     * Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.
+     * @nullable
+     */
   sourceKey?: string | null;
-  /** SHA-256 content fingerprint of the imported file bytes. Null for legacy snapshots. */
+  /**
+     * SHA-256 content fingerprint of the imported file bytes. Null for legacy snapshots.
+     * @nullable
+     */
   sourceHash?: string | null;
   /** Epoch milliseconds the snapshot was saved */
   createdAt: number;
@@ -2156,7 +2401,10 @@ export type SavedPremixSheetData = SavedMix[];
 export interface SavedPremixSheet {
   id: number;
   label: string;
-  /** Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots. */
+  /**
+     * Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.
+     * @nullable
+     */
   sourceKey?: string | null;
   /** Epoch milliseconds the snapshot was saved */
   createdAt: number;
@@ -2189,7 +2437,10 @@ export interface SavedCheeseRecipe {
 export interface SavedCheeseSheet {
   id: number;
   label: string;
-  /** Stable per-file identity; retention keeps two versions per source key. */
+  /**
+     * Stable per-file identity; retention keeps two versions per source key.
+     * @nullable
+     */
   sourceKey?: string | null;
   /** Epoch milliseconds the snapshot was saved */
   createdAt: number;
@@ -2480,6 +2731,26 @@ export const OperationalReportInventoryAvailability = {
   unavailable: 'unavailable',
 } as const;
 
+export type OperationalReportEvidenceReleaseIdentityStatus = typeof OperationalReportEvidenceReleaseIdentityStatus[keyof typeof OperationalReportEvidenceReleaseIdentityStatus];
+
+
+export const OperationalReportEvidenceReleaseIdentityStatus = {
+  'reported-unverified': 'reported-unverified',
+  incomplete: 'incomplete',
+  unavailable: 'unavailable',
+} as const;
+
+export type OperationalReportEvidenceReleaseIdentitySource = typeof OperationalReportEvidenceReleaseIdentitySource[keyof typeof OperationalReportEvidenceReleaseIdentitySource];
+
+
+export const OperationalReportEvidenceReleaseIdentitySource = {
+  'runtime-environment': 'runtime-environment',
+  unavailable: 'unavailable',
+} as const;
+
+/**
+ * @nullable
+ */
 export type OperationalReportQualityValue = {
   checks?: number;
   issues?: number;
@@ -2489,10 +2760,14 @@ export type OperationalReportQualityValue = {
 
 export type OperationalReportQuality = {
   availability: OperationalReportQualityAvailability;
+  /** @nullable */
   value: OperationalReportQualityValue;
   note?: string;
 };
 
+/**
+ * @nullable
+ */
 export type OperationalReportIncidentsValue = {
   total?: number;
   unresolved?: number;
@@ -2500,18 +2775,56 @@ export type OperationalReportIncidentsValue = {
 
 export type OperationalReportIncidents = {
   availability: OperationalReportIncidentsAvailability;
+  /** @nullable */
   value: OperationalReportIncidentsValue;
   note?: string;
 };
 
+/**
+ * @nullable
+ */
 export type OperationalReportInventoryValue = {
   flaggedItems?: number;
 } | null;
 
 export type OperationalReportInventory = {
   availability: OperationalReportInventoryAvailability;
+  /** @nullable */
   value: OperationalReportInventoryValue;
   note?: string;
+};
+
+/**
+ * Runtime-reported identity is informational only and is not provider-verified release proof.
+ */
+export type OperationalReportEvidenceRelease = {
+  version: string;
+  revision: string;
+  environment: string;
+  /**
+     * @maxLength 128
+     * @nullable
+     */
+  deploymentId?: string | null;
+  /**
+     * @nullable
+     * @pattern ^[a-f0-9]{40}$
+     */
+  deployedRevision?: string | null;
+  identityStatus?: OperationalReportEvidenceReleaseIdentityStatus;
+  identitySource?: OperationalReportEvidenceReleaseIdentitySource;
+};
+
+export type OperationalReportEvidenceRecovery = {
+  generatedAt?: string;
+  source?: string;
+  complete?: boolean;
+};
+
+export type OperationalReportEvidence = {
+  /** Runtime-reported identity is informational only and is not provider-verified release proof. */
+  release?: OperationalReportEvidenceRelease;
+  recovery?: OperationalReportEvidenceRecovery;
 };
 
 export interface OperationalReport {
@@ -2524,6 +2837,7 @@ export interface OperationalReport {
   quality: OperationalReportQuality;
   incidents: OperationalReportIncidents;
   inventory: OperationalReportInventory;
+  evidence?: OperationalReportEvidence;
 }
 
 export type FinalizedOperationalReport = FinalizedOperationalReportSummary & {
@@ -2616,6 +2930,9 @@ export type OperationalRunViewElapsed = {
   phase: OperationalRunViewElapsedPhase;
 };
 
+/**
+ * @nullable
+ */
 export type OperationalRunViewPacePaceStatus = typeof OperationalRunViewPacePaceStatus[keyof typeof OperationalRunViewPacePaceStatus] | null;
 
 
@@ -2627,6 +2944,7 @@ export const OperationalRunViewPacePaceStatus = {
 
 export type OperationalRunViewPace = {
   ppm: number;
+  /** @nullable */
   paceStatus: OperationalRunViewPacePaceStatus;
   paceDelta: number;
   catchUpPpm: number | null;
@@ -2788,8 +3106,11 @@ export interface ShiftHandoffItem {
   status: ShiftHandoffItemStatus;
   title: string;
   detail: string;
+  /** @nullable */
   affectedRun: string | null;
+  /** @nullable */
   affectedProduct: string | null;
+  /** @nullable */
   occurredAt: string | null;
   sourcePath: string;
   historical: boolean;
@@ -3102,7 +3423,10 @@ export interface ImportAlias {
   externalName: string;
   /** The saved name the imported name resolves to */
   canonicalName: string;
-  /** For flavor aliases, the canonical parent brand the flavor belongs to; null/omitted for brand aliases. */
+  /**
+     * For flavor aliases, the canonical parent brand the flavor belongs to; null/omitted for brand aliases.
+     * @nullable
+     */
   brandContext?: string | null;
 }
 
@@ -3121,6 +3445,7 @@ export interface ImportHistorySummary {
   unresolved?: string[];
   skipped?: string[];
   followUp?: string[];
+  /** @nullable */
   snapshotId?: number | null;
   [key: string]: unknown;
  }
@@ -3151,12 +3476,16 @@ export const ImportHistoryStatus = {
 export interface ImportHistory {
   id: number;
   importType: ImportHistoryImportType;
+  /** @nullable */
   sourceKey?: string | null;
   sourceLabel: string;
+  /** @nullable */
   customerScope?: string | null;
   status: ImportHistoryStatus;
   summary: ImportHistorySummary;
+  /** @nullable */
   snapshotId?: number | null;
+  /** @nullable */
   operationId?: string | null;
   /** Epoch milliseconds */
   createdAt: number;
@@ -3336,6 +3665,7 @@ export interface FacilityKnowledge {
 
 export type FacilityKnowledgeHealthFindingEntry = FacilityKnowledge & ({
   id: number;
+  /** @nullable */
   source?: string | null;
 });
 
@@ -3453,12 +3783,16 @@ export interface ProfileDataHealthApplyResult {
   before: ProfileDataHealthReport;
   after: ProfileDataHealthReport;
   applied: ProfileDataHealthRepair[];
+  /** @nullable */
   batchId?: string | null;
   summary: ProfileDataHealthApplyResultSummary;
 }
 
 export type ProfileDataHealthWorkspaceSummary = {[key: string]: number};
 
+/**
+ * @nullable
+ */
 export type ProfileDataHealthWorkspaceCleanupHistory = { [key: string]: unknown } | null;
 
 export type ProfileDataHealthWorkspaceRepairBatchesItem = { [key: string]: unknown };
@@ -3490,6 +3824,9 @@ export const DataHealthFindingSource = {
   cleanup: 'cleanup',
 } as const;
 
+/**
+ * @nullable
+ */
 export type DataHealthFindingReconciliationCategory = typeof DataHealthFindingReconciliationCategory[keyof typeof DataHealthFindingReconciliationCategory] | null;
 
 
@@ -3502,6 +3839,9 @@ export const DataHealthFindingReconciliationCategory = {
   'unexpected-stub': 'unexpected-stub',
 } as const;
 
+/**
+ * @nullable
+ */
 export type DataHealthFindingPreview = { [key: string]: unknown } | null;
 
 export interface DataHealthFinding {
@@ -3518,7 +3858,9 @@ export interface DataHealthFinding {
   protectedValue: boolean;
   source: DataHealthFindingSource;
   sourceRoute: string;
+  /** @nullable */
   reconciliationCategory?: DataHealthFindingReconciliationCategory;
+  /** @nullable */
   preview?: DataHealthFindingPreview;
 }
 
@@ -3676,6 +4018,7 @@ export type SourceLibraryReconciliationStatusHealResult = {
 export type SourceLibraryReconciliationStatusHeal = {
   id: string;
   fromDate: string;
+  /** @nullable */
   appliedAt: string | null;
   markerValid: boolean;
   result: SourceLibraryReconciliationStatusHealResult;
@@ -3727,6 +4070,7 @@ export interface ProfileDataHealthWorkspace {
   findings: DataHealthFinding[];
   safeRepairs: ProfileDataHealthRepair[];
   summary: ProfileDataHealthWorkspaceSummary;
+  /** @nullable */
   cleanupHistory: ProfileDataHealthWorkspaceCleanupHistory;
   repairBatches: ProfileDataHealthWorkspaceRepairBatchesItem[];
   aiRetention: AiRetentionReport;
@@ -3744,7 +4088,10 @@ export interface AuditLog {
   actor: string;
   /** Allowlisted action name */
   action: string;
-  /** Resource identifier */
+  /**
+     * Resource identifier
+     * @nullable
+     */
   resource: string | null;
   /** Allowlisted, redacted evidence object no larger than 8192 bytes. */
   changes: AuditLogChanges;
@@ -3756,7 +4103,10 @@ export interface AuditLogPage {
   logs: AuditLog[];
   /** Number of records in this page */
   count: number;
-  /** Opaque cursor limited to 200 characters */
+  /**
+     * Opaque cursor limited to 200 characters
+     * @nullable
+     */
   nextCursor: string | null;
 }
 
@@ -3950,21 +4300,45 @@ export interface ProductionRule {
   type: ProductionRuleType;
   enforcement: ProductionRuleEnforcement;
   enabled: boolean;
-  /** Run field key (required-field, numeric-range) */
+  /**
+     * Run field key (required-field, numeric-range)
+     * @nullable
+     */
   field?: string | null;
-  /** Inclusive lower bound (numeric-range) */
+  /**
+     * Inclusive lower bound (numeric-range)
+     * @nullable
+     */
   min?: number | null;
-  /** Inclusive upper bound (numeric-range) */
+  /**
+     * Inclusive upper bound (numeric-range)
+     * @nullable
+     */
   max?: number | null;
-  /** Run attribute key for the transition (sequence) */
+  /**
+     * Run attribute key for the transition (sequence)
+     * @nullable
+     */
   attribute?: string | null;
-  /** Disallowed preceding attribute value (sequence) */
+  /**
+     * Disallowed preceding attribute value (sequence)
+     * @nullable
+     */
   before?: string | null;
-  /** Disallowed following attribute value (sequence) */
+  /**
+     * Disallowed following attribute value (sequence)
+     * @nullable
+     */
   after?: string | null;
-  /** Exceptions: when the current run matches any of these conditions the rule is waived entirely (no warning, no block). Applies to any type. */
+  /**
+     * Exceptions: when the current run matches any of these conditions the rule is waived entirely (no warning, no block). Applies to any type.
+     * @nullable
+     */
   bypass?: RuleBypassCondition[] | null;
-  /** Exceptions: ordered step labels a manager attaches to a (strict) rule. When the rule is violated and not bypassed, the operator must acknowledge every step before Start unblocks for that run. */
+  /**
+     * Exceptions: ordered step labels a manager attaches to a (strict) rule. When the rule is violated and not bypassed, the operator must acknowledge every step before Start unblocks for that run.
+     * @nullable
+     */
   checklist?: string[] | null;
 }
 
@@ -4137,10 +4511,7 @@ export interface RecordMixSurplusInput {
      */
   mixId: string;
   productionDate: string;
-  /**
-     * @minimum 0.1
-     * @exclusiveMinimum
-     */
+  /** @exclusiveMinimum 0.1 */
   amountMade: number;
 }
 
@@ -4188,9 +4559,15 @@ export interface DieLineDefaultsEntry {
   freezerTime: number;
   /** "Extra Case Buffer" in the UI */
   casesPerLayer: number;
-  /** Pre-tunnel dwell time override in minutes. Absent = use the app's built-in per-die-size default (3.5 min for 7", 2.0 min for 12"). */
+  /**
+     * Pre-tunnel dwell time override in minutes. Absent = use the app's built-in per-die-size default (3.5 min for 7", 2.0 min for 12").
+     * @nullable
+     */
   preTunnelMin?: number | null;
-  /** Post-tunnel dwell time override in minutes. Absent = use the app's built-in per-die-size default (3.0 min for 7", 2.0 min for 12"). */
+  /**
+     * Post-tunnel dwell time override in minutes. Absent = use the app's built-in per-die-size default (3.0 min for 7", 2.0 min for 12").
+     * @nullable
+     */
   postTunnelMin?: number | null;
 }
 
@@ -4483,7 +4860,10 @@ export interface Ingredient {
   /** Current display name */
   name: string;
   categories: IngredientCategory[];
-  /** When set, this ingredient was merged into another ingredient's id; resolve display name by following this pointer. */
+  /**
+     * When set, this ingredient was merged into another ingredient's id; resolve display name by following this pointer.
+     * @nullable
+     */
   mergedInto?: string | null;
   /** false = soft-deleted (kept so old rows still resolve) */
   enabled: boolean;
@@ -4692,7 +5072,10 @@ export interface CycleCountSchedule {
   section: string;
   /** How many days may elapse between counts (default 7) */
   cadenceDays: number;
-  /** Date last counted (YYYY-MM-DD), or null if never counted */
+  /**
+     * Date last counted (YYYY-MM-DD), or null if never counted
+     * @nullable
+     */
   lastCountedAt: string | null;
   enabled: boolean;
 }
@@ -4745,7 +5128,10 @@ export interface SpecImportAlias {
   externalName: string;
   /** The saved canonical name the label resolves to */
   canonicalName: string;
-  /** Disambiguator within a kind (e.g. the canonical brand for a flavor alias); null/omitted otherwise. */
+  /**
+     * Disambiguator within a kind (e.g. the canonical brand for a flavor alias); null/omitted otherwise.
+     * @nullable
+     */
   context?: string | null;
 }
 
@@ -6044,4 +6430,22 @@ export type ListOperationalIntentReceipts200 = {
   cursor: number;
   hasMore: boolean;
   mutations: OperationalIntentReceipt[];
+};
+
+export type ListDistillationApplyEvidenceParams = {
+/**
+ * @minimum 1
+ * @maximum 20
+ */
+limit?: number;
+/**
+ * @maxLength 512
+ */
+cursor?: string;
+};
+
+export type ListDistillationApplyEvidence200 = {
+  records: DistillationApplyEvidenceRecord[];
+  /** @nullable */
+  nextCursor: string | null;
 };

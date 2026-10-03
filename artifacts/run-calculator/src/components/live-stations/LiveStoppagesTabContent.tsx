@@ -830,7 +830,7 @@ export const LiveStoppagesTabContent = memo(function LiveStoppagesTabContent() {
                         </div>
                         <div className="flex items-center gap-2">
                           {stopOnlyMs > 0 && (
-                            <span className="text-xs text-orange-400 font-semibold">
+                            <span className="text-xs text-orange-800 dark:text-orange-400 font-semibold">
                               {fmtTime(stopOnlyMs / 1000)} down
                             </span>
                           )}
@@ -847,7 +847,7 @@ export const LiveStoppagesTabContent = memo(function LiveStoppagesTabContent() {
                             <button
                               type="button"
                               onClick={() => { setStopReason(""); setStopNotes(""); setShowStopDialog(true); }}
-                              className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-orange-700/60 text-orange-400 hover:bg-orange-950/40 text-xs font-semibold transition-colors"
+                              className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-orange-700/60 text-orange-800 dark:text-orange-400 hover:text-orange-900 dark:hover:text-orange-300 hover:bg-orange-100/80 dark:hover:bg-orange-950/40 text-xs font-semibold transition-colors"
                             >
                               <Plus className="w-3 h-3" /> Log Stop
                             </button>
@@ -885,7 +885,7 @@ export const LiveStoppagesTabContent = memo(function LiveStoppagesTabContent() {
                               {(`${group.run.brand ?? ""}${group.run.flavor ? ` – ${group.run.flavor}` : ""}`.trim()) || `Run ${group.idx + 1}`}
                             </span>
                             {group.idx === dayState.currentIndex && (
-                              <span className="text-[10px] font-semibold uppercase tracking-wider text-primary shrink-0">Current</span>
+                              <span className="text-[10px] font-semibold uppercase tracking-wider text-orange-800 dark:text-orange-400 shrink-0">Current</span>
                             )}
                           </div>
                           <div className="divide-y divide-border/20">
@@ -908,33 +908,33 @@ export const LiveStoppagesTabContent = memo(function LiveStoppagesTabContent() {
                               <div key={stop.id} className={`flex items-start gap-3 px-4 py-2.5 text-sm ${rowBackground}`}>
                                 <div className="mt-0.5 shrink-0">
                                   {isPause
-                                    ? <PauseCircle className={`w-3.5 h-3.5 ${isActive ? "text-blue-400 animate-pulse" : "text-blue-400"}`} />
+                                    ? <PauseCircle className={`w-3.5 h-3.5 text-blue-700 dark:text-blue-400 ${isActive ? "animate-pulse" : ""}`} />
                                     : <OctagonX className={`w-3.5 h-3.5 ${isActive ? "text-orange-800 dark:text-orange-400 animate-pulse" : "text-orange-800 dark:text-orange-400"}`} />
                                   }
                                 </div>
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-1.5 flex-wrap">
-                                    <span className={`text-[10px] font-semibold uppercase tracking-wider ${isPause ? "text-blue-400" : isManual ? "text-violet-700 dark:text-violet-300" : "text-orange-800 dark:text-orange-400/70"}`}>
+                                    <span className={`text-[10px] font-semibold uppercase tracking-wider ${isPause ? "text-blue-700 dark:text-blue-400" : isManual ? "text-violet-700 dark:text-violet-300" : "text-orange-800 dark:text-orange-400/70"}`}>
                                       {isPause ? "Pause" : isManual ? "Manual" : "Stop"}
                                     </span>
                                     {noReason ? (
                                       <button
                                         type="button"
                                         onClick={() => setEditingStop({ ...stop })}
-                                        className="text-xs italic text-amber-400 hover:text-amber-300 transition-colors"
+                                        className="text-xs italic text-amber-800 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-300 transition-colors"
                                       >
                                         No reason — tap to add
                                       </button>
                                     ) : (
                                       <span className="text-xs font-medium">{stop.reason}</span>
                                     )}
-                                    {stop.notes && <span className="text-xs text-muted-foreground">— {stop.notes}</span>}
+                                    {stop.notes && <span className="text-xs text-foreground">— {stop.notes}</span>}
                                   </div>
-                                  <div className="text-[10px] text-muted-foreground mt-0.5">
+                                  <div className="text-[10px] text-foreground mt-0.5">
                                     {fmtClock(stop.startedAt)}{stop.endedAt ? ` → ${fmtClock(stop.endedAt)}` : " (ongoing)"}
                                   </div>
                                 </div>
-                                <span className={`text-xs font-semibold tabular-nums shrink-0 mt-0.5 ${isActive ? (isPause ? "text-blue-400" : "text-orange-400") : "text-muted-foreground"}`}>
+                                <span className={`text-xs font-semibold tabular-nums shrink-0 mt-0.5 ${isActive ? (isPause ? "text-blue-700 dark:text-blue-400" : "text-orange-800 dark:text-orange-400") : "text-foreground"}`}>
                                   {dur !== null ? fmtTime(dur) : fmtElapsed(nowTime.getTime() - stop.startedAt)}
                                 </span>
                                 <button

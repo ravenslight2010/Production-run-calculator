@@ -207,6 +207,13 @@
     min-width: 320px;
     overflow-x: hidden;
   }
+
+  /* Custom responsive dialogs do not use Radix's scroll lock. Keep the
+   * underlying station page fixed while any of them is open, including when
+   * a nested touch picker has just closed. */
+  body:has(.responsive-dialog-overlay) {
+    overflow: hidden;
+  }
 }
 
 /*

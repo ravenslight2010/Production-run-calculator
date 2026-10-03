@@ -10,9 +10,15 @@ import type { SavedSpecSheetData } from './savedSpecSheetData';
 export interface SavedSpecSheet {
   id: number;
   label: string;
-  /** Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots. */
+  /**
+     * Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.
+     * @nullable
+     */
   sourceKey?: string | null;
-  /** SHA-256 content fingerprint of the imported file bytes (per-file hashes sorted and re-hashed for multi-file imports). A re-import of the exact same file reuses this snapshot's parse instead of re-running the AI. Null for legacy snapshots. */
+  /**
+     * SHA-256 content fingerprint of the imported file bytes (per-file hashes sorted and re-hashed for multi-file imports). A re-import of the exact same file reuses this snapshot's parse instead of re-running the AI. Null for legacy snapshots.
+     * @nullable
+     */
   sourceHash?: string | null;
   /** Epoch milliseconds the snapshot was saved */
   createdAt: number;

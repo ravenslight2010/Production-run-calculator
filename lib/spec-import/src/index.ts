@@ -13,6 +13,9 @@ import {
   buildNearDupNameMatcherDetailed,
 } from "@workspace/name-match";
 
+/** Shared by the web parser, API evidence exporter, and distillation validator. */
+export const SPEC_IMPORT_PARSE_VERSION = "41";
+
 // ── Core data shapes ────────────────────────────────────────────────────────
 
 export type RecipeRow = { ingredient: string; lbs: number };
@@ -3176,6 +3179,22 @@ export type SpecImportAlias = {
   context: string | null;
 };
 
+/**
+ * Context is part of the identity for namespaces that cannot safely resolve a
+ * mapping without it. Legacy rows may have a NULL context because the column
+ * predates the scoped flavor and named-recipe link contracts.
+ */
+export function hasRequiredSpecAliasContext(
+  kind: SpecAliasKind,
+  context: string | null | undefined,
+): boolean {
+  const normalized = context?.trim().toLowerCase() ?? "";
+  if (kind === "flavor") return normalized.length > 0;
+  if (kind === "recipeName") return normalized === "dough" || normalized === "sauce";
+  if (kind === "crossFamilyRouting") return normalized === "cheese" || normalized === "mix";
+  return true;
+}
+
 const NUL = "\u0000";
 
 /** Case-insensitive identity key for an alias. */
@@ -3380,6 +3399,7 @@ export function sanitizeSpecAliases(
   aliases: ReadonlyArray<SpecImportAlias>,
 ): SpecImportAlias[] {
   const clean = aliases.filter((a) => {
+    if (!hasRequiredSpecAliasContext(a.kind, a.context)) return false;
     if (a.kind === "appType" && (isGenericSlotTypeName(a.externalName) || isGenericSlotTypeName(a.canonicalName))) {
       return false;
     }

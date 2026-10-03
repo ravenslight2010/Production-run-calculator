@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { resolveChromiumExecutable } from "./e2e/chromium";
 
 /**
  * The PWA handoff test serves its own two-version static site. Keep it out of
@@ -17,7 +18,7 @@ export default defineConfig({
     trace: "on-first-retry",
     video: "off",
     launchOptions: {
-      executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
+      executablePath: resolveChromiumExecutable(),
     },
   },
   projects: [

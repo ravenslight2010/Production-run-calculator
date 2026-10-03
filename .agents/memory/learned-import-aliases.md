@@ -130,3 +130,18 @@ dropdown — the exact bug the user hit.
 picks rename matching applicator types, keyed by pristine AND current names via
 the shared loose key). Both sides are regression-tested — extend those tests
 when touching either side.
+
+## Legacy context repair
+
+When a previously optional alias context becomes required for a namespace, add
+a new marker-guarded repair rather than changing the meaning of the released
+repair marker. Keep the shared sanitizer and API read path on the same context
+contract, and record only bounded counts in the repair result.
+
+**Why:** released markers are intentionally one-shot; changing an old marker's
+predicate leaves already-processed databases unrepaired, while raw malformed
+rows can still reach a manager before the next startup.
+
+**How to apply:** version the follow-up repair, scope it to the affected kinds,
+hide invalid rows at the API boundary, and test both persisted cleanup and a
+no-op rerun.

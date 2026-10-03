@@ -124,11 +124,16 @@ describe("requireAuth failure safety", () => {
   ])("does not disclose %s as a distinct public reason", async (_label, security) => {
     verifyToken.mockReturnValue({ sub: "opaque-user", iat: 10 });
     getUserSecurityState.mockResolvedValue(security);
-    const req = { headers: {}, cookies: {} } as any;
+    const req = {
+      headers: { authorization: "Bearer opaque-token" },
+      cookies: {},
+    } as any;
     const res = response();
 
     await requireAuth(req, res as any, vi.fn());
 
+    expect(verifyToken).toHaveBeenCalledWith("opaque-token");
+    expect(getUserSecurityState).toHaveBeenCalledWith("opaque-user");
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
       error: "Unauthorized",
       reason: "session_expired",

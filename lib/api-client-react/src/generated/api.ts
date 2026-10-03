@@ -128,6 +128,8 @@ import type {
   ListAuditLogsParams,
   ListCompletedHistoryParams,
   ListDeniedMergesParams,
+  ListDistillationApplyEvidence200,
+  ListDistillationApplyEvidenceParams,
   ListFinalizedOperationalReportsParams,
   ListImportHistoryParams,
   ListIncidentAssignees200Item,
@@ -299,7 +301,7 @@ export const getHealthCheckUrl = () => {
 }
 
 /**
- * Returns server health status
+ * Reports core API readiness and optional capability degradation. Startup completion, database reachability, and required audit-log protection are hard readiness gates. An unavailable AI credential or degraded background workers are reported as warnings and do not by themselves make the core API unready. The AI signal reports credential configuration only; it does not probe the remote provider.
  * @summary Health check
  */
 export const healthCheck = async ( options?: Parameters<typeof customFetch>[1]): Promise<HealthStatus> => {
@@ -324,7 +326,7 @@ export const getHealthCheckQueryKey = () => {
     }
 
 
-export const getHealthCheckQueryOptions = <TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<unknown>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthCheck>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+export const getHealthCheckQueryOptions = <TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<HealthStatus>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthCheck>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -343,10 +345,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type HealthCheckQueryResult = NonNullable<Awaited<ReturnType<typeof healthCheck>>>
-export type HealthCheckQueryError = ErrorType<unknown>
+export type HealthCheckQueryError = ErrorType<HealthStatus>
 
 
-export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<unknown>>(
+export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<HealthStatus>>(
   options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthCheck>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof healthCheck>>,
@@ -356,7 +358,7 @@ export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, 
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<unknown>>(
+export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<HealthStatus>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthCheck>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof healthCheck>>,
@@ -366,7 +368,7 @@ export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, 
       >, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<unknown>>(
+export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<HealthStatus>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthCheck>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -374,12 +376,114 @@ export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, 
  * @summary Health check
  */
 
-export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<unknown>>(
+export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<HealthStatus>>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthCheck>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getHealthCheckQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getReadinessCheckUrl = () => {
+
+
+
+
+  return `/api/readyz`
+}
+
+/**
+ * Canonical readiness probe. Returns 503 only while startup, database, or required audit-log protection is not ready. AI credential and background-worker degradation are non-blocking warnings.
+ * @summary Core API readiness
+ */
+export const readinessCheck = async ( options?: Parameters<typeof customFetch>[1]): Promise<HealthStatus> => {
+
+  return customFetch<HealthStatus>(getReadinessCheckUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getReadinessCheckQueryKey = () => {
+    return [
+    `/api/readyz`
+    ] as const;
+    }
+
+
+export const getReadinessCheckQueryOptions = <TData = Awaited<ReturnType<typeof readinessCheck>>, TError = ErrorType<HealthStatus>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof readinessCheck>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getReadinessCheckQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof readinessCheck>>> = ({ signal }) => readinessCheck({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof readinessCheck>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ReadinessCheckQueryResult = NonNullable<Awaited<ReturnType<typeof readinessCheck>>>
+export type ReadinessCheckQueryError = ErrorType<HealthStatus>
+
+
+export function useReadinessCheck<TData = Awaited<ReturnType<typeof readinessCheck>>, TError = ErrorType<HealthStatus>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof readinessCheck>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof readinessCheck>>,
+          TError,
+          Awaited<ReturnType<typeof readinessCheck>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useReadinessCheck<TData = Awaited<ReturnType<typeof readinessCheck>>, TError = ErrorType<HealthStatus>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof readinessCheck>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof readinessCheck>>,
+          TError,
+          Awaited<ReturnType<typeof readinessCheck>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useReadinessCheck<TData = Awaited<ReturnType<typeof readinessCheck>>, TError = ErrorType<HealthStatus>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof readinessCheck>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Core API readiness
+ */
+
+export function useReadinessCheck<TData = Awaited<ReturnType<typeof readinessCheck>>, TError = ErrorType<HealthStatus>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof readinessCheck>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getReadinessCheckQueryOptions(options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -19455,6 +19559,114 @@ export const useApplyImportOperation = <TError = ErrorType<void>,
       > => {
       return useMutation(getApplyImportOperationMutationOptions(options), queryClient);
     }
+
+export const getListDistillationApplyEvidenceUrl = (params?: ListDistillationApplyEvidenceParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/import-operations/distillation-evidence?${stringifiedParams}` : `/api/import-operations/distillation-evidence`
+}
+
+/**
+ * @summary Read eligible live spec Apply evidence for private export
+ */
+export const listDistillationApplyEvidence = async (params?: ListDistillationApplyEvidenceParams, options?: Parameters<typeof customFetch>[1]): Promise<ListDistillationApplyEvidence200> => {
+
+  return customFetch<ListDistillationApplyEvidence200>(getListDistillationApplyEvidenceUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListDistillationApplyEvidenceQueryKey = (params?: ListDistillationApplyEvidenceParams,) => {
+    return [
+    `/api/import-operations/distillation-evidence`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListDistillationApplyEvidenceQueryOptions = <TData = Awaited<ReturnType<typeof listDistillationApplyEvidence>>, TError = ErrorType<void>>(params?: ListDistillationApplyEvidenceParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDistillationApplyEvidence>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListDistillationApplyEvidenceQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listDistillationApplyEvidence>>> = ({ signal }) => listDistillationApplyEvidence(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listDistillationApplyEvidence>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListDistillationApplyEvidenceQueryResult = NonNullable<Awaited<ReturnType<typeof listDistillationApplyEvidence>>>
+export type ListDistillationApplyEvidenceQueryError = ErrorType<void>
+
+
+export function useListDistillationApplyEvidence<TData = Awaited<ReturnType<typeof listDistillationApplyEvidence>>, TError = ErrorType<void>>(
+ params: undefined |  ListDistillationApplyEvidenceParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDistillationApplyEvidence>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listDistillationApplyEvidence>>,
+          TError,
+          Awaited<ReturnType<typeof listDistillationApplyEvidence>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListDistillationApplyEvidence<TData = Awaited<ReturnType<typeof listDistillationApplyEvidence>>, TError = ErrorType<void>>(
+ params?: ListDistillationApplyEvidenceParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDistillationApplyEvidence>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listDistillationApplyEvidence>>,
+          TError,
+          Awaited<ReturnType<typeof listDistillationApplyEvidence>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListDistillationApplyEvidence<TData = Awaited<ReturnType<typeof listDistillationApplyEvidence>>, TError = ErrorType<void>>(
+ params?: ListDistillationApplyEvidenceParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDistillationApplyEvidence>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Read eligible live spec Apply evidence for private export
+ */
+
+export function useListDistillationApplyEvidence<TData = Awaited<ReturnType<typeof listDistillationApplyEvidence>>, TError = ErrorType<void>>(
+ params?: ListDistillationApplyEvidenceParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDistillationApplyEvidence>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListDistillationApplyEvidenceQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getGetImportOperationUrl = (operationId: string,) => {
 

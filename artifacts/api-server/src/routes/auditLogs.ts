@@ -112,7 +112,7 @@ const EVENT_SCHEMAS: Record<string, { required: string[]; allowed: string[] }> =
   },
   production_rules_updated: { required: ["outcome", "count"], allowed: ["outcome", "count"] },
   production_rules_deleted: { required: ["outcome", "count"], allowed: ["outcome", "count"] },
-  manager_action_item_update: { required: ["outcome", "targetId"], allowed: ["outcome", "targetId"] },
+  manager_action_item_update: { required: ["outcome", "targetId"], allowed: ["outcome", "targetId", "status"] },
   incident_workflow_updated: { required: ["outcome", "targetId"], allowed: ["outcome", "targetId"] },
   incident_note_added: { required: ["outcome", "targetId"], allowed: ["outcome", "targetId"] },
   profile_data_health_repair: { required: ["outcome", "count"], allowed: ["outcome", "count"] },

@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "browser": "webkit",
+  "revision": "da87155841275fa824ae0c5b877b3a1284c92cfc",
+  "environment": "ci",
+  "result": "failed",
+  "generatedAt": "2026-09-24T03:25:09.410Z",
+  "caseCount": 3,
+  "completedCount": 3,
+  "failureCount": 3,
+  "failureClassifications": {
+    "product": 0,
+    "test-setup": 0,
+    "infrastructure": 3,
+    "optional-environment-gap": 0
+  },
+  "cases": [
+    {
+      "file": "/home/runner/workspace/artifacts/run-calculator/e2e/release-webkit-smoke.spec.ts",
+      "title": " › webkit › release-webkit-smoke.spec.ts › authenticates and preserves current-run start, pause, resume, and reload",
+      "status": "failed",
+      "durationMs": 40,
+      "failureClassification": "infrastructure",
+      "error": "Error: browserType.launch: \n╔══════════════════════════════════════════════════════╗\n║ Host system is missing dependencies to run browsers. ║\n║ Missing libraries:                                   ║\n║     libatomic.so.1                                   ║\n║     libstdc++.so.6                                   ║\n║     libGLESv2.so.2                                   ║\n║     libx264.so                                       ║\n╚══════════════════════════════════════════════════════╝"
+    },
+    {
+      "file": "/home/runner/workspace/artifacts/run-calculator/e2e/release-webkit-smoke.spec.ts",
+      "title": " › webkit › release-webkit-smoke.spec.ts › recovers a failed sync pull after the browser reconnects",
+      "status": "failed",
+      "durationMs": 27,
+      "failureClassification": "infrastructure",
+      "error": "Error: browserType.launch: \n╔══════════════════════════════════════════════════════╗\n║ Host system is missing dependencies to run browsers. ║\n║ Missing libraries:                                   ║\n║     libatomic.so.1                                   ║\n║     libstdc++.so.6                                   ║\n║     libGLESv2.so.2                                   ║\n║     libx264.so                                       ║\n╚══════════════════════════════════════════════════════╝"
+    },
+    {
+      "file": "/home/runner/workspace/artifacts/run-calculator/e2e/release-webkit-smoke.spec.ts",
+      "title": " › webkit › release-webkit-smoke.spec.ts › manager can preview an authoritative operational report",
+      "status": "failed",
+      "durationMs": 29,
+      "failureClassification": "infrastructure",
+      "error": "Error: browserType.launch: \n╔══════════════════════════════════════════════════════╗\n║ Host system is missing dependencies to run browsers. ║\n║ Missing libraries:                                   ║\n║     libatomic.so.1                                   ║\n║     libstdc++.so.6                                   ║\n║     libGLESv2.so.2                                   ║\n║     libx264.so                                       ║\n╚══════════════════════════════════════════════════════╝"
+    }
+  ]
+}

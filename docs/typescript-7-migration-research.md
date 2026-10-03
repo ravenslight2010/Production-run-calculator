@@ -321,11 +321,10 @@ contracts:
 
 For each complete module, both the TypeScript 6 declaration namespace extends the
 TypeScript 7 namespace and the TypeScript 7 namespace extends the TypeScript 6 namespace.
-That bidirectional check passed when consumed by both compilers. These are intentional
-emitter differences, not public contract regressions, so each file has an exact
-baseline/candidate SHA-256 approval and a file-specific reason. The disposable reproduction
-passes with 195 formatting-only changes, 9 approved semantic changes, and no unexplained
-semantic drift.
+That bidirectional check was reported as passing when consumed by both compilers. These were
+treated as intentional emitter differences, with exact baseline/candidate SHA-256 approvals
+and file-specific reasons. The raw declaration-contract report for that comparison is not
+retained here, so its classifications cannot be independently verified from this repository.
 
 ### Results
 
@@ -340,23 +339,29 @@ semantic drift.
 | Corpus harness library `--noEmit` | Pass, 0.80s | Pass, 0.16s |
 | Generated API client/Zod forced build | Pass | Pass |
 | Diagnostic count in checks above | 0 | 0 |
-| Declaration file count | 729 | 729 |
-| Declaration files with textual differences | baseline | 205 |
-| Declaration contract comparison | baseline | Pass (196 formatting-only, 9 approved semantic, 0 unexplained) |
+| Declaration file count | 795 | 795 |
+| Declaration files with textual differences | baseline | 217 |
+| Declaration contract comparison | baseline | Historical report: 196 formatting-only, 9 approved semantic, 0 unexplained; raw report not retained |
 
 The declaration differences break down as:
 
 - 2 `api-client-react` generated declarations,
-- 142 `api-zod` generated declarations, and
-- 61 database schema declarations.
+- 150 `api-zod` generated declarations, and
+- 65 database schema declarations.
 
 There were 2,664 removed and 2,664 added diff lines. Inspected database differences were
 double-quote to single-quote changes in string literal types. Generated API declarations
 also changed some quoted literal renderings to template-literal or single-quoted forms.
-The two builds typechecked successfully. Formatting normalization accounts for 195 changed
-files, and exact hash-pinned review accounts for the remaining 9. A production switch must
-continue to block any new declaration output until it is fixed or receives the same
-contract-owner review.
+The earlier notes list 217 textual differences, while the historical contract-comparison
+counts list 196 formatting-only and 9 approved semantic changes (205 combined). Those
+figures do not reconcile. The checked-in comparison artifact currently records 206 changed
+paths and an unknown runner image; it is not a substitute for the missing per-file
+classification report. Do not describe these counts as non-additive or claim that all changed
+declarations have zero unexplained semantic drift from the available evidence. Re-run the
+comparison on an identifiable approved runner and retain its revision-bound summary and
+per-file classification before relying on those claims. A production switch must continue to
+block any new declaration output until it is fixed or receives the same contract-owner
+review.
 
 The advisory release lane captures one cold and one warm measurement for every TypeScript
 6/7 comparison check and aggregates up to five prior successful, revision-bound CI

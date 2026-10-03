@@ -42,9 +42,15 @@ export const wasteInsightBodyPlannedItemsItemCategoryMax = 100;
 export const wasteInsightBodyPlannedItemsItemNameMax = 200;
 export const wasteInsightBodyPlannedItemsItemUnitMax = 50;
 export const exportOperationalReportBodyRunsMax = 600;
+export const exportOperationalReportResponseEvidenceReleaseDeploymentIdMax = 128;
+export const exportOperationalReportResponseEvidenceReleaseDeployedRevisionRegExp = new RegExp('^[a-f0-9]{40}$');
 export const finalizeOperationalReportBodyRunsMax = 600;
+export const finalizeOperationalReportResponseTwoReportEvidenceReleaseDeploymentIdMax = 128;
+export const finalizeOperationalReportResponseTwoReportEvidenceReleaseDeployedRevisionRegExp = new RegExp('^[a-f0-9]{40}$');
 export const searchFinalizedOperationalReportsQueryLimitDefault = 100;
 export const searchFinalizedOperationalReportsQueryLimitMax = 100;
+export const getFinalizedOperationalReportResponseTwoReportEvidenceReleaseDeploymentIdMax = 128;
+export const getFinalizedOperationalReportResponseTwoReportEvidenceReleaseDeployedRevisionRegExp = new RegExp('^[a-f0-9]{40}$');
 export const aiParseSpecSheetResponseProfilesItemTargetDoughballWeightExclusiveMin = 0;
 export const aiParseSpecSheetResponseProfilesItemApplicatorsItemSlotMax = 4;
 export const listDuplicateReviewsResponseGroupsItemGroupKeyMax = 500;
@@ -237,6 +243,8 @@ export const getSyncTodayResponseOneTwoResetEpochMin = 0;
 export const getSyncTodayResponseTwoSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
 export const getSyncTodayResponseTwoResetEpochMin = 0;
 export const getSyncTodayResponseTwoCanonicalRevisionMin = 0;
+export const getSyncTodayResponseTwoServerTimeMin = 0;
+export const getSyncTodayResponseTwoOperationalProjectionOneCalculationRevisionMin = 0;
 export const putSyncTodayQueryEpochMin = 0;
 export const putSyncTodayBodySnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
 export const putSyncTodayBodyPayloadTwoBaseSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
@@ -347,6 +355,13 @@ export const applyImportOperationBodySourceKeyMax = 300;
 export const applyImportOperationBodySourceLabelMax = 300;
 export const applyImportOperationBodyRequestHashRegExp = new RegExp('^[a-f0-9]{64}$');
 export const applyImportOperationBodyExpectedStateHashRegExp = new RegExp('^[a-f0-9]{64}$');
+export const applyImportOperationBodySourceEvidenceSourceTextMax = 100000;
+export const applyImportOperationBodySourceEvidenceParseVersionMax = 24;
+export const listDistillationApplyEvidenceQueryLimitDefault = 20;
+export const listDistillationApplyEvidenceQueryLimitMax = 20;
+export const listDistillationApplyEvidenceQueryCursorMax = 512;
+export const listDistillationApplyEvidenceResponseRecordsItemActorIdSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const listDistillationApplyEvidenceResponseRecordsItemSourceSha256RegExp = new RegExp('^[a-f0-9]{64}$');
 export const getImportOperationPathOperationIdMin = 16;
 export const getImportOperationPathOperationIdMax = 120;
 export const undoImportOperationPathOperationIdMin = 16;
@@ -356,12 +371,67 @@ export const undoImportOperationBodyExpectedResultHashRegExp = new RegExp('^[a-f
 
 
 /**
- * Returns server health status
+ * Reports core API readiness and optional capability degradation. Startup completion, database reachability, and required audit-log protection are hard readiness gates. An unavailable AI credential or degraded background workers are reported as warnings and do not by themselves make the core API unready. The AI signal reports credential configuration only; it does not probe the remote provider.
  * @summary Health check
  */
 export const HealthCheckResponse = zod.object({
-  "status": zod.string()
-})
+  "status": zod.enum(['ok', 'starting', 'degraded']).describe('`ok` means core-ready; `starting` or `degraded` means a hard readiness gate failed.'),
+  "checks": zod.object({
+  "process": zod.enum(['ok', 'warning', 'error', 'pending']),
+  "startup": zod.enum(['ok', 'warning', 'error', 'pending']),
+  "database": zod.enum(['ok', 'warning', 'error', 'pending']),
+  "auditProtection": zod.enum(['ok', 'warning', 'error', 'pending']),
+  "dependencies": zod.enum(['ok', 'warning', 'error', 'pending']),
+  "backgroundWorkers": zod.enum(['ok', 'warning', 'error', 'pending'])
+}).describe('Statuses for core gates and optional dependencies. A warning on dependencies or backgroundWorkers does not block HTTP 200.'),
+  "capabilities": zod.object({
+  "ai": zod.object({
+  "status": zod.enum(['configured', 'not_configured', 'pending']),
+  "detail": zod.enum(['ai_provider_not_configured']).optional()
+}).describe('AI credential configuration, not remote provider reachability.')
+}),
+  "startup": zod.object({
+  "phase": zod.enum(['starting', 'ready', 'failed']),
+  "stage": zod.string().nullable(),
+  "durationMs": zod.number(),
+  "errorCode": zod.string().optional()
+}).optional(),
+  "diagnostics": zod.record(zod.string(), zod.unknown()).optional().describe('Bounded operational diagnostics; excludes provider credentials and request payloads.'),
+  "correlationId": zod.string(),
+  "timestamp": zod.coerce.date()
+}).describe('Readiness response. HTTP 200 means startup, database, and required audit protection are ready, even when optional checks report warnings. HTTP 503 is reserved for a failed core readiness gate.')
+
+
+/**
+ * Canonical readiness probe. Returns 503 only while startup, database, or required audit-log protection is not ready. AI credential and background-worker degradation are non-blocking warnings.
+ * @summary Core API readiness
+ */
+export const ReadinessCheckResponse = zod.object({
+  "status": zod.enum(['ok', 'starting', 'degraded']).describe('`ok` means core-ready; `starting` or `degraded` means a hard readiness gate failed.'),
+  "checks": zod.object({
+  "process": zod.enum(['ok', 'warning', 'error', 'pending']),
+  "startup": zod.enum(['ok', 'warning', 'error', 'pending']),
+  "database": zod.enum(['ok', 'warning', 'error', 'pending']),
+  "auditProtection": zod.enum(['ok', 'warning', 'error', 'pending']),
+  "dependencies": zod.enum(['ok', 'warning', 'error', 'pending']),
+  "backgroundWorkers": zod.enum(['ok', 'warning', 'error', 'pending'])
+}).describe('Statuses for core gates and optional dependencies. A warning on dependencies or backgroundWorkers does not block HTTP 200.'),
+  "capabilities": zod.object({
+  "ai": zod.object({
+  "status": zod.enum(['configured', 'not_configured', 'pending']),
+  "detail": zod.enum(['ai_provider_not_configured']).optional()
+}).describe('AI credential configuration, not remote provider reachability.')
+}),
+  "startup": zod.object({
+  "phase": zod.enum(['starting', 'ready', 'failed']),
+  "stage": zod.string().nullable(),
+  "durationMs": zod.number(),
+  "errorCode": zod.string().optional()
+}).optional(),
+  "diagnostics": zod.record(zod.string(), zod.unknown()).optional().describe('Bounded operational diagnostics; excludes provider credentials and request payloads.'),
+  "correlationId": zod.string(),
+  "timestamp": zod.coerce.date()
+}).describe('Readiness response. HTTP 200 means startup, database, and required audit protection are ready, even when optional checks report warnings. HTTP 503 is reserved for a failed core readiness gate.')
 
 
 /**
@@ -1538,6 +1608,9 @@ export const ExportOperationalReportBody = zod.object({
 }).describe('One run as shaped by the client for the production summary.')).max(exportOperationalReportBodyRunsMax).optional().describe('Legacy compatibility input. Ignored; canonical daily-sync snapshots are the sole production source.')
 })
 
+
+
+
 export const ExportOperationalReportResponse = zod.object({
   "scope": zod.enum(['day', 'week']),
   "date": zod.string(),
@@ -1587,7 +1660,23 @@ export const ExportOperationalReportResponse = zod.object({
   "flaggedItems": zod.int().optional()
 }).nullable(),
   "note": zod.string().optional()
-})
+}),
+  "evidence": zod.object({
+  "release": zod.object({
+  "version": zod.string(),
+  "revision": zod.string(),
+  "environment": zod.string(),
+  "deploymentId": zod.string().max(exportOperationalReportResponseEvidenceReleaseDeploymentIdMax).nullish(),
+  "deployedRevision": zod.string().regex(exportOperationalReportResponseEvidenceReleaseDeployedRevisionRegExp).nullish(),
+  "identityStatus": zod.enum(['reported-unverified', 'incomplete', 'unavailable']).optional(),
+  "identitySource": zod.enum(['runtime-environment', 'unavailable']).optional()
+}).optional().describe('Runtime-reported identity is informational only and is not provider-verified release proof.'),
+  "recovery": zod.object({
+  "generatedAt": zod.coerce.date().optional(),
+  "source": zod.string().optional(),
+  "complete": zod.boolean().optional()
+}).optional()
+}).optional()
 })
 
 
@@ -1611,6 +1700,9 @@ export const FinalizeOperationalReportBody = zod.object({
   "stoppageCount": zod.number().describe('Number of discrete stoppages on the run')
 }).describe('One run as shaped by the client for the production summary.')).max(finalizeOperationalReportBodyRunsMax).optional().describe('Legacy compatibility input. Ignored; canonical daily-sync snapshots are the sole production source.')
 })
+
+
+
 
 export const FinalizeOperationalReportResponse = zod.object({
   "id": zod.uuid(),
@@ -1678,7 +1770,23 @@ export const FinalizeOperationalReportResponse = zod.object({
   "flaggedItems": zod.int().optional()
 }).nullable(),
   "note": zod.string().optional()
-})
+}),
+  "evidence": zod.object({
+  "release": zod.object({
+  "version": zod.string(),
+  "revision": zod.string(),
+  "environment": zod.string(),
+  "deploymentId": zod.string().max(finalizeOperationalReportResponseTwoReportEvidenceReleaseDeploymentIdMax).nullish(),
+  "deployedRevision": zod.string().regex(finalizeOperationalReportResponseTwoReportEvidenceReleaseDeployedRevisionRegExp).nullish(),
+  "identityStatus": zod.enum(['reported-unverified', 'incomplete', 'unavailable']).optional(),
+  "identitySource": zod.enum(['runtime-environment', 'unavailable']).optional()
+}).optional().describe('Runtime-reported identity is informational only and is not provider-verified release proof.'),
+  "recovery": zod.object({
+  "generatedAt": zod.coerce.date().optional(),
+  "source": zod.string().optional(),
+  "complete": zod.boolean().optional()
+}).optional()
+}).optional()
 })
 }))
 
@@ -1749,6 +1857,9 @@ export const GetFinalizedOperationalReportParams = zod.object({
   "id": zod.uuid()
 })
 
+
+
+
 export const GetFinalizedOperationalReportResponse = zod.object({
   "id": zod.uuid(),
   "reportScope": zod.enum(['day', 'week']),
@@ -1815,7 +1926,23 @@ export const GetFinalizedOperationalReportResponse = zod.object({
   "flaggedItems": zod.int().optional()
 }).nullable(),
   "note": zod.string().optional()
-})
+}),
+  "evidence": zod.object({
+  "release": zod.object({
+  "version": zod.string(),
+  "revision": zod.string(),
+  "environment": zod.string(),
+  "deploymentId": zod.string().max(getFinalizedOperationalReportResponseTwoReportEvidenceReleaseDeploymentIdMax).nullish(),
+  "deployedRevision": zod.string().regex(getFinalizedOperationalReportResponseTwoReportEvidenceReleaseDeployedRevisionRegExp).nullish(),
+  "identityStatus": zod.enum(['reported-unverified', 'incomplete', 'unavailable']).optional(),
+  "identitySource": zod.enum(['runtime-environment', 'unavailable']).optional()
+}).optional().describe('Runtime-reported identity is informational only and is not provider-verified release proof.'),
+  "recovery": zod.object({
+  "generatedAt": zod.coerce.date().optional(),
+  "source": zod.string().optional(),
+  "complete": zod.boolean().optional()
+}).optional()
+}).optional()
 })
 }))
 
@@ -1901,7 +2028,7 @@ export const GetOperationalRunViewResponse = zod.object({
 }),
   "pace": zod.object({
   "ppm": zod.number(),
-  "paceStatus": zod.enum(['on-pace', 'ahead', 'behind']).nullable(),
+  "paceStatus": zod.union([zod.literal('on-pace'),zod.literal('ahead'),zod.literal('behind'),zod.literal(null)]).nullable(),
   "paceDelta": zod.number(),
   "catchUpPpm": zod.union([zod.number(),zod.null()])
 }),
@@ -2730,7 +2857,7 @@ export const ConfirmFreezerSurplusResponse = zod.object({
   "productKey": zod.string(),
   "cases": zod.int().min(1)
 })),
-  "createdLot": zod.object({
+  "createdLot": zod.union([zod.object({
   "id": zod.string(),
   "brand": zod.string(),
   "flavor": zod.string(),
@@ -2738,7 +2865,7 @@ export const ConfirmFreezerSurplusResponse = zod.object({
   "productionDate": zod.coerce.date(),
   "totalCases": zod.int().min(1),
   "remainingCases": zod.int().min(confirmFreezerSurplusResponseCreatedLotOneRemainingCasesMin)
-}).nullish()
+}),zod.null()]).optional()
 })
 
 
@@ -2796,7 +2923,7 @@ export const ReplaceFreezerSurplusAllocationResponse = zod.object({
   "productKey": zod.string(),
   "cases": zod.int().min(1)
 })),
-  "createdLot": zod.object({
+  "createdLot": zod.union([zod.object({
   "id": zod.string(),
   "brand": zod.string(),
   "flavor": zod.string(),
@@ -2804,7 +2931,7 @@ export const ReplaceFreezerSurplusAllocationResponse = zod.object({
   "productionDate": zod.coerce.date(),
   "totalCases": zod.int().min(1),
   "remainingCases": zod.int().min(replaceFreezerSurplusAllocationResponseCreatedLotOneRemainingCasesMin)
-}).nullish()
+}),zod.null()]).optional()
 })
 
 
@@ -2908,7 +3035,7 @@ export const RecordMixSurplusResponse = zod.object({
   "lbs": zod.number().min(recordMixSurplusResponseBalancesItemLbsMin),
   "productionDates": zod.array(zod.coerce.date())
 })),
-  "createdLot": zod.object({
+  "createdLot": zod.union([zod.object({
   "id": zod.string(),
   "mixId": zod.string(),
   "name": zod.string(),
@@ -2920,7 +3047,7 @@ export const RecordMixSurplusResponse = zod.object({
   "amountMade": zod.number().min(recordMixSurplusResponseCreatedLotOneAmountMadeMin),
   "amountUsed": zod.number().min(recordMixSurplusResponseCreatedLotOneAmountUsedMin),
   "amountRemaining": zod.number().min(recordMixSurplusResponseCreatedLotOneAmountRemainingMin)
-}).nullish()
+}),zod.null()]).optional()
 })
 
 
@@ -2986,7 +3113,7 @@ export const ReplaceMixSurplusAllocationsResponse = zod.object({
   "lbs": zod.number().min(replaceMixSurplusAllocationsResponseBalancesItemLbsMin),
   "productionDates": zod.array(zod.coerce.date())
 })),
-  "createdLot": zod.object({
+  "createdLot": zod.union([zod.object({
   "id": zod.string(),
   "mixId": zod.string(),
   "name": zod.string(),
@@ -2998,7 +3125,7 @@ export const ReplaceMixSurplusAllocationsResponse = zod.object({
   "amountMade": zod.number().min(replaceMixSurplusAllocationsResponseCreatedLotOneAmountMadeMin),
   "amountUsed": zod.number().min(replaceMixSurplusAllocationsResponseCreatedLotOneAmountUsedMin),
   "amountRemaining": zod.number().min(replaceMixSurplusAllocationsResponseCreatedLotOneAmountRemainingMin)
-}).nullish()
+}),zod.null()]).optional()
 })
 
 
@@ -3054,7 +3181,7 @@ export const VoidMixSurplusLotResponse = zod.object({
   "lbs": zod.number().min(voidMixSurplusLotResponseBalancesItemLbsMin),
   "productionDates": zod.array(zod.coerce.date())
 })),
-  "createdLot": zod.object({
+  "createdLot": zod.union([zod.object({
   "id": zod.string(),
   "mixId": zod.string(),
   "name": zod.string(),
@@ -3066,7 +3193,7 @@ export const VoidMixSurplusLotResponse = zod.object({
   "amountMade": zod.number().min(voidMixSurplusLotResponseCreatedLotOneAmountMadeMin),
   "amountUsed": zod.number().min(voidMixSurplusLotResponseCreatedLotOneAmountUsedMin),
   "amountRemaining": zod.number().min(voidMixSurplusLotResponseCreatedLotOneAmountRemainingMin)
-}).nullish()
+}),zod.null()]).optional()
 })
 
 
@@ -4395,7 +4522,7 @@ export const GetProfileDataHealthWorkspaceResponse = zod.object({
   "protectedValue": zod.boolean(),
   "source": zod.enum(['profile-health', 'master-data', 'saved-spec', 'cleanup']),
   "sourceRoute": zod.string(),
-  "reconciliationCategory": zod.enum(['pool-mismatch', 'alias-gap', 'stale-profile-link', 'stale-pending-run-link', 'protected-stub', 'unexpected-stub']).nullish(),
+  "reconciliationCategory": zod.union([zod.literal('pool-mismatch'),zod.literal('alias-gap'),zod.literal('stale-profile-link'),zod.literal('stale-pending-run-link'),zod.literal('protected-stub'),zod.literal('unexpected-stub'),zod.literal(null)]).nullish(),
   "preview": zod.record(zod.string(), zod.unknown()).nullish()
 })),
   "safeRepairs": zod.array(zod.object({
@@ -4570,7 +4697,7 @@ export const ExportAuditLogsPdfResponse = zod.unknown()
  * @summary View the completed name-link cleanup result
  */
 export const GetProfileNameLinkCleanupAuditResponse = zod.object({
-  "heal": zod.object({
+  "heal": zod.union([zod.object({
   "id": zod.string(),
   "appliedAt": zod.coerce.date(),
   "summary": zod.object({
@@ -4584,7 +4711,7 @@ export const GetProfileNameLinkCleanupAuditResponse = zod.object({
   "mix": zod.int()
 })
 })
-}).nullable()
+}),zod.null()])
 })
 
 
@@ -6506,6 +6633,8 @@ export const GetSyncTodayQueryParams = zod.object({
 
 
 
+
+
 export const GetSyncTodayResponse = zod.union([zod.object({
   "dayState": zod.record(zod.string(), zod.unknown()),
   "runValues": zod.record(zod.string(), zod.unknown())
@@ -6517,7 +6646,57 @@ export const GetSyncTodayResponse = zod.union([zod.object({
   "snapshotId": zod.string().regex(getSyncTodayResponseTwoSnapshotIdRegExp),
   "resetEpoch": zod.int().min(getSyncTodayResponseTwoResetEpochMin),
   "rollover": zod.boolean(),
-  "canonicalRevision": zod.int().min(getSyncTodayResponseTwoCanonicalRevisionMin).optional()
+  "canonicalRevision": zod.int().min(getSyncTodayResponseTwoCanonicalRevisionMin).optional(),
+  "serverTime": zod.int().min(getSyncTodayResponseTwoServerTimeMin).optional(),
+  "operationalProjection": zod.union([zod.object({
+  "version": zod.literal(1),
+  "runId": zod.string(),
+  "lifecycleGeneration": zod.string(),
+  "serverTimeMs": zod.number(),
+  "capturedAtServerMs": zod.number(),
+  "calculationRevision": zod.int().min(getSyncTodayResponseTwoOperationalProjectionOneCalculationRevisionMin),
+  "effectiveElapsedSec": zod.number(),
+  "timers": zod.object({
+  "nextBatchInSec": zod.number(),
+  "pressRemainingSec": zod.number(),
+  "freezerElapsedSec": zod.number(),
+  "freezerRemainingSec": zod.number()
+}),
+  "counters": zod.object({
+  "casesCompleted": zod.number(),
+  "casesInFreezer": zod.number(),
+  "casesOnLine": zod.number(),
+  "casesLeftToRun": zod.number(),
+  "pressCasesLeft": zod.number(),
+  "traysOnLine": zod.number(),
+  "batchesReady": zod.number(),
+  "sauceBarrelsMade": zod.number(),
+  "app1BatchesMade": zod.number(),
+  "app2BatchesMade": zod.number(),
+  "app3BatchesMade": zod.number(),
+  "app4BatchesMade": zod.number()
+}),
+  "facts": zod.object({
+  "runStatus": zod.enum(['pending', 'running', 'paused', 'ended']),
+  "pressDone": zod.boolean(),
+  "paceStatus": zod.union([zod.enum(['on-pace', 'ahead', 'behind']),zod.null()]),
+  "paceDelta": zod.number()
+}),
+  "calc": zod.record(zod.string(), zod.unknown()),
+  "due": zod.object({
+  "runId": zod.string(),
+  "generation": zod.string(),
+  "atMs": zod.number(),
+  "entries": zod.array(zod.object({
+  "channel": zod.string(),
+  "dueAt": zod.number(),
+  "dueNow": zod.boolean(),
+  "nextDueAt": zod.number(),
+  "canonical": zod.boolean(),
+  "sequence": zod.number().optional()
+}))
+})
+}).describe('Server-owned live operational read model returned beside the canonical sync snapshot.'),zod.null()]).optional()
 })])
 
 
@@ -7043,12 +7222,18 @@ export const ApplyImportOperationParams = zod.object({
 
 
 
+
+
 export const ApplyImportOperationBody = zod.object({
   "importType": zod.string().max(applyImportOperationBodyImportTypeMax),
   "sourceKey": zod.string().max(applyImportOperationBodySourceKeyMax).nullish(),
   "sourceLabel": zod.string().max(applyImportOperationBodySourceLabelMax),
   "requestHash": zod.string().regex(applyImportOperationBodyRequestHashRegExp).nullish(),
   "expectedStateHash": zod.string().regex(applyImportOperationBodyExpectedStateHashRegExp).nullish(),
+  "sourceEvidence": zod.object({
+  "sourceText": zod.string().min(1).max(applyImportOperationBodySourceEvidenceSourceTextMax),
+  "parseVersion": zod.string().min(1).max(applyImportOperationBodySourceEvidenceParseVersionMax)
+}).optional().describe('Exact bounded source text retained privately with a live spec Apply.'),
   "changes": zod.record(zod.string(), zod.unknown()).describe('Reviewed entity batches keyed by supported master-data domain.')
 })
 
@@ -7067,6 +7252,40 @@ export const ApplyImportOperationResponse = zod.object({
   "updatedAt": zod.int().optional(),
   "undoneAt": zod.int().nullish()
 })
+})
+
+
+/**
+ * @summary Read eligible live spec Apply evidence for private export
+ */
+
+
+
+
+export const ListDistillationApplyEvidenceQueryParams = zod.object({
+  "limit": zod.coerce.number().int().min(1).max(listDistillationApplyEvidenceQueryLimitMax).default(listDistillationApplyEvidenceQueryLimitDefault),
+  "cursor": zod.coerce.string().max(listDistillationApplyEvidenceQueryCursorMax).optional()
+})
+
+
+
+
+export const ListDistillationApplyEvidenceResponse = zod.object({
+  "records": zod.array(zod.object({
+  "operationId": zod.string(),
+  "importType": zod.enum(['spec']),
+  "scope": zod.enum(['live']),
+  "status": zod.enum(['applied']),
+  "undoneAt": zod.string().nullable(),
+  "actorCapability": zod.enum(['manage-profiles']),
+  "actorIdSha256": zod.string().regex(listDistillationApplyEvidenceResponseRecordsItemActorIdSha256RegExp),
+  "sourceSha256": zod.string().regex(listDistillationApplyEvidenceResponseRecordsItemSourceSha256RegExp),
+  "appliedAt": zod.coerce.date(),
+  "sourceText": zod.string().min(1),
+  "parseVersion": zod.string(),
+  "appliedValues": zod.record(zod.string(), zod.unknown())
+})),
+  "nextCursor": zod.string().nullable()
 })
 
 

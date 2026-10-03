@@ -56,7 +56,13 @@ export function useRunLifecycleManager(deps: {
     runId: string; skidsCompleted: number; casesOnCurrentSkid: number;
     manualOverrideUntil: number; now: number;
   }) => void;
-  persistManualPackagingProgress: (runId: string, skids: number, cases: number) => void;
+  persistManualPackagingProgress: (
+    runId: string,
+    skids: number,
+    cases: number,
+    manualOverrideUntil?: number,
+    beforeOverride?: Record<string, number>,
+  ) => void;
   calcTotalTimeSec: () => number;
   initialFinishTimestampRef: MutableRefObject<number>;
   summarizeCarriedInCases: (run: RunMeta, originalTarget: number) => number;
@@ -76,43 +82,72 @@ export function useRunLifecycleManager(deps: {
   operationalAdoptionInFlightRef?: MutableRefObject<number>;
   operationalCanonicalRevisionRef?: MutableRefObject<number>;
   operationalIntentBlocksLifecycle?: (runId: string) => boolean;
+  syncWritePending?: () => boolean;
 }) {
   const [pauseDecisionRunId, setPauseDecisionRunId] = useState<string | null>(null);
   const pauseDecisionPauseIdRef = useRef<string | null>(null);
   const deferredLifecycleRef = useRef<{
     runId: string;
-    action: "start" | "pause" | "resume";
+    action: "start" | "pause" | "resume" | "end";
   } | null>(null);
+  const deferredLifecycleTimerRef = useRef<number | null>(null);
+  const lifecycleMountedRef = useRef(true);
   const startRunRef = useRef<() => void>(() => {});
   const pauseRunRef = useRef<() => void>(() => {});
   const resumeRunRef = useRef<() => void>(() => {});
+  const endRunRef = useRef<(expectedRunId?: string) => void>(() => {});
   const lifecycleBlocked = (runId: string, waitForAdoption = true) =>
     (waitForAdoption && (deps.operationalAdoptionInFlightRef?.current ?? 0) > 0) ||
-    (deps.operationalIntentBlocksLifecycle?.(runId) ?? false);
+    (deps.operationalIntentBlocksLifecycle?.(runId) ?? false) ||
+    (deps.syncWritePending?.() ?? false);
   const canonicalRevision = () => deps.operationalCanonicalRevisionRef?.current ?? 0;
-  const deferUntilAdoptionSettles = (runId: string, action: "start" | "pause" | "resume") => {
-    if (
-      (!deps.operationalAdoptionInFlightRef && !deps.operationalIntentBlocksLifecycle) ||
-      deferredLifecycleRef.current
-    ) return;
+  const scheduleDeferredLifecyclePoll = (poll: () => void, delayMs: number) => {
+    if (!lifecycleMountedRef.current) return;
+    deferredLifecycleTimerRef.current = window.setTimeout(() => {
+      deferredLifecycleTimerRef.current = null;
+      if (!lifecycleMountedRef.current) return;
+      poll();
+    }, delayMs);
+  };
+  const deferUntilAdoptionSettles = (
+    runId: string,
+    action: "start" | "pause" | "resume" | "end",
+  ) => {
+    if (!lifecycleMountedRef.current || deferredLifecycleRef.current) return;
     deferredLifecycleRef.current = { runId, action };
     const poll = () => {
       const deferred = deferredLifecycleRef.current;
       if (!deferred || deferred.runId !== runId || deferred.action !== action) return;
       if (
+        deps.foregroundSyncBarrierRef.current ||
+        deps.formHandoffRef.current ||
         (deps.operationalAdoptionInFlightRef?.current ?? 0) > 0 ||
-        (deps.operationalIntentBlocksLifecycle?.(runId) ?? false)
+        (deps.operationalIntentBlocksLifecycle?.(runId) ?? false) ||
+        (deps.syncWritePending?.() ?? false)
       ) {
-        window.setTimeout(poll, 25);
+        scheduleDeferredLifecyclePoll(poll, 25);
         return;
       }
       deferredLifecycleRef.current = null;
       if (action === "start") startRunRef.current();
       else if (action === "pause") pauseRunRef.current();
-      else resumeRunRef.current();
+      else if (action === "resume") resumeRunRef.current();
+      else endRunRef.current(runId);
     };
-    window.setTimeout(poll, 0);
+    scheduleDeferredLifecyclePoll(poll, 0);
   };
+
+  useEffect(() => {
+    lifecycleMountedRef.current = true;
+    return () => {
+      lifecycleMountedRef.current = false;
+      if (deferredLifecycleTimerRef.current !== null) {
+        window.clearTimeout(deferredLifecycleTimerRef.current);
+        deferredLifecycleTimerRef.current = null;
+      }
+      deferredLifecycleRef.current = null;
+    };
+  }, []);
 
   const switchToRun = useEvent((newIndex: number, expectedCurrentRunId?: string) => {
     if (deps.foregroundSyncBarrierRef.current || deps.formHandoffRef.current) return false;
@@ -133,27 +168,40 @@ export function useRunLifecycleManager(deps: {
         void deps.propagateProfileToPendingRuns(current.brand, current.flavor);
       }
     }
-    const next = { ...base, currentIndex: newIndex };
-    deps.dayStateRef.current = next;
-    deps.setDayState(next);
-    deps.saveDayState(next);
     const nextRun = base.runs[newIndex];
-    const nextValues = deps.loadRunValues(nextRun.id);
-    deps.lastFormRunIdRef.current = nextRun.id;
-    deps.form.reset(nextValues);
-    deps.resetFieldArrays(nextValues);
-    deps.setDoughSubTab(nextRun.subTab ?? "dough");
-    deps.setActiveStopId(nextRun.stoppages?.find((stop) => !stop.endedAt)?.id ?? null);
-    deps.setConfirmDeleteStopId(null);
+    const changesRunIdentity = base.runs[base.currentIndex]?.id !== nextRun.id;
+    // Flush while writes are still allowed, then fence watch emissions until
+    // the new run's form identity has committed.
+    deps.formHandoffRef.current = true;
+    try {
+      const next = { ...base, currentIndex: newIndex };
+      deps.dayStateRef.current = next;
+      deps.setDayState(next);
+      deps.saveDayState(next);
+      const nextValues = deps.loadRunValues(nextRun.id);
+      deps.lastFormRunIdRef.current = nextRun.id;
+      deps.form.reset(nextValues);
+      deps.resetFieldArrays(nextValues);
+      deps.setDoughSubTab(nextRun.subTab ?? "dough");
+      deps.setActiveStopId(nextRun.stoppages?.find((stop) => !stop.endedAt)?.id ?? null);
+      deps.setConfirmDeleteStopId(null);
+    } finally {
+      // A real selection change releases after the post-commit identity effect;
+      // a same-run reset has no identity effect to release it.
+      if (!changesRunIdentity) deps.formHandoffRef.current = false;
+    }
     return true;
   });
 
   const startRun = useEvent(() => {
-    if (deps.foregroundSyncBarrierRef.current || deps.formHandoffRef.current) return;
     const base = deps.dayStateRef.current;
     const index = base.currentIndex;
     const activeRun = base.runs[index];
     if (!activeRun) return;
+    if (deps.foregroundSyncBarrierRef.current || deps.formHandoffRef.current) {
+      deferUntilAdoptionSettles(activeRun.id, "start");
+      return;
+    }
     if (lifecycleBlocked(activeRun.id)) {
       deferUntilAdoptionSettles(activeRun.id, "start");
       return;
@@ -204,7 +252,10 @@ export function useRunLifecycleManager(deps: {
       const cases = casesPerSkid > 0 ? carried % casesPerSkid : carried;
       deps.form.setValue("skidsCompleted", skids, { shouldDirty: true });
       deps.form.setValue("casesOnCurrentSkid", cases, { shouldDirty: true });
-      deps.persistManualPackagingProgress(activeRunId, skids, cases);
+      deps.persistManualPackagingProgress(activeRunId, skids, cases, undefined, {
+        skidsCompleted: Number(openingValues.skidsCompleted) || 0,
+        casesOnCurrentSkid: Number(openingValues.casesOnCurrentSkid) || 0,
+      });
       deps.saveRunValues(activeRunId, deps.form.getValues());
     }
     const prep = base.prepPhase;
@@ -327,7 +378,9 @@ export function useRunLifecycleManager(deps: {
     const index = base.currentIndex;
     const activeRun = base.runs[index];
     if (deps.formHandoffRef.current) return;
-    if (activeRun && lifecycleBlocked(activeRun.id)) return;
+    // The foreground barrier owns tap queueing. Record a Stop against the
+    // displayed run before a generic lifecycle/write fence can defer it behind
+    // the same recovery barrier and leave the operator without feedback.
     if (deps.foregroundSyncBarrierRef.current && !fromForegroundRecovery) {
       if (activeRun?.startedAt && !activeRun.endedAt && (!deps.foregroundStopIntentRef.current || deps.foregroundStopIntentRef.current.runId === activeRun.id)) {
         deps.foregroundStopIntentRef.current = { action: "stop", runId: activeRun.id };
@@ -335,6 +388,14 @@ export function useRunLifecycleManager(deps: {
         deps.showForegroundRecoveryNotice("recovering", "Stop requested. Checking the current run state before applying it…");
         deps.recordSyncEvent("local", "Stop request queued behind foreground recovery", undefined, activeRun.id);
       }
+      return;
+    }
+    if (activeRun && lifecycleBlocked(activeRun.id)) {
+      // A Start/Pause/Resume adoption can still be applying the canonical
+      // snapshot when the operator presses Stop. Do not drop that command;
+      // replay it after the adoption so the visible run cannot remain active
+      // merely because the first click raced the sync fence.
+      deferUntilAdoptionSettles(activeRun.id, "end");
       return;
     }
     if (!activeRun?.startedAt || activeRun.endedAt) return;
@@ -378,6 +439,7 @@ export function useRunLifecycleManager(deps: {
     deps.setConfirmDeleteStopId(null);
     deps.schedulePush(next, 0);
   });
+  endRunRef.current = endRun;
 
   useEffect(() => {
     if (!pauseDecisionRunId) return;

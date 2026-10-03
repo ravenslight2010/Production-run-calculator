@@ -146,6 +146,17 @@ export function useHomeFormLifecycle({
     } else {
       fences.lastFormRunIdRef.current = currentRunId;
     }
+    // switchToRun keeps this fence raised across the React commit so a stale
+    // watch snapshot cannot be attributed to the newly selected run. The old
+    // form was flushed before the fence; re-queue the canonical state now that
+    // the target run's form identity is settled.
+    if (
+      fences.formHandoffRef.current
+      && fences.lastFormRunIdRef.current === currentRunId
+    ) {
+      fences.formHandoffRef.current = false;
+      schedulePush(dayStateRef.current);
+    }
     // A run identity transition, not changing helper identities, owns this heal.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentRunId, persistenceScope]);

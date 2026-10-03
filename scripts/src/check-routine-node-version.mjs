@@ -23,7 +23,7 @@ const CI_WORKFLOW_PATHS = [
 ];
 const CI_WORKFLOW_PATH = CI_WORKFLOW_PATHS[0];
 const REPRODUCTION_COMMAND =
-  "npx --yes --package=node@<required> -- pnpm --filter @workspace/scripts run test";
+  "bash scripts/src/run-release-node.sh pnpm --filter @workspace/scripts run test";
 
 export function checkRoutineNodeVersion({
   actualVersion,
@@ -43,16 +43,12 @@ export function checkRoutineNodeVersion({
     return;
   }
 
-  const reproductionCommand = REPRODUCTION_COMMAND.replace(
-    "<required>",
-    requiredVersion,
-  );
   throw new Error(
     [
       "Routine scripts validation requires the Node version bound to retained evidence.",
       `Actual Node version: ${actualVersion}`,
       `Required Node version: ${requiredVersion}`,
-      `Safe reproduction command: ${reproductionCommand}`,
+      `Safe reproduction command: ${REPRODUCTION_COMMAND}`,
       "The preflight did not rewrite retained evidence.",
     ].join("\n"),
   );

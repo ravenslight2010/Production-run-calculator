@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { resolve } from "node:path";
+import { relative, resolve } from "node:path";
 import type {
   FullConfig,
   FullResult,
@@ -20,11 +20,16 @@ const VALID_CLASSIFICATIONS = [
   "optional-environment-gap",
 ] as const;
 
+function relativeFilePath(file: string): string {
+  return relative(repositoryRoot, file).replaceAll("\\", "/");
+}
+
 type FailureClassification = (typeof VALID_CLASSIFICATIONS)[number];
 
 type EvidenceCase = {
   file: string;
   title: string;
+  projectName: string;
   status: TestResult["status"] | "not-run";
   durationMs: number;
   failureClassification?: FailureClassification;
@@ -44,9 +49,10 @@ function revision(): string {
   }
 }
 
-function outputPath(): string {
+function outputPath(requireConfiguredPath: boolean): string | undefined {
   const configured = process.env.PLAYWRIGHT_RELEASE_SMOKE_EVIDENCE_PATH?.trim();
-  return configured ? resolve(repositoryRoot, configured) : resolve(repositoryRoot, DEFAULT_OUTPUT);
+  if (configured) return resolve(repositoryRoot, configured);
+  return requireConfiguredPath ? undefined : resolve(repositoryRoot, DEFAULT_OUTPUT);
 }
 
 function classifyFailure(result: TestResult): FailureClassification | undefined {
@@ -77,12 +83,18 @@ function errorSummary(result: TestResult): string | undefined {
 
 export default class ReleaseBrowserEvidenceReporter implements Reporter {
   private readonly cases = new Map<string, EvidenceCase>();
+  private readonly requireConfiguredPath: boolean;
+
+  constructor(options?: { requireConfiguredPath?: boolean }) {
+    this.requireConfiguredPath = options?.requireConfiguredPath ?? false;
+  }
 
   onBegin(_config: FullConfig, suite: Suite): void {
     for (const testCase of suite.allTests()) {
       this.cases.set(testCase.id, {
-        file: testCase.location.file,
+        file: relativeFilePath(testCase.location.file),
         title: testCase.titlePath().join(" › "),
+        projectName: testCase.parent.project()?.name ?? "",
         status: "not-run",
         durationMs: 0,
       });
@@ -91,8 +103,9 @@ export default class ReleaseBrowserEvidenceReporter implements Reporter {
 
   onTestEnd(testCase: TestCase, result: TestResult): void {
     this.cases.set(testCase.id, {
-      file: testCase.location.file,
+      file: relativeFilePath(testCase.location.file),
       title: testCase.titlePath().join(" › "),
+      projectName: testCase.parent.project()?.name ?? "",
       status: result.status,
       durationMs: result.duration,
       failureClassification: classifyFailure(result),
@@ -101,11 +114,12 @@ export default class ReleaseBrowserEvidenceReporter implements Reporter {
   }
 
   async onEnd(result: FullResult): Promise<void> {
+    const path = outputPath(this.requireConfiguredPath);
+    if (!path) return;
     const cases = [...this.cases.values()];
     const failed = cases.filter(
       (testCase) => testCase.status !== "passed" && testCase.status !== "skipped",
     );
-    const path = outputPath();
     await mkdir(resolve(path, ".."), { recursive: true });
     await writeFile(
       path,

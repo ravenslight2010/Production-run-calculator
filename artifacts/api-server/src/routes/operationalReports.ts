@@ -160,7 +160,10 @@ const LEGACY_REPORT_KEY_ORDER: Record<string, readonly string[]> = {
   ],
   "report.narrative": ["text", "source"],
   "report.evidence": ["release", "recovery"],
-  "report.evidence.release": ["version", "revision", "environment"],
+  "report.evidence.release": [
+    "version", "revision", "environment", "deploymentId", "deployedRevision",
+    "identityStatus", "identitySource",
+  ],
   "report.evidence.recovery": ["generatedAt", "source", "complete"],
 };
 
@@ -547,8 +550,21 @@ export function adaptCanonicalOperationalSnapshot(data: unknown): OperationalSyn
 
 export function operationalReleaseEvidence(
   env: NodeJS.ProcessEnv = process.env,
-): { version: string; revision: string; environment: string } {
+): {
+  version: string;
+  revision: string;
+  environment: string;
+  deploymentId: string | null;
+  deployedRevision: string | null;
+  identityStatus: "reported-unverified" | "incomplete" | "unavailable";
+  identitySource: "runtime-environment" | "unavailable";
+} {
   const controlledRevision = env.RELEASE_REVISION?.trim();
+  const deploymentIdCandidate = env.REPLIT_DEPLOYMENT_ID?.trim();
+  const deploymentId = deploymentIdCandidate &&
+      /^[A-Za-z0-9._:-]{1,128}$/u.test(deploymentIdCandidate)
+    ? deploymentIdCandidate
+    : null;
   const compatibilityRevision = [
     env.REPLIT_GIT_COMMIT,
     env.GIT_COMMIT,
@@ -558,10 +574,25 @@ export function operationalReleaseEvidence(
     : /^[a-f0-9]{40}$/u.test(controlledRevision)
       ? controlledRevision
       : undefined;
+  const deployedRevision = revision && /^[a-f0-9]{40}$/u.test(revision)
+    ? revision
+    : null;
+  const hasIdentityInput = Boolean(
+    deploymentIdCandidate ||
+    controlledRevision ||
+    env.REPLIT_GIT_COMMIT?.trim() ||
+    env.GIT_COMMIT?.trim(),
+  );
   return {
     version: env.npm_package_version?.trim() || "unknown",
     revision: revision ?? "unknown",
     environment: env.NODE_ENV?.trim() || "unknown",
+    deploymentId,
+    deployedRevision,
+    identityStatus: deploymentId && deployedRevision
+      ? "reported-unverified"
+      : hasIdentityInput ? "incomplete" : "unavailable",
+    identitySource: hasIdentityInput ? "runtime-environment" : "unavailable",
   };
 }
 
@@ -1078,7 +1109,7 @@ router.post(
     const oldestMutableSnapshot = mutableSnapshotTimes.length ? Math.min(...mutableSnapshotTimes) : null;
     const report: OperationalReport & {
       evidence: {
-        release: { version: string; revision: string; environment: string };
+        release: ReturnType<typeof operationalReleaseEvidence>;
         recovery: { generatedAt: string; source: "live-database"; complete: boolean };
       };
     } = {

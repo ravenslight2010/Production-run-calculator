@@ -46,7 +46,7 @@ import {
   fetchSpecImportAliases,
   saveSpecImportAliases,
 } from "./specImportAliases";
-import { saveAiCorrections } from "./aiCorrections";
+import { logCorrectionWriteFailure, saveAiCorrections } from "./aiCorrections";
 import { saveCheeseSheet, buildCheeseSheetLabel, deriveSourceKey } from "./savedCheeseSheets";
 import { applyImportOperation } from "./importOperations";
 import {
@@ -440,7 +440,17 @@ export async function commitCheeseImport(
     try {
       await saveSpecImportAliases(aliasesToSave);
     } catch {
-      // ignore — learning is non-critical
+      logCorrectionWriteFailure({
+        store: "spec-import-aliases",
+        failure: "request",
+        correctionCount: aliasesToSave.length,
+      });
+      warning = [
+        warning,
+        "Cheese recipes were imported, but the reviewed name mappings were not saved. A later import may ask you to confirm them again.",
+      ]
+        .filter(Boolean)
+        .join(" ");
     }
     const mirrorable = aliasesToSave.filter(
       (a) => a.kind === "brand" || a.kind === "flavor" || a.kind === "appType",

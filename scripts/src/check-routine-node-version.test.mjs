@@ -37,7 +37,7 @@ test("reports actual, required, and safe reproduction details on mismatch", () =
       assert.match(error.message, /Required Node version: 24\.20\.0/);
       assert.match(
         error.message,
-        /npx --yes --package=node@24\.20\.0 -- pnpm --filter @workspace\/scripts run test/,
+        /bash scripts\/src\/run-release-node\.sh pnpm --filter @workspace\/scripts run test/,
       );
       assert.match(error.message, /did not rewrite retained evidence/);
       return true;

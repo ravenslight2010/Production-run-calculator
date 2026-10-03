@@ -103,6 +103,21 @@ Compatible version managers such as `fnm` can also read `.nvmrc` (for example,
 `fnm use --install`). Selecting the declared runtime does not regenerate or
 modify retained evidence.
 
+In a Replit terminal, the `nodejs-24` module can resolve an older patch even
+though `.nvmrc` requests 24.20.0. Run ad hoc validation through the same
+fail-closed launcher used by Replit validation workflows and post-merge setup:
+
+```bash
+bash scripts/src/run-release-node.sh pnpm --filter @workspace/scripts run test
+bash scripts/src/run-release-node.sh pnpm run typecheck
+```
+
+The launcher checks the exact evidence-bound version and puts its executable
+first on `PATH` for pnpm and its child scripts. It uses the local runtime when
+it matches, otherwise obtains `node@24.20.0` through npx; if unavailable, the
+command fails rather than running with the wrong version. A bare `node` in a
+new Replit terminal is not necessarily pinned.
+
 ```bash
 pnpm install
 

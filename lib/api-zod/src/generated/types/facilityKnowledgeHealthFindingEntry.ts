@@ -9,5 +9,6 @@ import type { FacilityKnowledge } from './facilityKnowledge';
 
 export type FacilityKnowledgeHealthFindingEntry = FacilityKnowledge & ({
   id: number;
+  /** @nullable */
   source?: string | null;
 });

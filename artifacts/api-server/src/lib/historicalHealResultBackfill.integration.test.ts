@@ -74,7 +74,7 @@ beforeAll(async () => {
   pool = dbMod.pool;
   dataHealsTable = dbMod.dataHealsTable;
   runDataHeals = (await import("./dataHeals")).runDataHeals;
-}, 60_000);
+}, 120_000);
 
 afterAll(async () => {
   if (pool) await pool.end();

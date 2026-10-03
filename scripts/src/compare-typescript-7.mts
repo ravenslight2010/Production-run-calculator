@@ -262,7 +262,12 @@ export type Typescript7RunnerFingerprint = {
 
 function boundedRunnerLabel(value: string | undefined): string {
   const normalized = value?.trim().replace(/[^A-Za-z0-9._@+-]/g, "-").slice(0, 80);
-  return normalized || "unknown";
+  if (!normalized) {
+    throw new Error(
+      "TypeScript 7 runner image identity is unavailable; refusing to retain comparison evidence",
+    );
+  }
+  return normalized;
 }
 
 export function typescript7RunnerFingerprint(): Typescript7RunnerFingerprint {

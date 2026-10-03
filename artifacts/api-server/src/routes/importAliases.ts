@@ -4,13 +4,13 @@ import { db, importAliasesTable, type ImportAlias } from "@workspace/db";
 import { SaveImportAliasesBody } from "@workspace/api-zod";
 import { currentScope } from "../lib/requestScope";
 import { requireCapability } from "../middlewares/requireCapability";
+import { safeAiErrorMetadata } from "../lib/aiDataBoundary";
 
 const router: IRouter = Router();
 
 // Learned import aliases: persisted brand/flavor name mappings a user confirmed
-// during an Excel import, so future imports auto-apply them. All routes sit
-// behind the router-level requireAuth, so any signed-in user (operators
-// included) can read and contribute — intentionally NOT manager-gated.
+// during an Excel import, so future imports auto-apply them. Reads are available
+// to signed-in users; writes require manage-profiles.
 
 const MAX_BATCH = 500;
 const MAX_NAME_LEN = 200;
@@ -50,7 +50,7 @@ router.get("/import-aliases", async (req: Request, res: Response) => {
     const aliases = await listAll();
     res.json({ aliases });
   } catch (err) {
-    req.log.error({ err }, "failed to list import aliases");
+    req.log.error(safeAiErrorMetadata(err), "failed to list import aliases");
     res.status(500).json({ error: "Failed to list import aliases" });
   }
 });
@@ -73,6 +73,10 @@ router.post("/import-aliases", requireCapability("manage-profiles"), async (req:
         ? a.brandContext.trim().slice(0, MAX_NAME_LEN) || null
         : null;
     if (!externalName || !canonicalName) continue;
+    if (type === "flavor" && !brandContext) {
+      res.status(400).json({ error: "Flavor aliases require a non-empty brandContext" });
+      return;
+    }
     // A mapping that just restates the same name carries no information.
     if (externalName.toLowerCase() === canonicalName.toLowerCase()) continue;
     incoming.push({ type, externalName, canonicalName, brandContext });
@@ -118,7 +122,7 @@ router.post("/import-aliases", requireCapability("manage-profiles"), async (req:
     const aliases = await listAll();
     res.json({ aliases });
   } catch (err) {
-    req.log.error({ err }, "failed to save import aliases");
+    req.log.error(safeAiErrorMetadata(err), "failed to save import aliases");
     res.status(500).json({ error: "Failed to save import aliases" });
   }
 });

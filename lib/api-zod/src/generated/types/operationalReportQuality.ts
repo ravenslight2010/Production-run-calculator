@@ -10,6 +10,7 @@ import type { OperationalReportQualityValue } from './operationalReportQualityVa
 
 export type OperationalReportQuality = {
   availability: OperationalReportQualityAvailability;
+  /** @nullable */
   value: OperationalReportQualityValue;
   note?: string;
 };

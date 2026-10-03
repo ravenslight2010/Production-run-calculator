@@ -53,7 +53,7 @@ import {
 import { fetchMixes, saveMixes } from "./mixes";
 import { fetchCheeseRecipes } from "./cheeseRecipes";
 import { requestMatchPremix } from "./premixMatch";
-import { saveAiCorrections } from "./aiCorrections";
+import { logCorrectionWriteFailure, saveAiCorrections } from "./aiCorrections";
 import { savePremixSheet, buildPremixSheetLabel, deriveSourceKey } from "./savedPremixSheets";
 import { applyImportOperation } from "./importOperations";
 
@@ -508,7 +508,17 @@ export async function commitPremixImport(
     try {
       await saveSpecImportAliases(aliasesToSave);
     } catch {
-      // Best-effort: the import already applied; learning is a bonus.
+      logCorrectionWriteFailure({
+        store: "spec-import-aliases",
+        failure: "request",
+        correctionCount: aliasesToSave.length,
+      });
+      warning = [
+        warning,
+        "The mixes were imported, but the reviewed name mappings were not saved. A later import may ask you to confirm them again.",
+      ]
+        .filter(Boolean)
+        .join(" ");
     }
     // Mirror each learned BRAND/FLAVOR mapping into the factory-wide corrections
     // pool so every other name-resolving AI helper honors it too. Other kinds

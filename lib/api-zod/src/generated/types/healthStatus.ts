@@ -5,7 +5,24 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { HealthStatusCapabilities } from './healthStatusCapabilities';
+import type { HealthStatusChecks } from './healthStatusChecks';
+import type { HealthStatusDiagnostics } from './healthStatusDiagnostics';
+import type { HealthStatusStartup } from './healthStatusStartup';
+import type { HealthStatusStatus } from './healthStatusStatus';
 
+/**
+ * Readiness response. HTTP 200 means startup, database, and required audit protection are ready, even when optional checks report warnings. HTTP 503 is reserved for a failed core readiness gate.
+ */
 export interface HealthStatus {
-  status: string;
+  /** `ok` means core-ready; `starting` or `degraded` means a hard readiness gate failed. */
+  status: HealthStatusStatus;
+  /** Statuses for core gates and optional dependencies. A warning on dependencies or backgroundWorkers does not block HTTP 200. */
+  checks: HealthStatusChecks;
+  capabilities: HealthStatusCapabilities;
+  startup?: HealthStatusStartup;
+  /** Bounded operational diagnostics; excludes provider credentials and request payloads. */
+  diagnostics?: HealthStatusDiagnostics;
+  correlationId: string;
+  timestamp: Date;
 }

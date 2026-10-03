@@ -1130,6 +1130,75 @@ describe("capability-based access control", () => {
   }
 });
 
+describe("manager action queue manual resolution", () => {
+  it("keeps a resolved derived item out of the active queue after refresh", async () => {
+    const incidentId = `coderabbit-resolution-${Date.now()}`;
+    const dedupKey = `incident:${incidentId}`;
+    await db.execute(sql`
+      INSERT INTO incidents
+        (id, source, screen, app_platform, context, status, priority, workflow_state)
+      VALUES
+        (${incidentId}, 'user_report', 'Run', 'web',
+         '{"description":"Disposable action queue regression fixture"}'::jsonb,
+         'new', 'high', 'new')
+    `);
+
+    try {
+      const initialResponse = await req(
+        MANAGER,
+        "GET",
+        "/api/manager-action-queue?category=incident&status=all",
+      );
+      expect(initialResponse.status).toBe(200);
+      const initial = await initialResponse.json() as {
+        items: Array<{ id: number; dedupKey: string; status: string; version: number }>;
+      };
+      const item = initial.items.find((candidate) => candidate.dedupKey === dedupKey);
+      expect(item).toBeDefined();
+
+      const resolvedResponse = await req(
+        MANAGER,
+        "PATCH",
+        `/api/manager-action-queue/${item!.id}`,
+        {
+          status: "resolved",
+          version: item!.version,
+          resolutionNote: "Verified the incident is resolved.",
+        },
+      );
+      expect(resolvedResponse.status).toBe(200);
+
+      const refreshedResponse = await req(
+        MANAGER,
+        "GET",
+        "/api/manager-action-queue?category=incident&status=all",
+      );
+      expect(refreshedResponse.status).toBe(200);
+      const refreshed = await refreshedResponse.json() as {
+        items: Array<{ id: number; dedupKey: string; status: string }>;
+        counts: { resolved: number };
+      };
+      expect(
+        refreshed.items.find((candidate) => candidate.id === item!.id)?.status,
+      ).toBe("resolved");
+      expect(refreshed.counts.resolved).toBeGreaterThanOrEqual(1);
+
+      const audit = await db.execute<{ changes: Record<string, unknown> }>(sql`
+        SELECT changes FROM audit_logs
+        WHERE scope = 'live'
+          AND resource = ${`action_item:${item!.id}`}
+          AND action = 'manager_action_item_update'
+        ORDER BY id DESC
+        LIMIT 1
+      `);
+      expect(audit.rows[0]?.changes).toMatchObject({ status: "resolved" });
+    } finally {
+      await db.execute(sql`DELETE FROM action_items WHERE scope = 'live' AND dedup_key = ${dedupKey}`);
+      await db.execute(sql`DELETE FROM incidents WHERE id = ${incidentId}`);
+    }
+  });
+});
+
 describe("import history idempotency", () => {
   it("rejects an audit write without an idempotency key", async () => {
     const response = await req(MANAGER, "POST", "/api/import-history", {
@@ -1925,6 +1994,28 @@ describe("last-manager guard", () => {
       .from(userRolesTable)
       .where(sql`${userRolesTable.userId} = ${"manager-2"}`);
     expect(row.role).toBe("operator");
+  });
+
+  it("serializes concurrent final-manager disable attempts", async () => {
+    await db.insert(usersTable).values({
+      id: "manager-race-2",
+      username: "manager-race-2",
+      passwordHash: "x",
+    });
+    await db.insert(userRolesTable).values({ userId: "manager-race-2", role: "manager" });
+
+    // Equal-privilege targets remain protected, even when requests arrive at
+    // the same time. The target must not be left disabled by either request.
+    const responses = await Promise.all([
+      req(MANAGER, "PATCH", `/api/users/manager-race-2/status`, { disabled: true }),
+      req("manager-race-2", "PATCH", `/api/users/${MANAGER}/status`, { disabled: true }),
+    ]);
+    expect(responses.map((response) => response.status).sort()).toEqual([403, 403]);
+    const rows = await db.select({ id: usersTable.id, disabled: usersTable.disabled })
+      .from(usersTable);
+    const relevant = rows.filter((row) => row.id === MANAGER || row.id === "manager-race-2");
+    expect(relevant).toHaveLength(2);
+    expect(relevant.every((row) => row.disabled === false)).toBe(true);
   });
 
   it("rejects removing the only manager (DELETE /users/:id → 400)", async () => {

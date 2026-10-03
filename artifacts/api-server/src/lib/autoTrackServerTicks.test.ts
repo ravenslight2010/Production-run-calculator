@@ -264,15 +264,32 @@ describe("server auto-track claim builders", () => {
     expect(plan?.bookkeeping.caseNextDueMs).toBeGreaterThan(NOW);
   });
 
-  it("emits only one persisted wall-clock beat and advances its arm", () => {
-    const source = payload();
+  it("does not let an overdue legacy case arm advance ahead of freezer eligibility", () => {
+    const source = payload({ freezerTime: 3 });
     (source as Record<string, unknown>).autoTrackServerState = {
       wallClockBookkeeping: { [RUN]: { lifecycleGeneration: `${RUN}:1`, caseNextDueMs: NOW - 1 } },
     };
     const plan = buildWallClockServerClaims(source, NOW)!;
+    expect(plan.claims.filter((claim) => claim.channel === "case")).toEqual([]);
+    expect(plan.bookkeeping.lastExpectedCases).toBe(0);
+    expect(plan.bookkeeping.caseNextDueMs).toBeGreaterThan(NOW);
+  });
+
+  it("emits a freezer-authorized legacy case beat and advances its arm", () => {
+    const source = payload({ freezerTime: 3 });
+    const dueAt = NOW + 150_000;
+    (source as Record<string, unknown>).autoTrackServerState = {
+      wallClockBookkeeping: { [RUN]: { lifecycleGeneration: `${RUN}:1`, caseNextDueMs: dueAt - 1 } },
+    };
+    const plan = buildWallClockServerClaims(source, dueAt)!;
     const caseClaim = plan.claims.find((claim) => claim.channel === "case")!;
     expect(caseClaim.mutations).toHaveLength(2);
-    expect(plan.bookkeeping.caseNextDueMs).toBeGreaterThan(NOW);
+    expect(caseClaim.mutations[1]).toEqual({
+      field: "casesOnCurrentSkid",
+      from: 0,
+      to: 33,
+    });
+    expect(plan.bookkeeping.caseNextDueMs).toBeGreaterThan(dueAt);
   });
 
   it("continues canonical case beats during the bounded post-End freezer drain", () => {
@@ -401,7 +418,7 @@ describe("server auto-track claim builders", () => {
   });
 
   it("honors only matching-generation dough pause control while case continues", () => {
-    const source = payload();
+    const source = payload({ freezerTime: 0 });
     (source as Record<string, unknown>).doughTimerControls = {
       [RUN]: { generation: `${RUN}:1`, pausedAt: NOW - 1000, resumeAt: 0, updatedAt: NOW - 1000 },
     };

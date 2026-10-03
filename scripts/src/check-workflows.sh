@@ -14,6 +14,106 @@ release_concurrency_calibration_workflow="$workflow_dir/release-concurrency-cali
 stable_branch_protection_workflow="$workflow_dir/stable-branch-protection.yml"
 workflow_lint_workflow="$workflow_dir/workflow-lint.yml"
 promotion_workflow="$workflow_dir/promote-production.yml"
+project_workflow_config="$workspace_root/.replit"
+
+check_project_workflow_topology() {
+  if [[ ! -f "$project_workflow_config" ]]; then
+    echo "Workflow configuration check failed: $project_workflow_config is missing." >&2
+    return 1
+  fi
+
+  if ! awk '
+    BEGIN {
+      section = ""
+      workflow_name = ""
+      in_task = 0
+      run_button_count = 0
+      project_workflow_count = 0
+      project_task_count = 0
+      project_task_run_count = 0
+      project_target_count = 0
+      workflow_names["release:standard"] = 0
+      workflow_names["release:full"] = 0
+      workflow_names["test"] = 0
+      workflow_names["test:client"] = 0
+      workflow_names["typecheck"] = 0
+      workflow_names["security:prod"] = 0
+      workflow_names["check:clean-start"] = 0
+      workflow_names["evidence:release"] = 0
+      workflow_names["browser-full-159"] = 0
+    }
+    $0 == "[workflows]" {
+      section = "settings"
+      in_task = 0
+      next
+    }
+    $0 == "[[workflows.workflow]]" {
+      section = "workflow"
+      workflow_name = ""
+      in_task = 0
+      next
+    }
+    $0 == "[[workflows.workflow.tasks]]" {
+      if (section == "workflow" && workflow_name == "Project") {
+        project_task_count++
+      }
+      in_task = 1
+      next
+    }
+    $0 ~ /^\[/ {
+      section = "other"
+      in_task = 0
+      next
+    }
+    section == "settings" &&
+      $0 ~ /^[[:space:]]*runButton[[:space:]]*=/ {
+      if ($0 ~ /^[[:space:]]*runButton[[:space:]]*=[[:space:]]*"Project"[[:space:]]*$/) {
+        run_button_count++
+      }
+      next
+    }
+    section == "workflow" && !in_task &&
+      $0 ~ /^[[:space:]]*name[[:space:]]*=/ {
+      workflow_name = $0
+      sub(/^[[:space:]]*name[[:space:]]*=[[:space:]]*"/, "", workflow_name)
+      sub(/"[[:space:]]*$/, "", workflow_name)
+      if (workflow_name == "Project") {
+        project_workflow_count++
+      } else if (workflow_name in workflow_names) {
+        workflow_names[workflow_name]++
+      }
+      next
+    }
+    section == "workflow" && in_task && workflow_name == "Project" {
+      if ($0 ~ /^[[:space:]]*task[[:space:]]*=[[:space:]]*"workflow\.run"[[:space:]]*$/) {
+        project_task_run_count++
+      }
+      if ($0 ~ /^[[:space:]]*args[[:space:]]*=[[:space:]]*"release:standard"[[:space:]]*$/) {
+        project_target_count++
+      }
+    }
+    END {
+      failed = run_button_count != 1 ||
+        project_workflow_count != 1 ||
+        project_task_count != 1 ||
+        project_task_run_count != 1 ||
+        project_target_count != 1
+      for (name in workflow_names) {
+        if (workflow_names[name] != 1) failed = 1
+      }
+      exit failed
+    }
+  ' "$project_workflow_config"; then
+    cat >&2 <<'EOF'
+Workflow configuration check failed: the Project run button must launch only
+release:standard. Keep release:full and focused validation workflows available
+as separate runs.
+EOF
+    return 1
+  fi
+}
+
+check_project_workflow_topology
 
 mapfile -t workflow_files < <(
   find "$workflow_dir" -type f \( -name '*.yml' -o -name '*.yaml' \) -print | sort

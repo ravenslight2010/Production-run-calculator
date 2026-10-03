@@ -16,7 +16,10 @@ export interface CycleCountSchedule {
   section: string;
   /** How many days may elapse between counts (default 7) */
   cadenceDays: number;
-  /** Date last counted (YYYY-MM-DD), or null if never counted */
+  /**
+     * Date last counted (YYYY-MM-DD), or null if never counted
+     * @nullable
+     */
   lastCountedAt: string | null;
   enabled: boolean;
 }

@@ -428,16 +428,16 @@ const serverCalcCache = new Map<string, ServerCalcResult>();
 const CACHE_MAX_SIZE = 128;
 
 /**
- * Day-level inputs shared by every run's summaryStats and runLines derivation.
+ * Shared payload inputs used by every run's summaryStats and runLines derivation.
  * Keep this as the single dependency contract for both calculation and compact
  * SSE projection so adding a shared input cannot leave unchanged runs stale.
  */
-export const DERIVED_RUN_MAP_SHARED_DAY_STATE_FIELDS = ["pepTypes"] as const;
+export const DERIVED_RUN_MAP_SHARED_INPUT_FIELDS = ["pepTypes"] as const;
 
-function sharedDerivedRunInputs(dayState: Record<string, unknown> | undefined) {
+function sharedDerivedRunInputs(payload: Record<string, unknown> | undefined) {
   const sharedInputs = Object.fromEntries(
-    DERIVED_RUN_MAP_SHARED_DAY_STATE_FIELDS.map((field) => [field, dayState?.[field]]),
-  ) as Record<(typeof DERIVED_RUN_MAP_SHARED_DAY_STATE_FIELDS)[number], unknown>;
+    DERIVED_RUN_MAP_SHARED_INPUT_FIELDS.map((field) => [field, payload?.[field]]),
+  ) as Record<(typeof DERIVED_RUN_MAP_SHARED_INPUT_FIELDS)[number], unknown>;
   return {
     pepTypes: Array.isArray(sharedInputs.pepTypes)
       ? sharedInputs.pepTypes.filter((value: unknown): value is string => typeof value === "string")
@@ -501,8 +501,7 @@ function computeServerLiveState(
     const summaryStatsMap: Record<string, SummaryStats> = {};
     const runLinesMap: Record<string, Array<{ itemKey: string; qty: number }>> = {};
     if (payload?.dayState?.runs && payload?.runValues) {
-      const ds = payload.dayState as Record<string, unknown> | undefined;
-      const { pepTypes } = sharedDerivedRunInputs(ds);
+      const { pepTypes } = sharedDerivedRunInputs(payload as unknown as Record<string, unknown>);
       for (const run of payload.dayState.runs) {
         const rid = run.id;
         if (typeof rid !== "string") continue;
@@ -545,14 +544,21 @@ function broadcast(
   senderId: string,
   scope: Scope,
   date: string,
-  meta: { canonicalRevision?: number; serverTime?: number } = {},
+  meta: {
+    canonicalRevision?: number;
+    serverTime?: number;
+    operationalProjection?: ReturnType<typeof computeServerLiveState>["operationalProjection"];
+  } = {},
 ): void {
   data = completeSyncData(data);
-  const liveState = computeServerLiveState(
+  const computedLiveState = computeServerLiveState(
     data,
     meta.serverTime ?? Date.now(),
     meta.canonicalRevision ?? 0,
   );
+  const liveState = Object.prototype.hasOwnProperty.call(meta, "operationalProjection")
+    ? { ...computedLiveState, operationalProjection: meta.operationalProjection ?? null }
+    : computedLiveState;
   for (const client of clients) {
     if (client.scope === scope && client.watchDate === date) {
       if (client.clientId === senderId) {
@@ -640,11 +646,7 @@ function compactPeerLiveState(
   // These maps are derived from runValues. Sending every run on each peer
   // update erased most of the savings from the canonical sparse delta.
   // Any shared dependency change needs complete derived maps.
-  const changedDayState = isSyncRecord(deltaData.dayState) ? deltaData.dayState : null;
-  if (
-    changedDayState
-    && DERIVED_RUN_MAP_SHARED_DAY_STATE_FIELDS.some((field) => Object.hasOwn(changedDayState, field))
-  ) {
+  if (DERIVED_RUN_MAP_SHARED_INPUT_FIELDS.some((field) => Object.hasOwn(deltaData, field))) {
     return liveState;
   }
   const changedValues = deltaData.runValues;
@@ -1342,6 +1344,7 @@ async function upsertProtected(
         const serverOwnedPayload = capPackagingManualOverrideUntil(payloadForMerge, serverTime);
         const m = completeSyncData(capMergedResult(protectRunValues(serverOwnedPayload, canonicalExisting, {
           allowRunListReplacement: date > clientTodayDate,
+          nowMs: serverTime,
         }))) as Record<string, any>;
         canonicalizePepNames(m);
         applyResetBoundary(m, existing?.data, date === clientTodayDate);
@@ -1409,14 +1412,16 @@ router.get("/sync/today", async (req: Request, res: Response): Promise<void> => 
   const serverTime = Date.now();
   res.setHeader("X-Sync-Canonical-Revision", String(canonicalRevision));
   res.setHeader("X-Sync-Server-Time", String(serverTime));
+  const liveState = computeServerLiveState(data, serverTime, canonicalRevision);
   if (unchangedResponse(res, data, requestedSnapshot(req), {
     resetEpoch: resetState.epoch,
     rollover: resetState.rollover,
     canonicalRevision,
+    serverTime,
+    operationalProjection: liveState.operationalProjection,
   })) return;
   res.setHeader("X-Sync-Response", "complete");
   if (data) res.setHeader("X-Sync-Snapshot", syncSnapshotId(data));
-  const liveState = computeServerLiveState(data, serverTime, canonicalRevision);
   if (!liveState.operationalProjection) {
     // Preserve the empty-baseline response shape for clients that have no
     // selected run yet. The server-time headers still provide the anchor.
@@ -1551,6 +1556,9 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
   const responseBody = buildSyncWriteEnvelope(merged, {
     requestedSnapshotId: requestedId,
     partialFallback: result.partialFallback,
+    ...(merged === null
+      ? { snapshotIdOverride: syncSnapshotId(completeSyncData(emptySyncData(today))) }
+      : {}),
   });
   res.setHeader("X-Sync-Response-Bytes", String(Buffer.byteLength(JSON.stringify(responseBody))));
   const telemetryMode: SyncPutMode = result.partialFallback
@@ -1661,7 +1669,34 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
     }
     const next = JSON.parse(JSON.stringify(current)) as Record<string, any>;
     next.runValues = { ...(next.runValues ?? {}), [runId]: { ...(next.runValues?.[runId] ?? {}), ...values } };
-    next.runValuesUpdatedAt = { ...(next.runValuesUpdatedAt ?? {}), [runId]: Date.now() };
+    next.runValuesUpdatedAt = { ...(next.runValuesUpdatedAt ?? {}), [runId]: serverTime };
+    if (section === "packaging") {
+      const progressMap = current.packagingProgress
+        && typeof current.packagingProgress === "object"
+        && !Array.isArray(current.packagingProgress)
+        ? current.packagingProgress as Record<string, any>
+        : {};
+      const previousProgress = progressMap[runId];
+      const previousGeneration =
+        Number.isSafeInteger(previousProgress?.correctionGeneration)
+        && previousProgress.correctionGeneration >= 0
+          ? previousProgress.correctionGeneration as number
+          : 0;
+      const correctionGeneration = Math.min(Number.MAX_SAFE_INTEGER, previousGeneration + 1);
+      const canonicalValues = next.runValues[runId] ?? {};
+      const canonicalCounter = (value: unknown) =>
+        typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
+      next.packagingProgress = {
+        ...progressMap,
+        [runId]: {
+          skidsCompleted: canonicalCounter(canonicalValues.skidsCompleted),
+          casesOnCurrentSkid: canonicalCounter(canonicalValues.casesOnCurrentSkid),
+          correctionGeneration,
+          updatedAt: serverTime,
+          manualOverrideUntil: serverTime + MAX_PACKAGING_MANUAL_OVERRIDE_MS,
+        },
+      };
+    }
     const revision = currentRevision + 1;
     if (existing) {
       await tx.update(dailySyncTable).set({ data: next, canonicalRevision: revision, updatedAt: new Date() })
@@ -2624,32 +2659,42 @@ router.post("/sync/e2e/auto-track-tick", async (req: Request, res: Response): Pr
       ));
     });
   }
-  const summary = await runAutoTrackServerTicks({ nowMs, scope, date });
-  // A deterministic E2E clock step is also an authoritative projection frame.
-  // Production heartbeats publish this frame even when no counter cadence is
-  // due; without it, a test step inside the freezer-fill window would leave the
-  // browser displaying the projection captured at the previous server beat.
-  // Keep this fixture scoped exactly like the normal SSE path.
+  const summary = req.body?.skipAutoTrack === true
+    ? { examinedDates: 0, builtClaims: 0, accepted: 0, outcomes: {} }
+    : await runAutoTrackServerTicks({ nowMs, scope, date });
+  // Compute counters at the fixture clock, but timestamp the read model at the
+  // real server clock. This keeps deterministic elapsed-time tests from
+  // manufacturing a future server timestamp that a later wake cannot adopt.
   const [row] = await db.select().from(dailySyncTable).where(and(
     eq(dailySyncTable.scope, scope),
     eq(dailySyncTable.date, date),
   ));
-  if (row) {
-    broadcast(row.data, "server:e2e-clock", scope, date, {
-      canonicalRevision: row.canonicalRevision ?? 0,
-      serverTime: nowMs,
-    });
-  }
+  const serverTime = Date.now();
   const authoritative = row
     ? computeServerLiveState(row.data, nowMs, row.canonicalRevision ?? 0)
     : null;
+  const operationalProjection = authoritative?.operationalProjection
+    ? {
+        ...authoritative.operationalProjection,
+        serverTimeMs: serverTime,
+        capturedAtServerMs: serverTime,
+      }
+    : null;
+  if (row) {
+    broadcast(row.data, "server:e2e-clock", scope, date, {
+      canonicalRevision: row.canonicalRevision ?? 0,
+      serverTime,
+      operationalProjection,
+    });
+  }
   res.json({
     ...summary,
     canonicalRevision: row?.canonicalRevision ?? 0,
-    serverTime: nowMs,
+    serverTime,
     projected: !!row,
+    snapshotId: row ? syncSnapshotId(row.data) : undefined,
     autoTrackSchedule: authoritative?.autoTrackSchedule ?? null,
-    operationalProjection: authoritative?.operationalProjection ?? null,
+    operationalProjection,
   });
 });
 
@@ -2828,6 +2873,9 @@ router.put(
   const responseBody = buildSyncWriteEnvelope(merged, {
     requestedSnapshotId: requestedId,
     partialFallback: result.partialFallback,
+    ...(merged === null
+      ? { snapshotIdOverride: syncSnapshotId(completeSyncData(emptySyncData(date))) }
+      : {}),
   });
   res.setHeader("X-Sync-Response-Bytes", String(Buffer.byteLength(JSON.stringify(responseBody))));
   if (legacyUnversionedComplete) recordLegacySyncWrite("accepted");
@@ -2857,7 +2905,7 @@ router.delete("/sync/:date", requireCapability("manage-factory-settings"), async
 router.post(
   "/sync/reset",
   requireCapability("manage-staff"),
-  async (_req: Request, res: Response): Promise<void> => {
+  async (req: Request, res: Response): Promise<void> => {
     const scope = currentScope();
     const epoch = await db.transaction(async (tx) => {
       // Every writer locks this scope fence before a daily row. Establish it
@@ -2872,7 +2920,7 @@ router.post(
         .set({ epoch: sql`${dataResetTable.epoch} + 1`, resetAt: new Date() })
         .where(eq(dataResetTable.scope, scope))
         .returning();
-       await logAuditEvent(scope, "", "factory_reset", "daily_sync", { outcome: "success" }, undefined, undefined, tx);
+       await logAuditEvent(scope, req.userId ?? "", "factory_reset", "daily_sync", { outcome: "success" }, undefined, undefined, tx);
        return row?.epoch ?? 0;
     });
     broadcastReset(scope, epoch);

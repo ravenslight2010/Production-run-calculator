@@ -36,6 +36,17 @@ const expiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const conflictTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const listeners = new Set<() => void>();
 const keyOf = (runId: string, section: ManualSection) => `${runId}:${section}`;
+const lockStateSnapshots = new Map<string, ControlLockState>();
+const snapshotFor = (runId: string, section: ManualSection): ControlLockState => {
+  const key = keyOf(runId, section);
+  const next = getControlLockState(runId, section);
+  const prior = lockStateSnapshots.get(key);
+  if (prior && prior.locked === next.locked && prior.disabled === next.disabled && prior.message === next.message) {
+    return prior;
+  }
+  lockStateSnapshots.set(key, next);
+  return next;
+};
 
 function notify(): void {
   for (const listener of listeners) listener();
@@ -50,8 +61,6 @@ export function getManualSectionLock(runId: string, section: ManualSection, now 
   const key = keyOf(runId, section);
   const lock = locks.get(key);
   if (lock && lock.expiresAt <= now) {
-    locks.delete(key);
-    notify();
     return undefined;
   }
   return lock;
@@ -138,12 +147,14 @@ export function useManualSectionLock(runId: string | undefined, section: ManualS
 }
 
 export function useControlLockState(runId: string | undefined, section: ManualSection): ControlLockState {
+  const EMPTY_LOCK_STATE = EMPTY_LOCK_STATE_VALUE;
   return useSyncExternalStore(
     subscribeManualSectionLocks,
-    () => runId ? getControlLockState(runId, section) : { locked: false, disabled: false },
-    () => ({ locked: false, disabled: false }),
+    () => runId ? snapshotFor(runId, section) : EMPTY_LOCK_STATE,
+    () => EMPTY_LOCK_STATE,
   );
 }
+const EMPTY_LOCK_STATE_VALUE: ControlLockState = Object.freeze({ locked: false, disabled: false });
 export function useManualControlLock(runId: string | undefined, controlId: string): ManualSectionLock | undefined {
   const section = sectionForManualControl(controlId);
   return useManualSectionLock(runId, section ?? "packaging");
