@@ -44,3 +44,16 @@ publish and verify it is the intended/current deployment. A historical screensho
 does not establish current identity. If exposed tools cannot retrieve the build
 log, report that access limitation accurately; do not claim the information is
 absent from Replit or that automatic capture has been implemented.
+
+### Bounded HTTP probes in the execution sandbox
+
+Do not assume the impure execution sandbox exposes the browser `AbortSignal`
+global alongside `fetch`.
+
+**Why:** A bounded release-identity probe failed before issuing its requests
+because `AbortSignal` was undefined. Equivalent shell-driven Python HTTP probes
+with explicit timeouts worked.
+
+**How to apply:** If that global is unavailable, use a shell HTTP client with a
+request timeout and output only allowlisted identity/status fields. Never remove
+timeouts or retain full production responses merely to work around the sandbox.
