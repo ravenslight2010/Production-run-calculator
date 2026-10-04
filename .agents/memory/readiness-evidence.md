@@ -3,6 +3,23 @@ name: Readiness evidence
 description: Production readiness recovery records must be bounded, identity-bound, and projected from allowlisted health fields.
 ---
 
+## Owner-directed identity transition
+
+Git/GitHub identifiers must no longer be prerequisites for tests or readiness.
+Use independently captured source fingerprints and application-owned build
+identity as the primary binding. Keep Git as optional metadata and preserve
+historical Git-bound records without relabeling them.
+
+**Why:** The owner explicitly rejected a mandatory Git revision after the
+published source fingerprint matched but the older readiness contract blocked.
+GitHub is only a backup in this project's publishing workflow.
+
+**How to apply:** Treat the Git-only rules below as legacy-contract constraints,
+not the desired new approval path. Update all evidence producers and consumers
+together; preserve expiry, health, security, production-data provenance, and
+matching-test guards. Production-source fingerprints exclude tests, so bind
+test evidence separately to the current verification inputs.
+
 Readiness recovery evidence should be captured by a read-only probe that stores only fixed check statuses, bounded worker counts, operation names, and timestamps. Require a current, explicit provider-neutral deployment handoff containing the published deployment identifier and full deployed Git revision; never infer either from the verifier checkout or retain the target URL/body.
 
 **Why:** Database-worker incidents need proof of fail-closed 503 behavior and later recovery, but health responses can contain diagnostic details that should not become retained operational evidence. A separate expiring handoff prevents an operator or verifier checkout from silently substituting deployment identity.

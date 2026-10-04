@@ -8,6 +8,19 @@ description: GitHub is a project backup, not the publishing source; API authoriz
 GitHub is a backup location for this project, not the source of the live publish.
 A local Git commit can identify a source version without being pushed to GitHub.
 
+The owner explicitly requires test/readiness approval to stop depending on
+Git/GitHub identifiers. Application-owned build identity and independently
+verified source fingerprints are the intended primary identity; Git is optional
+metadata, not a prerequisite.
+
+**Why:** The owner reiterated that GitHub is only a backup after a mock readiness
+check still blocked on a full Git revision despite an exact published-source
+match.
+
+**How to apply:** Update evidence producers and consumers together rather than
+removing source-binding guards. Preserve historical Git-bound proof separately,
+and retain health, security, expiry, reconciliation, and matching-test gates.
+
 **Why:** The owner explicitly clarified, “Its a backup location for you,” after
 release identity discovery incorrectly emphasized GitHub branch revisions.
 
