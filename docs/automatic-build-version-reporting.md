@@ -77,9 +77,29 @@ rewrite historical release reports or infer the older build's revision.
 
 ```bash
 bash scripts/src/run-release-node.sh pnpm run test:build-identity
+bash scripts/src/run-release-node.sh pnpm run test:build-identity:integration
 ```
 
 The filesystem and HTTP tests use temporary fixtures only. There is no publish,
 GitHub push, production sign-in, or production database operation.
 These identity contracts are also a mandatory prerequisite in both standard
 and full release runs; the published HTTP comparison runs after an owner publish.
+
+The build-integration regression runs the real API and web build scripts in a
+temporary source workspace, leaving running application outputs untouched. It
+checks matching completed-stage identities, finalized PWA files, missing/failed
+counterpart rejection, and the actual bundled public getter while database
+startup fails against a disposable loopback target. The documented CLI compares
+that local target with an expectation prepared before building, and must still
+report `productionGo: false` with the unresolved controlled-handoff requirement,
+explicit unavailable Git binding, and 24-hour expiry intact.
+
+The integration test has a four-minute test budget (one-minute API/failed-build
+commands and a two-minute successful web build); its mandatory standard/full
+release prerequisite has a five-minute outer budget. Child environments do not
+inherit database, provider, authentication, or deployment credentials. Installed
+third-party tools are read-only links, workspace library sources are copied, and
+all generated outputs, receipts, and runtime dependencies are disposable.
+Build/runtime logs remain transient; retained output contains only allowlisted
+fixture outcomes, never source payloads, target URLs, credentials, or production
+readiness claims. This process check does not replace any browser or release gate.

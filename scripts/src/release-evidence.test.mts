@@ -1090,6 +1090,15 @@ async function run(): Promise<void> {
     releaseGateLabelsForMode("full").includes("WebKit identity contracts"),
     "full release checks must retain the standard WebKit identity contract",
   );
+  for (const mode of ["standard", "full"] as const) {
+    assert.equal(
+      releaseGateLabelsForMode(mode).filter(
+        (label) => label === "real API/web build-source integration",
+      ).length,
+      1,
+      `${mode} must run the isolated real-build identity regression exactly once`,
+    );
+  }
   assert.match(
     releaseJobs[0]!.source!,
     /run: pnpm run release:check$/m,

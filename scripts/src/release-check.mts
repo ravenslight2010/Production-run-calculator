@@ -1456,6 +1456,12 @@ const steps: ReleaseStep[] = [
     stage: "prerequisites",
   },
   {
+    label: "real API/web build-source integration",
+    args: ["run", "test:build-identity:integration"],
+    timeoutMs: 5 * 60_000,
+    stage: "prerequisites",
+  },
+  {
     label: "shared library typechecks",
     args: ["run", "typecheck:libs"],
     stage: "shared-output",
