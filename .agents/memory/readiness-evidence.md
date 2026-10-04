@@ -111,3 +111,14 @@ certificate verification enabled.
 `node --use-system-ca`; never disable TLS verification or substitute a
 development URL. Keep the independent prepared expectation and normal timeout
 and response limits.
+
+When a probe also imports TypeScript, preload `tsx` in that same Node process
+instead of relying on the separate `tsx` command-line launcher to preserve
+runtime trust options.
+
+**Why:** A direct Node probe with system CA trust and the TypeScript loader
+successfully performed the bounded readiness observation in this workspace.
+
+**How to apply:** Use the pinned wrapper with
+`node --use-system-ca --import ./scripts/node_modules/tsx/dist/loader.mjs`;
+keep captures observation-only if controlled deployment identity is missing.
