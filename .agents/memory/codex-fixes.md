@@ -1,3 +1,54 @@
+## 2026-10-04 — AI model fallback ladder on the resilient adapter
+
+**File(s):** `lib/integrations-openai-ai-server/src/models.ts`,
+`lib/integrations-openai-ai-server/src/client.ts`,
+`artifacts/api-server/src/routes/ai.ts`,
+`artifacts/api-server/src/lib/geminiAdapter.test.ts`,
+`.agents/memory/ai-fallback-chain-design.md`
+
+**Problem:** AI calls had a single hardcoded model and a single point of
+failure. When the primary returned a provider transient (quota 429, capacity
+503) or burned its whole output budget on hidden thoughts and answered HTTP 200
+with no text, the route surfaced a 502 or a hollow "0 specs / 0 recipes" parse.
+`origin/codex/fix-import-model-fallback` carried a model ladder, but on an older
+base with no timeout/circuit/metrics, and it proposed a fallback id
+(`gemini-3.5-flash-lite`) that is not a real model in `@google/genai` 2.25.x — it
+would have spent a ladder step on a guaranteed 404.
+
+The competing `origin/feat/local-ai-adapter` branch was **not** taken:
+`docs/evidence/gated-local-ai-adapter-decision-2026-10-02.md` is a dated no-go,
+and an independent re-read reproduced every defect it names (module-load env
+binding, `isTransportError` ending in `|| err instanceof Error`, and deleting the
+deferred stream telemetry).
+
+**Fix:** Lifted the ladder onto `createGeminiResilient` as `createWithModel`
+plus a bounded outer `create`. One provider, an ordered model list from
+`modelChain()`. Transient and 404 failures advance; cancellation, timeout, and
+deterministic 4xx do not. A SAFETY block short-circuits instead of advancing.
+Empty content advances. Streaming can only fall back at SETUP — once a chunk
+reaches the consumer a partial answer is on screen. `ChatResponse.model` is set
+only when a fallback actually served, so the primary-success shape is unchanged
+and `servedByFallback()` in `ai.ts` skips caching only in that case.
+
+Two deliberate corrections to the source branch: the breaker counts **exhausted
+ladders**, not individual rungs (counting rungs opens the circuit partway down
+and the fallbacks are never reached, since the threshold is 3); and the ladder
+defaults to `gemini-3.5-flash` / `gemini-3.1-flash-lite` with the primary left
+at `gemini-3.6-flash`, because the frozen evaluation identity
+(`SPEC_PARSE_VERSION` 41, system-prompt SHA-256, 51-workbook corpus) must keep
+holding and `gemini-3.8-flash` is unverified against this account's key.
+
+**Why it was needed:** Turns a single-provider outage into a degraded-but-served
+route without changing the export contract or the readiness contract.
+
+**Verification:** `CI=true pnpm run typecheck` exits 0 across all five packages.
+`geminiAdapter.test.ts` 15/15 — including new coverage for ladder advance on a
+transient, empty-content advance, safety-block short-circuit, no-advance on
+cancellation, and stream-setup fallback. Nine AI/readiness route suites: 109
+passed, 0 failed (3 files abort at import on `DATABASE_URL`, the known gate on
+this host). `health.test.ts` still asserts a proposed `LOCAL_AI_BASE_URL` does
+not configure a provider.
+
 ---
 name: Codex fixes log
 description: Running log of every fix Codex has made. Check this BEFORE making changes to avoid duplicate work.

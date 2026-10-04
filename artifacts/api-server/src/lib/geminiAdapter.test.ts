@@ -281,19 +281,103 @@ describe("Gemini adapter resilience", () => {
     expect(generateContent).toHaveBeenCalledTimes(1);
   });
 
+  it("advances to the next model after an exhausted rung and reports the serving model", async () => {
+    vi.useFakeTimers();
+    generateContent
+      .mockRejectedValueOnce(transient(503))
+      .mockRejectedValueOnce(transient(503))
+      .mockResolvedValueOnce({ text: "recovered" });
+
+    const request = openai.chat.completions.create(params);
+    const settled = expect(request).resolves.toEqual({
+      choices: [{ message: { content: "recovered" } }],
+      model: "gemini-3.5-flash",
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+    await settled;
+    expect(generateContent).toHaveBeenCalledTimes(3);
+  });
+
+  it("advances past empty content instead of returning a hollow answer", async () => {
+    generateContent
+      .mockResolvedValueOnce({ text: "" })
+      .mockResolvedValueOnce({ text: "recovered" });
+
+    await expect(openai.chat.completions.create(params)).resolves.toEqual({
+      choices: [{ message: { content: "recovered" } }],
+      model: "gemini-3.5-flash",
+    });
+    expect(generateContent).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops the ladder on a safety block rather than retrying another model", async () => {
+    generateContent.mockResolvedValueOnce({
+      text: "",
+      candidates: [{ finishReason: "SAFETY" }],
+    });
+
+    await expect(openai.chat.completions.create(params)).resolves.toEqual({
+      choices: [{ message: { content: null } }],
+    });
+    expect(generateContent).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not advance the ladder on a caller cancellation", async () => {
+    const controller = new AbortController();
+    generateContent.mockImplementation(() => {
+      controller.abort();
+      return Promise.reject(transient(503));
+    });
+
+    await expect(
+      openai.chat.completions.create(params, { signal: controller.signal }),
+    ).rejects.toThrow(/cancelled/);
+    expect(generateContent).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back when stream SETUP fails but never mid-stream", async () => {
+    vi.useFakeTimers();
+    generateContentStream
+      .mockRejectedValueOnce(transient(503))
+      .mockRejectedValueOnce(transient(503))
+      .mockResolvedValueOnce({
+        async *[Symbol.asyncIterator]() {
+          yield { text: "first" };
+        },
+      });
+
+    const request = openai.chat.completions.create({ ...params, stream: true });
+    // The failed setup retries once behind a 250ms backoff before the ladder
+    // advances, so fake time has to move while the call is in flight.
+    await vi.advanceTimersByTimeAsync(1_000);
+    const stream = await request;
+    const iterator = stream[Symbol.asyncIterator]();
+    await expect(iterator.next()).resolves.toMatchObject({
+      done: false,
+      value: { choices: [{ delta: { content: "first" } }] },
+    });
+    expect(generateContentStream).toHaveBeenCalledTimes(3);
+  });
+
   it("opens after repeated transient failures and permits only one half-open probe", async () => {
     vi.useFakeTimers();
     generateContent.mockRejectedValue(transient());
 
+    // The breaker counts EXHAUSTED LADDERS, not individual rungs: a rung that
+    // fails while fallbacks remain must not count, or the circuit would open
+    // partway down and the fallbacks would never be tried.
     for (let call = 0; call < 3; call += 1) {
       const request = openai.chat.completions.create(params);
       const rejected = expect(request).rejects.toBeInstanceOf(GeminiProviderUnavailableError);
-      await vi.advanceTimersByTimeAsync(250);
+      // Each rung retries once behind a 250ms backoff, so walking the whole
+      // ladder needs 3 x 250ms before the call settles.
+      await vi.advanceTimersByTimeAsync(1_000);
       await rejected;
     }
     await expect(openai.chat.completions.create(params))
       .rejects.toBeInstanceOf(GeminiProviderUnavailableError);
-    expect(generateContent).toHaveBeenCalledTimes(6);
+    // 3 exhausted ladders x 3 rungs x (initial attempt + 1 retry).
+    expect(generateContent).toHaveBeenCalledTimes(18);
 
     await vi.advanceTimersByTimeAsync(30_000);
     let resolveProbe!: (value: { text: string }) => void;
