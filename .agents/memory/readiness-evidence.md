@@ -96,3 +96,18 @@ with explicit timeouts worked.
 **How to apply:** If that global is unavailable, use a shell HTTP client with a
 request timeout and output only allowlisted identity/status fields. Never remove
 timeouts or retain full production responses merely to work around the sandbox.
+
+### Node HTTPS trust in this workspace
+
+Use the pinned Node runtime's `--use-system-ca` flag for a bounded HTTPS probe
+when its bundled CA store fails with `UNABLE_TO_VERIFY_LEAF_SIGNATURE` but the
+system-trust HTTPS client successfully verifies the same official target.
+
+**Why:** The published source-version lookup encountered this workspace trust
+store difference. Enabling system CA trust completed the lookup while keeping
+certificate verification enabled.
+
+**How to apply:** Run the verifier through the pinned Node wrapper with
+`node --use-system-ca`; never disable TLS verification or substitute a
+development URL. Keep the independent prepared expectation and normal timeout
+and response limits.
