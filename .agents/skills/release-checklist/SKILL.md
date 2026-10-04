@@ -433,7 +433,7 @@ retained-evidence verifier.
 The release runner is the source of the retained release record. A successful
 standard or full run must write `release-evidence/release-check-report.md` and
 the clean-start evidence files, then validate that record before returning
-success. The report must be tied to the current git revision and mode, list
+success. The report must be tied to the current source/test fingerprint identity and mode, list
 commands and results, and use explicit `PASS`/`FAIL` or infrastructure failure
 statuses for every gate. `GO` is invalid unless every applicable gate is
 `PASS`, operational warnings are answered, and accepted exceptions are either
@@ -446,6 +446,6 @@ read-only production database. Import it with
 `--source-library-evidence <path>` while the disposable CI guard and
 `RELEASE_CHECK_SKIP_PRODUCTION_SOURCE_LIBRARY_RECONCILIATION=1` are active.
 The importer must reject evidence that is not `release` environment, fresh,
-bound to the current full Git revision, and matched to the configured source
+bound to the independently verified deployed source fingerprint, and matched to the configured source
 report hash, heal ID, and repair boundary. The skip without an imported file
 must retain a NO-GO decision.

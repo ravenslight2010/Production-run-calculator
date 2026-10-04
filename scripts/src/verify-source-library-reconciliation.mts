@@ -7,6 +7,7 @@
  * Output is JSON only so the result can be retained by release automation.
  */
 import crypto from "node:crypto";
+import { captureReleaseIdentity, isDeploymentRevision } from "./release-source-identity.mjs";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -1308,10 +1309,7 @@ function dateFromHealId(healId: string) {
 }
 
 function currentRevision(): string {
-  return execFileSync("git", ["rev-parse", "HEAD"], {
-    cwd: ROOT,
-    encoding: "utf8",
-  }).trim();
+  return captureReleaseIdentity(ROOT).sourceRevision;
 }
 
 export function resolveSourceLibraryRevision(
@@ -1339,12 +1337,12 @@ export function resolveSourceLibraryRevision(
     (environment === "development" ? currentRevision() : undefined);
   if (!revision) {
     throw new Error(
-      "Missing deployed revision for release evidence; pass --revision or --deployment-handoff with the exact deployed 40-character Git commit SHA",
+      "Missing deployed source identity for release evidence; pass --revision or --deployment-handoff with source-sha256 identity (legacy exact deployed 40-character Git commit SHA remains readable)",
     );
   }
-  if (!/^[a-f0-9]{40}$/u.test(revision)) {
+  if (!isDeploymentRevision(revision)) {
     throw new Error(
-      "Invalid --revision; expected the full 40-character Git commit SHA; pass the exact deployed 40-character Git commit SHA.",
+      "Invalid --revision; expected source-sha256 identity or legacy full 40-character Git commit SHA; pass the exact deployed source identity.",
     );
   }
   return revision;
@@ -1407,7 +1405,7 @@ export function assertProductionSourceLibraryCapture(options: {
   }
   if (!options.configuredRevision?.trim() && !options.deploymentHandoffPath?.trim()) {
     throw new Error(
-      "Production source-library capture requires --revision or --deployment-handoff with the deployed Git SHA.",
+      "Production source-library capture requires --revision or --deployment-handoff with the deployed source identity.",
     );
   }
   if (!validDatabaseOwner(databaseOwner)) {

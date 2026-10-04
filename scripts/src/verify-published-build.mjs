@@ -1,5 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { sourceRevision } from "./release-source-identity.mjs";
 import {
   EXPECTED_RECORD_PATH, PROJECT_ROOT, readBoundedJson, sourceRecordDigest,
   validateBuildInfo, validateSourceRecord, writeRecord,
@@ -39,7 +40,7 @@ export async function verifyPublishedBuild({ url, expected, timeoutMs = 15_000 }
   } finally { reader.releaseLock(); }
   const actual = validateBuildInfo(JSON.parse(Buffer.concat(chunks).toString("utf8")));
   if (actual.buildMode !== "release") throw new Error("Published metadata is not a complete release build.");
-  for (const key of ["appBuildId", "sourcePolicy", "sourceFingerprintSha256", "gitRevision", "gitBinding"]) {
+  for (const key of ["appBuildId", "sourcePolicy", "sourceFingerprintSha256"]) {
     if (actual[key] !== expected[key]) throw new Error("Published source does not match the expected build.");
   }
   const now = new Date();
@@ -57,8 +58,24 @@ export async function verifyPublishedBuild({ url, expected, timeoutMs = 15_000 }
     expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString(),
     unresolvedIdentityRequirements: [
       "controlled-published-deployment-handoff",
-      ...(actual.gitBinding === "unavailable" ? ["verified-deployed-git-revision"] : []),
     ],
+  };
+}
+
+export async function createPublishedSourceHandoff(options) {
+  // Never accept a supplied receipt as proof: repeat the bounded live lookup
+  // against the separately prepared expectation.
+  const match = await verifyPublishedBuild(options);
+  return {
+    schemaVersion: 2, kind: "published-source-deployment-handoff",
+    identityAuthority: "independent-expected-source-comparison",
+    deploymentId: match.appBuildId, appBuildId: match.appBuildId,
+    deployedRevision: sourceRevision(match.sourceFingerprintSha256),
+    sourcePolicy: match.sourcePolicy,
+    sourceFingerprintSha256: match.sourceFingerprintSha256,
+    expectedRecordSha256: match.expectedRecordSha256,
+    expectedSource: validateSourceRecord(options.expected),
+    issuedAt: match.capturedAt, expiresAt: match.expiresAt,
   };
 }
 
@@ -67,7 +84,7 @@ async function main() {
   if (args[0] === "--") args.shift();
   const options = {};
   for (let i = 0; i < args.length; i += 2) {
-    if (!["--url", "--expected-file", "--output"].includes(args[i]) ||
+    if (!["--url", "--expected-file", "--output", "--handoff-output"].includes(args[i]) ||
         !args[i + 1] || Object.hasOwn(options, args[i])) throw new Error("Invalid version-check arguments.");
     options[args[i]] = args[i + 1];
   }
@@ -77,6 +94,10 @@ async function main() {
   const receipt = await verifyPublishedBuild({ url: options["--url"], expected });
   writeRecord(path.resolve(options["--output"] ??
     path.join(PROJECT_ROOT, ".local/build-identity/published-source-match.json")), receipt);
+  if (options["--handoff-output"]) {
+    const handoff = await createPublishedSourceHandoff({ url: options["--url"], expected });
+    writeRecord(path.resolve(options["--handoff-output"]), handoff);
+  }
   console.log(JSON.stringify(receipt));
 }
 

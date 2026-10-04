@@ -1,5 +1,8 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { isDeploymentRevision, isSourceRevision } from "./release-source-identity.mjs";
+import { EXPECTED_RECORD_PATH, PROJECT_ROOT, readBoundedJson, sourceRecordDigest, validateSourceRecord } from "./build-source-identity.mjs";
+import { createPublishedSourceHandoff, verifyPublishedBuild } from "./verify-published-build.mjs";
 
 export const READINESS_EVIDENCE_SCHEMA_VERSION = 1;
 export const READINESS_DEPLOYMENT_HANDOFF_SCHEMA_VERSION = 1;
@@ -58,17 +61,18 @@ export type ReadinessSample = {
 };
 
 export type ReadinessDeploymentHandoff = {
-  schemaVersion: typeof READINESS_DEPLOYMENT_HANDOFF_SCHEMA_VERSION;
-  kind: "published-deployment-handoff";
+  schemaVersion: 1 | 2;
+  kind: "published-deployment-handoff" | "published-source-deployment-handoff";
   deploymentId: string;
   deployedRevision: string;
   databaseOwner?: string;
   issuedAt: string;
   expiresAt: string;
+  expectedSource?: unknown;
 };
 
 export type ReadinessEvidence = {
-  schemaVersion: typeof READINESS_EVIDENCE_SCHEMA_VERSION;
+  schemaVersion: 1 | 2;
   kind: "readiness-recovery";
   environment: "development" | "release";
   deploymentId: string;
@@ -227,15 +231,35 @@ export function validateReadinessDeploymentHandoff(
     "Readiness deployment handoff must be a JSON object",
   );
   if (
-    handoff.schemaVersion !== READINESS_DEPLOYMENT_HANDOFF_SCHEMA_VERSION ||
-    handoff.kind !== "published-deployment-handoff"
+    !((handoff.schemaVersion === READINESS_DEPLOYMENT_HANDOFF_SCHEMA_VERSION &&
+      handoff.kind === "published-deployment-handoff") ||
+      (handoff.schemaVersion === 2 && handoff.kind === "published-source-deployment-handoff"))
   ) {
     throw new Error("Readiness deployment handoff has an unsupported schema or kind");
   }
   if (!isValidDeploymentId(handoff.deploymentId)) {
     throw new Error("Readiness deployment handoff deployment ID is malformed");
   }
-  if (!isValidRevision(handoff.deployedRevision)) {
+  if (handoff.schemaVersion === 2) {
+    const expected = validateSourceRecord(handoff.expectedSource);
+    if (
+      handoff.identityAuthority !== "independent-expected-source-comparison" ||
+      typeof handoff.appBuildId !== "string" ||
+      !/^app-build:[a-f0-9-]{36}$/u.test(handoff.appBuildId) ||
+      handoff.deploymentId !== handoff.appBuildId ||
+      handoff.sourcePolicy !== "production-source-v1" ||
+      typeof handoff.sourceFingerprintSha256 !== "string" ||
+      !/^[a-f0-9]{64}$/u.test(handoff.sourceFingerprintSha256) ||
+      handoff.deployedRevision !== `source-sha256:${handoff.sourceFingerprintSha256}` ||
+      typeof handoff.expectedRecordSha256 !== "string" ||
+      !/^[a-f0-9]{64}$/u.test(handoff.expectedRecordSha256) ||
+      sourceRecordDigest(expected) !== handoff.expectedRecordSha256 ||
+      expected.mode !== "publish" ||
+      expected.appBuildId !== handoff.appBuildId ||
+      expected.sourcePolicy !== handoff.sourcePolicy ||
+      expected.sourceFingerprintSha256 !== handoff.sourceFingerprintSha256
+    ) throw new Error("Readiness source handoff has invalid independent build/source binding");
+  } else if (!isValidRevision(handoff.deployedRevision)) {
     throw new Error("Readiness deployment handoff deployed revision is malformed");
   }
   if (
@@ -269,8 +293,8 @@ export function validateReadinessDeploymentHandoff(
     throw new Error("Readiness deployment handoff validity window is invalid");
   }
   return {
-    schemaVersion: READINESS_DEPLOYMENT_HANDOFF_SCHEMA_VERSION,
-    kind: "published-deployment-handoff",
+    schemaVersion: handoff.schemaVersion as 1 | 2,
+    kind: handoff.kind as ReadinessDeploymentHandoff["kind"],
     deploymentId: handoff.deploymentId,
     deployedRevision: handoff.deployedRevision,
     ...(handoff.databaseOwner === undefined
@@ -278,6 +302,7 @@ export function validateReadinessDeploymentHandoff(
       : { databaseOwner: handoff.databaseOwner }),
     issuedAt: new Date(issuedAtMs).toISOString(),
     expiresAt: new Date(expiresAtMs).toISOString(),
+    ...(handoff.schemaVersion === 2 ? { expectedSource: handoff.expectedSource } : {}),
   };
 }
 
@@ -359,20 +384,23 @@ export function validateReadinessEvidence(
     parseEvidenceInput(input),
     "Readiness evidence must be a JSON object",
   );
-  if (evidence.schemaVersion !== READINESS_EVIDENCE_SCHEMA_VERSION ||
+  if ((evidence.schemaVersion !== READINESS_EVIDENCE_SCHEMA_VERSION && evidence.schemaVersion !== 2) ||
       evidence.kind !== "readiness-recovery") {
     throw new Error("Readiness evidence has an unsupported schema or kind");
   }
   if (!isValidDeploymentId(options.expectedDeploymentId)) {
     throw new Error("Readiness evidence requires an expected published deployment ID");
   }
-  if (!isValidRevision(options.expectedRevision)) {
+  if (!isDeploymentRevision(options.expectedRevision)) {
     throw new Error("Readiness evidence requires the expected deployed revision");
   }
   if (!isValidDeploymentId(evidence.deploymentId)) {
     throw new Error("Readiness evidence deployment ID is malformed");
   }
-  if (!isValidRevision(evidence.revision)) {
+  if (!(evidence.schemaVersion === 2
+    ? isSourceRevision(evidence.revision) && typeof evidence.deploymentId === "string" &&
+      /^app-build:[a-f0-9-]{36}$/u.test(evidence.deploymentId)
+    : isValidRevision(evidence.revision))) {
     throw new Error("Readiness evidence revision is malformed");
   }
   if (evidence.deploymentId !== options.expectedDeploymentId) {
@@ -705,8 +733,8 @@ export function buildReadinessEvidence(input: {
       `readiness evidence requires 1-${READINESS_EVIDENCE_MAX_SAMPLES} samples`,
     );
   }
-  if (!/^[a-f0-9]{40}$/u.test(input.revision)) {
-    throw new Error("readiness evidence revision must be the full 40-character Git commit SHA");
+  if (!isDeploymentRevision(input.revision)) {
+    throw new Error("readiness evidence requires a source-sha256 identity (or legacy full 40-character Git commit SHA)");
   }
   if (!/^[A-Za-z0-9._:-]{1,128}$/u.test(input.deploymentId)) {
     throw new Error("readiness evidence deployment ID is invalid");
@@ -743,7 +771,7 @@ export function buildReadinessEvidence(input: {
     Date.parse(generatedAt) + READINESS_EVIDENCE_RETENTION_MS,
   ).toISOString();
   return {
-    schemaVersion: READINESS_EVIDENCE_SCHEMA_VERSION,
+    schemaVersion: isSourceRevision(input.revision) ? 2 : READINESS_EVIDENCE_SCHEMA_VERSION,
     kind: "readiness-recovery",
     environment: input.environment,
     deploymentId: input.deploymentId,
@@ -815,6 +843,9 @@ function targetUrl(value: string): string {
       parsed.password) {
     throw new Error("--url must be an HTTP(S) URL without embedded credentials");
   }
+  if (parsed.pathname !== "/api/readyz" || parsed.search || parsed.hash) {
+    throw new Error("--url must identify /api/readyz without query parameters or fragments");
+  }
   return parsed.toString();
 }
 
@@ -824,11 +855,24 @@ async function captureSample(
 ): Promise<ReadinessSample> {
   const capturedAt = new Date().toISOString();
   try {
-    const response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
-    const body = await response.text();
-    if (Buffer.byteLength(body, "utf8") > READINESS_EVIDENCE_MAX_RESPONSE_BYTES) {
-      return sanitizeReadinessResponse({ capturedAt, httpStatus: response.status });
-    }
+    const response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs), redirect: "error" });
+    if (!response.body) return sanitizeReadinessResponse({ capturedAt, httpStatus: response.status });
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let length = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        length += value.byteLength;
+        if (length > READINESS_EVIDENCE_MAX_RESPONSE_BYTES) {
+          await reader.cancel();
+          return sanitizeReadinessResponse({ capturedAt, httpStatus: response.status });
+        }
+        chunks.push(value);
+      }
+    } finally { reader.releaseLock(); }
+    const body = Buffer.concat(chunks).toString("utf8");
     let payload: unknown;
     try {
       payload = JSON.parse(body);
@@ -852,11 +896,22 @@ async function main(): Promise<void> {
   if (environment !== "development" && environment !== "release") {
     throw new Error("--environment must be development or release");
   }
-  const handoffPath = path.resolve(
-    process.cwd(),
-    requiredArgument("--deployment-handoff"),
-  );
-  const handoff = validateReadinessDeploymentHandoff(await readFile(handoffPath));
+  const configuredHandoff = argument("--deployment-handoff");
+  const handoff = configuredHandoff
+    ? validateReadinessDeploymentHandoff(await readFile(path.resolve(process.cwd(), configuredHandoff)))
+    : validateReadinessDeploymentHandoff(await createPublishedSourceHandoff({
+        url: new URL(url).origin,
+        expected: validateSourceRecord(readBoundedJson(path.resolve(
+          argument("--expected-file") ?? path.join(PROJECT_ROOT, EXPECTED_RECORD_PATH),
+        ))),
+      }));
+  // A handoff for A must never authorize collecting healthy samples at B.
+  if (handoff.schemaVersion === 2) {
+    await verifyPublishedBuild({
+      url: new URL(url).origin,
+      expected: validateSourceRecord(handoff.expectedSource),
+    });
+  }
   const suppliedDeploymentId = argument("--deployment-id")?.trim();
   if (
     suppliedDeploymentId !== undefined &&
@@ -903,6 +958,12 @@ async function main(): Promise<void> {
     if (index + 1 < sampleCount) {
       await new Promise((resolve) => setTimeout(resolve, intervalMs));
     }
+  }
+  if (handoff.schemaVersion === 2) {
+    await verifyPublishedBuild({
+      url: new URL(url).origin,
+      expected: validateSourceRecord(handoff.expectedSource),
+    });
   }
   const evidence = buildReadinessEvidence({
     environment,

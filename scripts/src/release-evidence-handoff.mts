@@ -1,6 +1,7 @@
 import { lstat, readFile, realpath } from "node:fs/promises";
 import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isEvidenceRevision } from "./release-source-identity.mjs";
 import { FULL_BROWSER_EXPECTED_CASES } from "./full-browser-case-contract.mts";
 import {
   READINESS_EVIDENCE_PATH,
@@ -32,6 +33,7 @@ type ParsedDocument = {
   environment?: string;
   sourceLibraryEnvironment?: string;
   sourceLibraryRevision?: string;
+  sourceVersion?: string;
   deployedRevision?: string;
   readinessEvidence?: string;
   gates: GateResult[];
@@ -108,7 +110,7 @@ function displayMetadata(value: string | undefined): string {
 }
 
 function gitRevision(value: string | undefined): string | undefined {
-  return value && /^[a-f0-9]{40}$/u.test(value) ? value : undefined;
+  return value && isEvidenceRevision(value) ? value : undefined;
 }
 
 function timestamp(value: string | undefined): string | undefined {
@@ -179,6 +181,7 @@ function parseDocument(
     sourceLibraryRevision: content
       ? gitRevision(field(content, "Source-library evidence revision"))
       : undefined,
+    sourceVersion: content ? gitRevision(field(content, "Source version")) : undefined,
     deployedRevision: content
       ? gitRevision(field(content, "Deployed revision"))
       : undefined,
@@ -451,8 +454,8 @@ export async function buildReleaseEvidenceHandoff(options: {
   if (mode !== "standard" && mode !== "full") {
     throw new Error("mode must be standard or full");
   }
-  if (!/^[a-f0-9]{40}$/u.test(revision)) {
-    throw new Error("revision must be a full 40-character lowercase Git SHA");
+  if (!isEvidenceRevision(revision)) {
+    throw new Error("revision must be a source/test SHA-256 identity or a legacy full 40-character lowercase Git SHA");
   }
   const repositoryRoot = resolve(options.repositoryRoot ?? REPOSITORY_ROOT);
   const evidencePath = options.evidenceDirectory
@@ -620,8 +623,8 @@ export async function buildReleaseEvidenceHandoff(options: {
   const productionBinding =
     report.status === "PASS"
     && report.sourceLibraryEnvironment === "release"
-    && report.sourceLibraryRevision === revision
-    && report.deployedRevision === revision
+    && report.sourceLibraryRevision === (report.sourceVersion ?? revision)
+    && report.deployedRevision === (report.sourceVersion ?? revision)
     && report.readinessEvidence === READINESS_EVIDENCE_PATH
     && supportingFiles.some(
       ({ path, status }) =>

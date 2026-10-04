@@ -188,7 +188,7 @@ test("failed responsive WebKit fixture retains only useful sanitized diagnostics
       assert.ok(!serialized.includes(canary), `must omit ${canary}`);
     }
     assert.match(manifest, /isolated-disposable-ci-fixture/u);
-    assert.match(manifest, new RegExp(`"revision": "${"a".repeat(40)}"`));
+    assert.match(manifest, /"revision": "test-sha256:[a-f0-9]{64}"/u);
     assert.match(manifest, /"retentionDays": 3/u);
 
     const trace = JSON.parse(summary) as {

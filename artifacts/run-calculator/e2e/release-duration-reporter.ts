@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { captureReleaseIdentity } from "../../../scripts/src/release-source-identity.mjs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { relative, resolve } from "node:path";
@@ -76,14 +76,7 @@ function currentRevision(): string {
   const configured = process.env.RELEASE_REVISION?.trim();
   if (configured) return configured;
 
-  try {
-    return execFileSync("git", ["rev-parse", "HEAD"], {
-      cwd: repositoryRoot,
-      encoding: "utf8",
-    }).trim();
-  } catch {
-    return "unknown";
-  }
+  return captureReleaseIdentity(repositoryRoot).revision;
 }
 
 function relativeFilePath(file: string): string {

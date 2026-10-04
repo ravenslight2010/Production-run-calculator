@@ -14,13 +14,13 @@ historical Git-bound records without relabeling them.
 published source fingerprint matched but the older readiness contract blocked.
 GitHub is only a backup in this project's publishing workflow.
 
-**How to apply:** Treat the Git-only rules below as legacy-contract constraints,
-not the desired new approval path. Update all evidence producers and consumers
-together; preserve expiry, health, security, production-data provenance, and
-matching-test guards. Production-source fingerprints exclude tests, so bind
+**How to apply:** Preserve Git-only historical records through explicit legacy
+readers, not as new prerequisites. Keep evidence producers and consumers aligned;
+preserve expiry, health, security, production-data provenance, and matching-test
+guards. Production-source fingerprints exclude tests, so bind
 test evidence separately to the current verification inputs.
 
-Readiness recovery evidence should be captured by a read-only probe that stores only fixed check statuses, bounded worker counts, operation names, and timestamps. Require a current, explicit provider-neutral deployment handoff containing the published deployment identifier and full deployed Git revision; never infer either from the verifier checkout or retain the target URL/body.
+Readiness recovery evidence should be captured by a read-only probe that stores only fixed check statuses, bounded worker counts, operation names, and timestamps. Require a fresh, source-based handoff bound to an independent expected record and the live application build; never infer published identity from the verifier checkout or retain the target URL/body. Git-only handoffs are historical compatibility records, not new prerequisites.
 
 **Why:** Database-worker incidents need proof of fail-closed 503 behavior and later recovery, but health responses can contain diagnostic details that should not become retained operational evidence. A separate expiring handoff prevents an operator or verifier checkout from silently substituting deployment identity.
 
@@ -28,7 +28,8 @@ Readiness recovery evidence should be captured by a read-only probe that stores 
 
 Published standard and full release verification must require the retained JSON
 path and validate it against caller-supplied deployment and revision identities
-before accepting GO. Development and disposable fixtures may opt out explicitly;
+before accepting GO. Identity includes production source and separate verification
+inputs; old results cannot satisfy changed test requirements. Development and disposable fixtures may opt out explicitly;
 that opt-out must not be available to the published release command.
 
 **Why:** A valid-but-missing readiness record otherwise leaves the release
@@ -64,7 +65,7 @@ or post-build validator must not produce a successful completion marker.
 
 For this project's release handoffs, look for identity automatically before
 asking the user to transcribe it. GitHub is a backup, not the publish source;
-local Git version identifiers do not require a matching GitHub backup tip.
+Git identifiers and backup-tip equality are not test/readiness prerequisites.
 See [GitHub's project role](github-git-push.md) for that scope boundary.
 The user identified the source as **Publishing
 → Logs → select the successful publish**, with `Deployment:` and `Build:` lines
@@ -77,9 +78,9 @@ without first investigating available build-log access.
 **How to apply:** Check official deployment metadata and available publishing
 build-log access, not only runtime logs. Distinguish the deployment UUID, build
 UUID, and full Git revision: a build UUID or its shortened UI label is not proof
-of the deployed commit. Read accessible Git commit identities directly rather
-than asking the user to locate them in the Git UI; the additional release
-requirement is proving which commit the intended publish contains.
+of a deployed commit. Git commit annotations are optional; the required binding
+is proving the intended publish's application build and source fingerprint
+against an independently captured expectation.
 Bind any extracted identifiers to the selected successful
 publish and verify it is the intended/current deployment. A historical screenshot
 does not establish current identity. If exposed tools cannot retrieve the build
@@ -97,8 +98,8 @@ does not distinguish those builds, and an older history entry can supply the
 wrong build for a live release check.
 
 **How to apply:** Check the selected log's date against Current status; preserve
-deployment and build identities separately, then establish the controlled Git
-revision mapping. Screenshot-supplied IDs are manual observations, not proof that
+deployment and build identities separately, then establish independently verified
+source binding. Screenshot-supplied IDs are manual observations, not proof that
 automatic retrieval works or that the build matches a guessed Git branch tip.
 
 ### Bounded HTTP probes in the execution sandbox
@@ -139,3 +140,15 @@ successfully performed the bounded readiness observation in this workspace.
 **How to apply:** Use the pinned wrapper with
 `node --use-system-ca --import ./scripts/node_modules/tsx/dist/loader.mjs`;
 keep captures observation-only if controlled deployment identity is missing.
+
+### Workflow-linter executable discovery
+
+An installed actionlint package shim is not proof that its native linter can
+launch. Do not use that shim as an `ACTIONLINT_BIN` override.
+
+**Why:** Pointing the override at the package shim produced a process-spawning
+failure (`Cannot fork`) and a timeout, despite the package and pin being present.
+
+**How to apply:** Prefer package-manager executable discovery, or an explicitly
+verified native executable. Report YAML parsing and configuration prechecks
+separately from a completed actionlint run; a blocked linter is not a pass.

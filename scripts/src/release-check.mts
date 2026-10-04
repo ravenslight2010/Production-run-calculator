@@ -1,4 +1,5 @@
 import { execFile, spawn } from "node:child_process";
+import { assessmentRevision, captureReleaseIdentity, isAssessmentRevision, isDeploymentRevision, isEvidenceRevision, isSourceRevision } from "./release-source-identity.mjs";
 import { createHash } from "node:crypto";
 import {
   access,
@@ -38,7 +39,6 @@ import {
 } from "./report-key-rotation-preflight.mts";
 import {
   diagnosticsEqualForPairs,
-  releaseRevisionGitArgs,
 } from "./typescript-7-evidence.mts";
 import {
   TYPESCRIPT_7_HISTORY_LIMIT,
@@ -693,7 +693,7 @@ export function validateTypescript7ComparisonEvidence(
       const isCurrent = index === revisions.length - 1;
       return isCurrent
         ? revision !== expectedRevision
-        : !/^[a-f0-9]{40}$/.test(revision);
+        : !isEvidenceRevision(revision);
     }) ||
     distinctRevisions.size !== revisionSamples.length ||
     revisions.at(-1) !== expectedRevision ||
@@ -1185,11 +1185,17 @@ const sourceLibraryDeploymentHandoffArgs =
     : [];
 const configuredReadinessDeploymentId =
   (cliOptionValue("--readiness-deployment-id") ??
-    process.env.READINESS_EVIDENCE_DEPLOYMENT_ID?.trim()) ||
+    process.env.READINESS_EVIDENCE_DEPLOYMENT_ID?.trim() ??
+    (configuredSourceLibraryDeploymentHandoff
+      ? readSourceLibraryDeploymentHandoff(configuredSourceLibraryDeploymentHandoff).deploymentId
+      : undefined)) ||
   undefined;
 const configuredDeployedRevision =
   (cliOptionValue("--deployed-revision") ??
-    process.env.READINESS_EVIDENCE_DEPLOYED_REVISION?.trim()) ||
+    process.env.READINESS_EVIDENCE_DEPLOYED_REVISION?.trim() ??
+    (configuredSourceLibraryDeploymentHandoff
+      ? readSourceLibraryDeploymentHandoff(configuredSourceLibraryDeploymentHandoff).deployedRevision
+      : undefined)) ||
   undefined;
 
 export function resolveSourceLibraryReleaseRevision(
@@ -1214,15 +1220,17 @@ export function resolveSourceLibraryReleaseRevision(
   const revision =
     explicitRevision ??
     handoffRevision ??
-    (environment === "development" ? releaseRevision : undefined);
+    (environment === "development"
+      ? (isDeploymentRevision(releaseRevision) ? releaseRevision : captureReleaseIdentity(rootDir).sourceRevision)
+      : undefined);
   if (!revision) {
     throw new Error(
-      "Production source-library evidence requires --source-library-revision or --source-library-deployment-handoff with the exact deployed 40-character Git commit SHA.",
+      "Production source-library evidence requires --source-library-revision or --source-library-deployment-handoff with the exact deployed source-sha256 identity (legacy exact deployed 40-character Git commit SHA remains readable).",
     );
   }
-  if (!/^[a-f0-9]{40}$/u.test(revision)) {
+  if (!isDeploymentRevision(revision)) {
     throw new Error(
-      "Source-library evidence revision must be the exact deployed 40-character Git commit SHA.",
+      "Source-library evidence revision must be the exact deployed source-sha256 identity (or legacy exact deployed 40-character Git commit SHA).",
     );
   }
   return revision;
@@ -1968,16 +1976,16 @@ function printHelp(): void {
     "  --source-library-evidence <path>  Import fresh revision-bound production reconciliation evidence",
   );
   console.log(
-    "  --source-library-revision <sha>   Exact deployed 40-character SHA for production reconciliation evidence",
+    "  --source-library-revision <identity>   Exact deployed source-sha256 identity for production reconciliation evidence",
   );
   console.log(
-    "  --source-library-deployment-handoff <path>   Validate a current published deployment handoff and obtain its deployed SHA",
+    "  --source-library-deployment-handoff <path>   Validate an expiring published source handoff and obtain its source identity",
   );
   console.log(
     "  --readiness-deployment-id <id>   Expected published deployment ID for retained readiness evidence",
   );
   console.log(
-    "  --deployed-revision <sha>       Expected deployed 40-character SHA for retained readiness evidence",
+    "  --deployed-revision <identity>  Expected deployed source-sha256 identity for retained readiness evidence",
   );
   console.log(
     "  pnpm --silent --filter @workspace/scripts exec tsx ./src/verify-source-library-reconciliation.mts --capture-production --environment release --deployment-handoff <handoff-path>  Capture bounded production evidence (read-only)",
@@ -2924,6 +2932,19 @@ export function validateReleaseReport(
       `Release report revision is missing or stale (expected ${options.currentRevision}).`,
     );
   }
+  if (isAssessmentRevision(revision)) {
+    const source = report.match(/^Source version:\s*(\S+)\s*$/m)?.[1];
+    const policy = report.match(/^Source policy:\s*(\S+)\s*$/m)?.[1];
+    const verification = report.match(/^Verification input fingerprint:\s*(\S+)\s*$/m)?.[1];
+    if (!isSourceRevision(source) || !policy || !verification ||
+        assessmentRevision(policy, source.slice("source-sha256:".length), verification) !== revision) {
+      throw new Error("Release report source and verification-input binding is missing or stale.");
+    }
+    if (options.expectedSourceLibraryEnvironment === "release" &&
+        source !== options.expectedSourceLibraryRevision) {
+      throw new Error("Release report tested source does not match the expected deployed source.");
+    }
+  }
   if (!mode || (options.expectedMode && mode !== options.expectedMode)) {
     if (mode && options.expectedMode && mode !== options.expectedMode) {
       throw new Error(
@@ -3049,9 +3070,9 @@ export function validateReleaseReport(
   if (
     options.expectedSourceLibraryEnvironment === "release" &&
     (!deployedRevision ||
-      !/^[a-f0-9]{40}$/u.test(deployedRevision) ||
+      !isDeploymentRevision(deployedRevision) ||
       options.expectedSourceLibraryRevision === undefined ||
-      !/^[a-f0-9]{40}$/u.test(options.expectedSourceLibraryRevision) ||
+      !isDeploymentRevision(options.expectedSourceLibraryRevision) ||
       deployedRevision !== options.expectedSourceLibraryRevision)
   ) {
     throw new Error(
@@ -3347,6 +3368,9 @@ export function formatReleaseReport(
           )
           .join("; ");
   const revision = metadata.revision ?? "unknown";
+  const assessedIdentity = isAssessmentRevision(revision)
+    ? (releaseIdentitySnapshot?.revision === revision ? releaseIdentitySnapshot : captureReleaseIdentity(rootDir))
+    : undefined;
   const reportSourceLibraryEnvironment =
     metadata.sourceLibraryEnvironment ?? sourceLibraryEnvironment;
   const developmentOnlyEvidence =
@@ -3416,6 +3440,11 @@ export function formatReleaseReport(
     "",
     `Generated: ${new Date().toISOString()}`,
     `Revision: ${revision}`,
+    ...(assessedIdentity ? [
+      `Source version: ${assessedIdentity.sourceRevision}`,
+      `Source policy: ${assessedIdentity.sourcePolicy}`,
+      `Verification input fingerprint: ${assessedIdentity.verificationFingerprintSha256}`,
+    ] : []),
     `Mode: ${mode}`,
     ...(isCheckpoint
       ? [
@@ -3840,16 +3869,10 @@ async function readCheckpoint(
   }
 }
 
+let releaseIdentitySnapshot: ReturnType<typeof captureReleaseIdentity> | undefined;
 async function currentRevision(): Promise<string> {
-  return new Promise((resolveRevision, reject) => {
-    execFile(
-      "git",
-      [...releaseRevisionGitArgs],
-      { cwd: rootDir },
-      (error, stdout) =>
-        error ? reject(error) : resolveRevision(stdout.trim()),
-    );
-  });
+  releaseIdentitySnapshot = captureReleaseIdentity(rootDir);
+  return releaseIdentitySnapshot.revision;
 }
 
 export async function promoteSourceLibraryEvidenceAtPaths(options: {
@@ -4372,6 +4395,9 @@ async function main(): Promise<void> {
     await releaseStatefulLock?.();
   }
 
+  if (isAssessmentRevision(revision) && captureReleaseIdentity(rootDir).revision !== revision) {
+    throw new Error("Production source or verification inputs changed during the release run; rerun against a stable source snapshot.");
+  }
   console.log("\nRelease check summary:");
   for (const result of results) {
     console.log(

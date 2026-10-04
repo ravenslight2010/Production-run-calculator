@@ -111,17 +111,14 @@ jobs:
         run: |
           mkdir -p "$HANDOFF_EVIDENCE_DIR"
           handoff_path="$HANDOFF_EVIDENCE_DIR/release-evidence-handoff.md"
-          if revision="$(git log -1 --format=%H -- . \
-            ':(exclude)release-evidence' \
-            ':(exclude)release-evidence/**' \
-            ':(exclude)release-evidence-full' \
-            ':(exclude)release-evidence-full/**')"; then
+          if revision="$(bash scripts/src/run-release-node.sh node --input-type=module -e \
+            'import { captureReleaseIdentity } from "./scripts/src/release-source-identity.mjs"; console.log(captureReleaseIdentity(process.cwd()).revision)')"; then
             :
           else
             revision=""
           fi
           handoff_status=127
-          if [[ "$revision" =~ ^[a-f0-9]{40}$ ]]; then
+          if [[ "$revision" =~ ^test-sha256:[a-f0-9]{64}$ ]]; then
             if bash scripts/src/run-release-node.sh \
               pnpm --filter @workspace/scripts exec tsx \
               ./src/release-evidence-handoff.mts \
@@ -298,17 +295,14 @@ jobs:
         run: |
           mkdir -p "$HANDOFF_EVIDENCE_DIR"
           handoff_path="$HANDOFF_EVIDENCE_DIR/release-evidence-handoff.md"
-          if revision="$(git log -1 --format=%H -- . \
-            ':(exclude)release-evidence' \
-            ':(exclude)release-evidence/**' \
-            ':(exclude)release-evidence-full' \
-            ':(exclude)release-evidence-full/**')"; then
+          if revision="$(bash scripts/src/run-release-node.sh node --input-type=module -e \
+            'import { captureReleaseIdentity } from "./scripts/src/release-source-identity.mjs"; console.log(captureReleaseIdentity(process.cwd()).revision)')"; then
             :
           else
             revision=""
           fi
           handoff_status=127
-          if [[ "$revision" =~ ^[a-f0-9]{40}$ ]]; then
+          if [[ "$revision" =~ ^test-sha256:[a-f0-9]{64}$ ]]; then
             if bash scripts/src/run-release-node.sh \
               pnpm --filter @workspace/scripts exec tsx \
               ./src/release-evidence-handoff.mts \

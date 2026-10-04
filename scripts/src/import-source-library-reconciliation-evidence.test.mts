@@ -177,7 +177,7 @@ try {
       revision: "unknown",
       now,
     }),
-    /exact deployed 40-character Git commit SHA/,
+    /exact deployed source identity/,
   );
   assert.deepEqual(
     await readFile(output),

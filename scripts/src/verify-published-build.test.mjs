@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { test } from "node:test";
 import { buildInfoFromRecord, createSourceRecord } from "./build-source-identity.mjs";
 import { sourceFixture } from "./fixtures/build-identity-fixture.mjs";
-import { verifyPublishedBuild } from "./verify-published-build.mjs";
+import { createPublishedSourceHandoff, verifyPublishedBuild } from "./verify-published-build.mjs";
 
 async function fixture(t, respond) {
   const expected = createSourceRecord(sourceFixture(t));
@@ -37,7 +37,6 @@ for (const [name, mutate] of [
   ["wrong source", (r) => ({ ...r, sourceFingerprintSha256: "f".repeat(64) })],
   ["wrong app build", (r) => ({ ...r, appBuildId: "app-build:00000000-0000-0000-0000-000000000000" })],
   ["development build", (r) => ({ ...r, buildMode: "development" })],
-  ["forged Git binding", (r) => ({ ...r, gitRevision: "a".repeat(40), gitBinding: "verified" })],
   ["unsupported schema", (r) => ({ ...r, schemaVersion: 2 })],
   ["sensitive extra field", (r) => ({ ...r, token: "synthetic" })],
   ["invalid timestamp", (r) => ({ ...r, completedAt: "tomorrow" })],
@@ -51,6 +50,27 @@ for (const [name, mutate] of [
   });
 }
 
+test("Git annotations are optional and cannot block an exact source match", async (t) => {
+  const input = await fixture(t, (res, info) => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ...info, gitRevision: "a".repeat(40), gitBinding: "verified" }));
+  });
+  assert.equal((await verifyPublishedBuild(input)).status, "source-match");
+});
+
+test("a source-based handoff is bound to the independent expectation without Git", async (t) => {
+  const input = await fixture(t, (res, info) => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(info));
+  });
+  assert.equal(input.expected.gitRevision, null);
+  const handoff = await createPublishedSourceHandoff(input);
+  assert.equal(handoff.schemaVersion, 2);
+  assert.equal(handoff.deploymentId, input.expected.appBuildId);
+  assert.equal(handoff.deployedRevision, `source-sha256:${input.expected.sourceFingerprintSha256}`);
+  assert.deepEqual(handoff.expectedSource, input.expected);
+  assert(!JSON.stringify(handoff).includes(input.url));
+});
 for (const status of [401, 404, 503]) {
   test(`HTTP ${status} fails explicitly`, async (t) => {
     const input = await fixture(t, (res) => {

@@ -1,13 +1,13 @@
 # Release evidence handoff
 
 Use this page and the read-only handoff command as the starting point for
-reviewing release evidence. The command requires an explicit mode and full Git
+reviewing release evidence. The command requires an explicit mode and source/test
 revision, compares only that mode's retained report and checkpoint, checks the
 current browser contract, and prints the links and unresolved statuses. It does
 not modify retained evidence, run release gates, or issue a production GO.
 
 ```bash
-REVISION="$(git rev-parse HEAD)"
+REVISION="$(node --input-type=module -e 'import { captureReleaseIdentity } from "./scripts/src/release-source-identity.mjs"; console.log(captureReleaseIdentity(process.cwd()).revision)')"
 pnpm run release:evidence-handoff -- --mode standard --revision "$REVISION"
 pnpm run release:evidence-handoff -- --mode full --revision "$REVISION"
 ```
@@ -39,8 +39,9 @@ pnpm --filter @workspace/scripts run check:release-evidence -- \
 | Production reconciliation and deployed-revision binding | [Production reconciliation instructions](release-operations.md#bind-production-reconciliation-evidence-to-the-deployed-build) |
 | Recovery after a stopped run | [Resume and fresh-run instructions](release-operations.md#how-to-interpret-a-result) |
 
-The workflow uses the same full Git revision selector as the release runner,
-excluding commits that only update either retained evidence directory. The
+The workflow uses the same source/test fingerprint selector as the release runner,
+excluding retained evidence and generated output. Git and GitHub identifiers are
+optional metadata; historical Git-bound records remain readable. The
 handoff is generated after allowlist verification and before upload, alongside
 the retained report and checkpoint; it does not replace or edit either record.
 If generation fails, the artifact contains an explicit **INCOMPLETE** handoff

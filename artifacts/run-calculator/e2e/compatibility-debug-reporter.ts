@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { captureReleaseIdentity } from "../../../scripts/src/release-source-identity.mjs";
 import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { basename, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -260,18 +260,7 @@ function failureType(result: TestResult): FailureRecord["failureType"] {
 }
 
 function currentRevision(): string | undefined {
-  const configured = process.env.GITHUB_SHA?.trim();
-  if (configured && /^[a-f0-9]{40}$/i.test(configured)) return configured;
-  try {
-    const current = execFileSync("git", ["rev-parse", "HEAD"], {
-      cwd: repositoryRoot,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-    return /^[a-f0-9]{40}$/i.test(current) ? current : undefined;
-  } catch {
-    return undefined;
-  }
+  return process.env.RELEASE_REVISION?.trim() || captureReleaseIdentity(repositoryRoot).revision;
 }
 
 function debugOutput(): DebugOutput | undefined {

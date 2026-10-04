@@ -216,10 +216,28 @@ retained evidence are mandatory.
 
 ### Bind production reconciliation evidence to the deployed build
 
-The controlled deployment must provide a current published-deployment handoff
-with the full 40-character Git commit SHA that was deployed. The
-provider-neutral handoff has this bounded shape:
-`{schemaVersion, kind, deploymentId, deployedRevision, issuedAt, expiresAt}`.
+New checks use application build IDs and `source-sha256:<64 hex>` identities,
+not Git or GitHub identifiers. Local test results use `test-sha256:<64 hex>`,
+derived from both production source and verification inputs; changing tests
+invalidates old passing evidence even when application source stays unchanged.
+Git-bound historical records remain readable through the legacy path.
+
+Create the current source-based handoff by comparing the live complete-release
+record with a separately prepared expectation:
+
+```bash
+pnpm run check:published-build -- \
+  --url '<official published URL>' \
+  --expected-file .local/build-identity/expected-source.json \
+  --handoff-output .local/build-identity/published-source-handoff.json
+```
+
+The handoff has schema version 2 and kind
+`published-source-deployment-handoff`. It carries the application-owned build ID,
+source policy, source fingerprint, exact independent expectation and digest,
+and an expiry of at most 24 hours. The `deploymentId` compatibility field contains
+the namespaced application build ID, **not** a Replit platform UUID.
+Source matching alone is not release approval.
 The operational report may expose the same value at
 `evidence.release.revision`; malformed, absent, or expired revision metadata is
 not valid release proof. `REPLIT_GIT_COMMIT` and `GIT_COMMIT` remain
@@ -282,8 +300,8 @@ handoff is read only for its bounded deployment identity and SHA and is not
 copied into retained evidence; recipe rows, aliases, database responses, and
 credentials are never retained. The retained release report records both
 `Source-library evidence revision` and `Deployed revision`; for release
-evidence those values must match the SHA returned by the controlled
-deployment/report path. The release runner validates and passes that SHA
+evidence those values must match the source identity returned by the controlled
+deployment/report path. The release runner validates and passes that identity
 through the source verifier's preflight and full verification/import steps, so
 an older release-state file or an omitted preflight value cannot silently
 qualify.

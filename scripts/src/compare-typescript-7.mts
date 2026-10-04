@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
+import { captureReleaseIdentity, isEvidenceRevision } from "./release-source-identity.mjs";
 import { createHash } from "node:crypto";
 import {
   cp,
@@ -14,7 +15,6 @@ import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   diagnosticsEqualForPairs,
-  releaseRevisionGitArgs,
 } from "./typescript-7-evidence.mts";
 import {
   TYPESCRIPT_7_MEASURED_PROJECTS,
@@ -346,7 +346,7 @@ export function analyzeTypescript7HistoricalReports(
     const revision = report.sourceRevision;
     if (
       typeof revision !== "string" ||
-      !/^[a-f0-9]{40}$/.test(revision) ||
+      !isEvidenceRevision(revision) ||
       revisions.has(revision) ||
       typescript7ResourceRegressions(report.performanceComparison) === null
     ) {
@@ -517,22 +517,13 @@ async function run(
   };
 }
 
-async function gitStatus(): Promise<string> {
-  const result = spawnSync("git", ["status", "--short"], {
-    cwd: rootDir,
-    encoding: "utf8",
-  });
-  if (result.status !== 0) throw new Error(result.stderr);
-  return result.stdout;
+async function sourceInputIdentity(): Promise<string> {
+  return captureReleaseIdentity(rootDir).revision;
 }
 
+let measuredRevision: string | undefined;
 function sourceRevision(): string {
-  const result = spawnSync("git", releaseRevisionGitArgs, {
-    cwd: rootDir,
-    encoding: "utf8",
-  });
-  if (result.status !== 0) throw new Error(result.stderr);
-  return result.stdout.trim();
+  return measuredRevision ??= captureReleaseIdentity(rootDir).revision;
 }
 
 async function main(): Promise<void> {
@@ -543,7 +534,8 @@ async function main(): Promise<void> {
     process.env.TYPESCRIPT_7_EVIDENCE_PATH ??
       resolve(rootDir, "release-evidence/typescript-7-comparison.json"),
   );
-  const beforeStatus = await gitStatus();
+  const beforeStatus = await sourceInputIdentity();
+  measuredRevision = beforeStatus;
   const temporaryRoot = await mkdtemp(resolve(tmpdir(), "typescript-7-release-"));
   const checkout = resolve(temporaryRoot, "repository");
   const commands: CommandEvidence[] = [];
@@ -905,7 +897,7 @@ async function main(): Promise<void> {
     await rm(temporaryRoot, { recursive: true, force: true });
   }
 
-  const afterStatus = await gitStatus();
+  const afterStatus = await sourceInputIdentity();
   const authoritativeOutputsChanged = afterStatus !== beforeStatus;
   if (authoritativeOutputsChanged) {
     throw new Error(
