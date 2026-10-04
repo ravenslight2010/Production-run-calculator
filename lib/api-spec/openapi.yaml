@@ -44,6 +44,35 @@ tags:
   - name: sync
     description: Client-date-scoped live day-state synchronization
 paths:
+  /build-info:
+    get:
+      operationId: getBuildInfo
+      tags: [health]
+      security: []
+      summary: Immutable application build version
+      description: >-
+        Public, database-independent version metadata loaded from the sealed
+        build artifact. Application build IDs are not platform Build UUIDs.
+        Runtime-reported platform IDs are informational, not verified handoffs.
+        A source match alone never authorizes production release.
+      responses:
+        "200":
+          description: Valid immutable build metadata; Cache-Control is no-store.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BuildInfo"
+        "503":
+          description: Build metadata is absent or malformed; no version is inferred.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, status]
+                properties:
+                  error: { type: string }
+                  status: { type: string, enum: [unavailable] }
+
   /healthz:
     get:
       operationId: healthCheck
@@ -5516,6 +5545,48 @@ components:
           oneOf:
             - $ref: "#/components/schemas/SyncPayload"
             - type: "null"
+
+    BuildInfo:
+      type: object
+      additionalProperties: false
+      required:
+        - schemaVersion
+        - kind
+        - appBuildId
+        - sourcePolicy
+        - sourceFingerprintSha256
+        - gitRevision
+        - gitBinding
+        - completedAt
+        - buildMode
+        - platformDeploymentId
+        - platformBuildId
+        - platformIdentitySource
+      properties:
+        schemaVersion: { type: integer, enum: [1] }
+        kind: { type: string, enum: [app-build-info] }
+        appBuildId:
+          type: string
+          pattern: '^app-build:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$'
+          description: Application-owned artifact-set ID, not a Replit Build UUID.
+        sourcePolicy: { type: string, enum: [production-source-v1] }
+        sourceFingerprintSha256: { type: string, pattern: '^[a-f0-9]{64}$' }
+        gitRevision:
+          type: string
+          nullable: true
+          pattern: '^[a-f0-9]{40}$'
+        gitBinding: { type: string, enum: [verified, unavailable] }
+        completedAt: { type: string, format: date-time }
+        buildMode: { type: string, enum: [release, development] }
+        platformDeploymentId:
+          type: string
+          nullable: true
+          pattern: '^[A-Za-z0-9._:-]{1,128}$'
+        platformBuildId:
+          type: string
+          nullable: true
+          pattern: '^[A-Za-z0-9._:-]{1,128}$'
+        platformIdentitySource: { type: string, enum: [runtime-reported, unavailable] }
 
     HealthStatus:
       type: object

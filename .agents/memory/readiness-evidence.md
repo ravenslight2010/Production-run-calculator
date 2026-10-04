@@ -35,6 +35,16 @@ identity, not a later workspace HEAD or mutable environment label. Keep existing
 controlled handoff and release gates; a source match is not a production GO.
 Do not retroactively assign this identity to an older build.
 
+Finalize artifact identity only after the compiler and post-build validators
+have succeeded and all generated assets are complete.
+
+**Why:** Vite's `writeBundle` can precede PWA asset generation, while
+`closeBundle` can run after a failed build. Neither hook alone proves a complete
+successful artifact.
+
+**How to apply:** Keep final completion outside those hooks; a failed compiler
+or post-build validator must not produce a successful completion marker.
+
 For this project's release handoffs, look for identity automatically before
 asking the user to transcribe it. GitHub is a backup, not the publish source;
 local Git version identifiers do not require a matching GitHub backup tip.
@@ -57,7 +67,8 @@ Bind any extracted identifiers to the selected successful
 publish and verify it is the intended/current deployment. A historical screenshot
 does not establish current identity. If exposed tools cannot retrieve the build
 log, report that access limitation accurately; do not claim the information is
-absent from Replit or that automatic capture has been implemented.
+absent from Replit or that automatic Replit deployment/Build UUID capture has
+been implemented. Application-owned artifact identifiers are a separate namespace.
 
 Prefer the **Tools → Publishing → Overview → Current status → log icon**
 source illustrated by the user when identifying the live build. Distinguish it

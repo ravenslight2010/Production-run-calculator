@@ -1,7 +1,8 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { HealthCheckResponse } from "@workspace/api-zod";
+import { GetBuildInfoResponse, HealthCheckResponse } from "@workspace/api-zod";
+import { getBuildInfo } from "../lib/buildInfo";
 import { isGeminiProviderConfigured } from "@workspace/integrations-openai-ai-server";
 import { logger } from "../lib/logger";
 import { getCacheMaintenanceDiagnostics } from "../lib/observability";
@@ -16,6 +17,16 @@ import {
 } from "../lib/backgroundOperations";
 
 const router: IRouter = Router();
+
+router.get("/build-info", (_req: Request, res: Response) => {
+  res.setHeader("Cache-Control", "no-store");
+  const info = getBuildInfo();
+  if (!info) {
+    res.status(503).json({ error: "Build version is unavailable.", status: "unavailable" });
+    return;
+  }
+  res.json(GetBuildInfoResponse.parse(info));
+});
 
 type CheckStatus = "ok" | "warning" | "error" | "pending";
 type AiCapabilityStatus = "configured" | "not_configured" | "pending";

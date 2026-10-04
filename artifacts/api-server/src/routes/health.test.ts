@@ -39,7 +39,10 @@ const mocks = vi.hoisted(() => ({
     connect: vi.fn(),
   },
   info: vi.fn(),
+  buildInfo: vi.fn(),
 }));
+
+vi.mock("../lib/buildInfo", () => ({ getBuildInfo: mocks.buildInfo }));
 
 vi.mock("@workspace/db", () => ({
   db: { execute: mocks.execute },
@@ -95,7 +98,37 @@ beforeEach(async () => {
   resetStartupHealthForTests();
   mocks.execute.mockClear();
   mocks.info.mockClear();
+  mocks.buildInfo.mockReturnValue(null);
   setProviderEnv({ AI_INTEGRATIONS_GEMINI_API_KEY: "test-replit-gemini-key" });
+});
+
+describe("public GET /build-info", () => {
+  it("reports unavailable without database access or authentication", async () => {
+    const response = await fetch(`${baseUrl}/build-info`);
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ error: "Build version is unavailable.", status: "unavailable" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("returns the sealed version while startup is incomplete, without querying the database", async () => {
+    beginStartup();
+    const info = {
+      schemaVersion: 1, kind: "app-build-info",
+      appBuildId: "app-build:00000000-0000-0000-0000-000000000000",
+      sourcePolicy: "production-source-v1", sourceFingerprintSha256: "a".repeat(64),
+      gitRevision: null, gitBinding: "unavailable", buildMode: "release",
+      completedAt: new Date().toISOString(), platformDeploymentId: null,
+      platformBuildId: null, platformIdentitySource: "unavailable",
+    };
+    mocks.buildInfo.mockReturnValue(info);
+    const response = await fetch(`${baseUrl}/build-info`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual(info);
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
 });
 
 describe("GET /readyz optional AI capability", () => {

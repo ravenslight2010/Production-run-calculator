@@ -1442,6 +1442,12 @@ const steps: ReleaseStep[] = [
     stage: "prerequisites",
   },
   {
+    label: "immutable build-source identity contracts",
+    args: ["run", "test:build-identity"],
+    timeoutMs: 60_000,
+    stage: "prerequisites",
+  },
+  {
     label: "shared library typechecks",
     args: ["run", "typecheck:libs"],
     stage: "shared-output",

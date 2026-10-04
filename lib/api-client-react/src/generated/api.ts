@@ -45,6 +45,7 @@ import type {
   AutoTrackClaimResponse,
   BackgroundOperationDiagnostics,
   BrandProfileList,
+  BuildInfo,
   ChangePasswordCredentials,
   CheckUsernameAvailableParams,
   CheeseRecipeList,
@@ -92,6 +93,7 @@ import type {
   FreezerPullItemList,
   FreezerSurplusLedger,
   FreezerSurplusMutationResponse,
+  GetBuildInfo503,
   GetOperationalRunViewParams,
   GetProfileDataHealthWorkspace200,
   GetProfileNameLinkCleanupAudit200,
@@ -291,6 +293,108 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   }
   return result;
 };
+
+export const getGetBuildInfoUrl = () => {
+
+
+
+
+  return `/api/build-info`
+}
+
+/**
+ * Public, database-independent version metadata loaded from the sealed build artifact. Application build IDs are not platform Build UUIDs. Runtime-reported platform IDs are informational, not verified handoffs. A source match alone never authorizes production release.
+ * @summary Immutable application build version
+ */
+export const getBuildInfo = async ( options?: Parameters<typeof customFetch>[1]): Promise<BuildInfo> => {
+
+  return customFetch<BuildInfo>(getGetBuildInfoUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetBuildInfoQueryKey = () => {
+    return [
+    `/api/build-info`
+    ] as const;
+    }
+
+
+export const getGetBuildInfoQueryOptions = <TData = Awaited<ReturnType<typeof getBuildInfo>>, TError = ErrorType<GetBuildInfo503>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getBuildInfo>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetBuildInfoQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getBuildInfo>>> = ({ signal }) => getBuildInfo({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getBuildInfo>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetBuildInfoQueryResult = NonNullable<Awaited<ReturnType<typeof getBuildInfo>>>
+export type GetBuildInfoQueryError = ErrorType<GetBuildInfo503>
+
+
+export function useGetBuildInfo<TData = Awaited<ReturnType<typeof getBuildInfo>>, TError = ErrorType<GetBuildInfo503>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getBuildInfo>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getBuildInfo>>,
+          TError,
+          Awaited<ReturnType<typeof getBuildInfo>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetBuildInfo<TData = Awaited<ReturnType<typeof getBuildInfo>>, TError = ErrorType<GetBuildInfo503>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getBuildInfo>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getBuildInfo>>,
+          TError,
+          Awaited<ReturnType<typeof getBuildInfo>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetBuildInfo<TData = Awaited<ReturnType<typeof getBuildInfo>>, TError = ErrorType<GetBuildInfo503>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getBuildInfo>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Immutable application build version
+ */
+
+export function useGetBuildInfo<TData = Awaited<ReturnType<typeof getBuildInfo>>, TError = ErrorType<GetBuildInfo503>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getBuildInfo>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetBuildInfoQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getHealthCheckUrl = () => {
 

@@ -7,6 +7,11 @@
  */
 import * as zod from 'zod';
 
+export const getBuildInfoResponseAppBuildIdRegExp = new RegExp('^app-build:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$');
+export const getBuildInfoResponseSourceFingerprintSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const getBuildInfoResponseGitRevisionRegExp = new RegExp('^[a-f0-9]{40}$');
+export const getBuildInfoResponsePlatformDeploymentIdRegExp = new RegExp('^[A-Za-z0-9._:-]{1,128}$');
+export const getBuildInfoResponsePlatformBuildIdRegExp = new RegExp('^[A-Za-z0-9._:-]{1,128}$');
 export const signUpBodyOneUsernameMin = 3;
 export const signUpBodyOneUsernameMax = 64;
 export const signUpBodyOnePasswordMin = 6;
@@ -368,6 +373,28 @@ export const undoImportOperationPathOperationIdMin = 16;
 export const undoImportOperationPathOperationIdMax = 120;
 export const undoImportOperationBodyExpectedResultHashRegExp = new RegExp('^[a-f0-9]{64}$');
 
+
+
+/**
+ * Public, database-independent version metadata loaded from the sealed build artifact. Application build IDs are not platform Build UUIDs. Runtime-reported platform IDs are informational, not verified handoffs. A source match alone never authorizes production release.
+ * @summary Immutable application build version
+ */
+
+
+export const GetBuildInfoResponse = zod.object({
+  "schemaVersion": zod.literal(1),
+  "kind": zod.enum(['app-build-info']),
+  "appBuildId": zod.string().regex(getBuildInfoResponseAppBuildIdRegExp).describe('Application-owned artifact-set ID, not a Replit Build UUID.'),
+  "sourcePolicy": zod.enum(['production-source-v1']),
+  "sourceFingerprintSha256": zod.string().regex(getBuildInfoResponseSourceFingerprintSha256RegExp),
+  "gitRevision": zod.string().regex(getBuildInfoResponseGitRevisionRegExp).nullable(),
+  "gitBinding": zod.enum(['verified', 'unavailable']),
+  "completedAt": zod.coerce.date(),
+  "buildMode": zod.enum(['release', 'development']),
+  "platformDeploymentId": zod.string().regex(getBuildInfoResponsePlatformDeploymentIdRegExp).nullable(),
+  "platformBuildId": zod.string().regex(getBuildInfoResponsePlatformBuildIdRegExp).nullable(),
+  "platformIdentitySource": zod.enum(['runtime-reported', 'unavailable'])
+})
 
 
 /**

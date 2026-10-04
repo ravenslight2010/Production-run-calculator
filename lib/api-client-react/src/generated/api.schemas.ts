@@ -956,6 +956,83 @@ export interface OperationalIntentReceipt {
   snapshot?: SyncPayload | null;
 }
 
+export type BuildInfoSchemaVersion = typeof BuildInfoSchemaVersion[keyof typeof BuildInfoSchemaVersion];
+
+
+export const BuildInfoSchemaVersion = {
+  NUMBER_1: 1,
+} as const;
+
+export type BuildInfoKind = typeof BuildInfoKind[keyof typeof BuildInfoKind];
+
+
+export const BuildInfoKind = {
+  'app-build-info': 'app-build-info',
+} as const;
+
+export type BuildInfoSourcePolicy = typeof BuildInfoSourcePolicy[keyof typeof BuildInfoSourcePolicy];
+
+
+export const BuildInfoSourcePolicy = {
+  'production-source-v1': 'production-source-v1',
+} as const;
+
+export type BuildInfoGitBinding = typeof BuildInfoGitBinding[keyof typeof BuildInfoGitBinding];
+
+
+export const BuildInfoGitBinding = {
+  verified: 'verified',
+  unavailable: 'unavailable',
+} as const;
+
+export type BuildInfoBuildMode = typeof BuildInfoBuildMode[keyof typeof BuildInfoBuildMode];
+
+
+export const BuildInfoBuildMode = {
+  release: 'release',
+  development: 'development',
+} as const;
+
+export type BuildInfoPlatformIdentitySource = typeof BuildInfoPlatformIdentitySource[keyof typeof BuildInfoPlatformIdentitySource];
+
+
+export const BuildInfoPlatformIdentitySource = {
+  'runtime-reported': 'runtime-reported',
+  unavailable: 'unavailable',
+} as const;
+
+export interface BuildInfo {
+  schemaVersion: BuildInfoSchemaVersion;
+  kind: BuildInfoKind;
+  /**
+     * Application-owned artifact-set ID, not a Replit Build UUID.
+     * @pattern ^app-build:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$
+     */
+  appBuildId: string;
+  sourcePolicy: BuildInfoSourcePolicy;
+  /** @pattern ^[a-f0-9]{64}$ */
+  sourceFingerprintSha256: string;
+  /**
+     * @nullable
+     * @pattern ^[a-f0-9]{40}$
+     */
+  gitRevision: string | null;
+  gitBinding: BuildInfoGitBinding;
+  completedAt: string;
+  buildMode: BuildInfoBuildMode;
+  /**
+     * @nullable
+     * @pattern ^[A-Za-z0-9._:-]{1,128}$
+     */
+  platformDeploymentId: string | null;
+  /**
+     * @nullable
+     * @pattern ^[A-Za-z0-9._:-]{1,128}$
+     */
+  platformBuildId: string | null;
+  platformIdentitySource: BuildInfoPlatformIdentitySource;
+}
+
 /**
  * `ok` means core-ready; `starting` or `degraded` means a hard readiness gate failed.
  */
@@ -6054,6 +6131,18 @@ export interface ManagerActionItemUpdate {
 export type ClientTodayParameter = string;
 
 export type SyncSnapshotParameter = string;
+
+export type GetBuildInfo503Status = typeof GetBuildInfo503Status[keyof typeof GetBuildInfo503Status];
+
+
+export const GetBuildInfo503Status = {
+  unavailable: 'unavailable',
+} as const;
+
+export type GetBuildInfo503 = {
+  error: string;
+  status: GetBuildInfo503Status;
+};
 
 export type CheckUsernameAvailableParams = {
 /**

@@ -3,8 +3,11 @@
   "version": "0.0.0",
   "license": "MIT",
   "scripts": {
+    "prepare:publish": "node scripts/src/prepare-publish-source.mjs",
+    "check:published-build": "node scripts/src/verify-published-build.mjs",
+    "test:build-identity": "node --test scripts/src/build-source-identity.test.mjs scripts/src/verify-published-build.test.mjs",
     "preinstall": "sh -c 'rm -f package-lock.json yarn.lock; case \"$npm_config_user_agent\" in pnpm/*) ;; *) echo \"Use pnpm instead\" >&2; exit 1 ;; esac'",
-    "build": "pnpm run typecheck && pnpm -r --if-present run build",
+    "build": "pnpm run typecheck && pnpm run prepare:publish --reuse-current && pnpm -r --if-present run build && node scripts/src/finalize-build-identity.mjs",
     "audit:prod": "pnpm run audit:prod:release",
     "audit:prod:ci": "pnpm audit --prod --audit-level high --ignore-registry-errors",
     "audit:prod:release": "pnpm audit --prod --audit-level high",
