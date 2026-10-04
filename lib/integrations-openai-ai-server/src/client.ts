@@ -11,13 +11,14 @@
 // async iterable of { choices: [{ delta: { content } }] } (stream). Vision is
 // supported via `image_url` data-URI parts. Everything else in the app (routes,
 // prompts, parsing) stays byte-for-byte unchanged.
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import type {
   Content,
   GenerateContentConfig,
   GenerateContentResponse,
   Part,
 } from "@google/genai";
+import { modelChain } from "./models";
 
 type TextPart = { type: "text"; text: string };
 type ImagePart = { type: "image_url"; image_url: { url: string } };
@@ -43,6 +44,13 @@ interface CreateParamsStream extends CreateParamsBase {
 
 interface ChatResponse {
   choices: Array<{ message: { content: string | null } }>;
+  /**
+   * Set ONLY when a fallback model served the call, so callers can avoid filing
+   * a fallback answer under the requested model's cache fingerprint. Absent on
+   * primary success, which keeps the response shape byte-identical to the
+   * pre-ladder contract — and an absent model is read as "not a fallback".
+   */
+  model?: string;
 }
 interface ChatChunk {
   choices: Array<{ delta: { content: string | null } }>;
@@ -217,9 +225,13 @@ function buildConfig(
   systemInstruction?: string,
 ): GenerateContentConfig {
   const config: GenerateContentConfig = {
-    // No thinkingConfig — gemini-2.5-flash does not support thinkingLevel.
-    // (Gemini 3.x models used thinkingLevel: "low" to avoid thinking tokens
-    // consuming the maxOutputTokens budget, but that knob is absent in 2.5.)
+    // Lower reasoning effort: Gemini 3.x models draw thoughts from the same
+    // maxOutputTokens pool, so hidden thinking can consume the whole budget and
+    // return EMPTY text with finishReason MAX_TOKENS. ThinkingLevel.LOW reduces
+    // that risk without reserving output tokens. The gemini-2.5-flash era
+    // removed this knob because 2.5 did not support thinkingLevel; it is
+    // restored now that gemini-3.6-flash is active.
+    thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
   };
   if (systemInstruction) config.systemInstruction = systemInstruction;
   if (params.response_format?.type === "json_object") {
@@ -379,17 +391,60 @@ function observeMetrics(metrics: GeminiRequestMetrics): void {
   }
 }
 
-async function create(params: CreateParamsStream, options?: CreateRequestOptions): Promise<AsyncIterable<ChatChunk>>;
-async function create(params: CreateParamsSync, options?: CreateRequestOptions): Promise<ChatResponse>;
-async function create(
+/**
+ * A safety block is a deliberate provider refusal, not a transport failure, so
+ * it short-circuits the ladder instead of advancing it.
+ */
+function isBlockedResponse(response: GenerateContentResponse): boolean {
+  if (response.promptFeedback?.blockReason) return true;
+  return (response.candidates ?? []).some((candidate) => candidate?.finishReason === "SAFETY");
+}
+
+/**
+ * Whether a failed rung should advance to the next model. Provider transients
+ * (quota 429s, capacity 503s, retired-model 404s) qualify; cancellation,
+ * timeout, and deterministic 4xx validation failures do not, because retrying
+ * those on another model only doubles the latency.
+ */
+function isChainAdvanceError(error: unknown): boolean {
+  if (error instanceof GeminiRequestCancelledError) return false;
+  if (error instanceof GeminiRequestTimeoutError) return false;
+  // Transport failures arrive wrapped in GeminiProviderUnavailableError, so the
+  // guards have to be re-applied to the unwrapped cause. Without this, a timeout
+  // — which isTransientProviderError() reports as transient — would advance to
+  // another model and multiply the caller's timeout budget threefold.
+  const cause = error instanceof Error && error.cause !== undefined ? error.cause : error;
+  if (cause instanceof GeminiRequestCancelledError) return false;
+  if (cause instanceof GeminiRequestTimeoutError) return false;
+  return isTransientProviderError(cause) || statusOf(cause) === 404;
+}
+
+/**
+ * Hand the single half-open probe back without recording a chain failure. An
+ * intermediate rung must neither open nor close the breaker, but it must not
+ * strand the half-open latch either.
+ */
+function releaseChainStep(mode: "closed" | "half_open"): void {
+  if (mode === "half_open") halfOpenProbeActive = false;
+}
+
+interface ChainAttempt extends ChatResponse {
+  /** SAFETY-blocked rather than empty; the ladder stops instead of advancing. */
+  blocked: boolean;
+}
+
+async function createWithModel(
   params: CreateParamsBase & { stream?: boolean },
-  options?: CreateRequestOptions,
-): Promise<ChatResponse | AsyncIterable<ChatChunk>> {
+  options: CreateRequestOptions | undefined,
+  chainIndex: number,
+  isFinalAttempt: boolean,
+): Promise<ChainAttempt | AsyncIterable<ChatChunk>> {
   const startedAt = performance.now();
   let retryCount = 0;
   let responseForMetrics: GenerateContentResponse | undefined;
   let outcome: GeminiRequestOutcome = "provider_error";
   let deferStreamCleanup = false;
+  let settled = false;
   let circuitMode: "closed" | "half_open";
   try {
     circuitMode = acquireCircuit();
@@ -448,7 +503,7 @@ async function create(
                 MAX_TIMEOUT_MS * 2,
               ),
               outcome,
-              retryCount,
+              retryCount: chainIndex + retryCount,
               ...usageMetrics(responseForMetrics),
             });
           };
@@ -506,8 +561,14 @@ async function create(
         const response = await ai.models.generateContent(requestConfig);
         responseForMetrics = response;
         outcome = "success";
+        settled = true;
         releaseCircuit(circuitMode, "success");
-        return { choices: [{ message: { content: response.text ?? null } }] };
+        const blocked = isBlockedResponse(response);
+        return {
+          choices: [{ message: { content: blocked ? null : response.text ?? null } }],
+          blocked,
+          ...(chainIndex > 0 ? { model: params.model } : {}),
+        };
       } catch (error) {
         const normalized = request.timedOut()
           ? new GeminiRequestTimeoutError()
@@ -526,10 +587,15 @@ async function create(
           : normalized instanceof GeminiRequestTimeoutError
             ? "timeout"
             : "provider_error";
-        releaseCircuit(
-          circuitMode,
-          transient ? "transient_failure" : "other_failure",
-        );
+        settled = true;
+        // Only an exhausted ladder counts against the breaker. Counting every
+        // rung would open the circuit partway down and the fallbacks would
+        // never be reached, because the threshold is 3 consecutive failures.
+        if (isFinalAttempt) {
+          releaseCircuit(circuitMode, transient ? "transient_failure" : "other_failure");
+        } else {
+          releaseChainStep(circuitMode);
+        }
         if (normalized instanceof GeminiRequestCancelledError) throw normalized;
         throw new GeminiProviderUnavailableError(undefined, { cause: normalized });
       } finally {
@@ -537,15 +603,62 @@ async function create(
       }
     }
   } finally {
-    if (!deferStreamCleanup) {
+    // One telemetry record per ladder: only the rung that decided the outcome
+    // reports, and retryCount carries the rung index so a fallback is visible.
+    if (!deferStreamCleanup && settled) {
       observeMetrics({
         durationMs: boundedInteger(performance.now() - startedAt, MAX_TIMEOUT_MS * 2),
         outcome,
-        retryCount,
+        retryCount: chainIndex + retryCount,
         ...usageMetrics(responseForMetrics),
       });
     }
   }
+}
+
+async function create(params: CreateParamsStream, options?: CreateRequestOptions): Promise<AsyncIterable<ChatChunk>>;
+async function create(params: CreateParamsSync, options?: CreateRequestOptions): Promise<ChatResponse>;
+async function create(
+  params: CreateParamsBase & { stream?: boolean },
+  options?: CreateRequestOptions,
+): Promise<ChatResponse | AsyncIterable<ChatChunk>> {
+  // One provider, an ordered ladder of models. The ladder is bounded by the
+  // configured fallbacks (default: primary + 2), so a request can never fan
+  // out without bound.
+  const chain = modelChain(params.model);
+  let lastError: unknown = new GeminiProviderUnavailableError();
+
+  for (const [index, model] of chain.entries()) {
+    const isFinalAttempt = index === chain.length - 1;
+    let attempt: ChainAttempt | AsyncIterable<ChatChunk>;
+    try {
+      attempt = await createWithModel({ ...params, model }, options, index, isFinalAttempt);
+    } catch (error) {
+      if (isFinalAttempt || !isChainAdvanceError(error)) throw error;
+      lastError = error;
+      continue;
+    }
+
+    // Only stream SETUP can fall back. Once the first chunk reaches the
+    // consumer a partial answer is already on screen, so iteration errors
+    // propagate out of the generator instead of advancing the ladder.
+    if (params.stream) return attempt as AsyncIterable<ChatChunk>;
+
+    const { blocked, ...response } = attempt as ChainAttempt;
+    if (blocked) return response;
+
+    const content = response.choices[0]?.message.content ?? null;
+    if (content !== null && content.trim() !== "") return response;
+
+    // Empty text with HTTP 200: the documented thinking-token starvation mode.
+    // A different model gets a fair chance before the route gives up.
+    lastError = new GeminiProviderUnavailableError(
+      `AI provider returned empty content from ${model}`,
+    );
+    if (isFinalAttempt) throw lastError;
+  }
+
+  throw lastError;
 }
 
 export function resetGeminiResilienceForTests(): void {

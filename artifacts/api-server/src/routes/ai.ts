@@ -151,6 +151,24 @@ class AiResponseError extends Error {
   }
 }
 
+/**
+ * True only when the adapter reports a DIFFERENT model than the one requested:
+ * a fallback model served the call, so the result must not be cached under the
+ * requested model's fingerprint. An adapter that reports no model (primary
+ * success, older stub, non-Gemini transport) counts as "not a fallback", so
+ * caching keeps working instead of silently turning off.
+ */
+function servedByFallback(
+  effectiveModel: string | undefined,
+  requestedModel: string,
+): boolean {
+  return (
+    typeof effectiveModel === "string" &&
+    effectiveModel.length > 0 &&
+    effectiveModel !== requestedModel
+  );
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -502,6 +520,7 @@ router.post(
           value.pepTypeMatches.every(isObject) &&
           (value.aiStatus === "enriched" || value.aiStatus === "unavailable"),
         load: async () => {
+          let effectiveModel: string | undefined;
           const result = await fetchModelJsonWithRetry({
             label: "ai-match-import",
             log: req.log,
@@ -515,6 +534,7 @@ router.post(
                   { role: "user", content: userPrompt },
                 ],
               });
+              effectiveModel = response.model;
               return response.choices[0]?.message?.content ?? "";
             },
           });
@@ -565,7 +585,7 @@ router.post(
             aiStatus: "enriched",
             ...(note ? { note } : {}),
           };
-          return { value, cacheable: rawIsValidShape };
+          return { value, cacheable: rawIsValidShape && !servedByFallback(effectiveModel, model) };
         },
           });
           return {
@@ -886,6 +906,7 @@ router.post(
           value.matches.every(isObject) &&
           (value.aiStatus === "enriched" || value.aiStatus === "unavailable"),
         load: async () => {
+          let effectiveModel: string | undefined;
           const result = await fetchModelJsonWithRetry({
             label: "ai-match-premix",
             log: req.log,
@@ -899,6 +920,7 @@ router.post(
                   { role: "user", content: userPrompt },
                 ],
               });
+              effectiveModel = response.model;
               return response.choices[0]?.message?.content ?? "";
             },
           });
@@ -919,7 +941,7 @@ router.post(
             matches,
             aiStatus: "enriched",
           };
-          return { value, cacheable: rawIsValidShape };
+          return { value, cacheable: rawIsValidShape && !servedByFallback(effectiveModel, model) };
         },
           });
           return {

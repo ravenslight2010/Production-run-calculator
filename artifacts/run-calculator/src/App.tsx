@@ -117,6 +117,47 @@ function HomeGate() {
     startupError,
     retryStartup,
   } = useAuth();
+  const { toast } = useToast();
+  const updateAndReload = useContext(AppUpdateContext)?.updateAndReload;
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    let active = true;
+    let clearWarmupFailure: (() => void) | undefined;
+    // Warm the lazy workbook chunks (xlsx, specImport, …) right after sign-in
+    // so an autoscale cold start can't kill the first import click with
+    // "Failed to fetch dynamically imported module". If the warm-up fails,
+    // surface the same update/reload recovery path used for stale workbook
+    // imports: the browser may cache a failed dynamic import and refuse the
+    // retry, so the user needs an explicit reload action.
+    void import("./workbookWorkflow")
+      .then(({ loadWorkbookWorkflow }) => loadWorkbookWorkflow())
+      .catch(() => {
+        if (!active) return;
+        const failureToast = toast({
+          variant: "destructive",
+          title: "Import tools couldn't load",
+          description: "The spreadsheet tools failed to download. Reload usually fixes this.",
+          duration: Infinity,
+          persistent: true,
+          action: (
+            <ToastAction
+              altText="Reload now"
+              onClick={() => void (updateAndReload ? updateAndReload() : window.location.reload())}
+            >
+              Reload now
+            </ToastAction>
+          ),
+        });
+        clearWarmupFailure = () => {
+          failureToast.update({ id: failureToast.id, persistent: false });
+          failureToast.dismiss();
+        };
+      });
+    return () => {
+      active = false;
+      clearWarmupFailure?.();
+    };
+  }, [isAuthenticated, toast, updateAndReload]);
   if (isLoading) return <AppLoadingSurface />;
   if (startupError) {
     return <AppLoadingSurface error={startupError} onRetry={retryStartup} />;
