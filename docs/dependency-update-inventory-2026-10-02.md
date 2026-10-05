@@ -141,6 +141,10 @@ not remove overrides or treat this inventory as a security certification.
    evaluate pnpm 12.8.1 and Node 24.21.0 together against the release runner,
    package-manager metadata, exact CI Node pins, and frozen-install/release
    evidence. Keep Node 26 and TypeScript 7 outside this slice.
+   The follow-up evaluation found that the candidate pair passes frozen install
+   and typecheck but is not adoptable until retained runtime evidence is
+   regenerated and the candidate release preflight passes; see
+   [`toolchain-evaluation-2026-10-04.md`](toolchain-evaluation-2026-10-04.md).
 4. The remaining eligible frontend/test/formatting rows are non-security
    maintenance. Prefer small batches: Vite/test tools, date/form/layout
    components, and visual utilities should be validated in their owning
