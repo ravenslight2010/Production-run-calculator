@@ -4,7 +4,16 @@ ARG NODE_IMAGE=node:24.20.0-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98ed
 
 ########## builder: install deps, build web + api ##########
 FROM ${NODE_IMAGE} AS builder
-RUN apt-get update \
+# Match the Debian package index to the snapshot date used by this pinned Node
+# image. Change the timestamp only as part of a reviewed image refresh.
+RUN snapshot=20260824T000000Z \
+  && rm -f /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources \
+  && printf '%s\n' \
+    "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/${snapshot} bookworm main" \
+    "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/${snapshot} bookworm-updates main" \
+    "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/${snapshot} bookworm-security main" \
+    > /etc/apt/sources.list \
+  && apt-get update \
   && apt-get install -y --no-install-recommends git python3 build-essential \
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
