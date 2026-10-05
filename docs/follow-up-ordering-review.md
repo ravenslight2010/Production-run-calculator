@@ -5,6 +5,12 @@ It is advisory: it cannot stop automatic acceptance, enforce platform scheduling
 change task settings, accept suggestions, edit dependencies, or assign work.
 No application server, database, browser, or credential is needed.
 
+**Acceptance-policy boundary:** this reviewer predates the future acceptance-order
+rule. Reviewer-selected sibling order and historical creation captures are not
+acceptance provenance. A passing report cannot satisfy the acceptance-order
+startup procedure in [Future-task dependency submission](follow-up-dependency-submission.md)
+by itself. The reviewer and capture-comparison implementation are unchanged.
+
 Use [the supported alternatives](follow-up-dependency-submission.md) when exact
 ordering is required: authorized dependency-aware manual planning, or sequential
 approval where manual acceptance is available. A warning does not suspend an

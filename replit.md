@@ -87,9 +87,10 @@ This section is the project-specific application of the shared task-scope rule i
   If any item is missing, do not create a follow-up; record the finding in the owning task's progress or failure ledger.
 - Finish in-scope work in the owning task; child tasks are for distinct outcomes with independent acceptance criteria, not symptoms, test failures, fixture repairs, or other sub-outcomes. High- and medium-priority independent outcomes may be submitted as child tasks. Low-priority outcomes may be submitted only when the plan states a concrete benefit and bounded scope. Optional work is not categorically excluded; physical-device-only work is excluded.
 - Every eligible child plan must state its parent, evidence, explicit priority and rationale, separate acceptance criteria, why it cannot remain in the owning task, and the result of checking current work for overlap.
-- Each generated child depends on every unfinished accepted task present when it is created, and later generated siblings wait behind earlier generated siblings. Unapproved drafts do not block it; tasks added later are not retroactively added as dependencies.
-- This requirement is not automatically enforced by the observed generated-follow-up path. See [Follow-up dependency submission](docs/follow-up-dependency-submission.md) for dependency-aware manual planning, sequential approval, persisted-record checks, and the remaining platform limitations. Do not treat a parent link or a passing policy checker as proof of compliant ordering.
-- Before acceptance, use the [read-only ordering review](docs/follow-up-ordering-review.md) to separate current missing links, selected sibling ordering, and retained historical evidence. Its warnings cannot stop automatic acceptance or enforce scheduling.
+- **Future-task ordering:** Clicking Accept establishes precedence for all future manually planned tasks, generated follow-ups of every category, standalone suggestions, main-workspace work, and isolated task agents. Acceptance order is primary; lower task number breaks only a verified acceptance-order tie, such as batch acceptance. Compare numeric task refs numerically, not lexicographically. Creation time and task number never override known acceptance order.
+- Before substantive execution, read a complete inventory and reliable acceptance-order evidence, verify every unfinished task accepted earlier is a persisted prerequisite, and wait for those prerequisites to finish. Missing evidence, missing dependency links, or unfinished prerequisites produce an explicit blocked/advisory outcome, not a claim of compliant execution. Unapproved drafts do not block work; accepted work awaiting merge remains unfinished; merged or archived work does not block. Later acceptances are not retroactively added as ordering dependencies. Preserve genuine prerequisite dependencies rather than erasing them.
+- This is intended future behavior, not automatic platform enforcement. Creation/update timestamps are not acceptance evidence; unknown acceptance order stays unknown. An advisory agent check cannot intercept acceptance or pause platform execution. Documentation or a passing checker does not enforce scheduling. See [Future-task dependency submission](docs/follow-up-dependency-submission.md) for supported manual recording, bounded provenance receipts, startup checks, and the read/create race.
+- The existing [read-only ordering review](docs/follow-up-ordering-review.md) separates current links, reviewer-selected sibling order, and historical creation captures. It does not establish acceptance order or satisfy the new startup check by itself; its warnings cannot stop automatic acceptance or enforce scheduling.
 - Platform settings determine whether a submitted task immediately becomes Active or remains a Draft. Priority is recorded in the plan, not enforced as native task metadata; the repository checker validates policy wording, not runtime task creation.
 - Every web-facing task must include a compatibility applicability matrix for desktop, phone, tablet portrait/landscape, Chromium/Chrome, and WebKit/Safari. Record an explicit `not applicable`, `blocked`, or `not run` reason for each check that is not a pass.
 - Responsive browser emulation is automated evidence, not physical Android Chrome or iOS Safari/PWA evidence. Real-device checks are a separate environment-dependent lane when required; this remains a web-only product with no native-mobile requirement.
@@ -145,13 +146,13 @@ Future current-task reviews use the same rule: preserve each task's existing sco
 
 ### Approval, execution, and reporting
 
-- Automatically approve and start ordinary, bounded UI, test, and bug-fix tasks when the task workflow permits it.
+- For future ordinary, bounded UI, test, and bug-fix tasks, approval/start preferences remain subject to the acceptance-order startup procedure above. Repository guidance does not change automatic approval/start settings or claim to stop a launched agent.
 - Keep manual approval and final merge review for:
   - database schema changes and data heals;
   - authentication, authorization, sync, or security changes;
   - production, release, or destructive operations;
   - external integrations, secrets, or irreversible data changes.
-- When a task is approved, execute the full plan, fix in-scope failures, add regression coverage, and report concrete verification evidence. Preserve actionable out-of-scope work without claiming it is complete.
+- When a future task is approved, perform the acceptance-order startup check before substantive execution; only after its prerequisites finish, execute the full plan, fix in-scope failures, add regression coverage, and report concrete verification evidence. Preserve actionable out-of-scope work without claiming it is complete.
 
 ### Examples
 

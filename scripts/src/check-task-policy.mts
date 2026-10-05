@@ -8,7 +8,74 @@ type Requirement = {
   contradictions?: { label: string; pattern: RegExp }[];
 };
 
+// Wording contracts only: these do not read acceptance events or decide eligibility.
+const orderingRequirements: Requirement[] = [
+  {
+    label: "universal future acceptance coverage",
+    pattern: /Clicking Accept establishes precedence[\s\S]{0,80}all future[\s\S]{0,80}manually planned[\s\S]{0,120}generated follow-ups of every category[\s\S]{0,200}standalone suggestions[\s\S]{0,80}main-workspace\s+work[\s\S]{0,80}isolated task agents/i,
+    remediation: "apply acceptance precedence to every future task origin and execution workspace",
+    contradictions: [
+      { label: "ordering applies only to generated children", pattern: /(?:ordering|acceptance[- ]order (?:policy|rule)) applies only to generated (?:children|follow-ups)/i },
+      { label: "the superseded creation-time generated-child rule is required", pattern: /Each generated child depends on every unfinished accepted task present when it is created|later generated siblings wait behind earlier generated siblings/i },
+    ],
+  },
+  {
+    label: "acceptance-first numeric verified ties",
+    pattern: /Acceptance order is primary; lower task number[\s\S]{0,50}only a verified acceptance-order tie[\s\S]{0,100}Compare\s+numeric task refs numerically, not lexicographically[\s\S]{0,260}Creation time and task number never override known acceptance order/i,
+    remediation: "use acceptance order first and numeric refs only for verified ties",
+    contradictions: [
+      { label: "creation time determines precedence", pattern: /(?:Creation time|creation order|createdAt) (?:is primary|determines precedence|establishes precedence|takes precedence)/i },
+      { label: "task number is primary", pattern: /(?:Task (?:number|ref)|lower task number|numeric task refs?) (?:is primary|determines precedence|takes precedence|always goes first)|(?:Order|sort) (?:all )?tasks by (?:task number|numeric ref) first/i },
+      { label: "task number breaks unverified order", pattern: /(?:unknown|missing|unverified) acceptance (?:order|evidence)[^.\n]{0,100}(?:fall back|fallback|use (?:the )?(?:task number|creation time))/i },
+    ],
+  },
+  {
+    label: "startup complete evidence and persisted prerequisites",
+    pattern: /Before substantive execution,[\s\S]{0,80}complete inventory and reliable acceptance-order evidence[\s\S]{0,160}every unfinished task accepted earlier is a persisted prerequisite[\s\S]{0,100}wait for those prerequisites to finish/i,
+    remediation: "require complete inventory, reliable acceptance evidence, persisted earlier prerequisites, and waiting before work",
+  },
+  {
+    label: "explicit advisory blockers",
+    pattern: /Missing evidence, missing dependency links, or unfinished prerequisites produce an explicit blocked\/advisory outcome, not a claim of compliant execution/i,
+    remediation: "report missing evidence, links, and unfinished prerequisites as blocked/advisory",
+  },
+  {
+    label: "unfinished states and drafts",
+    pattern: /Unapproved drafts do not block work; accepted work\s+awaiting merge remains unfinished; merged or archived work does not block/i,
+    remediation: "exclude drafts and finished work but include accepted work awaiting merge",
+    contradictions: [
+      { label: "unapproved drafts block work", pattern: /Unapproved drafts (?:do|should|must) block/i },
+      { label: "awaiting merge is finished", pattern: /accepted work awaiting merge (?:is finished|does not block)/i },
+    ],
+  },
+  {
+    label: "later acceptance and genuine prerequisites",
+    pattern: /Later acceptances are not retroactively added as ordering dependencies[\s\S]{0,100}Preserve genuine prerequisite dependencies rather than erasing them/i,
+    remediation: "exclude retroactive ordering edges while preserving genuine prerequisites",
+    contradictions: [
+      { label: "later acceptance retroactively blocks earlier work", pattern: /Later acceptances (?:are|must be) retroactively added|(?:Erase|remove) (?:all )?genuine prerequisite dependencies/i },
+    ],
+  },
+  {
+    label: "unknown acceptance provenance",
+    pattern: /Creation\/update timestamps are not acceptance evidence;\s+unknown acceptance order stays unknown/i,
+    remediation: "do not invent acceptance evidence from creation/update timestamps",
+    contradictions: [
+      { label: "acceptance timestamps are invented from task timestamps", pattern: /(?:Use|derive|infer|set) (?:the )?(?:acceptedAt|acceptance timestamp|acceptance time)[^.\n]{0,100}(?:createdAt|updatedAt|creation time|update time)|(?:Creation\/update timestamps|createdAt|updatedAt) (?:are|is) (?:reliable )?acceptance evidence/i },
+    ],
+  },
+  {
+    label: "advisory versus scheduler boundary",
+    pattern: /An advisory agent\s+check cannot intercept acceptance or pause platform execution[\s\S]{0,100}Documentation or a passing checker does not enforce scheduling/i,
+    remediation: "distinguish agent advice and wording checks from unavailable acceptance/scheduling enforcement",
+    contradictions: [
+      { label: "documentation or checker enforces scheduling", pattern: /(?:Documentation|(?:a )?passing checker|(?:the )?policy checker) (?:enforces|guarantees|controls) (?:scheduling|acceptance order)|(?:An )?advisory agent check (?:pauses|suspends) (?:the )?(?:scheduler|platform execution)/i },
+    ],
+  },
+];
+
 const requirements: Requirement[] = [
+  ...orderingRequirements,
   {
     label: "follow-up priority gate",
     pattern:
@@ -51,28 +118,6 @@ const requirements: Requirement[] = [
       /Every eligible child plan must state its parent, evidence, explicit priority and rationale, separate acceptance criteria, why it cannot remain in the owning task, and the result of checking current work for overlap/i,
     remediation:
       "require every eligible child plan to document its parent, evidence, priority and rationale, independent criteria, why it cannot remain with the owner, and an overlap check",
-  },
-  {
-    label: "follow-up dependency rule",
-    pattern:
-      /Each generated child depends on every unfinished accepted task present when it is created, and later generated siblings wait behind earlier generated siblings[\s\S]{0,150}Unapproved drafts do not block it; tasks added later are not retroactively added as dependencies/i,
-    remediation:
-      "snapshot dependencies on unfinished accepted work, sequence generated siblings, exclude unapproved drafts, and do not add later tasks retroactively",
-    contradictions: [
-      {
-        label: "unapproved drafts block generated children",
-        pattern: /Unapproved drafts (?:do|should|must) block/i,
-      },
-      {
-        label: "tasks added later are retroactively added as dependencies",
-        pattern: /Tasks added later are retroactively added as dependencies/i,
-      },
-      {
-        label: "generated siblings do not wait behind earlier generated siblings",
-        pattern:
-          /(?:later|subsequent) generated siblings (?:do not|need not|must not) wait behind earlier generated siblings/i,
-      },
-    ],
   },
   {
     label: "task-platform and checker limitation",
@@ -220,7 +265,45 @@ const root = resolve(
 );
 const failures: string[] = [];
 
-for (const relativePath of ["AGENTS.md", "replit.md"]) {
+const procedureRequirements: Requirement[] = [
+  ...orderingRequirements,
+  {
+    label: "complete state inventory procedure",
+    pattern: /PENDING[\s\S]{0,80}IN_PROGRESS[\s\S]{0,80}IMPLEMENTED[\s\S]{0,80}MERGING[\s\S]{0,80}QUEUED[\s\S]{0,300}truncated: false[\s\S]{0,100}totalCount[\s\S]{0,200}incomplete, stop/i,
+    remediation: "check all unfinished accepted states and stop on incomplete reads",
+  },
+  {
+    label: "acceptance provenance procedure",
+    pattern: /owner-attested sequential\/batch acceptance receipts[\s\S]{0,600}Missing acceptance evidence produces[\s\S]{0,80}acceptance order unknown/i,
+    remediation: "require reliable provenance and report unknown acceptance order explicitly",
+  },
+  {
+    label: "manual recording and race boundary",
+    pattern: /read\/create race[\s\S]*?dependsOn[\s\S]*?updateProjectTask[\s\S]{0,120}replaces[\s\S]{0,120}full list[\s\S]{0,180}genuine existing prerequisites/i,
+    remediation: "document non-atomic manual recording and full-list prerequisite preservation",
+  },
+  {
+    label: "bounded receipt procedure",
+    pattern: /Record a bounded outcome[\s\S]{0,1000}Capture time is not acceptance time; do not fabricate times/i,
+    remediation: "retain bounded provenance outcomes without fabricated acceptance times",
+  },
+  {
+    label: "future-only current record exclusion",
+    pattern: /user handles existing tasks[\s\S]{0,180}Do not change[\s\S]{0,180}current task record, dependency, scope, acceptance, assignment, or automation/i,
+    remediation: "leave existing task records and settings to the user",
+  },
+  {
+    label: "sequential acceptance limitations",
+    pattern: /User-coordinated sequential acceptance[\s\S]{0,1000}automatically[\s\S]{0,60}accept\/start work[\s\S]{0,100}unavailable/i,
+    remediation: "document sequential acceptance as a bounded alternative unavailable with automatic intake",
+  },
+];
+
+for (const [relativePath, documentRequirements] of [
+  ["AGENTS.md", requirements],
+  ["replit.md", requirements],
+  ["docs/follow-up-dependency-submission.md", procedureRequirements],
+] as const) {
   const path = resolve(root, relativePath);
   let content: string;
 
@@ -233,7 +316,7 @@ for (const relativePath of ["AGENTS.md", "replit.md"]) {
     continue;
   }
 
-  for (const requirement of requirements) {
+  for (const requirement of documentRequirements) {
     if (!requirement.pattern.test(content)) {
       failures.push(
         `${relativePath}: missing ${requirement.label}; ${requirement.remediation}`,

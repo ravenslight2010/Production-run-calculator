@@ -7,7 +7,20 @@ Task creation paths do not necessarily share dependency controls. The manual tas
 
 Assignment and mode are also separate evidence questions. A read-only task record may expose state without exposing the assignee, execution mode, or transition cause. Public task-board documentation may describe acceptance as starting background work while a workspace-specific task API uses different state names and transitions.
 
-A client-side queue read followed by creation is not an atomic creation-time snapshot. Retrofitting dependencies after submission can race with acceptance and cannot prove compliance at creation. Explicit manual dependency support also does not establish that the generated-follow-up path accepts the same inputs or retains the same hierarchy metadata.
+A client-side queue read followed by creation is not an atomic acceptance snapshot. Retrofitting dependencies after submission can race with acceptance and launch. Explicit manual dependency support also does not establish that the generated-follow-up path accepts the same inputs or retains the same hierarchy metadata.
+
+Creation/update timestamps and equal creation times cannot establish acceptance
+order or batch acceptance ties. Missing acceptance provenance must remain unknown,
+even when stored task dependencies can be inspected.
+
+**Why:** The owner clarified that clicking Accept, not draft creation or task
+number, establishes future precedence; exposed task reads do not provide a reliable
+acceptance sequence. Inferring one would turn advisory checks into false assurances.
+
+**How to apply:** Require reliable event evidence or explicit owner-attested
+acceptance receipts before claiming ordered startup. Keep missing provenance and
+missing persisted links as advisory blockers; never claim an agent's decision to
+wait has paused platform execution.
 
 **Why:** An audit found generated follow-ups missing dependencies that the repository policy expected, while official lifecycle descriptions and the workspace task-state definitions did not fully align.
 

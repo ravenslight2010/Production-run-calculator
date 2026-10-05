@@ -8,6 +8,99 @@ import test from "node:test";
 const packageRoot = resolve(import.meta.dirname, "..");
 const checkerPath = join(packageRoot, "src/check-task-policy.mts");
 
+// These are prose-contract cases, not task eligibility or platform scheduling tests.
+const acceptancePolicyRules = [
+  {
+    label: "universal future acceptance coverage",
+    phrase: "Clicking Accept establishes precedence for all future manually planned tasks, generated follow-ups of every category, standalone suggestions, main-workspace work, and isolated task agents.",
+    contradictions: [
+      "Acceptance-order policy applies only to generated children.",
+      "Each generated child depends on every unfinished accepted task present when it is created, and later generated siblings wait behind earlier generated siblings.",
+    ],
+  },
+  {
+    label: "acceptance-first numeric verified ties",
+    phrase: "Acceptance order is primary; lower task number breaks only a verified acceptance-order tie, such as batch acceptance. Compare numeric task refs numerically, not lexicographically. Creation time and task number never override known acceptance order.",
+    contradictions: [
+      "Creation time determines precedence.",
+      "Task number is primary.",
+      "Order tasks by task number first.",
+      "For unknown acceptance order fall back to task number.",
+    ],
+  },
+  {
+    label: "startup complete evidence and persisted prerequisites",
+    phrase: "Before substantive execution, read a complete inventory and reliable acceptance-order evidence, verify every unfinished task accepted earlier is a persisted prerequisite, and wait for those prerequisites to finish.",
+    contradictions: [],
+  },
+  {
+    label: "explicit advisory blockers",
+    phrase: "Missing evidence, missing dependency links, or unfinished prerequisites produce an explicit blocked/advisory outcome, not a claim of compliant execution.",
+    contradictions: [],
+  },
+  {
+    label: "unfinished states and drafts",
+    phrase: "Unapproved drafts do not block work; accepted work awaiting merge remains unfinished; merged or archived work does not block.",
+    contradictions: [
+      "Unapproved drafts do block work.",
+      "Accepted work awaiting merge is finished.",
+    ],
+  },
+  {
+    label: "later acceptance and genuine prerequisites",
+    phrase: "Later acceptances are not retroactively added as ordering dependencies. Preserve genuine prerequisite dependencies rather than erasing them.",
+    contradictions: [
+      "Later acceptances are retroactively added as ordering dependencies.",
+      "Erase genuine prerequisite dependencies.",
+    ],
+  },
+  {
+    label: "unknown acceptance provenance",
+    phrase: "Creation/update timestamps are not acceptance evidence; unknown acceptance order stays unknown.",
+    contradictions: [
+      "Derive acceptedAt from createdAt.",
+      "Infer acceptance timestamp from updatedAt.",
+      "Creation/update timestamps are acceptance evidence.",
+    ],
+  },
+  {
+    label: "advisory versus scheduler boundary",
+    phrase: "An advisory agent check cannot intercept acceptance or pause platform execution. Documentation or a passing checker does not enforce scheduling.",
+    contradictions: [
+      "Documentation enforces scheduling.",
+      "A passing checker guarantees acceptance order.",
+      "An advisory agent check pauses platform execution.",
+    ],
+  },
+];
+const acceptancePolicy = acceptancePolicyRules.map(rule => rule.phrase);
+const procedureRules = [
+  {
+    label: "complete state inventory procedure",
+    phrase: "Read PENDING, IN_PROGRESS, IMPLEMENTED, MERGING, QUEUED including MAIN_*; require truncated: false and returned count equal to totalCount. If any shard is incomplete, stop.",
+  },
+  {
+    label: "acceptance provenance procedure",
+    phrase: "Require owner-attested sequential/batch acceptance receipts. Missing acceptance evidence produces BLOCKED — acceptance order unknown.",
+  },
+  {
+    label: "manual recording and race boundary",
+    phrase: "There is a read/create race. Record dependsOn through manual creation; updateProjectTask replaces the full list, preserving genuine existing prerequisites.",
+  },
+  {
+    label: "bounded receipt procedure",
+    phrase: "Record a bounded outcome with refs, states, verified sequence/ties, dependencies, capture time, source, and next action. Capture time is not acceptance time; do not fabricate times.",
+  },
+  {
+    label: "future-only current record exclusion",
+    phrase: "The user handles existing tasks. Do not change any current task record, dependency, scope, acceptance, assignment, or automation setting.",
+  },
+  {
+    label: "sequential acceptance limitations",
+    phrase: "User-coordinated sequential acceptance limits overlap but does not create edges. If settings automatically accept/start work, this alternative is unavailable.",
+  },
+];
+
 const validDocuments: Record<string, string> = {
   "AGENTS.md": [
     "Use one durable task per objective.",
@@ -17,7 +110,7 @@ const validDocuments: Record<string, string> = {
     "Before creating another task, name the parent or owning task, search active and draft work for overlap, state independent acceptance criteria, name the approved exception, and document why the work cannot remain in the owning task.",
     "Finish every in-scope finding in its owning task; do not create child tasks for symptoms, test failures, fixture repairs, or other sub-outcomes. High- and medium-priority independent outcomes may be submitted as child tasks. Low-priority outcomes may be submitted only when the plan states a concrete benefit and bounded scope. Optional work is not categorically excluded; physical-device-only work is excluded.",
     "Every eligible child plan must state its parent, evidence, explicit priority and rationale, separate acceptance criteria, why it cannot remain in the owning task, and the result of checking current work for overlap.",
-    "Each generated child depends on every unfinished accepted task present when it is created, and later generated siblings wait behind earlier generated siblings. Unapproved drafts do not block it; tasks added later are not retroactively added as dependencies.",
+    ...acceptancePolicy,
     "Platform settings determine whether a submitted task immediately becomes Active or remains a Draft. Priority is recorded in the plan, not enforced as native task metadata; the repository checker validates policy wording, not runtime task creation.",
     "Applying this rule to current draft and active tasks must not merge, cancel, or re-scope them. New in-scope findings return to the matching existing owner.",
     "Completion review must retain the owning task's failure ledger and resolve every in-scope FAIL. Test failures, fixture repairs, cleanup, validation work, and other sub-outcomes must not become recursive tasks.",
@@ -32,12 +125,16 @@ const validDocuments: Record<string, string> = {
     "Before creating another task, name the parent or owning task, search current draft and active tasks for overlap, state independent acceptance criteria, name the approved exception, and document why the work cannot remain in the owning task.",
     "Finish in-scope work in the owning task; child tasks are for distinct outcomes with independent acceptance criteria, not symptoms, test failures, fixture repairs, or other sub-outcomes. High- and medium-priority independent outcomes may be submitted as child tasks. Low-priority outcomes may be submitted only when the plan states a concrete benefit and bounded scope. Optional work is not categorically excluded; physical-device-only work is excluded.",
     "Every eligible child plan must state its parent, evidence, explicit priority and rationale, separate acceptance criteria, why it cannot remain in the owning task, and the result of checking current work for overlap.",
-    "Each generated child depends on every unfinished accepted task present when it is created, and later generated siblings wait behind earlier generated siblings. Unapproved drafts do not block it; tasks added later are not retroactively added as dependencies.",
+    ...acceptancePolicy,
     "Platform settings determine whether a submitted task immediately becomes Active or remains a Draft. Priority is recorded in the plan, not enforced as native task metadata; the repository checker validates policy wording, not runtime task creation.",
     "This audit preserves current draft and active tasks and does not merge, cancel, or re-scope them. New in-scope findings return to the matching existing owner.",
     "Completion review must retain the owning task's failure ledger and resolve every in-scope FAIL. Test failures, fixture repairs, cleanup, validation work, and other sub-outcomes must not become recursive tasks.",
     "Every web-facing task must include a compatibility applicability matrix for desktop, phone, tablet portrait/landscape, Chromium/Chrome, and WebKit/Safari. Record an explicit not applicable, blocked, or not run reason for each check that is not a pass.",
     "Responsive browser emulation is automated evidence, not physical Android Chrome or iOS Safari/PWA evidence; this remains a web-only product with no native-mobile requirement.",
+  ].join("\n"),
+  "docs/follow-up-dependency-submission.md": [
+    ...acceptancePolicy,
+    ...procedureRules.map(rule => rule.phrase),
   ].join("\n"),
 };
 
@@ -70,17 +167,6 @@ const newPolicyRules = [
       "Every eligible child plan must state its parent, evidence, explicit priority and rationale, separate acceptance criteria, why it cannot remain in the owning task, and the result of checking current work for overlap.",
     ],
     contradictions: [],
-  },
-  {
-    label: "follow-up dependency rule",
-    omissions: [
-      "Each generated child depends on every unfinished accepted task present when it is created, and later generated siblings wait behind earlier generated siblings. Unapproved drafts do not block it; tasks added later are not retroactively added as dependencies.",
-    ],
-    contradictions: [
-      "Unapproved drafts do block generated children.",
-      "Tasks added later are retroactively added as dependencies.",
-      "Later generated siblings do not wait behind earlier generated siblings.",
-    ],
   },
   {
     label: "task-platform and checker limitation",
@@ -132,7 +218,7 @@ function runChecker(root?: string): Promise<CheckResult> {
       env.TASK_POLICY_ROOT = root;
     }
 
-    const child = spawn("pnpm", ["exec", "tsx", checkerPath], {
+    const child = spawn(process.execPath, ["--import", "tsx", checkerPath], {
       cwd: packageRoot,
       env,
       stdio: ["ignore", "pipe", "pipe"],
@@ -269,7 +355,17 @@ for (const driftCase of [
 }
 
 for (const relativePath of Object.keys(validDocuments)) {
-  for (const rule of newPolicyRules) {
+  const rules = acceptancePolicyRules.map(rule => ({
+    label: rule.label, omissions: [rule.phrase], contradictions: rule.contradictions,
+  }));
+  if (relativePath.startsWith("docs/")) {
+    rules.push(...procedureRules.map(rule => ({
+      label: rule.label, omissions: [rule.phrase], contradictions: [],
+    })));
+  } else {
+    rules.push(...newPolicyRules);
+  }
+  for (const rule of rules) {
     for (const omission of rule.omissions) {
       test(`${relativePath} fails when ${rule.label} is omitted`, async () => {
         const root = await createFixture({
@@ -306,3 +402,34 @@ for (const relativePath of Object.keys(validDocuments)) {
     }
   }
 }
+
+test("prose examples preserve acceptance-first order, numeric ties, and genuine edges without claiming scheduler proof", async () => {
+  const examples = [
+    "Example: #100 accepted before #9 has precedence, even if #9 was created first.",
+    "Example: in a verified batch acceptance tie, #9 precedes #10 numerically.",
+    "Example: an unapproved draft has no acceptance position; awaiting merge stays unfinished.",
+    "Example: accepting #101 later does not retroactively block #100.",
+    "Example: an incomplete inventory or missing acceptance receipt blocks advisory startup.",
+    "Example: preserve a genuine migration prerequisite even when it is not an ordering edge.",
+  ].join("\n");
+  const root = await createFixture(Object.fromEntries(
+    Object.entries(validDocuments).map(([path, content]) => [path, `${content}\n${examples}`]),
+  ));
+  try {
+    const result = await runChecker(root);
+    assert.equal(result.exitCode, 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a missing submission procedure document fails closed", async () => {
+  const root = await createFixture({ "docs/follow-up-dependency-submission.md": undefined });
+  try {
+    const result = await runChecker(root);
+    assert.equal(result.exitCode, 1);
+    assert.match(result.stderr, /docs\/follow-up-dependency-submission.md: could not read/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
