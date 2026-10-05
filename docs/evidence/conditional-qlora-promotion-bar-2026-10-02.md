@@ -41,6 +41,17 @@ This power-analysis method is separate from the seeded brand-cluster percentile 
 
 The preflight’s reported minimum brand count and both powers are checked against an independent offline C++17 Monte Carlo reference, using `std::mt19937_64` seeded with `20261002 + total synthetic cases` and 1,000,000 draws per synthetic vector. The reference draws whole brands with replacement and computes the case-weighted mean and cluster-normal lower bound directly from each brand’s case and gain totals; it does not call the TypeScript preflight or share its seeded random generator. The reference minimum is the first count whose estimated power, projected to 5,000 trials, has a 95% Wilson lower bound of at least 80% for both measures.
 
+Regenerate the independent reference with the standalone source retained at `scripts/src/qlora-power-reference.cpp`:
+
+```sh
+c++ -std=c++17 -O3 scripts/src/qlora-power-reference.cpp -o /tmp/qlora-power-reference
+/tmp/qlora-power-reference
+```
+
+The checked-in generator reports its C++ compiler and standard-library runtime versions. The checked-in values were verified with GCC 14.2.1 (build identifier `20250322`), C++17 (`__cplusplus=201703`), and libstdc++ (`__GLIBCXX__=20250322`). Each Monte Carlo estimate is projected to the frozen preflight's 5,000 trials by rounding `estimated power × 5,000` to the nearest integer success count; the 95% Wilson lower bound is then calculated on that projected count and must be at least 80% for both measures. The first brand count passing both projected checks is the reported minimum. The generator scans counts 2 through 102 for these fixed fixtures and prints the same brand-count checkpoints referenced by the test fixtures, so changes to its inputs or algorithm can be reviewed without invoking the TypeScript preflight. Increase that scan limit if revised fixtures need more than 102 brands. Because C++ does not prescribe `std::uniform_int_distribution`'s mapping, exact Monte Carlo digits are runtime-specific; use the reported GCC/libstdc++ versions for bit-for-bit reproduction, and the stated tolerances when comparing other standard libraries.
+
+On the recorded toolchain, regeneration returned minimum brand counts `2, 4, 99, 10` and overall/critical powers at those minima of `1.000000 / 1.000000`, `0.818710 / 0.948027`, `0.940386 / 0.814404`, and `0.827921 / 0.999998`. These minima match the evidence summary, and the generated powers are within the test fixtures' per-measure absolute tolerance of `0.03` (largest observed difference across all 14 fixture checkpoints: `0.000443`).
+
 Each vector uses 100 synthetic eligible fields, 20 of them critical. Candidate-only correct fields encode the paired gains; there are no customer records or provider calls. The predeclared comparison tolerances are an absolute power difference of at most 0.03 for each measure and the per-vector brand-count tolerance below.
 
 | Synthetic profile | Brands / cases | Mean overall / critical gain | Reference minimum (count tolerance) | Reference overall / critical power at minimum |
