@@ -21,3 +21,16 @@ DATABASE_URL *before* `beforeAll` repoints it at the throwaway DB.
 after setting `DATABASE_URL`, exactly like `db`, the router, and
 `clearUserValidityCache` are loaded. Only db-free modules (e.g. `lib/auth`
 `signToken`) are safe as static imports.
+
+When an integration test exercises one route family, mount that family with
+the production-wide middleware it needs instead of importing the full API
+composition.
+
+**Why:** A cold Vitest import of the full API router graph exceeded the setup
+hook budget before sync assertions ran. Mounting only the sync router with its
+cache, readiness, and authentication middleware kept the test bounded without
+weakening route behavior.
+
+**How to apply:** Confirm requests stay within that family, then mount its
+router after the relevant production middleware. Keep database binding after
+the disposable URL is selected and retain finite setup and runner timeouts.

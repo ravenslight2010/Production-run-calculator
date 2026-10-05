@@ -20,7 +20,7 @@
     "test:release:roles": "vitest run src/routes/roles.integration.test.ts",
     "test:release:sync": "vitest run src/routes/sync.integration.test.ts --testNamePattern='^(?!.*\\/sync\\/events)'",
     "test:release:sync-sse": "vitest run src/routes/sync.integration.test.ts --testNamePattern='\\/sync\\/events'",
-    "test:sync-convergence:isolated": "bash ../../scripts/src/run-isolated-sync-convergence.sh",
+    "test:sync-convergence:isolated": "bash ../../scripts/src/run-isolated-sync-convergence.sh src/routes/sync.convergence.integration.test.ts",
     "test:release:concurrency": "timeout 180s sh -c 'pnpm exec vitest run src/routes/inventory.integration.test.ts --testNamePattern=\"concurrent|parallel|same run twice\" && pnpm exec vitest run src/routes/sync.integration.test.ts --testNamePattern=\"concurrent|burst under pool pressure|repeated first-write burst\"'"
   },
   "dependencies": {

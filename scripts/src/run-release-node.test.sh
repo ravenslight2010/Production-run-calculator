@@ -446,7 +446,10 @@ case "$action" in
     rm -f "${data_dir}/running"
     ;;
   status)
-    [[ -f "${data_dir}/running" ]]
+    if [[ -f "${data_dir}/running" ]]; then
+      exit 0
+    fi
+    exit 3
     ;;
   *)
     printf 'Unexpected pg_ctl action: %s\n' "$action" >&2
@@ -593,6 +596,250 @@ test_isolated_browser_interrupt_cleans_database() {
     return 1
   }
   echo "PASS: interrupted isolated browser runner stops Playwright and removes its disposable database"
+}
+
+ISOLATED_SYNC_RUNNER="${SCRIPT_DIR}/run-isolated-sync-convergence.sh"
+SYNC_TEST_BIN="${TEST_ROOT}/isolated-sync-bin"
+mkdir -p "$SYNC_TEST_BIN"
+
+cat >"${SYNC_TEST_BIN}/postgres" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+
+cat >"${SYNC_TEST_BIN}/initdb" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+args=("$@")
+for ((index = 0; index < ${#args[@]}; index++)); do
+  if [[ "${args[index]}" == "-D" ]]; then
+    printf '%s\n' "${args[index + 1]}" >"$SYNC_DB_PATH_FILE"
+    exit 0
+  fi
+done
+printf 'initdb did not receive a data directory.\n' >&2
+exit 2
+EOF
+
+cat >"${SYNC_TEST_BIN}/pg_ctl" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+args=("$@")
+data_dir=""
+for ((index = 0; index < ${#args[@]}; index++)); do
+  if [[ "${args[index]}" == "-D" ]]; then
+    data_dir="${args[index + 1]}"
+    break
+  fi
+done
+action="${args[${#args[@]} - 1]}"
+case "$action" in
+  start)
+    : >"${data_dir}/running"
+    : >"$SYNC_PG_STARTED"
+    ;;
+  stop)
+    : >"$SYNC_PG_STOP_ATTEMPTED"
+    if [[ "${SYNC_PG_STOP_FAILURE:-0}" == "1" ]]; then
+      exit 1
+    fi
+    rm -f "${data_dir}/running"
+    : >"$SYNC_PG_STOPPED"
+    ;;
+  status)
+    [[ -f "${data_dir}/running" ]]
+    ;;
+  *)
+    printf 'Unexpected pg_ctl action: %s\n' "$action" >&2
+    exit 2
+    ;;
+esac
+EOF
+
+cat >"${SYNC_TEST_BIN}/createdb" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "${@: -1}" >"$SYNC_DB_NAME_FILE"
+EOF
+
+cat >"${SYNC_TEST_BIN}/api-child" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+trap 'touch "$SYNC_API_STOPPED"; exit 0' TERM
+touch "$SYNC_API_STARTED"
+while :; do sleep 1; done
+EOF
+
+cat >"${SYNC_TEST_BIN}/vitest-child" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+trap 'touch "$SYNC_VITEST_STOPPED"; exit 0' TERM
+touch "$SYNC_VITEST_STARTED"
+while :; do sleep 1; done
+EOF
+
+cat >"${SYNC_TEST_BIN}/pnpm" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" != "--filter" ||
+  "${2:-}" != "@workspace/api-server" ||
+  "${3:-}" != "exec" ||
+  "${4:-}" != "vitest" ]]; then
+  printf 'Unexpected isolated sync pnpm invocation: %s\n' "$*" >&2
+  exit 64
+fi
+printf '%s\n' "${DATABASE_URL:-<unset>}" >"$SYNC_DATABASE_URL_FILE"
+printf '%s\n' "$*" >"$SYNC_PNPM_ARGS_FILE"
+touch "$SYNC_PNPM_STARTED"
+bash "$SYNC_TEST_BIN/api-child" &
+bash "$SYNC_TEST_BIN/vitest-child" &
+wait
+EOF
+
+chmod +x \
+  "${SYNC_TEST_BIN}/postgres" \
+  "${SYNC_TEST_BIN}/initdb" \
+  "${SYNC_TEST_BIN}/pg_ctl" \
+  "${SYNC_TEST_BIN}/createdb" \
+  "${SYNC_TEST_BIN}/api-child" \
+  "${SYNC_TEST_BIN}/vitest-child" \
+  "${SYNC_TEST_BIN}/pnpm"
+
+run_isolated_sync_interrupt_case() {
+  local case_name="$1"
+  local stop_failure="$2"
+  local case_dir="${TEST_ROOT}/sync-${case_name}"
+  local db_path
+  local db_name
+  local db_url
+  local actual_status
+  local attempt
+  local runner_pid
+  local output_path="${case_dir}/output"
+  mkdir -p "${case_dir}/tmp"
+
+  env \
+    -u NODE_ENV \
+    -u APP_ENV \
+    -u REPLIT_DEPLOYMENT \
+    PATH="${SYNC_TEST_BIN}:${PATH}" \
+    TMPDIR="${case_dir}/tmp" \
+    DATABASE_URL="postgresql://shared.example/should-not-be-used" \
+    SYNC_DB_PATH_FILE="${case_dir}/db-path" \
+    SYNC_DB_NAME_FILE="${case_dir}/db-name" \
+    SYNC_DATABASE_URL_FILE="${case_dir}/database-url" \
+    SYNC_PNPM_ARGS_FILE="${case_dir}/pnpm-args" \
+    SYNC_PG_STARTED="${case_dir}/pg-started" \
+    SYNC_PG_STOP_ATTEMPTED="${case_dir}/pg-stop-attempted" \
+    SYNC_PG_STOPPED="${case_dir}/pg-stopped" \
+    SYNC_PG_STOP_FAILURE="$stop_failure" \
+    SYNC_PNPM_STARTED="${case_dir}/pnpm-started" \
+    SYNC_API_STARTED="${case_dir}/api-started" \
+    SYNC_API_STOPPED="${case_dir}/api-stopped" \
+    SYNC_VITEST_STARTED="${case_dir}/vitest-started" \
+    SYNC_VITEST_STOPPED="${case_dir}/vitest-stopped" \
+    SYNC_TEST_BIN="$SYNC_TEST_BIN" \
+    bash "$ISOLATED_SYNC_RUNNER" >"$output_path" 2>&1 &
+  runner_pid=$!
+
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    if [[ -f "${case_dir}/pnpm-started" &&
+      -f "${case_dir}/api-started" &&
+      -f "${case_dir}/vitest-started" ]]; then
+      break
+    fi
+    sleep 0.1
+  done
+  if [[ ! -f "${case_dir}/pnpm-started" ||
+    ! -f "${case_dir}/api-started" ||
+    ! -f "${case_dir}/vitest-started" ]]; then
+    kill -TERM "$runner_pid" 2>/dev/null || true
+    wait "$runner_pid" 2>/dev/null || true
+    printf 'Isolated sync runner did not reach the API/Vitest test processes.\n' >&2
+    cat "$output_path" >&2
+    return 1
+  fi
+
+  [[ -f "${case_dir}/db-path" && -f "${case_dir}/database-url" ]] || {
+    kill -TERM "$runner_pid" 2>/dev/null || true
+    wait "$runner_pid" 2>/dev/null || true
+    printf 'Isolated sync runner did not initialize its disposable database.\n' >&2
+    cat "$output_path" >&2
+    return 1
+  }
+  db_url=$(cat "${case_dir}/database-url")
+  db_name=$(cat "${case_dir}/db-name")
+  if [[ ! "$db_url" =~ ^postgresql://postgres@127\.0\.0\.1:[0-9]+/sync_convergence_test_[[:xdigit:]]{12}$ ]]; then
+    kill -TERM "$runner_pid" 2>/dev/null || true
+    wait "$runner_pid" 2>/dev/null || true
+    printf 'Isolated sync runner did not replace the inherited shared database URL: %s\n' \
+      "$db_url" >&2
+    return 1
+  fi
+  [[ "$db_url" == */"$db_name" ]] || {
+    kill -TERM "$runner_pid" 2>/dev/null || true
+    wait "$runner_pid" 2>/dev/null || true
+    printf 'Isolated sync runner connected to a database other than the one it created.\n' >&2
+    return 1
+  }
+  grep -Fq 'src/routes/sync.convergence.integration.test.ts' \
+    "${case_dir}/pnpm-args" || {
+    kill -TERM "$runner_pid" 2>/dev/null || true
+    wait "$runner_pid" 2>/dev/null || true
+    printf 'Isolated sync runner did not pass the owned integration test path to Vitest.\n' >&2
+    return 1
+  }
+
+  kill -TERM "$runner_pid"
+  set +e
+  wait "$runner_pid"
+  actual_status=$?
+  set -e
+  [[ "$actual_status" -eq 143 ]] || {
+    printf 'Expected interrupted isolated sync status 143, got %s. Output:\n' \
+      "$actual_status" >&2
+    cat "$output_path" >&2
+    return 1
+  }
+  [[ -f "${case_dir}/api-stopped" && -f "${case_dir}/vitest-stopped" ]] || {
+    printf 'Interrupted isolated sync run did not stop both API and Vitest children.\n' >&2
+    cat "$output_path" >&2
+    return 1
+  }
+  [[ -f "${case_dir}/pg-stop-attempted" ]] || {
+    printf 'Interrupted isolated sync run did not attempt to stop PostgreSQL.\n' >&2
+    cat "$output_path" >&2
+    return 1
+  }
+
+  db_path=$(cat "${case_dir}/db-path")
+  if [[ "$stop_failure" == "1" ]]; then
+    [[ -d "$db_path" ]] || {
+      printf 'Unstoppable disposable PostgreSQL data directory was not preserved.\n' >&2
+      cat "$output_path" >&2
+      return 1
+    }
+    assert_contains "$(cat "$output_path")" \
+      "Could not confirm that the disposable PostgreSQL server stopped; preserving its data directory at ${db_path}."
+    rm -rf -- "$db_path"
+  else
+    [[ -f "${case_dir}/pg-stopped" ]] || {
+      printf 'Interrupted isolated sync run did not stop PostgreSQL.\n' >&2
+      cat "$output_path" >&2
+      return 1
+    }
+    [[ ! -e "$db_path" ]] || {
+      printf 'Interrupted isolated sync run left its disposable data directory at %s.\n' \
+        "$db_path" >&2
+      return 1
+    }
+  fi
+}
+
+test_isolated_sync_interrupt_cleans_database_and_children() {
+  run_isolated_sync_interrupt_case stopped 0
+  run_isolated_sync_interrupt_case unconfirmed-stop 1
+  echo "PASS: interrupted isolated sync runner stops API/Vitest and cleans or safely preserves its disposable database"
 }
 
 test_release_node_fallback_interrupt_stops_process_group() {
@@ -852,6 +1099,7 @@ test_empty_node_selector_fails_before_release_commands
 test_missing_npx_fails_before_release_commands
 test_isolated_browser_status_and_database_cleanup
 test_isolated_browser_interrupt_cleans_database
+test_isolated_sync_interrupt_cleans_database_and_children
 test_release_node_fallback_interrupt_stops_process_group
 test_release_runner_serializes_same_workspace_commands
 test_release_runner_nested_invocation_reuses_lock

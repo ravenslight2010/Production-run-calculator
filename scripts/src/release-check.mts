@@ -909,6 +909,7 @@ export const API_RELEASE_INTEGRATION_SCRIPT_NAMES = {
   dedicated: {
     roles: ["test:release:roles"],
     sync: ["test:release:sync", "test:release:sync-sse"],
+    syncConvergence: ["test:sync-convergence:isolated"],
   },
 } as const;
 
@@ -1096,6 +1097,20 @@ export const RELEASE_CHECK_API_SHARD_STEPS: readonly ReleaseStep[] = [
     stage: "release-tests",
   },
 ] as const;
+
+export const RELEASE_CHECK_API_SYNC_CONVERGENCE_STEP: ReleaseStep = {
+  label: "API sync convergence tests (isolated PostgreSQL)",
+  args: [
+    "--filter",
+    "@workspace/api-server",
+    "run",
+    "test:sync-convergence:isolated",
+  ],
+  timeoutMs: API_SHARD_TIMEOUT_MS,
+  warningMs: API_SHARD_WARNING_MS,
+  group: "api-test-shards",
+  stage: "release-tests",
+};
 
 export const PRODUCTION_AUDIT_TIMEOUT_MS = 5 * 60_000;
 export const PRODUCTION_AUDIT_WARNING_MS = 4 * 60_000;
@@ -1543,6 +1558,7 @@ const steps: ReleaseStep[] = [
     concurrencyLimit: 1,
   },
   ...RELEASE_CHECK_API_SHARD_STEPS,
+  RELEASE_CHECK_API_SYNC_CONVERGENCE_STEP,
   {
     label: "run calculator tests",
     args: ["--filter", "@workspace/run-calculator", "run", "test:budget"],

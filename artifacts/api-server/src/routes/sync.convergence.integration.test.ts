@@ -111,6 +111,7 @@ function requireIsolatedSyncDatabase(environment = process.env): string {
 }
 
 beforeAll(async () => {
+  const setupStartedAt = Date.now();
   originalDatabaseUrl = process.env.DATABASE_URL;
   testDatabaseUrl = requireIsolatedSyncDatabase();
   const push = spawnSync("pnpm", ["--filter", "@workspace/db", "run", "push-force"], {
@@ -124,9 +125,21 @@ beforeAll(async () => {
       ?? (push.status === null ? push.signal ?? "unknown status" : `exit ${push.status}`);
     throw new Error(`isolated sync convergence schema setup failed (${status}); output omitted`);
   }
+  console.info(
+    `[sync convergence setup] schema push complete elapsedMs=${Date.now() - setupStartedAt}`,
+  );
   process.env.DATABASE_URL = testDatabaseUrl;
   const dbMod = await import("@workspace/db");
-  const routerMod = await import("./index");
+  const [syncRouterMod, authMod, startupGateMod, cacheControlMod] =
+    await Promise.all([
+      import("./sync"),
+      import("../middlewares/requireAuth"),
+      import("../lib/startupGate"),
+      import("../lib/cacheControl"),
+    ]);
+  console.info(
+    `[sync convergence setup] route modules loaded elapsedMs=${Date.now() - setupStartedAt}`,
+  );
   db = dbMod.db;
   pool = dbMod.pool;
   dailySyncTable = dbMod.dailySyncTable;
@@ -144,12 +157,20 @@ beforeAll(async () => {
     (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
     next();
   });
-  app.use("/api", routerMod.default);
+  // This soak only exercises /sync. Keep the production cross-cutting
+  // middleware while avoiding imports for every unrelated API route.
+  app.use("/api", cacheControlMod.noStoreMiddleware);
+  app.use("/api", startupGateMod.startupGate);
+  app.use("/api", authMod.requireAuth);
+  app.use("/api", syncRouterMod.default);
   await new Promise<void>((resolve) => {
     server = app.listen(0, "127.0.0.1", () => resolve());
   });
   baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-}, 120_000);
+  console.info(
+    `[sync convergence setup] loopback server ready elapsedMs=${Date.now() - setupStartedAt}`,
+  );
+}, 240_000);
 
 afterAll(async () => {
   if (server) {

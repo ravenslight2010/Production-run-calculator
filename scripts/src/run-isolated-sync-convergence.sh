@@ -6,6 +6,12 @@ REPO_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
 readonly SCRIPT_DIR REPO_ROOT
 cd "$REPO_ROOT"
 
+SYNC_TEST_PATH="${1:-src/routes/sync.convergence.integration.test.ts}"
+if (( $# > 1 )) || [[ "$SYNC_TEST_PATH" != "src/routes/sync.convergence.integration.test.ts" ]]; then
+  printf 'Isolated sync convergence validation only accepts src/routes/sync.convergence.integration.test.ts.\n' >&2
+  exit 64
+fi
+
 case "${NODE_ENV:-}:${APP_ENV:-}:${REPLIT_DEPLOYMENT:-}" in
   production:*|prod:*|*:production:*|*:prod:*|*:*:1)
     printf 'Refusing isolated sync convergence validation in a production runtime.\n' >&2
@@ -41,19 +47,100 @@ pg_data=""
 test_log=""
 test_status=0
 test_elapsed_ms=0
+active_child_pid=""
+
+stop_active_child() {
+  local signal="$1"
+  local process_group="$active_child_pid"
+  local deadline=$((SECONDS + 10))
+
+  [[ -n "$process_group" ]] || return 0
+  kill -s "$signal" -- "-$process_group" 2>/dev/null ||
+    kill -s "$signal" "$process_group" 2>/dev/null ||
+    true
+  while ps -eo sid=,stat= |
+    awk -v session="$process_group" \
+      '$1 == session && $2 !~ /^Z/ { found = 1 } END { exit !found }'; do
+    if (( SECONDS >= deadline )); then
+      kill -KILL -- "-$process_group" 2>/dev/null || true
+      break
+    fi
+    sleep 0.1
+  done
+}
+
+handle_signal() {
+  local signal="$1"
+  local exit_code="$2"
+
+  trap '' HUP INT TERM
+  if [[ -n "$active_child_pid" ]]; then
+    stop_active_child "$signal"
+    wait "$active_child_pid" 2>/dev/null || true
+    active_child_pid=""
+  fi
+  exit "$exit_code"
+}
+
+run_isolated_command() {
+  local child_status
+
+  python3 -c '
+import os
+import signal
+import sys
+
+os.setsid()
+signal.signal(signal.SIGINT, signal.SIG_DFL)
+signal.signal(signal.SIGQUIT, signal.SIG_DFL)
+os.execvp(sys.argv[1], sys.argv[1:])
+' "$@" >"$test_log" 2>&1 &
+  active_child_pid=$!
+  if wait "$active_child_pid"; then
+    child_status=0
+  else
+    child_status=$?
+  fi
+  active_child_pid=""
+  return "$child_status"
+}
 
 cleanup() {
   local exit_status=$?
+  local pg_status=0
   trap - EXIT HUP INT TERM
+
+  if [[ -n "$active_child_pid" ]]; then
+    stop_active_child TERM
+    wait "$active_child_pid" 2>/dev/null || true
+    active_child_pid=""
+  fi
 
   if [[ -n "$pg_data" && -n "$pg_bin" ]]; then
     if "$pg_bin/pg_ctl" -D "$pg_data" -m immediate -w stop >/dev/null 2>&1; then
-      rm -rf -- "$pg_data"
-    elif "$pg_bin/pg_ctl" -D "$pg_data" status >/dev/null 2>&1; then
-      printf 'Could not stop the disposable PostgreSQL server; preserving its data directory.\n' >&2
-      (( exit_status != 0 )) || exit_status=1
+      if ! rm -rf -- "$pg_data"; then
+        printf 'Could not remove the stopped disposable PostgreSQL data directory; preserving it at %s.\n' \
+          "$pg_data" >&2
+        (( exit_status != 0 )) || exit_status=1
+      fi
     else
-      rm -rf -- "$pg_data"
+      if "$pg_bin/pg_ctl" -D "$pg_data" status >/dev/null 2>&1; then
+        pg_status=0
+      else
+        pg_status=$?
+      fi
+      # pg_ctl status uses 3 for a confirmed stopped server; other failures are inconclusive.
+      if (( pg_status == 3 )); then
+        if ! rm -rf -- "$pg_data"; then
+          printf 'Could not remove the stopped disposable PostgreSQL data directory; preserving it at %s.\n' \
+            "$pg_data" >&2
+          (( exit_status != 0 )) || exit_status=1
+        fi
+      else
+        printf 'Could not confirm that the disposable PostgreSQL server stopped; preserving its data directory at %s.\n' \
+          "$pg_data" >&2
+        (( exit_status != 0 )) || exit_status=1
+      fi
     fi
   fi
 
@@ -63,9 +150,9 @@ cleanup() {
   exit "$exit_status"
 }
 trap cleanup EXIT
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 143' TERM
+trap 'handle_signal HUP 129' HUP
+trap 'handle_signal INT 130' INT
+trap 'handle_signal TERM 143' TERM
 
 # Do not allow inherited connection settings, especially a live DATABASE_URL,
 # to participate in test setup or child-process configuration.
@@ -96,9 +183,11 @@ fi
 export DATABASE_URL="postgresql://postgres@127.0.0.1:${PG_PORT}/${DB_NAME}"
 
 started_ms=$(date +%s%3N)
-if timeout --signal=TERM --kill-after=10s 300s \
+# Keep this below the API release-step deadline so the runner has time to stop
+# the child process group and clean up PostgreSQL before the release gate times out.
+if run_isolated_command timeout --signal=TERM --kill-after=10s 420s \
   pnpm --filter @workspace/api-server exec vitest run \
-    src/routes/sync.convergence.integration.test.ts >"$test_log" 2>&1; then
+    "$SYNC_TEST_PATH"; then
   test_status=0
 else
   test_status=$?
