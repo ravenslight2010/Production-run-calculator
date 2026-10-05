@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Check, Search } from "lucide-react";
 import {
   INGREDIENT_ALLERGENS,
+  ingredientAllergenReviewPending,
   type Ingredient,
   type IngredientAllergen,
 } from "@workspace/ingredient-catalog";
@@ -14,11 +15,14 @@ function titleCase(value: string): string {
   return value.replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+const MAX_REVIEW_QUEUE_RESULTS = 50;
+
 export default function IngredientAllergenMappingManager() {
   const queryClient = useQueryClient();
   const query = useMasterDataSlice("ingredients");
   const items = query.data ?? [];
   const [search, setSearch] = useState("");
+  const [reviewQueueOnly, setReviewQueueOnly] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<IngredientAllergen[]>([]);
   const [reviewed, setReviewed] = useState(false);
@@ -27,12 +31,23 @@ export default function IngredientAllergenMappingManager() {
 
   const byId = useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
   const selected = selectedId ? byId.get(selectedId) ?? null : null;
+  const reviewQueueItems = useMemo(
+    () =>
+      items
+        .filter(ingredientAllergenReviewPending)
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [items],
+  );
   const filteredItems = useMemo(() => {
     const queryText = search.trim().toLowerCase();
-    return [...items]
+    const source = reviewQueueOnly ? reviewQueueItems : items;
+    return [...source]
       .filter((item) => !queryText || item.name.toLowerCase().includes(queryText))
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [items, search]);
+  }, [items, reviewQueueItems, reviewQueueOnly, search]);
+  const visibleItems = reviewQueueOnly
+    ? filteredItems.slice(0, MAX_REVIEW_QUEUE_RESULTS)
+    : filteredItems;
 
   useEffect(() => {
     if (!selected) return;
@@ -94,6 +109,31 @@ export default function IngredientAllergenMappingManager() {
             data-testid="allergen-ingredient-search"
           />
         </label>
+        <label className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm">
+          <input
+            type="checkbox"
+            checked={reviewQueueOnly}
+            onChange={(event) => setReviewQueueOnly(event.target.checked)}
+            data-testid="allergen-review-queue-toggle"
+          />
+          <span className="flex-1">Only show ingredients needing review</span>
+          <span
+            className="rounded-full bg-muted px-2 py-0.5 text-xs font-semibold tabular-nums"
+            role="status"
+            aria-label={`${reviewQueueItems.length} ingredients need allergen review`}
+            data-testid="allergen-review-queue-count"
+          >
+            {reviewQueueItems.length > MAX_REVIEW_QUEUE_RESULTS
+              ? `${MAX_REVIEW_QUEUE_RESULTS}+`
+              : reviewQueueItems.length}
+          </span>
+        </label>
+        {reviewQueueOnly && (
+          <p className="text-xs text-muted-foreground" role="status">
+            Showing up to the first {MAX_REVIEW_QUEUE_RESULTS} matching ingredients. Search to
+            narrow the queue. Unreviewed or uncertain mappings remain unknown.
+          </p>
+        )}
 
         {query.isLoading ? (
           <p className="py-4 text-center text-sm text-muted-foreground" role="status">
@@ -119,7 +159,7 @@ export default function IngredientAllergenMappingManager() {
         ) : (
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,1fr)]">
             <div className="max-h-[28rem] space-y-1 overflow-y-auto rounded-md border border-border p-1">
-              {filteredItems.map((item) => {
+              {visibleItems.map((item) => {
                 const target = item.mergedInto ? byId.get(item.mergedInto) : null;
                 const inactive = !item.enabled || Boolean(item.mergedInto);
                 return (
@@ -151,8 +191,14 @@ export default function IngredientAllergenMappingManager() {
                   </button>
                 );
               })}
-              {filteredItems.length === 0 && (
-                <p className="p-3 text-sm text-muted-foreground">No matching ingredients.</p>
+              {visibleItems.length === 0 && (
+                <p className="p-3 text-sm text-muted-foreground">
+                  {reviewQueueOnly && reviewQueueItems.length === 0
+                    ? "No ingredient mappings need review."
+                    : reviewQueueOnly
+                      ? "No matching ingredients need review."
+                      : "No matching ingredients."}
+                </p>
               )}
             </div>
 

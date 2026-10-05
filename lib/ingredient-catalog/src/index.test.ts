@@ -5,6 +5,7 @@ import {
   coerceLbs,
   deriveRunAllergenFootprint,
   hydrateRecipeRows,
+  ingredientAllergenReviewPending,
   normalizeIngredient,
   pickerNamesForCategory,
   resolveActiveIngredient,
@@ -112,6 +113,19 @@ describe("normalizeIngredient", () => {
       allergens: ["wheat"],
       allergensReviewed: false,
     });
+  });
+});
+
+describe("ingredientAllergenReviewPending", () => {
+  it("keeps unknown distinct from reviewed-empty and treats uncertain values as pending", () => {
+    expect(ingredientAllergenReviewPending({ allergens: [], allergensReviewed: false })).toBe(true);
+    expect(ingredientAllergenReviewPending({ allergens: [], allergensReviewed: true })).toBe(false);
+    expect(
+      ingredientAllergenReviewPending({
+        allergens: ["wheat", "unrecognized"] as Ingredient["allergens"],
+        allergensReviewed: true,
+      }),
+    ).toBe(true);
   });
 });
 

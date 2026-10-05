@@ -58,6 +58,13 @@ export function normalizeIngredientAllergens(input: unknown): {
   return { allergens: [...allergens], valid };
 }
 
+/** True when allergen data is absent, unreviewed, or contains uncertain values. */
+export function ingredientAllergenReviewPending(
+  ingredient: Pick<Ingredient, "allergens" | "allergensReviewed">,
+): boolean {
+  return !ingredient.allergensReviewed || !normalizeIngredientAllergens(ingredient.allergens).valid;
+}
+
 /** Stable comparison key for catalog display names. */
 export function ingredientNameKey(name: string): string {
   return name.trim().toLowerCase();
