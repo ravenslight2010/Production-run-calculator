@@ -7,7 +7,8 @@
     "test": "vitest run"
   },
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./per-pizza-review": "./src/perPizzaReview.ts"
   },
   "devDependencies": {
     "vitest": "5.0.0"

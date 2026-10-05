@@ -10,6 +10,7 @@ import {
   specImportOmittedWarningCount,
   type SpecImportWarning,
 } from "./index";
+import { reviewSpecImportPerPizzaAmounts } from "./perPizzaReview";
 
 describe("reviewed import defects", () => {
   it.each([
@@ -85,13 +86,14 @@ describe("reviewed import defects", () => {
     expect(result.warnings?.[0].message).toMatch(/was not found on the sheet/);
   });
 
-  it("retains deferred ounce behavior and native values", () => {
+  it("retains extreme native ounces while flagging them for advisory review", () => {
     const result = sanitizeParsedSpecImport({
       profiles: [{ brand: "Example", flavor: "Supreme", sauceOzPerPizza: 1e6,
         applicators: [{ type: "Mozzarella", ozPerPizza: 1e6 }] }], recipes: [],
     });
     expect(result.profiles[0].sauceOzPerPizza).toBe(1e6);
     expect(result.profiles[0].applicators?.[0].ozPerPizza).toBe(1e6);
+    expect(reviewSpecImportPerPizzaAmounts(result.profiles[0])).toHaveLength(2);
   });
 });
 

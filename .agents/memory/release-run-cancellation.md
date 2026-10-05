@@ -33,4 +33,17 @@ exception is genuinely necessary for unavailable production prerequisites, name
 the completed scoped evidence and preserve broader FAIL/BLOCKED outcomes. Do not
 change release commands, fabricate identity, or imply a GO or publish approval.
 
+An automatic completion run can also be stopped by its polling window while a
+full browser suite is still progressing; the resulting partial log is neither a
+pass nor a test failure.
+
+**Why:** A serial full-browser suite exceeded the completion runner's observed
+poll window, which stopped queued and active checks before they produced final
+results.
+
+**How to apply:** Distinguish `STOPPED` from `FAILED`, use separately completed
+scoped results as evidence, and state when a full run has no terminal report.
+Do not relabel a partial test count as suite coverage or bypass a runnable
+release failure.
+
 Backgrounded child processes can inherit SIGINT as ignored, so forwarding SIGINT to a detached process group may not interrupt the command. **Why:** asynchronous shell execution can preserve ignored signal dispositions across exec, making cancellation appear handled while the browser and local servers continue. **How to apply:** create a dedicated session and restore SIGINT's default disposition before exec; let Playwright handle the graceful interrupt and reserve forced termination for that owned session.

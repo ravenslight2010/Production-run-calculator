@@ -10800,7 +10800,7 @@ export default function Home() {
     if (liveRun.startedAt || liveRun.endedAt || persistedRun?.startedAt || persistedRun?.endedAt) return;
     // Start is the immutable snapshot boundary. Shared setup/profile changes
     // continue updating future work, but never rewrite production or history.
-    runSharedRecipeRefresh(liveRun, () => {
+    await runSharedRecipeRefresh(liveRun, async () => {
       const profile = loadProfile(liveRun.brand, liveRun.flavor);
       if (!profile) return;
       // Same guard as the spec-import reload: a mix recipe name must never land
@@ -10812,14 +10812,21 @@ export default function Home() {
       const current = form.getValues();
       const merged = mergeProfileIntoOpenForm(current, profile);
       if (merged === current) return;
-      const now = Date.now();
-      saveRunValues(liveRun.id, merged);
-      markRunValuesUpdated(liveRun.id, now);
-      lastLocalEditRef.current = now;
+      // Bulk profile propagation deliberately skips the selected run. Persist
+      // only the profile-owned changes here so the durable pending snapshot
+      // cannot be left behind the refreshed form or overwrite unrelated edits.
+      const openRunUpdates: Record<string, unknown> = {};
+      for (const field of Object.keys(DEFAULT_VALUES) as (keyof FormValues)[]) {
+        if (!deepEqual(current[field], merged[field])) {
+          openRunUpdates[field] = merged[field];
+        }
+      }
       lastFormRunIdRef.current = liveRun.id;
       form.reset(merged);
       resetFieldArrays(merged);
-      schedulePush(dayStateRef.current, 0);
+      await persistOpenPendingRunSnapshotUpdates(openRunUpdates, {
+        expectedRunId: liveRun.id,
+      });
       toast({
         title: "Run form updated",
         description: `This run now uses the saved setup for ${liveRun.brand} — ${liveRun.flavor}.`,

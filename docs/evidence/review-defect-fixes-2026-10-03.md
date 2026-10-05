@@ -103,6 +103,11 @@ readiness were not assessed; this is not a recommendation to publish.
 
 ## Separately proposed follow-ups
 
+The per-pizza plausibility outcome now has separate
+[development evidence](per-pizza-advisory-review-2026-10-04.md) for the
+manager-approved advisory limits. This does not retroactively expand the
+historical checks or compatibility claims in this report.
+
 The assigned-task closing flow proposed two independent, out-of-scope outcomes:
 advisory plausibility review for extreme per-pizza amounts and a bounded
 published-background-job database investigation. Neither proposal authorizes

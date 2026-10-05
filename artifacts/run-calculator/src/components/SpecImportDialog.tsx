@@ -25,6 +25,7 @@ import {
   type SpecProfileRename,
   type SpecImportAlias,
 } from "@workspace/spec-import";
+import { reviewSpecImportPerPizzaAmounts } from "@workspace/spec-import/per-pizza-review";
 import type { SpecImportPrepared } from "@/specImport";
 import { buildDiscrepancies, importReviewSignature } from "@/specImport";
 import {
@@ -35,6 +36,7 @@ import {
   type SpecImportDisplayKind,
 } from "@/storage";
 import { useAccessibleDialog } from "./useAccessibleDialog";
+import { SpecImportAmountWarnings } from "./SpecImportAmountWarnings";
 
 type Props = {
   open: boolean;
@@ -884,6 +886,11 @@ export default function SpecImportDialog({
   );
 
   const includedProfiles = profiles.filter((p) => p.include).length;
+  // Recompute from the current review, including same-brand sauce cross-fill.
+  // This also covers reopened cached parses without changing parse-cache output.
+  const amountWarningCount = profiles
+    .filter((p) => p.include)
+    .reduce((count, p) => count + reviewSpecImportPerPizzaAmounts(p.orig).length, 0);
   const includedRecipes = recipes.filter((r) => r.include).length;
   const includedCount = includedProfiles + includedRecipes;
   const nothingParsed = prepared != null && profiles.length === 0 && recipes.length === 0;
@@ -1015,6 +1022,21 @@ export default function SpecImportDialog({
                   {attentionCount} checked item{attentionCount === 1 ? "" : "s"} still{" "}
                   need attention — a recipe needs a name, or a profile is missing its
                   brand/flavor. These won't be saved until fixed or unchecked.
+                </div>
+              )}
+
+              {amountWarningCount > 0 && (
+                <div
+                  className="rounded-md border border-amber-400/60 bg-amber-500/10 p-3 text-xs text-amber-700"
+                  data-testid="spec-import-amount-warnings"
+                >
+                  <p className="font-semibold">
+                    {amountWarningCount} per-pizza amount{amountWarningCount === 1 ? "" : "s"} above the advisory limit
+                  </p>
+                  <p className="mt-1">
+                    Check the highlighted products against the source. These warnings do not
+                    block Apply or change values; you decide whether to keep or exclude each product.
+                  </p>
                 </div>
               )}
 
@@ -1580,6 +1602,7 @@ function ProfileRow({
         {summary && (
           <div className="mt-1.5 text-xs text-muted-foreground">Read: {summary}</div>
         )}
+        <SpecImportAmountWarnings profile={item.orig} rowKey={item.key} />
         {warnings.length > 0 && (
           <ul className="mt-2 space-y-1">
             {warnings.map((w, i) => (
@@ -1662,6 +1685,7 @@ function ProfileRow({
               Read: {summary}
             </div>
           )}
+          <SpecImportAmountWarnings profile={item.orig} rowKey={item.key} />
 
           {warnings.length > 0 && (
             <div

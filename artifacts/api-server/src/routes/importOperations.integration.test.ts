@@ -22,8 +22,6 @@ let route: typeof import("./importOperations");
 let seedRoles: () => Promise<void>;
 let recordSession: typeof import("../lib/authSessions")["recordSession"];
 let signLegacyTokenForTests: typeof import("../lib/auth")["signLegacyTokenForTests"];
-
-let runImportSourceRetention: typeof import("../lib/importSourceRetention")["runImportSourceRetention"];
 const sessionTokens = new Map<string, string>();
 
 beforeAll(async () => {
@@ -40,18 +38,13 @@ beforeAll(async () => {
   process.env.DATABASE_URL = url.toString();
   ({ signLegacyTokenForTests } = await import("../lib/auth"));
   ({ recordSession } = await import("../lib/authSessions"));
-  ({ runImportSourceRetention } = await import("../lib/importSourceRetention"));
   tables = await import("@workspace/db");
-  ({ IMPORT_SOURCE_RETENTION_MS: retentionMs } = await import("@workspace/db/schema"));
   db = tables.db; pool = tables.pool;
   route = await import("./importOperations");
   seedRoles = (await import("../lib/roles")).seedRoles;
   const { requireAuth } = await import("../middlewares/requireAuth");
   const app = express();
   app.use(express.json({ limit: "1mb" }));
-  app.use((req, _res, next) => { (req as any).log = { info() {}, warn() {}, error() {}, debug() {} }; next(); });
-  app.use((req, _res, next) => { (req as any).log = { info() {}, warn() {}, error() {}, debug() {} }; next(); });
-  app.use((req, _res, next) => { (req as any).log = { info() {}, warn() {}, error() {}, debug() {} }; next(); });
   app.use((req, _res, next) => { (req as any).log = { info() {}, warn() {}, error() {}, debug() {} }; next(); });
   app.use("/api", requireAuth, route.default);
   await new Promise<void>((resolve, reject) => {
@@ -110,9 +103,13 @@ async function apply(operationId: string, body: Record<string, unknown>, user = 
 
 describe("atomic import operations", () => {
   it("rejects source evidence from a retired parser without persisting an operation", async () => {
-    const response = await apply("oversized-operation-001", {
-      importType: "premix", sourceLabel: "oversized.xlsx",
-      changes: { mixes: { upsert: oversized } },
+    const response = await apply("distill-retired-parser-0001", {
+      ...change("retired-parser"),
+      importType: "spec",
+      sourceEvidence: {
+        sourceText: "Retired parser fixture",
+        parseVersion: String(Number(SPEC_IMPORT_PARSE_VERSION) - 1),
+      },
     });
     expect(response.status).toBe(400);
     expect(await db.select().from(tables.importOperationsTable)
@@ -124,42 +121,35 @@ describe("atomic import operations", () => {
       sourceText: "=== SHEET: Spec ===\nBrand\tAlpine Foods\nFlavor\tFour Cheese",
       parseVersion: SPEC_IMPORT_PARSE_VERSION,
     };
-    const applied = await apply("mixed-capability-undo-0001", mixedBody);
+    const applied = await apply("distill-authorized-0001", {
+      importType: "spec",
+      sourceLabel: "private-source.xlsx",
+      sourceEvidence,
+      changes: {
+        brandProfiles: {
+          upsert: [{
+            key: "alpine foods__four cheese",
+            brand: "Alpine Foods",
+            flavor: "Four Cheese",
+            values: { pizzasPerCase: 12 },
+            crustValues: {},
+            updatedAtMs: 1,
+          }],
+        },
+      },
+    });
     expect(applied.status).toBe(200);
-    const before = await db.select().from(tables.importOperationsTable)
-      .where(sql`${tables.importOperationsTable.id} IN ('retention-applied-000001', 'retention-undone-000001')`);
-
-    const historyBefore = await db.select().from(tables.importHistoryTable)
-      .where(sql`${tables.importHistoryTable.operationId} IN ('retention-applied-000001', 'retention-undone-000001')`);
+    const before = (await db.select().from(tables.importOperationsTable))
+      .find((row) => row.id === "distill-authorized-0001");
     expect(before?.status).toBe("applied");
 
-    const response = await apply("oversized-operation-001", {
-      importType: "premix", sourceLabel: "oversized.xlsx",
-      changes: { mixes: { upsert: oversized } },
+    const response = await fetch(`${baseUrl}/api/import-operations/distillation-evidence`, {
+      headers: headers(),
     });
     expect(response.status).toBe(200);
-    const page = await response.json() as { records: Array<Record<string, unknown>> };
-
-    const applySource = async (operationId: string, label: string) => {
-      const result = await apply(operationId, {
-        importType: "spec",
-        sourceLabel: `${label}.xlsx`,
-        sourceEvidence: { sourceText: `private source for ${label}`, parseVersion: "41" },
-        changes: {
-          brandProfiles: {
-            upsert: [{
-              key: `${label.toLowerCase()}__flavor`,
-              brand: label,
-              flavor: "Flavor",
-              values: { pizzasPerCase: 12 },
-              crustValues: {},
-              updatedAtMs: Date.now(),
-            }],
-          },
-        },
-      });
-      expect(result.status).toBe(200);
-      return result.json() as Promise<any>;
+    const page = await response.json() as {
+      records: Array<Record<string, unknown>>;
+      nextCursor: string | null;
     };
     expect(page.records).toHaveLength(1);
     expect(page.records[0]).toMatchObject({
@@ -173,10 +163,8 @@ describe("atomic import operations", () => {
     });
     expect(page.records[0]).not.toHaveProperty("actorId");
     expect(page.records[0]).not.toHaveProperty("sourceLabel");
-    const after = await db.select().from(tables.importOperationsTable)
-      .where(sql`${tables.importOperationsTable.id} IN ('retention-applied-000001', 'retention-undone-000001')`);
-
-      const cleaned = after.find((row) => row.id === oldRow.id)!;
+    const after = (await db.select().from(tables.importOperationsTable))
+      .find((row) => row.id === "distill-authorized-0001");
     expect(after).toEqual(before);
   });
 
@@ -205,20 +193,20 @@ describe("atomic import operations", () => {
       `${baseUrl}/api/import-operations/distillation-evidence?limit=1`,
       { headers: headers() },
     );
-    const first = await (await apply("undo-deletion-000001", {
-      importType: "premix", sourceLabel: "delete.xlsx",
-      changes: { mixes: { delete: [deletedRow.id] } },
-    })).json() as any;
+    const first = await firstResponse.json() as {
+      records: Array<{ operationId: string }>;
+      nextCursor: string | null;
+    };
     expect(first.records).toHaveLength(1);
     expect(first.nextCursor).toBeTruthy();
     const secondResponse = await fetch(
       `${baseUrl}/api/import-operations/distillation-evidence?limit=1&cursor=${encodeURIComponent(first.nextCursor!)}`,
       { headers: headers() },
     );
-    const second = await (await apply("undo-deletion-000002", {
-      importType: "premix", sourceLabel: "delete-again.xlsx",
-      changes: { mixes: { delete: [deletedRow.id] } },
-    })).json() as any;
+    const second = await secondResponse.json() as {
+      records: Array<{ operationId: string }>;
+      nextCursor: string | null;
+    };
     expect(second.records).toHaveLength(1);
     expect(second.nextCursor).toBeNull();
     expect(new Set([...first.records, ...second.records].map((record) => record.operationId)).size).toBe(2);
@@ -251,50 +239,42 @@ describe("atomic import operations", () => {
       sourceLabel: "legacy-no-source.xlsx",
       changes: { brandProfiles: { upsert: [] } },
     });
-    const undone = await fetch(`${baseUrl}/api/import-operations/undo-aliases-000001/undo`, {
-      method: "POST", headers: headers(), body: JSON.stringify({ expectedResultHash: created.operation.resultHash }),
-    });
-    const undoResponse = await fetch(`${baseUrl}/api/import-operations/retention-undone-000001/undo`, {
+    const undone = await (await apply("distill-undone-source-0001", {
+      importType: "spec",
+      sourceLabel: "undone-source.xlsx",
+      sourceEvidence: { sourceText: "Undone source", parseVersion: SPEC_IMPORT_PARSE_VERSION },
+      changes: {
+        brandProfiles: {
+          upsert: [{
+            key: "undone brand__flavor",
+            brand: "Undone Brand",
+            flavor: "Flavor",
+            values: {},
+            crustValues: {},
+            updatedAtMs: 2,
+          }],
+        },
+      },
+    })).json() as any;
+    const undoResponse = await fetch(`${baseUrl}/api/import-operations/distill-undone-source-0001/undo`, {
       method: "POST",
       headers: headers(),
-      body: JSON.stringify({ expectedResultHash: oldUndone.operation.resultHash }),
+      body: JSON.stringify({ expectedResultHash: undone.operation.resultHash }),
     });
-
-    const now = Date.now();
     expect(undoResponse.status).toBe(200);
 
-    const response = await apply("oversized-operation-001", {
-      importType: "premix", sourceLabel: "oversized.xlsx",
-      changes: { mixes: { upsert: oversized } },
+    const response = await fetch(`${baseUrl}/api/import-operations/distillation-evidence`, {
+      headers: headers(),
     });
     expect(response.status).toBe(200);
     const page = await response.json() as { records: Array<Record<string, unknown>> };
+    expect(page.records).toHaveLength(0);
+  });
 
-    const applySource = async (operationId: string, label: string) => {
-      const result = await apply(operationId, {
-        importType: "spec",
-        sourceLabel: `${label}.xlsx`,
-        sourceEvidence: { sourceText: `private source for ${label}`, parseVersion: "41" },
-        changes: {
-          brandProfiles: {
-            upsert: [{
-              key: `${label.toLowerCase()}__flavor`,
-              brand: label,
-              flavor: "Flavor",
-              values: { pizzasPerCase: 12 },
-              crustValues: {},
-              updatedAtMs: Date.now(),
-            }],
-          },
-        },
-      });
-      expect(result.status).toBe(200);
-      return result.json() as Promise<any>;
-    };
-    const response = await apply("oversized-operation-001", {
-      importType: "premix", sourceLabel: "oversized.xlsx",
-      changes: { mixes: { upsert: oversized } },
-    });
+  it("rolls back after failures at domain and history stages", async () => {
+    for (const stage of ["after-mixes", "after-history"]) {
+      route.setImportOperationFailureHookForTest((actual) => { if (actual === stage) throw new Error("injected"); });
+      const response = await apply(`rollback-${stage.replace("-", "")}-001`, change());
       expect(response.status).toBe(500);
       expect(await db.select().from(tables.mixesTable)).toHaveLength(0);
       expect(await db.select().from(tables.importOperationsTable)).toHaveLength(0);
@@ -303,39 +283,22 @@ describe("atomic import operations", () => {
   });
 
   it("retries idempotently and rejects request mismatches", async () => {
-    const body = {
-      importType: "spec",
-      sourceLabel: "aliases.xlsx",
-      changes: {
-        specImportAliases: {
-          upsert: [{ kind: "brand", externalName: "Sheet Brand", canonicalName: "Canonical Brand", context: null }],
-        },
-      },
-    };
-    const first = await (await apply("undo-deletion-000001", {
-      importType: "premix", sourceLabel: "delete.xlsx",
-      changes: { mixes: { delete: [deletedRow.id] } },
-    })).json() as any;
-    const second = await (await apply("undo-deletion-000002", {
-      importType: "premix", sourceLabel: "delete-again.xlsx",
-      changes: { mixes: { delete: [deletedRow.id] } },
-    })).json() as any;
+    const body = change();
+    const first = await apply("retry-operation-000001", body);
+    const second = await apply("retry-operation-000001", body);
     expect(first.status).toBe(200); expect(second.status).toBe(200);
     expect(await db.select().from(tables.mixesTable)).toHaveLength(1);
     expect((await apply("retry-operation-000001", { ...body, sourceLabel: "different" })).status).toBe(409);
   });
 
   it("rejects a stale reviewed-state precondition", async () => {
-    const response = await apply("oversized-operation-001", {
-      importType: "premix", sourceLabel: "oversized.xlsx",
-      changes: { mixes: { upsert: oversized } },
-    });
+    const response = await apply("stale-review-000001", { ...change(), expectedStateHash: "0".repeat(64) });
     expect(response.status).toBe(409);
     expect(await db.select().from(tables.mixesTable)).toHaveLength(0);
   });
 
   it("undoes successfully, accepts unrelated edits, and refuses affected edits", async () => {
-    const created = await (await apply("undo-aliases-000001", body)).json() as any;
+    const created = await (await apply("undo-success-000001", change())).json() as any;
     const resultHash = created.operation.resultHash;
     const firstUndo = await fetch(`${baseUrl}/api/import-operations/undo-success-000001/undo`, {
       method: "POST", headers: headers(), body: JSON.stringify({ expectedResultHash: resultHash }),
@@ -343,10 +306,7 @@ describe("atomic import operations", () => {
     expect(firstUndo.status).toBe(200);
     expect(await db.select().from(tables.mixesTable)).toHaveLength(0);
 
-    const second = await (await apply("undo-deletion-000002", {
-      importType: "premix", sourceLabel: "delete-again.xlsx",
-      changes: { mixes: { delete: [deletedRow.id] } },
-    })).json() as any;
+    const second = await (await apply("undo-refuse-000001", change("unrelated-target"))).json() as any;
     await db.insert(tables.mixesTable).values({ id: "unrelated", scope: "live", name: "Unrelated", brand: "", flavor: "", batchSize: 1, daysEarly: 0, notes: "", amountAlreadyMade: 0, components: [], isPrep: false, enabled: true });
     expect((await fetch(`${baseUrl}/api/import-operations/undo-refuse-000001/undo`, { method: "POST", headers: headers(), body: JSON.stringify({ expectedResultHash: second.operation.resultHash }) })).status).toBe(200);
     expect(await db.select().from(tables.mixesTable).where(eq(tables.mixesTable.id, "unrelated"))).toHaveLength(1);
@@ -499,38 +459,3 @@ describe("atomic import operations", () => {
     ).toBe("applied");
   });
 });
-
-    const authorizedLiveMetadata = {
-      format: "spec-apply-source-v1",
-      sourceSha256: "a".repeat(64),
-      parseVersion: "41",
-      actorCapability: "manage-profiles",
-      actorIdSha256: "b".repeat(64),
-      sourceText: "should remain in sandbox",
-    };
-
-    const historyAfter = await db.select().from(tables.importHistoryTable)
-      .where(sql`${tables.importHistoryTable.operationId} IN ('retention-applied-000001', 'retention-undone-000001')`);
-
-    const sandboxAndPending = await db.select().from(tables.importOperationsTable)
-      .where(sql`${tables.importOperationsTable.id} IN ('retention-sandbox-000001', 'retention-pending-000001')`);
-
-    const oldApplied = await applySource("retention-applied-000001", "Retention Applied");
-
-      const originalEvidence = oldRow.distillEvidence as Record<string, unknown>;
-
-    const exported = await fetch(`${baseUrl}/api/import-operations/distillation-evidence`, {
-      headers: headers(),
-    });
-
-    const expiredAt = new Date(now - retentionMs - 1);
-
-let retentionMs: number;
-
-    const operationHistory = await fetch(`${baseUrl}/api/import-operations/retention-applied-000001`, {
-      headers: headers(),
-    });
-
-      const cleanedEvidence = cleaned.distillEvidence as Record<string, unknown>;
-
-    const oldUndone = await applySource("retention-undone-000001", "Retention Undone");
