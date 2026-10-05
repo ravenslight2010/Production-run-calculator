@@ -2273,7 +2273,11 @@ export async function prepareSpecImportMulti(
   // Detect new ingredient rows on existing mixes — best-effort, after all
   // other work so it doesn't slow the AI parse path.
   const newMixIngredients = await computeNewMixIngredients(parsed);
-  const sourceEvidence = totalDropped > 0 ? undefined : combineSourceEvidence(sourceEvidenceParts);
+  // A skipped file means the reviewed/applied parse no longer represents the
+  // complete selected source set. Never retain evidence for only the files
+  // that happened to parse successfully.
+  const sourceEvidence =
+    totalDropped > 0 || errors.length > 0 ? undefined : combineSourceEvidence(sourceEvidenceParts);
 
   return {
     parsed,
