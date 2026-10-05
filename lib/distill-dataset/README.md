@@ -33,22 +33,45 @@ in live scope can read eligible records through the API. The export helper
 requires an owner-only cookie file and an owner-only output directory, then
 writes a new owner-only JSONL file outside the repository; it does not call a
 model or change import records. Historical operations without source evidence
-are excluded rather than reconstructed. Stored source evidence remains in the
-operation ledger until a separate retention policy is established.
+are excluded rather than reconstructed.
+
+Exact source text is retained in the live Apply ledger for 90 days from Apply
+time. A daily API cleanup removes only `sourceText`; it preserves the source
+digest, parser version, actor authorization evidence, applied-value snapshots,
+operation result, and history. The evidence export stops returning a record at
+the 90-day deadline, including while a cleanup pass is pending. Sandbox,
+pending, and non-spec operations are outside this cleanup.
+
+Each JSONL file created by the export helper receives an owner-only retention
+sidecar and expires 90 days after export. To remove expired files, run the
+bounded cleanup command against the owner-only directory used for these exports:
+
+```sh
+pnpm --filter @workspace/scripts run distill:cleanup-applylog-exports -- \
+  --directory /private/path/applylog-exports
+```
+
+The command removes only expired files with a valid sidecar created by this
+export helper, examines at most 1,000 directory entries per run, and reports
+aggregate counts only. Schedule it with the file owner's maintenance process
+for timely deletion. Copies or archives created outside that directory are not
+managed by the API or this command and must follow the same 90-day limit under
+their owner's retention controls.
 
 ```sh
 pnpm --filter @workspace/scripts run distill:export-applylog -- \
   --api-base https://your-app.example \
   --cookie-file /private/path/manager-cookie.txt \
-  --out /private/path/applylog.jsonl
+  --out /private/path/applylog-exports/applylog.jsonl
 ```
 
-The cookie file must be an absolute path outside the repository with no group or
+Create the output directory with owner-only permissions before exporting. The
+cookie file must be an absolute path outside the repository with no group or
 other permissions. The destination must be a new absolute file path outside the
-repository, and its parent directory must also have owner-only permissions. The
-command prints aggregate counts only; it never prints source text, brands, or
-raw actor identity. The private JSONL includes source text and applied values,
-plus a hash of the actor ID rather than the actor ID itself.
+repository, and its parent directory must also have owner-only permissions.
+The command prints aggregate counts only; it never prints source text, brands,
+or raw actor identity. The private JSONL includes source text and applied
+values, plus a hash of the actor ID rather than the actor ID itself.
 
 Each JSONL record uses the `DistillCandidateInput` shape exported by this
 package. In particular, `sourceText` must be included in `userContent`;

@@ -13,6 +13,7 @@
     "audit:source-heal-plan": "tsx ./src/generate-source-library-heal-plan.mts",
     "distill:backfill": "tsx ./src/distill-backfill.mts",
     "distill:export-applylog": "tsx ./src/distill-applylog-export.mts",
+    "distill:cleanup-applylog-exports": "tsx ./src/cleanup-distill-applylog-exports.mts",
     "test:distill-backfill": "tsx ./src/distill-backfill.test.mts && tsx ./src/distill-applylog-export.test.mts && pnpm --filter @workspace/distill-dataset run test",
     "test:source-compare": "tsx ./src/compare-source-audit.test.mts",
     "test:source-manifest": "tsx ./src/source-library-manifest.test.mts",

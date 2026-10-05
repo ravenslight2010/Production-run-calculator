@@ -7,6 +7,7 @@ import {
   verifyCandidate,
 } from "@workspace/distill-dataset";
 import { loadProductionContract } from "./distill-backfill.mts";
+import { writeApplyLogExportRetentionMarker } from "./distill-applylog-retention.mts";
 
 const PAGE_SIZE = 20;
 const MAX_RECORDS = 5_000;
@@ -178,10 +179,12 @@ export async function exportApplyLog(
     fs.fsyncSync(output.fd);
     fs.fchmodSync(output.fd, 0o600);
     fs.closeSync(output.fd);
+    writeApplyLogExportRetentionMarker(output.actualPath);
     return { exported, skipped };
   } catch (error) {
     try { fs.closeSync(output.fd); } catch {}
     try { fs.rmSync(output.actualPath, { force: true }); } catch {}
+    try { fs.rmSync(`${output.actualPath}.applylog-retention.json`, { force: true }); } catch {}
     throw error;
   }
 }

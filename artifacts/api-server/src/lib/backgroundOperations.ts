@@ -27,6 +27,7 @@ export function getBackgroundOperationProcessEpochForTests(): number {
 
 export type BackgroundOperationName =
   | "auth-retention"
+  | "import-source-retention"
   | "daily-rollover"
   | "server-job-run"
   | "server-job-prune"
@@ -83,6 +84,7 @@ export function createBackgroundOperationBackoff(options: {
 
 const operationNames: BackgroundOperationName[] = [
   "auth-retention",
+  "import-source-retention",
   "daily-rollover",
   "server-job-run",
   "server-job-prune",

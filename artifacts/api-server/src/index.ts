@@ -10,6 +10,7 @@ import { startAutoTrackServerTicks, startDailyRolloverScheduler } from "./routes
 import { startWebPushAlertScheduler } from "./lib/webPush";
 import { startServerJobWorkerLoop } from "./lib/serverJobs";
 import { startAuthRetentionScheduler } from "./lib/authRetention";
+import { startImportSourceRetentionScheduler } from "./lib/importSourceRetention";
 import { db } from "@workspace/db";
 import { setGeminiMetricsObserver } from "@workspace/integrations-openai-ai-server";
 import { sql } from "drizzle-orm";
@@ -43,6 +44,7 @@ let stopServerJobWorker: (() => void) | undefined;
 let stopWebPushAlertScheduler: (() => void) | undefined;
 let stopDailyRolloverScheduler: (() => void) | undefined;
 let stopAuthRetentionScheduler: (() => void) | undefined;
+let stopImportSourceRetentionScheduler: (() => void) | undefined;
 
 if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
@@ -87,6 +89,8 @@ async function startServer(): Promise<void> {
     stopDailyRolloverScheduler = undefined;
     stopAuthRetentionScheduler?.();
     stopAuthRetentionScheduler = undefined;
+    stopImportSourceRetentionScheduler?.();
+    stopImportSourceRetentionScheduler = undefined;
 
     const forceExit = setTimeout(() => {
       logger.error({ signal }, "API server did not stop within 5 seconds");
@@ -208,6 +212,14 @@ async function initializeStartup(startedAt: number): Promise<void> {
         logger.error(
           { err: error, operation: "auth-retention", outcome: "degraded", errorCode: "auth_retention_failed" },
           "Auth retention background task failed",
+        );
+      },
+    }).stop;
+    stopImportSourceRetentionScheduler = startImportSourceRetentionScheduler({
+      onError() {
+        logger.error(
+          { event: "apply_source_retention", outcome: "degraded", errorCode: "apply_source_retention_failed" },
+          "Apply source retention cleanup failed",
         );
       },
     }).stop;

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { Router, type IRouter, type Request, type Response } from "express";
-import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import {
   db,
   importHistoryTable,
@@ -13,6 +13,7 @@ import {
   freezerPullItemsTable,
   specImportAliasesTable,
 } from "@workspace/db";
+import { IMPORT_SOURCE_RETENTION_MS } from "@workspace/db/schema";
 import { currentScope } from "../lib/requestScope";
 import { requireAnyCapability, requireCapability, requireLiveScope } from "../middlewares/requireCapability";
 import { normalizeMix } from "@workspace/mixes";
@@ -534,6 +535,7 @@ router.get(
       eq(importOperationsTable.importType, "spec"),
       eq(importOperationsTable.status, "applied"),
       isNull(importOperationsTable.undoneAt),
+      gt(importOperationsTable.createdAt, new Date(Date.now() - IMPORT_SOURCE_RETENTION_MS)),
       sql`${importOperationsTable.distillEvidence}->>'format' = 'spec-apply-source-v1'`,
       sql`${importOperationsTable.distillEvidence}->>'actorCapability' = 'manage-profiles'`,
       sql`${importOperationsTable.distillEvidence}->>'parseVersion' = ${SPEC_IMPORT_PARSE_VERSION}`,

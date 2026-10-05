@@ -1,5 +1,8 @@
 import { pgTable, text, jsonb, timestamp, index } from "drizzle-orm/pg-core";
 
+export const IMPORT_SOURCE_RETENTION_DAYS = 90;
+export const IMPORT_SOURCE_RETENTION_MS = IMPORT_SOURCE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+
 /** Durable idempotency and guarded-recovery record for a reviewed import apply. */
 export const importOperationsTable = pgTable(
   "import_operations",
