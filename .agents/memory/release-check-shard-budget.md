@@ -45,6 +45,16 @@ the application assertions are wrong.
 the same disposable database and complete test inventory; do not remove tests
 or extend timeouts to hide process pressure.
 
+Parallel release commands can also race while pnpm installs workspace links,
+producing symlink-collision errors after the initial thread failures.
+
+**Why:** A failed package-setup phase is not evidence that application tests
+failed, and starting another full batch can repeat the same shared-directory
+collision.
+
+**How to apply:** After failed workers have stopped, restore links with one
+`pnpm install --frozen-lockfile`, then rerun the task-relevant checks serially.
+
 Read-only release preflights that share a database with concurrent prerequisite
 gates should use a small bounded acquisition retry, while still failing closed
 after the retry budget is exhausted. Their retained evidence must also bind to

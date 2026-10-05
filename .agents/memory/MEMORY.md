@@ -1,7 +1,7 @@
 - [Policy evidence anchors](policy-evidence-anchors.md) — operational policy prose is checked by stable regex anchors; preserve required phrases when clarifying task rules.
 - [Drizzle generator evaluation](drizzle-generator-evaluation.md) — compare SQL while ignoring run-specific snapshot IDs and timestamps; pass schema and dialect explicitly.
 - [Orval Zod declaration order](orval-zod-declaration-order.md) — normalize generated scalars before validators; declare smoke-tested toolchain packages directly, not via Orval peers.
-- [Lockfile recovery](post-merge-setup.md) + [pnpm 12 provenance](pnpm12-lockfile-provenance.md) — resolve peers with the pinned resolver, prove frozen installs, and preserve historical reports.
+- [pnpm lockfile safety](post-merge-setup.md) + [provenance](pnpm12-lockfile-provenance.md) — repair stale peers safely; prove frozen installs; preserve historical evidence.
 - [pnpm outdated scope limits](pnpm-outdated-scope-limits.md) — cross-check workspace declarations against lockfile importers; recursive output can omit direct importers.
 - [Safe operational observability](observability-safe-events.md) — events carry correlation, timing, outcomes, and bounded counts; never copy request or recipe payloads into logs.
 - [Audit-log scope boundary](audit-log-scope-boundary.md) — manager capability alone is not enough for audit reads; keep compliance records behind the live-scope fence.
