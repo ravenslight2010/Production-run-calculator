@@ -15,7 +15,10 @@ RUN snapshot=20260824T000000Z \
     > /etc/apt/sources.list \
   && apt-get update \
   && apt-get install -y --no-install-recommends git python3 build-essential \
+  && printf '%s\n' 'Pinned Debian builder package versions:' \
+  && dpkg-query -W build-essential git g++ g++-12 gcc gcc-12 make python3 python3-minimal python3.11 python3.11-minimal \
   && rm -rf /var/lib/apt/lists/*
+# Review the snapshot and refresh procedure in docs/container-builder-security-refresh.md.
 WORKDIR /app
 
 # Copy the complete workspace dependency graph before application source. Keep
