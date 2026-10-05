@@ -33,6 +33,8 @@ function unitProvenanceWorkbook(): Buffer {
       "Sauce oz/pizza",
       "Applicator 2 Type",
       "Applicator 2 oz/pizza",
+      "Applicator 4 Type",
+      "Applicator 4 oz/pizza",
       "Pepperoni 1 Type",
       "Pepperoni 1 Sticks",
       "Pepperoni 1 oz/pizza",
@@ -47,6 +49,8 @@ function unitProvenanceWorkbook(): Buffer {
       17.25,
       "Cheese",
       18.25,
+      "Cheese",
+      20.75,
       "Natural",
       3,
       19.25,
@@ -122,7 +126,7 @@ async function openWorkbookImport(page: Page): Promise<void> {
 
 async function expectAmountWarnings(review: Locator): Promise<void> {
   const summary = review.getByTestId("spec-import-amount-warnings");
-  await expect(summary).toContainText("3 per-pizza amounts above the advisory limit");
+  await expect(summary).toContainText("4 per-pizza amounts above the advisory limit");
   await expect(summary).toContainText("These warnings do not block Apply or change values");
 
   const warnings = review.getByTestId("spec-profile-amount-warning-pk0");
@@ -136,11 +140,23 @@ async function expectAmountWarnings(review: Locator): Promise<void> {
     "Applicator 2 (Cheese): 18.25 oz per pizza exceeds the 16 oz per pizza advisory limit",
   );
   await expect(warnings).toContainText(
+    "Applicator 4 (Cheese): 20.75 oz per pizza exceeds the 16 oz per pizza advisory limit",
+  );
+  await expect(warnings).toContainText(
     "Pepperoni entry 1 (Natural): 19.25 oz per pizza exceeds the 16 oz per pizza advisory limit",
   );
 
   const rows = warnings.locator("li");
-  await expect(rows).toHaveCount(3);
+  await expect(rows).toHaveCount(4);
+  for (const message of [
+    "Applicator 2 (Cheese): 18.25 oz per pizza exceeds the 16 oz per pizza advisory limit",
+    "Applicator 4 (Cheese): 20.75 oz per pizza exceeds the 16 oz per pizza advisory limit",
+  ]) {
+    const stationWarning = rows.filter({ hasText: message });
+    await expect(stationWarning).toHaveCount(1);
+    await expect(stationWarning).toBeVisible();
+    await expect(stationWarning).toContainText(message);
+  }
   for (const row of await rows.all()) {
     await expect(row).toBeVisible();
     const dimensions = await row.evaluate((element) => ({

@@ -15,6 +15,20 @@ starting local servers alone does not redirect fixture setup requests.
 **How to apply:** Use the local API URL for focused release-debug runs, then
 investigate any remaining UI failure separately from fixture startup.
 
+## Cold local release-browser startup
+
+A focused release-browser run builds the API and full Vite production client
+before starting the browser. In this workspace, a cold client build can outlast
+a short Playwright server-startup deadline even when API readiness succeeds.
+
+**Why:** The first tablet warning run timed out waiting for the web preview while
+the production bundle was still building; API initialization itself was prompt.
+
+**How to apply:** When a focused local browser run times out, identify which
+configured server URL has not become available. Keep release builds intact,
+distinguish web-build delay from API readiness, and allow adequate independent
+deadlines for server startup and browser interaction.
+
 ## Deterministic browser clocks and server projections
 
 When a browser test mocks `Date` but the API process keeps real time, keep the

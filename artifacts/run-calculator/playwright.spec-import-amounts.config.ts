@@ -19,7 +19,7 @@ export default defineConfig({
   webServer: releaseBrowserWebServers(),
   testDir: "./e2e",
   testMatch: "spec-import-unit-provenance.spec.ts",
-  timeout: 90_000,
+  timeout: 180_000,
   globalTimeout: 12 * 60_000,
   retries: 0,
   workers: 1,

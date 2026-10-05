@@ -21,7 +21,7 @@ export function releaseBrowserWebServers():
         "pnpm run build && exec node --enable-source-maps ./dist/index.mjs",
       url: `${RELEASE_BROWSER_API_URL}/api/readyz`,
       reuseExistingServer: false,
-      timeout: 120_000,
+      timeout: 300_000,
     },
     {
       command:
@@ -30,7 +30,7 @@ export function releaseBrowserWebServers():
         `preview --config vite.config.ts --host 0.0.0.0 --port ${process.env.RELEASE_BROWSER_WEB_PORT ?? "18084"}`,
       url: RELEASE_BROWSER_BASE_URL,
       reuseExistingServer: false,
-      timeout: 120_000,
+      timeout: 300_000,
     },
   ];
 }
