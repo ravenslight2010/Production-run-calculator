@@ -336,6 +336,7 @@ type QloraPowerReferenceBrand = {
 
 type QloraPowerReferenceVector = {
   name: string;
+  nearMargin: boolean;
   brands: QloraPowerReferenceBrand[];
   referenceMinimumBrandClusters: number;
   minimumBrandClusterTolerance: number;
@@ -346,7 +347,7 @@ type QloraPowerReferenceVector = {
 const qloraPowerReferenceFields = Array.from({ length: 100 }, (_, index) => `field-${index}`);
 const qloraPowerReferenceCriticalFields = qloraPowerReferenceFields.slice(0, 20);
 
-function qloraPowerReferenceInput(brands: QloraPowerReferenceBrand[]) {
+function qloraPowerReferenceInput(brands: QloraPowerReferenceBrand[], seed = 20261002) {
   const candidate: QloraPromotionCaseResult[] = [];
   const promptedBase: QloraPromotionCaseResult[] = [];
   brands.forEach((brand, brandIndex) => {
@@ -378,14 +379,17 @@ function qloraPowerReferenceInput(brands: QloraPowerReferenceBrand[]) {
   });
   return {
     evidenceScope: "development-only" as const,
-    seed: 20261002,
+    seed,
     results: { candidate, promptedBase },
   };
 }
 
+const qloraPowerReferenceAdditionalSeeds = [20261003, 20261004, 20261005] as const;
+
 const qloraPowerReferenceVectors: QloraPowerReferenceVector[] = [
   {
     name: "balanced brands with low variance and gains comfortably above both margins",
+    nearMargin: false,
     brands: [
       { caseCount: 10, overallFieldGainsPerCase: 7, criticalFieldGainCases: 8 },
       { caseCount: 10, overallFieldGainsPerCase: 8, criticalFieldGainCases: 9 },
@@ -413,6 +417,7 @@ const qloraPowerReferenceVectors: QloraPowerReferenceVector[] = [
   },
   {
     name: "uneven low-variance brands with gains close to both margins",
+    nearMargin: true,
     brands: [
       { caseCount: 10, overallFieldGainsPerCase: 5, criticalFieldGainCases: 6 },
       { caseCount: 10, overallFieldGainsPerCase: 6, criticalFieldGainCases: 7 },
@@ -442,6 +447,7 @@ const qloraPowerReferenceVectors: QloraPowerReferenceVector[] = [
   },
   {
     name: "balanced high-variance brands with both gains close to their margins",
+    nearMargin: true,
     brands: [
       { caseCount: 10, overallFieldGainsPerCase: 1, criticalFieldGainCases: 10 },
       { caseCount: 10, overallFieldGainsPerCase: 12, criticalFieldGainCases: 10 },
@@ -479,6 +485,7 @@ const qloraPowerReferenceVectors: QloraPowerReferenceVector[] = [
   },
   {
     name: "uneven high-variance brands with gains close to both margins",
+    nearMargin: true,
     brands: [
       { caseCount: 5, overallFieldGainsPerCase: 12, criticalFieldGainCases: 4 },
       { caseCount: 5, overallFieldGainsPerCase: 11, criticalFieldGainCases: 5 },
@@ -580,6 +587,29 @@ describe("conditional QLoRA pre-holdout power analysis", () => {
         .toBeLessThanOrEqual(vector.powerAbsoluteTolerance);
     },
   );
+
+  for (const vector of qloraPowerReferenceVectors.filter((candidate) => candidate.nearMargin)) {
+    it.each(qloraPowerReferenceAdditionalSeeds)(
+      `matches the independent reference tolerances for ${vector.name} (seed $seed)`,
+      (seed) => {
+        const result = calculateQloraPromotionPower(qloraPowerReferenceInput(vector.brands, seed));
+
+        expect(result.state).toBe("qualified");
+        if (result.state !== "qualified") throw new Error("expected qualified power analysis");
+        expect(result.seed).toBe(seed);
+        expect(
+          Math.abs(result.plannedBrandClusters - vector.referenceMinimumBrandClusters),
+        ).toBeLessThanOrEqual(vector.minimumBrandClusterTolerance);
+
+        const referencePower = vector.referencePowerByBrandCount[result.plannedBrandClusters];
+        expect(referencePower).toBeDefined();
+        expect(Math.abs(result.overallPower - referencePower.overall))
+          .toBeLessThanOrEqual(vector.powerAbsoluteTolerance);
+        expect(Math.abs(result.criticalPower - referencePower.critical))
+          .toBeLessThanOrEqual(vector.powerAbsoluteTolerance);
+      },
+    );
+  }
 
   it("fails closed for missing, holdout-scoped, and malformed development evidence", () => {
     expect(calculateQloraPromotionPower(undefined)).toMatchObject({

@@ -50,6 +50,8 @@ Each vector uses 100 synthetic eligible fields, 20 of them critical. Candidate-o
 | Balanced, high variance, near margins | 20 / 200 | 6.50 / 3.50 pp | 99 (±3) | 0.940603 / 0.814192 |
 | Uneven, high variance, near margins | 20 / 250 | 6.30 / 3.60 pp | 10 (±1) | 0.828271 / 0.999996 |
 
+The TypeScript preflight is also checked against these independent curves for the three near-margin profiles at additional predeclared seeds `20261003`, `20261004`, and `20261005` (the existing baseline seed is `20261002`). Before running those checks, the accepted limits remain the per-profile minimum-count tolerances above (±1 for uneven low variance, ±3 for balanced high variance, and ±1 for uneven high variance) and an absolute power difference of at most 0.03 for each measure at the returned count. These are synthetic 5,000-replicate runs and make no provider calls.
+
 These vectors check estimation behavior only. They do not provide development evidence, establish a real sample-size requirement, or change the holdout restriction.
 
 ## Decision rules
