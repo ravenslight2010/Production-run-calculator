@@ -7,7 +7,7 @@
  * or production traffic are involved.
  *
  * Run with:
- *   pnpm --filter @workspace/api-server exec vitest run src/routes/sync.convergence.integration.test.ts
+ *   pnpm --filter @workspace/api-server run test:sync-convergence:isolated
  *
  * A failure prints the counters and divergent paths needed to distinguish a
  * lost update, a reset re-adoption, a date-scope mix-up, or retry storm.
@@ -19,7 +19,6 @@ import type { AddressInfo } from "node:net";
 import { fork, spawnSync, type ChildProcess } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import pg from "pg";
 import { sql } from "drizzle-orm";
 import { signLegacyTokenForTests } from "../lib/auth";
 
@@ -50,8 +49,6 @@ let usersTable: DbModule["usersTable"];
 let userRolesTable: DbModule["userRolesTable"];
 let rolesTable: DbModule["rolesTable"];
 let seedRoles: () => Promise<void>;
-let adminPool: pg.Pool;
-let testDbName: string;
 let originalDatabaseUrl: string | undefined;
 let server: Server;
 let baseUrl: string;
@@ -62,30 +59,72 @@ const MANAGER = "soak-manager";
 const TODAY = "2031-06-15";
 const TOMORROW = "2031-06-16";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
+const CROSS_PROCESS_SILENCE_WINDOW_MS = 1_000;
 const CANONICAL_BREAKS = [
   { slot: 1, enabled: true, mode: "at-time", atTime: "08:15", durationMin: 30 },
   { slot: 2, enabled: false, mode: "after-run", durationMin: 30 },
   { slot: 3, enabled: true, mode: "after-run", runId: "run-main", durationMin: 30 },
 ];
 
+function requireIsolatedSyncDatabase(environment = process.env): string {
+  if (
+    environment.NODE_ENV !== "test"
+    || environment.SYNC_CONVERGENCE_DISPOSABLE_DB !== "1"
+    || environment.E2E_TEST_DB !== "1"
+    || environment.E2E_APPROVED_DESTRUCTIVE_MODE !== "1"
+    || environment.REPLIT_DEPLOYMENT === "1"
+    || /^(production|prod)$/iu.test(environment.APP_ENV ?? "")
+  ) {
+    throw new Error(
+      "Sync convergence integration tests require the isolated disposable test runner.",
+    );
+  }
+
+  const rawUrl = environment.DATABASE_URL?.trim();
+  if (!rawUrl) {
+    throw new Error("The isolated sync convergence database URL is missing.");
+  }
+
+  let databaseUrl: URL;
+  try {
+    databaseUrl = new URL(rawUrl);
+  } catch {
+    throw new Error("The isolated sync convergence database URL is invalid.");
+  }
+
+  const databaseName = decodeURIComponent(databaseUrl.pathname.replace(/^\/+/, ""));
+  if (
+    !["postgres:", "postgresql:"].includes(databaseUrl.protocol)
+    || databaseUrl.hostname !== "127.0.0.1"
+    || databaseUrl.username !== "postgres"
+    || databaseUrl.password !== ""
+    || databaseUrl.search !== ""
+    || databaseUrl.hash !== ""
+    || !/^sync_convergence_test_[a-z0-9_]+$/u.test(databaseName)
+  ) {
+    throw new Error(
+      "Sync convergence integration tests require their named loopback disposable database.",
+    );
+  }
+
+  return databaseUrl.toString();
+}
+
 beforeAll(async () => {
   originalDatabaseUrl = process.env.DATABASE_URL;
-  if (!originalDatabaseUrl) throw new Error("DATABASE_URL must be set to run integration tests");
-  adminPool = new pg.Pool({ connectionString: originalDatabaseUrl });
-  adminPool.on("error", () => {});
-  testDbName = `helium_sync_soak_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
-  await adminPool.query(`CREATE DATABASE "${testDbName}"`);
-  const testUrl = new URL(originalDatabaseUrl);
-  testUrl.pathname = `/${testDbName}`;
-  const testUrlStr = testUrl.toString();
-  testDatabaseUrl = testUrlStr;
+  testDatabaseUrl = requireIsolatedSyncDatabase();
   const push = spawnSync("pnpm", ["--filter", "@workspace/db", "run", "push-force"], {
     cwd: repoRoot,
-    env: { ...process.env, DATABASE_URL: testUrlStr },
+    env: { ...process.env, DATABASE_URL: testDatabaseUrl },
     encoding: "utf8",
+    timeout: 120_000,
   });
-  if (push.status !== 0) throw new Error(`drizzle push failed:\n${push.stdout}\n${push.stderr}`);
-  process.env.DATABASE_URL = testUrlStr;
+  if (push.error || push.status !== 0) {
+    const status = push.error?.name
+      ?? (push.status === null ? push.signal ?? "unknown status" : `exit ${push.status}`);
+    throw new Error(`isolated sync convergence schema setup failed (${status}); output omitted`);
+  }
+  process.env.DATABASE_URL = testDatabaseUrl;
   const dbMod = await import("@workspace/db");
   const routerMod = await import("./index");
   db = dbMod.db;
@@ -107,10 +146,10 @@ beforeAll(async () => {
   });
   app.use("/api", routerMod.default);
   await new Promise<void>((resolve) => {
-    server = app.listen(0, () => resolve());
+    server = app.listen(0, "127.0.0.1", () => resolve());
   });
   baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-}, 60_000);
+}, 120_000);
 
 afterAll(async () => {
   if (server) {
@@ -118,10 +157,6 @@ afterAll(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
   if (pool) await pool.end();
-  if (adminPool) {
-    await adminPool.query(`DROP DATABASE IF EXISTS "${testDbName}" WITH (FORCE)`);
-    await adminPool.end();
-  }
   process.env.DATABASE_URL = originalDatabaseUrl;
 }, 60_000);
 
@@ -155,32 +190,56 @@ async function startIsolatedSyncProcess(): Promise<{ child: ChildProcess; baseUr
     },
     stdio: ["ignore", "ignore", "ignore", "ipc"],
   });
-  const port = await new Promise<number>((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error("isolated sync process did not start")), 10_000);
-    child.once("error", reject);
-    child.once("exit", (code) => reject(new Error(`isolated sync process exited before ready (${code})`)));
-    child.on("message", (message) => {
-      if (message && typeof message === "object" && (message as { type?: string }).type === "ready") {
+  try {
+    const port = await new Promise<number>((resolve, reject) => {
+      let settled = false;
+      const finish = (error: Error | undefined, readyPort?: number) => {
+        if (settled) return;
+        settled = true;
         clearTimeout(timeout);
-        resolve((message as { port: number }).port);
-      }
+        child.off("error", onError);
+        child.off("exit", onExit);
+        child.off("message", onMessage);
+        if (error) reject(error);
+        else resolve(readyPort!);
+      };
+      const onError = (error: Error) => finish(error);
+      const onExit = (code: number | null) =>
+        finish(new Error(`isolated sync process exited before ready (${code})`));
+      const onMessage = (message: unknown) => {
+        if (message && typeof message === "object" && (message as { type?: string }).type === "ready") {
+          finish(undefined, (message as { port: number }).port);
+        }
+      };
+      const timeout = setTimeout(
+        () => finish(new Error("isolated sync process did not start")),
+        20_000,
+      );
+      child.once("error", onError);
+      child.once("exit", onExit);
+      child.on("message", onMessage);
     });
-  });
-  return { child, baseUrl: `http://127.0.0.1:${port}` };
+    return { child, baseUrl: `http://127.0.0.1:${port}` };
+  } catch (error) {
+    await stopIsolatedSyncProcess(child);
+    throw error;
+  }
 }
 
 async function stopIsolatedSyncProcess(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null) return;
+  if (child.exitCode !== null || child.signalCode !== null) return;
   child.kill("SIGTERM");
   await new Promise<void>((resolve) => {
+    const finish = () => {
+      clearTimeout(timeout);
+      child.off("exit", finish);
+      resolve();
+    };
     const timeout = setTimeout(() => {
       child.kill("SIGKILL");
-      resolve();
+      finish();
     }, 5_000);
-    child.once("exit", () => {
-      clearTimeout(timeout);
-      resolve();
-    });
+    child.once("exit", finish);
   });
 }
 
@@ -201,10 +260,36 @@ async function readDataFrame(
       state.buffer += new TextDecoder().decode(chunk.value);
     }
   };
-  return Promise.race([
-    read(),
-    new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timed out waiting for data frame")), timeoutMs)),
-  ]);
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      read(),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error("timed out waiting for data frame")),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+async function expectNoDataFrame(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  state: { buffer: string },
+  timeoutMs: number,
+): Promise<void> {
+  try {
+    const frame = await readDataFrame(reader, state, timeoutMs);
+    throw new Error(`unexpected data frame: ${JSON.stringify(frame)}`);
+  } catch (error) {
+    if (error instanceof Error && error.message === "timed out waiting for data frame") {
+      return;
+    }
+    throw error;
+  }
 }
 
 function clone<T>(value: T): T {
@@ -450,19 +535,32 @@ describe("multi-client sync convergence soak", () => {
       const write = await writer.push();
       expect(write?.ok).toBe(true);
 
-      await expect(readDataFrame(reader, readState, 400)).rejects.toThrow("timed out waiting for data frame");
+      await expectNoDataFrame(reader, readState, CROSS_PROCESS_SILENCE_WINDOW_MS);
       await reader.cancel();
 
       const recoveredStream = await fetch(
         `${isolated.baseUrl}/api/sync/events?today=${TODAY}&clientId=process-b-reconnect`,
         { headers: headers() },
       );
+      expect(recoveredStream.status).toBe(200);
       const recoveredReader = recoveredStream.body!.getReader();
       const recovered = await readDataFrame(recoveredReader, { buffer: "" });
       expect(recovered).toMatchObject({
         initial: true,
         completeness: "complete",
-        data: { dayState: { runs: [{ id: "run-main" }] } },
+        data: {
+          dayState: {
+            runs: [{ id: "run-main", brand: "Acme", flavor: "Pepperoni" }],
+          },
+          runValues: {
+            "run-main": {
+              casesNeeded: 240,
+              casesPerSkid: 48,
+              skidsCompleted: 1,
+              casesOnCurrentSkid: 12,
+            },
+          },
+        },
       });
       await recoveredReader.cancel();
     } finally {
