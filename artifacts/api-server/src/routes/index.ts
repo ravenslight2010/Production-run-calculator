@@ -254,6 +254,9 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
     "POST /inventory/merge", "PUT /inventory/settings", "POST /inventory/consume-day-start",
     "POST /mix-surplus", "PUT /mix-surplus/allocations/:runDate", "DELETE /mix-surplus/lots/:id",
   ]),
+  ...writes("capability-gated", "scoped", "allowed", "manage-allergens", [
+    "PUT /ingredients/:id/allergen-mapping",
+  ]),
   ...writes("capability-gated", "scoped", "allowed", "use-ai-tools", [
     "POST /inventory/identify-photo", "POST /inventory/quality-photo", "POST /inventory/production-sheet-photo",
     "POST /inventory/label-verify",
@@ -320,12 +323,12 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
   {
     method: "POST", path: "/server-jobs", ownership: "capability-gated", scope: "scoped", sandbox: "allowed",
     capabilities: ["manage-staff", "manage-inventory", "edit-production-rules", "approve-password-resets",
-      "review-incidents", "use-ai-tools", "manage-factory-settings", "manage-profiles"], capabilityMatch: "any",
+      "review-incidents", "use-ai-tools", "manage-factory-settings", "manage-profiles", "manage-allergens"], capabilityMatch: "any",
   },
   {
     method: "POST", path: "/server-jobs/:id/cancel", ownership: "capability-gated", scope: "scoped", sandbox: "allowed",
     capabilities: ["manage-staff", "manage-inventory", "edit-production-rules", "approve-password-resets",
-      "review-incidents", "use-ai-tools", "manage-factory-settings", "manage-profiles"], capabilityMatch: "any",
+      "review-incidents", "use-ai-tools", "manage-factory-settings", "manage-profiles", "manage-allergens"], capabilityMatch: "any",
   },
 ];
 

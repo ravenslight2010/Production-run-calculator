@@ -1031,6 +1031,7 @@ export type Role = string;
 export const CAPABILITIES = [
   "manage-staff",
   "manage-inventory",
+  "manage-allergens",
   "manage-factory-settings",
   "edit-production-rules",
   "approve-password-resets",
@@ -1042,6 +1043,7 @@ export type Capability = (typeof CAPABILITIES)[number];
 export const CAPABILITY_LABELS: Record<Capability, string> = {
   "manage-staff": "Manage staff & roles",
   "manage-inventory": "Manage inventory",
+  "manage-allergens": "Manage ingredient allergens",
   "manage-factory-settings": "Manage factory settings",
   "edit-production-rules": "Edit production rules",
   "approve-password-resets": "Approve password resets",

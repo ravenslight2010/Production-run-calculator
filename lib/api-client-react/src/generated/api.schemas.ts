@@ -2087,6 +2087,7 @@ export const Capability = {
   'approve-password-resets': 'approve-password-resets',
   'review-incidents': 'review-incidents',
   'use-ai-tools': 'use-ai-tools',
+  'manage-allergens': 'manage-allergens',
 } as const;
 
 /**
@@ -4928,6 +4929,21 @@ export const IngredientCategory = {
   general: 'general',
 } as const;
 
+export type IngredientAllergen = typeof IngredientAllergen[keyof typeof IngredientAllergen];
+
+
+export const IngredientAllergen = {
+  egg: 'egg',
+  soy: 'soy',
+  milk: 'milk',
+  wheat: 'wheat',
+  peanuts: 'peanuts',
+  tree_nuts: 'tree nuts',
+  fish: 'fish',
+  shellfish: 'shellfish',
+  sesame: 'sesame',
+} as const;
+
 /**
  * A factory-wide catalog entry (Task #102). Recipe rows reference an ingredient by id; renaming/merging/deleting is a server operation that updates every reference with no client-side rewrite.
  */
@@ -4944,15 +4960,33 @@ export interface Ingredient {
   mergedInto?: string | null;
   /** false = soft-deleted (kept so old rows still resolve) */
   enabled: boolean;
+  /** Reviewed mapping values from the fixed ingredient-allergen vocabulary. An empty list means none of those allergens only when allergensReviewed is true. */
+  allergens: IngredientAllergen[];
+  /** Whether an authorized reviewer explicitly reviewed this mapping */
+  allergensReviewed: boolean;
 }
 
 export interface IngredientList {
   items: Ingredient[];
 }
 
+export interface IngredientCatalogInput {
+  id: string;
+  name: string;
+  categories: IngredientCategory[];
+  /** @nullable */
+  mergedInto?: string | null;
+  enabled: boolean;
+}
+
 export interface SaveIngredientsInput {
   /** The batch of ingredients to create or rename (by id) */
-  items: Ingredient[];
+  items: IngredientCatalogInput[];
+}
+
+export interface UpdateIngredientAllergenMappingInput {
+  allergens: IngredientAllergen[];
+  reviewed: boolean;
 }
 
 export interface DeleteIngredientsInput {

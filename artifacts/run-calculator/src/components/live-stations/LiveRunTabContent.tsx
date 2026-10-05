@@ -784,6 +784,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { DeferredSurface } from "../../departments/DeferredDepartmentSurface";
+import RunAllergenFootprintPanel from "../RunAllergenFootprintPanel";
 
 import { PauseTunnelDecision, OperationalStateBadge, ElapsedTimeBadge, PerRunMixSlotBadge, NumField, DoughRecipeCard, FrontlineRecipeCard, CheesePickCard, MixRecipeCard, TypeDropdown, NotesTextarea, aggregatePackagingNeeds } from "../../pages/liveTabsSupport";
 export const LiveRunTabContent = memo(function LiveRunTabContent() {
@@ -1175,6 +1176,11 @@ export const LiveRunTabContent = memo(function LiveRunTabContent() {
                       </div>
                     </div>
                   </div>
+
+                  <RunAllergenFootprintPanel
+                    values={v}
+                    substitutions={dayState.substitutions ?? []}
+                  />
 
                   {/* Status controls — big touch targets */}
                   {runStatus === "pending" && (

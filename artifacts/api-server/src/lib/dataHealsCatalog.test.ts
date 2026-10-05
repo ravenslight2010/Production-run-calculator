@@ -50,6 +50,7 @@ describe("historical automatic repair registration", () => {
       "source-library-reconciliation-2026-08-26-v2",
       "speed-adjustment-baseline-v1",
       "recipe-customer-metadata-cleanup-v1",
+      "qc-manager-allergen-capability-v1",
     ]);
     expect(repairs.every((repair) => repair.mode === "automatic" && !repair.managerAllowed)).toBe(true);
     expect(repairs.every((repair) =>

@@ -51,6 +51,11 @@ export const ingredientsTable = pgTable(
     categories: jsonb("categories").notNull().default([]).$type<IngredientCategory[]>(),
     mergedInto: text("merged_into"),
     enabled: boolean("enabled").notNull().default(true),
+    // Ingredient allergen mappings are reviewed independently from ingredient
+    // catalog edits. An empty list is only meaningful as "none of the tracked
+    // allergens" when allergensReviewed is true.
+    allergens: jsonb("allergens").notNull().default([]).$type<string[]>(),
+    allergensReviewed: boolean("allergens_reviewed").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

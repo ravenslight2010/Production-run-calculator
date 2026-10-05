@@ -22,6 +22,7 @@ import * as aug19ProfileV2 from "./repairs/aug19SavedSpecProfileRepairV2";
 import * as sourceReconciliation from "./repairs/sourceLibraryReconciliationRepair";
 import * as speedAdjustmentBaseline from "./repairs/speedAdjustmentBaselineRepair";
 import * as recipeCustomerMetadata from "./repairs/recipeCustomerMetadataRepair";
+import * as qcManagerAllergenCapability from "./repairs/qcManagerAllergenCapabilityRepair";
 
 export {
   pickMixDuplicateLosers,
@@ -97,6 +98,7 @@ export const AUTOMATIC_DATA_HEAL_IDS = Object.freeze([
   "source-library-reconciliation-2026-08-26-v2",
   "speed-adjustment-baseline-v1",
   "recipe-customer-metadata-cleanup-v1",
+  "qc-manager-allergen-capability-v1",
 ] as const);
 
 const modules = [
@@ -105,6 +107,7 @@ const modules = [
   historicalProfiles, augustImports, remainingAugustImports, profileStub,
   aug19Profile, aug19ProfileV2, sourceReconciliation, speedAdjustmentBaseline,
   recipeCustomerMetadata,
+  qcManagerAllergenCapability,
 ] as const;
 
 function isDefinition(value: unknown): value is RepairDefinition<RepairTransaction> {

@@ -2657,6 +2657,42 @@ paths:
         "403":
           description: Manager role required
 
+  /ingredients/{id}/allergen-mapping:
+    put:
+      operationId: updateIngredientAllergenMapping
+      tags: [ingredients]
+      summary: Review an ingredient's mapped allergens
+      description: >-
+        Sets the reviewed mapping for one existing ingredient within the
+        authenticated facility scope. Only callers with manage-allergens may
+        write this mapping. This is a mapping record, not a food-label claim or
+        cleaning clearance.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateIngredientAllergenMappingInput"
+      responses:
+        "200":
+          description: The updated ingredient mapping
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ingredient"
+        "400":
+          description: Invalid mapping
+        "403":
+          description: Allergen mapping capability required
+        "404":
+          description: Ingredient not found in the current facility scope
+
   /ingredients/merge:
     post:
       operationId: mergeIngredients
@@ -6891,6 +6927,7 @@ components:
         - approve-password-resets
         - review-incidents
         - use-ai-tools
+        - manage-allergens
       description: >-
         A discrete permission. A role grants a set of capabilities, and a user
         holds the union of their role's capabilities.
@@ -10517,6 +10554,10 @@ components:
         are also offered on every other category's picker.
       enum: [cheese, dough, frontline, mix, pep, general]
 
+    IngredientAllergen:
+      type: string
+      enum: [egg, soy, milk, wheat, peanuts, tree nuts, fish, shellfish, sesame]
+
     Ingredient:
       type: object
       description: >-
@@ -10528,6 +10569,8 @@ components:
         - name
         - categories
         - enabled
+        - allergens
+        - allergensReviewed
       properties:
         id:
           type: string
@@ -10548,6 +10591,17 @@ components:
         enabled:
           type: boolean
           description: false = soft-deleted (kept so old rows still resolve)
+        allergens:
+          type: array
+          description: >-
+            Reviewed mapping values from the fixed ingredient-allergen
+            vocabulary. An empty list means none of those allergens only when
+            allergensReviewed is true.
+          items:
+            $ref: "#/components/schemas/IngredientAllergen"
+        allergensReviewed:
+          type: boolean
+          description: Whether an authorized reviewer explicitly reviewed this mapping
 
     IngredientList:
       type: object
@@ -10568,7 +10622,39 @@ components:
           type: array
           description: The batch of ingredients to create or rename (by id)
           items:
-            $ref: "#/components/schemas/Ingredient"
+            $ref: "#/components/schemas/IngredientCatalogInput"
+
+    IngredientCatalogInput:
+      type: object
+      additionalProperties: false
+      required: [id, name, categories, enabled]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        categories:
+          type: array
+          items:
+            $ref: "#/components/schemas/IngredientCategory"
+        mergedInto:
+          type: string
+          nullable: true
+        enabled:
+          type: boolean
+
+    UpdateIngredientAllergenMappingInput:
+      type: object
+      additionalProperties: false
+      required: [allergens, reviewed]
+      properties:
+        allergens:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/IngredientAllergen"
+        reviewed:
+          type: boolean
 
     DeleteIngredientsInput:
       type: object

@@ -116,6 +116,7 @@ import type {
   IncidentClustersResult,
   IncidentDiagnosis,
   IncidentWorkflowUpdate,
+  Ingredient,
   IngredientBatchWeightList,
   IngredientList,
   InventoryItem,
@@ -261,6 +262,7 @@ import type {
   SyncWriteRequest,
   TransferInput,
   UnreviewedIncidentCount,
+  UpdateIngredientAllergenMappingInput,
   UpdateInventoryItemInput,
   UpdateInventoryLocationInput,
   UpdateInventorySettingsInput,
@@ -10011,6 +10013,96 @@ export const useDeleteIngredients = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getDeleteIngredientsMutationOptions(options), queryClient);
+    }
+
+export const getUpdateIngredientAllergenMappingUrl = (id: string,) => {
+
+
+
+
+  return `/api/ingredients/${id}/allergen-mapping`
+}
+
+/**
+ * Sets the reviewed mapping for one existing ingredient within the authenticated facility scope. Only callers with manage-allergens may write this mapping. This is a mapping record, not a food-label claim or cleaning clearance.
+ * @summary Review an ingredient's mapped allergens
+ */
+export const updateIngredientAllergenMapping = async (id: string,
+    updateIngredientAllergenMappingInput: UpdateIngredientAllergenMappingInput, options?: Parameters<typeof customFetch>[1]): Promise<Ingredient> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<Ingredient>(getUpdateIngredientAllergenMappingUrl(id),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(updateIngredientAllergenMappingInput)
+  }
+);}
+
+
+
+
+
+export const getUpdateIngredientAllergenMappingMutationKey = () => ['updateIngredientAllergenMapping'] as const;
+
+export const getUpdateIngredientAllergenMappingMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateIngredientAllergenMapping>>, TError,UpdateIngredientAllergenMappingMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateIngredientAllergenMapping>>, TError,UpdateIngredientAllergenMappingMutationVariables, TContext> => {
+
+const mutationKey = getUpdateIngredientAllergenMappingMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateIngredientAllergenMapping>>, UpdateIngredientAllergenMappingMutationVariables> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateIngredientAllergenMapping(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateIngredientAllergenMappingMutationResult = NonNullable<Awaited<ReturnType<typeof updateIngredientAllergenMapping>>>
+    export type UpdateIngredientAllergenMappingMutationBody = BodyType<UpdateIngredientAllergenMappingInput>
+    export type UpdateIngredientAllergenMappingMutationError = ErrorType<void>
+    export type UpdateIngredientAllergenMappingMutationVariables = {id: string;data: BodyType<UpdateIngredientAllergenMappingInput>}
+
+    /**
+ * @summary Review an ingredient's mapped allergens
+ */
+export const useUpdateIngredientAllergenMapping = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateIngredientAllergenMapping>>, TError,UpdateIngredientAllergenMappingMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateIngredientAllergenMapping>>,
+        TError,
+        UpdateIngredientAllergenMappingMutationVariables,
+        TContext
+      > => {
+      return useMutation(getUpdateIngredientAllergenMappingMutationOptions(options), queryClient);
     }
 
 export const getMergeIngredientsUrl = () => {

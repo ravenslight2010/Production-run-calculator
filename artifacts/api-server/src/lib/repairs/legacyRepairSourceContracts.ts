@@ -336,4 +336,10 @@ export const LEGACY_REPAIR_SOURCE_CONTRACTS: Readonly<
     nestedDoughField: "doughballVariants.customers",
     writes: ["brand", "flavors", "flavor", "doughballVariants.customers", "updatedAt"],
   },
+  "qc-manager-allergen-capability-v1": {
+    targetRole: "qc-manager",
+    addedCapability: "manage-allergens",
+    behavior: "add-only-if-absent",
+    preservesOtherCapabilities: true,
+  },
 });

@@ -25,6 +25,39 @@ export const INGREDIENT_CATEGORIES: IngredientCategory[] = [
   "general",
 ];
 
+export const INGREDIENT_ALLERGENS = [
+  "egg",
+  "soy",
+  "milk",
+  "wheat",
+  "peanuts",
+  "tree nuts",
+  "fish",
+  "shellfish",
+  "sesame",
+] as const;
+
+export type IngredientAllergen = (typeof INGREDIENT_ALLERGENS)[number];
+
+const INGREDIENT_ALLERGEN_SET = new Set<string>(INGREDIENT_ALLERGENS);
+
+export function normalizeIngredientAllergens(input: unknown): {
+  allergens: IngredientAllergen[];
+  valid: boolean;
+} {
+  if (!Array.isArray(input)) return { allergens: [], valid: false };
+  const allergens = new Set<IngredientAllergen>();
+  let valid = true;
+  for (const value of input) {
+    if (typeof value !== "string" || !INGREDIENT_ALLERGEN_SET.has(value)) {
+      valid = false;
+      continue;
+    }
+    allergens.add(value as IngredientAllergen);
+  }
+  return { allergens: [...allergens], valid };
+}
+
 /** Stable comparison key for catalog display names. */
 export function ingredientNameKey(name: string): string {
   return name.trim().toLowerCase();
@@ -50,6 +83,8 @@ export interface Ingredient {
   // id -> name resolution should follow this pointer instead of using `name`.
   mergedInto?: string | null;
   enabled: boolean;
+  allergens: IngredientAllergen[];
+  allergensReviewed: boolean;
 }
 
 // A recipe row that references an ingredient by stable id. `ingredient` is kept
@@ -95,6 +130,7 @@ export function normalizeIngredient(input: unknown): Ingredient | null {
     typeof raw.id === "string" && raw.id.trim()
       ? raw.id.trim()
       : `ing-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const mapping = normalizeIngredientAllergens(raw.allergens);
   return {
     id,
     name,
@@ -104,6 +140,9 @@ export function normalizeIngredient(input: unknown): Ingredient | null {
         ? raw.mergedInto.trim()
         : null,
     enabled: raw.enabled === false ? false : true,
+    allergens: mapping.allergens,
+    // Invalid or absent legacy mapping data is unknown, never "none".
+    allergensReviewed: raw.allergensReviewed === true && mapping.valid,
   };
 }
 
@@ -275,4 +314,173 @@ export function buildIngredientUniverse(
     for (const name of list) add(name);
   }
   return out.sort((a, b) => a.localeCompare(b));
+}
+
+export interface AllergenRecipeIngredientReference {
+  ingredientId?: string;
+  ingredient: string;
+}
+
+export interface AllergenRecipeComponent {
+  label: string;
+  configured: boolean;
+  ingredients: readonly AllergenRecipeIngredientReference[];
+}
+
+export interface RunAllergenFootprint {
+  allergens: Array<{ allergen: IngredientAllergen; ingredientNames: string[] }>;
+  unknownIngredients: Array<{
+    key: string;
+    name: string;
+    reason: "missing-catalog" | "not-reviewed";
+    components: string[];
+  }>;
+  missingComponents: string[];
+  hasRecipeData: boolean;
+  isComplete: boolean;
+}
+
+/**
+ * Derive a read-only, mapping-coverage footprint from saved recipe references.
+ * A configured component with no resolvable rows remains explicitly incomplete.
+ */
+export function deriveRunAllergenFootprint(
+  components: readonly AllergenRecipeComponent[],
+  catalog: readonly Ingredient[],
+): RunAllergenFootprint {
+  const index = buildIngredientIndex([...catalog]);
+  const traceIngredient = (id: string) => {
+    const path: Ingredient[] = [];
+    const seen = new Set<string>();
+    let current = index.byId.get(id) ?? null;
+    let incomplete = false;
+    for (let hop = 0; current && hop <= MAX_MERGE_HOPS; hop++) {
+      if (seen.has(current.id)) {
+        incomplete = true;
+        break;
+      }
+      seen.add(current.id);
+      path.push(current);
+      if (!current.mergedInto) break;
+      const next = index.byId.get(current.mergedInto);
+      if (!next) {
+        incomplete = true;
+        break;
+      }
+      current = next;
+      if (hop === MAX_MERGE_HOPS) incomplete = true;
+    }
+    return { path, ingredient: path[path.length - 1] ?? null, incomplete };
+  };
+  const allergens = new Map<IngredientAllergen, Set<string>>();
+  const unknown = new Map<
+    string,
+    { name: string; reason: "missing-catalog" | "not-reviewed"; components: Set<string> }
+  >();
+  const missingComponents: string[] = [];
+  let hasRecipeData = false;
+
+  const addUnknown = (
+    key: string,
+    name: string,
+    reason: "missing-catalog" | "not-reviewed",
+    component: string,
+  ) => {
+    const existing = unknown.get(key);
+    if (existing) {
+      existing.components.add(component);
+      return;
+    }
+    unknown.set(key, { name, reason, components: new Set([component]) });
+  };
+
+  for (const component of components) {
+    if (!component.configured) continue;
+    const references = component.ingredients.filter((reference) =>
+      Boolean(reference.ingredientId?.trim() || reference.ingredient.trim()),
+    );
+    if (references.length === 0) {
+      missingComponents.push(component.label);
+      continue;
+    }
+    hasRecipeData = true;
+
+    for (const reference of references) {
+      const id = reference.ingredientId?.trim();
+      const name = reference.ingredient.trim();
+      let path: Ingredient[] = [];
+      let ingredient: Ingredient | null = null;
+      let unresolvedMerge = false;
+      if (id) {
+        const resolution = traceIngredient(id);
+        path = resolution.path;
+        ingredient = resolution.ingredient;
+        unresolvedMerge = resolution.incomplete;
+      } else if (name) {
+        const candidate = index.byName.get(ingredientNameKey(name));
+        if (candidate) {
+          const resolution = traceIngredient(candidate.id);
+          path = resolution.path;
+          ingredient = resolution.ingredient;
+          unresolvedMerge = resolution.incomplete;
+        }
+      }
+
+      if (!ingredient) {
+        const displayName = name || (id ? `Unknown ingredient (${id})` : "Unnamed ingredient");
+        const key = id ? `id:${id}` : `name:${ingredientNameKey(displayName)}`;
+        addUnknown(key, displayName, "missing-catalog", component.label);
+        continue;
+      }
+
+      let mappingUnknown = unresolvedMerge;
+      for (const mappedIngredient of path) {
+        const mapping = normalizeIngredientAllergens(mappedIngredient.allergens);
+        if (!mappedIngredient.allergensReviewed || !mapping.valid) {
+          mappingUnknown = true;
+          continue;
+        }
+        for (const allergen of mapping.allergens) {
+          const contributors = allergens.get(allergen) ?? new Set<string>();
+          contributors.add(ingredient.name);
+          allergens.set(allergen, contributors);
+        }
+      }
+
+      if (mappingUnknown) {
+        addUnknown(
+          `id:${ingredient.id}`,
+          ingredient.name,
+          unresolvedMerge ? "missing-catalog" : "not-reviewed",
+          component.label,
+        );
+      }
+    }
+  }
+
+  const mappedAllergens = [...allergens.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([allergen, names]) => ({
+      allergen,
+      ingredientNames: [...names].sort((a, b) => a.localeCompare(b)),
+    }));
+  const unknownIngredients = [...unknown.entries()]
+    .map(([key, value]) => ({
+      key,
+      name: value.name,
+      reason: value.reason,
+      components: [...value.components].sort((a, b) => a.localeCompare(b)),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  return {
+    allergens: mappedAllergens,
+    unknownIngredients,
+    missingComponents: [...new Set(missingComponents)],
+    hasRecipeData,
+    isComplete:
+      hasRecipeData &&
+      unknownIngredients.length === 0 &&
+      missingComponents.length === 0,
+  };
 }

@@ -1,7 +1,7 @@
 # Allergen Tracking — Plan
 
-**Status:** Baseline run labels and sequence warnings built; ingredient mapping, QC verification, cleaning gates, declarations, and reporting remain planned
-**Updated:** 2026-09-19
+**Status:** Ingredient mappings and an incomplete-safe, read-only run footprint are implemented; QC verification, cleaning gates, declarations, and reporting remain planned
+**Updated:** 2026-10-05
 **Dependencies:** stable ingredient identity and durable QC ownership must precede automatic rollups or production-blocking cleaning controls. See the [QC plan](qc-department-plan.md) and [additional domain synthesis](../research/additional-domain-research-synthesis-2026-09-19.md).
 
 ## Current State
@@ -13,10 +13,12 @@
 | Sequence warnings | `lib/allergen/src/index.ts:169` | Warns if allergen → non-allergen transition needs cleaning |
 | Custom allergens | `lib/allergen/src/index.ts:30` | Supports custom allergens from spec sheets (milk, wheat, etc.) |
 | Allergen badge | UI components | Visual allergen badge on run cards |
+| Ingredient allergen mapping | Ingredient master data | Managers and `qc-manager` can maintain the nine tracked allergens; an explicit reviewed flag distinguishes reviewed-empty from unknown |
+| Derived run footprint | Live run view | Read-only footprint uses recipe ingredients, active day substitutions, and selected pepperoni types; missing or unreviewed mappings remain visibly incomplete |
 
 ### What's Missing
-- No per-ingredient allergen mapping (which ingredients contain which allergens)
 - No allergen verification during production (QC doesn't check allergen compliance)
+- No reviewer identity or change history for mapping edits
 - No allergen declaration on shipping labels
 - No allergen cleaning verification after allergen runs
 - No cross-contact risk assessment
@@ -30,14 +32,16 @@
 Each ingredient in the system can be tagged with allergens. When a run's recipe includes that ingredient, the run inherits those allergens automatically.
 
 **Data model**:
-- Extend `ingredients` table with `allergens` (text array)
-- Or new `ingredient_allergens` junction table for cleaner querying
-- Pre-populate common allergens: egg, soy, milk, wheat, peanuts, tree nuts, fish, shellfish, sesame
+- The `ingredients` table stores an allergen list and whether that mapping was reviewed.
+- Tracked vocabulary: egg, soy, milk, wheat, peanuts, tree nuts, fish, shellfish, sesame.
+- Reviewed with no selection means none of these nine; missing or unreviewed mappings remain unknown.
 
 **Implementation**:
-- QC or manager tags ingredients with allergens (once, persistent)
-- When a run's recipe is set, system auto-computes allergen footprint from ingredients
-- Run's `allergen` field becomes derived (or validated) rather than manually entered
+- Managers and the `qc-manager` role can maintain persistent mappings; `qc-operator` does not receive edit access by default.
+- The live run view computes a separate, read-only footprint from effective recipe ingredients, including active day substitutions and selected pepperoni types.
+- The footprint names contributing ingredients and marks missing recipe rows, absent catalog identities, or unreviewed mappings as incomplete.
+- The existing run `allergen` field remains manually entered and continues to drive sequencing warnings. The footprint does not set or validate it.
+- This foundation does not block runs, verify cleaning, release QC holds, or make label or food-safety claims.
 
 ### 2. Allergen Verification (QC)
 Before an allergen run starts, QC verifies:
@@ -83,9 +87,9 @@ End-of-day summary of allergen activity:
 ## Build Order
 
 ### Phase 1: Foundation
-1. Add `allergens` field to ingredient records
-2. Auto-compute run allergen footprint from recipe ingredients
-3. Validate/override run allergen field
+1. Add persisted ingredient mappings and explicit reviewed state — **implemented**
+2. Display a separate incomplete-safe run footprint — **implemented**
+3. Derive or override the manual run allergen field — **deferred; requires a separate owner decision**
 
 ### Phase 2: QC Verification
 4. Allergen pre-run checklist (QC)

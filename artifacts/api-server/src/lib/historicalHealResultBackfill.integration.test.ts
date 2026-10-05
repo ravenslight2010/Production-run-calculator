@@ -73,6 +73,8 @@ beforeAll(async () => {
   db = dbMod.db;
   pool = dbMod.pool;
   dataHealsTable = dbMod.dataHealsTable;
+  // Match application startup: built-in roles are seeded before repairs run.
+  await (await import("./roles")).seedRoles();
   runDataHeals = (await import("./dataHeals")).runDataHeals;
 }, 120_000);
 

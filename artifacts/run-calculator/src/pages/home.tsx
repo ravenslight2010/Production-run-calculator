@@ -409,6 +409,7 @@ import ProfileDataHealthCard from "../components/ProfileDataHealthCard";
 import ProfileNameLinkCleanupCard from "../components/ProfileNameLinkCleanupCard";
 import AiCorrectionsCard from "../components/AiCorrectionsCard";
 import ManageRunsPanel from "../components/ManageRunsPanel";
+import IngredientAllergenMappingManager from "../components/IngredientAllergenMappingManager";
 import ReorderCard from "../components/ReorderCard";
 import UseFirstCard from "../components/UseFirstCard";
 import ScheduledRecipeWarningCard from "../components/ScheduledRecipeWarningCard";
@@ -4178,6 +4179,7 @@ export default function Home() {
   }, [canManageProfiles, adoptedBrandsForProfilePurge]);
   const canEditRules = hasCapability("edit-production-rules");
   const canManageInventory = hasCapability("manage-inventory");
+  const canManageAllergens = hasCapability("manage-allergens");
   const canManageStaff = hasCapability("manage-staff");
   const canUseAiTools = hasCapability("use-ai-tools");
   const canApproveResets = hasCapability("approve-password-resets");
@@ -16222,6 +16224,7 @@ export default function Home() {
           pepTypes: "Pep Types", dieTypes: "Die Types", "ingredient-weights": "Ingredient Weights",
           rules: "Rules", dieDefaults: "Die Defaults", freezer: "Freezer Pull",
            cycleCount: "Cycle Counts", staff: "Staff", audit: "Data Health & Audit", pin: "Change PIN",
+          allergens: "Allergen Mappings",
           import: "Import", setupProfiles: "Setup Profiles", merge: "Merge",
           "ai-corrections": "AI Memory", times: "Shift Times", runs: "Manage Runs",
         };
@@ -16237,7 +16240,10 @@ export default function Home() {
           {
             key: "lists",
             label: "Lists",
-            subTabs: ["brands", "flavors", "pepTypes", "ingredientTypes", "dieTypes", "ingredient-weights"],
+            subTabs: [
+              "brands", "flavors", "pepTypes", "ingredientTypes", "dieTypes", "ingredient-weights",
+              ...(canManageAllergens ? ["allergens"] : []),
+            ],
           },
           {
             key: "settings",
@@ -16900,6 +16906,10 @@ export default function Home() {
                     />
                   );
                 })()}
+
+                {manageCategory === "allergens" && canManageAllergens && (
+                  <IngredientAllergenMappingManager />
+                )}
 
                 {/* Setup Profiles: launch the standalone brand/flavor profile editor */}
                 {manageCategory === "setupProfiles" && isSupervisor && (

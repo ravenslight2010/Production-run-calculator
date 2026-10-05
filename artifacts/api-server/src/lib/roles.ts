@@ -21,6 +21,7 @@ export const CAPABILITIES = [
   "use-ai-tools",
   "manage-factory-settings",
   "manage-profiles",
+  "manage-allergens",
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
@@ -56,7 +57,7 @@ export const ROLE_SEEDS: readonly RoleSeed[] = [
   { name: "qc-operator", capabilities: ["use-ai-tools"], builtin: false },
   {
     name: "qc-manager",
-    capabilities: ["use-ai-tools", "review-incidents"],
+    capabilities: ["use-ai-tools", "review-incidents", "manage-allergens"],
     builtin: false,
   },
   { name: "warehouse", capabilities: [], builtin: false },

@@ -41,6 +41,7 @@ const ALL_CAPS: Capability[] = [
   "use-ai-tools",
   "manage-factory-settings",
   "manage-profiles",
+  "manage-allergens",
 ];
 
 // The capability set each seeded role grants (must match ROLE_SEEDS in
@@ -50,7 +51,7 @@ const ROLE_CAPS: Record<string, Capability[]> = {
   operator: [],
   supervisor: ["review-incidents", "edit-production-rules"],
   "qc-operator": ["use-ai-tools"],
-  "qc-manager": ["use-ai-tools", "review-incidents"],
+  "qc-manager": ["use-ai-tools", "review-incidents", "manage-allergens"],
   warehouse: [],
   inventory: ["manage-inventory"],
 };
@@ -90,6 +91,7 @@ let ingredientBatchWeightsTable: DbModule["ingredientBatchWeightsTable"];
 let userRolesTable: DbModule["userRolesTable"];
 let usersTable: DbModule["usersTable"];
 let rolesTable: DbModule["rolesTable"];
+let dataHealsTable: DbModule["dataHealsTable"];
 let auditLogsTable: DbModule["auditLogsTable"];
 let passwordResetRequestsTable: DbModule["passwordResetRequestsTable"];
 
@@ -161,6 +163,7 @@ beforeAll(async () => {
   userRolesTable = dbMod.userRolesTable;
   usersTable = dbMod.usersTable;
   rolesTable = dbMod.rolesTable;
+  dataHealsTable = dbMod.dataHealsTable;
   auditLogsTable = dbMod.auditLogsTable;
   passwordResetRequestsTable = dbMod.passwordResetRequestsTable;
   const rolesMod = await import("../lib/roles");
@@ -688,6 +691,16 @@ const ROUTES: GatedRoute[] = [
     path: () => "/api/ingredients",
     body: { items: [] },
     okStatus: 200,
+  },
+  {
+    name: "PUT /ingredients/:id/allergen-mapping",
+    capability: "manage-allergens",
+    method: "PUT",
+    path: () => "/api/ingredients/ingredient-not-present/allergen-mapping",
+    body: { allergens: ["egg"], reviewed: true },
+    // A caller with the capability reaches the scoped handler; the deliberate
+    // missing id returns 404 without mutating the fixture.
+    okStatus: 404,
   },
   {
     name: "DELETE /ingredients",
@@ -1225,6 +1238,145 @@ describe("import history idempotency", () => {
   });
 });
 
+describe("PUT /ingredients/:id/allergen-mapping endpoint behavior", () => {
+  async function createIngredient(id: string, name: string): Promise<void> {
+    const response = await req(MANAGER, "POST", "/api/ingredients", {
+      items: [{ id, name, categories: ["dough"], enabled: true }],
+    });
+    expect(response.status).toBe(200);
+  }
+
+  it("keeps mappings readable to staff while restricting mapping writes to the approved capability", async () => {
+    await createIngredient("allergen-flour", "Allergen Flour");
+
+    const denied = await req(QC_OPERATOR, "PUT", "/api/ingredients/allergen-flour/allergen-mapping", {
+      allergens: ["wheat"],
+      reviewed: true,
+    });
+    expect(denied.status).toBe(403);
+    const [unchanged] = await db
+      .select()
+      .from(ingredientsTable)
+      .where(eq(ingredientsTable.id, "allergen-flour"));
+    expect(unchanged).toMatchObject({ allergens: [], allergensReviewed: false });
+
+    const accepted = await req(QC_MANAGER, "PUT", "/api/ingredients/allergen-flour/allergen-mapping", {
+      allergens: ["wheat", "soy"],
+      reviewed: true,
+    });
+    expect(accepted.status).toBe(200);
+    expect(await accepted.json()).toMatchObject({
+      id: "allergen-flour",
+      allergens: ["wheat", "soy"],
+      allergensReviewed: true,
+    });
+
+    const visibleToOperator = await req(QC_OPERATOR, "GET", "/api/ingredients");
+    expect(visibleToOperator.status).toBe(200);
+    const { items } = await visibleToOperator.json() as {
+      items: Array<{ id: string; allergens: string[]; allergensReviewed: boolean }>;
+    };
+    expect(items.find((item: { id: string }) => item.id === "allergen-flour")).toMatchObject({
+      allergens: ["wheat", "soy"],
+      allergensReviewed: true,
+    });
+  });
+
+  it("preserves mappings during ordinary catalog saves and rejects invalid mappings without overwriting saved state", async () => {
+    await createIngredient("allergen-oil", "Allergen Oil");
+    const mappingUrl = "/api/ingredients/allergen-oil/allergen-mapping";
+    const saved = await req(MANAGER, "PUT", mappingUrl, {
+      allergens: ["soy"],
+      reviewed: true,
+    });
+    expect(saved.status).toBe(200);
+
+    const catalogSave = await req(MANAGER, "POST", "/api/ingredients", {
+      items: [{ id: "allergen-oil", name: "Allergen Oil", categories: ["general"], enabled: true }],
+    });
+    expect(catalogSave.status).toBe(200);
+    let [ingredient] = await db
+      .select()
+      .from(ingredientsTable)
+      .where(eq(ingredientsTable.id, "allergen-oil"));
+    expect(ingredient).toMatchObject({ allergens: ["soy"], allergensReviewed: true });
+
+    const reviewedEmpty = await req(MANAGER, "PUT", mappingUrl, {
+      allergens: [],
+      reviewed: true,
+    });
+    expect(reviewedEmpty.status).toBe(200);
+
+    const invalid = await req(MANAGER, "PUT", mappingUrl, {
+      allergens: ["almond"],
+      reviewed: true,
+    });
+    expect(invalid.status).toBe(400);
+    [ingredient] = await db
+      .select()
+      .from(ingredientsTable)
+      .where(eq(ingredientsTable.id, "allergen-oil"));
+    expect(ingredient).toMatchObject({ allergens: [], allergensReviewed: true });
+  });
+
+  it("does not update an ingredient in another facility scope", async () => {
+    await createIngredient("other-scope-ingredient", "Other Scope Ingredient");
+    await db
+      .update(ingredientsTable)
+      .set({ scope: "other-facility" })
+      .where(eq(ingredientsTable.id, "other-scope-ingredient"));
+
+    const response = await req(MANAGER, "PUT", "/api/ingredients/other-scope-ingredient/allergen-mapping", {
+      allergens: ["egg"],
+      reviewed: true,
+    });
+    expect(response.status).toBe(404);
+    const [ingredient] = await db
+      .select()
+      .from(ingredientsTable)
+      .where(eq(ingredientsTable.id, "other-scope-ingredient"));
+    expect(ingredient).toMatchObject({ allergens: [], allergensReviewed: false });
+  });
+});
+
+describe("qc-manager allergen capability repair", () => {
+  it("adds only the approved grant to existing roles and does not override later role edits", async () => {
+    await db
+      .update(rolesTable)
+      .set({ capabilities: ["use-ai-tools", "review-incidents", "manage-inventory"] })
+      .where(eq(rolesTable.name, "qc-manager"));
+    await db
+      .insert(dataHealsTable)
+      .values({ id: "recipe-customer-metadata-cleanup-v1" })
+      .onConflictDoNothing();
+
+    const [{ qcManagerAllergenCapabilityRepair }, { runRegisteredRepair }] = await Promise.all([
+      import("../lib/repairs/qcManagerAllergenCapabilityRepair"),
+      import("../lib/repairRegistry"),
+    ]);
+    const applied = await runRegisteredRepair(qcManagerAllergenCapabilityRepair, db);
+    expect(applied).toMatchObject({ id: "qc-manager-allergen-capability-v1", status: "applied" });
+    let [role] = await db.select().from(rolesTable).where(eq(rolesTable.name, "qc-manager"));
+    expect(role).toBeDefined();
+    const addedCapabilities = role!.capabilities;
+    expect(addedCapabilities).toEqual([
+      "use-ai-tools",
+      "review-incidents",
+      "manage-inventory",
+      "manage-allergens",
+    ]);
+
+    await db
+      .update(rolesTable)
+      .set({ capabilities: addedCapabilities.filter((capability) => capability !== "manage-allergens") })
+      .where(eq(rolesTable.name, "qc-manager"));
+    const repeated = await runRegisteredRepair(qcManagerAllergenCapabilityRepair, db);
+    expect(repeated).toMatchObject({ id: "qc-manager-allergen-capability-v1", status: "skipped" });
+    [role] = await db.select().from(rolesTable).where(eq(rolesTable.name, "qc-manager"));
+    expect(role!.capabilities).toEqual(["use-ai-tools", "review-incidents", "manage-inventory"]);
+  });
+});
+
 describe("POST /ingredients/merge endpoint behavior", () => {
   it("reuses an active identity on repeat import and adds categories", async () => {
     const first = await req(MANAGER, "POST", "/api/ingredients", {
@@ -1257,6 +1409,8 @@ describe("POST /ingredients/merge endpoint behavior", () => {
         categories: ["cheese", "mix"],
         mergedInto: null,
         enabled: true,
+        allergens: [],
+        allergensReviewed: false,
       },
     ]);
   });

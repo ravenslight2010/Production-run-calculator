@@ -19,4 +19,5 @@ export const Capability = {
   'approve-password-resets': 'approve-password-resets',
   'review-incidents': 'review-incidents',
   'use-ai-tools': 'use-ai-tools',
+  'manage-allergens': 'manage-allergens',
 } as const;
