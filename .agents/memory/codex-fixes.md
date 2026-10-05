@@ -1390,3 +1390,20 @@ In that state the sauce/applicator effects `return`/`continue` BEFORE the local 
 **Verification (2026-09-22 ~23:12 UTC):** `https://runcalc.onrender.com/api/readyz` → HTTP 200 with `process/startup/database/dependencies/backgroundWorkers` all `ok`; `/api/healthz` 200; `/api/livez` 200. Live deploy image ref is the sha tag (digest `caf0787b…` platform manifest; evidence index digest for the same publish is `fff67f56…`).
 
 **Outstanding watch items:** `runcalc-db` (free tier) expires **2026-09-29**; nightly CI still has no `DATABASE_URL` Actions secret.
+
+## 2026-10-05 — Rebound reviewer evidence and pinned release-gate Node after the undici/fast-uri override bump
+
+**File(s):** `docs/second-pass-reviewer-benchmark-2026-09-05.json`, `.github/workflows/release-check.yml`
+
+**What was wrong:** Two independent failures, both pre-existing and branch-independent (they reproduce on `main` and on unrelated PRs such as #102):
+
+1. **Stale second-pass reviewer evidence.** `pnpm run test:second-pass-reviewer` asserts the checked-in evidence deep-equals a freshly built report. The report pins `dependencies.pnpmLockSha256`, so *any* lockfile change invalidates it. The prior undici/fast-uri override bump rebound `lib/corpus-harness/snapshots/evaluation-manifest.json` (`41078fb0…` -> `67689b44…`) but missed this second file, which still pinned the pre-bump `40a1ce55…`. Failing assertion: `checked-in reviewer evidence must match the pinned source and observations`. `main` is red for the same reason — its evidence pins `40a1ce55…` while `main`'s lockfile is `41078fb0…`.
+2. **Floating release-gate Node vs. pinned evidence.** Both `release-check.yml` jobs used `node-version: "24"`, which floats to the newest 24.x (now `24.21.0`), while `lib/corpus-harness` asserts the snapshot's `dependencies.node` by exact equality (pinned `24.20.0`). Result: `corpus.test.ts:46` failed with `- "node": "24.20.0" / + "node": "24.21.0"`. The evidence pin is deliberate, so the workflow is the side that must be deterministic — `ci.yml` already pins `24.20.0` for the jobs that assert this evidence.
+
+**What the fix was:** Regenerated the reviewer evidence with its own generator (`pnpm --filter @workspace/scripts benchmark:second-pass-reviewer docs/second-pass-reviewer-benchmark-2026-09-05.json`) rather than hand-editing, so only the lock hash moved and `node`/`benchmarkReporterSha256` were preserved. Pinned both release-gate jobs to `node-version: "24.20.0"`, matching `ci.yml` and the checked-in evidence.
+
+**Why it was needed:** Both failures blocked every open PR and `main` itself, so no PR could go green or merge. Note for future lockfile bumps: `pnpmLockSha256` is pinned in *two* places, and both must be rebound together.
+
+**Verification:** `pnpm --filter @workspace/scripts test:second-pass-reviewer` passes; `lib/corpus-harness` 12/12 on Node 24.20.0; `bash ./scripts/src/check-workflows.test.sh` all PASS; `release-check.yml` parses and both jobs resolve `24.20.0`.
+
+**Still open (pre-existing, not introduced here):** `artifacts/api-server/src/routes/masterDataBootstrap.test.ts:164` — `invalidates only the mutated scope` expects `304` for the untouched scope but CI returns `200`. Reproduces deterministically on #103 and #102 inside release shard 1/7 (`vitest run --exclude '**/*.integration.test.ts'`, which runs with `isolate: false` so module state is shared across test files in a worker), and passes 5/5 locally when the file runs alone. Not yet root-caused; needs a `DATABASE_URL`-provisioned local run to reproduce shard 1.
