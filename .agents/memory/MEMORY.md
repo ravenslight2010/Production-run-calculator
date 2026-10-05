@@ -71,7 +71,7 @@
 - [Cheese share oz basis](cheese-share-oz-basis.md) — Share % may use oz only with FULL oz coverage of lbs>0 rows; partial imported oz must be stripped (heal + editor clear) or shares go wild.
 - [Spec-import stub pollution](spec-import-stub-pollution.md) — spec imports mint all-zero stub recipes in every pool; unlinked stubs persist in prod; audit method + corpus pointer inside.
 - [Same-name pool dups](same-name-pool-dups.md) — name-keyed merge can't see two pool rows with one name; fix by deduping rows (heal), not the merge UI; beware tie-break sign under descending sort.
-- [DB recovery](dev-db-connection-exhaustion.md) + [process cleanup](detached-process-reaping.md) — bound retries and reap detached children.
+- [DB recovery](dev-db-connection-exhaustion.md) + [process cleanup](detached-process-reaping.md) + [test cleanup](isolated-test-process-cleanup.md) — reap owned processes before teardown.
 - [Pool deadlines](pool-acquisition-deadlines.md) + [scheduler backoff](background-scheduler-backoff.md) — bound DB waits and back off background work.
 - [Merge target must survive](merge-target-must-survive.md) — pool-name merges must promote a source by rename when the target name has no pool row, or deleting sources destroys the recipe.
 - [Applicator tolerance columns](applicator-tolerance-columns.md) — ozPerPizza = FIRST numeric cell after the name; trailing 0.2/0.1 cells are tolerances; verify via TARGET WEIGHT sum.

@@ -8,6 +8,8 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 LAUNCHER="${SCRIPT_DIR}/run-release-node.sh"
+REAL_TIMEOUT_BIN=$(command -v timeout)
+export SYNC_REAL_TIMEOUT="$REAL_TIMEOUT_BIN"
 TEST_ROOT=$(mktemp -d)
 trap 'rm -rf "$TEST_ROOT"' EXIT
 
@@ -640,6 +642,15 @@ case "$action" in
     ;;
   stop)
     : >"$SYNC_PG_STOP_ATTEMPTED"
+      if [[ -n "${SYNC_TIMEOUT_SESSION_FILE:-}" &&
+        -s "$SYNC_TIMEOUT_SESSION_FILE" ]]; then
+        test_session=$(cat "$SYNC_TIMEOUT_SESSION_FILE")
+        if ps -eo sid=,stat= |
+          awk -v session="$test_session" \
+            '$1 == session && $2 !~ /^Z/ { found = 1 } END { exit !found }'; then
+          : >"$SYNC_PG_STOP_WITH_TEST_CHILDREN"
+        fi
+      fi
     if [[ "${SYNC_PG_STOP_FAILURE:-0}" == "1" ]]; then
       exit 1
     fi
@@ -704,6 +715,65 @@ chmod +x \
   "${SYNC_TEST_BIN}/api-child" \
   "${SYNC_TEST_BIN}/vitest-child" \
   "${SYNC_TEST_BIN}/pnpm"
+
+cat >"${SYNC_TEST_BIN}/timeout" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${SYNC_TIMEOUT_TEST_MODE:-}" != "expire" ]]; then
+  exec "$SYNC_REAL_TIMEOUT" "$@"
+fi
+
+while (( $# > 0 )); do
+  case "$1" in
+    --*)
+      shift
+      ;;
+    [0-9]*s|[0-9]*m|[0-9]*h)
+      shift
+      break
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+if (( $# == 0 )); then
+  printf 'Fake timeout did not receive a command.\n' >&2
+  exit 64
+fi
+
+test_session=$(ps -o sid= -p "$$" | tr -d ' ')
+printf '%s\n' "$test_session" >"$SYNC_TIMEOUT_SESSION_FILE"
+"$@" &
+command_pid=$!
+for ((attempt = 0; attempt < 200; attempt++)); do
+  if [[ -f "$SYNC_PNPM_STARTED" &&
+    -f "$SYNC_API_STARTED" &&
+    -f "$SYNC_VITEST_STARTED" ]]; then
+    break
+  fi
+  sleep 0.01
+done
+if [[ ! -f "$SYNC_PNPM_STARTED" ||
+  ! -f "$SYNC_API_STARTED" ||
+  ! -f "$SYNC_VITEST_STARTED" ]]; then
+  kill -TERM "$command_pid" 2>/dev/null || true
+  wait "$command_pid" 2>/dev/null || true
+  printf 'Fake timeout command did not start its test descendants.\n' >&2
+  exit 65
+fi
+
+touch "$SYNC_TIMEOUT_STARTED"
+printf 'fake timeout expired\n'
+# Mirror a timeout that stops its direct command but exits without waiting for
+# grandchildren that are still in the runner-owned session.
+kill -TERM "$command_pid" 2>/dev/null || true
+wait "$command_pid" 2>/dev/null || true
+touch "$SYNC_TIMEOUT_EXPIRED"
+exit 124
+EOF
+chmod +x "${SYNC_TEST_BIN}/timeout"
 
 run_isolated_sync_interrupt_case() {
   local case_name="$1"
@@ -840,6 +910,138 @@ test_isolated_sync_interrupt_cleans_database_and_children() {
   run_isolated_sync_interrupt_case stopped 0
   run_isolated_sync_interrupt_case unconfirmed-stop 1
   echo "PASS: interrupted isolated sync runner stops API/Vitest and cleans or safely preserves its disposable database"
+}
+
+run_isolated_sync_timeout_case() {
+  local case_name="$1"
+  local stop_failure="$2"
+  local case_dir="${TEST_ROOT}/sync-timeout-${case_name}"
+  local db_path
+  local db_name
+  local db_url
+  local test_session
+  local actual_status
+  local attempt
+  local runner_pid
+  local output_path="${case_dir}/output"
+  mkdir -p "${case_dir}/tmp"
+
+  env \
+    -u NODE_ENV \
+    -u APP_ENV \
+    -u REPLIT_DEPLOYMENT \
+    PATH="${SYNC_TEST_BIN}:${PATH}" \
+    TMPDIR="${case_dir}/tmp" \
+    DATABASE_URL="postgresql://shared.example/should-not-be-used" \
+    SYNC_DB_PATH_FILE="${case_dir}/db-path" \
+    SYNC_DB_NAME_FILE="${case_dir}/db-name" \
+    SYNC_DATABASE_URL_FILE="${case_dir}/database-url" \
+    SYNC_PNPM_ARGS_FILE="${case_dir}/pnpm-args" \
+    SYNC_PG_STARTED="${case_dir}/pg-started" \
+    SYNC_PG_STOP_ATTEMPTED="${case_dir}/pg-stop-attempted" \
+    SYNC_PG_STOPPED="${case_dir}/pg-stopped" \
+    SYNC_PG_STOP_WITH_TEST_CHILDREN="${case_dir}/pg-stop-with-test-children" \
+    SYNC_PG_STOP_FAILURE="$stop_failure" \
+    SYNC_PNPM_STARTED="${case_dir}/pnpm-started" \
+    SYNC_API_STARTED="${case_dir}/api-started" \
+    SYNC_API_STOPPED="${case_dir}/api-stopped" \
+    SYNC_VITEST_STARTED="${case_dir}/vitest-started" \
+    SYNC_VITEST_STOPPED="${case_dir}/vitest-stopped" \
+    SYNC_TIMEOUT_SESSION_FILE="${case_dir}/timeout-session" \
+    SYNC_TIMEOUT_STARTED="${case_dir}/timeout-started" \
+    SYNC_TIMEOUT_EXPIRED="${case_dir}/timeout-expired" \
+    SYNC_TIMEOUT_TEST_MODE=expire \
+    SYNC_REAL_TIMEOUT="$REAL_TIMEOUT_BIN" \
+    SYNC_TEST_BIN="$SYNC_TEST_BIN" \
+    bash "$ISOLATED_SYNC_RUNNER" >"$output_path" 2>&1 &
+  runner_pid=$!
+
+  for ((attempt = 0; attempt < 250; attempt++)); do
+    [[ -f "${case_dir}/timeout-expired" ]] && break
+    sleep 0.1
+  done
+  if [[ ! -f "${case_dir}/timeout-expired" ]]; then
+    kill -TERM "$runner_pid" 2>/dev/null || true
+    wait "$runner_pid" 2>/dev/null || true
+    printf 'Isolated sync runner did not exercise fake timeout expiry.\n' >&2
+    cat "$output_path" >&2
+    return 1
+  fi
+
+  set +e
+  wait "$runner_pid"
+  actual_status=$?
+  set -e
+  [[ "$actual_status" -eq 124 ]] || {
+    printf 'Expected timed-out isolated sync status 124, got %s. Output:\n' \
+      "$actual_status" >&2
+    cat "$output_path" >&2
+    return 1
+  }
+  [[ -f "${case_dir}/api-stopped" && -f "${case_dir}/vitest-stopped" ]] || {
+    printf 'Timed-out isolated sync run did not stop both API and Vitest children.\n' >&2
+    cat "$output_path" >&2
+    return 1
+  }
+  [[ -f "${case_dir}/pg-stop-attempted" ]] || {
+    printf 'Timed-out isolated sync run did not attempt to stop PostgreSQL.\n' >&2
+    cat "$output_path" >&2
+    return 1
+  }
+  [[ ! -e "${case_dir}/pg-stop-with-test-children" ]] || {
+    printf 'Timed-out isolated sync run attempted PostgreSQL cleanup before stopping test descendants.\n' >&2
+    cat "$output_path" >&2
+    return 1
+  }
+
+  db_url=$(cat "${case_dir}/database-url")
+  db_name=$(cat "${case_dir}/db-name")
+  if [[ ! "$db_url" =~ ^postgresql://postgres@127\.0\.0\.1:[0-9]+/sync_convergence_test_[[:xdigit:]]{12}$ ||
+    "$db_url" != */"$db_name" ]]; then
+    printf 'Timed-out isolated sync runner did not use its own disposable database URL: %s\n' \
+      "$db_url" >&2
+    cat "$output_path" >&2
+    return 1
+  fi
+
+  test_session=$(cat "${case_dir}/timeout-session")
+  if ps -eo sid=,stat= |
+    awk -v session="$test_session" \
+      '$1 == session && $2 !~ /^Z/ { found = 1 } END { exit !found }'; then
+    printf 'Timed-out isolated sync run left live test descendants in session %s.\n' \
+      "$test_session" >&2
+    cat "$output_path" >&2
+    return 1
+  fi
+
+  db_path=$(cat "${case_dir}/db-path")
+  if [[ "$stop_failure" == "1" ]]; then
+    [[ -d "$db_path" && -f "${db_path}/running" ]] || {
+      printf 'Unconfirmed PostgreSQL shutdown did not preserve its live data directory.\n' >&2
+      cat "$output_path" >&2
+      return 1
+    }
+    assert_contains "$(cat "$output_path")" \
+      "Could not confirm that the disposable PostgreSQL server stopped; preserving its data directory at ${db_path}."
+    rm -rf -- "$db_path"
+  else
+    [[ -f "${case_dir}/pg-stopped" ]] || {
+      printf 'Timed-out isolated sync run did not stop PostgreSQL.\n' >&2
+      cat "$output_path" >&2
+      return 1
+    }
+    [[ ! -e "$db_path" ]] || {
+      printf 'Timed-out isolated sync run left its disposable data directory at %s.\n' \
+        "$db_path" >&2
+      return 1
+    }
+  fi
+}
+
+test_isolated_sync_timeout_cleans_descendants_before_database() {
+  run_isolated_sync_timeout_case stopped 0
+  run_isolated_sync_timeout_case unconfirmed-stop 1
+  echo "PASS: timed-out isolated sync runner stops test descendants before PostgreSQL cleanup and removes or safely preserves its disposable database"
 }
 
 test_release_node_fallback_interrupt_stops_process_group() {
@@ -1100,6 +1302,7 @@ test_missing_npx_fails_before_release_commands
 test_isolated_browser_status_and_database_cleanup
 test_isolated_browser_interrupt_cleans_database
 test_isolated_sync_interrupt_cleans_database_and_children
+test_isolated_sync_timeout_cleans_descendants_before_database
 test_release_node_fallback_interrupt_stops_process_group
 test_release_runner_serializes_same_workspace_commands
 test_release_runner_nested_invocation_reuses_lock

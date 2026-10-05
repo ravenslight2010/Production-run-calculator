@@ -48,6 +48,7 @@ test_log=""
 test_status=0
 test_elapsed_ms=0
 active_child_pid=""
+active_child_cleanup_failed=0
 
 stop_active_child() {
   local signal="$1"
@@ -63,10 +64,20 @@ stop_active_child() {
       '$1 == session && $2 !~ /^Z/ { found = 1 } END { exit !found }'; do
     if (( SECONDS >= deadline )); then
       kill -KILL -- "-$process_group" 2>/dev/null || true
+      deadline=$((SECONDS + 5))
+      while ps -eo sid=,stat= |
+        awk -v session="$process_group" \
+          '$1 == session && $2 !~ /^Z/ { found = 1 } END { exit !found }'; do
+        if (( SECONDS >= deadline )); then
+          return 1
+        fi
+        sleep 0.1
+      done
       break
     fi
     sleep 0.1
   done
+  return 0
 }
 
 handle_signal() {
@@ -75,7 +86,9 @@ handle_signal() {
 
   trap '' HUP INT TERM
   if [[ -n "$active_child_pid" ]]; then
-    stop_active_child "$signal"
+    if ! stop_active_child "$signal"; then
+      active_child_cleanup_failed=1
+    fi
     wait "$active_child_pid" 2>/dev/null || true
     active_child_pid=""
   fi
@@ -101,6 +114,12 @@ os.execvp(sys.argv[1], sys.argv[1:])
   else
     child_status=$?
   fi
+  # A timed-out wrapper can exit while descendants it started are still alive.
+  # Reap the owned session before cleanup is allowed to stop PostgreSQL.
+  if ! stop_active_child TERM; then
+    active_child_cleanup_failed=1
+    [[ "$child_status" != "0" ]] || child_status=1
+  fi
   active_child_pid=""
   return "$child_status"
 }
@@ -111,12 +130,22 @@ cleanup() {
   trap - EXIT HUP INT TERM
 
   if [[ -n "$active_child_pid" ]]; then
-    stop_active_child TERM
+    if ! stop_active_child TERM; then
+      active_child_cleanup_failed=1
+    fi
     wait "$active_child_pid" 2>/dev/null || true
     active_child_pid=""
   fi
 
-  if [[ -n "$pg_data" && -n "$pg_bin" ]]; then
+  if (( active_child_cleanup_failed )); then
+    if [[ -n "$pg_data" ]]; then
+      printf 'Could not confirm that all isolated sync test processes stopped; skipping PostgreSQL shutdown and preserving its data directory at %s.\n' \
+        "$pg_data" >&2
+    else
+      printf 'Could not confirm that all isolated sync test processes stopped.\n' >&2
+    fi
+    (( exit_status != 0 )) || exit_status=1
+  elif [[ -n "$pg_data" && -n "$pg_bin" ]]; then
     if "$pg_bin/pg_ctl" -D "$pg_data" -m immediate -w stop >/dev/null 2>&1; then
       if ! rm -rf -- "$pg_data"; then
         printf 'Could not remove the stopped disposable PostgreSQL data directory; preserving it at %s.\n' \
