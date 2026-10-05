@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { Client } from "pg";
 import * as XLSX from "xlsx";
 import {
@@ -23,20 +23,55 @@ const CHEESE_RECIPE = `Unit Cheese ${suffix}`;
 
 function unitProvenanceWorkbook(): Buffer {
   const profiles = XLSX.utils.aoa_to_sheet([
-    ["Brand", "Flavor", "Cases Planned", "Notes"],
-    [BRAND, FLAVOR, 12, "Unit provenance review fixture"],
+    [
+      "Brand",
+      "Flavor",
+      "Cases Planned",
+      "Notes",
+      "Dough Recipe",
+      "Sauce Recipe",
+      "Sauce oz/pizza",
+      "Applicator 2 Type",
+      "Applicator 2 oz/pizza",
+      "Pepperoni 1 Type",
+      "Pepperoni 1 Sticks",
+      "Pepperoni 1 oz/pizza",
+    ],
+    [
+      BRAND,
+      FLAVOR,
+      12,
+      "Unit provenance review fixture",
+      DOUGH_RECIPE,
+      SAUCE_RECIPE,
+      17.25,
+      "Cheese",
+      18.25,
+      "Natural",
+      3,
+      19.25,
+    ],
   ]);
-  // Keep the source data in one unsupported row so deterministic preparation
-  // recognizes the profile sheet but retains this complete row for explicit AI
-  // review instead of misclassifying recipe rows as extra profiles.
-  const recipeReview = XLSX.utils.aoa_to_sheet([[
-    DOUGH_RECIPE, "dough", "Flour", 50.25, "lbs",
-    SAUCE_RECIPE, "sauce", "Tomato Paste", 3.75,
-    CHEESE_RECIPE, "cheese", "Mozzarella", 7.125, "batch weight",
-  ]]);
+  const dough = XLSX.utils.aoa_to_sheet([
+    [`Recipe: ${DOUGH_RECIPE}`],
+    ["Ingredient", "lbs"],
+    ["Flour", 50.25],
+  ]);
+  const sauce = XLSX.utils.aoa_to_sheet([
+    [`Recipe: ${SAUCE_RECIPE}`],
+    ["Ingredient"],
+    ["Tomato Paste", 3.75],
+  ]);
+  const cheese = XLSX.utils.aoa_to_sheet([
+    [`Recipe: ${CHEESE_RECIPE}`],
+    ["Ingredient", "batch weight"],
+    ["Mozzarella", 7.125],
+  ]);
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, profiles, "Production Runs");
-  XLSX.utils.book_append_sheet(workbook, recipeReview, "Recipe Unit Review");
+  XLSX.utils.book_append_sheet(workbook, dough, "Dough Recipe Unit Review");
+  XLSX.utils.book_append_sheet(workbook, sauce, "Sauce Recipe Unit Review");
+  XLSX.utils.book_append_sheet(workbook, cheese, "Cheese Recipe Unit Review");
   return Buffer.from(XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }));
 }
 
@@ -85,6 +120,54 @@ async function openWorkbookImport(page: Page): Promise<void> {
   });
 }
 
+async function expectAmountWarnings(review: Locator): Promise<void> {
+  const summary = review.getByTestId("spec-import-amount-warnings");
+  await expect(summary).toContainText("3 per-pizza amounts above the advisory limit");
+  await expect(summary).toContainText("These warnings do not block Apply or change values");
+
+  const warnings = review.getByTestId("spec-profile-amount-warning-pk0");
+  await warnings.scrollIntoViewIfNeeded();
+  await expect(warnings).toBeVisible();
+  await expect(warnings).toContainText("Check per-pizza amounts — advisory only");
+  await expect(warnings).toContainText(
+    "Sauce: 17.25 oz per pizza exceeds the 16 oz per pizza advisory limit",
+  );
+  await expect(warnings).toContainText(
+    "Applicator 2 (Cheese): 18.25 oz per pizza exceeds the 16 oz per pizza advisory limit",
+  );
+  await expect(warnings).toContainText(
+    "Pepperoni entry 1 (Natural): 19.25 oz per pizza exceeds the 16 oz per pizza advisory limit",
+  );
+
+  const rows = warnings.locator("li");
+  await expect(rows).toHaveCount(3);
+  for (const row of await rows.all()) {
+    await expect(row).toBeVisible();
+    const dimensions = await row.evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+    }));
+    expect(dimensions.clientWidth).toBeGreaterThan(0);
+    expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth + 1);
+    expect(dimensions.clientHeight).toBeGreaterThan(0);
+    expect(dimensions.scrollHeight).toBeLessThanOrEqual(dimensions.clientHeight + 1);
+  }
+}
+
+async function captureReviewState(
+  review: Locator,
+  testInfo: TestInfo,
+  viewport: "portrait" | "landscape",
+  step: "products" | "details",
+): Promise<void> {
+  await testInfo.attach(`tablet-${viewport}-${step}`, {
+    body: await review.screenshot({ type: "jpeg", quality: 75 }),
+    contentType: "image/jpeg",
+  });
+}
+
 test.beforeAll(async () => {
   await requireIsolatedTestDatabase("spec import unit provenance browser regression");
 });
@@ -100,9 +183,19 @@ test.afterAll(async () => {
   }
 });
 
-test("shows recipe unit provenance without rescaling workbook values or blocking Apply", async ({
-  page,
-}) => {
+test("shows amount advisories and recipe unit provenance without rescaling or blocking Apply", async (
+  { page },
+  testInfo,
+) => {
+  await page.setViewportSize({ width: 768, height: 1024 });
+  const browserErrors: string[] = [];
+  page.on("pageerror", (error) => {
+    // The isolated WebKit runner cannot fetch the optional Google Fonts CSS.
+    // Keep real application page errors fatal while excluding this network-only
+    // failure, which does not affect the fallback-font layout under test.
+    if (error.message.includes("fonts.googleapis.com/css2?family=")) return;
+    browserErrors.push(error.message);
+  });
   const username = uniqueTestId("e2e_spec_units");
   testUsernames.add(username);
   await signUpAndHandleOnboarding(page, username, PASSWORD, {
@@ -116,6 +209,7 @@ test("shows recipe unit provenance without rescaling workbook values or blocking
     onboarding: { visibilityTimeout: 5_000 },
   });
   await promoteToManager(username);
+  await dismissOnboardingIfPresent(page, { visibilityTimeout: 5_000 });
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
   await dismissOnboardingIfPresent(page, { visibilityTimeout: 5_000 });
@@ -123,85 +217,19 @@ test("shows recipe unit provenance without rescaling workbook values or blocking
     const response = await fetch("/api/me", { cache: "no-store" });
     if (!response.ok) return false;
     const me = await response.json() as { capabilities?: string[] };
-    return me.capabilities?.includes("use-ai-tools") ?? false;
+    return me.capabilities?.includes("manage-factory-settings") ?? false;
   }), { timeout: 20_000 }).toBe(true);
-
-  let workbookText = "";
-  let structuredParseCount = 0;
-  await page.route("**/api/ai/parse-spec-sheet", async (route) => {
-    structuredParseCount += 1;
-    const body = route.request().postDataJSON() as { workbookText?: string };
-    workbookText = body.workbookText ?? workbookText;
-    await route.fulfill({
-      contentType: "application/json",
-      body: JSON.stringify({
-        profiles: [{
-          brand: BRAND,
-          flavor: FLAVOR,
-          doughName: DOUGH_RECIPE,
-          sauceName: SAUCE_RECIPE,
-          dieType: "12 inch",
-          pizzasPerCase: 12,
-          applicators: [],
-          pepperonis: [],
-        }],
-        recipes: [
-          {
-            kind: "dough",
-            name: DOUGH_RECIPE,
-            rowsUnit: "lbs",
-            rows: [{ ingredient: "Flour", lbs: 50.25 }],
-          },
-          {
-            kind: "sauce",
-            name: SAUCE_RECIPE,
-            rows: [{ ingredient: "Tomato Paste", lbs: 3.75 }],
-          },
-          {
-            kind: "cheese",
-            name: CHEESE_RECIPE,
-            rowsUnit: "batch weight",
-            rows: [{ ingredient: "Mozzarella", lbs: 7.125 }],
-          },
-        ],
-        generatedAt: Date.now(),
-      }),
-    });
-  });
-  await page.route("**/api/ai/match-import", async (route) => {
-    await route.fulfill({
-      contentType: "application/json",
-      body: JSON.stringify({
-        brandMatches: [],
-        flavorMatches: [],
-        ingredientMatches: [],
-        appTypeMatches: [],
-        pepTypeMatches: [],
-        generatedAt: Date.now(),
-      }),
-    });
-  });
 
   await openWorkbookImport(page);
 
   const review = page.getByRole("dialog", { name: "Import Spec Sheet" });
   await expect(review).toContainText("Step 1 of 2 — products", { timeout: 20_000 });
-  // Preparation is deterministic-first. Explicitly choosing AI is the
-  // manager action that interprets this unsupported source layout.
-  expect(structuredParseCount).toBe(0);
+  await expectAmountWarnings(review);
+  await expect(review.getByRole("button", { name: "Next", exact: true })).toBeInViewport();
+  await captureReviewState(review, testInfo, "portrait", "products");
   await review.getByRole("button", { name: "Next", exact: true }).click();
   await expect(review).toContainText("Step 2 of 2 — details");
-  await expect(review).toContainText("need review; no guesses were applied");
-  await review.getByRole("button", { name: /Use AI for \d+ unresolved items?/ }).click();
-  await expect.poll(() => structuredParseCount).toBeGreaterThanOrEqual(1);
-  expect(workbookText).toContain(DOUGH_RECIPE);
-  expect(workbookText).toContain("50.25");
-  expect(workbookText).toContain("batch weight");
-  // The interpreted result restarts at products so the manager reviews all
-  // additions before inspecting the detailed unit provenance.
-  await expect(review).toContainText("Step 1 of 2 — products");
-  await review.getByRole("button", { name: "Next", exact: true }).click();
-  await expect(review).toContainText("Step 2 of 2 — details");
+  await expectAmountWarnings(review);
 
   const recipeCards = review.locator('li[data-testid^="spec-recipe-"]');
   const dough = recipeCards.filter({ hasText: DOUGH_RECIPE });
@@ -216,9 +244,32 @@ test("shows recipe unit provenance without rescaling workbook values or blocking
   await expect(sauce).toContainText("the values will stay exactly as reported");
   await expect(cheese).toContainText("the values will stay exactly as reported");
 
+  await expectAmountWarnings(review);
   const apply = review.getByRole("button", { name: /^Apply \d+ items?$/ });
   await expect(apply).toBeVisible();
+  await expect(apply).toBeInViewport();
   await expect(apply).toBeEnabled();
+  await captureReviewState(review, testInfo, "portrait", "details");
+
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await expectAmountWarnings(review);
+  await expect(apply).toBeVisible();
+  await expect(apply).toBeInViewport();
+  await expect(apply).toBeEnabled();
+  await captureReviewState(review, testInfo, "landscape", "details");
+
+  await review.getByRole("button", { name: "Back", exact: true }).click();
+  await expect(review).toContainText("Step 1 of 2 — products");
+  await expectAmountWarnings(review);
+  await expect(review.getByRole("button", { name: "Next", exact: true })).toBeInViewport();
+  await captureReviewState(review, testInfo, "landscape", "products");
+  await review.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(review).toContainText("Step 2 of 2 — details");
+  await expectAmountWarnings(review);
+  await expect(apply).toBeVisible();
+  await expect(apply).toBeInViewport();
+  await expect(apply).toBeEnabled();
+  expect(browserErrors, "browser page errors").toEqual([]);
   await review.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(review).toBeHidden();
 });

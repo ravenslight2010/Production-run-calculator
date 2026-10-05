@@ -16,3 +16,17 @@ adding layout coverage.
 **How to apply:** Count lifecycle/report cases as compatibility evidence, and
 run the dedicated WebKit command for sync recovery. Never describe responsive
 WebKit emulation as physical iOS Safari/PWA evidence.
+
+In isolated Replit WebKit runs, a page error naming only
+`fonts.googleapis.com/css2?family=` can represent a no-response from the
+optional external font stylesheet. Exclude only that resource from the
+page-error assertion; keep other page errors fatal and test layout in fallback
+fonts.
+
+**Why:** The isolated browser may not reach Google Fonts even though the app
+flow is working. Treating that network-only failure as an app exception obscures
+the responsive result, while broadly suppressing page errors would hide defects.
+
+**How to apply:** Match the exact font stylesheet host/path in the WebKit test
+listener. Do not skip other network requests or errors, and do not claim the
+loaded Google font appearance was verified.
