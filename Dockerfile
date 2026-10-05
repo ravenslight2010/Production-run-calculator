@@ -1,17 +1,20 @@
 # syntax=docker/dockerfile:1
 
+ARG NODE_IMAGE=node:24.20.0-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e
+
 ########## builder: install deps, build web + api ##########
-FROM node:24-slim AS builder
+FROM ${NODE_IMAGE} AS builder
 RUN apt-get update \
   && apt-get install -y --no-install-recommends git python3 build-essential \
   && rm -rf /var/lib/apt/lists/*
-RUN npm install -g pnpm@12.6.0  # keep in sync with packageManager in package.json
 WORKDIR /app
 
 # Copy the complete workspace dependency graph before application source. Keep
 # this list aligned with pnpm-workspace.yaml so source-only changes can reuse the
 # frozen-lockfile install layer without omitting any workspace package.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN pnpm_version="$(node -e 'const match = /^pnpm@(\d+\.\d+\.\d+)(?:\+.*)?$/.exec(require("./package.json").packageManager ?? ""); if (!match) throw new Error("packageManager must pin pnpm exactly"); console.log(match[1]);')" \
+  && npm install -g "pnpm@${pnpm_version}"
 COPY artifacts/api-server/package.json ./artifacts/api-server/package.json
 COPY artifacts/mockup-sandbox/package.json ./artifacts/mockup-sandbox/package.json
 COPY artifacts/run-calculator/package.json ./artifacts/run-calculator/package.json
@@ -93,7 +96,7 @@ RUN rm -rf /app/api-runtime \
   && CI=true pnpm --filter @workspace/api-server deploy --legacy --prod /app/api-runtime
 
 ########## api: slim image for the bundled server ##########
-FROM node:24-slim AS api
+FROM ${NODE_IMAGE} AS api
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=builder /app/artifacts/api-server/dist ./artifacts/api-server/dist
