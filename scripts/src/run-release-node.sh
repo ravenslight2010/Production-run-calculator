@@ -15,6 +15,47 @@ if (( $# == 0 )); then
   exit 2
 fi
 
+# The configured validation workflows share this workspace's pnpm links and
+# build outputs. Serialize runner invocations so concurrent completion checks
+# cannot compete for those shared files or exhaust the workspace's workers.
+# Keep the lock descriptor open across exec so it remains held by the command
+# tree, and pass the lock key to nested runner calls to avoid self-deadlock.
+lock_digest=$(printf '%s' "$REPO_ROOT" | sha256sum)
+lock_key=${lock_digest%% *}
+if [[ "${RELEASE_RUNNER_LOCK_KEY:-}" != "$lock_key" ]]; then
+  if ! command -v flock >/dev/null 2>&1; then
+    printf 'Release runner requires flock to serialize workspace validation.\n' >&2
+    exit 127
+  fi
+
+  lock_owner_expected="${UID:-$(id -u)}"
+  lock_dir="/tmp/replit-release-runner-${lock_owner_expected}"
+  if [[ ! -d "$lock_dir" && ! -L "$lock_dir" ]]; then
+    mkdir -m 700 -- "$lock_dir" 2>/dev/null || true
+  fi
+  if [[ -L "$lock_dir" || ! -d "$lock_dir" ]]; then
+    printf 'Release runner could not prepare its private lock directory.\n' >&2
+    exit 1
+  fi
+  lock_dir_owner=$(stat -c '%u' -- "$lock_dir")
+  lock_dir_mode=$(stat -c '%a' -- "$lock_dir")
+  if [[ "$lock_dir_owner" != "$lock_owner_expected" || "$lock_dir_mode" != "700" ]]; then
+    printf 'Release runner lock directory must be owned by this user with mode 700.\n' >&2
+    exit 1
+  fi
+
+  lock_file="${lock_dir}/${lock_key}.lock"
+  exec {release_runner_lock_fd}>>"$lock_file"
+  if ! flock --nonblock "$release_runner_lock_fd"; then
+    printf 'Release runner is waiting for another command in this workspace.\n' >&2
+    if ! flock --exclusive "$release_runner_lock_fd"; then
+      printf 'Release runner could not acquire the workspace validation lock.\n' >&2
+      exit 1
+    fi
+  fi
+  export RELEASE_RUNNER_LOCK_KEY="$lock_key"
+fi
+
 if [[ ! -f "$NODE_SELECTOR" ]]; then
   printf 'Release Node selector is missing: %s\n' "$NODE_SELECTOR" >&2
   exit 1

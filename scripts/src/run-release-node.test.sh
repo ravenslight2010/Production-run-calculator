@@ -663,7 +663,184 @@ EOF
     printf 'Pinned-Node fallback left its temporary marker directory behind.\n' >&2
     return 1
   }
+
+  # The interrupted process group must release the workspace lock as well.
+  write_node "${workspace}/bin/node" "$REQUIRED_NODE_VERSION"
+  RUN_LOG="$log_path" PATH="${workspace}/bin:${PATH}" \
+    timeout 5s bash "${workspace}/scripts/src/run-release-node.sh" release-child \
+    >"$output_path" 2>&1 || {
+      printf 'Release runner remained locked after fallback interruption.\n' >&2
+      cat "$output_path" >&2
+      return 1
+    }
   echo "PASS: interrupted pinned-Node fallback stops its child group and removes its marker directory"
+}
+
+test_release_runner_serializes_same_workspace_commands() {
+  local workspace
+  local active_dir
+  local event_log
+  local first_output
+  local second_output
+  local first_pid
+  local second_pid
+  local first_status
+  local second_status
+  local events
+  local attempt
+  local second_waited=false
+  workspace=$(make_workspace serialized)
+  active_dir="${workspace}/active"
+  event_log="${workspace}/serialization-events"
+  first_output="${workspace}/first-output"
+  second_output="${workspace}/second-output"
+  local release_gate="${workspace}/allow-first-release"
+  write_node "${workspace}/bin/node" "$REQUIRED_NODE_VERSION"
+  write_failing_npx "${workspace}/bin/npx"
+
+  cat >"${workspace}/bin/serialized-child" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if ! mkdir "$SERIAL_ACTIVE_DIR" 2>/dev/null; then
+  printf 'overlap:%s\n' "$SERIAL_RUN_ID" >>"$SERIAL_EVENT_LOG"
+  exit 91
+fi
+trap 'rmdir "$SERIAL_ACTIVE_DIR" 2>/dev/null || true' EXIT
+printf 'start:%s\n' "$SERIAL_RUN_ID" >>"$SERIAL_EVENT_LOG"
+if [[ "$SERIAL_RUN_ID" == "first" ]]; then
+  for ((attempt = 0; attempt < 1000; attempt += 1)); do
+    [[ -e "$SERIAL_RELEASE_GATE" ]] && break
+    sleep 0.01
+  done
+  [[ -e "$SERIAL_RELEASE_GATE" ]] || exit 92
+fi
+printf 'end:%s\n' "$SERIAL_RUN_ID" >>"$SERIAL_EVENT_LOG"
+EOF
+  chmod +x "${workspace}/bin/serialized-child"
+
+  SERIAL_ACTIVE_DIR="$active_dir" SERIAL_EVENT_LOG="$event_log" \
+    SERIAL_RELEASE_GATE="$release_gate" SERIAL_RUN_ID=first \
+    RUN_LOG="${workspace}/runner-events" PATH="${workspace}/bin:${PATH}" \
+    bash "${workspace}/scripts/src/run-release-node.sh" serialized-child \
+    >"$first_output" 2>&1 &
+  first_pid=$!
+
+  for ((attempt = 0; attempt < 200; attempt += 1)); do
+    [[ -d "$active_dir" ]] && break
+    sleep 0.025
+  done
+  if [[ ! -d "$active_dir" ]]; then
+    kill "$first_pid" 2>/dev/null || true
+    wait "$first_pid" 2>/dev/null || true
+    printf 'First release-runner command did not start.\n' >&2
+    cat "$first_output" >&2
+    return 1
+  fi
+
+  SERIAL_ACTIVE_DIR="$active_dir" SERIAL_EVENT_LOG="$event_log" \
+    SERIAL_RELEASE_GATE="$release_gate" SERIAL_RUN_ID=second \
+    RUN_LOG="${workspace}/runner-events" PATH="${workspace}/bin:${PATH}" \
+    bash "${workspace}/scripts/src/run-release-node.sh" serialized-child \
+    >"$second_output" 2>&1 &
+  second_pid=$!
+
+  for ((attempt = 0; attempt < 200; attempt += 1)); do
+    if grep -q 'Release runner is waiting for another command in this workspace' \
+      "$second_output"; then
+      second_waited=true
+      break
+    fi
+    sleep 0.025
+  done
+  touch "$release_gate"
+
+  set +e
+  wait "$first_pid"
+  first_status=$?
+  wait "$second_pid"
+  second_status=$?
+  set -e
+  if (( first_status != 0 || second_status != 0 )); then
+    printf 'Concurrent release-runner children overlapped or failed (%s, %s).\n' \
+      "$first_status" "$second_status" >&2
+    cat "$first_output" "$second_output" >&2
+    cat "$event_log" >&2
+    return 1
+  fi
+
+  if [[ "$second_waited" != true ]]; then
+    printf 'Second command did not report waiting for the workspace lock.\n' >&2
+    cat "$second_output" >&2
+    return 1
+  fi
+
+  events=$(cat "$event_log")
+  if [[ "$events" == *overlap:* ]] ||
+    [[ "$(grep -c '^start:' "$event_log")" -ne 2 ]] ||
+    [[ "$(grep -c '^end:' "$event_log")" -ne 2 ]]; then
+    printf 'Release-runner lock did not serialize both commands:\n%s\n' "$events" >&2
+    return 1
+  fi
+  echo "PASS: concurrent release-runner commands in one workspace execute serially"
+}
+
+test_release_runner_nested_invocation_reuses_lock() {
+  local workspace
+  local log_path
+  local output_path
+  workspace=$(make_workspace nested-lock)
+  log_path="${workspace}/events"
+  output_path="${workspace}/output"
+  write_node "${workspace}/bin/node" "$REQUIRED_NODE_VERSION"
+  write_failing_npx "${workspace}/bin/npx"
+
+  cat >"${workspace}/bin/release-child" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+timeout 5s bash "${workspace}/scripts/src/run-release-node.sh" nested-child
+EOF
+  cat >"${workspace}/bin/nested-child" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'nested-child-ran\n' >>"$RUN_LOG"
+EOF
+  chmod +x "${workspace}/bin/release-child" "${workspace}/bin/nested-child"
+
+  RUN_LOG="$log_path" PATH="${workspace}/bin:${PATH}" \
+    timeout 10s bash "${workspace}/scripts/src/run-release-node.sh" release-child \
+    >"$output_path" 2>&1 || {
+      printf 'Nested release-runner invocation failed or deadlocked.\n' >&2
+      cat "$output_path" >&2
+      return 1
+    }
+  assert_contains "$(cat "$log_path")" "nested-child-ran"
+  echo "PASS: nested release-runner commands reuse the workspace lock without deadlocking"
+}
+
+test_release_runner_preserves_child_status() {
+  local workspace
+  local status
+  workspace=$(make_workspace child-status)
+  write_node "${workspace}/bin/node" "$REQUIRED_NODE_VERSION"
+  write_failing_npx "${workspace}/bin/npx"
+  cat >"${workspace}/bin/failing-child" <<'EOF'
+#!/usr/bin/env bash
+exit 37
+EOF
+  chmod +x "${workspace}/bin/failing-child"
+
+  set +e
+  RUN_LOG="${workspace}/events" PATH="${workspace}/bin:${PATH}" \
+    bash "${workspace}/scripts/src/run-release-node.sh" failing-child \
+    >"${workspace}/output" 2>&1
+  status=$?
+  set -e
+  [[ "$status" -eq 37 ]] || {
+    printf 'Expected child status 37 to propagate through lock, got %s.\n' "$status" >&2
+    cat "${workspace}/output" >&2
+    return 1
+  }
+  echo "PASS: release-runner lock preserves the child command exit status"
 }
 
 test_matching_node_skips_npx
@@ -676,3 +853,6 @@ test_missing_npx_fails_before_release_commands
 test_isolated_browser_status_and_database_cleanup
 test_isolated_browser_interrupt_cleans_database
 test_release_node_fallback_interrupt_stops_process_group
+test_release_runner_serializes_same_workspace_commands
+test_release_runner_nested_invocation_reuses_lock
+test_release_runner_preserves_child_status
