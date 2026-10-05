@@ -64,6 +64,19 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Build production API image and verify its Node.js version
+        run: |
+          set -euo pipefail
+          api_image="release-check-api:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          expected_node_version="v$(tr -d '\r\n' < .nvmrc)"
+          docker build --pull --target api --tag "$api_image" .
+          actual_node_version="$(docker run --rm "$api_image" node --version)"
+          if [[ "$actual_node_version" != "$expected_node_version" ]]; then
+            echo "Production API image Node.js version ${actual_node_version} does not match .nvmrc (${expected_node_version})." >&2
+            exit 1
+          fi
+          printf 'Production API image Node.js version matches .nvmrc: %s\n' "$actual_node_version"
+
       - name: Set up pnpm
         uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
         with:

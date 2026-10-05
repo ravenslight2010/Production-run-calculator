@@ -643,6 +643,10 @@ async function run(): Promise<void> {
     new URL("../../.github/workflows/release-check.yml", import.meta.url),
     "utf8",
   );
+  const dockerfile = await readFile(
+    new URL("../../Dockerfile", import.meta.url),
+    "utf8",
+  );
   const responsiveWebKitConfig = await readFile(
     new URL(
       "../../artifacts/run-calculator/playwright.compatibility.config.ts",
@@ -734,8 +738,16 @@ async function run(): Promise<void> {
       handoffBlock,
       new RegExp(`HANDOFF_EVIDENCE_DIR: release-evidence${job.name === "full" ? "-full" : ""}`),
     );
-    assert.match(handoffBlock, /git log -1 --format=%H -- \./);
-    assert.match(handoffBlock, /release-evidence-full\/\*\*/);
+    assert.match(
+      handoffBlock,
+      /captureReleaseIdentity\(process\.cwd\(\)\)\.revision/u,
+      "release handoffs must use the canonical filtered source revision",
+    );
+    assert.match(
+      handoffBlock,
+      /handoff_path="\$HANDOFF_EVIDENCE_DIR\/release-evidence-handoff\.md"/u,
+      "release handoffs must use the configured evidence directory",
+    );
     assert.match(
       handoffBlock,
       /run-release-node\.sh\s+\\\s+pnpm --filter @workspace\/scripts exec tsx\s+\\\s+\.\/src\/release-evidence-handoff\.mts/u,
@@ -748,6 +760,35 @@ async function run(): Promise<void> {
   const fullReleaseJob = releaseJobs.find((job) => job.name === "full");
   assert.ok(standardReleaseJob?.source);
   assert.ok(fullReleaseJob?.source);
+  const apiImageCheckStart = standardReleaseJob.source.indexOf(
+    "- name: Build production API image and verify its Node.js version",
+  );
+  const apiImageCheckEnd = standardReleaseJob.source.indexOf(
+    "\n      - name:",
+    apiImageCheckStart + 1,
+  );
+  assert.ok(apiImageCheckStart >= 0, "standard release job must build the production API image");
+  assert.ok(apiImageCheckEnd > apiImageCheckStart);
+  const apiImageCheck = standardReleaseJob.source.slice(
+    apiImageCheckStart,
+    apiImageCheckEnd,
+  );
+  assert.match(apiImageCheck, /docker build --pull --target api/u);
+  assert.match(apiImageCheck, /docker run --rm "\$api_image" node --version/u);
+  assert.match(apiImageCheck, /expected_node_version="v\$\(tr -d '\\r\\n' < \.nvmrc\)"/u);
+  assert.match(apiImageCheck, /actual_node_version.*expected_node_version/u);
+  assert.match(
+    dockerfile,
+    /COPY package\.json pnpm-lock\.yaml pnpm-workspace\.yaml \.nvmrc \.\/\n/u,
+    "the builder must have the checked-in Node.js pin available",
+  );
+  assert.match(dockerfile, /pnpm install --frozen-lockfile/u);
+  assert.match(dockerfile, /actual_pnpm_version="\$\(pnpm --version\)"/u);
+  assert.match(
+    dockerfile,
+    /actual_pnpm_version" != "\$pnpm_version"/u,
+    "the builder must fail when installed pnpm differs from packageManager",
+  );
   assert.doesNotMatch(
     standardReleaseJob.source,
     /PLAYWRIGHT_COMPATIBILITY_DEBUG_DIR|responsive-webkit-debug/u,

@@ -24,9 +24,21 @@ WORKDIR /app
 # Copy the complete workspace dependency graph before application source. Keep
 # this list aligned with pnpm-workspace.yaml so source-only changes can reuse the
 # frozen-lockfile install layer without omitting any workspace package.
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN pnpm_version="$(node -e 'const match = /^pnpm@(\d+\.\d+\.\d+)(?:\+.*)?$/.exec(require("./package.json").packageManager ?? ""); if (!match) throw new Error("packageManager must pin pnpm exactly"); console.log(match[1]);')" \
-  && npm install -g "pnpm@${pnpm_version}"
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .nvmrc ./
+RUN set -eu; \
+  expected_node_version="$(tr -d '\r\n' < .nvmrc)"; \
+  actual_node_version="$(node --version | sed 's/^v//')"; \
+  if [ "$actual_node_version" != "$expected_node_version" ]; then \
+    echo "Docker builder Node.js version ${actual_node_version} does not match .nvmrc (${expected_node_version})." >&2; \
+    exit 1; \
+  fi; \
+  pnpm_version="$(node -e 'const match = /^pnpm@(\d+\.\d+\.\d+)(?:\+.*)?$/.exec(require("./package.json").packageManager ?? ""); if (!match) throw new Error("packageManager must pin pnpm exactly"); console.log(match[1]);')"; \
+  npm install -g "pnpm@${pnpm_version}"; \
+  actual_pnpm_version="$(pnpm --version)"; \
+  if [ "$actual_pnpm_version" != "$pnpm_version" ]; then \
+    echo "Docker builder pnpm version ${actual_pnpm_version} does not match packageManager (${pnpm_version})." >&2; \
+    exit 1; \
+  fi
 COPY artifacts/api-server/package.json ./artifacts/api-server/package.json
 COPY artifacts/mockup-sandbox/package.json ./artifacts/mockup-sandbox/package.json
 COPY artifacts/run-calculator/package.json ./artifacts/run-calculator/package.json
