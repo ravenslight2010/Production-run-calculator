@@ -3,7 +3,7 @@
 **Captured:** 2026-10-02
 **Repository revision reviewed:** `d143c7ff5f95e8da2e8f8b15c41ed53c4ee5a3ed`
 **Environment checked:** Production deployment metadata and health-only HTTP probes; no credentials, operational payloads, or raw logs retained
-**Decision:** Do not change deployment topology or runtime code from this assessment. Resolve the live readiness mismatch and verify the production serving boundary before selecting a topology.
+**Decision (updated 2026-10-05):** The owner selected one always-on API process for live peer SSE. The current published Autoscale deployment cannot enforce that policy. No deployment configuration or runtime code was changed; a separate owner-approved deployment decision is required before treating the constraint as enforced.
 
 ## Current evidence and limits
 
@@ -12,6 +12,8 @@
 | Checked-in `.replit` deployment settings | `deploymentTarget = "autoscale"`; production command starts the API server with one Node command per serving server | The number of currently serving servers or the revision each one runs |
 | Replit deployment metadata (rechecked 2026-10-02) | An active, public Autoscale deployment with a successful build | Serving-server count, maximum concurrency, affinity, or source/build revision; the supported metadata includes no revision field |
 | Replit [deployment-type documentation](https://docs.replit.com/features/publishing/deployment-types) | Autoscale can scale from zero and add servers to handle traffic; it does not inherently provide session affinity | Whether more than one server was serving this deployment during the probe |
+| Replit deployment metadata and checked-in `.replit` (read-only recheck, 2026-10-05) | Deployment is active with a successful build and type `autoscale`; `.replit` also selects `autoscale` and starts one Node command per serving machine | Effective Autoscale maximum, current/peak serving-machine count, always-on status, process count on the published build, or deployed source revision |
+| Replit [machine configuration](https://docs.replit.com/features/publishing/machine-configuration) and [deployment types](https://docs.replit.com/features/publishing/deployment-types) documentation (checked 2026-10-05) | Autoscale supports a configurable maximum but can scale to zero; Reserved VM is continuously running on a dedicated VM | A configured maximum of one does not provide an always-on guarantee; one VM alone does not prove that its run command starts only one API process |
 | Sanitized production probe and diagnostics (rechecked 2026-10-02) | `/api/livez` returned 200; `/api/readyz` returned 503. `process`, `startup`, `database`, `auditProtection`, and `dependencies` were `ok`, while `backgroundWorkers` was `error`. The allowlisted worker diagnostics showed `web-push-schedule` with 5 recent failures against a threshold of 3, status `warning`, and generic code `operation_failed` | The raw worker exception, exact deployed source revision, or whether the failure rate will persist |
 | Checked-out readiness implementation and route tests | Commit `263514fe814ba16eb83f4fef83be9deb04816db6` maps optional AI and sustained worker failures to warnings; only startup, database, and audit-protection failures block readiness. The route tests cover warning-only HTTP 200 and required-failure HTTP 503 behavior | That production is running this implementation |
 | Sync SSE implementation and isolated two-process test | Source inspection confirms immediate broadcasts iterate a module-local client set. The test is written to assert no data frame within 400 ms when process A writes and process B owns the peer stream, then assert a reconnect receives canonical state. The configured API suite reported this test failed; a standalone rerun timed out in `beforeAll` while provisioning its disposable database, before any test ran | A passing execution of the test, production routing, proxy buffering, stream lifetime, or actual instance count |
@@ -41,12 +43,44 @@ Do not treat sticky sessions as a verified solution. Replit's Autoscale document
 | **One always-on API process** | Keeps immediate in-memory fanout within one process; fewer database pools and simpler operations | Gives up scale-to-zero; one process is a failure point; a single process must be enforced, not assumed from Autoscale | The owner accepts the availability/cost tradeoff and the platform can verify one process |
 | **Autoscale with shared cross-process fanout** | Retains Autoscale behavior while delivering live events to clients connected to other processes | Requires a shared event path, outage/replay behavior, cross-process tests, and a database-connection budget based on maximum server count | Scale-out or scale-to-zero is required and live peer updates must continue across processes |
 
-**Recommendation:** Keep the current deployment unchanged until the live readiness mismatch, serving-server count, and operational latency requirement are understood. If Autoscale may serve multiple API processes and connected peers must receive immediate updates, add shared fanout before relying on scale-out. If the product instead chooses a single process, enforce and verify that limit and explicitly accept the always-on and single-failure-domain tradeoffs. Do not change geography or publish as part of this decision.
+### Owner decision and current enforcement
+
+On 2026-10-03 the owner selected **one always-on API process** (Option A). This
+supersedes the earlier 2026-10-02 recommendation to defer topology selection.
+The contract is exact: live peer SSE is supported only while exactly one API
+process serves requests. The process-local client set has no cross-instance
+fanout, so a write handled elsewhere does not immediately reach an existing
+stream. Reconnect recovery does not make multi-process live delivery supported.
+
+The 2026-10-05 check was read-only and bounded to the checked-in deployment
+target, published deployment metadata, and current Replit deployment
+documentation. It retained no URL, credentials, request payload, or raw logs.
+Metadata reported an active Autoscale deployment and successful build, but did
+not expose its effective maximum, current/peak machine count, or process count.
+Replit's current Autoscale documentation says the maximum can be configured,
+but the minimum is zero and the service can scale to zero; it does not guarantee
+exactly one always-on instance. Thus the published deployment is
+**NOT ENFORCED / NOT VERIFIED** for the owner's SSE policy. A maximum of one,
+if configured, would still not establish always-on operation.
+
+No deployment change or publish was performed. Moving to a continuously running
+single-machine target such as Reserved VM is a separate owner-approved
+deployment decision; after any approved change, verify the actual Node process
+count and serving-machine counts from deployment evidence. If the requirement
+is instead to retain horizontal scale, shared fanout requires a separate owner
+decision and implementation. Until an approved topology change is published
+and verified, do not claim the current published deployment supports live peer
+SSE. The single-process choice also means one failure domain and gives up
+Autoscale scale-to-zero and horizontal availability.
+
+The topology result does not alter soft readiness: optional AI and
+background-worker warnings remain non-blocking; startup, database, and audit
+protection remain the core readiness gates.
 
 ### Evidence and acceptance checks required before a deployment change
 
 1. Identify the exact production build/revision and correlate it with readiness behavior. Obtain a safe, sanitized explanation for the current `backgroundWorkers: error`; do not infer it from the response status.
-2. From deployment control-plane evidence, record current and peak serving-server counts and any enforceable minimum/maximum. If this cannot be observed, keep the instance-count uncertainty explicit.
+2. For the selected single-process policy, obtain dated deployment control-plane evidence for always-on status, maximum serving-process count, and current/peak counts. A minimum of one or sticky routing alone is insufficient. If the target cannot guarantee one always-on process or the counts cannot be observed, record the policy as unverified and obtain separate owner approval before changing deployment configuration.
 3. In an isolated environment with two API processes sharing one test database, verify the selected design. For shared fanout, cover a day-state write, manual-section acquired/released, configuration invalidation, reset, and rollover across processes, including scope/date isolation and duplicate/loss behavior. For a single-process choice, verify the platform constraint rather than relying on affinity.
 4. Verify authenticated SSE first-frame timing, delivery across at least two heartbeat intervals, disconnect/reconnect recovery, and proxy idle-timeout/buffering behavior. Use synthetic records and retain only sanitized statuses, timings, bounded counts, and revision identity.
 5. Calculate the database connection budget using the database ceiling/reserves, other services, maximum serving-server count, and per-process pool limit. Do not increase pool limits before this calculation.

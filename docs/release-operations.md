@@ -16,6 +16,50 @@ packaging-progress, and atomic inventory-side-effect evidence. SSE topology or
 pool-size changes require sanitized deployment and capacity evidence. AI
 provider-key tests must not silently change the hard-versus-soft readiness policy.
 
+## Live peer SSE topology requirement
+
+Live peer updates over `/api/sync/events` are supported only while exactly one
+API process serves requests. The SSE client registry is process-local; there is
+no cross-instance fanout. Do not horizontally scale the API or claim that a
+client connected to one process receives an immediate update written through
+another. Reconnecting can fetch canonical state, but that is recovery, not
+cross-instance live delivery.
+
+The owner selected one always-on API process. This is also a single failure
+domain: a process or machine failure interrupts API service and live streams,
+and this design gives up Autoscale's scale-to-zero behavior and horizontal
+availability. Do not treat a configured minimum of one, a successful build, or
+sticky routing as proof that the published service has exactly one always-on
+API process.
+
+Before reporting this operating requirement as enforced, retain a dated,
+sanitized read-only deployment check tied to the published deployment. It must
+show that the deployment is always on, that no more than one serving API
+process can handle requests, and what the current and peak process counts are.
+Record the deployment type and bounded build/revision identity when available;
+do not retain URLs, credentials, request data, or raw logs. The usual deployment
+metadata reports deployment type and build status, but does not itself prove
+instance counts, capacity settings, or the number of Node processes.
+
+The read-only recheck recorded in
+[the uptime decision record](uptime-and-operational-backlog-decision-2026-10-02.md#owner-decision-and-current-enforcement)
+found the published deployment is Autoscale. Replit documents that Autoscale
+can add machines up to a configured maximum and scale down to zero; it has no
+always-on minimum. A maximum of one would not satisfy the always-on requirement.
+The available deployment metadata did not expose the configured maximum or
+current/peak counts. The current published topology is therefore **NOT
+ENFORCED / NOT VERIFIED** for live peer SSE.
+
+If this evidence cannot be produced, keep the gap explicit and do not represent
+live peer SSE as supported on the current topology. A move to a continuously
+running single-machine target such as Reserved VM requires a separate owner
+approval and a later publish; operators must then verify the actual process
+count and serving behavior. If horizontal scale is required instead, shared
+fanout needs its own owner-approved architecture decision and verification.
+Neither a topology change nor shared fanout is part of this release guidance.
+This deployment constraint is not a `/readyz` check: optional AI and
+background-worker warnings remain warnings and do not fail core readiness.
+
 ## Release commands
 
 ```bash
