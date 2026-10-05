@@ -38,3 +38,19 @@ assignment transition.
 **How to apply:** Check the live state after a completion rejection. Preserve the
 finished work, report the activation requirement, and do not invent a status-update
 operation or recreate the task.
+
+## Required task order
+
+Sequence all tasks by acceptance order. Each later-accepted task depends on the
+previous task, so only one task is active at a time. Treat this as the owner's
+required project rule, not as a guarantee that the task platform enforces it.
+
+**Why:** The owner clarified that tasks must form a single acceptance-ordered
+dependency chain rather than independent suggestions that can run concurrently.
+
+**How to apply:** Before proposing multiple tasks, ensure the creation path can
+persist a dependency chain. If generated follow-ups only link to a parent and
+leave siblings independent, propose one at a time or use a task-planning path that
+can store the dependencies. For existing unchained proposals, don't infer
+acceptance order from task numbers or creation times; establish the intended
+sequence before they are accepted.
