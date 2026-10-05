@@ -1,41 +1,71 @@
 # QC Department — Comprehensive Plan
 
 **Status:** Planning; existing quality, incident, downtime, substitution, and basic lot surfaces are inputs, not proof that the durable QC system is built
-**Updated:** 2026-09-19
+**Updated:** 2026-10-05
 **Related:** [Idea backlog](idea-backlog.md#2-qc-department-comprehensive), [import plan](import-system-plan.md), [allergen plan](allergen-tracking-plan.md), [additional domain synthesis](../research/additional-domain-research-synthesis-2026-09-19.md)
 
 QC is a durable follow-on product track, not a sync-protocol prerequisite. New QC actions require explicit capabilities, server-generated audit identity, reset/purge survival, and stable ingredient identity for lot and allergen rollups.
+
+## QC Phase 1 — Owner Decision Note
+
+**Status:** Owner accepted this as the current scope proposal on 2026-10-05. This is not approval to begin schema, API, or UI work. Resolve the open decisions before implementation.
+
+### Proposed minimum
+
+- Keep **Lots** and **Weights** on separate pages.
+- Record ingredient lots against a production run, including ingredient identity, lot number, station, authenticated recorder, and server timestamp.
+- Record weight checks before the run and every 30 minutes while it is running, for ingredients with a defined target weight. Capture the target and unit, actual value and unit, check time/type, recorder, and outcome; record a reason or note for an out-of-tolerance result.
+- Include crust weight targets. The target must be captured through spec imports; verify the needed spec-import field and mapping before implementation. Do not assume the current importer already supplies it.
+- Keep the existing manager-reviewed photo quality history as a separate record surface; Phase 1 does not replace or expand that workflow.
+
+**Still to define before implementation:** the source and allowed tolerance for each target weight, what constitutes a check failure, and how to handle an ingredient with no target. Do not invent a tolerance or infer one from incomplete spec data.
+
+### Roles and hold policy
+
+- **Recording:** QC staff may record lot and weight checks.
+- **Sign-off:** a designated QC lead or manager signs off. The exact role/capability mapping and whether sign-off is per check or per run remain open.
+- **Hold direction for later work:** a QC hold blocks shipping, not production-run completion. A designated QC lead or manager may clear it. Hold enforcement is explicitly deferred from Phase 1; who may place a hold, release criteria, and any exception process remain open.
+
+### Retention, audit, history, and export
+
+- **Retention direction:** retain QC records indefinitely, subject to a separately approved privacy/redaction policy. That policy is a prerequisite to implementation, not something this note decides.
+- Future QC records and their audit evidence must remain outside daily-reset day-state and factory-purge deletion. The audit trail must be append-only, use authenticated actor identity and server-generated timestamps, and represent corrections as new events rather than edits or deletions.
+- Provide filtered historical access and CSV export. Proposed filters are date, run, ingredient, lot, and station. The roles allowed to view/export history and the exact CSV columns remain open.
+- Historical evidence must be scope-isolated and capability-gated; facility scope must come from the authenticated request, not a client-selected query parameter. Any audit write required for a QC action must succeed atomically with that action or fail explicitly.
+
+### Deferred from Phase 1
+
+Component, label, and date-code checks; import or recipe approval; trend/analytics and lot-to-customer traceability; line clearance, finished-lot identification, mock recall, and HACCP evidence. The shipping hold/release policy above is reserved for later work and does not add hold enforcement to Phase 1.
+
+### Existing quality and purge behavior
+
+The existing `quality_checks` records are reviewed photo-quality checks, separate from proposed run-lot and weight records. The factory purge already retains this history, and the daily reset clears day-state rather than this server-side history. This prerequisite is complete; do not redo it as part of QC Phase 1. Any future QC tables or audit records must receive equivalent reset/purge protection before release.
 
 ## Critical Requirements
 
 ### Daily Reset: Archive Yesterday, Show Only Today
 The daily reset (midnight day-state clear) is the natural cutoff point. QC data behavior:
 
-- **Active QC Dashboard** — always shows ONLY today's checks (current run, today's weight checks, today's lot entries, today's component checks)
-- **Yesterday's data is saved** — QC records from previous days remain in the database, untouched by the daily reset
-- **History view** — one tap away from the active dashboard; browse any previous day, filter by date/ingredient/lot/station, export for audits
+- **Active QC pages** — Lots and Weights remain separate; each defaults to current-run/today records
+- **History view** — browse prior records, filter by date/ingredient/lot/station, and export CSV as scoped in the owner decision note
+- **Yesterday's data is saved** — historical QC records are not removed by the daily reset; retention follows the approved privacy/redaction policy
 - **No clutter** — operators see only what matters RIGHT NOW on the active screen; historical data never pollutes the current view
-- **The reset doesn't delete QC data** — it only clears day-state (runs, active operational data). QC tables are server-persisted and accumulate indefinitely
+- **The reset doesn't delete QC data** — it clears day-state (runs and active operational data), not server-persisted QC history
 
-**UI pattern**:
+**Illustrative view pattern (not an implementation spec)**:
 ```
-QC Dashboard
-├── Today (active)     ← default view, shows current run checks only
-├── History            ← calendar/date picker, browse past days
-│   ├── Sep 7 (yesterday) — 12 checks, 2 failures
-│   ├── Sep 6 — 18 checks, 0 failures
-│   └── ...
-└── Audit Export       ← CSV/PDF for compliance
+QC
+├── Lots               ← separate page; current run by default
+├── Weights            ← separate page; current run by default
+└── History / CSV      ← filter historical checks for authorized review
 ```
 
-The daily reset is invisible to QC — the dashboard just naturally shows today because that's the default filter. Yesterday becomes "history" automatically at midnight.
+The daily reset is invisible to QC pages: each defaults to current records, while older entries remain available in history subject to the approved retention policy.
 
 ### QC Data Survives All Wipes
-The factory reset (`POST /sync/purge-all`) currently wipes ALL scoped tables including `qualityChecksTable`. QC data must survive both:
-- **Daily reset** (day-state clear at midnight) — already safe since QC tables are server-side, not in day-state
-- **Factory reset** (full purge-all) — QC tables must be **excluded** from the purge-all scopedTables list in `sync.ts` line ~1200, or moved to a separate audit DB/schema that the purge endpoint doesn't touch
+The existing `quality_checks` history is already protected from the daily reset and factory purge. Integration coverage verifies that both live and sandbox quality history survive the purge while scoped operational data is removed.
 
-**Implementation**: Add QC tables to a new `auditedTables` group in the purge endpoint that gets `ON DELETE DO NOTHING` or is simply skipped. The purge-all handler at `artifacts/api-server/src/routes/sync.ts:1198` explicitly lists every table — QC tables must NOT appear in that list.
+For future QC records, the purge boundary remains a release requirement: never add QC evidence to day-state reset data or the factory-purge deletion list. Keep new records append-only and verify reset/purge survival for each new record type. This protection is already implemented for current quality history; do not repeat that work.
 
 ### Full Audit Trail / Traceability / Accountability
 Every QC operation must produce an immutable audit record:
@@ -48,15 +78,15 @@ Every QC operation must produce an immutable audit record:
 
 QC audit records must be:
 - Append-only (no UPDATE/DELETE allowed on audit rows)
-- Retained indefinitely (not subject to any cleanup/purge)
-- Queryable by any manager/supervisor for compliance review
-- Exportable as CSV/PDF for external audits
+- Retained indefinitely, subject to the separately approved privacy/redaction policy required by the owner decision note
+- Queryable only by authorized roles; the Phase 1 roles allowed to browse or export history remain unresolved
+- Exportable as CSV in the proposed Phase 1 scope; PDF is not included in that minimum
 
-**Implementation**:
+**Candidate implementation constraints (not approval to build)**:
 - Each QC table gets `created_at` (server DEFAULT NOW()), `created_by` (user FK), `scope` (factory isolation)
 - Add a `qc_audit_log` table that fires on INSERT to any QC table (PostgreSQL trigger or application-level)
-- Audit log has its own retention policy: never deleted, ever
-- API routes for audit export: `GET /api/qc/audit?from=&to=&type=&ingredient=`
+- Apply the owner-directed indefinite retention only after the privacy/redaction policy is approved
+- Keep the final route and export contract open until the decision note's unresolved access and CSV-field choices are settled
 
 **Privacy and authorization guardrails before implementation**:
 - Derive facility scope from the authenticated request and enforce the live-scope fence; a query parameter must never choose the authorization scope
@@ -66,6 +96,8 @@ QC audit records must be:
 - Paginate and capability-gate every read/export path
 - If an operation requires an audit record for compliance, persist both atomically or fail explicitly rather than swallowing the audit failure
 - Follow the retained [operational audit design boundaries](idea-backlog.md#17-residual-observability--resilience-ideas)
+
+The remainder of this document contains broader candidate designs. Where they conflict with the owner decision note above, that note governs Phase 1. Details not explicitly decided there are not approved requirements.
 
 ## Current State
 ### Move All Existing QC Features into the QC Department
@@ -209,11 +241,12 @@ The importers stay available to both QC and management, but with roles:
 
 ## Recommended Build Order
 
-### Phase 1: Foundation (highest impact)
-1. **QC role/permissions** — add "qc" role to StaffRolesCard, gate QC features behind it
-2. **Lot tracking per run** — `run_lots` table + per-station lot input UI
-3. **Weight checks** — `weight_checks` table + pre-run/periodic check forms
-4. **QC dashboard** — single screen showing all QC status for current run
+### Phase 1: Owner-proposed lot and weight checks
+1. **Lot page** — run-level ingredient and station lot records
+2. **Weight page** — pre-run and 30-minute checks for ingredients with defined target weights, including crust targets sourced from spec imports
+3. **Filtered history and CSV export** — subject to the unresolved viewer-role and CSV-column decisions
+
+The exact QC capability/role mapping, check sign-off granularity, and target tolerances must be resolved before implementation. A combined dashboard is not part of the minimum established in the owner decision note; whether to add one remains open.
 
 ### Phase 2: Verification Workflows
 5. **Component checks** — checklist form per run

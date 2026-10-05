@@ -1,6 +1,6 @@
 # Full Plan — Production Run Calculator
 
-**Version:** 2026-10-03  
+**Version:** 2026-10-05
 **Primary branch (production):** `Replit`  
 **Experimental branch:** `main`  
 **Published app:** https://lucias-production-assistant.replit.app  
@@ -181,12 +181,12 @@ Circles, shippers, cartons (partial today). Still open: slip sheets, grip sheets
 ### 8.2 QC department
 **Authority:** `docs/qc-department-plan.md` + industry research
 
-**Do not start Phase 1 schema until product answers:** required checks; who writes/releases; retention; does hold block complete-run?
+**QC Phase 1 owner direction:** see `docs/qc-department-plan.md`. The baseline checks, recording/sign-off direction, indefinite-retention direction, CSV history, and shipping-only later hold policy have been collected. Do not start schema, API, or UI work until the note's remaining prerequisites are resolved, including target/tolerance sources, role/capability mapping, history/export access, and the privacy/redaction policy.
 
 | Phase | Scope |
 |-------|--------|
 | **QC0** | B1 purge exclusion shipped |
-| **QC1** | QC role; `run_lots`; `weight_checks`; dashboard; OpenAPI/routes |
+| **QC1** | Separate lot and weight pages; `run_lots`; `weight_checks`; filtered history + CSV; append-only audit; OpenAPI/routes |
 | **QC2** | Component, label, date checks |
 | **QC3** | Import/recipe approval; future plans |
 | **QC4** | Trends, traceability reports, analytics |
@@ -284,7 +284,7 @@ Only after Phase A metrics: JSON Patch, compression, selective sync, timestamp p
 | 16 | Sync system residual | A | High | Partial |
 | 17A | Privacy-safe ops audit | B | Medium | Design |
 | 17B | Provider AI resilience | B | Medium | Partial (Gemini) |
-| R1 | Purge excludes QC | B | P0 | **Open on tip** |
+| R1 | Purge excludes QC | B | P0 | **Done** — current quality history is retained; see QC Phase 1 decision note |
 | R2 | SSE A/B decision | B | P0 | **Open** |
 | R3 | Web-push note | B | P1 | Monitor |
 | R4 | Stale LWW reconnect | A | High | Open |
