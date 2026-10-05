@@ -82,11 +82,11 @@ overrides:
   protobufjs: "7.6.5"
   "minimatch@5>brace-expansion": "2.1.4"
   "minimatch@10>brace-expansion": "5.0.9"
-  fast-uri: "3.1.6"
+  fast-uri: "3.1.7"
   js-yaml: "4.3.2"
   vitest: "5.0.0"
   "@vitest/mocker": "5.0.0"
-  undici: "7.29.0"
+  undici: "7.29.1"
   "@esbuild-kit/esm-loader": "npm:tsx@^4.23.12"
   esbuild: "^0.28.1"
   # replit uses linux-x64 only, we can exclude all other platforms
