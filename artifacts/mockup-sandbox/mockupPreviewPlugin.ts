@@ -1,6 +1,6 @@
-import { mkdirSync, writeFileSync } from "fs";
-import path from "path";
-import glob from "fast-glob";
+import { mkdirSync, writeFileSync, type Dirent } from "node:fs";
+import { readdir } from "node:fs/promises";
+import path from "node:path";
 import chokidar from "chokidar";
 import type { FSWatcher } from "chokidar";
 import type { Plugin } from "vite";
@@ -11,6 +11,49 @@ const GENERATED_MODULE = "src/.generated/mockup-components.ts";
 interface DiscoveredComponent {
   globKey: string;
   importPath: string;
+}
+
+export async function discoverMockupFiles(root: string): Promise<string[]> {
+  const pendingDirectories = [path.join(root, MOCKUPS_DIR)];
+  const files: string[] = [];
+
+  while (pendingDirectories.length > 0) {
+    const directory = pendingDirectories.pop()!;
+    let entries: Dirent[];
+
+    try {
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch (error) {
+      // fast-glob returns no matches for an absent root; also tolerate a
+      // directory disappearing while Vite is rescanning after a file change.
+      if (
+        error instanceof Error &&
+        "code" in error &&
+        error.code === "ENOENT"
+      ) {
+        continue;
+      }
+      throw error;
+    }
+
+    for (const entry of entries) {
+      // Match the prior glob's hidden-file and underscore ignore rules.
+      // Dirent symlinks are intentionally not followed, avoiding cycles and
+      // imports from outside the mockups source tree.
+      if (entry.name.startsWith(".") || entry.name.startsWith("_")) continue;
+
+      const absolutePath = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        pendingDirectories.push(absolutePath);
+      } else if (entry.isFile() && entry.name.endsWith(".tsx")) {
+        files.push(
+          path.relative(root, absolutePath).split(path.sep).join("/"),
+        );
+      }
+    }
+  }
+
+  return files;
 }
 
 export function mockupPreviewPlugin(): Plugin {
@@ -40,10 +83,7 @@ export function mockupPreviewPlugin(): Plugin {
   }
 
   async function discoverComponents(): Promise<Array<DiscoveredComponent>> {
-    const files = await glob(`${MOCKUPS_DIR}/**/*.tsx`, {
-      cwd: root,
-      ignore: ["**/_*/**", "**/_*.tsx"],
-    });
+    const files = await discoverMockupFiles(root);
 
     return files
       .map((f) => ({
