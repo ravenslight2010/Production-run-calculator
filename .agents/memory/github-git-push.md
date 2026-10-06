@@ -100,3 +100,11 @@ A workspace Git credential may be a token-only value rather than an authenticate
 **Why:** A valid token-only credential was skipped while an expired authenticated URL was retried.
 
 **How to apply:** Detect the format only inside the credential-consuming process, never print it, and build any temporary authenticated URL for the independently verified destination repository. Keep credentials in process-local configuration rather than persistent remotes.
+
+## Linked worktrees with optional LFS assets
+
+For bounded CI comparisons, set `GIT_LFS_SKIP_SMUDGE=1` on linked-worktree creation only after confirming that every selected test/build input is available as a normal Git blob and LFS payloads are outside the measured check closure.
+
+**Why:** A hosted worktree can fail during LFS smudge before any comparison runs, even when the primary checkout is valid and Git push authentication works.
+
+**How to apply:** Inspect the LFS inventory and the exact inputs used by the selected checks. Do not skip LFS downloads globally when a measured test or build depends on those assets.

@@ -1,0 +1,248 @@
+{
+  "schemaVersion": 1,
+  "advisoryOnly": true,
+  "authoritativeReleaseEvidence": false,
+  "capturedAt": "2026-10-06T17:58:49.101Z",
+  "workflow": {
+    "name": "Node Compatibility Advisory",
+    "runId": "37506619630",
+    "runAttempt": "1"
+  },
+  "sourceRevision": "6a18a7d85e7150ac0e56500bc47696724f1b3a02",
+  "lockfileSha256": "251d67bf080b4e0c8015913bc3f66e8229af0e8763325cfa723c93629e9e3f13",
+  "runner": {
+    "label": "ubuntu-latest",
+    "os": "Linux 6.17.0-1022-azure",
+    "arch": "x64",
+    "logicalCpus": 2,
+    "totalMemoryBytes": 8322928640,
+    "measurement": "GNU /usr/bin/time maximum resident set size for the top-level command"
+  },
+  "packageManager": {
+    "name": "pnpm",
+    "version": "12.8.1"
+  },
+  "comparisonMode": "sequential; two clean git worktrees; isolated pnpm stores; one hosted runner",
+  "runtimes": [
+    {
+      "label": "Node 24 baseline",
+      "nodeVersion": "24.21.0",
+      "packageManagerVersion": "12.8.1",
+      "checks": [
+        {
+          "id": "install",
+          "command": "pnpm install --frozen-lockfile --store-dir <isolated-temp-store>",
+          "outcome": "PASS",
+          "exitCode": 0,
+          "timedOut": false,
+          "elapsedMs": 7984,
+          "peakRssKiB": 643676,
+          "failureCode": null,
+          "skipReason": null
+        },
+        {
+          "id": "typecheck",
+          "command": "pnpm run typecheck",
+          "outcome": "PASS",
+          "exitCode": 0,
+          "timedOut": false,
+          "elapsedMs": 77853,
+          "peakRssKiB": 1070524,
+          "failureCode": null,
+          "skipReason": null
+        },
+        {
+          "id": "run-calculator-budget",
+          "command": "pnpm --filter @workspace/run-calculator run test:budget",
+          "outcome": "FAIL",
+          "exitCode": 1,
+          "timedOut": false,
+          "elapsedMs": 46,
+          "peakRssKiB": 65380,
+          "failureCode": "EXIT_CODE_1",
+          "skipReason": null
+        },
+        {
+          "id": "database-create",
+          "command": "pnpm --filter @workspace/api-server exec node -e <create disposable test database>",
+          "outcome": "PASS",
+          "exitCode": 0,
+          "timedOut": false,
+          "elapsedMs": 115,
+          "peakRssKiB": 65248,
+          "failureCode": null,
+          "skipReason": null
+        },
+        {
+          "id": "database-schema",
+          "command": "pnpm --filter @workspace/db run push-force",
+          "outcome": "PASS",
+          "exitCode": 0,
+          "timedOut": false,
+          "elapsedMs": 1450,
+          "peakRssKiB": 400808,
+          "failureCode": null,
+          "skipReason": null
+        },
+        {
+          "id": "api-integration-shard-1",
+          "command": "pnpm --filter @workspace/api-server run test:release:integration:1",
+          "outcome": "PASS",
+          "exitCode": 0,
+          "timedOut": false,
+          "elapsedMs": 70973,
+          "peakRssKiB": 495288,
+          "failureCode": null,
+          "skipReason": null
+        },
+        {
+          "id": "production-build",
+          "command": "pnpm run build",
+          "outcome": "FAIL",
+          "exitCode": 1,
+          "timedOut": false,
+          "elapsedMs": 66186,
+          "peakRssKiB": 1061728,
+          "failureCode": "EXIT_CODE_1",
+          "skipReason": null
+        }
+      ]
+    },
+    {
+      "label": "Node 26 candidate",
+      "nodeVersion": "26.10.0",
+      "packageManagerVersion": "12.8.1",
+      "checks": [
+        {
+          "id": "install",
+          "command": "pnpm install --frozen-lockfile --store-dir <isolated-temp-store>",
+          "outcome": "PASS",
+          "exitCode": 0,
+          "timedOut": false,
+          "elapsedMs": 5053,
+          "peakRssKiB": 354492,
+          "failureCode": null,
+          "skipReason": null
+        },
+        {
+          "id": "typecheck",
+          "command": "pnpm run typecheck",
+          "outcome": "PASS",
+          "exitCode": 0,
+          "timedOut": false,
+          "elapsedMs": 76966,
+          "peakRssKiB": 1070292,
+          "failureCode": null,
+          "skipReason": null
+        },
+        {
+          "id": "run-calculator-budget",
+          "command": "pnpm --filter @workspace/run-calculator run test:budget",
+          "outcome": "FAIL",
+          "exitCode": 1,
+          "timedOut": false,
+          "elapsedMs": 44,
+          "peakRssKiB": 65400,
+          "failureCode": "EXIT_CODE_1",
+          "skipReason": null
+        },
+        {
+          "id": "database-create",
+          "command": "pnpm --filter @workspace/api-server exec node -e <create disposable test database>",
+          "outcome": "PASS",
+          "exitCode": 0,
+          "timedOut": false,
+          "elapsedMs": 121,
+          "peakRssKiB": 65788,
+          "failureCode": null,
+          "skipReason": null
+        },
+        {
+          "id": "database-schema",
+          "command": "pnpm --filter @workspace/db run push-force",
+          "outcome": "PASS",
+          "exitCode": 0,
+          "timedOut": false,
+          "elapsedMs": 1359,
+          "peakRssKiB": 262392,
+          "failureCode": null,
+          "skipReason": null
+        },
+        {
+          "id": "api-integration-shard-1",
+          "command": "pnpm --filter @workspace/api-server run test:release:integration:1",
+          "outcome": "PASS",
+          "exitCode": 0,
+          "timedOut": false,
+          "elapsedMs": 66976,
+          "peakRssKiB": 526668,
+          "failureCode": null,
+          "skipReason": null
+        },
+        {
+          "id": "production-build",
+          "command": "pnpm run build",
+          "outcome": "FAIL",
+          "exitCode": 1,
+          "timedOut": false,
+          "elapsedMs": 65347,
+          "peakRssKiB": 1082992,
+          "failureCode": "EXIT_CODE_1",
+          "skipReason": null
+        }
+      ]
+    }
+  ],
+  "comparison": [
+    {
+      "id": "install",
+      "baselineOutcome": "PASS",
+      "candidateOutcome": "PASS",
+      "elapsedDeltaMs": -2931,
+      "peakRssDeltaKiB": -289184
+    },
+    {
+      "id": "typecheck",
+      "baselineOutcome": "PASS",
+      "candidateOutcome": "PASS",
+      "elapsedDeltaMs": -887,
+      "peakRssDeltaKiB": -232
+    },
+    {
+      "id": "run-calculator-budget",
+      "baselineOutcome": "FAIL",
+      "candidateOutcome": "FAIL",
+      "elapsedDeltaMs": -2,
+      "peakRssDeltaKiB": 20
+    },
+    {
+      "id": "database-create",
+      "baselineOutcome": "PASS",
+      "candidateOutcome": "PASS",
+      "elapsedDeltaMs": 6,
+      "peakRssDeltaKiB": 540
+    },
+    {
+      "id": "database-schema",
+      "baselineOutcome": "PASS",
+      "candidateOutcome": "PASS",
+      "elapsedDeltaMs": -91,
+      "peakRssDeltaKiB": -138416
+    },
+    {
+      "id": "api-integration-shard-1",
+      "baselineOutcome": "PASS",
+      "candidateOutcome": "PASS",
+      "elapsedDeltaMs": -3997,
+      "peakRssDeltaKiB": 31380
+    },
+    {
+      "id": "production-build",
+      "baselineOutcome": "FAIL",
+      "candidateOutcome": "FAIL",
+      "elapsedDeltaMs": -839,
+      "peakRssDeltaKiB": 21264
+    }
+  ],
+  "status": "ADVISORY_FAILURE"
+}
