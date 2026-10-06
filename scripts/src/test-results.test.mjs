@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import {
   mkdir,
   mkdtemp,
@@ -16,8 +17,11 @@ import {
   classifyProcessOutcome,
   BROWSER_MAIN_COUNT_SUMMARY_SUFFIX,
   createTestResultsReport,
+  expectedVitestPackagesForLane,
   getRunIdentity,
   getSourceRevision,
+  inspectStructuredVitestTestCounts,
+  LIBRARY_SWEEP_FILTER,
   mapReleaseStepOutcomes,
   mergeTestResultsReports,
   parseFullBrowserTestCounts,
@@ -29,6 +33,7 @@ import {
   resolveReportPath,
   TEST_RESULT_STATUSES,
   validateReport,
+  validateVitestPackageInventory,
   writeReport,
 } from "./test-results.mjs";
 import VitestCountOnlyReporter from "./vitest-count-reporter.mjs";
@@ -572,6 +577,109 @@ test("Vitest count summaries validate runner totals and retain no case details",
     }),
     null,
     "a missing runner in a multi-package lane must clear aggregate counts",
+  );
+  const missingPackage = await inspectStructuredVitestTestCounts({
+    directory,
+    expectedRunId,
+    expectedRevision,
+    expectedPackages: [
+      "@workspace/scripts",
+      "@workspace/inventory-math",
+      "@workspace/name-match",
+    ],
+  });
+  assert.equal(missingPackage.counts, null);
+  assert.match(
+    missingPackage.issue,
+    /missing package summaries: @workspace\/name-match/u,
+  );
+
+  await writeTextFile(
+    join(directory, "duplicate.json"),
+    JSON.stringify(summary),
+  );
+  const duplicatePackage = await inspectStructuredVitestTestCounts({
+    directory,
+    expectedRunId,
+    expectedRevision,
+    expectedPackages: ["@workspace/scripts", "@workspace/inventory-math"],
+  });
+  assert.equal(duplicatePackage.counts, null);
+  assert.match(
+    duplicatePackage.issue,
+    /duplicate package summary for @workspace\/scripts/u,
+  );
+});
+
+test("recursive library summary inventory matches the CI test scope selected by pnpm", async () => {
+  const catalog = await readLaneCatalog();
+  const lane = catalog.lanes.find((item) => item.id === "ci-library-sweep");
+  assert.ok(lane);
+  const normalizedCommand = lane.command
+    .replaceAll(/["']/g, "")
+    .replaceAll(/\s+/g, " ")
+    .trim();
+  assert.equal(
+    normalizedCommand,
+    `pnpm -r --filter ${LIBRARY_SWEEP_FILTER} --if-present test`,
+    "the inventory query and CI lane must use the same recursive package filter",
+  );
+
+  const selectedPackages = JSON.parse(
+    execFileSync(
+      "pnpm",
+      [
+        "-r",
+        "--filter",
+        LIBRARY_SWEEP_FILTER,
+        "list",
+        "--depth",
+        "-1",
+        "--json",
+      ],
+      {
+        cwd: ROOT,
+        encoding: "utf8",
+        timeout: 30_000,
+        maxBuffer: 1024 * 1024,
+      },
+    ),
+  );
+  assert.ok(Array.isArray(selectedPackages));
+  const packagesWithTests = [];
+  for (const selectedPackage of selectedPackages) {
+    const manifest = JSON.parse(
+      await readFile(join(selectedPackage.path, "package.json"), "utf8"),
+    );
+    if (manifest.scripts && Object.hasOwn(manifest.scripts, "test")) {
+      packagesWithTests.push({
+        name: manifest.name,
+        testCommand: manifest.scripts.test,
+      });
+    }
+  }
+  const expectedFromPnpm = validateVitestPackageInventory(packagesWithTests);
+  const collected = await expectedVitestPackagesForLane("ci-library-sweep");
+  assert.equal(expectedFromPnpm.issue, null);
+  assert.equal(collected.issue, null);
+  assert.deepEqual(collected.packages, expectedFromPnpm.packages);
+});
+
+test("library summary inventory rejects duplicate packages and unsupported test commands", () => {
+  const duplicate = validateVitestPackageInventory([
+    { name: "@workspace/sample", testCommand: "vitest run" },
+    { name: "@workspace/sample", testCommand: "vitest run" },
+  ]);
+  assert.equal(duplicate.packages, null);
+  assert.match(duplicate.issue, /duplicate test package/u);
+
+  const unsupported = validateVitestPackageInventory([
+    { name: "@workspace/sample", testCommand: "node --test" },
+  ]);
+  assert.equal(unsupported.packages, null);
+  assert.match(
+    unsupported.issue,
+    /unsupported test command for @workspace\/sample/u,
   );
 });
 

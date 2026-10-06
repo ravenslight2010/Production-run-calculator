@@ -64,6 +64,12 @@ const VITEST_REPORTER_LANES = new Set([
   "ci-client-unit",
   "ci-library-sweep",
 ]);
+export const LIBRARY_SWEEP_FILTER = "./lib/**";
+const LIBRARY_SWEEP_PNPM_ARGS = Object.freeze([
+  "-r",
+  "--filter",
+  LIBRARY_SWEEP_FILTER,
+]);
 const TEST_RESULTS_COUNTS_POLICY =
   "Counts are null unless captured from a current-run, revision-matched structured test summary with consistent bounded totals.";
 const AGGREGATION_STEP_OUTCOMES = new Set([
@@ -239,35 +245,38 @@ export function parseStructuredVitestTestCounts(
   return counts;
 }
 
-export async function readStructuredVitestTestCounts({
+export async function inspectStructuredVitestTestCounts({
   directory,
   expectedRunId,
   expectedRevision,
   expectedPackages,
 }) {
+  const invalid = (issue) => ({ counts: null, issue });
   if (
     typeof directory !== "string" ||
     !Array.isArray(expectedPackages) ||
     expectedPackages.length === 0 ||
     expectedPackages.length > MAX_VITEST_COUNT_SUMMARIES ||
     expectedPackages.some(
-      (name) => typeof name !== "string" || !/^@workspace\/[a-z0-9-]{2,80}$/.test(name),
+      (name) =>
+        typeof name !== "string" || !/^@workspace\/[a-z0-9-]{2,80}$/.test(name),
     ) ||
     new Set(expectedPackages).size !== expectedPackages.length
   ) {
-    return null;
+    return invalid("the expected package inventory is invalid");
   }
   try {
     const entries = await readdir(directory, { withFileTypes: true });
     if (
-      entries.length !== expectedPackages.length ||
       entries.some(
         (entry) =>
           !entry.isFile() ||
           !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,180}\.json$/.test(entry.name),
       )
     ) {
-      return null;
+      return invalid(
+        "the package summary inventory contains an unexpected file",
+      );
     }
     const expected = new Set(expectedPackages);
     const received = new Set();
@@ -280,29 +289,49 @@ export async function readStructuredVitestTestCounts({
         summaryStat.size < 1 ||
         summaryStat.size > MAX_VITEST_COUNT_SUMMARY_BYTES
       ) {
-        return null;
+        return invalid("a package summary has an invalid size");
       }
       const summary = JSON.parse(await readFile(summaryPath, "utf8"));
-      if (
-        !expected.has(summary?.packageName) ||
-        received.has(summary.packageName)
-      ) {
-        return null;
+      const packageName = summary?.packageName;
+      if (!expected.has(packageName)) {
+        return invalid("an unexpected package summary was received");
+      }
+      if (received.has(packageName)) {
+        return invalid(`duplicate package summary for ${packageName}`);
       }
       const counts = parseStructuredVitestTestCounts(summary, {
         expectedRunId,
         expectedRevision,
-        expectedPackageName: summary.packageName,
+        expectedPackageName: packageName,
       });
-      if (!counts) return null;
-      received.add(summary.packageName);
+      if (!counts) {
+        return invalid(
+          `the package summary for ${packageName} is invalid or stale`,
+        );
+      }
+      received.add(packageName);
       countsList.push(counts);
     }
-    if (received.size !== expected.size) return null;
-    return combineTestCounts(countsList);
+    const missing = [...expected].filter(
+      (packageName) => !received.has(packageName),
+    );
+    if (missing.length > 0) {
+      const listed = missing.slice(0, 8).join(", ");
+      const remainder =
+        missing.length > 8 ? `, and ${missing.length - 8} more` : "";
+      return invalid(`missing package summaries: ${listed}${remainder}`);
+    }
+    const counts = combineTestCounts(countsList);
+    return counts
+      ? { counts, issue: null }
+      : invalid("the package test totals are inconsistent");
   } catch {
-    return null;
+    return invalid("package summaries could not be read or parsed");
   }
+}
+
+export async function readStructuredVitestTestCounts(options) {
+  return (await inspectStructuredVitestTestCounts(options)).counts;
 }
 
 export function parseFullBrowserTestCounts(
@@ -1498,60 +1527,142 @@ function runChild(command, args, extraEnv = {}) {
   });
 }
 
-async function expectedVitestPackagesForLane(laneId) {
+export function validateVitestPackageInventory(packages) {
+  const invalid = (issue) => ({ packages: null, issue });
+  if (!Array.isArray(packages)) {
+    return invalid("the recursive package inventory is not a list");
+  }
+
+  const names = new Set();
+  for (const entry of packages) {
+    if (!isRecord(entry) || typeof entry.name !== "string") {
+      return invalid(
+        "the recursive package inventory contains an invalid package",
+      );
+    }
+    if (!Object.hasOwn(entry, "testCommand")) continue;
+    if (!/^@workspace\/[a-z0-9-]{2,80}$/.test(entry.name)) {
+      return invalid("a test package has an unsupported package name");
+    }
+    if (names.has(entry.name)) {
+      return invalid(
+        `duplicate test package in recursive inventory: ${entry.name}`,
+      );
+    }
+    if (
+      typeof entry.testCommand !== "string" ||
+      !/^\s*vitest\s+run(?:\s|$)/.test(entry.testCommand)
+    ) {
+      return invalid(`unsupported test command for ${entry.name}`);
+    }
+    names.add(entry.name);
+  }
+
+  const packageNames = [...names].sort();
+  if (
+    packageNames.length === 0 ||
+    packageNames.length > MAX_VITEST_COUNT_SUMMARIES
+  ) {
+    return invalid(
+      "the recursive inventory has no supported test packages or exceeds its limit",
+    );
+  }
+  return { packages: packageNames, issue: null };
+}
+
+export async function expectedVitestPackagesForLane(laneId) {
   const fixedPackages = {
     "ci-api-postgres": ["@workspace/api-server"],
     "ci-client-unit": ["@workspace/run-calculator"],
     "ci-scripts-routine": ["@workspace/scripts"],
   };
-  if (fixedPackages[laneId]) return fixedPackages[laneId];
-  if (laneId !== "ci-library-sweep") return null;
+  if (fixedPackages[laneId]) {
+    return { packages: fixedPackages[laneId], issue: null };
+  }
+  if (laneId !== "ci-library-sweep") {
+    return { packages: null, issue: null };
+  }
 
   try {
-    const packageRoots = [
-      resolve(REPOSITORY_ROOT, "lib"),
-      resolve(REPOSITORY_ROOT, "lib/integrations"),
-    ];
-    const packages = new Map();
-    for (const packageRoot of packageRoots) {
-      let entries;
-      try {
-        entries = await readdir(packageRoot, { withFileTypes: true });
-      } catch (error) {
-        if (error?.code === "ENOENT" && packageRoot.endsWith(`${sep}integrations`)) {
-          continue;
-        }
-        return null;
-      }
-      for (const entry of entries) {
-        if (!entry.isDirectory() || entry.name === "node_modules") continue;
-        const manifestPath = join(packageRoot, entry.name, "package.json");
-        let manifest;
-        try {
-          manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-        } catch (error) {
-          if (error?.code === "ENOENT") continue;
-          return null;
-        }
-        if (manifest.scripts?.test === undefined) continue;
-        if (
-          typeof manifest.scripts.test !== "string" ||
-          !/^\s*vitest\s+run(?:\s|$)/.test(manifest.scripts.test) ||
-          typeof manifest.name !== "string" ||
-          !/^@workspace\/[a-z0-9-]{2,80}$/.test(manifest.name) ||
-          packages.has(manifest.name)
-        ) {
-          return null;
-        }
-        packages.set(manifest.name, manifestPath);
-      }
+    const output = execFileSync(
+      "pnpm",
+      [...LIBRARY_SWEEP_PNPM_ARGS, "list", "--depth", "-1", "--json"],
+      {
+        cwd: REPOSITORY_ROOT,
+        encoding: "utf8",
+        timeout: 30_000,
+        maxBuffer: 1024 * 1024,
+      },
+    );
+    const workspacePackages = JSON.parse(output);
+    if (!Array.isArray(workspacePackages)) {
+      return {
+        packages: null,
+        issue: "pnpm returned an invalid recursive package inventory",
+      };
     }
-    const names = [...packages.keys()].sort();
-    return names.length > 0 && names.length <= MAX_VITEST_COUNT_SUMMARIES
-      ? names
-      : null;
+
+    const libraryRoot = resolve(REPOSITORY_ROOT, "lib");
+    const seenPaths = new Set();
+    const seenNames = new Set();
+    const packages = [];
+    for (const workspacePackage of workspacePackages) {
+      if (
+        !isRecord(workspacePackage) ||
+        typeof workspacePackage.name !== "string" ||
+        typeof workspacePackage.path !== "string" ||
+        !isAbsolute(workspacePackage.path)
+      ) {
+        return {
+          packages: null,
+          issue: "pnpm returned an invalid recursive package entry",
+        };
+      }
+      const packagePath = resolve(workspacePackage.path);
+      const relativePackagePath = relative(libraryRoot, packagePath);
+      if (
+        relativePackagePath === "" ||
+        relativePackagePath === ".." ||
+        relativePackagePath.startsWith(`..${sep}`) ||
+        isAbsolute(relativePackagePath)
+      ) {
+        return {
+          packages: null,
+          issue: "pnpm selected a package outside the library test scope",
+        };
+      }
+      if (seenPaths.has(packagePath) || seenNames.has(workspacePackage.name)) {
+        return {
+          packages: null,
+          issue: `duplicate package in recursive pnpm inventory: ${workspacePackage.name}`,
+        };
+      }
+      seenPaths.add(packagePath);
+      seenNames.add(workspacePackage.name);
+
+      const manifest = JSON.parse(
+        await readFile(join(packagePath, "package.json"), "utf8"),
+      );
+      if (!isRecord(manifest) || manifest.name !== workspacePackage.name) {
+        return {
+          packages: null,
+          issue: "a selected package manifest does not match pnpm's inventory",
+        };
+      }
+      const scripts = isRecord(manifest.scripts) ? manifest.scripts : null;
+      const entry = { name: workspacePackage.name };
+      if (scripts && Object.hasOwn(scripts, "test")) {
+        entry.testCommand = scripts.test;
+      }
+      packages.push(entry);
+    }
+
+    return validateVitestPackageInventory(packages);
   } catch {
-    return null;
+    return {
+      packages: null,
+      issue: "could not read the recursive pnpm library test inventory",
+    };
   }
 }
 
@@ -1572,9 +1683,18 @@ async function runLane(laneId, command, args) {
   const isReleaseLane = ["release-standard", "release-full"].includes(laneId);
   const releaseSidecarPath = `${path}.release-steps.json`;
   if (isReleaseLane) await rm(releaseSidecarPath, { force: true });
-  const expectedVitestPackages = isReleaseLane
-    ? [API_RELEASE_VITEST_PACKAGE]
-    : await expectedVitestPackagesForLane(laneId);
+  let expectedVitestPackages;
+  if (isReleaseLane) {
+    expectedVitestPackages = [API_RELEASE_VITEST_PACKAGE];
+  } else {
+    const vitestInventory = await expectedVitestPackagesForLane(laneId);
+    expectedVitestPackages = vitestInventory.packages;
+    if (vitestInventory.issue) {
+      console.error(
+        `Vitest count inventory mismatch for ${laneId}: ${vitestInventory.issue}. Totals will remain null.`,
+      );
+    }
+  }
   let vitestCountsDirectory;
   if (expectedVitestPackages) {
     const candidateDirectory = `${path}.vitest-counts-${randomUUID()}`;
@@ -1623,12 +1743,18 @@ async function runLane(laneId, command, args) {
   let counts = null;
   if (vitestCountsDirectory) {
     try {
-      counts = await readStructuredVitestTestCounts({
+      const summaryResult = await inspectStructuredVitestTestCounts({
         directory: vitestCountsDirectory,
         expectedRunId: existing.run.id,
         expectedRevision: existing.sourceRevision,
         expectedPackages: expectedVitestPackages,
       });
+      counts = summaryResult.counts;
+      if (summaryResult.issue) {
+        console.error(
+          `Vitest count inventory mismatch for ${laneId}: ${summaryResult.issue}. Totals will remain null.`,
+        );
+      }
     } finally {
       try {
         await rm(vitestCountsDirectory, { recursive: true, force: true });
@@ -1730,7 +1856,12 @@ function localCommandFor(lane) {
     case "ci-client-unit":
       return ["pnpm", "--filter", "@workspace/run-calculator", "test"];
     case "ci-library-sweep":
-      return ["pnpm", "-r", "--filter", "./lib/**", "--if-present", "test"];
+      return [
+        "pnpm",
+        ...LIBRARY_SWEEP_PNPM_ARGS,
+        "--if-present",
+        "test",
+      ];
     default:
       throw new Error(`No safe local routine command is defined for ${lane.id}.`);
   }
