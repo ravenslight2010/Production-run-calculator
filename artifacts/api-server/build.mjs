@@ -3,7 +3,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build as esbuild } from "esbuild";
 import esbuildPluginPino from "esbuild-plugin-pino";
-import { rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { buildSourceRecord, completeBuildStage } from "../../scripts/src/build-source-identity.mjs";
 
 // Plugins (e.g. 'esbuild-plugin-pino') may use `require` to resolve dependencies
@@ -121,6 +122,25 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
     `,
     },
   });
+  const reportRelativePath =
+    "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json";
+  const reportShaRelativePath =
+    "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.sha256";
+  const reportBytes = await readFile(path.resolve(root, reportRelativePath));
+  const reportSha256 = createHash("sha256").update(reportBytes).digest("hex");
+  const reviewedSha256 = (await readFile(path.resolve(root, reportShaRelativePath), "utf8")).trim();
+  if (!/^[a-f0-9]{64}$/u.test(reviewedSha256) || reviewedSha256 !== reportSha256) {
+    throw new Error("Bundled source-library reconciliation report does not match its reviewed SHA-256.");
+  }
+  await writeFile(
+    path.resolve(distDir, "source-library-reconciliation-report.json"),
+    reportBytes,
+  );
+  await writeFile(
+    path.resolve(distDir, "source-library-reconciliation-report.sha256"),
+    `${reportSha256}\n`,
+    "utf8",
+  );
   completeBuildStage(root, sourceRecord, "api");
 }
 

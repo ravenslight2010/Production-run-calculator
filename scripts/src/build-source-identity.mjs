@@ -181,7 +181,14 @@ export function sealBuildIdentity(root = PROJECT_ROOT, required = true) {
         part.schemaVersion !== 1 || part.kind !== "build-source-part" || part.stage !== stage ||
         !dateValid(part.completedAt) || !SHA.test(part.outputFingerprintSha256))
       throw new Error("Invalid completed build stage.");
-    if (sourceRecordDigest(part.record) !== sourceRecordDigest(record)) {
+    let partDigest;
+    try {
+      partDigest = sourceRecordDigest(part.record);
+    } catch {
+      if (required) throw new Error("API and web builds do not share the prepared source identity.");
+      return false;
+    }
+    if (partDigest !== sourceRecordDigest(record)) {
       if (required) throw new Error("API and web builds do not share the prepared source identity.");
       return false;
     }

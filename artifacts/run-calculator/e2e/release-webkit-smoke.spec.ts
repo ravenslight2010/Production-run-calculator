@@ -294,10 +294,11 @@ test("manager can preview an authoritative operational report", async ({ page })
   await page.getByTitle("More").click();
   await page.getByRole("menuitem", { name: "Summary", exact: true }).click();
   await expect(page.getByTestId("summary-tools-header")).toBeVisible();
-  const reportDetails = page.getByTestId("summary-report-details");
-  await expect(reportDetails).toBeVisible();
-  await reportDetails.locator("summary").click();
-  await expect(reportDetails).toHaveAttribute("open", "");
+  const reportToggle = page.getByTestId("summary-report-toggle");
+  await expect(reportToggle).toBeVisible();
+  await expect(reportToggle).toHaveAttribute("aria-expanded", "false");
+  await reportToggle.click();
+  await expect(reportToggle).toHaveAttribute("aria-expanded", "true");
   const report = page.getByTestId("operational-report");
   await expect(report).toBeVisible();
 

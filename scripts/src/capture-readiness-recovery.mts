@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { isDeploymentRevision, isSourceRevision } from "./release-source-identity.mjs";
+import { SOURCE_POLICY } from "./build-source-files.mjs";
 import { EXPECTED_RECORD_PATH, PROJECT_ROOT, readBoundedJson, sourceRecordDigest, validateSourceRecord } from "./build-source-identity.mjs";
 import { createPublishedSourceHandoff, verifyPublishedBuild } from "./verify-published-build.mjs";
 
@@ -247,7 +248,7 @@ export function validateReadinessDeploymentHandoff(
       typeof handoff.appBuildId !== "string" ||
       !/^app-build:[a-f0-9-]{36}$/u.test(handoff.appBuildId) ||
       handoff.deploymentId !== handoff.appBuildId ||
-      handoff.sourcePolicy !== "production-source-v1" ||
+      handoff.sourcePolicy !== SOURCE_POLICY ||
       typeof handoff.sourceFingerprintSha256 !== "string" ||
       !/^[a-f0-9]{64}$/u.test(handoff.sourceFingerprintSha256) ||
       handoff.deployedRevision !== `source-sha256:${handoff.sourceFingerprintSha256}` ||
@@ -981,7 +982,11 @@ async function main(): Promise<void> {
   if (!evidence.verification.passed) process.exitCode = 1;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname)) {
+if (
+  path.basename(new URL(import.meta.url).pathname) === "capture-readiness-recovery.mts" &&
+  process.argv[1] &&
+  path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname)
+) {
   main().catch((error) => {
     process.stderr.write(
       `FAIL readiness evidence: ${error instanceof Error ? error.message : "capture failed"}\n`,

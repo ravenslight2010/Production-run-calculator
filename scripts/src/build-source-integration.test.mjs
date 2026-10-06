@@ -74,6 +74,29 @@ function isolateSources(root) {
     chmodSync(target, statSync(path.join(PROJECT_ROOT, file)).mode);
   }
 
+  // pnpm validates every workspace importer before running a package script.
+  // Keep package metadata complete without copying unrelated workspace source.
+  for (const workspaceRoot of ["artifacts", "lib", "lib/integrations"]) {
+    const sourceRoot = path.join(PROJECT_ROOT, workspaceRoot);
+    if (!existsSync(sourceRoot)) continue;
+    for (const name of readdirSync(sourceRoot)) {
+      const relative = path.join(workspaceRoot, name, "package.json");
+      const source = path.join(PROJECT_ROOT, relative);
+      if (!existsSync(source)) continue;
+      const target = path.join(root, relative);
+      mkdirSync(path.dirname(target), { recursive: true });
+      copyFileSync(source, target);
+      chmodSync(target, statSync(source).mode);
+    }
+  }
+  for (const relative of ["scripts/package.json"]) {
+    const source = path.join(PROJECT_ROOT, relative);
+    const target = path.join(root, relative);
+    mkdirSync(path.dirname(target), { recursive: true });
+    copyFileSync(source, target);
+    chmodSync(target, statSync(source).mode);
+  }
+
   // Installed third-party tools are read-only links. Rebind workspace package
   // links to the isolated library sources so bundlers never read live sources.
   function linkDependencies(relative) {
@@ -86,6 +109,19 @@ function isolateSources(root) {
       // the installed-state records, never link their writable originals.
       if ([".modules.yaml", ".pnpm-workspace-state-v1.json"].includes(entry)) {
         copyFileSync(path.join(original, entry), path.join(destination, entry));
+        continue;
+      }
+      // pnpm may rewrite command shims while running a package command. Copy
+      // these too, or an isolated build can leave absolute fixture paths behind
+      // in the live workspace's executable wrappers.
+      if (entry === ".bin") {
+        mkdirSync(path.join(destination, entry), { recursive: true });
+        for (const binary of readdirSync(path.join(original, entry))) {
+          const source = path.join(original, entry, binary);
+          const target = path.join(destination, entry, binary);
+          copyFileSync(source, target);
+          chmodSync(target, statSync(source).mode);
+        }
         continue;
       }
       // Vite writes compiled configs and caches inside node_modules. Never

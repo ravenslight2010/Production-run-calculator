@@ -57,7 +57,7 @@ try {
   );
   const retainedComparison = JSON.parse(runComparisonCli([retained, retained]));
   assert.match(retainedComparison.summary, /^No changes:/);
-  assert.match(retainedComparison.limitations[0], /evaluator identity is unavailable/);
+  assert.deepEqual(retainedComparison.limitations, []);
   assert.throws(() => runComparisonCli([baseline]), /usage:/);
   console.log("AI evaluation comparison CLI tests passed");
 } finally {

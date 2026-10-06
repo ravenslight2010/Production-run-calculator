@@ -28,7 +28,9 @@ test("mutation property across each included source category and varied bytes", 
   const paths = ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml",
     "artifacts/api-server/src/index.ts", "artifacts/run-calculator/src/main.ts",
     "artifacts/api-server/build.mjs", "artifacts/run-calculator/vite.config.ts",
-    "lib/math/src/index.ts", "scripts/src/build.mjs", "artifacts/run-calculator/public/icon.svg"];
+    "lib/math/src/index.ts", "scripts/src/build.mjs", "artifacts/run-calculator/public/icon.svg",
+    "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json",
+    "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.sha256"];
   for (const file of paths) {
     const original = readFileSync(path.join(root, file));
     const baseline = hash(root);
@@ -48,6 +50,7 @@ test("secrets, evidence, fixtures and generated output are excluded and not expo
     "lib/math/node_modules/private.js", "lib/math/fixtures/customer.json",
     "scripts/src/build.test.mjs", "artifacts/api-server/dist/index.mjs",
     "artifacts/run-calculator/e2e/scenario.ts", "release-evidence/private.json",
+    "attached_assets/source-library/audits/unreviewed.json",
     SOURCE_RECORD_PATH]) put(root, file, "synthetic-private-marker");
   assert.equal(hash(root), before);
   const record = createSourceRecord(root);
@@ -137,6 +140,21 @@ test("compiled output mutation and mismatched artifact-set IDs block finalizatio
   record = preparePublishSource(root);
   completeBuildStage(root, record, "api");
   assert.throws(() => sealBuildIdentity(root), /do not share/);
+});
+
+test("a stale build stage from an older source policy cannot block a fresh stage", (t) => {
+  const root = sourceFixture(t);
+  const record = preparePublishSource(root);
+  outputs(root);
+  completeBuildStage(root, record, "web");
+  const webPartPath = "artifacts/run-calculator/dist/public/build-source-part.json";
+  const webPart = JSON.parse(readFileSync(path.join(root, webPartPath), "utf8"));
+  webPart.record.sourcePolicy = "production-source-v1";
+  put(root, webPartPath, `${JSON.stringify(webPart)}\n`);
+
+  assert.equal(completeBuildStage(root, record, "api"), false);
+  const sealed = completeBuildStage(root, record, "web");
+  assert.equal(sealed.sourcePolicy, "production-source-v2");
 });
 
 test("development metadata is explicit and cannot serve as a complete release", (t) => {

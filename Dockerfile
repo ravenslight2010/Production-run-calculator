@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-ARG NODE_IMAGE=node:24.20.0-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e
+ARG NODE_IMAGE=node:24.21.0-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20
 
 ########## builder: install deps, build web + api ##########
 FROM ${NODE_IMAGE} AS builder
@@ -42,6 +42,7 @@ RUN set -eu; \
 COPY artifacts/api-server/package.json ./artifacts/api-server/package.json
 COPY artifacts/mockup-sandbox/package.json ./artifacts/mockup-sandbox/package.json
 COPY artifacts/run-calculator/package.json ./artifacts/run-calculator/package.json
+COPY lib/ai-evaluation/package.json ./lib/ai-evaluation/package.json
 COPY lib/ai-memory/package.json ./lib/ai-memory/package.json
 COPY lib/allergen/package.json ./lib/allergen/package.json
 COPY lib/anomaly/package.json ./lib/anomaly/package.json
@@ -55,7 +56,9 @@ COPY lib/corpus-harness/package.json ./lib/corpus-harness/package.json
 COPY lib/cycle-count/package.json ./lib/cycle-count/package.json
 COPY lib/day-summary/package.json ./lib/day-summary/package.json
 COPY lib/db/package.json ./lib/db/package.json
+COPY lib/distill-dataset/package.json ./lib/distill-dataset/package.json
 COPY lib/downtime-trends/package.json ./lib/downtime-trends/package.json
+COPY lib/factory-constants/package.json ./lib/factory-constants/package.json
 COPY lib/fill-missing/package.json ./lib/fill-missing/package.json
 COPY lib/formula-guard/package.json ./lib/formula-guard/package.json
 COPY lib/freezer-pull/package.json ./lib/freezer-pull/package.json
@@ -63,6 +66,7 @@ COPY lib/incident-cluster/package.json ./lib/incident-cluster/package.json
 COPY lib/ingredient-catalog/package.json ./lib/ingredient-catalog/package.json
 COPY lib/integrations-openai-ai-server/package.json ./lib/integrations-openai-ai-server/package.json
 COPY lib/inventory-math/package.json ./lib/inventory-math/package.json
+COPY lib/live-calc/package.json ./lib/live-calc/package.json
 COPY lib/merge-suggest/package.json ./lib/merge-suggest/package.json
 COPY lib/mixes/package.json ./lib/mixes/package.json
 COPY lib/mix-reconcile/package.json ./lib/mix-reconcile/package.json
@@ -82,6 +86,8 @@ COPY lib/shipping-import/package.json ./lib/shipping-import/package.json
 COPY lib/spec-export/package.json ./lib/spec-export/package.json
 COPY lib/spec-import/package.json ./lib/spec-import/package.json
 COPY lib/spec-reconcile/package.json ./lib/spec-reconcile/package.json
+COPY lib/sync-contract/package.json ./lib/sync-contract/package.json
+COPY lib/typescript-api-v6/package.json ./lib/typescript-api-v6/package.json
 COPY scripts/package.json ./scripts/package.json
 RUN pnpm install --frozen-lockfile
 

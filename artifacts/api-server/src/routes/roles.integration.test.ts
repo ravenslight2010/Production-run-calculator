@@ -852,6 +852,14 @@ const ROUTES: GatedRoute[] = [
     okStatus: 400,
   },
   {
+    name: "POST /profile-data/source-library-reconciliation/capture",
+    capability: "manage-staff",
+    method: "POST",
+    path: () => "/api/profile-data/source-library-reconciliation/capture",
+    body: {},
+    okStatus: 400,
+  },
+  {
     name: "POST /profile-data/health-check/batches/:batchId/undo",
     capability: "manage-staff",
     method: "POST",
@@ -1022,6 +1030,43 @@ describe("capability-based access control", () => {
     // Invalid input proves direct requireAuth and sandbox scope both passed; a
     // live-only regression would return the safe sandbox denial (403) instead.
     expect(res.status).toBe(400);
+  });
+
+  it("rejects source-library captures from the sandbox before request validation", async () => {
+    const res = await req(
+      SANDBOX,
+      "POST",
+      "/api/profile-data/source-library-reconciliation/capture",
+      {},
+    );
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toEqual({
+      error: "Not available in the sandbox account",
+    });
+  });
+
+  it("marks source-library capture responses as non-cacheable", async () => {
+    const res = await req(
+      MANAGER,
+      "POST",
+      "/api/profile-data/source-library-reconciliation/capture",
+      {},
+    );
+    expect(res.status).toBe(400);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("rejects source-library capture bodies above the 8 KiB request cap", async () => {
+    const res = await req(
+      MANAGER,
+      "POST",
+      "/api/profile-data/source-library-reconciliation/capture",
+      { padding: "x".repeat(9000) },
+    );
+    expect(res.status).toBe(413);
+    await expect(res.json()).resolves.toEqual({
+      error: "Request body too large",
+    });
   });
 
   it("rejects every protected route with 401 when signed out", async () => {

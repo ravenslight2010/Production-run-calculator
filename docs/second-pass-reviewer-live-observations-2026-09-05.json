@@ -1,6 +1,15 @@
 {
-  "formatVersion": 1,
+  "formatVersion": 2,
+  "capturedAt": "2026-10-06T11:17:00.238Z",
+  "environment": "candidate-workspace",
+  "sourceRevision": "unknown (dirty worktree; evaluator and lockfile are hashed)",
   "sourceHash": "1d8a2a3ddda96c32959e43fdcd901f3a14308bf12bc4d65ef4e2e3ce12505294",
+  "evaluatorSha256": "53c77a1ff4944bf77f773c18cde93d7cc0342ac17400ca15b0e6d1220dba08da",
+  "toolchain": {
+    "nodeVersion": "24.21.0",
+    "pnpmVersion": "12.8.1",
+    "pnpmLockSha256": "f0de32515ea5526d874c8490c91669890ac77f8d6e1eea26157b8dd590f47d45"
+  },
   "model": "gemini-2.5-flash",
   "operations": {
     "parse-spec-sheet": {
@@ -13,7 +22,8 @@
       "falseWarnings": 0,
       "falseRejects": 0,
       "noOpVerdicts": 76,
-      "latencyMs": 20732,
+      "providerRetries": 0,
+      "latencyMs": 17001,
       "inputTokens": null,
       "outputTokens": null,
       "failureClass": "SyntaxError"
@@ -28,7 +38,8 @@
       "falseWarnings": 0,
       "falseRejects": 0,
       "noOpVerdicts": 22,
-      "latencyMs": 14851,
+      "providerRetries": 0,
+      "latencyMs": 15982,
       "inputTokens": null,
       "outputTokens": null,
       "failureClass": "SyntaxError"
@@ -43,7 +54,8 @@
       "falseWarnings": 0,
       "falseRejects": 0,
       "noOpVerdicts": 78,
-      "latencyMs": 24169,
+      "providerRetries": 0,
+      "latencyMs": 15722,
       "inputTokens": null,
       "outputTokens": null,
       "failureClass": "SyntaxError"
@@ -54,13 +66,14 @@
       "nonMaterialCases": 0,
       "providerCalls": 1,
       "reviewerFailures": 0,
-      "duplicateWarnings": 3,
+      "duplicateWarnings": 2,
       "falseWarnings": 0,
       "falseRejects": 0,
-      "noOpVerdicts": 0,
-      "latencyMs": 9619,
-      "inputTokens": null,
-      "outputTokens": null
+      "noOpVerdicts": 1,
+      "providerRetries": 0,
+      "latencyMs": 8209,
+      "inputTokens": 726,
+      "outputTokens": 252
     },
     "fill-missing": {
       "cases": 125,
@@ -72,7 +85,8 @@
       "falseWarnings": 0,
       "falseRejects": 0,
       "noOpVerdicts": 125,
-      "latencyMs": 18479,
+      "providerRetries": 0,
+      "latencyMs": 14660,
       "inputTokens": null,
       "outputTokens": null,
       "failureClass": "SyntaxError"

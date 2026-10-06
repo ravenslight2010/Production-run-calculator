@@ -2,18 +2,44 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
-import { openai, pickModel } from "@workspace/integrations-openai-ai-server";
+import {
+  openai,
+  pickModel,
+  setGeminiMetricsObserver,
+  type GeminiRequestMetrics,
+} from "@workspace/integrations-openai-ai-server";
 import {
   buildReviewPrompt,
   sanitizeReviewVerdicts,
   type ReviewItem,
-} from "@workspace/ai-review";
+} from "../../../scripts/src/second-pass-reviewer-evaluator.mts";
 import { OPERATION_FINDINGS } from "../../../scripts/src/second-pass-reviewer-benchmark.mts";
 
 type Label = "duplicate-if-flagged" | "false-if-flagged";
 type Case = ReviewItem & { label: Label; materialKey: string };
 
 const root = path.resolve(import.meta.dirname, "../../..");
+const pnpmUserAgent = process.env.npm_config_user_agent ?? "";
+const pnpmVersion = pnpmUserAgent.match(/(?:^|\s)pnpm\/([^\s]+)/u)?.[1];
+if (!pnpmVersion) {
+  throw new Error("run the live reviewer benchmark through pnpm so its version is recorded");
+}
+const evaluatorFiles = [
+  path.join(root, "artifacts/api-server/scripts/benchmark-second-pass-reviewer-live.mts"),
+  path.join(root, "scripts/src/second-pass-reviewer-evaluator.mts"),
+  path.join(root, "lib/integrations-openai-ai-server/src/client.ts"),
+  path.join(root, "lib/integrations-openai-ai-server/src/models.ts"),
+];
+const evaluatorHash = createHash("sha256");
+for (const evaluatorFile of evaluatorFiles) {
+  evaluatorHash.update(path.relative(root, evaluatorFile).replaceAll(path.sep, "/"));
+  evaluatorHash.update("\0");
+  evaluatorHash.update(fs.readFileSync(evaluatorFile));
+  evaluatorHash.update("\0");
+}
+const pnpmLockSha256 = createHash("sha256")
+  .update(fs.readFileSync(path.join(root, "pnpm-lock.yaml")))
+  .digest("hex");
 const sourcePath = path.join(
   root,
   "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json",
@@ -55,6 +81,10 @@ function toCases(config: { material: readonly string[]; nonMaterial: readonly st
 }
 
 const aggregate: Record<string, unknown> = {};
+const providerMetrics: GeminiRequestMetrics[] = [];
+setGeminiMetricsObserver((metrics) => {
+  providerMetrics.push(metrics);
+});
 for (const [operation, config] of Object.entries(OPERATION_FINDINGS)) {
   const cases = toCases(config);
   const { system, user } = buildReviewPrompt(
@@ -63,6 +93,7 @@ for (const [operation, config] of Object.entries(OPERATION_FINDINGS)) {
     cases,
   );
   const started = performance.now();
+  providerMetrics.length = 0;
   try {
     const response = await openai.chat.completions.create({
       model: pickModel("full"),
@@ -103,9 +134,14 @@ for (const [operation, config] of Object.entries(OPERATION_FINDINGS)) {
       falseWarnings,
       falseRejects,
       noOpVerdicts,
+      providerRetries: providerMetrics.at(-1)?.retryCount ?? 0,
       latencyMs: Math.round(latencyMs),
-      inputTokens: response.usage?.prompt_tokens ?? null,
-      outputTokens: response.usage?.completion_tokens ?? null,
+      inputTokens: providerMetrics.at(-1)?.promptTokens
+        ? providerMetrics.at(-1)!.promptTokens
+        : null,
+      outputTokens: providerMetrics.at(-1)?.completionTokens
+        ? providerMetrics.at(-1)!.completionTokens
+        : null,
     };
   } catch (error) {
     aggregate[operation] = {
@@ -118,6 +154,7 @@ for (const [operation, config] of Object.entries(OPERATION_FINDINGS)) {
       falseWarnings: 0,
       falseRejects: 0,
       noOpVerdicts: cases.length,
+      providerRetries: providerMetrics.at(-1)?.retryCount ?? 0,
       latencyMs: Math.round(performance.now() - started),
       inputTokens: null,
       outputTokens: null,
@@ -127,8 +164,17 @@ for (const [operation, config] of Object.entries(OPERATION_FINDINGS)) {
 }
 
 const output = {
-  formatVersion: 1,
+  formatVersion: 2,
+  capturedAt: new Date().toISOString(),
+  environment: "candidate-workspace",
+  sourceRevision: "unknown (dirty worktree; evaluator and lockfile are hashed)",
   sourceHash: createHash("sha256").update(sourceBytes).digest("hex"),
+  evaluatorSha256: evaluatorHash.digest("hex"),
+  toolchain: {
+    nodeVersion: process.versions.node,
+    pnpmVersion,
+    pnpmLockSha256,
+  },
   model: pickModel("full"),
   operations: aggregate,
 };

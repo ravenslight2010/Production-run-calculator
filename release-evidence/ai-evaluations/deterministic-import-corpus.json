@@ -15,10 +15,10 @@
     "maximumGridSanityIssues": 0
   },
   "dependencies": {
-    "node": "24.20.0",
-    "pnpmLockSha256": "2c47ed8787daf1e167b691e433979db9d1b4e88445b17c2d069022f96c821f41",
+    "node": "24.21.0",
+    "pnpmLockSha256": "251d67bf080b4e0c8015913bc3f66e8229af0e8763325cfa723c93629e9e3f13",
     "xlsx": "npm:@e965/xlsx@^0.20.3",
-    "vitest": "^4.1.9"
+    "vitest": "5.0.0"
   },
   "provider": {
     "identityState": "not-applicable",
@@ -66,7 +66,7 @@
     "evidenceType": "source-workbook-byte-hash",
     "evaluator": {
       "state": "hashed",
-      "sha256": "a57f4c2b96b4a6e0f55178c191adfa03b7f1b4cbc9e6471b623ac0cea5c3541c"
+      "sha256": "0a454a854c8f8c15bdeda8ebf2037b396c9345fccc6b586992c7f7baf7be2d78"
     }
   }
 }

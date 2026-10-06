@@ -3,9 +3,15 @@ import { execFileSync } from "node:child_process";
 import { lstatSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 
-export const SOURCE_POLICY = "production-source-v1";
+export const SOURCE_POLICY = "production-source-v2";
+const SOURCE_LIBRARY_RECONCILIATION_ASSETS = new Set([
+  "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json",
+  "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.sha256",
+]);
 const REQUIRED = ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml",
-  "artifacts/api-server/src", "artifacts/run-calculator/src", "lib", "scripts/src"];
+  "artifacts/api-server/src", "artifacts/run-calculator/src", "lib", "scripts/src",
+  "attached_assets/source-library/audits",
+  ...SOURCE_LIBRARY_RECONCILIATION_ASSETS];
 const TOP_FILES = new Set(["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml",
   ".replit", ".npmrc", ".node-version", ".nvmrc"]);
 const SKIP_DIRS = new Set(["node_modules", "dist", "coverage", ".git", "__tests__",
@@ -18,6 +24,7 @@ export function isSourceInput(relative) {
   if (parts.some((p) => SKIP_DIRS.has(p) || p.startsWith(".env")) ||
       SKIP_FILES.has(parts.at(-1)) || /\.(?:test|spec)\.[^.]+$/.test(relative) ||
       /\.(?:log|tsbuildinfo)$/.test(relative)) return false;
+  if (SOURCE_LIBRARY_RECONCILIATION_ASSETS.has(relative)) return true;
   if (parts.length === 1) return TOP_FILES.has(relative) || /^tsconfig.*\.json$/.test(relative);
   if (parts[0] === "lib" || relative.startsWith("scripts/src/")) return true;
   if (parts[0] !== "artifacts" || !["api-server", "run-calculator"].includes(parts[1])) return false;
@@ -66,7 +73,8 @@ export function fingerprintSource(root) {
   for (const name of readdirSync(sourceRoot).sort()) {
     if (TOP_FILES.has(name) || /^tsconfig.*\.json$/.test(name)) walk(name);
   }
-  for (const base of ["lib", "scripts/src", "artifacts/api-server", "artifacts/run-calculator"]) {
+  for (const base of ["lib", "scripts/src", "artifacts/api-server", "artifacts/run-calculator",
+    "attached_assets/source-library/audits"]) {
     const names = readdirSync(path.join(sourceRoot, base)).sort();
     for (const name of names) {
       if (SKIP_DIRS.has(name) || name.startsWith(".env")) continue;

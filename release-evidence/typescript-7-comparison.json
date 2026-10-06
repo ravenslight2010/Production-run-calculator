@@ -1,6 +1,6 @@
 {
   "schemaVersion": 3,
-  "sourceRevision": "09fbe23d228ed206df207cf27f33872360f03d04",
+  "sourceRevision": "test-sha256:423e5522b1faab8ba00a2295f6ae8b86875f44e82ef13b9df6e4f806afb01624",
   "status": "ADVISORY_DRIFT",
   "authoritativeCompiler": "Version 6.0.3",
   "candidateCompiler": "Version 7.0.2",
@@ -45,7 +45,7 @@
       "@typescript/typescript-win32-arm64",
       "@typescript/typescript-win32-x64"
     ],
-    "image": "unknown",
+    "image": "ubuntu-24.04.4-lts-x64",
     "hardwareClass": "b4f56ab335d4ca2f1c54a5278605fe5693d55aaa606a503a34a4b81b6c9ad816",
     "logicalCpuCount": 8,
     "memoryGiB": 16
@@ -54,211 +54,211 @@
     {
       "name": "frozen-install",
       "exitCode": 0,
-      "elapsedMs": 4274,
-      "peakRssKiB": 163084,
+      "elapsedMs": 13123,
+      "peakRssKiB": 461588,
       "diagnostics": []
     },
     {
       "name": "typescript-6-build-cold",
       "exitCode": 0,
-      "elapsedMs": 12444,
-      "peakRssKiB": 856184,
+      "elapsedMs": 13763,
+      "peakRssKiB": 876872,
       "diagnostics": []
     },
     {
       "name": "typescript-6-clean",
       "exitCode": 0,
-      "elapsedMs": 205,
-      "peakRssKiB": 94660,
+      "elapsedMs": 187,
+      "peakRssKiB": 96780,
       "diagnostics": []
     },
     {
       "name": "typescript-7-build-cold",
       "exitCode": 0,
-      "elapsedMs": 1999,
-      "peakRssKiB": 765420,
+      "elapsedMs": 2831,
+      "peakRssKiB": 798316,
       "diagnostics": []
     },
     {
       "name": "typescript-6-scripts-cold",
       "exitCode": 0,
-      "elapsedMs": 3837,
-      "peakRssKiB": 513560,
+      "elapsedMs": 4615,
+      "peakRssKiB": 532660,
       "diagnostics": []
     },
     {
       "name": "typescript-7-scripts-cold",
       "exitCode": 0,
-      "elapsedMs": 566,
-      "peakRssKiB": 282480,
+      "elapsedMs": 792,
+      "peakRssKiB": 299720,
       "diagnostics": []
     },
     {
       "name": "typescript-6-api-server-cold",
       "exitCode": 0,
-      "elapsedMs": 9263,
-      "peakRssKiB": 870820,
+      "elapsedMs": 11106,
+      "peakRssKiB": 880856,
       "diagnostics": []
     },
     {
       "name": "typescript-7-api-server-cold",
       "exitCode": 0,
-      "elapsedMs": 1572,
-      "peakRssKiB": 639360,
+      "elapsedMs": 1733,
+      "peakRssKiB": 651504,
       "diagnostics": []
     },
     {
       "name": "typescript-6-run-calculator-cold",
       "exitCode": 0,
-      "elapsedMs": 36346,
-      "peakRssKiB": 1053120,
+      "elapsedMs": 39350,
+      "peakRssKiB": 1049108,
       "diagnostics": []
     },
     {
       "name": "typescript-7-run-calculator-cold",
       "exitCode": 0,
-      "elapsedMs": 2390,
-      "peakRssKiB": 768252,
+      "elapsedMs": 2981,
+      "peakRssKiB": 749580,
       "diagnostics": []
     },
     {
       "name": "typescript-6-mockup-sandbox-cold",
       "exitCode": 0,
-      "elapsedMs": 3633,
-      "peakRssKiB": 615420,
+      "elapsedMs": 4496,
+      "peakRssKiB": 573124,
       "diagnostics": []
     },
     {
       "name": "typescript-7-mockup-sandbox-cold",
       "exitCode": 0,
-      "elapsedMs": 795,
-      "peakRssKiB": 360940,
+      "elapsedMs": 712,
+      "peakRssKiB": 364704,
       "diagnostics": []
     },
     {
       "name": "typescript-6-ai-evaluation-cold",
       "exitCode": 0,
-      "elapsedMs": 300,
-      "peakRssKiB": 119852,
+      "elapsedMs": 878,
+      "peakRssKiB": 219772,
       "diagnostics": []
     },
     {
       "name": "typescript-7-ai-evaluation-cold",
       "exitCode": 0,
-      "elapsedMs": 74,
-      "peakRssKiB": 50208,
+      "elapsedMs": 166,
+      "peakRssKiB": 63832,
       "diagnostics": []
     },
     {
       "name": "typescript-6-corpus-harness-cold",
       "exitCode": 0,
-      "elapsedMs": 665,
-      "peakRssKiB": 213544,
+      "elapsedMs": 776,
+      "peakRssKiB": 212552,
       "diagnostics": []
     },
     {
       "name": "typescript-7-corpus-harness-cold",
       "exitCode": 0,
-      "elapsedMs": 140,
-      "peakRssKiB": 66428,
+      "elapsedMs": 175,
+      "peakRssKiB": 62788,
       "diagnostics": []
     },
     {
       "name": "typescript-6-build-warm",
       "exitCode": 0,
-      "elapsedMs": 11176,
-      "peakRssKiB": 859108,
+      "elapsedMs": 13556,
+      "peakRssKiB": 869784,
       "diagnostics": []
     },
     {
       "name": "typescript-7-build-warm",
       "exitCode": 0,
-      "elapsedMs": 1938,
-      "peakRssKiB": 784116,
+      "elapsedMs": 2912,
+      "peakRssKiB": 861312,
       "diagnostics": []
     },
     {
       "name": "typescript-6-scripts-warm",
       "exitCode": 0,
-      "elapsedMs": 3538,
-      "peakRssKiB": 512496,
+      "elapsedMs": 5333,
+      "peakRssKiB": 536792,
       "diagnostics": []
     },
     {
       "name": "typescript-7-scripts-warm",
       "exitCode": 0,
-      "elapsedMs": 573,
-      "peakRssKiB": 281628,
+      "elapsedMs": 763,
+      "peakRssKiB": 300488,
       "diagnostics": []
     },
     {
       "name": "typescript-6-api-server-warm",
       "exitCode": 0,
-      "elapsedMs": 10347,
-      "peakRssKiB": 873940,
+      "elapsedMs": 12544,
+      "peakRssKiB": 886328,
       "diagnostics": []
     },
     {
       "name": "typescript-7-api-server-warm",
       "exitCode": 0,
-      "elapsedMs": 2894,
-      "peakRssKiB": 644032,
+      "elapsedMs": 2021,
+      "peakRssKiB": 647000,
       "diagnostics": []
     },
     {
       "name": "typescript-6-run-calculator-warm",
       "exitCode": 0,
-      "elapsedMs": 42348,
-      "peakRssKiB": 1055816,
+      "elapsedMs": 39096,
+      "peakRssKiB": 1085336,
       "diagnostics": []
     },
     {
       "name": "typescript-7-run-calculator-warm",
       "exitCode": 0,
-      "elapsedMs": 2309,
-      "peakRssKiB": 787620,
+      "elapsedMs": 2738,
+      "peakRssKiB": 782696,
       "diagnostics": []
     },
     {
       "name": "typescript-6-mockup-sandbox-warm",
       "exitCode": 0,
-      "elapsedMs": 3466,
-      "peakRssKiB": 572104,
+      "elapsedMs": 4054,
+      "peakRssKiB": 593312,
       "diagnostics": []
     },
     {
       "name": "typescript-7-mockup-sandbox-warm",
       "exitCode": 0,
-      "elapsedMs": 829,
-      "peakRssKiB": 377028,
+      "elapsedMs": 801,
+      "peakRssKiB": 379544,
       "diagnostics": []
     },
     {
       "name": "typescript-6-ai-evaluation-warm",
       "exitCode": 0,
-      "elapsedMs": 353,
-      "peakRssKiB": 122612,
+      "elapsedMs": 966,
+      "peakRssKiB": 222412,
       "diagnostics": []
     },
     {
       "name": "typescript-7-ai-evaluation-warm",
       "exitCode": 0,
-      "elapsedMs": 78,
-      "peakRssKiB": 48564,
+      "elapsedMs": 175,
+      "peakRssKiB": 63992,
       "diagnostics": []
     },
     {
       "name": "typescript-6-corpus-harness-warm",
       "exitCode": 0,
-      "elapsedMs": 652,
-      "peakRssKiB": 214600,
+      "elapsedMs": 738,
+      "peakRssKiB": 213600,
       "diagnostics": []
     },
     {
       "name": "typescript-7-corpus-harness-warm",
       "exitCode": 0,
-      "elapsedMs": 131,
-      "peakRssKiB": 65116,
+      "elapsedMs": 166,
+      "peakRssKiB": 64912,
       "diagnostics": []
     }
   ],
@@ -267,224 +267,224 @@
       "check": "build",
       "mode": "cold",
       "elapsedMs": {
-        "baseline": 12444,
-        "candidate": 1999,
-        "delta": -10445,
-        "ratio": 0.1606396657023465
+        "baseline": 13763,
+        "candidate": 2831,
+        "delta": -10932,
+        "ratio": 0.20569643246385236
       },
       "peakRssKiB": {
-        "baseline": 856184,
-        "candidate": 765420,
-        "delta": -90764,
-        "ratio": 0.893990076899358
+        "baseline": 876872,
+        "candidate": 798316,
+        "delta": -78556,
+        "ratio": 0.9104133784634474
       }
     },
     {
       "check": "scripts",
       "mode": "cold",
       "elapsedMs": {
-        "baseline": 3837,
-        "candidate": 566,
-        "delta": -3271,
-        "ratio": 0.14751107636174093
+        "baseline": 4615,
+        "candidate": 792,
+        "delta": -3823,
+        "ratio": 0.171614301191766
       },
       "peakRssKiB": {
-        "baseline": 513560,
-        "candidate": 282480,
-        "delta": -231080,
-        "ratio": 0.5500428382272763
+        "baseline": 532660,
+        "candidate": 299720,
+        "delta": -232940,
+        "ratio": 0.5626853903052604
       }
     },
     {
       "check": "api-server",
       "mode": "cold",
       "elapsedMs": {
-        "baseline": 9263,
-        "candidate": 1572,
-        "delta": -7691,
-        "ratio": 0.16970743819496922
+        "baseline": 11106,
+        "candidate": 1733,
+        "delta": -9373,
+        "ratio": 0.15604177921844048
       },
       "peakRssKiB": {
-        "baseline": 870820,
-        "candidate": 639360,
-        "delta": -231460,
-        "ratio": 0.7342045428446752
+        "baseline": 880856,
+        "candidate": 651504,
+        "delta": -229352,
+        "ratio": 0.7396260001634773
       }
     },
     {
       "check": "run-calculator",
       "mode": "cold",
       "elapsedMs": {
-        "baseline": 36346,
-        "candidate": 2390,
-        "delta": -33956,
-        "ratio": 0.06575689209266494
+        "baseline": 39350,
+        "candidate": 2981,
+        "delta": -36369,
+        "ratio": 0.07575603557814485
       },
       "peakRssKiB": {
-        "baseline": 1053120,
-        "candidate": 768252,
-        "delta": -284868,
-        "ratio": 0.7295009115770282
+        "baseline": 1049108,
+        "candidate": 749580,
+        "delta": -299528,
+        "ratio": 0.7144926928400127
       }
     },
     {
       "check": "mockup-sandbox",
       "mode": "cold",
       "elapsedMs": {
-        "baseline": 3633,
-        "candidate": 795,
-        "delta": -2838,
-        "ratio": 0.21882741535920727
+        "baseline": 4496,
+        "candidate": 712,
+        "delta": -3784,
+        "ratio": 0.1583629893238434
       },
       "peakRssKiB": {
-        "baseline": 615420,
-        "candidate": 360940,
-        "delta": -254480,
-        "ratio": 0.5864937766078451
+        "baseline": 573124,
+        "candidate": 364704,
+        "delta": -208420,
+        "ratio": 0.63634396744858
       }
     },
     {
       "check": "ai-evaluation",
       "mode": "cold",
       "elapsedMs": {
-        "baseline": 300,
-        "candidate": 74,
-        "delta": -226,
-        "ratio": 0.24666666666666667
+        "baseline": 878,
+        "candidate": 166,
+        "delta": -712,
+        "ratio": 0.18906605922551253
       },
       "peakRssKiB": {
-        "baseline": 119852,
-        "candidate": 50208,
-        "delta": -69644,
-        "ratio": 0.41891666388545873
+        "baseline": 219772,
+        "candidate": 63832,
+        "delta": -155940,
+        "ratio": 0.2904464626977049
       }
     },
     {
       "check": "corpus-harness",
       "mode": "cold",
       "elapsedMs": {
-        "baseline": 665,
-        "candidate": 140,
-        "delta": -525,
-        "ratio": 0.21052631578947367
+        "baseline": 776,
+        "candidate": 175,
+        "delta": -601,
+        "ratio": 0.22551546391752578
       },
       "peakRssKiB": {
-        "baseline": 213544,
-        "candidate": 66428,
-        "delta": -147116,
-        "ratio": 0.3110740643614431
+        "baseline": 212552,
+        "candidate": 62788,
+        "delta": -149764,
+        "ratio": 0.295400654898566
       }
     },
     {
       "check": "build",
       "mode": "warm",
       "elapsedMs": {
-        "baseline": 11176,
-        "candidate": 1938,
-        "delta": -9238,
-        "ratio": 0.17340730136005728
+        "baseline": 13556,
+        "candidate": 2912,
+        "delta": -10644,
+        "ratio": 0.21481262909412807
       },
       "peakRssKiB": {
-        "baseline": 859108,
-        "candidate": 784116,
-        "delta": -74992,
-        "ratio": 0.912709461441402
+        "baseline": 869784,
+        "candidate": 861312,
+        "delta": -8472,
+        "ratio": 0.9902596506718909
       }
     },
     {
       "check": "scripts",
       "mode": "warm",
       "elapsedMs": {
-        "baseline": 3538,
-        "candidate": 573,
-        "delta": -2965,
-        "ratio": 0.1619559072922555
+        "baseline": 5333,
+        "candidate": 763,
+        "delta": -4570,
+        "ratio": 0.1430714419651228
       },
       "peakRssKiB": {
-        "baseline": 512496,
-        "candidate": 281628,
-        "delta": -230868,
-        "ratio": 0.5495223377353189
+        "baseline": 536792,
+        "candidate": 300488,
+        "delta": -236304,
+        "ratio": 0.5597847956005305
       }
     },
     {
       "check": "api-server",
       "mode": "warm",
       "elapsedMs": {
-        "baseline": 10347,
-        "candidate": 2894,
-        "delta": -7453,
-        "ratio": 0.27969459746786507
+        "baseline": 12544,
+        "candidate": 2021,
+        "delta": -10523,
+        "ratio": 0.16111288265306123
       },
       "peakRssKiB": {
-        "baseline": 873940,
-        "candidate": 644032,
-        "delta": -229908,
-        "ratio": 0.736929308648191
+        "baseline": 886328,
+        "candidate": 647000,
+        "delta": -239328,
+        "ratio": 0.7299780668104809
       }
     },
     {
       "check": "run-calculator",
       "mode": "warm",
       "elapsedMs": {
-        "baseline": 42348,
-        "candidate": 2309,
-        "delta": -40039,
-        "ratio": 0.05452441673750826
+        "baseline": 39096,
+        "candidate": 2738,
+        "delta": -36358,
+        "ratio": 0.07003273992224268
       },
       "peakRssKiB": {
-        "baseline": 1055816,
-        "candidate": 787620,
-        "delta": -268196,
-        "ratio": 0.7459822544837358
+        "baseline": 1085336,
+        "candidate": 782696,
+        "delta": -302640,
+        "ratio": 0.721155476276471
       }
     },
     {
       "check": "mockup-sandbox",
       "mode": "warm",
       "elapsedMs": {
-        "baseline": 3466,
-        "candidate": 829,
-        "delta": -2637,
-        "ratio": 0.2391806116560877
+        "baseline": 4054,
+        "candidate": 801,
+        "delta": -3253,
+        "ratio": 0.1975826344351258
       },
       "peakRssKiB": {
-        "baseline": 572104,
-        "candidate": 377028,
-        "delta": -195076,
-        "ratio": 0.659020038314712
+        "baseline": 593312,
+        "candidate": 379544,
+        "delta": -213768,
+        "ratio": 0.6397038994660482
       }
     },
     {
       "check": "ai-evaluation",
       "mode": "warm",
       "elapsedMs": {
-        "baseline": 353,
-        "candidate": 78,
-        "delta": -275,
-        "ratio": 0.22096317280453256
+        "baseline": 966,
+        "candidate": 175,
+        "delta": -791,
+        "ratio": 0.18115942028985507
       },
       "peakRssKiB": {
-        "baseline": 122612,
-        "candidate": 48564,
-        "delta": -74048,
-        "ratio": 0.39607868724105305
+        "baseline": 222412,
+        "candidate": 63992,
+        "delta": -158420,
+        "ratio": 0.28771828858155135
       }
     },
     {
       "check": "corpus-harness",
       "mode": "warm",
       "elapsedMs": {
-        "baseline": 652,
-        "candidate": 131,
-        "delta": -521,
-        "ratio": 0.200920245398773
+        "baseline": 738,
+        "candidate": 166,
+        "delta": -572,
+        "ratio": 0.22493224932249323
       },
       "peakRssKiB": {
-        "baseline": 214600,
-        "candidate": 65116,
-        "delta": -149484,
-        "ratio": 0.3034296365330848
+        "baseline": 213600,
+        "candidate": 64912,
+        "delta": -148688,
+        "ratio": 0.3038951310861423
       }
     }
   ],
@@ -507,230 +507,230 @@
     "regressedRevisions": [],
     "revisionSamples": [
       {
-        "sourceRevision": "09fbe23d228ed206df207cf27f33872360f03d04",
+        "sourceRevision": "test-sha256:423e5522b1faab8ba00a2295f6ae8b86875f44e82ef13b9df6e4f806afb01624",
         "performanceComparison": [
           {
             "check": "build",
             "mode": "cold",
             "elapsedMs": {
-              "baseline": 12444,
-              "candidate": 1999,
-              "delta": -10445,
-              "ratio": 0.1606396657023465
+              "baseline": 13763,
+              "candidate": 2831,
+              "delta": -10932,
+              "ratio": 0.20569643246385236
             },
             "peakRssKiB": {
-              "baseline": 856184,
-              "candidate": 765420,
-              "delta": -90764,
-              "ratio": 0.893990076899358
+              "baseline": 876872,
+              "candidate": 798316,
+              "delta": -78556,
+              "ratio": 0.9104133784634474
             }
           },
           {
             "check": "scripts",
             "mode": "cold",
             "elapsedMs": {
-              "baseline": 3837,
-              "candidate": 566,
-              "delta": -3271,
-              "ratio": 0.14751107636174093
+              "baseline": 4615,
+              "candidate": 792,
+              "delta": -3823,
+              "ratio": 0.171614301191766
             },
             "peakRssKiB": {
-              "baseline": 513560,
-              "candidate": 282480,
-              "delta": -231080,
-              "ratio": 0.5500428382272763
+              "baseline": 532660,
+              "candidate": 299720,
+              "delta": -232940,
+              "ratio": 0.5626853903052604
             }
           },
           {
             "check": "api-server",
             "mode": "cold",
             "elapsedMs": {
-              "baseline": 9263,
-              "candidate": 1572,
-              "delta": -7691,
-              "ratio": 0.16970743819496922
+              "baseline": 11106,
+              "candidate": 1733,
+              "delta": -9373,
+              "ratio": 0.15604177921844048
             },
             "peakRssKiB": {
-              "baseline": 870820,
-              "candidate": 639360,
-              "delta": -231460,
-              "ratio": 0.7342045428446752
+              "baseline": 880856,
+              "candidate": 651504,
+              "delta": -229352,
+              "ratio": 0.7396260001634773
             }
           },
           {
             "check": "run-calculator",
             "mode": "cold",
             "elapsedMs": {
-              "baseline": 36346,
-              "candidate": 2390,
-              "delta": -33956,
-              "ratio": 0.06575689209266494
+              "baseline": 39350,
+              "candidate": 2981,
+              "delta": -36369,
+              "ratio": 0.07575603557814485
             },
             "peakRssKiB": {
-              "baseline": 1053120,
-              "candidate": 768252,
-              "delta": -284868,
-              "ratio": 0.7295009115770282
+              "baseline": 1049108,
+              "candidate": 749580,
+              "delta": -299528,
+              "ratio": 0.7144926928400127
             }
           },
           {
             "check": "mockup-sandbox",
             "mode": "cold",
             "elapsedMs": {
-              "baseline": 3633,
-              "candidate": 795,
-              "delta": -2838,
-              "ratio": 0.21882741535920727
+              "baseline": 4496,
+              "candidate": 712,
+              "delta": -3784,
+              "ratio": 0.1583629893238434
             },
             "peakRssKiB": {
-              "baseline": 615420,
-              "candidate": 360940,
-              "delta": -254480,
-              "ratio": 0.5864937766078451
+              "baseline": 573124,
+              "candidate": 364704,
+              "delta": -208420,
+              "ratio": 0.63634396744858
             }
           },
           {
             "check": "ai-evaluation",
             "mode": "cold",
             "elapsedMs": {
-              "baseline": 300,
-              "candidate": 74,
-              "delta": -226,
-              "ratio": 0.24666666666666667
+              "baseline": 878,
+              "candidate": 166,
+              "delta": -712,
+              "ratio": 0.18906605922551253
             },
             "peakRssKiB": {
-              "baseline": 119852,
-              "candidate": 50208,
-              "delta": -69644,
-              "ratio": 0.41891666388545873
+              "baseline": 219772,
+              "candidate": 63832,
+              "delta": -155940,
+              "ratio": 0.2904464626977049
             }
           },
           {
             "check": "corpus-harness",
             "mode": "cold",
             "elapsedMs": {
-              "baseline": 665,
-              "candidate": 140,
-              "delta": -525,
-              "ratio": 0.21052631578947367
+              "baseline": 776,
+              "candidate": 175,
+              "delta": -601,
+              "ratio": 0.22551546391752578
             },
             "peakRssKiB": {
-              "baseline": 213544,
-              "candidate": 66428,
-              "delta": -147116,
-              "ratio": 0.3110740643614431
+              "baseline": 212552,
+              "candidate": 62788,
+              "delta": -149764,
+              "ratio": 0.295400654898566
             }
           },
           {
             "check": "build",
             "mode": "warm",
             "elapsedMs": {
-              "baseline": 11176,
-              "candidate": 1938,
-              "delta": -9238,
-              "ratio": 0.17340730136005728
+              "baseline": 13556,
+              "candidate": 2912,
+              "delta": -10644,
+              "ratio": 0.21481262909412807
             },
             "peakRssKiB": {
-              "baseline": 859108,
-              "candidate": 784116,
-              "delta": -74992,
-              "ratio": 0.912709461441402
+              "baseline": 869784,
+              "candidate": 861312,
+              "delta": -8472,
+              "ratio": 0.9902596506718909
             }
           },
           {
             "check": "scripts",
             "mode": "warm",
             "elapsedMs": {
-              "baseline": 3538,
-              "candidate": 573,
-              "delta": -2965,
-              "ratio": 0.1619559072922555
+              "baseline": 5333,
+              "candidate": 763,
+              "delta": -4570,
+              "ratio": 0.1430714419651228
             },
             "peakRssKiB": {
-              "baseline": 512496,
-              "candidate": 281628,
-              "delta": -230868,
-              "ratio": 0.5495223377353189
+              "baseline": 536792,
+              "candidate": 300488,
+              "delta": -236304,
+              "ratio": 0.5597847956005305
             }
           },
           {
             "check": "api-server",
             "mode": "warm",
             "elapsedMs": {
-              "baseline": 10347,
-              "candidate": 2894,
-              "delta": -7453,
-              "ratio": 0.27969459746786507
+              "baseline": 12544,
+              "candidate": 2021,
+              "delta": -10523,
+              "ratio": 0.16111288265306123
             },
             "peakRssKiB": {
-              "baseline": 873940,
-              "candidate": 644032,
-              "delta": -229908,
-              "ratio": 0.736929308648191
+              "baseline": 886328,
+              "candidate": 647000,
+              "delta": -239328,
+              "ratio": 0.7299780668104809
             }
           },
           {
             "check": "run-calculator",
             "mode": "warm",
             "elapsedMs": {
-              "baseline": 42348,
-              "candidate": 2309,
-              "delta": -40039,
-              "ratio": 0.05452441673750826
+              "baseline": 39096,
+              "candidate": 2738,
+              "delta": -36358,
+              "ratio": 0.07003273992224268
             },
             "peakRssKiB": {
-              "baseline": 1055816,
-              "candidate": 787620,
-              "delta": -268196,
-              "ratio": 0.7459822544837358
+              "baseline": 1085336,
+              "candidate": 782696,
+              "delta": -302640,
+              "ratio": 0.721155476276471
             }
           },
           {
             "check": "mockup-sandbox",
             "mode": "warm",
             "elapsedMs": {
-              "baseline": 3466,
-              "candidate": 829,
-              "delta": -2637,
-              "ratio": 0.2391806116560877
+              "baseline": 4054,
+              "candidate": 801,
+              "delta": -3253,
+              "ratio": 0.1975826344351258
             },
             "peakRssKiB": {
-              "baseline": 572104,
-              "candidate": 377028,
-              "delta": -195076,
-              "ratio": 0.659020038314712
+              "baseline": 593312,
+              "candidate": 379544,
+              "delta": -213768,
+              "ratio": 0.6397038994660482
             }
           },
           {
             "check": "ai-evaluation",
             "mode": "warm",
             "elapsedMs": {
-              "baseline": 353,
-              "candidate": 78,
-              "delta": -275,
-              "ratio": 0.22096317280453256
+              "baseline": 966,
+              "candidate": 175,
+              "delta": -791,
+              "ratio": 0.18115942028985507
             },
             "peakRssKiB": {
-              "baseline": 122612,
-              "candidate": 48564,
-              "delta": -74048,
-              "ratio": 0.39607868724105305
+              "baseline": 222412,
+              "candidate": 63992,
+              "delta": -158420,
+              "ratio": 0.28771828858155135
             }
           },
           {
             "check": "corpus-harness",
             "mode": "warm",
             "elapsedMs": {
-              "baseline": 652,
-              "candidate": 131,
-              "delta": -521,
-              "ratio": 0.200920245398773
+              "baseline": 738,
+              "candidate": 166,
+              "delta": -572,
+              "ratio": 0.22493224932249323
             },
             "peakRssKiB": {
-              "baseline": 214600,
-              "candidate": 65116,
-              "delta": -149484,
-              "ratio": 0.3034296365330848
+              "baseline": 213600,
+              "candidate": 64912,
+              "delta": -148688,
+              "ratio": 0.3038951310861423
             }
           }
         ]
@@ -751,7 +751,7 @@
     "baseline": [
       {
         "path": "lib/ai-evaluation/dist/index.d.ts",
-        "sha256": "584b2e00dc618e357d83144e86ca4b7335d1211f112c7c9d440acb9e450bbb87"
+        "sha256": "d9da7d2756a499b8cd56465ea46f5600bb6a9c15347949f8a38bc9bce3716e28"
       },
       {
         "path": "lib/ai-memory/dist/index.d.ts",
@@ -771,11 +771,11 @@
       },
       {
         "path": "lib/api-client-react/dist/generated/api.d.ts",
-        "sha256": "b0795fa0bf97d3d159663cd18887848761e4a03a0306371a7c7738a96f77eff5"
+        "sha256": "7f9d839edd2764b69ea8910859153d2d294be1d09a628ed3a05cd96c8790a806"
       },
       {
         "path": "lib/api-client-react/dist/generated/api.schemas.d.ts",
-        "sha256": "34f2117d795b3ac3e747ff9f377a69d3932ff5acc6b45e5b1d6f97c26be80ae3"
+        "sha256": "df5d462cbaecc5c2bb9377e8b6ad6216dfbfaf56221138d5cb56557d996ea168"
       },
       {
         "path": "lib/api-client-react/dist/index.d.ts",
@@ -787,7 +787,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/api.d.ts",
-        "sha256": "0ca12e6855de8628225c23aaebf6e381c4cc63ae830215db15764700f2fb8c02"
+        "sha256": "e77b97bb1964fed4a847cb0fac2c9e75c4a35d3be99098e088c716885c2ad254"
       },
       {
         "path": "lib/api-zod/dist/generated/types/adjustInput.d.ts",
@@ -935,7 +935,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/auditLog.d.ts",
-        "sha256": "a774ec034b99bd01b1d14d78c5c6c090abc82373d7abdb468353a7d8ce6e7e0c"
+        "sha256": "bf04f13678bd3abbc9437544883b232a43d639c22bcd5b7ca896e040a455ae10"
       },
       {
         "path": "lib/api-zod/dist/generated/types/auditLogChanges.d.ts",
@@ -943,7 +943,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/auditLogPage.d.ts",
-        "sha256": "f1834c4c03bacd33c295fad7014cacb33451f4c4c93101957e1dfccfd28312db"
+        "sha256": "f3833d5fd6d8c934298fb169c0630a6bb6027e7c1e35fd72b7682d0f694be2d3"
       },
       {
         "path": "lib/api-zod/dist/generated/types/auditProfileDataHealth200.d.ts",
@@ -1028,6 +1028,34 @@
       {
         "path": "lib/api-zod/dist/generated/types/brandProfileValues.d.ts",
         "sha256": "366fa77585b15b31371274b836a3446f23e6ce6b1e26e2ebd49f2372ae74f3bc"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/buildInfo.d.ts",
+        "sha256": "06490d166c2632bb448b55eeb668f3461bcf14dc6654fe31535346d2e31f2781"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/buildInfoBuildMode.d.ts",
+        "sha256": "5320d7b94205ecb593095fc080462f46e8ccc81f174d493ced46bfb40660b272"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/buildInfoGitBinding.d.ts",
+        "sha256": "d9ab17ada600960f10b2686eb9a3cc8445cb3eebf69f1a5c7caa6b20da1bd989"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/buildInfoKind.d.ts",
+        "sha256": "6ab7d878a4e60fa4eab3df73a189eef1348bf923b3b6fc5389183e1bfff6896f"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/buildInfoPlatformIdentitySource.d.ts",
+        "sha256": "10550a0107fcf53aa2e028edcde0801d23cc71621eafdcc629d46a2988463c30"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/buildInfoSchemaVersion.d.ts",
+        "sha256": "b98a63e7d21de0ecfd748262e7aebb418cb2c01ac15d218e035c3c8a86fd07c5"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/buildInfoSourcePolicy.d.ts",
+        "sha256": "970a1a40d956746a7924ab8b0f729de4c31e2bbffdbfbd5e318a9f984f45692f"
       },
       {
         "path": "lib/api-zod/dist/generated/types/capability.d.ts",
@@ -1119,7 +1147,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/cycleCountSchedule.d.ts",
-        "sha256": "e0db8381ef98e36f8bce0a939dc78824d5d3cee6c9812a427d4305533d95771c"
+        "sha256": "4d89ad061ed1d572849fb11c9dfe003eb5d57f1b22cfb3431fb14c934b692218"
       },
       {
         "path": "lib/api-zod/dist/generated/types/cycleCountScheduleList.d.ts",
@@ -1127,15 +1155,15 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/dataHealthFinding.d.ts",
-        "sha256": "32c479ab598049d9f5c62c0edbbb740202b1f67c7ee1eb194d6d91add4b1a635"
+        "sha256": "a5d400a716b4b5853ed5f11a68a1bf08d2c665af85666a05254ad370997a6252"
       },
       {
         "path": "lib/api-zod/dist/generated/types/dataHealthFindingPreview.d.ts",
-        "sha256": "a9df085c462735686fe5cb7623381c7078ba695ab68d39af733624304af79039"
+        "sha256": "241da20ff48ad6f2300123ceba6e71c341ee7892f486fc77d694b1930075bfbf"
       },
       {
         "path": "lib/api-zod/dist/generated/types/dataHealthFindingReconciliationCategory.d.ts",
-        "sha256": "971e81e687dedd4cc615e56241e44259dec7a6d1430c82061d0a6ac465dadb74"
+        "sha256": "f8f7309e46e8bef14c7b36e88ba170aeaa07bc81e772d73d0f80f5aa05efcf08"
       },
       {
         "path": "lib/api-zod/dist/generated/types/dataHealthFindingRepairability.d.ts",
@@ -1215,7 +1243,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/dieLineDefaultsEntry.d.ts",
-        "sha256": "340d1efde51da49603be20901c822fe15cd54668e654ca07322849b5e825de82"
+        "sha256": "8aa677cf4f45f61e5f5e979701b7d9fb8f56e5475b780924c1f4d23933bf14c2"
       },
       {
         "path": "lib/api-zod/dist/generated/types/dieLineDefaultsList.d.ts",
@@ -1224,6 +1252,30 @@
       {
         "path": "lib/api-zod/dist/generated/types/dieTypeList.d.ts",
         "sha256": "b34aee1978ec22fc5f0bbdd399d205bece6127001f3ae2c8c67334a5c2103380"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/distillationApplyEvidenceRecord.d.ts",
+        "sha256": "64eb8ab19211039c6f5eb9951995615080b8e3bdb9727f9f57a3d73bd2abbfa3"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/distillationApplyEvidenceRecordActorCapability.d.ts",
+        "sha256": "ee69da9088041d40c7fd56aec232bd9e038926aafb1e1795271f8b82d3a876f9"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/distillationApplyEvidenceRecordAppliedValues.d.ts",
+        "sha256": "5f64772a4c79460145f47a237f73b71b04982003b3ef6637dba910c9c2d948a2"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/distillationApplyEvidenceRecordImportType.d.ts",
+        "sha256": "d5ad6bce8e0da970a6a260540444126efeb30a388001d9ed04109e83d14ff654"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/distillationApplyEvidenceRecordScope.d.ts",
+        "sha256": "8e39e447a59c368268bf4106baf725a9caa48c49236d15d94085abd8e9941c04"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/distillationApplyEvidenceRecordStatus.d.ts",
+        "sha256": "5a7aede3101762938b19c87b2b3069fc4422e097e7e924ea359a8e6e0d44f650"
       },
       {
         "path": "lib/api-zod/dist/generated/types/doughballVariant.d.ts",
@@ -1271,7 +1323,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/facilityKnowledgeHealthFindingEntry.d.ts",
-        "sha256": "8ac9e7f27e4362f2918a62646e28fe900f4ea080547deaa58e1123851d00e9be"
+        "sha256": "fb75b8c3d613aaf4f4ae928b59fbccfd1c6568909b0db00aedef8f05ed726481"
       },
       {
         "path": "lib/api-zod/dist/generated/types/facilityKnowledgeHealthFindingStatus.d.ts",
@@ -1422,6 +1474,14 @@
         "sha256": "f1b853b2f8ca202e7b87b8ccbbdb866414af78fbf8f54ca941be13ef1dd2fefe"
       },
       {
+        "path": "lib/api-zod/dist/generated/types/getBuildInfo503.d.ts",
+        "sha256": "4f55bf5027a824ba86602fcf2ed899a110363becec9e563aea005fc104afb230"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/getBuildInfo503Status.d.ts",
+        "sha256": "4c9e7d41754242787e77320f9f29d356c90a3308f2df56ca826b29a67f202d44"
+      },
+      {
         "path": "lib/api-zod/dist/generated/types/getOperationalRunViewParams.d.ts",
         "sha256": "9c1a0d87b9c209de145418421351ba4ad0e8c75f7d01749c4962eae772667e43"
       },
@@ -1467,7 +1527,67 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/healthStatus.d.ts",
-        "sha256": "a9d48661ff5cd9df346112b08ca68f422fe4fec06537b9c8c8b2115d1ddb8300"
+        "sha256": "f764136f7d980040cbdaf12b16b732c5295ffdd5ddd03bf51fe4c32b55d104fd"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusCapabilities.d.ts",
+        "sha256": "9c99cb6b2ebed351bbce97e8d0bbedfb3377ff22cdc905cdcc8ee76afedf015d"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusCapabilitiesAi.d.ts",
+        "sha256": "3c1b2884b4c473f967683dd6666c8c2eeb643aa201fb769fd815fefe0b3db1df"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusCapabilitiesAiDetail.d.ts",
+        "sha256": "0ef4a6da0466f2aa6e0d69dcfffa637eb4f60acba6f91949ebd4041140af3264"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusCapabilitiesAiStatus.d.ts",
+        "sha256": "edaf2103b85805083e6a8fb94861f6571c40347a3d181bf313c5a62ad61e0e47"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusChecks.d.ts",
+        "sha256": "34661df17000fd724b5f691ebdd41dbacd02b5d45e663864808eba7fd6cb2bf0"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusChecksAuditProtection.d.ts",
+        "sha256": "e9894e7ce08e8ceb66249f17671cb8fa1d930b1160445b067f8d6a154c3c1b89"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusChecksBackgroundWorkers.d.ts",
+        "sha256": "079ef17c760e8dddf694f94ed9e042e31578775d51a0195b30f48f975bb9ebc7"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusChecksDatabase.d.ts",
+        "sha256": "d69e2b147c7c6ba136826028c39ecec83a07fefb5aeb4d8342dfac935e4b44bb"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusChecksDependencies.d.ts",
+        "sha256": "79ddbc83331d32661bfb4879d6ff3482e2ce9f37be3047439a062c05f3bc534b"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusChecksProcess.d.ts",
+        "sha256": "4071c872cc3dab9e3de9f394b0fd77e39c04f9ccbd838134ea13732da797b5d0"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusChecksStartup.d.ts",
+        "sha256": "eb329166757976d07643772d7a5831ee7fd00c19df33078ba90d4c843330cb05"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusDiagnostics.d.ts",
+        "sha256": "09dde55f8e874dfc2da70519b6893093f48a4d8bc2744d819312e271b6cee87f"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusStartup.d.ts",
+        "sha256": "6425d73d1a8a584b5b135ce41d093699b771ea7d5f88199440223454dca89661"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusStartupPhase.d.ts",
+        "sha256": "acc8934460337f1e44a8776533774db9ec0d56a095d059a6ac68bd1f3e8cb7f6"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusStatus.d.ts",
+        "sha256": "c6d1e70e31c87651163470b9a592dca30bb438a47db7dc0442257733fe3f559e"
       },
       {
         "path": "lib/api-zod/dist/generated/types/identifyPhotoInput.d.ts",
@@ -1479,7 +1599,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/importAlias.d.ts",
-        "sha256": "ba6ad4607f86b681f8bd04f340e72b635d9f788a0da21365ec3facf094c3e3eb"
+        "sha256": "83bcbc99ca91bbb803f3c70dc1ea734ba374bebd6b5e7f97d50b60038146eacb"
       },
       {
         "path": "lib/api-zod/dist/generated/types/importAliasList.d.ts",
@@ -1491,7 +1611,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/importHistory.d.ts",
-        "sha256": "e3d77fd83f62685ddaa6a7d8fde91473ed3290078a8686e679a6466e3974a57d"
+        "sha256": "69e56a1329d4554c028425c3d0cc75f20e3e443caa7d9143c97f1621e4bae533"
       },
       {
         "path": "lib/api-zod/dist/generated/types/importHistoryImportType.d.ts",
@@ -1523,7 +1643,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/importHistorySummary.d.ts",
-        "sha256": "705e7adad0cc6a6251a28a5703d4884c2e13cae091bd60e188e73732cc1b2fe6"
+        "sha256": "d864cd7ec1c17c1b496e95d1b701e016327e0166729d795dd8404ae08be9c9d8"
       },
       {
         "path": "lib/api-zod/dist/generated/types/importHistorySummaryCounts.d.ts",
@@ -1535,11 +1655,15 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/importOperationApplyInput.d.ts",
-        "sha256": "0fb9b8d25305ca20df3f7595fd69c7742b7cd3981e647450b3f3e64d3c95ce9a"
+        "sha256": "9b9a24c8ead4a84d76d08eec10d99a41c037f9582452de1be71061f8ee21a01a"
       },
       {
         "path": "lib/api-zod/dist/generated/types/importOperationApplyInputChanges.d.ts",
         "sha256": "30135f918d3322227dbde7341d08f208165aed9fe405e7e61be26fbb7321933b"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/importOperationApplyInputSourceEvidence.d.ts",
+        "sha256": "6703bc17c46185b43a499045dd3f4677cb6e80507e0f319c9c03960e0aaffba3"
       },
       {
         "path": "lib/api-zod/dist/generated/types/importOperationResponse.d.ts",
@@ -1547,7 +1671,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/importOperationResponseOperation.d.ts",
-        "sha256": "afc2bbdd856df3aa11db511919ec09665fb896d4c02a98a7de9f0433d2728d8e"
+        "sha256": "93c2d971b1857f83edc7baaaafd362eb300c8bea90345d481a3d9f2e3e5ccc5f"
       },
       {
         "path": "lib/api-zod/dist/generated/types/importOperationResponseOperationAffectedEntities.d.ts",
@@ -1635,11 +1759,11 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/index.d.ts",
-        "sha256": "4f690f9464ddf801968625b21f91419d154f31e399eb6b0fb8299963896963c5"
+        "sha256": "a87535bb2395722dff81e6c1bc38715d78afd6d59b62b7dab61def38a099ab13"
       },
       {
         "path": "lib/api-zod/dist/generated/types/ingredient.d.ts",
-        "sha256": "7c4e8749c0cb0cfb0df72d9f8073ac35dd5c40861de0fda2d63fa86c8d34f695"
+        "sha256": "f8e487e1c02c93abee454f3133fdf34e720f5f340c41b26c5adc85435bce510c"
       },
       {
         "path": "lib/api-zod/dist/generated/types/ingredientBatchWeight.d.ts",
@@ -1724,6 +1848,14 @@
       {
         "path": "lib/api-zod/dist/generated/types/listDeniedMergesParams.d.ts",
         "sha256": "23e763d759f5fb87840bc47bd823d4dbd86351c80641cd6860afeae4f9047d9d"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/listDistillationApplyEvidence200.d.ts",
+        "sha256": "50017f40fd36292c7f8e8cc439c6c0080bc0241afae67b0c830b03fc1c47d35f"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/listDistillationApplyEvidenceParams.d.ts",
+        "sha256": "5051241f66877aa390ddf6fbee1b7ca2abc65b83b51c10f87ac482ed1cda8239"
       },
       {
         "path": "lib/api-zod/dist/generated/types/listFinalizedOperationalReportsParams.d.ts",
@@ -2259,11 +2391,31 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/operationalReport.d.ts",
-        "sha256": "09c39531560260b2d99653048679a44115f690835e35faf9873df65debf90ab4"
+        "sha256": "2550bdb985b64547d127a70f6ab8e4a6db6df37d57ba6f14f8e18dd6c79f42d1"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/operationalReportEvidence.d.ts",
+        "sha256": "f92dcc26ca8b4c853030bdcb31466f862b36ca90f37c0835fdefbfd23480f5ec"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/operationalReportEvidenceRecovery.d.ts",
+        "sha256": "1ab3bcf58e32e08b8b4bc54eb8572438f50b8ecca42047492aab00246aaa0d57"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/operationalReportEvidenceRelease.d.ts",
+        "sha256": "e8d3485b44646275d66c203814ed20440bc42da09a4a2830cdc1f127e00eda26"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/operationalReportEvidenceReleaseIdentitySource.d.ts",
+        "sha256": "5a3b0acac28efbcdc91dd9e99d4252cc971d35c2ddf1b1c4bfb7364ba5c09b43"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/operationalReportEvidenceReleaseIdentityStatus.d.ts",
+        "sha256": "ca9c2a8423ca0f16c4d00f50ab6cb667d76eb9b22fa329a8077fed6d00438120"
       },
       {
         "path": "lib/api-zod/dist/generated/types/operationalReportIncidents.d.ts",
-        "sha256": "750eedacf245ba26ab3aa89bcbd99a57bde06fb406dd621609dc2df4390bd451"
+        "sha256": "7bef2e85184e19227989303baa2899a57d3a69a0fd7711a0b4ee75731e83a31c"
       },
       {
         "path": "lib/api-zod/dist/generated/types/operationalReportIncidentsAvailability.d.ts",
@@ -2271,7 +2423,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/operationalReportIncidentsValue.d.ts",
-        "sha256": "235ca993f8a2a229bdda36c6addcded735ebfc4f00721d0a6bfdc14c249a3443"
+        "sha256": "7e03058f515aad39963664e960507cefe54ca637f4a83ed4225857d62a68260e"
       },
       {
         "path": "lib/api-zod/dist/generated/types/operationalReportInput.d.ts",
@@ -2283,7 +2435,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/operationalReportInventory.d.ts",
-        "sha256": "8290852c5277598e0457ef420bca27f49845a5d43075a17e0bf0d65f869810a0"
+        "sha256": "a8f2fe55b0702f670d652d09e1976a748440bc12117c82e5f901caa8cdb7747f"
       },
       {
         "path": "lib/api-zod/dist/generated/types/operationalReportInventoryAvailability.d.ts",
@@ -2291,11 +2443,11 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/operationalReportInventoryValue.d.ts",
-        "sha256": "23dc42ec543ae757101845959eaedce374031d4f72fa109b3e580e260f99ebbe"
+        "sha256": "c7327bb6490fd5e1211f3e209fe18bb7e54856caa7fea8767f6471ad511cd616"
       },
       {
         "path": "lib/api-zod/dist/generated/types/operationalReportQuality.d.ts",
-        "sha256": "249122dc8269172218fa09a7e930474def5f76c4049d9f1f631ebb72496794cc"
+        "sha256": "5987f2b17e33b977c03073e961b86c9ba1b9c011c02b30f8b33729210438c7f8"
       },
       {
         "path": "lib/api-zod/dist/generated/types/operationalReportQualityAvailability.d.ts",
@@ -2303,7 +2455,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/operationalReportQualityValue.d.ts",
-        "sha256": "ed0ea2e3cf37faf5571836e7c6d9919c69c7c077055791c894e1080424f86d32"
+        "sha256": "a18b973111f520723a28603a2d7546b7794dc0aaf16e92f98a8d36e5b3e6d5be"
       },
       {
         "path": "lib/api-zod/dist/generated/types/operationalReportScope.d.ts",
@@ -2399,11 +2551,11 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/operationalRunViewPace.d.ts",
-        "sha256": "5fa23f3dfeaaf4df896d7e52a66595846137cf2a95778ceee9a15ebc6474b769"
+        "sha256": "b58d39ab428e3743e57a7a47d9ceabd7d15b423d9ed31daa7c1f2e44a243b3a7"
       },
       {
         "path": "lib/api-zod/dist/generated/types/operationalRunViewPacePaceStatus.d.ts",
-        "sha256": "d0be338d7cf480cd207747c576ed661741458f54b14234a9edc629c7e030f4f4"
+        "sha256": "c3a471ec732d925e246f01c1d95e64268c3cbba03e1462cf2c515afcdccc34d9"
       },
       {
         "path": "lib/api-zod/dist/generated/types/operationalRunViewRecap.d.ts",
@@ -2475,7 +2627,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/productionRule.d.ts",
-        "sha256": "a063ac5f659d3da1a6b391ffc4c54acc268f271f550068af9181d2f0a7084f5f"
+        "sha256": "1fe32aae91046241466a3122c63f0dde053a8d93a2a86957d610e521b9ad5773"
       },
       {
         "path": "lib/api-zod/dist/generated/types/productionRuleEnforcement.d.ts",
@@ -2519,7 +2671,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/profileDataHealthApplyResult.d.ts",
-        "sha256": "e1784657374533f15e41dd9358758c4e9f23fd31ae76bef7ad81694e045a2fed"
+        "sha256": "b440600b24b6d3b568e16f6468a7da00420e322db6ba3ffea2354e1f63c12dfc"
       },
       {
         "path": "lib/api-zod/dist/generated/types/profileDataHealthApplyResultSummary.d.ts",
@@ -2563,11 +2715,11 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/profileDataHealthWorkspace.d.ts",
-        "sha256": "eecca77a459335549ca35919c5814c14891ce1b94856175e69ce0cdda75f4fa0"
+        "sha256": "eed2559c22d580759691d2988efe983f28e02bf0564b71d0179c47874a289418"
       },
       {
         "path": "lib/api-zod/dist/generated/types/profileDataHealthWorkspaceCleanupHistory.d.ts",
-        "sha256": "743a75f1a9d14ea76405f8bd6d18c15db1e781b648110011ff24721eaf27e0f8"
+        "sha256": "0d8c1bb67e0bb14552e4ee5ac7eb23e37dae30a446f59cd5b16084d7d55432a3"
       },
       {
         "path": "lib/api-zod/dist/generated/types/profileDataHealthWorkspaceRepairBatchesItem.d.ts",
@@ -2615,7 +2767,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/qualityCheckRecord.d.ts",
-        "sha256": "ce276a98306bc7049ff773ed5e4c3b0694c7315960b0f3f8dba0db4b34ce1d71"
+        "sha256": "2cc74d1ec713f1cff08ac31eee99b34e620f53c3f3f6d9ca1023546fe531e657"
       },
       {
         "path": "lib/api-zod/dist/generated/types/qualityCheckRecordInput.d.ts",
@@ -2663,7 +2815,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/recordMixSurplusInput.d.ts",
-        "sha256": "66e72581ce5a0c8b27f2e1f529977375ae86f45fa4a92b2fa4a82be5c1db09c4"
+        "sha256": "240774c6645569c3d00cd2477457bb99a22d7ae783171309c829546138116693"
       },
       {
         "path": "lib/api-zod/dist/generated/types/replaceFreezerSurplusAllocationInput.d.ts",
@@ -2899,7 +3051,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/savedCheeseSheet.d.ts",
-        "sha256": "f0e25421e495066ebcb8f4305df0febe065769a66c558cbdd2f776fb4bd179b0"
+        "sha256": "49e6aee9992135760453129482106bc136de05402936d4285f5a1b9865b8361a"
       },
       {
         "path": "lib/api-zod/dist/generated/types/savedCheeseSheetList.d.ts",
@@ -2915,7 +3067,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/savedPremixSheet.d.ts",
-        "sha256": "e19664755c525dd9dc29005ed2fe04eef5b92ee5be1ce450b61d941eb8c72824"
+        "sha256": "1bc120fc604a1c3d278f7ecb0a0e166afd329a4ceb04aec3d1512db3a212763e"
       },
       {
         "path": "lib/api-zod/dist/generated/types/savedPremixSheetData.d.ts",
@@ -2927,7 +3079,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/savedShippingGuide.d.ts",
-        "sha256": "0d3417f8436f1d61b74bdb62d6eb348eac57dcd93178ac3416d911e11f2752a0"
+        "sha256": "8d924f050408f61effa18ba913647b480be6143a3d3d41afc049c25bfe8c87ab"
       },
       {
         "path": "lib/api-zod/dist/generated/types/savedShippingGuideData.d.ts",
@@ -2943,7 +3095,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/savedSpecSheet.d.ts",
-        "sha256": "03933528e0e6667cda8168e40a0b8cb9f6784e57c70b6f6eb2e212f32bb1a950"
+        "sha256": "83459bf2ce7f5e96ddbbc9db01d09a1b690cb8da98b6b1e64f5f873dfc0d9aa3"
       },
       {
         "path": "lib/api-zod/dist/generated/types/savedSpecSheetData.d.ts",
@@ -3031,7 +3183,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/shiftHandoffItem.d.ts",
-        "sha256": "c0b5564002d82270bbafe642b0d82291e818fdba83283678575c38ae5ac7c546"
+        "sha256": "3594c8545b60612e928edc4637513466fed52e276a5a60e448a39ceaf452fc62"
       },
       {
         "path": "lib/api-zod/dist/generated/types/shiftHandoffItemSeverity.d.ts",
@@ -3091,7 +3243,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/sourceLibraryReconciliationStatusHeal.d.ts",
-        "sha256": "0dbeec88e0f2f6a8e4583ee12b9e12c1fde16b3d6d5ef364b030698b92adb12c"
+        "sha256": "efcaf3708e7594b1277bcc6b825a27c023ba54f3dc4dfd4cf79db2b2bb142bf5"
       },
       {
         "path": "lib/api-zod/dist/generated/types/sourceLibraryReconciliationStatusHealResult.d.ts",
@@ -3119,7 +3271,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/specImportAlias.d.ts",
-        "sha256": "094fb3e43bca46bfccf3464b19bd7d4880b57eb4e4bf227e4a80c63940d6f9cc"
+        "sha256": "08e55caa47a49447fc0a28dd763b944d965b2130023def6ed9c8a5bc3a5a33e9"
       },
       {
         "path": "lib/api-zod/dist/generated/types/specImportAliasKind.d.ts",
@@ -3391,7 +3543,7 @@
       },
       {
         "path": "lib/day-summary/dist/index.d.ts",
-        "sha256": "8f394b26c3a10707e1b6f2b8309a9c9177895eead8f345e54fd4c6ae0466e35b"
+        "sha256": "355a942727553ae354dcddc9839b429812d3d5adc601d6126fe1ca46234deb85"
       },
       {
         "path": "lib/db/dist/index.d.ts",
@@ -3507,7 +3659,7 @@
       },
       {
         "path": "lib/db/dist/schema/importOperations.d.ts",
-        "sha256": "5933b233d2a3990aff25da667ae95dd18850d555e7f91b4710ba23870b315a79"
+        "sha256": "517ebaaf01df3cff555061e98fec9e7f76c90116c9fb9f33ef0da8f6ebd73fd5"
       },
       {
         "path": "lib/db/dist/schema/incidents.d.ts",
@@ -3660,6 +3812,10 @@
       {
         "path": "lib/db/dist/schema/webPush.d.ts",
         "sha256": "fac426bda3bdacda8907847b7658a671361097d34308f0181322e9a4c3555f6e"
+      },
+      {
+        "path": "lib/distill-dataset/dist/index.d.ts",
+        "sha256": "e596611b268d6424101e942eb4369d8c4e2d8d9e78e06a2ffb963b96563273db"
       },
       {
         "path": "lib/downtime-trends/dist/index.d.ts",
@@ -3863,7 +4019,7 @@
       },
       {
         "path": "lib/spec-import/dist/index.d.ts",
-        "sha256": "6ca9739c68e5766f48100767d93ec91d5d55234733f5e6e761e8ca16ba15f46b"
+        "sha256": "02967edc6856cdee2f5d936c249adfbae06f1b1d6b943692334cbccaa02f1ccd"
       },
       {
         "path": "lib/spec-import/dist/mergeParsedSpecImports.test.d.ts",
@@ -3880,6 +4036,14 @@
       {
         "path": "lib/spec-import/dist/parenIngredientGuard.test.d.ts",
         "sha256": "5f1387494658910172f920775ba117ee37a6d3a3fe7fdaf9bc3a44e2714916d4"
+      },
+      {
+        "path": "lib/spec-import/dist/perPizzaReview.d.ts",
+        "sha256": "60942141ad4e2798eb5d9f13becf1c1cc2d17fba50ec01b8cd45b2bc3b8b3191"
+      },
+      {
+        "path": "lib/spec-import/dist/perPizzaReview.test.d.ts",
+        "sha256": "72826dc1b23e744be49ccafa48576f28c4a5fac78d72afe6cc6fcf0c70ba32b7"
       },
       {
         "path": "lib/spec-import/dist/pruneAgainstSnapshot.test.d.ts",
@@ -3900,6 +4064,10 @@
       {
         "path": "lib/spec-import/dist/retargetSpecImport.test.d.ts",
         "sha256": "e616fed043b5313113321fa7ae0afec269d9c17bcc133d38efa9ded0889de93a"
+      },
+      {
+        "path": "lib/spec-import/dist/reviewDefects.test.d.ts",
+        "sha256": "7453a2fe8fbb9b1fc9ef9f963d2d61ca81c0b2d38ad9c963603b124341435835"
       },
       {
         "path": "lib/spec-import/dist/sauceFamilyMatch.test.d.ts",
@@ -3933,7 +4101,7 @@
     "candidate": [
       {
         "path": "lib/ai-evaluation/dist/index.d.ts",
-        "sha256": "584b2e00dc618e357d83144e86ca4b7335d1211f112c7c9d440acb9e450bbb87"
+        "sha256": "d9da7d2756a499b8cd56465ea46f5600bb6a9c15347949f8a38bc9bce3716e28"
       },
       {
         "path": "lib/ai-memory/dist/index.d.ts",
@@ -3953,11 +4121,11 @@
       },
       {
         "path": "lib/api-client-react/dist/generated/api.d.ts",
-        "sha256": "269779d51bcc557ab179d3180922110ab022b4c7da526c3b60aeb03f70bc1793"
+        "sha256": "21ea0fe8a182380f4676046c24e1df1be1b0cb594c6758a8b203fb1e41d3fbc6"
       },
       {
         "path": "lib/api-client-react/dist/generated/api.schemas.d.ts",
-        "sha256": "d1a90f491c9df9d97761c9c61020b46eb3e66e1c45266040df6ef7de7cdf99f5"
+        "sha256": "93acafab7f17fac57e6ac7889b1cee327dd3156d64294064de9336c42d86922b"
       },
       {
         "path": "lib/api-client-react/dist/index.d.ts",
@@ -3969,7 +4137,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/api.d.ts",
-        "sha256": "cec7813131d30296366974ad4b3bd040f2dba9d203333eb0d049078745557a56"
+        "sha256": "a7a6125cfcc7972ac21a8932ec155c3d4a6f8308c9edbbb461b2a0a627084ac8"
       },
       {
         "path": "lib/api-zod/dist/generated/types/adjustInput.d.ts",
@@ -4117,7 +4285,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/auditLog.d.ts",
-        "sha256": "a774ec034b99bd01b1d14d78c5c6c090abc82373d7abdb468353a7d8ce6e7e0c"
+        "sha256": "bf04f13678bd3abbc9437544883b232a43d639c22bcd5b7ca896e040a455ae10"
       },
       {
         "path": "lib/api-zod/dist/generated/types/auditLogChanges.d.ts",
@@ -4125,7 +4293,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/auditLogPage.d.ts",
-        "sha256": "f1834c4c03bacd33c295fad7014cacb33451f4c4c93101957e1dfccfd28312db"
+        "sha256": "f3833d5fd6d8c934298fb169c0630a6bb6027e7c1e35fd72b7682d0f694be2d3"
       },
       {
         "path": "lib/api-zod/dist/generated/types/auditProfileDataHealth200.d.ts",
@@ -4210,6 +4378,34 @@
       {
         "path": "lib/api-zod/dist/generated/types/brandProfileValues.d.ts",
         "sha256": "366fa77585b15b31371274b836a3446f23e6ce6b1e26e2ebd49f2372ae74f3bc"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/buildInfo.d.ts",
+        "sha256": "06490d166c2632bb448b55eeb668f3461bcf14dc6654fe31535346d2e31f2781"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/buildInfoBuildMode.d.ts",
+        "sha256": "6be8ddfd103771758fed8b30fd401b9813aed4b4fc37e62c95ca284bbbdd3e83"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/buildInfoGitBinding.d.ts",
+        "sha256": "e968458324b381c05cfe82adac3b9a89f06e01c0749d0e842121f830ba705eb7"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/buildInfoKind.d.ts",
+        "sha256": "da049e13697916c94551962886af2d0ecd2a25559e93a013f0010f88632e8e2e"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/buildInfoPlatformIdentitySource.d.ts",
+        "sha256": "2facffc4d55ed311d5e256f4854d77d15cff72316b8614ac0398d08d193a8710"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/buildInfoSchemaVersion.d.ts",
+        "sha256": "b98a63e7d21de0ecfd748262e7aebb418cb2c01ac15d218e035c3c8a86fd07c5"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/buildInfoSourcePolicy.d.ts",
+        "sha256": "21569102d71da9803e0dbe8ccf6bcae1451495a1e5c7ae676a3dcb434ff27bfb"
       },
       {
         "path": "lib/api-zod/dist/generated/types/capability.d.ts",
@@ -4301,7 +4497,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/cycleCountSchedule.d.ts",
-        "sha256": "e0db8381ef98e36f8bce0a939dc78824d5d3cee6c9812a427d4305533d95771c"
+        "sha256": "4d89ad061ed1d572849fb11c9dfe003eb5d57f1b22cfb3431fb14c934b692218"
       },
       {
         "path": "lib/api-zod/dist/generated/types/cycleCountScheduleList.d.ts",
@@ -4309,15 +4505,15 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/dataHealthFinding.d.ts",
-        "sha256": "32c479ab598049d9f5c62c0edbbb740202b1f67c7ee1eb194d6d91add4b1a635"
+        "sha256": "a5d400a716b4b5853ed5f11a68a1bf08d2c665af85666a05254ad370997a6252"
       },
       {
         "path": "lib/api-zod/dist/generated/types/dataHealthFindingPreview.d.ts",
-        "sha256": "a9df085c462735686fe5cb7623381c7078ba695ab68d39af733624304af79039"
+        "sha256": "241da20ff48ad6f2300123ceba6e71c341ee7892f486fc77d694b1930075bfbf"
       },
       {
         "path": "lib/api-zod/dist/generated/types/dataHealthFindingReconciliationCategory.d.ts",
-        "sha256": "1b26fd91f81330b860d589039ffee33777d0a7c7e04b1406e83ebf70d2be1d83"
+        "sha256": "235c2a09670fd5ddd13b54d3f621653c2522342cee06866a4698e62e0c8ed448"
       },
       {
         "path": "lib/api-zod/dist/generated/types/dataHealthFindingRepairability.d.ts",
@@ -4397,7 +4593,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/dieLineDefaultsEntry.d.ts",
-        "sha256": "340d1efde51da49603be20901c822fe15cd54668e654ca07322849b5e825de82"
+        "sha256": "8aa677cf4f45f61e5f5e979701b7d9fb8f56e5475b780924c1f4d23933bf14c2"
       },
       {
         "path": "lib/api-zod/dist/generated/types/dieLineDefaultsList.d.ts",
@@ -4406,6 +4602,30 @@
       {
         "path": "lib/api-zod/dist/generated/types/dieTypeList.d.ts",
         "sha256": "b34aee1978ec22fc5f0bbdd399d205bece6127001f3ae2c8c67334a5c2103380"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/distillationApplyEvidenceRecord.d.ts",
+        "sha256": "64eb8ab19211039c6f5eb9951995615080b8e3bdb9727f9f57a3d73bd2abbfa3"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/distillationApplyEvidenceRecordActorCapability.d.ts",
+        "sha256": "fdb551602df2a8779fea1f3762b727b6eb1591980bb38d3b2aeaf9ff6d652ba4"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/distillationApplyEvidenceRecordAppliedValues.d.ts",
+        "sha256": "5f64772a4c79460145f47a237f73b71b04982003b3ef6637dba910c9c2d948a2"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/distillationApplyEvidenceRecordImportType.d.ts",
+        "sha256": "f12b5b5c1c319ecbb3f5912881e9257a3e620a9b6a20885838d662d04e58308b"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/distillationApplyEvidenceRecordScope.d.ts",
+        "sha256": "d40c8be1fce78293652846c7a6d3a45566e6fdc283d72c570898893ddb189d9f"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/distillationApplyEvidenceRecordStatus.d.ts",
+        "sha256": "3b442504de603058b0e13e9fa7b3b7f51e688f91abac0e88c2c32023815ae2dc"
       },
       {
         "path": "lib/api-zod/dist/generated/types/doughballVariant.d.ts",
@@ -4453,7 +4673,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/facilityKnowledgeHealthFindingEntry.d.ts",
-        "sha256": "8ac9e7f27e4362f2918a62646e28fe900f4ea080547deaa58e1123851d00e9be"
+        "sha256": "fb75b8c3d613aaf4f4ae928b59fbccfd1c6568909b0db00aedef8f05ed726481"
       },
       {
         "path": "lib/api-zod/dist/generated/types/facilityKnowledgeHealthFindingStatus.d.ts",
@@ -4604,6 +4824,14 @@
         "sha256": "f1b853b2f8ca202e7b87b8ccbbdb866414af78fbf8f54ca941be13ef1dd2fefe"
       },
       {
+        "path": "lib/api-zod/dist/generated/types/getBuildInfo503.d.ts",
+        "sha256": "4f55bf5027a824ba86602fcf2ed899a110363becec9e563aea005fc104afb230"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/getBuildInfo503Status.d.ts",
+        "sha256": "a6c12c3c09a10a73dcb4e062eaaa8f3db242c69dfec3365734ae4e014ed632a7"
+      },
+      {
         "path": "lib/api-zod/dist/generated/types/getOperationalRunViewParams.d.ts",
         "sha256": "9c1a0d87b9c209de145418421351ba4ad0e8c75f7d01749c4962eae772667e43"
       },
@@ -4649,7 +4877,67 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/healthStatus.d.ts",
-        "sha256": "a9d48661ff5cd9df346112b08ca68f422fe4fec06537b9c8c8b2115d1ddb8300"
+        "sha256": "f764136f7d980040cbdaf12b16b732c5295ffdd5ddd03bf51fe4c32b55d104fd"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusCapabilities.d.ts",
+        "sha256": "9c99cb6b2ebed351bbce97e8d0bbedfb3377ff22cdc905cdcc8ee76afedf015d"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusCapabilitiesAi.d.ts",
+        "sha256": "3c1b2884b4c473f967683dd6666c8c2eeb643aa201fb769fd815fefe0b3db1df"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusCapabilitiesAiDetail.d.ts",
+        "sha256": "a11e2638340052de0f6cbcda6ee46340f27f68a28c601d13840624b0740f67c8"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusCapabilitiesAiStatus.d.ts",
+        "sha256": "1919dca85d1e4ee4c879cf2a04e09e57e59f1b897120b3d2134761bbf76fe42c"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusChecks.d.ts",
+        "sha256": "34661df17000fd724b5f691ebdd41dbacd02b5d45e663864808eba7fd6cb2bf0"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusChecksAuditProtection.d.ts",
+        "sha256": "132d26153fc345fca0584cb41c6223620d0d04afc839b35354e695755870dc13"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusChecksBackgroundWorkers.d.ts",
+        "sha256": "5aa83bc4bc916cc677bfe5f228b256ee3a7ec881e3e627c6413615284490a0cf"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusChecksDatabase.d.ts",
+        "sha256": "5ee58915a7e479be5a2adfa3ccf37687c3cc638431f6b0d6e911ccbee1acfa75"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusChecksDependencies.d.ts",
+        "sha256": "cb3792548109ced8de712b6db01fa56c1d1dce225ae076d52765e8ccd5be70d5"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusChecksProcess.d.ts",
+        "sha256": "4099998e6f226c36659f5e6456e0fed7506e0039a8102a7b15eae9cce1fad7f2"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusChecksStartup.d.ts",
+        "sha256": "0b981f55eea88313eb873055dd3bf3ad761c5d80469b44edcc34d0d8e71c16d2"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusDiagnostics.d.ts",
+        "sha256": "09dde55f8e874dfc2da70519b6893093f48a4d8bc2744d819312e271b6cee87f"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusStartup.d.ts",
+        "sha256": "6425d73d1a8a584b5b135ce41d093699b771ea7d5f88199440223454dca89661"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusStartupPhase.d.ts",
+        "sha256": "688b2d99f7da48a6fcf9fea77696001fecab3137b2dd33db60ea9443361868f3"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/healthStatusStatus.d.ts",
+        "sha256": "8260336c5826a54962e65b5d35866a11a73d4234161d70a23a82232dbb1fdac4"
       },
       {
         "path": "lib/api-zod/dist/generated/types/identifyPhotoInput.d.ts",
@@ -4661,7 +4949,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/importAlias.d.ts",
-        "sha256": "ba6ad4607f86b681f8bd04f340e72b635d9f788a0da21365ec3facf094c3e3eb"
+        "sha256": "83bcbc99ca91bbb803f3c70dc1ea734ba374bebd6b5e7f97d50b60038146eacb"
       },
       {
         "path": "lib/api-zod/dist/generated/types/importAliasList.d.ts",
@@ -4673,7 +4961,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/importHistory.d.ts",
-        "sha256": "e3d77fd83f62685ddaa6a7d8fde91473ed3290078a8686e679a6466e3974a57d"
+        "sha256": "69e56a1329d4554c028425c3d0cc75f20e3e443caa7d9143c97f1621e4bae533"
       },
       {
         "path": "lib/api-zod/dist/generated/types/importHistoryImportType.d.ts",
@@ -4705,7 +4993,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/importHistorySummary.d.ts",
-        "sha256": "705e7adad0cc6a6251a28a5703d4884c2e13cae091bd60e188e73732cc1b2fe6"
+        "sha256": "d864cd7ec1c17c1b496e95d1b701e016327e0166729d795dd8404ae08be9c9d8"
       },
       {
         "path": "lib/api-zod/dist/generated/types/importHistorySummaryCounts.d.ts",
@@ -4717,11 +5005,15 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/importOperationApplyInput.d.ts",
-        "sha256": "0fb9b8d25305ca20df3f7595fd69c7742b7cd3981e647450b3f3e64d3c95ce9a"
+        "sha256": "9b9a24c8ead4a84d76d08eec10d99a41c037f9582452de1be71061f8ee21a01a"
       },
       {
         "path": "lib/api-zod/dist/generated/types/importOperationApplyInputChanges.d.ts",
         "sha256": "30135f918d3322227dbde7341d08f208165aed9fe405e7e61be26fbb7321933b"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/importOperationApplyInputSourceEvidence.d.ts",
+        "sha256": "6703bc17c46185b43a499045dd3f4677cb6e80507e0f319c9c03960e0aaffba3"
       },
       {
         "path": "lib/api-zod/dist/generated/types/importOperationResponse.d.ts",
@@ -4729,7 +5021,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/importOperationResponseOperation.d.ts",
-        "sha256": "afc2bbdd856df3aa11db511919ec09665fb896d4c02a98a7de9f0433d2728d8e"
+        "sha256": "93c2d971b1857f83edc7baaaafd362eb300c8bea90345d481a3d9f2e3e5ccc5f"
       },
       {
         "path": "lib/api-zod/dist/generated/types/importOperationResponseOperationAffectedEntities.d.ts",
@@ -4817,11 +5109,11 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/index.d.ts",
-        "sha256": "4f690f9464ddf801968625b21f91419d154f31e399eb6b0fb8299963896963c5"
+        "sha256": "a87535bb2395722dff81e6c1bc38715d78afd6d59b62b7dab61def38a099ab13"
       },
       {
         "path": "lib/api-zod/dist/generated/types/ingredient.d.ts",
-        "sha256": "7c4e8749c0cb0cfb0df72d9f8073ac35dd5c40861de0fda2d63fa86c8d34f695"
+        "sha256": "f8e487e1c02c93abee454f3133fdf34e720f5f340c41b26c5adc85435bce510c"
       },
       {
         "path": "lib/api-zod/dist/generated/types/ingredientBatchWeight.d.ts",
@@ -4906,6 +5198,14 @@
       {
         "path": "lib/api-zod/dist/generated/types/listDeniedMergesParams.d.ts",
         "sha256": "23e763d759f5fb87840bc47bd823d4dbd86351c80641cd6860afeae4f9047d9d"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/listDistillationApplyEvidence200.d.ts",
+        "sha256": "50017f40fd36292c7f8e8cc439c6c0080bc0241afae67b0c830b03fc1c47d35f"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/listDistillationApplyEvidenceParams.d.ts",
+        "sha256": "5051241f66877aa390ddf6fbee1b7ca2abc65b83b51c10f87ac482ed1cda8239"
       },
       {
         "path": "lib/api-zod/dist/generated/types/listFinalizedOperationalReportsParams.d.ts",
@@ -5441,11 +5741,31 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/operationalReport.d.ts",
-        "sha256": "09c39531560260b2d99653048679a44115f690835e35faf9873df65debf90ab4"
+        "sha256": "2550bdb985b64547d127a70f6ab8e4a6db6df37d57ba6f14f8e18dd6c79f42d1"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/operationalReportEvidence.d.ts",
+        "sha256": "f92dcc26ca8b4c853030bdcb31466f862b36ca90f37c0835fdefbfd23480f5ec"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/operationalReportEvidenceRecovery.d.ts",
+        "sha256": "1ab3bcf58e32e08b8b4bc54eb8572438f50b8ecca42047492aab00246aaa0d57"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/operationalReportEvidenceRelease.d.ts",
+        "sha256": "e8d3485b44646275d66c203814ed20440bc42da09a4a2830cdc1f127e00eda26"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/operationalReportEvidenceReleaseIdentitySource.d.ts",
+        "sha256": "58c7a4cfa076fc5d1020ad9777881b6627a41a41f3ce00b1a194227b247fe6cd"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/operationalReportEvidenceReleaseIdentityStatus.d.ts",
+        "sha256": "00cad7cf4b1a28bed3e8b88825116563e7eb85c38a74998d9e475c1877d9e606"
       },
       {
         "path": "lib/api-zod/dist/generated/types/operationalReportIncidents.d.ts",
-        "sha256": "750eedacf245ba26ab3aa89bcbd99a57bde06fb406dd621609dc2df4390bd451"
+        "sha256": "7bef2e85184e19227989303baa2899a57d3a69a0fd7711a0b4ee75731e83a31c"
       },
       {
         "path": "lib/api-zod/dist/generated/types/operationalReportIncidentsAvailability.d.ts",
@@ -5453,7 +5773,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/operationalReportIncidentsValue.d.ts",
-        "sha256": "235ca993f8a2a229bdda36c6addcded735ebfc4f00721d0a6bfdc14c249a3443"
+        "sha256": "7e03058f515aad39963664e960507cefe54ca637f4a83ed4225857d62a68260e"
       },
       {
         "path": "lib/api-zod/dist/generated/types/operationalReportInput.d.ts",
@@ -5465,7 +5785,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/operationalReportInventory.d.ts",
-        "sha256": "8290852c5277598e0457ef420bca27f49845a5d43075a17e0bf0d65f869810a0"
+        "sha256": "a8f2fe55b0702f670d652d09e1976a748440bc12117c82e5f901caa8cdb7747f"
       },
       {
         "path": "lib/api-zod/dist/generated/types/operationalReportInventoryAvailability.d.ts",
@@ -5473,11 +5793,11 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/operationalReportInventoryValue.d.ts",
-        "sha256": "23dc42ec543ae757101845959eaedce374031d4f72fa109b3e580e260f99ebbe"
+        "sha256": "c7327bb6490fd5e1211f3e209fe18bb7e54856caa7fea8767f6471ad511cd616"
       },
       {
         "path": "lib/api-zod/dist/generated/types/operationalReportQuality.d.ts",
-        "sha256": "249122dc8269172218fa09a7e930474def5f76c4049d9f1f631ebb72496794cc"
+        "sha256": "5987f2b17e33b977c03073e961b86c9ba1b9c011c02b30f8b33729210438c7f8"
       },
       {
         "path": "lib/api-zod/dist/generated/types/operationalReportQualityAvailability.d.ts",
@@ -5485,7 +5805,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/operationalReportQualityValue.d.ts",
-        "sha256": "ed0ea2e3cf37faf5571836e7c6d9919c69c7c077055791c894e1080424f86d32"
+        "sha256": "a18b973111f520723a28603a2d7546b7794dc0aaf16e92f98a8d36e5b3e6d5be"
       },
       {
         "path": "lib/api-zod/dist/generated/types/operationalReportScope.d.ts",
@@ -5581,11 +5901,11 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/operationalRunViewPace.d.ts",
-        "sha256": "5fa23f3dfeaaf4df896d7e52a66595846137cf2a95778ceee9a15ebc6474b769"
+        "sha256": "b58d39ab428e3743e57a7a47d9ceabd7d15b423d9ed31daa7c1f2e44a243b3a7"
       },
       {
         "path": "lib/api-zod/dist/generated/types/operationalRunViewPacePaceStatus.d.ts",
-        "sha256": "0805d77779c1dc4aa0746f09ec772ee11c313fc5be37865081d44b41ba483863"
+        "sha256": "46f42bd01c21dcaee0cabdcf46167515f8ec7e714b66181696dfed45b214c63d"
       },
       {
         "path": "lib/api-zod/dist/generated/types/operationalRunViewRecap.d.ts",
@@ -5657,7 +5977,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/productionRule.d.ts",
-        "sha256": "a063ac5f659d3da1a6b391ffc4c54acc268f271f550068af9181d2f0a7084f5f"
+        "sha256": "1fe32aae91046241466a3122c63f0dde053a8d93a2a86957d610e521b9ad5773"
       },
       {
         "path": "lib/api-zod/dist/generated/types/productionRuleEnforcement.d.ts",
@@ -5701,7 +6021,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/profileDataHealthApplyResult.d.ts",
-        "sha256": "e1784657374533f15e41dd9358758c4e9f23fd31ae76bef7ad81694e045a2fed"
+        "sha256": "b440600b24b6d3b568e16f6468a7da00420e322db6ba3ffea2354e1f63c12dfc"
       },
       {
         "path": "lib/api-zod/dist/generated/types/profileDataHealthApplyResultSummary.d.ts",
@@ -5745,11 +6065,11 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/profileDataHealthWorkspace.d.ts",
-        "sha256": "eecca77a459335549ca35919c5814c14891ce1b94856175e69ce0cdda75f4fa0"
+        "sha256": "eed2559c22d580759691d2988efe983f28e02bf0564b71d0179c47874a289418"
       },
       {
         "path": "lib/api-zod/dist/generated/types/profileDataHealthWorkspaceCleanupHistory.d.ts",
-        "sha256": "743a75f1a9d14ea76405f8bd6d18c15db1e781b648110011ff24721eaf27e0f8"
+        "sha256": "0d8c1bb67e0bb14552e4ee5ac7eb23e37dae30a446f59cd5b16084d7d55432a3"
       },
       {
         "path": "lib/api-zod/dist/generated/types/profileDataHealthWorkspaceRepairBatchesItem.d.ts",
@@ -5797,7 +6117,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/qualityCheckRecord.d.ts",
-        "sha256": "ce276a98306bc7049ff773ed5e4c3b0694c7315960b0f3f8dba0db4b34ce1d71"
+        "sha256": "2cc74d1ec713f1cff08ac31eee99b34e620f53c3f3f6d9ca1023546fe531e657"
       },
       {
         "path": "lib/api-zod/dist/generated/types/qualityCheckRecordInput.d.ts",
@@ -5845,7 +6165,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/recordMixSurplusInput.d.ts",
-        "sha256": "66e72581ce5a0c8b27f2e1f529977375ae86f45fa4a92b2fa4a82be5c1db09c4"
+        "sha256": "240774c6645569c3d00cd2477457bb99a22d7ae783171309c829546138116693"
       },
       {
         "path": "lib/api-zod/dist/generated/types/replaceFreezerSurplusAllocationInput.d.ts",
@@ -6081,7 +6401,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/savedCheeseSheet.d.ts",
-        "sha256": "f0e25421e495066ebcb8f4305df0febe065769a66c558cbdd2f776fb4bd179b0"
+        "sha256": "49e6aee9992135760453129482106bc136de05402936d4285f5a1b9865b8361a"
       },
       {
         "path": "lib/api-zod/dist/generated/types/savedCheeseSheetList.d.ts",
@@ -6097,7 +6417,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/savedPremixSheet.d.ts",
-        "sha256": "e19664755c525dd9dc29005ed2fe04eef5b92ee5be1ce450b61d941eb8c72824"
+        "sha256": "1bc120fc604a1c3d278f7ecb0a0e166afd329a4ceb04aec3d1512db3a212763e"
       },
       {
         "path": "lib/api-zod/dist/generated/types/savedPremixSheetData.d.ts",
@@ -6109,7 +6429,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/savedShippingGuide.d.ts",
-        "sha256": "0d3417f8436f1d61b74bdb62d6eb348eac57dcd93178ac3416d911e11f2752a0"
+        "sha256": "8d924f050408f61effa18ba913647b480be6143a3d3d41afc049c25bfe8c87ab"
       },
       {
         "path": "lib/api-zod/dist/generated/types/savedShippingGuideData.d.ts",
@@ -6125,7 +6445,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/savedSpecSheet.d.ts",
-        "sha256": "03933528e0e6667cda8168e40a0b8cb9f6784e57c70b6f6eb2e212f32bb1a950"
+        "sha256": "83459bf2ce7f5e96ddbbc9db01d09a1b690cb8da98b6b1e64f5f873dfc0d9aa3"
       },
       {
         "path": "lib/api-zod/dist/generated/types/savedSpecSheetData.d.ts",
@@ -6213,7 +6533,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/shiftHandoffItem.d.ts",
-        "sha256": "c0b5564002d82270bbafe642b0d82291e818fdba83283678575c38ae5ac7c546"
+        "sha256": "3594c8545b60612e928edc4637513466fed52e276a5a60e448a39ceaf452fc62"
       },
       {
         "path": "lib/api-zod/dist/generated/types/shiftHandoffItemSeverity.d.ts",
@@ -6273,7 +6593,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/sourceLibraryReconciliationStatusHeal.d.ts",
-        "sha256": "0dbeec88e0f2f6a8e4583ee12b9e12c1fde16b3d6d5ef364b030698b92adb12c"
+        "sha256": "efcaf3708e7594b1277bcc6b825a27c023ba54f3dc4dfd4cf79db2b2bb142bf5"
       },
       {
         "path": "lib/api-zod/dist/generated/types/sourceLibraryReconciliationStatusHealResult.d.ts",
@@ -6301,7 +6621,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/specImportAlias.d.ts",
-        "sha256": "094fb3e43bca46bfccf3464b19bd7d4880b57eb4e4bf227e4a80c63940d6f9cc"
+        "sha256": "08e55caa47a49447fc0a28dd763b944d965b2130023def6ed9c8a5bc3a5a33e9"
       },
       {
         "path": "lib/api-zod/dist/generated/types/specImportAliasKind.d.ts",
@@ -6573,7 +6893,7 @@
       },
       {
         "path": "lib/day-summary/dist/index.d.ts",
-        "sha256": "8f394b26c3a10707e1b6f2b8309a9c9177895eead8f345e54fd4c6ae0466e35b"
+        "sha256": "355a942727553ae354dcddc9839b429812d3d5adc601d6126fe1ca46234deb85"
       },
       {
         "path": "lib/db/dist/index.d.ts",
@@ -6689,7 +7009,7 @@
       },
       {
         "path": "lib/db/dist/schema/importOperations.d.ts",
-        "sha256": "2d0ec61a5729231388213eb702eb650c8385e49082dc8529741bd7bca2c7fafd"
+        "sha256": "4fe828c3fdb89b2b613d09022bf7167708957120db0e5e73101b4a65d14bb6f3"
       },
       {
         "path": "lib/db/dist/schema/incidents.d.ts",
@@ -6842,6 +7162,10 @@
       {
         "path": "lib/db/dist/schema/webPush.d.ts",
         "sha256": "e4482ace76e9e1c0b2f031919327053207a29e7a80f133cade97d5de10ddef6b"
+      },
+      {
+        "path": "lib/distill-dataset/dist/index.d.ts",
+        "sha256": "e596611b268d6424101e942eb4369d8c4e2d8d9e78e06a2ffb963b96563273db"
       },
       {
         "path": "lib/downtime-trends/dist/index.d.ts",
@@ -7045,7 +7369,7 @@
       },
       {
         "path": "lib/spec-import/dist/index.d.ts",
-        "sha256": "6ca9739c68e5766f48100767d93ec91d5d55234733f5e6e761e8ca16ba15f46b"
+        "sha256": "02967edc6856cdee2f5d936c249adfbae06f1b1d6b943692334cbccaa02f1ccd"
       },
       {
         "path": "lib/spec-import/dist/mergeParsedSpecImports.test.d.ts",
@@ -7062,6 +7386,14 @@
       {
         "path": "lib/spec-import/dist/parenIngredientGuard.test.d.ts",
         "sha256": "5f1387494658910172f920775ba117ee37a6d3a3fe7fdaf9bc3a44e2714916d4"
+      },
+      {
+        "path": "lib/spec-import/dist/perPizzaReview.d.ts",
+        "sha256": "60942141ad4e2798eb5d9f13becf1c1cc2d17fba50ec01b8cd45b2bc3b8b3191"
+      },
+      {
+        "path": "lib/spec-import/dist/perPizzaReview.test.d.ts",
+        "sha256": "72826dc1b23e744be49ccafa48576f28c4a5fac78d72afe6cc6fcf0c70ba32b7"
       },
       {
         "path": "lib/spec-import/dist/pruneAgainstSnapshot.test.d.ts",
@@ -7082,6 +7414,10 @@
       {
         "path": "lib/spec-import/dist/retargetSpecImport.test.d.ts",
         "sha256": "e616fed043b5313113321fa7ae0afec269d9c17bcc133d38efa9ded0889de93a"
+      },
+      {
+        "path": "lib/spec-import/dist/reviewDefects.test.d.ts",
+        "sha256": "7453a2fe8fbb9b1fc9ef9f963d2d61ca81c0b2d38ad9c963603b124341435835"
       },
       {
         "path": "lib/spec-import/dist/sauceFamilyMatch.test.d.ts",
@@ -7128,11 +7464,20 @@
       "lib/api-zod/dist/generated/types/autoTrackClaimResponseOutcome.d.ts",
       "lib/api-zod/dist/generated/types/autoTrackMutationField.d.ts",
       "lib/api-zod/dist/generated/types/backgroundOperationDiagnosticsWarningsItemOperation.d.ts",
+      "lib/api-zod/dist/generated/types/buildInfoBuildMode.d.ts",
+      "lib/api-zod/dist/generated/types/buildInfoGitBinding.d.ts",
+      "lib/api-zod/dist/generated/types/buildInfoKind.d.ts",
+      "lib/api-zod/dist/generated/types/buildInfoPlatformIdentitySource.d.ts",
+      "lib/api-zod/dist/generated/types/buildInfoSourcePolicy.d.ts",
       "lib/api-zod/dist/generated/types/capability.d.ts",
       "lib/api-zod/dist/generated/types/dataHealthFindingReconciliationCategory.d.ts",
       "lib/api-zod/dist/generated/types/dataHealthFindingRepairability.d.ts",
       "lib/api-zod/dist/generated/types/dataHealthFindingSeverity.d.ts",
       "lib/api-zod/dist/generated/types/dataHealthFindingSource.d.ts",
+      "lib/api-zod/dist/generated/types/distillationApplyEvidenceRecordActorCapability.d.ts",
+      "lib/api-zod/dist/generated/types/distillationApplyEvidenceRecordImportType.d.ts",
+      "lib/api-zod/dist/generated/types/distillationApplyEvidenceRecordScope.d.ts",
+      "lib/api-zod/dist/generated/types/distillationApplyEvidenceRecordStatus.d.ts",
       "lib/api-zod/dist/generated/types/downloadCanonicalOperationalReportFormat.d.ts",
       "lib/api-zod/dist/generated/types/duplicateReviewGroupStatus.d.ts",
       "lib/api-zod/dist/generated/types/facilityKnowledgeHealthFindingStatus.d.ts",
@@ -7150,10 +7495,21 @@
       "lib/api-zod/dist/generated/types/finalizedOperationalReportSummaryProofContract.d.ts",
       "lib/api-zod/dist/generated/types/finalizedOperationalReportSummaryProofStatus.d.ts",
       "lib/api-zod/dist/generated/types/finalizedOperationalReportSummaryReportScope.d.ts",
+      "lib/api-zod/dist/generated/types/getBuildInfo503Status.d.ts",
       "lib/api-zod/dist/generated/types/hardwareFieldCheckConfirmationCheckName.d.ts",
       "lib/api-zod/dist/generated/types/hardwareFieldCheckConfirmationCheckVersion.d.ts",
       "lib/api-zod/dist/generated/types/hardwareFieldCheckConfirmationDeviceCategory.d.ts",
       "lib/api-zod/dist/generated/types/hardwareFieldCheckConfirmationOutcome.d.ts",
+      "lib/api-zod/dist/generated/types/healthStatusCapabilitiesAiDetail.d.ts",
+      "lib/api-zod/dist/generated/types/healthStatusCapabilitiesAiStatus.d.ts",
+      "lib/api-zod/dist/generated/types/healthStatusChecksAuditProtection.d.ts",
+      "lib/api-zod/dist/generated/types/healthStatusChecksBackgroundWorkers.d.ts",
+      "lib/api-zod/dist/generated/types/healthStatusChecksDatabase.d.ts",
+      "lib/api-zod/dist/generated/types/healthStatusChecksDependencies.d.ts",
+      "lib/api-zod/dist/generated/types/healthStatusChecksProcess.d.ts",
+      "lib/api-zod/dist/generated/types/healthStatusChecksStartup.d.ts",
+      "lib/api-zod/dist/generated/types/healthStatusStartupPhase.d.ts",
+      "lib/api-zod/dist/generated/types/healthStatusStatus.d.ts",
       "lib/api-zod/dist/generated/types/importAliasType.d.ts",
       "lib/api-zod/dist/generated/types/importHistoryImportType.d.ts",
       "lib/api-zod/dist/generated/types/importHistoryInputImportType.d.ts",
@@ -7204,6 +7560,8 @@
       "lib/api-zod/dist/generated/types/operationalLinePhaseState.d.ts",
       "lib/api-zod/dist/generated/types/operationalProjectionFactsPaceStatus.d.ts",
       "lib/api-zod/dist/generated/types/operationalProjectionFactsRunStatus.d.ts",
+      "lib/api-zod/dist/generated/types/operationalReportEvidenceReleaseIdentitySource.d.ts",
+      "lib/api-zod/dist/generated/types/operationalReportEvidenceReleaseIdentityStatus.d.ts",
       "lib/api-zod/dist/generated/types/operationalReportIncidentsAvailability.d.ts",
       "lib/api-zod/dist/generated/types/operationalReportInputScope.d.ts",
       "lib/api-zod/dist/generated/types/operationalReportInventoryAvailability.d.ts",
@@ -7336,7 +7694,7 @@
   "advisory": true,
   "authoritativeOutputsChanged": false,
   "containment": {
-    "beforeStatusSha256": "641a35cbc701b93290f0633f6a855e3cfd226f22ab6af5c55bc7a97b8a3e13c7",
-    "afterStatusSha256": "641a35cbc701b93290f0633f6a855e3cfd226f22ab6af5c55bc7a97b8a3e13c7"
+    "beforeStatusSha256": "87944375d3ac02670d61138f17c9b76af0cd4d300ae78aef8ee5d7760493bf59",
+    "afterStatusSha256": "87944375d3ac02670d61138f17c9b76af0cd4d300ae78aef8ee5d7760493bf59"
   }
 }

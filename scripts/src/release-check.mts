@@ -1276,7 +1276,7 @@ export const SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_STEP: ReleaseStep = {
     "@workspace/scripts",
     "exec",
     "tsx",
-    "./src/verify-source-library-reconciliation.mts",
+    "./src/verify-source-library-reconciliation-cli.mts",
     "--report",
     sourceLibraryReport,
     "--heal-id",
@@ -1299,7 +1299,7 @@ export const SOURCE_LIBRARY_RECONCILIATION_STEP: ReleaseStep = {
     "@workspace/scripts",
     "exec",
     "tsx",
-    "./src/verify-source-library-reconciliation.mts",
+    "./src/verify-source-library-reconciliation-cli.mts",
     "--report",
     sourceLibraryReport,
     "--heal-id",
@@ -2010,7 +2010,7 @@ function printHelp(): void {
     "  --deployed-revision <identity>  Expected deployed source-sha256 identity for retained readiness evidence",
   );
   console.log(
-    "  pnpm --silent --filter @workspace/scripts exec tsx ./src/verify-source-library-reconciliation.mts --capture-production --environment release --deployment-handoff <handoff-path>  Capture bounded production evidence (read-only)",
+    "  pnpm --silent --filter @workspace/scripts exec tsx ./src/verify-source-library-reconciliation-cli.mts --capture-production --environment release --deployment-handoff <handoff-path>  Capture bounded production evidence (read-only)",
   );
   console.log(
     "  pnpm --filter @workspace/scripts run check:release-evidence -- --evidence-dir <directory>  Verify a selected evidence directory (mode is read from its report)",

@@ -128,7 +128,9 @@ certificate verification enabled.
 **How to apply:** Run the verifier through the pinned Node wrapper with
 `node --use-system-ca`; never disable TLS verification or substitute a
 development URL. Keep the independent prepared expectation and normal timeout
-and response limits.
+and response limits. A Nix certificate-directory warning can appear even when
+the bounded source/readiness request succeeds; verify the command exit and
+sanitized result rather than treating that warning alone as failure.
 
 When a probe also imports TypeScript, preload `tsx` in that same Node process
 instead of relying on the separate `tsx` command-line launcher to preserve

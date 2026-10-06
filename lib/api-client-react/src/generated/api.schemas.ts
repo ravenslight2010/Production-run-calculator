@@ -5,6 +5,341 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+export type SourceLibraryReconciliationCaptureRequestDeploymentHandoffSchemaVersion = typeof SourceLibraryReconciliationCaptureRequestDeploymentHandoffSchemaVersion[keyof typeof SourceLibraryReconciliationCaptureRequestDeploymentHandoffSchemaVersion];
+
+
+export const SourceLibraryReconciliationCaptureRequestDeploymentHandoffSchemaVersion = {
+  NUMBER_2: 2,
+} as const;
+
+export type SourceLibraryReconciliationCaptureRequestDeploymentHandoffKind = typeof SourceLibraryReconciliationCaptureRequestDeploymentHandoffKind[keyof typeof SourceLibraryReconciliationCaptureRequestDeploymentHandoffKind];
+
+
+export const SourceLibraryReconciliationCaptureRequestDeploymentHandoffKind = {
+  'published-source-deployment-handoff': 'published-source-deployment-handoff',
+} as const;
+
+export type SourceLibraryReconciliationCaptureRequestDeploymentHandoffSourcePolicy = typeof SourceLibraryReconciliationCaptureRequestDeploymentHandoffSourcePolicy[keyof typeof SourceLibraryReconciliationCaptureRequestDeploymentHandoffSourcePolicy];
+
+
+export const SourceLibraryReconciliationCaptureRequestDeploymentHandoffSourcePolicy = {
+  'production-source-v2': 'production-source-v2',
+} as const;
+
+export type SourceLibraryReconciliationCaptureRequestDeploymentHandoffIdentityAuthority = typeof SourceLibraryReconciliationCaptureRequestDeploymentHandoffIdentityAuthority[keyof typeof SourceLibraryReconciliationCaptureRequestDeploymentHandoffIdentityAuthority];
+
+
+export const SourceLibraryReconciliationCaptureRequestDeploymentHandoffIdentityAuthority = {
+  'independent-expected-source-comparison': 'independent-expected-source-comparison',
+} as const;
+
+export type SourceLibraryReconciliationCaptureRequestDeploymentHandoffExpectedSource = { [key: string]: unknown };
+
+/**
+ * Fresh published schema-v2 source deployment handoff, independently validated by the server.
+ */
+export type SourceLibraryReconciliationCaptureRequestDeploymentHandoff = {
+  schemaVersion: SourceLibraryReconciliationCaptureRequestDeploymentHandoffSchemaVersion;
+  kind: SourceLibraryReconciliationCaptureRequestDeploymentHandoffKind;
+  /**
+     * @minLength 1
+     * @maxLength 128
+     */
+  deploymentId: string;
+  /** @pattern ^source-sha256:[a-f0-9]{64}$ */
+  deployedRevision: string;
+  /** @pattern ^app-build:[a-f0-9-]{36}$ */
+  appBuildId: string;
+  sourcePolicy: SourceLibraryReconciliationCaptureRequestDeploymentHandoffSourcePolicy;
+  /** @pattern ^[a-f0-9]{64}$ */
+  sourceFingerprintSha256: string;
+  identityAuthority: SourceLibraryReconciliationCaptureRequestDeploymentHandoffIdentityAuthority;
+  /** @pattern ^[a-f0-9]{64}$ */
+  expectedRecordSha256: string;
+  expectedSource: SourceLibraryReconciliationCaptureRequestDeploymentHandoffExpectedSource;
+  /**
+     * @minLength 1
+     * @maxLength 128
+     * @pattern ^[A-Za-z_][A-Za-z0-9_$-]*$
+     */
+  databaseOwner?: string;
+  issuedAt: string;
+  expiresAt: string;
+  [key: string]: unknown;
+ };
+
+export interface SourceLibraryReconciliationCaptureRequest {
+  /** Fresh published schema-v2 source deployment handoff, independently validated by the server. */
+  deploymentHandoff: SourceLibraryReconciliationCaptureRequestDeploymentHandoff;
+  /**
+     * @minLength 1
+     * @maxLength 128
+     * @pattern ^[A-Za-z_][A-Za-z0-9_$-]*$
+     */
+  expectedDatabaseOwner: string;
+}
+
+export interface SourceLibraryCaptureError {
+  /** @maxLength 160 */
+  error: string;
+}
+
+export type SourceLibraryReconciliationEvidenceVerifier = typeof SourceLibraryReconciliationEvidenceVerifier[keyof typeof SourceLibraryReconciliationEvidenceVerifier];
+
+
+export const SourceLibraryReconciliationEvidenceVerifier = {
+  'source-library-reconciliation': 'source-library-reconciliation',
+} as const;
+
+export type SourceLibraryReconciliationEvidenceEnvironment = typeof SourceLibraryReconciliationEvidenceEnvironment[keyof typeof SourceLibraryReconciliationEvidenceEnvironment];
+
+
+export const SourceLibraryReconciliationEvidenceEnvironment = {
+  release: 'release',
+} as const;
+
+export type SourceLibraryReconciliationEvidenceRepairBoundary = {
+  fromDate: string;
+};
+
+export type SourceLibraryReconciliationEvidenceReportFormatVersion = typeof SourceLibraryReconciliationEvidenceReportFormatVersion[keyof typeof SourceLibraryReconciliationEvidenceReportFormatVersion];
+
+
+export const SourceLibraryReconciliationEvidenceReportFormatVersion = {
+  NUMBER_1: 1,
+} as const;
+
+export type SourceLibraryReconciliationEvidenceReport = {
+  /** @pattern ^[a-f0-9]{64}$ */
+  sha256: string;
+  formatVersion: SourceLibraryReconciliationEvidenceReportFormatVersion;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  automaticProposals: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  stubs: number;
+};
+
+export type SourceLibraryReconciliationEvidenceMarkerResultCounts = {
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  replacements: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  aliasesInserted: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  repointedProfiles: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  repointedRuns: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  deletedStubs: number;
+};
+
+export type SourceLibraryReconciliationEvidenceMarker = {
+  present: boolean;
+  resultValid: boolean;
+  resultWithinBounds: boolean;
+  resultCounts: SourceLibraryReconciliationEvidenceMarkerResultCounts;
+  appliedAtPresent: boolean;
+};
+
+export type SourceLibraryReconciliationEvidencePools = {
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  expected: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  exactMatches: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  guardedRenames: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  missing: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  mismatches: number;
+};
+
+export type SourceLibraryReconciliationEvidenceAliases = {
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  expected: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  exactMatches: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  missing: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  mismatches: number;
+};
+
+export type SourceLibraryReconciliationEvidenceProtectedHistory = {
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  references: number;
+};
+
+export type SourceLibraryReconciliationEvidenceStubs = {
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  expected: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  canonicalExact: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  canonicalMissing: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  canonicalMismatches: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  deletedExpected: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  remainingProtected: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  unexpectedlyDeleted: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  unexpectedlyRemaining: number;
+};
+
+export type SourceLibraryReconciliationEvidenceIdempotencyFingerprintAlgorithm = typeof SourceLibraryReconciliationEvidenceIdempotencyFingerprintAlgorithm[keyof typeof SourceLibraryReconciliationEvidenceIdempotencyFingerprintAlgorithm];
+
+
+export const SourceLibraryReconciliationEvidenceIdempotencyFingerprintAlgorithm = {
+  sha256: 'sha256',
+} as const;
+
+export type SourceLibraryReconciliationEvidenceIdempotencyFingerprint = {
+  algorithm: SourceLibraryReconciliationEvidenceIdempotencyFingerprintAlgorithm;
+  /** @pattern ^[a-f0-9]{64}$ */
+  value: string;
+};
+
+export type SourceLibraryReconciliationEvidenceFailuresItem = {
+  /** @pattern ^[A-Za-z0-9_-]{1,80}$ */
+  check: string;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  count: number;
+};
+
+export interface SourceLibraryReferenceCounts {
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  inspected: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  canonical: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  stale: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  nonCanonical: number;
+}
+
+export interface SourceLibraryReconciliationEvidence {
+  verifier: SourceLibraryReconciliationEvidenceVerifier;
+  environment: SourceLibraryReconciliationEvidenceEnvironment;
+  /**
+     * @minLength 1
+     * @maxLength 128
+     */
+  revision: string;
+  capturedAt: string;
+  /** @pattern ^[a-f0-9]{64}$ */
+  evidenceId: string;
+  /**
+     * @minLength 1
+     * @maxLength 128
+     */
+  healId: string;
+  repairBoundary: SourceLibraryReconciliationEvidenceRepairBoundary;
+  report: SourceLibraryReconciliationEvidenceReport;
+  marker: SourceLibraryReconciliationEvidenceMarker;
+  pools: SourceLibraryReconciliationEvidencePools;
+  aliases: SourceLibraryReconciliationEvidenceAliases;
+  profiles: SourceLibraryReferenceCounts;
+  pendingRuns: SourceLibraryReferenceCounts;
+  protectedHistory: SourceLibraryReconciliationEvidenceProtectedHistory;
+  stubs: SourceLibraryReconciliationEvidenceStubs;
+  idempotencyFingerprint: SourceLibraryReconciliationEvidenceIdempotencyFingerprint;
+  ok: boolean;
+  /** @maxItems 20 */
+  failures: SourceLibraryReconciliationEvidenceFailuresItem[];
+}
+
 /**
  * Exact bounded source text retained privately with a live spec Apply.
  */
@@ -974,7 +1309,7 @@ export type BuildInfoSourcePolicy = typeof BuildInfoSourcePolicy[keyof typeof Bu
 
 
 export const BuildInfoSourcePolicy = {
-  'production-source-v1': 'production-source-v1',
+  'production-source-v2': 'production-source-v2',
 } as const;
 
 export type BuildInfoGitBinding = typeof BuildInfoGitBinding[keyof typeof BuildInfoGitBinding];

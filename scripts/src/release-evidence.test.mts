@@ -707,7 +707,7 @@ async function run(): Promise<void> {
     assert.ok(job.source, `${job.name} release job must be present`);
     assert.match(
       job.source!,
-      /node-version:\s*"24\.20\.0"/,
+      /node-version:\s*"24\.21\.0"/,
       `${job.name} release job must use the retained Node.js version`,
     );
     assert.match(
@@ -1484,7 +1484,7 @@ async function run(): Promise<void> {
       "@workspace/scripts",
       "exec",
       "tsx",
-      "./src/verify-source-library-reconciliation.mts",
+      "./src/verify-source-library-reconciliation-cli.mts",
     ],
     "the release gate must invoke the read-only source-library verifier",
   );

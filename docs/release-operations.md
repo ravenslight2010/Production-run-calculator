@@ -322,7 +322,7 @@ bounded verifier result, so it can be piped directly to the importer:
 ```bash
 HANDOFF=/secure/path/published-deployment-handoff.json
 pnpm --silent --filter @workspace/scripts exec tsx \
-  ./src/verify-source-library-reconciliation.mts \
+  ./src/verify-source-library-reconciliation-cli.mts \
   --capture-production \
   --environment release \
   --deployment-handoff "$HANDOFF" \

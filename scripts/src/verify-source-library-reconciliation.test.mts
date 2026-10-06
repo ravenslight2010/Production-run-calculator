@@ -30,7 +30,7 @@ const report = parseReport(JSON.parse(reportBytes.toString("utf8")));
 const queries: string[] = [];
 const rootDir = path.resolve(new URL("../../", import.meta.url).pathname);
 const verifierPath = path.resolve(
-  new URL("./verify-source-library-reconciliation.mts", import.meta.url).pathname,
+  new URL("./verify-source-library-reconciliation-cli.mts", import.meta.url).pathname,
 );
 const importerPath = path.resolve(
   new URL("./import-source-library-reconciliation-evidence.mts", import.meta.url).pathname,

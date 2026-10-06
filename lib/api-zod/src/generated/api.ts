@@ -134,6 +134,90 @@ export const deleteRunTemplatesBodyThreeItemsItemRevisionMax = 9007199254740991;
 export const deleteRunTemplatesResponseTemplatesItemRevisionMin = 0;
 export const deleteRunTemplatesResponseTemplatesItemRevisionMax = 9007199254740991;
 export const deleteRunTemplatesResponseTemplatesItemDeletedDefault = false;
+export const captureSourceLibraryReconciliationBodyDeploymentHandoffDeploymentIdMax = 128;
+export const captureSourceLibraryReconciliationBodyDeploymentHandoffDeployedRevisionRegExp = new RegExp('^source-sha256:[a-f0-9]{64}$');
+export const captureSourceLibraryReconciliationBodyDeploymentHandoffAppBuildIdRegExp = new RegExp('^app-build:[a-f0-9-]{36}$');
+export const captureSourceLibraryReconciliationBodyDeploymentHandoffSourceFingerprintSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const captureSourceLibraryReconciliationBodyDeploymentHandoffExpectedRecordSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const captureSourceLibraryReconciliationBodyDeploymentHandoffDatabaseOwnerMax = 128;
+export const captureSourceLibraryReconciliationBodyDeploymentHandoffDatabaseOwnerRegExp = new RegExp('^[A-Za-z_][A-Za-z0-9_$-]*$');
+export const captureSourceLibraryReconciliationBodyExpectedDatabaseOwnerMax = 128;
+export const captureSourceLibraryReconciliationBodyExpectedDatabaseOwnerRegExp = new RegExp('^[A-Za-z_][A-Za-z0-9_$-]*$');
+export const captureSourceLibraryReconciliationResponseRevisionMax = 128;
+export const captureSourceLibraryReconciliationResponseEvidenceIdRegExp = new RegExp('^[a-f0-9]{64}$');
+export const captureSourceLibraryReconciliationResponseHealIdMax = 128;
+export const captureSourceLibraryReconciliationResponseReportSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const captureSourceLibraryReconciliationResponseReportAutomaticProposalsMin = 0;
+export const captureSourceLibraryReconciliationResponseReportAutomaticProposalsMax = 1000000;
+export const captureSourceLibraryReconciliationResponseReportStubsMin = 0;
+export const captureSourceLibraryReconciliationResponseReportStubsMax = 1000000;
+export const captureSourceLibraryReconciliationResponseMarkerResultCountsReplacementsMin = 0;
+export const captureSourceLibraryReconciliationResponseMarkerResultCountsReplacementsMax = 1000000;
+export const captureSourceLibraryReconciliationResponseMarkerResultCountsAliasesInsertedMin = 0;
+export const captureSourceLibraryReconciliationResponseMarkerResultCountsAliasesInsertedMax = 1000000;
+export const captureSourceLibraryReconciliationResponseMarkerResultCountsRepointedProfilesMin = 0;
+export const captureSourceLibraryReconciliationResponseMarkerResultCountsRepointedProfilesMax = 1000000;
+export const captureSourceLibraryReconciliationResponseMarkerResultCountsRepointedRunsMin = 0;
+export const captureSourceLibraryReconciliationResponseMarkerResultCountsRepointedRunsMax = 1000000;
+export const captureSourceLibraryReconciliationResponseMarkerResultCountsDeletedStubsMin = 0;
+export const captureSourceLibraryReconciliationResponseMarkerResultCountsDeletedStubsMax = 1000000;
+export const captureSourceLibraryReconciliationResponsePoolsExpectedMin = 0;
+export const captureSourceLibraryReconciliationResponsePoolsExpectedMax = 1000000;
+export const captureSourceLibraryReconciliationResponsePoolsExactMatchesMin = 0;
+export const captureSourceLibraryReconciliationResponsePoolsExactMatchesMax = 1000000;
+export const captureSourceLibraryReconciliationResponsePoolsGuardedRenamesMin = 0;
+export const captureSourceLibraryReconciliationResponsePoolsGuardedRenamesMax = 1000000;
+export const captureSourceLibraryReconciliationResponsePoolsMissingMin = 0;
+export const captureSourceLibraryReconciliationResponsePoolsMissingMax = 1000000;
+export const captureSourceLibraryReconciliationResponsePoolsMismatchesMin = 0;
+export const captureSourceLibraryReconciliationResponsePoolsMismatchesMax = 1000000;
+export const captureSourceLibraryReconciliationResponseAliasesExpectedMin = 0;
+export const captureSourceLibraryReconciliationResponseAliasesExpectedMax = 1000000;
+export const captureSourceLibraryReconciliationResponseAliasesExactMatchesMin = 0;
+export const captureSourceLibraryReconciliationResponseAliasesExactMatchesMax = 1000000;
+export const captureSourceLibraryReconciliationResponseAliasesMissingMin = 0;
+export const captureSourceLibraryReconciliationResponseAliasesMissingMax = 1000000;
+export const captureSourceLibraryReconciliationResponseAliasesMismatchesMin = 0;
+export const captureSourceLibraryReconciliationResponseAliasesMismatchesMax = 1000000;
+export const captureSourceLibraryReconciliationResponseProfilesInspectedMin = 0;
+export const captureSourceLibraryReconciliationResponseProfilesInspectedMax = 1000000;
+export const captureSourceLibraryReconciliationResponseProfilesCanonicalMin = 0;
+export const captureSourceLibraryReconciliationResponseProfilesCanonicalMax = 1000000;
+export const captureSourceLibraryReconciliationResponseProfilesStaleMin = 0;
+export const captureSourceLibraryReconciliationResponseProfilesStaleMax = 1000000;
+export const captureSourceLibraryReconciliationResponseProfilesNonCanonicalMin = 0;
+export const captureSourceLibraryReconciliationResponseProfilesNonCanonicalMax = 1000000;
+export const captureSourceLibraryReconciliationResponsePendingRunsInspectedMin = 0;
+export const captureSourceLibraryReconciliationResponsePendingRunsInspectedMax = 1000000;
+export const captureSourceLibraryReconciliationResponsePendingRunsCanonicalMin = 0;
+export const captureSourceLibraryReconciliationResponsePendingRunsCanonicalMax = 1000000;
+export const captureSourceLibraryReconciliationResponsePendingRunsStaleMin = 0;
+export const captureSourceLibraryReconciliationResponsePendingRunsStaleMax = 1000000;
+export const captureSourceLibraryReconciliationResponsePendingRunsNonCanonicalMin = 0;
+export const captureSourceLibraryReconciliationResponsePendingRunsNonCanonicalMax = 1000000;
+export const captureSourceLibraryReconciliationResponseProtectedHistoryReferencesMin = 0;
+export const captureSourceLibraryReconciliationResponseProtectedHistoryReferencesMax = 1000000;
+export const captureSourceLibraryReconciliationResponseStubsExpectedMin = 0;
+export const captureSourceLibraryReconciliationResponseStubsExpectedMax = 1000000;
+export const captureSourceLibraryReconciliationResponseStubsCanonicalExactMin = 0;
+export const captureSourceLibraryReconciliationResponseStubsCanonicalExactMax = 1000000;
+export const captureSourceLibraryReconciliationResponseStubsCanonicalMissingMin = 0;
+export const captureSourceLibraryReconciliationResponseStubsCanonicalMissingMax = 1000000;
+export const captureSourceLibraryReconciliationResponseStubsCanonicalMismatchesMin = 0;
+export const captureSourceLibraryReconciliationResponseStubsCanonicalMismatchesMax = 1000000;
+export const captureSourceLibraryReconciliationResponseStubsDeletedExpectedMin = 0;
+export const captureSourceLibraryReconciliationResponseStubsDeletedExpectedMax = 1000000;
+export const captureSourceLibraryReconciliationResponseStubsRemainingProtectedMin = 0;
+export const captureSourceLibraryReconciliationResponseStubsRemainingProtectedMax = 1000000;
+export const captureSourceLibraryReconciliationResponseStubsUnexpectedlyDeletedMin = 0;
+export const captureSourceLibraryReconciliationResponseStubsUnexpectedlyDeletedMax = 1000000;
+export const captureSourceLibraryReconciliationResponseStubsUnexpectedlyRemainingMin = 0;
+export const captureSourceLibraryReconciliationResponseStubsUnexpectedlyRemainingMax = 1000000;
+export const captureSourceLibraryReconciliationResponseIdempotencyFingerprintValueRegExp = new RegExp('^[a-f0-9]{64}$');
+export const captureSourceLibraryReconciliationResponseFailuresItemCheckRegExp = new RegExp('^[A-Za-z0-9_-]{1,80}$');
+export const captureSourceLibraryReconciliationResponseFailuresItemCountMin = 0;
+export const captureSourceLibraryReconciliationResponseFailuresItemCountMax = 1000000;
+export const captureSourceLibraryReconciliationResponseFailuresMax = 20;
 export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesConversationTurnsMin = 0;
 export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesRetiredFacilityFactsMin = 0;
 export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesIncidentGeneratedTextToLabelMin = 0;
@@ -385,7 +469,7 @@ export const GetBuildInfoResponse = zod.object({
   "schemaVersion": zod.literal(1),
   "kind": zod.enum(['app-build-info']),
   "appBuildId": zod.string().regex(getBuildInfoResponseAppBuildIdRegExp).describe('Application-owned artifact-set ID, not a Replit Build UUID.'),
-  "sourcePolicy": zod.enum(['production-source-v1']),
+  "sourcePolicy": zod.enum(['production-source-v2']),
   "sourceFingerprintSha256": zod.string().regex(getBuildInfoResponseSourceFingerprintSha256RegExp),
   "gitRevision": zod.string().regex(getBuildInfoResponseGitRevisionRegExp).nullable(),
   "gitBinding": zod.enum(['verified', 'unavailable']),
@@ -4529,6 +4613,154 @@ export const ApplyProfileDataHealthRepairsResponse = zod.object({
   "repairedProfiles": zod.int(),
   "repairedRuns": zod.int()
 })
+})
+
+
+/**
+ * Manager-only and live-scope only. Validates a fresh schema-v2 published source handoff against the immutable identity of this running API build, then runs the reviewed verifier in one read-only production transaction. Returns only its bounded summary; no source rows or report payloads are persisted or logged. A 200 response may have ok=false and remains a valid capture result.
+ * @summary Capture bounded production source-library reconciliation evidence
+ */
+
+
+
+
+
+
+
+export const CaptureSourceLibraryReconciliationBody = zod.object({
+  "deploymentHandoff": zod.object({
+  "schemaVersion": zod.literal(2),
+  "kind": zod.enum(['published-source-deployment-handoff']),
+  "deploymentId": zod.string().min(1).max(captureSourceLibraryReconciliationBodyDeploymentHandoffDeploymentIdMax),
+  "deployedRevision": zod.string().regex(captureSourceLibraryReconciliationBodyDeploymentHandoffDeployedRevisionRegExp),
+  "appBuildId": zod.string().regex(captureSourceLibraryReconciliationBodyDeploymentHandoffAppBuildIdRegExp),
+  "sourcePolicy": zod.enum(['production-source-v2']),
+  "sourceFingerprintSha256": zod.string().regex(captureSourceLibraryReconciliationBodyDeploymentHandoffSourceFingerprintSha256RegExp),
+  "identityAuthority": zod.enum(['independent-expected-source-comparison']),
+  "expectedRecordSha256": zod.string().regex(captureSourceLibraryReconciliationBodyDeploymentHandoffExpectedRecordSha256RegExp),
+  "expectedSource": zod.record(zod.string(), zod.unknown()),
+  "databaseOwner": zod.string().min(1).max(captureSourceLibraryReconciliationBodyDeploymentHandoffDatabaseOwnerMax).regex(captureSourceLibraryReconciliationBodyDeploymentHandoffDatabaseOwnerRegExp).optional(),
+  "issuedAt": zod.coerce.date(),
+  "expiresAt": zod.coerce.date()
+}).describe('Fresh published schema-v2 source deployment handoff, independently validated by the server.'),
+  "expectedDatabaseOwner": zod.string().min(1).max(captureSourceLibraryReconciliationBodyExpectedDatabaseOwnerMax).regex(captureSourceLibraryReconciliationBodyExpectedDatabaseOwnerRegExp)
+})
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+export const CaptureSourceLibraryReconciliationResponse = zod.object({
+  "verifier": zod.enum(['source-library-reconciliation']),
+  "environment": zod.enum(['release']),
+  "revision": zod.string().min(1).max(captureSourceLibraryReconciliationResponseRevisionMax),
+  "capturedAt": zod.coerce.date(),
+  "evidenceId": zod.string().regex(captureSourceLibraryReconciliationResponseEvidenceIdRegExp),
+  "healId": zod.string().min(1).max(captureSourceLibraryReconciliationResponseHealIdMax),
+  "repairBoundary": zod.object({
+  "fromDate": zod.coerce.date()
+}),
+  "report": zod.object({
+  "sha256": zod.string().regex(captureSourceLibraryReconciliationResponseReportSha256RegExp),
+  "formatVersion": zod.literal(1),
+  "automaticProposals": zod.int().min(captureSourceLibraryReconciliationResponseReportAutomaticProposalsMin).max(captureSourceLibraryReconciliationResponseReportAutomaticProposalsMax),
+  "stubs": zod.int().min(captureSourceLibraryReconciliationResponseReportStubsMin).max(captureSourceLibraryReconciliationResponseReportStubsMax)
+}),
+  "marker": zod.object({
+  "present": zod.boolean(),
+  "resultValid": zod.boolean(),
+  "resultWithinBounds": zod.boolean(),
+  "resultCounts": zod.object({
+  "replacements": zod.int().min(captureSourceLibraryReconciliationResponseMarkerResultCountsReplacementsMin).max(captureSourceLibraryReconciliationResponseMarkerResultCountsReplacementsMax),
+  "aliasesInserted": zod.int().min(captureSourceLibraryReconciliationResponseMarkerResultCountsAliasesInsertedMin).max(captureSourceLibraryReconciliationResponseMarkerResultCountsAliasesInsertedMax),
+  "repointedProfiles": zod.int().min(captureSourceLibraryReconciliationResponseMarkerResultCountsRepointedProfilesMin).max(captureSourceLibraryReconciliationResponseMarkerResultCountsRepointedProfilesMax),
+  "repointedRuns": zod.int().min(captureSourceLibraryReconciliationResponseMarkerResultCountsRepointedRunsMin).max(captureSourceLibraryReconciliationResponseMarkerResultCountsRepointedRunsMax),
+  "deletedStubs": zod.int().min(captureSourceLibraryReconciliationResponseMarkerResultCountsDeletedStubsMin).max(captureSourceLibraryReconciliationResponseMarkerResultCountsDeletedStubsMax)
+}),
+  "appliedAtPresent": zod.boolean()
+}),
+  "pools": zod.object({
+  "expected": zod.int().min(captureSourceLibraryReconciliationResponsePoolsExpectedMin).max(captureSourceLibraryReconciliationResponsePoolsExpectedMax),
+  "exactMatches": zod.int().min(captureSourceLibraryReconciliationResponsePoolsExactMatchesMin).max(captureSourceLibraryReconciliationResponsePoolsExactMatchesMax),
+  "guardedRenames": zod.int().min(captureSourceLibraryReconciliationResponsePoolsGuardedRenamesMin).max(captureSourceLibraryReconciliationResponsePoolsGuardedRenamesMax),
+  "missing": zod.int().min(captureSourceLibraryReconciliationResponsePoolsMissingMin).max(captureSourceLibraryReconciliationResponsePoolsMissingMax),
+  "mismatches": zod.int().min(captureSourceLibraryReconciliationResponsePoolsMismatchesMin).max(captureSourceLibraryReconciliationResponsePoolsMismatchesMax)
+}),
+  "aliases": zod.object({
+  "expected": zod.int().min(captureSourceLibraryReconciliationResponseAliasesExpectedMin).max(captureSourceLibraryReconciliationResponseAliasesExpectedMax),
+  "exactMatches": zod.int().min(captureSourceLibraryReconciliationResponseAliasesExactMatchesMin).max(captureSourceLibraryReconciliationResponseAliasesExactMatchesMax),
+  "missing": zod.int().min(captureSourceLibraryReconciliationResponseAliasesMissingMin).max(captureSourceLibraryReconciliationResponseAliasesMissingMax),
+  "mismatches": zod.int().min(captureSourceLibraryReconciliationResponseAliasesMismatchesMin).max(captureSourceLibraryReconciliationResponseAliasesMismatchesMax)
+}),
+  "profiles": zod.object({
+  "inspected": zod.int().min(captureSourceLibraryReconciliationResponseProfilesInspectedMin).max(captureSourceLibraryReconciliationResponseProfilesInspectedMax),
+  "canonical": zod.int().min(captureSourceLibraryReconciliationResponseProfilesCanonicalMin).max(captureSourceLibraryReconciliationResponseProfilesCanonicalMax),
+  "stale": zod.int().min(captureSourceLibraryReconciliationResponseProfilesStaleMin).max(captureSourceLibraryReconciliationResponseProfilesStaleMax),
+  "nonCanonical": zod.int().min(captureSourceLibraryReconciliationResponseProfilesNonCanonicalMin).max(captureSourceLibraryReconciliationResponseProfilesNonCanonicalMax)
+}),
+  "pendingRuns": zod.object({
+  "inspected": zod.int().min(captureSourceLibraryReconciliationResponsePendingRunsInspectedMin).max(captureSourceLibraryReconciliationResponsePendingRunsInspectedMax),
+  "canonical": zod.int().min(captureSourceLibraryReconciliationResponsePendingRunsCanonicalMin).max(captureSourceLibraryReconciliationResponsePendingRunsCanonicalMax),
+  "stale": zod.int().min(captureSourceLibraryReconciliationResponsePendingRunsStaleMin).max(captureSourceLibraryReconciliationResponsePendingRunsStaleMax),
+  "nonCanonical": zod.int().min(captureSourceLibraryReconciliationResponsePendingRunsNonCanonicalMin).max(captureSourceLibraryReconciliationResponsePendingRunsNonCanonicalMax)
+}),
+  "protectedHistory": zod.object({
+  "references": zod.int().min(captureSourceLibraryReconciliationResponseProtectedHistoryReferencesMin).max(captureSourceLibraryReconciliationResponseProtectedHistoryReferencesMax)
+}),
+  "stubs": zod.object({
+  "expected": zod.int().min(captureSourceLibraryReconciliationResponseStubsExpectedMin).max(captureSourceLibraryReconciliationResponseStubsExpectedMax),
+  "canonicalExact": zod.int().min(captureSourceLibraryReconciliationResponseStubsCanonicalExactMin).max(captureSourceLibraryReconciliationResponseStubsCanonicalExactMax),
+  "canonicalMissing": zod.int().min(captureSourceLibraryReconciliationResponseStubsCanonicalMissingMin).max(captureSourceLibraryReconciliationResponseStubsCanonicalMissingMax),
+  "canonicalMismatches": zod.int().min(captureSourceLibraryReconciliationResponseStubsCanonicalMismatchesMin).max(captureSourceLibraryReconciliationResponseStubsCanonicalMismatchesMax),
+  "deletedExpected": zod.int().min(captureSourceLibraryReconciliationResponseStubsDeletedExpectedMin).max(captureSourceLibraryReconciliationResponseStubsDeletedExpectedMax),
+  "remainingProtected": zod.int().min(captureSourceLibraryReconciliationResponseStubsRemainingProtectedMin).max(captureSourceLibraryReconciliationResponseStubsRemainingProtectedMax),
+  "unexpectedlyDeleted": zod.int().min(captureSourceLibraryReconciliationResponseStubsUnexpectedlyDeletedMin).max(captureSourceLibraryReconciliationResponseStubsUnexpectedlyDeletedMax),
+  "unexpectedlyRemaining": zod.int().min(captureSourceLibraryReconciliationResponseStubsUnexpectedlyRemainingMin).max(captureSourceLibraryReconciliationResponseStubsUnexpectedlyRemainingMax)
+}),
+  "idempotencyFingerprint": zod.object({
+  "algorithm": zod.enum(['sha256']),
+  "value": zod.string().regex(captureSourceLibraryReconciliationResponseIdempotencyFingerprintValueRegExp)
+}),
+  "ok": zod.boolean(),
+  "failures": zod.array(zod.object({
+  "check": zod.string().regex(captureSourceLibraryReconciliationResponseFailuresItemCheckRegExp),
+  "count": zod.int().min(captureSourceLibraryReconciliationResponseFailuresItemCountMin).max(captureSourceLibraryReconciliationResponseFailuresItemCountMax)
+})).max(captureSourceLibraryReconciliationResponseFailuresMax)
 })
 
 

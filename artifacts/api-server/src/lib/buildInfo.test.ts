@@ -12,7 +12,7 @@ vi.mock("node:fs", async (original) => ({
 const stamp = {
   schemaVersion: 1, kind: "app-build-info",
   appBuildId: "app-build:00000000-0000-0000-0000-000000000000",
-  sourcePolicy: "production-source-v1", sourceFingerprintSha256: "a".repeat(64),
+  sourcePolicy: "production-source-v2", sourceFingerprintSha256: "a".repeat(64),
   gitRevision: "b".repeat(40), gitBinding: "verified",
   completedAt: "2026-10-03T23:00:00.000Z", buildMode: "release",
   platformDeploymentId: null, platformBuildId: null, platformIdentitySource: "unavailable",

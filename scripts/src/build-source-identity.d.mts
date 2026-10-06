@@ -2,7 +2,7 @@ export interface SourceRecord {
   schemaVersion: 1;
   kind: "prepared-build-source";
   appBuildId: string;
-  sourcePolicy: "production-source-v1";
+  sourcePolicy: "production-source-v2";
   sourceFingerprintSha256: string;
   gitRevision: string | null;
   gitBinding: "verified" | "unavailable";
@@ -13,7 +13,7 @@ export interface BuildInfo {
   schemaVersion: 1;
   kind: "app-build-info";
   appBuildId: string;
-  sourcePolicy: "production-source-v1";
+  sourcePolicy: "production-source-v2";
   sourceFingerprintSha256: string;
   gitRevision: string | null;
   gitBinding: "verified" | "unavailable";

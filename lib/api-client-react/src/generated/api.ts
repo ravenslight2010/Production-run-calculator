@@ -244,6 +244,9 @@ import type {
   ShiftHandoffDigest,
   SignUpCredentials,
   SignupCodeStatusUpdate,
+  SourceLibraryCaptureError,
+  SourceLibraryReconciliationCaptureRequest,
+  SourceLibraryReconciliationEvidence,
   SpecImportAliasList,
   SpecReconcileInput,
   SpecReconcileResult,
@@ -12227,6 +12230,95 @@ export const useApplyProfileDataHealthRepairs = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getApplyProfileDataHealthRepairsMutationOptions(options), queryClient);
+    }
+
+export const getCaptureSourceLibraryReconciliationUrl = () => {
+
+
+
+
+  return `/api/profile-data/source-library-reconciliation/capture`
+}
+
+/**
+ * Manager-only and live-scope only. Validates a fresh schema-v2 published source handoff against the immutable identity of this running API build, then runs the reviewed verifier in one read-only production transaction. Returns only its bounded summary; no source rows or report payloads are persisted or logged. A 200 response may have ok=false and remains a valid capture result.
+ * @summary Capture bounded production source-library reconciliation evidence
+ */
+export const captureSourceLibraryReconciliation = async (sourceLibraryReconciliationCaptureRequest: SourceLibraryReconciliationCaptureRequest, options?: Parameters<typeof customFetch>[1]): Promise<SourceLibraryReconciliationEvidence> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<SourceLibraryReconciliationEvidence>(getCaptureSourceLibraryReconciliationUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(sourceLibraryReconciliationCaptureRequest)
+  }
+);}
+
+
+
+
+
+export const getCaptureSourceLibraryReconciliationMutationKey = () => ['captureSourceLibraryReconciliation'] as const;
+
+export const getCaptureSourceLibraryReconciliationMutationOptions = <TError = ErrorType<SourceLibraryCaptureError | void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof captureSourceLibraryReconciliation>>, TError,CaptureSourceLibraryReconciliationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof captureSourceLibraryReconciliation>>, TError,CaptureSourceLibraryReconciliationMutationVariables, TContext> => {
+
+const mutationKey = getCaptureSourceLibraryReconciliationMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof captureSourceLibraryReconciliation>>, CaptureSourceLibraryReconciliationMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  captureSourceLibraryReconciliation(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CaptureSourceLibraryReconciliationMutationResult = NonNullable<Awaited<ReturnType<typeof captureSourceLibraryReconciliation>>>
+    export type CaptureSourceLibraryReconciliationMutationBody = BodyType<SourceLibraryReconciliationCaptureRequest>
+    export type CaptureSourceLibraryReconciliationMutationError = ErrorType<SourceLibraryCaptureError | void>
+    export type CaptureSourceLibraryReconciliationMutationVariables = {data: BodyType<SourceLibraryReconciliationCaptureRequest>}
+
+    /**
+ * @summary Capture bounded production source-library reconciliation evidence
+ */
+export const useCaptureSourceLibraryReconciliation = <TError = ErrorType<SourceLibraryCaptureError | void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof captureSourceLibraryReconciliation>>, TError,CaptureSourceLibraryReconciliationMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof captureSourceLibraryReconciliation>>,
+        TError,
+        CaptureSourceLibraryReconciliationMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCaptureSourceLibraryReconciliationMutationOptions(options), queryClient);
     }
 
 export const getGetProfileDataHealthWorkspaceUrl = () => {

@@ -366,6 +366,12 @@ export function analyzeTypescript7HistoricalReports(
   return { reports, incompatibleRunnerClassSamples };
 }
 
+export function typescript7RetainedSummaryCheckArgs(
+  reproductionScript: string,
+): string[] {
+  return [reproductionScript, "--check-retained-summary"];
+}
+
 export function typescript7TrendHistorySummary(
   distinctRevisionCount: number,
   incompatibleRunnerClassSamples: number,
@@ -581,10 +587,9 @@ async function main(): Promise<void> {
       await cp(resolve(rootDir, name), resolve(checkout, name), {
         recursive: true,
         filter: (source) =>
-          !source.includes("/node_modules") &&
-          !source.includes("/dist") &&
-          !source.includes("/test-results") &&
-          !source.includes("/playwright-report"),
+          !/(?:^|\/)(?:node_modules|dist|test-results|playwright-report)(?:\/|$)/.test(
+            source.replaceAll("\\", "/"),
+          ),
       });
     }
     const frozenInstall = await run(
@@ -916,11 +921,9 @@ async function main(): Promise<void> {
   await writeFile(evidencePath, `${JSON.stringify(report, null, 2)}\n`);
   const retainedEvidenceCheck = spawnSync(
     "bash",
-    [
+    typescript7RetainedSummaryCheckArgs(
       resolve(rootDir, "docs/evidence/reproduce-typescript-7-comparison.sh"),
-      "--check-retained-summary",
-      evidencePath,
-    ],
+    ),
     {
       cwd: rootDir,
       encoding: "utf8",

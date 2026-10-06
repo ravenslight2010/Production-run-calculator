@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { fingerprintSource } from "./build-source-files.mjs";
+import { fingerprintSource, SOURCE_POLICY } from "./build-source-files.mjs";
 
 const SOURCE = /^source-sha256:[a-f0-9]{64}$/;
 const ASSESSMENT = /^test-sha256:[a-f0-9]{64}$/;
@@ -13,7 +13,7 @@ export const isEvidenceRevision = (value) => typeof value === "string" &&
   (SOURCE.test(value) || ASSESSMENT.test(value) || LEGACY.test(value));
 export const isAssessmentRevision = (value) => typeof value === "string" && ASSESSMENT.test(value);
 export function assessmentRevision(policy, source, verification) {
-  if (policy !== "production-source-v1" ||
+  if (policy !== SOURCE_POLICY ||
       !/^[a-f0-9]{64}$/.test(source) || !/^[a-f0-9]{64}$/.test(verification))
     throw new Error("Invalid source/verification identity.");
   return `test-sha256:${createHash("sha256").update(JSON.stringify([

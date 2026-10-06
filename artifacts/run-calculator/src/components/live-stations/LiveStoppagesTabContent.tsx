@@ -847,7 +847,7 @@ export const LiveStoppagesTabContent = memo(function LiveStoppagesTabContent() {
                             <button
                               type="button"
                               onClick={() => { setStopReason(""); setStopNotes(""); setShowStopDialog(true); }}
-                              className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-orange-700/60 text-orange-800 dark:text-orange-400 hover:text-orange-900 dark:hover:text-orange-300 hover:bg-orange-100/80 dark:hover:bg-orange-950/40 text-xs font-semibold transition-colors"
+                              className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-orange-700/60 text-orange-950 dark:text-orange-400 hover:text-orange-950 dark:hover:text-orange-300 hover:bg-orange-100/80 dark:hover:bg-orange-950/40 text-xs font-semibold transition-colors"
                             >
                               <Plus className="w-3 h-3" /> Log Stop
                             </button>

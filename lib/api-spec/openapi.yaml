@@ -3236,6 +3236,72 @@ paths:
         "403":
           description: Missing manager capability
 
+  /profile-data/source-library-reconciliation/capture:
+    post:
+      operationId: captureSourceLibraryReconciliation
+      tags: [audit]
+      summary: Capture bounded production source-library reconciliation evidence
+      description: >-
+        Manager-only and live-scope only. Validates a fresh schema-v2 published
+        source handoff against the immutable identity of this running API build,
+        then runs the reviewed verifier in one read-only production transaction.
+        Returns only its bounded summary; no source rows or report payloads are
+        persisted or logged. A 200 response may have ok=false and remains a
+        valid capture result.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SourceLibraryReconciliationCaptureRequest"
+      responses:
+        "200":
+          description: Bounded verifier evidence; ok=false is a valid verification result
+          headers:
+            Cache-Control:
+              description: Capture responses are never cached.
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryReconciliationEvidence"
+        "400":
+          description: Invalid capture request, owner identifier, or source handoff
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryCaptureError"
+        "413":
+          description: Serialized capture request exceeds the 8 KiB limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryCaptureError"
+        "401":
+          description: Authentication required
+        "403":
+          description: Manager role and live facility scope required
+        "409":
+          description: Handoff is expired or does not match this build, or another capture is running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryCaptureError"
+        "500":
+          description: Bundled report integrity or bounded output contract failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryCaptureError"
+        "503":
+          description: Running build identity or read-only production database is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryCaptureError"
+
   /profile-data/health-workspace:
     get:
       operationId: getProfileDataHealthWorkspace
@@ -5147,6 +5213,197 @@ components:
       required: false
       schema: { type: string, pattern: "^[a-f0-9]{64}$" }
   schemas:
+    SourceLibraryReconciliationCaptureRequest:
+      type: object
+      required: [deploymentHandoff, expectedDatabaseOwner]
+      additionalProperties: false
+      properties:
+        deploymentHandoff:
+          type: object
+          description: Fresh published schema-v2 source deployment handoff, independently validated by the server.
+          required:
+            - schemaVersion
+            - kind
+            - deploymentId
+            - deployedRevision
+            - appBuildId
+            - sourcePolicy
+            - sourceFingerprintSha256
+            - identityAuthority
+            - expectedRecordSha256
+            - expectedSource
+            - issuedAt
+            - expiresAt
+          additionalProperties: true
+          properties:
+            schemaVersion: { type: integer, enum: [2] }
+            kind: { type: string, enum: [published-source-deployment-handoff] }
+            deploymentId: { type: string, minLength: 1, maxLength: 128 }
+            deployedRevision: { type: string, pattern: "^source-sha256:[a-f0-9]{64}$" }
+            appBuildId: { type: string, pattern: "^app-build:[a-f0-9-]{36}$" }
+            sourcePolicy: { type: string, enum: [production-source-v2] }
+            sourceFingerprintSha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+            identityAuthority: { type: string, enum: [independent-expected-source-comparison] }
+            expectedRecordSha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+            expectedSource: { type: object, additionalProperties: true }
+            databaseOwner:
+              type: string
+              minLength: 1
+              maxLength: 128
+              pattern: "^[A-Za-z_][A-Za-z0-9_$-]*$"
+            issuedAt: { type: string, format: date-time }
+            expiresAt: { type: string, format: date-time }
+        expectedDatabaseOwner:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: "^[A-Za-z_][A-Za-z0-9_$-]*$"
+    SourceLibraryCaptureError:
+      type: object
+      required: [error]
+      additionalProperties: false
+      properties:
+        error: { type: string, maxLength: 160 }
+    SourceLibraryReconciliationEvidence:
+      type: object
+      required:
+        - verifier
+        - environment
+        - revision
+        - capturedAt
+        - evidenceId
+        - healId
+        - repairBoundary
+        - report
+        - marker
+        - pools
+        - aliases
+        - profiles
+        - pendingRuns
+        - protectedHistory
+        - stubs
+        - idempotencyFingerprint
+        - ok
+        - failures
+      additionalProperties: false
+      properties:
+        verifier: { type: string, enum: [source-library-reconciliation] }
+        environment: { type: string, enum: [release] }
+        revision: { type: string, minLength: 1, maxLength: 128 }
+        capturedAt: { type: string, format: date-time }
+        evidenceId: { type: string, pattern: "^[a-f0-9]{64}$" }
+        healId: { type: string, minLength: 1, maxLength: 128 }
+        repairBoundary:
+          type: object
+          required: [fromDate]
+          additionalProperties: false
+          properties:
+            fromDate: { type: string, format: date }
+        report:
+          type: object
+          required: [sha256, formatVersion, automaticProposals, stubs]
+          additionalProperties: false
+          properties:
+            sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+            formatVersion: { type: integer, enum: [1] }
+            automaticProposals: { type: integer, minimum: 0, maximum: 1000000 }
+            stubs: { type: integer, minimum: 0, maximum: 1000000 }
+        marker:
+          type: object
+          required: [present, resultValid, resultWithinBounds, resultCounts, appliedAtPresent]
+          additionalProperties: false
+          properties:
+            present: { type: boolean }
+            resultValid: { type: boolean }
+            resultWithinBounds: { type: boolean }
+            resultCounts:
+              type: object
+              required: [replacements, aliasesInserted, repointedProfiles, repointedRuns, deletedStubs]
+              additionalProperties: false
+              properties:
+                replacements: { type: integer, minimum: 0, maximum: 1000000 }
+                aliasesInserted: { type: integer, minimum: 0, maximum: 1000000 }
+                repointedProfiles: { type: integer, minimum: 0, maximum: 1000000 }
+                repointedRuns: { type: integer, minimum: 0, maximum: 1000000 }
+                deletedStubs: { type: integer, minimum: 0, maximum: 1000000 }
+            appliedAtPresent: { type: boolean }
+        pools:
+          type: object
+          required: [expected, exactMatches, guardedRenames, missing, mismatches]
+          additionalProperties: false
+          properties:
+            expected: { type: integer, minimum: 0, maximum: 1000000 }
+            exactMatches: { type: integer, minimum: 0, maximum: 1000000 }
+            guardedRenames: { type: integer, minimum: 0, maximum: 1000000 }
+            missing: { type: integer, minimum: 0, maximum: 1000000 }
+            mismatches: { type: integer, minimum: 0, maximum: 1000000 }
+        aliases:
+          type: object
+          required: [expected, exactMatches, missing, mismatches]
+          additionalProperties: false
+          properties:
+            expected: { type: integer, minimum: 0, maximum: 1000000 }
+            exactMatches: { type: integer, minimum: 0, maximum: 1000000 }
+            missing: { type: integer, minimum: 0, maximum: 1000000 }
+            mismatches: { type: integer, minimum: 0, maximum: 1000000 }
+        profiles:
+          $ref: "#/components/schemas/SourceLibraryReferenceCounts"
+        pendingRuns:
+          $ref: "#/components/schemas/SourceLibraryReferenceCounts"
+        protectedHistory:
+          type: object
+          required: [references]
+          additionalProperties: false
+          properties:
+            references: { type: integer, minimum: 0, maximum: 1000000 }
+        stubs:
+          type: object
+          required:
+            - expected
+            - canonicalExact
+            - canonicalMissing
+            - canonicalMismatches
+            - deletedExpected
+            - remainingProtected
+            - unexpectedlyDeleted
+            - unexpectedlyRemaining
+          additionalProperties: false
+          properties:
+            expected: { type: integer, minimum: 0, maximum: 1000000 }
+            canonicalExact: { type: integer, minimum: 0, maximum: 1000000 }
+            canonicalMissing: { type: integer, minimum: 0, maximum: 1000000 }
+            canonicalMismatches: { type: integer, minimum: 0, maximum: 1000000 }
+            deletedExpected: { type: integer, minimum: 0, maximum: 1000000 }
+            remainingProtected: { type: integer, minimum: 0, maximum: 1000000 }
+            unexpectedlyDeleted: { type: integer, minimum: 0, maximum: 1000000 }
+            unexpectedlyRemaining: { type: integer, minimum: 0, maximum: 1000000 }
+        idempotencyFingerprint:
+          type: object
+          required: [algorithm, value]
+          additionalProperties: false
+          properties:
+            algorithm: { type: string, enum: [sha256] }
+            value: { type: string, pattern: "^[a-f0-9]{64}$" }
+        ok: { type: boolean }
+        failures:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            required: [check, count]
+            additionalProperties: false
+            properties:
+              check: { type: string, pattern: "^[A-Za-z0-9_-]{1,80}$" }
+              count: { type: integer, minimum: 0, maximum: 1000000 }
+    SourceLibraryReferenceCounts:
+      type: object
+      required: [inspected, canonical, stale, nonCanonical]
+      additionalProperties: false
+      properties:
+        inspected: { type: integer, minimum: 0, maximum: 1000000 }
+        canonical: { type: integer, minimum: 0, maximum: 1000000 }
+        stale: { type: integer, minimum: 0, maximum: 1000000 }
+        nonCanonical: { type: integer, minimum: 0, maximum: 1000000 }
     ImportOperationApplyInput:
       type: object
       required: [importType, sourceLabel, changes]
@@ -5605,7 +5862,7 @@ components:
           type: string
           pattern: '^app-build:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$'
           description: Application-owned artifact-set ID, not a Replit Build UUID.
-        sourcePolicy: { type: string, enum: [production-source-v1] }
+        sourcePolicy: { type: string, enum: [production-source-v2] }
         sourceFingerprintSha256: { type: string, pattern: '^[a-f0-9]{64}$' }
         gitRevision:
           type: string

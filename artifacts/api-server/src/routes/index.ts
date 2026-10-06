@@ -3,6 +3,7 @@ import healthRouter from "./health";
 import authRouter from "./auth";
 import runsRouter from "./runs";
 import profileDataHealthRouter from "./profileDataHealth";
+import sourceLibraryReconciliationCaptureRouter from "./sourceLibraryReconciliationCapture";
 import masterDataHealthRouter from "./masterDataHealth";
 import runTemplatesRouter from "./runTemplates";
 import coreSyncRunsRouter from "./capabilities/coreSyncRuns";
@@ -51,6 +52,10 @@ export const directAuthorizationCoverageRouters = [
     authOnlyRoutes: ["GET /runs"],
   },
   { name: "profile data health", router: profileDataHealthRouter },
+  {
+    name: "source-library reconciliation capture",
+    router: sourceLibraryReconciliationCaptureRouter,
+  },
   { name: "master data health", router: masterDataHealthRouter },
   {
     name: "run templates",
@@ -279,6 +284,16 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
     "POST /staff-invitations", "DELETE /staff-invitations/:id",
     "PATCH /signup-code/status", "POST /signup-code/rotate",
   ]),
+  {
+    method: "POST",
+    path: "/profile-data/source-library-reconciliation/capture",
+    ownership: "manager-only",
+    capabilities: ["manage-staff"],
+    capabilityMatch: "all",
+    managerRole: true,
+    scope: "live-only",
+    sandbox: "denied",
+  },
   ...writes("capability-gated", "live-only", "denied", "approve-password-resets", [
     "POST /password-reset-requests/:id/approve", "POST /password-reset-requests/:id/decline",
   ]),

@@ -10,6 +10,7 @@ import {
   normalizeDiagnostics,
   selectTypescript7HistoricalReports,
   typescript7ProjectMeasurementCommands,
+  typescript7RetainedSummaryCheckArgs,
   typescript7TrendHistorySummary,
   typescript7RunnerFingerprint,
   typescript7ResourceRegressions,
@@ -256,6 +257,17 @@ test("disposable reproduction shares declaration and prerequisite boundaries", a
   assert.ok(
     recipeBuild < runCalculator,
     "recipe-guide-import must be built before run-calculator is checked",
+  );
+});
+
+test("current comparison validates the historical summary without current-report counts", () => {
+  const reproductionScript = resolve(
+    import.meta.dirname,
+    "../../docs/evidence/reproduce-typescript-7-comparison.sh",
+  );
+  assert.deepEqual(
+    typescript7RetainedSummaryCheckArgs(reproductionScript),
+    [reproductionScript, "--check-retained-summary"],
   );
 });
 
