@@ -1,5 +1,10 @@
 # Release evidence handoff
 
+The Replit deployment is the only authorized current publisher of the active
+production app. GitHub is used for source backup and CI/testing. GitHub pushes,
+releases, workflow runs, successful checks, test artifacts, and container
+builds are not publication events and do not prove what is live.
+
 Use this page and the read-only handoff command as the starting point for
 reviewing release evidence. The command requires an explicit mode and source/test
 revision, compares only that mode's retained report and checkpoint, checks the
@@ -57,6 +62,10 @@ case count in the current contract. The runner timeout and warning budgets are
 maintained in `scripts/src/release-check.mts`, not inferred from an old report.
 
 ## Local/CI results are not production proof
+
+GitHub CI artifacts and local reports are test evidence only. Neither an
+artifact upload nor a passing branch-protection check publishes the app or
+establishes its live deployment identity.
 
 The handoff shows the report environment, source-library evidence environment
 and revision, deployed revision, and readiness-evidence path separately. A

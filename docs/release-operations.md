@@ -4,6 +4,22 @@ This guide is the operating contract for the repository's release checks. A
 release check is successful only when the command exits zero **and** the
 retained evidence verifier passes for the same git revision.
 
+## Production publication authority
+
+The Replit deployment is the only authorized current publisher of the active
+production app. GitHub is used for source backup and CI/testing. GitHub pushes,
+releases, workflow runs, successful checks, test artifacts, and Docker image
+builds do not publish the active app and do not prove what is live. Branch
+protection governs source merges only; it is not publication authority or
+production-readiness evidence.
+
+Render and manual Docker production instructions retained in this repository
+are legacy references and unsupported for current publication. Repository
+changes do not alter any external Render account, service, or deployment
+setting. The `Render image smoke` release gate remains a local disposable Docker
+test only; it does not contact Render or publish an image. Existing release and
+readiness gates remain required and are not replaced by GitHub CI evidence.
+
 For one revision-bound summary of retained reports, incomplete checkpoints,
 browser artifacts, and production-proof gaps, start with the
 [Release evidence handoff](release-evidence-handoff.md). It is read-only and

@@ -1,11 +1,17 @@
-# Render Blueprint — deploy with one click:
+# LEGACY / UNSUPPORTED FOR CURRENT PRODUCTION PUBLICATION.
+# This retained Blueprint is historical reference only. The Replit deployment
+# is the sole authorized publisher of the active production app. Keeping this
+# file does not create, change, or remove any external Render account, service,
+# or deployment setting.
+#
+# Historical Render Blueprint setup:
 #   1. Go to https://dashboard.render.com/blueprints
 #   2. Click "New Blueprint Instance"
 #   3. Connect your GitHub repo (this file is auto-detected)
 #   4. Render provisions the database + service from the Docker image
 #   5. Add the secrets in the service's "Environment" tab
 #
-# The API image is the slim `api` Docker target. Render runs the migration
+# Historically, the API image was the slim `api` Docker target. Render ran the migration
 # payload copied into that image before each deploy, then starts the bundled
 # server. The full `api-migrate` target is published separately for manual
 # recovery and Docker Compose.

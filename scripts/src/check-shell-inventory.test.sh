@@ -157,6 +157,27 @@ test_detects_stale_top_level_inventory_entry() {
   echo "PASS: detects a stale top-level inventory entry"
 }
 
+test_ignores_deleted_tracked_file_after_inventory_update() {
+  local workspace
+  workspace=$(make_workspace deleted_tracked \
+    'shellcheck ./src/check-shell-inventory.sh')
+  cat > "${workspace}/scripts/src/removed.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+  git -C "$workspace" add scripts/src/removed.sh
+  rm "${workspace}/scripts/src/removed.sh"
+
+  run_guard "$workspace"
+  [[ "$CHECK_STATUS" -eq 0 ]] || {
+    printf 'Expected an unstaged deleted tracked file to be absent from the current inventory. Output:\n%s\n' \
+      "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" "covers 1 maintained scripts"
+  echo "PASS: ignores deleted tracked files after their inventory entries are removed"
+}
+
 test_allows_only_documented_exclusions() {
   local workspace
   workspace=$(make_workspace exclusions \
@@ -210,5 +231,6 @@ test_detects_missing_maintained_script
 test_detects_missing_top_level_script
 test_detects_stale_inventory_entry
 test_detects_stale_top_level_inventory_entry
+test_ignores_deleted_tracked_file_after_inventory_update
 test_allows_only_documented_exclusions
 test_release_validation_runs_package_inventory_guards

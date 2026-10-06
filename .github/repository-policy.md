@@ -1,8 +1,13 @@
 # Stable `main` branch policy
 
-GitHub's live branch protection for `main` is the enforcement boundary for
-every delivery path. The current verified contract requires pull requests with
-at least one approval, dismisses stale approvals, requires an up-to-date branch,
+GitHub branch protection for `main` governs source merges; it is not production
+publication authority. The Replit deployment is the only authorized current
+publisher of the active production app. GitHub is used for source backup and
+CI/testing: pushes, releases, successful checks, test artifacts, and container
+builds do not publish the active app or prove what is live.
+
+The current verified branch-protection contract requires pull requests with at
+least one approval, dismisses stale approvals, requires an up-to-date branch,
 requires signed commits, and requires the six status checks listed below.
 Force-pushes and branch deletion are disabled. Administrator enforcement and
 conversation resolution are currently disabled in the live rule; this document
@@ -50,19 +55,18 @@ implicit `setup-node` caches; any future cache must include
 `${{ github.run_id }}` so reruns and untrusted pull requests cannot collide
 with a retained result.
 
-The manual production-promotion handoff is protected by the `production`
-environment and has read-only repository and Actions permissions. It consumes
-only a named artifact from a caller-selected successful `main` CI run, verifies
-the artifact digest and revision, and emits digest-qualified image references.
-It has no deployment or package credentials; a later deployment integration
-must consume that handoff without substituting tags or rebuilding from source.
+The workflow guard rejects `packages: write`, registry image pushes, deploy or
+promotion workflows/actions, production-image handoff workflows, production
+environments, and deployment-token write permissions. Read-only builds, tests,
+and run-scoped test-evidence artifacts remain allowed. The required
+`Docker image` check remains a build-only test with `push: false`; its check
+name stays part of the branch-protection contract above.
 
-Write permissions are exceptions, not defaults. The current approved
-exceptions are:
+Write permissions are exceptions, not defaults. The only current approved
+exception is:
 
 | Workflow/job | Capability | Boundary |
 | --- | --- | --- |
-| CI / `docker-publish` | `packages: write` | Only a push of `main` publishes immutable image tags. |
 | Stable branch protection / `notify` | `issues: write` | Only a scheduled failure updates one maintainer alert issue. |
 
 Each exception is documented beside the permission in its workflow. The
@@ -120,9 +124,11 @@ maintainer before they are applied.
 ## Source-of-truth contract
 
 The live GitHub rule, not this file or the local guarded-push helper, is the
-source of truth. The local helper is an additional early check and may reject
-an unsigned commit when its repository-local opt-in is enabled, but it cannot
-weaken or replace GitHub enforcement.
+source of truth for source merging only. It does not authorize or prove
+production publication. The Replit deployment remains the sole authorized
+publisher of the active app. The local helper is an additional early check and
+may reject an unsigned commit when its repository-local opt-in is enabled, but
+it cannot weaken or replace GitHub enforcement.
 
 The latest bounded activation result is retained in
 `.github/signed-commit-policy-evidence.md`. Re-run the read-only verifier after

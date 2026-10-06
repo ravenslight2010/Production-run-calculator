@@ -13,7 +13,6 @@ department_navigation_workflow="$workflow_dir/department-navigation.yml"
 release_concurrency_calibration_workflow="$workflow_dir/release-concurrency-calibration.yml"
 stable_branch_protection_workflow="$workflow_dir/stable-branch-protection.yml"
 workflow_lint_workflow="$workflow_dir/workflow-lint.yml"
-promotion_workflow="$workflow_dir/promote-production.yml"
 project_workflow_config="$workspace_root/.replit"
 
 check_project_workflow_topology() {
@@ -123,6 +122,63 @@ if (( ${#workflow_files[@]} == 0 )); then
   echo "Workflow lint failed: no GitHub Actions workflow files were found in $workflow_dir." >&2
   exit 1
 fi
+
+check_github_publication_boundary() {
+  local failures=0
+  local workflow_path
+  local workflow_name
+
+  for workflow_path in "${workflow_files[@]}"; do
+    workflow_name="${workflow_path##*/}"
+
+    if [[ "$workflow_name" =~ (deploy|promot) ||
+      "$workflow_name" =~ (production|prod).*(handoff)|(handoff).*(production|prod) ]]; then
+      echo "${workflow_path#"$workspace_root"/}: GitHub deploy/promotion workflows are not authorized." >&2
+      failures=$((failures + 1))
+    fi
+
+    if grep -Eiq '^[[:space:]]*name:[[:space:]].*(deploy|promot)|^[[:space:]]*name:[[:space:]].*(production|prod).*(handoff)|^[[:space:]]*name:[[:space:]].*handoff.*(production|prod)' \
+      "$workflow_path"; then
+      echo "${workflow_path#"$workspace_root"/}: GitHub workflow/job names must not claim deploy or promotion authority." >&2
+      failures=$((failures + 1))
+    fi
+
+    if grep -Eiq '^[[:space:]]+environment:[[:space:]]*["'\'']?(production|prod)(["'\'']|[[:space:]]|$)' \
+      "$workflow_path"; then
+      echo "${workflow_path#"$workspace_root"/}: GitHub workflows must not target a production environment." >&2
+      failures=$((failures + 1))
+    fi
+
+    if grep -Eiq '^[[:space:]]+packages:[[:space:]]*write([[:space:]]|$)' \
+      "$workflow_path"; then
+      echo "${workflow_path#"$workspace_root"/}: GitHub package publishing is not authorized." >&2
+      failures=$((failures + 1))
+    fi
+
+    if grep -Eiq '^[[:space:]]+(deployments|id-token):[[:space:]]*write([[:space:]]|$)' \
+      "$workflow_path"; then
+      echo "${workflow_path#"$workspace_root"/}: GitHub deployment-token write authority is not authorized." >&2
+      failures=$((failures + 1))
+    fi
+
+    if grep -Eiq '^[[:space:]]+-[[:space:]]+uses:[^#]*(deploy|promot)|^[[:space:]]+push:[[:space:]]*true([[:space:]]|$)|--push|(^|[[:space:]])docker[[:space:]]+(buildx[[:space:]]+build[[:space:]][^#]*--push|push)([[:space:]]|$)|(^|[[:space:]])(crane[[:space:]]+push|oras[[:space:]]+push|skopeo[[:space:]]+copy)([[:space:]]|$)|(^|[[:space:]])replit[[:space:]]+(app[[:space:]]+)?(deploy|publish)([[:space:]]|$)' \
+      "$workflow_path"; then
+      echo "${workflow_path#"$workspace_root"/}: GitHub workflows may build test images but must not deploy apps or push images to a registry." >&2
+      failures=$((failures + 1))
+    fi
+  done
+
+  if (( failures > 0 )); then
+    cat >&2 <<'EOF'
+GitHub production publication boundary failed. GitHub Actions is limited to
+source validation and test evidence: it must not publish packages or images,
+deploy apps, or declare production promotion authority.
+EOF
+    return 1
+  fi
+}
+
+check_github_publication_boundary
 
 local_actionlint_version=""
 local_actionlint_state="missing"
@@ -435,7 +491,6 @@ check_workflow_timeouts \
   "Release concurrency calibration" "$release_concurrency_calibration_workflow"
 check_workflow_timeouts "Stable branch protection" "$stable_branch_protection_workflow"
 check_workflow_timeouts "Workflow lint" "$workflow_lint_workflow"
-check_workflow_timeouts "Production promotion" "$promotion_workflow"
 
 check_immutable_workflow_dependencies() {
   local workflow_path="$1"

@@ -1,5 +1,7 @@
 ## Run & Operate
 
+- **Production publication authority:** Only the Replit deployment is authorized to publish the active production app. GitHub is for source backup and CI/testing: pushes, releases, workflow runs, test artifacts, and container builds neither publish the app nor prove what is live. Retained Render and manual Docker production material is legacy and unsupported for current publication; repository edits do not change any external account, service, or deployment settings.
+
 - **Publish version identity:** Before offering Publish, run `bash scripts/src/run-release-node.sh pnpm run prepare:publish` after source changes/release checks. After the owner publishes, resolve the official published URL through deployment metadata and run `pnpm run check:published-build -- --url <official-url>`. Never derive the expected record from the live response. Source-match receipts do not replace controlled handoff/GO gates. See `docs/automatic-build-version-reporting.md`.
 
 - `pnpm --filter @workspace/api-server run dev` — run the API server on the artifact-configured local workflow port 8080 (`artifacts/api-server/.replit-artifact/artifact.toml`). This development command applies the development schema first, but refuses a confirmed deployed Replit runtime before schema push. `REPLIT_ENVIRONMENT=production` alone does not trigger the refusal because isolated workspaces can carry it. CI may intentionally override the port with `PORT=5000`; do not use the CI port as local startup guidance.
