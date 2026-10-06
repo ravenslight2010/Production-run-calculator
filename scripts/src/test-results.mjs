@@ -12,7 +12,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const TEST_RESULTS_SCHEMA_VERSION = 1;
@@ -50,6 +50,19 @@ const MAX_TEST_RESULTS_REPORT_BYTES = 5 * 1024 * 1024;
 const MAX_AGGREGATION_REPORTS = 256;
 const MAX_AGGREGATION_ENTRIES = 8192;
 const MAX_AGGREGATION_DEPTH = 12;
+const MAX_VITEST_COUNT_SUMMARIES = 128;
+const MAX_VITEST_COUNT_SUMMARY_BYTES = 4096;
+const VITEST_COUNT_REPORTER_PATH = resolve(
+  scriptDir,
+  "vitest-count-reporter.mjs",
+);
+const VITEST_REPORTER_LANES = new Set([
+  "ci-api-postgres",
+  "ci-client-unit",
+  "ci-library-sweep",
+]);
+const TEST_RESULTS_COUNTS_POLICY =
+  "Counts are null unless captured from a current-run, revision-matched structured test summary with consistent bounded totals.";
 const SAFE_REASONS = new Set([
   "This lane was not executed in this report's run scope.",
   "This lane is optional or manual and was not requested.",
@@ -161,6 +174,125 @@ function combineTestCounts(countsList) {
     { total: 0, completed: 0, passed: 0, failed: 0, skipped: 0, notRun: 0 },
   );
   return isValidTestCounts(combined) ? combined : null;
+}
+
+export function parseStructuredVitestTestCounts(
+  summary,
+  { expectedRunId, expectedRevision, expectedPackageName } = {},
+) {
+  if (
+    !hasOnlyKeys(summary, [
+      "schemaVersion",
+      "runner",
+      "runId",
+      "sourceRevision",
+      "packageName",
+      "totals",
+    ]) ||
+    summary.schemaVersion !== 1 ||
+    summary.runner !== "vitest" ||
+    typeof expectedRunId !== "string" ||
+    !/^[a-zA-Z0-9:._-]{1,200}$/.test(expectedRunId) ||
+    summary.runId !== expectedRunId ||
+    typeof expectedRevision !== "string" ||
+    !/^[a-f0-9]{40,64}$/i.test(expectedRevision) ||
+    summary.sourceRevision !== expectedRevision ||
+    typeof expectedPackageName !== "string" ||
+    !/^@workspace\/[a-z0-9-]{2,80}$/.test(expectedPackageName) ||
+    summary.packageName !== expectedPackageName ||
+    !hasOnlyKeys(summary.totals, [
+      "total",
+      "passed",
+      "failed",
+      "skipped",
+      "notRun",
+    ]) ||
+    Object.values(summary.totals).some(
+      (value) =>
+        !Number.isInteger(value) ||
+        value < 0 ||
+        value > MAX_STRUCTURED_TEST_CASES,
+    )
+  ) {
+    return null;
+  }
+  const { total, passed, failed, skipped, notRun } = summary.totals;
+  const completed = passed + failed + skipped;
+  const counts = { total, completed, passed, failed, skipped, notRun };
+  if (
+    total < 1 ||
+    total !== completed + notRun ||
+    !isValidTestCounts(counts)
+  ) {
+    return null;
+  }
+  return counts;
+}
+
+export async function readStructuredVitestTestCounts({
+  directory,
+  expectedRunId,
+  expectedRevision,
+  expectedPackages,
+}) {
+  if (
+    typeof directory !== "string" ||
+    !Array.isArray(expectedPackages) ||
+    expectedPackages.length === 0 ||
+    expectedPackages.length > MAX_VITEST_COUNT_SUMMARIES ||
+    expectedPackages.some(
+      (name) => typeof name !== "string" || !/^@workspace\/[a-z0-9-]{2,80}$/.test(name),
+    ) ||
+    new Set(expectedPackages).size !== expectedPackages.length
+  ) {
+    return null;
+  }
+  try {
+    const entries = await readdir(directory, { withFileTypes: true });
+    if (
+      entries.length !== expectedPackages.length ||
+      entries.some(
+        (entry) =>
+          !entry.isFile() ||
+          !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,180}\.json$/.test(entry.name),
+      )
+    ) {
+      return null;
+    }
+    const expected = new Set(expectedPackages);
+    const received = new Set();
+    const countsList = [];
+    for (const entry of entries) {
+      const summaryPath = join(directory, entry.name);
+      const summaryStat = await stat(summaryPath);
+      if (
+        !summaryStat.isFile() ||
+        summaryStat.size < 1 ||
+        summaryStat.size > MAX_VITEST_COUNT_SUMMARY_BYTES
+      ) {
+        return null;
+      }
+      const summary = JSON.parse(await readFile(summaryPath, "utf8"));
+      if (
+        !expected.has(summary?.packageName) ||
+        received.has(summary.packageName)
+      ) {
+        return null;
+      }
+      const counts = parseStructuredVitestTestCounts(summary, {
+        expectedRunId,
+        expectedRevision,
+        expectedPackageName: summary.packageName,
+      });
+      if (!counts) return null;
+      received.add(summary.packageName);
+      countsList.push(counts);
+    }
+    if (received.size !== expected.size) return null;
+    return combineTestCounts(countsList);
+  } catch {
+    return null;
+  }
 }
 
 export function parseStructuredBrowserTestCounts(
@@ -620,8 +752,7 @@ export function createTestResultsReport({
     sourceRevision: /^[a-f0-9]{40,64}$/i.test(revision) ? revision.toLowerCase() : "unknown",
     run: runIdentity,
     environment,
-    countsPolicy:
-      "Counts are null unless captured from a current-run, revision-matched structured JSON test summary.",
+    countsPolicy: TEST_RESULTS_COUNTS_POLICY,
     artifactReferences,
     lanes: catalog.lanes.map((lane) => ({
       ...initialLaneResult(lane, env),
@@ -669,8 +800,7 @@ export function validateReport(report, catalog) {
       "nodeVersion",
     ]) ||
     !isValidEnvironment(report.environment) ||
-    report.countsPolicy !==
-      "Counts are null unless captured from a current-run, revision-matched structured JSON test summary." ||
+    report.countsPolicy !== TEST_RESULTS_COUNTS_POLICY ||
     !isValidArtifactReferences(report.artifactReferences)
   ) {
     throw new Error("The test-results report failed its schema or provenance checks.");
@@ -1266,6 +1396,63 @@ function runChild(command, args, extraEnv = {}) {
   });
 }
 
+async function expectedVitestPackagesForLane(laneId) {
+  const fixedPackages = {
+    "ci-api-postgres": ["@workspace/api-server"],
+    "ci-client-unit": ["@workspace/run-calculator"],
+    "ci-scripts-routine": ["@workspace/scripts"],
+  };
+  if (fixedPackages[laneId]) return fixedPackages[laneId];
+  if (laneId !== "ci-library-sweep") return null;
+
+  try {
+    const packageRoots = [
+      resolve(REPOSITORY_ROOT, "lib"),
+      resolve(REPOSITORY_ROOT, "lib/integrations"),
+    ];
+    const packages = new Map();
+    for (const packageRoot of packageRoots) {
+      let entries;
+      try {
+        entries = await readdir(packageRoot, { withFileTypes: true });
+      } catch (error) {
+        if (error?.code === "ENOENT" && packageRoot.endsWith(`${sep}integrations`)) {
+          continue;
+        }
+        return null;
+      }
+      for (const entry of entries) {
+        if (!entry.isDirectory() || entry.name === "node_modules") continue;
+        const manifestPath = join(packageRoot, entry.name, "package.json");
+        let manifest;
+        try {
+          manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+        } catch (error) {
+          if (error?.code === "ENOENT") continue;
+          return null;
+        }
+        if (manifest.scripts?.test === undefined) continue;
+        if (
+          typeof manifest.scripts.test !== "string" ||
+          !/^\s*vitest\s+run(?:\s|$)/.test(manifest.scripts.test) ||
+          typeof manifest.name !== "string" ||
+          !/^@workspace\/[a-z0-9-]{2,80}$/.test(manifest.name) ||
+          packages.has(manifest.name)
+        ) {
+          return null;
+        }
+        packages.set(manifest.name, manifestPath);
+      }
+    }
+    const names = [...packages.keys()].sort();
+    return names.length > 0 && names.length <= MAX_VITEST_COUNT_SUMMARIES
+      ? names
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 async function runLane(laneId, command, args) {
   const catalog = await readLaneCatalog();
   const path = resolveReportPath();
@@ -1283,17 +1470,60 @@ async function runLane(laneId, command, args) {
   const isReleaseLane = ["release-standard", "release-full"].includes(laneId);
   const releaseSidecarPath = `${path}.release-steps.json`;
   if (isReleaseLane) await rm(releaseSidecarPath, { force: true });
-  const outcome = await runChild(
-    command,
-    args,
-    isReleaseLane
+  const expectedVitestPackages = await expectedVitestPackagesForLane(laneId);
+  let vitestCountsDirectory;
+  if (expectedVitestPackages) {
+    const candidateDirectory = `${path}.vitest-counts-${randomUUID()}`;
+    try {
+      await mkdir(candidateDirectory, { recursive: false });
+      vitestCountsDirectory = candidateDirectory;
+    } catch {
+      // Count evidence is optional; never block or change a test lane because
+      // its temporary summary directory could not be created.
+    }
+  }
+  const childEnv = {
+    ...(isReleaseLane
       ? {
           TEST_RESULTS_REPORT_ID: existing.run.id,
           TEST_RESULTS_RELEASE_STEPS_PATH: releaseSidecarPath,
         }
-      : {},
-  );
+      : {}),
+    ...(vitestCountsDirectory
+      ? {
+          TEST_RESULTS_VITEST_COUNTS_DIR: vitestCountsDirectory,
+          TEST_RESULTS_VITEST_RUN_ID: existing.run.id,
+          TEST_RESULTS_VITEST_SOURCE_REVISION: existing.sourceRevision,
+        }
+      : {}),
+  };
+  const childArgs =
+    vitestCountsDirectory && VITEST_REPORTER_LANES.has(laneId)
+      ? [
+          ...args,
+          "--reporter=default",
+          `--reporter=${VITEST_COUNT_REPORTER_PATH}`,
+        ]
+      : args;
+  const outcome = await runChild(command, childArgs, childEnv);
   const end = new Date().toISOString();
+  let counts = null;
+  if (vitestCountsDirectory) {
+    try {
+      counts = await readStructuredVitestTestCounts({
+        directory: vitestCountsDirectory,
+        expectedRunId: existing.run.id,
+        expectedRevision: existing.sourceRevision,
+        expectedPackages: expectedVitestPackages,
+      });
+    } finally {
+      try {
+        await rm(vitestCountsDirectory, { recursive: true, force: true });
+      } catch {
+        // Temporary count cleanup must not change the recorded test outcome.
+      }
+    }
+  }
   if (isReleaseLane) {
     try {
       const sidecar = JSON.parse(await readFile(releaseSidecarPath, "utf8"));
@@ -1341,6 +1571,7 @@ async function runLane(laneId, command, args) {
     status: outcome.status,
     reason: outcome.reason,
     durationMs: outcome.durationMs,
+    counts,
     failure: parseFailure(outcome.status, outcome),
     artifactName: process.env.TEST_RESULTS_ARTIFACT_NAME,
     now: end,

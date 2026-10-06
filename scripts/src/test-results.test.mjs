@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile as writeTextFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile as writeTextFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -12,13 +19,16 @@ import {
   mapReleaseStepOutcomes,
   mergeTestResultsReports,
   parseStructuredBrowserTestCounts,
+  parseStructuredVitestTestCounts,
   readLaneCatalog,
+  readStructuredVitestTestCounts,
   recordLaneResult,
   resolveReportPath,
   TEST_RESULT_STATUSES,
   validateReport,
   writeReport,
 } from "./test-results.mjs";
+import VitestCountOnlyReporter from "./vitest-count-reporter.mjs";
 
 const ROOT = resolve(new URL("../..", import.meta.url).pathname);
 const MERGE_REVISION = "a".repeat(40);
@@ -144,6 +154,24 @@ function browserSummaryFixture() {
         durationMs: 0,
       },
     ],
+  };
+}
+
+function vitestSummaryFixture(overrides = {}) {
+  return {
+    schemaVersion: 1,
+    runner: "vitest",
+    runId: "github:123456:2",
+    sourceRevision: MERGE_REVISION,
+    packageName: "@workspace/scripts",
+    totals: {
+      total: 5,
+      passed: 1,
+      failed: 1,
+      skipped: 1,
+      notRun: 2,
+    },
+    ...overrides,
   };
 }
 
@@ -290,6 +318,225 @@ test("browser JSON summaries provide only validated bounded counts", async () =>
   }
   assert.equal(parseStructuredBrowserTestCounts(undefined, options), null);
   assert.equal(parseStructuredBrowserTestCounts(null, options), null);
+});
+
+test("Vitest count summaries validate runner totals and retain no case details", async (t) => {
+  const expectedRunId = "github:123456:2";
+  const expectedRevision = MERGE_REVISION;
+  const summary = vitestSummaryFixture();
+  assert.deepEqual(
+    parseStructuredVitestTestCounts(summary, {
+      expectedRunId,
+      expectedRevision,
+      expectedPackageName: "@workspace/scripts",
+    }),
+    {
+      total: 5,
+      completed: 3,
+      passed: 1,
+      failed: 1,
+      skipped: 1,
+      notRun: 2,
+    },
+  );
+  for (const malformed of [
+    { ...summary, totals: { ...summary.totals, total: 4 } },
+    { ...summary, totals: { ...summary.totals, failed: -1 } },
+    { ...summary, runId: "github:old-run:1" },
+    { ...summary, sourceRevision: "b".repeat(40) },
+    { ...summary, packageName: "@workspace/other" },
+    { ...summary, title: "a case name must not be accepted" },
+    {
+      ...summary,
+      totals: { ...summary.totals, total: 100_001 },
+    },
+  ]) {
+    assert.equal(
+      parseStructuredVitestTestCounts(malformed, {
+        expectedRunId,
+        expectedRevision,
+        expectedPackageName: "@workspace/scripts",
+      }),
+      null,
+    );
+  }
+  const directory = await mkdtemp(join(ROOT, ".test-results-vitest-counts-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const interruptedDirectory = await mkdtemp(
+    join(ROOT, ".test-results-vitest-interrupted-"),
+  );
+  const unhandledErrorDirectory = await mkdtemp(
+    join(ROOT, ".test-results-vitest-unhandled-"),
+  );
+  t.after(() => rm(interruptedDirectory, { recursive: true, force: true }));
+  t.after(() => rm(unhandledErrorDirectory, { recursive: true, force: true }));
+  assert.equal(
+    await readStructuredVitestTestCounts({
+      directory,
+      expectedRunId,
+      expectedRevision,
+      expectedPackages: ["@workspace/scripts"],
+    }),
+    null,
+    "missing runner summaries must not produce counts",
+  );
+
+  const previousEnvironment = Object.fromEntries(
+    [
+      "TEST_RESULTS_VITEST_COUNTS_DIR",
+      "TEST_RESULTS_VITEST_RUN_ID",
+      "TEST_RESULTS_VITEST_SOURCE_REVISION",
+      "npm_package_name",
+    ].map((key) => [key, process.env[key]]),
+  );
+  process.env.TEST_RESULTS_VITEST_COUNTS_DIR = directory;
+  process.env.TEST_RESULTS_VITEST_RUN_ID = expectedRunId;
+  process.env.TEST_RESULTS_VITEST_SOURCE_REVISION = expectedRevision;
+  process.env.npm_package_name = "@workspace/scripts";
+  try {
+    const testCases = [
+      {
+        name: "sensitive passing case name",
+        options: { mode: "run" },
+        result: () => ({ state: "passed" }),
+      },
+      {
+        name: "sensitive failing case name",
+        options: { mode: "run" },
+        result: () => ({ state: "failed" }),
+      },
+      {
+        name: "sensitive skipped case name",
+        options: { mode: "skip" },
+        result: () => ({ state: "skipped" }),
+      },
+      {
+        name: "sensitive todo case name",
+        options: { mode: "todo" },
+        result: () => ({ state: "skipped" }),
+      },
+      {
+        name: "sensitive pending case name",
+        options: { mode: "run" },
+        result: () => ({ state: "pending" }),
+      },
+    ];
+    const module = {
+      children: {
+        allTests: function* allTests() {
+          yield* testCases;
+        },
+      },
+    };
+
+    process.env.TEST_RESULTS_VITEST_COUNTS_DIR = interruptedDirectory;
+    await new VitestCountOnlyReporter().onTestRunEnd(
+      [module],
+      [],
+      "interrupted",
+    );
+    assert.deepEqual(await readdir(interruptedDirectory), []);
+
+    process.env.TEST_RESULTS_VITEST_COUNTS_DIR = unhandledErrorDirectory;
+    await new VitestCountOnlyReporter().onTestRunEnd(
+      [module],
+      [{ message: "private unhandled error" }],
+      "failed",
+    );
+    assert.deepEqual(await readdir(unhandledErrorDirectory), []);
+
+    process.env.TEST_RESULTS_VITEST_COUNTS_DIR = directory;
+    await new VitestCountOnlyReporter().onTestRunEnd([module]);
+  } finally {
+    for (const [key, value] of Object.entries(previousEnvironment)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+
+  const counts = await readStructuredVitestTestCounts({
+    directory,
+    expectedRunId,
+    expectedRevision,
+    expectedPackages: ["@workspace/scripts"],
+  });
+  assert.deepEqual(counts, {
+    total: 5,
+    completed: 3,
+    passed: 1,
+    failed: 1,
+    skipped: 1,
+    notRun: 2,
+  });
+  const [summaryFile] = await readdir(directory);
+  const persistedSummary = await readFile(join(directory, summaryFile), "utf8");
+  assert.ok(!persistedSummary.includes("sensitive"));
+  assert.ok(!persistedSummary.includes("case name"));
+
+  await rm(join(directory, summaryFile));
+  const invalid = { ...summary, totals: { ...summary.totals, total: 6 } };
+  await writeTextFile(join(directory, "scripts-invalid.json"), JSON.stringify(invalid));
+  assert.equal(
+    await readStructuredVitestTestCounts({
+      directory,
+      expectedRunId,
+      expectedRevision,
+      expectedPackages: ["@workspace/scripts"],
+    }),
+    null,
+    "inconsistent runner totals must not be retained",
+  );
+
+  await rm(join(directory, "scripts-invalid.json"));
+  const librarySummary = {
+    ...summary,
+    packageName: "@workspace/inventory-math",
+    totals: {
+      total: 2,
+      passed: 2,
+      failed: 0,
+      skipped: 0,
+      notRun: 0,
+    },
+  };
+  await writeTextFile(
+    join(directory, "scripts.json"),
+    JSON.stringify(summary),
+  );
+  await writeTextFile(
+    join(directory, "inventory-math.json"),
+    JSON.stringify(librarySummary),
+  );
+  assert.deepEqual(
+    await readStructuredVitestTestCounts({
+      directory,
+      expectedRunId,
+      expectedRevision,
+      expectedPackages: ["@workspace/scripts", "@workspace/inventory-math"],
+    }),
+    {
+      total: 7,
+      completed: 5,
+      passed: 3,
+      failed: 1,
+      skipped: 1,
+      notRun: 2,
+    },
+  );
+  assert.equal(
+    await readStructuredVitestTestCounts({
+      directory,
+      expectedRunId,
+      expectedRevision,
+      expectedPackages: [
+        "@workspace/scripts",
+        "@workspace/inventory-math",
+        "@workspace/name-match",
+      ],
+    }),
+    null,
+    "a missing runner in a multi-package lane must clear aggregate counts",
+  );
 });
 
 test("report provenance is run-scoped and a result cannot be joined to another revision", async (t) => {

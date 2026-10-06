@@ -131,6 +131,7 @@
 - [WebKit operational-report fixture](webkit-operational-report-fixture.md) — authoritative report smoke needs an isolated canonical snapshot and a sync-write fence after hydration.
 - [Factory baseline ownership](factory-baseline-ownership.md) — cross-service runtime defaults use dependency-free shared constants; historical blank sentinels remain explicit compatibility values.
 - [Revision evidence](production-evidence-revision-binding.md) + [CI pins](ci-pinned-evidence.md) + [Node](release-node-pinning.md) + [WebKit](webkit-nix-launch.md) — bind proof to revision/toolchain.
+- [Vitest count evidence](vitest-count-evidence.md) — use count-only summaries; require complete run/revision-matched package sets, otherwise keep totals null.
 - [Retry](release-finalization-retry.md) + [workspace locks](workspace-lock-refresh-pruning.md) + [browser refresh](full-release-browser-refresh.md) — retry safely and refresh stale state.
 - [Release-run lifecycle](release-run-cancellation.md) + [nested pnpm exits](nested-pnpm-exit-codes.md) — check child/evidence state after cancellation; assert structured outcomes.
 - [Local release browser fixtures](local-release-browser-fixture-base.md) — bind fixtures to local API; distinguish slow cold production builds from API readiness timeouts.
