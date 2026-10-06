@@ -40,6 +40,7 @@ node_modules
 /release-evidence/report-key-rotation-preflight.json
 /release-evidence/browser-smoke/webkit-result.json
 /release-evidence/.source-library-reconciliation.json.pending
+/api-load-workload/
 /release-evidence-full/
 /rollback-rehearsal-report.md
 /libpeerconnection.log
