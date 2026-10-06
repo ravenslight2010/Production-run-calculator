@@ -48,12 +48,16 @@ jobs:
       # journey starts the API on 5000, so make browser API calls reach that
       # ready server rather than receiving the proxy's 503.
       VITE_API_PROXY_TARGET: http://127.0.0.1:5000
+      TEST_RESULTS_REPORT_PATH: test-evidence/test-results.json
+      TEST_RESULTS_ARTIFACT_NAME: automated-test-results-department-${{ github.run_id }}-${{ github.run_attempt }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+      - name: Initialize machine-readable test report
+        run: node scripts/src/test-results.mjs init
 
       - name: Set up pnpm
         uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
@@ -141,7 +145,12 @@ jobs:
           }
 
       - name: Run department navigation evidence
-        run: pnpm --filter @workspace/run-calculator run test:e2e:department
+        id: run-department-evidence
+        run: node scripts/src/test-results.mjs run --lane browser-department -- pnpm --filter @workspace/run-calculator run test:e2e:department
+
+      - name: Mark department lane blocked when setup failed
+        if: ${{ always() && steps.run-department-evidence.outcome == 'skipped' }}
+        run: node scripts/src/test-results.mjs block --lane browser-department
 
       - name: Upload browser server logs on failure
         if: failure()
@@ -164,3 +173,12 @@ jobs:
         if: always()
         run: |
           kill "${WEB_SERVER_PID:-}" "${API_SERVER_PID:-}" 2>/dev/null || true
+
+      - name: Upload machine-readable test report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: automated-test-results-department-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-evidence/test-results.json
+          if-no-files-found: error
+          retention-days: 14

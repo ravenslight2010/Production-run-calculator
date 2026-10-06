@@ -40,12 +40,16 @@ jobs:
       E2E_TEST_DB: "1"
       RELEASE_CONCURRENCY_APPROVED_DISPOSABLE_DB: "1"
       RELEASE_CONCURRENCY_EVIDENCE_DIR: release-concurrency-calibration
+      TEST_RESULTS_REPORT_PATH: test-evidence/test-results.json
+      TEST_RESULTS_ARTIFACT_NAME: automated-test-results-concurrency-calibration-${{ github.run_id }}-${{ github.run_attempt }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+      - name: Initialize machine-readable test report
+        run: node scripts/src/test-results.mjs init
 
       - name: Set up pnpm
         uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
@@ -61,7 +65,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Verify calibration archive validation
-        run: pnpm --filter @workspace/scripts run test:release-concurrency
+        run: node scripts/src/test-results.mjs run --lane ci-release-concurrency-fixtures -- pnpm --filter @workspace/scripts run test:release-concurrency
 
       - name: Fetch prior healthy calibration history
         shell: bash
@@ -70,7 +74,7 @@ jobs:
         run: bash scripts/src/fetch-release-concurrency-history.sh
 
       - name: Run release concurrency calibration
-        run: pnpm run check:release-concurrency
+        run: node scripts/src/test-results.mjs run --lane release-concurrency-calibration -- pnpm run check:release-concurrency
 
       - name: Add calibration comparison to job summary
         if: always()
@@ -90,3 +94,12 @@ jobs:
           path: release-concurrency-calibration
           if-no-files-found: warn
           retention-days: 90
+
+      - name: Upload machine-readable test report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: automated-test-results-concurrency-calibration-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-evidence/test-results.json
+          if-no-files-found: error
+          retention-days: 14

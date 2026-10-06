@@ -274,6 +274,34 @@ normal release command remains fail-closed: outside the narrowly identified
 disposable CI test database, the production reconciliation verifier and its
 retained evidence are mandatory.
 
+### Machine-readable test summaries
+
+Run the safe local routine suite from the workspace root with:
+
+```bash
+pnpm run test:results:local
+```
+
+The latest report is written to `.local/test-evidence/latest.json`; that path is
+git-ignored and is replaced at the start of each local run. It includes the
+entire maintained catalog, so optional or manual lanes remain visible as
+`NOT_RUN`, and lanes missing a required device connection are `BLOCKED`.
+Test counts are `null` unless a trusted structured count source is available;
+the recorder does not parse console output.
+
+CI test jobs and the standard/full release jobs upload a run-scoped
+`automated-test-results-*` artifact even when a wrapped test command fails.
+Download the matching artifact from that GitHub Actions run's **Artifacts**
+section; each JSON file includes workflow/job/run identity when available.
+CI and local reports record only bounded outcome metadata and never copy test
+logs, credentials, request payloads, or recipe data.
+
+These JSON files are summaries, not the standard/full release evidence
+contract, production reconciliation evidence, or proof that the application is
+production-ready. A lane that was not selected or could not run is never
+represented as a pass. Keep using the existing release-evidence artifact and
+its verifier for release decisions.
+
 ### Bind production reconciliation evidence to the deployed build
 
 New checks use application build IDs and `source-sha256:<64 hex>` identities,

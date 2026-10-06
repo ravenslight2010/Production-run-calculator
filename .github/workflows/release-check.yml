@@ -57,12 +57,16 @@ jobs:
       REPORT_KEY_ROTATION_PREFLIGHT_ENVIRONMENT: disposable-ci
       RELEASE_EVIDENCE_DIR: release-evidence
       RELEASE_CHECK_MAX_CONCURRENCY: "4"
+      TEST_RESULTS_REPORT_PATH: test-evidence/test-results.json
+      TEST_RESULTS_ARTIFACT_NAME: automated-test-results-release-standard-${{ github.run_id }}-${{ github.run_attempt }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+      - name: Initialize machine-readable test report
+        run: node scripts/src/test-results.mjs init
 
       - name: Build production API image and verify its Node.js version
         run: |
@@ -108,7 +112,11 @@ jobs:
         id: run-standard-release-check
         env:
           TYPESCRIPT_7_RUNNER_IMAGE: ${{ runner.os }}-${{ runner.arch }}
-        run: pnpm run release:check
+        run: node scripts/src/test-results.mjs run --lane release-standard -- pnpm run release:check
+
+      - name: Mark standard release lane blocked when setup failed
+        if: ${{ always() && steps.run-standard-release-check.outcome == 'skipped' }}
+        run: node scripts/src/test-results.mjs block --lane release-standard
 
 
       - name: Verify release evidence allowlist
@@ -184,6 +192,15 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      - name: Upload machine-readable test report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: automated-test-results-release-standard-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-evidence/test-results.json
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Summarize stopped standard release check
         if: always()
         env:
@@ -243,12 +260,16 @@ jobs:
       REPORT_KEY_ROTATION_PREFLIGHT_ENVIRONMENT: disposable-ci
       RELEASE_EVIDENCE_DIR: release-evidence-full
       RELEASE_CHECK_MAX_CONCURRENCY: "4"
+      TEST_RESULTS_REPORT_PATH: test-evidence/test-results.json
+      TEST_RESULTS_ARTIFACT_NAME: automated-test-results-release-full-${{ github.run_id }}-${{ github.run_attempt }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+      - name: Initialize machine-readable test report
+        run: node scripts/src/test-results.mjs init
 
       - name: Set up pnpm
         uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
@@ -292,7 +313,11 @@ jobs:
         env:
           TYPESCRIPT_7_RUNNER_IMAGE: ${{ runner.os }}-${{ runner.arch }}
           PLAYWRIGHT_COMPATIBILITY_DEBUG_DIR: ${{ runner.temp }}/responsive-webkit-debug-${{ github.run_id }}-${{ github.run_attempt }}
-        run: pnpm run release:check:full
+        run: node scripts/src/test-results.mjs run --lane release-full -- pnpm run release:check:full
+
+      - name: Mark full release lane blocked when setup failed
+        if: ${{ always() && steps.run-full-release-check.outcome == 'skipped' }}
+        run: node scripts/src/test-results.mjs block --lane release-full
 
 
       - name: Verify full release evidence allowlist
@@ -366,6 +391,15 @@ jobs:
           name: release-evidence-full-${{ github.run_id }}
           path: release-evidence-full
           if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload machine-readable test report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: automated-test-results-release-full-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-evidence/test-results.json
+          if-no-files-found: error
           retention-days: 14
 
       - name: Check for sanitized responsive WebKit diagnostics

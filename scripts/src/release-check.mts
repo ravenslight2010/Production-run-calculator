@@ -4417,6 +4417,53 @@ async function main(): Promise<void> {
     await releaseStatefulLock?.();
   }
 
+  async function writeTestResultsStepSidecar(
+    releaseResults: readonly ReleaseStepResult[],
+  ): Promise<void> {
+    const sidecarPath = process.env.TEST_RESULTS_RELEASE_STEPS_PATH;
+    const reportId = process.env.TEST_RESULTS_REPORT_ID;
+    if (
+      !sidecarPath ||
+      !reportId ||
+      !/^(?:github:[0-9]{1,32}:[0-9]{1,8}|local:[\w-]{1,64})$/.test(reportId)
+    ) {
+      return;
+    }
+    const destination = resolve(sidecarPath);
+    const relativeDestination = relative(rootDir, destination);
+    if (
+      relativeDestination === ".." ||
+      relativeDestination.startsWith(`..${sep}`) ||
+      relativeDestination.length === 0
+    ) {
+      return;
+    }
+    const outcomes = releaseResults
+      .filter(
+        (result) =>
+          result.label.length <= 160 &&
+          /^[A-Za-z0-9 ()/.:_-]+$/.test(result.label) &&
+          Number.isFinite(result.elapsedMs) &&
+          result.elapsedMs >= 0,
+      )
+      .map(({ label, status, elapsedMs }) => ({
+        label,
+        status,
+        durationMs: Math.round(elapsedMs),
+      }));
+    await writeFile(
+      destination,
+      `${JSON.stringify({ runId: reportId, outcomes })}\n`,
+      { encoding: "utf8", mode: 0o600 },
+    );
+  }
+
+  try {
+    await writeTestResultsStepSidecar(results);
+  } catch {
+    // The optional summary sidecar must not change release-gate behavior.
+  }
+
   if (isAssessmentRevision(revision) && captureReleaseIdentity(rootDir).revision !== revision) {
     throw new Error("Production source or verification inputs changed during the release run; rerun against a stable source snapshot.");
   }

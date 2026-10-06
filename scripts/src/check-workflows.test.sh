@@ -364,7 +364,7 @@ test_ci_runs_routine_scripts_tests() {
   typecheck_block=$(ci_typecheck_job_block)
   assert_contains "$typecheck_block" "      - name: Run routine scripts tests"
   assert_contains "$typecheck_block" \
-    "        run: pnpm --filter @workspace/scripts run test"
+    "        run: node scripts/src/test-results.mjs run --lane ci-scripts-routine -- pnpm --filter @workspace/scripts run test"
 
   routine_step_line=$(grep -nF -- \
     "      - name: Run routine scripts tests" "$CI_WORKFLOW" | cut -d: -f1)
@@ -616,7 +616,8 @@ test_schema_safe_rollback_ci_contract() {
   root_package=$(<"${SCRIPT_DIR}/../../package.json")
   assert_contains "$job_block" "    timeout-minutes: 20"
   assert_contains "$job_block" "          fetch-depth: 2"
-  assert_contains "$job_block" "        run: pnpm run check:schema-safe-rollback"
+  assert_contains "$job_block" \
+    "        run: node scripts/src/test-results.mjs run --lane ci-schema-safe-rollback -- pnpm run check:schema-safe-rollback"
   assert_contains "$job_block" "        if: always()"
   assert_contains "$job_block" "            cat rollback-rehearsal-report.md >> \"\$GITHUB_STEP_SUMMARY\""
   assert_contains "$job_block" \
