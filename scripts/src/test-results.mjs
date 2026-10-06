@@ -66,6 +66,13 @@ const VITEST_REPORTER_LANES = new Set([
 ]);
 const TEST_RESULTS_COUNTS_POLICY =
   "Counts are null unless captured from a current-run, revision-matched structured test summary with consistent bounded totals.";
+const AGGREGATION_STEP_OUTCOMES = new Set([
+  "success",
+  "failure",
+  "cancelled",
+  "skipped",
+]);
+
 const SAFE_REASONS = new Set([
   "This lane was not executed in this report's run scope.",
   "This lane is optional or manual and was not requested.",
@@ -1299,6 +1306,38 @@ export async function mergeTestResultsReports({
   return { path: output, report: merged, sourceReportCount: reports.length };
 }
 
+export async function appendAggregationFailureSummary({
+  downloadOutcome,
+  mergeOutcome,
+  summaryPath = process.env.GITHUB_STEP_SUMMARY,
+}) {
+  for (const [step, outcome] of [
+    ["download", downloadOutcome],
+    ["merge", mergeOutcome],
+  ]) {
+    if (!AGGREGATION_STEP_OUTCOMES.has(outcome)) {
+      throw new Error(
+        `A valid ${step} step outcome is required to summarize report aggregation.`,
+      );
+    }
+  }
+  if (downloadOutcome === "success" && mergeOutcome === "success") return false;
+  if (typeof summaryPath !== "string" || summaryPath.length === 0) {
+    throw new Error("GITHUB_STEP_SUMMARY is required when report aggregation fails.");
+  }
+
+  const summary = [
+    "### Merged test report unavailable",
+    "",
+    "The merged test report could not be produced because downloading, validating, or merging the release reports did not complete successfully.",
+    "",
+    "This notice describes report aggregation only; it does not state whether any release gate passed or failed. Check the standard and full release job results for gate outcomes.",
+    "",
+  ].join("\n");
+  await writeFile(summaryPath, summary, { flag: "a" });
+  return true;
+}
+
 function assertSameRun(report, env) {
   const expectedRevision = getSourceRevision(env);
   if (report.sourceRevision !== expectedRevision) {
@@ -1754,7 +1793,14 @@ async function main(argv) {
     }
     return;
   }
-  throw new Error("Usage: test-results.mjs <init|run|local|block|merge>");
+  if (mode === "summarize-aggregation") {
+    await appendAggregationFailureSummary({
+      downloadOutcome: process.env.TEST_RESULTS_DOWNLOAD_OUTCOME,
+      mergeOutcome: process.env.TEST_RESULTS_MERGE_OUTCOME,
+    });
+    return;
+  }
+  throw new Error("Usage: test-results.mjs <init|run|local|block|merge|summarize-aggregation>");
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

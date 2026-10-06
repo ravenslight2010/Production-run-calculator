@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import {
+  appendAggregationFailureSummary,
   boundedFailure,
   classifyProcessOutcome,
   BROWSER_MAIN_COUNT_SUMMARY_SUFFIX,
@@ -1195,6 +1196,52 @@ test("interrupted run-level aggregation does not publish a partial report", asyn
   await assert.rejects(readFile(outputPath), { code: "ENOENT" });
 });
 
+test("missing merged-report summary is safe and separate from release-gate outcomes", async (t) => {
+  const temp = await mkdtemp(join(tmpdir(), "test-results-summary-"));
+  t.after(() => rm(temp, { recursive: true, force: true }));
+  const summaryPath = join(temp, "step-summary.md");
+
+  assert.equal(
+    await appendAggregationFailureSummary({
+      downloadOutcome: "failure",
+      mergeOutcome: "skipped",
+      summaryPath,
+    }),
+    true,
+  );
+  assert.equal(
+    await appendAggregationFailureSummary({
+      downloadOutcome: "success",
+      mergeOutcome: "failure",
+      summaryPath,
+    }),
+    true,
+  );
+  const summary = await readFile(summaryPath, "utf8");
+  assert.equal((summary.match(/### Merged test report unavailable/gu) ?? []).length, 2);
+  assert.match(summary, /downloading, validating, or merging the release reports/u);
+  assert.match(summary, /does not state whether any release gate passed or failed/u);
+  assert.doesNotMatch(summary, /private failure output|request payload|test case details/u);
+
+  assert.equal(
+    await appendAggregationFailureSummary({
+      downloadOutcome: "success",
+      mergeOutcome: "success",
+      summaryPath,
+    }),
+    false,
+  );
+  assert.equal((await readFile(summaryPath, "utf8")).length, summary.length);
+  await assert.rejects(
+    appendAggregationFailureSummary({
+      downloadOutcome: "unexpected\n## injected content",
+      mergeOutcome: "success",
+      summaryPath,
+    }),
+    /valid download step outcome/u,
+  );
+});
+
 test("the report persists normalized counts without runner case details", async (t) => {
   const catalog = await readLaneCatalog();
   const temp = await mkdtemp(join(tmpdir(), "test-results-counts-"));
@@ -1434,4 +1481,10 @@ test("workflow contracts publish reports on failure without changing triggers or
     release,
     /pattern: automated-test-results-release-\$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.run_full && '\*' \|\| 'standard' \}\}-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/u,
   );
+  assert.match(
+    release,
+    /name: Summarize missing merged test report\n\s+if: \$\{\{ always\(\) && \(steps\.download-release-test-reports\.outcome != 'success' \|\| steps\.merge-release-test-report\.outcome != 'success'\) \}\}\n\s+env:\n\s+TEST_RESULTS_DOWNLOAD_OUTCOME:/u,
+  );
+  assert.match(release, /TEST_RESULTS_MERGE_OUTCOME: \$\{\{ steps\.merge-release-test-report\.outcome \}\}/u);
+  assert.match(release, /run: node scripts\/src\/test-results\.mjs summarize-aggregation/u);
 });

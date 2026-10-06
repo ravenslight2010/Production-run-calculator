@@ -465,11 +465,13 @@ jobs:
       # Full dispatch also runs the standard job. Download both reports there so
       # aggregation can retain both gate outcomes and prefer full shared lanes.
       - name: Download release test reports from this workflow run
+        id: download-release-test-reports
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: automated-test-results-release-${{ github.event_name == 'workflow_dispatch' && inputs.run_full && '*' || 'standard' }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: test-evidence/reports
       - name: Merge and validate run-level test report
+        id: merge-release-test-report
         run: node scripts/src/test-results.mjs merge --input-dir test-evidence/reports
       - name: Upload merged machine-readable test report
         if: always()
@@ -479,3 +481,9 @@ jobs:
           path: test-evidence/merged-test-results.json
           if-no-files-found: ignore
           retention-days: 14
+      - name: Summarize missing merged test report
+        if: ${{ always() && (steps.download-release-test-reports.outcome != 'success' || steps.merge-release-test-report.outcome != 'success') }}
+        env:
+          TEST_RESULTS_DOWNLOAD_OUTCOME: ${{ steps.download-release-test-reports.outcome }}
+          TEST_RESULTS_MERGE_OUTCOME: ${{ steps.merge-release-test-report.outcome }}
+        run: node scripts/src/test-results.mjs summarize-aggregation
