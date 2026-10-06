@@ -62,6 +62,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Verify schema failure removes its child database
+        env:
+          API_LOAD_WORKLOAD_FAILURE_TEST: "1"
+        run: node --test scripts/src/run-api-load-workload.test.mjs
+
       - name: Run bounded API workload
         run: node scripts/src/test-results.mjs run --lane api-load-workload -- pnpm --filter @workspace/api-server run test:load:isolated
 
