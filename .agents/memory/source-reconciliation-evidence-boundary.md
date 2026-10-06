@@ -27,9 +27,12 @@ evidence still requires the exact deployed Git SHA from the controlled
 deployment/report handoff and a verifier run in the database-owning environment.
 
 **Why:** Deployment metadata may confirm that a build is healthy without
-exposing its source revision, while the local development `DATABASE_URL` can
-point at a partial fixture. Accepting counts or the current checkout SHA would
-mix database ownership and revision identity.
+exposing its source revision. Replit provides deployment status and logs, but
+not the source files or build artifacts of an already-live deployment. The
+production SQL tool reads a replica, so its `current_user` must not be assumed
+to attest the deployed app process's database role. Meanwhile, the local
+development `DATABASE_URL` can point at a partial fixture. Accepting counts or
+the current checkout SHA would mix database ownership and revision identity.
 
 **How to apply:** Treat a matching production preflight without a bound
 deployed revision as an actionable NO-GO. Do not generate a write-side
