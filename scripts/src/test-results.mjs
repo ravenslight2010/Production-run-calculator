@@ -26,6 +26,22 @@ export const TEST_RESULT_STATUSES = Object.freeze([
   "BLOCKED",
 ]);
 
+const STRUCTURED_BROWSER_CASE_STATUSES = new Set([
+  "passed",
+  "failed",
+  "timedout",
+  "interrupted",
+  "skipped",
+  "not-run",
+]);
+const STRUCTURED_BROWSER_FAILURE_CLASSIFICATIONS = Object.freeze([
+  "product",
+  "test-setup",
+  "infrastructure",
+  "optional-environment-gap",
+]);
+const MAX_STRUCTURED_TEST_CASES = 100_000;
+
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 export const REPOSITORY_ROOT = resolve(scriptDir, "../..");
 const DEFAULT_REPORT_PATH = ".local/test-evidence/latest.json";
@@ -101,6 +117,186 @@ function hasOnlyKeys(value, allowed) {
   return isRecord(value) && Object.keys(value).every((key) => allowed.includes(key));
 }
 
+function isValidTestCounts(counts) {
+  if (
+    !hasOnlyKeys(counts, [
+      "total",
+      "completed",
+      "passed",
+      "failed",
+      "skipped",
+      "notRun",
+    ]) ||
+    Object.values(counts).some(
+      (value) =>
+        !Number.isInteger(value) ||
+        value < 0 ||
+        value > MAX_STRUCTURED_TEST_CASES,
+    )
+  ) {
+    return false;
+  }
+  return (
+    counts.completed === counts.passed + counts.failed + counts.skipped &&
+    counts.total === counts.completed + counts.notRun
+  );
+}
+
+function combineTestCounts(countsList) {
+  if (
+    countsList.length === 0 ||
+    countsList.some((counts) => !isValidTestCounts(counts))
+  ) {
+    return null;
+  }
+  const combined = countsList.reduce(
+    (total, counts) => ({
+      total: total.total + counts.total,
+      completed: total.completed + counts.completed,
+      passed: total.passed + counts.passed,
+      failed: total.failed + counts.failed,
+      skipped: total.skipped + counts.skipped,
+      notRun: total.notRun + counts.notRun,
+    }),
+    { total: 0, completed: 0, passed: 0, failed: 0, skipped: 0, notRun: 0 },
+  );
+  return isValidTestCounts(combined) ? combined : null;
+}
+
+export function parseStructuredBrowserTestCounts(
+  summary,
+  {
+    expectedRevision,
+    notBeforeMs,
+    notAfterMs,
+    expectedProjects,
+    expectedReleaseStatus,
+  } = {},
+) {
+  if (
+    !hasOnlyKeys(summary, [
+      "schemaVersion",
+      "browser",
+      "revision",
+      "environment",
+      "result",
+      "generatedAt",
+      "caseCount",
+      "completedCount",
+      "failureCount",
+      "failureClassifications",
+      "cases",
+    ]) ||
+    summary.schemaVersion !== 1 ||
+    summary.browser !== "webkit" ||
+    typeof expectedRevision !== "string" ||
+    summary.revision !== expectedRevision ||
+    !["ci", "development"].includes(summary.environment) ||
+    !["passed", "failed", "timedout", "interrupted"].includes(summary.result) ||
+    !isIsoDate(summary.generatedAt) ||
+    !Number.isFinite(notBeforeMs) ||
+    !Number.isFinite(notAfterMs) ||
+    !Array.isArray(expectedProjects) ||
+    expectedProjects.length === 0 ||
+    !["PASS", "FAIL", "INFRASTRUCTURE TIMEOUT", "INFRASTRUCTURE ERROR"].includes(
+      expectedReleaseStatus,
+    ) ||
+    (expectedReleaseStatus === "PASS" && summary.result !== "passed") ||
+    (expectedReleaseStatus === "FAIL" && summary.result === "passed") ||
+    Date.parse(summary.generatedAt) < notBeforeMs ||
+    Date.parse(summary.generatedAt) > notAfterMs ||
+    !Number.isInteger(summary.caseCount) ||
+    summary.caseCount < 0 ||
+    summary.caseCount > MAX_STRUCTURED_TEST_CASES ||
+    summary.caseCount !== summary.cases?.length ||
+    !Array.isArray(summary.cases) ||
+    !isRecord(summary.failureClassifications) ||
+    !hasOnlyKeys(
+      summary.failureClassifications,
+      STRUCTURED_BROWSER_FAILURE_CLASSIFICATIONS,
+    )
+  ) {
+    return null;
+  }
+
+  const counts = {
+    total: summary.cases.length,
+    completed: 0,
+    passed: 0,
+    failed: 0,
+    skipped: 0,
+    notRun: 0,
+  };
+  const failureClassifications = Object.fromEntries(
+    STRUCTURED_BROWSER_FAILURE_CLASSIFICATIONS.map((classification) => [
+      classification,
+      0,
+    ]),
+  );
+  for (const testCase of summary.cases) {
+    if (
+      !hasOnlyKeys(testCase, [
+        "file",
+        "title",
+        "projectName",
+        "status",
+        "durationMs",
+        "failureClassification",
+        "error",
+      ]) ||
+      typeof testCase.file !== "string" ||
+      testCase.file.length < 1 ||
+      testCase.file.length > 500 ||
+      typeof testCase.title !== "string" ||
+      testCase.title.length > 2_000 ||
+      typeof testCase.projectName !== "string" ||
+      testCase.projectName.length > 120 ||
+      !expectedProjects.includes(testCase.projectName) ||
+      !STRUCTURED_BROWSER_CASE_STATUSES.has(testCase.status) ||
+      !Number.isFinite(testCase.durationMs) ||
+      testCase.durationMs < 0 ||
+      testCase.durationMs > 8 * 60 * 60 * 1000 ||
+      (testCase.failureClassification !== undefined &&
+        !STRUCTURED_BROWSER_FAILURE_CLASSIFICATIONS.includes(
+          testCase.failureClassification,
+        )) ||
+      (["failed", "timedout", "interrupted"].includes(testCase.status) !==
+        (testCase.failureClassification !== undefined)) ||
+      (testCase.error !== undefined &&
+        (typeof testCase.error !== "string" || testCase.error.length > 2_000))
+    ) {
+      return null;
+    }
+    if (testCase.status === "not-run") {
+      counts.notRun += 1;
+      if (testCase.failureClassification !== undefined) return null;
+    } else {
+      counts.completed += 1;
+      if (testCase.status === "passed") counts.passed += 1;
+      else if (testCase.status === "skipped") counts.skipped += 1;
+      else counts.failed += 1;
+    }
+    if (testCase.failureClassification !== undefined) {
+      failureClassifications[testCase.failureClassification] += 1;
+    }
+  }
+
+  if (
+    summary.completedCount !== counts.completed ||
+    summary.failureCount !== counts.failed + counts.notRun ||
+    !STRUCTURED_BROWSER_FAILURE_CLASSIFICATIONS.every(
+      (classification) =>
+        Number.isInteger(summary.failureClassifications[classification]) &&
+        summary.failureClassifications[classification] ===
+          failureClassifications[classification],
+    ) ||
+    !isValidTestCounts(counts)
+  ) {
+    return null;
+  }
+  return counts;
+}
+
 export function classifyProcessOutcome({ exitCode, signal, spawnError }) {
   if (spawnError) return "INFRASTRUCTURE_ERROR";
   if (signal === "SIGINT" || signal === "SIGTERM") return "CANCELLED";
@@ -149,14 +345,15 @@ export function mapReleaseStepOutcomes(
     outcomes.length > 256 ||
     outcomes.some(
       (outcome) =>
-        !hasOnlyKeys(outcome, ["label", "status", "durationMs"]) ||
+        !hasOnlyKeys(outcome, ["label", "status", "durationMs", "counts"]) ||
         typeof outcome.label !== "string" ||
         outcome.label.length < 1 ||
         outcome.label.length > 160 ||
         !releaseStatuses.includes(outcome.status) ||
         !Number.isFinite(outcome.durationMs) ||
         outcome.durationMs < 0 ||
-        outcome.durationMs > 8 * 60 * 60 * 1000,
+        outcome.durationMs > 8 * 60 * 60 * 1000 ||
+        (outcome.counts !== undefined && !isValidTestCounts(outcome.counts)),
     )
   ) {
     throw new Error("Release step outcome evidence has an invalid shape.");
@@ -227,6 +424,10 @@ export function mapReleaseStepOutcomes(
               ? "Required prerequisites did not complete."
               : "Structured test-step outcomes were unavailable.",
       durationMs: status === "BLOCKED" ? null : durationMs,
+      counts:
+        !incomplete && steps.every((step) => step.counts !== undefined)
+          ? combineTestCounts(steps.map((step) => step.counts))
+          : null,
       failure:
         status === "PASS" || status === "BLOCKED"
           ? null
@@ -419,7 +620,8 @@ export function createTestResultsReport({
     sourceRevision: /^[a-f0-9]{40,64}$/i.test(revision) ? revision.toLowerCase() : "unknown",
     run: runIdentity,
     environment,
-    countsPolicy: "Counts are null unless captured from a trusted structured test summary.",
+    countsPolicy:
+      "Counts are null unless captured from a current-run, revision-matched structured JSON test summary.",
     artifactReferences,
     lanes: catalog.lanes.map((lane) => ({
       ...initialLaneResult(lane, env),
@@ -468,7 +670,7 @@ export function validateReport(report, catalog) {
     ]) ||
     !isValidEnvironment(report.environment) ||
     report.countsPolicy !==
-      "Counts are null unless captured from a trusted structured test summary." ||
+      "Counts are null unless captured from a current-run, revision-matched structured JSON test summary." ||
     !isValidArtifactReferences(report.artifactReferences)
   ) {
     throw new Error("The test-results report failed its schema or provenance checks.");
@@ -497,7 +699,7 @@ export function validateReport(report, catalog) {
       typeof result.attempted !== "boolean" ||
       (result.durationMs !== null &&
         (!Number.isFinite(result.durationMs) || result.durationMs < 0)) ||
-      (result.counts !== null) ||
+      (result.counts !== null && !isValidTestCounts(result.counts)) ||
       (result.status !== "PASS" &&
         (typeof result.reason !== "string" ||
           result.reason.length === 0 ||
@@ -517,6 +719,7 @@ export function validateReport(report, catalog) {
       (["NOT_RUN", "BLOCKED"].includes(result.status) &&
         (result.attempted ||
           result.durationMs !== null ||
+          result.counts !== null ||
           result.failure !== null ||
           result.startedAt !== undefined ||
           result.finishedAt !== undefined)) ||
@@ -888,6 +1091,7 @@ export async function recordLaneResult({
   status,
   reason,
   durationMs,
+  counts,
   failure,
   artifactName,
   now = new Date().toISOString(),
@@ -904,6 +1108,9 @@ export async function recordLaneResult({
   if (status !== "PASS" && !isSafeReason(reason)) {
     throw new Error("Test-results reasons must use bounded, non-sensitive wording.");
   }
+  if (counts !== undefined && counts !== null && !isValidTestCounts(counts)) {
+    throw new Error("Structured test counts have an invalid shape.");
+  }
   const report = await readReport(reportPath, catalog);
   assertSameRun(report, env);
   const result = report.lanes.find((item) => item.laneId === laneId);
@@ -912,7 +1119,7 @@ export async function recordLaneResult({
   result.attempted = !["NOT_RUN", "BLOCKED"].includes(status);
   result.durationMs =
     Number.isFinite(durationMs) && durationMs >= 0 ? Math.round(durationMs) : null;
-  result.counts = null;
+  result.counts = counts ?? null;
   result.failure = failure ?? null;
   if (artifactName && !report.artifactReferences.some((ref) => ref.name === artifactName)) {
     report.artifactReferences.push({

@@ -11,6 +11,7 @@ import {
   getSourceRevision,
   mapReleaseStepOutcomes,
   mergeTestResultsReports,
+  parseStructuredBrowserTestCounts,
   readLaneCatalog,
   recordLaneResult,
   resolveReportPath,
@@ -82,6 +83,58 @@ async function saveMergeSource(inputDirectory, report, artifactName) {
   const artifactDirectory = join(inputDirectory, artifactName);
   await mkdir(artifactDirectory, { recursive: true });
   await writeReport(join(artifactDirectory, "test-results.json"), report, await readLaneCatalog());
+}
+
+function browserSummaryFixture() {
+  return {
+    schemaVersion: 1,
+    browser: "webkit",
+    revision: `test-sha256:${"a".repeat(64)}`,
+    environment: "ci",
+    result: "failed",
+    generatedAt: "2026-10-06T12:30:00.000Z",
+    caseCount: 4,
+    completedCount: 3,
+    failureCount: 2,
+    failureClassifications: {
+      product: 1,
+      "test-setup": 0,
+      infrastructure: 0,
+      "optional-environment-gap": 0,
+    },
+    cases: [
+      {
+        file: "e2e/smoke.spec.ts",
+        title: "a passing case",
+        projectName: "webkit",
+        status: "passed",
+        durationMs: 120,
+      },
+      {
+        file: "e2e/smoke.spec.ts",
+        title: "a case with sensitive error output",
+        projectName: "webkit",
+        status: "failed",
+        durationMs: 180,
+        failureClassification: "product",
+        error: "private failure output",
+      },
+      {
+        file: "e2e/smoke.spec.ts",
+        title: "a skipped case",
+        projectName: "webkit",
+        status: "skipped",
+        durationMs: 0,
+      },
+      {
+        file: "e2e/smoke.spec.ts",
+        title: "a case that did not run",
+        projectName: "webkit",
+        status: "not-run",
+        durationMs: 0,
+      },
+    ],
+  };
 }
 
 test("catalog is complete against the maintained test/release matrix", async () => {
@@ -158,6 +211,7 @@ test("release step summaries map structured outcomes into the shared lane contra
   assert.equal(resultFor("api-integration-shards").durationMs, 90);
   assert.equal(resultFor("browser-webkit").failure.kind, "timeout");
   assert.equal(resultFor("browser-compatibility").status, "PASS");
+  assert.equal(resultFor("browser-webkit").counts, null);
   assert.throws(
     () =>
       mapReleaseStepOutcomes(
@@ -168,6 +222,64 @@ test("release step summaries map structured outcomes into the shared lane contra
       ),
     /unknown test lane label/u,
   );
+});
+
+test("browser JSON summaries provide only validated bounded counts", async () => {
+  const expectedRevision = `test-sha256:${"a".repeat(64)}`;
+  const options = {
+    expectedRevision,
+    notBeforeMs: Date.parse("2026-10-06T12:00:00.000Z"),
+    notAfterMs: Date.parse("2026-10-06T13:00:00.000Z"),
+    expectedProjects: ["webkit"],
+    expectedReleaseStatus: "FAIL",
+  };
+  const summary = browserSummaryFixture();
+  const counts = parseStructuredBrowserTestCounts(summary, options);
+  assert.deepEqual(counts, {
+    total: 4,
+    completed: 3,
+    passed: 1,
+    failed: 1,
+    skipped: 1,
+    notRun: 1,
+  });
+
+  const catalog = await readLaneCatalog();
+  const mapped = mapReleaseStepOutcomes(
+    catalog,
+    [
+      {
+        label: "browser WebKit smoke",
+        status: "FAIL",
+        durationMs: 300,
+        counts,
+      },
+    ],
+    "release-standard",
+    "FAIL",
+  );
+  assert.deepEqual(
+    mapped.find((result) => result.laneId === "browser-webkit").counts,
+    counts,
+  );
+
+  const malformed = [
+    { ...summary, caseCount: 5 },
+    { ...summary, completedCount: 4 },
+    {
+      ...summary,
+      cases: [{ ...summary.cases[0], status: "ambiguous" }, ...summary.cases.slice(1)],
+    },
+    { ...summary, revision: `test-sha256:${"b".repeat(64)}` },
+    { ...summary, generatedAt: "2026-10-06T11:59:59.999Z" },
+    { ...summary, result: "passed" },
+    { ...summary, rawOutput: "must not be retained" },
+  ];
+  for (const candidate of malformed) {
+    assert.equal(parseStructuredBrowserTestCounts(candidate, options), null);
+  }
+  assert.equal(parseStructuredBrowserTestCounts(undefined, options), null);
+  assert.equal(parseStructuredBrowserTestCounts(null, options), null);
 });
 
 test("report provenance is run-scoped and a result cannot be joined to another revision", async (t) => {
@@ -372,6 +484,54 @@ test("interrupted run-level aggregation does not publish a partial report", asyn
     /aggregation was interrupted/u,
   );
   await assert.rejects(readFile(outputPath), { code: "ENOENT" });
+});
+
+test("the report persists normalized counts without runner case details", async (t) => {
+  const catalog = await readLaneCatalog();
+  const temp = await mkdtemp(join(tmpdir(), "test-results-counts-"));
+  t.after(() => rm(temp, { recursive: true, force: true }));
+  const path = join(temp, "report.json");
+  const env = {};
+  const report = createTestResultsReport({
+    catalog,
+    revision: getSourceRevision(env),
+    runIdentity: { id: "local:count-summary" },
+    environment: {
+      kind: "local",
+      platform: "linux",
+      architecture: "x64",
+      nodeVersion: "v24.0.0",
+    },
+    env,
+  });
+  const counts = parseStructuredBrowserTestCounts(browserSummaryFixture(), {
+    expectedRevision: `test-sha256:${"a".repeat(64)}`,
+    notBeforeMs: Date.parse("2026-10-06T12:00:00.000Z"),
+    notAfterMs: Date.parse("2026-10-06T13:00:00.000Z"),
+    expectedProjects: ["webkit"],
+    expectedReleaseStatus: "FAIL",
+  });
+  assert.ok(counts);
+  await writeReport(path, report, catalog);
+  await recordLaneResult({
+    reportPath: path,
+    catalog,
+    laneId: "browser-webkit",
+    status: "FAIL",
+    reason: "The test command exited unsuccessfully.",
+    durationMs: 300,
+    counts,
+    failure: boundedFailure("FAIL", { exitCode: 1 }),
+    env,
+  });
+  const saved = await readFile(path, "utf8");
+  const parsed = JSON.parse(saved);
+  assert.deepEqual(
+    parsed.lanes.find((lane) => lane.laneId === "browser-webkit").counts,
+    counts,
+  );
+  assert.ok(!saved.includes("a case with sensitive error output"));
+  assert.ok(!saved.includes("private failure output"));
 });
 
 test("missing, blocked, and interrupted lanes remain explicit; reports never retain raw output", async (t) => {

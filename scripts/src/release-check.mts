@@ -62,6 +62,7 @@ import {
 } from "./retained-evaluation-contract.mjs";
 import { validateReadinessEvidence } from "./capture-readiness-recovery.mts";
 import { FULL_BROWSER_EXPECTED_CASES } from "./full-browser-case-contract.mts";
+import { parseStructuredBrowserTestCounts } from "./test-results.mjs";
 import { WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES } from "./webkit-case-contract.mts";
 export { TYPESCRIPT_7_SUPPORTED_RUNNERS } from "./typescript-7-native-contract.mts";
 
@@ -4023,6 +4024,7 @@ async function main(): Promise<void> {
   }
   await assertApiIntegrationTestShardInventory();
   console.log(`Release check started (${releaseMode} mode).`);
+  const releaseRunStartedAt = Date.now();
   let revision: string;
   try {
     revision = await currentRevision();
@@ -4438,7 +4440,7 @@ async function main(): Promise<void> {
     ) {
       return;
     }
-    const outcomes = releaseResults
+    const outcomes = await Promise.all(releaseResults
       .filter(
         (result) =>
           result.label.length <= 160 &&
@@ -4446,10 +4448,45 @@ async function main(): Promise<void> {
           Number.isFinite(result.elapsedMs) &&
           result.elapsedMs >= 0,
       )
-      .map(({ label, status, elapsedMs }) => ({
-        label,
-        status,
-        durationMs: Math.round(elapsedMs),
+      .map(async ({ label, status, elapsedMs }) => {
+        const summaryPath =
+          label === "browser WebKit smoke"
+            ? "browser-smoke/webkit-result.json"
+            : label === FULL_RESPONSIVE_WEBKIT_GATE_LABEL
+              ? "browser-compatibility/webkit-result.json"
+              : undefined;
+        let counts;
+        if (summaryPath) {
+          try {
+            const summary = JSON.parse(
+              await readFile(resolve(rootDir, releaseEvidenceDir, summaryPath), "utf8"),
+            );
+            counts = parseStructuredBrowserTestCounts(summary, {
+              expectedRevision: revision,
+              notBeforeMs: releaseRunStartedAt,
+              notAfterMs: Date.now(),
+              expectedProjects:
+                label === "browser WebKit smoke"
+                  ? ["webkit"]
+                  : ["phone-webkit", "tablet-webkit"],
+              expectedReleaseStatus:
+                status === "INFRASTRUCTURE TIMEOUT" ||
+                status === "INFRASTRUCTURE ERROR"
+                  ? status
+                  : status === "PASS"
+                    ? "PASS"
+                    : "FAIL",
+            }) ?? undefined;
+          } catch {
+            // Missing or malformed runner evidence leaves counts unavailable.
+          }
+        }
+        return {
+          label,
+          status,
+          durationMs: Math.round(elapsedMs),
+          ...(counts ? { counts } : {}),
+        };
       }));
     await writeFile(
       destination,

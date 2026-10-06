@@ -286,8 +286,15 @@ The latest report is written to `.local/test-evidence/latest.json`; that path is
 git-ignored and is replaced at the start of each local run. It includes the
 entire maintained catalog, so optional or manual lanes remain visible as
 `NOT_RUN`, and lanes missing a required device connection are `BLOCKED`.
-Test counts are `null` unless a trusted structured count source is available;
-the recorder does not parse console output.
+Test counts are populated only for the standard/full WebKit smoke lane and the
+full-mode phone/tablet WebKit compatibility lane, when their Playwright JSON
+case summaries match the current release revision and run window. The shared
+report stores only validated totals (`total`, `completed`, `passed`, `failed`,
+`skipped`, and `notRun`), not case names or error text. Direct Vitest lanes,
+other browser suites, and the full Chromium suite remain `null` because they do
+not currently produce an accepted structured JSON count summary. Missing,
+malformed, stale, or mismatched summaries also leave counts `null`; console
+output is never parsed.
 
 CI test jobs and the standard/full release jobs upload a run-scoped
 `automated-test-results-*` artifact even when a wrapped test command fails.

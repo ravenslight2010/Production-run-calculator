@@ -40,6 +40,14 @@ production-readiness proof. Release summaries retain individual outcomes for
 the API, shared-library, startup, and browser gates that run inside the release
 command.
 
+The shared test-results report records counts only from validated, current-run
+Playwright JSON case summaries: `browser-webkit` (standard/full WebKit smoke)
+and `browser-compatibility` (full-mode phone/tablet WebKit). It stores totals
+for total, completed, passed, failed, skipped, and not-run cases, without case
+details. Direct Vitest lanes, browser suites without a JSON case summary, and
+`browser-main` (whose full-suite summary is Markdown) remain `null`; console
+output is not a count source.
+
 The full Chromium contract currently enumerates 170 cases, including the
 Summary-card live-timer focus regression added after the previous 169-case report.
 Physical Android suspension and process-restart checks remain excluded from
