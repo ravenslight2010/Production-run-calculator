@@ -16,6 +16,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const TEST_RESULTS_SCHEMA_VERSION = 1;
+export const BROWSER_MAIN_COUNT_SUMMARY_SUFFIX = ".browser-main-counts.json";
 export const TEST_RESULT_STATUSES = Object.freeze([
   "PASS",
   "FAIL",
@@ -293,6 +294,59 @@ export async function readStructuredVitestTestCounts({
   } catch {
     return null;
   }
+}
+
+export function parseFullBrowserTestCounts(
+  summary,
+  {
+    expectedRunId,
+    expectedRevision,
+    notBeforeMs,
+    notAfterMs,
+    expectedCaseCount,
+    expectedReleaseStatus,
+  } = {},
+) {
+  if (
+    !hasOnlyKeys(summary, [
+      "schemaVersion",
+      "browser",
+      "runId",
+      "revision",
+      "result",
+      "generatedAt",
+      "counts",
+    ]) ||
+    summary.schemaVersion !== 1 ||
+    summary.browser !== "chromium" ||
+    typeof expectedRunId !== "string" ||
+    !isValidRunIdentity({ id: expectedRunId }) ||
+    summary.runId !== expectedRunId ||
+    typeof expectedRevision !== "string" ||
+    !expectedRevision ||
+    summary.revision !== expectedRevision ||
+    !["passed", "failed", "timedout", "interrupted"].includes(summary.result) ||
+    !isIsoDate(summary.generatedAt) ||
+    !Number.isFinite(notBeforeMs) ||
+    !Number.isFinite(notAfterMs) ||
+    Date.parse(summary.generatedAt) < notBeforeMs ||
+    Date.parse(summary.generatedAt) > notAfterMs ||
+    !Number.isInteger(expectedCaseCount) ||
+    expectedCaseCount < 1 ||
+    expectedCaseCount > MAX_STRUCTURED_TEST_CASES ||
+    !["PASS", "FAIL", "INFRASTRUCTURE TIMEOUT", "INFRASTRUCTURE ERROR"].includes(
+      expectedReleaseStatus,
+    ) ||
+    (expectedReleaseStatus === "PASS" && summary.result !== "passed") ||
+    (expectedReleaseStatus !== "PASS" && summary.result === "passed") ||
+    !isValidTestCounts(summary.counts) ||
+    summary.counts.total !== expectedCaseCount ||
+    (expectedReleaseStatus === "PASS" &&
+      (summary.counts.failed !== 0 || summary.counts.notRun !== 0))
+  ) {
+    return null;
+  }
+  return summary.counts;
 }
 
 export function parseStructuredBrowserTestCounts(
@@ -1332,7 +1386,14 @@ async function markLaneBlocked(laneId) {
 async function initialize({ env = process.env } = {}) {
   const catalog = await readLaneCatalog();
   const path = resolveReportPath(env.TEST_RESULTS_REPORT_PATH);
-  await rm(`${path}.release-steps.json`, { force: true });
+  const releaseSidecarPath = `${path}.release-steps.json`;
+  await Promise.all([
+    rm(releaseSidecarPath, { force: true }),
+    rm(
+      `${releaseSidecarPath}${BROWSER_MAIN_COUNT_SUMMARY_SUFFIX}`,
+      { force: true },
+    ),
+  ]);
   const report = createTestResultsReport({
     catalog,
     revision: getSourceRevision(env),

@@ -135,11 +135,10 @@
 - [Retry](release-finalization-retry.md) + [workspace locks](workspace-lock-refresh-pruning.md) + [browser refresh](full-release-browser-refresh.md) — retry safely and refresh stale state.
 - [Release-run lifecycle](release-run-cancellation.md) + [nested pnpm exits](nested-pnpm-exit-codes.md) — check child/evidence state after cancellation; assert structured outcomes.
 - [Local release browser fixtures](local-release-browser-fixture-base.md) — bind fixtures to local API; distinguish slow cold production builds from API readiness timeouts.
-- [Disposable PostgreSQL socket paths](local-postgres-socket-dir.md) — local PostgreSQL clusters need a writable per-cluster Unix socket directory when `/run/postgresql` is absent.
+- [Local PostgreSQL](local-postgres-socket-dir.md) + [ARM64 toolchain](local-arm64-toolchain.md) — use writable private sockets; preserve native Node/ShellCheck setup.
 - [Section-scoped online edits](section-scoped-online-edits.md) — transient peer locks are UX only; correctness uses row serialization, complete baselines, and durable snapshot fencing.
 - [Automatic staged supply](automatic-staged-supply.md) — active Sauce/Frontline caps are pipeline limits, not lifetime production caps; derive stages from canonical cumulative progress.
-- [Readiness evidence](readiness-evidence.md) — retain only allowlisted health outcomes with explicit deployment/revision identity, bounded samples, and expiry.
-- [WebKit compatibility boundary](webkit-compatibility-lane-boundary.md) — phone/tablet responsive WebKit covers lifecycle/report; keep synthetic sync-recovery timing in the dedicated WebKit gate.
+- [Readiness](readiness-evidence.md) + [WebKit lane](webkit-compatibility-lane-boundary.md) — deployment-bound allowlisted evidence; synthetic sync recovery stays in its dedicated gate.
 - [Replit migrations](replit-custom-migrations.md) + [audit maintenance](audit-maintenance-workflow.md) — apply raw triggers before serving; keep audited maintenance off the app role.
 - [Atomic import/history](atomic-import-operations.md) + [completed history](completed-history-durability.md) — retain pending uploads and undo only touched rows after transactional Apply.
 - [Sauce auto-track failure identity](sauce-auto-track-failure-identity.md) — retry notices follow the claim event identity; accepted recovery clears only the matching barrel.
@@ -153,7 +152,6 @@
 - [Task-platform evidence limits](task-platform-evidence-limits.md) — sequence tasks by acceptance; each later task depends on the prior one, with only one active at a time.
 - [Apply-source retention](apply-source-evidence-retention.md) — exact parser text belongs with its authorized live Apply, not reusable snapshots; retention still needs a policy.
 - [PostgreSQL cursor precision](queue-history-cursor-precision.md) — preserve database timestamp precision or use a stable key so keyset cursors cannot skip rows at millisecond boundaries.
-- [Local ARM64 toolchain](local-arm64-toolchain.md) — ShellCheck is required; keep system Node and account for the oxide install asymmetry.
 - [Owner-selected SSE topology](sse-topology-choice.md) — one always-on API process; no shared fanout without a new decision; actual deployment enforcement still needs verification.
 - [Per-pizza advisory limits](per-pizza-advisory-limits.md) — owner chose 16 oz for sauce, each applicator, and each pepperoni entry; warn only above it, never clamp or block Apply.
 - [Shell signal cleanup output](shell-signal-cleanup-output.md) — redirect child logs narrowly so temporary log removal cannot swallow signal-time cleanup warnings.

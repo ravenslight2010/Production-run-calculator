@@ -13,11 +13,13 @@ import test from "node:test";
 import {
   boundedFailure,
   classifyProcessOutcome,
+  BROWSER_MAIN_COUNT_SUMMARY_SUFFIX,
   createTestResultsReport,
   getRunIdentity,
   getSourceRevision,
   mapReleaseStepOutcomes,
   mergeTestResultsReports,
+  parseFullBrowserTestCounts,
   parseStructuredBrowserTestCounts,
   parseStructuredVitestTestCounts,
   readLaneCatalog,
@@ -172,6 +174,25 @@ function vitestSummaryFixture(overrides = {}) {
       notRun: 2,
     },
     ...overrides,
+  };
+}
+
+function fullBrowserCountSummaryFixture() {
+  return {
+    schemaVersion: 1,
+    browser: "chromium",
+    runId: "github:123456:2",
+    revision: `test-sha256:${"a".repeat(64)}`,
+    result: "passed",
+    generatedAt: "2026-10-06T12:30:00.000Z",
+    counts: {
+      total: 170,
+      completed: 170,
+      passed: 170,
+      failed: 0,
+      skipped: 0,
+      notRun: 0,
+    },
   };
 }
 
@@ -539,6 +560,99 @@ test("Vitest count summaries validate runner totals and retain no case details",
   );
 });
 
+test("full Chromium summaries are run-bound, count-only, and map to browser-main", async () => {
+  const options = {
+    expectedRunId: "github:123456:2",
+    expectedRevision: `test-sha256:${"a".repeat(64)}`,
+    notBeforeMs: Date.parse("2026-10-06T12:00:00.000Z"),
+    notAfterMs: Date.parse("2026-10-06T13:00:00.000Z"),
+    expectedCaseCount: 170,
+    expectedReleaseStatus: "PASS",
+  };
+  const summary = fullBrowserCountSummaryFixture();
+  const counts = parseFullBrowserTestCounts(summary, options);
+  assert.deepEqual(counts, {
+    total: 170,
+    completed: 170,
+    passed: 170,
+    failed: 0,
+    skipped: 0,
+    notRun: 0,
+  });
+
+  const catalog = await readLaneCatalog();
+  const mapped = mapReleaseStepOutcomes(
+    catalog,
+    [
+      {
+        label: "full browser E2E suite",
+        status: "PASS",
+        durationMs: 300,
+        counts,
+      },
+    ],
+    "release-full",
+    "PASS",
+  );
+  assert.deepEqual(
+    mapped.find((result) => result.laneId === "browser-main").counts,
+    counts,
+  );
+  const missingCounts = mapReleaseStepOutcomes(
+    catalog,
+    [{ label: "full browser E2E suite", status: "PASS", durationMs: 300 }],
+    "release-full",
+    "PASS",
+  );
+  assert.equal(
+    missingCounts.find((result) => result.laneId === "browser-main").counts,
+    null,
+  );
+
+  const failedSummary = {
+    ...summary,
+    result: "failed",
+    counts: {
+      total: 170,
+      completed: 169,
+      passed: 168,
+      failed: 1,
+      skipped: 0,
+      notRun: 1,
+    },
+  };
+  assert.deepEqual(
+    parseFullBrowserTestCounts(failedSummary, {
+      ...options,
+      expectedReleaseStatus: "FAIL",
+    }),
+    failedSummary.counts,
+  );
+  const malformed = [
+    { ...summary, runId: "github:999999:2" },
+    { ...summary, revision: `test-sha256:${"b".repeat(64)}` },
+    { ...summary, generatedAt: "2026-10-06T11:59:59.999Z" },
+    { ...summary, generatedAt: "2026-10-06T13:00:00.001Z" },
+    { ...summary, browser: "webkit" },
+    { ...summary, counts: { ...summary.counts, total: 169 } },
+    {
+      ...summary,
+      counts: { ...summary.counts, passed: 169 },
+    },
+    { ...summary, result: "failed" },
+    { ...summary, cases: [{ title: "case details must not be retained" }] },
+  ];
+  for (const candidate of malformed) {
+    assert.equal(parseFullBrowserTestCounts(candidate, options), null);
+  }
+  assert.equal(parseFullBrowserTestCounts(undefined, options), null);
+  assert.equal(parseFullBrowserTestCounts(null, options), null);
+  assert.equal(
+    BROWSER_MAIN_COUNT_SUMMARY_SUFFIX,
+    ".browser-main-counts.json",
+  );
+});
+
 test("report provenance is run-scoped and a result cannot be joined to another revision", async (t) => {
   const catalog = await readLaneCatalog();
   const temp = await mkdtemp(join(tmpdir(), "test-results-"));
@@ -871,9 +985,10 @@ test("the report persists normalized counts without runner case details", async 
   t.after(() => rm(temp, { recursive: true, force: true }));
   const path = join(temp, "report.json");
   const env = {};
+  const revision = getSourceRevision(env);
   const report = createTestResultsReport({
     catalog,
-    revision: getSourceRevision(env),
+    revision,
     runIdentity: { id: "local:count-summary" },
     environment: {
       kind: "local",
@@ -891,6 +1006,22 @@ test("the report persists normalized counts without runner case details", async 
     expectedReleaseStatus: "FAIL",
   });
   assert.ok(counts);
+  const chromiumCounts = parseFullBrowserTestCounts(
+    {
+      ...fullBrowserCountSummaryFixture(),
+      runId: "local:count-summary",
+      revision,
+    },
+    {
+      expectedRunId: "local:count-summary",
+      expectedRevision: revision,
+      notBeforeMs: Date.parse("2026-10-06T12:00:00.000Z"),
+      notAfterMs: Date.parse("2026-10-06T13:00:00.000Z"),
+      expectedCaseCount: 170,
+      expectedReleaseStatus: "PASS",
+    },
+  );
+  assert.ok(chromiumCounts);
   await writeReport(path, report, catalog);
   await recordLaneResult({
     reportPath: path,
@@ -903,14 +1034,28 @@ test("the report persists normalized counts without runner case details", async 
     failure: boundedFailure("FAIL", { exitCode: 1 }),
     env,
   });
+  await recordLaneResult({
+    reportPath: path,
+    catalog,
+    laneId: "browser-main",
+    status: "PASS",
+    durationMs: 300,
+    counts: chromiumCounts,
+    env,
+  });
   const saved = await readFile(path, "utf8");
   const parsed = JSON.parse(saved);
   assert.deepEqual(
     parsed.lanes.find((lane) => lane.laneId === "browser-webkit").counts,
     counts,
   );
+  assert.deepEqual(
+    parsed.lanes.find((lane) => lane.laneId === "browser-main").counts,
+    chromiumCounts,
+  );
   assert.ok(!saved.includes("a case with sensitive error output"));
   assert.ok(!saved.includes("private failure output"));
+  assert.ok(!saved.includes("cases"));
 });
 
 test("missing, blocked, and interrupted lanes remain explicit; reports never retain raw output", async (t) => {

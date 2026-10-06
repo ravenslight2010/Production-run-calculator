@@ -62,7 +62,11 @@ import {
 } from "./retained-evaluation-contract.mjs";
 import { validateReadinessEvidence } from "./capture-readiness-recovery.mts";
 import { FULL_BROWSER_EXPECTED_CASES } from "./full-browser-case-contract.mts";
-import { parseStructuredBrowserTestCounts } from "./test-results.mjs";
+import {
+  BROWSER_MAIN_COUNT_SUMMARY_SUFFIX,
+  parseFullBrowserTestCounts,
+  parseStructuredBrowserTestCounts,
+} from "./test-results.mjs";
 import { WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES } from "./webkit-case-contract.mts";
 export { TYPESCRIPT_7_SUPPORTED_RUNNERS } from "./typescript-7-native-contract.mts";
 
@@ -404,6 +408,32 @@ const releaseEvidenceDir = resolveReleaseEvidenceDir(
   releaseMode,
   evidenceDirArgument ?? process.env.RELEASE_EVIDENCE_DIR,
 );
+function testResultsBrowserMainCountSummaryPath(): string | undefined {
+  const sidecarPath = process.env.TEST_RESULTS_RELEASE_STEPS_PATH?.trim();
+  const reportId = process.env.TEST_RESULTS_REPORT_ID?.trim();
+  if (
+    !sidecarPath ||
+    !reportId ||
+    !/^(?:github:[0-9]{1,32}:(?:[0-9]{1,8}|unknown)|local:[\w-]{1,64})$/.test(
+      reportId,
+    )
+  ) {
+    return undefined;
+  }
+  const destination = resolve(rootDir, sidecarPath);
+  const relativeDestination = relative(rootDir, destination);
+  if (
+    relativeDestination === ".." ||
+    relativeDestination.startsWith(`..${sep}`) ||
+    relativeDestination.length === 0
+  ) {
+    return undefined;
+  }
+  return `${destination}${BROWSER_MAIN_COUNT_SUMMARY_SUFFIX}`;
+}
+
+const browserMainCountSummaryPath =
+  testResultsBrowserMainCountSummaryPath();
 const cleanStartEvidenceDir = `${releaseEvidenceDir}/clean-start`;
 const fullBrowserReportPath = resolve(
   rootDir,
@@ -4071,6 +4101,9 @@ async function main(): Promise<void> {
   const checkpointReportPath = resolve(evidenceRoot, RELEASE_CHECKPOINT_REPORT);
   const logPath = resolve(evidenceRoot, "release-check.log");
   await mkdir(evidenceRoot, { recursive: true });
+  if (fullRun && browserMainCountSummaryPath) {
+    await rm(browserMainCountSummaryPath, { force: true });
+  }
   const resume = process.argv.includes("--resume");
   let concurrencyLimit: number;
   try {
@@ -4321,6 +4354,13 @@ async function main(): Promise<void> {
                         : step.label === REPORT_KEY_ROTATION_PREFLIGHT_LABEL
                           ? { REPORT_KEY_ROTATION_PREFLIGHT_REVISION: revision }
                           : {}),
+                      ...(step.label === FULL_BROWSER_GATE_LABEL &&
+                      browserMainCountSummaryPath
+                        ? {
+                            PLAYWRIGHT_RELEASE_COUNT_SUMMARY_PATH:
+                              browserMainCountSummaryPath,
+                          }
+                        : {}),
                     },
                   }
                 : step;
@@ -4454,29 +4494,47 @@ async function main(): Promise<void> {
             ? "browser-smoke/webkit-result.json"
             : label === FULL_RESPONSIVE_WEBKIT_GATE_LABEL
               ? "browser-compatibility/webkit-result.json"
+              : label === FULL_BROWSER_GATE_LABEL
+                ? browserMainCountSummaryPath
               : undefined;
         let counts;
         if (summaryPath) {
           try {
             const summary = JSON.parse(
-              await readFile(resolve(rootDir, releaseEvidenceDir, summaryPath), "utf8"),
+              await readFile(
+                label === FULL_BROWSER_GATE_LABEL
+                  ? summaryPath
+                  : resolve(rootDir, releaseEvidenceDir, summaryPath),
+                "utf8",
+              ),
             );
-            counts = parseStructuredBrowserTestCounts(summary, {
-              expectedRevision: revision,
-              notBeforeMs: releaseRunStartedAt,
-              notAfterMs: Date.now(),
-              expectedProjects:
-                label === "browser WebKit smoke"
-                  ? ["webkit"]
-                  : ["phone-webkit", "tablet-webkit"],
-              expectedReleaseStatus:
-                status === "INFRASTRUCTURE TIMEOUT" ||
-                status === "INFRASTRUCTURE ERROR"
-                  ? status
-                  : status === "PASS"
-                    ? "PASS"
-                    : "FAIL",
-            }) ?? undefined;
+            const expectedReleaseStatus =
+              status === "INFRASTRUCTURE TIMEOUT" ||
+              status === "INFRASTRUCTURE ERROR"
+                ? status
+                : status === "PASS"
+                  ? "PASS"
+                  : "FAIL";
+            counts =
+              label === FULL_BROWSER_GATE_LABEL
+                ? parseFullBrowserTestCounts(summary, {
+                    expectedRunId: reportId,
+                    expectedRevision: revision,
+                    notBeforeMs: releaseRunStartedAt,
+                    notAfterMs: Date.now(),
+                    expectedCaseCount: FULL_BROWSER_EXPECTED_CASES,
+                    expectedReleaseStatus,
+                  }) ?? undefined
+                : parseStructuredBrowserTestCounts(summary, {
+                    expectedRevision: revision,
+                    notBeforeMs: releaseRunStartedAt,
+                    notAfterMs: Date.now(),
+                    expectedProjects:
+                      label === "browser WebKit smoke"
+                        ? ["webkit"]
+                        : ["phone-webkit", "tablet-webkit"],
+                    expectedReleaseStatus,
+                  }) ?? undefined;
           } catch {
             // Missing or malformed runner evidence leaves counts unavailable.
           }

@@ -7,6 +7,7 @@ import {
   EXPECTED_CASES,
   canRetainFullBrowserReport,
   findDurationRegressions,
+  formatFullBrowserCountSummary,
   formatFullBrowserReport,
   parseCompleteFullBrowserBaseline,
   parsePerFileDurations,
@@ -261,6 +262,50 @@ const completeCases = Array.from({ length: EXPECTED_CASES }, () => ({
   completed: true,
   status: "passed" as const,
 }));
+const countSummary = JSON.parse(
+  formatFullBrowserCountSummary(
+    completeCases,
+    "passed",
+    "current-revision",
+    "github:123456:2",
+    "2026-10-06T12:30:00.000Z",
+  ),
+) as {
+  schemaVersion: number;
+  browser: string;
+  runId: string;
+  revision: string;
+  result: string;
+  generatedAt: string;
+  counts: {
+    total: number;
+    completed: number;
+    passed: number;
+    failed: number;
+    skipped: number;
+    notRun: number;
+  };
+};
+assert.deepEqual(countSummary, {
+  schemaVersion: 1,
+  browser: "chromium",
+  runId: "github:123456:2",
+  revision: "current-revision",
+  result: "passed",
+  generatedAt: "2026-10-06T12:30:00.000Z",
+  counts: {
+    total: EXPECTED_CASES,
+    completed: EXPECTED_CASES,
+    passed: EXPECTED_CASES,
+    failed: 0,
+    skipped: 0,
+    notRun: 0,
+  },
+});
+assert.ok(
+  !JSON.stringify(countSummary).includes("Passing case"),
+  "the full-browser summary must not retain case details",
+);
 const validBaselineReport = formatFullBrowserReport(
   completeCases,
   "passed",
