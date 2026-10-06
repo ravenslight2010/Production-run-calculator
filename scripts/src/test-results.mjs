@@ -4,9 +4,11 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
   mkdir,
+  readdir,
   readFile,
   rename,
   rm,
+  stat,
   writeFile,
 } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
@@ -28,6 +30,10 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 export const REPOSITORY_ROOT = resolve(scriptDir, "../..");
 const DEFAULT_REPORT_PATH = ".local/test-evidence/latest.json";
 const CATALOG_PATH = resolve(REPOSITORY_ROOT, "docs/test-lane-catalog.json");
+const MAX_TEST_RESULTS_REPORT_BYTES = 5 * 1024 * 1024;
+const MAX_AGGREGATION_REPORTS = 256;
+const MAX_AGGREGATION_ENTRIES = 8192;
+const MAX_AGGREGATION_DEPTH = 12;
 const SAFE_REASONS = new Set([
   "This lane was not executed in this report's run scope.",
   "This lane is optional or manual and was not requested.",
@@ -608,26 +614,255 @@ function validateFailureMetadata(failure) {
   }
 }
 
-export async function writeReport(path, report, catalog) {
-  validateReport(report, catalog);
-  await mkdir(dirname(path), { recursive: true });
-  const temporaryPath = `${path}.${process.pid}.tmp`;
-  await writeFile(temporaryPath, `${JSON.stringify(report, null, 2)}\n`, {
-    encoding: "utf8",
-    mode: 0o600,
-  });
-  await rename(temporaryPath, path);
+function throwIfAborted(signal) {
+  if (signal?.aborted) {
+    throw new Error("Test-results aggregation was interrupted.");
+  }
 }
 
-async function readReport(path, catalog) {
+export async function writeReport(path, report, catalog, { signal } = {}) {
+  validateReport(report, catalog);
+  await mkdir(dirname(path), { recursive: true });
+  const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    throwIfAborted(signal);
+    await writeFile(temporaryPath, `${JSON.stringify(report, null, 2)}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+      ...(signal ? { signal } : {}),
+    });
+    throwIfAborted(signal);
+    await rename(temporaryPath, path);
+  } catch (error) {
+    if (signal?.aborted) throw new Error("Test-results aggregation was interrupted.");
+    throw error;
+  } finally {
+    await rm(temporaryPath, { force: true });
+  }
+}
+
+async function readReport(path, catalog, {
+  signal,
+  maxBytes = MAX_TEST_RESULTS_REPORT_BYTES,
+} = {}) {
   let report;
   try {
-    report = JSON.parse(await readFile(path, "utf8"));
-  } catch {
+    throwIfAborted(signal);
+    const metadata = await stat(path);
+    if (!metadata.isFile()) {
+      throw new Error("The test-results report is not a regular file.");
+    }
+    if (metadata.size > maxBytes) {
+      throw new Error("The test-results report exceeds the size limit.");
+    }
+    const contents = await readFile(path, {
+      encoding: "utf8",
+      ...(signal ? { signal } : {}),
+    });
+    report = JSON.parse(contents);
+  } catch (error) {
+    if (signal?.aborted) throw new Error("Test-results aggregation was interrupted.");
+    if (error instanceof SyntaxError || error?.code === "ENOENT" || error?.code === "EACCES") {
+      throw new Error("Test-results report is missing or unreadable; initialize a new run.");
+    }
+    if (error instanceof Error && error.message === "The test-results report exceeds the size limit.") {
+      throw error;
+    }
     throw new Error("Test-results report is missing or unreadable; initialize a new run.");
   }
   validateReport(report, catalog);
   return report;
+}
+
+async function findDownloadedReports(directory, signal) {
+  const root = resolveReportPath(directory);
+  const reports = [];
+  let entriesScanned = 0;
+  const visit = async (currentDirectory, depth = 0) => {
+    throwIfAborted(signal);
+    if (depth > MAX_AGGREGATION_DEPTH) {
+      throw new Error("The downloaded test-results directory is nested too deeply.");
+    }
+    let entries;
+    try {
+      entries = await readdir(currentDirectory, { withFileTypes: true });
+    } catch (error) {
+      if (currentDirectory === root && error?.code === "ENOENT") return;
+      throw error;
+    }
+    entries.sort((left, right) => left.name.localeCompare(right.name));
+    for (const entry of entries) {
+      throwIfAborted(signal);
+      entriesScanned += 1;
+      if (entriesScanned > MAX_AGGREGATION_ENTRIES) {
+        throw new Error("Too many files were supplied for test-results aggregation.");
+      }
+      if (entry.isSymbolicLink()) continue;
+      const path = resolve(currentDirectory, entry.name);
+      if (entry.isDirectory()) {
+        await visit(path, depth + 1);
+      } else if (entry.isFile() && entry.name === "test-results.json") {
+        reports.push(path);
+        if (reports.length > MAX_AGGREGATION_REPORTS) {
+          throw new Error("Too many test-results reports were supplied for aggregation.");
+        }
+      }
+    }
+  };
+  await visit(root);
+  return reports;
+}
+
+function assertMergeIdentity(report, expected, expectedRevision) {
+  if (report.sourceRevision !== expectedRevision) {
+    throw new Error("Refusing to merge test results from different source revisions.");
+  }
+  for (const key of ["id", "workflow", "event", "runId", "attempt"]) {
+    if (
+      expected[key] === undefined ||
+      report.run[key] !== expected[key]
+    ) {
+      throw new Error("Refusing to merge test results from different workflow runs.");
+    }
+  }
+  if (typeof report.run.job !== "string") {
+    throw new Error("Refusing to merge a report without a workflow job identity.");
+  }
+}
+
+function reportArtifactName(report, reportPath, inputDirectory) {
+  const relativePath = relative(inputDirectory, reportPath);
+  const [artifactName] = relativePath.split(sep);
+  if (
+    !artifactName ||
+    artifactName === "." ||
+    report.artifactReferences.length !== 1 ||
+    report.artifactReferences[0].name !== artifactName ||
+    report.lanes.some((lane) =>
+      lane.artifactReferences.some((reference) => reference.name !== artifactName),
+    ) ||
+    !artifactName.endsWith(`-${report.run.runId}-${report.run.attempt}`)
+  ) {
+    throw new Error("Refusing to merge a report with mismatched artifact provenance.");
+  }
+  return artifactName;
+}
+
+export async function mergeTestResultsReports({
+  inputDirectory,
+  outputPath = resolveReportPath(),
+  catalog,
+  env = process.env,
+  now = new Date().toISOString(),
+  signal,
+}) {
+  if (typeof inputDirectory !== "string" || inputDirectory.trim() === "") {
+    throw new Error("A test-results input directory is required for aggregation.");
+  }
+  const inputRoot = resolveReportPath(inputDirectory);
+  const output = resolveReportPath(outputPath);
+  const outputRelativeToInput = relative(inputRoot, output);
+  if (
+    outputRelativeToInput === "" ||
+    (!outputRelativeToInput.startsWith(`..${sep}`) &&
+      outputRelativeToInput !== ".." &&
+      !isAbsolute(outputRelativeToInput))
+  ) {
+    throw new Error("The merged test-results report must be outside its input directory.");
+  }
+  throwIfAborted(signal);
+
+  const expectedRun = getRunIdentity(env);
+  const expectedRevision = getSourceRevision(env);
+  if (
+    expectedRevision === "unknown" ||
+    !expectedRun.runId ||
+    !expectedRun.attempt ||
+    !expectedRun.workflow ||
+    !expectedRun.event
+  ) {
+    throw new Error("A complete workflow run identity and source revision are required to aggregate reports.");
+  }
+  const reportPaths = await findDownloadedReports(inputRoot, signal);
+  const reports = [];
+  const artifactNames = new Set();
+  const jobs = new Set();
+  for (const path of reportPaths) {
+    throwIfAborted(signal);
+    const report = await readReport(path, catalog, { signal });
+    assertMergeIdentity(report, expectedRun, expectedRevision);
+    const artifactName = reportArtifactName(report, path, inputRoot);
+    if (artifactNames.has(artifactName) || jobs.has(report.run.job)) {
+      throw new Error("Refusing to merge duplicate test-results artifacts or workflow jobs.");
+    }
+    artifactNames.add(artifactName);
+    jobs.add(report.run.job);
+    reports.push({ report, artifactName });
+  }
+
+  const merged = createTestResultsReport({
+    catalog,
+    revision: expectedRevision,
+    runIdentity: { ...expectedRun, job: "test-results-aggregation" },
+    environment: getEnvironment(env),
+    artifactName: env.TEST_RESULTS_ARTIFACT_NAME,
+    now,
+    env,
+  });
+  const mergedLaneById = new Map(merged.lanes.map((lane) => [lane.laneId, lane]));
+  for (const lane of catalog.lanes) {
+    throwIfAborted(signal);
+    const candidates = reports
+      .map(({ report, artifactName }) => ({
+        result: report.lanes.find((item) => item.laneId === lane.id),
+        artifactName,
+      }))
+      .filter(({ result }) => result);
+    const attempted = candidates.filter(({ result }) => result.attempted);
+    const explicitlyBlocked = candidates.filter(
+      ({ result }) =>
+        result.status === "BLOCKED" &&
+        result.reason === "Required prerequisites did not complete.",
+    );
+    if (
+      attempted.length > 1 ||
+      explicitlyBlocked.length > 1 ||
+      (attempted.length > 0 && explicitlyBlocked.length > 0)
+    ) {
+      throw new Error(`Refusing to merge duplicate results for test lane ${lane.id}.`);
+    }
+    const blocked = candidates.filter(({ result }) => result.status === "BLOCKED");
+    const selected =
+      attempted[0] ??
+      blocked.find(({ result }) => result.reason === "Required prerequisites did not complete.") ??
+      blocked[0];
+    if (selected) {
+      mergedLaneById.set(lane.id, {
+        ...selected.result,
+        artifactReferences: selected.result.artifactReferences.some(
+          (reference) => reference.name === selected.artifactName,
+        )
+          ? [...selected.result.artifactReferences]
+          : [
+              ...selected.result.artifactReferences,
+              { kind: "github-actions-artifact", name: selected.artifactName },
+            ],
+      });
+    }
+  }
+  merged.lanes = catalog.lanes.map((lane) => mergedLaneById.get(lane.id));
+  merged.artifactReferences = [
+    ...new Map(
+      [
+        ...merged.artifactReferences,
+        ...reports.flatMap(({ report }) => report.artifactReferences),
+      ].map((reference) => [reference.name, reference]),
+    ).values(),
+  ];
+  merged.updatedAt = now;
+  throwIfAborted(signal);
+  await writeReport(output, merged, catalog, { signal });
+  return { path: output, report: merged, sourceReportCount: reports.length };
 }
 
 function assertSameRun(report, env) {
@@ -927,7 +1162,34 @@ async function main(argv) {
     await markLaneBlocked(laneId);
     return;
   }
-  throw new Error("Usage: test-results.mjs <init|run|local|block>");
+  if (mode === "merge") {
+    const inputIndex = args.indexOf("--input-dir");
+    const inputDirectory = inputIndex >= 0 ? args[inputIndex + 1] : undefined;
+    if (!inputDirectory) {
+      throw new Error("Usage: test-results.mjs merge --input-dir <directory>");
+    }
+    const controller = new AbortController();
+    const interrupt = () => controller.abort();
+    process.once("SIGINT", interrupt);
+    process.once("SIGTERM", interrupt);
+    try {
+      const catalog = await readLaneCatalog();
+      const result = await mergeTestResultsReports({
+        inputDirectory,
+        outputPath: resolveReportPath(),
+        catalog,
+        signal: controller.signal,
+      });
+      console.log(
+        `Merged ${result.sourceReportCount} test-results report(s): ${relative(REPOSITORY_ROOT, result.path)}`,
+      );
+    } finally {
+      process.removeListener("SIGINT", interrupt);
+      process.removeListener("SIGTERM", interrupt);
+    }
+    return;
+  }
+  throw new Error("Usage: test-results.mjs <init|run|local|block|merge>");
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

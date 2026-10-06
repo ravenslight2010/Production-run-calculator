@@ -442,3 +442,39 @@ jobs:
           REGENERATE_COMMAND: pnpm run release:check:full
         run: |
           bash scripts/src/release-stopped-summary.sh
+
+  aggregate-test-results:
+    name: Aggregate release test results
+    if: always()
+    needs:
+      - release-check-standard
+      - release-check-full
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      TEST_RESULTS_REPORT_PATH: test-evidence/merged-test-results.json
+      TEST_RESULTS_ARTIFACT_NAME: automated-test-results-merged-release-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      # Full dispatch also runs the standard job. Prefer the full report there,
+      # because it covers the shared lanes and avoids merging duplicate claims.
+      - name: Download the selected release report from this workflow run
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: automated-test-results-release-${{ github.event_name == 'workflow_dispatch' && inputs.run_full && 'full' || 'standard' }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-evidence/reports
+      - name: Merge and validate run-level test report
+        run: node scripts/src/test-results.mjs merge --input-dir test-evidence/reports
+      - name: Upload merged machine-readable test report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: automated-test-results-merged-release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-evidence/merged-test-results.json
+          if-no-files-found: ignore
+          retention-days: 14

@@ -400,3 +400,41 @@ jobs:
         run: pnpm --filter @workspace/run-calculator run build
       - name: Build API server bundle
         run: pnpm --filter @workspace/api-server run build
+
+  aggregate-test-results:
+    name: Aggregate CI test results
+    if: always()
+    needs:
+      - typescript-7-codegen-bridge
+      - typecheck
+      - test
+      - test-release-concurrency
+      - test-db
+      - schema-safe-rollback
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      TEST_RESULTS_REPORT_PATH: test-evidence/merged-test-results.json
+      TEST_RESULTS_ARTIFACT_NAME: automated-test-results-merged-ci-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Download test reports from this workflow run
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: automated-test-results-*-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-evidence/reports
+      - name: Merge and validate run-level test report
+        run: node scripts/src/test-results.mjs merge --input-dir test-evidence/reports
+      - name: Upload merged machine-readable test report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: automated-test-results-merged-ci-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-evidence/merged-test-results.json
+          if-no-files-found: ignore
+          retention-days: 14

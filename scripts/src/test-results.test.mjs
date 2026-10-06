@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile as writeTextFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -10,6 +10,7 @@ import {
   getRunIdentity,
   getSourceRevision,
   mapReleaseStepOutcomes,
+  mergeTestResultsReports,
   readLaneCatalog,
   recordLaneResult,
   resolveReportPath,
@@ -19,6 +20,69 @@ import {
 } from "./test-results.mjs";
 
 const ROOT = resolve(new URL("../..", import.meta.url).pathname);
+const MERGE_REVISION = "a".repeat(40);
+
+function mergeEnvironment(job = "aggregate-test-results", revision = MERGE_REVISION) {
+  return {
+    GITHUB_ACTIONS: "true",
+    GITHUB_SHA: revision,
+    GITHUB_RUN_ID: "123456",
+    GITHUB_RUN_ATTEMPT: "2",
+    GITHUB_WORKFLOW: "CI",
+    GITHUB_JOB: job,
+    GITHUB_EVENT_NAME: "pull_request",
+    TEST_RESULTS_ARTIFACT_NAME: "automated-test-results-merged-ci-123456-2",
+  };
+}
+
+function createMergeSourceReport(catalog, job, revision = MERGE_REVISION) {
+  const env = mergeEnvironment(job, revision);
+  const artifactName = `automated-test-results-${job}-123456-2`;
+  return createTestResultsReport({
+    catalog,
+    revision,
+    runIdentity: getRunIdentity(env),
+    environment: {
+      kind: "ci",
+      platform: "linux",
+      architecture: "x64",
+      nodeVersion: "v24.0.0",
+    },
+    artifactName,
+    now: "2026-10-06T12:00:00.000Z",
+    env,
+  });
+}
+
+function markLanePassed(report, laneId) {
+  const result = report.lanes.find((lane) => lane.laneId === laneId);
+  assert.ok(result, `${laneId} must be present in the source report`);
+  result.status = "PASS";
+  result.reason = undefined;
+  result.attempted = true;
+  result.durationMs = 12;
+  result.failure = null;
+  result.startedAt = "2026-10-06T12:00:00.000Z";
+  result.finishedAt = "2026-10-06T12:00:00.012Z";
+}
+
+function markLaneBlocked(report, laneId) {
+  const result = report.lanes.find((lane) => lane.laneId === laneId);
+  assert.ok(result, `${laneId} must be present in the source report`);
+  result.status = "BLOCKED";
+  result.reason = "Required prerequisites did not complete.";
+  result.attempted = false;
+  result.durationMs = null;
+  result.failure = null;
+  delete result.startedAt;
+  delete result.finishedAt;
+}
+
+async function saveMergeSource(inputDirectory, report, artifactName) {
+  const artifactDirectory = join(inputDirectory, artifactName);
+  await mkdir(artifactDirectory, { recursive: true });
+  await writeReport(join(artifactDirectory, "test-results.json"), report, await readLaneCatalog());
+}
 
 test("catalog is complete against the maintained test/release matrix", async () => {
   const catalog = await readLaneCatalog();
@@ -137,6 +201,177 @@ test("report provenance is run-scoped and a result cannot be joined to another r
     /different source revisions/u,
   );
   assert.equal(getSourceRevision({ GITHUB_SHA: "not-a-revision" }, temp), "unknown");
+});
+
+test("run-level aggregation preserves explicit results and leaves missing lanes unrun", async (t) => {
+  const catalog = await readLaneCatalog();
+  const temp = await mkdtemp(join(ROOT, ".test-results-merge-"));
+  t.after(() => rm(temp, { recursive: true, force: true }));
+  const inputDirectory = join(temp, "reports");
+  const outputPath = join(temp, "merged.json");
+  const source = createMergeSourceReport(catalog, "typecheck");
+  const artifactName = source.artifactReferences[0].name;
+  markLanePassed(source, "ci-typecheck");
+  await saveMergeSource(inputDirectory, source, artifactName);
+  const blockedSource = createMergeSourceReport(catalog, "api-postgres");
+  const blockedArtifactName = blockedSource.artifactReferences[0].name;
+  markLaneBlocked(blockedSource, "ci-api-postgres");
+  await saveMergeSource(inputDirectory, blockedSource, blockedArtifactName);
+
+  const result = await mergeTestResultsReports({
+    inputDirectory,
+    outputPath,
+    catalog,
+    env: mergeEnvironment(),
+    now: "2026-10-06T12:01:00.000Z",
+  });
+  assert.equal(result.sourceReportCount, 2);
+  assert.equal(result.report.run.id, "github:123456:2");
+  assert.equal(result.report.run.workflow, "CI");
+  assert.equal(result.report.run.job, "test-results-aggregation");
+  assert.equal(result.report.lanes.find((lane) => lane.laneId === "ci-typecheck").status, "PASS");
+  assert.equal(result.report.lanes.find((lane) => lane.laneId === "ci-api-postgres").status, "BLOCKED");
+  assert.equal(result.report.lanes.find((lane) => lane.laneId === "ci-client-unit").status, "NOT_RUN");
+  assert.equal(result.report.lanes.find((lane) => lane.laneId === "browser-main").status, "NOT_RUN");
+  assert.equal(
+    result.report.lanes.find((lane) => lane.laneId === "ci-client-unit").reason,
+    "This lane was not executed in this report's run scope.",
+  );
+  assert.equal(
+    result.report.lanes.find((lane) => lane.laneId === "ci-api-postgres").reason,
+    "Required prerequisites did not complete.",
+  );
+  assert.equal(
+    result.report.lanes.find((lane) => lane.laneId === "browser-main").reason,
+    "This lane is optional or manual and was not requested.",
+  );
+  assert.ok(result.report.artifactReferences.some((reference) => reference.name === artifactName));
+  assert.ok(result.report.artifactReferences.some((reference) => reference.name === blockedArtifactName));
+  assert.ok(result.report.artifactReferences.some((reference) => reference.name === mergeEnvironment().TEST_RESULTS_ARTIFACT_NAME));
+  validateReport(JSON.parse(await readFile(outputPath, "utf8")), catalog);
+});
+
+test("run-level aggregation records every lane when no job reports were uploaded", async (t) => {
+  const catalog = await readLaneCatalog();
+  const temp = await mkdtemp(join(ROOT, ".test-results-merge-"));
+  t.after(() => rm(temp, { recursive: true, force: true }));
+  const result = await mergeTestResultsReports({
+    inputDirectory: join(temp, "reports"),
+    outputPath: join(temp, "merged.json"),
+    catalog,
+    env: mergeEnvironment(),
+  });
+  assert.equal(result.sourceReportCount, 0);
+  assert.equal(result.report.lanes.length, catalog.lanes.length);
+  assert.ok(result.report.lanes.every((lane) => ["BLOCKED", "NOT_RUN"].includes(lane.status)));
+  assert.ok(result.report.artifactReferences.some((reference) => reference.name === mergeEnvironment().TEST_RESULTS_ARTIFACT_NAME));
+});
+
+test("run-level aggregation rejects duplicate executed lanes", async (t) => {
+  const catalog = await readLaneCatalog();
+  const temp = await mkdtemp(join(ROOT, ".test-results-merge-"));
+  t.after(() => rm(temp, { recursive: true, force: true }));
+  const inputDirectory = join(temp, "reports");
+  const outputPath = join(temp, "merged.json");
+  for (const job of ["typecheck", "unit"]) {
+    const report = createMergeSourceReport(catalog, job);
+    markLanePassed(report, "ci-typecheck");
+    await saveMergeSource(inputDirectory, report, report.artifactReferences[0].name);
+  }
+  await assert.rejects(
+    mergeTestResultsReports({
+      inputDirectory,
+      outputPath,
+      catalog,
+      env: mergeEnvironment(),
+    }),
+    /duplicate results for test lane ci-typecheck/u,
+  );
+  await assert.rejects(readFile(outputPath), { code: "ENOENT" });
+});
+
+test("run-level aggregation rejects source revision mismatches", async (t) => {
+  const catalog = await readLaneCatalog();
+  const temp = await mkdtemp(join(ROOT, ".test-results-merge-"));
+  t.after(() => rm(temp, { recursive: true, force: true }));
+  const inputDirectory = join(temp, "reports");
+  const outputPath = join(temp, "merged.json");
+  const source = createMergeSourceReport(catalog, "typecheck", "b".repeat(40));
+  await saveMergeSource(inputDirectory, source, source.artifactReferences[0].name);
+  await assert.rejects(
+    mergeTestResultsReports({
+      inputDirectory,
+      outputPath,
+      catalog,
+      env: mergeEnvironment(),
+    }),
+    /different source revisions/u,
+  );
+  await assert.rejects(readFile(outputPath), { code: "ENOENT" });
+});
+
+test("run-level aggregation rejects mismatched schema and workflow identities", async (t) => {
+  const catalog = await readLaneCatalog();
+  const temp = await mkdtemp(join(ROOT, ".test-results-merge-"));
+  t.after(() => rm(temp, { recursive: true, force: true }));
+  const inputDirectory = join(temp, "reports");
+  const outputPath = join(temp, "merged.json");
+  const source = createMergeSourceReport(catalog, "typecheck");
+  source.run.attempt = 3;
+  await saveMergeSource(inputDirectory, source, source.artifactReferences[0].name);
+  await assert.rejects(
+    mergeTestResultsReports({
+      inputDirectory,
+      outputPath,
+      catalog,
+      env: mergeEnvironment(),
+    }),
+    /different workflow runs/u,
+  );
+  await rm(inputDirectory, { recursive: true, force: true });
+
+  const schemaMismatch = createMergeSourceReport(catalog, "typecheck");
+  schemaMismatch.schemaVersion += 1;
+  const schemaArtifactName = schemaMismatch.artifactReferences[0].name;
+  const schemaArtifactDirectory = join(inputDirectory, schemaArtifactName);
+  await mkdir(schemaArtifactDirectory, { recursive: true });
+  await writeTextFile(
+    join(schemaArtifactDirectory, "test-results.json"),
+    JSON.stringify(schemaMismatch),
+  );
+  await assert.rejects(
+    mergeTestResultsReports({
+      inputDirectory,
+      outputPath,
+      catalog,
+      env: mergeEnvironment(),
+    }),
+    /schema or provenance/u,
+  );
+  await assert.rejects(readFile(outputPath), { code: "ENOENT" });
+});
+
+test("interrupted run-level aggregation does not publish a partial report", async (t) => {
+  const catalog = await readLaneCatalog();
+  const temp = await mkdtemp(join(ROOT, ".test-results-merge-"));
+  t.after(() => rm(temp, { recursive: true, force: true }));
+  const inputDirectory = join(temp, "reports");
+  const outputPath = join(temp, "merged.json");
+  const source = createMergeSourceReport(catalog, "typecheck");
+  await saveMergeSource(inputDirectory, source, source.artifactReferences[0].name);
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(
+    mergeTestResultsReports({
+      inputDirectory,
+      outputPath,
+      catalog,
+      env: mergeEnvironment(),
+      signal: controller.signal,
+    }),
+    /aggregation was interrupted/u,
+  );
+  await assert.rejects(readFile(outputPath), { code: "ENOENT" });
 });
 
 test("missing, blocked, and interrupted lanes remain explicit; reports never retain raw output", async (t) => {
@@ -265,4 +500,12 @@ test("workflow contracts publish reports on failure without changing triggers or
   assert.match(release, /cancel-in-progress: false/u);
   assert.match(department, /pull_request:\n\s+workflow_dispatch:/u);
   assert.match(calibration, /on:\n\s+workflow_dispatch:/u);
+  const downloadAction = "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093";
+  assert.match(ci, /aggregate-test-results:\n\s+name: Aggregate CI test results\n\s+if: always\(\)\n\s+needs:/u);
+  assert.match(ci, /continue-on-error: true\n\s+runs-on: ubuntu-latest\n\s+timeout-minutes: 5/u);
+  assert.match(ci, new RegExp(`uses: ${downloadAction.replaceAll("/", "\\/")}`, "u"));
+  assert.match(ci, /pattern: automated-test-results-\*-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/u);
+  assert.match(release, /aggregate-test-results:\n\s+name: Aggregate release test results\n\s+if: always\(\)\n\s+needs:/u);
+  assert.match(release, new RegExp(`uses: ${downloadAction.replaceAll("/", "\\/")}`, "u"));
+  assert.match(release, /inputs\.run_full && 'full' \|\| 'standard'/u);
 });
