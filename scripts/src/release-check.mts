@@ -4325,6 +4325,29 @@ async function main(): Promise<void> {
           const [{ step, index }] = waiting.splice(nextIndex, 1);
           if (step.group === "api-test-shards") apiActive += 1;
           console.log(`[${index + 1}/${steps.length}] ${step.label}`);
+          const isApiUnitReleaseStep =
+            step.label === "API unit tests (release shard 1/7)";
+          const releaseVitestCountsDirectory =
+            process.env.TEST_RESULTS_RELEASE_VITEST_COUNTS_DIR?.trim();
+          const releaseVitestRunId =
+            process.env.TEST_RESULTS_RELEASE_VITEST_RUN_ID?.trim();
+          const releaseVitestSourceRevision =
+            process.env.TEST_RESULTS_RELEASE_VITEST_SOURCE_REVISION?.trim();
+          const apiUnitVitestCountEnvironment: Record<string, string> =
+            isApiUnitReleaseStep &&
+            releaseVitestCountsDirectory &&
+            releaseVitestRunId &&
+            /^[a-zA-Z0-9:._-]{1,200}$/.test(releaseVitestRunId) &&
+            releaseVitestSourceRevision &&
+            /^[a-f0-9]{40,64}$/i.test(releaseVitestSourceRevision)
+              ? {
+                  TEST_RESULTS_VITEST_COUNTS_DIR:
+                    releaseVitestCountsDirectory,
+                  TEST_RESULTS_VITEST_RUN_ID: releaseVitestRunId,
+                  TEST_RESULTS_VITEST_SOURCE_REVISION:
+                    releaseVitestSourceRevision,
+                }
+              : {};
           let task: Promise<void>;
           task = (async () => {
             const isSourceLibraryStep =
@@ -4334,7 +4357,8 @@ async function main(): Promise<void> {
               step.label === FULL_BROWSER_GATE_LABEL ||
               step.label === FULL_RESPONSIVE_WEBKIT_GATE_LABEL ||
               step.label === REPORT_KEY_ROTATION_PREFLIGHT_LABEL ||
-              isSourceLibraryStep
+              isSourceLibraryStep ||
+              Object.keys(apiUnitVitestCountEnvironment).length > 0
                 ? {
                     ...step,
                     ...(isSourceLibraryStep
@@ -4361,6 +4385,7 @@ async function main(): Promise<void> {
                               browserMainCountSummaryPath,
                           }
                         : {}),
+                      ...apiUnitVitestCountEnvironment,
                     },
                   }
                 : step;

@@ -53,6 +53,8 @@ const MAX_AGGREGATION_ENTRIES = 8192;
 const MAX_AGGREGATION_DEPTH = 12;
 const MAX_VITEST_COUNT_SUMMARIES = 128;
 const MAX_VITEST_COUNT_SUMMARY_BYTES = 4096;
+const API_RELEASE_VITEST_PACKAGE = "@workspace/api-server";
+const API_RELEASE_VITEST_STEP_LABEL = "API unit tests (release shard 1/7)";
 const VITEST_COUNT_REPORTER_PATH = resolve(
   scriptDir,
   "vitest-count-reporter.mjs",
@@ -1531,7 +1533,9 @@ async function runLane(laneId, command, args) {
   const isReleaseLane = ["release-standard", "release-full"].includes(laneId);
   const releaseSidecarPath = `${path}.release-steps.json`;
   if (isReleaseLane) await rm(releaseSidecarPath, { force: true });
-  const expectedVitestPackages = await expectedVitestPackagesForLane(laneId);
+  const expectedVitestPackages = isReleaseLane
+    ? [API_RELEASE_VITEST_PACKAGE]
+    : await expectedVitestPackagesForLane(laneId);
   let vitestCountsDirectory;
   if (expectedVitestPackages) {
     const candidateDirectory = `${path}.vitest-counts-${randomUUID()}`;
@@ -1548,9 +1552,18 @@ async function runLane(laneId, command, args) {
       ? {
           TEST_RESULTS_REPORT_ID: existing.run.id,
           TEST_RESULTS_RELEASE_STEPS_PATH: releaseSidecarPath,
+          ...(vitestCountsDirectory
+            ? {
+                TEST_RESULTS_RELEASE_VITEST_COUNTS_DIR:
+                  vitestCountsDirectory,
+                TEST_RESULTS_RELEASE_VITEST_RUN_ID: existing.run.id,
+                TEST_RESULTS_RELEASE_VITEST_SOURCE_REVISION:
+                  existing.sourceRevision,
+              }
+            : {}),
         }
       : {}),
-    ...(vitestCountsDirectory
+    ...(vitestCountsDirectory && !isReleaseLane
       ? {
           TEST_RESULTS_VITEST_COUNTS_DIR: vitestCountsDirectory,
           TEST_RESULTS_VITEST_RUN_ID: existing.run.id,
@@ -1591,9 +1604,17 @@ async function runLane(laneId, command, args) {
       if (sidecar.runId !== existing.run.id || !Array.isArray(sidecar.outcomes)) {
         throw new Error("Release step outcomes came from another run.");
       }
+      const outcomes =
+        counts === null
+          ? sidecar.outcomes
+          : sidecar.outcomes.map((result) =>
+              result.label === API_RELEASE_VITEST_STEP_LABEL
+                ? { ...result, counts }
+                : result,
+            );
       const mapped = mapReleaseStepOutcomes(
         catalog,
-        sidecar.outcomes,
+        outcomes,
         laneId,
         outcome.status,
       );

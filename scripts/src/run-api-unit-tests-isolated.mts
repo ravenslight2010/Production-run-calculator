@@ -10,6 +10,10 @@ const workspaceRoot = resolve(import.meta.dirname, "../..");
 const databaseCommandTimeoutMs = 30_000;
 const schemaPushTimeoutMs = 2 * 60_000;
 const unitTestTimeoutMs = 7 * 60_000;
+const API_UNIT_COUNT_REPORTER_PATH = resolve(
+  workspaceRoot,
+  "scripts/src/vitest-count-reporter.mjs",
+);
 
 type IsolationTarget = {
   adminUrl: URL;
@@ -20,6 +24,28 @@ type IsolationTarget = {
 let activeChild: ChildProcess | undefined;
 let receivedSignal: NodeJS.Signals | undefined;
 let signalKillTimer: NodeJS.Timeout | undefined;
+
+function vitestCountReporterArgs(
+  environment: NodeJS.ProcessEnv,
+): string[] {
+  if (
+    !environment.TEST_RESULTS_VITEST_COUNTS_DIR?.trim() ||
+    !environment.TEST_RESULTS_VITEST_RUN_ID?.trim() ||
+    !/^[a-zA-Z0-9:._-]{1,200}$/.test(
+      environment.TEST_RESULTS_VITEST_RUN_ID.trim(),
+    ) ||
+    !environment.TEST_RESULTS_VITEST_SOURCE_REVISION?.trim() ||
+    !/^[a-f0-9]{40,64}$/i.test(
+      environment.TEST_RESULTS_VITEST_SOURCE_REVISION.trim(),
+    )
+  ) {
+    return [];
+  }
+  return [
+    "--reporter=default",
+    `--reporter=${API_UNIT_COUNT_REPORTER_PATH}`,
+  ];
+}
 
 function signalProcessGroup(
   child: ChildProcess,
@@ -232,6 +258,7 @@ async function runIsolatedApiUnitTests(): Promise<void> {
         "run",
         "--exclude",
         "**/*.integration.test.ts",
+        ...vitestCountReporterArgs(childEnvironment),
       ],
       childEnvironment,
       unitTestTimeoutMs,

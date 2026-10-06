@@ -251,8 +251,21 @@ test("all public outcome classifications are handled without promoting missing w
 
 test("release step summaries map structured outcomes into the shared lane contract", async () => {
   const catalog = await readLaneCatalog();
+  const apiUnitCounts = {
+    total: 14,
+    completed: 14,
+    passed: 13,
+    failed: 1,
+    skipped: 0,
+    notRun: 0,
+  };
   const outcomes = [
-    { label: "API unit tests (release shard 1/7)", status: "PASS", durationMs: 20 },
+    {
+      label: "API unit tests (release shard 1/7)",
+      status: "FAIL",
+      durationMs: 20,
+      counts: apiUnitCounts,
+    },
     { label: "API integration tests (release shard 2/7)", status: "PASS", durationMs: 30 },
     { label: "API integration tests (release shard 3/7)", status: "PASS", durationMs: 35 },
     { label: "API integration tests (release shard 4/7)", status: "PASS", durationMs: 25 },
@@ -262,7 +275,8 @@ test("release step summaries map structured outcomes into the shared lane contra
   ];
   const mapped = mapReleaseStepOutcomes(catalog, outcomes, "release-full", "CANCELLED");
   const resultFor = (id) => mapped.find((result) => result.laneId === id);
-  assert.equal(resultFor("api-unit-isolated").status, "PASS");
+  assert.equal(resultFor("api-unit-isolated").status, "FAIL");
+  assert.deepEqual(resultFor("api-unit-isolated").counts, apiUnitCounts);
   assert.equal(resultFor("api-integration-shards").status, "PASS");
   assert.equal(resultFor("api-roles").status, "CANCELLED");
   assert.equal(resultFor("browser-webkit").status, "TIMEOUT");
@@ -560,6 +574,165 @@ test("Vitest count summaries validate runner totals and retain no case details",
   );
 });
 
+test("API unit release totals require one current summary and persist count-only", async (t) => {
+  const catalog = await readLaneCatalog();
+  const expectedRunId = "github:123456:2";
+  const expectedRevision = MERGE_REVISION;
+  const directory = await mkdtemp(join(ROOT, ".test-results-api-unit-counts-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const summaryPath = join(directory, "api-server-9876.json");
+  const summary = vitestSummaryFixture({
+    packageName: "@workspace/api-server",
+    totals: {
+      total: 5,
+      passed: 4,
+      failed: 1,
+      skipped: 0,
+      notRun: 0,
+    },
+  });
+  const expectedCounts = {
+    total: 5,
+    completed: 5,
+    passed: 4,
+    failed: 1,
+    skipped: 0,
+    notRun: 0,
+  };
+
+  assert.equal(
+    await readStructuredVitestTestCounts({
+      directory,
+      expectedRunId,
+      expectedRevision,
+      expectedPackages: ["@workspace/api-server"],
+    }),
+    null,
+    "a missing API unit summary must leave counts unavailable",
+  );
+  await writeTextFile(summaryPath, JSON.stringify(summary));
+  assert.deepEqual(
+    await readStructuredVitestTestCounts({
+      directory,
+      expectedRunId,
+      expectedRevision,
+      expectedPackages: ["@workspace/api-server"],
+    }),
+    expectedCounts,
+  );
+
+  const staleSummaries = [
+    { ...summary, runId: "github:999999:1" },
+    { ...summary, sourceRevision: "b".repeat(40) },
+    {
+      ...summary,
+      totals: { ...summary.totals, total: summary.totals.total + 1 },
+    },
+  ];
+  for (const stale of staleSummaries) {
+    await writeTextFile(summaryPath, JSON.stringify(stale));
+    assert.equal(
+      await readStructuredVitestTestCounts({
+        directory,
+        expectedRunId,
+        expectedRevision,
+        expectedPackages: ["@workspace/api-server"],
+      }),
+      null,
+    );
+  }
+
+  await writeTextFile(summaryPath, JSON.stringify(summary));
+  const extraSummary = join(directory, "unexpected-package.json");
+  await writeTextFile(
+    extraSummary,
+    JSON.stringify(vitestSummaryFixture()),
+  );
+  assert.equal(
+    await readStructuredVitestTestCounts({
+      directory,
+      expectedRunId,
+      expectedRevision,
+      expectedPackages: ["@workspace/api-server"],
+    }),
+    null,
+    "extra shard summaries must not be merged into API unit totals",
+  );
+  await rm(extraSummary);
+
+  const env = mergeEnvironment("release-standard", expectedRevision);
+  const report = createTestResultsReport({
+    catalog,
+    revision: expectedRevision,
+    runIdentity: getRunIdentity(env),
+    environment: {
+      kind: "ci",
+      platform: "linux",
+      architecture: "x64",
+      nodeVersion: "v24.0.0",
+    },
+    artifactName: "automated-test-results-release-standard-123456-2",
+    now: "2026-10-06T12:00:00.000Z",
+    env,
+  });
+  const reportPath = join(directory, "release-report.json");
+  await writeReport(reportPath, report, catalog);
+  const mapped = mapReleaseStepOutcomes(
+    catalog,
+    [
+      {
+        label: "API unit tests (release shard 1/7)",
+        status: "FAIL",
+        durationMs: 30,
+        counts: expectedCounts,
+      },
+    ],
+    "release-standard",
+    "FAIL",
+  );
+  const apiUnitLane = mapped.find(
+    (lane) => lane.laneId === "api-unit-isolated",
+  );
+  assert.ok(apiUnitLane);
+  await recordLaneResult({
+    reportPath,
+    catalog,
+    ...apiUnitLane,
+    env,
+    now: "2026-10-06T12:01:00.000Z",
+  });
+  const savedReport = await readFile(reportPath, "utf8");
+  const savedLane = JSON.parse(savedReport).lanes.find(
+    (lane) => lane.laneId === "api-unit-isolated",
+  );
+  assert.deepEqual(savedLane.counts, expectedCounts);
+  assert.ok(!savedReport.includes("sensitive"));
+  assert.ok(!savedReport.includes("case name"));
+});
+
+test("release API unit count settings reach only the isolated test runner", async () => {
+  const [releaseCheck, isolatedRunner] = await Promise.all([
+    readFile(join(ROOT, "scripts/src/release-check.mts"), "utf8"),
+    readFile(join(ROOT, "scripts/src/run-api-unit-tests-isolated.mts"), "utf8"),
+  ]);
+  assert.match(
+    releaseCheck,
+    /step\.label === "API unit tests \(release shard 1\/7\)"/u,
+  );
+  assert.match(
+    releaseCheck,
+    /TEST_RESULTS_RELEASE_VITEST_COUNTS_DIR/u,
+  );
+  assert.match(
+    isolatedRunner,
+    /vitestCountReporterArgs\(childEnvironment\)/u,
+  );
+  assert.match(
+    isolatedRunner,
+    /scripts\/src\/vitest-count-reporter\.mjs/u,
+  );
+});
+
 test("full Chromium summaries are run-bound, count-only, and map to browser-main", async () => {
   const options = {
     expectedRunId: "github:123456:2",
@@ -746,6 +919,14 @@ test("standard-only release aggregation preserves its release outcome", async (t
   const artifactName = source.artifactReferences[0].name;
   markLanePassed(source, "release-standard");
   markLanePassed(source, "api-unit-isolated");
+  source.lanes.find((lane) => lane.laneId === "api-unit-isolated").counts = {
+    total: 11,
+    completed: 11,
+    passed: 11,
+    failed: 0,
+    skipped: 0,
+    notRun: 0,
+  };
   await saveMergeSource(inputDirectory, source, artifactName);
 
   const result = await mergeTestResultsReports({
@@ -760,6 +941,17 @@ test("standard-only release aggregation preserves its release outcome", async (t
   assert.equal(result.sourceReportCount, 1);
   assert.equal(result.report.lanes.find((lane) => lane.laneId === "release-standard").status, "PASS");
   assert.equal(result.report.lanes.find((lane) => lane.laneId === "api-unit-isolated").status, "PASS");
+  assert.deepEqual(
+    result.report.lanes.find((lane) => lane.laneId === "api-unit-isolated").counts,
+    {
+      total: 11,
+      completed: 11,
+      passed: 11,
+      failed: 0,
+      skipped: 0,
+      notRun: 0,
+    },
+  );
   assert.ok(
     result.report.lanes
       .find((lane) => lane.laneId === "release-standard")
@@ -780,6 +972,14 @@ test("full release aggregation keeps both gate outcomes and uses full shared-lan
   const standardArtifactName = standard.artifactReferences[0].name;
   markLanePassed(standard, "release-standard");
   markLanePassed(standard, "api-unit-isolated", 12);
+  standard.lanes.find((lane) => lane.laneId === "api-unit-isolated").counts = {
+    total: 12,
+    completed: 12,
+    passed: 12,
+    failed: 0,
+    skipped: 0,
+    notRun: 0,
+  };
   await saveMergeSource(inputDirectory, standard, standardArtifactName);
 
   const full = createMergeSourceReport(catalog, "release-check-full", MERGE_REVISION, {
@@ -788,6 +988,14 @@ test("full release aggregation keeps both gate outcomes and uses full shared-lan
   const fullArtifactName = full.artifactReferences[0].name;
   markLanePassed(full, "release-full");
   markLanePassed(full, "api-unit-isolated", 34);
+  full.lanes.find((lane) => lane.laneId === "api-unit-isolated").counts = {
+    total: 34,
+    completed: 34,
+    passed: 34,
+    failed: 0,
+    skipped: 0,
+    notRun: 0,
+  };
   await saveMergeSource(inputDirectory, full, fullArtifactName);
 
   const result = await mergeTestResultsReports({
@@ -815,6 +1023,14 @@ test("full release aggregation keeps both gate outcomes and uses full shared-lan
     ),
   );
   assert.equal(lane("api-unit-isolated").durationMs, 34);
+  assert.deepEqual(lane("api-unit-isolated").counts, {
+    total: 34,
+    completed: 34,
+    passed: 34,
+    failed: 0,
+    skipped: 0,
+    notRun: 0,
+  });
   assert.ok(
     lane("api-unit-isolated").artifactReferences.some(
       (reference) => reference.name === fullArtifactName,
