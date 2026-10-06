@@ -1003,6 +1003,26 @@ export async function mergeTestResultsReports({
     reports.push({ report, artifactName });
   }
 
+  const standardReleaseReport = reports.find(
+    ({ report }) => report.run.job === "release-check-standard",
+  );
+  const fullReleaseReport = reports.find(
+    ({ report }) => report.run.job === "release-check-full",
+  );
+  const expectsFullRelease = env.TEST_RESULTS_EXPECT_FULL_RELEASE === "true";
+  const hasFullReleasePair = Boolean(standardReleaseReport && fullReleaseReport);
+  if (
+    (env.TEST_RESULTS_EXPECT_FULL_RELEASE !== undefined &&
+      !["true", "false"].includes(env.TEST_RESULTS_EXPECT_FULL_RELEASE)) ||
+    (expectsFullRelease && !hasFullReleasePair) ||
+    (fullReleaseReport && !standardReleaseReport) ||
+    (hasFullReleasePair &&
+      (expectedRun.event !== "workflow_dispatch" ||
+        env.TEST_RESULTS_EXPECT_FULL_RELEASE === "false"))
+  ) {
+    throw new Error("Refusing to merge an incomplete or unexpected full release report pair.");
+  }
+
   const merged = createTestResultsReport({
     catalog,
     revision: expectedRevision,
@@ -1027,17 +1047,42 @@ export async function mergeTestResultsReports({
         result.status === "BLOCKED" &&
         result.reason === "Required prerequisites did not complete.",
     );
+    const isExpectedReleasePairDuplicate =
+      hasFullReleasePair &&
+      attempted.length + explicitlyBlocked.length === 2 &&
+      new Set(
+        [...attempted, ...explicitlyBlocked].map(({ artifactName }) => artifactName),
+      ).size === 2 &&
+      [...attempted, ...explicitlyBlocked].every(({ artifactName }) =>
+        [
+          standardReleaseReport.artifactName,
+          fullReleaseReport.artifactName,
+        ].includes(artifactName),
+      );
     if (
-      attempted.length > 1 ||
-      explicitlyBlocked.length > 1 ||
-      (attempted.length > 0 && explicitlyBlocked.length > 0)
+      !isExpectedReleasePairDuplicate &&
+      (attempted.length > 1 ||
+        explicitlyBlocked.length > 1 ||
+        (attempted.length > 0 && explicitlyBlocked.length > 0))
     ) {
       throw new Error(`Refusing to merge duplicate results for test lane ${lane.id}.`);
     }
     const blocked = candidates.filter(({ result }) => result.status === "BLOCKED");
+    const releaseGateReport =
+      lane.id === "release-standard"
+        ? standardReleaseReport
+        : lane.id === "release-full"
+          ? fullReleaseReport
+          : undefined;
     const selected =
-      attempted[0] ??
-      blocked.find(({ result }) => result.reason === "Required prerequisites did not complete.") ??
+      (releaseGateReport &&
+        candidates.find(({ artifactName }) => artifactName === releaseGateReport.artifactName)) ||
+      (hasFullReleasePair &&
+        candidates.find(({ artifactName }) => artifactName === fullReleaseReport.artifactName)) ||
+      attempted[0] ||
+      blocked.find(
+        ({ result }) => result.reason === "Required prerequisites did not complete.",
+      ) ||
       blocked[0];
     if (selected) {
       mergedLaneById.set(lane.id, {

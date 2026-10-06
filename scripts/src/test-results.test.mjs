@@ -23,7 +23,11 @@ import {
 const ROOT = resolve(new URL("../..", import.meta.url).pathname);
 const MERGE_REVISION = "a".repeat(40);
 
-function mergeEnvironment(job = "aggregate-test-results", revision = MERGE_REVISION) {
+function mergeEnvironment(
+  job = "aggregate-test-results",
+  revision = MERGE_REVISION,
+  { event = "pull_request", expectFullRelease = false } = {},
+) {
   return {
     GITHUB_ACTIONS: "true",
     GITHUB_SHA: revision,
@@ -31,13 +35,19 @@ function mergeEnvironment(job = "aggregate-test-results", revision = MERGE_REVIS
     GITHUB_RUN_ATTEMPT: "2",
     GITHUB_WORKFLOW: "CI",
     GITHUB_JOB: job,
-    GITHUB_EVENT_NAME: "pull_request",
+    GITHUB_EVENT_NAME: event,
+    TEST_RESULTS_EXPECT_FULL_RELEASE: String(expectFullRelease),
     TEST_RESULTS_ARTIFACT_NAME: "automated-test-results-merged-ci-123456-2",
   };
 }
 
-function createMergeSourceReport(catalog, job, revision = MERGE_REVISION) {
-  const env = mergeEnvironment(job, revision);
+function createMergeSourceReport(
+  catalog,
+  job,
+  revision = MERGE_REVISION,
+  { event = "pull_request" } = {},
+) {
+  const env = mergeEnvironment(job, revision, { event });
   const artifactName = `automated-test-results-${job}-123456-2`;
   return createTestResultsReport({
     catalog,
@@ -55,16 +65,16 @@ function createMergeSourceReport(catalog, job, revision = MERGE_REVISION) {
   });
 }
 
-function markLanePassed(report, laneId) {
+function markLanePassed(report, laneId, durationMs = 12) {
   const result = report.lanes.find((lane) => lane.laneId === laneId);
   assert.ok(result, `${laneId} must be present in the source report`);
   result.status = "PASS";
   result.reason = undefined;
   result.attempted = true;
-  result.durationMs = 12;
+  result.durationMs = durationMs;
   result.failure = null;
   result.startedAt = "2026-10-06T12:00:00.000Z";
-  result.finishedAt = "2026-10-06T12:00:00.012Z";
+  result.finishedAt = new Date(Date.parse(result.startedAt) + durationMs).toISOString();
 }
 
 function markLaneBlocked(report, laneId) {
@@ -361,6 +371,128 @@ test("run-level aggregation preserves explicit results and leaves missing lanes 
   assert.ok(result.report.artifactReferences.some((reference) => reference.name === blockedArtifactName));
   assert.ok(result.report.artifactReferences.some((reference) => reference.name === mergeEnvironment().TEST_RESULTS_ARTIFACT_NAME));
   validateReport(JSON.parse(await readFile(outputPath, "utf8")), catalog);
+});
+
+test("standard-only release aggregation preserves its release outcome", async (t) => {
+  const catalog = await readLaneCatalog();
+  const temp = await mkdtemp(join(ROOT, ".test-results-merge-"));
+  t.after(() => rm(temp, { recursive: true, force: true }));
+  const inputDirectory = join(temp, "reports");
+  const outputPath = join(temp, "merged.json");
+  const source = createMergeSourceReport(catalog, "release-check-standard", MERGE_REVISION, {
+    event: "workflow_dispatch",
+  });
+  const artifactName = source.artifactReferences[0].name;
+  markLanePassed(source, "release-standard");
+  markLanePassed(source, "api-unit-isolated");
+  await saveMergeSource(inputDirectory, source, artifactName);
+
+  const result = await mergeTestResultsReports({
+    inputDirectory,
+    outputPath,
+    catalog,
+    env: mergeEnvironment("aggregate-test-results", MERGE_REVISION, {
+      event: "workflow_dispatch",
+    }),
+  });
+
+  assert.equal(result.sourceReportCount, 1);
+  assert.equal(result.report.lanes.find((lane) => lane.laneId === "release-standard").status, "PASS");
+  assert.equal(result.report.lanes.find((lane) => lane.laneId === "api-unit-isolated").status, "PASS");
+  assert.ok(
+    result.report.lanes
+      .find((lane) => lane.laneId === "release-standard")
+      .artifactReferences.some((reference) => reference.name === artifactName),
+  );
+  assert.ok(result.report.artifactReferences.some((reference) => reference.name === artifactName));
+});
+
+test("full release aggregation keeps both gate outcomes and uses full shared-lane results", async (t) => {
+  const catalog = await readLaneCatalog();
+  const temp = await mkdtemp(join(ROOT, ".test-results-merge-"));
+  t.after(() => rm(temp, { recursive: true, force: true }));
+  const inputDirectory = join(temp, "reports");
+  const outputPath = join(temp, "merged.json");
+  const standard = createMergeSourceReport(catalog, "release-check-standard", MERGE_REVISION, {
+    event: "workflow_dispatch",
+  });
+  const standardArtifactName = standard.artifactReferences[0].name;
+  markLanePassed(standard, "release-standard");
+  markLanePassed(standard, "api-unit-isolated", 12);
+  await saveMergeSource(inputDirectory, standard, standardArtifactName);
+
+  const full = createMergeSourceReport(catalog, "release-check-full", MERGE_REVISION, {
+    event: "workflow_dispatch",
+  });
+  const fullArtifactName = full.artifactReferences[0].name;
+  markLanePassed(full, "release-full");
+  markLanePassed(full, "api-unit-isolated", 34);
+  await saveMergeSource(inputDirectory, full, fullArtifactName);
+
+  const result = await mergeTestResultsReports({
+    inputDirectory,
+    outputPath,
+    catalog,
+    env: mergeEnvironment("aggregate-test-results", MERGE_REVISION, {
+      event: "workflow_dispatch",
+      expectFullRelease: true,
+    }),
+  });
+
+  const lane = (laneId) => result.report.lanes.find((item) => item.laneId === laneId);
+  assert.equal(result.sourceReportCount, 2);
+  assert.equal(lane("release-standard").status, "PASS");
+  assert.equal(lane("release-full").status, "PASS");
+  assert.ok(
+    lane("release-standard").artifactReferences.some(
+      (reference) => reference.name === standardArtifactName,
+    ),
+  );
+  assert.ok(
+    lane("release-full").artifactReferences.some(
+      (reference) => reference.name === fullArtifactName,
+    ),
+  );
+  assert.equal(lane("api-unit-isolated").durationMs, 34);
+  assert.ok(
+    lane("api-unit-isolated").artifactReferences.some(
+      (reference) => reference.name === fullArtifactName,
+    ),
+  );
+  assert.ok(result.report.artifactReferences.some((reference) => reference.name === standardArtifactName));
+  assert.ok(result.report.artifactReferences.some((reference) => reference.name === fullArtifactName));
+  validateReport(JSON.parse(await readFile(outputPath, "utf8")), catalog);
+});
+
+test("full release aggregation rejects shared-lane claims from an unrelated job", async (t) => {
+  const catalog = await readLaneCatalog();
+  const temp = await mkdtemp(join(ROOT, ".test-results-merge-"));
+  t.after(() => rm(temp, { recursive: true, force: true }));
+  const inputDirectory = join(temp, "reports");
+  const outputPath = join(temp, "merged.json");
+  for (const job of ["release-check-standard", "release-check-full", "typecheck"]) {
+    const source = createMergeSourceReport(catalog, job, MERGE_REVISION, {
+      event: "workflow_dispatch",
+    });
+    if (job === "release-check-standard") markLanePassed(source, "release-standard");
+    if (job === "release-check-full") markLanePassed(source, "release-full");
+    markLanePassed(source, "api-unit-isolated");
+    await saveMergeSource(inputDirectory, source, source.artifactReferences[0].name);
+  }
+
+  await assert.rejects(
+    mergeTestResultsReports({
+      inputDirectory,
+      outputPath,
+      catalog,
+      env: mergeEnvironment("aggregate-test-results", MERGE_REVISION, {
+        event: "workflow_dispatch",
+        expectFullRelease: true,
+      }),
+    }),
+    /duplicate results for test lane api-unit-isolated/u,
+  );
+  await assert.rejects(readFile(outputPath), { code: "ENOENT" });
 });
 
 test("run-level aggregation records every lane when no job reports were uploaded", async (t) => {
@@ -668,7 +800,6 @@ test("workflow contracts publish reports on failure without changing triggers or
   assert.match(ci, /pattern: automated-test-results-\*-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/u);
   assert.match(release, /aggregate-test-results:\n\s+name: Aggregate release test results\n\s+if: always\(\)\n\s+needs:/u);
   assert.match(release, new RegExp(`uses: ${downloadAction.replaceAll("/", "\\/")}`, "u"));
-  assert.match(release, /inputs\.run_full && 'full' \|\| 'standard'/u);
   assert.match(apiLoad, /^on:\n\s+workflow_dispatch:\s*$/mu);
   assert.doesNotMatch(apiLoad, /^\s+(?:push|pull_request|schedule):/mu);
   assert.match(apiLoad, /^permissions:\n\s+contents: read\s*$/mu);
@@ -687,4 +818,12 @@ test("workflow contracts publish reports on failure without changing triggers or
   for (const workflow of [ci, release]) {
     assert.doesNotMatch(workflow, /test:load:isolated|api-load-workload/u);
   }
+  assert.match(
+    release,
+    /TEST_RESULTS_EXPECT_FULL_RELEASE: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.run_full \}\}/u,
+  );
+  assert.match(
+    release,
+    /pattern: automated-test-results-release-\$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.run_full && '\*' \|\| 'standard' \}\}-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/u,
+  );
 });

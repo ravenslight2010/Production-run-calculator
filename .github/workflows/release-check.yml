@@ -457,16 +457,17 @@ jobs:
     env:
       TEST_RESULTS_REPORT_PATH: test-evidence/merged-test-results.json
       TEST_RESULTS_ARTIFACT_NAME: automated-test-results-merged-release-${{ github.run_id }}-${{ github.run_attempt }}
+      TEST_RESULTS_EXPECT_FULL_RELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.run_full }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      # Full dispatch also runs the standard job. Prefer the full report there,
-      # because it covers the shared lanes and avoids merging duplicate claims.
-      - name: Download the selected release report from this workflow run
+      # Full dispatch also runs the standard job. Download both reports there so
+      # aggregation can retain both gate outcomes and prefer full shared lanes.
+      - name: Download release test reports from this workflow run
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          pattern: automated-test-results-release-${{ github.event_name == 'workflow_dispatch' && inputs.run_full && 'full' || 'standard' }}-${{ github.run_id }}-${{ github.run_attempt }}
+          pattern: automated-test-results-release-${{ github.event_name == 'workflow_dispatch' && inputs.run_full && '*' || 'standard' }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: test-evidence/reports
       - name: Merge and validate run-level test report
         run: node scripts/src/test-results.mjs merge --input-dir test-evidence/reports
