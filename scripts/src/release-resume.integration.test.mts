@@ -13,10 +13,16 @@ import { computeSourceLibraryEvidenceId } from "./verify-source-library-reconcil
 import { FULL_BROWSER_EXPECTED_CASES } from "./full-browser-case-contract.mts";
 import { WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES } from "./webkit-case-contract.mts";
 import {
+  BROWSER_MAIN_COUNT_SUMMARY_SUFFIX,
+  mapReleaseStepOutcomes,
+  readLaneCatalog,
+} from "./test-results.mjs";
+import {
   TYPESCRIPT_7_RESOURCE_BUDGETS,
   typescript7MeasuredCheckNames,
   typescript7ExpectedMeasurementCommandNames,
 } from "./typescript-7-resource-contract.mts";
+import { captureReleaseIdentity } from "./release-source-identity.mjs";
 
 type FixtureStep = {
   label: string;
@@ -57,7 +63,7 @@ async function runReleaseCheck(
   args: string[] = [],
   envOverrides: Record<string, string> = {},
 ): Promise<{ code: number; output: string }> {
-  const revision = await getCurrentRevision();
+  const revision = captureReleaseIdentity(rootDir).revision;
   await writeFile(
     join(evidenceDir, "report-key-rotation-preflight.json"),
     `${JSON.stringify(
@@ -188,6 +194,7 @@ async function runReleaseCheck(
         NODE_ENV: "test",
         E2E_TEST_DB: "1",
         RELEASE_CHECK_SKIP_PRODUCTION_SOURCE_LIBRARY_RECONCILIATION: "1",
+        SOURCE_LIBRARY_RECONCILIATION_ENVIRONMENT: "development",
         RELEASE_EVIDENCE_DIR: evidenceDir,
         RELEASE_CHECK_FIXTURE_STEPS: JSON.stringify(steps),
         ...envOverrides,
@@ -2045,8 +2052,16 @@ async function runFullModeScenario(): Promise<void> {
   const markerDir = await mkdtemp(
     join(tmpdir(), "release-resume-full-marker-"),
   );
+  const countSummaryDir = await mkdtemp(
+    join(rootDir, ".release-resume-count-summary-"),
+  );
+  const releaseStepsPath = join(countSummaryDir, "release-steps.json");
+  const countSummaryPath =
+    releaseStepsPath + BROWSER_MAIN_COUNT_SUMMARY_SUFFIX;
+  const interruptedRunId = "local:release-resume-first";
+  const resumedRunId = "local:release-resume-next";
   const marker = join(markerDir, "full-browser-started");
-  const revision = await getCurrentRevision();
+  const revision = captureReleaseIdentity(rootDir).revision;
   const browserReport = [
     "# Full Browser Release Run",
     "",
@@ -2156,7 +2171,15 @@ async function runFullModeScenario(): Promise<void> {
       "utf8",
     );
 
-    const interrupted = await runReleaseCheck(evidenceDir, steps, ["--full"]);
+    const interrupted = await runReleaseCheck(
+      evidenceDir,
+      steps,
+      ["--full"],
+      {
+        TEST_RESULTS_RELEASE_STEPS_PATH: releaseStepsPath,
+        TEST_RESULTS_REPORT_ID: interruptedRunId,
+      },
+    );
     assert.equal(interrupted.code, 1, interrupted.output);
     assert.match(
       interrupted.output,
@@ -2187,6 +2210,30 @@ async function runFullModeScenario(): Promise<void> {
       "full mode must checkpoint the interrupted browser gate and blocked dependent",
     );
     assert.equal(await readFile(marker, "utf8"), "started\n");
+    await writeFile(
+      countSummaryPath,
+      `${JSON.stringify({
+        schemaVersion: 1,
+        browser: "chromium",
+        runId: interruptedRunId,
+        revision: firstCheckpoint.revision,
+        result: "passed",
+        generatedAt: new Date().toISOString(),
+        counts: {
+          total: FULL_BROWSER_EXPECTED_CASES,
+          completed: FULL_BROWSER_EXPECTED_CASES,
+          passed: FULL_BROWSER_EXPECTED_CASES,
+          failed: 0,
+          skipped: 0,
+          notRun: 0,
+        },
+      })}\n`,
+      "utf8",
+    );
+    assert.ok(
+      await readFile(countSummaryPath, "utf8"),
+      "the interrupted run fixture must seed a prior Chromium count summary",
+    );
 
     const interruptedReport = await readFile(
       join(evidenceDir, "release-check-report.md"),
@@ -2230,16 +2277,65 @@ async function runFullModeScenario(): Promise<void> {
       "an interrupted full browser gate must not produce a passing report",
     );
 
-    const resumed = await runReleaseCheck(evidenceDir, steps, [
-      "--full",
-      "--resume",
-    ]);
+    const resumed = await runReleaseCheck(
+      evidenceDir,
+      steps,
+      ["--full", "--resume"],
+      {
+        TEST_RESULTS_RELEASE_STEPS_PATH: releaseStepsPath,
+        TEST_RESULTS_REPORT_ID: resumedRunId,
+      },
+    );
     assert.equal(resumed.code, 0, resumed.output);
     assert.match(resumed.output, /Resuming after 1 completed gate\(s\)\./);
     assert.doesNotMatch(
       resumed.output,
       /Resuming after 2 completed gate\(s\)\./,
       "resume must rerun the failed full browser gate",
+    );
+    await assert.rejects(
+      readFile(countSummaryPath, "utf8"),
+      { code: "ENOENT" },
+      "resume must remove the prior run's Chromium count summary",
+    );
+    const releaseSteps = JSON.parse(
+      await readFile(releaseStepsPath, "utf8"),
+    ) as {
+      runId: string;
+      outcomes: Array<{
+        label: string;
+        status: string;
+        durationMs: number;
+        counts?: {
+          total: number;
+          completed: number;
+          passed: number;
+          failed: number;
+          skipped: number;
+          notRun: number;
+        };
+      }>;
+    };
+    assert.equal(
+      releaseSteps.runId,
+      resumedRunId,
+      "the resumed release sidecar must use the new run identity",
+    );
+    const browserOutcome = releaseSteps.outcomes.find(
+      (outcome) => outcome.label === "full browser E2E suite",
+    );
+    assert.ok(browserOutcome, "the resumed browser outcome must be recorded");
+    const mappedOutcomes = mapReleaseStepOutcomes(
+      await readLaneCatalog(),
+      [browserOutcome],
+      "release-full",
+      "PASS",
+    );
+    assert.equal(
+      mappedOutcomes.find((outcome) => outcome.laneId === "browser-main")
+        ?.counts,
+      null,
+      "browser-main counts must stay null without a fresh summary for the resumed run",
     );
 
     const report = await readFile(
@@ -2295,6 +2391,7 @@ async function runFullModeScenario(): Promise<void> {
   } finally {
     await rm(evidenceDir, { recursive: true, force: true });
     await rm(markerDir, { recursive: true, force: true });
+    await rm(countSummaryDir, { recursive: true, force: true });
   }
 }
 
@@ -2331,7 +2428,8 @@ async function runTamperedSourceLibraryPreflightCheckpointScenario(): Promise<vo
     join(tmpdir(), "release-resume-tampered-source-preflight-marker-"),
   );
   const marker = join(markerDir, "gate-started");
-  const revision = await getCurrentRevision();
+  const identity = captureReleaseIdentity(rootDir);
+  const revision = identity.revision;
   const sourcePreflightLabel =
     "source-library reconciliation database preflight";
   const steps: FixtureStep[] = [

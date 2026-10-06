@@ -27,6 +27,19 @@ CI artifact handoffs must use the same filtered full revision selected by the re
 
 **How to apply:** Keep the standard and full CI handoff revision selector aligned with `releaseRevisionGitArgs`, and preserve the explicit mode/revision checks.
 
+Release-runner integration fixtures must bind checkpoint and preflight evidence
+to the assessed release identity, not Git HEAD. When production reconciliation
+is skipped for a disposable test, the checkpoint's source-library revision is
+the same assessed revision.
+
+**Why:** Release assessment identities include verification inputs and can
+differ from Git HEAD; fixtures tied to HEAD are rejected as stale before their
+intended resume assertions run.
+
+**How to apply:** Build test-only release evidence from the release identity
+captured for that checkout, and keep the fixture's source-library environment
+consistent with whether production reconciliation actually ran.
+
 A GitHub push SHA proves which source commit was pushed, not which commit a production deployment actually published. Keep push evidence separate until a trusted publish event or provider-verified handoff binds that SHA to the deployment identity.
 
 **Why:** Publishing can be a separate action from pushing, so a valid pushed commit alone cannot establish the live deployment's identity.

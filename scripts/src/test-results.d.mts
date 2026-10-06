@@ -7,7 +7,28 @@ export type StructuredTestCounts = {
   notRun: number;
 };
 
+export type TestResultsLaneCatalog = {
+  schemaVersion: number;
+  lanes: Array<{ id: string; [key: string]: unknown }>;
+};
+
+export type ReleaseStepOutcome = {
+  label: string;
+  status: string;
+  durationMs: number;
+  counts?: StructuredTestCounts;
+};
+
 export const BROWSER_MAIN_COUNT_SUMMARY_SUFFIX: string;
+
+export function mapReleaseStepOutcomes(
+  catalog: TestResultsLaneCatalog,
+  outcomes: ReleaseStepOutcome[],
+  releaseLaneId: string,
+  releaseOutcome: string,
+): Array<{ laneId: string; counts: StructuredTestCounts | null }>;
+
+export function readLaneCatalog(path?: string): Promise<TestResultsLaneCatalog>;
 
 export function parseFullBrowserTestCounts(
   summary: unknown,
