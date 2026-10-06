@@ -134,6 +134,7 @@
 - [Retry](release-finalization-retry.md) + [workspace locks](workspace-lock-refresh-pruning.md) + [browser refresh](full-release-browser-refresh.md) — retry safely and refresh stale state.
 - [Release-run lifecycle](release-run-cancellation.md) + [nested pnpm exits](nested-pnpm-exit-codes.md) — check child/evidence state after cancellation; assert structured outcomes.
 - [Local release browser fixtures](local-release-browser-fixture-base.md) — bind fixtures to local API; distinguish slow cold production builds from API readiness timeouts.
+- [Disposable PostgreSQL socket paths](local-postgres-socket-dir.md) — local PostgreSQL clusters need a writable per-cluster Unix socket directory when `/run/postgresql` is absent.
 - [Section-scoped online edits](section-scoped-online-edits.md) — transient peer locks are UX only; correctness uses row serialization, complete baselines, and durable snapshot fencing.
 - [Automatic staged supply](automatic-staged-supply.md) — active Sauce/Frontline caps are pipeline limits, not lifetime production caps; derive stages from canonical cumulative progress.
 - [Readiness evidence](readiness-evidence.md) — retain only allowlisted health outcomes with explicit deployment/revision identity, bounded samples, and expiry.

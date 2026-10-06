@@ -22,6 +22,7 @@
     "test:release:sync-sse": "vitest run src/routes/sync.integration.test.ts --testNamePattern='\\/sync\\/events'",
     "test:sync-convergence:isolated": "bash ../../scripts/src/run-isolated-sync-convergence.sh src/routes/sync.convergence.integration.test.ts",
     "test:release:concurrency": "timeout 180s sh -c 'pnpm exec vitest run src/routes/inventory.integration.test.ts --testNamePattern=\"concurrent|parallel|same run twice\" && pnpm exec vitest run src/routes/sync.integration.test.ts --testNamePattern=\"concurrent|burst under pool pressure|repeated first-write burst\"'",
+    "test:load:isolated": "node ../../scripts/src/run-api-load-workload.mjs",
     "benchmark:second-pass-reviewer-live": "../../scripts/node_modules/.bin/tsx scripts/benchmark-second-pass-reviewer-live.mts"
   },
   "dependencies": {

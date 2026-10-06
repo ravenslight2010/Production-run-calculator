@@ -516,6 +516,38 @@ The test covers healthy baseline/history retention, malformed and unsafe
 reports, expired artifacts, unsafe archive paths, and the invariant that the
 calibration lane does not change the release-gate inventory.
 
+
+## Bounded API application workload
+
+The API application-load lane is separate from release-shard calibration. It
+repeats real live/scheduled sync writes and inventory consume/adjust requests
+against an isolated PostgreSQL database; it does not measure release shard
+capacity or represent production traffic.
+
+Run `.github/workflows/api-load-workload.yml` through `workflow_dispatch`, or
+from a test environment with its dedicated loopback disposable PostgreSQL
+service and explicit `API_LOAD_TEST_DISPOSABLE_DB=1` acknowledgement:
+
+```bash
+DATABASE_URL=postgresql://postgres:api-load-ci@127.0.0.1:5432/api_load_test_admin \
+  NODE_ENV=test API_LOAD_TEST_DISPOSABLE_DB=1 \
+  pnpm --filter @workspace/api-server run test:load:isolated
+```
+
+The runner accepts only the named loopback `api_load_test_admin` service,
+creates a uniquely named `api_load_test_*` child database, applies the schema,
+and drops that child database during normal, failed, timed-out, or interrupted
+cleanup. It rejects production/deployment contexts and does not forward
+inherited secrets into the test process. The profile has at most four clients,
+four rounds, four sync attempts per write, 187 API requests, twelve in-flight
+requests, and six minutes total runtime. Its
+revision-bound result artifact contains only bounded operation counts, elapsed
+times, status, and an allowlisted failure classification; it contains no
+request bodies or raw logs. Timings are diagnostic data only, not a product
+performance target. Reports show `NOT_RUN` unless this opt-in lane was invoked.
+It is intentionally absent from routine CI and both standard and full release
+gate inventories.
+
 Any non-passing shard, timeout, lock/setup failure, missing shard startup, or
 observed cap violation fails the lane with a clear `Concurrency cap unsafe`
 diagnostic. This is a calibration signal, not a release GO/NO-GO decision:

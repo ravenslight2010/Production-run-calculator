@@ -195,6 +195,16 @@
       "safety": "isolated disposable database only"
     },
     {
+      "id": "api-load-workload",
+      "surface": "Bounded API application workload",
+      "command": "pnpm --filter @workspace/api-server run test:load:isolated",
+      "trigger": "manual GitHub Actions workflow dispatch only",
+      "runsByDefault": false,
+      "environment": ["Node.js 24", "job-owned disposable PostgreSQL service"],
+      "prerequisites": ["explicit API load disposable-database acknowledgement", "loopback api_load_test_admin database", "pnpm frozen install"],
+      "safety": "opt-in; unique child database is dropped after the run; four clients, four rounds, at most four sync attempts per write, 187 total API requests, twelve in-flight requests, six-minute total bound; timings are diagnostic only"
+    },
+    {
       "id": "shared-library-focused",
       "surface": "Pure calculations and shared decision logic",
       "command": "Package test scripts for inventory-math, production-rules, spec-reconcile, spec-import, scheduled-recipe-check, spec-export, and corpus-harness",

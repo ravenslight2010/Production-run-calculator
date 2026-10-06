@@ -629,17 +629,18 @@ test("failure metadata rejects unbounded messages and unsafe report paths", asyn
 });
 
 test("workflow contracts publish reports on failure without changing triggers or concurrency", async () => {
-  const [ci, release, department, calibration] = await Promise.all(
+  const [ci, release, department, calibration, apiLoad] = await Promise.all(
     [
       ".github/workflows/ci.yml",
       ".github/workflows/release-check.yml",
       ".github/workflows/department-navigation.yml",
       ".github/workflows/release-concurrency-calibration.yml",
+      ".github/workflows/api-load-workload.yml",
     ].map((path) => readFile(join(ROOT, path), "utf8")),
   );
   const catalog = await readLaneCatalog();
   const normalize = (command) => command.replaceAll(/["']/g, "").replaceAll(/\s+/g, " ").trim();
-  for (const workflow of [ci, release, department, calibration]) {
+  for (const workflow of [ci, release, department, calibration, apiLoad]) {
     const wrapped = [
       ...workflow.matchAll(
         /run: node scripts\/src\/test-results\.mjs run --lane ([a-z0-9-]+) -- (.+)$/gmu,
@@ -668,4 +669,22 @@ test("workflow contracts publish reports on failure without changing triggers or
   assert.match(release, /aggregate-test-results:\n\s+name: Aggregate release test results\n\s+if: always\(\)\n\s+needs:/u);
   assert.match(release, new RegExp(`uses: ${downloadAction.replaceAll("/", "\\/")}`, "u"));
   assert.match(release, /inputs\.run_full && 'full' \|\| 'standard'/u);
+  assert.match(apiLoad, /^on:\n\s+workflow_dispatch:\s*$/mu);
+  assert.doesNotMatch(apiLoad, /^\s+(?:push|pull_request|schedule):/mu);
+  assert.match(apiLoad, /^permissions:\n\s+contents: read\s*$/mu);
+  assert.doesNotMatch(apiLoad, /\$\{\{\s*secrets\./u);
+  assert.match(apiLoad, /postgres:16@sha256:[a-f0-9]{64}/u);
+  assert.match(apiLoad, /timeout-minutes:\s*(?:[1-9]|1[0-5])\s*$/mu);
+  assert.match(apiLoad, /retention-days:\s*14/u);
+  assert.match(apiLoad, /contents: read/u);
+  assert.doesNotMatch(apiLoad, /actions:\s*write|contents:\s*write|pull-requests:\s*write/u);
+  const apiLoadLane = catalog.lanes.find((lane) => lane.id === "api-load-workload");
+  assert.equal(apiLoadLane?.runsByDefault, false);
+  assert.equal(
+    normalize(apiLoadLane?.command),
+    normalize("pnpm --filter @workspace/api-server run test:load:isolated"),
+  );
+  for (const workflow of [ci, release]) {
+    assert.doesNotMatch(workflow, /test:load:isolated|api-load-workload/u);
+  }
 });

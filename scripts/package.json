@@ -33,7 +33,7 @@
     "check:evaluation-report-retention": "tsx ./src/check-evaluation-report-retention.mts",
     "test:evaluation-report-retention": "tsx --test ./src/check-evaluation-report-retention.test.mts && pnpm run check:evaluation-report-retention && pnpm run test:benchmark-report-privacy",
     "test:skill-catalog": "tsx ./src/skill-catalog.test.mts",
-    "test:results": "node --test ./src/test-results.test.mjs",
+    "test:results": "node --test ./src/test-results.test.mjs ./src/run-api-load-workload.test.mjs",
     "test:results:local": "node ./src/test-results.mjs local",
     "test:task-policy": "tsx ./src/check-task-policy.test.mts && pnpm run test:follow-up-ordering",
     "review:follow-up-ordering": "node ./src/review-follow-up-ordering.mjs",
