@@ -586,7 +586,7 @@
       "ownership": "project-owned",
       "coverage": "project-owned",
       "path": ".agents/skills/db-schema-change/SKILL.md",
-      "description": "Compatibility router for any Postgres schema change under lib/db/src/schema/*. Use whenever modifying, adding, or removing a Drizzle table/column, or when a migration/db push is needed. For a new field/column on an existing table, follow schema-change-checklist as the canonical detailed procedure; otherwise use this entry for additive safety, API/codegen, typecheck, push-force, and data-heal routing.",
+      "description": "Route Postgres/Drizzle schema work that needs additive-safety, API/codegen, typecheck, push-force, or data-heal guidance. For a new field or column on an existing table, use schema-change-checklist directly as the canonical procedure; use this router for new tables and other schema changes.",
       "evals": [
         {
           "id": "db-schema-change-trigger-1",
@@ -1126,7 +1126,7 @@
       "ownership": "project-owned",
       "coverage": "project-owned",
       "path": ".agents/skills/verify-before-commit/SKILL.md",
-      "description": "Verify changes before committing or pushing, and on any change to the repo. Use whenever about to commit, push, or claim a \"green build\" / \"tests pass\" / \"ready to deploy\" for this app. Encodes the local verification discipline for this repo: git status always clean before commit, locked dependency overrides kept in sync, typecheck (not build) because this machine is ARM, rely on CI for the real test gate, and check .agents/memory before touching unfamiliar areas.",
+      "description": "Verify local repository state and supported checks before committing or pushing changes, and before claiming changed-code typechecks or tests are green. Use release-checklist for full pre-publish verification and production-go for the final production GO/NO-GO decision.",
       "evals": [
         {
           "id": "verify-before-commit-trigger-1",
@@ -1479,11 +1479,11 @@
     {
       "name": "db-schema-change",
       "positive_overlap": [
-        9,
+        8,
         5
       ],
       "negative_overlap": [
-        4,
+        3,
         1
       ],
       "under_trigger_signal": 0,
@@ -1731,12 +1731,12 @@
     {
       "name": "verify-before-commit",
       "positive_overlap": [
-        9,
-        7
+        6,
+        3
       ],
       "negative_overlap": [
         2,
-        2
+        0
       ],
       "under_trigger_signal": 0,
       "over_trigger_signal": 0,
