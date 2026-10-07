@@ -35,6 +35,8 @@ changes to secondary or platform-managed content.
 
 ## Composition boundaries
 
+- `brainstorming` hands an approved design to `writing-plans`; in Plan mode,
+  that plan is persisted through the project-task workflow.
 - `testing` covers ordinary Playwright browser flows.
   `operational-browser-verification` adds manager, scope, navigation, reload,
   import-review, sync-diagnostics, and startup/log evidence requirements.
