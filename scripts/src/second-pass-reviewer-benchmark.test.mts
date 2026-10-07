@@ -57,11 +57,11 @@ assert.deepEqual(actual.decision.thresholdPasses, {
   reviewerFailureRate: false,
 });
 assert.equal(actual.pairedOutcome.reviewer.uniqueMaterialCatches, 0);
-assert.equal(actual.pairedOutcome.reviewer.duplicateWarnings, 2);
+assert.equal(actual.pairedOutcome.reviewer.duplicateWarnings, 0);
 assert.equal(actual.pairedOutcome.reviewer.reviewerFailures, 301);
-assert.equal(actual.pairedOutcome.reviewer.noOpVerdicts, 302);
+assert.equal(actual.pairedOutcome.reviewer.noOpVerdicts, 304);
 assert.equal(actual.pairedOutcome.reviewer.falseWarningRate, null);
-assert.equal(actual.measuredEffects.p95LatencyMs, 17_001);
+assert.equal(actual.measuredEffects.p95LatencyMs, 19_084);
 assert.match(actual.decision.authority, /human confirmation/);
 assert.deepEqual(
   reviewerEvaluatorProvenance("a".repeat(64)),

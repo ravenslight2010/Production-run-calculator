@@ -1,6 +1,6 @@
 {
   "formatVersion": 2,
-  "capturedAt": "2026-10-06T11:17:00.238Z",
+  "capturedAt": "2026-10-06T21:23:32.257Z",
   "environment": "candidate-workspace",
   "sourceRevision": "unknown (dirty worktree; evaluator and lockfile are hashed)",
   "sourceHash": "1d8a2a3ddda96c32959e43fdcd901f3a14308bf12bc4d65ef4e2e3ce12505294",
@@ -8,7 +8,7 @@
   "toolchain": {
     "nodeVersion": "24.21.0",
     "pnpmVersion": "12.8.1",
-    "pnpmLockSha256": "f0de32515ea5526d874c8490c91669890ac77f8d6e1eea26157b8dd590f47d45"
+    "pnpmLockSha256": "3a25a065ab3926f3a4a1f5fda1121485174d2e3271965d6201aef95fce38fecd"
   },
   "model": "gemini-2.5-flash",
   "operations": {
@@ -23,7 +23,7 @@
       "falseRejects": 0,
       "noOpVerdicts": 76,
       "providerRetries": 0,
-      "latencyMs": 17001,
+      "latencyMs": 16795,
       "inputTokens": null,
       "outputTokens": null,
       "failureClass": "SyntaxError"
@@ -39,7 +39,7 @@
       "falseRejects": 0,
       "noOpVerdicts": 22,
       "providerRetries": 0,
-      "latencyMs": 15982,
+      "latencyMs": 19084,
       "inputTokens": null,
       "outputTokens": null,
       "failureClass": "SyntaxError"
@@ -55,7 +55,7 @@
       "falseRejects": 0,
       "noOpVerdicts": 78,
       "providerRetries": 0,
-      "latencyMs": 15722,
+      "latencyMs": 17048,
       "inputTokens": null,
       "outputTokens": null,
       "failureClass": "SyntaxError"
@@ -66,14 +66,14 @@
       "nonMaterialCases": 0,
       "providerCalls": 1,
       "reviewerFailures": 0,
-      "duplicateWarnings": 2,
+      "duplicateWarnings": 0,
       "falseWarnings": 0,
       "falseRejects": 0,
-      "noOpVerdicts": 1,
+      "noOpVerdicts": 3,
       "providerRetries": 0,
-      "latencyMs": 8209,
+      "latencyMs": 10590,
       "inputTokens": 726,
-      "outputTokens": 252
+      "outputTokens": 148
     },
     "fill-missing": {
       "cases": 125,
@@ -86,7 +86,7 @@
       "falseRejects": 0,
       "noOpVerdicts": 125,
       "providerRetries": 0,
-      "latencyMs": 14660,
+      "latencyMs": 17644,
       "inputTokens": null,
       "outputTokens": null,
       "failureClass": "SyntaxError"

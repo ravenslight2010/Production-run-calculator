@@ -51,35 +51,30 @@ could receive unique credit over that same evidence boundary.
 The labeled retained corpus contains 304 cases: 101 material discrepancies already surfaced by deterministic source reconciliation and 203 unresolved non-material records left for human review. The fresh five-request full-model run captured on 2026-10-06 observed:
 
 - **Unique material catches:** 0.
-- **Duplicate warnings:** 2, both on material discrepancies already surfaced by deterministic reconciliation; neither earns unique-catch credit.
+- **Duplicate warnings:** 0.
 - **False warnings / false rejects:** not measurable; all 203 non-material cases were inside failed batches, so this threshold fails closed.
-- **No-op verdicts:** 302, including the fail-open no-op fallback for failed batches.
+- **No-op verdicts:** 304, including the fail-open no-op fallback for failed batches.
 - **Reviewer failures:** 301 of 304 cases across four of five operation batches.
 
 The four failed batches recorded a `SyntaxError` classification; raw provider
 responses were not retained, so the report does not make a stronger claim about
 their contents. The successful batch covered three cases and returned two
-duplicate warnings plus one no-op. Each operation issued one logical provider
-request and all five recorded zero provider retries. Observed batch latency
-ranged from 8.2 to 17.0 seconds, with a 17.001-second p95. Token counts were
-available for only one operation (726 input and 252 output tokens); total usage
+three no-op verdicts. Each operation issued one logical provider request and
+all five recorded zero provider retries. Observed batch latency
+ranged from 10.590 to 19.084 seconds, with a 19.084-second p95. Token counts
+were available for only one operation (726 input and 148 output tokens); total usage
 and cost remain unavailable, so the cost threshold fails closed rather than
 using an estimate.
 
 The current observation and report bind the run to Node 24.21.0, pnpm 12.8.1,
 lockfile SHA-256
-`f0de32515ea5526d874c8490c91669890ac77f8d6e1eea26157b8dd590f47d45`, evaluator
+`3a25a065ab3926f3a4a1f5fda1121485174d2e3271965d6201aef95fce38fecd`, evaluator
 SHA-256 `53c77a1ff4944bf77f773c18cde93d7cc0342ac17400ca15b0e6d1220dba08da`, and
 source-data SHA-256
 `1d8a2a3ddda96c32959e43fdcd901f3a14308bf12bc4d65ef4e2e3ce12505294`. The
-observation still marks the full source revision as unknown because the
-worktree was dirty. The prepared candidate source record at capture time
-identified `source-sha256:8490541a48265babfb8b1d33412f8e6bbc2d279ca61c27a69d04768ade8b8173`,
-and the current prepared app-build record still identifies that fingerprint,
-now Git-bound to `c0ac012b76fa2a4de3720a068f586267d06f73bb`. The benchmark
-manifest does not embed that identity, so treat its evaluator, lockfile, and
-source-data bindings as verified; the report is not a standalone full-source
-attestation.
+observation records the full source revision as unknown. Its evaluator,
+lockfile, and source-data hashes are recorded, but the report is not a
+standalone full-source attestation.
 
 ## Decision
 
