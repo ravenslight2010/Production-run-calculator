@@ -152,6 +152,18 @@ class GeminiBenchmarkTests(unittest.TestCase):
                 },
                 project_owned,
             )
+            self.assertEqual(
+                payload["historical_runtime_attempt"]["status"],
+                "blocked_before_model_evaluation",
+            )
+            self.assertEqual(
+                payload["historical_runtime_attempt"]["prompt_count"],
+                124,
+            )
+            self.assertIn(
+                "has no model evaluation",
+                payload["runtime_status"],
+            )
             self.assertTrue(all(skill["metadata_name"] == skill["name"] for skill in payload["skills"]))
             self.assertTrue(all(
                 skill["name"] == skill["name"].lower()
@@ -161,6 +173,53 @@ class GeminiBenchmarkTests(unittest.TestCase):
             ))
             self.assertIn(f"Skills: **{len(expected)}**", report.read_text())
             self.assertIn("Catalog validation: **PASS**", report.read_text())
+
+    def test_writing_plans_has_approved_plan_triggers_and_adjacent_near_misses(self):
+        payload = build()
+        project_skills = payload["catalog_validation"]["coverage"]["project_owned"]
+        self.assertIn("writing-plans", project_skills)
+
+        skill = next(
+            item for item in payload["skills"] if item["name"] == "writing-plans"
+        )
+        self.assertEqual(
+            [item["should_trigger"] for item in skill["evals"]],
+            [True, True, False, False],
+        )
+        positive, negative = PROMPTS["writing-plans"]
+        self.assertEqual(len(positive), 2)
+        self.assertEqual(len(negative), 2)
+        self.assertTrue(
+            all(
+                "approved" in query.lower()
+                and "multi-step plan" in query.lower()
+                for query in positive
+            )
+        )
+        self.assertTrue(
+            any(
+                "brainstorm" in query.lower()
+                and "before we select" in query.lower()
+                for query in negative
+            )
+        )
+        self.assertTrue(
+            any(
+                "one-file bug fix" in query.lower()
+                and "does not need a multi-step" in query.lower()
+                for query in negative
+            )
+        )
+        checked_in = json.loads(
+            (Path(__file__).resolve().parents[1] / "skill-trigger-benchmark.json").read_text()
+        )
+        checked_in_skill = next(
+            item for item in checked_in["skills"] if item["name"] == "writing-plans"
+        )
+        self.assertEqual(
+            [item["should_trigger"] for item in checked_in_skill["evals"]],
+            [True, True, False, False],
+        )
 
     def test_checked_in_benchmark_only_references_available_skills(self):
         root = Path(__file__).resolve().parents[1]
@@ -177,6 +236,8 @@ class GeminiBenchmarkTests(unittest.TestCase):
         payload = json.loads((root / "skill-trigger-benchmark.json").read_text())
         benchmarked = {skill["name"] for skill in payload["skills"]}
         self.assertEqual(benchmarked - available, set())
+        generated_inventory = {skill["name"] for skill in build()["skills"]}
+        self.assertEqual(benchmarked, generated_inventory)
         queue = json.loads((root / "gemini-skill-trigger-review-queue.json").read_text())
         queued = {case["skill"] for case in queue["cases"]}
         self.assertEqual(queued - benchmarked, set())
@@ -188,6 +249,10 @@ class GeminiBenchmarkTests(unittest.TestCase):
         self.assertTrue(runtime_metrics)
         self.assertTrue(all(metric["precision"] is None for metric in runtime_metrics))
         self.assertTrue(all("unavailable" in metric["status"] for metric in runtime_metrics))
+        self.assertIn(
+            "has no model evaluation",
+            corpus_payload["runtime_status"],
+        )
 
         report = (root / "skill-trigger-benchmark.md").read_text()
         self.assertIn("not model observations", report)

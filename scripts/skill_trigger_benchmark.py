@@ -36,6 +36,14 @@ MANAGED_FIXTURE_SKILLS: frozenset[str] = frozenset({
     "seo-auditor",
 })
 INTENTIONAL_FIXTURE_SKILLS = MANAGED_FIXTURE_SKILLS
+RETAINED_CLAUDE_ATTEMPT = {
+    "skill_count": 31,
+    "prompt_count": 124,
+    "repetitions": 3,
+    "balanced_held_out_prompt_count": 62,
+    "balanced_held_out_repetitions": 3,
+    "failure": "[Errno 2] No such file or directory: 'claude'",
+}
 
 # Four deliberately substantive prompts per skill: one clear and one casual
 # positive, plus two adjacent negative cases. The negatives share vocabulary
@@ -363,7 +371,7 @@ def build() -> dict:
         raise SystemExit(f"Benchmark prompts have no benchmarked skill: {missing}")
     total_prompts = sum(len(skill["evals"]) for skill in skills)
     return {
-        "benchmark": "skills-trigger-2026-09",
+        "benchmark": "skills-trigger-2026-10",
         "method": (
             "held-out, balanced, two positive and two near-miss negative prompts per "
             "project-owned skill, plus a reviewed managed-skill fixture subset"
@@ -388,9 +396,14 @@ def build() -> dict:
         },
         "runtime_evaluator": ".agents/skills/skill-creator/scripts/run_eval.py",
         "runtime_status": (
-            f"blocked: run_eval.py was exercised on {total_prompts} prompts with 3 repetitions "
-            "and a balanced held-out split, but the claude CLI is unavailable"
+            f"unavailable: the current {len(skills)}-skill/{total_prompts}-prompt corpus "
+            f"has no model evaluation; the retained {RETAINED_CLAUDE_ATTEMPT['prompt_count']}-prompt "
+            "attempt used an earlier corpus and failed before model evaluation"
         ),
+        "historical_runtime_attempt": {
+            **RETAINED_CLAUDE_ATTEMPT,
+            "status": "blocked_before_model_evaluation",
+        },
         "runtime_metrics": [
             {
                 "skill": skill["name"],
@@ -398,7 +411,7 @@ def build() -> dict:
                 "recall": None,
                 "false_positive_rate": None,
                 "false_negative_rate": None,
-                "status": "unavailable: claude CLI missing before model evaluation",
+                "status": "unavailable: current corpus has no model evaluation",
             }
             for skill in skills
         ],
@@ -454,21 +467,29 @@ def main() -> None:
             f"({total_positive} should-trigger, {total_prompts - total_positive} near-miss should-not-trigger)",
             "- Catalog validation: **PASS** (every prompt targets an available skill; "
             "managed fixtures are intentional and documented)",
-            f"- Runtime model rates: **blocked** (the complete {total_prompts}-prompt run and balanced held-out run "
-            "were attempted with three repetitions, but every subprocess failed because `claude` is unavailable)",
+            f"- Runtime model rates: **unavailable for the current corpus** (the current {total_prompts}-prompt "
+            f"inventory has no model evaluation; the retained historical attempt covered "
+            f"{RETAINED_CLAUDE_ATTEMPT['prompt_count']} prompts and failed before model evaluation)",
             "",
-            "## Runtime attempt",
+            "## Historical runtime attempt",
             "",
-            f"The runtime attempt targeted this {total_prompts}-prompt corpus: "
-            f"{total_prompts} prompts × 3 repetitions ({total_prompts * 3} attempts). "
-            "A deterministic balanced held-out split (one positive and one near-miss per skill) "
-            f"was also exercised: {len(data['skills']) * 2} prompts × 3 repetitions "
-            f"({len(data['skills']) * 6} attempts). Every attempt failed "
-            "before model evaluation with `[Errno 2] No such file or directory: 'claude'`.",
+            f"The retained attempt targeted the previous {RETAINED_CLAUDE_ATTEMPT['skill_count']}-skill/"
+            f"{RETAINED_CLAUDE_ATTEMPT['prompt_count']}-prompt corpus: "
+            f"{RETAINED_CLAUDE_ATTEMPT['prompt_count']} prompts × "
+            f"{RETAINED_CLAUDE_ATTEMPT['repetitions']} repetitions "
+            f"({RETAINED_CLAUDE_ATTEMPT['prompt_count'] * RETAINED_CLAUDE_ATTEMPT['repetitions']} attempts). "
+            "A deterministic balanced held-out split was also exercised: "
+            f"{RETAINED_CLAUDE_ATTEMPT['balanced_held_out_prompt_count']} prompts × "
+            f"{RETAINED_CLAUDE_ATTEMPT['balanced_held_out_repetitions']} repetitions "
+            f"({RETAINED_CLAUDE_ATTEMPT['balanced_held_out_prompt_count'] * RETAINED_CLAUDE_ATTEMPT['balanced_held_out_repetitions']} attempts). "
+            f"Every attempt failed before model evaluation with `{RETAINED_CLAUDE_ATTEMPT['failure']}`.",
+            f"No model-backed evaluation is recorded for the current {total_prompts}-prompt corpus. "
+            "The retained attempt is historical and is not evidence for the current or newly added prompts.",
             "",
             "Because `run_eval.py` records failed subprocesses as non-triggers, its resulting 0/3 "
-            "rates are synthetic failure output, not model observations. Precision, recall, false-positive, "
-            "and false-negative rates are therefore **unavailable** for every skill.",
+            "rates are synthetic failure output, not model observations. They are not attributed to the "
+            "current prompt inventory. Current precision, recall, false-positive, and false-negative "
+            "rates are **unavailable** for every skill.",
             "",
             "## Preflight findings",
             "",
@@ -492,8 +513,9 @@ def main() -> None:
             "## Per-skill runtime metrics",
             "",
             "Runtime precision, recall, false-positive rate, and false-negative rate are "
-            "**unavailable** for every skill because all attempts failed before model evaluation. "
-            "The evaluator's 0/3 output is synthetic and is not included as evidence.",
+            "**unavailable** for every skill because no model evaluation is recorded for the current "
+            "prompt inventory. The historical evaluator's 0/3 output is synthetic and is not included "
+            "as current-corpus evidence.",
             "",
             "| Skill | Precision | Recall | False-positive rate | False-negative rate | Signals |",
             "| --- | --- | --- | --- | --- | --- |",

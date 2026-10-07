@@ -8,6 +8,7 @@ This repository is worked on by **multiple coding agents** (Codex, Replit Agent,
 2. **Check `.agents/memory/claude-bugs.md`** — bugs Claude has found (Open) or already fixed (Fixed). Don't re-report an Open bug as new, and don't re-apply a Fixed one.
 3. **Check `.agents/memory/`** — other memory files contain design decisions, patterns, and gotchas. Read them before modifying code.
 4. **Never force-push to `main`** — always use a feature branch + PR. Branch protection is enabled.
+5. For Replit main-workspace and isolated task agents, follow the [task-agent startup and evidence-access instructions](replit.md#task-agent-startup-and-evidence-access) before substantive work.
 
 ## After making a fix
 

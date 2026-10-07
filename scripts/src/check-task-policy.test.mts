@@ -100,10 +100,33 @@ const procedureRules = [
     phrase: "User-coordinated sequential acceptance limits overlap but does not create edges. If settings automatically accept/start work, this alternative is unavailable.",
   },
 ];
+const taskAgentStartupRules = [
+  {
+    label: "task startup rules and applicable skills",
+    phrase:
+      "Before substantive work in either the main workspace or an isolated task copy:",
+  },
+  {
+    label: "evidence-first access before asking the user",
+    phrase:
+      "Before asking the user for evidence, first retrieve it through available authorized workspace, Replit, deployment, or connected-service access.",
+  },
+  {
+    label: "owning-task investigation and verification",
+    phrase:
+      "Keep all in-scope investigation through final verification in the owning task.",
+  },
+  {
+    label: "supported instruction delivery and stale-session boundary",
+    phrase:
+      "Replit documents [`replit.md`](https://docs.replit.com/features/project-setup/replit-dot-md) as project instructions",
+  },
+];
 
 const validDocuments: Record<string, string> = {
   "AGENTS.md": [
     "Use one durable task per objective.",
+    "For Replit main-workspace and isolated task agents, follow the [task-agent startup and evidence-access instructions](replit.md#task-agent-startup-and-evidence-access) before substantive work.",
     "Before starting, capture the task's scope, affected surfaces, owner, applicable specialist safety checks, and validation matrix.",
     "Keep discoveries for the same objective in the owning task's progress updates and failure ledger. Fix every in-scope finding before completion.",
     "A separate project task is allowed only for a genuinely independent outcome with separate acceptance criteria, an explicitly deferred user outcome, or an out-of-scope safety, security, data-integrity, or release blocker.",
@@ -119,6 +142,14 @@ const validDocuments: Record<string, string> = {
   ].join("\n"),
   "replit.md": [
     "Generate one durable task per work objective.",
+    [
+      "Replit documents [`replit.md`](https://docs.replit.com/features/project-setup/replit-dot-md) as project instructions and [project skills in `.agents/skills/`](https://docs.replit.com/features/agent/skills) as available during background task execution. Its [task-system guidance](https://docs.replit.com/core-concepts/agent/task-system) says background tasks run in an isolated project copy that inherits `replit.md`, Agent memory, and installed skills at launch, but do not receive real-time updates. Re-read current task records and rules at startup; do not assume a running task saw later changes. Replit's published docs do not name `AGENTS.md` as an automatic task-agent entry point, so this file explicitly directs agents to read it for shared repository rules.",
+      "Before substantive work in either the main workspace or an isolated task copy:",
+      "- Read the current task record, scope, and dependencies; read the task rules in this file and `AGENTS.md`, plus applicable project skills in `.agents/skills/` and any Replit-provided skills required by the task.",
+      "- Complete the acceptance/dependency preflight in [Future-task dependency submission](docs/follow-up-dependency-submission.md). Missing evidence or prerequisites are advisory blockers; this check does not pause or reorder platform work.",
+      "- Before asking the user for evidence, first retrieve it through available authorized workspace, Replit, deployment, or connected-service access. Ask only for a decision, permission, or access grant the user controls; if an expected source is inaccessible, report the exact blocker rather than shifting retrieval work to the user.",
+      "- Keep all in-scope investigation through final verification in the owning task. Apply the separate-task exceptions below and the applicable Replit follow-up skill; do not split symptoms, failures, or validation into child tasks.",
+    ].join("\n"),
     "Before starting, capture the task's scope, affected surfaces, expected owner, applicable specialist safety checks, and validation matrix.",
     "Keep newly discovered in-scope failures in the owning task's failure ledger and close them before completion.",
     "A separate project task requires a genuinely independent outcome with separate acceptance criteria, an explicitly deferred user outcome, or an out-of-scope safety, security, data-integrity, or release blocker.",
@@ -402,6 +433,41 @@ for (const relativePath of Object.keys(validDocuments)) {
     }
   }
 }
+
+for (const rule of taskAgentStartupRules) {
+  test(`replit.md fails when ${rule.label} is omitted`, async () => {
+    const root = await createFixture({
+      "replit.md": validDocuments["replit.md"].replace(rule.phrase, ""),
+    });
+
+    try {
+      const result = await runChecker(root);
+      assert.equal(result.exitCode, 1);
+      assert.match(result.stderr, new RegExp(`replit\\.md: missing ${rule.label}`));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+}
+
+test("AGENTS.md fails when the Replit task startup pointer is omitted", async () => {
+  const phrase =
+    "For Replit main-workspace and isolated task agents, follow the [task-agent startup and evidence-access instructions](replit.md#task-agent-startup-and-evidence-access) before substantive work.";
+  const root = await createFixture({
+    "AGENTS.md": validDocuments["AGENTS.md"].replace(phrase, ""),
+  });
+
+  try {
+    const result = await runChecker(root);
+    assert.equal(result.exitCode, 1);
+    assert.match(
+      result.stderr,
+      /AGENTS\.md: missing Replit task-agent startup pointer/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("prose examples preserve acceptance-first order, numeric ties, and genuine edges without claiming scheduler proof", async () => {
   const examples = [

@@ -260,6 +260,47 @@ const requirements: Requirement[] = [
   },
 ];
 
+const taskAgentStartupRequirements: Requirement[] = [
+  {
+    label: "task startup rules and applicable skills",
+    pattern:
+      /Before substantive work in either the main workspace or an isolated task copy:[\s\S]{0,260}Read the current task record, scope, and dependencies[\s\S]{0,220}applicable project skills in `\.agents\/skills\/`[\s\S]{0,240}Complete the acceptance\/dependency preflight/i,
+    remediation:
+      "require task agents to refresh task context, read applicable skills, and complete the existing acceptance/dependency preflight",
+  },
+  {
+    label: "evidence-first access before asking the user",
+    pattern:
+      /Before asking the user for evidence, first retrieve it through available authorized workspace, Replit, deployment, or connected-service access[\s\S]{0,240}Ask only for a decision, permission, or access grant the user controls/i,
+    remediation:
+      "retrieve available evidence through authorized workspace and connected-service access before asking the user",
+  },
+  {
+    label: "owning-task investigation and verification",
+    pattern:
+      /Keep all in-scope investigation through final verification in the owning task[\s\S]{0,240}Apply the separate-task exceptions[\s\S]{0,200}do not split symptoms, failures, or validation into child tasks/i,
+    remediation:
+      "keep same-objective investigation and validation with the owning task and use only documented follow-up exceptions",
+  },
+  {
+    label: "supported instruction delivery and stale-session boundary",
+    pattern:
+      /Replit documents \[?`replit\.md`[\s\S]{0,240}project skills in `\.agents\/skills\/`[\s\S]{0,260}isolated project copy[\s\S]{0,240}do not receive real-time updates[\s\S]{0,360}AGENTS\.md`?[\s\S]{0,80}automatic task-agent entry point/i,
+    remediation:
+      "document the supported Replit entry points, task snapshot behavior, and explicit AGENTS.md read requirement",
+  },
+];
+
+const agentEntryRequirements: Requirement[] = [
+  {
+    label: "Replit task-agent startup pointer",
+    pattern:
+      /For Replit main-workspace and isolated task agents, follow the \[task-agent startup and evidence-access instructions\]\(replit\.md#task-agent-startup-and-evidence-access\) before substantive work/i,
+    remediation:
+      "point Replit main-workspace and isolated task agents to the supported startup entry point",
+  },
+];
+
 const root = resolve(
   process.env.TASK_POLICY_ROOT ?? resolve(import.meta.dirname, "../.."),
 );
@@ -316,7 +357,14 @@ for (const [relativePath, documentRequirements] of [
     continue;
   }
 
-  for (const requirement of documentRequirements) {
+  const additionalRequirements =
+    relativePath === "replit.md"
+      ? taskAgentStartupRequirements
+      : relativePath === "AGENTS.md"
+        ? agentEntryRequirements
+        : [];
+
+  for (const requirement of [...documentRequirements, ...additionalRequirements]) {
     if (!requirement.pattern.test(content)) {
       failures.push(
         `${relativePath}: missing ${requirement.label}; ${requirement.remediation}`,

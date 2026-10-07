@@ -1,5 +1,5 @@
 {
-  "benchmark": "skills-trigger-2026-09",
+  "benchmark": "skills-trigger-2026-10",
   "method": "held-out, balanced, two positive and two near-miss negative prompts per project-owned skill, plus a reviewed managed-skill fixture subset",
   "catalog_validation": {
     "status": "pass",
@@ -31,6 +31,7 @@
         "evidence-hygiene",
         "external-skill-import",
         "import-bug-investigation",
+        "media-prompt-quality",
         "operational-browser-verification",
         "production-go",
         "property-based-testing",
@@ -43,6 +44,7 @@
         "sync-invariant-check",
         "test-gap-triage",
         "verify-before-commit",
+        "writing-plans",
         "writing-quality-editor",
         "wrong-number-triage"
       ],
@@ -56,7 +58,16 @@
     }
   },
   "runtime_evaluator": ".agents/skills/skill-creator/scripts/run_eval.py",
-  "runtime_status": "blocked: run_eval.py was exercised on 124 prompts with 3 repetitions and a balanced held-out split, but the claude CLI is unavailable",
+  "runtime_status": "unavailable: the current 33-skill/132-prompt corpus has no model evaluation; the retained 124-prompt attempt used an earlier corpus and failed before model evaluation",
+  "historical_runtime_attempt": {
+    "skill_count": 31,
+    "prompt_count": 124,
+    "repetitions": 3,
+    "balanced_held_out_prompt_count": 62,
+    "balanced_held_out_repetitions": 3,
+    "failure": "[Errno 2] No such file or directory: 'claude'",
+    "status": "blocked_before_model_evaluation"
+  },
   "runtime_metrics": [
     {
       "skill": "api-design",
@@ -64,7 +75,7 @@
       "recall": null,
       "false_positive_rate": null,
       "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
+      "status": "unavailable: current corpus has no model evaluation"
     },
     {
       "skill": "brainstorming",
@@ -72,7 +83,7 @@
       "recall": null,
       "false_positive_rate": null,
       "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
+      "status": "unavailable: current corpus has no model evaluation"
     },
     {
       "skill": "ci-security-review",
@@ -80,7 +91,7 @@
       "recall": null,
       "false_positive_rate": null,
       "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
+      "status": "unavailable: current corpus has no model evaluation"
     },
     {
       "skill": "customer-import-audit",
@@ -88,7 +99,7 @@
       "recall": null,
       "false_positive_rate": null,
       "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
+      "status": "unavailable: current corpus has no model evaluation"
     },
     {
       "skill": "data-cleanup",
@@ -96,7 +107,7 @@
       "recall": null,
       "false_positive_rate": null,
       "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
+      "status": "unavailable: current corpus has no model evaluation"
     },
     {
       "skill": "data-heal-playbook",
@@ -104,7 +115,7 @@
       "recall": null,
       "false_positive_rate": null,
       "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
+      "status": "unavailable: current corpus has no model evaluation"
     },
     {
       "skill": "db-schema-change",
@@ -112,7 +123,7 @@
       "recall": null,
       "false_positive_rate": null,
       "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
+      "status": "unavailable: current corpus has no model evaluation"
     },
     {
       "skill": "documentation-claim-review",
@@ -120,7 +131,7 @@
       "recall": null,
       "false_positive_rate": null,
       "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
+      "status": "unavailable: current corpus has no model evaluation"
     },
     {
       "skill": "error-handling",
@@ -128,7 +139,7 @@
       "recall": null,
       "false_positive_rate": null,
       "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
+      "status": "unavailable: current corpus has no model evaluation"
     },
     {
       "skill": "evidence-hygiene",
@@ -136,7 +147,7 @@
       "recall": null,
       "false_positive_rate": null,
       "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
+      "status": "unavailable: current corpus has no model evaluation"
     },
     {
       "skill": "external-skill-import",
@@ -144,7 +155,7 @@
       "recall": null,
       "false_positive_rate": null,
       "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
+      "status": "unavailable: current corpus has no model evaluation"
     },
     {
       "skill": "import-bug-investigation",
@@ -152,7 +163,15 @@
       "recall": null,
       "false_positive_rate": null,
       "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
+      "status": "unavailable: current corpus has no model evaluation"
+    },
+    {
+      "skill": "media-prompt-quality",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: current corpus has no model evaluation"
     },
     {
       "skill": "operational-browser-verification",
@@ -160,7 +179,7 @@
       "recall": null,
       "false_positive_rate": null,
       "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
+      "status": "unavailable: current corpus has no model evaluation"
     },
     {
       "skill": "production-go",
@@ -168,7 +187,7 @@
       "recall": null,
       "false_positive_rate": null,
       "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
+      "status": "unavailable: current corpus has no model evaluation"
     },
     {
       "skill": "property-based-testing",
@@ -176,7 +195,7 @@
       "recall": null,
       "false_positive_rate": null,
       "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
+      "status": "unavailable: current corpus has no model evaluation"
     },
     {
       "skill": "release-checklist",
@@ -184,7 +203,7 @@
       "recall": null,
       "false_positive_rate": null,
       "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
+      "status": "unavailable: current corpus has no model evaluation"
     },
     {
       "skill": "rollback-recovery",
@@ -192,7 +211,7 @@
       "recall": null,
       "false_positive_rate": null,
       "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
+      "status": "unavailable: current corpus has no model evaluation"
     },
     {
       "skill": "schema-change-checklist",
@@ -200,7 +219,7 @@
       "recall": null,
       "false_positive_rate": null,
       "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
+      "status": "unavailable: current corpus has no model evaluation"
     },
     {
       "skill": "skill-creator",
@@ -208,7 +227,7 @@
       "recall": null,
       "false_positive_rate": null,
       "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
+      "status": "unavailable: current corpus has no model evaluation"
     },
     {
       "skill": "spec-import-guard",
@@ -216,7 +235,7 @@
       "recall": null,
       "false_positive_rate": null,
       "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
+      "status": "unavailable: current corpus has no model evaluation"
     },
     {
       "skill": "state-accuracy-check",
@@ -224,7 +243,7 @@
       "recall": null,
       "false_positive_rate": null,
       "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
+      "status": "unavailable: current corpus has no model evaluation"
     },
     {
       "skill": "sync-invariant-check",
@@ -232,7 +251,7 @@
       "recall": null,
       "false_positive_rate": null,
       "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
+      "status": "unavailable: current corpus has no model evaluation"
     },
     {
       "skill": "test-gap-triage",
@@ -240,7 +259,7 @@
       "recall": null,
       "false_positive_rate": null,
       "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
+      "status": "unavailable: current corpus has no model evaluation"
     },
     {
       "skill": "verify-before-commit",
@@ -248,7 +267,15 @@
       "recall": null,
       "false_positive_rate": null,
       "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
+      "status": "unavailable: current corpus has no model evaluation"
+    },
+    {
+      "skill": "writing-plans",
+      "precision": null,
+      "recall": null,
+      "false_positive_rate": null,
+      "false_negative_rate": null,
+      "status": "unavailable: current corpus has no model evaluation"
     },
     {
       "skill": "writing-quality-editor",
@@ -256,7 +283,7 @@
       "recall": null,
       "false_positive_rate": null,
       "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
+      "status": "unavailable: current corpus has no model evaluation"
     },
     {
       "skill": "wrong-number-triage",
@@ -264,7 +291,7 @@
       "recall": null,
       "false_positive_rate": null,
       "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
+      "status": "unavailable: current corpus has no model evaluation"
     },
     {
       "skill": "ad-creative",
@@ -272,7 +299,7 @@
       "recall": null,
       "false_positive_rate": null,
       "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
+      "status": "unavailable: current corpus has no model evaluation"
     },
     {
       "skill": "deep-research",
@@ -280,7 +307,7 @@
       "recall": null,
       "false_positive_rate": null,
       "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
+      "status": "unavailable: current corpus has no model evaluation"
     },
     {
       "skill": "design-thinker",
@@ -288,7 +315,7 @@
       "recall": null,
       "false_positive_rate": null,
       "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
+      "status": "unavailable: current corpus has no model evaluation"
     },
     {
       "skill": "recipe-creator",
@@ -296,7 +323,7 @@
       "recall": null,
       "false_positive_rate": null,
       "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
+      "status": "unavailable: current corpus has no model evaluation"
     },
     {
       "skill": "seo-auditor",
@@ -304,7 +331,7 @@
       "recall": null,
       "false_positive_rate": null,
       "false_negative_rate": null,
-      "status": "unavailable: claude CLI missing before model evaluation"
+      "status": "unavailable: current corpus has no model evaluation"
     }
   ],
   "focused_lexical_reviews": [
@@ -734,6 +761,36 @@
       ]
     },
     {
+      "name": "media-prompt-quality",
+      "metadata_name": "media-prompt-quality",
+      "ownership": "project-owned",
+      "coverage": "project-owned",
+      "path": ".agents/skills/media-prompt-quality/SKILL.md",
+      "description": "Improve prompts and review criteria for generated or edited raster images. Use alongside the platform media-generation or image-editing skill when a request needs precise composition, style, edit invariants, variants, text handling, or transparent-background planning. This skill does not generate media or choose a provider.",
+      "evals": [
+        {
+          "id": "media-prompt-quality-trigger-1",
+          "query": "Improve this image-generation prompt with precise composition, lighting, text, output constraints, and unacceptable-defect criteria.",
+          "should_trigger": true
+        },
+        {
+          "id": "media-prompt-quality-trigger-2",
+          "query": "Review an image-edit request by separating the requested change from the visual details that must remain unchanged, including transparency requirements.",
+          "should_trigger": true
+        },
+        {
+          "id": "media-prompt-quality-near-miss-1",
+          "query": "Generate the image using the configured provider and return the finished asset.",
+          "should_trigger": false
+        },
+        {
+          "id": "media-prompt-quality-near-miss-2",
+          "query": "Create a new SVG icon for the existing UI component library instead of a raster image.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
       "name": "operational-browser-verification",
       "metadata_name": "operational-browser-verification",
       "ownership": "project-owned",
@@ -1089,6 +1146,36 @@
         {
           "id": "verify-before-commit-near-miss-2",
           "query": "Review a finished feature for security and product risks, but do not commit or push it.",
+          "should_trigger": false
+        }
+      ]
+    },
+    {
+      "name": "writing-plans",
+      "metadata_name": "writing-plans",
+      "ownership": "project-owned",
+      "coverage": "project-owned",
+      "path": ".agents/skills/writing-plans/SKILL.md",
+      "description": "Use after the user approves a design or specification and before implementation when the work needs a multi-step plan aligned with this repository's task workflow.",
+      "evals": [
+        {
+          "id": "writing-plans-trigger-1",
+          "query": "The feature design is approved. Turn it into a bounded, testable multi-step plan aligned with this repository's task workflow before implementation.",
+          "should_trigger": true
+        },
+        {
+          "id": "writing-plans-trigger-2",
+          "query": "The specification is approved. Before implementation, make a multi-step plan aligned with this repository's task workflow.",
+          "should_trigger": true
+        },
+        {
+          "id": "writing-plans-near-miss-1",
+          "query": "Help me brainstorm possible product directions before we select and approve a design.",
+          "should_trigger": false
+        },
+        {
+          "id": "writing-plans-near-miss-2",
+          "query": "Implement this small one-file bug fix now; it does not need a multi-step project plan.",
           "should_trigger": false
         }
       ]
@@ -1474,6 +1561,20 @@
       "status": "no lexical flag"
     },
     {
+      "name": "media-prompt-quality",
+      "positive_overlap": [
+        5,
+        2
+      ],
+      "negative_overlap": [
+        2,
+        1
+      ],
+      "under_trigger_signal": 0,
+      "over_trigger_signal": 0,
+      "status": "no lexical flag"
+    },
+    {
       "name": "operational-browser-verification",
       "positive_overlap": [
         11,
@@ -1632,6 +1733,20 @@
       "positive_overlap": [
         9,
         7
+      ],
+      "negative_overlap": [
+        2,
+        2
+      ],
+      "under_trigger_signal": 0,
+      "over_trigger_signal": 0,
+      "status": "no lexical flag"
+    },
+    {
+      "name": "writing-plans",
+      "positive_overlap": [
+        9,
+        9
       ],
       "negative_overlap": [
         2,

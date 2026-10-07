@@ -76,6 +76,17 @@
 
 This section is the project-specific application of the shared task-scope rule in `AGENTS.md`. It is authoritative for planning and closing work, but does not change task automation settings or rewrite, merge, or re-scope existing tasks.
 
+### Task-agent startup and evidence access
+
+Replit documents [`replit.md`](https://docs.replit.com/features/project-setup/replit-dot-md) as project instructions and [project skills in `.agents/skills/`](https://docs.replit.com/features/agent/skills) as available during background task execution. Its [task-system guidance](https://docs.replit.com/core-concepts/agent/task-system) says background tasks run in an isolated project copy that inherits `replit.md`, Agent memory, and installed skills at launch, but do not receive real-time updates. Re-read current task records and rules at startup; do not assume a running task saw later changes. Replit's published docs do not name `AGENTS.md` as an automatic task-agent entry point, so this file explicitly directs agents to read it for shared repository rules.
+
+Before substantive work in either the main workspace or an isolated task copy:
+
+- Read the current task record, scope, and dependencies; read the task rules in this file and `AGENTS.md`, plus applicable project skills in `.agents/skills/` and any Replit-provided skills required by the task.
+- Complete the acceptance/dependency preflight in [Future-task dependency submission](docs/follow-up-dependency-submission.md). Missing evidence or prerequisites are advisory blockers; this check does not pause or reorder platform work.
+- Before asking the user for evidence, first retrieve it through available authorized workspace, Replit, deployment, or connected-service access. Ask only for a decision, permission, or access grant the user controls; if an expected source is inaccessible, report the exact blocker rather than shifting retrieval work to the user.
+- Keep all in-scope investigation through final verification in the owning task. Apply the separate-task exceptions below and the applicable Replit follow-up skill; do not split symptoms, failures, or validation into child tasks.
+
 ### Universal task intake
 
 - Generate one durable task per work objective. The owning task includes investigation, implementation, integration and persistence impacts, regression coverage, final verification, and all in-scope repair work. Do not create a new task for each symptom, test failure, fixture repair, or sub-outcome inside the same objective.
