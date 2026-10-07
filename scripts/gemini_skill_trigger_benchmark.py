@@ -385,25 +385,33 @@ def write_report(path: Path, result: dict[str, Any]) -> None:
         if isinstance(source, dict) and isinstance(selection, dict):
             source_hash = source.get("sha256")
             source_cases = source.get("cases")
+            source_skills = source.get("skills")
             selected_hash = selection.get("sha256")
             selected_cases = selection.get("cases")
             selected_skills = selection.get("skills")
             if (
                 isinstance(source_hash, str)
                 and isinstance(source_cases, int)
+                and isinstance(source_skills, int)
                 and isinstance(selected_cases, int)
                 and isinstance(selected_skills, list)
             ):
+                selected_skill_names = [
+                    skill for skill in selected_skills if isinstance(skill, str)
+                ]
                 if selected_hash == source_hash:
-                    selected_scope = "all source skills"
+                    selected_scope = (
+                        f"all source skills ({source_skills} of {source_skills})"
+                    )
                 else:
-                    selected_scope = ", ".join(
-                        skill for skill in selected_skills if isinstance(skill, str)
-                    ) or "no skills"
+                    selected_scope = (
+                        f"{', '.join(selected_skill_names) or 'no skills'} "
+                        f"({len(selected_skill_names)} of {source_skills} source skills)"
+                    )
                 scope_lines = [
                     "## Evaluation scope",
                     "",
-                    f"- Source corpus: SHA-256 `{source_hash}`; **{source_cases} cases**",
+                    f"- Source corpus: SHA-256 `{source_hash}`; **{source_skills} skills**, **{source_cases} cases**",
                     f"- Selected skills: **{selected_scope}**; **{selected_cases} cases**",
                     "",
                 ]
@@ -521,6 +529,7 @@ def evaluation_manifest(
     retries: int,
     selected_corpus_bytes: bytes | None = None,
     source_case_count: int | None = None,
+    source_skill_count: int | None = None,
 ) -> dict[str, Any]:
     source_hash = hashlib.sha256(corpus_bytes).hexdigest()
     selected_hash = hashlib.sha256(
@@ -529,6 +538,9 @@ def evaluation_manifest(
     result_metrics = metrics(records)
     selected_cases = sum(len(skill["evals"]) for skill in corpus["skills"])
     source_cases = selected_cases if source_case_count is None else source_case_count
+    source_skills = (
+        len(corpus["skills"]) if source_skill_count is None else source_skill_count
+    )
     lockfile_hash = hashlib.sha256(
         (Path(__file__).resolve().parents[1] / "pnpm-lock.yaml").read_bytes()
     ).hexdigest()
@@ -561,6 +573,7 @@ def evaluation_manifest(
         "corpus": {
             "sha256": source_hash,
             "cases": source_cases,
+            "skills": source_skills,
             "sourceAuthority": "held-out-reviewed-skill-trigger-corpus",
         },
         "selection": {
@@ -821,6 +834,7 @@ def main() -> None:
             args.retries,
             selected_corpus_bytes,
             sum(len(skill["evals"]) for skill in source_corpus["skills"]),
+            len(source_corpus["skills"]),
         ),
     }
     write_benchmark_artifacts(args.results, args.queue, args.report, result, records)

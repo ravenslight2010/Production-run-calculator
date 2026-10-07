@@ -550,12 +550,14 @@ class GeminiBenchmarkTests(unittest.TestCase):
             0,
             selected_bytes,
             sum(len(skill["evals"]) for skill in source["skills"]),
+            len(source["skills"]),
         )
 
         self.assertEqual([row["id"] for row in records], ["second-yes", "second-no"])
         self.assertEqual(adapter.calls, 2)
         self.assertEqual(manifest["corpus"]["sha256"], hashlib.sha256(source_bytes).hexdigest())
         self.assertEqual(manifest["corpus"]["cases"], 3)
+        self.assertEqual(manifest["corpus"]["skills"], 2)
         self.assertEqual(manifest["outcome"]["state"], "passed")
         self.assertEqual(manifest["selection"]["skills"], ["second"])
         self.assertEqual(manifest["selection"]["cases"], 2)
@@ -570,10 +572,13 @@ class GeminiBenchmarkTests(unittest.TestCase):
             })
             report = report_path.read_text()
         self.assertIn(
-            f"Source corpus: SHA-256 `{manifest['corpus']['sha256']}`; **3 cases**",
+            f"Source corpus: SHA-256 `{manifest['corpus']['sha256']}`; **2 skills**, **3 cases**",
             report,
         )
-        self.assertIn("- Selected skills: **second**; **2 cases**", report)
+        self.assertIn(
+            "- Selected skills: **second (1 of 2 source skills)**; **2 cases**",
+            report,
+        )
         self.assertEqual(
             manifest["selection"]["sha256"],
             hashlib.sha256(selected_bytes).hexdigest(),
@@ -624,10 +629,14 @@ class GeminiBenchmarkTests(unittest.TestCase):
             report = report_path.read_text()
 
         self.assertIn(
-            f"Source corpus: SHA-256 `{manifest['corpus']['sha256']}`; **2 cases**",
+            f"Source corpus: SHA-256 `{manifest['corpus']['sha256']}`; **2 skills**, **2 cases**",
             report,
         )
-        self.assertIn("- Selected skills: **all source skills**; **2 cases**", report)
+        self.assertEqual(manifest["corpus"]["skills"], 2)
+        self.assertIn(
+            "- Selected skills: **all source skills (2 of 2)**; **2 cases**",
+            report,
+        )
 
     def test_skill_selection_rejects_unknown_names(self):
         with self.assertRaisesRegex(ValueError, "unknown skill name\\(s\\): missing"):
@@ -997,6 +1006,7 @@ class GeminiBenchmarkTests(unittest.TestCase):
                 ["first-case", "third-case"],
             )
             selection = payload["evaluationManifest"]["selection"]
+            self.assertEqual(payload["evaluationManifest"]["corpus"]["skills"], 3)
             self.assertEqual(selection["skills"], ["first", "third"])
             self.assertEqual(selection["cases"], 2)
             self.assertEqual(
@@ -1004,6 +1014,10 @@ class GeminiBenchmarkTests(unittest.TestCase):
                 hashlib.sha256(source_bytes).hexdigest(),
             )
             self.assertNotEqual(selection["sha256"], hashlib.sha256(source_bytes).hexdigest())
+            self.assertIn(
+                "- Selected skills: **first, third (2 of 3 source skills)**; **2 cases**",
+                (root / "selected-report.md").read_text(),
+            )
 
             unknown = run_cli(
                 "--skill", "missing",
