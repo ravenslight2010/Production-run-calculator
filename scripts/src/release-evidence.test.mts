@@ -1782,6 +1782,26 @@ async function run(): Promise<void> {
   assert.throws(
     () =>
       validateSourceLibraryReconciliationEvidence(
+        Buffer.from(JSON.stringify(sourceEvidence({
+          databaseAttestation: "unexpected-owner-claim",
+        }))),
+      ),
+    /invalid database attestation/,
+    "unknown database attestations must not enter release evidence",
+  );
+  assert.throws(
+    () =>
+      validateSourceLibraryReconciliationEvidence(
+        Buffer.from(JSON.stringify(sourceEvidence({
+          databaseAttestation: "published-app-runtime-connection",
+        }))),
+      ),
+    /does not match its environment/,
+    "published-app database attestation must not qualify development evidence",
+  );
+  assert.throws(
+    () =>
+      validateSourceLibraryReconciliationEvidence(
         Buffer.from(JSON.stringify(sourceEvidence())),
         {
           maxAgeMs: 60_000,

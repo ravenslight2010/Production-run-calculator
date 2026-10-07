@@ -3237,6 +3237,71 @@ paths:
           description: Missing manager capability
 
   /profile-data/source-library-reconciliation/capture:
+    get:
+      operationId: getPublishedSourceLibraryReconciliationCapture
+      tags: [audit]
+      summary: Capture a bounded reconciliation summary from the published app
+      description: >-
+        Public read-only capture for Replit Agent. Runs the reviewed verifier
+        through this published API process's configured database connection and
+        binds the result to this process's build identity. It attests to the
+        database configured for the published app, not to an independently
+        supplied PostgreSQL owner name. Returns aggregate counts and hashes only;
+        it never returns source rows or credentials. Rate limited and unavailable
+        outside production.
+      security: []
+      responses:
+        "200":
+          description: Bounded published-app capture; ok=false is a valid result
+          headers:
+            Cache-Control:
+              description: Capture responses are never cached.
+              schema:
+                type: string
+                enum: [no-store]
+            RateLimit-Limit:
+              schema: { type: integer }
+            RateLimit-Remaining:
+              schema: { type: integer }
+            RateLimit-Reset:
+              schema: { type: integer }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryReconciliationEvidence"
+        "404":
+          description: Capture is available only from the published production app
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryCaptureError"
+        "409":
+          description: Another capture is already running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryCaptureError"
+        "429":
+          description: Public capture rate limit exceeded
+          headers:
+            Retry-After:
+              schema: { type: integer }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryCaptureError"
+        "500":
+          description: Bundled report integrity or bounded output contract failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryCaptureError"
+        "503":
+          description: Running build identity or production database is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryCaptureError"
     post:
       operationId: captureSourceLibraryReconciliation
       tags: [audit]
@@ -5269,6 +5334,7 @@ components:
       required:
         - verifier
         - environment
+        - databaseAttestation
         - revision
         - capturedAt
         - evidenceId
@@ -5289,6 +5355,9 @@ components:
       properties:
         verifier: { type: string, enum: [source-library-reconciliation] }
         environment: { type: string, enum: [release] }
+        databaseAttestation:
+          type: string
+          enum: [external-owner-check, published-app-runtime-connection]
         revision: { type: string, minLength: 1, maxLength: 128 }
         capturedAt: { type: string, format: date-time }
         evidenceId: { type: string, pattern: "^[a-f0-9]{64}$" }

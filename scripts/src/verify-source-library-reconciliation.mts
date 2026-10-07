@@ -534,6 +534,15 @@ function markerCheck(marker: Record<string, unknown> | undefined, report: Report
 export type VerificationOutput = {
   verifier: "source-library-reconciliation";
   environment: SourceLibraryEvidenceEnvironment;
+  /**
+   * New captures identify how the database target was attested. Older retained
+   * evidence omitted this field and remains interpretable as the historical
+   * external-owner-check path.
+   */
+  databaseAttestation?:
+    | "external-owner-check"
+    | "development-no-owner-check"
+    | "published-app-runtime-connection";
   revision: string;
   capturedAt: string;
   evidenceId: string;
@@ -555,6 +564,7 @@ export type VerificationOutput = {
 export const SOURCE_LIBRARY_EVIDENCE_KEYS = [
   "verifier",
   "environment",
+  "databaseAttestation",
   "revision",
   "capturedAt",
   "evidenceId",
@@ -572,6 +582,10 @@ export const SOURCE_LIBRARY_EVIDENCE_KEYS = [
   "ok",
   "failures",
 ] as const;
+
+const LEGACY_SOURCE_LIBRARY_EVIDENCE_KEYS = SOURCE_LIBRARY_EVIDENCE_KEYS.filter(
+  (key) => key !== "databaseAttestation",
+);
 
 const SOURCE_LIBRARY_EVIDENCE_MAX_COUNT = 1_000_000;
 
@@ -618,11 +632,19 @@ function assertBoundedSummary(
 export function assertBoundedSourceLibraryReconciliationEvidence(
   value: unknown,
 ): asserts value is VerificationOutput {
+  const hasCurrentShape =
+    isRecord(value) && hasExactKeys(value, SOURCE_LIBRARY_EVIDENCE_KEYS);
+  const hasLegacyShape =
+    isRecord(value) && hasExactKeys(value, LEGACY_SOURCE_LIBRARY_EVIDENCE_KEYS);
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, SOURCE_LIBRARY_EVIDENCE_KEYS) ||
+    (!hasCurrentShape && !hasLegacyShape) ||
     value.verifier !== "source-library-reconciliation" ||
     (value.environment !== "development" && value.environment !== "release") ||
+    (hasCurrentShape &&
+      value.databaseAttestation !== "external-owner-check" &&
+      value.databaseAttestation !== "development-no-owner-check" &&
+      value.databaseAttestation !== "published-app-runtime-connection") ||
     !boundedEvidenceString(value.revision) ||
     !boundedEvidenceString(value.capturedAt) ||
     !/^[a-f0-9]{64}$/u.test(String(value.evidenceId ?? "")) ||
@@ -1154,6 +1176,13 @@ export async function verifySourceLibraryReconciliation(
   environment: SourceLibraryEvidenceEnvironment = "development",
   revision = "development-unbound",
   expectedDatabaseOwner?: string,
+  databaseAttestation:
+    | "external-owner-check"
+    | "development-no-owner-check"
+    | "published-app-runtime-connection" =
+    environment === "development" && expectedDatabaseOwner === undefined
+      ? "development-no-owner-check"
+      : "external-owner-check",
 ): Promise<VerificationOutput> {
   const proposals = report.proposals as unknown as Proposal[];
   const idsByTable = Object.fromEntries(TABLES.map((table) => [
@@ -1169,11 +1198,11 @@ export async function verifySourceLibraryReconciliation(
   const mappings = buildMappings(report);
   const references = await selectReferences(query, mappings, fromDate);
   const aliases = compareAliases(await selectAliases(query, report));
-  const databaseOwnerAttested = await checkDatabaseOwner(
-    query,
-    environment,
-    expectedDatabaseOwner,
-  );
+  const databaseOwnerAttested =
+    databaseAttestation === "published-app-runtime-connection" ||
+    databaseAttestation === "development-no-owner-check"
+      ? true
+      : await checkDatabaseOwner(query, environment, expectedDatabaseOwner);
   const poolState = comparePoolRows(report, rowsByTable);
   const pendingSummary = summarizeReferences(references.runs.filter((reference) => reference.scope === "pending"));
   const profileSummary = summarizeReferences(references.profiles);
@@ -1198,6 +1227,7 @@ export async function verifySourceLibraryReconciliation(
   const fingerprintInput = {
     reportSha256: sha256(reportBytes),
     healId,
+    databaseAttestation,
     marker: marker.resultCounts,
     pool: poolState.counts,
     poolObservations: poolState.fingerprintRows,
@@ -1213,6 +1243,7 @@ export async function verifySourceLibraryReconciliation(
   const output: Omit<VerificationOutput, "evidenceId"> = {
     verifier: "source-library-reconciliation",
     environment,
+    databaseAttestation,
     revision,
     capturedAt,
     healId,

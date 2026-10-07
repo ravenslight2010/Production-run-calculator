@@ -13,6 +13,7 @@ import {
 } from "../../../../scripts/src/source-library-reconciliation-capture-core.mjs";
 import {
   captureSourceLibraryReconciliation,
+  captureSourceLibraryReconciliationFromPublishedApp,
   SOURCE_LIBRARY_CAPTURE_OUTPUT_MAX_BYTES,
   SOURCE_LIBRARY_CAPTURE_REQUEST_MAX_BYTES,
   type SourceLibraryCapturePool,
@@ -73,6 +74,7 @@ const handoff = {
 const evidenceOutput: VerificationOutput = {
   verifier: "source-library-reconciliation",
   environment: "release",
+  databaseAttestation: "external-owner-check",
   revision: handoff.deployedRevision,
   capturedAt: "2026-10-05T17:00:00.000Z",
   evidenceId: "b".repeat(64),
@@ -127,11 +129,20 @@ function fakePool(options: {
   failOnQuery?: string;
   queryGate?: Promise<void>;
   onGatedQuery?: () => void;
+  acquireAdvisoryLock?: boolean;
 } = {}) {
   const calls: string[] = [];
   const release = vi.fn();
   const query = vi.fn(async (text: string) => {
     calls.push(text);
+    if (text.includes("pg_try_advisory_lock")) {
+      return {
+        rows: [{ locked: options.acquireAdvisoryLock ?? true }],
+      };
+    }
+    if (text.includes("pg_advisory_unlock")) {
+      return { rows: [{ unlocked: true }] };
+    }
     if (options.failOnQuery && text === options.failOnQuery) {
       throw new Error("database detail must not escape");
     }
@@ -200,12 +211,14 @@ describe("source-library reconciliation capture", () => {
     );
 
     expect(fake.calls).toEqual([
+      "SELECT pg_try_advisory_lock($1::bigint) AS locked",
       "BEGIN TRANSACTION READ ONLY",
       "SET LOCAL statement_timeout = '15s'",
       "SET LOCAL lock_timeout = '2s'",
       "SELECT capture_first",
       "SELECT capture_second",
       "ROLLBACK",
+      "SELECT pg_advisory_unlock($1::bigint) AS unlocked",
     ]);
     expect(fake.release).toHaveBeenCalledWith(false);
     expect(result).toEqual(evidenceOutput);
@@ -218,6 +231,65 @@ describe("source-library reconciliation capture", () => {
     expect(call[5]).toBe("release");
     expect(call[6]).toBe(handoff.deployedRevision);
     expect(call[7]).toBe("production_owner");
+    expect(call[8]).toBe("external-owner-check");
+  });
+
+  it("captures from the published app pool without an external owner name", async () => {
+    const runtimeEvidence = {
+      ...evidenceOutput,
+      databaseAttestation: "published-app-runtime-connection" as const,
+    };
+    vi.mocked(verifySourceLibraryReconciliation).mockResolvedValue(
+      runtimeEvidence,
+    );
+    const fake = fakePool();
+    const result = await captureSourceLibraryReconciliationFromPublishedApp(
+      dependencies(fake.pool),
+    );
+
+    expect(result).toEqual(runtimeEvidence);
+    expect(result.databaseAttestation).toBe(
+      "published-app-runtime-connection",
+    );
+    const call = vi.mocked(verifySourceLibraryReconciliation).mock.calls[0]!;
+    expect(call[5]).toBe("release");
+    expect(call[6]).toBe(`source-sha256:${expectedSource.sourceFingerprintSha256}`);
+    expect(call[7]).toBeUndefined();
+    expect(call[8]).toBe("published-app-runtime-connection");
+    expect(JSON.stringify(result)).not.toContain("production_owner");
+    expect(fake.calls).toContain("BEGIN TRANSACTION READ ONLY");
+    expect(fake.calls).toContain("ROLLBACK");
+  });
+
+  it("rejects a missing published build identity before connecting", async () => {
+    const fake = fakePool();
+    await expect(
+      captureSourceLibraryReconciliationFromPublishedApp({
+        ...dependencies(fake.pool),
+        buildInfo: null,
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 503,
+      code: "build_identity_unavailable",
+    });
+    expect(fake.pool.connect).not.toHaveBeenCalled();
+  });
+
+  it("coordinates capture exclusivity across API processes with a PostgreSQL advisory lock", async () => {
+    const fake = fakePool({ acquireAdvisoryLock: false });
+    await expect(
+      captureSourceLibraryReconciliation(
+        validRequest,
+        dependencies(fake.pool),
+      ),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      code: "capture_in_progress",
+    });
+    expect(fake.calls).toEqual([
+      "SELECT pg_try_advisory_lock($1::bigint) AS locked",
+    ]);
+    expect(fake.release).toHaveBeenCalledWith(false);
   });
 
   it("rejects expired or mismatched deployment identities without acquiring a connection", async () => {
@@ -312,7 +384,8 @@ describe("source-library reconciliation capture", () => {
     );
     expect(result).toEqual(diagnostic);
     expect(result.ok).toBe(false);
-    expect(fake.calls.at(-1)).toBe("ROLLBACK");
+    expect(fake.calls.at(-2)).toBe("ROLLBACK");
+    expect(fake.calls.at(-1)).toContain("pg_advisory_unlock");
   });
 
   it("maps database failures to a safe 503 and rolls back before releasing the client", async () => {

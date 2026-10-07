@@ -98,6 +98,14 @@ export const SourceLibraryReconciliationEvidenceEnvironment = {
   release: 'release',
 } as const;
 
+export type SourceLibraryReconciliationEvidenceDatabaseAttestation = typeof SourceLibraryReconciliationEvidenceDatabaseAttestation[keyof typeof SourceLibraryReconciliationEvidenceDatabaseAttestation];
+
+
+export const SourceLibraryReconciliationEvidenceDatabaseAttestation = {
+  'external-owner-check': 'external-owner-check',
+  'published-app-runtime-connection': 'published-app-runtime-connection',
+} as const;
+
 export type SourceLibraryReconciliationEvidenceRepairBoundary = {
   fromDate: string;
 };
@@ -312,6 +320,7 @@ export interface SourceLibraryReferenceCounts {
 export interface SourceLibraryReconciliationEvidence {
   verifier: SourceLibraryReconciliationEvidenceVerifier;
   environment: SourceLibraryReconciliationEvidenceEnvironment;
+  databaseAttestation: SourceLibraryReconciliationEvidenceDatabaseAttestation;
   /**
      * @minLength 1
      * @maxLength 128

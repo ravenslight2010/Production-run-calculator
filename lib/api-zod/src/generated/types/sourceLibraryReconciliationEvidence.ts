@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { SourceLibraryReconciliationEvidenceAliases } from './sourceLibraryReconciliationEvidenceAliases';
+import type { SourceLibraryReconciliationEvidenceDatabaseAttestation } from './sourceLibraryReconciliationEvidenceDatabaseAttestation';
 import type { SourceLibraryReconciliationEvidenceEnvironment } from './sourceLibraryReconciliationEvidenceEnvironment';
 import type { SourceLibraryReconciliationEvidenceFailuresItem } from './sourceLibraryReconciliationEvidenceFailuresItem';
 import type { SourceLibraryReconciliationEvidenceIdempotencyFingerprint } from './sourceLibraryReconciliationEvidenceIdempotencyFingerprint';
@@ -21,6 +22,7 @@ import type { SourceLibraryReferenceCounts } from './sourceLibraryReferenceCount
 export interface SourceLibraryReconciliationEvidence {
   verifier: SourceLibraryReconciliationEvidenceVerifier;
   environment: SourceLibraryReconciliationEvidenceEnvironment;
+  databaseAttestation: SourceLibraryReconciliationEvidenceDatabaseAttestation;
   /**
      * @minLength 1
      * @maxLength 128

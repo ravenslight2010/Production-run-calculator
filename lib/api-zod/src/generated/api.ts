@@ -134,6 +134,81 @@ export const deleteRunTemplatesBodyThreeItemsItemRevisionMax = 9007199254740991;
 export const deleteRunTemplatesResponseTemplatesItemRevisionMin = 0;
 export const deleteRunTemplatesResponseTemplatesItemRevisionMax = 9007199254740991;
 export const deleteRunTemplatesResponseTemplatesItemDeletedDefault = false;
+export const getPublishedSourceLibraryReconciliationCaptureResponseRevisionMax = 128;
+export const getPublishedSourceLibraryReconciliationCaptureResponseEvidenceIdRegExp = new RegExp('^[a-f0-9]{64}$');
+export const getPublishedSourceLibraryReconciliationCaptureResponseHealIdMax = 128;
+export const getPublishedSourceLibraryReconciliationCaptureResponseReportSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const getPublishedSourceLibraryReconciliationCaptureResponseReportAutomaticProposalsMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseReportAutomaticProposalsMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseReportStubsMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseReportStubsMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsReplacementsMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsReplacementsMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsAliasesInsertedMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsAliasesInsertedMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsRepointedProfilesMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsRepointedProfilesMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsRepointedRunsMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsRepointedRunsMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsDeletedStubsMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsDeletedStubsMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePoolsExpectedMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePoolsExpectedMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePoolsExactMatchesMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePoolsExactMatchesMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePoolsGuardedRenamesMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePoolsGuardedRenamesMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePoolsMissingMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePoolsMissingMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePoolsMismatchesMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePoolsMismatchesMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseAliasesExpectedMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseAliasesExpectedMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseAliasesExactMatchesMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseAliasesExactMatchesMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseAliasesMissingMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseAliasesMissingMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseAliasesMismatchesMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseAliasesMismatchesMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseProfilesInspectedMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseProfilesInspectedMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseProfilesCanonicalMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseProfilesCanonicalMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseProfilesStaleMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseProfilesStaleMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseProfilesNonCanonicalMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseProfilesNonCanonicalMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePendingRunsInspectedMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePendingRunsInspectedMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePendingRunsCanonicalMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePendingRunsCanonicalMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePendingRunsStaleMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePendingRunsStaleMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePendingRunsNonCanonicalMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePendingRunsNonCanonicalMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseProtectedHistoryReferencesMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseProtectedHistoryReferencesMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseStubsExpectedMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseStubsExpectedMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseStubsCanonicalExactMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseStubsCanonicalExactMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseStubsCanonicalMissingMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseStubsCanonicalMissingMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseStubsCanonicalMismatchesMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseStubsCanonicalMismatchesMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseStubsDeletedExpectedMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseStubsDeletedExpectedMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseStubsRemainingProtectedMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseStubsRemainingProtectedMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseStubsUnexpectedlyDeletedMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseStubsUnexpectedlyDeletedMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseStubsUnexpectedlyRemainingMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseStubsUnexpectedlyRemainingMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseIdempotencyFingerprintValueRegExp = new RegExp('^[a-f0-9]{64}$');
+export const getPublishedSourceLibraryReconciliationCaptureResponseFailuresItemCheckRegExp = new RegExp('^[A-Za-z0-9_-]{1,80}$');
+export const getPublishedSourceLibraryReconciliationCaptureResponseFailuresItemCountMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseFailuresItemCountMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseFailuresMax = 20;
 export const captureSourceLibraryReconciliationBodyDeploymentHandoffDeploymentIdMax = 128;
 export const captureSourceLibraryReconciliationBodyDeploymentHandoffDeployedRevisionRegExp = new RegExp('^source-sha256:[a-f0-9]{64}$');
 export const captureSourceLibraryReconciliationBodyDeploymentHandoffAppBuildIdRegExp = new RegExp('^app-build:[a-f0-9-]{36}$');
@@ -4629,6 +4704,129 @@ export const ApplyProfileDataHealthRepairsResponse = zod.object({
 
 
 /**
+ * Public read-only capture for Replit Agent. Runs the reviewed verifier through this published API process's configured database connection and binds the result to this process's build identity. It attests to the database configured for the published app, not to an independently supplied PostgreSQL owner name. Returns aggregate counts and hashes only; it never returns source rows or credentials. Rate limited and unavailable outside production.
+ * @summary Capture a bounded reconciliation summary from the published app
+ */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+export const GetPublishedSourceLibraryReconciliationCaptureResponse = zod.object({
+  "verifier": zod.enum(['source-library-reconciliation']),
+  "environment": zod.enum(['release']),
+  "databaseAttestation": zod.enum(['external-owner-check', 'published-app-runtime-connection']),
+  "revision": zod.string().min(1).max(getPublishedSourceLibraryReconciliationCaptureResponseRevisionMax),
+  "capturedAt": zod.coerce.date(),
+  "evidenceId": zod.string().regex(getPublishedSourceLibraryReconciliationCaptureResponseEvidenceIdRegExp),
+  "healId": zod.string().min(1).max(getPublishedSourceLibraryReconciliationCaptureResponseHealIdMax),
+  "repairBoundary": zod.object({
+  "fromDate": zod.coerce.date()
+}),
+  "report": zod.object({
+  "sha256": zod.string().regex(getPublishedSourceLibraryReconciliationCaptureResponseReportSha256RegExp),
+  "formatVersion": zod.literal(1),
+  "automaticProposals": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseReportAutomaticProposalsMin).max(getPublishedSourceLibraryReconciliationCaptureResponseReportAutomaticProposalsMax),
+  "stubs": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseReportStubsMin).max(getPublishedSourceLibraryReconciliationCaptureResponseReportStubsMax)
+}),
+  "marker": zod.object({
+  "present": zod.boolean(),
+  "resultValid": zod.boolean(),
+  "resultWithinBounds": zod.boolean(),
+  "resultCounts": zod.object({
+  "replacements": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsReplacementsMin).max(getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsReplacementsMax),
+  "aliasesInserted": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsAliasesInsertedMin).max(getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsAliasesInsertedMax),
+  "repointedProfiles": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsRepointedProfilesMin).max(getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsRepointedProfilesMax),
+  "repointedRuns": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsRepointedRunsMin).max(getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsRepointedRunsMax),
+  "deletedStubs": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsDeletedStubsMin).max(getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsDeletedStubsMax)
+}),
+  "appliedAtPresent": zod.boolean()
+}),
+  "pools": zod.object({
+  "expected": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponsePoolsExpectedMin).max(getPublishedSourceLibraryReconciliationCaptureResponsePoolsExpectedMax),
+  "exactMatches": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponsePoolsExactMatchesMin).max(getPublishedSourceLibraryReconciliationCaptureResponsePoolsExactMatchesMax),
+  "guardedRenames": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponsePoolsGuardedRenamesMin).max(getPublishedSourceLibraryReconciliationCaptureResponsePoolsGuardedRenamesMax),
+  "missing": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponsePoolsMissingMin).max(getPublishedSourceLibraryReconciliationCaptureResponsePoolsMissingMax),
+  "mismatches": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponsePoolsMismatchesMin).max(getPublishedSourceLibraryReconciliationCaptureResponsePoolsMismatchesMax)
+}),
+  "aliases": zod.object({
+  "expected": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseAliasesExpectedMin).max(getPublishedSourceLibraryReconciliationCaptureResponseAliasesExpectedMax),
+  "exactMatches": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseAliasesExactMatchesMin).max(getPublishedSourceLibraryReconciliationCaptureResponseAliasesExactMatchesMax),
+  "missing": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseAliasesMissingMin).max(getPublishedSourceLibraryReconciliationCaptureResponseAliasesMissingMax),
+  "mismatches": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseAliasesMismatchesMin).max(getPublishedSourceLibraryReconciliationCaptureResponseAliasesMismatchesMax)
+}),
+  "profiles": zod.object({
+  "inspected": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseProfilesInspectedMin).max(getPublishedSourceLibraryReconciliationCaptureResponseProfilesInspectedMax),
+  "canonical": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseProfilesCanonicalMin).max(getPublishedSourceLibraryReconciliationCaptureResponseProfilesCanonicalMax),
+  "stale": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseProfilesStaleMin).max(getPublishedSourceLibraryReconciliationCaptureResponseProfilesStaleMax),
+  "nonCanonical": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseProfilesNonCanonicalMin).max(getPublishedSourceLibraryReconciliationCaptureResponseProfilesNonCanonicalMax)
+}),
+  "pendingRuns": zod.object({
+  "inspected": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponsePendingRunsInspectedMin).max(getPublishedSourceLibraryReconciliationCaptureResponsePendingRunsInspectedMax),
+  "canonical": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponsePendingRunsCanonicalMin).max(getPublishedSourceLibraryReconciliationCaptureResponsePendingRunsCanonicalMax),
+  "stale": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponsePendingRunsStaleMin).max(getPublishedSourceLibraryReconciliationCaptureResponsePendingRunsStaleMax),
+  "nonCanonical": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponsePendingRunsNonCanonicalMin).max(getPublishedSourceLibraryReconciliationCaptureResponsePendingRunsNonCanonicalMax)
+}),
+  "protectedHistory": zod.object({
+  "references": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseProtectedHistoryReferencesMin).max(getPublishedSourceLibraryReconciliationCaptureResponseProtectedHistoryReferencesMax)
+}),
+  "stubs": zod.object({
+  "expected": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseStubsExpectedMin).max(getPublishedSourceLibraryReconciliationCaptureResponseStubsExpectedMax),
+  "canonicalExact": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseStubsCanonicalExactMin).max(getPublishedSourceLibraryReconciliationCaptureResponseStubsCanonicalExactMax),
+  "canonicalMissing": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseStubsCanonicalMissingMin).max(getPublishedSourceLibraryReconciliationCaptureResponseStubsCanonicalMissingMax),
+  "canonicalMismatches": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseStubsCanonicalMismatchesMin).max(getPublishedSourceLibraryReconciliationCaptureResponseStubsCanonicalMismatchesMax),
+  "deletedExpected": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseStubsDeletedExpectedMin).max(getPublishedSourceLibraryReconciliationCaptureResponseStubsDeletedExpectedMax),
+  "remainingProtected": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseStubsRemainingProtectedMin).max(getPublishedSourceLibraryReconciliationCaptureResponseStubsRemainingProtectedMax),
+  "unexpectedlyDeleted": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseStubsUnexpectedlyDeletedMin).max(getPublishedSourceLibraryReconciliationCaptureResponseStubsUnexpectedlyDeletedMax),
+  "unexpectedlyRemaining": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseStubsUnexpectedlyRemainingMin).max(getPublishedSourceLibraryReconciliationCaptureResponseStubsUnexpectedlyRemainingMax)
+}),
+  "idempotencyFingerprint": zod.object({
+  "algorithm": zod.enum(['sha256']),
+  "value": zod.string().regex(getPublishedSourceLibraryReconciliationCaptureResponseIdempotencyFingerprintValueRegExp)
+}),
+  "ok": zod.boolean(),
+  "failures": zod.array(zod.object({
+  "check": zod.string().regex(getPublishedSourceLibraryReconciliationCaptureResponseFailuresItemCheckRegExp),
+  "count": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseFailuresItemCountMin).max(getPublishedSourceLibraryReconciliationCaptureResponseFailuresItemCountMax)
+})).max(getPublishedSourceLibraryReconciliationCaptureResponseFailuresMax)
+})
+
+
+/**
  * Manager-only and live-scope only. Validates a fresh schema-v2 published source handoff against the immutable identity of this running API build, then runs the reviewed verifier in one read-only production transaction. Returns only its bounded summary; no source rows or report payloads are persisted or logged. A 200 response may have ok=false and remains a valid capture result.
  * @summary Capture bounded production source-library reconciliation evidence
  */
@@ -4700,6 +4898,7 @@ export const CaptureSourceLibraryReconciliationBody = zod.object({
 export const CaptureSourceLibraryReconciliationResponse = zod.object({
   "verifier": zod.enum(['source-library-reconciliation']),
   "environment": zod.enum(['release']),
+  "databaseAttestation": zod.enum(['external-owner-check', 'published-app-runtime-connection']),
   "revision": zod.string().min(1).max(captureSourceLibraryReconciliationResponseRevisionMax),
   "capturedAt": zod.coerce.date(),
   "evidenceId": zod.string().regex(captureSourceLibraryReconciliationResponseEvidenceIdRegExp),

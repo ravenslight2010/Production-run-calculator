@@ -1056,6 +1056,26 @@ describe("capability-based access control", () => {
     expect(res.headers.get("cache-control")).toBe("no-store");
   });
 
+  it("keeps the public capture path unauthenticated but unavailable outside production", async () => {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const res = await req(
+        null,
+        "GET",
+        "/api/profile-data/source-library-reconciliation/capture",
+      );
+      expect(res.status).toBe(404);
+      expect(res.headers.get("cache-control")).toContain("no-store");
+      await expect(res.json()).resolves.toEqual({ error: "Not found" });
+    }
+    const limited = await req(
+      null,
+      "GET",
+      "/api/profile-data/source-library-reconciliation/capture",
+    );
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get("retry-after")).toBeTruthy();
+  });
+
   it("rejects source-library capture bodies above the 8 KiB request cap", async () => {
     const res = await req(
       MANAGER,

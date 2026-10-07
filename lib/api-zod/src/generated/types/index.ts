@@ -630,6 +630,7 @@ export * from './sourceLibraryReconciliationCaptureRequestDeploymentHandoffSchem
 export * from './sourceLibraryReconciliationCaptureRequestDeploymentHandoffSourcePolicy';
 export * from './sourceLibraryReconciliationEvidence';
 export * from './sourceLibraryReconciliationEvidenceAliases';
+export * from './sourceLibraryReconciliationEvidenceDatabaseAttestation';
 export * from './sourceLibraryReconciliationEvidenceEnvironment';
 export * from './sourceLibraryReconciliationEvidenceFailuresItem';
 export * from './sourceLibraryReconciliationEvidenceIdempotencyFingerprint';

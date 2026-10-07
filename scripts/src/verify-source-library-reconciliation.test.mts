@@ -429,6 +429,32 @@ assert.throws(
 assert.match(output.idempotencyFingerprint.value, /^[a-f0-9]{64}$/);
 assert.ok(queries.length > 0);
 
+const runtimeQueryStart = queries.length;
+const runtimeAttestedOutput = await verifySourceLibraryReconciliation(
+  report,
+  reportBytes,
+  "source-library-reconciliation-2026-08-26-v1",
+  query,
+  "2026-08-26",
+  "release",
+  "source-sha256:" + "a".repeat(64),
+  undefined,
+  "published-app-runtime-connection",
+);
+assert.equal(
+  runtimeAttestedOutput.databaseAttestation,
+  "published-app-runtime-connection",
+);
+assert.equal(
+  runtimeAttestedOutput.failures.some(({ check }) => check === "databaseOwner"),
+  false,
+);
+assert.equal(
+  queries.slice(runtimeQueryStart).some((text) => text.includes("FROM pg_database")),
+  false,
+  "published-app capture must attest through its executing DB connection, not query an external owner name",
+);
+
 const preflight = await preflightSourceLibraryReconciliation(
   report,
   reportBytes,
@@ -754,6 +780,7 @@ function assertBoundedCliEvidence(
   assert.deepEqual(Object.keys(value).sort(), [
     "aliases",
     "capturedAt",
+      "databaseAttestation",
     "environment",
     "evidenceId",
     "failures",

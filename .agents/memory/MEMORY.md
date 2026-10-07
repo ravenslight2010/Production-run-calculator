@@ -90,7 +90,7 @@
 - [SSE cleanup](sse-disconnect-registration.md) + [sleep/wake](sleep-wake-sync-fences.md) + [complete writes](complete-sync-snapshot-fencing.md) — clean before awaits; lock-fence complete writes.
 - [Formula import safety](formula-import-safety.md) + [workbook layouts](source-workbook-layouts.md) — preserve native-unit provenance and use fail-closed layout guards.
 - [Gate budgets](release-check-shard-budget.md) + [browser cases](browser-release-case-contract.md) + [container proof](container-image-release-evidence.md) — bound gates; bind proof to revision.
-- [Source reconciliation evidence](source-reconciliation-evidence-boundary.md) — production repair proof must use the matching database, not mixed fixtures.
+- [Source reconciliation evidence](source-reconciliation-evidence-boundary.md) — CLI captures independently match an approved DB owner; published-app captures attest only to the app-configured database.
 - [Audit captures](large-source-audit-captures.md) + [report versions](source-audit-report-versions.md) + [CLI paths](source-audit-cli-paths.md) — hash captures; resolve versions and script paths.
 - [Importer audit recovery](importer-audit-recovery.md) — retryable audit writes must be user/scope-bound and server-idempotent; never replay source imports automatically.
 - [Cross-channel auto-track claims](cross-channel-auto-track-claims.md) — shared run stamps require queued deltas to distinguish peer auto accepts from manual edits before rebasing.

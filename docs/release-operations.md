@@ -347,12 +347,55 @@ provider-verified deployment handoff; `incomplete` or `unavailable` means the
 identity values were absent or invalid. Production release checks must continue
 to require the current, validated published-deployment handoff described below.
 
-Capture and import production reconciliation evidence with the revision in that
-handoff. Run this from the deployment environment that owns the production
-`DATABASE_URL`; the capture mode validates the handoff before querying,
-refuses fixture query input, requires the explicit release environment, and
-runs one PostgreSQL `READ ONLY` transaction. Its stdout contains only the
-bounded verifier result, so it can be piped directly to the importer:
+### Preferred: capture from the published Replit app
+
+After publishing the revision, Replit Agent can retrieve the bounded summary
+directly from the published API. The public `GET` uses the running app's own
+database connection and build identity; it does not require a manager login,
+PostgreSQL owner name, request body, or database credentials. It reports
+`published-app-runtime-connection` attestation, which means the evidence came
+from the database configured for that published app; it is not an independent
+PostgreSQL owner-name comparison. The summary contains only bounded counts and
+hashes. The verifier itself runs in a PostgreSQL `READ ONLY` transaction; the
+shared rate limiter records only its request counter in the existing rate-limit
+table. The endpoint is limited to five requests per 15 minutes and returns
+`429` with `Retry-After` when the limit is reached. A PostgreSQL advisory lock
+prevents overlapping captures across API workers; a concurrent capture returns
+`409`.
+
+First create a fresh handoff using the published-build procedure above, then
+fetch and import the summary:
+
+```bash
+mkdir -p .local/build-identity
+PUBLISHED_URL='<official published URL>'
+HANDOFF=.local/build-identity/published-source-handoff.json
+CAPTURE=.local/build-identity/source-library-reconciliation.json
+curl --fail --silent --show-error --max-time 25 --max-filesize 32768 \
+  "$PUBLISHED_URL/api/profile-data/source-library-reconciliation/capture" \
+  --output "$CAPTURE"
+pnpm --filter @workspace/scripts exec tsx \
+  ./src/import-source-library-reconciliation-evidence.mts \
+  --input "$CAPTURE" \
+  --report attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json \
+  --heal-id source-library-reconciliation-2026-08-26-v2 \
+  --from-date 2026-08-26 \
+  --deployment-handoff "$HANDOFF" \
+  --output .local/build-identity/source-library-reconciliation-imported.json
+```
+
+The importer checks the captured source revision against the fresh handoff. A
+stale or mismatched published build is rejected. Do not upload raw records,
+database dumps, response logs, or credentials.
+
+### Alternative: capture in the database-owning environment
+
+For an independently owner-attested capture, run this from the environment
+that owns the production `DATABASE_URL`. The capture mode validates the handoff
+and approved PostgreSQL owner name before querying, refuses fixture query input,
+requires the explicit release environment, and runs one PostgreSQL `READ ONLY`
+transaction. Its stdout contains only the bounded verifier result, so it can be
+piped directly to the importer:
 
 ```bash
 HANDOFF=/secure/path/published-deployment-handoff.json
@@ -387,9 +430,9 @@ pnpm run release:check -- \
   --source-library-evidence /secure/path/source-library-reconciliation.json
 ```
 
-Release captures and imports reject a missing, malformed, `unknown`, or
-stale handoff, and reject an explicit `--revision` that differs from the
-handoff. The production revision must come from the controlled
+CLI release captures and evidence imports reject a missing, malformed,
+`unknown`, or stale handoff, and reject an explicit `--revision` that differs
+from the handoff. The production revision must come from the controlled
 deployment/report path; never substitute the current repository `HEAD`. The
 handoff is read only for its bounded deployment identity and SHA and is not
 copied into retained evidence; recipe rows, aliases, database responses, and

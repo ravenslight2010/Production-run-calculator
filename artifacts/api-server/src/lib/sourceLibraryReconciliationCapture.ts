@@ -16,6 +16,7 @@ export const SOURCE_LIBRARY_CAPTURE_REQUEST_MAX_BYTES = 8 * 1024;
 export const SOURCE_LIBRARY_CAPTURE_OUTPUT_MAX_BYTES = 32 * 1024;
 export const SOURCE_LIBRARY_CAPTURE_STATEMENT_TIMEOUT = "15s";
 export const SOURCE_LIBRARY_CAPTURE_LOCK_TIMEOUT = "2s";
+const SOURCE_LIBRARY_CAPTURE_ADVISORY_LOCK_KEY = "6389014719231";
 
 type QueryResult = { rows: Array<Record<string, unknown>> };
 type ReadOnlyClient = {
@@ -52,6 +53,10 @@ type CaptureDependencies = {
   buildInfo: Readonly<BuildInfo> | null;
   now?: Date;
 };
+
+export type SourceLibraryDatabaseAttestation =
+  | "external-owner-check"
+  | "published-app-runtime-connection";
 
 let captureInProgress = false;
 
@@ -194,6 +199,55 @@ export async function captureSourceLibraryReconciliation(
     dependencies,
   );
   const report = loadReviewedReport(dependencies);
+  return runReadOnlyCapture(
+    report,
+    dependencies,
+    handoff.deployedRevision,
+    input.expectedDatabaseOwner as string,
+    "external-owner-check",
+  );
+}
+
+/**
+ * Capture through the published API's own database pool. This proves which
+ * database the running app is configured to use; unlike the manager/CLI path,
+ * it does not claim an independently supplied PostgreSQL owner-name match.
+ */
+export async function captureSourceLibraryReconciliationFromPublishedApp(
+  dependencies: CaptureDependencies,
+): Promise<VerificationOutput> {
+  const buildInfo = dependencies.buildInfo;
+  if (
+    !buildInfo ||
+    typeof buildInfo.appBuildId !== "string" ||
+    buildInfo.appBuildId.trim() !== buildInfo.appBuildId ||
+    buildInfo.appBuildId.length === 0 ||
+    buildInfo.appBuildId.length > 128 ||
+    !/^[a-f0-9]{64}$/u.test(buildInfo.sourceFingerprintSha256)
+  ) {
+    fail(
+      503,
+      "build_identity_unavailable",
+      "The running build identity is unavailable",
+    );
+  }
+  const report = loadReviewedReport(dependencies);
+  return runReadOnlyCapture(
+    report,
+    dependencies,
+    `source-sha256:${buildInfo.sourceFingerprintSha256}`,
+    undefined,
+    "published-app-runtime-connection",
+  );
+}
+
+async function runReadOnlyCapture(
+  report: ReturnType<typeof loadReviewedReport>,
+  dependencies: CaptureDependencies,
+  deployedRevision: string,
+  expectedDatabaseOwner: string | undefined,
+  databaseAttestation: SourceLibraryDatabaseAttestation,
+): Promise<VerificationOutput> {
   if (captureInProgress) {
     fail(
       409,
@@ -206,8 +260,27 @@ export async function captureSourceLibraryReconciliation(
   let client: ReadOnlyClient | undefined;
   let transactionOpen = false;
   let destroyClient = false;
+  let advisoryLockHeld = false;
   try {
     client = await dependencies.pool.connect();
+    let lockResult;
+    try {
+      lockResult = await client.query(
+        "SELECT pg_try_advisory_lock($1::bigint) AS locked",
+        [SOURCE_LIBRARY_CAPTURE_ADVISORY_LOCK_KEY],
+      );
+    } catch (error) {
+      destroyClient = true;
+      throw error;
+    }
+    advisoryLockHeld = lockResult.rows[0]?.locked === true;
+    if (!advisoryLockHeld) {
+      fail(
+        409,
+        "capture_in_progress",
+        "A source-library capture is already running",
+      );
+    }
     transactionOpen = true;
     await client.query("BEGIN TRANSACTION READ ONLY");
     await client.query(
@@ -227,11 +300,15 @@ export async function captureSourceLibraryReconciliation(
       },
       DEFAULT_FROM_DATE,
       "release",
-      handoff.deployedRevision,
-      input.expectedDatabaseOwner as string,
+      deployedRevision,
+      expectedDatabaseOwner,
+      databaseAttestation,
     );
     try {
       assertBoundedSourceLibraryReconciliationEvidence(output);
+      if (output.databaseAttestation !== databaseAttestation) {
+        throw new Error("Capture attestation did not match the requested mode");
+      }
     } catch {
       fail(
         500,
@@ -269,6 +346,19 @@ export async function captureSourceLibraryReconciliation(
       "The production database could not complete the read-only capture",
     );
   } finally {
+    if (advisoryLockHeld && client) {
+      try {
+        const unlockResult = await client.query(
+          "SELECT pg_advisory_unlock($1::bigint) AS unlocked",
+          [SOURCE_LIBRARY_CAPTURE_ADVISORY_LOCK_KEY],
+        );
+        if (unlockResult.rows[0]?.unlocked !== true) {
+          destroyClient = true;
+        }
+      } catch {
+        destroyClient = true;
+      }
+    }
     client?.release(destroyClient);
     captureInProgress = false;
   }

@@ -40,22 +40,31 @@ operational report merely to discover the revision; obtain the controlled
 handoff, run the full read-only verifier, then import only its summary-shaped
 output.
 
-Production source-library evidence also requires an explicit approved database
-owner attestation, compared with PostgreSQL's read-only catalog owner. Matching
-counts alone are not evidence of database ownership, and owner names must not
-enter retained summaries.
+Production source-library evidence supports two explicit database-attestation
+paths. The CLI capture requires an approved owner name and compares it with
+PostgreSQL's catalog owner. The published-app endpoint instead attests that the
+summary was captured through the currently published API's configured database
+connection, bound to that app build; it is not an independent owner-name match.
+Both paths retain bounded evidence only, never owner names or source rows.
 
-**Why:** An unrelated database can reproduce aggregate pool, alias, and marker
-counts while still being the wrong production target.
+**Why:** Replit Agent cannot access the published app's production connection
+directly. The owner approved an app-provided, public, rate-limited summary so
+the agent can capture without a manager running a command. This removes manual
+owner-name entry but cannot independently detect a misconfigured production
+database URL.
 
-**How to apply:** Configure the approved owner for release preflight and full
-capture; classify missing or mismatched ownership as a fail-closed
-`databaseOwner` check while retaining only bounded diagnostics.
+**How to apply:** Use the published-app path for unattended capture only after
+confirming the official published URL and matching its reported revision to the
+fresh deployment handoff. Describe its attestation as the app-configured
+database, not an independently verified production owner. Use the CLI path when
+independent owner-name confirmation is required; reject missing or mismatched
+owner values there.
 
 The controlled deployment handoff may also carry a bounded `databaseOwner`
-attestation. Release source-library checks use it when the environment does
+attestation. CLI release source-library checks use it when the environment does
 not provide an owner and reject any mismatch between the two sources; the
-owner remains outside retained evidence and checkpoint diagnostics.
+owner remains outside retained evidence and checkpoint diagnostics. The
+published-app runtime-connection mode does not consume this field.
 
 **Why:** Keeping the owner attestation with deployment and revision identity
 prevents preflight and production capture from silently targeting different

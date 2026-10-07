@@ -4,9 +4,12 @@ import { fileURLToPath } from "node:url";
 import { Router } from "express";
 import { CaptureSourceLibraryReconciliationBody } from "@workspace/api-zod";
 import { pool } from "@workspace/db";
+import { rateLimit } from "../middlewares/rateLimit";
+import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
 import { getBuildInfo } from "../lib/buildInfo";
 import {
   captureSourceLibraryReconciliation,
+  captureSourceLibraryReconciliationFromPublishedApp,
   SOURCE_LIBRARY_CAPTURE_REQUEST_MAX_BYTES,
   SourceLibraryCaptureFailure,
 } from "../lib/sourceLibraryReconciliationCapture";
@@ -44,6 +47,61 @@ function readReviewedReportBundle(): { reportBytes: Buffer; reviewedReportSha256
 }
 
 const router = Router();
+
+const publicCaptureRateWindowMs = 15 * 60 * 1000;
+const publicCaptureRateLimit = rateLimit({
+  windowMs: publicCaptureRateWindowMs,
+  max: 5,
+  keyGenerator: () => "source-library-public-capture",
+  store:
+    process.env.NODE_ENV === "production"
+      ? new PostgresRateLimitStore(publicCaptureRateWindowMs, {
+          enableSweep: false,
+        })
+      : undefined,
+});
+
+export const publicSourceLibraryReconciliationCaptureRouter = Router();
+
+publicSourceLibraryReconciliationCaptureRouter.get(
+  "/profile-data/source-library-reconciliation/capture",
+  (_req, res, next) => {
+    res.setHeader("Cache-Control", "no-store");
+    next();
+  },
+  publicCaptureRateLimit,
+  async (req, res): Promise<void> => {
+    if (process.env.NODE_ENV !== "production") {
+      res.status(404).json({ error: "Not found" });
+      return;
+    }
+    try {
+      const report = readReviewedReportBundle();
+      const output = await captureSourceLibraryReconciliationFromPublishedApp({
+        pool,
+        ...report,
+        buildInfo: getBuildInfo(),
+      });
+      res.status(200).json(output);
+    } catch (error) {
+      if (error instanceof SourceLibraryCaptureFailure) {
+        req.log.warn(
+          { captureFailure: error.code, statusCode: error.statusCode },
+          "public source-library reconciliation capture did not complete",
+        );
+        res.status(error.statusCode).json({ error: error.publicMessage });
+        return;
+      }
+      req.log.error(
+        { captureFailure: "unexpected" },
+        "public source-library reconciliation capture failed",
+      );
+      res.status(500).json({
+        error: "Source-library reconciliation capture failed",
+      });
+    }
+  },
+);
 
 router.post(
   "/profile-data/source-library-reconciliation/capture",

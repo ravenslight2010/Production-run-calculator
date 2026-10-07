@@ -2673,6 +2673,26 @@ export function validateSourceLibraryReconciliationEvidence(
     );
   }
   if (
+    output.databaseAttestation !== undefined &&
+    output.databaseAttestation !== "external-owner-check" &&
+    output.databaseAttestation !== "development-no-owner-check" &&
+    output.databaseAttestation !== "published-app-runtime-connection"
+  ) {
+    throw new Error(
+      "Source-library reconciliation evidence has an invalid database attestation.",
+    );
+  }
+  if (
+    (evidenceEnvironment === "release" &&
+      output.databaseAttestation === "development-no-owner-check") ||
+    (evidenceEnvironment === "development" &&
+      output.databaseAttestation === "published-app-runtime-connection")
+  ) {
+    throw new Error(
+      "Source-library reconciliation evidence database attestation does not match its environment.",
+    );
+  }
+  if (
     typeof output.revision !== "string" ||
     output.revision.trim() === "" ||
     output.revision === "unknown" ||

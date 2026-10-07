@@ -3,7 +3,9 @@ import healthRouter from "./health";
 import authRouter from "./auth";
 import runsRouter from "./runs";
 import profileDataHealthRouter from "./profileDataHealth";
-import sourceLibraryReconciliationCaptureRouter from "./sourceLibraryReconciliationCapture";
+import sourceLibraryReconciliationCaptureRouter, {
+  publicSourceLibraryReconciliationCaptureRouter,
+} from "./sourceLibraryReconciliationCapture";
 import masterDataHealthRouter from "./masterDataHealth";
 import runTemplatesRouter from "./runTemplates";
 import coreSyncRunsRouter from "./capabilities/coreSyncRuns";
@@ -172,6 +174,7 @@ router.use(noStoreMiddleware);
 // Public lifecycle order is contractual: probes, readiness gate, then auth.
 router.use(healthRouter);
 router.use(startupGate);
+router.use(publicSourceLibraryReconciliationCaptureRouter);
 router.use(authRouter);
 
 // All capability families are authenticated. Family-owned capability checks

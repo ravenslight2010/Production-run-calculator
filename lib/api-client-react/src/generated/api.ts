@@ -12232,6 +12232,108 @@ export const useApplyProfileDataHealthRepairs = <TError = ErrorType<void>,
       return useMutation(getApplyProfileDataHealthRepairsMutationOptions(options), queryClient);
     }
 
+export const getGetPublishedSourceLibraryReconciliationCaptureUrl = () => {
+
+
+
+
+  return `/api/profile-data/source-library-reconciliation/capture`
+}
+
+/**
+ * Public read-only capture for Replit Agent. Runs the reviewed verifier through this published API process's configured database connection and binds the result to this process's build identity. It attests to the database configured for the published app, not to an independently supplied PostgreSQL owner name. Returns aggregate counts and hashes only; it never returns source rows or credentials. Rate limited and unavailable outside production.
+ * @summary Capture a bounded reconciliation summary from the published app
+ */
+export const getPublishedSourceLibraryReconciliationCapture = async ( options?: Parameters<typeof customFetch>[1]): Promise<SourceLibraryReconciliationEvidence> => {
+
+  return customFetch<SourceLibraryReconciliationEvidence>(getGetPublishedSourceLibraryReconciliationCaptureUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPublishedSourceLibraryReconciliationCaptureQueryKey = () => {
+    return [
+    `/api/profile-data/source-library-reconciliation/capture`
+    ] as const;
+    }
+
+
+export const getGetPublishedSourceLibraryReconciliationCaptureQueryOptions = <TData = Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>, TError = ErrorType<SourceLibraryCaptureError>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPublishedSourceLibraryReconciliationCaptureQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>> = ({ signal }) => getPublishedSourceLibraryReconciliationCapture({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetPublishedSourceLibraryReconciliationCaptureQueryResult = NonNullable<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>>
+export type GetPublishedSourceLibraryReconciliationCaptureQueryError = ErrorType<SourceLibraryCaptureError>
+
+
+export function useGetPublishedSourceLibraryReconciliationCapture<TData = Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>, TError = ErrorType<SourceLibraryCaptureError>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>,
+          TError,
+          Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPublishedSourceLibraryReconciliationCapture<TData = Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>, TError = ErrorType<SourceLibraryCaptureError>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>,
+          TError,
+          Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPublishedSourceLibraryReconciliationCapture<TData = Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>, TError = ErrorType<SourceLibraryCaptureError>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Capture a bounded reconciliation summary from the published app
+ */
+
+export function useGetPublishedSourceLibraryReconciliationCapture<TData = Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>, TError = ErrorType<SourceLibraryCaptureError>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationCapture>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetPublishedSourceLibraryReconciliationCaptureQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
 export const getCaptureSourceLibraryReconciliationUrl = () => {
 
 

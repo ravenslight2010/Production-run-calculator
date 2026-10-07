@@ -3,6 +3,10 @@ export type SourceLibraryEvidenceEnvironment = "development" | "release";
 export type VerificationOutput = {
   verifier: "source-library-reconciliation";
   environment: SourceLibraryEvidenceEnvironment;
+  databaseAttestation?:
+    | "external-owner-check"
+    | "development-no-owner-check"
+    | "published-app-runtime-connection";
   revision: string;
   capturedAt: string;
   evidenceId: string;
@@ -101,6 +105,10 @@ export function verifySourceLibraryReconciliation(
   environment?: SourceLibraryEvidenceEnvironment,
   revision?: string,
   expectedDatabaseOwner?: string,
+  databaseAttestation?:
+    | "external-owner-check"
+    | "development-no-owner-check"
+    | "published-app-runtime-connection",
 ): Promise<VerificationOutput>;
 export function assertBoundedSourceLibraryReconciliationEvidence(
   value: unknown,
