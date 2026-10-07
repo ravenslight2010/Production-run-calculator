@@ -156,3 +156,4 @@
 - [Per-pizza advisory limits](per-pizza-advisory-limits.md) — owner chose 16 oz for sauce, each applicator, and each pepperoni entry; warn only above it, never clamp or block Apply.
 - [Shell signal cleanup output](shell-signal-cleanup-output.md) — redirect child logs narrowly so temporary log removal cannot swallow signal-time cleanup warnings.
 - [Production publish workflow](production-publish-workflow.md) — production is published through Replit; use manager-authorized production evidence, never a development fixture.
+- [Project skill session refresh](skill-session-registry-refresh.md) — project skills register from `.agents/skills`, but existing chats can keep a stale skill list until a new session.
