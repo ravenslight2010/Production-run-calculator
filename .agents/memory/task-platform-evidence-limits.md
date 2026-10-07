@@ -54,3 +54,20 @@ leave siblings independent, propose one at a time or use a task-planning path th
 can store the dependencies. For existing unchained proposals, don't infer
 acceptance order from task numbers or creation times; establish the intended
 sequence before they are accepted.
+
+## Task-completion validation scope
+
+Keep automatic completion checks short and broadly applicable. Run focused
+domain suites with the task that changes that domain; reserve release evidence,
+standard/full release checks, and the full browser suite for release work. Keep
+the release GO/NO-GO requirements intact rather than weakening them to unblock
+ordinary feature tasks.
+
+**Why:** The owner chose a fast shared completion gate because long release checks
+can delay unrelated tasks and fail them on evidence or defects outside their
+scope.
+
+**How to apply:** When adjusting project-wide task validation, distinguish the
+automatic completion set from workflows that remain manually runnable. Verify
+the registered global set and confirm all release commands remain available to
+the release owner.
