@@ -1,4 +1,9 @@
 import { computeAppSlotInfo, getAutoTrackTiming } from "./autoTrackEngine";
+import {
+  APPLICATOR_STOCK_REGISTERS,
+  applicatorStockFields,
+  computeApplicatorStockCadenceSeconds,
+} from "./applicatorStock";
 import { computeSauceRunRequirement } from "./stagedSupply";
 import { computeWallClockDueRefs } from "./wallClockEngine";
 import type { Calc, CalcFormValues, CalcStoppage, ServerCalcResult } from "./index";
@@ -6,6 +11,8 @@ import type { Calc, CalcFormValues, CalcStoppage, ServerCalcResult } from "./ind
 export const AUTO_TRACK_SCHEDULE_CHANNELS = [
   "case", "tray-consume", "tray-produce", "batch-consume", "batch-produce", "hopper",
   "sauce-barrel", "app1-batch", "app2-batch", "app3-batch", "app4-batch",
+  "app1-stock", "app2-stock", "app3-stock", "app4-stock",
+  "pep1-stock", "pep1b-stock", "pep2-stock", "pep2b-stock",
 ] as const;
 export type AutoTrackScheduleChannel = typeof AUTO_TRACK_SCHEDULE_CHANNELS[number];
 export type AutoTrackScheduleEntry = {
@@ -149,28 +156,57 @@ export function computeAutoTrackSchedule(input: AutoTrackScheduleInput): AutoTra
       canonical: owned,
     });
   }
+  // Keep the legacy cumulative-made register on its existing observation
+  // channel. It is historical production evidence, not the stock ticker; the
+  // separate stock claims below never mutate these fields.
   if (live && !input.calc.pressDone) {
     for (const slot of ["app1", "app2", "app3", "app4"] as const) {
       const info = computeAppSlotInfo({
-        type: input.v[`${slot}Type`],
+        type: String(input.v[`${slot}Type`] ?? ""),
         recipe: input.v[`${slot}CheeseRecipe`],
-        batchLbs: input.v[`${slot}BatchLbs`],
-        ozPerPizza: input.v[`${slot}OzPerPizza`],
+        batchLbs: number(input.v[`${slot}BatchLbs`]),
+        ozPerPizza: number(input.v[`${slot}OzPerPizza`]),
         casesNeeded: number(input.v.casesNeeded),
         pizzasPerCase: number(input.v.pizzasPerCase),
         ppm: input.calc.ppm,
       });
       const made = Math.max(0, number(input.progress?.[`${slot}BatchesMade`]));
-      if (!info.validForClaim || made >= Math.ceil(info.required)) continue;
-      const dueAt = Math.max(0, number(input.progress?.[`${slot}BatchAnchorNetSec`])) + info.cadence;
+      if (!info.validForClaim || info.cadence <= 0 || made >= Math.ceil(info.required)) continue;
       const channel = `${slot}-batch` as AutoTrackScheduleChannel;
+      const dueAt = Math.max(0, number(input.progress?.[`${slot}BatchAnchorNetSec`])) + info.cadence;
       const state = input.coordination?.[channel];
       const owned = netCanonical(channel);
       const canonicalDue = owned ? number(state?.nextDueAt) : dueAt;
       entries.push({
-        channel, dueAt: canonicalDue,
+        channel,
+        dueAt: canonicalDue,
         dueNow: elapsedSec >= canonicalDue,
-        nextDueAt: owned ? canonicalDue : dueAt + info.cadence, canonical: owned,
+        nextDueAt: owned ? canonicalDue : dueAt + info.cadence,
+        canonical: owned,
+      });
+    }
+  }
+  if (live && !input.calc.pressDone && input.progress?.applicatorStockInitialized === true) {
+    for (const register of APPLICATOR_STOCK_REGISTERS) {
+      const fields = applicatorStockFields(register);
+      const onHand = Math.max(0, number(input.progress?.[fields.stock]));
+      const cadence = computeApplicatorStockCadenceSeconds(
+        input.v as unknown as Record<string, unknown>,
+        register,
+        input.calc.ppm,
+      );
+      if (onHand <= 0 || cadence <= 0) continue;
+      const dueAt = Math.max(0, number(input.progress?.[fields.anchor])) + cadence;
+      const channel = `${register}-stock` as AutoTrackScheduleChannel;
+      const state = input.coordination?.[channel];
+      const owned = netCanonical(channel);
+      const canonicalDue = owned ? number(state?.nextDueAt) : dueAt;
+      entries.push({
+        channel,
+        dueAt: canonicalDue,
+        dueNow: elapsedSec >= canonicalDue,
+        nextDueAt: owned ? canonicalDue : dueAt + cadence,
+        canonical: owned,
       });
     }
   }

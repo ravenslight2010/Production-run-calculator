@@ -4,6 +4,7 @@ import type { UseFormReturn } from "react-hook-form";
 import type { DayState, FormValues, RunMeta, Stoppage } from "../types";
 import type { OperationalIntent, PreEndLifecycle } from "../operationalIntentOutbox";
 import { useEvent } from "./useEvent";
+import { initializeApplicatorStockOnRunStart } from "@workspace/live-calc";
 
 type InventoryLine = { itemKey: string; qty: number };
 
@@ -227,6 +228,16 @@ export function useRunLifecycleManager(deps: {
       deps.form.setValue("skidsCompleted", 0, { shouldDirty: true });
       deps.form.setValue("casesOnCurrentSkid", 0, { shouldDirty: true });
       deps.recordManualPackagingProgress({ runId: activeRunId, skidsCompleted: 0, casesOnCurrentSkid: 0, manualOverrideUntil: now, now });
+      deps.saveRunValues(activeRunId, deps.form.getValues());
+      deps.markRunValuesUpdated(activeRunId, now);
+    }
+    const stockInitialization = initializeApplicatorStockOnRunStart(
+      deps.form.getValues() as unknown as Record<string, unknown>,
+    );
+    for (const [field, value] of Object.entries(stockInitialization)) {
+      deps.form.setValue(field as keyof FormValues, value as never, { shouldDirty: true });
+    }
+    if (Object.keys(stockInitialization).length) {
       deps.saveRunValues(activeRunId, deps.form.getValues());
       deps.markRunValuesUpdated(activeRunId, now);
     }

@@ -247,6 +247,12 @@ const FRONTLINE_APPLICATOR_LOCK_CASES = [
   { slot: "app4", label: "App 4 — Cheese" },
 ] as const;
 
+function applicatorStockControls(slot: (typeof FRONTLINE_APPLICATOR_LOCK_CASES)[number]["slot"]) {
+  const input = screen.getByTestId(`stock-${slot}-lbs`) as HTMLInputElement;
+  const buttons = within(input.parentElement!).getAllByRole("button") as HTMLButtonElement[];
+  return [input, ...buttons];
+}
+
 function expectSelector(
   selector:
     | { readonly role: "button"; readonly name: string }
@@ -336,7 +342,7 @@ describe("live station startup", () => {
   });
 
   it.each(FRONTLINE_APPLICATOR_LOCK_CASES)(
-    "keeps $slot Frontline correction controls disabled while a peer owns the applicator section, then restores them",
+    "keeps $slot Frontline stock controls disabled while a peer owns the applicator section, then restores them",
     ({ slot, label }) => {
       claimManualSectionLock(RUN_ID, slot, "peer-device", 30_000, true);
       render(
@@ -345,7 +351,8 @@ describe("live station startup", () => {
         </StationProviders>,
       );
 
-      const controls = within(screen.getByText(label).parentElement!).getAllByRole("button", { name: /consumed batches correction/ });
+      expect(screen.getByText(label)).toBeTruthy();
+      const controls = applicatorStockControls(slot);
       expect(controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(true);
 
       act(() => {
@@ -365,8 +372,8 @@ describe("live station startup", () => {
       </StationProviders>,
     );
 
-    const app1Controls = within(screen.getByText("App 1 — Cheese").parentElement!).getAllByRole("button", { name: /consumed batches correction/ });
-    const app2Controls = within(screen.getByText("App 2 — Cheese").parentElement!).getAllByRole("button", { name: /consumed batches correction/ });
+    const app1Controls = applicatorStockControls("app1");
+    const app2Controls = applicatorStockControls("app2");
     expect(app1Controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(true);
     expect(app2Controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(true);
 
@@ -551,7 +558,7 @@ describe("live station startup", () => {
   });
 
   it.each(FRONTLINE_APPLICATOR_LOCK_CASES.filter(({ slot }) => slot !== "app1"))(
-    "keeps $slot Frontline correction controls usable after switching away from the peer-locked run",
+    "keeps $slot Frontline stock controls usable after switching away from the peer-locked run",
     ({ slot, label }) => {
       claimManualSectionLock(RUN_ID, slot, "peer-device", 30_000, true);
       render(
@@ -564,7 +571,8 @@ describe("live station startup", () => {
         </StationProviders>,
       );
 
-      const controls = within(screen.getByText(label).parentElement!).getAllByRole("button", { name: /consumed batches correction/ });
+      expect(screen.getByText(label)).toBeTruthy();
+      const controls = applicatorStockControls(slot);
       expect(controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(false);
     },
   );

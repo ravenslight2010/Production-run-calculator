@@ -82,6 +82,7 @@ import {
 } from "../lib/syncContract";
 import {
   computeAutoTrackSchedule,
+  computeAutoTrackElapsedMs,
   buildOperationalProjection,
   computeServerCalc,
   applyTemporaryOverrides,
@@ -89,6 +90,9 @@ import {
   type AutoTrackScheduleInput,
   type OperationalProjection,
   type ServerCalcResult,
+  APPLICATOR_STOCK_REGISTERS,
+  applicatorStockFields,
+  computeApplicatorStockCapacityLbs,
 } from "@workspace/live-calc";
 import {
   DEFAULT_LIVE_CALC_TICK_MS,
@@ -1660,6 +1664,51 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
       return { status: 409, data: current, revision: currentRevision, duplicate: false, serverTime };
     }
     const currentValues = current.runValues?.[runId] ?? {};
+    const stockRegisters = section === "app1" || section === "app2" || section === "app3" || section === "app4"
+      ? [section as "app1" | "app2" | "app3" | "app4"]
+      : section === "pep1" ? ["pep1", "pep1b"] as const
+      : section === "pep2" ? ["pep2", "pep2b"] as const
+      : [];
+    const stockUpdates: Array<{ register: (typeof APPLICATOR_STOCK_REGISTERS)[number]; stock: number; anchor: number; generation: number }> = [];
+    for (const register of stockRegisters) {
+      const fields = applicatorStockFields(register);
+      const hasStockField = [fields.stock, fields.anchor, fields.correctionGeneration]
+        .some((field) => Object.prototype.hasOwnProperty.call(values, field));
+      if (!hasStockField) continue;
+      if (![fields.stock, fields.anchor, fields.correctionGeneration]
+        .every((field) => Object.prototype.hasOwnProperty.call(values, field))) {
+        return { status: 400, data: current, revision: currentRevision, duplicate: false, serverTime };
+      }
+      const onHand = Number((values as Record<string, unknown>)[fields.stock]);
+      const anchor = Number((values as Record<string, unknown>)[fields.anchor]);
+      const correctionGeneration = Number((values as Record<string, unknown>)[fields.correctionGeneration]);
+      const previousStock = Number(currentValues[fields.stock]) || 0;
+      const previousAnchor = Number(currentValues[fields.anchor]) || 0;
+      const previousGeneration = Number(currentValues[fields.correctionGeneration]) || 0;
+      const capacity = computeApplicatorStockCapacityLbs(currentValues, register);
+      const maxAnchor = computeAutoTrackElapsedMs({
+        startedAt: Number(run.startedAt) || 0,
+        pausedAt: Number(run.pausedAt) || undefined,
+        nowMs: serverTime,
+        stoppages: Array.isArray(run.stoppages) ? run.stoppages as never : [],
+      }) / 1000;
+      if (
+        !run.startedAt
+        || run.endedAt
+        || capacity <= 0
+        || !Number.isFinite(onHand)
+        || onHand < 0
+        || onHand > capacity
+        || !Number.isFinite(anchor)
+        || anchor < previousAnchor
+        || anchor > maxAnchor + 2
+        || !Number.isSafeInteger(correctionGeneration)
+        || correctionGeneration !== previousGeneration + 1
+      ) {
+        return { status: 400, data: current, revision: currentRevision, duplicate: false, serverTime };
+      }
+      stockUpdates.push({ register, stock: onHand, anchor, generation: correctionGeneration });
+    }
     for (const key of allowed) {
       const expected = (baseValues as Record<string, unknown>)[key];
       if (expected !== undefined && Number(currentValues[key] ?? 0) !== expected) {
@@ -1667,7 +1716,9 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
       }
     }
     const next = JSON.parse(JSON.stringify(current)) as Record<string, any>;
-    next.runValues = { ...(next.runValues ?? {}), [runId]: { ...(next.runValues?.[runId] ?? {}), ...values } };
+    const updatedRunValues = { ...(next.runValues?.[runId] ?? {}), ...values };
+    if (stockUpdates.length) updatedRunValues.applicatorStockInitialized = true;
+    next.runValues = { ...(next.runValues ?? {}), [runId]: updatedRunValues };
     next.runValuesUpdatedAt = { ...(next.runValuesUpdatedAt ?? {}), [runId]: serverTime };
     if (section === "packaging") {
       const progressMap = current.packagingProgress

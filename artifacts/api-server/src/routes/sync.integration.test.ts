@@ -225,6 +225,39 @@ describe("POST /sync/manual-section — section ownership contract", () => {
       : { skidsCompleted: 1, casesOnCurrentSkid: 2 },
     observedGeneration: `${runId}:1`, baseRevision: 0, resetEpoch: 0, deviceId: id, ...extra,
   });
+  const stockBaseline = {
+    app1BatchesMade: 9,
+    app1BatchAnchorNetSec: 0,
+    app1BatchCorrectionGeneration: 0,
+    app1StockLbs: 40,
+    app1StockAnchorNetSec: 0,
+    app1StockCorrectionGeneration: 0,
+  };
+  const seedStockRun = async () => db.update(dailySyncTable).set({
+    data: {
+      dayState: { date: DATE, runs: [{ id: "stock-run", startedAt: 1_000, pausedAt: 2_000, metaUpdatedAt: 3 }] },
+      runValues: {
+        "stock-run": {
+          app1Type: "Cheese",
+          app1BatchLbs: 50,
+          app1CheeseRecipe: [],
+          ...stockBaseline,
+          applicatorStockInitialized: false,
+        },
+      },
+    },
+    canonicalRevision: 0,
+  }).where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
+  const stockEdit = (id: string, pounds: number) => ({
+    id, date: DATE, runId: "stock-run", section: "app1",
+    values: {
+      app1StockLbs: pounds,
+      app1StockAnchorNetSec: 0,
+      app1StockCorrectionGeneration: 1,
+    },
+    baseValues: stockBaseline,
+    observedGeneration: "stock-run:3", baseRevision: 0, resetEpoch: 0, deviceId: id,
+  });
 
   beforeEach(async () => {
     await db.update(dailySyncTable).set({ data: values(), canonicalRevision: 0 })
@@ -268,6 +301,30 @@ describe("POST /sync/manual-section — section ownership contract", () => {
     const retry = await request(body);
     expect(retry.status).toBe(200);
     expect((await retry.json() as { duplicate?: boolean }).duplicate).toBe(true);
+  });
+
+  it("accepts a paused-run stock refill within capacity and preserves cumulative made history", async () => {
+    await seedStockRun();
+    const response = await request(stockEdit("stock-refill", 100));
+    expect(response.status).toBe(200);
+    const body = await response.json() as { data: { runValues: Record<string, Record<string, unknown>> } };
+    expect(body.data.runValues["stock-run"]).toMatchObject({
+      app1StockLbs: 100,
+      app1StockAnchorNetSec: 0,
+      app1StockCorrectionGeneration: 1,
+      app1BatchesMade: 9,
+      applicatorStockInitialized: true,
+    });
+  });
+
+  it("rejects an operator stock adjustment above that slot's capacity", async () => {
+    await seedStockRun();
+    const response = await request(stockEdit("stock-over-cap", 100.01));
+    expect(response.status).toBe(400);
+    const [stored] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
+    expect((stored.data as any).runValues["stock-run"].app1StockLbs).toBe(40);
+    expect((stored.data as any).runValues["stock-run"].applicatorStockInitialized).toBe(false);
   });
 
   it("accepted Packaging correction survives a newer stale ordinary snapshot write", async () => {
@@ -760,6 +817,36 @@ describe("server-owned applicator ticks — evidence transaction boundary", () =
         DROP FUNCTION IF EXISTS reject_auto_applicator_evidence();
       `);
     }
+  });
+
+  it("server-depletes initialized stock fractionally without changing cumulative-made history", async () => {
+    await seedServerApplicatorRun();
+    const [before] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+    const data = before.data as any;
+    data.runValues[TICK_RUN] = {
+      ...data.runValues[TICK_RUN],
+      app1BatchesMade: 13, // Demand cap reached; the separate historic register is not due.
+      app1StockLbs: 100,
+      app1StockAnchorNetSec: 0,
+      app1StockCorrectionGeneration: 0,
+      applicatorStockInitialized: true,
+    };
+    await db.update(dailySyncTable).set({ data })
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+
+    const result = await runAutoTrackServerTicks({
+      nowMs: TICK_NOW, maxClaims: 4, scope: "live", date: TICK_DATE,
+    });
+    expect(result.accepted).toBeGreaterThan(0);
+    const [after] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+    expect((after.data as any).runValues[TICK_RUN]).toMatchObject({
+      app1StockLbs: 87.5,
+      app1StockAnchorNetSec: 15,
+      app1BatchesMade: 13,
+    });
+    expect(await db.select().from(applicatorBatchEvidenceTable)).toHaveLength(0);
   });
 });
 
@@ -1504,6 +1591,72 @@ describe("POST /sync/auto-track/claim", () => {
     expect(await db.select().from(applicatorBatchEvidenceTable)).toHaveLength(1);
   });
 
+  it("accepts only one competing applicator stock depletion per run and slot", async () => {
+    await db.update(dailySyncTable).set({
+      data: {
+        dayState: {
+          currentIndex: 0,
+          runs: [{
+            id: RUN, brand: "Acme", flavor: "Pep", startedAt: 1, metaUpdatedAt: 2,
+            subTab: "crusts",
+          }],
+        },
+        runValuesUpdatedAt: { [RUN]: 1 },
+        runValues: {
+          [RUN]: {
+            casesNeeded: 200, crustsPerCycle: 12, cycleSpeed: 600, speedAdjustment: 1,
+            approxLineSpeed: 400, freezerTime: 3, pizzasPerCase: 12, casesPerSkid: 48,
+            casesPerLayer: 12, doughballsPerTray: 36, crustsPerStack: 6, doughBatchYield: 150,
+            crustsPerCase: 12, skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 0,
+            batchesReady: 0, targetDoughballWeight: 8, doughRecipe: [],
+            app1Type: "Cheese", app1OzPerPizza: 2, app1BatchLbs: 50,
+            app1CheeseRecipe: [], app1BatchesMade: 9,
+            app1StockLbs: 50, app1StockAnchorNetSec: 0,
+            app1StockCorrectionGeneration: 0, applicatorStockInitialized: true,
+          },
+        },
+      },
+      canonicalRevision: 0,
+    }).where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
+    const stockEvent = (senderId: string, eventId: string) => ({
+      senderId,
+      claim: {
+        version: 1,
+        runId: RUN,
+        channel: "app1-stock",
+        generation: `${RUN}:2`,
+        sequence: 1,
+        eventId,
+        dueAt: 15,
+        nextDueAt: 30,
+        baseUpdatedAt: 1,
+        correctionGeneration: 0,
+        mutations: [
+          { field: "app1StockLbs", from: 50, to: 37.5 },
+          { field: "app1StockAnchorNetSec", from: 0, to: 15 },
+          { field: "app1StockCorrectionGeneration", from: 0, to: 0 },
+        ],
+      },
+    });
+    const [a, b] = await Promise.all([
+      post(stockEvent("stock-station-a", "stock-station-a:app1:1")),
+      post(stockEvent("stock-station-b", "stock-station-b:app1:1")),
+    ]);
+    expect(a.status).toBe(200);
+    expect(b.status).toBe(200);
+    const bodies = await Promise.all([a.json(), b.json()]) as Array<{
+      outcome: string;
+      values: Record<string, number>;
+    }>;
+    expect(bodies.map(({ outcome }) => outcome).sort()).toEqual(["accepted", "stale"]);
+    expect(bodies.every(({ values }) =>
+      values.app1StockLbs === 37.5
+      && values.app1StockAnchorNetSec === 15
+      && values.app1BatchesMade === 9
+    )).toBe(true);
+    expect(await db.select().from(applicatorBatchEvidenceTable)).toHaveLength(0);
+  });
+
   it("atomically advances one Sauce barrel and deducts its inventory once across competing stations", async () => {
     const [item] = await db.insert(inventoryItemsTable).values({
       key: "ingredient:BBQ Sauce:lbs",
@@ -1914,6 +2067,8 @@ describe("/sync snapshot conditionals", () => {
       body: JSON.stringify({ senderId: "c1", payload }),
     });
     const firstBody = await first.json() as { data: unknown; snapshotId: string };
+    expect((firstBody.data as any).runValues["snapshot-run"])
+      .not.toHaveProperty("applicatorStockInitialized");
     expect(firstBody.snapshotId).toMatch(/^[a-f0-9]{64}$/);
 
     const unchanged = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {

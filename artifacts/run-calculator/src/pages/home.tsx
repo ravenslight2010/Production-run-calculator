@@ -305,6 +305,7 @@ import {
   pickCurrentRunPushValue,
   reconcileOperationalIntentCanonical,
   serverOwnedApp1BatchProgress,
+  serverOwnedApplicatorStockProgress,
   selectInboundRunLifecycles,
   shouldAcceptSyncDaySnapshot,
   shouldAtomicallyAdoptFirstSnapshot,
@@ -7979,7 +7980,12 @@ export default function Home() {
       const payload = data as SyncPayload;
       const acceptedFinalization =
         outcome === "accepted" && intent.action === "lifecycle" && intent.lifecycle === "end";
-      if (outcome === "accepted" && !acceptedFinalization) {
+      const acceptedStockStart =
+        outcome === "accepted"
+        && intent.action === "lifecycle"
+        && intent.lifecycle === "start"
+        && payload.runValues[intent.runId]?.applicatorStockInitialized === true;
+      if (outcome === "accepted" && !acceptedFinalization && intent.action !== "correction" && !acceptedStockStart) {
         applySyncCallbackRef.current(payload);
         adoptReceipt();
         adoptionSucceeded = true;
@@ -8414,6 +8420,8 @@ export default function Home() {
           // older automatic event from overriding a manual App 1 correction.
           const app1Progress = serverOwnedApp1BatchProgress(payload, id, localVals);
           if (app1Progress) acceptedVals = { ...acceptedVals, ...app1Progress };
+          const stockProgress = serverOwnedApplicatorStockProgress(payload, id, localVals);
+          if (stockProgress) acceptedVals = { ...acceptedVals, ...stockProgress };
           saveRunValues(id, acceptedVals);
         }
         // A partial sync may carry an accepted progress register without a
@@ -8829,6 +8837,19 @@ export default function Home() {
               const key = field as "app1BatchesMade" | "app1BatchCorrectionGeneration";
               if (form.getValues(key) !== value) {
                 form.setValue(key, value, {
+                  shouldDirty: false,
+                  shouldTouch: false,
+                  shouldValidate: false,
+                });
+              }
+            }
+          }
+          const stockProgress = serverOwnedApplicatorStockProgress(payload, currentId, form.getValues());
+          if (stockProgress) {
+            for (const [field, value] of Object.entries(stockProgress)) {
+              const key = field as keyof FormValues;
+              if (form.getValues(key) !== value) {
+                form.setValue(key, value as never, {
                   shouldDirty: false,
                   shouldTouch: false,
                   shouldValidate: false,

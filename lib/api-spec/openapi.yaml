@@ -5620,7 +5620,7 @@ components:
         runId: { type: string, minLength: 1, maxLength: 160 }
         channel:
           type: string
-          enum: [case, tray-consume, tray-produce, batch-consume, batch-produce, hopper, sauce-barrel, app1-batch, app2-batch, app3-batch, app4-batch]
+          enum: [case, tray-consume, tray-produce, batch-consume, batch-produce, hopper, sauce-barrel, app1-batch, app2-batch, app3-batch, app4-batch, app1-stock, app2-stock, app3-stock, app4-stock, pep1-stock, pep1b-stock, pep2-stock, pep2b-stock]
         generation: { type: string, minLength: 1, maxLength: 160 }
         sequence: { type: integer, minimum: 1, maximum: 10000000 }
         eventId: { type: string, minLength: 1, maxLength: 160 }
@@ -5711,7 +5711,7 @@ components:
         id: { type: string, pattern: "^[A-Za-z0-9:_-]{1,160}$" }
         date: { type: string, format: date }
         runId: { type: string, pattern: "^[A-Za-z0-9:_-]{1,160}$" }
-        section: { type: string, enum: [packaging, dough, sauce, app1, app2, app3, app4] }
+        section: { type: string, enum: [packaging, dough, sauce, app1, app2, app3, app4, pep1, pep2] }
         values: { type: object, minProperties: 1, additionalProperties: { type: number, minimum: 0, maximum: 1000000 }, description: Only fields belonging to section }
         baseValues: { type: object, minProperties: 2, additionalProperties: { type: number, minimum: 0, maximum: 1000000 }, description: Complete baseline for every field in section }
         observedGeneration: { type: string, minLength: 1, maxLength: 160 }
@@ -5726,6 +5726,8 @@ components:
         - $ref: "#/components/schemas/ManualApp2Edit"
         - $ref: "#/components/schemas/ManualApp3Edit"
         - $ref: "#/components/schemas/ManualApp4Edit"
+        - $ref: "#/components/schemas/ManualPep1Edit"
+        - $ref: "#/components/schemas/ManualPep2Edit"
     ManualPackagingEdit:
       allOf:
         - $ref: "#/components/schemas/ManualSectionEditRequestBase"
@@ -5756,32 +5758,48 @@ components:
         - type: object
           properties:
             section: { const: app1 }
-            values: { type: object, minProperties: 1, maxProperties: 3, additionalProperties: false, properties: { app1BatchesMade: { type: number }, app1BatchAnchorNetSec: { type: number }, app1BatchCorrectionGeneration: { type: number } } }
-            baseValues: { type: object, required: [app1BatchesMade, app1BatchAnchorNetSec, app1BatchCorrectionGeneration], minProperties: 3, maxProperties: 3, additionalProperties: false, properties: { app1BatchesMade: { type: number }, app1BatchAnchorNetSec: { type: number }, app1BatchCorrectionGeneration: { type: number } } }
+            values: { type: object, minProperties: 1, maxProperties: 6, additionalProperties: false, properties: { app1BatchesMade: { type: number }, app1BatchAnchorNetSec: { type: number }, app1BatchCorrectionGeneration: { type: number }, app1StockLbs: { type: number }, app1StockAnchorNetSec: { type: number }, app1StockCorrectionGeneration: { type: number } } }
+            baseValues: { type: object, required: [app1BatchesMade, app1BatchAnchorNetSec, app1BatchCorrectionGeneration, app1StockLbs, app1StockAnchorNetSec, app1StockCorrectionGeneration], minProperties: 6, maxProperties: 6, additionalProperties: false, properties: { app1BatchesMade: { type: number }, app1BatchAnchorNetSec: { type: number }, app1BatchCorrectionGeneration: { type: number }, app1StockLbs: { type: number }, app1StockAnchorNetSec: { type: number }, app1StockCorrectionGeneration: { type: number } } }
     ManualApp2Edit:
       allOf:
         - $ref: "#/components/schemas/ManualSectionEditRequestBase"
         - type: object
           properties:
             section: { const: app2 }
-            values: { type: object, minProperties: 1, maxProperties: 3, additionalProperties: false, properties: { app2BatchesMade: { type: number }, app2BatchAnchorNetSec: { type: number }, app2BatchCorrectionGeneration: { type: number } } }
-            baseValues: { type: object, required: [app2BatchesMade, app2BatchAnchorNetSec, app2BatchCorrectionGeneration], minProperties: 3, maxProperties: 3, additionalProperties: false, properties: { app2BatchesMade: { type: number }, app2BatchAnchorNetSec: { type: number }, app2BatchCorrectionGeneration: { type: number } } }
+            values: { type: object, minProperties: 1, maxProperties: 6, additionalProperties: false, properties: { app2BatchesMade: { type: number }, app2BatchAnchorNetSec: { type: number }, app2BatchCorrectionGeneration: { type: number }, app2StockLbs: { type: number }, app2StockAnchorNetSec: { type: number }, app2StockCorrectionGeneration: { type: number } } }
+            baseValues: { type: object, required: [app2BatchesMade, app2BatchAnchorNetSec, app2BatchCorrectionGeneration, app2StockLbs, app2StockAnchorNetSec, app2StockCorrectionGeneration], minProperties: 6, maxProperties: 6, additionalProperties: false, properties: { app2BatchesMade: { type: number }, app2BatchAnchorNetSec: { type: number }, app2BatchCorrectionGeneration: { type: number }, app2StockLbs: { type: number }, app2StockAnchorNetSec: { type: number }, app2StockCorrectionGeneration: { type: number } } }
     ManualApp3Edit:
       allOf:
         - $ref: "#/components/schemas/ManualSectionEditRequestBase"
         - type: object
           properties:
             section: { const: app3 }
-            values: { type: object, minProperties: 1, maxProperties: 3, additionalProperties: false, properties: { app3BatchesMade: { type: number }, app3BatchAnchorNetSec: { type: number }, app3BatchCorrectionGeneration: { type: number } } }
-            baseValues: { type: object, required: [app3BatchesMade, app3BatchAnchorNetSec, app3BatchCorrectionGeneration], minProperties: 3, maxProperties: 3, additionalProperties: false, properties: { app3BatchesMade: { type: number }, app3BatchAnchorNetSec: { type: number }, app3BatchCorrectionGeneration: { type: number } } }
+            values: { type: object, minProperties: 1, maxProperties: 6, additionalProperties: false, properties: { app3BatchesMade: { type: number }, app3BatchAnchorNetSec: { type: number }, app3BatchCorrectionGeneration: { type: number }, app3StockLbs: { type: number }, app3StockAnchorNetSec: { type: number }, app3StockCorrectionGeneration: { type: number } } }
+            baseValues: { type: object, required: [app3BatchesMade, app3BatchAnchorNetSec, app3BatchCorrectionGeneration, app3StockLbs, app3StockAnchorNetSec, app3StockCorrectionGeneration], minProperties: 6, maxProperties: 6, additionalProperties: false, properties: { app3BatchesMade: { type: number }, app3BatchAnchorNetSec: { type: number }, app3BatchCorrectionGeneration: { type: number }, app3StockLbs: { type: number }, app3StockAnchorNetSec: { type: number }, app3StockCorrectionGeneration: { type: number } } }
     ManualApp4Edit:
       allOf:
         - $ref: "#/components/schemas/ManualSectionEditRequestBase"
         - type: object
           properties:
             section: { const: app4 }
-            values: { type: object, minProperties: 1, maxProperties: 3, additionalProperties: false, properties: { app4BatchesMade: { type: number }, app4BatchAnchorNetSec: { type: number }, app4BatchCorrectionGeneration: { type: number } } }
-            baseValues: { type: object, required: [app4BatchesMade, app4BatchAnchorNetSec, app4BatchCorrectionGeneration], minProperties: 3, maxProperties: 3, additionalProperties: false, properties: { app4BatchesMade: { type: number }, app4BatchAnchorNetSec: { type: number }, app4BatchCorrectionGeneration: { type: number } } }
+            values: { type: object, minProperties: 1, maxProperties: 6, additionalProperties: false, properties: { app4BatchesMade: { type: number }, app4BatchAnchorNetSec: { type: number }, app4BatchCorrectionGeneration: { type: number }, app4StockLbs: { type: number }, app4StockAnchorNetSec: { type: number }, app4StockCorrectionGeneration: { type: number } } }
+            baseValues: { type: object, required: [app4BatchesMade, app4BatchAnchorNetSec, app4BatchCorrectionGeneration, app4StockLbs, app4StockAnchorNetSec, app4StockCorrectionGeneration], minProperties: 6, maxProperties: 6, additionalProperties: false, properties: { app4BatchesMade: { type: number }, app4BatchAnchorNetSec: { type: number }, app4BatchCorrectionGeneration: { type: number }, app4StockLbs: { type: number }, app4StockAnchorNetSec: { type: number }, app4StockCorrectionGeneration: { type: number } } }
+    ManualPep1Edit:
+      allOf:
+        - $ref: "#/components/schemas/ManualSectionEditRequestBase"
+        - type: object
+          properties:
+            section: { const: pep1 }
+            values: { type: object, minProperties: 1, maxProperties: 6, additionalProperties: false, properties: { pep1StockLbs: { type: number }, pep1StockAnchorNetSec: { type: number }, pep1StockCorrectionGeneration: { type: number }, pep1bStockLbs: { type: number }, pep1bStockAnchorNetSec: { type: number }, pep1bStockCorrectionGeneration: { type: number } } }
+            baseValues: { type: object, required: [pep1StockLbs, pep1StockAnchorNetSec, pep1StockCorrectionGeneration, pep1bStockLbs, pep1bStockAnchorNetSec, pep1bStockCorrectionGeneration], minProperties: 6, maxProperties: 6, additionalProperties: false, properties: { pep1StockLbs: { type: number }, pep1StockAnchorNetSec: { type: number }, pep1StockCorrectionGeneration: { type: number }, pep1bStockLbs: { type: number }, pep1bStockAnchorNetSec: { type: number }, pep1bStockCorrectionGeneration: { type: number } } }
+    ManualPep2Edit:
+      allOf:
+        - $ref: "#/components/schemas/ManualSectionEditRequestBase"
+        - type: object
+          properties:
+            section: { const: pep2 }
+            values: { type: object, minProperties: 1, maxProperties: 6, additionalProperties: false, properties: { pep2StockLbs: { type: number }, pep2StockAnchorNetSec: { type: number }, pep2StockCorrectionGeneration: { type: number }, pep2bStockLbs: { type: number }, pep2bStockAnchorNetSec: { type: number }, pep2bStockCorrectionGeneration: { type: number } } }
+            baseValues: { type: object, required: [pep2StockLbs, pep2StockAnchorNetSec, pep2StockCorrectionGeneration, pep2bStockLbs, pep2bStockAnchorNetSec, pep2bStockCorrectionGeneration], minProperties: 6, maxProperties: 6, additionalProperties: false, properties: { pep2StockLbs: { type: number }, pep2StockAnchorNetSec: { type: number }, pep2StockCorrectionGeneration: { type: number }, pep2bStockLbs: { type: number }, pep2bStockAnchorNetSec: { type: number }, pep2bStockCorrectionGeneration: { type: number } } }
     ManualSectionEditRequestBase:
       type: object
       required: [id, date, runId, observedGeneration, baseRevision, resetEpoch, deviceId]

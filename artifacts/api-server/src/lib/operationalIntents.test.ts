@@ -49,6 +49,60 @@ describe("operational intents", () => {
     expect(projectedOut.outcome).toBe("superseded");
     expect(projectedOut.data.dayState.runs[0].endedAt).toBe(250);
   });
+  it("seeds configured applicator stock once on start without reinterpreting old counters", () => {
+    const pending = {
+      dayState: { runs: [{ id: "run-1", metaUpdatedAt: 100 }] },
+      runValues: {
+        "run-1": {
+          app1Type: "Cheese", app1BatchLbs: 25, app1CheeseRecipe: [],
+          app2Type: "Mix", app2BatchLbs: 25,
+          pep1Type: "Pepperoni", pep1TypeB: "Beef",
+          app1BatchesMade: 7,
+        },
+      },
+    };
+    const start = {
+      ...pause,
+      id: "offline:start",
+      action: "lifecycle" as const,
+      lifecycle: "start" as const,
+      observedGeneration: "run-1:100",
+      effectiveAt: 200,
+    };
+    const started = applyOperationalIntent(pending, start, 300);
+    expect(started.outcome).toBe("accepted");
+    expect(started.data.runValues["run-1"]).toMatchObject({
+      app1StockLbs: 50,
+      app2StockLbs: 100,
+      pep1StockLbs: 50,
+      pep1bStockLbs: 50,
+      app4StockLbs: 0,
+      applicatorStockInitialized: true,
+      app1BatchesMade: 7,
+    });
+
+    const corrected = {
+      ...started.data,
+      runValues: {
+        ...started.data.runValues,
+        "run-1": { ...started.data.runValues["run-1"], app1StockLbs: 12, app1StockCorrectionGeneration: 1 },
+      },
+    };
+    const replay = applyOperationalIntent(corrected, {
+      ...start, id: "offline:start-replay", observedGeneration: "run-1:300",
+    }, 400);
+    expect(replay.data.runValues["run-1"].app1StockLbs).toBe(12);
+    expect(replay.data.runValues["run-1"].app1StockCorrectionGeneration).toBe(1);
+  });
+  it("does not initialize a previously started run during an unrelated lifecycle change", () => {
+    const oldRun = {
+      dayState: { runs: [{ id: "run-1", startedAt: 100, metaUpdatedAt: 100 }] },
+      runValues: { "run-1": { app1Type: "Cheese", app1BatchLbs: 50, app1StockLbs: 0 } },
+    };
+    const result = applyOperationalIntent(oldRun, pause, 300);
+    expect(result.data.runValues["run-1"].applicatorStockInitialized).toBeUndefined();
+    expect(result.data.runValues["run-1"].app1StockLbs).toBe(0);
+  });
   it("accepts an exact-generation correction once and requires review after a run switch", () => {
     const correction = { ...pause, id: "offline:correction", action: "correction", values: { traysOnLine: 9 } } as const;
     const first = applyOperationalIntent(base(), correction, 300);

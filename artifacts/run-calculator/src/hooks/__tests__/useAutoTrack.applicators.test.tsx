@@ -3,7 +3,10 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { useAutoTrack } from "../useAutoTrack";
 
 function form() {
-  const values: Record<string, number> = {};
+  const values: Record<string, number> = {
+    app1StockLbs: 50, app1StockAnchorNetSec: 0, app1StockCorrectionGeneration: 0,
+    app2StockLbs: 100, app2StockAnchorNetSec: 0, app2StockCorrectionGeneration: 0,
+  };
   return {
     values,
     form: {
@@ -26,17 +29,20 @@ function values(overrides: Record<string, unknown> = {}) {
     sauceBarrelAnchorNetSec: 0, sauceBarrelCorrectionGeneration: 0,
     app1Type: "Mozzarella", app1OzPerPizza: 4, app1BatchLbs: 25, app1CheeseRecipe: [],
     app1BatchesMade: 0, app1BatchAnchorNetSec: 0, app1BatchCorrectionGeneration: 0,
+    app1StockLbs: 50, app1StockAnchorNetSec: 0, app1StockCorrectionGeneration: 0,
     app2Type: "Cheese Mix", app2OzPerPizza: 4, app2BatchLbs: 25, app2CheeseRecipe: [],
     app2BatchesMade: 0, app2BatchAnchorNetSec: 0, app2BatchCorrectionGeneration: 0,
+    app2StockLbs: 100, app2StockAnchorNetSec: 0, app2StockCorrectionGeneration: 0,
     app3Type: "", app3OzPerPizza: 0, app3BatchLbs: 0, app3CheeseRecipe: [],
     app3BatchesMade: 0, app3BatchAnchorNetSec: 0, app3BatchCorrectionGeneration: 0,
     app4Type: "", app4OzPerPizza: 0, app4BatchLbs: 0, app4CheeseRecipe: [],
     app4BatchesMade: 0, app4BatchAnchorNetSec: 0, app4BatchCorrectionGeneration: 0,
+    applicatorStockInitialized: true,
     ...overrides,
   } as any;
 }
 
-describe("useAutoTrack applicator batches", () => {
+describe("useAutoTrack applicator stock", () => {
   it("serializes tray and batch claims that become due in the same tick", async () => {
     const { form: fakeForm, values: stored } = form();
     stored.traysOnLine = 10;
@@ -107,30 +113,39 @@ describe("useAutoTrack applicator batches", () => {
     });
   });
 
-  it("claims an eligible app at its own fractional cadence and excludes mix rows", async () => {
+  it("claims fractional pounds while keeping the cumulative-made observation in its separate register", async () => {
     const { form: fakeForm, values: stored } = form();
+    stored.app1BatchesMade = 7;
+    stored.app2BatchesMade = 9;
     const claim = vi.fn(async (event: any) => ({
       outcome: "accepted" as const,
       state: { generation: event.generation, sequence: event.sequence, nextDueAt: event.nextDueAt },
       values: Object.fromEntries(event.mutations.map((m: any) => [m.field, m.to])),
     }));
-    // 25 lb × 16 / 7 oz / 100 ppm × 60 = 34.2857... seconds.
+    // App 1 checks every quarter of its 25 lb batch: 25 lb / (7 oz × 100 ppm) / 4.
     renderHook(() => useAutoTrack({
       runId: "app-run", runStatus: "running", nowTime: new Date(1_700_000_000_000),
-      elapsedBatchSec: 35, calc, v: values({ app1OzPerPizza: 7 }), form: fakeForm, claimAutoTrackEvent: claim,
+      elapsedBatchSec: 35, calc, v: values({ app1OzPerPizza: 7, app1BatchesMade: 7, app2BatchesMade: 9 }), form: fakeForm, claimAutoTrackEvent: claim,
     }));
-    await waitFor(() => expect(claim.mock.calls.some(([event]) => event.channel === "app1-batch")).toBe(true));
-    const appClaim = claim.mock.calls.map(([event]) => event).find((event) => event.channel === "app1-batch");
-    expect(appClaim.channel).toBe("app1-batch");
-    expect(appClaim.dueAt).toBeCloseTo(240 / 7);
-    expect(stored.app1BatchesMade).toBe(1);
-    expect(stored.app2BatchesMade).toBeUndefined();
+    await waitFor(() => expect(claim.mock.calls.some(([event]) => event.channel === "app1-stock")).toBe(true));
+    const appClaim = claim.mock.calls.map(([event]) => event).find((event) => event.channel === "app1-stock");
+    expect(appClaim.dueAt).toBeCloseTo(60 / 7);
+    expect(appClaim.mutations).toEqual([
+      { field: "app1StockLbs", from: 50, to: 43.75 },
+      { field: "app1StockAnchorNetSec", from: 0, to: 60 / 7 },
+      { field: "app1StockCorrectionGeneration", from: 0, to: 0 },
+    ]);
+    await waitFor(() => expect(claim.mock.calls.some(([event]) => event.channel === "app2-stock")).toBe(true));
+    expect(stored.app1StockLbs).toBe(43.75);
+    expect(stored.app1BatchesMade).toBe(8);
+    expect(stored.app2BatchesMade).toBe(9);
   });
 
   it.each([0, 75])(
-    "uses the shared 50 lb cadence when the configured Frontline weight is %s lb",
+    "uses a 50 lb operational batch for stock cadence when configured weight is %s lb",
     async (configuredWeight) => {
-      const { form: fakeForm } = form();
+      const { form: fakeForm, values: stored } = form();
+      stored.app1StockLbs = 100;
       const claim = vi.fn(async (event: any) => ({
         outcome: "accepted" as const,
         state: {
@@ -146,50 +161,56 @@ describe("useAutoTrack applicator batches", () => {
         nowTime: new Date(1_700_000_000_000),
         elapsedBatchSec,
         calc,
-        v: values({ app1BatchLbs: configuredWeight, app1OzPerPizza: 10 }),
+        v: values({ app1BatchLbs: configuredWeight, app1OzPerPizza: 10, app1StockLbs: 100 }),
         form: fakeForm,
         claimAutoTrackEvent: claim,
       });
       const { rerender } = renderHook(
         ({ value }) => useAutoTrack(value),
-        { initialProps: { value: input(47) } },
+        { initialProps: { value: input(11) } },
       );
       await new Promise((resolve) => setTimeout(resolve, 20));
-      expect(claim.mock.calls.some(([event]) => event.channel === "app1-batch")).toBe(false);
+      expect(claim.mock.calls.some(([event]) => event.channel === "app1-stock")).toBe(false);
 
-      rerender({ value: input(48) });
+      rerender({ value: input(12) });
       await waitFor(() => expect(claim.mock.calls.some(
-        ([event]) => event.channel === "app1-batch",
+        ([event]) => event.channel === "app1-stock",
       )).toBe(true));
       const event = claim.mock.calls.map(([candidate]) => candidate)
-        .find((candidate) => candidate.channel === "app1-batch");
-      expect(event.dueAt).toBe(48);
+        .find((candidate) => candidate.channel === "app1-stock");
+      expect(event.dueAt).toBe(12);
     },
   );
 
   it("does not apply an in-flight acknowledgement after a manual correction", async () => {
     const { form: fakeForm, values: stored } = form();
-    stored.app1BatchesMade = 0;
-    stored.app1BatchAnchorNetSec = 0;
-    stored.app1BatchCorrectionGeneration = 0;
+    stored.app1StockLbs = 50;
+    stored.app1StockAnchorNetSec = 0;
+    stored.app1StockCorrectionGeneration = 0;
     const resolvers = new Map<string, (result: any) => void>();
-    const claim = vi.fn((event: any) => new Promise((resolve) => {
-      resolvers.set(event.channel, resolve);
-    }));
+    const claim = vi.fn((event: any) => {
+      const result = {
+        outcome: "accepted" as const,
+        state: { generation: event.generation, sequence: event.sequence, nextDueAt: event.nextDueAt },
+        values: Object.fromEntries(event.mutations.map((mutation: any) => [mutation.field, mutation.to])),
+      };
+      if (event.channel !== "app1-stock") return Promise.resolve(result);
+      return new Promise((resolve) => {
+        resolvers.set(event.channel, resolve);
+      });
+    });
     renderHook(() => useAutoTrack({
       runId: "manual-race", runStatus: "running", nowTime: new Date(),
-      elapsedBatchSec: 61, calc, v: values(), form: fakeForm, claimAutoTrackEvent: claim,
+      elapsedBatchSec: 61, calc: { ...calc, app1Batches: 0 }, v: values(), form: fakeForm, claimAutoTrackEvent: claim,
     }));
-    await waitFor(() => expect(resolvers.has("app1-batch")).toBe(true));
+    await waitFor(() => expect(resolvers.has("app1-stock")).toBe(true));
     const event = claim.mock.calls.map(([candidate]) => candidate)
-      .find((candidate) => candidate.channel === "app1-batch");
+      .find((candidate) => candidate.channel === "app1-stock");
 
-    // Simulate the Frontline +/- handler changing the canonical local baseline
-    // before the server's older automatic acknowledgement resolves.
-    stored.app1BatchesMade = 4;
-    stored.app1BatchAnchorNetSec = 61;
-    stored.app1BatchCorrectionGeneration = 1;
-    resolvers.get("app1-batch")!({
+    stored.app1StockLbs = 30;
+    stored.app1StockAnchorNetSec = 61;
+    stored.app1StockCorrectionGeneration = 1;
+    resolvers.get("app1-stock")!({
       outcome: "accepted",
       state: { generation: event.generation, sequence: event.sequence, nextDueAt: event.nextDueAt },
       values: Object.fromEntries(event.mutations.map((mutation: any) => [mutation.field, mutation.to])),
@@ -197,25 +218,33 @@ describe("useAutoTrack applicator batches", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(stored.app1BatchesMade).toBe(4);
-    expect(stored.app1BatchAnchorNetSec).toBe(61);
-    expect(stored.app1BatchCorrectionGeneration).toBe(1);
+    expect(stored.app1StockLbs).toBe(30);
+    expect(stored.app1StockAnchorNetSec).toBe(61);
+    expect(stored.app1StockCorrectionGeneration).toBe(1);
   });
 
   it("does not apply run A's in-flight acknowledgement after switching to run B", async () => {
     const { form: fakeForm, values: stored } = form();
     const resolvers = new Map<string, (result: any) => void>();
-    const claim = vi.fn((event: any) => new Promise((resolve) => {
-      resolvers.set(event.runId, resolve);
-    }));
+    const claim = vi.fn((event: any) => {
+      const result = {
+        outcome: "accepted" as const,
+        state: { generation: event.generation, sequence: event.sequence, nextDueAt: event.nextDueAt },
+        values: Object.fromEntries(event.mutations.map((mutation: any) => [mutation.field, mutation.to])),
+      };
+      if (event.channel !== "app1-stock") return Promise.resolve(result);
+      return new Promise((resolve) => {
+        resolvers.set(event.runId, resolve);
+      });
+    });
     const props = {
       runId: "run-a",
       runGeneration: "1",
       runStatus: "running" as const,
       nowTime: new Date(),
       elapsedBatchSec: 61,
-      calc,
-      v: values(),
+      calc: { ...calc, app1Batches: 0 },
+      v: values({ app1StockLbs: 50 }),
       form: fakeForm,
       claimAutoTrackEvent: claim,
     };
@@ -230,10 +259,11 @@ describe("useAutoTrack applicator batches", () => {
         runId: "run-b",
         runGeneration: "2",
         elapsedBatchSec: 0,
-        v: values({ app1BatchesMade: 7, app1BatchAnchorNetSec: 0 }),
+        calc: { ...calc, app1Batches: 0 },
+        v: values({ app1StockLbs: 21, app1StockAnchorNetSec: 0 }),
       },
     });
-    stored.app1BatchesMade = 7;
+    stored.app1StockLbs = 21;
     const event = claim.mock.calls.map(([candidate]) => candidate)
       .find((candidate) => candidate.runId === "run-a");
     resolvers.get("run-a")!({
@@ -244,7 +274,7 @@ describe("useAutoTrack applicator batches", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(stored.app1BatchesMade).toBe(7);
+    expect(stored.app1StockLbs).toBe(21);
   });
 
   it("does not apply run A's in-flight Sauce acknowledgement after switching to run B", async () => {
@@ -309,7 +339,7 @@ describe("useAutoTrack applicator batches", () => {
         claimAutoTrackEvent: claim,
       }));
       await Promise.resolve();
-      expect(claim.mock.calls.some(([event]) => event.channel.startsWith("app"))).toBe(false);
+      expect(claim.mock.calls.some(([event]) => event.channel.includes("stock"))).toBe(false);
     },
   );
 

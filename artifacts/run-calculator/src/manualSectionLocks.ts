@@ -17,10 +17,12 @@ export const MANUAL_SECTION_CONTROLS = {
   packaging: ["calculator-skids", "calculator-cases", "packaging-skids", "packaging-cases", "floor-skid-done", "floor-cases", "dough-quick-check-skids", "dough-quick-check-cases"],
   dough: ["dough-trays", "dough-batches", "dough-crust-trays", "dough-crust-batches"],
   sauce: ["sauce-batches"],
-  app1: ["applicator-1-batches"],
-  app2: ["applicator-2-batches"],
-  app3: ["applicator-3-batches"],
-  app4: ["applicator-4-batches"],
+  app1: ["applicator-1-batches", "applicator-1-stock"],
+  app2: ["applicator-2-batches", "applicator-2-stock"],
+  app3: ["applicator-3-batches", "applicator-3-stock"],
+  app4: ["applicator-4-batches", "applicator-4-stock"],
+  pep1: ["pepperoni-1-stock"],
+  pep2: ["pepperoni-2-stock"],
 } as const;
 export const USED_MANUAL_SECTION_CONTROL_IDS = Object.values(MANUAL_SECTION_CONTROLS).flat();
 export function sectionForManualControl(controlId: string): ManualSection | undefined {

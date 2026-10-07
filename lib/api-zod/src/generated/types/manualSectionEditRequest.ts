@@ -11,6 +11,8 @@ import type { ManualApp3Edit } from './manualApp3Edit';
 import type { ManualApp4Edit } from './manualApp4Edit';
 import type { ManualDoughEdit } from './manualDoughEdit';
 import type { ManualPackagingEdit } from './manualPackagingEdit';
+import type { ManualPep1Edit } from './manualPep1Edit';
+import type { ManualPep2Edit } from './manualPep2Edit';
 import type { ManualSauceEdit } from './manualSauceEdit';
 import type { ManualSectionEditRequestBaseValues } from './manualSectionEditRequestBaseValues';
 import type { ManualSectionEditRequestSection } from './manualSectionEditRequestSection';
@@ -173,6 +175,58 @@ export type ManualSectionEditRequest = (ManualPackagingEdit & {
      */
   deviceId: string;
 }) | (ManualApp4Edit & {
+  /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
+  id: string;
+  date: Date;
+  /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
+  runId: string;
+  section: ManualSectionEditRequestSection;
+  /** Only fields belonging to section */
+  values: ManualSectionEditRequestValues;
+  /** Complete baseline for every field in section */
+  baseValues: ManualSectionEditRequestBaseValues;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  observedGeneration: string;
+  /** @minimum 0 */
+  baseRevision: number;
+  /** @minimum 0 */
+  resetEpoch: number;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     * @pattern ^[A-Za-z0-9:_-]{1,160}$
+     */
+  deviceId: string;
+}) | (ManualPep1Edit & {
+  /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
+  id: string;
+  date: Date;
+  /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
+  runId: string;
+  section: ManualSectionEditRequestSection;
+  /** Only fields belonging to section */
+  values: ManualSectionEditRequestValues;
+  /** Complete baseline for every field in section */
+  baseValues: ManualSectionEditRequestBaseValues;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  observedGeneration: string;
+  /** @minimum 0 */
+  baseRevision: number;
+  /** @minimum 0 */
+  resetEpoch: number;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     * @pattern ^[A-Za-z0-9:_-]{1,160}$
+     */
+  deviceId: string;
+}) | (ManualPep2Edit & {
   /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
   id: string;
   date: Date;

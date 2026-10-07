@@ -9,6 +9,13 @@ import {
 } from "../autoTrackCoordinationClient";
 import {
   buildCaseClaimMutations,
+  APPLICATOR_STOCK_REGISTERS,
+  applicatorStockFields,
+  applicatorStockRegisterForChannel,
+  capApplicatorStock,
+  computeApplicatorStockCadenceSeconds,
+  computeApplicatorStockCapacityLbs,
+  depleteApplicatorStock,
   computeAppSlotInfo,
   computeAutoTrackSuggestion,
   computeCaseTickWrite,
@@ -84,6 +91,17 @@ interface AutoTrackValues {
   app3BatchesMade: number; app3BatchAnchorNetSec: number; app3BatchCorrectionGeneration: number;
   app4Type: string; app4OzPerPizza: number; app4BatchLbs: number; app4CheeseRecipe: Array<{ lbs: number }>;
   app4BatchesMade: number; app4BatchAnchorNetSec: number; app4BatchCorrectionGeneration: number;
+  app1StockLbs: number; app1StockAnchorNetSec: number; app1StockCorrectionGeneration: number;
+  app2StockLbs: number; app2StockAnchorNetSec: number; app2StockCorrectionGeneration: number;
+  app3StockLbs: number; app3StockAnchorNetSec: number; app3StockCorrectionGeneration: number;
+  app4StockLbs: number; app4StockAnchorNetSec: number; app4StockCorrectionGeneration: number;
+  pep1Type: string; pep1OzPerPizza: number; pep1TypeB: string; pep1OzPerPizzaB: number;
+  pep2Type: string; pep2OzPerPizza: number; pep2TypeB: string; pep2OzPerPizzaB: number;
+  pep1Combined: boolean; applicatorStockInitialized: boolean;
+  pep1StockLbs: number; pep1StockAnchorNetSec: number; pep1StockCorrectionGeneration: number;
+  pep1bStockLbs: number; pep1bStockAnchorNetSec: number; pep1bStockCorrectionGeneration: number;
+  pep2StockLbs: number; pep2StockAnchorNetSec: number; pep2StockCorrectionGeneration: number;
+  pep2bStockLbs: number; pep2bStockAnchorNetSec: number; pep2bStockCorrectionGeneration: number;
 }
 
 export type AutoTrackChannel =
@@ -97,7 +115,9 @@ export type AutoTrackChannel =
   | "app1-batch"
   | "app2-batch"
   | "app3-batch"
-  | "app4-batch";
+  | "app4-batch"
+  | "app1-stock" | "app2-stock" | "app3-stock" | "app4-stock"
+  | "pep1-stock" | "pep1b-stock" | "pep2-stock" | "pep2b-stock";
 
 export type AutoTrackMutation = {
   field: "skidsCompleted" | "casesOnCurrentSkid" | "traysOnLine" | "batchesReady"
@@ -105,7 +125,15 @@ export type AutoTrackMutation = {
     | "app1BatchesMade" | "app1BatchAnchorNetSec" | "app1BatchCorrectionGeneration"
     | "app2BatchesMade" | "app2BatchAnchorNetSec" | "app2BatchCorrectionGeneration"
     | "app3BatchesMade" | "app3BatchAnchorNetSec" | "app3BatchCorrectionGeneration"
-    | "app4BatchesMade" | "app4BatchAnchorNetSec" | "app4BatchCorrectionGeneration";
+    | "app4BatchesMade" | "app4BatchAnchorNetSec" | "app4BatchCorrectionGeneration"
+    | "app1StockLbs" | "app1StockAnchorNetSec" | "app1StockCorrectionGeneration"
+    | "app2StockLbs" | "app2StockAnchorNetSec" | "app2StockCorrectionGeneration"
+    | "app3StockLbs" | "app3StockAnchorNetSec" | "app3StockCorrectionGeneration"
+    | "app4StockLbs" | "app4StockAnchorNetSec" | "app4StockCorrectionGeneration"
+    | "pep1StockLbs" | "pep1StockAnchorNetSec" | "pep1StockCorrectionGeneration"
+    | "pep1bStockLbs" | "pep1bStockAnchorNetSec" | "pep1bStockCorrectionGeneration"
+    | "pep2StockLbs" | "pep2StockAnchorNetSec" | "pep2StockCorrectionGeneration"
+    | "pep2bStockLbs" | "pep2bStockAnchorNetSec" | "pep2bStockCorrectionGeneration";
   from: number;
   to: number;
 };
@@ -470,6 +498,16 @@ export function useAutoTrack({
     app3: useRef(0),
     app4: useRef(0),
   };
+  const stockNextDueNetSecRefs = {
+    app1: useRef(0),
+    app2: useRef(0),
+    app3: useRef(0),
+    app4: useRef(0),
+    pep1: useRef(0),
+    pep1b: useRef(0),
+    pep2: useRef(0),
+    pep2b: useRef(0),
+  };
   // Fresh, non-canonical server schedule entries temporarily own net-second
   // writes. The lease intentionally expires so disconnected/stale clients
   // retain the established local fallback.
@@ -496,6 +534,8 @@ export function useAutoTrack({
     if (channel === "app2-batch") return appNextDueNetSecRefs.app2;
     if (channel === "app3-batch") return appNextDueNetSecRefs.app3;
     if (channel === "app4-batch") return appNextDueNetSecRefs.app4;
+    const stockRegister = applicatorStockRegisterForChannel(channel);
+    if (stockRegister) return stockNextDueNetSecRefs[stockRegister];
     return hopperProdNextDueMsRef;
   };
 
@@ -638,6 +678,7 @@ useEffect(() => {
     appNextDueNetSecRefs.app2.current = 0;
     appNextDueNetSecRefs.app3.current = 0;
     appNextDueNetSecRefs.app4.current = 0;
+    for (const ref of Object.values(stockNextDueNetSecRefs)) ref.current = 0;
     // Schedule leases are run-scoped. Never let an ended/switched run's
     // server verdict suppress the next run before it receives its own frame.
     clearServerSchedule();
@@ -741,6 +782,15 @@ useEffect(() => {
         if (typeof anchor === "number") form.setValue(`${slot}BatchAnchorNetSec` as keyof FormValues, anchor as never, { shouldDirty: true });
         if (typeof generation === "number") form.setValue(`${slot}BatchCorrectionGeneration` as keyof FormValues, generation as never, { shouldDirty: true });
       });
+      for (const register of APPLICATOR_STOCK_REGISTERS) {
+        const fields = applicatorStockFields(register);
+        for (const field of [fields.stock, fields.anchor, fields.correctionGeneration]) {
+          const value = values[field as keyof FormValues];
+          if (typeof value === "number") {
+            form.setValue(field as keyof FormValues, value as never, { shouldDirty: true });
+          }
+        }
+      }
     };
     const localValues = Object.fromEntries(mutations.map((mutation) => [mutation.field, mutation.to])) as Partial<FormValues>;
     if (authoritativeServerAutoTrack) {
@@ -759,7 +809,9 @@ useEffect(() => {
 
     const claimIdentity = coordinationIdentity;
     const correctionMutation = mutations.find((mutation) =>
-      mutation.field === "sauceBarrelCorrectionGeneration" || mutation.field.endsWith("BatchCorrectionGeneration"),
+      mutation.field === "sauceBarrelCorrectionGeneration"
+      || mutation.field.endsWith("BatchCorrectionGeneration")
+      || mutation.field.endsWith("StockCorrectionGeneration"),
     );
     coordinationPendingRef.current.add(channel);
     setCoordinationPendingCount(coordinationPendingRef.current.size);
@@ -1327,10 +1379,9 @@ useEffect(() => {
     v.pizzasPerCase,
   ]);
 
-  // Persisted anchors are the authoritative rebase points. In particular, a
-  // manual +/- may happen while a prior automatic event is due: resetting this
-  // slot's due time to the new anchor prevents that stale event from writing
-  // the old anchor back after the suppression fence expires.
+  // The cumulative made-count register remains an independent historical
+  // observation. Its display controls were replaced by stock-on-hand controls;
+  // it is intentionally never used as the stock value.
   useEffect(() => {
     if (!productionNeedsAvailable) {
       appNextDueNetSecRefs.app1.current = 0;
@@ -1358,10 +1409,95 @@ useEffect(() => {
     });
   }, [calc.ppm, productionNeedsAvailable, v]);
 
-  // Applicator batches use the same provider-owned, net-production clock as
-  // Sauce. Each slot has its own effective batch and therefore its own cadence;
-  // this deliberately does not use the dough batch cadence or add controls to
-  // mix/lb-only rows.
+  useEffect(() => {
+    if (
+      disabled ||
+      autoTrackBlocked ||
+      autoTrackBlockedRef?.current ||
+      !autoTrackProgress ||
+      !productionNeedsAvailable ||
+      runStatus !== "running" ||
+      endedAt != null ||
+      calc.pressDone ||
+      Date.now() < autoSuppressUntilRef.current ||
+      !Number.isFinite(elapsedBatchSec)
+    ) return;
+    const values = v as FormValues;
+    for (const slot of ["app1", "app2", "app3", "app4"] as const) {
+      const recipe = values[`${slot}CheeseRecipe` as keyof FormValues] as FormValues["app1CheeseRecipe"];
+      const info = computeAppSlotInfo({
+        type: String(values[`${slot}Type` as keyof FormValues] ?? ""),
+        recipe,
+        batchLbs: Number(values[`${slot}BatchLbs` as keyof FormValues]) || 0,
+        ozPerPizza: Number(values[`${slot}OzPerPizza` as keyof FormValues]) || 0,
+        casesNeeded: Number(v.casesNeeded) || 0,
+        pizzasPerCase: Number(v.pizzasPerCase) || 0,
+        ppm: calc.ppm,
+      });
+      if (!info.validForClaim || !Number.isFinite(info.cadence) || info.cadence <= 0) continue;
+      const channel = `${slot}-batch` as AutoTrackChannel;
+      const madeField = `${slot}BatchesMade` as keyof FormValues;
+      const anchorField = `${slot}BatchAnchorNetSec` as keyof FormValues;
+      const correctionField = `${slot}BatchCorrectionGeneration` as keyof FormValues;
+      const made = Math.max(0, Number(values[madeField]) || 0);
+      const anchor = Math.max(0, Number(values[anchorField]) || 0);
+      const correctionGeneration = Math.max(0, Number(values[correctionField]) || 0);
+      const dueAt = dueRefForChannel(channel).current || anchor + info.cadence;
+      if (
+        elapsedBatchSec < dueAt
+        || made >= Math.ceil(info.required)
+        || serverOwnsChannel(channel)
+      ) continue;
+      dueRefForChannel(channel).current = dueAt;
+      commitAutomatic(channel, dueAt, dueAt + info.cadence, [
+        { field: madeField as AutoTrackMutation["field"], from: made, to: Math.min(Math.ceil(info.required), made + 1) },
+        { field: anchorField as AutoTrackMutation["field"], from: anchor, to: dueAt },
+        { field: correctionField as AutoTrackMutation["field"], from: correctionGeneration, to: correctionGeneration },
+      ]);
+    }
+  }, [
+    autoSuppressUntilRef,
+    autoTrackBlocked,
+    autoTrackBlockedRef,
+    autoTrackProgress,
+    productionNeedsAvailable,
+    autoTrackWakeAcknowledgement,
+    calc,
+    commitAutomatic,
+    disabled,
+    elapsedBatchSec,
+    endedAt,
+    runGeneration,
+    runId,
+    runStatus,
+    v,
+  ]);
+
+  // Persisted anchors are authoritative rebase points for each pounds-on-hand
+  // register. A correction updates its own anchor and generation, so no
+  // elapsed production before the correction can be replayed.
+  useEffect(() => {
+    const values = v as unknown as Record<string, unknown>;
+    for (const register of APPLICATOR_STOCK_REGISTERS) {
+      const fields = applicatorStockFields(register);
+      const capacity = computeApplicatorStockCapacityLbs(values, register);
+      const onHand = Number(values[fields.stock]) || 0;
+      const cadence = computeApplicatorStockCadenceSeconds(values, register, calc.ppm);
+      const channel = `${register}-stock` as AutoTrackChannel;
+      dueRefForChannel(channel).current =
+        productionNeedsAvailable
+        && values.applicatorStockInitialized === true
+        && capacity > 0
+        && onHand > 0
+        && onHand <= capacity
+        && cadence > 0
+          ? Math.max(0, Number(values[fields.anchor]) || 0) + cadence
+          : 0;
+    }
+  }, [calc.ppm, productionNeedsAvailable, v]);
+
+  // Applicator stock is consumed fractionally from the actual per-pizza usage
+  // and line speed. Only live, unpaused production can claim a decrease.
   useEffect(() => {
     if (
       !claimAutoTrackEvent ||
@@ -1371,52 +1507,38 @@ useEffect(() => {
       !autoTrackProgress ||
       !productionNeedsAvailable ||
       runStatus !== "running" ||
+      endedAt != null ||
       calc.pressDone ||
       Date.now() < autoSuppressUntilRef.current ||
       !Number.isFinite(elapsedBatchSec)
     ) return;
-    const formValues = v as FormValues;
-    const slots = (["app1", "app2", "app3", "app4"] as const).map((slot) => {
-      const recipe = formValues[`${slot}CheeseRecipe` as keyof FormValues] as FormValues["app1CheeseRecipe"];
-      const info = computeAppSlotInfo({
-        type: String(formValues[`${slot}Type` as keyof FormValues] ?? ""),
-        recipe,
-        batchLbs: Number(formValues[`${slot}BatchLbs` as keyof FormValues]) || 0,
-        ozPerPizza: Number(formValues[`${slot}OzPerPizza` as keyof FormValues]) || 0,
-        casesNeeded: Number(v.casesNeeded) || 0,
-        pizzasPerCase: Number(v.pizzasPerCase) || 0,
+    const values = v as unknown as Record<string, unknown>;
+    if (values.applicatorStockInitialized !== true) return;
+    for (const register of APPLICATOR_STOCK_REGISTERS) {
+      const fields = applicatorStockFields(register);
+      const capacity = computeApplicatorStockCapacityLbs(values, register);
+      const onHand = Number(values[fields.stock]) || 0;
+      const anchor = Math.max(0, Number(values[fields.anchor]) || 0);
+      const correctionGeneration = Math.max(0, Number(values[fields.correctionGeneration]) || 0);
+      const cadence = computeApplicatorStockCadenceSeconds(values, register, calc.ppm);
+      const channel = `${register}-stock` as AutoTrackChannel;
+      if (capacity <= 0 || onHand <= 0 || onHand > capacity || cadence <= 0) continue;
+      const dueAt = dueRefForChannel(channel).current || anchor + cadence;
+      if (elapsedBatchSec < dueAt || serverOwnsChannel(channel)) continue;
+      const ozField = register.endsWith("b")
+        ? `${register.slice(0, -1)}OzPerPizzaB`
+        : `${register}OzPerPizza`;
+      const nextOnHand = capApplicatorStock(depleteApplicatorStock({
+        onHandLbs: onHand,
+        elapsedSeconds: dueAt - anchor,
+        ozPerPizza: Number(values[ozField]) || 0,
         ppm: calc.ppm,
-      });
-      return {
-        slot,
-        channel: `${slot}-batch` as AutoTrackChannel,
-        madeField: `${slot}BatchesMade` as keyof FormValues,
-        anchorField: `${slot}BatchAnchorNetSec` as keyof FormValues,
-        correctionField: `${slot}BatchCorrectionGeneration` as keyof FormValues,
-        valid: info.validForClaim,
-        cadence: info.cadence,
-        required: info.required,
-      };
-    });
-    for (const slot of slots) {
-      if (!slot.valid || !Number.isFinite(slot.cadence) || slot.cadence <= 0) continue;
-      const made = Math.max(0, Number(formValues[slot.madeField]) || 0);
-      const anchor = Math.max(0, Number(formValues[slot.anchorField]) || 0);
-      const correctionGeneration = Math.max(0, Number(formValues[slot.correctionField]) || 0);
-      const dueAt = dueRefForChannel(slot.channel).current || anchor + slot.cadence;
-      // At most one sequenced event is claimed at a time. The canonical
-      // acknowledgement advances the persisted anchor, then this effect claims
-      // the next overdue fractional cadence without losing accumulated time.
-      if (
-        elapsedBatchSec < dueAt
-        || made >= Math.ceil(slot.required)
-        || serverOwnsChannel(slot.channel)
-      ) continue;
-      dueRefForChannel(slot.channel).current = dueAt;
-      commitAutomatic(slot.channel, dueAt, dueAt + slot.cadence, [
-        { field: slot.madeField as AutoTrackMutation["field"], from: made, to: Math.min(Math.ceil(slot.required), made + 1) },
-        { field: slot.anchorField as AutoTrackMutation["field"], from: anchor, to: dueAt },
-        { field: slot.correctionField as AutoTrackMutation["field"], from: correctionGeneration, to: correctionGeneration },
+      }), capacity);
+      dueRefForChannel(channel).current = dueAt;
+      commitAutomatic(channel, dueAt, dueAt + cadence, [
+        { field: fields.stock as AutoTrackMutation["field"], from: onHand, to: nextOnHand },
+        { field: fields.anchor as AutoTrackMutation["field"], from: anchor, to: dueAt },
+        { field: fields.correctionGeneration as AutoTrackMutation["field"], from: correctionGeneration, to: correctionGeneration },
       ]);
     }
   }, [
@@ -1431,6 +1553,7 @@ useEffect(() => {
     commitAutomatic,
     disabled,
     elapsedBatchSec,
+    endedAt,
     runStatus,
     v,
   ]);

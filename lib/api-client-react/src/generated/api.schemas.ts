@@ -692,6 +692,14 @@ export const AutoTrackClaimChannel = {
   'app2-batch': 'app2-batch',
   'app3-batch': 'app3-batch',
   'app4-batch': 'app4-batch',
+  'app1-stock': 'app1-stock',
+  'app2-stock': 'app2-stock',
+  'app3-stock': 'app3-stock',
+  'app4-stock': 'app4-stock',
+  'pep1-stock': 'pep1-stock',
+  'pep1b-stock': 'pep1b-stock',
+  'pep2-stock': 'pep2-stock',
+  'pep2b-stock': 'pep2b-stock',
 } as const;
 
 export interface AutoTrackClaim {
@@ -874,6 +882,8 @@ export const ManualSectionEditRequestSection = {
   app2: 'app2',
   app3: 'app3',
   app4: 'app4',
+  pep1: 'pep1',
+  pep2: 'pep2',
 } as const;
 
 /**
@@ -962,12 +972,18 @@ export type ManualApp1EditValues = {
   app1BatchesMade?: number;
   app1BatchAnchorNetSec?: number;
   app1BatchCorrectionGeneration?: number;
+  app1StockLbs?: number;
+  app1StockAnchorNetSec?: number;
+  app1StockCorrectionGeneration?: number;
 };
 
 export type ManualApp1EditBaseValues = {
   app1BatchesMade: number;
   app1BatchAnchorNetSec: number;
   app1BatchCorrectionGeneration: number;
+  app1StockLbs: number;
+  app1StockAnchorNetSec: number;
+  app1StockCorrectionGeneration: number;
 };
 
 export type ManualApp1Edit = ManualSectionEditRequestBase & {
@@ -980,12 +996,18 @@ export type ManualApp2EditValues = {
   app2BatchesMade?: number;
   app2BatchAnchorNetSec?: number;
   app2BatchCorrectionGeneration?: number;
+  app2StockLbs?: number;
+  app2StockAnchorNetSec?: number;
+  app2StockCorrectionGeneration?: number;
 };
 
 export type ManualApp2EditBaseValues = {
   app2BatchesMade: number;
   app2BatchAnchorNetSec: number;
   app2BatchCorrectionGeneration: number;
+  app2StockLbs: number;
+  app2StockAnchorNetSec: number;
+  app2StockCorrectionGeneration: number;
 };
 
 export type ManualApp2Edit = ManualSectionEditRequestBase & {
@@ -998,12 +1020,18 @@ export type ManualApp3EditValues = {
   app3BatchesMade?: number;
   app3BatchAnchorNetSec?: number;
   app3BatchCorrectionGeneration?: number;
+  app3StockLbs?: number;
+  app3StockAnchorNetSec?: number;
+  app3StockCorrectionGeneration?: number;
 };
 
 export type ManualApp3EditBaseValues = {
   app3BatchesMade: number;
   app3BatchAnchorNetSec: number;
   app3BatchCorrectionGeneration: number;
+  app3StockLbs: number;
+  app3StockAnchorNetSec: number;
+  app3StockCorrectionGeneration: number;
 };
 
 export type ManualApp3Edit = ManualSectionEditRequestBase & {
@@ -1016,18 +1044,72 @@ export type ManualApp4EditValues = {
   app4BatchesMade?: number;
   app4BatchAnchorNetSec?: number;
   app4BatchCorrectionGeneration?: number;
+  app4StockLbs?: number;
+  app4StockAnchorNetSec?: number;
+  app4StockCorrectionGeneration?: number;
 };
 
 export type ManualApp4EditBaseValues = {
   app4BatchesMade: number;
   app4BatchAnchorNetSec: number;
   app4BatchCorrectionGeneration: number;
+  app4StockLbs: number;
+  app4StockAnchorNetSec: number;
+  app4StockCorrectionGeneration: number;
 };
 
 export type ManualApp4Edit = ManualSectionEditRequestBase & {
   section?: 'app4';
   values?: ManualApp4EditValues;
   baseValues?: ManualApp4EditBaseValues;
+};
+
+export type ManualPep1EditValues = {
+  pep1StockLbs?: number;
+  pep1StockAnchorNetSec?: number;
+  pep1StockCorrectionGeneration?: number;
+  pep1bStockLbs?: number;
+  pep1bStockAnchorNetSec?: number;
+  pep1bStockCorrectionGeneration?: number;
+};
+
+export type ManualPep1EditBaseValues = {
+  pep1StockLbs: number;
+  pep1StockAnchorNetSec: number;
+  pep1StockCorrectionGeneration: number;
+  pep1bStockLbs: number;
+  pep1bStockAnchorNetSec: number;
+  pep1bStockCorrectionGeneration: number;
+};
+
+export type ManualPep1Edit = ManualSectionEditRequestBase & {
+  section?: 'pep1';
+  values?: ManualPep1EditValues;
+  baseValues?: ManualPep1EditBaseValues;
+};
+
+export type ManualPep2EditValues = {
+  pep2StockLbs?: number;
+  pep2StockAnchorNetSec?: number;
+  pep2StockCorrectionGeneration?: number;
+  pep2bStockLbs?: number;
+  pep2bStockAnchorNetSec?: number;
+  pep2bStockCorrectionGeneration?: number;
+};
+
+export type ManualPep2EditBaseValues = {
+  pep2StockLbs: number;
+  pep2StockAnchorNetSec: number;
+  pep2StockCorrectionGeneration: number;
+  pep2bStockLbs: number;
+  pep2bStockAnchorNetSec: number;
+  pep2bStockCorrectionGeneration: number;
+};
+
+export type ManualPep2Edit = ManualSectionEditRequestBase & {
+  section?: 'pep2';
+  values?: ManualPep2EditValues;
+  baseValues?: ManualPep2EditBaseValues;
 };
 
 export type ManualSectionEditRequest = (ManualPackagingEdit & {
@@ -1187,6 +1269,58 @@ export type ManualSectionEditRequest = (ManualPackagingEdit & {
      */
   deviceId: string;
 }) | (ManualApp4Edit & {
+  /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
+  id: string;
+  date: string;
+  /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
+  runId: string;
+  section: ManualSectionEditRequestSection;
+  /** Only fields belonging to section */
+  values: ManualSectionEditRequestValues;
+  /** Complete baseline for every field in section */
+  baseValues: ManualSectionEditRequestBaseValues;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  observedGeneration: string;
+  /** @minimum 0 */
+  baseRevision: number;
+  /** @minimum 0 */
+  resetEpoch: number;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     * @pattern ^[A-Za-z0-9:_-]{1,160}$
+     */
+  deviceId: string;
+}) | (ManualPep1Edit & {
+  /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
+  id: string;
+  date: string;
+  /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
+  runId: string;
+  section: ManualSectionEditRequestSection;
+  /** Only fields belonging to section */
+  values: ManualSectionEditRequestValues;
+  /** Complete baseline for every field in section */
+  baseValues: ManualSectionEditRequestBaseValues;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  observedGeneration: string;
+  /** @minimum 0 */
+  baseRevision: number;
+  /** @minimum 0 */
+  resetEpoch: number;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     * @pattern ^[A-Za-z0-9:_-]{1,160}$
+     */
+  deviceId: string;
+}) | (ManualPep2Edit & {
   /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
   id: string;
   date: string;

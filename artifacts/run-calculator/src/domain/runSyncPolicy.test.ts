@@ -4,6 +4,8 @@ import {
   acceptRemoteRunValueOnSync,
   adoptStrictlyNewerRemoteLifecycles,
   isEmptyOverPopulated,
+  reconcileOperationalIntentCanonical,
+  serverOwnedApplicatorStockProgress,
   shouldAtomicallyAdoptFirstSnapshot,
   stampDayStateMeta,
 } from "./runSyncPolicy";
@@ -29,5 +31,88 @@ describe("run sync policy", () => {
   it("only atomically adopts the initial untouched seeded placeholder", () => {
     expect(shouldAtomicallyAdoptFirstSnapshot({ initialSnapshot: true, localRuns: [{ id: "a", brand: "", flavor: "", seeded: true }] })).toBe(true);
     expect(shouldAtomicallyAdoptFirstSnapshot({ initialSnapshot: true, hasLocalUserEdit: true, localRuns: [{ id: "a", brand: "", flavor: "", seeded: true }] })).toBe(false);
+  });
+  it("adopts server-proven pound depletion without allowing an older same-generation refill", () => {
+    const remote = {
+      ...DEFAULT_VALUES,
+      app1Type: "Cheese",
+      app1BatchLbs: 50,
+      app1StockLbs: 49,
+      app1StockAnchorNetSec: 12,
+      app1StockCorrectionGeneration: 0,
+      applicatorStockInitialized: true,
+    };
+    const payload: any = {
+      runValues: { "stock-run": remote },
+      runValuesUpdatedAt: { "stock-run": 200 },
+      autoTrackCoordination: {
+        version: 1,
+        runs: {
+          "stock-run": {
+            "app1-stock": {
+              generation: "stock-run:2",
+              sequence: 1,
+              nextDueAt: 20,
+              acceptedRunValuesUpdatedAt: 200,
+              acceptedEventId: "app1-stock-event",
+              updatedAt: 190,
+            },
+          },
+        },
+      },
+      autoTrackServerState: {
+        netOwnership: {
+          "stock-run": { "app1-stock": { generation: "stock-run:2", sequence: 1, updatedAt: 190 } },
+        },
+      },
+    };
+    const local = {
+      ...DEFAULT_VALUES,
+      app1Type: "Cheese",
+      app1BatchLbs: 50,
+      app1StockLbs: 50,
+      app1StockAnchorNetSec: 0,
+      app1StockCorrectionGeneration: 0,
+      applicatorStockInitialized: true,
+    };
+    expect(serverOwnedApplicatorStockProgress(payload, "stock-run", local)).toMatchObject({
+      app1StockLbs: 49,
+      app1StockAnchorNetSec: 12,
+      app1StockCorrectionGeneration: 0,
+      applicatorStockInitialized: true,
+    });
+    expect(serverOwnedApplicatorStockProgress(payload, "other-run", local)).toBeNull();
+    expect(serverOwnedApplicatorStockProgress(payload, "stock-run", {
+      ...local,
+      app1StockLbs: 48,
+      app1StockAnchorNetSec: 13,
+    })).toBeNull();
+  });
+  it("adopts canonical stock seeded by Start without changing historical made counters", () => {
+    const canonicalValues = {
+      ...DEFAULT_VALUES,
+      app1Type: "Cheese",
+      app1BatchLbs: 25,
+      app1StockLbs: 50,
+      app1StockAnchorNetSec: 0,
+      app1StockCorrectionGeneration: 0,
+      applicatorStockInitialized: true,
+    };
+    const result = reconcileOperationalIntentCanonical({
+      dayState: day([{ id: "stock-run", brand: "", flavor: "", metaUpdatedAt: 100 }]),
+      runValues: { ...DEFAULT_VALUES, app1BatchesMade: 7, app1StockLbs: 0 },
+      runValuesUpdatedAt: { "stock-run": 10 },
+      payload: {
+        dayState: { runs: [{ id: "stock-run", brand: "", flavor: "", startedAt: 200, metaUpdatedAt: 201 }] },
+        runValues: { "stock-run": canonicalValues },
+        runValuesUpdatedAt: { "stock-run": 200 },
+      },
+      intent: { runId: "stock-run", action: "lifecycle", lifecycle: "start" },
+      outcome: "accepted",
+    });
+    expect(result.runValues.app1StockLbs).toBe(50);
+    expect(result.runValues.applicatorStockInitialized).toBe(true);
+    expect(result.runValues.app1BatchesMade).toBe(7);
+    expect(result.runValuesUpdatedAt["stock-run"]).toBe(200);
   });
 });

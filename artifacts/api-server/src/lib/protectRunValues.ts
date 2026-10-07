@@ -250,15 +250,40 @@ const CURRENT_BLANK_RUN_VALUE: Record<string, unknown> = {
   app1BatchesMade: 0,
   app1BatchAnchorNetSec: 0,
   app1BatchCorrectionGeneration: 0,
+  app1StockLbs: 0,
+  app1StockAnchorNetSec: 0,
+  app1StockCorrectionGeneration: 0,
   app2BatchesMade: 0,
   app2BatchAnchorNetSec: 0,
   app2BatchCorrectionGeneration: 0,
+  app2StockLbs: 0,
+  app2StockAnchorNetSec: 0,
+  app2StockCorrectionGeneration: 0,
   app3BatchesMade: 0,
   app3BatchAnchorNetSec: 0,
   app3BatchCorrectionGeneration: 0,
+  app3StockLbs: 0,
+  app3StockAnchorNetSec: 0,
+  app3StockCorrectionGeneration: 0,
   app4BatchesMade: 0,
   app4BatchAnchorNetSec: 0,
   app4BatchCorrectionGeneration: 0,
+  app4StockLbs: 0,
+  app4StockAnchorNetSec: 0,
+  app4StockCorrectionGeneration: 0,
+  applicatorStockInitialized: false,
+  pep1StockLbs: 0,
+  pep1StockAnchorNetSec: 0,
+  pep1StockCorrectionGeneration: 0,
+  pep1bStockLbs: 0,
+  pep1bStockAnchorNetSec: 0,
+  pep1bStockCorrectionGeneration: 0,
+  pep2StockLbs: 0,
+  pep2StockAnchorNetSec: 0,
+  pep2StockCorrectionGeneration: 0,
+  pep2bStockLbs: 0,
+  pep2bStockAnchorNetSec: 0,
+  pep2bStockCorrectionGeneration: 0,
   app1OzPerPizza: 0,
   app1BatchLbs: 0,
   app2OzPerPizza: 0,
@@ -364,8 +389,19 @@ function isBlankRunValue(v: unknown): boolean {
     "app4BatchesMade",
     "app4BatchAnchorNetSec",
     "app4BatchCorrectionGeneration",
+    "app1StockLbs", "app1StockAnchorNetSec", "app1StockCorrectionGeneration",
+    "app2StockLbs", "app2StockAnchorNetSec", "app2StockCorrectionGeneration",
+    "app3StockLbs", "app3StockAnchorNetSec", "app3StockCorrectionGeneration",
+    "app4StockLbs", "app4StockAnchorNetSec", "app4StockCorrectionGeneration",
+    "pep1StockLbs", "pep1StockAnchorNetSec", "pep1StockCorrectionGeneration",
+    "pep1bStockLbs", "pep1bStockAnchorNetSec", "pep1bStockCorrectionGeneration",
+    "pep2StockLbs", "pep2StockAnchorNetSec", "pep2StockCorrectionGeneration",
+    "pep2bStockLbs", "pep2bStockAnchorNetSec", "pep2bStockCorrectionGeneration",
   ]) {
     if (!(field in withMachineDefaults)) withMachineDefaults[field] = 0;
+  }
+  if (!("applicatorStockInitialized" in withMachineDefaults)) {
+    withMachineDefaults.applicatorStockInitialized = false;
   }
   for (const [k, def] of Object.entries(FACTORY_TIMING_DEFAULTS)) {
     if (withMachineDefaults[k] === HISTORICAL_ZERO_TIMING_SENTINEL) {
@@ -570,13 +606,23 @@ export function protectRunValues(
       undefined,
       tombstonedRunIds(incoming),
     );
-    // Preserve the established first-write identity behavior for legacy
-    // payloads that do not carry the new independent register.
-    if (!progress) return incoming;
+    const incomingValues = isPlainObject(incoming.runValues) ? incoming.runValues : {};
+    const hasUntrustedStockValues = Object.values(incomingValues).some((candidate) =>
+      isPlainObject(candidate)
+      && APPLICATOR_STOCK_VALUE_FIELDS.some((field) =>
+        Object.prototype.hasOwnProperty.call(candidate, field),
+      ),
+    );
+    if (!progress && !hasUntrustedStockValues) return incoming;
     const out: Record<string, unknown> = { ...incoming };
     const outVals = isPlainObject(incoming.runValues)
       ? { ...incoming.runValues }
       : {};
+    preserveCanonicalApplicatorStock(outVals, {});
+    if (isPlainObject(incoming.runValues)) out.runValues = outVals;
+    // Preserve the established first-write identity behavior for legacy
+    // payloads that do not carry the new independent register.
+    if (!progress) return out;
     overlayPackagingIntoRunValues(outVals, progress);
     out.packagingProgress = progress;
     out.runValues = outVals;
@@ -671,6 +717,7 @@ export function protectRunValues(
         if (inStamp > 0) outUpd[id] = inStamp;
       }
     }
+    preserveCanonicalApplicatorStock(outVals, exVals);
     const base: Record<string, unknown> = {
       ...(incoming as Record<string, unknown>),
       ...(inDay ? { dayState: { ...inDay, ...mergeBreakSchedule(inDay, exDay, nowMs) } } : {}),
@@ -834,6 +881,7 @@ export function protectRunValues(
       outUpd[id] = inStamp;
     }
   }
+  preserveCanonicalApplicatorStock(outVals, exVals);
 
   // Rebuild dayState with the merged run list, keeping every other incoming
   // dayState field (shiftNotes, overlays, resetAt, date, …). If the push omitted
@@ -1105,6 +1153,40 @@ function overlayPackagingIntoRunValues(
       skidsCompleted: entry.skidsCompleted,
       casesOnCurrentSkid: entry.casesOnCurrentSkid,
     };
+  }
+}
+
+const APPLICATOR_STOCK_VALUE_FIELDS = [
+  "applicatorStockInitialized",
+  "app1StockLbs", "app1StockAnchorNetSec", "app1StockCorrectionGeneration",
+  "app2StockLbs", "app2StockAnchorNetSec", "app2StockCorrectionGeneration",
+  "app3StockLbs", "app3StockAnchorNetSec", "app3StockCorrectionGeneration",
+  "app4StockLbs", "app4StockAnchorNetSec", "app4StockCorrectionGeneration",
+  "pep1StockLbs", "pep1StockAnchorNetSec", "pep1StockCorrectionGeneration",
+  "pep1bStockLbs", "pep1bStockAnchorNetSec", "pep1bStockCorrectionGeneration",
+  "pep2StockLbs", "pep2StockAnchorNetSec", "pep2StockCorrectionGeneration",
+  "pep2bStockLbs", "pep2bStockAnchorNetSec", "pep2bStockCorrectionGeneration",
+] as const;
+
+/** Ordinary full-run snapshots cannot rewrite the claim/manual-section registers. */
+function preserveCanonicalApplicatorStock(
+  output: Record<string, unknown>,
+  stored: Record<string, unknown>,
+): void {
+  for (const [id, candidate] of Object.entries(output)) {
+    if (!isPlainObject(candidate)) continue;
+    const previous = isPlainObject(stored[id]) ? stored[id] as Record<string, unknown> : {};
+    const values = { ...candidate };
+    for (const field of APPLICATOR_STOCK_VALUE_FIELDS) {
+      if (Object.prototype.hasOwnProperty.call(previous, field)) {
+        values[field] = previous[field];
+      } else if (previous.applicatorStockInitialized === true) {
+        values[field] = CURRENT_BLANK_RUN_VALUE[field];
+      } else {
+        delete values[field];
+      }
+    }
+    output[id] = values;
   }
 }
 

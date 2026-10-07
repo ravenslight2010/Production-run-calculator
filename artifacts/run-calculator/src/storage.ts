@@ -515,6 +515,15 @@ export const PROFILE_EXCLUDED_FIELDS = [
   "app2BatchesMade", "app2BatchAnchorNetSec", "app2BatchCorrectionGeneration",
   "app3BatchesMade", "app3BatchAnchorNetSec", "app3BatchCorrectionGeneration",
   "app4BatchesMade", "app4BatchAnchorNetSec", "app4BatchCorrectionGeneration",
+  "app1StockLbs", "app1StockAnchorNetSec", "app1StockCorrectionGeneration",
+  "app2StockLbs", "app2StockAnchorNetSec", "app2StockCorrectionGeneration",
+  "app3StockLbs", "app3StockAnchorNetSec", "app3StockCorrectionGeneration",
+  "app4StockLbs", "app4StockAnchorNetSec", "app4StockCorrectionGeneration",
+  "applicatorStockInitialized",
+  "pep1StockLbs", "pep1StockAnchorNetSec", "pep1StockCorrectionGeneration",
+  "pep1bStockLbs", "pep1bStockAnchorNetSec", "pep1bStockCorrectionGeneration",
+  "pep2StockLbs", "pep2StockAnchorNetSec", "pep2StockCorrectionGeneration",
+  "pep2bStockLbs", "pep2bStockAnchorNetSec", "pep2bStockCorrectionGeneration",
 ] as const satisfies readonly (keyof FormValues)[];
 
 // Rename legacy pep-type names ("Pep - Cured"/"Pep - Natural") to the detailed

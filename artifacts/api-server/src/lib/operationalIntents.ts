@@ -1,3 +1,5 @@
+import { initializeApplicatorStockOnRunStart } from "@workspace/live-calc";
+
 /**
  * Versioned, replay-safe offline operator commands.  These are deliberately
  * stored with the daily document: deployments which predate this feature need
@@ -108,6 +110,10 @@ export function applyOperationalIntent(stored: unknown, intent: OperationalInten
       || (intent.action === "resume" && !run.pausedAt && !!run.startedAt)
       || (intent.action === "lifecycle" && intent.lifecycle === "start" && !!run.startedAt)
       || (intent.action === "lifecycle" && intent.lifecycle === "end" && !!run.endedAt);
+    const matchingStartReplay = intent.action === "lifecycle"
+      && intent.lifecycle === "start"
+      && !!run.startedAt
+      && Math.abs(Number(run.startedAt) - intent.effectiveAt) <= 5 * 60_000;
     if (exactGeneration || alreadyApplied || safeResumeRebase) {
       outcome = alreadyApplied ? "superseded" : exactGeneration ? "accepted" : "rebased";
       if (!alreadyApplied && intent.action !== "correction") {
@@ -138,6 +144,24 @@ export function applyOperationalIntent(stored: unknown, intent: OperationalInten
       if (outcome !== "review-required" && intent.action === "correction") {
         const values = obj(data.runValues); values[intent.runId] = { ...obj(values[intent.runId]), ...intent.values };
         data.runValues = values; data.runValuesUpdatedAt = { ...obj(data.runValuesUpdatedAt), [intent.runId]: now };
+      }
+      if (
+        outcome !== "review-required"
+        && intent.action === "lifecycle"
+        && intent.lifecycle === "start"
+        && (!alreadyApplied || matchingStartReplay)
+      ) {
+        const allValues = obj(data.runValues);
+        const currentValues = obj(allValues[intent.runId]);
+        const initialized = initializeApplicatorStockOnRunStart(currentValues);
+        if (Object.keys(initialized).length) {
+          allValues[intent.runId] = { ...currentValues, ...initialized };
+          data.runValues = allValues;
+          data.runValuesUpdatedAt = {
+            ...obj(data.runValuesUpdatedAt),
+            [intent.runId]: Math.max(now, (Number(obj(data.runValuesUpdatedAt)[intent.runId]) || 0) + 1),
+          };
+        }
       }
     } else {
       outcome = "conflicted";
