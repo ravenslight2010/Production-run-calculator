@@ -136,7 +136,7 @@ describe("retained reviewer benchmark privacy boundary", () => {
     );
     const observationsPath = path.join(
       root,
-      "docs/second-pass-reviewer-live-observations-2026-09-05.json",
+      "docs/second-pass-reviewer-live-observations-2026-10-06.json",
     );
     const target = path.join(root, "retained-report.json");
     fs.mkdirSync(path.dirname(sourcePath), { recursive: true });

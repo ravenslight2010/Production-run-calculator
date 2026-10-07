@@ -14,7 +14,7 @@ const REPO_ROOT = path.resolve(SCRIPT_DIR, "../..");
 const RETAINED_EVIDENCE_DIRECTORIES = retainedEvaluationDirectories(REPO_ROOT);
 const EVIDENCE_PATH = path.join(
   REPO_ROOT,
-  "docs/second-pass-reviewer-benchmark-2026-09-05.json",
+  "docs/second-pass-reviewer-benchmark-2026-10-06.json",
 );
 const NODE_SELECTOR_PATH = path.join(REPO_ROOT, ".nvmrc");
 const CI_WORKFLOW_PATHS = [

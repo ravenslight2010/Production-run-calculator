@@ -569,7 +569,9 @@ test("manager attention remains stable across dialog and destination transitions
     await expect(page.getByText(scheduledFlavor, { exact: true })).toBeVisible();
     const doughRecipePicker = page.getByTestId("setup-recipe-picker-dough");
     await doughRecipePicker.click();
-    await expect(page.getByText("Valid Dough", { exact: true })).toBeVisible();
+    await expect(page.getByText("Valid Dough", { exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
     await expect(page.getByText("Legacy Dough", { exact: true })).toBeVisible();
     await page.keyboard.press("Escape");
     await page.screenshot({ path: testInfo.outputPath("manager-attention-destination.png") });

@@ -1076,7 +1076,10 @@ test(
 
       const destinationWriteError = page
         .getByRole("alert")
-        .filter({ hasText: "Couldn't save the destination plan." });
+        .filter({ hasText: "Couldn't save the destination plan." })
+        .filter({
+          hasText: "The source is unchanged; check your connection and try again.",
+        });
       await expect(destinationWriteError).toContainText(
         "The source is unchanged; check your connection and try again.",
       );

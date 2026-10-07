@@ -287,7 +287,7 @@ export function buildReviewerBenchmark(root = repositoryRoot()) {
   const source = JSON.parse(fs.readFileSync(sourcePath, "utf8")) as { findings: FindingMap };
   const observationsPath = path.join(
     root,
-    "docs/second-pass-reviewer-live-observations-2026-09-05.json",
+    "docs/second-pass-reviewer-live-observations-2026-10-06.json",
   );
   const observationsFile = JSON.parse(fs.readFileSync(observationsPath, "utf8")) as {
     formatVersion?: unknown;

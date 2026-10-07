@@ -17,7 +17,7 @@ const root = path.resolve(import.meta.dirname, "../..");
 const actual = buildReviewerBenchmark(root);
 const expected = JSON.parse(
   fs.readFileSync(
-    path.join(root, "docs/second-pass-reviewer-benchmark-2026-09-05.json"),
+    path.join(root, "docs/second-pass-reviewer-benchmark-2026-10-06.json"),
     "utf8",
   ),
 );
@@ -26,7 +26,7 @@ assert.deepEqual(actual, expected, "checked-in reviewer evidence must match the 
 assert.match(expected.evaluationManifest.dependencies.pnpmLockSha256, /^[a-f0-9]{64}$/u);
 const liveObservations = JSON.parse(
   fs.readFileSync(
-    path.join(root, "docs/second-pass-reviewer-live-observations-2026-09-05.json"),
+    path.join(root, "docs/second-pass-reviewer-live-observations-2026-10-06.json"),
     "utf8",
   ),
 );
@@ -61,7 +61,7 @@ assert.equal(actual.pairedOutcome.reviewer.duplicateWarnings, 0);
 assert.equal(actual.pairedOutcome.reviewer.reviewerFailures, 301);
 assert.equal(actual.pairedOutcome.reviewer.noOpVerdicts, 304);
 assert.equal(actual.pairedOutcome.reviewer.falseWarningRate, null);
-assert.equal(actual.measuredEffects.p95LatencyMs, 19_084);
+assert.equal(actual.measuredEffects.p95LatencyMs, 18_529);
 assert.match(actual.decision.authority, /human confirmation/);
 assert.deepEqual(
   reviewerEvaluatorProvenance("a".repeat(64)),

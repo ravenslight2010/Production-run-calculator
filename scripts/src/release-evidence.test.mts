@@ -510,6 +510,7 @@ async function run(): Promise<void> {
     retainedEvaluationInventory.map((entry) => entry.sourceRelativePath),
     [
       "docs/second-pass-reviewer-benchmark-2026-09-05.json",
+      "docs/second-pass-reviewer-benchmark-2026-10-06.json",
       "lib/corpus-harness/snapshots/evaluation-manifest.json",
     ],
     "release evidence must inventory both root-level and wrapped retained evaluations",
@@ -1142,7 +1143,7 @@ async function run(): Promise<void> {
   }
   assert.match(
     releaseJobs[0]!.source!,
-    /run: pnpm run release:check$/m,
+    /run: node scripts\/src\/test-results\.mjs run --lane release-standard -- pnpm run release:check$/m,
     "the standard GitHub release job must enter through the release checker that owns the WebKit identity gate",
   );
   assert.ok(

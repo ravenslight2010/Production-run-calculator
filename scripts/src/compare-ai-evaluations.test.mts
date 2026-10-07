@@ -53,7 +53,7 @@ try {
   assert.match(runComparisonCli([baseline, candidate, "--human"]), /1 change: 0 identity, 1 metric, 0 outcome/);
   const retained = path.resolve(
     import.meta.dirname,
-    "../../docs/second-pass-reviewer-benchmark-2026-09-05.json",
+    "../../docs/second-pass-reviewer-benchmark-2026-10-06.json",
   );
   const retainedComparison = JSON.parse(runComparisonCli([retained, retained]));
   assert.match(retainedComparison.summary, /^No changes:/);
