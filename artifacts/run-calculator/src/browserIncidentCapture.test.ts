@@ -13,6 +13,7 @@ import {
 afterEach(() => {
   clearBrowserIncidentCaptureForTests();
   reportIncident.mockClear();
+  window.history.replaceState({}, "", "/");
 });
 
 describe("browser incident capture", () => {
@@ -51,5 +52,11 @@ describe("browser incident capture", () => {
     }));
     expect(JSON.stringify(reportIncident.mock.calls)).not.toContain("private");
     uninstall();
+  });
+
+  it("does not submit browser incidents from read-only station displays", async () => {
+    window.history.replaceState({}, "", "/?screen=dashboard");
+    await reportBrowserFailure("api_failure", new Error("sync unavailable"));
+    expect(reportIncident).not.toHaveBeenCalled();
   });
 });

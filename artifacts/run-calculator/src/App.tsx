@@ -364,14 +364,19 @@ function ErrorBoundaryWithRecovery({ children }: { children: ReactNode }) {
 }
 
 function App() {
-  useEffect(() => installBrowserFailureCapture(), []);
+  const isStationDisplay =
+    new URLSearchParams(window.location.search).get("screen") !== null;
+  useEffect(() => {
+    if (isStationDisplay) return;
+    return installBrowserFailureCapture();
+  }, [isStationDisplay]);
   return (
     <WouterRouter base={basePath}>
       <QueryClientProvider client={queryClient}>
         <AppUpdatePrompt>
           <ErrorBoundaryWithRecovery>
           <AuthProvider>
-            <FieldVerificationObserver appBuild={WEB_BUILD_ID} />
+            {!isStationDisplay && <FieldVerificationObserver appBuild={WEB_BUILD_ID} />}
             <AppRoutes />
           </AuthProvider>
           </ErrorBoundaryWithRecovery>

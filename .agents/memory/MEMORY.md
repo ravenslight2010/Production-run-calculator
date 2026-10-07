@@ -22,7 +22,7 @@
 - [Reset relay](password-reset-relay.md) + [session invalidation](password-change-session-invalidation.md) — manager resets and password changes revoke sessions safely.
 - [Old-schema fixtures](isolated-db-may-predate-migrations.md) + [session fixtures](session-boundary-integration-fixtures.md) — Postgres may predate migrations; bind pools after disposable URLs exist.
 - [Pool binding](integration-test-db-binding.md) + [CI parity](local-ci-postgres-parity.md) — preserve dynamic imports, workflow roles, and writable sockets.
-- [Web harness](web-test-harness.md) + [responsive](responsive-browser-fixtures.md) + [onboarding](onboarding-ack-latch.md) — fallback; reapply inputs; target dialogs; latch duplicate acks.
+- [Web harness](web-test-harness.md) + [offline SSE](playwright-offline-sse.md) + [responsive](responsive-browser-fixtures.md) + [onboarding](onboarding-ack-latch.md) — stable setup, offline stream limits, and dialog/ack checks.
 - [Phone forms](phone-e2e-form-overrides.md) + [query coercion](orval-query-coerce-quirk.md) — isolate inputs and guard missing query parameters.
 - [AI merge assist](merge-suggest.md) — sanitize request bodies before cost checks; keep learned aliases consistent across clients.
 - [Spec-sheet importer](spec-import.md) + [scale](spec-import-scale-harness.md) + [corpus](corpus-harness.md) — ground sauce rows to FRONTLINE, bound prompt cells, and rerun model checks.
