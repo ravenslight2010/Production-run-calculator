@@ -246,6 +246,7 @@ import type {
   SignupCodeStatusUpdate,
   SourceLibraryCaptureError,
   SourceLibraryReconciliationCaptureRequest,
+  SourceLibraryReconciliationDiagnostics,
   SourceLibraryReconciliationEvidence,
   SpecImportAliasList,
   SpecReconcileInput,
@@ -12422,6 +12423,108 @@ export const useCaptureSourceLibraryReconciliation = <TError = ErrorType<SourceL
       > => {
       return useMutation(getCaptureSourceLibraryReconciliationMutationOptions(options), queryClient);
     }
+
+export const getGetPublishedSourceLibraryReconciliationDiagnosticsUrl = () => {
+
+
+
+
+  return `/api/profile-data/source-library-reconciliation/diagnostics`
+}
+
+/**
+ * Public read-only diagnostics for Replit Agent. Runs the pool comparison through this published API process's configured database connection and binds the result to this process's build identity. Returns at most ten pool table names, stable record IDs, approved source names, mismatch types, and differing field names. It never returns current values, ingredient names, recipe rows, credentials, or database-owner names. Shares the published capture rate limit and is unavailable outside production. This response is diagnostic only, not retained release evidence.
+ * @summary Inspect bounded pool mismatch descriptors from the published app
+ */
+export const getPublishedSourceLibraryReconciliationDiagnostics = async ( options?: Parameters<typeof customFetch>[1]): Promise<SourceLibraryReconciliationDiagnostics> => {
+
+  return customFetch<SourceLibraryReconciliationDiagnostics>(getGetPublishedSourceLibraryReconciliationDiagnosticsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPublishedSourceLibraryReconciliationDiagnosticsQueryKey = () => {
+    return [
+    `/api/profile-data/source-library-reconciliation/diagnostics`
+    ] as const;
+    }
+
+
+export const getGetPublishedSourceLibraryReconciliationDiagnosticsQueryOptions = <TData = Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>, TError = ErrorType<SourceLibraryCaptureError>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPublishedSourceLibraryReconciliationDiagnosticsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>> = ({ signal }) => getPublishedSourceLibraryReconciliationDiagnostics({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetPublishedSourceLibraryReconciliationDiagnosticsQueryResult = NonNullable<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>>
+export type GetPublishedSourceLibraryReconciliationDiagnosticsQueryError = ErrorType<SourceLibraryCaptureError>
+
+
+export function useGetPublishedSourceLibraryReconciliationDiagnostics<TData = Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>, TError = ErrorType<SourceLibraryCaptureError>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>,
+          TError,
+          Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPublishedSourceLibraryReconciliationDiagnostics<TData = Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>, TError = ErrorType<SourceLibraryCaptureError>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>,
+          TError,
+          Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPublishedSourceLibraryReconciliationDiagnostics<TData = Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>, TError = ErrorType<SourceLibraryCaptureError>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Inspect bounded pool mismatch descriptors from the published app
+ */
+
+export function useGetPublishedSourceLibraryReconciliationDiagnostics<TData = Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>, TError = ErrorType<SourceLibraryCaptureError>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPublishedSourceLibraryReconciliationDiagnostics>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetPublishedSourceLibraryReconciliationDiagnosticsQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getGetProfileDataHealthWorkspaceUrl = () => {
 

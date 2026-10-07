@@ -64,6 +64,31 @@ type Report = {
   findings: { allZeroStubs: unknown[] };
 };
 
+export const SOURCE_LIBRARY_POOL_DIAGNOSTIC_MAX_ITEMS = 10;
+
+export type SourceLibraryPoolMismatchDescriptor = {
+  table: RecipeTable;
+  id: string;
+  sourceName: string;
+  mismatchType: "missing" | "renamed" | "field-mismatch";
+  differingFields: string[];
+};
+
+export type SourceLibraryPoolMismatchDiagnostics = {
+  counts: {
+    expected: number;
+    exactMatches: number;
+    guardedRenames: number;
+    missing: number;
+    mismatches: number;
+  };
+  maxItems: number;
+  total: number;
+  returned: number;
+  omitted: number;
+  items: SourceLibraryPoolMismatchDescriptor[];
+};
+
 type Mapping = { old: string; canonical: string; table: RecipeTable | "cheese_recipes" };
 type ReferenceObservation = {
   scope: "profile" | "pending" | "protected";
@@ -389,6 +414,7 @@ async function checkDatabaseOwner(
 function comparePoolRows(report: Report, rowsByTable: Record<RecipeTable, Array<Record<string, unknown>>>) {
   const counts = { expected: 0, exactMatches: 0, guardedRenames: 0, missing: 0, mismatches: 0 };
   const fingerprintRows: unknown[] = [];
+  const mismatchDescriptors: SourceLibraryPoolMismatchDescriptor[] = [];
   for (const raw of report.proposals) {
     const proposal = raw as unknown as Proposal;
     const row = rowsByTable[proposal.table].find((candidate) => candidate.id === proposal.before.id);
@@ -396,11 +422,25 @@ function comparePoolRows(report: Report, rowsByTable: Record<RecipeTable, Array<
     if (!row) {
       counts.missing++;
       fingerprintRows.push([proposal.table, proposal.before.id, "missing"]);
+      mismatchDescriptors.push({
+        table: proposal.table,
+        id: proposal.before.id,
+        sourceName: proposal.before.name,
+        mismatchType: "missing",
+        differingFields: [],
+      });
       continue;
     }
     if (row.name !== proposal.before.name) {
       counts.guardedRenames++;
       fingerprintRows.push([proposal.table, proposal.before.id, "guarded-rename"]);
+      mismatchDescriptors.push({
+        table: proposal.table,
+        id: proposal.before.id,
+        sourceName: proposal.before.name,
+        mismatchType: "renamed",
+        differingFields: ["name"],
+      });
       continue;
     }
     if (proposal.action === "link-source-identity") {
@@ -416,9 +456,56 @@ function comparePoolRows(report: Report, rowsByTable: Record<RecipeTable, Array<
     } else {
       counts.mismatches++;
       fingerprintRows.push([proposal.table, proposal.before.id, actual]);
+      mismatchDescriptors.push({
+        table: proposal.table,
+        id: proposal.before.id,
+        sourceName: proposal.before.name,
+        mismatchType: "field-mismatch",
+        differingFields: Object.keys(expected).filter(
+          (field) => stable(expected[field]) !== stable(actual[field]),
+        ),
+      });
     }
   }
-  return { counts, fingerprintRows };
+  return { counts, fingerprintRows, mismatchDescriptors };
+}
+
+async function readPoolState(report: Report, query: ReadOnlyQuery) {
+  const proposals = report.proposals as unknown as Proposal[];
+  const idsByTable = Object.fromEntries(TABLES.map((table) => [
+    table,
+    [...new Set(proposals.filter((proposal) => proposal.table === table).map((proposal) => proposal.before.id))],
+  ])) as Record<RecipeTable, string[]>;
+  const rowsByTable = {} as Record<RecipeTable, Array<Record<string, unknown>>>;
+  // A pg client owns one connection. Keep these SELECTs sequential so the
+  // verifier itself does not create concurrent-query warnings or ambiguity.
+  for (const table of TABLES) rowsByTable[table] = await selectPoolRows(query, table, idsByTable[table]);
+  return comparePoolRows(report, rowsByTable);
+}
+
+export async function inspectSourceLibraryPoolMismatchDiagnostics(
+  reportInput: unknown,
+  query: ReadOnlyQuery,
+): Promise<SourceLibraryPoolMismatchDiagnostics> {
+  const report = parseReport(reportInput);
+  const poolState = await readPoolState(report, query);
+  const total =
+    poolState.counts.guardedRenames +
+    poolState.counts.missing +
+    poolState.counts.mismatches;
+  const items = poolState.mismatchDescriptors
+    .sort((left, right) =>
+      left.table.localeCompare(right.table) || left.id.localeCompare(right.id),
+    )
+    .slice(0, SOURCE_LIBRARY_POOL_DIAGNOSTIC_MAX_ITEMS);
+  return {
+    counts: poolState.counts,
+    maxItems: SOURCE_LIBRARY_POOL_DIAGNOSTIC_MAX_ITEMS,
+    total,
+    returned: items.length,
+    omitted: total - items.length,
+    items,
+  };
 }
 
 function compareAliases(aliasState: Awaited<ReturnType<typeof selectAliases>>) {
@@ -1184,15 +1271,7 @@ export async function verifySourceLibraryReconciliation(
       ? "development-no-owner-check"
       : "external-owner-check",
 ): Promise<VerificationOutput> {
-  const proposals = report.proposals as unknown as Proposal[];
-  const idsByTable = Object.fromEntries(TABLES.map((table) => [
-    table,
-    [...new Set(proposals.filter((proposal) => proposal.table === table).map((proposal) => proposal.before.id))],
-  ])) as Record<RecipeTable, string[]>;
-  const rowsByTable = {} as Record<RecipeTable, Array<Record<string, unknown>>>;
-  // A pg client owns one connection. Keep these SELECTs sequential so the
-  // verifier itself does not create concurrent-query warnings or ambiguity.
-  for (const table of TABLES) rowsByTable[table] = await selectPoolRows(query, table, idsByTable[table]);
+  const poolState = await readPoolState(report, query);
   const stubs = report.findings.allZeroStubs as Stub[];
   const stubRows = await selectStubRows(query, stubs);
   const mappings = buildMappings(report);
@@ -1203,7 +1282,6 @@ export async function verifySourceLibraryReconciliation(
     databaseAttestation === "development-no-owner-check"
       ? true
       : await checkDatabaseOwner(query, environment, expectedDatabaseOwner);
-  const poolState = comparePoolRows(report, rowsByTable);
   const pendingSummary = summarizeReferences(references.runs.filter((reference) => reference.scope === "pending"));
   const profileSummary = summarizeReferences(references.profiles);
   const protectedReferences = references.runs.filter((reference) => reference.scope === "protected");

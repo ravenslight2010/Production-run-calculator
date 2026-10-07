@@ -9,6 +9,7 @@ import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
 import { getBuildInfo } from "../lib/buildInfo";
 import {
   captureSourceLibraryReconciliation,
+  captureSourceLibraryReconciliationDiagnosticsFromPublishedApp,
   captureSourceLibraryReconciliationFromPublishedApp,
   SOURCE_LIBRARY_CAPTURE_REQUEST_MAX_BYTES,
   SourceLibraryCaptureFailure,
@@ -98,6 +99,47 @@ publicSourceLibraryReconciliationCaptureRouter.get(
       );
       res.status(500).json({
         error: "Source-library reconciliation capture failed",
+      });
+    }
+  },
+);
+
+publicSourceLibraryReconciliationCaptureRouter.get(
+  "/profile-data/source-library-reconciliation/diagnostics",
+  (_req, res, next) => {
+    res.setHeader("Cache-Control", "no-store");
+    next();
+  },
+  publicCaptureRateLimit,
+  async (req, res): Promise<void> => {
+    if (process.env.NODE_ENV !== "production") {
+      res.status(404).json({ error: "Not found" });
+      return;
+    }
+    try {
+      const report = readReviewedReportBundle();
+      const output =
+        await captureSourceLibraryReconciliationDiagnosticsFromPublishedApp({
+          pool,
+          ...report,
+          buildInfo: getBuildInfo(),
+        });
+      res.status(200).json(output);
+    } catch (error) {
+      if (error instanceof SourceLibraryCaptureFailure) {
+        req.log.warn(
+          { captureFailure: error.code, statusCode: error.statusCode },
+          "public source-library reconciliation diagnostics did not complete",
+        );
+        res.status(error.statusCode).json({ error: error.publicMessage });
+        return;
+      }
+      req.log.error(
+        { captureFailure: "unexpected" },
+        "public source-library reconciliation diagnostics failed",
+      );
+      res.status(500).json({
+        error: "Source-library reconciliation diagnostics failed",
       });
     }
   },

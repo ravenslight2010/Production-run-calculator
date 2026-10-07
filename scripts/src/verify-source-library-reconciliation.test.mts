@@ -14,6 +14,7 @@ import {
   assertProductionSourceLibraryCapture,
   assertBoundedSourceLibraryReconciliationEvidence,
   isRetryableSourceLibraryDatabaseError,
+  inspectSourceLibraryPoolMismatchDiagnostics,
   SOURCE_LIBRARY_PREFLIGHT_DB_ATTEMPTS,
   stable,
   verifySourceLibraryReconciliation,
@@ -454,6 +455,84 @@ assert.equal(
   false,
   "published-app capture must attest through its executing DB connection, not query an external owner name",
 );
+
+const componentMismatchProposal = report.proposals.find(
+  (proposal) =>
+    proposal.classification === "automatic" &&
+    proposal.action === "replace-components-from-approved-source",
+) as Record<string, any> | undefined;
+const missingProposal = report.proposals.find(
+  (proposal) => {
+    const candidate = proposal as Record<string, any>;
+    return candidate.classification === "automatic" &&
+      candidate.action === "replace-components-from-approved-source" &&
+      candidate.before.id !== componentMismatchProposal?.before.id;
+  },
+) as Record<string, any> | undefined;
+assert.ok(componentMismatchProposal);
+assert.ok(missingProposal);
+const privateComponentSentinel = "private-diagnostic-component-sentinel";
+const diagnosticQuery = async (text: string, values?: readonly unknown[]) => {
+  const result = await query(text, values);
+  let rows = result.rows;
+  if (text.includes(`FROM ${componentMismatchProposal.table}`)) {
+    rows = rows.map((row) => {
+      const candidate = row as Record<string, unknown>;
+      return candidate.id === componentMismatchProposal.before.id
+        ? { ...candidate, components: [{ ingredient: privateComponentSentinel, lbs: 999 }] }
+        : row;
+    });
+  }
+  if (text.includes(`FROM ${missingProposal.table}`)) {
+    rows = rows.filter(
+      (row) =>
+        (row as Record<string, unknown>).id !== missingProposal.before.id,
+    );
+  }
+  return { rows };
+};
+const poolDiagnostics = await inspectSourceLibraryPoolMismatchDiagnostics(
+  report,
+  diagnosticQuery,
+);
+assert.equal(poolDiagnostics.counts.mismatches, 1);
+assert.equal(poolDiagnostics.counts.missing, 1);
+assert.equal(poolDiagnostics.total, 2);
+assert.equal(poolDiagnostics.returned, 2);
+assert.equal(poolDiagnostics.omitted, 0);
+assert.deepEqual(
+  poolDiagnostics.items.find(
+    (item) => item.id === componentMismatchProposal.before.id,
+  )?.differingFields,
+  ["components"],
+);
+assert.equal(
+  poolDiagnostics.items.find((item) => item.id === missingProposal.before.id)
+    ?.mismatchType,
+  "missing",
+);
+assert.doesNotMatch(
+  JSON.stringify(poolDiagnostics),
+  new RegExp(privateComponentSentinel),
+  "diagnostics must not return current recipe component values",
+);
+
+const cappedDiagnostics = await inspectSourceLibraryPoolMismatchDiagnostics(
+  report,
+  async (text) => {
+    if (text.includes("FROM dough_recipes") ||
+        text.includes("FROM sauce_recipes") ||
+        text.includes("FROM cheese_recipes") ||
+        text.includes("FROM mixes")) {
+      return { rows: [] };
+    }
+    throw new Error(`Unexpected diagnostics query: ${text}`);
+  },
+);
+assert.equal(cappedDiagnostics.total, 68);
+assert.equal(cappedDiagnostics.returned, 10);
+assert.equal(cappedDiagnostics.omitted, 58);
+assert.equal(cappedDiagnostics.items.length, 10);
 
 const preflight = await preflightSourceLibraryReconciliation(
   report,

@@ -3367,6 +3367,75 @@ paths:
               schema:
                 $ref: "#/components/schemas/SourceLibraryCaptureError"
 
+  /profile-data/source-library-reconciliation/diagnostics:
+    get:
+      operationId: getPublishedSourceLibraryReconciliationDiagnostics
+      tags: [audit]
+      summary: Inspect bounded pool mismatch descriptors from the published app
+      description: >-
+        Public read-only diagnostics for Replit Agent. Runs the pool comparison
+        through this published API process's configured database connection and
+        binds the result to this process's build identity. Returns at most ten
+        pool table names, stable record IDs, approved source names, mismatch
+        types, and differing field names. It never returns current values,
+        ingredient names, recipe rows, credentials, or database-owner names.
+        Shares the published capture rate limit and is unavailable outside
+        production. This response is diagnostic only, not retained release
+        evidence.
+      security: []
+      responses:
+        "200":
+          description: Bounded mismatch descriptors from a read-only transaction
+          headers:
+            Cache-Control:
+              description: Diagnostic responses are never cached.
+              schema:
+                type: string
+                enum: [no-store]
+            RateLimit-Limit:
+              schema: { type: integer }
+            RateLimit-Remaining:
+              schema: { type: integer }
+            RateLimit-Reset:
+              schema: { type: integer }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryReconciliationDiagnostics"
+        "404":
+          description: Diagnostics are available only from the published production app
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryCaptureError"
+        "409":
+          description: Another source-library capture is already running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryCaptureError"
+        "429":
+          description: Shared public capture rate limit exceeded
+          headers:
+            Retry-After:
+              schema: { type: integer }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryCaptureError"
+        "500":
+          description: Bundled report integrity or bounded output contract failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryCaptureError"
+        "503":
+          description: Running build identity or production database is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryCaptureError"
+
   /profile-data/health-workspace:
     get:
       operationId: getProfileDataHealthWorkspace
@@ -5464,6 +5533,91 @@ components:
             properties:
               check: { type: string, pattern: "^[A-Za-z0-9_-]{1,80}$" }
               count: { type: integer, minimum: 0, maximum: 1000000 }
+    SourceLibraryPoolMismatchDescriptor:
+      type: object
+      required: [table, id, sourceName, mismatchType, differingFields]
+      additionalProperties: false
+      properties:
+        table:
+          type: string
+          enum: [dough_recipes, sauce_recipes, cheese_recipes, mixes]
+        id: { type: string, minLength: 1, maxLength: 128 }
+        sourceName: { type: string, minLength: 1, maxLength: 256 }
+        mismatchType:
+          type: string
+          enum: [missing, renamed, field-mismatch]
+        differingFields:
+          type: array
+          maxItems: 8
+          items:
+            type: string
+            enum:
+              - name
+              - components
+              - doughballVariants
+              - doughballWeightOz
+              - doughballsPerTray
+              - brand
+              - flavors
+              - shredderSetting
+              - cellulose
+              - notes
+              - flavor
+              - daysEarly
+    SourceLibraryReconciliationDiagnostics:
+      type: object
+      required:
+        - verifier
+        - environment
+        - databaseAttestation
+        - revision
+        - capturedAt
+        - report
+        - pools
+        - mismatchDetails
+      additionalProperties: false
+      properties:
+        verifier:
+          type: string
+          enum: [source-library-reconciliation-diagnostics]
+        environment:
+          type: string
+          enum: [release]
+        databaseAttestation:
+          type: string
+          enum: [published-app-runtime-connection]
+        revision: { type: string, pattern: "^source-sha256:[a-f0-9]{64}$" }
+        capturedAt: { type: string, format: date-time }
+        report:
+          type: object
+          required: [sha256]
+          additionalProperties: false
+          properties:
+            sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+        pools:
+          type: object
+          required: [expected, exactMatches, guardedRenames, missing, mismatches]
+          additionalProperties: false
+          properties:
+            expected: { type: integer, minimum: 0, maximum: 1000000 }
+            exactMatches: { type: integer, minimum: 0, maximum: 1000000 }
+            guardedRenames: { type: integer, minimum: 0, maximum: 1000000 }
+            missing: { type: integer, minimum: 0, maximum: 1000000 }
+            mismatches: { type: integer, minimum: 0, maximum: 1000000 }
+        mismatchDetails:
+          type: object
+          required: [maxItems, total, returned, omitted, items]
+          additionalProperties: false
+          properties:
+            maxItems: { type: integer, enum: [10] }
+            total: { type: integer, minimum: 0, maximum: 68 }
+            returned: { type: integer, minimum: 0, maximum: 10 }
+            omitted: { type: integer, minimum: 0, maximum: 68 }
+            items:
+              type: array
+              maxItems: 10
+              items:
+                $ref: "#/components/schemas/SourceLibraryPoolMismatchDescriptor"
     SourceLibraryReferenceCounts:
       type: object
       required: [inspected, canonical, stale, nonCanonical]

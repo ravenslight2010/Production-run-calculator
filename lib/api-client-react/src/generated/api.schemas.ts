@@ -349,6 +349,154 @@ export interface SourceLibraryReconciliationEvidence {
   failures: SourceLibraryReconciliationEvidenceFailuresItem[];
 }
 
+export type SourceLibraryPoolMismatchDescriptorTable = typeof SourceLibraryPoolMismatchDescriptorTable[keyof typeof SourceLibraryPoolMismatchDescriptorTable];
+
+
+export const SourceLibraryPoolMismatchDescriptorTable = {
+  dough_recipes: 'dough_recipes',
+  sauce_recipes: 'sauce_recipes',
+  cheese_recipes: 'cheese_recipes',
+  mixes: 'mixes',
+} as const;
+
+export type SourceLibraryPoolMismatchDescriptorMismatchType = typeof SourceLibraryPoolMismatchDescriptorMismatchType[keyof typeof SourceLibraryPoolMismatchDescriptorMismatchType];
+
+
+export const SourceLibraryPoolMismatchDescriptorMismatchType = {
+  missing: 'missing',
+  renamed: 'renamed',
+  'field-mismatch': 'field-mismatch',
+} as const;
+
+export type SourceLibraryPoolMismatchDescriptorDifferingFieldsItem = typeof SourceLibraryPoolMismatchDescriptorDifferingFieldsItem[keyof typeof SourceLibraryPoolMismatchDescriptorDifferingFieldsItem];
+
+
+export const SourceLibraryPoolMismatchDescriptorDifferingFieldsItem = {
+  name: 'name',
+  components: 'components',
+  doughballVariants: 'doughballVariants',
+  doughballWeightOz: 'doughballWeightOz',
+  doughballsPerTray: 'doughballsPerTray',
+  brand: 'brand',
+  flavors: 'flavors',
+  shredderSetting: 'shredderSetting',
+  cellulose: 'cellulose',
+  notes: 'notes',
+  flavor: 'flavor',
+  daysEarly: 'daysEarly',
+} as const;
+
+export interface SourceLibraryPoolMismatchDescriptor {
+  table: SourceLibraryPoolMismatchDescriptorTable;
+  /**
+     * @minLength 1
+     * @maxLength 128
+     */
+  id: string;
+  /**
+     * @minLength 1
+     * @maxLength 256
+     */
+  sourceName: string;
+  mismatchType: SourceLibraryPoolMismatchDescriptorMismatchType;
+  /** @maxItems 8 */
+  differingFields: SourceLibraryPoolMismatchDescriptorDifferingFieldsItem[];
+}
+
+export type SourceLibraryReconciliationDiagnosticsVerifier = typeof SourceLibraryReconciliationDiagnosticsVerifier[keyof typeof SourceLibraryReconciliationDiagnosticsVerifier];
+
+
+export const SourceLibraryReconciliationDiagnosticsVerifier = {
+  'source-library-reconciliation-diagnostics': 'source-library-reconciliation-diagnostics',
+} as const;
+
+export type SourceLibraryReconciliationDiagnosticsEnvironment = typeof SourceLibraryReconciliationDiagnosticsEnvironment[keyof typeof SourceLibraryReconciliationDiagnosticsEnvironment];
+
+
+export const SourceLibraryReconciliationDiagnosticsEnvironment = {
+  release: 'release',
+} as const;
+
+export type SourceLibraryReconciliationDiagnosticsDatabaseAttestation = typeof SourceLibraryReconciliationDiagnosticsDatabaseAttestation[keyof typeof SourceLibraryReconciliationDiagnosticsDatabaseAttestation];
+
+
+export const SourceLibraryReconciliationDiagnosticsDatabaseAttestation = {
+  'published-app-runtime-connection': 'published-app-runtime-connection',
+} as const;
+
+export type SourceLibraryReconciliationDiagnosticsReport = {
+  /** @pattern ^[a-f0-9]{64}$ */
+  sha256: string;
+};
+
+export type SourceLibraryReconciliationDiagnosticsPools = {
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  expected: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  exactMatches: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  guardedRenames: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  missing: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  mismatches: number;
+};
+
+export type SourceLibraryReconciliationDiagnosticsMismatchDetailsMaxItems = typeof SourceLibraryReconciliationDiagnosticsMismatchDetailsMaxItems[keyof typeof SourceLibraryReconciliationDiagnosticsMismatchDetailsMaxItems];
+
+
+export const SourceLibraryReconciliationDiagnosticsMismatchDetailsMaxItems = {
+  NUMBER_10: 10,
+} as const;
+
+export type SourceLibraryReconciliationDiagnosticsMismatchDetails = {
+  maxItems: SourceLibraryReconciliationDiagnosticsMismatchDetailsMaxItems;
+  /**
+     * @minimum 0
+     * @maximum 68
+     */
+  total: number;
+  /**
+     * @minimum 0
+     * @maximum 10
+     */
+  returned: number;
+  /**
+     * @minimum 0
+     * @maximum 68
+     */
+  omitted: number;
+  /** @maxItems 10 */
+  items: SourceLibraryPoolMismatchDescriptor[];
+};
+
+export interface SourceLibraryReconciliationDiagnostics {
+  verifier: SourceLibraryReconciliationDiagnosticsVerifier;
+  environment: SourceLibraryReconciliationDiagnosticsEnvironment;
+  databaseAttestation: SourceLibraryReconciliationDiagnosticsDatabaseAttestation;
+  /** @pattern ^source-sha256:[a-f0-9]{64}$ */
+  revision: string;
+  capturedAt: string;
+  report: SourceLibraryReconciliationDiagnosticsReport;
+  pools: SourceLibraryReconciliationDiagnosticsPools;
+  mismatchDetails: SourceLibraryReconciliationDiagnosticsMismatchDetails;
+}
+
 /**
  * Exact bounded source text retained privately with a live spec Apply.
  */

@@ -1,5 +1,31 @@
 export type SourceLibraryEvidenceEnvironment = "development" | "release";
 
+export type SourceLibraryPoolMismatchDescriptor = {
+  table: "dough_recipes" | "sauce_recipes" | "cheese_recipes" | "mixes";
+  id: string;
+  sourceName: string;
+  mismatchType: "missing" | "renamed" | "field-mismatch";
+  differingFields: string[];
+};
+export type SourceLibraryPoolMismatchDiagnostics = {
+  counts: {
+    expected: number;
+    exactMatches: number;
+    guardedRenames: number;
+    missing: number;
+    mismatches: number;
+  };
+  maxItems: number;
+  total: number;
+  returned: number;
+  omitted: number;
+  items: SourceLibraryPoolMismatchDescriptor[];
+};
+export type ReadOnlyQuery = (
+  text: string,
+  values?: readonly unknown[],
+) => Promise<{ rows: Array<Record<string, unknown>> }>;
+
 export type VerificationOutput = {
   verifier: "source-library-reconciliation";
   environment: SourceLibraryEvidenceEnvironment;
@@ -72,11 +98,6 @@ export type VerificationOutput = {
   failures: Array<{ check: string; count: number }>;
 };
 
-export type ReadOnlyQuery = (
-  text: string,
-  values?: readonly unknown[],
-) => Promise<{ rows: Array<Record<string, unknown>> }>;
-
 export type ReadinessDeploymentHandoff = {
   schemaVersion: 1 | 2;
   kind: "published-deployment-handoff" | "published-source-deployment-handoff";
@@ -90,8 +111,13 @@ export type ReadinessDeploymentHandoff = {
 
 export const DEFAULT_FROM_DATE: string;
 export const DEFAULT_HEAL_ID: string;
+export const SOURCE_LIBRARY_POOL_DIAGNOSTIC_MAX_ITEMS: number;
 export function parseReport(value: unknown): unknown;
 export function isValidSourceLibraryDatabaseOwner(value: unknown): value is string;
+export function inspectSourceLibraryPoolMismatchDiagnostics(
+  report: unknown,
+  query: ReadOnlyQuery,
+): Promise<SourceLibraryPoolMismatchDiagnostics>;
 export function validateReadinessDeploymentHandoff(
   input: Uint8Array | unknown,
   options?: { now?: Date },

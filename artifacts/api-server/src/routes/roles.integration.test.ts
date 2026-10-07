@@ -1056,12 +1056,19 @@ describe("capability-based access control", () => {
     expect(res.headers.get("cache-control")).toBe("no-store");
   });
 
-  it("keeps the public capture path unauthenticated but unavailable outside production", async () => {
-    for (let attempt = 0; attempt < 5; attempt += 1) {
+  it("keeps public capture and diagnostics unauthenticated, production-only, and on one shared rate limit", async () => {
+    const paths = [
+      "/api/profile-data/source-library-reconciliation/capture",
+      "/api/profile-data/source-library-reconciliation/diagnostics",
+      "/api/profile-data/source-library-reconciliation/capture",
+      "/api/profile-data/source-library-reconciliation/diagnostics",
+      "/api/profile-data/source-library-reconciliation/capture",
+    ];
+    for (const path of paths) {
       const res = await req(
         null,
         "GET",
-        "/api/profile-data/source-library-reconciliation/capture",
+        path,
       );
       expect(res.status).toBe(404);
       expect(res.headers.get("cache-control")).toContain("no-store");
@@ -1070,7 +1077,7 @@ describe("capability-based access control", () => {
     const limited = await req(
       null,
       "GET",
-      "/api/profile-data/source-library-reconciliation/capture",
+      "/api/profile-data/source-library-reconciliation/diagnostics",
     );
     expect(limited.status).toBe(429);
     expect(limited.headers.get("retry-after")).toBeTruthy();

@@ -74,3 +74,19 @@ approved databases when release configuration drifts.
 identifier bounds as the release configuration, resolve handoff-or-
 environment ownership before database work, and report only the
 `databaseOwner` check name and bounded count.
+
+Public pool mismatch diagnostics are separate from retained aggregate release
+evidence. They may return at most ten stable pool IDs, approved source names,
+mismatch types, and differing field names; never return current values or
+recipe/ingredient rows. Keep the diagnostic response read-only, build-bound,
+rate-limited, and outside the release evidence importer.
+
+**Why:** A failed aggregate capture must remain rejected as release evidence,
+but the agent still needs bounded information to investigate the mismatches.
+Making diagnostics part of the capture contract would blur that boundary, while
+returning raw recipe data would expose more production information than needed.
+
+**How to apply:** Use a separate diagnostics endpoint for troubleshooting;
+preserve the aggregate capture and importer contracts unchanged. Do not treat
+diagnostic results as a passing reconciliation or as authorization to repair
+production data.

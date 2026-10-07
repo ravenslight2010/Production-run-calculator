@@ -293,6 +293,28 @@ export const captureSourceLibraryReconciliationResponseFailuresItemCheckRegExp =
 export const captureSourceLibraryReconciliationResponseFailuresItemCountMin = 0;
 export const captureSourceLibraryReconciliationResponseFailuresItemCountMax = 1000000;
 export const captureSourceLibraryReconciliationResponseFailuresMax = 20;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponseRevisionRegExp = new RegExp('^source-sha256:[a-f0-9]{64}$');
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponseReportSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsExpectedMin = 0;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsExpectedMax = 1000000;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsExactMatchesMin = 0;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsExactMatchesMax = 1000000;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsGuardedRenamesMin = 0;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsGuardedRenamesMax = 1000000;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsMissingMin = 0;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsMissingMax = 1000000;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsMismatchesMin = 0;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsMismatchesMax = 1000000;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsTotalMin = 0;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsTotalMax = 68;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsReturnedMin = 0;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsReturnedMax = 10;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsOmittedMin = 0;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsOmittedMax = 68;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsItemsItemIdMax = 128;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsItemsItemSourceNameMax = 256;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsItemsItemDifferingFieldsMax = 8;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsItemsMax = 10;
 export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesConversationTurnsMin = 0;
 export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesRetiredFacilityFactsMin = 0;
 export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesIncidentGeneratedTextToLabelMin = 0;
@@ -4972,6 +4994,56 @@ export const CaptureSourceLibraryReconciliationResponse = zod.object({
   "check": zod.string().regex(captureSourceLibraryReconciliationResponseFailuresItemCheckRegExp),
   "count": zod.int().min(captureSourceLibraryReconciliationResponseFailuresItemCountMin).max(captureSourceLibraryReconciliationResponseFailuresItemCountMax)
 })).max(captureSourceLibraryReconciliationResponseFailuresMax)
+})
+
+
+/**
+ * Public read-only diagnostics for Replit Agent. Runs the pool comparison through this published API process's configured database connection and binds the result to this process's build identity. Returns at most ten pool table names, stable record IDs, approved source names, mismatch types, and differing field names. It never returns current values, ingredient names, recipe rows, credentials, or database-owner names. Shares the published capture rate limit and is unavailable outside production. This response is diagnostic only, not retained release evidence.
+ * @summary Inspect bounded pool mismatch descriptors from the published app
+ */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+export const GetPublishedSourceLibraryReconciliationDiagnosticsResponse = zod.object({
+  "verifier": zod.enum(['source-library-reconciliation-diagnostics']),
+  "environment": zod.enum(['release']),
+  "databaseAttestation": zod.enum(['published-app-runtime-connection']),
+  "revision": zod.string().regex(getPublishedSourceLibraryReconciliationDiagnosticsResponseRevisionRegExp),
+  "capturedAt": zod.coerce.date(),
+  "report": zod.object({
+  "sha256": zod.string().regex(getPublishedSourceLibraryReconciliationDiagnosticsResponseReportSha256RegExp)
+}),
+  "pools": zod.object({
+  "expected": zod.int().min(getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsExpectedMin).max(getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsExpectedMax),
+  "exactMatches": zod.int().min(getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsExactMatchesMin).max(getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsExactMatchesMax),
+  "guardedRenames": zod.int().min(getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsGuardedRenamesMin).max(getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsGuardedRenamesMax),
+  "missing": zod.int().min(getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsMissingMin).max(getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsMissingMax),
+  "mismatches": zod.int().min(getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsMismatchesMin).max(getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsMismatchesMax)
+}),
+  "mismatchDetails": zod.object({
+  "maxItems": zod.literal(10),
+  "total": zod.int().min(getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsTotalMin).max(getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsTotalMax),
+  "returned": zod.int().min(getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsReturnedMin).max(getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsReturnedMax),
+  "omitted": zod.int().min(getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsOmittedMin).max(getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsOmittedMax),
+  "items": zod.array(zod.object({
+  "table": zod.enum(['dough_recipes', 'sauce_recipes', 'cheese_recipes', 'mixes']),
+  "id": zod.string().min(1).max(getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsItemsItemIdMax),
+  "sourceName": zod.string().min(1).max(getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsItemsItemSourceNameMax),
+  "mismatchType": zod.enum(['missing', 'renamed', 'field-mismatch']),
+  "differingFields": zod.array(zod.enum(['name', 'components', 'doughballVariants', 'doughballWeightOz', 'doughballsPerTray', 'brand', 'flavors', 'shredderSetting', 'cellulose', 'notes', 'flavor', 'daysEarly'])).max(getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsItemsItemDifferingFieldsMax)
+})).max(getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsItemsMax)
+})
 })
 
 

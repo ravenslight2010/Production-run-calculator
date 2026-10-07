@@ -13,6 +13,7 @@ import {
 } from "../../../../scripts/src/source-library-reconciliation-capture-core.mjs";
 import {
   captureSourceLibraryReconciliation,
+  captureSourceLibraryReconciliationDiagnosticsFromPublishedApp,
   captureSourceLibraryReconciliationFromPublishedApp,
   SOURCE_LIBRARY_CAPTURE_OUTPUT_MAX_BYTES,
   SOURCE_LIBRARY_CAPTURE_REQUEST_MAX_BYTES,
@@ -259,6 +260,48 @@ describe("source-library reconciliation capture", () => {
     expect(JSON.stringify(result)).not.toContain("production_owner");
     expect(fake.calls).toContain("BEGIN TRANSACTION READ ONLY");
     expect(fake.calls).toContain("ROLLBACK");
+  });
+
+  it("returns at most ten safe mismatch descriptors from the published app pool", async () => {
+    const fake = fakePool();
+    const result =
+      await captureSourceLibraryReconciliationDiagnosticsFromPublishedApp(
+        dependencies(fake.pool),
+      );
+
+    expect(result).toMatchObject({
+      verifier: "source-library-reconciliation-diagnostics",
+      environment: "release",
+      databaseAttestation: "published-app-runtime-connection",
+      revision: `source-sha256:${expectedSource.sourceFingerprintSha256}`,
+      pools: {
+        expected: 68,
+        exactMatches: 0,
+        missing: 68,
+        mismatches: 0,
+      },
+      mismatchDetails: {
+        maxItems: 10,
+        total: 68,
+        returned: 10,
+        omitted: 58,
+      },
+    });
+    expect(result.mismatchDetails.items).toHaveLength(10);
+    expect(Object.keys(result.mismatchDetails.items[0] ?? {}).sort()).toEqual([
+      "differingFields",
+      "id",
+      "mismatchType",
+      "sourceName",
+      "table",
+    ]);
+    expect(result.mismatchDetails.items.every(
+      (item) => item.mismatchType === "missing" && item.differingFields.length === 0,
+    )).toBe(true);
+    expect(JSON.stringify(result)).not.toContain("production_owner");
+    expect(fake.calls).toContain("BEGIN TRANSACTION READ ONLY");
+    expect(fake.calls).toContain("ROLLBACK");
+    expect(fake.calls.at(-1)).toBe("SELECT pg_advisory_unlock($1::bigint) AS unlocked");
   });
 
   it("rejects a missing published build identity before connecting", async () => {

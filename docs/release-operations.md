@@ -388,6 +388,16 @@ The importer checks the captured source revision against the fresh handoff. A
 stale or mismatched published build is rejected. Do not upload raw records,
 database dumps, response logs, or credentials.
 
+For investigation when the aggregate capture reports pool mismatches, the
+published app also exposes
+`GET /api/profile-data/source-library-reconciliation/diagnostics`. This
+rate-limited, uncached, read-only endpoint uses the same published-app database
+connection and build identity and returns at most ten stable pool IDs, approved
+source names, mismatch types, and differing field names. It never returns live
+field values or recipe ingredient rows. The endpoint is public, so do not add
+unbounded or raw recipe data to its response. Diagnostics are not release
+evidence and must not replace the aggregate capture or its verifier.
+
 ### Alternative: capture in the database-owning environment
 
 For an independently owner-attested capture, run this from the environment
