@@ -60,6 +60,21 @@ database, not an independently verified production owner. Use the CLI path when
 independent owner-name confirmation is required; reject missing or mismatched
 owner values there.
 
+The owner publishes through Replit and expects the task or agent to retrieve
+available evidence directly instead of asking them to relay fingerprints,
+database-owner names, credentials, or files. When the public runtime path is
+approved, the agent should check the live revision itself and use the capture
+endpoint only after it matches the handoff.
+
+**Why:** Repeated requests for information already available from the published
+app turn task execution into manual relaying and block work on inputs the owner
+does not have.
+
+**How to apply:** Ask the owner only to perform the Replit publish when needed.
+Then compare the live diagnostics revision to the handoff, capture through the
+published app, and import only a revision-matched capture. Keep diagnostics
+separate from the importable capture contract.
+
 The controlled deployment handoff may also carry a bounded `databaseOwner`
 attestation. CLI release source-library checks use it when the environment does
 not provide an owner and reject any mismatch between the two sources; the
