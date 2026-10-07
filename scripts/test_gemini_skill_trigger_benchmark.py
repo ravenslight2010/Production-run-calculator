@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import subprocess
@@ -19,6 +20,7 @@ from gemini_skill_trigger_benchmark import (
     provider_failure_cases,
     record_manual_decision,
     review_queue,
+    select_skill_corpus,
     validate_classification,
     write_benchmark_artifacts,
 )
@@ -351,6 +353,66 @@ class GeminiBenchmarkTests(unittest.TestCase):
         self.assertEqual(result["accuracy"], 0.5)
         self.assertEqual(result["excluded"], 1)
 
+    def test_skill_selection_evaluates_only_requested_cases_and_hashes_both_corpora(self):
+        source = {
+            "skills": [
+                {"name": "first", "description": "first skill", "evals": [
+                    {"id": "first-yes", "query": "first", "should_trigger": True},
+                ]},
+                {"name": "second", "description": "second skill", "evals": [
+                    {"id": "second-yes", "query": "second yes", "should_trigger": True},
+                    {"id": "second-no", "query": "second no", "should_trigger": False},
+                ]},
+            ],
+        }
+        source_bytes = json.dumps(source).encode()
+        selected = select_skill_corpus(source, ["second"])
+        adapter = Fixture([
+            {"decision": "trigger", "confidence": 1, "rationale": "fixture"},
+            {"decision": "do_not_trigger", "confidence": 1, "rationale": "fixture"},
+        ])
+        records = evaluate(selected, adapter, retries=0)
+        selected_bytes = json.dumps(
+            selected,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        manifest = evaluation_manifest(
+            source_bytes,
+            selected,
+            records,
+            "fixture-model",
+            0.75,
+            0,
+            selected_bytes,
+            sum(len(skill["evals"]) for skill in source["skills"]),
+        )
+
+        self.assertEqual([row["id"] for row in records], ["second-yes", "second-no"])
+        self.assertEqual(adapter.calls, 2)
+        self.assertEqual(manifest["corpus"]["sha256"], hashlib.sha256(source_bytes).hexdigest())
+        self.assertEqual(manifest["corpus"]["cases"], 3)
+        self.assertEqual(manifest["outcome"]["state"], "passed")
+        self.assertEqual(manifest["selection"]["skills"], ["second"])
+        self.assertEqual(manifest["selection"]["cases"], 2)
+        self.assertEqual(
+            manifest["selection"]["sha256"],
+            hashlib.sha256(selected_bytes).hexdigest(),
+        )
+        self.assertEqual(
+            manifest["provenance"]["sourceSha256"],
+            manifest["corpus"]["sha256"],
+        )
+        self.assertEqual(
+            manifest["provenance"]["selectedCorpusSha256"],
+            manifest["selection"]["sha256"],
+        )
+
+    def test_skill_selection_rejects_unknown_names(self):
+        with self.assertRaisesRegex(ValueError, "unknown skill name\\(s\\): missing"):
+            select_skill_corpus(corpus(), ["missing"])
+
     def test_manifest_distinguishes_unavailable_and_failed_without_payloads(self):
         with patch.dict("os.environ", {
             "AI_INTEGRATIONS_GEMINI_API_KEY": "",
@@ -370,6 +432,11 @@ class GeminiBenchmarkTests(unittest.TestCase):
             0,
         )
         self.assertEqual(manifest["outcome"]["state"], "unavailable")
+        self.assertEqual(
+            manifest["selection"]["sha256"],
+            hashlib.sha256(json.dumps(corpus()).encode()).hexdigest(),
+        )
+        self.assertEqual(manifest["selection"]["cases"], 2)
         self.assertEqual(manifest["execution"]["retries"], 0)
         self.assertFalse(manifest["privacy"]["rawProviderPayloadsRetained"])
         self.assertEqual(manifest["privacy"]["mode"], "metadata-only")
@@ -395,7 +462,7 @@ class GeminiBenchmarkTests(unittest.TestCase):
         }]
         retried_manifest = evaluation_manifest(
             b"{}",
-            {"skills": [{"evals": [{}]}]},
+            {"skills": [{"name": "demo", "evals": [{}]}]},
             retried,
             "fixture-model",
             0.75,
@@ -606,7 +673,18 @@ class GeminiBenchmarkTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             root = Path(directory)
             corpus_path = root / "corpus.json"
-            corpus_path.write_text(json.dumps(corpus()))
+            source = {
+                "skills": [
+                    {"name": "first", "description": "first skill", "evals": [
+                        {"id": "first-yes", "query": "first", "should_trigger": True},
+                    ]},
+                    {"name": "second", "description": "second skill", "evals": [
+                        {"id": "second-yes", "query": "second", "should_trigger": True},
+                    ]},
+                ],
+            }
+            source_bytes = json.dumps(source).encode()
+            corpus_path.write_bytes(source_bytes)
             script = Path(__file__).with_name("gemini_skill_trigger_benchmark.py").resolve()
             result = subprocess.run(
                 [
@@ -636,6 +714,85 @@ class GeminiBenchmarkTests(unittest.TestCase):
             payload = json.loads((root / "results.json").read_text())
             self.assertEqual(payload["execution_mode"], "live_provider_opt_in")
             self.assertFalse(payload["ci_evidence"])
+            self.assertEqual(
+                [row["id"] for row in payload["results"]],
+                ["first-yes", "second-yes"],
+            )
+            self.assertEqual(
+                payload["evaluationManifest"]["corpus"]["sha256"],
+                hashlib.sha256(source_bytes).hexdigest(),
+            )
+            self.assertEqual(
+                payload["evaluationManifest"]["selection"]["sha256"],
+                hashlib.sha256(source_bytes).hexdigest(),
+            )
+
+    def test_cli_filters_to_repeated_skill_names_and_rejects_unknown_name(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = {
+                "skills": [
+                    {"name": "first", "description": "first skill", "evals": [
+                        {"id": "first-case", "query": "first", "should_trigger": True},
+                    ]},
+                    {"name": "second", "description": "second skill", "evals": [
+                        {"id": "second-case", "query": "second", "should_trigger": True},
+                    ]},
+                    {"name": "third", "description": "third skill", "evals": [
+                        {"id": "third-case", "query": "third", "should_trigger": True},
+                    ]},
+                ],
+            }
+            source_bytes = json.dumps(source).encode()
+            corpus_path = root / "corpus.json"
+            corpus_path.write_bytes(source_bytes)
+            script = Path(__file__).with_name("gemini_skill_trigger_benchmark.py").resolve()
+            environment = {
+                **os.environ,
+                "AI_INTEGRATIONS_GEMINI_API_KEY": "",
+                "AI_INTEGRATIONS_GEMINI_BASE_URL": "",
+            }
+
+            def run_cli(*arguments):
+                return subprocess.run(
+                    [sys.executable, str(script), "benchmark", "--live-provider",
+                     "--corpus", str(corpus_path), *arguments],
+                    cwd=root,
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                )
+
+            selected = run_cli(
+                "--skill", "third",
+                "--skill", "first",
+                "--results", str(root / "selected-results.json"),
+                "--report", str(root / "selected-report.md"),
+                "--queue", str(root / "selected-queue.json"),
+            )
+            self.assertEqual(selected.returncode, 1, selected.stderr)
+            payload = json.loads((root / "selected-results.json").read_text())
+            self.assertEqual(
+                [row["id"] for row in payload["results"]],
+                ["first-case", "third-case"],
+            )
+            selection = payload["evaluationManifest"]["selection"]
+            self.assertEqual(selection["skills"], ["first", "third"])
+            self.assertEqual(selection["cases"], 2)
+            self.assertEqual(
+                payload["evaluationManifest"]["corpus"]["sha256"],
+                hashlib.sha256(source_bytes).hexdigest(),
+            )
+            self.assertNotEqual(selection["sha256"], hashlib.sha256(source_bytes).hexdigest())
+
+            unknown = run_cli(
+                "--skill", "missing",
+                "--results", str(root / "invalid-results.json"),
+            )
+            self.assertEqual(unknown.returncode, 2)
+            self.assertIn("unknown skill name(s): missing", unknown.stderr)
+            self.assertIn("Available skills: first, second, third", unknown.stderr)
+            self.assertFalse((root / "invalid-results.json").exists())
 
 
 if __name__ == "__main__":

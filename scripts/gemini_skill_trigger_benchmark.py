@@ -234,6 +234,34 @@ def evaluate(
     return records
 
 
+def select_skill_corpus(
+    corpus: dict[str, Any],
+    requested_skills: Iterable[str] | None,
+) -> dict[str, Any]:
+    """Return the corpus limited to requested exact skill names, preserving source order."""
+    requested = list(requested_skills or [])
+    if not requested:
+        return corpus
+
+    available = {skill["name"] for skill in corpus["skills"]}
+    unknown = sorted(set(requested) - available)
+    if unknown:
+        raise ValueError(
+            "unknown skill name(s): "
+            + ", ".join(unknown)
+            + ". Available skills: "
+            + ", ".join(sorted(available))
+        )
+
+    selected_names = set(requested)
+    return {
+        **corpus,
+        "skills": [
+            skill for skill in corpus["skills"] if skill["name"] in selected_names
+        ],
+    }
+
+
 def metrics(records: Iterable[dict[str, Any]]) -> dict[str, Any]:
     records = list(records)
     included = [r for r in records if r["status"] in {"included", "disagreement"}]
@@ -375,10 +403,16 @@ def evaluation_manifest(
     model: str,
     confidence_threshold: float,
     retries: int,
+    selected_corpus_bytes: bytes | None = None,
+    source_case_count: int | None = None,
 ) -> dict[str, Any]:
-    corpus_hash = hashlib.sha256(corpus_bytes).hexdigest()
+    source_hash = hashlib.sha256(corpus_bytes).hexdigest()
+    selected_hash = hashlib.sha256(
+        corpus_bytes if selected_corpus_bytes is None else selected_corpus_bytes
+    ).hexdigest()
     result_metrics = metrics(records)
-    total_cases = sum(len(skill["evals"]) for skill in corpus["skills"])
+    selected_cases = sum(len(skill["evals"]) for skill in corpus["skills"])
+    source_cases = selected_cases if source_case_count is None else source_case_count
     lockfile_hash = hashlib.sha256(
         (Path(__file__).resolve().parents[1] / "pnpm-lock.yaml").read_bytes()
     ).hexdigest()
@@ -391,15 +425,15 @@ def evaluation_manifest(
         reason = "one or more provider calls or structured outputs failed"
     elif (
         result_metrics["evaluated"] < 1
-        or total_cases == 0
-        or result_metrics["evaluated"] / total_cases < MINIMUM_COVERAGE
+        or selected_cases == 0
+        or result_metrics["evaluated"] / selected_cases < MINIMUM_COVERAGE
         or result_metrics["accuracy"] is None
         or result_metrics["accuracy"] < MINIMUM_ACCURACY
     ):
-        state = "failed" if total_cases > 0 else "unavailable"
+        state = "failed" if selected_cases > 0 else "unavailable"
         reason = (
             "quality or coverage thresholds failed"
-            if total_cases > 0
+            if selected_cases > 0
             else "corpus contained no evaluation cases"
         )
     else:
@@ -409,9 +443,14 @@ def evaluation_manifest(
         "manifestVersion": 1,
         "evaluation": {"id": "gemini-skill-trigger", "kind": "provider-backed"},
         "corpus": {
-            "sha256": corpus_hash,
-            "cases": total_cases,
+            "sha256": source_hash,
+            "cases": source_cases,
             "sourceAuthority": "held-out-reviewed-skill-trigger-corpus",
+        },
+        "selection": {
+            "sha256": selected_hash,
+            "cases": selected_cases,
+            "skills": [skill["name"] for skill in corpus["skills"]],
         },
         "thresholds": {
             "minimumConfidence": confidence_threshold,
@@ -450,7 +489,8 @@ def evaluation_manifest(
         },
         "outcome": {"state": state, "reason": reason},
         "provenance": {
-            "sourceSha256": corpus_hash,
+            "sourceSha256": source_hash,
+            "selectedCorpusSha256": selected_hash,
             "evidence": {
                 "state": "hashed",
                 "sha256": hashlib.sha256(
@@ -575,6 +615,13 @@ def main() -> None:
         help="review action (use with the review command)",
     )
     parser.add_argument("--corpus", type=Path, default=Path("skill-trigger-benchmark.json"))
+    parser.add_argument(
+        "--skill",
+        action="append",
+        default=None,
+        metavar="NAME",
+        help="evaluate only this exact skill name; repeat to select multiple skills",
+    )
     parser.add_argument("--results", type=Path, default=Path("gemini-skill-trigger-benchmark.json"))
     parser.add_argument("--report", type=Path, default=Path("gemini-skill-trigger-benchmark.md"))
     parser.add_argument("--queue", type=Path, default=Path("gemini-skill-trigger-review-queue.json"))
@@ -623,7 +670,21 @@ def main() -> None:
             "intentional provider-backed check (not CI evidence)"
         )
     corpus_bytes = args.corpus.read_bytes()
-    corpus = json.loads(corpus_bytes)
+    source_corpus = json.loads(corpus_bytes)
+    try:
+        corpus = select_skill_corpus(source_corpus, args.skill)
+    except ValueError as exc:
+        parser.error(str(exc))
+    selected_corpus_bytes = (
+        corpus_bytes
+        if not args.skill
+        else json.dumps(
+            corpus,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
     adapter = GeminiAdapter(model=args.model)
     records = evaluate(corpus, adapter, args.confidence_threshold, args.retries)
     result = {
@@ -642,6 +703,8 @@ def main() -> None:
             args.model,
             args.confidence_threshold,
             args.retries,
+            selected_corpus_bytes,
+            sum(len(skill["evals"]) for skill in source_corpus["skills"]),
         ),
     }
     write_benchmark_artifacts(args.results, args.queue, args.report, result, records)

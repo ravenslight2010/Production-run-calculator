@@ -37,3 +37,17 @@ provider model and is therefore not comparable release proof.
 **How to apply:** Derive trusted expectations from the canonical manifest at
 the reviewed revision, require hashed evidence and evaluator provenance, and
 reject legacy or unavailable identities rather than translating them.
+
+For a filtered provider benchmark, keep the original source-file digest as the
+source corpus identity and record the evaluated subset with a separate digest,
+case count, and selected names. With no filter, retain the original source
+bytes as the selected-corpus identity.
+
+**Why:** Replacing the source digest with a subset digest would lose the link to
+the reviewed corpus and could break consumers that require provenance to match
+the canonical source; reporting only the source digest would hide what was
+actually evaluated.
+
+**How to apply:** Add focused-selection metadata alongside the established
+source identity, and calculate quality coverage against the selected case
+count rather than unrelated cases in the full source corpus.
