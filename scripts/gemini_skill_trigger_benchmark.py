@@ -377,6 +377,36 @@ def review_queue(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def write_report(path: Path, result: dict[str, Any]) -> None:
     m = result["metrics"]
+    evaluation_manifest = result.get("evaluationManifest")
+    scope_lines: list[str] = []
+    if isinstance(evaluation_manifest, dict):
+        source = evaluation_manifest.get("corpus")
+        selection = evaluation_manifest.get("selection")
+        if isinstance(source, dict) and isinstance(selection, dict):
+            source_hash = source.get("sha256")
+            source_cases = source.get("cases")
+            selected_hash = selection.get("sha256")
+            selected_cases = selection.get("cases")
+            selected_skills = selection.get("skills")
+            if (
+                isinstance(source_hash, str)
+                and isinstance(source_cases, int)
+                and isinstance(selected_cases, int)
+                and isinstance(selected_skills, list)
+            ):
+                if selected_hash == source_hash:
+                    selected_scope = "all source skills"
+                else:
+                    selected_scope = ", ".join(
+                        skill for skill in selected_skills if isinstance(skill, str)
+                    ) or "no skills"
+                scope_lines = [
+                    "## Evaluation scope",
+                    "",
+                    f"- Source corpus: SHA-256 `{source_hash}`; **{source_cases} cases**",
+                    f"- Selected skills: **{selected_scope}**; **{selected_cases} cases**",
+                    "",
+                ]
     lines = [
         "# Gemini skill-trigger benchmark",
         "",
@@ -385,6 +415,7 @@ def write_report(path: Path, result: dict[str, Any]) -> None:
         f"- Run at: **{result['run_at']}**",
         "- Scope: Gemini classification only; this is not evidence of Claude behavior or Claude tool selection.",
         "",
+        *scope_lines,
         "## Metrics",
         "",
         f"- Evaluated: **{m['evaluated']}**; excluded: **{m['excluded']}**",

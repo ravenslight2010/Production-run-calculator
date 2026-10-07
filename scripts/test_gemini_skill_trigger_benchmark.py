@@ -24,6 +24,7 @@ from gemini_skill_trigger_benchmark import (
     select_skill_corpus,
     validate_classification,
     write_benchmark_artifacts,
+    write_report,
 )
 from skill_trigger_benchmark import (
     FOCUSED_LEXICAL_REVIEWS,
@@ -558,6 +559,21 @@ class GeminiBenchmarkTests(unittest.TestCase):
         self.assertEqual(manifest["outcome"]["state"], "passed")
         self.assertEqual(manifest["selection"]["skills"], ["second"])
         self.assertEqual(manifest["selection"]["cases"], 2)
+        with TemporaryDirectory() as directory:
+            report_path = Path(directory) / "focused-report.md"
+            write_report(report_path, {
+                "provider": "gemini",
+                "model": "fixture-model",
+                "run_at": "2026-10-07T00:00:00+00:00",
+                "metrics": metrics(records),
+                "evaluationManifest": manifest,
+            })
+            report = report_path.read_text()
+        self.assertIn(
+            f"Source corpus: SHA-256 `{manifest['corpus']['sha256']}`; **3 cases**",
+            report,
+        )
+        self.assertIn("- Selected skills: **second**; **2 cases**", report)
         self.assertEqual(
             manifest["selection"]["sha256"],
             hashlib.sha256(selected_bytes).hexdigest(),
@@ -570,6 +586,48 @@ class GeminiBenchmarkTests(unittest.TestCase):
             manifest["provenance"]["selectedCorpusSha256"],
             manifest["selection"]["sha256"],
         )
+
+    def test_unfiltered_report_identifies_all_source_skills(self):
+        source = {
+            "skills": [
+                {"name": "first", "description": "first skill", "evals": [
+                    {"id": "first-yes", "query": "first", "should_trigger": True},
+                ]},
+                {"name": "second", "description": "second skill", "evals": [
+                    {"id": "second-no", "query": "second", "should_trigger": False},
+                ]},
+            ],
+        }
+        source_bytes = json.dumps(source).encode()
+        records = evaluate(source, Fixture([
+            {"decision": "trigger", "confidence": 1, "rationale": "fixture"},
+            {"decision": "do_not_trigger", "confidence": 1, "rationale": "fixture"},
+        ]), retries=0)
+        manifest = evaluation_manifest(
+            source_bytes,
+            source,
+            records,
+            "fixture-model",
+            0.75,
+            0,
+        )
+
+        with TemporaryDirectory() as directory:
+            report_path = Path(directory) / "full-report.md"
+            write_report(report_path, {
+                "provider": "gemini",
+                "model": "fixture-model",
+                "run_at": "2026-10-07T00:00:00+00:00",
+                "metrics": metrics(records),
+                "evaluationManifest": manifest,
+            })
+            report = report_path.read_text()
+
+        self.assertIn(
+            f"Source corpus: SHA-256 `{manifest['corpus']['sha256']}`; **2 cases**",
+            report,
+        )
+        self.assertIn("- Selected skills: **all source skills**; **2 cases**", report)
 
     def test_skill_selection_rejects_unknown_names(self):
         with self.assertRaisesRegex(ValueError, "unknown skill name\\(s\\): missing"):
