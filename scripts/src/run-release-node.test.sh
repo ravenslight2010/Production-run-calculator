@@ -48,6 +48,7 @@ make_workspace() {
 set -euo pipefail
 
 printf 'child-node=%s\n' "$(node --version)" >>"$RUN_LOG"
+printf 'node-system-ca=%s\n' "${NODE_USE_SYSTEM_CA:-unset}" >>"$RUN_LOG"
 pnpm --filter @workspace/scripts exec node --version
 EOF
   cat >"${workspace}/bin/pnpm" <<'EOF'
@@ -226,6 +227,7 @@ test_matching_node_skips_npx() {
   events=$(cat "$log_path")
   assert_contains "$events" "preflight-node=v${REQUIRED_NODE_VERSION}"
   assert_contains "$events" "child-node=v${REQUIRED_NODE_VERSION}"
+  assert_contains "$events" "node-system-ca=1"
   assert_contains "$events" "package-child-node=v${REQUIRED_NODE_VERSION}"
   assert_not_contains "$events" "npx-invoked"
   echo "PASS: matching Node path runs preflight, skips npx, and preserves Node for the child"

@@ -6,6 +6,11 @@
 
 set -euo pipefail
 
+# Replit's system trust store contains the certificates needed for verified
+# HTTPS requests from the pinned Node runtime. Keep certificate verification on;
+# do not replace this with NODE_TLS_REJECT_UNAUTHORIZED=0.
+export NODE_USE_SYSTEM_CA=1
+
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
 NODE_SELECTOR="${REPO_ROOT}/.nvmrc"
