@@ -33,8 +33,10 @@ export function shouldAutosaveHomeForm(
   formRunId: string,
   currentRunId: string,
   handoffInProgress: boolean,
+  readOnly = false,
 ): boolean {
-  return formRunId === currentRunId
+  return !readOnly
+    && formRunId === currentRunId
     && !handoffInProgress
     && !deepEqual(stored, incoming)
     && !isEmptyOverPopulated(incoming, stored);
@@ -85,6 +87,7 @@ interface HomeFormLifecycleOptions {
   saveDayState: (dayState: DayState) => void;
   setDayState: Dispatch<SetStateAction<DayState>>;
   canManageProfiles: boolean;
+  readOnly?: boolean;
   saveProfileForRun: (brand: string, flavor: string, values: FormValues) => boolean;
   propagateProfileToPendingRuns: (brand: string, flavor: string) => Promise<unknown>;
   schedulePush: (dayState: DayState, delay?: number, trigger?: "edit") => void;
@@ -109,6 +112,7 @@ export function useHomeFormLifecycle({
   saveDayState,
   setDayState,
   canManageProfiles,
+  readOnly = false,
   saveProfileForRun,
   propagateProfileToPendingRuns,
   schedulePush,
@@ -178,6 +182,7 @@ export function useHomeFormLifecycle({
   }, []);
 
   useEffect(() => {
+    if (readOnly) return;
     let dayState = dayStateRef.current;
     const run = dayState.runs[dayState.currentIndex];
     const runId = run?.id;
@@ -189,6 +194,7 @@ export function useHomeFormLifecycle({
       fences.lastFormRunIdRef.current,
       runId,
       fences.formHandoffRef.current,
+      readOnly,
     )) return;
 
     const capturedRun = { ...run };
@@ -231,5 +237,5 @@ export function useHomeFormLifecycle({
       schedulePush(dayStateRef.current, undefined, "edit");
       flashSaved();
     });
-  }, [values, persistenceScope]);
+  }, [values, persistenceScope, readOnly]);
 }

@@ -1,4 +1,4 @@
-import { createContext, lazy, memo, Profiler, useCallback, useEffect, useId, useMemo, useRef, useState, useContext } from "react";
+import { createContext, lazy, memo, Profiler, useCallback, useEffect, useId, useMemo, useRef, useState, useContext, useReducer } from "react";
 import { useEvent } from "../hooks/useEvent";
 import { createFrameRepeater } from "../frameRepeater";
 import {
@@ -602,6 +602,12 @@ import {
 import { syncRetryDelay } from "../syncRetry";
 
 import { usePresentationCast } from "../hooks/usePresentationCast";
+import {
+  createScreenSyncState,
+  getScreenSyncStatus,
+  reduceScreenSyncState,
+} from "../screenSyncState";
+import { detectCastGuidancePlatform, getCastGuidance } from "../castGuidance";
 import {
   getAutoTrackTiming,
   suggestedDoughStaging,
@@ -2819,10 +2825,10 @@ const HOME_DIALOG_CARD_SCROLL_CLASS =
 
 function LiveRunHandoffGuard() {
   const { nextRunPrepActive } = useLiveRun();
-  const { currentRunId, dayState, dayStateRef, setDayState, schedulePush } =
+  const { currentRunId, dayState, dayStateRef, screenMode, setDayState, schedulePush } =
     useHomeTabCtx();
   useEffect(() => {
-    if (!nextRunPrepActive) return;
+    if (screenMode !== null || !nextRunPrepActive) return;
     if (dayState.prepPhase?.prepHandoffFromRunId === currentRunId) return;
     // First time nextRunPrepActive for this run: reset prep so the crew can log
     // next-run batches from zero with prepCarriedOver: false (so startRun will
@@ -2841,6 +2847,7 @@ function LiveRunHandoffGuard() {
   }, [
     nextRunPrepActive,
     currentRunId,
+    screenMode,
     dayState.prepPhase?.prepHandoffFromRunId,
     dayStateRef,
     setDayState,
@@ -2854,6 +2861,7 @@ function loadPackagingAwareRunValues(runId: string): FormValues {
 }
 
 export default function Home() {
+  const screenMode = useMemo(() => new URLSearchParams(window.location.search).get("screen"), []);
   const specImportOperationRef = useRef<string | null>(null);
   const premixImportOperationRef = useRef<string | null>(null);
   const cheeseImportOperationRef = useRef<string | null>(null);
@@ -4702,6 +4710,7 @@ export default function Home() {
   // profile/run fan-out after the newer manager edit has already succeeded.
   const queueBatchWeightChanges = useCallback(
     (entries: { name: string; lbs: number }[]): Promise<void> => {
+      if (screenMode !== null) return Promise.resolve();
       const changes = normalizeBatchWeightChanges(entries);
       if (changes.length === 0) return batchWeightSaveChainRef.current;
       for (const change of changes) {
@@ -4753,7 +4762,7 @@ export default function Home() {
         });
       return batchWeightSaveChainRef.current;
     },
-    [cycleCountQc, propagateBatchWeightUpdates],
+    [cycleCountQc, propagateBatchWeightUpdates, screenMode],
   );
   const commitBatchWeightField = useCallback(
     (name: string, lbs: number): void => {
@@ -4769,6 +4778,7 @@ export default function Home() {
   // the saved recipes. Also updates the open form and pending runs.
   const propagateCheeseRecipeUpdates = useCallback(
     async (updatedRecipes: CheeseRecipe[]) => {
+      if (screenMode !== null) return;
       sharedRecipeRefreshGenerationRef.current += 1;
       acknowledgedCheeseSaveFingerprintRef.current = JSON.stringify(updatedRecipes);
       return enqueueSharedRecipeRefresh(async () => {
@@ -4924,7 +4934,7 @@ export default function Home() {
       });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [form, canManageProfiles],
+    [form, canManageProfiles, screenMode],
   );
   // Manager-set per-die line-setting overrides (server master-data); the run
   // form's die pre-fill resolves through these first, then the built-in map.
@@ -5008,7 +5018,7 @@ export default function Home() {
   // marker-guarded so it runs once, and re-armed on failure to retry next mount.
   const doughSauceMigratedRef = useRef(false);
   useEffect(() => {
-    if (doughSauceMigratedRef.current || !canManageInventory) return;
+    if (screenMode !== null || doughSauceMigratedRef.current || !canManageInventory) return;
     const MARKER = "run-calc-dough-sauce-server-migrated-v1";
     try {
       if (localStorage.getItem(MARKER)) { doughSauceMigratedRef.current = true; return; }
@@ -5017,7 +5027,7 @@ export default function Home() {
     pushLocalDoughSauceToServer()
       .then(() => { try { localStorage.setItem(MARKER, "1"); } catch {} })
       .catch(() => { doughSauceMigratedRef.current = false; });
-  }, [canManageInventory, pushLocalDoughSauceToServer]);
+  }, [canManageInventory, pushLocalDoughSauceToServer, screenMode]);
 
   // One-time name cleanup: rename existing server dough/sauce pool entries that
   // still carry spec-sheet formatting noise (sourcing qualifiers like
@@ -5031,7 +5041,7 @@ export default function Home() {
   // rename. Manager-only, marker-guarded, re-armed on failure.
   const nameCleanupRef = useRef(false);
   useEffect(() => {
-    if (nameCleanupRef.current || !canManageInventory) return;
+    if (screenMode !== null || nameCleanupRef.current || !canManageInventory) return;
     const MARKER = "run-calc-dough-sauce-name-cleanup-v1";
     try {
       if (localStorage.getItem(MARKER)) { nameCleanupRef.current = true; return; }
@@ -5113,7 +5123,7 @@ export default function Home() {
     })()
       .then(() => { try { localStorage.setItem(MARKER, "1"); } catch {} })
       .catch(() => { nameCleanupRef.current = false; });
-  }, [canManageInventory, cycleCountQc]);
+  }, [canManageInventory, cycleCountQc, screenMode]);
 
   // One-time phantom-name heal: a dough/sauce name in the synced option list
   // that NO recipe anywhere backs (no server-pool entry, no local preset
@@ -5125,7 +5135,7 @@ export default function Home() {
   // resurrect it. Manager-only, marker-guarded, re-armed on failure.
   const phantomNameHealRef = useRef(false);
   useEffect(() => {
-    if (phantomNameHealRef.current || !canManageInventory) return;
+    if (screenMode !== null || phantomNameHealRef.current || !canManageInventory) return;
     const MARKER = "run-calc-dough-sauce-phantom-names-heal-v1";
     try {
       if (localStorage.getItem(MARKER)) { phantomNameHealRef.current = true; return; }
@@ -5211,7 +5221,7 @@ export default function Home() {
     })()
       .then(() => { try { localStorage.setItem(MARKER, "1"); } catch {} })
       .catch(() => { phantomNameHealRef.current = false; });
-  }, [canManageInventory]);
+  }, [canManageInventory, screenMode]);
 
   // Best-effort follow-through for the one-time mix-slot cleanup migration:
   // mixes it queued (raw applicator-type mix names converted to "Mix" slots)
@@ -5220,7 +5230,7 @@ export default function Home() {
   // survives failures and retries on the next mount/session.
   const pendingMixPushRef = useRef(false);
   useEffect(() => {
-    if (pendingMixPushRef.current || !canManageInventory) return;
+    if (screenMode !== null || pendingMixPushRef.current || !canManageInventory) return;
     const pending = loadPendingServerMixPushes();
     if (pending.length === 0) { pendingMixPushRef.current = true; return; }
     pendingMixPushRef.current = true;
@@ -5236,7 +5246,7 @@ export default function Home() {
       }
       clearPendingServerMixPushes();
     })().catch(() => { pendingMixPushRef.current = false; });
-  }, [canManageInventory, cycleCountQc]);
+  }, [canManageInventory, cycleCountQc, screenMode]);
 
   const [showReportIssue, setShowReportIssue] = useState(false);
   // First-login "Get Started" overview. Auto-opens once when the server says
@@ -5386,7 +5396,6 @@ export default function Home() {
   }, [showStopDialog]);
 
   // ── Screen casting mode ────────────────────────────────────────────────────
-  const screenMode = useMemo(() => new URLSearchParams(window.location.search).get("screen"), []);
   const [showScreensDialog, setShowScreensDialog] = useState(false);
   // One-click Chromecast (Presentation API). Disabled on the cast display itself
   // (screenMode !== null) so TVs never try to reconnect/start presentations.
@@ -5413,13 +5422,24 @@ export default function Home() {
 
   // ── Online / offline ───────────────────────────────────────────────────────
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
+  const [screenSyncState, dispatchScreenSync] = useReducer(
+    reduceScreenSyncState,
+    navigator.onLine,
+    createScreenSyncState,
+  );
   useEffect(() => {
-    const on = () => setIsOnline(true);
-    const off = () => setIsOnline(false);
+    const on = () => {
+      setIsOnline(true);
+      if (screenMode !== null) dispatchScreenSync({ type: "online" });
+    };
+    const off = () => {
+      setIsOnline(false);
+      if (screenMode !== null) dispatchScreenSync({ type: "offline" });
+    };
     window.addEventListener("online", on);
     window.addEventListener("offline", off);
     return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); };
-  }, []);
+  }, [screenMode]);
 
   // Finished-case surplus is authoritative server data, not a day-state
   // overlay. Load it for every signed-in web session so Packaging can record a
@@ -7947,6 +7967,7 @@ export default function Home() {
   // The normal snapshot sync remains a recovery path; this separate queue keeps
   // operator occurrence times and can be retried after a tab/browser restart.
   useEffect(() => {
+    if (screenMode !== null) return;
     setOperationalIntentCanonicalAdopter(async (data, intent, outcome) => {
       const adoptionGeneration = ++operationalAdoptionGenerationRef.current;
       operationalAdoptionInFlightRef.current += 1;
@@ -8094,7 +8115,7 @@ export default function Home() {
       setOperationalIntentCanonicalAdopter(undefined);
       window.removeEventListener("online", flush);
     };
-  }, []);
+  }, [screenMode]);
   // Cursor recovery complements the normal snapshot/SSE paths for a device
   // that missed accepted offline commands. It adopts canonical materialized
   // snapshots only; commands themselves are never replayed in the browser.
@@ -8115,6 +8136,9 @@ export default function Home() {
   }, [me?.sandbox, me?.userId]);
 
   function claimAutoTrackEvent(claim: AutoTrackEventClaim): Promise<AutoTrackEventResult> {
+    if (screenMode !== null) {
+      return Promise.reject(new Error("Station displays are read-only"));
+    }
     const enqueuedBaseUpdatedAt = canonicalRunValuesUpdatedAtRef.current[claim.runId] ?? 0;
     const request = autoTrackClaimQueueRef.current
       .catch(() => {})
@@ -9119,6 +9143,7 @@ export default function Home() {
   // calls within the same day return applied=false with zero side-effects.
   // Managers-only gate on the server; non-managers get a harmless 403.
   useEffect(() => {
+    if (screenMode !== null) return;
     (async () => {
       try {
         await fetch("/api/inventory/consume-day-start", {
@@ -9130,7 +9155,7 @@ export default function Home() {
         /* best-effort — daily reset will retry next boot if needed */
       }
     })();
-  }, []);
+  }, [screenMode]);
 
     // ── Factory KV: startup fetch + write-through hook registration ──
   // Fetch all migrated factory-wide keys from the server on login, hydrate
@@ -9147,11 +9172,11 @@ export default function Home() {
         // Only flush after comparing each durable operation with the server
         // timestamp. A pre-read flush could let a sleeping device overwrite a
         // setting that another device saved while it was offline.
-        void flushFactoryQueue();
+        if (screenMode === null) void flushFactoryQueue();
         // One-time migration heals: push localStorage data to the server for
         // devices that had data before the factory-KV migration. Best-effort —
         // failures leave the marker unset so the heal retries on the next load.
-        void runFactoryKvMigration(data);
+        if (screenMode === null) void runFactoryKvMigration(data);
       } catch {
         // Offline / error — keep whatever is in localStorage already
       }
@@ -9159,12 +9184,13 @@ export default function Home() {
     // Register write-through: every storage mutation for a cached factory key
     // bumps the local stamp and fires a server PUT.
     setKvMutationHook(({ key, value }) => {
+      if (screenMode !== null) return;
       if (FACTORY_KV_CACHED_KEYS.has(key)) {
         putFactoryKey(key, value);
       }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [screenMode]);
 
   // ── Brand+flavor profile pool reconcile (boot) ──
   // Profiles live in their own factory-wide server pool with per-profile
@@ -9177,6 +9203,7 @@ export default function Home() {
   // recovery keep long-lived tabs converged; queued pushes retry on each pass.
   // Best-effort — a fetch failure changes nothing locally.
   useEffect(() => {
+    if (screenMode !== null) return;
     let cancelled = false;
     const pass = async () => {
       try {
@@ -9191,7 +9218,7 @@ export default function Home() {
     };
     void pass();
     return () => { cancelled = true; };
-  }, []);
+  }, [screenMode]);
 
   // Dough pause/resume is immediate in the hook; this listener durably queues
   // the corresponding server-visible control without coupling the hook to Home.
@@ -9222,15 +9249,17 @@ export default function Home() {
         if (!current()) return;
       }
       if (families.has("profiles")) {
-        try {
-          const result = await reconcileProfilesFromServerDetailed();
+        if (screenMode === null) {
+          try {
+            const result = await reconcileProfilesFromServerDetailed();
+            if (!current()) return;
+            if (result.changed) {
+              setDieTypes(healDieTypesFromProfiles());
+              applyProfileReconcileRef.current(result);
+            }
+          } catch {}
           if (!current()) return;
-          if (result.changed) {
-            setDieTypes(healDieTypesFromProfiles());
-            applyProfileReconcileRef.current(result);
-          }
-        } catch {}
-        if (!current()) return;
+        }
       }
       if (families.has("factory-data")) {
         try {
@@ -9238,7 +9267,7 @@ export default function Home() {
           if (!current()) return;
           hydrateFromServer(data);
           refreshFactoryDataConsumers();
-          await flushFactoryQueue();
+          if (screenMode === null) await flushFactoryQueue();
         } catch {}
         if (!current()) return;
       }
@@ -9326,6 +9355,7 @@ export default function Home() {
       getSnapshot: () => syncSnapshotIdRef.current,
       onOpen: () => {
       setSyncConnected(true);
+      if (screenMode !== null) dispatchScreenSync({ type: "stream-open" });
       recordSyncEvent("connected", "Live sync connection opened");
       // The coordination hook routes stream drops through the foreground
       // recovery owner. Do not start a second reconnect push here; the initial
@@ -9567,11 +9597,20 @@ export default function Home() {
       // effect. Fence automatic pushes until that reconnect delivers its own
       // initial snapshot.
       setSyncConnected(false);
+      if (screenMode !== null) dispatchScreenSync({ type: "stream-error" });
       // The browser stream can't read the HTTP status, so a drop may be the daily reset
       // signing us out. Re-check /me; if the session is gone we land on login.
       revalidate();
     },
     onInitialBaseline: (shouldPush) => {
+      if (screenMode !== null) {
+        // The coordinator calls this only after the canonical baseline has
+        // been accepted and applied. A read-only display must not echo it.
+        dispatchScreenSync({ type: "canonical-adopted" });
+        pushAcknowledgedRef.current = true;
+        setSyncPendingCount(0);
+        return;
+      }
       // applySyncCallbackRef clears its sync-apply suppression in a frame.
       // The manager opens this gate only after Home has merged the baseline.
       if (shouldPush) requestAnimationFrame(() => {
@@ -9584,7 +9623,9 @@ export default function Home() {
         schedulePush(dayStateRef.current, 0);
       });
     },
-    onClose: () => {},
+    onClose: () => {
+      if (screenMode !== null) dispatchScreenSync({ type: "stream-closed" });
+    },
     });
     return () => {
       cancelled = true;
@@ -9607,6 +9648,7 @@ export default function Home() {
     let cancelled = false;
 
     const foregroundRegistration = registerForegroundRecovery(visibleTabScheduler, async ({ classify }): Promise<boolean> => {
+      if (screenMode !== null) dispatchScreenSync({ type: "recovery-started" });
       const recoveryOwner = synchronizationStateMachineRef.current.beginWake();
       foregroundRecoveryOwnerRef.current = recoveryOwner;
       const isCurrentRecovery = () =>
@@ -9713,6 +9755,7 @@ export default function Home() {
           setIsOnline(true);
           if (recovery.kind === "unchanged") {
             reconciled = true;
+            if (screenMode !== null) dispatchScreenSync({ type: "recovery-succeeded" });
             return true;
           }
           const payload = recovery.payload;
@@ -9760,9 +9803,13 @@ export default function Home() {
                   allowForegroundCanonicalFormReset: true,
                 });
               },
-              reconcileProfiles: reconcileProfilesFromServerDetailed,
+              reconcileProfiles: () => screenMode === null
+                ? reconcileProfilesFromServerDetailed()
+                : Promise.resolve(
+                    { changed: false } as Awaited<ReturnType<typeof reconcileProfilesFromServerDetailed>>,
+                  ),
               applyProfiles: (profileResult) => {
-                if (!profileResult.changed) return;
+                if (screenMode !== null || !profileResult.changed) return;
                 setDieTypes(healDieTypesFromProfiles());
                 applyProfileReconcileRef.current(profileResult);
               },
@@ -9770,7 +9817,7 @@ export default function Home() {
               applyFactory: async (factoryData) => {
                 hydrateFromServer(factoryData);
                 refreshFactoryDataConsumers();
-                await flushFactoryQueue();
+                if (screenMode === null) await flushFactoryQueue();
               },
               isCurrent: isCurrentRecovery,
             });
@@ -9781,6 +9828,7 @@ export default function Home() {
            pushAcknowledgedRef.current = true;
          if (!isCurrentRecovery()) return false;
          reconciled = true;
+          if (screenMode !== null) dispatchScreenSync({ type: "recovery-succeeded" });
           return true;
          } catch (error) {
             classify(
@@ -9800,6 +9848,7 @@ export default function Home() {
              foregroundStopIntentRef.current?.runId,
            );
            setSyncFailedCount((count) => count + 1);
+           if (screenMode !== null) dispatchScreenSync({ type: "recovery-failed" });
            showForegroundRecoveryNotice(
              "failed",
              "Couldn't confirm the current production state. Your local work is retained and tracking is paused. Retry recovery when connected.",
@@ -9915,6 +9964,7 @@ export default function Home() {
   // across a device that was offline during the merge. Best-effort: a failure
   // just leaves the existing local/sync behavior unchanged.
   useEffect(() => {
+    if (screenMode !== null) return;
     let cancelled = false;
     (async () => {
       let remoteNames: string[];
@@ -9950,7 +10000,7 @@ export default function Home() {
       prune(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS, setMixIngredients);
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [screenMode]);
 
   // Periodic push every 30 s — ensures sync recovers automatically even with no user activity
   useEffect(() => {
@@ -9966,6 +10016,7 @@ export default function Home() {
   // Target Doughball Weight rides along (falling back to any weight the preset
   // already carried) so the weight follows the recipe name.
   useEffect(() => {
+    if (screenMode !== null) return;
     const name = v.doughRecipeName?.trim();
     if (!name || (v.doughRecipe ?? []).length === 0) return;
     const presets = loadDoughRecipePresets();
@@ -9975,7 +10026,7 @@ export default function Home() {
       ? { rows: v.doughRecipe ?? [], doughballWeightOz: ballOz }
       : { rows: v.doughRecipe ?? [] };
     saveDoughRecipePresets(presets);
-  }, [v.doughRecipeName, v.doughRecipe, v.targetDoughballWeight]);
+  }, [v.doughRecipeName, v.doughRecipe, v.targetDoughballWeight, screenMode]);
 
   // Self-heal: a run form pointing at a pool dough recipe that KNOWS its
   // doughball weight, while the form still sits at 0 oz, adopts the pool
@@ -10030,15 +10081,17 @@ export default function Home() {
 
   // Auto-save frontline (sauce) recipe preset
   useEffect(() => {
+    if (screenMode !== null) return;
     const name = v.frontlineRecipeName?.trim();
     if (!name || (v.frontlineRecipe ?? []).length === 0) return;
     const presets = loadFrontlineRecipePresets();
     presets[name] = v.frontlineRecipe ?? [];
     saveFrontlineRecipePresets(presets);
-  }, [v.frontlineRecipeName, v.frontlineRecipe]);
+  }, [v.frontlineRecipeName, v.frontlineRecipe, screenMode]);
 
   // Auto-save cheese blend recipe presets (one per applicator, shared pool by name)
   useEffect(() => {
+    if (screenMode !== null) return;
     const saves: [string | undefined, RecipeRow[]][] = [
       [v.app1CheeseRecipeName, v.app1CheeseRecipe ?? []],
       [v.app2CheeseRecipeName, v.app2CheeseRecipe ?? []],
@@ -10054,7 +10107,7 @@ export default function Home() {
       changed = true;
     }
     if (changed) saveCheeseRecipePresets(presets);
-  }, [v.app1CheeseRecipeName, v.app1CheeseRecipe, v.app2CheeseRecipeName, v.app2CheeseRecipe, v.app3CheeseRecipeName, v.app3CheeseRecipe, v.app4CheeseRecipeName, v.app4CheeseRecipe]);
+  }, [v.app1CheeseRecipeName, v.app1CheeseRecipe, v.app2CheeseRecipeName, v.app2CheeseRecipe, v.app3CheeseRecipeName, v.app3CheeseRecipe, v.app4CheeseRecipeName, v.app4CheeseRecipe, screenMode]);
 
   // Daily rollover is server-owned. The initial SSE frame and the reset-epoch
   // handshake are the only current-day bootstrap authorities: they adopt the
@@ -10161,6 +10214,7 @@ export default function Home() {
   }
 
   async function pushTodayCanonical(payload: SyncPayload): Promise<Response> {
+    if (screenMode !== null) throw new Error("Station displays are read-only");
     let res = await writeToday({
       payload,
       clientId: clientId.current,
@@ -10210,6 +10264,7 @@ export default function Home() {
       trigger?: SyncMeasurementTrigger;
     },
   ) {
+    if (screenMode !== null) return;
     if (generation !== syncPushGenerationRef.current) return;
     const work = { payload, sig, ...timing };
     // A local edit, focus event, and online event can all arrive while a
@@ -10577,6 +10632,7 @@ export default function Home() {
     delay = SYNC_EDIT_DEBOUNCE_MS,
     trigger: SyncMeasurementTrigger = "edit",
   ) {
+    if (screenMode !== null) return;
     // Keep every timer-driven/debounced write asleep with the document. The
     // foreground reconciliation barrier pulls canonical state first, then
     // replays this pending local delta after adoption.
@@ -10681,6 +10737,7 @@ export default function Home() {
     }, delay);
   }
   function retryLatestSync(): void {
+    if (screenMode !== null) return;
     const payload = latestSyncPayloadRef.current;
     if (!payload) {
       recordSyncEvent("local", "No retained change is available to retry");
@@ -10733,6 +10790,7 @@ export default function Home() {
     propagateProfileToPendingRuns,
     schedulePush: (state, delay, trigger) => schedulePush(state, delay, trigger),
     flashSaved,
+    readOnly: screenMode !== null,
   });
 
   // ── Unified setup editing: edit once, updates everywhere ──────────────────
@@ -10749,6 +10807,7 @@ export default function Home() {
     savedValues?: FormValues,
     sharedRefreshGeneration?: number,
   ) {
+    if (screenMode !== null) return;
     // Capture the selected run before any profile queue/bootstrap work. Both
     // pending runs are eligible for shared recipe refresh, so checking only
     // eligibility after an await can apply the old run's refresh to whichever
@@ -10901,6 +10960,7 @@ export default function Home() {
     updates: Record<string, unknown>,
     options: { pushCanonicalIfUnchanged?: boolean; expectedRunId?: string } = {},
   ): Promise<void> {
+    if (screenMode !== null) return;
     if (Object.keys(updates).length === 0) return;
     const liveDay = dayStateRef.current;
     const liveRun = liveDay.runs[liveDay.currentIndex];
@@ -10964,6 +11024,7 @@ export default function Home() {
   const propagateSigRef = useRef<Map<string, string>>(new Map());
   const profilePropagationChainsRef = useRef<Map<string, Promise<void>>>(new Map());
   async function propagateProfileToPendingRuns(brand: string, flavor: string) {
+    if (screenMode !== null) return;
     const b = (brand ?? "").trim();
     const f = (flavor ?? "").trim();
     if (!b && !f) return;
@@ -10982,6 +11043,7 @@ export default function Home() {
     }
   }
   async function propagateProfileToPendingRunsNow(b: string, f: string) {
+    if (screenMode !== null) return;
     const profile = loadProfile(b, f);
     if (!profile) return;
     // Cheap dedup: nav-saves fire on every tab change — skip the fan-out when
@@ -11112,6 +11174,7 @@ export default function Home() {
     kind: "cheese" | "mix" | "dough" | "sauce" = "cheese",
     previousPoolSignature?: string,
   ) {
+    if (screenMode !== null) return;
     const nameLc = recipeName.trim().toLowerCase();
     if (!nameLc || rows.length === 0) return;
     const ds = dayStateRef.current;
@@ -11206,6 +11269,7 @@ export default function Home() {
     canonicalItems: NamedRecipe[],
     submittedItems: NamedRecipe[],
   ) {
+    if (screenMode !== null) return;
     // Capture before profile bootstrap: that GET can be delayed while the
     // operator switches runs. The acknowledged refresh belongs to the run
     // selected when this save was applied, not whichever run is selected after
@@ -11248,6 +11312,7 @@ export default function Home() {
     acknowledgedNames?: ReadonlySet<string>,
     initiatingRunId?: string,
   ) {
+    if (screenMode !== null) return;
     const refreshRunId =
       initiatingRunId ?? dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id;
     const onNamedProfileSaved = (brand: string, flavor: string) => {
@@ -11410,6 +11475,7 @@ export default function Home() {
     });
   }
   useEffect(() => {
+    if (screenMode !== null) return;
     // First-load reconciliation must share the acknowledgement queue. A
     // manager save can update the pool while this effect is starting; letting
     // the initial heal run independently can publish an older profile snapshot
@@ -11427,8 +11493,9 @@ export default function Home() {
       ),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doughRecipesList]);
+  }, [doughRecipesList, screenMode]);
   useEffect(() => {
+    if (screenMode !== null) return;
     const backgroundGeneration = sharedRecipeRefreshGenerationRef.current;
     const initiatingRunId =
       dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id;
@@ -11442,7 +11509,7 @@ export default function Home() {
       ),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sauceRecipesList]);
+  }, [sauceRecipesList, screenMode]);
 
   // Cheese / mix recipe rows — parallel one-time boot heal + ongoing empty-row
   // healing. Cheese and mix pools don't have a diff-and-update watcher like
@@ -11469,6 +11536,7 @@ export default function Home() {
     canonicalItems: typeof mixes,
     submittedItems: typeof mixes,
   ) {
+    if (screenMode !== null) return;
     sharedRecipeRefreshGenerationRef.current += 1;
     // Set this before awaited profile hydration. The pool observer runs from
     // the same React update and must not launch a second background repair for
@@ -11566,6 +11634,7 @@ export default function Home() {
     });
   }
   useEffect(() => {
+    if (screenMode !== null) return;
     const markerKey = "run-calc-cheese-mix-row-heal-v1";
     const backgroundGeneration = sharedRecipeRefreshGenerationRef.current;
     const refresh = async () => {
@@ -11647,13 +11716,14 @@ export default function Home() {
     // an acknowledged manager save.
     void enqueueSharedRecipeRefresh(refresh);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cheeseRecipesList, mixes]);
+  }, [cheeseRecipesList, mixes, screenMode]);
 
   // Seed the currently-open form's mix applicator slots from server data
   // whenever the mixes pool changes and a slot has a name set but all-zero
   // recipe rows. Covers: page load before mixes arrive from the server, and
   // the first session after a premix import without re-picking the name.
   useEffect(() => {
+    if (screenMode !== null) return;
     const liveDay = loadDayState();
     const liveRun = liveDay.runs[liveDay.currentIndex] ?? dayStateRef.current.runs[dayStateRef.current.currentIndex];
     runSharedRecipeRefresh(liveRun, () => {
@@ -11685,12 +11755,13 @@ export default function Home() {
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serverMixRowsByName]);
+  }, [serverMixRowsByName, screenMode]);
   // For mix applicators, the recipe rows' lbs field stores oz/pizza per
   // ingredient. Their sum should always equal appNOzPerPizza. Auto-sync
   // appNOzPerPizza from the row sum whenever it drifts (e.g. after the user
   // edits recipe rows or loads a profile where the total was never matched).
   useEffect(() => {
+    if (screenMode !== null) return;
     const slots = [
       { typeField: "app1Type", recipeField: "app1CheeseRecipe", ozField: "app1OzPerPizza" },
       { typeField: "app2Type", recipeField: "app2CheeseRecipe", ozField: "app2OzPerPizza" },
@@ -11714,6 +11785,7 @@ export default function Home() {
     v.app2Type, v.app2CheeseRecipe,
     v.app3Type, v.app3CheeseRecipe,
     v.app4Type, v.app4CheeseRecipe,
+    screenMode,
   ]);
 
   // One-time boot heal: write preTunnelMin = postTunnelMin = 2.5 into every
@@ -11723,6 +11795,7 @@ export default function Home() {
   // manager (the marker is only set then, so a manager device still heals
   // later); non-managers just get the open-form fix on every boot.
   useEffect(() => {
+    if (screenMode !== null) return;
     const MARKER = "run-calc-tunnel-pre-post-default-v1";
     const alreadyHealed = !!localStorage.getItem(MARKER);
     if (!alreadyHealed && canManageProfiles) {
@@ -11761,7 +11834,7 @@ export default function Home() {
   // Re-runs when canManageProfiles resolves (marker keeps the persist loop
   // one-time); form ref is stable.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canManageProfiles]);
+  }, [canManageProfiles, screenMode]);
 
   // (3) Promote the open form's hand-tweaked dough/sauce rows into the shared
   // server-pool recipe ("Update shared recipe" on the drift indicator). Uses
@@ -15952,6 +16025,10 @@ export default function Home() {
       {/* ── Screens / Cast Dialog ───────────────────────────────────────── */}
       {showScreensDialog && (() => {
         const base = window.location.origin + window.location.pathname;
+        const castGuidance = getCastGuidance(
+          detectCastGuidancePlatform(navigator.userAgent, navigator.maxTouchPoints ?? 0),
+          castSupported,
+        );
         const screens = [
           {
             key: "dashboard",
@@ -16011,15 +16088,7 @@ export default function Home() {
                 <button type="button" aria-label="Close cast to screens" onClick={() => setShowScreensDialog(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
               </div>
               <p className="text-xs text-muted-foreground mt-3">Open any URL below on another device or browser tab. Each screen stays live-synced automatically.</p>
-              {castSupported ? (
-                <p className="text-xs text-muted-foreground mt-1.5">
-                  Have a Chromecast? Tap <span className="font-semibold text-foreground">Cast</span> to send a screen straight to a TV — you can cast different screens to different devices at the same time. For AirPlay or Miracast TVs, use the QR code / URL or your device's screen mirroring.
-                </p>
-              ) : (
-                <p className="text-xs text-muted-foreground mt-1.5">
-                  One-click casting needs Chrome or Edge. In this browser, use the QR code or URL on the TV's browser — or use AirPlay / Miracast screen mirroring from your device.
-                </p>
-              )}
+              <p className="text-xs text-muted-foreground mt-1.5">{castGuidance}</p>
               <div className="space-y-3 overflow-y-auto overscroll-contain flex-1 mt-3">
                 {screens.map(s => (
                   <div key={s.key} className="flex items-start gap-4 p-4 rounded-lg bg-muted/20 border border-border/50">
@@ -19498,6 +19567,7 @@ export default function Home() {
         serverClockOffsetMs={serverClockOffsetMs}
         operationalOnline={isOnline}
         operationalSyncConnected={syncConnected}
+        screenSyncStatus={getScreenSyncStatus(screenSyncState)}
       >
         {/* Always-mounted: resets prepPhase once per run at depletion handoff */}
         <LiveRunHandoffGuard />

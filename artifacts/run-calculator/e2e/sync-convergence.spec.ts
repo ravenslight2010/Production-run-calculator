@@ -1074,7 +1074,10 @@ test(
       await page.route("**/api/sync/**", destinationFailureRoute);
       await futureDay.getByRole("button", { name: "Move", exact: true }).last().click();
 
-      await expect(page.getByRole("alert")).toContainText(
+      const destinationWriteError = page
+        .getByRole("alert")
+        .filter({ hasText: "Couldn't save the destination plan." });
+      await expect(destinationWriteError).toContainText(
         "The source is unchanged; check your connection and try again.",
       );
       await expect(futureDay).toBeVisible();

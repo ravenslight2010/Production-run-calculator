@@ -58,6 +58,7 @@ import {
   type OperationalSnapshotReceipt,
 } from "../operationalState";
 import type { OperationalProjection } from "@workspace/live-calc";
+import type { ScreenSyncStatus } from "../screenSyncState";
 
 type RunStatus = "pending" | "running" | "paused" | "ended";
 type RunStoppage = NonNullable<RunMeta["stoppages"]>[number];
@@ -68,6 +69,7 @@ export type { Calc } from "@workspace/live-calc";
 export interface LiveRunContextValue {
   nowTime: Date;
   calc: Calc;
+  screenSyncStatus: ScreenSyncStatus;
   liveFreezerMin: number;
   elapsedBatchSec: number;
   /** Day-state-owned line-phase model; server-adopted when confirmed, local fallback. */
@@ -161,6 +163,7 @@ export interface LiveRunProviderProps {
   serverClockOffsetMs?: number;
   operationalOnline?: boolean;
   operationalSyncConnected?: boolean;
+  screenSyncStatus?: ScreenSyncStatus;
 }
 
 // ── Context ──────────────────────────────────────────────────────────────────
@@ -204,6 +207,7 @@ export function LiveRunProvider({
   serverClockOffsetMs = 0,
   operationalOnline = true,
   operationalSyncConnected = false,
+  screenSyncStatus = "reconnecting",
 }: LiveRunProviderProps) {
   const nowTime = useClock(runStatus, autoTrackWakeAcknowledgement);
   // A selected pending run must never inherit Packaging, Sauce, or Frontline
@@ -695,7 +699,7 @@ export function LiveRunProvider({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const value = useMemo<LiveRunContextValue>(
     () => ({
-      nowTime, calc: operationalCalc, liveFreezerMin, elapsedBatchSec, linePhases, currentRunDowntimeMs,
+      nowTime, calc: operationalCalc, screenSyncStatus, liveFreezerMin, elapsedBatchSec, linePhases, currentRunDowntimeMs,
       casesPct, casesFreezerPct, casesPctWithFreezer,
       currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
       showBatchDue, setShowBatchDue,
@@ -714,7 +718,7 @@ export function LiveRunProvider({
       showPaceAlert, setShowPaceAlert, paceAlertMsg,
     }),
     [
-      nowTime, operationalCalc, liveFreezerMin, elapsedBatchSec, linePhases, currentRunDowntimeMs,
+      nowTime, operationalCalc, screenSyncStatus, liveFreezerMin, elapsedBatchSec, linePhases, currentRunDowntimeMs,
       casesPct, casesFreezerPct, casesPctWithFreezer,
       currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
       showBatchDue, setShowBatchDue,

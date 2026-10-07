@@ -227,6 +227,12 @@ PROMPTS: dict[str, tuple[list[str], list[str]]] = {
         ["The displayed number is correct; I only want a layout redesign.",
          "A database import created incorrect stored values across many profiles."],
     ),
+    "writing-plans": (
+        ["The feature design is approved. Turn it into a bounded, testable multi-step plan aligned with this repository's task workflow before implementation.",
+         "The specification is approved. Before implementation, make a multi-step plan aligned with this repository's task workflow."],
+        ["Help me brainstorm possible product directions before we select and approve a design.",
+         "Implement this small one-file bug fix now; it does not need a multi-step project plan."],
+    ),
     "writing-quality-editor": (
         ["Tighten this user-facing help text while preserving every warning, number, condition, identifier, and factual claim.",
          "Rewrite these error messages in plain language without changing their meaning or hiding unsupported statements."],
