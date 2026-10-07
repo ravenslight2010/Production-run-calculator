@@ -51,6 +51,39 @@ try {
   const json = JSON.parse(runComparisonCli([baseline, candidate]));
   assert.equal(json.metricChanges[0].path, "performance.latencyP95.value");
   assert.match(runComparisonCli([baseline, candidate, "--human"]), /1 change: 0 identity, 1 metric, 0 outcome/);
+
+  const filteredBaseline = path.join(dir, "filtered-baseline.json");
+  const filteredCandidate = path.join(dir, "filtered-candidate.json");
+  const fullRun = path.join(dir, "full-run.json");
+  const filteredManifest = {
+    ...manifest,
+    provenance: { ...manifest.provenance, selectedCorpusSha256: "b".repeat(64) },
+  };
+  fs.writeFileSync(filteredBaseline, JSON.stringify({ evaluationManifest: filteredManifest }));
+  fs.writeFileSync(filteredCandidate, JSON.stringify({
+    evaluationManifest: {
+      ...filteredManifest,
+      provenance: { ...filteredManifest.provenance, selectedCorpusSha256: "c".repeat(64) },
+    },
+  }));
+  fs.writeFileSync(fullRun, JSON.stringify({
+    evaluationManifest: {
+      ...manifest,
+      provenance: { ...manifest.provenance, selectedCorpusSha256: digest },
+    },
+  }));
+
+  const filteredComparison = JSON.parse(runComparisonCli([filteredBaseline, filteredCandidate]));
+  assert.deepEqual(
+    filteredComparison.identityChanges.map((change: { path: string }) => change.path),
+    ["provenance.selectedCorpusSha256"],
+  );
+  const filteredVersusFull = JSON.parse(runComparisonCli([filteredBaseline, fullRun]));
+  assert.deepEqual(
+    filteredVersusFull.identityChanges.map((change: { path: string }) => change.path),
+    ["provenance.selectedCorpusSha256"],
+  );
+
   const retained = path.resolve(
     import.meta.dirname,
     "../../docs/second-pass-reviewer-benchmark-2026-10-06.json",

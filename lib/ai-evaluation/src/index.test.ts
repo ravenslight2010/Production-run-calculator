@@ -49,6 +49,22 @@ describe("evaluation manifest", () => {
     expect(validateEvaluationManifest(manifest)).toEqual(manifest);
   });
 
+  it("retains and validates an optional selected-corpus identity", () => {
+    const selected = {
+      ...manifest,
+      provenance: {
+        ...manifest.provenance,
+        selectedCorpusSha256: "b".repeat(64),
+      },
+    };
+    expect(validateEvaluationManifest(selected)).toEqual(selected);
+    expect(readEvaluationManifest({ evaluationManifest: selected })).toEqual(selected);
+    expect(() => validateEvaluationManifest({
+      ...selected,
+      provenance: { ...selected.provenance, selectedCorpusSha256: "not-a-digest" },
+    })).toThrow(/selectedCorpusSha256.*lowercase SHA-256 digest/);
+  });
+
   it("keeps unavailable distinct from failed", () => {
     expect(validateEvaluationManifest({ ...manifest, outcome: { state: "unavailable", reason: "provider not configured" } }).outcome.state).toBe("unavailable");
     expect(validateEvaluationManifest({ ...manifest, outcome: { state: "failed", reason: "threshold missed" } }).outcome.state).toBe("failed");
@@ -159,6 +175,41 @@ describe("evaluation manifest comparison", () => {
 
   it("reports identical manifests concisely", () => {
     expect(compareEvaluationManifests(manifest, manifest).summary).toMatch(/^No changes:/);
+  });
+
+  it("reports different selected-corpus identities as identity changes", () => {
+    const baselineSelection: EvaluationManifest = {
+      ...manifest,
+      provenance: { ...manifest.provenance, selectedCorpusSha256: "b".repeat(64) },
+    };
+    const candidateSelection: EvaluationManifest = {
+      ...manifest,
+      provenance: { ...manifest.provenance, selectedCorpusSha256: "c".repeat(64) },
+    };
+    const comparison = compareEvaluationManifests(baselineSelection, candidateSelection);
+    expect(comparison.identityChanges).toEqual([
+      {
+        path: "provenance.selectedCorpusSha256",
+        before: "b".repeat(64),
+        after: "c".repeat(64),
+      },
+    ]);
+    expect(comparison.summary).toBe("1 change: 1 identity, 0 metric, 0 outcome.");
+  });
+
+  it("reports a filtered-versus-full selected-corpus identity change", () => {
+    const filtered: EvaluationManifest = {
+      ...manifest,
+      provenance: { ...manifest.provenance, selectedCorpusSha256: "b".repeat(64) },
+    };
+    const full: EvaluationManifest = {
+      ...manifest,
+      provenance: { ...manifest.provenance, selectedCorpusSha256: digest },
+    };
+    const comparison = compareEvaluationManifests(filtered, full);
+    expect(comparison.identityChanges.map((change) => change.path)).toEqual([
+      "provenance.selectedCorpusSha256",
+    ]);
   });
 
   it("refuses incompatible and unbound evidence", () => {

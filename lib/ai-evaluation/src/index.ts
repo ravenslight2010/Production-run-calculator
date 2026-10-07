@@ -32,6 +32,7 @@ export type EvaluationManifest = {
   outcome: { state: EvaluationState; reason: string | null };
   provenance: {
     sourceSha256: string;
+    selectedCorpusSha256?: string;
     evidence:
       | { state: "hashed"; sha256: string }
       | { state: "unavailable"; reason: string };
@@ -148,6 +149,16 @@ export function validateEvaluationManifest(value: unknown): EvaluationManifest {
   const sourceSha256 = string(provenance.sourceSha256, "provenance.sourceSha256") as string;
   if (!/^[a-f0-9]{64}$/.test(sourceSha256)) throw new Error("provenance.sourceSha256 must be a lowercase SHA-256 digest");
   if (sourceSha256 !== sha256) throw new Error("provenance source must match corpus hash");
+  let selectedCorpusSha256: string | undefined;
+  if ("selectedCorpusSha256" in provenance) {
+    selectedCorpusSha256 = string(
+      provenance.selectedCorpusSha256,
+      "provenance.selectedCorpusSha256",
+    ) as string;
+    if (!/^[a-f0-9]{64}$/.test(selectedCorpusSha256)) {
+      throw new Error("provenance.selectedCorpusSha256 must be a lowercase SHA-256 digest");
+    }
+  }
   const evidence = record(provenance.evidence, "provenance.evidence");
   let validatedEvidence: EvaluationManifest["provenance"]["evidence"];
   if (evidence.state === "hashed") {
@@ -235,6 +246,7 @@ export function validateEvaluationManifest(value: unknown): EvaluationManifest {
     },
     provenance: {
       sourceSha256,
+      ...(selectedCorpusSha256 === undefined ? {} : { selectedCorpusSha256 }),
       evidence: validatedEvidence,
       evidenceType: string(provenance.evidenceType, "provenance.evidenceType") as string,
       evaluator: validatedEvaluator,
