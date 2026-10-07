@@ -11,6 +11,7 @@ from tempfile import TemporaryDirectory
 from gemini_skill_trigger_benchmark import (
     Classification,
     check_checked_in_artifacts,
+    FAILURE_CATEGORIES,
     GeminiAdapter,
     evaluate,
     evaluation_manifest,
@@ -309,7 +310,168 @@ class GeminiBenchmarkTests(unittest.TestCase):
         adapter = Fixture([{"decision": "maybe", "confidence": 0.9, "rationale": "x"}] * 2)
         result = evaluate(corpus(), adapter, retries=0)
         self.assertEqual(result[0]["status"], "invalid_output")
+        self.assertEqual(result[0]["failure_category"], "field_validation")
         self.assertEqual(review_queue(result)[0]["reason"], "invalid_output")
+        self.assertEqual(
+            review_queue(result)[0]["failure_category"], "field_validation"
+        )
+
+    def test_invalid_gemini_output_categories_are_safe_and_excluded(self):
+        def provider_reply(text):
+            return json.dumps({
+                "candidates": [{"content": {"parts": [{"text": text}]}}],
+            }).encode()
+
+        raw_replies = iter([
+            b"NOT_JSON PROVIDER_PAYLOAD_SENTINEL",
+            provider_reply("NOT_JSON CLASSIFICATION_RESPONSE_SENTINEL"),
+            json.dumps({"candidates": []}).encode(),
+            provider_reply(json.dumps({
+                "decision": "maybe",
+                "confidence": 0.9,
+                "rationale": "RATIONALE_SENTINEL",
+            })),
+        ])
+        adapter = GeminiAdapter(
+            api_key="CREDENTIAL_SENTINEL",
+            base_url="https://offline.test",
+            transport=lambda _url, _key, _body: next(raw_replies),
+        )
+        test_corpus = {
+            "skills": [{
+                "name": "demo",
+                "description": "offline fixture",
+                "evals": [
+                    {
+                        "id": "outer-json",
+                        "query": "PROMPT_SENTINEL outer JSON",
+                        "should_trigger": True,
+                    },
+                    {
+                        "id": "classification-json",
+                        "query": "PROMPT_SENTINEL classification JSON",
+                        "should_trigger": True,
+                    },
+                    {
+                        "id": "response-shape",
+                        "query": "PROMPT_SENTINEL response shape",
+                        "should_trigger": True,
+                    },
+                    {
+                        "id": "invalid-field",
+                        "query": "PROMPT_SENTINEL invalid field",
+                        "should_trigger": True,
+                    },
+                ],
+            }],
+        }
+        records = evaluate(test_corpus, adapter, retries=0)
+        categories = [
+            "json_parsing",
+            "json_parsing",
+            "response_schema",
+            "field_validation",
+        ]
+
+        self.assertEqual([row["status"] for row in records], ["invalid_output"] * 4)
+        self.assertEqual(
+            [row["failure_category"] for row in records],
+            categories,
+        )
+        self.assertTrue(set(categories).issubset(FAILURE_CATEGORIES))
+        measured = metrics(records)
+        self.assertEqual(measured["evaluated"], 0)
+        self.assertEqual(measured["excluded"], 4)
+        self.assertIsNone(measured["accuracy"])
+
+        source_bytes = json.dumps(test_corpus).encode()
+        manifest = evaluation_manifest(
+            source_bytes,
+            test_corpus,
+            records,
+            "offline-fixture",
+            0.75,
+            0,
+        )
+        self.assertEqual(manifest["outcome"]["state"], "failed")
+        self.assertEqual(manifest["provenance"]["evidence"]["state"], "hashed")
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            result_paths = [
+                root / "results.json",
+                root / "queue.json",
+                root / "report.md",
+            ]
+            write_benchmark_artifacts(
+                *result_paths,
+                {
+                    "provider": "gemini",
+                    "model": "offline-fixture",
+                    "run_at": "2026-10-07T00:00:00+00:00",
+                    "metrics": measured,
+                    "evaluationManifest": manifest,
+                },
+                records,
+            )
+            artifact_text = "\n".join(path.read_text() for path in result_paths)
+            for sentinel in (
+                "PROVIDER_PAYLOAD_SENTINEL",
+                "CLASSIFICATION_RESPONSE_SENTINEL",
+                "RATIONALE_SENTINEL",
+                "CREDENTIAL_SENTINEL",
+                "PROMPT_SENTINEL",
+            ):
+                self.assertNotIn(sentinel, artifact_text)
+
+            result_payload = json.loads(result_paths[0].read_text())
+            self.assertEqual(
+                [row["failure_category"] for row in result_payload["results"]],
+                categories,
+            )
+            self.assertTrue(
+                all("query" not in row and "rationale" not in row
+                    for row in result_payload["results"])
+            )
+            queue_payload = json.loads(result_paths[1].read_text())
+            self.assertEqual(
+                [case["failure_category"] for case in queue_payload["cases"]],
+                categories,
+            )
+
+    def test_unrecognized_failure_categories_are_not_retained(self):
+        record = {
+            "id": "invalid",
+            "skill": "demo",
+            "expected": "trigger",
+            "attempts": 1,
+            "status": "invalid_output",
+            "error": "invalid_output",
+            "failure_category": "UNTRUSTED_CATEGORY_SENTINEL",
+        }
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            result_paths = [
+                root / "results.json",
+                root / "queue.json",
+                root / "report.md",
+            ]
+            write_benchmark_artifacts(
+                *result_paths,
+                {
+                    "provider": "gemini",
+                    "model": "offline-fixture",
+                    "run_at": "2026-10-07T00:00:00+00:00",
+                    "metrics": metrics([record]),
+                },
+                [record],
+            )
+            artifact_text = "\n".join(path.read_text() for path in result_paths)
+            self.assertNotIn("UNTRUSTED_CATEGORY_SENTINEL", artifact_text)
+            retained = json.loads(result_paths[0].read_text())["results"][0]
+            queued = json.loads(result_paths[1].read_text())["cases"][0]
+            self.assertNotIn("failure_category", retained)
+            self.assertNotIn("failure_category", queued)
 
     def test_provider_failure_remains_distinct_from_invalid_output(self):
         adapter = Fixture([RuntimeError("provider connection failed")] * 2)

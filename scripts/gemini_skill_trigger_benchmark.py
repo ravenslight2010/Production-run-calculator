@@ -25,6 +25,11 @@ from typing import Any, Callable, Iterable
 
 
 DECISIONS = {"trigger", "do_not_trigger", "uncertain"}
+FAILURE_CATEGORIES = frozenset({
+    "json_parsing",
+    "response_schema",
+    "field_validation",
+})
 DEFAULT_MODEL = "gemini-2.5-flash"
 DEFAULT_CONFIDENCE = 0.75
 MINIMUM_ACCURACY = 0.8
@@ -57,6 +62,26 @@ class ProviderFailure(RuntimeError):
     pass
 
 
+class InvalidStructuredOutput(ProviderFailure):
+    """A provider reply failed structured-output parsing or validation."""
+
+    def __init__(self, category: str):
+        if not isinstance(category, str) or category not in FAILURE_CATEGORIES:
+            raise ValueError("unsupported structured-output failure category")
+        super().__init__("Gemini returned invalid structured output")
+        self.category = category
+
+
+class ClassificationValidationFailure(ValueError):
+    """A parsed classification failed response-shape or field validation."""
+
+    def __init__(self, message: str, category: str):
+        if not isinstance(category, str) or category not in FAILURE_CATEGORIES:
+            raise ValueError("unsupported classification failure category")
+        super().__init__(message)
+        self.category = category
+
+
 @dataclass(frozen=True)
 class Classification:
     decision: str
@@ -68,20 +93,37 @@ def validate_classification(value: Any) -> Classification:
     if isinstance(value, Classification):
         return value
     if not isinstance(value, dict):
-        raise ValueError("response must be a JSON object")
+        raise ClassificationValidationFailure(
+            "response must be a JSON object", "response_schema"
+        )
+    if not {"decision", "confidence", "rationale"}.issubset(value):
+        raise ClassificationValidationFailure(
+            "response is missing required fields", "response_schema"
+        )
     decision = value.get("decision")
     confidence = value.get("confidence")
     rationale = value.get("rationale")
-    if decision not in DECISIONS:
-        raise ValueError("decision must be trigger, do_not_trigger, or uncertain")
+    if not isinstance(decision, str) or decision not in DECISIONS:
+        raise ClassificationValidationFailure(
+            "decision must be trigger, do_not_trigger, or uncertain",
+            "field_validation",
+        )
     if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
-        raise ValueError("confidence must be numeric")
+        raise ClassificationValidationFailure(
+            "confidence must be numeric", "field_validation"
+        )
     if not 0 <= confidence <= 1:
-        raise ValueError("confidence must be between 0 and 1")
+        raise ClassificationValidationFailure(
+            "confidence must be between 0 and 1", "field_validation"
+        )
     if not isinstance(rationale, str) or not rationale.strip():
-        raise ValueError("rationale must be a non-empty string")
+        raise ClassificationValidationFailure(
+            "rationale must be a non-empty string", "field_validation"
+        )
     if len(rationale) > MAX_RATIONALE_CHARS:
-        raise ValueError("rationale is too long")
+        raise ClassificationValidationFailure(
+            "rationale is too long", "field_validation"
+        )
     return Classification(decision, float(confidence), rationale.strip())
 
 
@@ -147,15 +189,28 @@ class GeminiAdapter:
         url = f"{base}/models/{self.model}:generateContent"
         try:
             raw = self._transport(url, key, body)
-            payload = json.loads(raw)
-            text = payload["candidates"][0]["content"]["parts"][0]["text"]
-            return validate_classification(json.loads(text))
         except ProviderUnavailable:
             raise
-        except (ValueError, KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
-            raise ProviderFailure("Gemini returned invalid structured output") from exc
         except Exception as exc:
             raise ProviderFailure("Gemini request failed") from exc
+
+        try:
+            payload = json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError, TypeError):
+            raise InvalidStructuredOutput("json_parsing") from None
+
+        try:
+            text = payload["candidates"][0]["content"]["parts"][0]["text"]
+        except (KeyError, IndexError, TypeError):
+            raise InvalidStructuredOutput("response_schema") from None
+        if not isinstance(text, str):
+            raise InvalidStructuredOutput("response_schema") from None
+
+        try:
+            classification_value = json.loads(text)
+        except (json.JSONDecodeError, UnicodeDecodeError, TypeError):
+            raise InvalidStructuredOutput("json_parsing") from None
+        return validate_classification(classification_value)
 
     @staticmethod
     def _request(url: str, key: str, body: dict[str, Any]) -> bytes:
@@ -192,6 +247,7 @@ def evaluate(
         for item in skill["evals"]:
             classification = None
             error = None
+            failure_category = None
             attempts = 0
             for attempt in range(retries + 1):
                 attempts = attempt + 1
@@ -201,11 +257,19 @@ def evaluate(
                 except ProviderUnavailable:
                     error = "provider_unavailable"
                     break
+                except InvalidStructuredOutput as exc:
+                    error = "invalid_output"
+                    failure_category = exc.category
+                    break
+                except ClassificationValidationFailure as exc:
+                    error = "invalid_output"
+                    failure_category = exc.category
+                    break
                 except ValueError:
                     error = "invalid_output"
                     break
                 except Exception as exc:
-                    error = "invalid_output" if "structured output" in str(exc).lower() else "provider_failure"
+                    error = "provider_failure"
                     if attempt >= retries or not _is_transient(exc):
                         break
                     sleep(0.2 * (2**attempt))
@@ -230,6 +294,8 @@ def evaluate(
                     record["status"] = "included"
             else:
                 record.update({"status": error or "provider_failure", "error": error})
+                if isinstance(failure_category, str) and failure_category in FAILURE_CATEGORIES:
+                    record["failure_category"] = failure_category
             records.append(record)
     return records
 
@@ -282,8 +348,17 @@ def metrics(records: Iterable[dict[str, Any]]) -> dict[str, Any]:
 
 
 def review_queue(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [
-        {
+    cases = []
+    for r in records:
+        if r["status"] not in {
+            "provider_unavailable",
+            "provider_failure",
+            "invalid_output",
+            "uncertain",
+            "disagreement",
+        }:
+            continue
+        case = {
             "id": r["id"],
             "skill": r["skill"],
             "expected": r["expected"],
@@ -293,9 +368,11 @@ def review_queue(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
             "manual_decision": None,
             "manual_reason": None,
         }
-        for r in records
-        if r["status"] in {"provider_unavailable", "provider_failure", "invalid_output", "uncertain", "disagreement"}
-    ]
+        category = r.get("failure_category")
+        if isinstance(category, str) and category in FAILURE_CATEGORIES:
+            case["failure_category"] = category
+        cases.append(case)
+    return cases
 
 
 def write_report(path: Path, result: dict[str, Any]) -> None:
@@ -333,8 +410,16 @@ def retained_results(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
         "confidence",
         "status",
         "error",
+        "failure_category",
     )
-    return [{key: record[key] for key in retained_keys if key in record} for record in records]
+    retained = []
+    for record in records:
+        item = {key: record[key] for key in retained_keys if key in record}
+        category = item.get("failure_category")
+        if not isinstance(category, str) or category not in FAILURE_CATEGORIES:
+            item.pop("failure_category", None)
+        retained.append(item)
+    return retained
 
 
 def private_artifact_fields(value: Any, path: str = "$") -> list[str]:
