@@ -71,3 +71,17 @@ scope.
 automatic completion set from workflows that remain manually runnable. Verify
 the registered global set and confirm all release commands remain available to
 the release owner.
+
+## Background-task configuration snapshots
+
+Replit background tasks run from an isolated project snapshot that includes
+configuration and AI context. Changes to the main project's configuration do
+not retroactively change a task that was already running.
+
+**Why:** A running task continued to report the previous validation suite after
+the main project's automatic validation set was narrowed; Replit's task
+documentation confirms that task startup captures project configuration.
+
+**How to apply:** When a validation change appears ineffective, compare the
+task's start snapshot with the current main project. Verify the change on a task
+started afterward rather than claiming it altered an in-flight task.
