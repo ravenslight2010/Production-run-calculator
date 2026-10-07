@@ -2500,6 +2500,7 @@ describe("/sync/today — complete-write causal fence", () => {
     baseSnapshotId: string,
     casesNeeded: number,
     stamp: number,
+    runMeta: Record<string, unknown> = {},
   ): Record<string, unknown> {
     return {
       syncVersion: 1,
@@ -2507,7 +2508,7 @@ describe("/sync/today — complete-write causal fence", () => {
       baseSnapshotId,
       dayState: {
         date: DATE,
-        runs: [{ id: "complete-fence-run", brand: "Acme", flavor: "Pep" }],
+        runs: [{ id: "complete-fence-run", brand: "Acme", flavor: "Pep", ...runMeta }],
       },
       runValues: { "complete-fence-run": { casesNeeded } },
       runValuesUpdatedAt: { "complete-fence-run": stamp },
@@ -2548,6 +2549,56 @@ describe("/sync/today — complete-write causal fence", () => {
     expect(staleBody.partialFallback).toBe(true);
     expect(staleBody.canonicalRevision).toBe(currentBody.canonicalRevision);
     expect(staleBody.data.runValues["complete-fence-run"].casesNeeded).toBe(24);
+  });
+
+  it("accepts a current-base fast-clock write, then a normally stamped edit without losing terminal lifecycle", async () => {
+    const serverNow = Date.now();
+    const fastStamp = serverNow + 86_400_000;
+    const first = await put(
+      complete(emptyCompleteSnapshotId(DATE), 12, fastStamp, {
+        startedAt: serverNow - 10_000,
+        endedAt: serverNow - 1_000,
+        metaUpdatedAt: serverNow - 1_000,
+      }),
+      "fast-clock-device",
+    );
+    expect(first.status).toBe(200);
+    const firstBody = await first.json() as {
+      serverTime: number;
+      snapshotId: string;
+      data: {
+        dayState: { runs: Array<{ endedAt?: number }> };
+        runValues: Record<string, { casesNeeded?: number }>;
+        runValuesUpdatedAt: Record<string, number>;
+      };
+    };
+    expect(firstBody.data.runValues["complete-fence-run"].casesNeeded).toBe(12);
+    expect(firstBody.data.runValuesUpdatedAt["complete-fence-run"]).toBe(firstBody.serverTime);
+    expect(firstBody.data.runValuesUpdatedAt["complete-fence-run"]).toBeLessThan(fastStamp);
+    expect(firstBody.data.dayState.runs[0].endedAt).toBeDefined();
+
+    const normalStamp = Math.max(1, firstBody.serverTime - 1);
+    const laterEdit = await put(
+      complete(firstBody.snapshotId, 24, normalStamp, {
+        startedAt: serverNow - 10_000,
+        metaUpdatedAt: firstBody.serverTime + 1,
+      }),
+      "normal-clock-device",
+    );
+    expect(laterEdit.status).toBe(200);
+    const laterBody = await laterEdit.json() as {
+      partialFallback?: boolean;
+      serverTime: number;
+      data: {
+        dayState: { runs: Array<{ endedAt?: number }> };
+        runValues: Record<string, { casesNeeded?: number }>;
+        runValuesUpdatedAt: Record<string, number>;
+      };
+    };
+    expect(laterBody.partialFallback).not.toBe(true);
+    expect(laterBody.data.runValues["complete-fence-run"].casesNeeded).toBe(24);
+    expect(laterBody.data.runValuesUpdatedAt["complete-fence-run"]).toBe(laterBody.serverTime);
+    expect(laterBody.data.dayState.runs[0].endedAt).toBeDefined();
   });
 
   it("serializes concurrent complete writes from the same base with one winner", async () => {
@@ -2925,11 +2976,10 @@ describe("/sync large-day complete versus partial measurements", () => {
 });
 
 describe("/sync — per-run protective merge (data-loss guard)", () => {
-  // The server is now a per-run last-writer-wins register keyed on each run's
-  // edit stamp (runValuesUpdatedAt), not a blind blob overwrite. An empty run
-  // value paired with an EQUAL-or-older stamp must never overwrite a populated
-  // stored value — that is the recurring "I entered it, refreshed, it vanished"
-  // corruption. Only a strictly-newer-stamped edit changes a run.
+  // Writes without a validated base use per-run last-writer-wins stamps; writes
+  // from the exact current versioned base use snapshot causality and are stamped
+  // by the server. In both cases, an empty value must never overwrite populated
+  // data, the recurring "I entered it, refreshed, it vanished" corruption.
   const DATE = "2030-05-01";
   function put(payload: unknown) {
     return fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {

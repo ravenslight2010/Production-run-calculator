@@ -30,10 +30,11 @@ import {
 // unless that run was explicitly deleted:
 //
 //   - Run VALUES are a per-run last-writer-wins register keyed on the per-run
-//     edit stamp (runValuesUpdatedAt). An incoming value is accepted ONLY when
-//     its stamp is STRICTLY NEWER than what's stored; equal/older stamps keep the
-//     stored value (this blocks the empty-value-with-equal-stamp corruption). A
-//     run present in the store but omitted from the push keeps its stored value.
+//     edit stamp (runValuesUpdatedAt) for writes without a validated base. An
+//     exact current-base snapshot is the stronger causal signal: changed values
+//     from it are accepted and stamped with server time. Client timestamps are
+//     never allowed to advance beyond server time. A run present in the store
+//     but omitted from the push keeps its stored value.
 //
 //   - The run LIST (dayState.runs) is union-merged by run id: incoming runs
 //     first (the pusher's current ordering), then any stored run the push
@@ -65,6 +66,35 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 
 function asNumber(v: unknown): number {
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
+}
+function runValueStampAtServerTime(value: unknown, nowMs: number): number {
+  const stamp = asNumber(value);
+  return stamp > nowMs ? nowMs : stamp;
+}
+function capFutureRunValueStamps(
+  payload: Record<string, unknown>,
+  nowMs: number,
+): Record<string, unknown> {
+  if (!isPlainObject(payload.runValuesUpdatedAt)) return payload;
+  let changed = false;
+  const stamps: Record<string, unknown> = { ...payload.runValuesUpdatedAt };
+  for (const [runId, value] of Object.entries(stamps)) {
+    if (typeof value !== "number" || !Number.isFinite(value) || value <= nowMs) continue;
+    stamps[runId] = nowMs;
+    changed = true;
+  }
+  return changed ? { ...payload, runValuesUpdatedAt: stamps } : payload;
+}
+function stampRunValuesAtServerTime(
+  payload: Record<string, unknown>,
+  nowMs: number,
+): Record<string, unknown> {
+  const values = isPlainObject(payload.runValues) ? payload.runValues : {};
+  const stamps = isPlainObject(payload.runValuesUpdatedAt)
+    ? { ...payload.runValuesUpdatedAt }
+    : {};
+  for (const runId of Object.keys(values)) stamps[runId] = nowMs;
+  return { ...payload, runValuesUpdatedAt: stamps };
 }
 const MAX_BREAK_STAMP_SKEW_MS = 5 * 60 * 1000;
 function validBreakStamp(value: unknown, nowMs = Date.now()): number {
@@ -584,19 +614,31 @@ function preserveAndInvalidateAutoTrackCoordination(
 
 /**
  * Merge `incoming` against the already-stored `existing` payload so that:
- *   - a run's stored VALUE only changes on a strictly-newer-stamped edit, and
+ *   - a run's stored VALUE changes on a strictly-newer stamp, or on a changed
+ *     value from a caller-validated current-base snapshot, and
  *   - a stored RUN is never dropped by a push that omits it (additive run list),
  *   - unless the run was explicitly deleted (tombstoned), or the caller is
  *     replacing a future scheduled-day row.
  * Returns a new payload object. Non-object payloads are returned unchanged.
  */
 export function protectRunValues(
-  incoming: unknown,
+  incomingInput: unknown,
   existing: unknown,
-  options: { allowRunListReplacement?: boolean; nowMs?: number } = {},
+  options: {
+    allowRunListReplacement?: boolean;
+    acceptCurrentBaseRunValueEdits?: boolean;
+    nowMs?: number;
+  } = {},
 ): unknown {
-  if (!isPlainObject(incoming)) return incoming;
+  if (!isPlainObject(incomingInput)) return incomingInput;
   const nowMs = Number.isFinite(options.nowMs) ? Number(options.nowMs) : Date.now();
+  let incoming = capFutureRunValueStamps(incomingInput, nowMs);
+  if (options.acceptCurrentBaseRunValueEdits && !isPlainObject(existing)) {
+    // A first complete snapshot has no stored value to compare against. The
+    // accepted base identity is its causal proof, so issue server-time stamps
+    // rather than preserving a client clock that could be arbitrarily ahead.
+    incoming = stampRunValuesAtServerTime(incoming, nowMs);
+  }
   // Nothing stored yet (first write for this scope+date): the payload was
   // already sanitized by the route, but still canonicalize the legacy
   // runValues pair from packagingProgress before storing/returning it.
@@ -700,8 +742,8 @@ export function protectRunValues(
     // Incoming run IDs are authoritative for the new day (the reset supplies
     // the run list). Only protect values for runs the reset explicitly includes.
     for (const id of Object.keys(inVals)) {
-      const inStamp = asNumber(inUpd[id]);
-      const exStamp = asNumber(exUpd[id]);
+      const inStamp = runValueStampAtServerTime(inUpd[id], nowMs);
+      const exStamp = runValueStampAtServerTime(exUpd[id], nowMs);
       if (
         isPlainObject(exVals[id]) &&
         isBlankRunValue(inVals[id]) &&
@@ -711,10 +753,12 @@ export function protectRunValues(
         // real data on this row — preserve the real data and advance the
         // stamp so the surviving value wins the per-run LWW on every peer.
         outVals[id] = exVals[id];
-        outUpd[id]  = Math.max(inStamp, exStamp, Date.now());
+        outUpd[id]  = Math.max(inStamp, exStamp, nowMs);
       } else {
         outVals[id] = inVals[id];
-        if (inStamp > 0) outUpd[id] = inStamp;
+        if (inStamp > 0 || options.acceptCurrentBaseRunValueEdits) {
+          outUpd[id] = options.acceptCurrentBaseRunValueEdits ? nowMs : inStamp;
+        }
       }
     }
     preserveCanonicalApplicatorStock(outVals, exVals);
@@ -819,17 +863,24 @@ export function protectRunValues(
   }
   const mergedRuns: unknown[] = runOrder.map((id) => runById.get(id));
 
-  // ── Per-run VALUE register merge (strictly-newer-stamp wins), additive ──────
+  // ── Per-run VALUE merge (stamp or validated base), additive ─────────────────
   const outVals: Record<string, unknown> = {};
   const outUpd: Record<string, unknown> = {};
   const valueIds = new Set<string>([...Object.keys(exVals), ...Object.keys(inVals)]);
   for (const id of valueIds) {
     if (tombstoned.has(id)) continue; // a deleted run keeps no value
-    const exStamp = asNumber(exUpd[id]);
-    const inStamp = asNumber(inUpd[id]);
+    const exStamp = runValueStampAtServerTime(exUpd[id], nowMs);
+    const inStamp = runValueStampAtServerTime(inUpd[id], nowMs);
     const inHas = Object.prototype.hasOwnProperty.call(inVals, id);
     const exHas = Object.prototype.hasOwnProperty.call(exVals, id);
-    if (inHas && inStamp > exStamp) {
+    const currentBaseValueChanged =
+      options.acceptCurrentBaseRunValueEdits
+      && inHas
+      && (!exHas || !deepEqualValue(inVals[id], exVals[id]));
+    // Snapshot identity was verified under the row lock by the route. For a
+    // changed value that causal proof outranks client clock order; the new
+    // canonical stamp is server-owned. Unchanged values keep their old stamp.
+    if (inHas && (inStamp > exStamp || currentBaseValueChanged)) {
       if (exHas && isBlankRunValue(inVals[id]) && !isBlankRunValue(exVals[id])) {
         // Empty-over-populated, even with a strictly-newer stamp. The original
         // stamp-only guard assumed the empty-value corruption ALWAYS carried an
@@ -846,11 +897,15 @@ export function protectRunValues(
         // surviving value strictly wins on every peer (and heals the offending
         // client on its next read instead of stalemating on its stale stamp).
         outVals[id] = exVals[id];
-        outUpd[id] = inStamp;
+        outUpd[id] = options.acceptCurrentBaseRunValueEdits
+          ? nowMs
+          : inStamp;
       } else {
-        // Genuine, strictly-newer edit.
+        // Genuine edit that passed timestamp ordering or the current-base fence.
         outVals[id] = inVals[id];
-        outUpd[id] = inStamp;
+        outUpd[id] = options.acceptCurrentBaseRunValueEdits
+          ? nowMs
+          : inStamp;
         // Field-level preservation: casesNeeded is the planned production target,
         // set once from the schedule and never modified during a live run. A peer
         // that synced the run without the schedule will have casesNeeded=0, and

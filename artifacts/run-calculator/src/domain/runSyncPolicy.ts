@@ -176,8 +176,24 @@ export function shouldHealFormFromStored(live: FormValues, stored: FormValues, e
 export function shouldResetFormOnRunSwitch(live: FormValues, stored: FormValues, settled: boolean): boolean {
   return !settled && !deepEqual(live, stored);
 }
-export function acceptRemoteRunValueOnSync(remote: FormValues, local: FormValues, remoteTs: number, localTs: number): boolean {
-  return !isEmptyOverPopulated(remote, local) && !(localTs > remoteTs);
+export function isRunValueStampAheadOfServerTime(stamp: number, serverNowMs: number): boolean {
+  return Number.isFinite(stamp) && stamp > serverNowMs;
+}
+export function acceptRemoteRunValueOnSync(
+  remote: FormValues,
+  local: FormValues,
+  remoteTs: number,
+  localTs: number,
+  serverNowMs = Date.now(),
+): boolean {
+  // A local stamp ahead of server time is evidence of device-clock skew, not
+  // proof that the local value is newer than the server's canonical snapshot.
+  // Current-base writes are ordered by their snapshot fence, and the server
+  // re-stamps accepted edits with its own clock; use the same clock basis here.
+  const comparableLocalTs = isRunValueStampAheadOfServerTime(localTs, serverNowMs)
+    ? 0
+    : localTs;
+  return !isEmptyOverPopulated(remote, local) && !(comparableLocalTs > remoteTs);
 }
 
 /**

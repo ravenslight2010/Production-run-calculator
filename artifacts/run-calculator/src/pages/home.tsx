@@ -301,6 +301,7 @@ import {
   freshDayState,
   isBlankRemovableRun,
   isEmptyOverPopulated,
+  isRunValueStampAheadOfServerTime,
   isPristineSeedRun,
   pickCurrentRunPushValue,
   reconcileOperationalIntentCanonical,
@@ -8384,6 +8385,7 @@ export default function Home() {
       // ── Run values (only accept if we're taking the remote day) ──
       if (acceptRemoteDay) {
         const mergedUpd: Record<string, number> = { ...localUpd };
+        const runValueServerNow = Date.now() + serverClockOffsetMsRef.current;
         for (const [id, vals] of Object.entries(payload.runValues)) {
           const rTs = remoteUpd[id] ?? 0;
           const lTs = localUpd[id] ?? 0;
@@ -8403,6 +8405,7 @@ export default function Home() {
             localVals,
             rTs,
             lTs,
+            runValueServerNow,
           );
           let acceptedVals = localVals;
           if (!acceptWholeRun) {
@@ -8410,7 +8413,7 @@ export default function Home() {
             // empty-over-populated corruption, advance our stamp so the heal
             // re-push strictly wins; a genuinely-fresher local edit keeps its
             // stamp as-is (the merge already bumped re-pointed runs' stamps).
-            if (isEmptyOverPopulated(vals as FormValues, localVals)) mergedUpd[id] = Date.now();
+            if (isEmptyOverPopulated(vals as FormValues, localVals)) mergedUpd[id] = runValueServerNow;
             rejectedStale = true;
           } else {
             // Field-level preservation: casesNeeded is the planned target, set
@@ -8428,7 +8431,10 @@ export default function Home() {
               // arrives via SSE would otherwise display with decimals on screen.
               casesOnCurrentSkid: Math.round(Number(remoteVals.casesOnCurrentSkid) || 0),
             };
-            if (rTs > lTs) mergedUpd[id] = rTs;
+            if (
+              rTs > lTs
+              || isRunValueStampAheadOfServerTime(lTs, runValueServerNow)
+            ) mergedUpd[id] = rTs;
           }
           // Packaging progress is a separate causal register. Its winning pair
           // overlays whichever whole-run copy won above, so a stale automatic
@@ -10156,6 +10162,11 @@ export default function Home() {
   ): Promise<{ body: unknown; stale: boolean }> {
     const result = await consumeSyncWriteResponse<SyncPayload>(res, {
       shouldConsume,
+      onServerTime: (serverTime) => {
+        const offset = serverTime - Date.now();
+        serverClockOffsetMsRef.current = offset;
+        setServerClockOffsetMs(offset);
+      },
       onStale: (body) => {
         handleStaleSyncWrite(body);
       },

@@ -1291,6 +1291,7 @@ async function upsertProtected(
             legacyRejected: true,
           };
         }
+        let currentBaseSnapshotValidated = false;
         // Complete protocol writes are also causally tied to the exact snapshot
         // the client adopted. A future-skewed per-run timestamp must not let an
         // offline client overwrite a canonical edit it never observed.
@@ -1312,6 +1313,15 @@ async function upsertProtected(
             canonicalRevision: existing?.canonicalRevision ?? 0,
             serverTime,
           };
+        }
+        if (
+          payload
+          && typeof payload === "object"
+          && !Array.isArray(payload)
+          && (payload as Record<string, unknown>).completeness === "complete"
+          && (payload as Record<string, unknown>).baseSnapshotId === completeBaseSnapshotId
+        ) {
+          currentBaseSnapshotValidated = true;
         }
         // A partial payload is a delta over the exact locked snapshot. Inherit
         // omitted cold sections (such as history) from that snapshot before the
@@ -1339,6 +1349,7 @@ async function upsertProtected(
               serverTime,
             };
           }
+          currentBaseSnapshotValidated = true;
         }
         // Only a FUTURE scheduled row may use resetAt to replace its run list.
         // Today's row must always be additive/tombstone-driven: a new device can
@@ -1347,6 +1358,10 @@ async function upsertProtected(
         const serverOwnedPayload = capPackagingManualOverrideUntil(payloadForMerge, serverTime);
         const m = completeSyncData(capMergedResult(protectRunValues(serverOwnedPayload, canonicalExisting, {
           allowRunListReplacement: date > clientTodayDate,
+          // The exact locked snapshot is the causal ordering signal for
+          // versioned writes. Changed run values from that base are accepted
+          // regardless of client clock order and receive a server-time stamp.
+          acceptCurrentBaseRunValueEdits: currentBaseSnapshotValidated,
           nowMs: serverTime,
         }))) as Record<string, any>;
         canonicalizePepNames(m);

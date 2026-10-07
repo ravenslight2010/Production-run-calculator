@@ -2,10 +2,10 @@
 // purpose (no module that binds @workspace/db at import) so it never trips the
 // integration-test DB-binding gotcha.
 //
-// The merge makes PUT /sync a per-run last-writer-wins register keyed on each
-// run's edit stamp instead of blind blob replacement, which is what stops the
-// recurring shared day-state data loss: an empty run value paired with a REAL
-// (equal or older) stamp can no longer overwrite a populated stored value.
+// Writes without a validated snapshot base use per-run last-writer-wins stamps
+// instead of blind blob replacement. Versioned writes from the exact current
+// base use snapshot causality and receive server-time stamps. The empty-value
+// guard applies to both paths so an empty run value cannot erase populated data.
 
 import { describe, it, expect } from "vitest";
 import { protectRunValues, sanitizeSyncPayload, isSyncPayloadTooLarge, capMergedResult } from "./protectRunValues";
@@ -351,6 +351,38 @@ describe("protectRunValues", () => {
     const out = protectRunValues(incoming, existing) as Payload;
     expect(out.runValues.r1).toEqual({ casesNeeded: 999 });
     expect(out.runValuesUpdatedAt.r1).toBe(2000);
+  });
+
+  it("uses a validated current snapshot as value ordering and stamps accepted edits with server time", () => {
+    const nowMs = 2_000;
+    const existing: Payload = {
+      runValues: { r1: POP },
+      runValuesUpdatedAt: { r1: nowMs + 86_400_000 },
+    };
+    const incoming: Payload = {
+      runValues: { r1: { casesNeeded: 777 } },
+      runValuesUpdatedAt: { r1: nowMs + 86_400_000 },
+    };
+    const out = protectRunValues(incoming, existing, {
+      acceptCurrentBaseRunValueEdits: true,
+      nowMs,
+    }) as Payload;
+    expect(out.runValues.r1).toEqual({ casesNeeded: 777 });
+    expect(out.runValuesUpdatedAt.r1).toBe(nowMs);
+  });
+
+  it("server-stamps initial current-base values instead of retaining a fast client clock", () => {
+    const nowMs = 2_000;
+    const incoming: Payload = {
+      runValues: { r1: { casesNeeded: 12 } },
+      runValuesUpdatedAt: { r1: nowMs + 86_400_000 },
+    };
+    const out = protectRunValues(incoming, undefined, {
+      acceptCurrentBaseRunValueEdits: true,
+      nowMs,
+    }) as Payload;
+    expect(out.runValues.r1).toEqual({ casesNeeded: 12 });
+    expect(out.runValuesUpdatedAt.r1).toBe(nowMs);
   });
 
   it("preserves stored casesNeeded when a peer's newer edit carries casesNeeded=0", () => {

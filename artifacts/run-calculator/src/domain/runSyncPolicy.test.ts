@@ -3,6 +3,7 @@ import { DEFAULT_VALUES, type DayState, type RunMeta } from "../types";
 import {
   acceptRemoteRunValueOnSync,
   adoptStrictlyNewerRemoteLifecycles,
+  isRunValueStampAheadOfServerTime,
   isEmptyOverPopulated,
   reconcileOperationalIntentCanonical,
   serverOwnedApplicatorStockProgress,
@@ -17,6 +18,28 @@ describe("run sync policy", () => {
     const populated = { ...DEFAULT_VALUES, casesNeeded: 44 };
     expect(isEmptyOverPopulated(DEFAULT_VALUES, populated)).toBe(true);
     expect(acceptRemoteRunValueOnSync(DEFAULT_VALUES, populated, 200, 100)).toBe(false);
+  });
+  it("accepts a canonical peer edit instead of letting a fast local clock retain stale values", () => {
+    const serverNow = 1_700_000_000_000;
+    const clockFastByOneDay = serverNow + 86_400_000;
+    const oldLocal = { ...DEFAULT_VALUES, casesNeeded: 120 };
+    const updatedRemote = { ...DEFAULT_VALUES, casesNeeded: 240 };
+
+    expect(isRunValueStampAheadOfServerTime(clockFastByOneDay, serverNow)).toBe(true);
+    expect(acceptRemoteRunValueOnSync(
+      updatedRemote,
+      oldLocal,
+      serverNow,
+      clockFastByOneDay,
+      serverNow,
+    )).toBe(true);
+    expect(acceptRemoteRunValueOnSync(
+      updatedRemote,
+      oldLocal,
+      300,
+      301,
+      302,
+    )).toBe(false);
   });
   it("retains a paused lifecycle when a same-start remote copy regresses it", () => {
     const local = { id: "a", brand: "A", flavor: "", startedAt: 10, pausedAt: 20, metaUpdatedAt: 20 };

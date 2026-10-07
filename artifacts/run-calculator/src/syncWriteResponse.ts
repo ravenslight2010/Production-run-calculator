@@ -56,6 +56,7 @@ export function syncWriteFieldCheck(input: {
 
 interface ConsumeSyncWriteResponseOptions<T> {
   applyCanonical?: (data: T) => void | Promise<void>;
+  onServerTime?: (serverTime: number) => void;
   onStale?: (body: SyncWriteResponseBody<T>) => void | Promise<void>;
   shouldConsume?: () => boolean;
 }
@@ -81,6 +82,9 @@ export async function consumeSyncWriteResponse<T>(
   const malformed = response.ok && !validEnvelope;
   const stale = body?.stale === true;
 
+  if (!malformed && typeof body?.serverTime === "number" && Number.isFinite(body.serverTime)) {
+    options.onServerTime?.(body.serverTime);
+  }
   if (malformed) {
     // A successful transport with no sync envelope is not an acknowledgment.
     // Callers keep their retry/fence state until a canonical response arrives.

@@ -74,6 +74,32 @@ describe("consumeSyncWriteResponse", () => {
     expect(applyCanonical).toHaveBeenCalledWith(canonical);
   });
 
+  it("adopts the server clock before applying canonical values", async () => {
+    const order: string[] = [];
+    const result = await consumeSyncWriteResponse(
+      new Response(JSON.stringify({
+        ok: true,
+        data: { runValues: {} },
+        serverTime: 123_456,
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+      {
+        onServerTime: (serverTime) => {
+          expect(serverTime).toBe(123_456);
+          order.push("server-time");
+        },
+        applyCanonical: () => {
+          order.push("canonical");
+        },
+      },
+    );
+
+    expect(result.malformed).toBe(false);
+    expect(order).toEqual(["server-time", "canonical"]);
+  });
+
   it("does not apply a null fallback as a canonical payload", async () => {
     const applyCanonical = vi.fn();
     const result = await consumeSyncWriteResponse(
