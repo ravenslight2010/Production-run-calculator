@@ -49,6 +49,8 @@ const NEXT_DATE = "2030-03-12";
 const ROLLOVER_NOW = Date.parse("2030-03-12T06:00:00.000Z");
 const ROLLOVER_RUN = "failover-rollover-run";
 const ALERT_DATE = "2030-04-01";
+const ALERT_SANDBOX_SCOPE = "sandbox" as const;
+const SCHEDULED_DATE_COUNT = 70;
 
 beforeAll(async () => {
   originalDatabaseUrl = process.env.DATABASE_URL;
@@ -429,36 +431,60 @@ describe("background operation PostgreSQL reconnection", () => {
     expect(await db.select().from(inventoryLedgerTable)).toHaveLength(1);
   });
 
-  it("coalesces scoped dates into one scheduled web-push job and records each alert once", async () => {
+  it("coalesces many dates by scope and time bucket while evaluating every date", async () => {
     const now = Date.now();
     const endedAt = now - 120_000;
     const dueAt = endedAt + 60_000;
-    await db.insert(dailySyncTable).values({
-      date: ALERT_DATE,
-      scope: SCOPE,
-      data: {
-        dayState: {
-          date: ALERT_DATE,
-          runs: [{ id: "scheduled-alert-run", startedAt: now - 300_000, endedAt }],
+    const dates = Array.from({ length: SCHEDULED_DATE_COUNT }, (_, index) =>
+      new Date(Date.parse(`${ALERT_DATE}T00:00:00.000Z`) + index * 24 * 60 * 60 * 1_000)
+        .toISOString()
+        .slice(0, 10));
+    await db.insert(dailySyncTable).values(
+      [SCOPE, ALERT_SANDBOX_SCOPE].flatMap((scope) => dates.map((date) => ({
+        date,
+        scope,
+        data: {
+          dayState: {
+            date,
+            runs: scope === SCOPE && date === ALERT_DATE
+              ? [{ id: "scheduled-alert-run", startedAt: now - 300_000, endedAt }]
+              : [],
+          },
+          runValues: scope === SCOPE && date === ALERT_DATE
+            ? { "scheduled-alert-run": { freezerTime: 1 } }
+            : {},
         },
-        runValues: { "scheduled-alert-run": { freezerTime: 1 } },
-      },
-    });
-    await db.insert(dailySyncTable).values({
-      date: "2030-04-02",
-      scope: SCOPE,
-      data: {
-        dayState: { date: "2030-04-02", runs: [] },
-        runValues: {},
-      },
-    });
+      }))),
+    );
 
     // Arm the freezer milestone before it is due. The production scheduled
     // handler will then claim the logical record after the milestone passes.
     await runWebPushAlerts(dueAt - 1, { scope: SCOPE, date: ALERT_DATE });
-    const queued = await enqueueScheduledWebPushAlerts(now);
-    expect(queued).toEqual({ examined: 1, enqueued: 1 });
-    expect(await enqueueScheduledWebPushAlerts(now)).toEqual({ examined: 1, enqueued: 0 });
+    const bucketMs = 60_000;
+    const scheduledAt = Date.parse("2030-04-01T12:00:10.000Z");
+    const bucketStart = Date.parse("2030-04-01T12:00:00.000Z");
+    const queued = await enqueueScheduledWebPushAlerts(scheduledAt, bucketMs);
+    expect(queued).toEqual({ examined: 2, enqueued: 2 });
+    expect(await enqueueScheduledWebPushAlerts(scheduledAt + 30_000, bucketMs))
+      .toEqual({ examined: 2, enqueued: 0 });
+    const queuedJobs = await db.select().from(serverJobsTable);
+    expect(queuedJobs).toHaveLength(2);
+    expect(queuedJobs.map((job) => ({
+      scope: job.scope,
+      idempotencyKey: job.idempotencyKey,
+      input: job.input,
+    }))).toEqual(expect.arrayContaining([
+      {
+        scope: SCOPE,
+        idempotencyKey: `scheduled-evaluation:${SCOPE}:${bucketStart}`,
+        input: { scheduledFor: scheduledAt },
+      },
+      {
+        scope: ALERT_SANDBOX_SCOPE,
+        idempotencyKey: `scheduled-evaluation:${ALERT_SANDBOX_SCOPE}:${bucketStart}`,
+        input: { scheduledFor: scheduledAt },
+      },
+    ]));
 
     const worker = new ServerJobWorker("failover-test-worker");
     await killer.query(`
@@ -484,18 +510,30 @@ describe("background operation PostgreSQL reconnection", () => {
     expect(retryPid).not.toBe(terminatedPid);
     expect(recoveredPid).not.toBe(terminatedPid);
 
-    const [job] = await db.select().from(serverJobsTable);
-    expect(job).toMatchObject({
-      scope: SCOPE,
+    const jobsAfterRetry = await db.select().from(serverJobsTable);
+    expect(jobsAfterRetry.map((job) => job.status).sort()).toEqual(["queued", "succeeded"]);
+    const recoveredJob = jobsAfterRetry.find((job) => job.status === "succeeded");
+    expect(recoveredJob).toMatchObject({
       type: "scheduled-evaluation",
-      status: "succeeded",
       attempt: 1,
-      result: { examined: 2, candidates: 1 },
     });
-    expect(await db.select().from(serverJobAttemptsTable)).toHaveLength(1);
-    const [jobAttempt] = await db.select().from(serverJobAttemptsTable);
+    expect(await worker.runOnce()).toBe(true);
+
+    const evaluatedJobs = await db.select().from(serverJobsTable);
+    expect(evaluatedJobs).toHaveLength(2);
+    expect(evaluatedJobs.map((job) => ({
+      scope: job.scope,
+      status: job.status,
+      result: job.result,
+    }))).toEqual(expect.arrayContaining([
+      { scope: SCOPE, status: "succeeded", result: { examined: SCHEDULED_DATE_COUNT, candidates: 1 } },
+      { scope: ALERT_SANDBOX_SCOPE, status: "succeeded", result: { examined: SCHEDULED_DATE_COUNT, candidates: 0 } },
+    ]));
+    expect(await db.select().from(serverJobAttemptsTable)).toHaveLength(2);
+    const jobAttempt = (await db.select().from(serverJobAttemptsTable))
+      .find((attempt) => attempt.jobId === recoveredJob?.id);
     expect(jobAttempt).toMatchObject({
-      jobId: job.id,
+      jobId: recoveredJob?.id,
       attempt: 1,
       workerId: "failover-test-worker",
       outcome: "succeeded",

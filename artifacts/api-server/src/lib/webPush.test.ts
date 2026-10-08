@@ -141,24 +141,32 @@ describe("server web-push alert candidates", () => {
     expect(scheduledEvaluationIdempotencyKey("sandbox", 120_001, 60_000)).not.toBe(first);
   });
 
-  it("enqueues one time-bucketed scheduled evaluation for each distinct scope", async () => {
+  it("coalesces repeated time-bucketed scheduled evaluations for each distinct scope", async () => {
     const grouped = vi.fn().mockResolvedValue([{ scope: "live" }, { scope: "sandbox" }]);
     const from = vi.fn().mockReturnValue({ groupBy: grouped });
     mocks.dbSelect.mockReturnValue({ from });
-    mocks.enqueueServerJob.mockResolvedValue({ created: true });
+    mocks.enqueueServerJob
+      .mockResolvedValueOnce({ created: true })
+      .mockResolvedValueOnce({ created: true })
+      .mockResolvedValueOnce({ created: false })
+      .mockResolvedValueOnce({ created: false });
 
     await expect(enqueueScheduledWebPushAlerts(120_001, 60_000))
       .resolves.toEqual({ examined: 2, enqueued: 2 });
+    await expect(enqueueScheduledWebPushAlerts(179_999, 60_000))
+      .resolves.toEqual({ examined: 2, enqueued: 0 });
 
-    expect(grouped).toHaveBeenCalledTimes(1);
-    expect(mocks.enqueueServerJob).toHaveBeenCalledTimes(2);
+    expect(grouped).toHaveBeenCalledTimes(2);
+    expect(mocks.enqueueServerJob).toHaveBeenCalledTimes(4);
     expect(mocks.enqueueServerJob.mock.calls.map(([job]) => ({
       scope: job.scope,
       idempotencyKey: job.idempotencyKey,
-      input: job.input,
+      scheduledFor: job.input.scheduledFor,
     }))).toEqual([
-      { scope: "live", idempotencyKey: scheduledEvaluationIdempotencyKey("live", 120_001, 60_000), input: { scheduledFor: 120_001 } },
-      { scope: "sandbox", idempotencyKey: scheduledEvaluationIdempotencyKey("sandbox", 120_001, 60_000), input: { scheduledFor: 120_001 } },
+      { scope: "live", idempotencyKey: scheduledEvaluationIdempotencyKey("live", 120_001, 60_000), scheduledFor: 120_001 },
+      { scope: "sandbox", idempotencyKey: scheduledEvaluationIdempotencyKey("sandbox", 120_001, 60_000), scheduledFor: 120_001 },
+      { scope: "live", idempotencyKey: scheduledEvaluationIdempotencyKey("live", 179_999, 60_000), scheduledFor: 179_999 },
+      { scope: "sandbox", idempotencyKey: scheduledEvaluationIdempotencyKey("sandbox", 179_999, 60_000), scheduledFor: 179_999 },
     ]);
   });
 
