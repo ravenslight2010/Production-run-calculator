@@ -1,17 +1,48 @@
+import { EventEmitter } from "node:events";
+import { performance } from "node:perf_hooks";
+import { Pool, type PoolClient } from "pg";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   capacityTelemetrySnapshot,
   clearCapacityTelemetryForTests,
+  installPoolTelemetry,
   legacySyncReadinessSnapshot,
   recordLegacySyncWrite,
   recordSseFrame,
   recordSyncParserRejection,
   recordSyncPut,
+  recordSyncTransaction,
   reportCapacityTelemetry,
   syncRunCountBucket,
 } from "./capacityTelemetry";
 
 beforeEach(() => clearCapacityTelemetryForTests());
+
+class SyntheticPgClient extends EventEmitter {
+  private connected = false;
+  _queryable = true;
+  _ending = false;
+
+  connect(callback: (error?: Error) => void): void {
+    this.connected = true;
+    setImmediate(() => callback());
+  }
+
+  isConnected(): boolean {
+    return this.connected;
+  }
+
+  end(callback?: (error?: Error) => void): Promise<void> {
+    this.connected = false;
+    this._ending = true;
+    callback?.();
+    return Promise.resolve();
+  }
+
+  ref(): void {}
+
+  unref(): void {}
+}
 
 describe("capacity telemetry", () => {
   it("reports bounded percentile distributions without operational identifiers", () => {
@@ -49,6 +80,57 @@ describe("capacity telemetry", () => {
     expect(syncRunCountBucket({ dayState: { runs: [{}] } })).toBe("1-5");
     expect(syncRunCountBucket({ dayState: { runs: Array(20).fill({}) } })).toBe("6-20");
     expect(syncRunCountBucket({ dayState: { runs: Array(80).fill({}) } })).toBe("21-50");
+  });
+
+  it("keeps percentile samples representative across the whole report window", () => {
+    const random = vi.spyOn(Math, "random").mockReturnValue(0);
+    try {
+      for (let index = 0; index < 50_000; index += 1) {
+        recordSyncTransaction(5);
+      }
+      for (let index = 0; index < 1_000; index += 1) {
+        recordSyncTransaction(21_500);
+      }
+
+      expect(capacityTelemetrySnapshot().distributions["db.sync_transaction.duration_ms"]).toEqual({
+        count: 51_000,
+        p50: 5,
+        p95: 5,
+        p99: 5,
+        max: 21_500,
+      });
+    } finally {
+      random.mockRestore();
+    }
+  });
+
+  it("records elapsed time when pg-pool's checkout timeout fires late", async () => {
+    const pool = new Pool({
+      Client: SyntheticPgClient as never,
+      max: 1,
+      connectionTimeoutMillis: 10,
+      idleTimeoutMillis: 0,
+    });
+    installPoolTelemetry(pool);
+
+    let heldClient: PoolClient | undefined;
+    try {
+      heldClient = await pool.connect();
+      const queuedCheckout = pool.connect();
+      const stallStartedAt = performance.now();
+      while (performance.now() - stallStartedAt < 80) {}
+
+      await expect(queuedCheckout).rejects.toThrow("timeout exceeded when trying to connect");
+      expect(pool.waitingCount).toBe(0);
+      expect(capacityTelemetrySnapshot().distributions["db.pool.acquisition_ms"]).toMatchObject({
+        count: 2,
+      });
+      expect(capacityTelemetrySnapshot().distributions["db.pool.acquisition_ms"]?.max)
+        .toBeGreaterThanOrEqual(60);
+    } finally {
+      heldClient?.release();
+      await pool.end();
+    }
   });
 
   it("requires a complete zero-write window before declaring the legacy cutoff ready", () => {

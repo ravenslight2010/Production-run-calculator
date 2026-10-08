@@ -77,10 +77,11 @@ function observe(key: string, value: number): void {
   if (metric.samples.length < MAX_SAMPLES) {
     metric.samples.push(safe);
   } else {
-    // Deterministic bounded reservoir: retain evenly spaced observations from
-    // the whole process window without storing request-level records.
-    const index = metric.count % MAX_SAMPLES;
-    metric.samples[index] = safe;
+    // Algorithm R keeps a uniform bounded sample from the entire report
+    // window. Replacing count % MAX_SAMPLES instead favors recent observations
+    // and can make a short latency burst look like the whole-window p95/p99.
+    const index = Math.floor(Math.random() * metric.count);
+    if (index < MAX_SAMPLES) metric.samples[index] = safe;
   }
   distributions.set(key, metric);
 }
