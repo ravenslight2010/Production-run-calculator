@@ -10,6 +10,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { signLegacyTokenForTests } from "../lib/auth";
 import { syncSnapshotId } from "../lib/syncContract";
 import { legacySyncReadinessSnapshot } from "../lib/capacityTelemetry";
+import { applySyncDeltaData } from "@workspace/sync-contract";
 
 const emptyCompleteSnapshotId = (date: string) => syncSnapshotId({
   dayState: { date, runs: [] },
@@ -55,6 +56,7 @@ let testDbName: string;
 let originalDatabaseUrl: string | undefined;
 let server: Server;
 let baseUrl: string;
+let injectedSseWriteFailures = 0;
 
 const USER = "user-1";
 const MANAGER = "manager-1";
@@ -118,6 +120,31 @@ beforeAll(async () => {
     (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
     next();
   });
+  app.use((req, res, next) => {
+    const failSenderId = req.get("x-test-fail-broadcast-sender-id");
+    if (req.path === "/api/sync/events" && failSenderId) {
+      let failurePending = true;
+      res.write = new Proxy(res.write, {
+        apply(target, thisArg, args) {
+          const chunk = args[0];
+          const text = typeof chunk === "string"
+            ? chunk
+            : Buffer.isBuffer(chunk) ? chunk.toString("utf8") : "";
+          const line = text.split("\n").find((entry) => entry.startsWith("data: "));
+          if (failurePending && line) {
+            const frame = JSON.parse(line.slice("data: ".length)) as { senderId?: string | null };
+            if (frame.senderId === failSenderId) {
+              failurePending = false;
+              injectedSseWriteFailures += 1;
+              throw new Error("injected SSE broadcast write failure");
+            }
+          }
+          return Reflect.apply(target, thisArg, args);
+        },
+      });
+    }
+    next();
+  });
   app.use("/api", routerMod.default);
 
   await new Promise<void>((resolve) => {
@@ -152,6 +179,7 @@ function dayRow(date: string) {
 }
 
 beforeEach(async () => {
+  injectedSseWriteFailures = 0;
   await db.execute(sql`TRUNCATE ${dailySyncTable}, ${dataResetTable}, ${operationalIntentLedgerTable}, ${completedRunHistoryTable}, ${applicatorBatchEvidenceTable}, ${dataHealsTable}, ${syncConflictLogsTable}, ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
   await db.insert(usersTable).values([
@@ -4416,6 +4444,148 @@ describe("/sync/events — date-scoped broadcasts", () => {
       if (currentPeer) {
         await currentPeer.reader.cancel().catch(() => {});
         currentPeer.ctrl.abort();
+      }
+    }
+  });
+
+  it("keeps a failed peer's baseline and recovers it with the next valid delta", async () => {
+    const date = "2030-03-14";
+    const runs = Array.from({ length: 32 }, (_, index) => ({
+      id: `failed-write-run-${index}`,
+      brand: "Acme",
+      flavor: `Flavor ${index}`,
+      metaUpdatedAt: 1_000 + index,
+    }));
+    const runValues = Object.fromEntries(runs.map((run, index) => [
+      run.id,
+      {
+        casesNeeded: 200 + index,
+        pizzasPerCase: 10,
+        doughRecipe: Array.from({ length: 8 }, (_, ingredient) => ({
+          ingredient: `Ingredient ${ingredient}`,
+          lbs: ingredient + index + 1,
+        })),
+      },
+    ]));
+    const baselinePayload = {
+      dayState: { date, runs, shiftNotes: "baseline" },
+      runValues,
+      runValuesUpdatedAt: Object.fromEntries(runs.map((run, index) => [run.id, 1_000 + index])),
+      packagingProgress: Object.fromEntries(runs.map((run, index) => [
+        run.id, { skidsCompleted: index % 3, updatedAt: 1_000 + index },
+      ])),
+    };
+    const seed = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "failed-write-seed", payload: baselinePayload }),
+    });
+    expect(seed.status).toBe(200);
+    const seedBody = await seed.json() as { data: Record<string, any>; snapshotId: string };
+
+    const connectPeer = async (clientId: string, failSenderId?: string) => {
+      const ctrl = new AbortController();
+      const response = await fetch(
+        `${baseUrl}/api/sync/events?clientId=${clientId}&today=${date}`,
+        {
+          headers: {
+            ...authHeaders(),
+            ...(failSenderId ? { "x-test-fail-broadcast-sender-id": failSenderId } : {}),
+          },
+          signal: ctrl.signal,
+        },
+      );
+      expect(response.status).toBe(200);
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      const readFrame = async (predicate: (frame: Record<string, any>) => boolean) => {
+        for (;;) {
+          const boundary = buffer.indexOf("\n\n");
+          if (boundary >= 0) {
+            const raw = buffer.slice(0, boundary);
+            buffer = buffer.slice(boundary + 2);
+            const line = raw.split("\n").find((entry) => entry.startsWith("data: "));
+            if (line) {
+              const frame = JSON.parse(line.slice("data: ".length)) as Record<string, any>;
+              if (predicate(frame)) return frame;
+            }
+            continue;
+          }
+          const { value, done } = await reader.read();
+          if (done) throw new Error(`SSE stream for ${clientId} ended before the expected frame`);
+          buffer += decoder.decode(value, { stream: true });
+        }
+      };
+      const initial = await readFrame((frame) => frame.initial === true);
+      return { ctrl, reader, readFrame, initial };
+    };
+
+    const failedPeer = await connectPeer("failed-write-peer", "first-failed-broadcast");
+    let healthyPeer: Awaited<ReturnType<typeof connectPeer>> | undefined;
+    try {
+      expect(failedPeer.initial.snapshotId).toBe(seedBody.snapshotId);
+      healthyPeer = await connectPeer("healthy-write-peer");
+      expect(healthyPeer.initial.snapshotId).toBe(seedBody.snapshotId);
+
+      const firstWrite = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
+        method: "PUT",
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({
+          senderId: "first-failed-broadcast",
+          snapshotId: seedBody.snapshotId,
+          payload: {
+            ...seedBody.data,
+            dayState: { ...seedBody.data.dayState, shiftNotes: "first update missed" },
+            syncVersion: 1,
+            completeness: "complete",
+            baseSnapshotId: seedBody.snapshotId,
+          },
+        }),
+      });
+      expect(firstWrite.status).toBe(200);
+      const firstBody = await firstWrite.json() as { data: Record<string, any>; snapshotId: string };
+      const healthyFirstFrame = await healthyPeer.readFrame(
+        (frame) => frame.senderId === "first-failed-broadcast",
+      );
+      expect(healthyFirstFrame.snapshotId).toBe(firstBody.snapshotId);
+      expect(injectedSseWriteFailures).toBe(1);
+
+      const recoveryWrite = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
+        method: "PUT",
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({
+          senderId: "recovery-writer",
+          snapshotId: firstBody.snapshotId,
+          payload: {
+            ...firstBody.data,
+            dayState: { ...firstBody.data.dayState, shiftNotes: "recovered canonical state" },
+            syncVersion: 1,
+            completeness: "complete",
+            baseSnapshotId: firstBody.snapshotId,
+          },
+        }),
+      });
+      expect(recoveryWrite.status).toBe(200);
+      const recoveryBody = await recoveryWrite.json() as { data: Record<string, any>; snapshotId: string };
+      const recoveryFrame = await failedPeer.readFrame((frame) => frame.senderId === "recovery-writer");
+
+      expect(recoveryFrame).toMatchObject({
+        completeness: "partial",
+        syncVersion: 1,
+        baseSnapshotId: seedBody.snapshotId,
+        snapshotId: recoveryBody.snapshotId,
+      });
+      const recovered = applySyncDeltaData(seedBody.data, recoveryFrame.data);
+      expect(recovered).not.toBeNull();
+      expect(syncSnapshotId(recovered)).toBe(recoveryBody.snapshotId);
+      expect(recovered).toEqual(recoveryBody.data);
+    } finally {
+      await failedPeer.reader.cancel().catch(() => {});
+      failedPeer.ctrl.abort();
+      if (healthyPeer) {
+        await healthyPeer.reader.cancel().catch(() => {});
+        healthyPeer.ctrl.abort();
       }
     }
   });
