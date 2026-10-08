@@ -6,6 +6,7 @@
 - [pnpm outdated scope limits](pnpm-outdated-scope-limits.md) — cross-check workspace declarations against lockfile importers; recursive output can omit direct importers.
 - [Security override scope](dependency-override-scope.md) — scope vulnerable transitive overrides to the affected parent when a global major replacement could disrupt other consumers.
 - [Safe operational observability](observability-safe-events.md) — events carry correlation, timing, outcomes, and bounded counts; never copy request or recipe payloads into logs.
+- [Event-loop histogram tests](event-loop-delay-monitor-warmup.md) — after a reset, let one sampling interval pass before injecting a stall so the first reading reflects real delay.
 - [Audit-log scope boundary](audit-log-scope-boundary.md) — manager capability alone is not enough for audit reads; keep compliance records behind the live-scope fence.
 - [Shared recipe refresh identity](shared-recipe-refresh-run-identity.md) — async profile fan-out must capture the originating run ID; eligibility alone cannot protect a newly selected pending run.
 - [Dough families](dough-family-collapse.md) + [customer matching](doughball-variant-customers-matching.md) + [weights](dough-weight-server-pool.md) — specific flavors first; fill only unset weights.

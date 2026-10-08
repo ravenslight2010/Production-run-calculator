@@ -75,6 +75,42 @@ describe("capacity telemetry", () => {
     expect(JSON.stringify(snapshot)).not.toMatch(/payload|runId|recipe|user|facility|errorText/i);
   });
 
+  it("reports bounded event-loop delay percentiles after a stall and resets them with the window", async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const stallStartedAt = performance.now();
+    while (performance.now() - stallStartedAt < 100) {}
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const snapshot = capacityTelemetrySnapshot();
+    const eventLoopDelay = snapshot.distributions["node.event_loop.delay_ms"];
+    expect(eventLoopDelay).toBeDefined();
+    expect(eventLoopDelay?.count).toBeGreaterThan(0);
+    expect(eventLoopDelay?.max).toBeGreaterThanOrEqual(50);
+    expect(Object.keys(eventLoopDelay ?? {}).sort()).toEqual(["count", "max", "p50", "p95", "p99"]);
+    expect(Object.values(eventLoopDelay ?? {}).every((value) =>
+      Number.isFinite(value) && value >= 0 && value <= 10 * 60 * 1_000,
+    )).toBe(true);
+    expect(JSON.stringify(snapshot)).not.toMatch(/payload|runId|recipe|user|facility|errorText/i);
+
+    const info = vi.fn();
+    reportCapacityTelemetry({ info } as never);
+    expect(info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        distributions: expect.objectContaining({
+          "node.event_loop.delay_ms": expect.objectContaining({
+            count: expect.any(Number),
+            p50: expect.any(Number),
+            p95: expect.any(Number),
+            p99: expect.any(Number),
+            max: expect.any(Number),
+          }),
+        }),
+      }),
+      "bounded capacity telemetry",
+    );
+    expect(capacityTelemetrySnapshot().distributions["node.event_loop.delay_ms"]).toBeUndefined();
+  });
+
   it("classifies bounded run counts", () => {
     expect(syncRunCountBucket({ dayState: { runs: [] } })).toBe("0");
     expect(syncRunCountBucket({ dayState: { runs: [{}] } })).toBe("1-5");

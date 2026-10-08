@@ -1,3 +1,4 @@
+import { monitorEventLoopDelay } from "node:perf_hooks";
 import type { Pool, PoolClient } from "pg";
 import type { Logger } from "pino";
 import { logger } from "./logger";
@@ -5,6 +6,9 @@ import { logger } from "./logger";
 const MAX_SAMPLES = 2_048;
 const REPORT_INTERVAL_MS = 60_000;
 const MAX_METRIC_VALUE = 10 * 60 * 1_000;
+const EVENT_LOOP_DELAY_DISTRIBUTION = "node.event_loop.delay_ms";
+const EVENT_LOOP_DELAY_RESOLUTION_MS = 20;
+const NANOSECONDS_PER_MILLISECOND = 1_000_000;
 export const LEGACY_SYNC_READINESS_WINDOW_MS = 24 * 60 * 60 * 1_000;
 export const LEGACY_SYNC_EVIDENCE_TTL_MS = 5 * 60 * 1_000;
 const LEGACY_SYNC_BUCKET_MS = 60_000;
@@ -37,6 +41,10 @@ type CapacitySnapshot = {
 
 const counters = new Map<string, number>();
 const distributions = new Map<string, Distribution>();
+const eventLoopDelayHistogram = monitorEventLoopDelay({
+  resolution: EVENT_LOOP_DELAY_RESOLUTION_MS,
+});
+eventLoopDelayHistogram.enable();
 let windowStartedAt = Date.now();
 let lastReportAt = windowStartedAt;
 let latestPool = { total: 0, idle: 0, waiting: 0 };
@@ -89,6 +97,17 @@ function observe(key: string, value: number): void {
 function percentile(sorted: number[], fraction: number): number {
   if (sorted.length === 0) return 0;
   return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * fraction) - 1)] ?? 0;
+}
+
+function eventLoopDelayDistribution(): CapacitySnapshot["distributions"][string] | undefined {
+  if (eventLoopDelayHistogram.count === 0) return undefined;
+  return {
+    count: bounded(eventLoopDelayHistogram.count),
+    p50: bounded(eventLoopDelayHistogram.percentile(50) / NANOSECONDS_PER_MILLISECOND),
+    p95: bounded(eventLoopDelayHistogram.percentile(95) / NANOSECONDS_PER_MILLISECOND),
+    p99: bounded(eventLoopDelayHistogram.percentile(99) / NANOSECONDS_PER_MILLISECOND),
+    max: bounded(eventLoopDelayHistogram.max / NANOSECONDS_PER_MILLISECOND),
+  };
 }
 
 export function syncRunCountBucket(payload: unknown): "0" | "1-5" | "6-20" | "21-50" {
@@ -253,6 +272,8 @@ export function capacityTelemetrySnapshot(now = Date.now()): CapacitySnapshot {
       max: value.max,
     };
   }
+  const eventLoopDelay = eventLoopDelayDistribution();
+  if (eventLoopDelay) result[EVENT_LOOP_DELAY_DISTRIBUTION] = eventLoopDelay;
   return {
     windowMs: Math.max(0, now - windowStartedAt),
     counters: Object.fromEntries(counters),
@@ -271,6 +292,7 @@ export function reportCapacityTelemetry(log: Pick<Logger, "info"> = logger, now 
   }
   counters.clear();
   distributions.clear();
+  eventLoopDelayHistogram.reset();
   windowStartedAt = now;
   lastReportAt = now;
 }
@@ -282,6 +304,7 @@ function maybeReport(now = Date.now()): void {
 export function clearCapacityTelemetryForTests(now = Date.now()): void {
   counters.clear();
   distributions.clear();
+  eventLoopDelayHistogram.reset();
   latestPool = { total: 0, idle: 0, waiting: 0 };
   windowStartedAt = now;
   lastReportAt = now;
