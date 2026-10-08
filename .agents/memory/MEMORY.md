@@ -150,6 +150,7 @@
 - [Declaration types](declaration-compatibility-dependencies.md) + [API route typecheck](api-route-typecheck-isolation.md) — mirror package links and use last-successful declarations.
 - [Workspace operations](secret-refresh-shell.md) + [Replit config edits](replit-config-validator.md) — refreshed secrets may lag in shell; stage a full `.replit` candidate and validate replacement.
 - [Task-platform evidence limits](task-platform-evidence-limits.md) — sequence tasks by acceptance; each later task depends on the prior one, with only one active at a time.
+- [Roadmap synthesis](roadmap-synthesis.md) — answer broad “what next” questions from imported research and plans, reconciled against current evidence.
 - [Apply-source retention](apply-source-evidence-retention.md) — exact parser text belongs with its authorized live Apply, not reusable snapshots; retention still needs a policy.
 - [PostgreSQL cursor precision](queue-history-cursor-precision.md) — preserve database timestamp precision or use a stable key so keyset cursors cannot skip rows at millisecond boundaries.
 - [Owner-selected SSE topology](sse-topology-choice.md) — one always-on API process; no shared fanout without a new decision; actual deployment enforcement still needs verification.
