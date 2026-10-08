@@ -4652,7 +4652,11 @@ describe("/sync/events — date-scoped broadcasts", () => {
     };
     const peers = new Map<string, Peer>();
     let completeFrames = 0;
+    let initialFrames = 0;
+    let deliveredPeerFrames = 0;
     let partialFrames = 0;
+    let completePeerFrames = 0;
+    const completePeerSteps: number[] = [];
     let partialBytes = 0;
     let equivalentCompleteBytes = 0;
     type LifecycleKind = "start" | "add" | "end" | "remove";
@@ -4717,6 +4721,7 @@ describe("/sync/events — date-scoped broadcasts", () => {
       peer.snapshotId = initial.frame.snapshotId;
       peers.set(id, peer);
       completeFrames += 1;
+      initialFrames += 1;
     };
 
     const disconnect = async (id: string) => {
@@ -4834,6 +4839,7 @@ describe("/sync/events — date-scoped broadcasts", () => {
             runValuesUpdatedAt: remainingStamps,
           };
         }
+        const priorSnapshotId = syncSnapshotId(canonical);
         const write = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
           method: "PUT",
           headers: { ...authHeaders(), "content-type": "application/json" },
@@ -4841,6 +4847,9 @@ describe("/sync/events — date-scoped broadcasts", () => {
         });
         expect(write.status).toBe(200);
         const writeBody = await write.json() as { data: Record<string, any>; snapshotId: string };
+        if (step === 0) {
+          expect(writeBody.snapshotId).toBe(priorSnapshotId);
+        }
         canonical = writeBody.data;
 
         for (const peer of peers.values()) {
@@ -4864,6 +4873,7 @@ describe("/sync/events — date-scoped broadcasts", () => {
             metrics.actualBytes += received.bytes;
             metrics.equivalentCompleteBytes += completeEquivalentBytes;
           }
+          deliveredPeerFrames += 1;
           if (received.frame.completeness === "partial") {
             partialFrames += 1;
             partialBytes += received.bytes;
@@ -4873,6 +4883,8 @@ describe("/sync/events — date-scoped broadcasts", () => {
             equivalentCompleteBytes += completeEquivalentBytes;
           } else {
             completeFrames += 1;
+            completePeerFrames += 1;
+            completePeerSteps.push(step);
             if (lifecycleKind) lifecycleMetrics[lifecycleKind].completeFallbacks += 1;
             expect(received.frame.data).toEqual(canonical);
             expect(received.frame.snapshotId).toBe(writeBody.snapshotId);
@@ -4890,15 +4902,25 @@ describe("/sync/events — date-scoped broadcasts", () => {
       steps: 48,
       peers: 3,
       reconnects: 3,
+      deliveredPeerFrames,
       partialFrames,
       completeFrames,
+      completePeerFrames,
+      completePeerSteps,
       partialBytes,
       equivalentCompleteBytes,
       savingsPercent: Number(savingsPercent.toFixed(2)),
       lifecycleMetrics,
     });
-    expect(partialFrames).toBe(96);
-    expect(completeFrames).toBeLessThanOrEqual(6);
+    // Step 0 leaves run-0's seeded skid value at 0, so the canonical snapshot
+    // does not change. The server correctly sends a complete fallback to both
+    // peers when there is no delta; the other 94 peer updates are partial.
+    expect(deliveredPeerFrames).toBe(96);
+    expect(completePeerSteps).toEqual([0, 0]);
+    expect(completePeerFrames).toBe(2);
+    expect(partialFrames).toBe(94);
+    expect(initialFrames).toBe(6);
+    expect(completeFrames).toBe(initialFrames + completePeerFrames);
     expect(partialBytes).toBeLessThan(equivalentCompleteBytes * 0.5);
     for (const kind of ["start", "add", "end", "remove"] as const) {
       const metrics = lifecycleMetrics[kind];
