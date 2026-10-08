@@ -1269,6 +1269,21 @@ const configuredSourceLibraryDeploymentHandoff =
   (cliOptionValue("--source-library-deployment-handoff") ??
     process.env.SOURCE_LIBRARY_RECONCILIATION_DEPLOYMENT_HANDOFF?.trim()) ||
   discoverCurrentPublishedHandoff();
+let configuredSourceLibraryDeploymentHandoffInvalid = false;
+let parsedSourceLibraryDeploymentHandoff:
+  | ReturnType<typeof readSourceLibraryDeploymentHandoff>
+  | undefined;
+if (configuredSourceLibraryDeploymentHandoff) {
+  try {
+    parsedSourceLibraryDeploymentHandoff = readSourceLibraryDeploymentHandoff(
+      configuredSourceLibraryDeploymentHandoff,
+    );
+  } catch {
+    // Invalid or stale deployment evidence is treated as unavailable here.
+    // The release entry point can then retain a bounded BLOCKED checkpoint.
+    configuredSourceLibraryDeploymentHandoffInvalid = true;
+  }
+}
 const sourceLibraryRevisionArgs = configuredSourceLibraryRevision
   ? ["--revision", configuredSourceLibraryRevision]
   : [];
@@ -1282,16 +1297,12 @@ const sourceLibraryDeploymentHandoffArgs =
 const configuredReadinessDeploymentId =
   (cliOptionValue("--readiness-deployment-id") ??
     process.env.READINESS_EVIDENCE_DEPLOYMENT_ID?.trim() ??
-    (configuredSourceLibraryDeploymentHandoff
-      ? readSourceLibraryDeploymentHandoff(configuredSourceLibraryDeploymentHandoff).deploymentId
-      : undefined)) ||
+    parsedSourceLibraryDeploymentHandoff?.deploymentId) ||
   undefined;
 const configuredDeployedRevision =
   (cliOptionValue("--deployed-revision") ??
     process.env.READINESS_EVIDENCE_DEPLOYED_REVISION?.trim() ??
-    (configuredSourceLibraryDeploymentHandoff
-      ? readSourceLibraryDeploymentHandoff(configuredSourceLibraryDeploymentHandoff).deployedRevision
-      : undefined)) ||
+    parsedSourceLibraryDeploymentHandoff?.deployedRevision) ||
   undefined;
 
 export function resolveSourceLibraryReleaseRevision(
@@ -1489,6 +1500,60 @@ export function publishedReleaseReadinessRequired(
     hasProductionEvidence
   );
 }
+
+export type PublishedReadinessMissingEvidence =
+  | "readiness deployment ID"
+  | "deployed source revision"
+  | "current published deployment handoff";
+
+const PUBLISHED_READINESS_MISSING_EVIDENCE = new Set<PublishedReadinessMissingEvidence>([
+  "readiness deployment ID",
+  "deployed source revision",
+  "current published deployment handoff",
+]);
+
+export function missingPublishedReadinessEvidence(options: {
+  deploymentId: string | undefined;
+  deployedRevision: string | undefined;
+  invalidHandoff?: boolean;
+}): PublishedReadinessMissingEvidence[] {
+  const missing: PublishedReadinessMissingEvidence[] = [];
+  if (options.invalidHandoff) {
+    missing.push("current published deployment handoff");
+  }
+  if (!options.deploymentId) missing.push("readiness deployment ID");
+  if (!options.deployedRevision) missing.push("deployed source revision");
+  return missing;
+}
+
+export function formatPublishedReadinessBlockedCheckpoint(options: {
+  mode: ReleaseMode;
+  assessedRevision: string;
+  missingEvidence: readonly PublishedReadinessMissingEvidence[];
+}): string {
+  if (!isEvidenceRevision(options.assessedRevision)) {
+    throw new Error("Blocked release checkpoint requires a valid assessed revision.");
+  }
+  if (
+    options.missingEvidence.length === 0 ||
+    options.missingEvidence.length > PUBLISHED_READINESS_MISSING_EVIDENCE.size ||
+    new Set(options.missingEvidence).size !== options.missingEvidence.length ||
+    options.missingEvidence.some(
+      (item) => !PUBLISHED_READINESS_MISSING_EVIDENCE.has(item),
+    )
+  ) {
+    throw new Error("Blocked release checkpoint requires missing evidence.");
+  }
+  return [
+    "# Release Check Checkpoint — BLOCKED / NO-GO",
+    `Mode: ${options.mode}`,
+    `Assessed revision: ${options.assessedRevision}`,
+    "Missing evidence:",
+    ...options.missingEvidence.map((item) => `- ${item}`),
+    "",
+  ].join("\n");
+}
+
 const requiresPublishedReadiness = publishedReleaseReadinessRequired(
   releaseMode,
   hasProductionSourceLibraryReconciliation,
@@ -2202,6 +2267,19 @@ export async function verifyReleaseEvidence(
     }
   }
   if (checkpointReport.trim() !== "" && !options.allowIncompleteCheckpoint) {
+    if (
+      checkpointReport.startsWith(
+        "# Release Check Checkpoint — BLOCKED / NO-GO",
+      )
+    ) {
+      throw new Error(
+        [
+          `Release check was blocked before its gates at ${RELEASE_CHECKPOINT_REPORT}; it is not retained release evidence and has no resumable gate state.`,
+          "Supply a current published deployment handoff or the explicit deployment ID and deployed revision, then rerun without --resume.",
+          "The retained release-check-report.md was left unchanged.",
+        ].join(" "),
+      );
+    }
     throw new Error(
       [
         `Release check has an incomplete checkpoint at ${RELEASE_CHECKPOINT_REPORT}; it is not retained release evidence.`,
@@ -4247,8 +4325,6 @@ async function main(): Promise<void> {
     }
   }
   await assertApiIntegrationTestShardInventory();
-  console.log(`Release check started (${releaseMode} mode).`);
-  const releaseRunStartedAt = Date.now();
   let revision: string;
   try {
     revision = await currentRevision();
@@ -4260,6 +4336,48 @@ async function main(): Promise<void> {
     );
     process.exit(1);
   }
+  const missingPublishedEvidence = requiresPublishedReadiness
+    ? missingPublishedReadinessEvidence({
+        deploymentId: configuredReadinessDeploymentId,
+        deployedRevision: configuredDeployedRevision,
+        invalidHandoff: configuredSourceLibraryDeploymentHandoffInvalid,
+      })
+    : [];
+  if (missingPublishedEvidence.length > 0) {
+    const evidenceRoot = resolve(rootDir, releaseEvidenceDir);
+    const checkpointReportPath = resolve(
+      evidenceRoot,
+      RELEASE_CHECKPOINT_REPORT,
+    );
+    try {
+      await mkdir(evidenceRoot, { recursive: true });
+      await writeFile(
+        checkpointReportPath,
+        formatPublishedReadinessBlockedCheckpoint({
+          mode: releaseMode,
+          assessedRevision: revision,
+          missingEvidence: missingPublishedEvidence,
+        }),
+        { encoding: "utf8", mode: 0o600 },
+      );
+    } catch (error) {
+      console.error(
+        `Could not write blocked release checkpoint: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      process.exit(1);
+    }
+    console.error(
+      "Published release evidence is missing; no release gates were run and production readiness is NO-GO.",
+    );
+    console.error(
+      `Release checkpoint (BLOCKED / NO-GO): ${checkpointReportPath}`,
+    );
+    process.exit(1);
+  }
+  console.log(`Release check started (${releaseMode} mode).`);
+  const releaseRunStartedAt = Date.now();
   let sourceLibraryRevision: string;
   try {
     if (hasProductionSourceLibraryReconciliation) {
@@ -4279,15 +4397,6 @@ async function main(): Promise<void> {
       : revision;
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
-    process.exit(1);
-  }
-  if (
-    requiresPublishedReadiness &&
-    (!configuredReadinessDeploymentId || !configuredDeployedRevision)
-  ) {
-    console.error(
-      "Published standard/full release verification requires --readiness-deployment-id and --deployed-revision before GO validation.",
-    );
     process.exit(1);
   }
   const evidenceRoot = resolve(rootDir, releaseEvidenceDir);

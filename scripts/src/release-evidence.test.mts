@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   mkdir,
@@ -10,7 +11,60 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { captureReleaseIdentity } from "./release-source-identity.mjs";
 import {
+  discoverRetainedEvaluationPaths as discoverRoutineRetainedEvaluationPaths,
+} from "./check-routine-node-version.mjs";
+import { parseReportSigningKeyring } from "./report-key-rotation-preflight.mts";
+import {
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_V2_ID,
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
+  computeSourceLibraryEvidenceId,
+  DEFAULT_FROM_DATE,
+  DEFAULT_HEAL_ID,
+  DEFAULT_REPORT,
+  parseSourceLibraryPreflightDiagnostic as parseStoredSourceLibraryPreflightDiagnostic,
+} from "./verify-source-library-reconciliation.mts";
+import {
+  buildReadinessEvidence,
+  sanitizeReadinessResponse,
+  validateReadinessEvidence,
+} from "./capture-readiness-recovery.mts";
+import { FULL_BROWSER_EXPECTED_CASES } from "./full-browser-case-contract.mts";
+import { WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES } from "./webkit-case-contract.mts";
+
+const releaseCheckEnvironment = {
+  RELEASE_EVIDENCE_DIR: join(
+    tmpdir(),
+    `release-evidence-test-import-${process.pid}`,
+  ),
+  SOURCE_LIBRARY_RECONCILIATION_EVIDENCE_INPUT: "",
+  SOURCE_LIBRARY_RECONCILIATION_ENVIRONMENT: "development",
+  SOURCE_LIBRARY_RECONCILIATION_DEPLOYMENT_HANDOFF: "",
+  SOURCE_LIBRARY_RECONCILIATION_REVISION: "",
+  SOURCE_LIBRARY_RECONCILIATION_DATABASE_OWNER: "",
+  RELEASE_CHECK_SKIP_PRODUCTION_SOURCE_LIBRARY_RECONCILIATION: "",
+  READINESS_EVIDENCE_DEPLOYMENT_ID: "",
+  READINESS_EVIDENCE_DEPLOYED_REVISION: "",
+} as const;
+const originalReleaseCheckEnvironment = new Map(
+  [
+    ...Object.keys(releaseCheckEnvironment),
+    "RELEASE_CHECK_FIXTURE_STEPS",
+  ].map((key) => [
+    key,
+    process.env[key],
+  ]),
+);
+Object.assign(process.env, releaseCheckEnvironment);
+delete process.env.RELEASE_CHECK_FIXTURE_STEPS;
+const releaseCheck = await import("./release-check.mts");
+for (const [key, value] of originalReleaseCheckEnvironment) {
+  if (value === undefined) delete process.env[key];
+  else process.env[key] = value;
+}
+const {
   RELEASE_EVIDENCE_ALLOWLIST,
   READINESS_EVIDENCE_PATH,
   RELEASE_CHECKPOINT_REPORT,
@@ -24,10 +78,13 @@ import {
   TYPESCRIPT_7_COMPARISON_EVIDENCE,
   TYPESCRIPT_7_SUPPORTED_RUNNERS,
   SOURCE_LIBRARY_RECONCILIATION_FIXTURE_STEP,
+  SOURCE_LIBRARY_RECONCILIATION_IMPORT_STEP,
   SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL,
   SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_STEP,
   SOURCE_LIBRARY_RECONCILIATION_STEP,
   WEBKIT_IDENTITY_CONTRACT_STEP,
+  formatPublishedReadinessBlockedCheckpoint,
+  missingPublishedReadinessEvidence,
   resolveSourceLibraryEvidenceEnvironment,
   resolveSourceLibraryReleaseDatabaseOwner,
   resolveSourceLibraryReleaseRevision,
@@ -57,28 +114,7 @@ import {
   validateWebKitBrowserEvidence,
   validateSourceLibraryReconciliationEvidence,
   verifyReleaseEvidence,
-} from "./release-check.mts";
-import {
-  discoverRetainedEvaluationPaths as discoverRoutineRetainedEvaluationPaths,
-} from "./check-routine-node-version.mjs";
-import { parseReportSigningKeyring } from "./report-key-rotation-preflight.mts";
-import {
-  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
-  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_V2_ID,
-  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
-  computeSourceLibraryEvidenceId,
-  DEFAULT_FROM_DATE,
-  DEFAULT_HEAL_ID,
-  DEFAULT_REPORT,
-  parseSourceLibraryPreflightDiagnostic as parseStoredSourceLibraryPreflightDiagnostic,
-} from "./verify-source-library-reconciliation.mts";
-import {
-  buildReadinessEvidence,
-  sanitizeReadinessResponse,
-  validateReadinessEvidence,
-} from "./capture-readiness-recovery.mts";
-import { FULL_BROWSER_EXPECTED_CASES } from "./full-browser-case-contract.mts";
-import { WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES } from "./webkit-case-contract.mts";
+} = releaseCheck;
 
 const sourceReportSha256 = createHash("sha256")
   .update(await readFile(new URL(`../../${DEFAULT_REPORT}`, import.meta.url)))
@@ -517,6 +553,40 @@ async function run(): Promise<void> {
     false,
     "disposable fixture verification must have an explicit readiness opt-out contract",
   );
+  const blockedMissingEvidence = missingPublishedReadinessEvidence({
+    deploymentId: undefined,
+    deployedRevision: undefined,
+    invalidHandoff: true,
+  });
+  assert.deepEqual(blockedMissingEvidence, [
+    "current published deployment handoff",
+    "readiness deployment ID",
+    "deployed source revision",
+  ]);
+  const boundedBlockedCheckpoint = formatPublishedReadinessBlockedCheckpoint({
+    mode: "full",
+    assessedRevision: `test-sha256:${"a".repeat(64)}`,
+    missingEvidence: blockedMissingEvidence,
+  });
+  assert.deepEqual(boundedBlockedCheckpoint.trimEnd().split("\n"), [
+    "# Release Check Checkpoint — BLOCKED / NO-GO",
+    "Mode: full",
+    `Assessed revision: test-sha256:${"a".repeat(64)}`,
+    "Missing evidence:",
+    "- current published deployment handoff",
+    "- readiness deployment ID",
+    "- deployed source revision",
+  ]);
+  assert.throws(
+    () =>
+      formatPublishedReadinessBlockedCheckpoint({
+        mode: "standard",
+        assessedRevision: "unknown",
+        missingEvidence: ["deployed source revision"],
+      }),
+    /valid assessed revision/,
+    "the blocked checkpoint must not accept an unbound revision value",
+  );
   const retainedEvaluationInventory = retainedEvaluationEvidenceInventory();
   const retainedEvidenceFiles = new Set(
     retainedEvaluationInventory.map((entry) => entry.evidencePath),
@@ -914,6 +984,7 @@ async function run(): Promise<void> {
   assert.throws(
     () => resolveSourceLibraryReleaseRevision("a".repeat(40), "release", undefined),
     /requires --source-library-revision/,
+    "the assessed checkout revision must never stand in for a deployed revision",
   );
   const handoffDirectory = await mkdtemp(
     join(tmpdir(), "release-source-handoff-"),
@@ -976,9 +1047,202 @@ async function run(): Promise<void> {
         ),
       /conflicts with the deployed revision/,
     );
+    const staleIssuedAt = new Date(Date.now() - 2 * 60 * 60 * 1_000);
+    const staleHandoffPath = join(
+      handoffDirectory,
+      "stale-deployment-handoff.json",
+    );
+    await writeFile(
+      staleHandoffPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        kind: "published-deployment-handoff",
+        deploymentId: "stale-published-release",
+        deployedRevision: "f".repeat(40),
+        databaseOwner: "approved_source_owner",
+        issuedAt: staleIssuedAt.toISOString(),
+        expiresAt: new Date(
+          staleIssuedAt.getTime() + 60 * 60 * 1_000,
+        ).toISOString(),
+      }),
+      "utf8",
+    );
+    assert.throws(
+      () =>
+        resolveSourceLibraryReleaseRevision(
+          "a".repeat(40),
+          "release",
+          undefined,
+          staleHandoffPath,
+        ),
+      /deployment handoff is stale/,
+      "an expired published deployment handoff must not supply release identity",
+    );
   } finally {
     await rm(handoffDirectory, { recursive: true, force: true });
   }
+
+  const blockedEvidenceDirectory = await mkdtemp(
+    join(tmpdir(), "release-blocked-evidence-"),
+  );
+  try {
+    const retainedReport = "# Previous retained report\n";
+    await writeFile(
+      join(blockedEvidenceDirectory, "release-check-report.md"),
+      retainedReport,
+      "utf8",
+    );
+    const expectedAssessedRevision = captureReleaseIdentity(
+      new URL("../../", import.meta.url).pathname,
+    ).revision;
+    const childEnvironment: NodeJS.ProcessEnv = {
+      ...process.env,
+      CI: "true",
+      NODE_ENV: "test",
+      RELEASE_EVIDENCE_DIR: blockedEvidenceDirectory,
+      READINESS_EVIDENCE_DEPLOYMENT_ID: "",
+      READINESS_EVIDENCE_DEPLOYED_REVISION: "",
+      SOURCE_LIBRARY_RECONCILIATION_DEPLOYMENT_HANDOFF: "",
+      SOURCE_LIBRARY_RECONCILIATION_REVISION: "",
+      SOURCE_LIBRARY_RECONCILIATION_DATABASE_OWNER: "",
+      SOURCE_LIBRARY_RECONCILIATION_EVIDENCE_INPUT: "",
+      RELEASE_CHECK_SKIP_PRODUCTION_SOURCE_LIBRARY_RECONCILIATION: "",
+    };
+    const blockedRun = spawnSync(
+      process.execPath,
+      [
+        "--import",
+        "tsx",
+        new URL("./release-check.mts", import.meta.url).pathname,
+        "--readiness-deployment-id",
+        "",
+        "--deployed-revision",
+        "",
+      ],
+      {
+        cwd: new URL("../", import.meta.url).pathname,
+        env: childEnvironment,
+        encoding: "utf8",
+        timeout: 60_000,
+      },
+    );
+    assert.equal(
+      blockedRun.error,
+      undefined,
+      blockedRun.error?.message ?? "",
+    );
+    assert.equal(blockedRun.status, 1, blockedRun.stderr);
+    assert.match(
+      blockedRun.stderr,
+      /no release gates were run and production readiness is NO-GO/,
+    );
+    assert.doesNotMatch(
+      `${blockedRun.stdout}\n${blockedRun.stderr}`,
+      /Release check started/,
+      "missing published identity must block before release gates start",
+    );
+    const blockedCheckpoint = await readFile(
+      join(blockedEvidenceDirectory, RELEASE_CHECKPOINT_REPORT),
+      "utf8",
+    );
+    assert.deepEqual(blockedCheckpoint.trimEnd().split("\n"), [
+      "# Release Check Checkpoint — BLOCKED / NO-GO",
+      "Mode: standard",
+      `Assessed revision: ${expectedAssessedRevision}`,
+      "Missing evidence:",
+      "- readiness deployment ID",
+      "- deployed source revision",
+    ]);
+    assert.doesNotMatch(
+      blockedCheckpoint,
+      /^Deployed revision:/m,
+      "the assessed checkout revision must not be recorded as the deployed revision",
+    );
+    assert.equal(
+      await readFile(
+        join(blockedEvidenceDirectory, "release-check-report.md"),
+        "utf8",
+      ),
+      retainedReport,
+      "a pre-gate checkpoint must leave retained release evidence untouched",
+    );
+
+    const staleIssuedAt = new Date(Date.now() - 2 * 60 * 60 * 1_000);
+    const staleHandoffPath = join(
+      blockedEvidenceDirectory,
+      "stale-deployment-handoff.json",
+    );
+    await writeFile(
+      staleHandoffPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        kind: "published-deployment-handoff",
+        deploymentId: "stale-release-handoff",
+        deployedRevision: "f".repeat(40),
+        databaseOwner: "approved_source_owner",
+        issuedAt: staleIssuedAt.toISOString(),
+        expiresAt: new Date(
+          staleIssuedAt.getTime() + 60 * 60 * 1_000,
+        ).toISOString(),
+      }),
+      "utf8",
+    );
+    const staleBlockedRun = spawnSync(
+      process.execPath,
+      [
+        "--import",
+        "tsx",
+        new URL("./release-check.mts", import.meta.url).pathname,
+        "--full",
+        "--readiness-deployment-id",
+        "",
+        "--deployed-revision",
+        "",
+      ],
+      {
+        cwd: new URL("../", import.meta.url).pathname,
+        env: {
+          ...childEnvironment,
+          SOURCE_LIBRARY_RECONCILIATION_DEPLOYMENT_HANDOFF:
+            staleHandoffPath,
+        },
+        encoding: "utf8",
+        timeout: 60_000,
+      },
+    );
+    assert.equal(
+      staleBlockedRun.error,
+      undefined,
+      staleBlockedRun.error?.message ?? "",
+    );
+    assert.equal(staleBlockedRun.status, 1, staleBlockedRun.stderr);
+    assert.doesNotMatch(
+      `${staleBlockedRun.stdout}\n${staleBlockedRun.stderr}`,
+      /Release check started/,
+      "an expired handoff must be rejected before full-release gates start",
+    );
+    const staleBlockedCheckpoint = await readFile(
+      join(blockedEvidenceDirectory, RELEASE_CHECKPOINT_REPORT),
+      "utf8",
+    );
+    assert.deepEqual(staleBlockedCheckpoint.trimEnd().split("\n"), [
+      "# Release Check Checkpoint — BLOCKED / NO-GO",
+      "Mode: full",
+      `Assessed revision: ${expectedAssessedRevision}`,
+      "Missing evidence:",
+      "- current published deployment handoff",
+      "- readiness deployment ID",
+      "- deployed source revision",
+    ]);
+    assert.doesNotMatch(
+      staleBlockedCheckpoint,
+      /stale-release-handoff|f{40}|Deployed revision:/,
+      "a stale handoff must not leak or promote its old deployment identity",
+    );
+  } finally {
+    await rm(blockedEvidenceDirectory, { recursive: true, force: true });
+  }
+
   assert.deepEqual(
     configuredKeyrings,
     [
@@ -1200,13 +1464,26 @@ async function run(): Promise<void> {
     true,
     "full reconciliation must wait for the database preflight",
   );
+  const sourceEvidenceInputIndex =
+    SOURCE_LIBRARY_RECONCILIATION_IMPORT_STEP.args.indexOf("--input");
+  const importsSourceLibraryEvidence =
+    sourceEvidenceInputIndex >= 0 &&
+    Boolean(
+      SOURCE_LIBRARY_RECONCILIATION_IMPORT_STEP.args[
+        sourceEvidenceInputIndex + 1
+      ],
+    );
   assert.equal(
     releaseStepDependencies(
       { label: "release-tests", args: [], stage: "release-tests" },
       0,
     ).includes(SOURCE_LIBRARY_RECONCILIATION_PREFLIGHT_LABEL),
-    true,
-    "expensive release tests must wait for the database preflight",
+    sourceLibraryReconciliationPreflightEnabled(
+      true,
+      importsSourceLibraryEvidence,
+      undefined,
+    ),
+    "expensive release tests must wait for the database preflight unless published evidence is explicitly imported",
   );
   assert.equal(
     SOURCE_LIBRARY_RECONCILIATION_FIXTURE_STEP.args.includes("--preflight"),
@@ -1516,8 +1793,12 @@ async function run(): Promise<void> {
     SOURCE_LIBRARY_RECONCILIATION_STEP.args[
       SOURCE_LIBRARY_RECONCILIATION_STEP.args.indexOf("--environment") + 1
     ],
-    "development",
-    "local release evidence must identify the development database explicitly",
+    resolveSourceLibraryEvidenceEnvironment(
+      process.env.SOURCE_LIBRARY_RECONCILIATION_ENVIRONMENT,
+      importsSourceLibraryEvidence,
+      Boolean(process.env.CI),
+    ),
+    "the verifier environment must reflect whether production evidence is imported",
   );
   assert.match(
     SOURCE_LIBRARY_RECONCILIATION_STEP.args[
@@ -2839,6 +3120,20 @@ async function run(): Promise<void> {
       }),
       /incomplete checkpoint.*not retained release evidence.*left unchanged.*--resume/,
       "an active checkpoint must not make an older retained report look current",
+    );
+    await writeFile(
+      join(root, RELEASE_CHECKPOINT_REPORT),
+      boundedBlockedCheckpoint,
+      "utf8",
+    );
+    await assert.rejects(
+      verifyReleaseEvidence(root, {
+        currentRevision: "current-revision",
+        expectedMode: "standard",
+        expectedLabels: validLabels,
+      }),
+      /blocked before its gates.*no resumable gate state.*rerun without --resume/,
+      "a missing-identity checkpoint must not suggest resuming gates that never ran",
     );
     await rm(join(root, RELEASE_CHECKPOINT_REPORT));
     await rm(join(root, "release-check-report.md"));

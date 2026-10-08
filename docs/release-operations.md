@@ -184,6 +184,16 @@ as regressions.
 - A missing gate in the report is an incomplete run, never a pass.
 - A missing, empty, stale-revision, or unexpected evidence file is an evidence
   failure, never a pass.
+- Standard and full published release checks require a current deployment ID
+  and exact deployed source revision before any release gates run. If either is
+  missing, or the configured deployment handoff is invalid or stale, the runner
+  writes `release-check-checkpoint.md` with only the mode, assessed revision,
+  and missing evidence, then exits `BLOCKED / NO-GO`. It does not run gates or
+  update the retained release report. The assessed revision identifies the
+  checkout and verification inputs; it is not the deployed revision and must
+  never be inferred from repository `HEAD`. Supply current published identity
+  evidence and rerun without `--resume`; this pre-gate checkpoint has no
+  resumable gate state.
 - The compatibility lane's Chromium and WebKit projects are responsive browser
   emulations. They are not proof of physical Android Chrome or iOS Safari/PWA
   behavior. Run physical Android Chrome through the dedicated device command
