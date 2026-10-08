@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./spec-import-gold-review": "./src/spec-import-gold-review.ts"
   },
   "scripts": {
     "test": "vitest run",
