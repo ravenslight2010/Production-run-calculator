@@ -429,7 +429,7 @@ describe("background operation PostgreSQL reconnection", () => {
     expect(await db.select().from(inventoryLedgerTable)).toHaveLength(1);
   });
 
-  it("recovers server-job scheduled web-push evaluation on a fresh backend with one attempt and one record", async () => {
+  it("coalesces scoped dates into one scheduled web-push job and records each alert once", async () => {
     const now = Date.now();
     const endedAt = now - 120_000;
     const dueAt = endedAt + 60_000;
@@ -442,6 +442,14 @@ describe("background operation PostgreSQL reconnection", () => {
           runs: [{ id: "scheduled-alert-run", startedAt: now - 300_000, endedAt }],
         },
         runValues: { "scheduled-alert-run": { freezerTime: 1 } },
+      },
+    });
+    await db.insert(dailySyncTable).values({
+      date: "2030-04-02",
+      scope: SCOPE,
+      data: {
+        dayState: { date: "2030-04-02", runs: [] },
+        runValues: {},
       },
     });
 
@@ -482,6 +490,7 @@ describe("background operation PostgreSQL reconnection", () => {
       type: "scheduled-evaluation",
       status: "succeeded",
       attempt: 1,
+      result: { examined: 2, candidates: 1 },
     });
     expect(await db.select().from(serverJobAttemptsTable)).toHaveLength(1);
     const [jobAttempt] = await db.select().from(serverJobAttemptsTable);
@@ -531,7 +540,7 @@ describe("background operation PostgreSQL reconnection", () => {
       scope: SCOPE,
       actorId: "system:scheduled-alert-scheduler",
       type: "scheduled-evaluation",
-      idempotencyKey: `scheduled-evaluation:${ALERT_DATE}:${now}`,
+      idempotencyKey: `scheduled-evaluation:${SCOPE}:${now}`,
       status: "queued",
       attempt: 0,
     });

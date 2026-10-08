@@ -4,19 +4,27 @@ import { getServerJobDefinition } from "./serverJobs";
 const mocks = vi.hoisted(() => ({
   calc: vi.fn(),
   elapsed: vi.fn(),
+  dbSelect: vi.fn(),
+  enqueueServerJob: vi.fn(),
 }));
 
 vi.mock("@workspace/db", () => ({
-  db: {},
-  dailySyncTable: {}, usersTable: {}, webPushDeliveriesTable: {}, webPushSubscriptionsTable: {},
+  db: { select: mocks.dbSelect },
+  dailySyncTable: { scope: { name: "scope" }, date: { name: "date" } },
+  usersTable: {}, webPushDeliveriesTable: {}, webPushSubscriptionsTable: {},
 }));
 vi.mock("@workspace/live-calc", () => ({ computeServerCalc: mocks.calc, computeAutoTrackElapsedMs: mocks.elapsed }));
 vi.mock("../lib/logger", () => ({ logger: { error: vi.fn(), warn: vi.fn() } }));
 vi.mock("web-push", () => ({ default: { setVapidDetails: vi.fn(), sendNotification: vi.fn() } }));
+vi.mock("./serverJobs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./serverJobs")>();
+  return { ...actual, enqueueServerJob: mocks.enqueueServerJob };
+});
 
 const {
   alertCandidates,
   deferredCandidate,
+  enqueueScheduledWebPushAlerts,
   freezerCandidates,
   pendingFreezerArms,
   scheduledEvaluationIdempotencyKey,
@@ -126,11 +134,32 @@ describe("server web-push alert candidates", () => {
     });
   });
 
-  it("deduplicates scheduled evaluation by date and time bucket", () => {
-    const first = scheduledEvaluationIdempotencyKey("2026-01-01", 120_001, 60_000);
-    expect(scheduledEvaluationIdempotencyKey("2026-01-01", 179_999, 60_000)).toBe(first);
-    expect(scheduledEvaluationIdempotencyKey("2026-01-01", 180_000, 60_000)).not.toBe(first);
-    expect(scheduledEvaluationIdempotencyKey("2026-01-02", 120_001, 60_000)).not.toBe(first);
+  it("deduplicates scheduled evaluation by scope and time bucket, not date", () => {
+    const first = scheduledEvaluationIdempotencyKey("live", 120_001, 60_000);
+    expect(scheduledEvaluationIdempotencyKey("live", 179_999, 60_000)).toBe(first);
+    expect(scheduledEvaluationIdempotencyKey("live", 180_000, 60_000)).not.toBe(first);
+    expect(scheduledEvaluationIdempotencyKey("sandbox", 120_001, 60_000)).not.toBe(first);
+  });
+
+  it("enqueues one time-bucketed scheduled evaluation for each distinct scope", async () => {
+    const grouped = vi.fn().mockResolvedValue([{ scope: "live" }, { scope: "sandbox" }]);
+    const from = vi.fn().mockReturnValue({ groupBy: grouped });
+    mocks.dbSelect.mockReturnValue({ from });
+    mocks.enqueueServerJob.mockResolvedValue({ created: true });
+
+    await expect(enqueueScheduledWebPushAlerts(120_001, 60_000))
+      .resolves.toEqual({ examined: 2, enqueued: 2 });
+
+    expect(grouped).toHaveBeenCalledTimes(1);
+    expect(mocks.enqueueServerJob).toHaveBeenCalledTimes(2);
+    expect(mocks.enqueueServerJob.mock.calls.map(([job]) => ({
+      scope: job.scope,
+      idempotencyKey: job.idempotencyKey,
+      input: job.input,
+    }))).toEqual([
+      { scope: "live", idempotencyKey: scheduledEvaluationIdempotencyKey("live", 120_001, 60_000), input: { scheduledFor: 120_001 } },
+      { scope: "sandbox", idempotencyKey: scheduledEvaluationIdempotencyKey("sandbox", 120_001, 60_000), input: { scheduledFor: 120_001 } },
+    ]);
   });
 
   it("registers scheduled evaluation as an executable bounded server job", () => {

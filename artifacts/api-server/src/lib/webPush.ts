@@ -4,7 +4,7 @@ import {
   createBackgroundOperationBackoff,
   runBackgroundOperation,
 } from "./backgroundOperations";
-import { and, eq, gt, isNull, lt, or } from "drizzle-orm";
+import { and, asc, eq, gt, isNull, lt, or } from "drizzle-orm";
 import {
   db, usersTable, webPushDeliveriesTable, webPushSubscriptionsTable, webPushAlertArmsTable,
   dailySyncTable, scheduledAlertRecordsTable,
@@ -387,29 +387,32 @@ function quietHours(nowMs: number): boolean {
   return start < end ? hour >= start && hour < end : hour >= start || hour < end;
 }
 
-export function scheduledEvaluationIdempotencyKey(date: string, nowMs: number, bucketMs = DEFAULT_ALERT_INTERVAL_MS): string {
+export function scheduledEvaluationIdempotencyKey(scope: Scope, nowMs: number, bucketMs = DEFAULT_ALERT_INTERVAL_MS): string {
   const bucket = Math.floor(nowMs / bucketMs) * bucketMs;
-  return `scheduled-evaluation:${date}:${bucket}`;
+  return `scheduled-evaluation:${scope}:${bucket}`;
 }
 
 /**
- * Enqueues one durable workload per canonical scope/date/time bucket. The
- * server_jobs unique key elects the insert winner across API instances; actual
- * evaluation is performed only by the shared bounded ServerJobWorker.
+ * Enqueues one durable workload per canonical scope/time bucket. A single job
+ * evaluates that scope's dates individually, so local-day boundaries and
+ * date-specific alert state remain intact without one queue entry per date.
  */
 export async function enqueueScheduledWebPushAlerts(
   nowMs = Date.now(),
   bucketMs = DEFAULT_ALERT_INTERVAL_MS,
 ): Promise<{ examined: number; enqueued: number }> {
-  const rows = await db.select({ scope: dailySyncTable.scope, date: dailySyncTable.date }).from(dailySyncTable);
+  const rows = await db.select({ scope: dailySyncTable.scope })
+    .from(dailySyncTable)
+    .groupBy(dailySyncTable.scope);
   let enqueued = 0;
   for (const row of rows) {
+    const scope = row.scope as Scope;
     const result = await enqueueServerJob({
-      scope: row.scope as Scope,
+      scope,
       actorId: SCHEDULED_EVALUATION_ACTOR,
       type: "scheduled-evaluation",
-      idempotencyKey: scheduledEvaluationIdempotencyKey(row.date, nowMs, bucketMs),
-      input: { date: row.date, scheduledFor: nowMs },
+      idempotencyKey: scheduledEvaluationIdempotencyKey(scope, nowMs, bucketMs),
+      input: { scheduledFor: nowMs },
     });
     if (result.created) enqueued++;
   }
@@ -422,23 +425,38 @@ registerServerJob("scheduled-evaluation", {
   timeoutMs: 60_000,
   handler: async (context) => {
     const input = context.job.input as { date?: unknown; scheduledFor?: unknown };
-    if (typeof input?.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(input.date)
-      || typeof input.scheduledFor !== "number" || !Number.isFinite(input.scheduledFor)) {
-      throw new Error("scheduled-evaluation requires a date and scheduledFor timestamp");
+    if ((input?.date !== undefined
+      && (typeof input.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(input.date)))
+      || typeof input?.scheduledFor !== "number" || !Number.isFinite(input.scheduledFor)) {
+      throw new Error("scheduled-evaluation requires scheduledFor and an optional date");
     }
-    const date = input.date;
     if (await context.isCancellationRequested()) throw new Error("Cancelled");
     await context.reportProgress(10, "Evaluating scheduled production alerts");
-    // Evaluate at execution time rather than the enqueue timestamp so a queued
-    // job cannot emit an alert before its canonical milestone is actually due.
-    const result = await context.commit(() => runWebPushAlerts(Date.now(), {
-      scope: context.job.scope as Scope,
-      date,
-      signal: context.signal,
-    }));
+    const scope = context.job.scope as Scope;
+    const dates = typeof input.date === "string"
+      ? [{ date: input.date }]
+      : await db.select({ date: dailySyncTable.date })
+        .from(dailySyncTable)
+        .where(eq(dailySyncTable.scope, scope))
+        .orderBy(asc(dailySyncTable.date));
+    let examined = 0;
+    let candidates = 0;
+    // Keep each date's alert effects in its own commit. Besides preserving the
+    // former transaction size, logical alert claims make retries safe if a
+    // later date fails after earlier dates have completed.
+    for (const row of dates) {
+      if (await context.isCancellationRequested()) throw new Error("Cancelled");
+      const result = await context.commit(() => runWebPushAlerts(Date.now(), {
+        scope,
+        date: row.date,
+        signal: context.signal,
+      }));
+      examined += result.examined;
+      candidates += result.candidates;
+    }
     if (await context.isCancellationRequested()) throw new Error("Cancelled");
     await context.reportProgress(100, "Scheduled production alerts evaluated");
-    return result;
+    return { examined, candidates };
   },
 });
 
