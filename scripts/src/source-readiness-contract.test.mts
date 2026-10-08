@@ -15,9 +15,11 @@ import { formatReleaseReport, validateReleaseReport } from "./release-check.mts"
 
 async function setup(t: Parameters<typeof sourceFixture>[0]) {
   const expected = createSourceRecord(sourceFixture(t));
-  const server = createServer((_req, res) => {
+  const server = createServer((request, res) => {
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(buildInfoFromRecord(expected, "release")));
+    res.end(JSON.stringify(request.url === "/api/build-info"
+      ? buildInfoFromRecord(expected, "release")
+      : { status: "ok" }));
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));

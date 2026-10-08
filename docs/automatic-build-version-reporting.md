@@ -3,10 +3,11 @@
 This applies to new publishes only. The earlier live build cannot be identified
 retroactively. GitHub is a backup and is not queried by these commands.
 
-## Agent-assisted publish preparation
+## Automatic publish preparation
 
-After finishing changes and the applicable release checks, but **before**
-offering the owner a Publish action, run from the repository root:
+After each task merge, post-merge setup refreshes the prepared source record.
+If more source changes are made afterward, the agent refreshes it again before
+offering the owner a Publish action:
 
 ```bash
 bash scripts/src/run-release-node.sh pnpm run prepare:publish
@@ -18,11 +19,13 @@ snapshot, and keeps an independent expected copy at
 `.local/build-identity/expected-source.json`. Neither contains source contents,
 credentials, account information, or recipe data. Do not hand-edit either file.
 
-Root builds reuse that record only if the source fingerprint is still current.
-API and web build scripts check the fingerprint at their boundaries. They
-record completed compiled-output fingerprints and seal the version only when
-both stages match the prepared record. Changing source after preparation fails
-the build identity check; run preparation again instead of overriding it.
+The Replit deployment runs the focused `build:publish` command. It reuses the
+prepared record only if the source fingerprint is still current, builds the API
+and web app, then seals the version only when both completed outputs match that
+record. API and web build scripts also check the fingerprint at their
+boundaries. Changing source after preparation fails the build identity check;
+refresh the record instead of overriding it. This deployment build intentionally
+does not run the full release suite.
 Development API builds report `buildMode: development` and cannot pass the
 published-source check.
 
@@ -48,12 +51,13 @@ Use `--expected-file <path>` to select a previously captured independent source
 record and `--output <path>` to choose a receipt location. By default the receipt
 is `.local/build-identity/published-source-match.json`.
 
-The command performs one public, bounded, timeout-protected GET to
-`/api/build-info`. Missing/old-server metadata, redirects, invalid responses,
-partial/development builds, or mismatched source/build/Git fields exit nonzero.
-A successful check emits a 24-hour source-match receipt without retaining the
-target URL or response body. Never derive the expected record from the response
-being verified.
+The command performs public, bounded, timeout-protected GETs to `/api/build-info`
+and `/api`. It verifies the published source identity, then waits briefly for
+the live readiness endpoint to report ready. Missing/old-server metadata,
+redirects, invalid responses, partial/development builds, mismatched
+source/build/Git fields, or readiness timeout exit nonzero. A successful check
+emits a 24-hour source-match receipt without retaining the target URL or
+response body. Never derive the expected record from the response being verified.
 
 The endpoint is database-independent and unauthenticated. It returns only safe
 version fields, uses `Cache-Control: no-store`, and loads its sealed record once

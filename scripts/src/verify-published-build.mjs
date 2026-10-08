@@ -6,6 +6,66 @@ import {
   validateBuildInfo, validateSourceRecord, writeRecord,
 } from "./build-source-identity.mjs";
 
+async function readBoundedJsonResponse(response, limit, label) {
+  if (!response.body) throw new Error(`${label} is empty.`);
+  const reader = response.body.getReader();
+  const chunks = [];
+  let length = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      length += value.length;
+      if (length > limit) {
+        await reader.cancel();
+        throw new Error(`${label} exceeds its response budget.`);
+      }
+      chunks.push(value);
+    }
+  } finally { reader.releaseLock(); }
+  try {
+    const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      throw new Error();
+    return value;
+  } catch {
+    throw new Error(`${label} is invalid.`);
+  }
+}
+
+async function verifyReadiness(target, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const remaining = deadline - Date.now();
+    try {
+      const response = await fetch(new URL("/api", target), {
+        signal: AbortSignal.timeout(Math.min(remaining, 3_000)),
+        redirect: "error",
+        headers: { Accept: "application/json", "Cache-Control": "no-cache" },
+      });
+      if (response.status === 200) {
+        if (!response.headers.get("content-type")?.includes("application/json")) {
+          await response.body?.cancel();
+          throw new Error("Published readiness response is invalid.");
+        }
+        const health = await readBoundedJsonResponse(response, 8192, "Published readiness response");
+        if (health.status === "ok") return;
+        throw new Error("Published readiness response is not ready.");
+      }
+      await response.body?.cancel();
+      if (response.status < 500)
+        throw new Error("Published readiness endpoint returned an unexpected response.");
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("Published readiness")) throw error;
+      if (!(error instanceof TypeError) && error?.name !== "AbortError" && error?.name !== "TimeoutError")
+        throw error;
+    }
+    const waitMs = Math.min(250, deadline - Date.now());
+    if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
+  }
+  throw new Error("Published app did not become ready before the readiness timeout.");
+}
+
 export async function verifyPublishedBuild({ url, expected, timeoutMs = 15_000 }) {
   validateSourceRecord(expected);
   if (expected.mode !== "publish") throw new Error("The expected record must be a publish candidate.");
@@ -22,23 +82,7 @@ export async function verifyPublishedBuild({ url, expected, timeoutMs = 15_000 }
   });
   if (response.status !== 200 || !response.headers.get("content-type")?.includes("application/json"))
     throw new Error("Published build metadata is unavailable or has an unexpected response.");
-  if (!response.body) throw new Error("Published build metadata is empty.");
-  const reader = response.body.getReader();
-  const chunks = [];
-  let length = 0;
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      length += value.length;
-      if (length > 8192) {
-        await reader.cancel();
-        throw new Error("Published build metadata exceeds its response budget.");
-      }
-      chunks.push(value);
-    }
-  } finally { reader.releaseLock(); }
-  const actual = validateBuildInfo(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+  const actual = validateBuildInfo(await readBoundedJsonResponse(response, 8192, "Published build metadata"));
   if (actual.buildMode !== "release") throw new Error("Published metadata is not a complete release build.");
   for (const key of ["appBuildId", "sourcePolicy", "sourceFingerprintSha256"]) {
     if (actual[key] !== expected[key]) throw new Error("Published source does not match the expected build.");
@@ -47,6 +91,7 @@ export async function verifyPublishedBuild({ url, expected, timeoutMs = 15_000 }
   if (Date.parse(actual.completedAt) < Date.parse(expected.preparedAt) ||
       Date.parse(actual.completedAt) > now.getTime() + 60_000)
     throw new Error("Published build timestamps conflict with the expected record.");
+  await verifyReadiness(target, timeoutMs);
   return {
     schemaVersion: 1, kind: "published-source-match", status: "source-match",
     authority: "application-source-comparison-only", productionGo: false,
@@ -112,10 +157,17 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       "Published build metadata is unavailable or has an unexpected response.",
       "Published build metadata is empty.",
       "Published build metadata exceeds its response budget.",
+      "Published build metadata is invalid.",
       "Invalid sealed build identity.",
       "Published metadata is not a complete release build.",
       "Published source does not match the expected build.",
       "Published build timestamps conflict with the expected record.",
+      "Published readiness response is empty.",
+      "Published readiness response exceeds its response budget.",
+      "Published readiness response is invalid.",
+      "Published readiness response is not ready.",
+      "Published readiness endpoint returned an unexpected response.",
+      "Published app did not become ready before the readiness timeout.",
       "Build identity record contains invalid JSON.",
     ]);
     const reason = error instanceof Error && safeReasons.has(error.message) ? error.message :

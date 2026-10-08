@@ -5,14 +5,18 @@ import { buildInfoFromRecord, createSourceRecord } from "./build-source-identity
 import { sourceFixture } from "./fixtures/build-identity-fixture.mjs";
 import { createPublishedSourceHandoff, verifyPublishedBuild } from "./verify-published-build.mjs";
 
-async function fixture(t, respond) {
+async function fixture(t, respond, respondHealth = (res) => {
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ status: "ok" }));
+}) {
   const expected = createSourceRecord(sourceFixture(t));
   const info = buildInfoFromRecord(expected, "release");
   const server = createServer((req, res) => {
-    assert.equal(req.url, "/api/build-info");
     assert.equal(req.headers.authorization, undefined);
     assert.equal(req.headers.cookie, undefined);
-    respond(res, info);
+    if (req.url === "/api/build-info") respond(res, info);
+    else if (req.url === "/api") respondHealth(res);
+    else { res.writeHead(404); res.end(); }
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => { server.closeAllConnections(); server.close(); });
@@ -71,6 +75,32 @@ test("a source-based handoff is bound to the independent expectation without Git
   assert.deepEqual(handoff.expectedSource, input.expected);
   assert(!JSON.stringify(handoff).includes(input.url));
 });
+
+test("readiness verification waits through transient startup responses", async (t) => {
+  let attempts = 0;
+  const input = await fixture(t, (res, info) => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(info));
+  }, (res) => {
+    attempts += 1;
+    res.writeHead(attempts < 3 ? 503 : 200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ status: attempts < 3 ? "starting" : "ok" }));
+  });
+  assert.equal((await verifyPublishedBuild(input)).status, "source-match");
+  assert.equal(attempts, 3);
+});
+
+test("unready or malformed health responses cannot produce a source-match receipt", async (t) => {
+  const input = await fixture(t, (res, info) => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(info));
+  }, (res) => {
+    res.writeHead(503, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ status: "starting" }));
+  });
+  await assert.rejects(verifyPublishedBuild({ ...input, timeoutMs: 100 }), /readiness timeout/);
+});
+
 for (const status of [401, 404, 503]) {
   test(`HTTP ${status} fails explicitly`, async (t) => {
     const input = await fixture(t, (res) => {

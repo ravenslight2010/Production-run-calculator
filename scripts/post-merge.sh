@@ -37,3 +37,7 @@ until pnpm --filter db push-force; do
   echo "db push-force failed (attempt $attempts), retrying in 15s..." >&2
   sleep 15
 done
+
+# Keep the independent publish expectation synchronized with the merged source.
+# Deployment builds reuse this exact record and fail if source changes afterward.
+pnpm run prepare:publish
