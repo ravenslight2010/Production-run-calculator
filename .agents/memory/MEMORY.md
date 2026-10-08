@@ -155,3 +155,4 @@
 - [Production publish workflow](production-publish-workflow.md) — production is published through Replit; use manager-authorized production evidence, never a development fixture.
 - [Project skill session refresh](skill-session-registry-refresh.md) — project skills register from `.agents/skills`, but existing chats can keep a stale skill list until a new session.
 - [Pool-exception fingerprints](source-library-pool-exception-fingerprints.md) — preserve v1 approvals as historical bytes; only pinned, fresh, owner-reviewed fingerprints can waive current recipe drift.
+- [Sandbox network globals](codeexecution-network-globals.md) — impure CodeExecution may expose fetch without AbortSignal; verify runtime support before adding fetch timeouts.

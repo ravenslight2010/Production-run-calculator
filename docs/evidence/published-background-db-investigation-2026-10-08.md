@@ -104,6 +104,91 @@ Autoscale maximum/current instance count, and actual database ceiling/reserve
 are known. The logs prove both timeout classes occurred; they do not prove that
 historical scheduling alone caused either one.
 
+
+## Post-publish verification follow-up
+
+- Captured: 2026-10-08, after the published build completed at 10:20:28.789 UTC;
+  the aggregate query snapshot was 10:41:14.611 UTC.
+- The active deployment reported a successful release build:
+  - App build: `app-build:a3d3e838-87ab-4ad7-9301-8dc2d534daf1`
+  - Published source fingerprint:
+    `a0028555380e99766d502dccbe8754327fb75b7e39d08c3147270c1132029b18`
+  - Published Git revision: `d173e1f8bbb0ea67f105b031e9c03d80f3b9cfa6`
+    (`gitBinding: verified`)
+  - Platform build: `7217e2f3-be6b-4544-ae39-4f2086beb132`
+- The current checkout's independently computed source fingerprint and its
+  prepared publish record both reported
+  `5f6017a6a8addfa59e2ba3bde0492f9f49f1f373d9ff970717bdf44ae9028071`.
+  This does not match the live fingerprint, so the checkout was not used as
+  proof of the deployed implementation.
+- A production read-replica aggregate-only `SELECT`, scoped to jobs created
+  since the reported build completion, found 70 `daily_sync` rows in one scope
+  (70 dated rows at most in that scope). During the 20m 45s observation window,
+  63 scheduled-evaluation jobs were created. Their numeric idempotency-key
+  suffixes formed 6 scope/time-bucket groups; the largest group contained 37
+  jobs, and 3 groups contained more than one job. 59 of the 63 keys did not
+  match the current checkout's scope/time-bucket key format. This violates the
+  required one-job-per-scope/time-bucket condition.
+- At the aggregate snapshot, scheduled-evaluation statuses were 115,944 queued,
+  2 running, 29 succeeded, 8 failed, and 10 cancelled. This single snapshot
+  does not establish the net backlog trend because workers may process jobs
+  concurrently; it does establish that the newly published service continued
+  producing multiple jobs for some scope/time buckets.
+- Readiness shortly after publish returned HTTP 200 with `status: ok` while
+  `backgroundWorkers` was `warning`; database, startup, and audit protection
+  were `ok`. The subsequent readiness check returned HTTP 200 with all checks
+  `ok`.
+- No production job rows, scopes, inputs, or results were returned. No existing
+  production jobs were deleted, cancelled, or rewritten; no production writes
+  were performed.
+
+**Initial post-publish outcome:** This first observation window did not meet the
+scheduler criterion: the aggregate showed multiple scheduled-evaluation jobs
+per scope/time bucket. A later platform build and observation window are recorded
+below; this initial result is retained as rollout evidence and is not replaced
+by the later sample.
+
+
+## Second post-publish verification
+
+- Captured: 2026-10-08, from the reported build completion at 15:56:34.756 UTC
+  through the aggregate query snapshot at 16:19:17.425 UTC (22m 42.669s).
+- The platform reported a new successful build:
+  - App build: `app-build:a3d3e838-87ab-4ad7-9301-8dc2d534daf1`
+  - Platform build: `91ef316e-f1ae-4b6a-afcc-2cd753f5d0c6`
+  - Published source fingerprint:
+    `a0028555380e99766d502dccbe8754327fb75b7e39d08c3147270c1132029b18`
+  - Published Git revision: `d173e1f8bbb0ea67f105b031e9c03d80f3b9cfa6`
+    (`gitBinding: verified`)
+- The published source fingerprint remained different from the checkout and
+  prepared publish record (`5f6017a6a8addfa59e2ba3bde0492f9f49f1f373d9ff970717bdf44ae9028071`).
+  The observed production behavior below is therefore reported directly, not
+  attributed to an exact source match.
+- The production read-replica aggregate again found 70 dated rows in one scope,
+  with at most 70 rows in that scope. In this window, 10 scheduled-evaluation
+  jobs were created across 10 scope/time-bucket groups: maximum one job per
+  group, zero duplicate groups, and zero keys outside the current checkout's
+  expected scope/time-bucket format.
+- Scheduled-evaluation status totals at capture were 110,929 queued, 2 running,
+  55 succeeded, 18 failed, and 2 cancelled. The queued count was 5,015 lower
+  than the earlier 10:41 UTC snapshot, but these snapshots span different
+  platform builds and do not establish that the scheduler correction caused
+  the net decrease.
+- Readiness returned HTTP 200 with `status: ok` and all checks `ok`. In the
+  earlier post-publish check, readiness returned HTTP 200 with
+  `backgroundWorkers: warning` and core database/startup/audit checks `ok`.
+- The aggregate did not return scope names, job keys, inputs, or results. No
+  production jobs were deleted, cancelled, or rewritten; no production writes
+  were performed.
+
+**Outcome:** The latest observed production window satisfies the
+one-job-per-scope/time-bucket criterion across 10 buckets while the scope has
+70 dated rows. Readiness was healthy both with an optional worker warning and
+with all checks healthy. The earlier duplicate-producing window and the
+published-vs-checkout fingerprint mismatch remain evidence caveats; this
+bounded sample confirms the later behavior but does not prove long-term queue
+drainage or exact source identity.
+
 ## Evidence hygiene
 
 Only build identity, health status, allowlisted error classes, aggregate counts,
