@@ -43,9 +43,11 @@ observed model-list digest matched the SHA-256 of the installed Ollama manifest.
   rejected.
 - Proxy access logging is disabled. Ollama stdout/stderr are discarded by the
   launcher. The proxy does not persist request or response bodies.
-- The local model-list and health checks used only metadata routes. No
-  completion/inference request was sent, no customer content was used, no
-  inference provider was called, and no production routing was changed.
+- At the setup capture below, the local model-list and health checks used only
+  metadata routes; no completion/inference request had yet been sent. The later
+  synthetic-only smoke attempts and their capacity-gate result are recorded
+  below. No customer content or remote inference provider was used, and no
+  production routing was changed.
 
 The endpoint remains a workspace-local service, not a managed Replit workflow.
 The workspace rejected adding another workflow at its current workflow limit;
@@ -58,9 +60,9 @@ launches, and removes stale process records left by a workspace restart.
 For manual control:
 
 ```sh
-bash scripts/start_local_model_eval_proxy.sh status
-bash scripts/start_local_model_eval_proxy.sh stop
-bash scripts/start_local_model_eval_proxy.sh start
+HOME="$PWD/.local/ollama-cache-home" bash scripts/start_local_model_eval_proxy.sh status
+HOME="$PWD/.local/ollama-cache-home" bash scripts/start_local_model_eval_proxy.sh stop
+HOME="$PWD/.local/ollama-cache-home" bash scripts/start_local_model_eval_proxy.sh start
 ```
 
 The helper only stops a process whose command line matches this endpoint. It
@@ -68,6 +70,18 @@ checks readiness through the loopback `/v1/models` metadata route and does not
 read or log completions. It does not expose a port or create a Replit workflow.
 If an untracked service is already answering on the local endpoint, the helper
 refuses to claim it or stop it.
+
+The endpoint was stopped after the smoke attempts and was not listening at the
+final smoke capture. The weights are in the ignored workspace-local cache
+because the home overlay quota blocked the initial pull. The manual commands
+above select that cache through `HOME`. The configured `onBoot` command still
+uses the default home and has not been verified against this relocated cache;
+its startup evidence below uses a metadata fixture rather than these weights.
+For a foreground launch with the restored cache:
+
+```sh
+HOME="$PWD/.local/ollama-cache-home" python3 scripts/local_model_eval_proxy.py
+```
 
 ## Verification and provenance
 
@@ -94,6 +108,66 @@ refuses to claim it or stop it.
 This setup record does not establish that comparison cases are authorized or
 ready. The provider-comparison gate review remains a separate, time-bound
 assessment.
+
+
+## Synthetic local smoke attempt — capacity gate failed
+
+- Captured at `2026-10-08T17:55:05Z` in the development workspace at Git
+  revision `11d23273a331cd3f5da7b00703c4b280c039add0`.
+- The registry manifest and installed Ollama model both matched the approved
+  `qwen3:8b` digest above. Its model layer is 5,225,374,496 bytes. The weights
+  were restored only after owner approval and are in an ignored workspace-local
+  cache; no model files were added to Git.
+- Three local completion attempts used the same synthetic prompt through
+  `http://127.0.0.1:11434/v1`; no source-backed or customer content was sent.
+  Each returned HTTP 500 before generating a completion. The first error
+  response arrived in 0.429 seconds; this is not a successful inference latency.
+- The sanitized Ollama error reported that the configured 32,768-token context
+  required 12.3 GiB while 10.8 GiB was available. No model remained loaded, so
+  the active context length could not be verified during these 32,768-token
+  attempts; the context was not lowered for them.
+- The cgroup limit remained 17,179,869,184 bytes (16 GiB), with an 8-CPU quota.
+  Its high-water after the attempts was 11,715,952,640 bytes (10.91 GiB), below
+  the limit. That high-water was already present immediately before the timed
+  request, so it is cumulative workspace evidence, not a request-isolated peak.
+  `memory.events` reported zero `oom` and `oom_kill` events.
+- The proxy's captured stdout/stderr contained only startup output and no
+  synthetic prompt; the access-log handler is tested to emit nothing. The
+  proxy and launcher keep bodies in memory and do not write request or response
+  bodies to files. No model completion was produced or retained.
+- No source-backed comparison was run and production routing was unchanged.
+  **Result: the 32,768-token setting does not pass on this host.**
+- `python3 -m unittest discover -s scripts -p 'test_local_model_eval_proxy.py' -v`
+  — 10 tests passed, including the access-log suppression test;
+  `py_compile` and `git diff --check` passed.
+
+
+## Owner-approved lower-context smoke follow-up
+
+- Final evidence captured at `2026-10-08T18:17:15Z` in the development
+  workspace at Git revision `727d993d0a086b611b535f32e9c471519b5d8e29`.
+- After the owner approved a lower-context check, a one-off evaluator process
+  used a 4,096-token context limit, below the approved 32,768-token ceiling.
+  The checked-in proxy and production routing were not changed. The same
+  synthetic prompt was sent only to the loopback endpoint.
+- A first lower-context attempt at 8,192 tokens returned HTTP 504 at 120.025
+  seconds without a completion. Its sampled memory peak was 9,517,625,344 bytes;
+  the cgroup high-water remained 11,715,952,640 bytes, with no new OOM events.
+- The 4,096-token attempt returned HTTP 200 with a non-empty completion in
+  68.745 seconds. The one-off evaluator set `OLLAMA_CONTEXT_LENGTH=4096`;
+  Ollama's `/api/ps` response did not provide a readable `context_length` value.
+- For the successful attempt, cgroup high-water rose from 11,715,952,640 to
+  12,705,800,192 bytes (11.83 GiB), below the 17,179,869,184-byte (16 GiB)
+  limit. The sampled peak matched that high-water, and `oom`/`oom_kill` counts
+  stayed at zero.
+- Captured proxy stdout/stderr contained only startup output: neither the
+  synthetic prompt nor the non-empty completion appeared in logs. Request and
+  response bodies were held in memory only; no body file was written or
+  retained.
+- **Result:** Qwen3 returned under the 120-second deadline at the owner-approved
+  4,096-token setting, but not at 8,192 or 32,768 tokens in this workspace.
+  This does not establish that the full 32,768-token context fits or authorize
+  source-backed comparisons. No source-backed comparison was run.
 
 ## Workspace-startup implementation verification
 

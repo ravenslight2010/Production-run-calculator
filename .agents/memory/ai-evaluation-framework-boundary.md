@@ -64,3 +64,19 @@ AI service and approved the workspace after learning its CPU-only limitations.
 **How to apply:** Reuse existing local compute when approved, state hardware
 limits and any dedicated-host deviation plainly, and get explicit approval
 before provisioning recurring infrastructure or changing production routing.
+
+For large local model downloads in Replit workspaces, do not infer writable
+quota from filesystem free space reported for the home overlay. Keep weights in
+an ignored cache on the larger workspace volume and launch the local evaluator
+with its home directory pointed at that cache.
+
+**Why:** A multi-gigabyte Ollama pull reached 98%, then creating a small
+temporary log failed with `Disk quota exceeded` despite substantial filesystem
+free space. Moving the partial cache to ignored workspace storage allowed the
+pinned model pull and digest verification to finish without adding model files
+to Git.
+
+**How to apply:** Before downloading large local weights, check the actual
+workspace mount and quota behavior. If the home overlay is constrained, use
+non-versioned workspace storage and verify the approved model digest before
+sending any prompt.

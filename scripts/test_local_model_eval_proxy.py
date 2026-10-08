@@ -1,4 +1,5 @@
 import http.client
+import io
 import json
 import subprocess
 import threading
@@ -96,6 +97,13 @@ class ProxyValidationTests(unittest.TestCase):
 
 
 class ProxyForwardingTests(unittest.TestCase):
+    def test_http_access_logging_does_not_emit_request_or_response_text(self):
+        handler = object.__new__(proxy.EndpointHandler)
+        with patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            handler.log_message("%s", "synthetic prompt and response sentinel")
+
+        self.assertEqual(stderr.getvalue(), "")
+
     def test_forwarder_has_an_absolute_120_second_deadline(self):
         marker = proxy.STATUS_MARKER + b"200"
         completed = subprocess.CompletedProcess(
