@@ -96,3 +96,36 @@ Validation performed:
 - No approved local inference endpoint or local model identity was available.
 - Gemini and local provider accuracy, blank-poison rate, empty-output rate, and p50/p95 latency remain unknown.
 - A future comparison needs an access-controlled, verified gold split; frozen case-specific prompts; an approved local endpoint; fixed provider/retry settings; and metadata-only side-by-side manifests.
+
+## Independent gold-case review protocol and current count
+
+- **Protocol review date:** 2026-10-08
+- **Review scope:** Repository evidence and metadata only. No customer workbook, personal or operational data, private evidence store, or provider payload was accessed.
+- **Eligible independent gold cases found in the reviewed workspace:** 0
+- **Authorized Apply-evidence bundle:** Not found in the reviewed workspace
+- **Eligible cases in unreviewed private stores:** Unknown; those stores were not accessed.
+
+This is a metadata-only preparation record, not a new benchmark result or a change to the inconclusive benchmark / no-go decision. The count is limited to eligible cases identifiable from the reviewed repository evidence; it does not claim that no cases exist in other stores. The 304 historical discrepancy-review cases remain excluded because their labels concern discrepancy detection, not source-backed extraction correctness.
+
+### Authorization and privacy requirements
+
+Before a reviewer opens source material, the data owner must authorize its use for spec-import accuracy evaluation, identify the permitted source records and reviewers, and confirm that the use is compatible with applicable customer terms and retention rules. Existing workbook access, a prior import, or a human Apply record is not by itself authorization for evaluation. If authorization or the allowed scope is unclear, do not inspect or use the material.
+
+Keep source workbooks, extracted labels, source locations, and any identity mapping in an access-controlled location outside Git and general-purpose reports. Use opaque case IDs in review records. Do not include workbook names, customer or brand names, personal data, operational values, source rows, prompts, or provider outputs in public/shared evidence. A digest is an integrity aid, not anonymization; retain any source digest or detailed provenance only in the restricted record when authorized and necessary.
+
+### Eligibility and independent labeling criteria
+
+A case may count as an eligible independent gold case only when all of the following are true:
+
+1. Its source is an authorized spec workbook, or an authorized human Apply record that can be independently checked against its underlying source evidence. Apply-only assertions without source support do not qualify.
+2. The expected values are transcribed from the authoritative source, not copied from parser output, deterministic parser snapshots, prior discrepancy labels, or provider responses. Preserve raw source wording and units in the restricted record when normalization is needed.
+3. Two reviewers independently label the case from the source without seeing parser/provider output or each other's labels. Review covers the applicable critical fields listed above, including explicit “not present”, “unclear”, and “not inferable” states rather than guessed values.
+4. A separate adjudicator resolves disagreements against the source. Unresolved fields remain unknown; a case is not eligible for fields whose source cannot be interpreted reliably.
+5. The restricted record binds the opaque case ID and labels to source evidence and records authorization, reviewer/adjudicator identities, review status, field coverage, and the applicable parse/prompt identity. Identity mappings and source locators remain restricted.
+6. A privacy review confirms the retained evaluation metadata is minimized and does not expose source content or identifying details.
+
+### Representative selection and future evidence
+
+Select authorized cases before looking at any model output. Track broad source-layout and product/field-family coverage in the restricted review record so selection is not dominated by one template or category; do not publish customer or brand breakdowns. Record the number screened, number authorized for review, number fully adjudicated, and number eligible, using aggregate counts only. The case count is the unit of eligibility; field-level coverage and unknowns must be reported separately in a future evaluation.
+
+No cases, labels, manifests, training examples, or dataset splits were created by this review. A future evaluation requires a separate decision using the then-current parse/prompt identity, an approved provider/model configuration, frozen settings, and its own privacy-safe evidence. This protocol does not authorize a provider run, training, or a change to the existing no-go. The benchmark remains unrun.

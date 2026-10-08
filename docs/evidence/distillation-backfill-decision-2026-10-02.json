@@ -7,7 +7,7 @@
   "productionSystemPromptSha256": "65196b19789f6f1cc676c45f00e32b14c34320f869766e8f6c711a351e9f9d76",
   "benchmark": {
     "outcome": "inconclusive",
-    "evidenceSha256": "1803a7bc5b917387c3f3ac03bfbd8e1937a74ac7a7d6d9913562cb0ea3257601"
+    "evidenceSha256": "263401938696e0197a01311143638e8d23cfed893cbdaf80b5bf4629d12cb2c1"
   },
   "trainingEvaluation": {
     "outcome": "no-go",
@@ -19,6 +19,22 @@
   },
   "verifiedIndependentGoldCaseCount": 0,
   "eligibleAuthorizedApplyEvidenceBundle": "not_found_in_reviewed_workspace",
+  "goldCaseReview": {
+    "outcome": "protocol_documented_no_private_case_review",
+    "reviewDate": "2026-10-08",
+    "evidenceSha256": "263401938696e0197a01311143638e8d23cfed893cbdaf80b5bf4629d12cb2c1",
+    "reviewedSources": [
+      "docs/evidence/local-spec-import-benchmark-blocker-2026-10-02.md",
+      "docs/evidence/distillation-dataset-safety-review-2026-10-02.md",
+      "docs/evidence/conditional-qlora-training-decision-2026-10-02.md"
+    ],
+    "provenanceScope": "Repository evidence and metadata only; no customer workbook, private evidence store, or provider payload was accessed.",
+    "verifiedIndependentGoldCaseCount": 0,
+    "unreviewedPrivateStoreCaseCount": "unknown_not_accessed",
+    "eligibleAuthorizedApplyEvidenceBundle": "not_found_in_reviewed_workspace",
+    "examplesCreated": 0,
+    "datasetSplitsCreated": 0
+  },
   "reasonCodes": [
     "benchmark_has_zero_eligible_independent_gold_cases",
     "training_evaluation_is_no_go",
@@ -30,6 +46,6 @@
   "examplesEmitted": 0,
   "maintenanceUpdate": {
     "date": "2026-10-08",
-    "note": "Recomputed the production system-prompt SHA-256 from buildParseSpecSheetPrompt({ workbookText: \"\" }); it remains 65196b19789f6f1cc676c45f00e32b14c34320f869766e8f6c711a351e9f9d76, matching the backfill guard. The generated prompt contains no NaN. This metadata-only verification does not change the benchmark, training evaluation, dataset-safety evidence, parse version, or no-go decision."
+    "note": "Recomputed the production system-prompt SHA-256 from buildParseSpecSheetPrompt({ workbookText: \"\" }); it remains 65196b19789f6f1cc676c45f00e32b14c34320f869766e8f6c711a351e9f9d76, matching the backfill guard. The generated prompt contains no NaN. The independent gold-case review protocol and metadata-only eligible count were documented; no private evidence was accessed and no examples or splits were created. The benchmark remains inconclusive and the no-go decision, training evaluation, dataset-safety outcome, and parse version are unchanged."
   }
 }
