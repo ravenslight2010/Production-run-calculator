@@ -40,6 +40,7 @@ const mocks = vi.hoisted(() => ({
   },
   info: vi.fn(),
   buildInfo: vi.fn(),
+  scheduledQueueDiagnostics: vi.fn(),
 }));
 
 vi.mock("../lib/buildInfo", () => ({ getBuildInfo: mocks.buildInfo }));
@@ -51,6 +52,11 @@ vi.mock("@workspace/db", () => ({
 
 vi.mock("../lib/logger", () => ({
   logger: { info: mocks.info },
+}));
+
+vi.mock("../lib/serverJobs", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../lib/serverJobs")>(),
+  getScheduledEvaluationQueueDiagnostics: mocks.scheduledQueueDiagnostics,
 }));
 
 let server: Server;
@@ -99,6 +105,17 @@ beforeEach(async () => {
   mocks.execute.mockClear();
   mocks.info.mockClear();
   mocks.buildInfo.mockReturnValue(null);
+  mocks.scheduledQueueDiagnostics.mockReturnValue({
+    status: "pending",
+    queued: 0,
+    running: 0,
+    terminalLastWindow: { succeeded: 0, failed: 0, cancelled: 0 },
+    duplicateTimeBucketGroups: 0,
+    duplicateGroupsTruncated: false,
+    warningCodes: [],
+    sampleCount: 0,
+    windowMs: 300_000,
+  });
   setProviderEnv({ AI_INTEGRATIONS_GEMINI_API_KEY: "test-replit-gemini-key" });
 });
 
@@ -266,6 +283,40 @@ describe("GET /healthz background operation diagnostics", () => {
     expect(response.status).toBe(200);
     expect(body.checks.backgroundWorkers).toBe("ok");
     vi.useRealTimers();
+  });
+
+  it("reports a scheduled-evaluation warning without blocking core readiness", async () => {
+    mocks.scheduledQueueDiagnostics.mockReturnValue({
+      status: "warning",
+      queued: 4,
+      running: 1,
+      terminalLastWindow: { succeeded: 3, failed: 1, cancelled: 0 },
+      duplicateTimeBucketGroups: 0,
+      duplicateGroupsTruncated: false,
+      warningCodes: ["backlog_stalled"],
+      sampleCount: 6,
+      windowMs: 300_000,
+      lastSampleAt: "2026-10-08T12:00:00.000Z",
+    });
+
+    const response = await fetch(`${baseUrl}/readyz`);
+    const body = (await response.json()) as {
+      status: string;
+      checks: Record<string, string>;
+      diagnostics: { scheduledEvaluationQueue: Record<string, unknown> };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.status).toBe("ok");
+    expect(body.checks.backgroundWorkers).toBe("warning");
+    expect(body.diagnostics.scheduledEvaluationQueue).toMatchObject({
+      status: "warning",
+      queued: 4,
+      running: 1,
+      warningCodes: ["backlog_stalled"],
+    });
+    expect(JSON.stringify(body.diagnostics.scheduledEvaluationQueue))
+      .not.toMatch(/scope|idempotency|input|result/i);
   });
 });
 

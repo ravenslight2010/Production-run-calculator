@@ -15,6 +15,7 @@ import {
   backgroundOperationsDegraded,
   getBackgroundOperationDiagnostics,
 } from "../lib/backgroundOperations";
+import { getScheduledEvaluationQueueDiagnostics } from "../lib/serverJobs";
 
 const router: IRouter = Router();
 
@@ -86,10 +87,18 @@ async function readiness(req: Request, res: Response): Promise<void> {
       ? { status: "configured" }
       : { status: "not_configured", detail: "ai_provider_not_configured" };
     const backgroundOperationDiagnostics = await getBackgroundOperationDiagnostics();
-    checks.backgroundWorkers = backgroundOperationsDegraded(backgroundOperationDiagnostics)
-      ? { status: "warning", detail: "sustained_background_worker_failures" }
+    const scheduledEvaluationQueue = getScheduledEvaluationQueueDiagnostics();
+    const backgroundOperationsWarning = backgroundOperationsDegraded(backgroundOperationDiagnostics);
+    checks.backgroundWorkers = backgroundOperationsWarning || scheduledEvaluationQueue.status === "warning"
+      ? {
+        status: "warning",
+        detail: scheduledEvaluationQueue.status === "warning"
+          ? "scheduled_evaluation_queue_warning"
+          : "sustained_background_worker_failures",
+      }
       : { status: "ok" };
     res.locals.backgroundOperationDiagnostics = backgroundOperationDiagnostics;
+    res.locals.scheduledEvaluationQueue = scheduledEvaluationQueue;
   }
 
   // Only conditions required to safely serve core operational traffic block
@@ -107,6 +116,7 @@ async function readiness(req: Request, res: Response): Promise<void> {
         cacheMaintenance: await getCacheMaintenanceDiagnostics(),
         auditProtection: res.locals.auditProtection,
         backgroundOperations: res.locals.backgroundOperationDiagnostics,
+        scheduledEvaluationQueue: res.locals.scheduledEvaluationQueue,
       }
       : undefined;
   logger.info(

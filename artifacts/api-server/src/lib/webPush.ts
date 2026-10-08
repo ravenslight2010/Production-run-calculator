@@ -14,7 +14,13 @@ import { logger } from "./logger";
 import type { Scope } from "./requestScope";
 import { getUserCapabilities } from "./roles";
 import { computeAutoTrackElapsedMs } from "@workspace/live-calc";
-import { enqueueServerJob, registerServerJob } from "./serverJobs";
+import {
+  enqueueServerJob,
+  registerServerJob,
+  sampleScheduledEvaluationQueue,
+  SCHEDULED_EVALUATION_MONITOR_SAMPLE_INTERVAL_MS,
+  type ScheduledEvaluationQueueTransition,
+} from "./serverJobs";
 
 export const WEB_PUSH_KINDS = ["fifteenMin", "batchDue", "warehouseStaging", "runComplete", "freezerEmpty"] as const;
 export type WebPushKind = (typeof WEB_PUSH_KINDS)[number];
@@ -462,16 +468,76 @@ registerServerJob("scheduled-evaluation", {
 
 export type WebPushAlertScheduler = { stop(): void };
 
+function logScheduledEvaluationQueueTransitions(
+  transition: ScheduledEvaluationQueueTransition,
+): void {
+  const { diagnostics } = transition;
+  const safeCounts = {
+    queued: diagnostics.queued,
+    running: diagnostics.running,
+    terminalLastWindow: diagnostics.terminalLastWindow,
+    duplicateTimeBucketGroups: diagnostics.duplicateTimeBucketGroups,
+    duplicateGroupsTruncated: diagnostics.duplicateGroupsTruncated,
+    sampleCount: diagnostics.sampleCount,
+    windowMs: diagnostics.windowMs,
+  };
+  if (transition.started.length) {
+    logger.warn({
+      event: "scheduled_evaluation_queue_monitor",
+      outcome: "warning",
+      warningCodes: transition.started,
+      safeCounts,
+    }, "Scheduled evaluation queue warning started");
+  }
+  if (transition.cleared.length) {
+    logger.info({
+      event: "scheduled_evaluation_queue_monitor",
+      outcome: "recovered",
+      warningCodes: transition.cleared,
+      safeCounts,
+    }, "Scheduled evaluation queue warning cleared");
+  }
+}
+
 export function startWebPushAlertScheduler(options: {
   now?: () => number;
   enqueue?: typeof enqueueScheduledWebPushAlerts;
+  sampleQueue?: () => Promise<ScheduledEvaluationQueueTransition>;
 } = {}): WebPushAlertScheduler {
   const interval = Math.max(30_000, Number(process.env.WEB_PUSH_ALERT_INTERVAL_MS) || DEFAULT_ALERT_INTERVAL_MS);
   const now = options.now ?? Date.now;
   const enqueue = options.enqueue ?? enqueueScheduledWebPushAlerts;
+  const sampleQueue = options.sampleQueue ?? sampleScheduledEvaluationQueue;
   const backoff = createBackgroundOperationBackoff();
   let stopped = false;
   let scheduling = false;
+  let monitoring = false;
+  let monitorUnavailable = false;
+  const sample = () => {
+    if (stopped || monitoring) return;
+    monitoring = true;
+    void sampleQueue()
+      .then((transition) => {
+        if (monitorUnavailable) {
+          logger.info({
+            event: "scheduled_evaluation_queue_monitor",
+            outcome: "monitor_recovered",
+          }, "Scheduled evaluation queue monitor recovered");
+          monitorUnavailable = false;
+        }
+        logScheduledEvaluationQueueTransitions(transition);
+      })
+      .catch(() => {
+        if (!monitorUnavailable) {
+          logger.warn({
+            event: "scheduled_evaluation_queue_monitor",
+            outcome: "sample_unavailable",
+          }, "Scheduled evaluation queue monitor sample unavailable");
+          monitorUnavailable = true;
+        }
+      })
+      .finally(() => { monitoring = false; });
+  };
   const execute = () => {
     if (stopped || scheduling) return;
     const currentTime = now();
@@ -494,14 +560,20 @@ export function startWebPushAlertScheduler(options: {
   // Enqueue promptly after startup and recurringly without a foreground
   // browser. This timer is only a producer, never a second execution loop.
   const first = setTimeout(execute, 0);
+  const firstSample = setTimeout(sample, 0);
   first.unref();
+  firstSample.unref();
   const timer = setInterval(execute, interval);
+  const sampleTimer = setInterval(sample, SCHEDULED_EVALUATION_MONITOR_SAMPLE_INTERVAL_MS);
   timer.unref();
+  sampleTimer.unref();
   return {
     stop() {
       stopped = true;
       clearTimeout(first);
+      clearTimeout(firstSample);
       clearInterval(timer);
+      clearInterval(sampleTimer);
     },
   };
 }

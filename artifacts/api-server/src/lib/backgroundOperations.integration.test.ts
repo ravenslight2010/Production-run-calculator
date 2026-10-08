@@ -39,6 +39,8 @@ let runWebPushAlerts: typeof import("./webPush")["runWebPushAlerts"];
 let enqueueScheduledWebPushAlerts: typeof import("./webPush")["enqueueScheduledWebPushAlerts"];
 let ServerJobWorker: typeof import("./serverJobs")["ServerJobWorker"];
 let enqueueServerJob: typeof import("./serverJobs")["enqueueServerJob"];
+
+let readScheduledEvaluationQueueSnapshot: typeof import("./serverJobs")["readScheduledEvaluationQueueSnapshot"];
 let registerServerJob: typeof import("./serverJobs")["registerServerJob"];
 let requestServerJobCancellation: typeof import("./serverJobs")["requestServerJobCancellation"];
 
@@ -113,6 +115,7 @@ beforeAll(async () => {
   enqueueScheduledWebPushAlerts = webPushMod.enqueueScheduledWebPushAlerts;
   ServerJobWorker = jobsMod.ServerJobWorker;
   enqueueServerJob = jobsMod.enqueueServerJob;
+  readScheduledEvaluationQueueSnapshot = jobsMod.readScheduledEvaluationQueueSnapshot;
   registerServerJob = jobsMod.registerServerJob;
   requestServerJobCancellation = jobsMod.requestServerJobCancellation;
 
@@ -429,6 +432,47 @@ describe("background operation PostgreSQL reconnection", () => {
     expect(await db.select().from(completedRunHistoryTable)).toHaveLength(1);
     expect(await db.select().from(inventoryConsumedRunsTable)).toHaveLength(1);
     expect(await db.select().from(inventoryLedgerTable)).toHaveLength(1);
+  });
+
+  it("counts duplicate scheduled scope/time buckets across scheduler actors without exposing identifiers", async () => {
+    const now = Date.now();
+    const bucketStart = Math.floor(now / 60_000) * 60_000;
+    const expiresAt = new Date(now + 60_000);
+    await db.insert(serverJobsTable).values([
+      {
+        scope: SCOPE,
+        type: "scheduled-evaluation",
+        actorId: "first-scheduler",
+        idempotencyKey: `scheduled-evaluation:${SCOPE}:${bucketStart}`,
+        input: { scheduledFor: now },
+        expiresAt,
+      },
+      {
+        scope: SCOPE,
+        type: "scheduled-evaluation",
+        actorId: "second-scheduler",
+        idempotencyKey: `scheduled-evaluation:${SCOPE}:${bucketStart}`,
+        input: { scheduledFor: now },
+        expiresAt,
+      },
+      {
+        scope: ALERT_SANDBOX_SCOPE,
+        type: "scheduled-evaluation",
+        actorId: "sandbox-scheduler",
+        idempotencyKey: `scheduled-evaluation:${ALERT_SANDBOX_SCOPE}:${bucketStart}`,
+        input: { scheduledFor: now },
+        expiresAt,
+      },
+    ]);
+
+    const snapshot = await readScheduledEvaluationQueueSnapshot(now);
+
+    expect(snapshot).toMatchObject({
+      queued: 3,
+      duplicateTimeBucketGroups: 1,
+      duplicateGroupsTruncated: false,
+    });
+    expect(JSON.stringify(snapshot)).not.toMatch(/first-scheduler|second-scheduler|sandbox-scheduler|idempotencyKey/i);
   });
 
   it("coalesces many dates by scope and time bucket while evaluating every date", async () => {

@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { getServerJobDefinition } from "./serverJobs";
+import {
+  getScheduledEvaluationQueueDiagnostics,
+  getServerJobDefinition,
+} from "./serverJobs";
 
 const mocks = vi.hoisted(() => ({
   calc: vi.fn(),
@@ -14,7 +17,7 @@ vi.mock("@workspace/db", () => ({
   usersTable: {}, webPushDeliveriesTable: {}, webPushSubscriptionsTable: {},
 }));
 vi.mock("@workspace/live-calc", () => ({ computeServerCalc: mocks.calc, computeAutoTrackElapsedMs: mocks.elapsed }));
-vi.mock("../lib/logger", () => ({ logger: { error: vi.fn(), warn: vi.fn() } }));
+vi.mock("../lib/logger", () => ({ logger: { error: vi.fn(), info: vi.fn(), warn: vi.fn() } }));
 vi.mock("web-push", () => ({ default: { setVapidDetails: vi.fn(), sendNotification: vi.fn() } }));
 vi.mock("./serverJobs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./serverJobs")>();
@@ -40,7 +43,12 @@ describe("server web-push alert candidates", () => {
     const enqueue = vi.fn()
       .mockRejectedValueOnce(Object.assign(new Error("connection terminated"), { code: "57P01" }))
       .mockResolvedValueOnce({ examined: 1, enqueued: 0 });
-    const scheduler = startWebPushAlertScheduler({ now, enqueue });
+    const sampleQueue = vi.fn(async () => ({
+      started: [],
+      cleared: [],
+      diagnostics: getScheduledEvaluationQueueDiagnostics(),
+    }));
+    const scheduler = startWebPushAlertScheduler({ now, enqueue, sampleQueue });
 
     try {
       await vi.advanceTimersByTimeAsync(0);
@@ -53,6 +61,43 @@ describe("server web-push alert candidates", () => {
     expect(now).toHaveBeenCalledTimes(1);
     expect(enqueue).toHaveBeenCalledTimes(2);
     expect(enqueue.mock.calls.map(([scheduledAt]) => scheduledAt)).toEqual([59_999, 59_999]);
+  });
+
+  it("logs only the transition into a scheduled-queue warning with aggregate counts", async () => {
+    vi.useFakeTimers();
+    const diagnostic = {
+      ...getScheduledEvaluationQueueDiagnostics(),
+      status: "warning" as const,
+      queued: 3,
+      running: 1,
+      warningCodes: ["backlog_stalled" as const],
+    };
+    const sampleQueue = vi.fn()
+      .mockResolvedValueOnce({
+        started: ["backlog_stalled" as const],
+        cleared: [],
+        diagnostics: diagnostic,
+      })
+      .mockResolvedValue({
+        started: [],
+        cleared: [],
+        diagnostics: diagnostic,
+      });
+    const enqueue = vi.fn(async () => ({ examined: 0, enqueued: 0 }));
+    const scheduler = startWebPushAlertScheduler({ enqueue, sampleQueue });
+
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(60_000);
+    } finally {
+      scheduler.stop();
+      vi.useRealTimers();
+    }
+
+    const { logger } = await import("../lib/logger");
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(vi.mocked(logger.warn).mock.calls)).toMatch(/scheduled_evaluation_queue_monitor/);
+    expect(JSON.stringify(vi.mocked(logger.warn).mock.calls)).not.toMatch(/scope|idempotency|customer-visible-label/i);
   });
 
   it("does not emit live timing alerts while paused or ended", () => {
