@@ -33,6 +33,7 @@ function make(over: Partial<CheeseRecipe> = {}): CheeseRecipe {
     notes: over.notes ?? "",
     components: over.components ?? [],
     enabled: over.enabled ?? true,
+    ...(over.updatedAt !== undefined ? { updatedAt: over.updatedAt } : {}),
   };
 }
 
@@ -436,6 +437,39 @@ describe("addCheeseRecipesIfAbsentByName", () => {
 });
 
 describe("mergeCheeseRecipes", () => {
+  it("retains the baseline revision for an unstamped workbook update", () => {
+    const revision = "2026-10-08T12:00:00.000Z";
+    const [merged] = mergeCheeseRecipes(
+      [make({ id: "a", updatedAt: revision })],
+      [make({ id: "a", name: "Imported" })],
+    );
+    expect(merged.updatedAt).toBe(revision);
+    expect(merged.name).toBe("Imported");
+  });
+
+  it("does not upgrade an explicitly stale revision or stamp a new recipe", () => {
+    const stale = "2026-10-07T12:00:00.000Z";
+    const merged = mergeCheeseRecipes(
+      [make({ id: "a", updatedAt: "2026-10-08T12:00:00.000Z" })],
+      [make({ id: "a", updatedAt: stale }), make({ id: "new" })],
+    );
+    expect(merged[0].updatedAt).toBe(stale);
+    expect(merged[1].updatedAt).toBeUndefined();
+  });
+
+  it("retains revisions through spec name matching without upgrading stale candidates", () => {
+    const revision = "2026-10-08T12:00:00.000Z";
+    const existing = make({ id: "a", name: "Blend", updatedAt: revision });
+    const candidate = make({
+      id: "parsed", name: "Blend", components: [{ ingredient: "Mozzarella", lbs: 50 }],
+    });
+    expect(addCheeseRecipesIfAbsentByName([existing], [candidate]).merged[0].updatedAt)
+      .toBe(revision);
+    const stale = "2026-10-07T12:00:00.000Z";
+    expect(addCheeseRecipesIfAbsentByName([existing], [{ ...candidate, updatedAt: stale }])
+      .merged[0].updatedAt).toBe(stale);
+  });
+
   it("replaces by id and appends new, preserving order", () => {
     const merged = mergeCheeseRecipes(
       [make({ id: "a", name: "old" }), make({ id: "b" })],

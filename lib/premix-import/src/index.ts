@@ -1200,6 +1200,9 @@ export function mergePremixIntoMixes(
     );
     const merged: Mix = {
       ...m,
+      // A parsed workbook is not a new server revision. Keep the baseline
+      // unless the caller supplied its own (possibly stale) revision.
+      updatedAt: m.updatedAt ?? prev.updatedAt,
       components: [
         ...m.components,
         ...(importedHasCellulose

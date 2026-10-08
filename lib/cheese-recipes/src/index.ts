@@ -544,6 +544,9 @@ export function addCheeseRecipesIfAbsentByName(
     const next: CheeseRecipe = {
       ...c,
       id: prev.id,    // keep stable existing id
+      // Parsed workbooks have no server revision. Retain the baseline revision,
+      // but never upgrade an explicitly stale candidate to a newer revision.
+      updatedAt: c.updatedAt ?? prev.updatedAt,
       name: prev.name, // keep existing display name / casing
       // Components: use candidate's when it carries real per-batch lbs (cheese
       // workbook); regular specs refresh only explicit ratios and keep the
@@ -696,8 +699,11 @@ export function mergeCheeseRecipes(
   for (const r of existing) byId.set(r.id, r);
   const order: string[] = existing.map((r) => r.id);
   for (const r of imported) {
-    if (!byId.has(r.id)) order.push(r.id);
-    byId.set(r.id, r);
+    const previous = byId.get(r.id);
+    if (!previous) order.push(r.id);
+    byId.set(r.id, previous
+      ? { ...r, updatedAt: r.updatedAt ?? previous.updatedAt }
+      : r);
   }
   return order.map((id) => byId.get(id)!).filter(Boolean);
 }

@@ -765,6 +765,30 @@ describe("re-import always updates components via mergePremixIntoMixes", () => {
     };
   }
 
+  it("retains a stored revision for a workbook row that has no revision", () => {
+    const revision = "2026-10-08T12:00:00.000Z";
+    const existing = mkMix({ id: "saved", name: "Mix", updatedAt: revision });
+    const imported = mkMix({
+      id: "saved", name: "Mix", components: [{ ingredient: "Pepper", perPizza: 1 }],
+    });
+    const [merged] = mergePremixIntoMixes([existing], [imported]);
+    expect(merged.updatedAt).toBe(revision);
+    expect(merged.components).toEqual(imported.components);
+  });
+
+  it("keeps explicit stale revisions and leaves new recipes unstamped", () => {
+    const existing = mkMix({
+      id: "saved", name: "Mix", updatedAt: "2026-10-08T12:00:00.000Z",
+    });
+    const stale = "2026-10-07T12:00:00.000Z";
+    const merged = mergePremixIntoMixes([existing], [
+      mkMix({ id: "saved", name: "Mix", updatedAt: stale }),
+      mkMix({ id: "new", name: "New" }),
+    ]);
+    expect(merged[0].updatedAt).toBe(stale);
+    expect(merged[1].updatedAt).toBeUndefined();
+  });
+
   it("a redirect onto an existing mix updates components while preserving amountAlreadyMade, enabled, and notes", () => {
     const existing = mkMix({
       id: "saved-corner-booth",
