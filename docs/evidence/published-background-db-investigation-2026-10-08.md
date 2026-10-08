@@ -111,3 +111,66 @@ date classes, and timestamps are retained. Raw logs, job inputs/results,
 production records, recipe data, credentials, URLs with sensitive values, and
 request payloads were not retained. All production SQL was read-only and
 aggregate-only. No production writes or publish were performed.
+
+## Follow-up live capacity capture
+
+- Captured 2026-10-08 02:26:35–03:26:35 UTC from the published deployment.
+  Deployment metadata confirmed a successful Autoscale deployment. Public
+  `/api/build-info` returned the same app build, verified Git revision, platform
+  deployment, platform build, and source fingerprint listed above.
+- Public `/api/readyz` returned HTTP 200 with overall status `ok`; `database`
+  was `ok` and `backgroundWorkers` was `warning`. No authenticated diagnostic
+  route or production app credentials were used.
+- Filtered deployment logs for that one-hour window contained 25 exact pool
+  checkout-wait messages and 30 new-client connection-timeout messages. There
+  were no matching connection-refusal/setup or database connection-limit
+  messages.
+- The same filtered log result contained 46 bounded `capacity_telemetry`
+  records. Across those records, the observed pool total reached 10 clients,
+  the maximum reported wait queue was 6, and 4 records had a nonzero wait
+  queue. One record showed 10 total clients and 6 waiting. The production
+  environment inventory contained no `DATABASE_POOL_MAX` environment entry or
+  secret, and the published `.replit` run command does not set it; the current
+  source therefore resolves the deployed pool maximum to its default of 10.
+  This confirms pool saturation in at least one telemetry snapshot. The summed
+  acquisition-error counter was 69 across 10,358 acquisition timing samples.
+  The largest per-record acquisition p95/p99 were 21,600 ms and 22,401 ms,
+  respectively. These acquisition durations substantially exceed the
+  source-configured 900 ms timeout; they show delayed `pool.connect`
+  completions, but do not independently establish that a database handshake
+  itself lasted that long. Timer/event-loop delay or the measurement path needs
+  separate corroboration.
+- A read-only aggregate against the production read replica, limited to
+  `server_job_attempts` started in the same one-hour period, found 3 exact
+  checkout-wait messages and no new-client timeout, refusal/setup, or
+  connection-limit messages. This receipt table is narrower than all database
+  activity and does not contradict the deployment-log counts.
+
+### Updated conclusion and remaining limits
+
+The capture confirms that **the API pool saturated at its 10-client limit in
+at least one snapshot**, with up to 6 waiting clients, and that new-client
+connection timeouts also occurred. No explicit refusal or server
+connection-limit error was observed in this window. The pool saturation is a
+confirmed proximate cause of checkout waits; the separate establishment
+timeouts remain unexplained and may or may not share that cause.
+
+The production SQL interface reads a replica and cannot establish live-primary
+connection headroom, `max_connections`, reserved slots, or other primary
+clients. The deployment metadata identifies Autoscale but does not return the
+current instance count. Replit documents active-instance and scaling
+visibility in **Tools → Replit Cloud → Monitoring**
+([Monitoring a deployment](https://docs.replit.com/features/publishing/monitoring-a-deployment));
+that dashboard was not queried as part of this capture.
+
+Therefore, the current evidence establishes process-pool saturation and
+concurrent connection-establishment failures, but does not establish whether
+the primary is at its connection limit or whether Autoscale fan-out multiplies
+the per-process pool demand beyond available headroom. Before considering any
+pool or deployment change, obtain the Autoscale instance count for the same
+period and the primary connection ceiling, reserve, and baseline client usage.
+No pool or deployment setting was changed.
+
+Only timestamps, build identity, status checks, allowlisted error classes,
+aggregate pool metrics, and bounded attempt counts were retained. Raw logs,
+database rows, production payloads, and credentials were not retained.
