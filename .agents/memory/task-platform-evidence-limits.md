@@ -22,38 +22,18 @@ acceptance receipts before claiming ordered startup. Keep missing provenance and
 missing persisted links as advisory blockers; never claim an agent's decision to
 wait has paused platform execution.
 
-**Why:** An audit found generated follow-ups missing dependencies that the repository policy expected, while official lifecycle descriptions and the workspace task-state definitions did not fully align.
+## Task sequencing where supported
 
-**How to apply:** Inspect stored dependency metadata for multiple origins and siblings. Record the exact evidence source for state semantics, and mark assignment/mode claims unverified when event history or task settings are unavailable. Do not infer a universal platform guarantee from the repository checker.
+Use real dependency links when work genuinely depends on prior work. Do not
+promise that Drafts or generated follow-ups will enforce one-at-a-time execution;
+the owner accepts that the platform may allow concurrent tasks.
 
-Removing dependency edges does not prove that a queued main task has activated.
-Explicit chat permission for direct work and eligibility for formal task completion
-must be reported separately.
+**Why:** The owner said the one-at-a-time rule may not be enforceable through
+Drafts and follow-ups and is okay with that limitation.
 
-**Why:** A main task remained pending with an empty dependency list after a
-user-approved ordering exception; the completion operation rejected it as having
-no active task. General task lifecycle documentation did not expose that local
-assignment transition.
-
-**How to apply:** Check the live state after a completion rejection. Preserve the
-finished work, report the activation requirement, and do not invent a status-update
-operation or recreate the task.
-
-## Required task order
-
-Sequence all tasks by acceptance order. Each later-accepted task depends on the
-previous task, so only one task is active at a time. Treat this as the owner's
-required project rule, not as a guarantee that the task platform enforces it.
-
-**Why:** The owner clarified that tasks must form a single acceptance-ordered
-dependency chain rather than independent suggestions that can run concurrently.
-
-**How to apply:** Before proposing multiple tasks, ensure the creation path can
-persist a dependency chain. If generated follow-ups only link to a parent and
-leave siblings independent, propose one at a time or use a task-planning path that
-can store the dependencies. For existing unchained proposals, don't infer
-acceptance order from task numbers or creation times; establish the intended
-sequence before they are accepted.
+**How to apply:** Preserve dependencies that represent technical or release
+ordering, but do not treat concurrent task states as a blocker or infer
+acceptance order from task numbers or creation times.
 
 ## Task-completion validation scope
 
