@@ -259,3 +259,42 @@ No pool or deployment setting was changed.
 Only timestamps, build identity, status checks, allowlisted error classes,
 aggregate pool metrics, and bounded attempt counts were retained. Raw logs,
 database rows, production payloads, and credentials were not retained.
+
+## Queue trend confirmation
+
+- Captured a follow-up aggregate snapshot at 2026-10-08 16:37:18.658 UTC.
+  The public build-info check immediately before capture still identified the
+  active release as:
+  - App build: `app-build:a3d3e838-87ab-4ad7-9301-8dc2d534daf1`
+  - Platform build: `91ef316e-f1ae-4b6a-afcc-2cd753f5d0c6`
+  - Published source fingerprint:
+    `a0028555380e99766d502dccbe8754327fb75b7e39d08c3147270c1132029b18`
+  - Published Git revision: `d173e1f8bbb0ea67f105b031e9c03d80f3b9cfa6`
+    (`gitBinding: verified`)
+- This snapshot is compared only with the earlier 2026-10-08 16:19:17.425 UTC
+  aggregate, which recorded the same app build, platform build, source
+  fingerprint, and verified Git revision. The snapshots are 18m 1.233s apart.
+- The read-only production aggregate found 110,876 queued, 2 running, 79
+  succeeded, 31 failed, and 19 cancelled scheduled evaluations. Compared with
+  the earlier snapshot, queued fell by 53; running stayed at 2; succeeded rose
+  by 24, failed by 13, and cancelled by 17. Total jobs rose by 1, consistent
+  with 54 terminal transitions and 1 new job.
+- Across jobs created since the published build completed at 15:56:34.756 UTC,
+  the aggregate found 11 new scheduled evaluations, all with the current
+  scope/time-bucket key format. Grouping by stored scope and the numeric
+  time-bucket suffix found 11 groups, zero duplicate groups, and a maximum of
+  one job per group. The previous 16:19 snapshot had 10 new jobs across 10
+  groups, also with zero duplicates and maximum one per group.
+- The public readiness endpoint returned HTTP 200 with overall status `ok`;
+  `backgroundWorkers` was `warning`, while database, startup, and audit
+  protection were `ok`.
+- Only aggregate counts and timestamps were retained. The query did not select
+  job inputs/results, and its output did not include scope names or job keys.
+  No jobs were cancelled, deleted, or rewritten; no production writes were
+  performed.
+
+**Outcome:** Two snapshots of the same published build show the queued backlog
+decreasing while new evaluations remain capped at one per scope/time bucket.
+This confirms a short-term net decline of 53 queued jobs over 18 minutes; the
+backlog remains large, and this brief interval is not a reliable basis for a
+completion-time estimate.
