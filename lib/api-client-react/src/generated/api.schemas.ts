@@ -4781,10 +4781,46 @@ export interface ProfileDataHealthWorkspace {
   sourceReconciliation: SourceLibraryReconciliationStatus;
 }
 
+export type AuditLogChangesFieldNamesItem = typeof AuditLogChangesFieldNamesItem[keyof typeof AuditLogChangesFieldNamesItem];
+
+
+export const AuditLogChangesFieldNamesItem = {
+  name: 'name',
+  brand: 'brand',
+  flavors: 'flavors',
+  shredderSetting: 'shredderSetting',
+  cellulose: 'cellulose',
+  notes: 'notes',
+  components: 'components',
+  enabled: 'enabled',
+} as const;
+
 /**
  * Allowlisted, redacted evidence object no larger than 8192 bytes.
  */
-export type AuditLogChanges = { [key: string]: unknown };
+export type AuditLogChanges = {
+  count?: number;
+  outcome?: string;
+  /** @maxLength 200 */
+  reasonCode?: string;
+  targetId?: string | number;
+  /** @maxLength 200 */
+  targetType?: string;
+  /** @maxLength 200 */
+  authorizedBy?: string;
+  /** @maxLength 200 */
+  from?: string;
+  /** @maxLength 200 */
+  to?: string;
+  /** @maxLength 200 */
+  method?: string;
+  /** @maxLength 200 */
+  requestId?: string;
+  /** @maxItems 8 */
+  fieldNames?: AuditLogChangesFieldNamesItem[];
+  /** @maxLength 128 */
+  correlationId?: string;
+};
 
 export interface AuditLog {
   id: number;

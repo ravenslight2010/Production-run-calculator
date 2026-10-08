@@ -121,7 +121,21 @@ const EVENT_SCHEMAS: Record<string, { required: string[]; allowed: string[] }> =
   sessions_revoked: { required: ["outcome", "targetId"], allowed: ["outcome", "targetId"] },
   staff_invitation_created: { required: ["outcome"], allowed: ["outcome", "targetType", "from"] },
   staff_invitation_revoked: { required: ["outcome"], allowed: ["outcome", "targetType"] },
+  cheese_recipe_created: { required: ["fieldNames", "correlationId"], allowed: ["fieldNames", "correlationId"] },
+  cheese_recipe_updated: { required: ["fieldNames", "correlationId"], allowed: ["fieldNames", "correlationId"] },
+  cheese_recipe_deleted: { required: ["fieldNames", "correlationId"], allowed: ["fieldNames", "correlationId"] },
 };
+
+const RECIPE_AUDIT_FIELD_NAMES = new Set([
+  "name",
+  "brand",
+  "flavors",
+  "shredderSetting",
+  "cellulose",
+  "notes",
+  "components",
+  "enabled",
+]);
 
 function boundedString(value: unknown, max = MAX_STRING): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -131,12 +145,23 @@ function boundedString(value: unknown, max = MAX_STRING): string | undefined {
 
 /** Redacts arbitrary legacy event input into the small operational evidence schema. */
 export function redactAuditChanges(value: unknown): Record<string, unknown> {
-  const allowed = new Set(["count", "outcome", "reasonCode", "targetId", "targetType", "authorizedBy", "from", "to", "method", "requestId"]);
+  const allowed = new Set(["count", "outcome", "reasonCode", "targetId", "targetType", "authorizedBy", "from", "to", "method", "requestId", "fieldNames", "correlationId"]);
   const output: Record<string, unknown> = {};
   if (!value || typeof value !== "object" || Array.isArray(value)) return output;
   for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
     if (!allowed.has(key)) continue;
-    if (typeof raw === "number" && Number.isFinite(raw)) output[key] = Math.max(-1_000_000, Math.min(1_000_000, Math.trunc(raw)));
+    if (key === "fieldNames") {
+      if (
+        Array.isArray(raw) &&
+        raw.length <= RECIPE_AUDIT_FIELD_NAMES.size &&
+        raw.every((field) => typeof field === "string" && RECIPE_AUDIT_FIELD_NAMES.has(field))
+      ) {
+        output.fieldNames = [...new Set(raw as string[])];
+      }
+    } else if (key === "correlationId") {
+      const correlationId = boundedString(raw, 128);
+      if (correlationId) output.correlationId = correlationId;
+    } else if (typeof raw === "number" && Number.isFinite(raw)) output[key] = Math.max(-1_000_000, Math.min(1_000_000, Math.trunc(raw)));
     else if (typeof raw === "boolean") output[key] = raw;
     else {
       const text = boundedString(raw);

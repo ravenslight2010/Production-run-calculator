@@ -9753,6 +9753,27 @@ components:
           type: object
           additionalProperties: false
           description: Allowlisted, redacted evidence object no larger than 8192 bytes.
+          properties:
+            count: { type: integer }
+            outcome: { type: string }
+            reasonCode: { type: string, maxLength: 200 }
+            targetId:
+              oneOf:
+                - { type: string, maxLength: 200 }
+                - { type: integer }
+            targetType: { type: string, maxLength: 200 }
+            authorizedBy: { type: string, maxLength: 200 }
+            from: { type: string, maxLength: 200 }
+            to: { type: string, maxLength: 200 }
+            method: { type: string, maxLength: 200 }
+            requestId: { type: string, maxLength: 200 }
+            fieldNames:
+              type: array
+              maxItems: 8
+              items:
+                type: string
+                enum: [name, brand, flavors, shredderSetting, cellulose, notes, components, enabled]
+            correlationId: { type: string, maxLength: 128 }
         createdAt: { type: string, format: date-time }
     AuditLogPage:
       type: object

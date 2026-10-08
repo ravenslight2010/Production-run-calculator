@@ -44,6 +44,7 @@ export * from './approvePasswordResetResult';
 export * from './auditAiMemoryHealth200';
 export * from './auditLog';
 export * from './auditLogChanges';
+export * from './auditLogChangesFieldNamesItem';
 export * from './auditLogPage';
 export * from './auditProfileDataHealth200';
 export * from './authCredentials';

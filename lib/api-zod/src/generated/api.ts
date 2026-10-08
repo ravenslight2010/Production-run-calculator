@@ -345,6 +345,16 @@ export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationS
 export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryUnexpectedStubsMin = 0;
 export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryProtectedHistoryReferencesMin = 0;
 export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryOmittedFindingsMin = 0;
+export const listAuditLogsResponseLogsItemChangesReasonCodeMax = 200;
+export const listAuditLogsResponseLogsItemChangesTargetIdOneMax = 200;
+export const listAuditLogsResponseLogsItemChangesTargetTypeMax = 200;
+export const listAuditLogsResponseLogsItemChangesAuthorizedByMax = 200;
+export const listAuditLogsResponseLogsItemChangesFromMax = 200;
+export const listAuditLogsResponseLogsItemChangesToMax = 200;
+export const listAuditLogsResponseLogsItemChangesMethodMax = 200;
+export const listAuditLogsResponseLogsItemChangesRequestIdMax = 200;
+export const listAuditLogsResponseLogsItemChangesFieldNamesMax = 8;
+export const listAuditLogsResponseLogsItemChangesCorrelationIdMax = 128;
 export const listServerJobsResponseProgressMin = 0;
 export const listServerJobsResponseProgressMax = 100;
 export const createServerJobBodyTypeRegExp = new RegExp('^[a-z][a-z0-9-]{1,63}$');
@@ -5224,6 +5234,18 @@ export const ListAuditLogsQueryParams = zod.object({
   "cursor": zod.coerce.string().optional().describe('Opaque stable cursor, limited to 200 characters.')
 })
 
+
+
+
+
+
+
+
+
+
+
+
+
 export const ListAuditLogsResponse = zod.object({
   "logs": zod.array(zod.object({
   "id": zod.int(),
@@ -5231,7 +5253,18 @@ export const ListAuditLogsResponse = zod.object({
   "action": zod.string().describe('Allowlisted action name'),
   "resource": zod.string().nullable().describe('Resource identifier'),
   "changes": zod.object({
-
+  "count": zod.int().optional(),
+  "outcome": zod.string().optional(),
+  "reasonCode": zod.string().max(listAuditLogsResponseLogsItemChangesReasonCodeMax).optional(),
+  "targetId": zod.union([zod.string().max(listAuditLogsResponseLogsItemChangesTargetIdOneMax),zod.int()]).optional(),
+  "targetType": zod.string().max(listAuditLogsResponseLogsItemChangesTargetTypeMax).optional(),
+  "authorizedBy": zod.string().max(listAuditLogsResponseLogsItemChangesAuthorizedByMax).optional(),
+  "from": zod.string().max(listAuditLogsResponseLogsItemChangesFromMax).optional(),
+  "to": zod.string().max(listAuditLogsResponseLogsItemChangesToMax).optional(),
+  "method": zod.string().max(listAuditLogsResponseLogsItemChangesMethodMax).optional(),
+  "requestId": zod.string().max(listAuditLogsResponseLogsItemChangesRequestIdMax).optional(),
+  "fieldNames": zod.array(zod.enum(['name', 'brand', 'flavors', 'shredderSetting', 'cellulose', 'notes', 'components', 'enabled'])).max(listAuditLogsResponseLogsItemChangesFieldNamesMax).optional(),
+  "correlationId": zod.string().max(listAuditLogsResponseLogsItemChangesCorrelationIdMax).optional()
 }).describe('Allowlisted, redacted evidence object no larger than 8192 bytes.'),
   "createdAt": zod.coerce.date()
 })).describe('At most 200 records, ordered newest first by server timestamp and ID.'),

@@ -32,6 +32,7 @@ type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
 let pool: DbModule["pool"];
 let cheeseRecipesTable: DbModule["cheeseRecipesTable"];
+let auditLogsTable: DbModule["auditLogsTable"];
 let brandProfilesTable: DbModule["brandProfilesTable"];
 let dataHealsTable: DbModule["dataHealsTable"];
 let usersTable: DbModule["usersTable"];
@@ -81,6 +82,7 @@ beforeAll(async () => {
   db = dbMod.db;
   pool = dbMod.pool;
   cheeseRecipesTable = dbMod.cheeseRecipesTable;
+  auditLogsTable = dbMod.auditLogsTable;
   brandProfilesTable = dbMod.brandProfilesTable;
   dataHealsTable = dbMod.dataHealsTable;
   usersTable = dbMod.usersTable;
@@ -96,6 +98,8 @@ beforeAll(async () => {
     (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
     next();
   });
+  const observabilityMod = await import("../lib/observability");
+  app.use(observabilityMod.observabilityMiddleware);
   app.use("/api", routerMod.default);
 
   await new Promise<void>((resolve) => {
@@ -123,7 +127,7 @@ afterAll(async () => {
 beforeEach(async () => {
   clearUserValidityCache();
   await db.execute(
-    sql`TRUNCATE ${cheeseRecipesTable}, ${dataHealsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${cheeseRecipesTable}, ${auditLogsTable}, ${dataHealsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
   );
   await seedRoles();
   await db.insert(usersTable).values([{ id: MANAGER, username: "manager", passwordHash: "x" }]);
@@ -158,7 +162,10 @@ function recipe(id: string, name: string, extra?: Partial<ApiRecipe>): ApiRecipe
   };
 }
 
-async function post(items: ApiRecipe[]): Promise<ApiRecipe[]> {
+async function rawPost(
+  items: ApiRecipe[],
+  extraHeaders: Record<string, string> = {},
+): Promise<Response> {
   const currentRows = await db
     .select({ id: cheeseRecipesTable.id, updatedAt: cheeseRecipesTable.updatedAt })
     .from(cheeseRecipesTable)
@@ -169,17 +176,104 @@ async function post(items: ApiRecipe[]): Promise<ApiRecipe[]> {
       ? item
       : { ...item, updatedAt: revisions.get(item.id) },
   );
-  const res = await fetch(`${baseUrl}/api/cheese-recipes`, {
+  return fetch(`${baseUrl}/api/cheese-recipes`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
       authorization: `Bearer ${signLegacyTokenForTests(MANAGER)}`,
+      ...extraHeaders,
     },
     body: JSON.stringify({ items: fencedItems }),
   });
+}
+
+async function post(items: ApiRecipe[]): Promise<ApiRecipe[]> {
+  const res = await rawPost(items);
   expect(res.status).toBe(200);
   return ((await res.json()) as { items: ApiRecipe[] }).items;
 }
+
+describe("cheese recipe audit attribution", () => {
+  it("records actor, recipe, changed fields, timestamp, and server correlation without values", async () => {
+    const original = recipe("audit-recipe-id", "PRIVATE_RECIPE_NAME", {
+      notes: "PRIVATE_RECIPE_NOTES",
+      components: [{ ingredient: "PRIVATE_INGREDIENT", lbs: 9, ozPerPizza: 0 }],
+    });
+    const createdResponse = await rawPost([original], {
+      "x-correlation-id": "client-supplied-correlation",
+    });
+    expect(createdResponse.status).toBe(200);
+    const createdCorrelationId = createdResponse.headers.get("x-correlation-id");
+    expect(createdCorrelationId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(createdCorrelationId).not.toBe("client-supplied-correlation");
+
+    const updatedResponse = await rawPost([
+      recipe("audit-recipe-id", "UPDATED_PRIVATE_RECIPE_NAME", {
+        notes: "UPDATED_PRIVATE_RECIPE_NOTES",
+        components: original.components,
+      }),
+    ]);
+    expect(updatedResponse.status).toBe(200);
+    const updatedCorrelationId = updatedResponse.headers.get("x-correlation-id");
+    expect(updatedCorrelationId).toMatch(/^[0-9a-f-]{36}$/);
+
+    const deleteResponse = await fetch(`${baseUrl}/api/cheese-recipes`, {
+      method: "DELETE",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${signLegacyTokenForTests(MANAGER)}`,
+      },
+      body: JSON.stringify({ ids: ["audit-recipe-id"] }),
+    });
+    expect(deleteResponse.status).toBe(200);
+    const deletedCorrelationId = deleteResponse.headers.get("x-correlation-id");
+    expect(deletedCorrelationId).toMatch(/^[0-9a-f-]{36}$/);
+
+    const auditRows = (await db.select().from(auditLogsTable))
+      .filter((row) => row.resource === "cheese_recipe:audit-recipe-id")
+      .sort((left, right) => left.id - right.id);
+    expect(auditRows).toHaveLength(3);
+    expect(auditRows.map((row) => row.action)).toEqual([
+      "cheese_recipe_created",
+      "cheese_recipe_updated",
+      "cheese_recipe_deleted",
+    ]);
+    expect(auditRows.map((row) => row.actor)).toEqual([MANAGER, MANAGER, MANAGER]);
+    expect(auditRows.every((row) => row.createdAt instanceof Date)).toBe(true);
+    expect(auditRows.map((row) => row.changes)).toEqual([
+      {
+        fieldNames: ["name", "brand", "flavors", "shredderSetting", "cellulose", "notes", "components", "enabled"],
+        correlationId: createdCorrelationId,
+      },
+      {
+        fieldNames: ["name", "notes"],
+        correlationId: updatedCorrelationId,
+      },
+      {
+        fieldNames: ["name", "brand", "flavors", "shredderSetting", "cellulose", "notes", "components", "enabled"],
+        correlationId: deletedCorrelationId,
+      },
+    ]);
+
+    const auditPayload = JSON.stringify(auditRows.map((row) => row.changes));
+    for (const privateValue of [
+      "PRIVATE_RECIPE_NAME",
+      "PRIVATE_RECIPE_NOTES",
+      "PRIVATE_INGREDIENT",
+      "UPDATED_PRIVATE_RECIPE_NAME",
+      "UPDATED_PRIVATE_RECIPE_NOTES",
+    ]) {
+      expect(auditPayload).not.toContain(privateValue);
+    }
+
+    const managerRead = await fetch(`${baseUrl}/api/audit-logs`, {
+      headers: { authorization: `Bearer ${signLegacyTokenForTests(MANAGER)}` },
+    });
+    expect(managerRead.status).toBe(200);
+    const page = await managerRead.json() as { logs: Array<{ action: string; resource: string }> };
+    expect(page.logs.filter((row) => row.resource === "cheese_recipe:audit-recipe-id")).toHaveLength(3);
+  });
+});
 
 describe("POST /cheese-recipes duplicate-name guard", () => {
   it("skips a NEW id whose name already exists (trim/case-insensitive)", async () => {
