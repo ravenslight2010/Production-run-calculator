@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { SourceLibraryPoolExceptionSummary } from './sourceLibraryPoolExceptionSummary';
 import type { SourceLibraryReconciliationDiagnosticsDatabaseAttestation } from './sourceLibraryReconciliationDiagnosticsDatabaseAttestation';
 import type { SourceLibraryReconciliationDiagnosticsEnvironment } from './sourceLibraryReconciliationDiagnosticsEnvironment';
 import type { SourceLibraryReconciliationDiagnosticsMismatchDetails } from './sourceLibraryReconciliationDiagnosticsMismatchDetails';
@@ -21,5 +22,6 @@ export interface SourceLibraryReconciliationDiagnostics {
   capturedAt: Date;
   report: SourceLibraryReconciliationDiagnosticsReport;
   pools: SourceLibraryReconciliationDiagnosticsPools;
+  poolExceptions: SourceLibraryPoolExceptionSummary;
   mismatchDetails: SourceLibraryReconciliationDiagnosticsMismatchDetails;
 }

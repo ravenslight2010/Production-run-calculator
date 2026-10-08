@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { SourceLibraryPoolExceptionSummary } from './sourceLibraryPoolExceptionSummary';
 import type { SourceLibraryReconciliationEvidenceAliases } from './sourceLibraryReconciliationEvidenceAliases';
 import type { SourceLibraryReconciliationEvidenceDatabaseAttestation } from './sourceLibraryReconciliationEvidenceDatabaseAttestation';
 import type { SourceLibraryReconciliationEvidenceEnvironment } from './sourceLibraryReconciliationEvidenceEnvironment';
@@ -38,6 +39,7 @@ export interface SourceLibraryReconciliationEvidence {
   healId: string;
   repairBoundary: SourceLibraryReconciliationEvidenceRepairBoundary;
   report: SourceLibraryReconciliationEvidenceReport;
+  poolExceptions: SourceLibraryPoolExceptionSummary;
   marker: SourceLibraryReconciliationEvidenceMarker;
   pools: SourceLibraryReconciliationEvidencePools;
   aliases: SourceLibraryReconciliationEvidenceAliases;

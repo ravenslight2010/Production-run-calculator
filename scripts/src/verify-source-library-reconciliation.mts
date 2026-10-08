@@ -91,6 +91,7 @@ export type SourceLibraryPoolMismatchDiagnostics = {
   returned: number;
   omitted: number;
   items: SourceLibraryPoolMismatchDescriptor[];
+  poolExceptions: VerificationOutput["poolExceptions"];
 };
 
 export type SourceLibraryPoolExceptionApproval = {
@@ -127,8 +128,12 @@ const DIAGNOSTICS_PATH =
 const LIVE_CAPTURE_PATH =
   "docs/evidence/source-library-live-pool-capture-2026-10-08.json";
 
-function readApprovedEvidence(pathFromRoot: string, expectedSha256: unknown): Buffer {
-  const resolved = path.resolve(ROOT, pathFromRoot);
+function readApprovedEvidence(
+  pathFromRoot: string,
+  expectedSha256: unknown,
+  evidenceRoot = ROOT,
+): Buffer {
+  const resolved = path.resolve(evidenceRoot, pathFromRoot);
   const stats = fs.lstatSync(resolved);
   if (!stats.isFile() || stats.isSymbolicLink()) {
     return reportError(`Approved source-library evidence is not a regular file: ${pathFromRoot}`);
@@ -174,8 +179,11 @@ function parsePoolMismatchDescriptor(value: unknown): SourceLibraryPoolMismatchD
 export function loadSourceLibraryPoolExceptionApproval(
   exceptionPath: string,
   reportBytes: Buffer,
+  evidenceRoot = ROOT,
 ): SourceLibraryPoolExceptionApproval {
-  const resolvedPath = path.resolve(process.cwd(), exceptionPath);
+  const resolvedPath = path.isAbsolute(exceptionPath)
+    ? exceptionPath
+    : path.resolve(process.cwd(), exceptionPath);
   const stats = fs.lstatSync(resolvedPath);
   if (!stats.isFile() || stats.isSymbolicLink()) {
     return reportError("Source-library pool exception manifest must be a regular file");
@@ -230,6 +238,7 @@ export function loadSourceLibraryPoolExceptionApproval(
   const ownerReviewBytes = readApprovedEvidence(
     OWNER_REVIEW_PATH,
     value.ownerApproval.recordSha256,
+    evidenceRoot,
   );
   const ownerReviewText = ownerReviewBytes.toString("utf8");
   if (
@@ -242,10 +251,12 @@ export function loadSourceLibraryPoolExceptionApproval(
   const diagnosticsBytes = readApprovedEvidence(
     DIAGNOSTICS_PATH,
     value.reviewedEvidence.diagnosticsSha256,
+    evidenceRoot,
   );
   const captureBytes = readApprovedEvidence(
     LIVE_CAPTURE_PATH,
     value.reviewedEvidence.captureSha256,
+    evidenceRoot,
   );
   let diagnostics: unknown;
   let capture: unknown;
@@ -685,9 +696,54 @@ async function readPoolState(report: Report, query: ReadOnlyQuery) {
   return comparePoolRows(report, rowsByTable);
 }
 
+function classifyPoolMismatchDescriptors(
+  mismatchDescriptors: SourceLibraryPoolMismatchDescriptor[],
+  reportBytes: Buffer | undefined,
+  poolExceptionApproval: SourceLibraryPoolExceptionApproval | undefined,
+): VerificationOutput["poolExceptions"] {
+  const fieldMismatches = mismatchDescriptors.filter(
+    (mismatch) => mismatch.mismatchType === "field-mismatch",
+  );
+  if (!poolExceptionApproval) {
+    return {
+      id: null,
+      sha256: null,
+      approvedMismatches: 0,
+      unresolvedMismatches: fieldMismatches.length,
+    };
+  }
+  if (
+    !reportBytes ||
+    poolExceptionApproval.sourceReportSha256 !== sha256(reportBytes)
+  ) {
+    return reportError(
+      "Source-library pool exception approval targets a different source report",
+    );
+  }
+  const approvedDifferences = new Map(
+    poolExceptionApproval.approvedDifferences.map((difference) => [
+      `${difference.table}\u0000${difference.id}`,
+      stable(difference),
+    ]),
+  );
+  const approvedMismatches = fieldMismatches.filter(
+    (mismatch) =>
+      approvedDifferences.get(`${mismatch.table}\u0000${mismatch.id}`) ===
+      stable(mismatch),
+  ).length;
+  return {
+    id: poolExceptionApproval.id,
+    sha256: poolExceptionApproval.sha256,
+    approvedMismatches,
+    unresolvedMismatches: fieldMismatches.length - approvedMismatches,
+  };
+}
+
 export async function inspectSourceLibraryPoolMismatchDiagnostics(
   reportInput: unknown,
   query: ReadOnlyQuery,
+  poolExceptionApproval?: SourceLibraryPoolExceptionApproval,
+  reportBytes?: Buffer,
 ): Promise<SourceLibraryPoolMismatchDiagnostics> {
   const report = parseReport(reportInput);
   const poolState = await readPoolState(report, query);
@@ -700,6 +756,11 @@ export async function inspectSourceLibraryPoolMismatchDiagnostics(
       left.table.localeCompare(right.table) || left.id.localeCompare(right.id),
     )
     .slice(0, SOURCE_LIBRARY_POOL_DIAGNOSTIC_MAX_ITEMS);
+  const poolExceptions = classifyPoolMismatchDescriptors(
+    poolState.mismatchDescriptors,
+    reportBytes,
+    poolExceptionApproval,
+  );
   return {
     counts: poolState.counts,
     maxItems: SOURCE_LIBRARY_POOL_DIAGNOSTIC_MAX_ITEMS,
@@ -707,6 +768,7 @@ export async function inspectSourceLibraryPoolMismatchDiagnostics(
     returned: items.length,
     omitted: total - items.length,
     items,
+    poolExceptions,
   };
 }
 
@@ -1513,26 +1575,11 @@ export async function verifySourceLibraryReconciliation(
   poolExceptionApproval?: SourceLibraryPoolExceptionApproval,
 ): Promise<VerificationOutput> {
   const poolState = await readPoolState(report, query);
-  if (
-    poolExceptionApproval !== undefined &&
-    poolExceptionApproval.sourceReportSha256 !== sha256(reportBytes)
-  ) {
-    return reportError("Source-library pool exception approval targets a different source report");
-  }
-  const approvedDifferences = new Map(
-    (poolExceptionApproval?.approvedDifferences ?? []).map((difference) => [
-      `${difference.table}\u0000${difference.id}`,
-      stable(difference),
-    ]),
+  const poolExceptions = classifyPoolMismatchDescriptors(
+    poolState.mismatchDescriptors,
+    reportBytes,
+    poolExceptionApproval,
   );
-  const approvedPoolMismatches = poolState.mismatchDescriptors.filter(
-    (mismatch) =>
-      mismatch.mismatchType === "field-mismatch" &&
-      approvedDifferences.get(`${mismatch.table}\u0000${mismatch.id}`) ===
-        stable(mismatch),
-  ).length;
-  const unresolvedPoolMismatches =
-    poolState.counts.mismatches - approvedPoolMismatches;
   const stubs = report.findings.allZeroStubs as Stub[];
   const stubRows = await selectStubRows(query, stubs);
   const mappings = buildMappings(report);
@@ -1556,7 +1603,10 @@ export async function verifySourceLibraryReconciliation(
   const failureCandidates: Array<[string, number]> = [
     ["marker", Number(!marker.present || !marker.appliedAtPresent || !marker.resultValid || !marker.resultWithinBounds)],
     ["databaseOwner", Number(!databaseOwnerAttested)],
-    ["pools", poolState.counts.missing + unresolvedPoolMismatches],
+    [
+      "pools",
+      poolState.counts.missing + poolExceptions.unresolvedMismatches,
+    ],
     ["aliases", aliases.counts.missing + aliases.counts.mismatches],
     ["profiles", profileSummary.stale + profileSummary.nonCanonical],
     ["pendingRuns", pendingSummary.stale + pendingSummary.nonCanonical],
@@ -1570,8 +1620,7 @@ export async function verifySourceLibraryReconciliation(
     databaseAttestation,
     marker: marker.resultCounts,
     pool: poolState.counts,
-    approvedPoolMismatches,
-    unresolvedPoolMismatches,
+    poolExceptions,
     poolObservations: poolState.fingerprintRows,
     aliases: aliases.counts,
     aliasObservations: aliases.observations,
@@ -1596,12 +1645,7 @@ export async function verifySourceLibraryReconciliation(
       automaticProposals: report.proposals.length,
       stubs: stubs.length,
     },
-    poolExceptions: {
-      id: poolExceptionApproval?.id ?? null,
-      sha256: poolExceptionApproval?.sha256 ?? null,
-      approvedMismatches: approvedPoolMismatches,
-      unresolvedMismatches: unresolvedPoolMismatches,
-    },
+    poolExceptions,
     marker,
     pools: poolState.counts,
     aliases: aliases.counts,

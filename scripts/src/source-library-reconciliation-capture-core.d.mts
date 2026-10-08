@@ -20,6 +20,12 @@ export type SourceLibraryPoolMismatchDiagnostics = {
   returned: number;
   omitted: number;
   items: SourceLibraryPoolMismatchDescriptor[];
+  poolExceptions: {
+    id: string | null;
+    sha256: string | null;
+    approvedMismatches: number;
+    unresolvedMismatches: number;
+  };
 };
 export type SourceLibraryPoolExceptionApproval = {
   id: string;
@@ -123,13 +129,23 @@ export type ReadinessDeploymentHandoff = {
 
 export const DEFAULT_FROM_DATE: string;
 export const DEFAULT_HEAL_ID: string;
+export const DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS: string;
+export const APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID: string;
+export const APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256: string;
 export const SOURCE_LIBRARY_POOL_DIAGNOSTIC_MAX_ITEMS: number;
 export function parseReport(value: unknown): unknown;
 export function isValidSourceLibraryDatabaseOwner(value: unknown): value is string;
 export function inspectSourceLibraryPoolMismatchDiagnostics(
   report: unknown,
   query: ReadOnlyQuery,
+  poolExceptionApproval?: SourceLibraryPoolExceptionApproval,
+  reportBytes?: Buffer,
 ): Promise<SourceLibraryPoolMismatchDiagnostics>;
+export function loadSourceLibraryPoolExceptionApproval(
+  exceptionPath: string,
+  reportBytes: Buffer,
+  evidenceRoot?: string,
+): SourceLibraryPoolExceptionApproval;
 export function validateReadinessDeploymentHandoff(
   input: Uint8Array | unknown,
   options?: { now?: Date },

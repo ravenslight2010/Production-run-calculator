@@ -3246,9 +3246,11 @@ paths:
         through this published API process's configured database connection and
         binds the result to this process's build identity. It attests to the
         database configured for the published app, not to an independently
-        supplied PostgreSQL owner name. Returns aggregate counts and hashes only;
-        it never returns source rows or credentials. Rate limited and unavailable
-        outside production.
+        supplied PostgreSQL owner name. Returns raw, approved, and unresolved
+        pool mismatch counts with the pinned exception ID and digest, plus
+        aggregate counts and hashes. Any unresolved pool difference keeps the
+        verification result false. It never returns source rows or credentials.
+        Rate limited and unavailable outside production.
       security: []
       responses:
         "200":
@@ -3291,7 +3293,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/SourceLibraryCaptureError"
         "500":
-          description: Bundled report integrity or bounded output contract failed
+          description: Bundled report or pinned exception evidence failed integrity, or the bounded output contract failed
           content:
             application/json:
               schema:
@@ -3375,13 +3377,14 @@ paths:
       description: >-
         Public read-only diagnostics for Replit Agent. Runs the pool comparison
         through this published API process's configured database connection and
-        binds the result to this process's build identity. Returns at most ten
-        pool table names, stable record IDs, approved source names, mismatch
-        types, and differing field names. It never returns current values,
-        ingredient names, recipe rows, credentials, or database-owner names.
-        Shares the published capture rate limit and is unavailable outside
-        production. This response is diagnostic only, not retained release
-        evidence.
+        binds the result to this process's build identity. Returns raw, approved,
+        and unresolved mismatch counts using the same pinned exception set as
+        the release verifier, plus at most ten pool table names, stable record
+        IDs, approved source names, mismatch types, and differing field names.
+        It never returns current values, ingredient names, recipe rows,
+        credentials, or database-owner names. Shares the published capture rate
+        limit and is unavailable outside production. This response is diagnostic
+        only, not retained release evidence.
       security: []
       responses:
         "200":
@@ -3424,7 +3427,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/SourceLibraryCaptureError"
         "500":
-          description: Bundled report integrity or bounded output contract failed
+          description: Bundled report or pinned exception evidence failed integrity, or the bounded output contract failed
           content:
             application/json:
               schema:
@@ -5398,6 +5401,19 @@ components:
       additionalProperties: false
       properties:
         error: { type: string, maxLength: 160 }
+    SourceLibraryPoolExceptionSummary:
+      type: object
+      required: [id, sha256, approvedMismatches, unresolvedMismatches]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          enum: [source-library-pool-owner-approved-differences-2026-10-08-v1]
+        sha256:
+          type: string
+          enum: [42cf3d8d482a07657eeae5725710b098bb7f8de19a4f45d6356f670378cd2137]
+        approvedMismatches: { type: integer, minimum: 0, maximum: 68 }
+        unresolvedMismatches: { type: integer, minimum: 0, maximum: 68 }
     SourceLibraryReconciliationEvidence:
       type: object
       required:
@@ -5410,6 +5426,7 @@ components:
         - healId
         - repairBoundary
         - report
+        - poolExceptions
         - marker
         - pools
         - aliases
@@ -5446,6 +5463,8 @@ components:
             formatVersion: { type: integer, enum: [1] }
             automaticProposals: { type: integer, minimum: 0, maximum: 1000000 }
             stubs: { type: integer, minimum: 0, maximum: 1000000 }
+        poolExceptions:
+          $ref: "#/components/schemas/SourceLibraryPoolExceptionSummary"
         marker:
           type: object
           required: [present, resultValid, resultWithinBounds, resultCounts, appliedAtPresent]
@@ -5474,7 +5493,11 @@ components:
             exactMatches: { type: integer, minimum: 0, maximum: 1000000 }
             guardedRenames: { type: integer, minimum: 0, maximum: 1000000 }
             missing: { type: integer, minimum: 0, maximum: 1000000 }
-            mismatches: { type: integer, minimum: 0, maximum: 1000000 }
+            mismatches:
+              type: integer
+              minimum: 0
+              maximum: 1000000
+              description: Raw field-mismatch count before approved exceptions are applied.
         aliases:
           type: object
           required: [expected, exactMatches, missing, mismatches]
@@ -5574,6 +5597,7 @@ components:
         - capturedAt
         - report
         - pools
+        - poolExceptions
         - mismatchDetails
       additionalProperties: false
       properties:
@@ -5603,7 +5627,13 @@ components:
             exactMatches: { type: integer, minimum: 0, maximum: 1000000 }
             guardedRenames: { type: integer, minimum: 0, maximum: 1000000 }
             missing: { type: integer, minimum: 0, maximum: 1000000 }
-            mismatches: { type: integer, minimum: 0, maximum: 1000000 }
+            mismatches:
+              type: integer
+              minimum: 0
+              maximum: 1000000
+              description: Raw field-mismatch count before approved exceptions are applied.
+        poolExceptions:
+          $ref: "#/components/schemas/SourceLibraryPoolExceptionSummary"
         mismatchDetails:
           type: object
           required: [maxItems, total, returned, omitted, items]

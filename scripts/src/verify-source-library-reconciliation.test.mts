@@ -509,6 +509,19 @@ assert.deepEqual(ownerApprovedOutput.poolExceptions, {
 });
 assert.equal(ownerApprovedOutput.ok, true);
 assert.deepEqual(ownerApprovedOutput.failures, []);
+const ownerApprovedDiagnostics = await inspectSourceLibraryPoolMismatchDiagnostics(
+  report,
+  query,
+  ownerApprovedPoolExceptions,
+  reportBytes,
+);
+assert.equal(ownerApprovedDiagnostics.counts.mismatches, 10);
+assert.deepEqual(ownerApprovedDiagnostics.poolExceptions, {
+  id: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
+  sha256: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
+  approvedMismatches: 10,
+  unresolvedMismatches: 0,
+});
 
 const additionalDriftRow = rowsByTable.get("cheese_recipes")!.find(
   (row) =>
@@ -540,6 +553,19 @@ assert.equal(unresolvedDriftOutput.poolExceptions.approvedMismatches, 10);
 assert.equal(unresolvedDriftOutput.poolExceptions.unresolvedMismatches, 1);
 assert.equal(unresolvedDriftOutput.ok, false);
 assert.deepEqual(unresolvedDriftOutput.failures, [{ check: "pools", count: 1 }]);
+const unresolvedDiagnostics = await inspectSourceLibraryPoolMismatchDiagnostics(
+  report,
+  query,
+  ownerApprovedPoolExceptions,
+  reportBytes,
+);
+assert.equal(unresolvedDiagnostics.counts.mismatches, 11);
+assert.deepEqual(unresolvedDiagnostics.poolExceptions, {
+  id: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
+  sha256: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
+  approvedMismatches: 10,
+  unresolvedMismatches: 1,
+});
 additionalDriftRow.brand = originalAdditionalDriftBrand;
 for (const saved of changedApprovedRows) {
   if (saved.hadComponents) saved.row.components = saved.components;

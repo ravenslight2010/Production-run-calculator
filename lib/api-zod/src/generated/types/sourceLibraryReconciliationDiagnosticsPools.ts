@@ -28,6 +28,7 @@ export type SourceLibraryReconciliationDiagnosticsPools = {
      */
   missing: number;
   /**
+     * Raw field-mismatch count before approved exceptions are applied.
      * @minimum 0
      * @maximum 1000000
      */

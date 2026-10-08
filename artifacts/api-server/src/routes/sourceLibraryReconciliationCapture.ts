@@ -15,6 +15,10 @@ import {
   SourceLibraryCaptureFailure,
 } from "../lib/sourceLibraryReconciliationCapture";
 import {
+  DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS,
+  loadSourceLibraryPoolExceptionApproval,
+} from "../../../../scripts/src/source-library-reconciliation-capture-core.mjs";
+import {
   requireCapability,
   requireLiveScope,
   requireManagerRole,
@@ -26,8 +30,13 @@ const SOURCE_REPORT_PATH =
   "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json";
 const SOURCE_REPORT_SHA_PATH =
   "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.sha256";
+const POOL_EXCEPTION_FILE = path.basename(DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS);
 
-function readReviewedReportBundle(): { reportBytes: Buffer; reviewedReportSha256: string } {
+function readReviewedReportBundle(): {
+  reportBytes: Buffer;
+  reviewedReportSha256: string;
+  poolExceptionApproval: ReturnType<typeof loadSourceLibraryPoolExceptionApproval>;
+} {
   const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
   const baseDirectory =
     process.env.NODE_ENV === "production"
@@ -41,9 +50,19 @@ function readReviewedReportBundle(): { reportBytes: Buffer; reviewedReportSha256
     process.env.NODE_ENV === "production"
       ? path.join(baseDirectory, REPORT_SHA_FILE)
       : path.resolve(baseDirectory, SOURCE_REPORT_SHA_PATH);
+  const poolExceptionPath =
+    process.env.NODE_ENV === "production"
+      ? path.join(baseDirectory, POOL_EXCEPTION_FILE)
+      : path.resolve(baseDirectory, DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS);
+  const reportBytes = fs.readFileSync(reportPath);
   return {
-    reportBytes: fs.readFileSync(reportPath),
+    reportBytes,
     reviewedReportSha256: fs.readFileSync(reportShaPath, "utf8").trim(),
+    poolExceptionApproval: loadSourceLibraryPoolExceptionApproval(
+      poolExceptionPath,
+      reportBytes,
+      baseDirectory,
+    ),
   };
 }
 

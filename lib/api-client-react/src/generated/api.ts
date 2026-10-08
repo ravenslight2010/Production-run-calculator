@@ -12242,7 +12242,7 @@ export const getGetPublishedSourceLibraryReconciliationCaptureUrl = () => {
 }
 
 /**
- * Public read-only capture for Replit Agent. Runs the reviewed verifier through this published API process's configured database connection and binds the result to this process's build identity. It attests to the database configured for the published app, not to an independently supplied PostgreSQL owner name. Returns aggregate counts and hashes only; it never returns source rows or credentials. Rate limited and unavailable outside production.
+ * Public read-only capture for Replit Agent. Runs the reviewed verifier through this published API process's configured database connection and binds the result to this process's build identity. It attests to the database configured for the published app, not to an independently supplied PostgreSQL owner name. Returns raw, approved, and unresolved pool mismatch counts with the pinned exception ID and digest, plus aggregate counts and hashes. Any unresolved pool difference keeps the verification result false. It never returns source rows or credentials. Rate limited and unavailable outside production.
  * @summary Capture a bounded reconciliation summary from the published app
  */
 export const getPublishedSourceLibraryReconciliationCapture = async ( options?: Parameters<typeof customFetch>[1]): Promise<SourceLibraryReconciliationEvidence> => {
@@ -12433,7 +12433,7 @@ export const getGetPublishedSourceLibraryReconciliationDiagnosticsUrl = () => {
 }
 
 /**
- * Public read-only diagnostics for Replit Agent. Runs the pool comparison through this published API process's configured database connection and binds the result to this process's build identity. Returns at most ten pool table names, stable record IDs, approved source names, mismatch types, and differing field names. It never returns current values, ingredient names, recipe rows, credentials, or database-owner names. Shares the published capture rate limit and is unavailable outside production. This response is diagnostic only, not retained release evidence.
+ * Public read-only diagnostics for Replit Agent. Runs the pool comparison through this published API process's configured database connection and binds the result to this process's build identity. Returns raw, approved, and unresolved mismatch counts using the same pinned exception set as the release verifier, plus at most ten pool table names, stable record IDs, approved source names, mismatch types, and differing field names. It never returns current values, ingredient names, recipe rows, credentials, or database-owner names. Shares the published capture rate limit and is unavailable outside production. This response is diagnostic only, not retained release evidence.
  * @summary Inspect bounded pool mismatch descriptors from the published app
  */
 export const getPublishedSourceLibraryReconciliationDiagnostics = async ( options?: Parameters<typeof customFetch>[1]): Promise<SourceLibraryReconciliationDiagnostics> => {

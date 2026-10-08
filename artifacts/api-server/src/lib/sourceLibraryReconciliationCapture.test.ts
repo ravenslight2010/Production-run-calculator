@@ -4,10 +4,18 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  GetPublishedSourceLibraryReconciliationCaptureResponse,
+  GetPublishedSourceLibraryReconciliationDiagnosticsResponse,
+} from "@workspace/api-zod";
+import {
   sourceRecordDigest,
   type SourceRecord,
 } from "../../../../scripts/src/build-source-identity.mjs";
 import {
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
+  DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS,
+  loadSourceLibraryPoolExceptionApproval,
   verifySourceLibraryReconciliation,
   type VerificationOutput,
 } from "../../../../scripts/src/source-library-reconciliation-capture-core.mjs";
@@ -45,6 +53,11 @@ const reportBytes = fs.readFileSync(
   ),
 );
 const reportSha256 = createHash("sha256").update(reportBytes).digest("hex");
+const poolExceptionApproval = loadSourceLibraryPoolExceptionApproval(
+  path.resolve(repoRoot, DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS),
+  reportBytes,
+  repoRoot,
+);
 const fixedNow = new Date("2026-10-05T17:00:00.000Z");
 const expectedSource: SourceRecord = {
   schemaVersion: 1,
@@ -88,8 +101,8 @@ const evidenceOutput: VerificationOutput = {
     stubs: 3,
   },
   poolExceptions: {
-    id: null,
-    sha256: null,
+    id: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
+    sha256: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
     approvedMismatches: 0,
     unresolvedMismatches: 0,
   },
@@ -185,6 +198,7 @@ function dependencies(
         overrides.sourceFingerprintSha256 ??
         expectedSource.sourceFingerprintSha256,
     } as import("../../../../scripts/src/build-source-identity.mjs").BuildInfo,
+    poolExceptionApproval,
     now: overrides.now ?? fixedNow,
   };
 }
@@ -239,6 +253,7 @@ describe("source-library reconciliation capture", () => {
     expect(call[6]).toBe(handoff.deployedRevision);
     expect(call[7]).toBe("production_owner");
     expect(call[8]).toBe("external-owner-check");
+    expect(call[9]).toEqual(poolExceptionApproval);
   });
 
   it("captures from the published app pool without an external owner name", async () => {
@@ -263,6 +278,19 @@ describe("source-library reconciliation capture", () => {
     expect(call[6]).toBe(`source-sha256:${expectedSource.sourceFingerprintSha256}`);
     expect(call[7]).toBeUndefined();
     expect(call[8]).toBe("published-app-runtime-connection");
+    expect(call[9]).toEqual(poolExceptionApproval);
+    expect(result.report.sha256).toBe(reportSha256);
+    expect(result.revision).toBe(
+      `source-sha256:${expectedSource.sourceFingerprintSha256}`,
+    );
+    expect(result.poolExceptions).toMatchObject({
+      id: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
+      sha256: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
+    });
+    expect(
+      GetPublishedSourceLibraryReconciliationCaptureResponse.safeParse(result)
+        .success,
+    ).toBe(true);
     expect(JSON.stringify(result)).not.toContain("production_owner");
     expect(fake.calls).toContain("BEGIN TRANSACTION READ ONLY");
     expect(fake.calls).toContain("ROLLBACK");
@@ -280,11 +308,18 @@ describe("source-library reconciliation capture", () => {
       environment: "release",
       databaseAttestation: "published-app-runtime-connection",
       revision: `source-sha256:${expectedSource.sourceFingerprintSha256}`,
+      report: { sha256: reportSha256 },
       pools: {
         expected: 68,
         exactMatches: 0,
         missing: 68,
         mismatches: 0,
+      },
+      poolExceptions: {
+        id: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
+        sha256: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
+        approvedMismatches: 0,
+        unresolvedMismatches: 0,
       },
       mismatchDetails: {
         maxItems: 10,
@@ -293,6 +328,11 @@ describe("source-library reconciliation capture", () => {
         omitted: 58,
       },
     });
+    expect(
+      GetPublishedSourceLibraryReconciliationDiagnosticsResponse.safeParse(
+        result,
+      ).success,
+    ).toBe(true);
     expect(result.mismatchDetails.items).toHaveLength(10);
     expect(Object.keys(result.mismatchDetails.items[0] ?? {}).sort()).toEqual([
       "differingFields",

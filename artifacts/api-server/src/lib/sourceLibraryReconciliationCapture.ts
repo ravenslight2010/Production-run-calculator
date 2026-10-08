@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import {
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
   assertBoundedSourceLibraryReconciliationEvidence,
   DEFAULT_FROM_DATE,
   DEFAULT_HEAL_ID,
@@ -11,6 +13,7 @@ import {
   type SourceLibraryPoolMismatchDescriptor,
   type SourceLibraryPoolMismatchDiagnostics,
   type ReadOnlyQuery,
+  type SourceLibraryPoolExceptionApproval,
   type VerificationOutput,
   validateReadinessDeploymentHandoff,
   type ReadinessDeploymentHandoff,
@@ -56,6 +59,7 @@ type CaptureDependencies = {
   reportBytes: Buffer;
   reviewedReportSha256: string;
   buildInfo: Readonly<BuildInfo> | null;
+  poolExceptionApproval: SourceLibraryPoolExceptionApproval;
   now?: Date;
 };
 
@@ -71,6 +75,7 @@ export type SourceLibraryReconciliationDiagnosticsOutput = {
   capturedAt: string;
   report: { sha256: string };
   pools: SourceLibraryPoolMismatchDiagnostics["counts"];
+  poolExceptions: SourceLibraryPoolMismatchDiagnostics["poolExceptions"];
   mismatchDetails: {
     maxItems: number;
     total: number;
@@ -136,6 +141,7 @@ function validateDiagnosticsOutput(
       "capturedAt",
       "report",
       "pools",
+      "poolExceptions",
       "mismatchDetails",
     ]) ||
     value.verifier !== "source-library-reconciliation-diagnostics" ||
@@ -157,6 +163,13 @@ function validateDiagnosticsOutput(
       "missing",
       "mismatches",
     ]) ||
+    !record(value.poolExceptions) ||
+    !exactKeys(value.poolExceptions, [
+      "id",
+      "sha256",
+      "approvedMismatches",
+      "unresolvedMismatches",
+    ]) ||
     !record(value.mismatchDetails) ||
     !exactKeys(value.mismatchDetails, [
       "maxItems",
@@ -170,6 +183,7 @@ function validateDiagnosticsOutput(
   }
 
   const pools = value.pools;
+  const poolExceptions = value.poolExceptions;
   const details = value.mismatchDetails;
   if (
     !isBoundedCount(pools.expected) ||
@@ -179,6 +193,12 @@ function validateDiagnosticsOutput(
     !isBoundedCount(pools.mismatches) ||
     pools.exactMatches + pools.guardedRenames + pools.missing + pools.mismatches !==
       pools.expected ||
+    poolExceptions.id !== APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID ||
+    poolExceptions.sha256 !== APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256 ||
+    !isBoundedCount(poolExceptions.approvedMismatches) ||
+    !isBoundedCount(poolExceptions.unresolvedMismatches) ||
+    poolExceptions.approvedMismatches + poolExceptions.unresolvedMismatches !==
+      pools.mismatches ||
     details.maxItems !== SOURCE_LIBRARY_POOL_DIAGNOSTIC_MAX_ITEMS ||
     !isBoundedCount(details.total) ||
     !isBoundedCount(details.returned, SOURCE_LIBRARY_POOL_DIAGNOSTIC_MAX_ITEMS) ||
@@ -443,10 +463,17 @@ async function runReadOnlyCapture(
         deployedRevision,
         expectedDatabaseOwner,
         databaseAttestation,
+        dependencies.poolExceptionApproval,
       ),
     (output) => {
       assertBoundedSourceLibraryReconciliationEvidence(output);
-      if (output.databaseAttestation !== databaseAttestation) {
+      if (
+        output.databaseAttestation !== databaseAttestation ||
+        output.poolExceptions.id !== APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID ||
+        output.poolExceptions.sha256 !== APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256 ||
+        output.poolExceptions.approvedMismatches >
+          dependencies.poolExceptionApproval.approvedDifferences.length
+      ) {
         throw new Error("Capture attestation did not match the requested mode");
       }
     },
@@ -462,7 +489,12 @@ async function runReadOnlyDiagnosticsCapture(
     dependencies,
     async (query) => {
       const poolDiagnostics =
-        await inspectSourceLibraryPoolMismatchDiagnostics(report, query);
+        await inspectSourceLibraryPoolMismatchDiagnostics(
+          report,
+          query,
+          dependencies.poolExceptionApproval,
+          dependencies.reportBytes,
+        );
       return {
         verifier: "source-library-reconciliation-diagnostics",
         environment: "release",
@@ -475,6 +507,7 @@ async function runReadOnlyDiagnosticsCapture(
             .digest("hex"),
         },
         pools: poolDiagnostics.counts,
+        poolExceptions: poolDiagnostics.poolExceptions,
         mismatchDetails: {
           maxItems: poolDiagnostics.maxItems,
           total: poolDiagnostics.total,

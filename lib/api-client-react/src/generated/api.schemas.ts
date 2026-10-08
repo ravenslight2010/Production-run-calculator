@@ -84,6 +84,35 @@ export interface SourceLibraryCaptureError {
   error: string;
 }
 
+export type SourceLibraryPoolExceptionSummaryId = typeof SourceLibraryPoolExceptionSummaryId[keyof typeof SourceLibraryPoolExceptionSummaryId];
+
+
+export const SourceLibraryPoolExceptionSummaryId = {
+  'source-library-pool-owner-approved-differences-2026-10-08-v1': 'source-library-pool-owner-approved-differences-2026-10-08-v1',
+} as const;
+
+export type SourceLibraryPoolExceptionSummarySha256 = typeof SourceLibraryPoolExceptionSummarySha256[keyof typeof SourceLibraryPoolExceptionSummarySha256];
+
+
+export const SourceLibraryPoolExceptionSummarySha256 = {
+  '42cf3d8d482a07657eeae5725710b098bb7f8de19a4f45d6356f670378cd2137': '42cf3d8d482a07657eeae5725710b098bb7f8de19a4f45d6356f670378cd2137',
+} as const;
+
+export interface SourceLibraryPoolExceptionSummary {
+  id: SourceLibraryPoolExceptionSummaryId;
+  sha256: SourceLibraryPoolExceptionSummarySha256;
+  /**
+     * @minimum 0
+     * @maximum 68
+     */
+  approvedMismatches: number;
+  /**
+     * @minimum 0
+     * @maximum 68
+     */
+  unresolvedMismatches: number;
+}
+
 export type SourceLibraryReconciliationEvidenceVerifier = typeof SourceLibraryReconciliationEvidenceVerifier[keyof typeof SourceLibraryReconciliationEvidenceVerifier];
 
 
@@ -191,6 +220,7 @@ export type SourceLibraryReconciliationEvidencePools = {
      */
   missing: number;
   /**
+     * Raw field-mismatch count before approved exceptions are applied.
      * @minimum 0
      * @maximum 1000000
      */
@@ -336,6 +366,7 @@ export interface SourceLibraryReconciliationEvidence {
   healId: string;
   repairBoundary: SourceLibraryReconciliationEvidenceRepairBoundary;
   report: SourceLibraryReconciliationEvidenceReport;
+  poolExceptions: SourceLibraryPoolExceptionSummary;
   marker: SourceLibraryReconciliationEvidenceMarker;
   pools: SourceLibraryReconciliationEvidencePools;
   aliases: SourceLibraryReconciliationEvidenceAliases;
@@ -451,6 +482,7 @@ export type SourceLibraryReconciliationDiagnosticsPools = {
      */
   missing: number;
   /**
+     * Raw field-mismatch count before approved exceptions are applied.
      * @minimum 0
      * @maximum 1000000
      */
@@ -494,6 +526,7 @@ export interface SourceLibraryReconciliationDiagnostics {
   capturedAt: string;
   report: SourceLibraryReconciliationDiagnosticsReport;
   pools: SourceLibraryReconciliationDiagnosticsPools;
+  poolExceptions: SourceLibraryPoolExceptionSummary;
   mismatchDetails: SourceLibraryReconciliationDiagnosticsMismatchDetails;
 }
 
