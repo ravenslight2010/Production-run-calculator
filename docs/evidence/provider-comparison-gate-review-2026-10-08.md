@@ -1,31 +1,31 @@
 # Spec-import provider comparison gate review — blocked
 
 **Review date:** 2026-10-08  
-**Current source revision:** `e5c4e620e53eeb48830913b3031a3db260be45bf`  
-**Decision:** Not authorized to run; no provider comparison was made.  
-**Privacy:** Repository code and metadata only. No workbook contents, source-backed labels, private evidence stores, prompts containing source data, credentials, or provider responses were accessed or retained.
+**Current source revision:** `81060a78b36b550727bcf6c498ea6335677137c7`
+**Decision:** Inconclusive — no eligible gold cases were available in the reviewed workspace, the approved endpoint is not reachable here, and a temporary 32K-context fit probe was rejected by the local runtime's memory guard. Keep the existing Gemini production route unchanged.
+**Privacy:** No workbook contents, source-backed labels, private evidence stores, credentials, or Gemini requests were accessed or retained. One generated synthetic prompt was sent to a temporary loopback-only Ollama server; the memory guard rejected it before model load or generation. The marker was absent from the server log, and the client saved no prompt or response.
 
 ## Gate decision
 
-The current review found **0 eligible independent gold cases** in the reviewed workspace and no authorized Apply-evidence bundle. Cases in unreviewed private stores remain **unknown**; those stores were not accessed. An evaluation-only local model target is now owner-approved (see below), but no endpoint has been provided or verified for this evaluation and there is no separate authorization for a Phase-0 provider run.
+The user explicitly resumed this assigned benchmark in chat on 2026-10-08; this is authorization to continue the task, but not a substitute for a restricted run record authorizing a provider comparison. Repository metadata identifies 0 eligible independently verified gold cases; the restricted case manifest, label records, and prompts are unavailable here, and counts in unreviewed private stores remain **unknown**. The project task state reports private-endpoint setup and restart-availability work as merged, but the approved host and its model digest are not accessible from this workspace. This evaluator has 8 vCPUs, a 16-GiB memory cgroup limit, and no visible GPU. A temporary local Qwen3 8B pull was used only for a synthetic memory-fit probe; at the required 32,768-token context, Ollama estimated 12.3 GiB needed while reporting 10.6 GiB available, and rejected the request before loading the model.
 
-Do not call either provider for this comparison, treat unavailable measurements as zero, train a model, create dataset splits, or change production routing. The local model selection is evaluation-only; this remains a blocked, unmeasured comparison—not evidence that Gemini is better or that a local model fails.
+No Gemini baseline or provider-comparison request was made. Do not treat unavailable measurements as zero, train a model, create dataset splits, or change production routing. The local model selection is evaluation-only; this remains an inconclusive, unmeasured comparison—not evidence that Gemini is better or that a local model fails.
 
 Eligibility and authorization were assessed against the independent review protocol in the existing benchmark blocker report. It requires authorized source evidence; two independent labels made without model/parser outputs; separate adjudication; restricted provenance and reviewer records; and a privacy review. Existing deterministic snapshots and discrepancy-review labels do not qualify as extraction gold.
 
 ## Current production identity
 
-The earlier benchmark record is bound to source revision `7f41f4931c459a3f273af7554d5527503d1d98f9` and parse version `41`. This review checked the current repository revision above: the parse version is now `42`. The production system-prompt digest was recomputed from the current prompt builder with empty workbook input and remains the same as the earlier record. **No comparison was run against parse version 42.**
+The earlier benchmark record is bound to source revision `7f41f4931c459a3f273af7554d5527503d1d98f9` and parse version `41`. This review checked the current repository revision above: the parse version is now `42`. The production system-prompt digest was recomputed from the prompt builder during the prior review; that builder is unchanged in this revision. **No comparison was run against parse version 42.**
 
 | Identity or setting | Current code-backed value | Comparison status |
 | --- | --- | --- |
 | Parse version | `SPEC_IMPORT_PARSE_VERSION` `42` | Identified; no run |
 | Production system prompt | SHA-256 `65196b19789f6f1cc676c45f00e32b14c34320f869766e8f6c711a351e9f9d76` | Identified; no run |
 | Empty-input user-prompt template | SHA-256 `259e965be5921e54b93f0ab17d1ba9663cd2a0e65d167bafda0363243ea43ccc` | Template fingerprint only; not a case prompt |
-| Case-specific grounded user prompts | No eligible cases; route also adds learned-memory grounding | Not available to freeze |
+| Case-specific grounded user prompts | Restricted case bundle is not available here; route also adds learned-memory grounding | Eligible-case count unknown; cannot freeze in this workspace |
 | Output contract | `ParsedSpecImport` (`profiles`, `recipes`, optional `note`, `warnings`, and `unresolved`), passed through `sanitizeParseSpecSheet` / `sanitizeParsedSpecImport` | No separate output-schema version is declared |
 | Current Gemini route identity | Replit AI Integrations; `pickModel("full")` resolves to `gemini-2.5-flash` | Production identity only; no benchmark request |
-| Local provider/model | Owner-approved evaluation target: Ollama with `qwen3:8b` (Qwen3 8B); endpoint and immutable model digest not yet verified | No verified endpoint; not run |
+| Local provider/model | Owner-approved evaluation target: Ollama with `qwen3:8b` (Qwen3 8B); the approved endpoint and digest remain inaccessible. A temporary pull produced digest `500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41`, which is not verified against the approved host. | Synthetic-only fit request reached the temporary loopback server and was rejected before model load or generation; no comparison run |
 | Structured-output request | `json_object`; `max_completion_tokens` `65536` | Current route settings; not frozen as a side-by-side protocol |
 | Sampling settings | No explicit temperature, top-p, or seed in this route | Provider defaults are not pinned |
 | JSON retry policy | At most 2 total attempts; retry malformed JSON once; retry a 429 once after 20 seconds; do not retry other provider-call errors | Current route behavior; no benchmark retries occurred |
@@ -49,16 +49,32 @@ Any blank-poison case, a critical-field gap over 5 percentage points, or systema
 
 ## Measurements and execution status
 
-No cases, prompts, provider calls, retries, or comparison outputs were executed. No measurement failed; measurements are unavailable because the run was not authorized, zero eligible gold cases were found, and no endpoint or immutable model digest has been verified.
+No cases, case-specific prompts, Gemini requests, provider retries, or comparison outputs were executed. Comparison measurements are unavailable because no eligible gold cases are accessible here and the approved endpoint is unreachable. The separate synthetic local fit request failed at the runtime memory guard; this is not a provider-quality measurement.
 
 | Measurement | Gemini | Local candidate |
 | --- | --- | --- |
-| Schema-valid rate | Unavailable — not run | Unavailable — approved model has no verified endpoint; not run |
-| Field-level agreement | Unavailable — no verified gold | Unavailable — no verified gold |
-| Critical-field agreement | Unavailable — no verified gold | Unavailable — no verified gold |
+| Schema-valid rate | Unavailable — not run | Unavailable — synthetic request rejected before generation; no comparison cases |
+| Field-level agreement | Unavailable — restricted gold labels are not accessible; count unknown | Unavailable — restricted gold labels are not accessible; count unknown |
+| Critical-field agreement | Unavailable — restricted gold labels are not accessible; count unknown | Unavailable — restricted gold labels are not accessible; count unknown |
 | Blank-poison rate | Unavailable — no comparison outputs | Unavailable — no comparison outputs |
 | Empty-output rate | Unavailable — no comparison outputs | Unavailable — no comparison outputs |
-| Latency p50 / p95 | Unavailable — not run | Unavailable — no verified endpoint; not run |
+| Latency p50 / p95 | Unavailable — not run | Unavailable — no comparison run; the single failed synthetic fit request is not a latency sample |
+
+## Synthetic local fit probe (not a provider comparison)
+
+The only request used a generated, non-sensitive prompt against a temporary loopback-only Ollama server. No source-backed, customer, or operational content was used.
+
+| Probe item | Result |
+| --- | --- |
+| Runtime and model tag | Ollama `0.9.5`; `qwen3:8b` |
+| Pulled model digest | SHA-256 `500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41` (temporary local pull; not verified as the approved endpoint's digest) |
+| Model size | `5,225,388,164` bytes |
+| Endpoint and settings | Temporary `127.0.0.1:11434/api/chat`; CPU-only, one concurrent request, 32,768-token context, 120-second client timeout, `OLLAMA_NOHISTORY=1` |
+| Runtime result | HTTP 500 after `0.165` seconds; Ollama estimated `12.3 GiB` required and `10.6 GiB` available, then refused to load the model. No output was generated. |
+| Workspace resources | 16-GiB cgroup memory limit; sampled cgroup peak during the rejected request was `6,648,442,880` bytes. No cgroup max or OOM events occurred. |
+| Payload handling | The synthetic marker was absent from the server log; the client did not persist request or response content. Temporary model/runtime files were removed after the probe. |
+
+This probe does not establish that the approved dedicated endpoint fits its own resource limits. Do not reduce the approved context or stop application workflows to turn this shared-workspace failure into a pass; verify capacity on the approved evaluator host.
 
 ## Evidence hashes
 
@@ -80,23 +96,23 @@ All hashes below identify repository metadata or code, not customer source mater
 ## Evaluation-only local model approval
 
 **Approval date:** 2026-10-07
-**Authorization:** The project owner accepted the recommended model and safeguards for spec-import evaluation only. This does not authorize a provider request, use of customer content, or a production routing change.
+**Authorization:** The project owner accepted the recommended model and safeguards for spec-import evaluation only. This does not authorize a provider-comparison request, use of customer content, or a production routing change.
 
 | Item | Approved evaluation target |
 | --- | --- |
 | Provider/runtime | Ollama, using its OpenAI-compatible chat-completions endpoint |
-| Model/version | Qwen3 8B instruct, Ollama model tag `qwen3:8b`. The immutable model digest must be captured and verified before any request; it was not supplied or captured for this decision. |
-| Endpoint | Intended loopback target: `http://127.0.0.1:11434/v1` on a dedicated evaluator-controlled host. No endpoint host/service was verified or contacted during this review. |
+| Model/version | Qwen3 8B instruct, Ollama model tag `qwen3:8b`. The approved endpoint's immutable digest remains unavailable; the temporary pull digest above was not verified against that host. |
+| Endpoint | Intended loopback target: `http://127.0.0.1:11434/v1` on a dedicated evaluator-controlled host. Its host/access details remain unavailable here. A separate temporary loopback Ollama server was used only for the synthetic fit probe above; it was not verified as the approved endpoint. |
 | Endpoint owner | Project owner who authorized the evaluation target; any other endpoint operator must be explicitly designated by that owner before setup. Record the actual operator and host in the restricted run record, not this shared report. |
 | Data handling | No customer or operational content for this approval. Until source-backed cases are separately authorized, only generated/non-sensitive test inputs may be used. Any later source material remains subject to the independent source review and its restricted-storage protocol. |
 | Retention | Do not persist request prompts, source contents, or raw model responses; disable payload logging. Retain only privacy-reviewed aggregate metrics and non-sensitive run metadata, including model/prompt digests. |
 | Access | Bind to loopback; do not expose the service to LAN or public networks. Restrict the host to the project owner or an explicitly designated evaluator. |
-| Resource limits | One concurrent request; maximum 32,768-token context and 120-second request deadline. Run on a dedicated evaluation host, never on the production API/Render instance. Set and verify host-level CPU, memory, and accelerator limits before the run; this review did not identify a host or configured limits. |
+| Resource limits | One concurrent request; maximum 32,768-token context and 120-second request deadline. Run on a dedicated evaluation host, never on the production API/Render instance. This shared workspace did not have enough available memory for the model runtime's 12.3-GiB estimate; dedicated-host CPU, memory, and accelerator limits remain inaccessible here. |
 
-Before any future call, verify the endpoint is loopback-only, enforce the stated controls and egress restrictions, record the actual endpoint operator/host in restricted evidence, pin the model digest, complete the independent source-backed case review, and obtain separate Phase-0 run authorization. No package was installed as part of this decision, and no provider was called.
+Before any future comparison call, obtain and verify access to the restricted case manifest and labels, freeze eligible cases and grounded prompts, verify the approved endpoint is loopback-only, enforce the stated controls and egress/resource limits, record the actual endpoint operator/host in restricted evidence, verify its model digest, and record separate Phase-0 run authorization. Ollama `0.9.5` was loaded temporarily from Nix for the synthetic fit probe; no project dependency or application workflow changed. The local request was rejected before inference, and the temporary model/runtime files were removed.
 
 The model choice follows the project's earlier local-AI installation research, which proposed Qwen3 8B as a text-only Phase-0 candidate for spec parsing. This is a fit-based recommendation, not a measured quality result.
 
 ## Conditions for a future run
 
-Reconsider only after the independent source-backed case review is complete, the approved local endpoint is deployed and its operator, host, model digest, and resource limits are verified, and a separate Phase-0 run is authorized. At that point, refresh the parse/prompt/schema identity, freeze the same eligible cases and case-specific prompts for both providers, pin all available sampling and retry settings, and retain only privacy-reviewed metadata with separate evidence hashes. Keep training, dataset splits, and production routing changes out of that decision unless separately authorized.
+Reconsider only after the restricted source-backed case manifest and labels are available for verification, the approved local endpoint is reachable from the evaluator and its operator, host, model digest, and resource limits are verified, and a separate Phase-0 run is authorized. At that point, refresh the parse/prompt/schema identity, freeze the same eligible cases and case-specific prompts for both providers, pin all available sampling and retry settings, and retain only privacy-reviewed metadata with separate evidence hashes. Keep training, dataset splits, and production routing changes out of that decision unless separately authorized.
