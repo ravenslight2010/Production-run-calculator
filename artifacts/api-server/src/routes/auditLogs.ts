@@ -105,7 +105,7 @@ type AuditEventSchema = {
   fieldNames?: ReadonlySet<string>;
 };
 
-const CHEESE_RECIPE_AUDIT_FIELDS = [
+export const CHEESE_RECIPE_AUDIT_FIELDS = [
   "name", "brand", "flavors", "shredderSetting", "cellulose", "notes", "components", "enabled",
 ] as const;
 export const DOUGH_RECIPE_AUDIT_FIELDS = [

@@ -25,6 +25,7 @@ import { broadcastMasterDataChanged } from "./sync";
 import { SPEC_IMPORT_PARSE_VERSION } from "@workspace/spec-import";
 import {
   writeAuditEvent,
+  CHEESE_RECIPE_AUDIT_FIELDS,
   DOUGH_RECIPE_AUDIT_FIELDS,
   MIX_RECIPE_AUDIT_FIELDS,
   SAUCE_RECIPE_AUDIT_FIELDS,
@@ -247,6 +248,7 @@ async function captureSnapshotRows(
 }
 
 const RECIPE_AUDIT_CONFIG = {
+  cheeseRecipes: { family: "cheese_recipe", fields: CHEESE_RECIPE_AUDIT_FIELDS },
   doughRecipes: { family: "dough_recipe", fields: DOUGH_RECIPE_AUDIT_FIELDS },
   sauceRecipes: { family: "sauce_recipe", fields: SAUCE_RECIPE_AUDIT_FIELDS },
   mixes: { family: "mix_recipe", fields: MIX_RECIPE_AUDIT_FIELDS },

@@ -110,7 +110,7 @@ async function apply(
 }
 
 describe("atomic import operations", () => {
-  it("records value-free imported create, update, and delete events for dough, sauce, and mix recipes", async () => {
+  it("records value-free imported create, update, and delete events for cheese, dough, sauce, and mix recipes", async () => {
     const dough = {
       id: "import-audit-dough",
       name: "PRIVATE_DOUGH_NAME",
@@ -143,7 +143,19 @@ describe("atomic import operations", () => {
       isPrep: true,
       enabled: true,
     };
+    const cheese = {
+      id: "import-audit-cheese",
+      name: "PRIVATE_CHEESE_NAME",
+      brand: "PRIVATE_CHEESE_BRAND",
+      flavors: ["PRIVATE_CHEESE_FLAVOR"],
+      shredderSetting: "PRIVATE_CHEESE_SHREDDER_SETTING",
+      cellulose: "PRIVATE_CHEESE_CELLULOSE",
+      notes: "PRIVATE_CHEESE_NOTES",
+      components: [{ ingredient: "PRIVATE_CHEESE_INGREDIENT", lbs: 10 }],
+      enabled: true,
+    };
     const changesFor = (recipes: {
+      cheese: typeof cheese;
       dough: typeof dough;
       sauce: typeof sauce;
       mix: typeof mix;
@@ -151,6 +163,7 @@ describe("atomic import operations", () => {
       importType: "spec",
       sourceLabel: "private-recipe-source.xlsx",
       changes: {
+        cheeseRecipes: { upsert: [recipes.cheese] },
         doughRecipes: { upsert: [recipes.dough] },
         sauceRecipes: { upsert: [recipes.sauce] },
         mixes: { upsert: [recipes.mix] },
@@ -158,7 +171,7 @@ describe("atomic import operations", () => {
     });
     const createdResponse = await apply(
       "import-audit-create-0001",
-      changesFor({ dough, sauce, mix }),
+      changesFor({ cheese, dough, sauce, mix }),
       "inventory",
       { "x-correlation-id": "client-supplied-correlation" },
     );
@@ -167,10 +180,12 @@ describe("atomic import operations", () => {
     expect(createdCorrelationId).toMatch(/^[0-9a-f-]{36}$/u);
     expect(createdCorrelationId).not.toBe("client-supplied-correlation");
 
+    const updatedCheese = { ...cheese, shredderSetting: "UPDATED_CHEESE_SHREDDER_SETTING" };
     const updatedDough = { ...dough, notes: "UPDATED_DOUGH_NOTES" };
     const updatedSauce = { ...sauce, brand: "UPDATED_SAUCE_BRAND" };
     const updatedMix = { ...mix, batchSize: 4 };
     const updatedResponse = await apply("import-audit-update-0001", changesFor({
+      cheese: updatedCheese,
       dough: updatedDough,
       sauce: updatedSauce,
       mix: updatedMix,
@@ -180,6 +195,7 @@ describe("atomic import operations", () => {
     expect(updatedCorrelationId).toMatch(/^[0-9a-f-]{36}$/u);
 
     const noOpChanges = changesFor({
+      cheese: updatedCheese,
       dough: updatedDough,
       sauce: updatedSauce,
       mix: updatedMix,
@@ -188,6 +204,10 @@ describe("atomic import operations", () => {
       ...noOpChanges,
       changes: {
         ...noOpChanges.changes,
+        cheeseRecipes: {
+          ...noOpChanges.changes.cheeseRecipes,
+          delete: ["missing-import-audit-recipe"],
+        },
         doughRecipes: {
           ...noOpChanges.changes.doughRecipes,
           delete: ["missing-import-audit-recipe"],
@@ -200,6 +220,7 @@ describe("atomic import operations", () => {
       importType: "spec",
       sourceLabel: "private-recipe-source.xlsx",
       changes: {
+        cheeseRecipes: { delete: [cheese.id] },
         doughRecipes: { delete: [dough.id] },
         sauceRecipes: { delete: [sauce.id] },
         mixes: { delete: [mix.id] },
@@ -212,6 +233,15 @@ describe("atomic import operations", () => {
     const auditRows = (await db.select().from(tables.auditLogsTable))
       .sort((left, right) => left.id - right.id);
     const families = [
+      {
+        family: "cheese_recipe",
+        id: cheese.id,
+        fields: [
+          "name", "brand", "flavors", "shredderSetting", "cellulose",
+          "notes", "components", "enabled",
+        ],
+        updatedFields: ["shredderSetting"],
+      },
       {
         family: "dough_recipe",
         id: dough.id,
@@ -237,7 +267,7 @@ describe("atomic import operations", () => {
         updatedFields: ["batchSize"],
       },
     ];
-    expect(auditRows).toHaveLength(9);
+    expect(auditRows).toHaveLength(12);
     for (const recipe of families) {
       const events = auditRows.filter((row) => row.resource === `${recipe.family}:${recipe.id}`);
       expect(events.map((row) => row.action)).toEqual([
@@ -256,8 +286,12 @@ describe("atomic import operations", () => {
       (row.changes as Record<string, unknown>).correlationId === noOpResponse.headers.get("x-correlation-id"),
     )).toBe(false);
 
-    const auditPayload = JSON.stringify(auditRows.map((row) => row.changes));
+    const auditPayload = JSON.stringify(auditRows);
     for (const privateValue of [
+      "PRIVATE_CHEESE_NAME", "PRIVATE_CHEESE_BRAND", "PRIVATE_CHEESE_FLAVOR",
+      "PRIVATE_CHEESE_SHREDDER_SETTING", "PRIVATE_CHEESE_CELLULOSE",
+      "PRIVATE_CHEESE_NOTES", "PRIVATE_CHEESE_INGREDIENT",
+      "UPDATED_CHEESE_SHREDDER_SETTING",
       "PRIVATE_DOUGH_NAME", "PRIVATE_DOUGH_BRAND", "PRIVATE_DOUGH_FLAVOR",
       "PRIVATE_DOUGH_NOTES", "PRIVATE_DOUGH_INGREDIENT", "PRIVATE_DOUGH_VARIANT",
       "UPDATED_DOUGH_NOTES", "PRIVATE_SAUCE_NAME", "PRIVATE_SAUCE_BRAND",
@@ -439,11 +473,31 @@ describe("atomic import operations", () => {
   });
 
   it("rolls back after failures at domain and history stages", async () => {
+    const rollbackBody = {
+      ...change(),
+      changes: {
+        ...change().changes,
+        cheeseRecipes: {
+          upsert: [{
+            id: "rollback-cheese-recipe",
+            name: "Rollback Cheese",
+            brand: "Brand",
+            flavors: [],
+            shredderSetting: "",
+            cellulose: "",
+            notes: "",
+            components: [],
+            enabled: true,
+          }],
+        },
+      },
+    };
     for (const stage of ["after-mixes", "after-recipe-audit", "after-history"]) {
       route.setImportOperationFailureHookForTest((actual) => { if (actual === stage) throw new Error("injected"); });
-      const response = await apply(`rollback-${stage.replace("-", "")}-001`, change());
+      const response = await apply(`rollback-${stage.replace("-", "")}-001`, rollbackBody);
       expect(response.status).toBe(500);
       expect(await db.select().from(tables.mixesTable)).toHaveLength(0);
+      expect(await db.select().from(tables.cheeseRecipesTable)).toHaveLength(0);
       expect(await db.select().from(tables.importOperationsTable)).toHaveLength(0);
       expect(await db.select().from(tables.auditLogsTable)).toHaveLength(0);
       route.setImportOperationFailureHookForTest();
