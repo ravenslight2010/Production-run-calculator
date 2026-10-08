@@ -64,6 +64,7 @@ import {
 import { parseReportSigningKeyring } from "./report-key-rotation-preflight.mts";
 import {
   APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_V2_ID,
   APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
   computeSourceLibraryEvidenceId,
   DEFAULT_FROM_DATE,
@@ -2013,7 +2014,61 @@ async function run(): Promise<void> {
           APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
       },
     ),
-    "release evidence must accept the exact pinned owner-approved exception set",
+    "historical v1 evidence may remain readable when it authorizes no current mismatches",
+  );
+  const fingerprintBoundExceptionSha256 = "c".repeat(64);
+  assert.doesNotThrow(() =>
+    validateSourceLibraryReconciliationEvidence(
+      Buffer.from(
+        JSON.stringify(
+          sourceEvidence({
+            environment: "release",
+            poolExceptions: {
+              id: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_V2_ID,
+              sha256: fingerprintBoundExceptionSha256,
+              approvedMismatches: 0,
+              unresolvedMismatches: 0,
+            },
+          }),
+        ),
+      ),
+      {
+        expectedEnvironment: "release",
+        expectedPoolExceptionsSha256: fingerprintBoundExceptionSha256,
+      },
+    ),
+    "release evidence may use a pinned fingerprint-bound version 2 exception",
+  );
+  assert.throws(
+    () =>
+      validateSourceLibraryReconciliationEvidence(
+        Buffer.from(
+          JSON.stringify(
+            sourceEvidence({
+              environment: "release",
+              pools: {
+                expected: 68,
+                exactMatches: 58,
+                guardedRenames: 0,
+                missing: 0,
+                mismatches: 10,
+              },
+              poolExceptions: {
+                id: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
+                sha256: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
+                approvedMismatches: 10,
+                unresolvedMismatches: 0,
+              },
+            }),
+          ),
+        ),
+        {
+          expectedEnvironment: "release",
+          expectedPoolExceptionsSha256: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
+        },
+      ),
+    /fingerprint-bound owner approval/u,
+    "historical v1 evidence must not silently waive current mismatches",
   );
   assert.throws(
     () =>
@@ -2024,7 +2079,7 @@ async function run(): Promise<void> {
           expectedPoolExceptionsSha256: "a".repeat(64),
         },
       ),
-    /pinned owner-approved pool exception/u,
+    /fingerprint-bound owner approval/u,
     "release evidence must reject a different exception-set hash",
   );
   assert.throws(

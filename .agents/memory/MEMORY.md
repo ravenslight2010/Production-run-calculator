@@ -90,14 +90,12 @@
 - [SSE cleanup](sse-disconnect-registration.md) + [sleep/wake](sleep-wake-sync-fences.md) + [complete writes](complete-sync-snapshot-fencing.md) — clean before awaits; lock-fence complete writes.
 - [Formula import safety](formula-import-safety.md) + [workbook layouts](source-workbook-layouts.md) — preserve native-unit provenance and use fail-closed layout guards.
 - [Gate budgets](release-check-shard-budget.md) + [browser cases](browser-release-case-contract.md) + [container proof](container-image-release-evidence.md) — bound gates; bind proof to revision.
-- [Source reconciliation evidence](source-reconciliation-evidence-boundary.md) — CLI captures independently match an approved DB owner; published-app captures attest only to the app-configured database.
-- [Audit captures](large-source-audit-captures.md) + [report versions](source-audit-report-versions.md) + [CLI paths](source-audit-cli-paths.md) — hash captures; resolve versions and script paths.
+- [Source reconciliation](source-reconciliation-evidence-boundary.md) + [audit captures](large-source-audit-captures.md) + [CLI paths](source-audit-cli-paths.md) — bind production evidence to its owner database, report, revision, and provenance.
 - [Importer audit recovery](importer-audit-recovery.md) — retryable audit writes must be user/scope-bound and server-idempotent; never replay source imports automatically.
 - [Cross-channel auto-track claims](cross-channel-auto-track-claims.md) — shared run stamps require queued deltas to distinguish peer auto accepts from manual edits before rebasing.
 - [Push](github-git-push.md) + [cancelled runs](github-actions-job-summary-visibility.md) + [forks](github-external-fork-verification.md) — secure remotes; verify cancellation and external ownership.
 - [AI eval gates](deterministic-ai-gates.md) + [framework](ai-evaluation-framework-boundary.md) + [QLoRA](qlora-power-margin-boundary.md) — keep evidence offline; strict thresholds do not admit ties.
-- [Browser seeding](browser-fixture-seeding.md) + [disposable DB](browser-e2e-disposable-database.md) + [list mode](playwright-list-discovery.md) — seed after baselines; list mode still imports tests.
-- [Data Health undo coverage](data-health-undo-coverage.md) — verify persisted repair records include future-run snapshots before expecting guarded undo to restore them.
+- [Browser seeding](browser-fixture-seeding.md) + [assertions](browser-evidence-assertions.md) + [local fixtures](local-release-browser-fixture-base.md) + [disposable DB](browser-e2e-disposable-database.md) — seed after baselines and bind browser proof to the local API.
 - [String-reference purge safety](string-reference-purge-safety.md) — recipe stub purges must scan profiles and every historical/current run snapshot before deleting text-linked master data.
 - [Wake/offline claims](wake-sync-claim-fence.md) + [intents](offline-operational-intents.md) + [receipts](offline-command-receipts.md) — fence stale claims; adopt outcomes before finalizing.
 - [Warehouse and Inventory boundary](warehouse-inventory-boundary.md) — Warehouse prepares production; Inventory maintains stock records; keep destinations and permissions distinct.
@@ -130,17 +128,14 @@
 - [ZIP asset inventory safety](zip-asset-inventory.md) — inspect central-directory metadata only; fail closed on unsafe members and label output as review evidence, not installation approval.
 - [WebKit operational-report fixture](webkit-operational-report-fixture.md) — authoritative report smoke needs an isolated canonical snapshot and a sync-write fence after hydration.
 - [Factory baseline ownership](factory-baseline-ownership.md) — cross-service runtime defaults use dependency-free shared constants; historical blank sentinels remain explicit compatibility values.
-- [Revision evidence](production-evidence-revision-binding.md) + [CI pins](ci-pinned-evidence.md) + [Node](release-node-pinning.md) + [WebKit](webkit-nix-launch.md) — bind proof to revision/toolchain.
-- [Vitest count evidence](vitest-count-evidence.md) — use count-only summaries; require complete run/revision-matched package sets, otherwise keep totals null.
-- [Retry](release-finalization-retry.md) + [workspace locks](workspace-lock-refresh-pruning.md) + [browser refresh](full-release-browser-refresh.md) — retry safely and refresh stale state.
-- [Release-run lifecycle](release-run-cancellation.md) + [nested pnpm exits](nested-pnpm-exit-codes.md) — check child/evidence state after cancellation; assert structured outcomes.
-- [Local release browser fixtures](local-release-browser-fixture-base.md) — bind fixtures to local API; distinguish slow cold production builds from API readiness timeouts.
+- [Revision proof](production-evidence-revision-binding.md) + [CI pins](ci-pinned-evidence.md) + [WebKit](webkit-nix-launch.md) + [Vitest counts](vitest-count-evidence.md) — bind evidence to revision, runner, and complete totals.
+- [Release retry/locks](release-finalization-retry.md) + [browser refresh](full-release-browser-refresh.md) + [cancellation](release-run-cancellation.md) + [child exits](nested-pnpm-exit-codes.md) — resume safely and preserve structured outcomes.
 - [Local PostgreSQL](local-postgres-socket-dir.md) + [ARM64 toolchain](local-arm64-toolchain.md) — use writable private sockets; preserve native Node/ShellCheck setup.
 - [Section-scoped online edits](section-scoped-online-edits.md) — transient peer locks are UX only; correctness uses row serialization, complete baselines, and durable snapshot fencing.
 - [Automatic staged supply](automatic-staged-supply.md) — active Sauce/Frontline caps are pipeline limits, not lifetime production caps; derive stages from canonical cumulative progress.
 - [Readiness](readiness-evidence.md) + [WebKit lane](webkit-compatibility-lane-boundary.md) — deployment-bound allowlisted evidence; synthetic sync recovery stays in its dedicated gate.
 - [Replit migrations](replit-custom-migrations.md) + [audit maintenance](audit-maintenance-workflow.md) — apply raw triggers before serving; keep audited maintenance off the app role.
-- [Atomic import/history](atomic-import-operations.md) + [completed history](completed-history-durability.md) — retain pending uploads and undo only touched rows after transactional Apply.
+- [Atomic import](atomic-import-operations.md) + [history](completed-history-durability.md) + [repair undo](data-health-undo-coverage.md) — preserve source evidence and dependent snapshots for safe reversals.
 - [Sauce auto-track failure identity](sauce-auto-track-failure-identity.md) — retry notices follow the claim event identity; accepted recovery clears only the matching barrel.
 - [Managed rebase tree recovery](managed-rebase-tree-recovery.md) — a completed rebase can replay malformed conflict sides without markers; compare its tree with the pre-rebase integrated baseline.
 - [Approved ingredient identities](approved-ingredient-identities.md) — owner-approved Chicken, Bacon, Cilantro, and Goat Cheese targets; keep ambiguous Spinach variants separate.
@@ -158,3 +153,4 @@
 - [Shell signal cleanup output](shell-signal-cleanup-output.md) — redirect child logs narrowly so temporary log removal cannot swallow signal-time cleanup warnings.
 - [Production publish workflow](production-publish-workflow.md) — production is published through Replit; use manager-authorized production evidence, never a development fixture.
 - [Project skill session refresh](skill-session-registry-refresh.md) — project skills register from `.agents/skills`, but existing chats can keep a stale skill list until a new session.
+- [Pool-exception fingerprints](source-library-pool-exception-fingerprints.md) — preserve v1 approvals as historical bytes; only pinned, fresh, owner-reviewed fingerprints can waive current recipe drift.

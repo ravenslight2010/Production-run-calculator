@@ -213,15 +213,23 @@ function validateDiagnosticsOutput(
 
   const previous = new Set<string>();
   for (const item of details.items) {
+    const hasFingerprints = record(item) &&
+      Object.prototype.hasOwnProperty.call(item, "fieldFingerprints");
     if (
       !record(item) ||
-      !exactKeys(item, [
-        "table",
-        "id",
-        "sourceName",
-        "mismatchType",
-        "differingFields",
-      ]) ||
+      !exactKeys(
+        item,
+        hasFingerprints
+          ? [
+              "table",
+              "id",
+              "sourceName",
+              "mismatchType",
+              "differingFields",
+              "fieldFingerprints",
+            ]
+          : ["table", "id", "sourceName", "mismatchType", "differingFields"],
+      ) ||
       !["dough_recipes", "sauce_recipes", "cheese_recipes", "mixes"].includes(
         String(item.table),
       ) ||
@@ -243,6 +251,21 @@ function validateDiagnosticsOutput(
       )
     ) {
       throw new Error("Invalid diagnostics item");
+    }
+    if (
+      (item.mismatchType === "field-mismatch" &&
+        (!hasFingerprints ||
+          !record(item.fieldFingerprints) ||
+          Object.keys(item.fieldFingerprints).sort().join(",") !==
+            [...item.differingFields as string[]].sort().join(",") ||
+          Object.values(item.fieldFingerprints).some(
+            (fingerprint) =>
+              typeof fingerprint !== "string" ||
+              !/^[a-f0-9]{64}$/u.test(fingerprint),
+          ))) ||
+      (item.mismatchType !== "field-mismatch" && hasFingerprints)
+    ) {
+      throw new Error("Invalid diagnostics value fingerprints");
     }
     const key = `${String(item.table)}\u0000${item.id}`;
     if (previous.has(key)) throw new Error("Duplicate diagnostics item");

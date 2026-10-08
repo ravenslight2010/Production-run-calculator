@@ -150,10 +150,14 @@ function fakePool(options: {
   queryGate?: Promise<void>;
   onGatedQuery?: () => void;
   acquireAdvisoryLock?: boolean;
+  rowsForQuery?: (
+    text: string,
+    values?: readonly unknown[],
+  ) => Array<Record<string, unknown>>;
 } = {}) {
   const calls: string[] = [];
   const release = vi.fn();
-  const query = vi.fn(async (text: string) => {
+  const query = vi.fn(async (text: string, values?: readonly unknown[]) => {
     calls.push(text);
     if (text.includes("pg_try_advisory_lock")) {
       return {
@@ -169,6 +173,10 @@ function fakePool(options: {
     if (options.queryGate && text === "SELECT capture_gate") {
       options.onGatedQuery?.();
       await options.queryGate;
+    }
+    if (options.rowsForQuery) {
+      const rows = options.rowsForQuery(text, values);
+      if (rows.length > 0 || text.includes("FROM cheese_recipes")) return { rows };
     }
     return { rows: [] as Array<Record<string, unknown>> };
   });
@@ -350,8 +358,8 @@ describe("source-library reconciliation capture", () => {
     expect(fake.calls.at(-1)).toBe("SELECT pg_advisory_unlock($1::bigint) AS unlocked");
   });
 
-  it("rejects a missing published build identity before connecting", async () => {
-    const fake = fakePool();
+  it("maps database failures to a safe 503 and rolls back before releasing the client", async () => {
+    const fake = fakePool({ failOnQuery: "SELECT capture_first" });
     await expect(
       captureSourceLibraryReconciliationFromPublishedApp({
         ...dependencies(fake.pool),
@@ -444,7 +452,7 @@ describe("source-library reconciliation capture", () => {
   });
 
   it("rejects an owner that conflicts with the published handoff", async () => {
-    const fake = fakePool();
+    const fake = fakePool({ failOnQuery: "SELECT capture_first" });
     await expect(
       captureSourceLibraryReconciliation(
         { ...validRequest, expectedDatabaseOwner: "another_owner" },
@@ -466,7 +474,7 @@ describe("source-library reconciliation capture", () => {
     vi.mocked(verifySourceLibraryReconciliation).mockImplementation(
       async () => diagnostic,
     );
-    const fake = fakePool();
+    const fake = fakePool({ failOnQuery: "SELECT capture_first" });
     const result = await captureSourceLibraryReconciliation(
       validRequest,
       dependencies(fake.pool),
@@ -538,5 +546,51 @@ describe("source-library reconciliation capture", () => {
     expect(Buffer.byteLength(JSON.stringify(validRequest), "utf8")).toBeLessThan(
       SOURCE_LIBRARY_CAPTURE_REQUEST_MAX_BYTES,
     );
+  });
+
+  it("returns only field fingerprints for current recipe-value differences", async () => {
+    const report = JSON.parse(reportBytes.toString("utf8")) as {
+      proposals: Array<{
+        action: string;
+        table: string;
+        before: { id: string; name: string };
+        after: Record<string, unknown>;
+      }>;
+    };
+    const proposal = report.proposals
+      .filter(
+        (candidate) =>
+          candidate.action === "replace-components-from-approved-source" &&
+          candidate.table === "cheese_recipes" &&
+          Object.prototype.hasOwnProperty.call(candidate.after, "brand"),
+      )
+      .sort((left, right) => left.before.id.localeCompare(right.before.id))[0];
+    expect(proposal).toBeDefined();
+
+    const privateValue = "private-brand-fingerprint-sentinel";
+    const row = {
+      ...proposal!.after,
+      id: proposal!.before.id,
+      name: proposal!.before.name,
+      brand: privateValue,
+    };
+    const fake = fakePool({
+      rowsForQuery: (text) =>
+        text.includes("FROM cheese_recipes") ? [row] : [],
+    });
+    const result =
+      await captureSourceLibraryReconciliationDiagnosticsFromPublishedApp(
+        dependencies(fake.pool),
+      );
+    const item = result.mismatchDetails.items.find(
+      (candidate) => candidate.id === proposal!.before.id,
+    );
+
+    expect(item?.mismatchType).toBe("field-mismatch");
+    expect(item?.differingFields).toContain("brand");
+    expect(item?.fieldFingerprints).toMatchObject({
+      brand: expect.stringMatching(/^[a-f0-9]{64}$/u),
+    });
+    expect(JSON.stringify(result)).not.toContain(privateValue);
   });
 });

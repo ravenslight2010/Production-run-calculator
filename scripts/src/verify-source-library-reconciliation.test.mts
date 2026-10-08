@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -14,8 +15,10 @@ import {
   assertProductionSourceLibraryCapture,
   assertBoundedSourceLibraryReconciliationEvidence,
   APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_V2_ID,
   APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
   DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS,
+  fingerprintSourceLibraryPoolField,
   isRetryableSourceLibraryDatabaseError,
   inspectSourceLibraryPoolMismatchDiagnostics,
   loadSourceLibraryPoolExceptionApproval,
@@ -443,6 +446,8 @@ assert.equal(
   APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
 );
 assert.equal(ownerApprovedPoolExceptions.approvedDifferences.length, 10);
+assert.equal(ownerApprovedPoolExceptions.formatVersion, 1);
+assert.equal(ownerApprovedPoolExceptions.historical, true);
 const exceptionTamperDirectory = await mkdtemp(
   path.join(tmpdir(), "source-library-pool-exception-tamper-"),
 );
@@ -457,7 +462,7 @@ try {
   assert.throws(
     () =>
       loadSourceLibraryPoolExceptionApproval(tamperedPath, reportBytes),
-    /not the pinned owner-approved version/u,
+    /not a pinned owner-approved version/u,
     "changing the approved exception list must invalidate its pinned SHA-256",
   );
 } finally {
@@ -504,11 +509,11 @@ assert.equal(ownerApprovedOutput.pools.mismatches, 10);
 assert.deepEqual(ownerApprovedOutput.poolExceptions, {
   id: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
   sha256: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
-  approvedMismatches: 10,
-  unresolvedMismatches: 0,
+  approvedMismatches: 0,
+  unresolvedMismatches: 10,
 });
-assert.equal(ownerApprovedOutput.ok, true);
-assert.deepEqual(ownerApprovedOutput.failures, []);
+assert.equal(ownerApprovedOutput.ok, false);
+assert.deepEqual(ownerApprovedOutput.failures, [{ check: "pools", count: 10 }]);
 const ownerApprovedDiagnostics = await inspectSourceLibraryPoolMismatchDiagnostics(
   report,
   query,
@@ -519,9 +524,85 @@ assert.equal(ownerApprovedDiagnostics.counts.mismatches, 10);
 assert.deepEqual(ownerApprovedDiagnostics.poolExceptions, {
   id: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
   sha256: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
-  approvedMismatches: 10,
-  unresolvedMismatches: 0,
+  approvedMismatches: 0,
+  unresolvedMismatches: 10,
 });
+
+const freshFingerprintDiagnostics = await inspectSourceLibraryPoolMismatchDiagnostics(
+  report,
+  query,
+);
+assert.equal(freshFingerprintDiagnostics.items.length, 10);
+assert.ok(
+  freshFingerprintDiagnostics.items.every(
+    (item) =>
+      item.mismatchType === "field-mismatch" &&
+      item.fieldFingerprints !== undefined &&
+      Object.keys(item.fieldFingerprints).sort().join(",") ===
+        [...item.differingFields].sort().join(",") &&
+      Object.values(item.fieldFingerprints).every((fingerprint) =>
+        /^[a-f0-9]{64}$/u.test(fingerprint),
+      ),
+  ),
+);
+assert.equal(
+  fingerprintSourceLibraryPoolField({ b: 2, a: 1 }),
+  fingerprintSourceLibraryPoolField({ a: 1, b: 2 }),
+  "fingerprints must be deterministic across object key order",
+);
+assert.notEqual(
+  fingerprintSourceLibraryPoolField("approved value"),
+  fingerprintSourceLibraryPoolField("later edit"),
+);
+const syntheticV2Approval = {
+  id: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_V2_ID,
+  sha256: "f".repeat(64),
+  sourceReportSha256: createHash("sha256").update(reportBytes).digest("hex"),
+  formatVersion: 2 as const,
+  historical: false,
+  approvedDifferences: freshFingerprintDiagnostics.items,
+};
+const fingerprintBoundOutput = await verifySourceLibraryReconciliation(
+  report,
+  reportBytes,
+  "source-library-reconciliation-2026-08-26-v1",
+  query,
+  "2026-08-26",
+  "development",
+  "development-unbound",
+  undefined,
+  undefined,
+  syntheticV2Approval,
+);
+assert.equal(fingerprintBoundOutput.poolExceptions.approvedMismatches, 10);
+assert.equal(fingerprintBoundOutput.poolExceptions.unresolvedMismatches, 0);
+assert.equal(fingerprintBoundOutput.ok, true);
+
+const changedFingerprintDescriptor = freshFingerprintDiagnostics.items[0]!;
+const changedFingerprintRow = rowsByTable
+  .get(changedFingerprintDescriptor.table)!
+  .find((row) => row.id === changedFingerprintDescriptor.id)!;
+const fingerprintField = changedFingerprintDescriptor.differingFields[0]!;
+const originalFingerprintValue = changedFingerprintRow[fingerprintField];
+changedFingerprintRow[fingerprintField] = fingerprintField === "components"
+  ? [{ lbs: 123456 }]
+  : "Fingerprint changed sentinel";
+const changedFingerprintOutput = await verifySourceLibraryReconciliation(
+  report,
+  reportBytes,
+  "source-library-reconciliation-2026-08-26-v1",
+  query,
+  "2026-08-26",
+  "development",
+  "development-unbound",
+  undefined,
+  undefined,
+  syntheticV2Approval,
+);
+assert.equal(changedFingerprintOutput.poolExceptions.approvedMismatches, 9);
+assert.equal(changedFingerprintOutput.poolExceptions.unresolvedMismatches, 1);
+assert.equal(changedFingerprintOutput.ok, false);
+changedFingerprintRow[fingerprintField] = originalFingerprintValue;
 
 const additionalDriftRow = rowsByTable.get("cheese_recipes")!.find(
   (row) =>
@@ -549,10 +630,10 @@ const unresolvedDriftOutput = await verifySourceLibraryReconciliation(
   undefined,
   ownerApprovedPoolExceptions,
 );
-assert.equal(unresolvedDriftOutput.poolExceptions.approvedMismatches, 10);
-assert.equal(unresolvedDriftOutput.poolExceptions.unresolvedMismatches, 1);
+assert.equal(unresolvedDriftOutput.poolExceptions.approvedMismatches, 0);
+assert.equal(unresolvedDriftOutput.poolExceptions.unresolvedMismatches, 11);
 assert.equal(unresolvedDriftOutput.ok, false);
-assert.deepEqual(unresolvedDriftOutput.failures, [{ check: "pools", count: 1 }]);
+assert.deepEqual(unresolvedDriftOutput.failures, [{ check: "pools", count: 11 }]);
 const unresolvedDiagnostics = await inspectSourceLibraryPoolMismatchDiagnostics(
   report,
   query,
@@ -563,8 +644,8 @@ assert.equal(unresolvedDiagnostics.counts.mismatches, 11);
 assert.deepEqual(unresolvedDiagnostics.poolExceptions, {
   id: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
   sha256: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
-  approvedMismatches: 10,
-  unresolvedMismatches: 1,
+  approvedMismatches: 0,
+  unresolvedMismatches: 11,
 });
 additionalDriftRow.brand = originalAdditionalDriftBrand;
 for (const saved of changedApprovedRows) {

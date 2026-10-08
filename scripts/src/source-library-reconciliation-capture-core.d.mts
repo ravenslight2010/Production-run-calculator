@@ -6,6 +6,7 @@ export type SourceLibraryPoolMismatchDescriptor = {
   sourceName: string;
   mismatchType: "missing" | "renamed" | "field-mismatch";
   differingFields: string[];
+  fieldFingerprints?: Record<string, string>;
 };
 export type SourceLibraryPoolMismatchDiagnostics = {
   counts: {
@@ -31,6 +32,8 @@ export type SourceLibraryPoolExceptionApproval = {
   id: string;
   sha256: string;
   sourceReportSha256: string;
+  formatVersion: 1 | 2;
+  historical: boolean;
   approvedDifferences: SourceLibraryPoolMismatchDescriptor[];
 };
 export type ReadOnlyQuery = (

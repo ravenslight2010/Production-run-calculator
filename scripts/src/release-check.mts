@@ -25,7 +25,9 @@ import {
   DEFAULT_REPORT,
   DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS,
   APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_V2_ID,
   APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_V2_SHA256,
   SOURCE_LIBRARY_PREFLIGHT_DIAGNOSTIC_VERSION,
   computeSourceLibraryEvidenceId,
   loadSourceLibraryPoolExceptionApproval,
@@ -298,7 +300,21 @@ function approvedSourceLibraryPoolExceptionSha256(reportBytes: Buffer): string {
     resolve(rootDir, DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS),
     reportBytes,
   );
-  if (approval.sha256 !== APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256) {
+  if (
+    approval.formatVersion === 1 &&
+    approval.historical &&
+    approval.id === APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID &&
+    approval.sha256 === APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256
+  ) {
+    return approval.sha256;
+  }
+  if (
+    approval.formatVersion !== 2 ||
+    approval.historical ||
+    approval.id !== APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_V2_ID ||
+    APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_V2_SHA256 === null ||
+    approval.sha256 !== APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_V2_SHA256
+  ) {
     throw new Error("Source-library owner-approved pool exception hash is not pinned.");
   }
   return approval.sha256;
@@ -2814,7 +2830,11 @@ export function validateSourceLibraryReconciliationEvidence(
         : undefined;
     const absentException = exceptionId === null && exceptionSha256 === null &&
       approvedMismatches === 0;
-    const pinnedException = exceptionId === APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID &&
+    const historicalException =
+      exceptionId === APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID &&
+      exceptionSha256 === APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256;
+    const fingerprintBoundException =
+      exceptionId === APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_V2_ID &&
       /^[a-f0-9]{64}$/u.test(String(exceptionSha256 ?? ""));
     if (
       !poolExceptions ||
@@ -2824,7 +2844,7 @@ export function validateSourceLibraryReconciliationEvidence(
         ["approvedMismatches", "id", "sha256", "unresolvedMismatches"]
           .sort()
           .join(",") ||
-      (!absentException && !pinnedException) ||
+      (!absentException && !historicalException && !fingerprintBoundException) ||
       !pools ||
       typeof pools !== "object" ||
       Array.isArray(pools) ||
@@ -2846,12 +2866,18 @@ export function validateSourceLibraryReconciliationEvidence(
     }
     if (
       options.expectedPoolExceptionsSha256 !== undefined &&
-      (!pinnedException ||
-        exceptionSha256 !== options.expectedPoolExceptionsSha256 ||
-        unresolvedMismatches !== 0)
+      !(
+        (fingerprintBoundException &&
+          exceptionSha256 === options.expectedPoolExceptionsSha256 &&
+          unresolvedMismatches === 0) ||
+        (historicalException &&
+          exceptionSha256 === options.expectedPoolExceptionsSha256 &&
+          approvedMismatches === 0 &&
+          unresolvedMismatches === 0)
+      )
     ) {
       throw new Error(
-        "Source-library reconciliation evidence is missing the pinned owner-approved pool exception or has unresolved pool mismatches.",
+        "Source-library reconciliation evidence is missing the pinned fingerprint-bound owner approval or has unresolved pool mismatches.",
       );
     }
   } else if (options.expectedPoolExceptionsSha256 !== undefined) {

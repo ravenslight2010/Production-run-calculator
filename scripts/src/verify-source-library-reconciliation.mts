@@ -76,6 +76,7 @@ export type SourceLibraryPoolMismatchDescriptor = {
   sourceName: string;
   mismatchType: "missing" | "renamed" | "field-mismatch";
   differingFields: string[];
+  fieldFingerprints?: Record<string, string>;
 };
 
 export type SourceLibraryPoolMismatchDiagnostics = {
@@ -98,6 +99,8 @@ export type SourceLibraryPoolExceptionApproval = {
   id: string;
   sha256: string;
   sourceReportSha256: string;
+  formatVersion: 1 | 2;
+  historical: boolean;
   approvedDifferences: SourceLibraryPoolMismatchDescriptor[];
 };
 
@@ -121,6 +124,12 @@ const isFiniteNumber = (value: unknown): value is number =>
 
 export const APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID =
   "source-library-pool-owner-approved-differences-2026-10-08-v1";
+export const APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_V2_ID =
+  "source-library-pool-owner-approved-differences-2026-10-08-v2";
+// Keep unset until a fresh production capture and a new owner-review record
+// bind the exact v2 manifest bytes. A v1 digest is historical, not an active
+// release exception.
+export const APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_V2_SHA256: string | null = null;
 const OWNER_REVIEW_PATH =
   "docs/evidence/source-library-pool-owner-review-2026-10-08.md";
 const DIAGNOSTICS_PATH =
@@ -146,9 +155,16 @@ function readApprovedEvidence(
 }
 
 function parsePoolMismatchDescriptor(value: unknown): SourceLibraryPoolMismatchDescriptor {
+  const hasFingerprints = isRecord(value) &&
+    Object.prototype.hasOwnProperty.call(value, "fieldFingerprints");
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, ["table", "id", "sourceName", "mismatchType", "differingFields"]) ||
+    !hasExactKeys(
+      value,
+      hasFingerprints
+        ? ["table", "id", "sourceName", "mismatchType", "differingFields", "fieldFingerprints"]
+        : ["table", "id", "sourceName", "mismatchType", "differingFields"],
+    ) ||
     value.table !== "cheese_recipes" ||
     typeof value.id !== "string" ||
     value.id.length === 0 ||
@@ -162,19 +178,44 @@ function parsePoolMismatchDescriptor(value: unknown): SourceLibraryPoolMismatchD
   ) {
     return reportError("Approved source-library pool exception contains an invalid mismatch descriptor");
   }
+  let fieldFingerprints: Record<string, string> | undefined;
+  if (hasFingerprints) {
+    if (
+      value.mismatchType !== "field-mismatch" ||
+      !isRecord(value.fieldFingerprints) ||
+      Object.keys(value.fieldFingerprints).sort().join(",") !==
+        [...value.differingFields as string[]].sort().join(",") ||
+      Object.values(value.fieldFingerprints).some(
+        (fingerprint) => typeof fingerprint !== "string" || !/^[a-f0-9]{64}$/u.test(fingerprint),
+      )
+    ) {
+      return reportError("Approved source-library pool exception has invalid value fingerprints");
+    }
+    fieldFingerprints = value.fieldFingerprints as Record<string, string>;
+  }
   return {
     table: "cheese_recipes",
     id: value.id,
     sourceName: value.sourceName,
     mismatchType: "field-mismatch",
     differingFields: value.differingFields as string[],
+    ...(fieldFingerprints ? { fieldFingerprints } : {}),
   };
 }
 
+function isVersionedPoolEvidencePath(value: unknown, extension: ".json" | ".md"): value is string {
+  return typeof value === "string" &&
+    value.startsWith("docs/evidence/source-library-pool-") &&
+    value.endsWith(extension) &&
+    !value.split("/").some((part) => part === "." || part === "..") &&
+    !path.isAbsolute(value);
+}
+
 /**
- * Load the one owner-approved exception set. It must remain tied to the
- * immutable August report and to the exact reviewed evidence bytes. The
- * verifier intentionally retains no recipe values in this approval record.
+ * Load the owner-approved exception set. Version 1 remains readable as
+ * historical evidence, but has no value fingerprints and cannot waive current
+ * pool drift. New active versions must be fingerprint-bound and separately
+ * pinned after fresh owner review.
  */
 export function loadSourceLibraryPoolExceptionApproval(
   exceptionPath: string,
@@ -190,9 +231,6 @@ export function loadSourceLibraryPoolExceptionApproval(
   }
   const exceptionBytes = fs.readFileSync(resolvedPath);
   const exceptionSha256 = sha256(exceptionBytes);
-  if (exceptionSha256 !== APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256) {
-    return reportError("Source-library pool exception manifest is not the pinned owner-approved version");
-  }
   if (exceptionBytes.byteLength > 64 * 1024) {
     return reportError("Source-library pool exception manifest exceeds its size bound");
   }
@@ -201,6 +239,20 @@ export function loadSourceLibraryPoolExceptionApproval(
     value = JSON.parse(exceptionBytes.toString("utf8"));
   } catch {
     return reportError("Source-library pool exception manifest is not valid JSON");
+  }
+  const isHistoricalV1 =
+    isRecord(value) &&
+    value.formatVersion === 1 &&
+    value.id === APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID &&
+    exceptionSha256 === APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256;
+  const isPinnedV2 =
+    isRecord(value) &&
+    value.formatVersion === 2 &&
+    value.id === APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_V2_ID &&
+    APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_V2_SHA256 !== null &&
+    exceptionSha256 === APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_V2_SHA256;
+  if (!isHistoricalV1 && !isPinnedV2) {
+    return reportError("Source-library pool exception manifest is not a pinned owner-approved version");
   }
   if (
     !isRecord(value) ||
@@ -214,13 +266,18 @@ export function loadSourceLibraryPoolExceptionApproval(
       "approvedDifferences",
     ]) ||
     value.format !== "source-library-pool-owner-approved-differences" ||
-    value.formatVersion !== 1 ||
-    value.id !== APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID ||
+    (value.formatVersion !== 1 && value.formatVersion !== 2) ||
+    (isHistoricalV1 && value.formatVersion !== 1) ||
+    (isPinnedV2 && value.formatVersion !== 2) ||
+    (isHistoricalV1 && value.id !== APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID) ||
+    (isPinnedV2 && value.id !== APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_V2_ID) ||
     value.sourceReportSha256 !== sha256(reportBytes) ||
     !isRecord(value.ownerApproval) ||
     !hasExactKeys(value.ownerApproval, ["decision", "recordPath", "recordSha256"]) ||
     value.ownerApproval.decision !== "intentional-differences-no-data-heal" ||
-    value.ownerApproval.recordPath !== OWNER_REVIEW_PATH ||
+    (isHistoricalV1 && value.ownerApproval.recordPath !== OWNER_REVIEW_PATH) ||
+    (isPinnedV2 &&
+      !isVersionedPoolEvidencePath(value.ownerApproval.recordPath, ".md")) ||
     !isRecord(value.reviewedEvidence) ||
     !hasExactKeys(value.reviewedEvidence, [
       "diagnosticsPath",
@@ -228,33 +285,45 @@ export function loadSourceLibraryPoolExceptionApproval(
       "capturePath",
       "captureSha256",
     ]) ||
-    value.reviewedEvidence.diagnosticsPath !== DIAGNOSTICS_PATH ||
-    value.reviewedEvidence.capturePath !== LIVE_CAPTURE_PATH ||
+    (isHistoricalV1 && value.reviewedEvidence.diagnosticsPath !== DIAGNOSTICS_PATH) ||
+    (isHistoricalV1 && value.reviewedEvidence.capturePath !== LIVE_CAPTURE_PATH) ||
+    (isPinnedV2 &&
+      !isVersionedPoolEvidencePath(value.reviewedEvidence.diagnosticsPath, ".json")) ||
+    (isPinnedV2 &&
+      !isVersionedPoolEvidencePath(value.reviewedEvidence.capturePath, ".json")) ||
     !Array.isArray(value.approvedDifferences) ||
-    value.approvedDifferences.length !== 10
+    (isHistoricalV1 && value.approvedDifferences.length !== 10) ||
+    (isPinnedV2 && value.approvedDifferences.length === 0)
   ) {
     return reportError("Source-library pool exception manifest does not match its approved contract");
   }
   const ownerReviewBytes = readApprovedEvidence(
-    OWNER_REVIEW_PATH,
+    value.ownerApproval.recordPath as string,
     value.ownerApproval.recordSha256,
     evidenceRoot,
   );
   const ownerReviewText = ownerReviewBytes.toString("utf8");
   if (
     !ownerReviewText.includes("intentional differences") ||
-    !ownerReviewText.includes(APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID)
+    !ownerReviewText.includes(String(value.id)) ||
+    (isPinnedV2 &&
+      (!ownerReviewText.includes("value fingerprints") ||
+        !ownerReviewText.includes("fresh production capture") ||
+        !ownerReviewText.includes(String(value.reviewedEvidence.diagnosticsPath)) ||
+        !ownerReviewText.includes(String(value.reviewedEvidence.diagnosticsSha256)) ||
+        !ownerReviewText.includes(String(value.reviewedEvidence.capturePath)) ||
+        !ownerReviewText.includes(String(value.reviewedEvidence.captureSha256))))
   ) {
     return reportError("Owner-review evidence does not authorize this source-library exception");
   }
 
   const diagnosticsBytes = readApprovedEvidence(
-    DIAGNOSTICS_PATH,
+    value.reviewedEvidence.diagnosticsPath as string,
     value.reviewedEvidence.diagnosticsSha256,
     evidenceRoot,
   );
   const captureBytes = readApprovedEvidence(
-    LIVE_CAPTURE_PATH,
+    value.reviewedEvidence.capturePath as string,
     value.reviewedEvidence.captureSha256,
     evidenceRoot,
   );
@@ -279,15 +348,7 @@ export function loadSourceLibraryPoolExceptionApproval(
     !isRecord(diagnostics.report) ||
     diagnostics.report.sha256 !== value.sourceReportSha256 ||
     !isRecord(diagnostics.pools) ||
-    diagnostics.pools.expected !== 68 ||
-    diagnostics.pools.exactMatches !== 58 ||
-    diagnostics.pools.guardedRenames !== 0 ||
-    diagnostics.pools.missing !== 0 ||
-    diagnostics.pools.mismatches !== 10 ||
     !isRecord(diagnostics.mismatchDetails) ||
-    diagnostics.mismatchDetails.total !== 10 ||
-    diagnostics.mismatchDetails.returned !== 10 ||
-    diagnostics.mismatchDetails.omitted !== 0 ||
     !Array.isArray(diagnostics.mismatchDetails.items) ||
     !isRecord(capture) ||
     capture.verifier !== "source-library-reconciliation" ||
@@ -297,14 +358,71 @@ export function loadSourceLibraryPoolExceptionApproval(
     !isRecord(capture.report) ||
     capture.report.sha256 !== value.sourceReportSha256 ||
     !isRecord(capture.pools) ||
-    capture.pools.mismatches !== 10 ||
-    !Array.isArray(capture.failures) ||
-    stable(capture.failures) !== stable([{ check: "pools", count: 10 }])
+    !Array.isArray(capture.failures)
   ) {
     return reportError("Reviewed source-library evidence does not match the approved report and mismatch counts");
   }
-  const approvedDifferences = value.approvedDifferences.map(parsePoolMismatchDescriptor);
-  const diagnosticDifferences = diagnostics.mismatchDetails.items.map(parsePoolMismatchDescriptor);
+  if (isHistoricalV1) {
+    if (
+      diagnostics.pools.expected !== 68 ||
+      diagnostics.pools.exactMatches !== 58 ||
+      diagnostics.pools.guardedRenames !== 0 ||
+      diagnostics.pools.missing !== 0 ||
+      diagnostics.pools.mismatches !== 10 ||
+      diagnostics.mismatchDetails.total !== 10 ||
+      diagnostics.mismatchDetails.returned !== 10 ||
+      diagnostics.mismatchDetails.omitted !== 0 ||
+      capture.pools.mismatches !== 10 ||
+      stable(capture.failures) !== stable([{ check: "pools", count: 10 }])
+    ) {
+      return reportError("Reviewed historical source-library evidence has unexpected mismatch counts");
+    }
+  } else {
+    const diagnosticPools = diagnostics.pools as Record<string, unknown>;
+    const mismatchDetails = diagnostics.mismatchDetails as Record<string, unknown>;
+    const capturePools = capture.pools as Record<string, unknown>;
+    if (
+      typeof diagnostics.revision !== "string" ||
+      diagnostics.revision !== capture.revision ||
+      typeof diagnostics.capturedAt !== "string" ||
+      typeof capture.capturedAt !== "string" ||
+      !Number.isFinite(Date.parse(diagnostics.capturedAt)) ||
+      !Number.isFinite(Date.parse(capture.capturedAt)) ||
+      Math.abs(Date.parse(diagnostics.capturedAt) - Date.parse(capture.capturedAt)) >
+        30 * 60_000 ||
+      !Number.isSafeInteger(diagnosticPools.expected) ||
+      !Number.isSafeInteger(diagnosticPools.exactMatches) ||
+      !Number.isSafeInteger(diagnosticPools.guardedRenames) ||
+      !Number.isSafeInteger(diagnosticPools.missing) ||
+      !Number.isSafeInteger(diagnosticPools.mismatches) ||
+      diagnosticPools.expected !==
+        Number(diagnosticPools.exactMatches) +
+          Number(diagnosticPools.guardedRenames) +
+          Number(diagnosticPools.missing) +
+          Number(diagnosticPools.mismatches) ||
+      mismatchDetails.total !== diagnosticPools.mismatches ||
+      mismatchDetails.returned !== diagnosticPools.mismatches ||
+      mismatchDetails.omitted !== 0 ||
+      capturePools.mismatches !== diagnosticPools.mismatches ||
+      stable(capture.failures) !==
+        stable([{ check: "pools", count: diagnosticPools.mismatches }])
+    ) {
+      return reportError("Fresh version 2 source-library evidence has inconsistent capture identity or counts");
+    }
+  }
+  const approvedDifferences = value.approvedDifferences.map((item) =>
+    parsePoolMismatchDescriptor(item),
+  );
+  const diagnosticDifferences = diagnostics.mismatchDetails.items.map((item) =>
+    parsePoolMismatchDescriptor(item),
+  );
+  if (isPinnedV2) {
+    for (const item of [...approvedDifferences, ...diagnosticDifferences]) {
+      if (item.mismatchType !== "field-mismatch" || item.fieldFingerprints === undefined) {
+        return reportError("Version 2 source-library exceptions require a fingerprint for every approved field");
+      }
+    }
+  }
   if (
     stable(approvedDifferences) !== stable(diagnosticDifferences) ||
     new Set(approvedDifferences.map((item) => `${item.table}\u0000${item.id}`)).size !==
@@ -313,17 +431,47 @@ export function loadSourceLibraryPoolExceptionApproval(
     return reportError("Approved source-library exceptions do not exactly match the owner-reviewed diagnostic");
   }
   return {
-    id: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
+    id: String(value.id),
     sha256: exceptionSha256,
     sourceReportSha256: value.sourceReportSha256 as string,
+    formatVersion: value.formatVersion as 1 | 2,
+    historical: isHistoricalV1,
     approvedDifferences,
   };
 }
 
 function stable(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`;
-  if (!isRecord(value)) return JSON.stringify(value);
+  if (!isRecord(value)) return JSON.stringify(value) ?? "undefined";
   return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stable(value[key])}`).join(",")}}`;
+}
+
+/**
+ * Hash one canonical recipe-field value. Only the digest leaves the read-only
+ * verifier; the raw value is never added to retained diagnostics or approval
+ * evidence.
+ */
+export function fingerprintSourceLibraryPoolField(value: unknown): string {
+  return sha256(`source-library-pool-field-fingerprint-v1\u0000${stable(value)}`);
+}
+
+export function countApprovedSourceLibraryPoolMismatches(
+  mismatches: readonly SourceLibraryPoolMismatchDescriptor[],
+  approval: SourceLibraryPoolExceptionApproval | undefined,
+): number {
+  if (!approval || approval.formatVersion !== 2 || approval.historical) return 0;
+  const approved = new Map(
+    approval.approvedDifferences.map((difference) => [
+      `${difference.table}\u0000${difference.id}`,
+      stable(difference),
+    ]),
+  );
+  return mismatches.filter(
+    (mismatch) =>
+      mismatch.mismatchType === "field-mismatch" &&
+      mismatch.fieldFingerprints !== undefined &&
+      approved.get(`${mismatch.table}\u0000${mismatch.id}`) === stable(mismatch),
+  ).length;
 }
 
 function reportError(message: string): never {
@@ -668,15 +816,23 @@ function comparePoolRows(report: Report, rowsByTable: Record<RecipeTable, Array<
       fingerprintRows.push([proposal.table, proposal.before.id, expected]);
     } else {
       counts.mismatches++;
-      fingerprintRows.push([proposal.table, proposal.before.id, actual]);
+      const differingFields = Object.keys(expected).filter(
+        (field) => stable(expected[field]) !== stable(actual[field]),
+      );
+      const fieldFingerprints = Object.fromEntries(
+        differingFields.map((field) => [
+          field,
+          fingerprintSourceLibraryPoolField(actual[field]),
+        ]),
+      );
+      fingerprintRows.push([proposal.table, proposal.before.id, fieldFingerprints]);
       mismatchDescriptors.push({
         table: proposal.table,
         id: proposal.before.id,
         sourceName: proposal.before.name,
         mismatchType: "field-mismatch",
-        differingFields: Object.keys(expected).filter(
-          (field) => stable(expected[field]) !== stable(actual[field]),
-        ),
+        differingFields,
+        fieldFingerprints,
       });
     }
   }
@@ -720,17 +876,10 @@ function classifyPoolMismatchDescriptors(
       "Source-library pool exception approval targets a different source report",
     );
   }
-  const approvedDifferences = new Map(
-    poolExceptionApproval.approvedDifferences.map((difference) => [
-      `${difference.table}\u0000${difference.id}`,
-      stable(difference),
-    ]),
+  const approvedMismatches = countApprovedSourceLibraryPoolMismatches(
+    fieldMismatches,
+    poolExceptionApproval,
   );
-  const approvedMismatches = fieldMismatches.filter(
-    (mismatch) =>
-      approvedDifferences.get(`${mismatch.table}\u0000${mismatch.id}`) ===
-      stable(mismatch),
-  ).length;
   return {
     id: poolExceptionApproval.id,
     sha256: poolExceptionApproval.sha256,
