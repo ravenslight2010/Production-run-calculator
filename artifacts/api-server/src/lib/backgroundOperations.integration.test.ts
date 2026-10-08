@@ -463,28 +463,54 @@ describe("background operation PostgreSQL reconnection", () => {
     const bucketMs = 60_000;
     const scheduledAt = Date.parse("2030-04-01T12:00:10.000Z");
     const bucketStart = Date.parse("2030-04-01T12:00:00.000Z");
-    const queued = await enqueueScheduledWebPushAlerts(scheduledAt, bucketMs);
-    expect(queued).toEqual({ examined: 2, enqueued: 2 });
-    expect(await enqueueScheduledWebPushAlerts(scheduledAt + 30_000, bucketMs))
-      .toEqual({ examined: 2, enqueued: 0 });
+    await killer.query(`
+      CREATE OR REPLACE FUNCTION background_ops_sleep_scheduled_enqueue()
+      RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.type = 'scheduled-evaluation' THEN
+          PERFORM pg_sleep(0.2);
+        END IF;
+        RETURN NEW;
+      END;
+      $$;
+      CREATE TRIGGER background_ops_scheduled_enqueue_sleep
+      BEFORE INSERT ON server_jobs
+      FOR EACH ROW EXECUTE FUNCTION background_ops_sleep_scheduled_enqueue();
+    `);
+    let concurrentResults: Awaited<ReturnType<typeof enqueueScheduledWebPushAlerts>>[];
+    try {
+      concurrentResults = await Promise.all([
+        enqueueScheduledWebPushAlerts(scheduledAt, bucketMs),
+        enqueueScheduledWebPushAlerts(scheduledAt + 30_000, bucketMs),
+      ]);
+    } finally {
+      await killer.query("DROP TRIGGER IF EXISTS background_ops_scheduled_enqueue_sleep ON server_jobs");
+      await killer.query("DROP FUNCTION IF EXISTS background_ops_sleep_scheduled_enqueue()");
+    }
+    expect(concurrentResults).toHaveLength(2);
+    expect(concurrentResults.every((result) => result.examined === 2)).toBe(true);
+    expect(concurrentResults.reduce((sum, result) => sum + result.enqueued, 0)).toBe(2);
     const queuedJobs = await db.select().from(serverJobsTable);
-    expect(queuedJobs).toHaveLength(2);
+    expect(queuedJobs.filter((job) => job.type === "scheduled-evaluation")).toHaveLength(2);
+    expect(queuedJobs.map((job) => job.scope).sort()).toEqual([SCOPE, ALERT_SANDBOX_SCOPE].sort());
     expect(queuedJobs.map((job) => ({
       scope: job.scope,
       idempotencyKey: job.idempotencyKey,
-      input: job.input,
     }))).toEqual(expect.arrayContaining([
       {
         scope: SCOPE,
         idempotencyKey: `scheduled-evaluation:${SCOPE}:${bucketStart}`,
-        input: { scheduledFor: scheduledAt },
       },
       {
         scope: ALERT_SANDBOX_SCOPE,
         idempotencyKey: `scheduled-evaluation:${ALERT_SANDBOX_SCOPE}:${bucketStart}`,
-        input: { scheduledFor: scheduledAt },
       },
     ]));
+    for (const job of queuedJobs) {
+      const scheduledFor = (job.input as { scheduledFor: number }).scheduledFor;
+      expect([scheduledAt, scheduledAt + 30_000]).toContain(scheduledFor);
+      expect(Math.floor(scheduledFor / bucketMs) * bucketMs).toBe(bucketStart);
+    }
 
     const worker = new ServerJobWorker("failover-test-worker");
     await killer.query(`

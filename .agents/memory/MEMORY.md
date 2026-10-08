@@ -156,3 +156,4 @@
 - [Project skill session refresh](skill-session-registry-refresh.md) — project skills register from `.agents/skills`, but existing chats can keep a stale skill list until a new session.
 - [Pool-exception fingerprints](source-library-pool-exception-fingerprints.md) — preserve v1 approvals as historical bytes; only pinned, fresh, owner-reviewed fingerprints can waive current recipe drift.
 - [Sandbox network globals](codeexecution-network-globals.md) — impure CodeExecution may expose fetch without AbortSignal; verify runtime support before adding fetch timeouts.
+- [Disposable database test startup](disposable-database-test-startup.md) — if PostgreSQL fixture setup times out before tests start, retry with a longer hook timeout before diagnosing test behavior.
