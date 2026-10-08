@@ -11,7 +11,9 @@ import { startWebPushAlertScheduler } from "./lib/webPush";
 import { startServerJobWorkerLoop } from "./lib/serverJobs";
 import { startAuthRetentionScheduler } from "./lib/authRetention";
 import { startImportSourceRetentionScheduler } from "./lib/importSourceRetention";
-import { db } from "@workspace/db";
+import { db, pool } from "@workspace/db";
+import { startDatabaseCapacityCollection } from "./lib/databaseCapacity";
+import { getBuildInfo } from "./lib/buildInfo";
 import { setGeminiMetricsObserver } from "@workspace/integrations-openai-ai-server";
 import { sql } from "drizzle-orm";
 import {
@@ -45,6 +47,7 @@ let stopWebPushAlertScheduler: (() => void) | undefined;
 let stopDailyRolloverScheduler: (() => void) | undefined;
 let stopAuthRetentionScheduler: (() => void) | undefined;
 let stopImportSourceRetentionScheduler: (() => void) | undefined;
+let stopDatabaseCapacityCollection: (() => void) | undefined;
 
 if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
@@ -91,6 +94,8 @@ async function startServer(): Promise<void> {
     stopAuthRetentionScheduler = undefined;
     stopImportSourceRetentionScheduler?.();
     stopImportSourceRetentionScheduler = undefined;
+    stopDatabaseCapacityCollection?.();
+    stopDatabaseCapacityCollection = undefined;
 
     const forceExit = setTimeout(() => {
       logger.error({ signal }, "API server did not stop within 5 seconds");
@@ -195,6 +200,7 @@ async function initializeStartup(startedAt: number): Promise<void> {
   // request pool during the long serialized suite.
   startAutoTrackServerTicks();
   if (process.env.DISABLE_BACKGROUND_AUXILIARY_SCHEDULERS !== "1") {
+    stopDatabaseCapacityCollection = startDatabaseCapacityCollection(pool, logger, getBuildInfo).stop;
     stopDailyRolloverScheduler = startDailyRolloverScheduler(
       sandboxAllowed() ? ["live", "sandbox"] : ["live"],
     ).stop;
