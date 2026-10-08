@@ -27,5 +27,9 @@
     "no_training_examples_or_manifest_emitted"
   ],
   "privateEvidenceAccessed": false,
-  "examplesEmitted": 0
+  "examplesEmitted": 0,
+  "maintenanceUpdate": {
+    "date": "2026-10-08",
+    "note": "Recomputed the production system-prompt SHA-256 from buildParseSpecSheetPrompt({ workbookText: \"\" }); it remains 65196b19789f6f1cc676c45f00e32b14c34320f869766e8f6c711a351e9f9d76, matching the backfill guard. The generated prompt contains no NaN. This metadata-only verification does not change the benchmark, training evaluation, dataset-safety evidence, parse version, or no-go decision."
+  }
 }

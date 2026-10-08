@@ -351,7 +351,7 @@ describe("buildParseSpecSheetPrompt numeric accuracy", () => {
 
 describe("buildParseSpecSheetPrompt runtime-coercion guard", () => {
   it("does not inject NaN into the production system prompt", () => {
-    const { system } = buildParseSpecSheetPrompt(input());
+    const { system } = buildParseSpecSheetPrompt(input({ workbookText: "" }));
     expect(system).not.toContain("NaN");
     expect(system).toContain("Likewise, when a spec sheet NAMES a specific dough or crust");
   });

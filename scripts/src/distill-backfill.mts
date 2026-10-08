@@ -21,6 +21,9 @@ import {
 } from "@workspace/distill-dataset";
 import { SPEC_IMPORT_PARSE_VERSION } from "@workspace/spec-import";
 
+// SHA-256 of buildParseSpecSheetPrompt({ workbookText: "" }).system. The
+// distill-backfill tests recompute this from the production builder and keep
+// this guard aligned with the decision record.
 export const EXPECTED_PRODUCTION_PROMPT_SHA256 =
   "65196b19789f6f1cc676c45f00e32b14c34320f869766e8f6c711a351e9f9d76";
 const DEFAULT_DECISION_RELATIVE_PATH = "docs/evidence/distillation-backfill-decision-2026-10-02.json";

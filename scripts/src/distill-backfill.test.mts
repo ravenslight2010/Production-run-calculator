@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { runBackfill } from "./distill-backfill.mts";
+import { fileURLToPath } from "node:url";
+import {
+  EXPECTED_PRODUCTION_PROMPT_SHA256,
+  loadProductionContract,
+  runBackfill,
+} from "./distill-backfill.mts";
 import {
   hashCriticalGoldEvidence,
   hashHumanApplyRecord,
@@ -16,6 +21,19 @@ const contract = {
   currentParseVersion: "41",
 };
 const digest = "a".repeat(64);
+
+const workspaceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const currentProductionContract = await loadProductionContract(workspaceRoot);
+assert.doesNotMatch(currentProductionContract.systemPrompt, /NaN/u);
+assert.equal(currentProductionContract.systemPromptSha256, EXPECTED_PRODUCTION_PROMPT_SHA256);
+const checkedDecision = JSON.parse(
+  fs.readFileSync(
+    path.join(workspaceRoot, "docs/evidence/distillation-backfill-decision-2026-10-02.json"),
+    "utf8",
+  ),
+) as { decision: string; productionSystemPromptSha256: string };
+assert.equal(checkedDecision.productionSystemPromptSha256, currentProductionContract.systemPromptSha256);
+assert.equal(checkedDecision.decision, "no-go");
 
 function makeDecision(decision: "go" | "no-go") {
   return {
