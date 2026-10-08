@@ -298,3 +298,99 @@ decreasing while new evaluations remain capped at one per scope/time bucket.
 This confirms a short-term net decline of 53 queued jobs over 18 minutes; the
 backlog remains large, and this brief interval is not a reliable basis for a
 completion-time estimate.
+
+## Additional short-window queue snapshot
+
+- Captured a read-only production aggregate at 2026-10-08 16:48:18.744 UTC.
+  Public build-info checks immediately before and after capture identified the
+  same published release:
+  - App build: `app-build:a3d3e838-87ab-4ad7-9301-8dc2d534daf1`
+  - Platform deployment: `411f3a0b-be0f-499a-9b85-b35deec43e5d`
+  - Platform build: `91ef316e-f1ae-4b6a-afcc-2cd753f5d0c6`
+  - Published source fingerprint:
+    `a0028555380e99766d502dccbe8754327fb75b7e39d08c3147270c1132029b18`
+  - Published Git revision: `d173e1f8bbb0ea67f105b031e9c03d80f3b9cfa6`
+    (`gitBinding: verified`)
+  - Build mode: `release`
+- The status aggregate found 110,837 queued, 2 running, and 172 terminal jobs:
+  106 succeeded, 41 failed, and 25 cancelled. Compared with the matching-build
+  16:37:18.658 UTC snapshot, queued fell by 39, running stayed at 2, and
+  terminal counts rose by 43 (27 succeeded, 10 failed, 6 cancelled).
+- Since the preceding 16:37:18.658 UTC capture, 4 scheduled evaluations were
+  created in 4 scope/time-bucket groups: zero duplicate groups, maximum one job
+  per group, and zero malformed keys. The 4 new jobs and 43 terminal
+  transitions reconcile with the 39-job queue decrease.
+- Across the two adjacent intervals on platform build
+  `91ef316e-f1ae-4b6a-afcc-2cd753f5d0c6`, the observed queue decline was 53 in
+  18m 1.233s (about 176 per hour), then 39 in 11m 0.086s (about 213 per hour).
+  Combined, that is 92 over 29m 1.319s (about 190 per hour). This is a
+  short-window observation only, not a full-day rate or completion estimate.
+- The 10:41 UTC snapshot used the same app build ID and source fingerprint but
+  a different platform build ID. It also precedes the 15:56 UTC platform build
+  completion and is not included in the exact-platform-build rate above. The
+  available captures do not identify representative busy and quiet periods,
+  and the exact-platform-build observations cover only about 29 minutes.
+
+Only aggregate counts, capture times, and build identity were retained. The
+query did not select job inputs/results or return scopes or job keys. No
+production jobs were changed. **The requested full-operating-day measurement
+was not yet complete at this capture; the operating-day extension below adds
+later evidence.**
+
+## Operating-day extension
+
+- Captured another read-only production aggregate at 2026-10-08 18:11:22.828
+  UTC (13:11 Central). Public build-info before capture and deployment metadata
+  confirmed a successful Autoscale deployment. The live identity remained:
+  - App build: `app-build:a3d3e838-87ab-4ad7-9301-8dc2d534daf1`
+  - Platform deployment: `411f3a0b-be0f-499a-9b85-b35deec43e5d`
+  - Platform build: `91ef316e-f1ae-4b6a-afcc-2cd753f5d0c6`
+  - Published source fingerprint:
+    `a0028555380e99766d502dccbe8754327fb75b7e39d08c3147270c1132029b18`
+  - Published Git revision: `d173e1f8bbb0ea67f105b031e9c03d80f3b9cfa6`
+    (`gitBinding: verified`)
+- The aggregate found 110,625 queued, 2 running, and 409 terminal scheduled
+  evaluations: 228 succeeded, 108 failed, and 73 cancelled. Compared with
+  16:48:18.744 UTC on the same platform build, queued fell by 212, running
+  stayed at 2, and terminal counts rose by 237 (122 succeeded, 67 failed,
+  48 cancelled).
+- During that 1h 23m 4.084s interval, 25 jobs were created across 25
+  scope/time-bucket groups: zero duplicate groups, maximum one job per group,
+  and zero malformed keys. Across the platform build's lifetime since
+  15:56:34.756 UTC, the aggregate found 40 jobs across 40 groups, also with
+  zero duplicates and maximum one per group. The 25 new jobs and 237 terminal
+  transitions reconcile with the 212-job queued decrease.
+- On the exact platform build, adjacent interval net queue declines were:
+  53 over 18m 1.233s (about 176 per hour), 39 over 11m 0.086s (about 213 per
+  hour), and 212 over 1h 23m 4.084s (about 153 per hour). Across 16:19:17.425
+  to 18:11:22.828 UTC, the net decline was 304 jobs over 1h 52m 5.403s
+  (about 163 per hour). These observed interval rates give a cautious range of
+  about 153–213 queued jobs per hour, not a completion estimate.
+- The user-supplied Replit Monitoring screenshots show the past day's request
+  activity, with visible bursts in the early morning and late morning and much
+  lower activity around the 13:09 Central capture. They provide busy/quiet
+  context, not queue counts. Queue aggregates on the same app build/source
+  identity span 10:41–18:11 UTC (05:41–13:11 Central); this includes captures
+  near the morning activity and a later low-activity period. The platform build
+  ID changed between the 10:41 and 16:19 captures while the app build ID,
+  source fingerprint, Git revision, and deployment ID remained the same.
+  Therefore the full span is evidence for one published app/source identity,
+  but rates are calculated only within the unchanged 16:19–18:11 platform
+  build.
+- The 10:41 and 16:19 status aggregates differ by a 4,987-job reduction in
+  total rows, despite only a 5,015-job queued decline and 28-job net terminal
+  increase. The available snapshots do not explain this total-row change, so
+  that longer cross-platform interval is excluded from the drain-rate range.
+- Only timestamps, build identity, health status, aggregate counts, and
+  scope/time-bucket summary metrics were retained. The production queries did
+  not return job payloads, scopes, or job keys. No production jobs were
+  altered.
+
+**Outcome:** Five aggregate snapshots across the same published app/source
+identity cover the observed morning-to-early-afternoon operating window and
+include busy and quieter periods indicated by the one-day Monitoring graphs.
+Later snapshots on the current platform build show a net queue decline of
+about 153–213 jobs per hour, while new work remained capped at one job per
+scope/time bucket. The exact-platform-build sample is under two hours and the
+earlier cross-platform total-row change remains unexplained; no backlog
+completion estimate is supported.
