@@ -7,6 +7,13 @@ current-versus-approved field differences. The owner commented: “Those was
 proper corrections.” No data-heal was authorized. Production data was not
 changed.
 
+For reconciliation against the older August report, the owner approves treating
+only the exact ten ID/field descriptors in the linked mismatch diagnostic as
+intentional differences. This approval preserves the current production values;
+it does not authorize a correction, a broader mismatch waiver, or a data-heal.
+The controlled exception is versioned as
+`source-library-pool-owner-approved-differences-2026-10-08-v1`.
+
 ## Bounded evidence
 
 - Live published-app diagnostic: `source-library-pool-mismatch-diagnostics-2026-10-08.json`
@@ -47,3 +54,6 @@ passing release reconciliation.
 - The existing approved report and repair boundary remain unchanged.
 - Any future correction requires a new owner review and a separate data-heal
   process; do not restore the August source values solely to clear this report.
+- The reconciliation exception is limited to the reviewed diagnostic's exact
+  IDs and differing fields and is bound to the report, owner-review record,
+  diagnostic, and bounded live capture by SHA-256 in its versioned manifest.

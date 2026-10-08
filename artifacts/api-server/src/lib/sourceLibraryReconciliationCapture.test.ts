@@ -87,6 +87,12 @@ const evidenceOutput: VerificationOutput = {
     automaticProposals: 68,
     stubs: 3,
   },
+  poolExceptions: {
+    id: null,
+    sha256: null,
+    approvedMismatches: 0,
+    unresolvedMismatches: 0,
+  },
   marker: {
     present: true,
     resultValid: true,

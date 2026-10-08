@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 import { validateSourceLibraryReconciliationEvidence } from "./release-check.mts";
 import {
   assertBoundedSourceLibraryReconciliationEvidence,
+  DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS,
+  loadSourceLibraryPoolExceptionApproval,
   resolveSourceLibraryRevision,
 } from "./verify-source-library-reconciliation.mts";
 
@@ -75,6 +77,10 @@ export async function importSourceLibraryReconciliationEvidence(
     readInput(options.input === "-" ? "-" : input),
     readFile(report),
   ]);
+  const poolExceptionApproval = loadSourceLibraryPoolExceptionApproval(
+    path.resolve(ROOT, DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS),
+    reportBytes,
+  );
   let parsedEvidence: unknown;
   try {
     parsedEvidence = JSON.parse(new TextDecoder().decode(evidenceBytes));
@@ -90,6 +96,7 @@ export async function importSourceLibraryReconciliationEvidence(
     expectedHealId: healId,
     expectedFromDate: fromDate,
     expectedReportSha256: createHash("sha256").update(reportBytes).digest("hex"),
+    expectedPoolExceptionsSha256: poolExceptionApproval.sha256,
     maxAgeMs: MAX_AGE_MS,
     now: options.now,
   });

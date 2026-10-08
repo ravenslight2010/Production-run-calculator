@@ -3,11 +3,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   assertBoundedSourceLibraryReconciliationEvidence,
+  DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS,
   assertProductionSourceLibraryCapture,
   DEFAULT_FROM_DATE,
   DEFAULT_HEAL_ID,
   DEFAULT_REPORT,
   parseReport,
+  loadSourceLibraryPoolExceptionApproval,
   parseSourceLibraryEvidenceEnvironment,
   preflightSourceLibraryReconciliation,
   resolveSourceLibraryDatabaseOwner,
@@ -105,6 +107,17 @@ async function main(): Promise<void> {
 
   const reportBytes = fs.readFileSync(reportPath);
   const report = parseReport(JSON.parse(reportBytes.toString("utf8")));
+  const explicitPoolExceptionsPath = argument("--pool-exceptions");
+  const poolExceptionsPath =
+    explicitPoolExceptionsPath ??
+    (environment === "release" &&
+    reportPath === path.resolve(ROOT, DEFAULT_REPORT)
+      ? DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS
+      : undefined);
+  const poolExceptionApproval =
+    !preflightOnly && poolExceptionsPath !== undefined
+      ? loadSourceLibraryPoolExceptionApproval(poolExceptionsPath, reportBytes)
+      : undefined;
   const { pool } = await import("@workspace/db");
   if (preflightOnly) {
     const output = await runSourceLibraryReadOnlyCheck(
@@ -140,6 +153,8 @@ async function main(): Promise<void> {
         environment,
         revision,
         databaseOwner,
+        undefined,
+        poolExceptionApproval,
       ),
   );
   assertBoundedSourceLibraryReconciliationEvidence(output);

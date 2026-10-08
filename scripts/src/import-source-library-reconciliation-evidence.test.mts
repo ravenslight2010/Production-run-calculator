@@ -7,6 +7,8 @@ import {
   importSourceLibraryReconciliationEvidence,
 } from "./import-source-library-reconciliation-evidence.mts";
 import {
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
   DEFAULT_FROM_DATE,
   DEFAULT_HEAL_ID,
   DEFAULT_REPORT,
@@ -21,6 +23,7 @@ function evidence(reportSha256: string, overrides: Record<string, unknown> = {})
   const value = {
     verifier: "source-library-reconciliation",
     environment: "release",
+    databaseAttestation: "external-owner-check",
     revision,
     capturedAt,
     healId: DEFAULT_HEAL_ID,
@@ -50,6 +53,12 @@ function evidence(reportSha256: string, overrides: Record<string, unknown> = {})
       guardedRenames: 0,
       missing: 0,
       mismatches: 0,
+    },
+    poolExceptions: {
+      id: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
+      sha256: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
+      approvedMismatches: 0,
+      unresolvedMismatches: 0,
     },
     aliases: { expected: 0, exactMatches: 0, missing: 0, mismatches: 0 },
     profiles: { inspected: 0, canonical: 0, stale: 0, nonCanonical: 0 },

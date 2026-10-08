@@ -105,3 +105,21 @@ returning raw recipe data would expose more production information than needed.
 preserve the aggregate capture and importer contracts unchanged. Do not treat
 diagnostic results as a passing reconciliation or as authorization to repair
 production data.
+
+Owner-approved pool exceptions must be separate, versioned, and hash-pinned to
+the immutable source report, owner-review record, bounded mismatch diagnostic,
+and live capture. Scope each exception to a stable recipe ID and the exact
+differing field list. Keep raw mismatch totals visible alongside approved and
+unresolved counts; only unresolved differences may be waived from the pool gate.
+Never rewrite the approved report or alter production rows to make the gate pass.
+
+**Why:** Owner-reviewed current values may intentionally differ from an older
+approved baseline, while retaining recipe values in evidence is not acceptable.
+A broad ignore switch or report rewrite would hide unrelated drift; a bounded,
+reviewed descriptor set preserves the gate without exposing those values.
+
+**How to apply:** Pin the exception manifest in the verifier, require exact
+descriptor matches, and include its ID, digest, and classification counts in
+summary evidence. Release validation and evidence import must require the same
+digest. Missing rows, renames, unlisted IDs, and newly differing fields remain
+unresolved and must fail the release gate.

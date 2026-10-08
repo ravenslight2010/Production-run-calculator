@@ -1,0 +1,89 @@
+{
+  "format": "source-library-pool-owner-approved-differences",
+  "formatVersion": 1,
+  "id": "source-library-pool-owner-approved-differences-2026-10-08-v1",
+  "sourceReportSha256": "1d8a2a3ddda96c32959e43fdcd901f3a14308bf12bc4d65ef4e2e3ce12505294",
+  "ownerApproval": {
+    "decision": "intentional-differences-no-data-heal",
+    "recordPath": "docs/evidence/source-library-pool-owner-review-2026-10-08.md",
+    "recordSha256": "d6bf7afc287b66d835abae25f5b0b130860dc8ccbc414f9160c8d41907cfe3de"
+  },
+  "reviewedEvidence": {
+    "diagnosticsPath": "docs/evidence/source-library-pool-mismatch-diagnostics-2026-10-08.json",
+    "diagnosticsSha256": "bf7dd2930c063b2db5eea84557dce95863ceee45c4e22db96573b960a60b5f8f",
+    "capturePath": "docs/evidence/source-library-live-pool-capture-2026-10-08.json",
+    "captureSha256": "cff6a73209796abe28d3ffa9a8a9e9a154c3fce61c8375b55dddfbde0ab090c9"
+  },
+  "approvedDifferences": [
+    {
+      "table": "cheese_recipes",
+      "id": "cheese:aldo:aldo-s-standard-cheese-mix",
+      "sourceName": "Aldo's Standard Cheese Mix",
+      "mismatchType": "field-mismatch",
+      "differingFields": ["brand"]
+    },
+    {
+      "table": "cheese_recipes",
+      "id": "cheese:bobo:bobo-s-breakfast-cheese-mix",
+      "sourceName": "Bobo's Breakfast Cheese Mix",
+      "mismatchType": "field-mismatch",
+      "differingFields": ["brand"]
+    },
+    {
+      "table": "cheese_recipes",
+      "id": "cheese:bobo:bobo-s-chx-alfredo-cheese-mix",
+      "sourceName": "Bobo's Chx Alfredo Cheese Mix",
+      "mismatchType": "field-mismatch",
+      "differingFields": ["brand"]
+    },
+    {
+      "table": "cheese_recipes",
+      "id": "cheese:brand:brand-cheese-mix",
+      "sourceName": "Brand Cheese Mix",
+      "mismatchType": "field-mismatch",
+      "differingFields": ["components"]
+    },
+    {
+      "table": "cheese_recipes",
+      "id": "cheese:lowe:lowe-s-california-cheese-mix",
+      "sourceName": "Lowe's California Cheese Mix",
+      "mismatchType": "field-mismatch",
+      "differingFields": ["brand"]
+    },
+    {
+      "table": "cheese_recipes",
+      "id": "cheese:lowe:lowe-s-grilled-vegetable-cheese-mix",
+      "sourceName": "Lowe's Grilled Vegetable Cheese Mix",
+      "mismatchType": "field-mismatch",
+      "differingFields": ["brand"]
+    },
+    {
+      "table": "cheese_recipes",
+      "id": "cheese:lowe:lowe-s-margehrita-cheese-mix",
+      "sourceName": "Lowe's Margehrita Cheese Mix",
+      "mismatchType": "field-mismatch",
+      "differingFields": ["brand"]
+    },
+    {
+      "table": "cheese_recipes",
+      "id": "cheese:lowe:lowe-s-pepperoni-romano-cheese-mix",
+      "sourceName": "Lowe's Pepperoni/Romano Cheese Mix",
+      "mismatchType": "field-mismatch",
+      "differingFields": ["brand"]
+    },
+    {
+      "table": "cheese_recipes",
+      "id": "cheese:lowe:lowe-s-white-spinach-cheese-mix",
+      "sourceName": "Lowe's White Spinach Cheese Mix",
+      "mismatchType": "field-mismatch",
+      "differingFields": ["brand"]
+    },
+    {
+      "table": "cheese_recipes",
+      "id": "cheese:mauro:mauro-tomato-basil-cheese-mix",
+      "sourceName": "Mauro Tomato Basil Cheese Mix",
+      "mismatchType": "field-mismatch",
+      "differingFields": ["brand"]
+    }
+  ]
+}

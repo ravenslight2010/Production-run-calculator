@@ -23,8 +23,12 @@ import {
   DEFAULT_FROM_DATE,
   DEFAULT_HEAL_ID,
   DEFAULT_REPORT,
+  DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS,
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
   SOURCE_LIBRARY_PREFLIGHT_DIAGNOSTIC_VERSION,
   computeSourceLibraryEvidenceId,
+  loadSourceLibraryPoolExceptionApproval,
   parseSourceLibraryPreflightDiagnostic as parseStoredSourceLibraryPreflightDiagnostic,
   parseSourceLibraryEvidenceEnvironment,
   resolveSourceLibraryDatabaseOwner,
@@ -289,6 +293,16 @@ const RELEASE_BROWSER_ENV = {
   PLAYWRIGHT_BASE_URL: "http://127.0.0.1:18084",
 } as const;
 const rootDir = new URL("../../", import.meta.url).pathname;
+function approvedSourceLibraryPoolExceptionSha256(reportBytes: Buffer): string {
+  const approval = loadSourceLibraryPoolExceptionApproval(
+    resolve(rootDir, DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS),
+    reportBytes,
+  );
+  if (approval.sha256 !== APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256) {
+    throw new Error("Source-library owner-approved pool exception hash is not pinned.");
+  }
+  return approval.sha256;
+}
 const STATEFUL_RELEASE_LOCK_DIR =
   "/tmp/run-calculator-release-stateful-gates.lock";
 const STATEFUL_RELEASE_LOCK_STALE_MS = 60 * 60_000;
@@ -2348,6 +2362,10 @@ export async function verifyReleaseEvidence(
       expectedReportSha256: createHash("sha256")
         .update(sourceLibraryReportBytes)
         .digest("hex"),
+      expectedPoolExceptionsSha256:
+        expectedSourceLibraryEnvironment === "release"
+          ? approvedSourceLibraryPoolExceptionSha256(sourceLibraryReportBytes)
+          : undefined,
     });
   }
   if (requiresWebKitEvidence) {
@@ -2630,6 +2648,7 @@ export function validateSourceLibraryReconciliationEvidence(
     expectedHealId?: string;
     expectedFromDate?: string;
     expectedReportSha256?: string;
+    expectedPoolExceptionsSha256?: string;
     maxAgeMs?: number;
     now?: Date;
   } = {},
@@ -2772,6 +2791,72 @@ export function validateSourceLibraryReconciliationEvidence(
   ) {
     throw new Error(
       "Source-library reconciliation evidence targets the wrong source report.",
+    );
+  }
+  const poolExceptions = output.poolExceptions;
+  if (poolExceptions !== undefined) {
+    const pools = output.pools;
+    const exceptionId =
+      poolExceptions && typeof poolExceptions === "object" && !Array.isArray(poolExceptions)
+        ? (poolExceptions as Record<string, unknown>).id
+        : undefined;
+    const exceptionSha256 =
+      poolExceptions && typeof poolExceptions === "object" && !Array.isArray(poolExceptions)
+        ? (poolExceptions as Record<string, unknown>).sha256
+        : undefined;
+    const approvedMismatches =
+      poolExceptions && typeof poolExceptions === "object" && !Array.isArray(poolExceptions)
+        ? (poolExceptions as Record<string, unknown>).approvedMismatches
+        : undefined;
+    const unresolvedMismatches =
+      poolExceptions && typeof poolExceptions === "object" && !Array.isArray(poolExceptions)
+        ? (poolExceptions as Record<string, unknown>).unresolvedMismatches
+        : undefined;
+    const absentException = exceptionId === null && exceptionSha256 === null &&
+      approvedMismatches === 0;
+    const pinnedException = exceptionId === APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID &&
+      /^[a-f0-9]{64}$/u.test(String(exceptionSha256 ?? ""));
+    if (
+      !poolExceptions ||
+      typeof poolExceptions !== "object" ||
+      Array.isArray(poolExceptions) ||
+      Object.keys(poolExceptions).sort().join(",") !==
+        ["approvedMismatches", "id", "sha256", "unresolvedMismatches"]
+          .sort()
+          .join(",") ||
+      (!absentException && !pinnedException) ||
+      !pools ||
+      typeof pools !== "object" ||
+      Array.isArray(pools) ||
+      !Number.isSafeInteger(approvedMismatches) ||
+      Number(approvedMismatches) < 0 ||
+      Number(approvedMismatches) > 1_000_000 ||
+      !Number.isSafeInteger(unresolvedMismatches) ||
+      Number(unresolvedMismatches) < 0 ||
+      Number(unresolvedMismatches) > 1_000_000 ||
+      !Number.isSafeInteger((pools as Record<string, unknown>).mismatches) ||
+      Number((pools as Record<string, unknown>).mismatches) < 0 ||
+      Number((pools as Record<string, unknown>).mismatches) > 1_000_000 ||
+      Number(approvedMismatches) + Number(unresolvedMismatches) !==
+        Number((pools as Record<string, unknown>).mismatches)
+    ) {
+      throw new Error(
+        "Source-library reconciliation evidence has an invalid owner-approved pool-exception summary.",
+      );
+    }
+    if (
+      options.expectedPoolExceptionsSha256 !== undefined &&
+      (!pinnedException ||
+        exceptionSha256 !== options.expectedPoolExceptionsSha256 ||
+        unresolvedMismatches !== 0)
+    ) {
+      throw new Error(
+        "Source-library reconciliation evidence is missing the pinned owner-approved pool exception or has unresolved pool mismatches.",
+      );
+    }
+  } else if (options.expectedPoolExceptionsSha256 !== undefined) {
+    throw new Error(
+      "Source-library reconciliation evidence is missing the pinned owner-approved pool-exception summary.",
     );
   }
   if (
@@ -3980,6 +4065,10 @@ export async function promoteSourceLibraryEvidenceAtPaths(options: {
     expectedReportSha256: createHash("sha256")
       .update(reportBytes)
       .digest("hex"),
+    expectedPoolExceptionsSha256:
+      options.expectedEnvironment === "release"
+        ? approvedSourceLibraryPoolExceptionSha256(reportBytes)
+        : undefined,
   });
 }
 

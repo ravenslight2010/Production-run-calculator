@@ -21,6 +21,12 @@ export type SourceLibraryPoolMismatchDiagnostics = {
   omitted: number;
   items: SourceLibraryPoolMismatchDescriptor[];
 };
+export type SourceLibraryPoolExceptionApproval = {
+  id: string;
+  sha256: string;
+  sourceReportSha256: string;
+  approvedDifferences: SourceLibraryPoolMismatchDescriptor[];
+};
 export type ReadOnlyQuery = (
   text: string,
   values?: readonly unknown[],
@@ -43,6 +49,12 @@ export type VerificationOutput = {
     formatVersion: number;
     automaticProposals: number;
     stubs: number;
+  };
+  poolExceptions: {
+    id: string | null;
+    sha256: string | null;
+    approvedMismatches: number;
+    unresolvedMismatches: number;
   };
   marker: {
     present: boolean;
@@ -135,6 +147,7 @@ export function verifySourceLibraryReconciliation(
     | "external-owner-check"
     | "development-no-owner-check"
     | "published-app-runtime-connection",
+  poolExceptionApproval?: SourceLibraryPoolExceptionApproval,
 ): Promise<VerificationOutput>;
 export function assertBoundedSourceLibraryReconciliationEvidence(
   value: unknown,

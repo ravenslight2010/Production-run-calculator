@@ -13,8 +13,12 @@ import {
   readSourceLibraryDeploymentHandoff,
   assertProductionSourceLibraryCapture,
   assertBoundedSourceLibraryReconciliationEvidence,
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
+  DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS,
   isRetryableSourceLibraryDatabaseError,
   inspectSourceLibraryPoolMismatchDiagnostics,
+  loadSourceLibraryPoolExceptionApproval,
   SOURCE_LIBRARY_PREFLIGHT_DB_ATTEMPTS,
   stable,
   verifySourceLibraryReconciliation,
@@ -429,6 +433,120 @@ assert.throws(
 );
 assert.match(output.idempotencyFingerprint.value, /^[a-f0-9]{64}$/);
 assert.ok(queries.length > 0);
+
+const ownerApprovedPoolExceptions = loadSourceLibraryPoolExceptionApproval(
+  path.resolve(rootDir, DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS),
+  reportBytes,
+);
+assert.equal(
+  ownerApprovedPoolExceptions.sha256,
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
+);
+assert.equal(ownerApprovedPoolExceptions.approvedDifferences.length, 10);
+const exceptionTamperDirectory = await mkdtemp(
+  path.join(tmpdir(), "source-library-pool-exception-tamper-"),
+);
+try {
+  const exceptionBytes = await readFile(
+    path.resolve(rootDir, DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS),
+  );
+  const tamperedManifest = JSON.parse(exceptionBytes.toString("utf8"));
+  tamperedManifest.approvedDifferences.pop();
+  const tamperedPath = path.join(exceptionTamperDirectory, "exceptions.json");
+  await writeFile(tamperedPath, JSON.stringify(tamperedManifest));
+  assert.throws(
+    () =>
+      loadSourceLibraryPoolExceptionApproval(tamperedPath, reportBytes),
+    /not the pinned owner-approved version/u,
+    "changing the approved exception list must invalidate its pinned SHA-256",
+  );
+} finally {
+  await rm(exceptionTamperDirectory, { recursive: true, force: true });
+}
+const changedApprovedRows: Array<{
+  row: Record<string, unknown>;
+  components: unknown;
+  brand: unknown;
+  hadComponents: boolean;
+  hadBrand: boolean;
+}> = [];
+for (const exception of ownerApprovedPoolExceptions.approvedDifferences) {
+  const row = rowsByTable
+    .get(exception.table)!
+    .find((candidate) => candidate.id === exception.id)!;
+  changedApprovedRows.push({
+    row,
+    components: row.components,
+    brand: row.brand,
+    hadComponents: Object.prototype.hasOwnProperty.call(row, "components"),
+    hadBrand: Object.prototype.hasOwnProperty.call(row, "brand"),
+  });
+  if (exception.differingFields.includes("components")) {
+    row.components = [{ lbs: 999 }];
+  }
+  if (exception.differingFields.includes("brand")) {
+    row.brand = "Owner-approved correction";
+  }
+}
+const ownerApprovedOutput = await verifySourceLibraryReconciliation(
+  report,
+  reportBytes,
+  "source-library-reconciliation-2026-08-26-v1",
+  query,
+  "2026-08-26",
+  "development",
+  "development-unbound",
+  undefined,
+  undefined,
+  ownerApprovedPoolExceptions,
+);
+assert.equal(ownerApprovedOutput.pools.mismatches, 10);
+assert.deepEqual(ownerApprovedOutput.poolExceptions, {
+  id: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
+  sha256: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
+  approvedMismatches: 10,
+  unresolvedMismatches: 0,
+});
+assert.equal(ownerApprovedOutput.ok, true);
+assert.deepEqual(ownerApprovedOutput.failures, []);
+
+const additionalDriftRow = rowsByTable.get("cheese_recipes")!.find(
+  (row) =>
+    !ownerApprovedPoolExceptions.approvedDifferences.some(
+      (exception) => exception.id === row.id,
+    ) &&
+    report.proposals.some((proposal) => {
+      const candidate = proposal as Record<string, any>;
+      return candidate.table === "cheese_recipes" &&
+        candidate.before.id === row.id &&
+        Object.prototype.hasOwnProperty.call(candidate.after, "brand");
+    }),
+)!;
+const originalAdditionalDriftBrand = additionalDriftRow.brand;
+additionalDriftRow.brand = "Unapproved additional drift";
+const unresolvedDriftOutput = await verifySourceLibraryReconciliation(
+  report,
+  reportBytes,
+  "source-library-reconciliation-2026-08-26-v1",
+  query,
+  "2026-08-26",
+  "development",
+  "development-unbound",
+  undefined,
+  undefined,
+  ownerApprovedPoolExceptions,
+);
+assert.equal(unresolvedDriftOutput.poolExceptions.approvedMismatches, 10);
+assert.equal(unresolvedDriftOutput.poolExceptions.unresolvedMismatches, 1);
+assert.equal(unresolvedDriftOutput.ok, false);
+assert.deepEqual(unresolvedDriftOutput.failures, [{ check: "pools", count: 1 }]);
+additionalDriftRow.brand = originalAdditionalDriftBrand;
+for (const saved of changedApprovedRows) {
+  if (saved.hadComponents) saved.row.components = saved.components;
+  else delete saved.row.components;
+  if (saved.hadBrand) saved.row.brand = saved.brand;
+  else delete saved.row.brand;
+}
 
 const runtimeQueryStart = queries.length;
 const runtimeAttestedOutput = await verifySourceLibraryReconciliation(
@@ -868,6 +986,7 @@ function assertBoundedCliEvidence(
     "marker",
     "ok",
     "pendingRuns",
+    "poolExceptions",
     "pools",
     "profiles",
     "protectedHistory",
@@ -890,6 +1009,12 @@ function assertBoundedCliEvidence(
       "resultCounts",
       "resultValid",
       "resultWithinBounds",
+    ],
+    poolExceptions: [
+      "approvedMismatches",
+      "id",
+      "sha256",
+      "unresolvedMismatches",
     ],
     pools: ["exactMatches", "expected", "guardedRenames", "mismatches", "missing"],
     aliases: ["exactMatches", "expected", "mismatches", "missing"],

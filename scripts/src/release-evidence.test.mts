@@ -63,6 +63,8 @@ import {
 } from "./check-routine-node-version.mjs";
 import { parseReportSigningKeyring } from "./report-key-rotation-preflight.mts";
 import {
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
   computeSourceLibraryEvidenceId,
   DEFAULT_FROM_DATE,
   DEFAULT_HEAL_ID,
@@ -96,7 +98,19 @@ function sourceEvidence(overrides: Record<string, unknown> = {}) {
       stubs: 3,
     },
     marker: {},
-    pools: {},
+    pools: {
+      expected: 68,
+      exactMatches: 68,
+      guardedRenames: 0,
+      missing: 0,
+      mismatches: 0,
+    },
+    poolExceptions: {
+      id: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
+      sha256: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
+      approvedMismatches: 0,
+      unresolvedMismatches: 0,
+    },
     aliases: {},
     profiles: {},
     pendingRuns: {},
@@ -1989,6 +2003,61 @@ async function run(): Promise<void> {
       ),
     /targets development, but release evidence was requested/,
     "evidence from another environment must not be accepted",
+  );
+  assert.doesNotThrow(() =>
+    validateSourceLibraryReconciliationEvidence(
+      Buffer.from(JSON.stringify(sourceEvidence({ environment: "release" }))),
+      {
+        expectedEnvironment: "release",
+        expectedPoolExceptionsSha256:
+          APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
+      },
+    ),
+    "release evidence must accept the exact pinned owner-approved exception set",
+  );
+  assert.throws(
+    () =>
+      validateSourceLibraryReconciliationEvidence(
+        Buffer.from(JSON.stringify(sourceEvidence({ environment: "release" }))),
+        {
+          expectedEnvironment: "release",
+          expectedPoolExceptionsSha256: "a".repeat(64),
+        },
+      ),
+    /pinned owner-approved pool exception/u,
+    "release evidence must reject a different exception-set hash",
+  );
+  assert.throws(
+    () =>
+      validateSourceLibraryReconciliationEvidence(
+        Buffer.from(
+          JSON.stringify(
+            sourceEvidence({
+              environment: "release",
+              pools: {
+                expected: 68,
+                exactMatches: 67,
+                guardedRenames: 0,
+                missing: 0,
+                mismatches: 1,
+              },
+              poolExceptions: {
+                id: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
+                sha256: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
+                approvedMismatches: 0,
+                unresolvedMismatches: 1,
+              },
+            }),
+          ),
+        ),
+        {
+          expectedEnvironment: "release",
+          expectedPoolExceptionsSha256:
+            APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
+        },
+      ),
+    /unresolved pool mismatches/u,
+    "a GO-shaped result must not hide an unresolved pool mismatch",
   );
   assert.throws(
     () =>
