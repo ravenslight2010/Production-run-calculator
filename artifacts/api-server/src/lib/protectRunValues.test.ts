@@ -263,6 +263,38 @@ describe("protectRunValues", () => {
     expect(out.runValuesUpdatedAt.r1).toBe(1000);
   });
 
+  it.each([
+    ["equal", 2_000],
+    ["older", 1_999],
+  ])("does not replace a populated value when the incoming stamp is %s", (_label, incomingStamp) => {
+    const existing: Payload = {
+      runValues: { r1: { casesNeeded: 240 } },
+      runValuesUpdatedAt: { r1: 2_000 },
+    };
+    const incoming: Payload = {
+      runValues: { r1: { casesNeeded: 999 } },
+      runValuesUpdatedAt: { r1: incomingStamp },
+    };
+    const out = protectRunValues(incoming, existing, { nowMs: 3_000 }) as Payload;
+    expect(out.runValues.r1).toEqual(existing.runValues.r1);
+    expect(out.runValuesUpdatedAt.r1).toBe(2_000);
+  });
+
+  it("does not let a far-future client clock make an unbased stale value win", () => {
+    const nowMs = 2_000_000;
+    const existing: Payload = {
+      runValues: { r1: { casesNeeded: 240 } },
+      runValuesUpdatedAt: { r1: nowMs - 1_000 },
+    };
+    const incoming: Payload = {
+      runValues: { r1: { casesNeeded: 999 } },
+      runValuesUpdatedAt: { r1: nowMs + 86_400_000 },
+    };
+    const out = protectRunValues(incoming, existing, { nowMs }) as Payload;
+    expect(out.runValues.r1).toEqual(existing.runValues.r1);
+    expect(out.runValuesUpdatedAt.r1).toBe(nowMs - 1_000);
+  });
+
   it("keeps the populated stored value when an all-default push arrives with a STRICTLY-NEWER stamp over an UNSTAMPED stored value (the production hole)", () => {
     // Imports / daily-rollover adopt populated run values WITHOUT a stamp, so the
     // stored stamp is 0. A stale-but-positive client stamp paired with an
@@ -382,6 +414,24 @@ describe("protectRunValues", () => {
       nowMs,
     }) as Payload;
     expect(out.runValues.r1).toEqual({ casesNeeded: 12 });
+    expect(out.runValuesUpdatedAt.r1).toBe(nowMs);
+  });
+
+  it("accepts a far-future value only when an exact current snapshot proves the edit", () => {
+    const nowMs = 2_000;
+    const existing: Payload = {
+      runValues: { r1: { casesNeeded: 12 } },
+      runValuesUpdatedAt: { r1: 1_000 },
+    };
+    const incoming: Payload = {
+      runValues: { r1: { casesNeeded: 13 } },
+      runValuesUpdatedAt: { r1: nowMs + 86_400_000 },
+    };
+    const out = protectRunValues(incoming, existing, {
+      acceptCurrentBaseRunValueEdits: true,
+      nowMs,
+    }) as Payload;
+    expect(out.runValues.r1).toEqual({ casesNeeded: 13 });
     expect(out.runValuesUpdatedAt.r1).toBe(nowMs);
   });
 

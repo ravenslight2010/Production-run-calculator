@@ -18,6 +18,9 @@ import { isManualSection } from "@workspace/sync-contract";
 
 type SyncWork = {
   payload: SyncPayload;
+  baseSnapshot?: SyncPayload;
+  pendingIntentId?: string;
+  recoveryBlocked?: boolean;
   sig?: string;
   queuedAtPerf?: number;
   queuedAtEpoch?: number;

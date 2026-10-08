@@ -71,6 +71,7 @@ function runValueStampAtServerTime(value: unknown, nowMs: number): number {
   const stamp = asNumber(value);
   return stamp > nowMs ? nowMs : stamp;
 }
+const MAX_RUN_VALUE_STAMP_SKEW_MS = 5 * 60 * 1000;
 function capFutureRunValueStamps(
   payload: Record<string, unknown>,
   nowMs: number,
@@ -80,7 +81,11 @@ function capFutureRunValueStamps(
   const stamps: Record<string, unknown> = { ...payload.runValuesUpdatedAt };
   for (const [runId, value] of Object.entries(stamps)) {
     if (typeof value !== "number" || !Number.isFinite(value) || value <= nowMs) continue;
-    stamps[runId] = nowMs;
+    // A small clock lead is normalized to server time. A much larger lead is
+    // not evidence that an unbased value is newer, so give it no LWW weight.
+    // Exact current-base writes are separately accepted by snapshot identity
+    // and stamped with server time below.
+    stamps[runId] = value - nowMs <= MAX_RUN_VALUE_STAMP_SKEW_MS ? nowMs : 0;
     changed = true;
   }
   return changed ? { ...payload, runValuesUpdatedAt: stamps } : payload;

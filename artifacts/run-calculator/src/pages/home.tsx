@@ -17,6 +17,12 @@ import {
   useHomeSyncCoordination,
 } from "../hooks/useHomeSyncCoordination";
 import { consumeForegroundRecoveryResponse } from "../foregroundRecoveryResponse";
+import { rebaseStaleSyncIntent } from "../syncStaleBaseRecovery";
+import {
+  clearPendingSyncIntent,
+  loadPendingSyncIntent,
+  savePendingSyncIntent,
+} from "../syncPendingIntent";
 import { closeTopmostImportDialog, useHomeImportDialogs } from "../hooks/useHomeImportDialogs";
 import {
   applyTemporaryOverrides,
@@ -8316,6 +8322,62 @@ export default function Home() {
         allowForegroundCanonicalFormReset?: boolean;
       },
     ) => {
+      let queuedIntentReapplied = false;
+      if (options?.initialSnapshot && payload.completeness !== "partial") {
+        const scope = me ? `${me.sandbox ? "sandbox" : "live"}:${me.userId}` : "";
+        const pending = loadPendingSyncIntent(scope, payload.dayState.date ?? "");
+        if (pending) {
+          if (pending.epoch !== getStoredResetEpoch()) {
+            clearPendingSyncIntent(scope, pending.date, pending.id);
+            recordSyncEvent(
+              "stale",
+              "Discarded queued sync recovery after a reset",
+              "reset-epoch",
+            );
+          } else if (!isValidSyncSnapshotId(syncSnapshotIdRef.current)) {
+            recordSyncEvent(
+              "stale",
+              "Queued sync recovery is retained until a valid server snapshot is available",
+              "stale-base-unrecoverable",
+            );
+          } else {
+            const canonical = persistedSyncPayload(payload);
+            const recovery = rebaseStaleSyncIntent(
+              pending.baseline,
+              pending.payload,
+              canonical,
+              {
+                snapshotId: syncSnapshotIdRef.current,
+                serverTime: payload.serverTime ?? Date.now() + serverClockOffsetMsRef.current,
+              },
+            );
+            if (recovery.reappliedChanges > 0) {
+              payload = recovery.payload;
+              queuedIntentReapplied = true;
+              const saved = savePendingSyncIntent({
+                ...pending,
+                baseSnapshotId: syncSnapshotIdRef.current,
+                baseline: canonical,
+                payload: recovery.payload,
+              });
+              recordSyncEvent(
+                "merge",
+                `Recovered queued sync after reload: reapplied ${recovery.reappliedChanges} changes; retained ${recovery.retainedServerConflicts} server conflicts${saved ? "" : " (recovery copy could not be updated)"}.`,
+                "stale-base-recovered",
+              );
+            } else {
+              clearPendingSyncIntent(scope, pending.date, pending.id);
+              if (recovery.retainedServerConflicts > 0) {
+                recordSyncEvent(
+                  "merge",
+                  `Kept ${recovery.retainedServerConflicts} newer server values during queued sync recovery`,
+                  "stale-base-conflicts",
+                );
+              }
+            }
+          }
+        }
+      }
       publishAutoTrackCoordination(payload);
       isSyncApplyingRef.current = true;
       const arraysEqual = (a: string[], b: string[]) =>
@@ -8350,7 +8412,7 @@ export default function Home() {
       // before. `rejectedStale` triggers a re-push so peers converge on our edit.
       const remoteUpd = payload.runValuesUpdatedAt ?? {};
       const localUpd = loadRunValuesUpdated();
-      let rejectedStale = false;
+      let rejectedStale = queuedIntentReapplied;
       const localPackaging = loadPackagingProgress();
       // Date/reset acceptance fences packaging exactly like day/run values. A
       // stale payload from another day must never advance this independent map.
@@ -10159,7 +10221,7 @@ export default function Home() {
     res: Response,
     applyToLiveDay: boolean,
     shouldConsume?: () => boolean,
-  ): Promise<{ body: unknown; stale: boolean }> {
+  ): Promise<{ body: unknown; stale: boolean; recoverableConflict: boolean }> {
     const result = await consumeSyncWriteResponse<SyncPayload>(res, {
       shouldConsume,
       onServerTime: (serverTime) => {
@@ -10176,6 +10238,9 @@ export default function Home() {
     });
     if (result.malformed) {
       throw new Error("sync write returned a malformed response");
+    }
+    if (res.status === 409 && !result.recoverableConflict) {
+      throw new Error("sync write returned a non-recoverable conflict");
     }
     const snapshot = result.body?.snapshotId;
     adoptOperationalRevision(
@@ -10226,40 +10291,92 @@ export default function Home() {
 
   async function pushTodayCanonical(payload: SyncPayload): Promise<Response> {
     if (screenMode !== null) throw new Error("Station displays are read-only");
-    let res = await writeToday({
+    const scope = me ? `${me.sandbox ? "sandbox" : "live"}:${me.userId}` : "";
+    const date = payload.dayState.date ?? todayStr();
+    const work = {
       payload,
+      baseSnapshot: adoptedCanonicalSnapshotRef.current ?? undefined,
+      pendingIntentId: genId(),
+    };
+    if (scope && work.baseSnapshot) {
+      const saved = savePendingSyncIntent({
+        version: 1,
+        id: work.pendingIntentId,
+        scope,
+        date,
+        epoch: getStoredResetEpoch(),
+        baseSnapshotId: payload.baseSnapshotId ?? syncSnapshotIdRef.current,
+        baseline: persistedSyncPayload(work.baseSnapshot),
+        payload,
+      });
+      if (!saved) {
+        recordSyncEvent(
+          "failure",
+          "Offline recovery context could not be saved for a page reload",
+          "pending-intent-storage",
+        );
+      }
+    }
+    let res = await writeToday({
+      payload: work.payload,
       clientId: clientId.current,
       snapshotId: syncSnapshotIdRef.current,
       epoch: getStoredResetEpoch(),
     });
     let result = await consumeCanonicalSyncWriteResponse(res, true);
-    if (!res.ok) throw new Error(`sync write failed: ${res.status}`);
+    if (!res.ok && !result.recoverableConflict) throw new Error(`sync write failed: ${res.status}`);
     if (result.stale) throw new Error("sync write was rejected by the reset boundary");
     // A stale base can return successful transport with the authoritative
     // canonical snapshot instead of applying this write. Adopt it first, then
     // rebuild once from the reconciled local state so only edits still eligible
     // after canonical adoption are replayed against the new exact base.
     const partialFallbackBody = result.body as
-      | { partialFallback?: boolean; data?: unknown }
+      | { partialFallback?: boolean; data?: SyncPayload; snapshotId?: string; serverTime?: number }
       | null
       | undefined;
     if (shouldReplaySyncWrite(partialFallbackBody)) {
-      const recoveryPayload = buildSyncPayload(dayStateRef.current);
+      if (!partialFallbackBody?.data) {
+        throw new Error("Stale sync response omitted its canonical data");
+      }
+      const recovery = rebasePendingSyncWork(
+        work,
+        partialFallbackBody.data,
+        partialFallbackBody.snapshotId,
+        partialFallbackBody.serverTime,
+      );
+      if (recovery.reappliedChanges === 0) {
+        clearPendingSyncIntent(scope, date, work.pendingIntentId);
+        return res;
+      }
       res = await writeToday({
-        payload: recoveryPayload,
+        payload: work.payload,
         clientId: clientId.current,
         snapshotId: syncSnapshotIdRef.current,
         epoch: getStoredResetEpoch(),
       });
       result = await consumeCanonicalSyncWriteResponse(res, true);
-      if (!res.ok) throw new Error(`sync recovery write failed: ${res.status}`);
+      const secondFallback = result.body as
+        | { partialFallback?: boolean; data?: SyncPayload; snapshotId?: string; serverTime?: number }
+        | null
+        | undefined;
+      if (!res.ok && !result.recoverableConflict) {
+        throw new Error(`sync recovery write failed: ${res.status}`);
+      }
       if (result.stale) throw new Error("sync recovery write was rejected by the reset boundary");
-      if (shouldReplaySyncWrite(
-        result.body as { partialFallback?: boolean; data?: unknown } | null | undefined,
-      )) {
+      if (shouldReplaySyncWrite(secondFallback)) {
+        if (!secondFallback?.data) {
+          throw new Error("Repeated stale sync response omitted canonical data");
+        }
+        rebasePendingSyncWork(
+          work,
+          secondFallback.data,
+          secondFallback.snapshotId,
+          secondFallback.serverTime,
+        );
         throw new Error("sync write remained stale after canonical rebase");
       }
     }
+    clearPendingSyncIntent(scope, date, work.pendingIntentId);
     return res;
   }
 
@@ -10273,11 +10390,47 @@ export default function Home() {
       queuedAtPerf?: number;
       queuedAtEpoch?: number;
       trigger?: SyncMeasurementTrigger;
+      baseSnapshot?: SyncPayload;
+      pendingIntentId?: string;
+      recoveryBlocked?: boolean;
     },
   ) {
     if (screenMode !== null) return;
     if (generation !== syncPushGenerationRef.current) return;
-    const work = { payload, sig, ...timing };
+    const pendingScope = me ? `${me.sandbox ? "sandbox" : "live"}:${me.userId}` : "";
+    const pendingDate = payload.dayState.date ?? todayStr();
+    const priorIntent = loadPendingSyncIntent(pendingScope, pendingDate);
+    const matchesPriorIntent = priorIntent
+      && JSON.stringify(priorIntent.payload) === JSON.stringify(payload);
+    const baseSnapshot =
+      timing?.baseSnapshot
+      ?? (matchesPriorIntent ? priorIntent.baseline : undefined)
+      ?? adoptedCanonicalSnapshotRef.current
+      ?? undefined;
+    const pendingIntentId =
+      timing?.pendingIntentId
+      ?? (matchesPriorIntent ? priorIntent.id : undefined)
+      ?? genId();
+    const work = { payload, sig, ...timing, baseSnapshot, pendingIntentId };
+    if (pendingScope && baseSnapshot) {
+      const saved = savePendingSyncIntent({
+        version: 1,
+        id: pendingIntentId,
+        scope: pendingScope,
+        date: pendingDate,
+        epoch: getStoredResetEpoch(),
+        baseSnapshotId: payload.baseSnapshotId ?? syncSnapshotIdRef.current,
+        baseline: persistedSyncPayload(baseSnapshot),
+        payload,
+      });
+      if (!saved) {
+        recordSyncEvent(
+          "failure",
+          "Offline recovery context could not be saved for a page reload",
+          "pending-intent-storage",
+        );
+      }
+    }
     // A local edit, focus event, and online event can all arrive while a
     // request is retrying. Keep only the newest payload; never start a second
     // retry chain for the same tab.
@@ -10320,6 +10473,8 @@ export default function Home() {
       ...(timing?.queuedAtEpoch ? { syncMeta: { queuedAt: timing.queuedAtEpoch } } : {}),
     });
     const requestBytes = new Blob([requestBody]).size;
+    let responseStatus = 0;
+    let recoverableConflictResponse = false;
     writeToday({
       payload,
       clientId: clientId.current,
@@ -10328,6 +10483,7 @@ export default function Home() {
       signal: controller.signal,
       queuedAtEpoch: timing?.queuedAtEpoch,
     }).then(async (res) => {
+      responseStatus = res.status;
       if (generation !== syncPushGenerationRef.current) return;
       // Authentication failures are permanent for this request. Retrying them
       // only creates a storm while the session is being repaired.
@@ -10347,61 +10503,119 @@ export default function Home() {
         setSyncRetryWaiting(false);
         return;
       }
-      // Any other non-success response must follow the retry path below.
+      // Any non-success response other than the documented canonical 409
+      // fallback must follow the retry path below.
       // consumeCanonicalSyncWriteResponse intentionally does not throw for
       // HTTP errors so callers can safely inspect their response bodies; a
       // sync write must not be recorded as acknowledged just because the
       // server returned parseable JSON with a 5xx status.
-      if (!res.ok) throw new Error(`Sync write failed: ${res.status}`);
+      if (!res.ok && res.status !== 409) throw new Error(`Sync write failed: ${res.status}`);
       const mergeStartedAt = typeof performance === "undefined" ? null : performance.now();
       let canonicalResult = await consumeCanonicalSyncWriteResponse(
         res,
         true,
         () => generation === syncPushGenerationRef.current,
       );
+      recoverableConflictResponse = canonicalResult.recoverableConflict;
       if (generation !== syncPushGenerationRef.current) return;
+      if (!res.ok && !canonicalResult.recoverableConflict) {
+        throw new Error(`Sync write failed: ${res.status}`);
+      }
       // A stale base is successful transport, but it did not persist this
       // local change. Canonical response consumption runs first; rebuild from
       // that reconciled state and replay once against its exact snapshot.
       const partialFallbackBody = canonicalResult.body as
-        | { partialFallback?: boolean; data?: unknown }
+        | { partialFallback?: boolean; data?: SyncPayload; snapshotId?: string; serverTime?: number }
         | null
         | undefined;
       let replayedAfterPartialFallback = false;
+      let recoveredWithoutReplay = false;
       if (shouldReplaySyncWrite(partialFallbackBody)) {
         replayedAfterPartialFallback = true;
-        const recoveryPayload = buildSyncPayload(dayStateRef.current);
-        // Keep retries tied to the canonical response we just adopted. If the
-        // rebase request is interrupted, retrying the original stale payload
-        // would simply replay the same pre-wake snapshot.
-        work.payload = recoveryPayload;
-        work.sig = JSON.stringify(recoveryPayload);
-        latestSyncPayloadRef.current = recoveryPayload;
-        res = await writeToday({
-          payload: recoveryPayload,
-          clientId: clientId.current,
-          snapshotId: syncSnapshotIdRef.current,
-          epoch: getStoredResetEpoch(),
-          signal: controller.signal,
-          queuedAtEpoch: timing?.queuedAtEpoch,
-        });
-        if (!res.ok) throw new Error(`Sync recovery write failed: ${res.status}`);
-        canonicalResult = await consumeCanonicalSyncWriteResponse(
-          res,
-          true,
-          () => generation === syncPushGenerationRef.current,
+        if (!partialFallbackBody?.data) {
+          work.recoveryBlocked = true;
+          throw new Error("Stale sync response omitted its canonical data");
+        }
+        let recovery = rebasePendingSyncWork(
+          work,
+          partialFallbackBody.data,
+          partialFallbackBody.snapshotId,
+          partialFallbackBody.serverTime,
         );
-        if (generation !== syncPushGenerationRef.current) return;
-        if (shouldReplaySyncWrite(
-          canonicalResult.body as
-            | { partialFallback?: boolean; data?: unknown }
+        if (recovery.reappliedChanges > 0) {
+          res = await writeToday({
+            payload: work.payload,
+            clientId: clientId.current,
+            snapshotId: syncSnapshotIdRef.current,
+            epoch: getStoredResetEpoch(),
+            signal: controller.signal,
+            queuedAtEpoch: timing?.queuedAtEpoch,
+          });
+          responseStatus = res.status;
+          recoverableConflictResponse = false;
+          if (!res.ok && res.status !== 409) {
+            throw new Error(`Sync recovery write failed: ${res.status}`);
+          }
+          canonicalResult = await consumeCanonicalSyncWriteResponse(
+            res,
+            true,
+            () => generation === syncPushGenerationRef.current,
+          );
+          recoverableConflictResponse = canonicalResult.recoverableConflict;
+          if (generation !== syncPushGenerationRef.current) return;
+          if (!res.ok && !canonicalResult.recoverableConflict) {
+            throw new Error(`Sync recovery write failed: ${res.status}`);
+          }
+          const secondFallback = canonicalResult.body as
+            | { partialFallback?: boolean; data?: SyncPayload; snapshotId?: string; serverTime?: number }
             | null
-            | undefined,
-        )) {
-          throw new Error("sync write remained stale after canonical rebase");
+            | undefined;
+          if (shouldReplaySyncWrite(secondFallback)) {
+            if (!secondFallback?.data) {
+              work.recoveryBlocked = true;
+              throw new Error("Repeated stale sync response omitted canonical data");
+            }
+            // Preserve the intent against the newest canonical response before
+            // the bounded retry loop resumes. Never retry this same stale body.
+            recovery = rebasePendingSyncWork(
+              work,
+              secondFallback.data,
+              secondFallback.snapshotId,
+              secondFallback.serverTime,
+            );
+            if (recovery.reappliedChanges > 0) {
+              throw new Error("sync write remained stale after a second canonical rebase");
+            }
+            recoveredWithoutReplay = true;
+          }
+        } else {
+          recoveredWithoutReplay = true;
         }
       }
       const { stale } = canonicalResult;
+      if (recoveredWithoutReplay && !stale) {
+        clearPendingSyncIntent(pendingScope, pendingDate, work.pendingIntentId);
+        pushAcknowledgedRef.current = true;
+        setSyncPushFailed(false);
+        setSyncPendingCount(0);
+        setSyncFailedCount(0);
+        setSyncRetryWaiting(false);
+        const queued = syncPushQueueRef.current.finish({ drainQueued: true });
+        if (queued) {
+          const freshPayload = buildSyncPayload(dayStateRef.current);
+          pushAcknowledgedRef.current = false;
+          setSyncPendingCount(1);
+          doFetch(
+            freshPayload,
+            3,
+            JSON.stringify(freshPayload),
+            syncPushGenerationRef.current,
+            false,
+            queued,
+          );
+        }
+        return;
+      }
       const acknowledgedAt = typeof performance === "undefined" ? null : performance.now();
       pushAcknowledgedRef.current = true;
       if (stale) {
@@ -10458,6 +10672,7 @@ export default function Home() {
         currentRunId,
         syncWriteFieldCheck(res),
       );
+      clearPendingSyncIntent(pendingScope, pendingDate, work.pendingIntentId);
       // Record the synced signature ONLY after a successful PUT, so a failed
       // push is never treated as synced (which would block its retry).
        if (work.sig !== undefined) lastSyncSigRef.current = work.sig;
@@ -10495,6 +10710,23 @@ export default function Home() {
       }
     }).catch(() => {
       if (generation !== syncPushGenerationRef.current) return;
+      if (responseStatus === 409 && !recoverableConflictResponse) {
+        work.recoveryBlocked = true;
+      }
+      if (work.recoveryBlocked) {
+        setSyncRetryWaiting(false);
+        setSyncPushFailed(true);
+        setSyncPendingCount(0);
+        setSyncFailedCount((count) => count + 1);
+        recordSyncEvent(
+          "stale",
+          "Stale sync change was retained locally because it could not be safely rebased",
+          "stale-base-unrecoverable",
+          currentRunId,
+        );
+        syncPushQueueRef.current.finish({ drainQueued: false });
+        return;
+      }
       if (retriesLeft > 0) {
         setSyncRetryWaiting(true);
         const retryDelay = syncRetryDelay(3 - retriesLeft);
@@ -10772,6 +11004,86 @@ export default function Home() {
     syncPushQueueRef.current.reset();
     setSyncPendingCount(1);
     doFetch(payload, 0, JSON.stringify(payload));
+  }
+  function rebasePendingSyncWork(
+    work: {
+      payload: SyncPayload;
+      baseSnapshot?: SyncPayload;
+      pendingIntentId?: string;
+      sig?: string;
+      recoveryBlocked?: boolean;
+    },
+    canonicalInput: SyncPayload,
+    snapshotId: string | undefined,
+    serverTime?: number,
+  ): { reappliedChanges: number; retainedServerConflicts: number } {
+    try {
+      if (!work.baseSnapshot) throw new Error("Stale sync write has no captured canonical baseline");
+      if (!snapshotId) throw new Error("Stale sync response omitted its canonical snapshot identity");
+
+      const canonical = persistedSyncPayload(canonicalInput);
+      const recovery = rebaseStaleSyncIntent(work.baseSnapshot, work.payload, canonical, {
+        snapshotId,
+        serverTime,
+      });
+      work.baseSnapshot = canonical;
+      work.payload = recovery.payload;
+      work.sig = JSON.stringify(recovery.payload);
+      work.recoveryBlocked = false;
+      latestSyncPayloadRef.current = recovery.payload;
+
+      const scope = me ? `${me.sandbox ? "sandbox" : "live"}:${me.userId}` : "";
+      const date = recovery.payload.dayState.date ?? todayStr();
+      const pending = loadPendingSyncIntent(scope, date);
+      let durable = false;
+      if (recovery.reappliedChanges > 0 && scope && work.pendingIntentId) {
+        if (!pending || pending.id === work.pendingIntentId) {
+          durable = savePendingSyncIntent({
+            version: 1,
+            id: work.pendingIntentId,
+            scope,
+            date,
+            epoch: getStoredResetEpoch(),
+            baseSnapshotId: snapshotId,
+            baseline: canonical,
+            payload: recovery.payload,
+          });
+        }
+      } else if (scope && work.pendingIntentId) {
+        clearPendingSyncIntent(scope, date, work.pendingIntentId);
+      }
+
+      if (recovery.reappliedChanges > 0) {
+        applySyncCallbackRef.current(recovery.payload);
+        recordSyncEvent(
+          "merge",
+          `Recovered stale-base write: reapplied ${recovery.reappliedChanges} changes; retained ${recovery.retainedServerConflicts} server conflicts${durable ? "" : " (reload recovery copy unavailable)"}.`,
+          "stale-base-recovered",
+          currentRunId,
+        );
+      } else if (recovery.retainedServerConflicts > 0) {
+        recordSyncEvent(
+          "merge",
+          `Kept ${recovery.retainedServerConflicts} newer server values during stale-base recovery`,
+          "stale-base-conflicts",
+          currentRunId,
+        );
+      } else {
+        recordSyncEvent(
+          "merge",
+          "Canonical server state already included the queued intent; no stale snapshot was replayed",
+          "stale-base-recovered",
+          currentRunId,
+        );
+      }
+      return {
+        reappliedChanges: recovery.reappliedChanges,
+        retainedServerConflicts: recovery.retainedServerConflicts,
+      };
+    } catch (error) {
+      work.recoveryBlocked = true;
+      throw error;
+    }
   }
   function resetFieldArrays(vals: FormValues) {
     replaceCheese1(vals.app1CheeseRecipe ?? []);

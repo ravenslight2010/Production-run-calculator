@@ -80,6 +80,28 @@ describe("SyncStatusPopover wake-recovery activity", () => {
     );
   });
 
+  it("shows bounded stale-base recovery and server-conflict counts", () => {
+    render(
+      <SyncStatusPopover
+        {...baseProps}
+        diagnostics={[{
+          id: "stale-base-recovered",
+          kind: "merge",
+          at: 1_758_211_200_000,
+          date: "2026-09-18",
+          message: "Recovered stale-base write: reapplied 4 changes; retained 2 server conflicts",
+          response: "stale-base-recovered",
+        }]}
+      />,
+    );
+
+    openPopover();
+
+    expect(screen.getByTestId("sync-activity-stale-base-recovered").textContent).toContain(
+      "Recovered stale-base write: reapplied 4 changes; retained 2 server conflicts [stale-base-recovered]",
+    );
+  });
+
   it("leaves ordinary sync activity rows unchanged", () => {
     render(
       <SyncStatusPopover

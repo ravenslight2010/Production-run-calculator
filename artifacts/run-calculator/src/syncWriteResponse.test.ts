@@ -3,6 +3,7 @@ import { SYNC_DELTA_MAP_SECTIONS } from "@workspace/sync-contract";
 import {
   consumeSyncWriteResponse,
   isCanonicalRecoverySyncPayload,
+  isRecoverableStaleBaseFallback,
   isUnchangedSyncResponse,
   mergeSparseServerRunMap,
   persistedSyncPayload,
@@ -42,6 +43,52 @@ describe("consumeSyncWriteResponse", () => {
     expect(shouldReplaySyncWrite({ partialFallback: true })).toBe(true);
     expect(shouldReplaySyncWrite({ data: { runValues: {} } })).toBe(false);
     expect(shouldReplaySyncWrite(null)).toBe(false);
+  });
+
+  it("accepts only a complete canonical 409 fallback as stale-base recovery data", async () => {
+    const canonical = {
+      completeness: "complete",
+      dayState: { date: "2030-01-01", runs: [] },
+      runValues: {},
+    };
+    const validBody = {
+      partialFallback: true,
+      data: canonical,
+      snapshotId: "a".repeat(64),
+    };
+    const applyCanonical = vi.fn();
+    const result = await consumeSyncWriteResponse(
+      new Response(JSON.stringify(validBody), {
+        status: 409,
+        headers: { "content-type": "application/json" },
+      }),
+      { applyCanonical },
+    );
+
+    expect(result.recoverableConflict).toBe(true);
+    expect(applyCanonical).toHaveBeenCalledWith(canonical);
+    expect(isRecoverableStaleBaseFallback(409, validBody)).toBe(true);
+    expect(isRecoverableStaleBaseFallback(409, { ...validBody, snapshotId: "bad" })).toBe(false);
+    expect(isRecoverableStaleBaseFallback(409, { partialFallback: true })).toBe(false);
+    expect(isRecoverableStaleBaseFallback(500, validBody)).toBe(false);
+  });
+
+  it("does not adopt or replay a 409 without a valid canonical snapshot", async () => {
+    const applyCanonical = vi.fn();
+    const result = await consumeSyncWriteResponse(
+      new Response(JSON.stringify({
+        partialFallback: true,
+        data: { dayState: { date: "2030-01-01", runs: [] }, runValues: {} },
+        snapshotId: "not-a-snapshot-id",
+      }), {
+        status: 409,
+        headers: { "content-type": "application/json" },
+      }),
+      { applyCanonical },
+    );
+
+    expect(result.recoverableConflict).toBe(false);
+    expect(applyCanonical).not.toHaveBeenCalled();
   });
 
   it("immediately self-applies the server canonical payload on a successful write", async () => {

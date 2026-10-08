@@ -64,16 +64,22 @@ interface ConsumeSyncWriteResponseOptions<T> {
 export async function consumeSyncWriteResponse<T>(
   response: Response,
   options: ConsumeSyncWriteResponseOptions<T> = {},
-): Promise<{ body: SyncWriteResponseBody<T> | null; stale: boolean; malformed: boolean }> {
+): Promise<{
+  body: SyncWriteResponseBody<T> | null;
+  stale: boolean;
+  malformed: boolean;
+  recoverableConflict: boolean;
+}> {
   const parsed = await response.clone().json().catch(() => null);
   const body =
     parsed && typeof parsed === "object" && !Array.isArray(parsed)
       ? parsed as SyncWriteResponseBody<T>
       : null;
   if (options.shouldConsume && !options.shouldConsume()) {
-    return { body, stale: false, malformed: false };
+    return { body, stale: false, malformed: false, recoverableConflict: false };
   }
   const hasData = body !== null && Object.prototype.hasOwnProperty.call(body, "data");
+  const recoverableConflict = isRecoverableStaleBaseFallback(response.status, body);
   const validEnvelope = body !== null && (
     body.stale === true
       || isUnchangedSyncResponse(body)
@@ -90,11 +96,32 @@ export async function consumeSyncWriteResponse<T>(
     // Callers keep their retry/fence state until a canonical response arrives.
   } else if (stale) {
     await options.onStale?.(body);
-  } else if (response.ok && body?.data !== undefined && body.data !== null) {
+  } else if (
+    (response.ok || recoverableConflict)
+    && body?.data !== undefined
+    && body.data !== null
+  ) {
     await options.applyCanonical?.(body.data);
   }
 
-  return { body, stale, malformed };
+  return { body, stale, malformed, recoverableConflict };
+}
+
+/** The only non-2xx sync write that carries canonical rebase data is this legacy-upgrade 409. */
+export function isRecoverableStaleBaseFallback(
+  status: number,
+  body: SyncWriteResponseBody<unknown> | null,
+): boolean {
+  if (
+    status !== 409
+    || body?.partialFallback !== true
+    || !isValidSyncSnapshotId(body.snapshotId)
+    || !isSyncRecord(body.data)
+  ) return false;
+  return body.data.completeness !== "partial"
+    && isSyncRecord(body.data.dayState)
+    && Array.isArray(body.data.dayState.runs)
+    && isSyncRecord(body.data.runValues);
 }
 
 /** Removes server-owned read models that are transported beside, but not hashed into, the canonical document. */

@@ -21,6 +21,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { sql } from "drizzle-orm";
 import { signLegacyTokenForTests } from "../lib/auth";
+import { rebaseStaleSyncIntent } from "@workspace/sync-contract/stale-base-recovery";
 
 type DbModule = typeof import("@workspace/db");
 type SyncPayload = Record<string, unknown>;
@@ -31,13 +32,24 @@ type SyncResponse = {
   epoch?: number;
   snapshotId?: string;
   partialFallback?: boolean;
+  serverTime?: number;
 };
 type Metrics = {
   requests: number;
   retries: number;
+  recoveredWrites: number;
+  replayedIntentCount: number;
   conflicts: number;
   convergenceMs: number;
   divergentFields: string[];
+};
+type QueuedSyncWrite = {
+  date: string;
+  today: string;
+  payload: SyncPayload;
+  baseSnapshot: SyncPayload;
+  epoch: number;
+  baseSnapshotId: string;
 };
 
 let db: DbModule["db"];
@@ -345,18 +357,22 @@ function paths(a: unknown, b: unknown, prefix = "$"): string[] {
 
 class SimulatedClient {
   readonly id: string;
-  readonly metrics: Metrics = { requests: 0, retries: 0, conflicts: 0, convergenceMs: 0, divergentFields: [] };
+  readonly metrics: Metrics = {
+    requests: 0,
+    retries: 0,
+    recoveredWrites: 0,
+    replayedIntentCount: 0,
+    conflicts: 0,
+    convergenceMs: 0,
+    divergentFields: [],
+  };
   private online = true;
-  private queued: Array<{
-    date: string;
-    today: string;
-    payload: SyncPayload;
-    epoch: number;
-    baseSnapshotId: string;
-  }> = [];
+  private queued: QueuedSyncWrite[] = [];
+  private lastQueued: QueuedSyncWrite | null = null;
   private logicalNow = 10_000;
   private _epoch = 0;
   private snapshotId = "";
+  private canonicalState: SyncPayload | null = null;
   state: SyncPayload | null = null;
 
   constructor(id: string) {
@@ -399,6 +415,7 @@ class SimulatedClient {
       const res = await this.request("GET", `/api/sync/today?today=${today}`);
       if (!res.ok) return false;
       this.state = (await res.json()) as SyncPayload | null;
+      this.canonicalState = this.state ? clone(this.state) : null;
       this.snapshotId = res.headers.get("x-sync-snapshot") ?? "";
       return true;
     } catch {
@@ -411,6 +428,8 @@ class SimulatedClient {
     payload = this.state,
     epoch = this._epoch,
     baseSnapshotId = this.snapshotId,
+    baseSnapshot = this.canonicalState,
+    allowRecovery = true,
   ): Promise<SyncResponse | null> {
     if (!payload) throw new Error(`${this.id} has no payload`);
     try {
@@ -429,17 +448,56 @@ class SimulatedClient {
         this.metrics.retries++;
         return body;
       }
+      if (body.partialFallback && body.data) {
+        this.state = clone(body.data);
+        this.canonicalState = clone(body.data);
+        this.snapshotId = body.snapshotId ?? "";
+        if (!allowRecovery || !baseSnapshot || !this.snapshotId) return body;
+        const recovery = rebaseStaleSyncIntent(
+          baseSnapshot,
+          payload,
+          body.data,
+          { snapshotId: this.snapshotId, serverTime: body.serverTime ?? this.logicalNow },
+        );
+        if (recovery.reappliedChanges === 0) return body;
+        this.metrics.retries++;
+        this.metrics.recoveredWrites++;
+        this.metrics.replayedIntentCount += 1;
+        this.state = clone(recovery.payload as unknown as SyncPayload);
+        const recovered = await this.push(
+          today,
+          recovery.payload as unknown as SyncPayload,
+          epoch,
+          this.snapshotId,
+          body.data,
+          false,
+        );
+        if (recovered?.partialFallback) {
+          this.metrics.conflicts++;
+        }
+        return recovered;
+      }
       if (body.data) this.state = clone(body.data);
+      if (body.data) this.canonicalState = clone(body.data);
       if (typeof body.snapshotId === "string") this.snapshotId = body.snapshotId;
       return body;
     } catch {
-      this.queued.push({
+      const queued = {
         date: "today",
         today,
         payload: clone(payload),
+        baseSnapshot: clone(baseSnapshot ?? payload),
         epoch,
         baseSnapshotId,
-      });
+      };
+      this.lastQueued = clone(queued);
+      const sameBase = this.queued.findIndex((item) =>
+        item.today === today
+        && item.epoch === epoch
+        && item.baseSnapshotId === baseSnapshotId,
+      );
+      if (sameBase >= 0) this.queued[sameBase] = queued;
+      else this.queued.push(queued);
       return null;
     }
   }
@@ -448,18 +506,54 @@ class SimulatedClient {
     while (this.queued.length > 0 && this.online) {
       const item = this.queued.shift()!;
       this.metrics.retries++;
-      await this.push(item.today, item.payload, item.epoch, item.baseSnapshotId);
+      await this.push(
+        item.today,
+        item.payload,
+        item.epoch,
+        item.baseSnapshotId,
+        item.baseSnapshot,
+      );
     }
   }
 
-  rebaseQueuedWrites(): void {
-    if (!this.state) throw new Error(`${this.id} cannot rebase before adoption`);
-    const adoptedState = this.state;
-    this.queued = this.queued.map((item) => ({
-      ...item,
-      payload: clone(adoptedState),
-      baseSnapshotId: this.snapshotId,
-    }));
+  reload(): SimulatedClient {
+    const next = new SimulatedClient(this.id);
+    const persisted = JSON.parse(JSON.stringify({
+      queued: this.queued,
+      lastQueued: this.lastQueued,
+      state: this.state,
+      canonicalState: this.canonicalState,
+      snapshotId: this.snapshotId,
+      epoch: this._epoch,
+      logicalNow: this.logicalNow,
+    })) as {
+      queued: QueuedSyncWrite[];
+      lastQueued: QueuedSyncWrite | null;
+      state: SyncPayload | null;
+      canonicalState: SyncPayload | null;
+      snapshotId: string;
+      epoch: number;
+      logicalNow: number;
+    };
+    next.queued = persisted.queued;
+    next.lastQueued = persisted.lastQueued;
+    next.state = persisted.state;
+    next.canonicalState = persisted.canonicalState;
+    next.snapshotId = persisted.snapshotId;
+    next._epoch = persisted.epoch;
+    next.logicalNow = persisted.logicalNow;
+    next.online = this.online;
+    return next;
+  }
+
+  queuedForDuplicateDelivery(): {
+    today: string;
+    payload: SyncPayload;
+    epoch: number;
+    baseSnapshotId: string;
+    baseSnapshot: SyncPayload;
+  } | null {
+    return this.lastQueued ? clone(this.lastQueued) : null;
   }
 
   async adoptReset(): Promise<void> {
@@ -484,6 +578,7 @@ const fixture = (): SyncPayload => ({
   runValues: {
     "run-main": {
       casesNeeded: 240,
+      pizzasPerCase: 12,
       casesPerSkid: 48,
       skidsCompleted: 1,
       casesOnCurrentSkid: 12,
@@ -524,18 +619,88 @@ describe("multi-client sync convergence soak", () => {
     });
     await client.push();
 
-    client.setOnline(true);
-    expect(await client.pull()).toBe(true);
-    expect((client.state?.dayState as Record<string, unknown>).breaks).toEqual(CANONICAL_BREAKS);
-    client.rebaseQueuedWrites();
-    await client.flush();
-    expect((client.state?.dayState as Record<string, unknown>).breaks).toEqual(CANONICAL_BREAKS);
+    const reloaded = client.reload();
+    reloaded.setOnline(true);
+    expect(await reloaded.pull()).toBe(true);
+    const queued = reloaded.queuedForDuplicateDelivery();
+    expect(queued).not.toBeNull();
+    await reloaded.flush();
+    expect((reloaded.state?.dayState as Record<string, unknown>).breaks).toEqual(CANONICAL_BREAKS);
 
-    expect(await client.pull()).toBe(true);
-    const recoveredBreaks = (client.state?.dayState as Record<string, unknown>).breaks;
+    expect(await reloaded.pull()).toBe(true);
+    const recoveredBreaks = (reloaded.state?.dayState as Record<string, unknown>).breaks;
     expect(recoveredBreaks).toEqual(CANONICAL_BREAKS);
     expect(recoveredBreaks).toHaveLength(3);
     expect((recoveredBreaks as Array<{ durationMin: number }>).every((slot) => slot.durationMin === 30)).toBe(true);
+
+    const requestsBeforeDuplicate = reloaded.metrics.requests;
+    const duplicate = await reloaded.push(
+      queued!.today,
+      queued!.payload,
+      queued!.epoch,
+      queued!.baseSnapshotId,
+      queued!.baseSnapshot,
+    );
+    expect(duplicate?.partialFallback).toBe(true);
+    expect(reloaded.metrics.requests).toBe(requestsBeforeDuplicate + 1);
+    expect((reloaded.state?.dayState as Record<string, unknown>).breaks).toEqual(CANONICAL_BREAKS);
+  }, 30_000);
+
+  it("rebases interleaved offline edits after reload and does not replay a queued intent twice", async () => {
+    const writer = new SimulatedClient("interleaved-writer");
+    const offline = new SimulatedClient("interleaved-offline");
+    expect(await writer.pull()).toBe(true);
+    writer.state = fixture();
+    expect((await writer.push())?.ok).toBe(true);
+    expect(await offline.pull()).toBe(true);
+
+    offline.setOnline(false);
+    offline.edit((state) => {
+      const values = state.runValues as Record<string, Record<string, unknown>>;
+      values["run-main"].casesNeeded = 777;
+      values["run-main"].pizzasPerCase = 14;
+    });
+    expect(await offline.push()).toBeNull();
+    const reloaded = offline.reload();
+    const queued = reloaded.queuedForDuplicateDelivery();
+    expect(queued).not.toBeNull();
+
+    writer.edit((state) => {
+      const values = state.runValues as Record<string, Record<string, unknown>>;
+      values["run-main"].casesNeeded = 999;
+    });
+    expect((await writer.push())?.ok).toBe(true);
+
+    reloaded.setOnline(true);
+    expect(await reloaded.pull()).toBe(true);
+    await reloaded.flush();
+    expect(reloaded.metrics.recoveredWrites).toBe(1);
+    expect(reloaded.metrics.replayedIntentCount).toBe(1);
+    expect(reloaded.state?.runValues).toMatchObject({
+      "run-main": {
+        casesNeeded: 999,
+        pizzasPerCase: 14,
+      },
+    });
+
+    const requestsBeforeDuplicate = reloaded.metrics.requests;
+    const duplicate = await reloaded.push(
+      queued!.today,
+      queued!.payload,
+      queued!.epoch,
+      queued!.baseSnapshotId,
+      queued!.baseSnapshot,
+    );
+    expect(duplicate?.partialFallback).toBe(true);
+    expect(reloaded.metrics.requests).toBe(requestsBeforeDuplicate + 1);
+    expect(reloaded.metrics.replayedIntentCount).toBe(1);
+    expect(await reloaded.pull()).toBe(true);
+    expect(reloaded.state?.runValues).toMatchObject({
+      "run-main": {
+        casesNeeded: 999,
+        pizzasPerCase: 14,
+      },
+    });
   }, 30_000);
 
   it("documents the cross-process fanout boundary and complete reconnect recovery", async () => {
@@ -605,6 +770,9 @@ describe("multi-client sync convergence soak", () => {
       clients[0].edit((state) => {
         const values = state.runValues as Record<string, Record<string, unknown>>;
         values["run-main"].casesOnCurrentSkid = 13 + i;
+        const progress = (state.packagingProgress as Record<string, Record<string, unknown>>)["run-main"];
+        progress.casesOnCurrentSkid = 13 + i;
+        progress.updatedAt = 10_001 + i;
         if (i === 11) {
           const runs = state.dayState as { runs: Array<Record<string, unknown>> };
           runs.runs[0].endedAt = 20_000;
@@ -630,7 +798,13 @@ describe("multi-client sync convergence soak", () => {
       runValues: { "run-main": {} },
       runValuesUpdatedAt: { "run-main": 1_000 },
     });
-    expect(stalePut?.data?.runValues).toEqual(clients[0].state?.runValues);
+    expect(stalePut?.data?.runValues).toMatchObject({
+      "run-main": {
+        casesNeeded: 251,
+        casesOnCurrentSkid: 24,
+        skidsCompleted: 1,
+      },
+    });
     expect(stalePut?.data?.dayState).toMatchObject({
       runs: [{ id: "run-main", endedAt: 20_000, metaUpdatedAt: 20_000 }],
     });
