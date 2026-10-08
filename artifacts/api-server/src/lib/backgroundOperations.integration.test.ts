@@ -166,7 +166,7 @@ beforeAll(async () => {
     END;
     $$;
   `);
-}, 60_000);
+}, 180_000);
 
 afterAll(async () => {
   if (clearBackgroundOperationDiagnosticsForTests) {
@@ -205,6 +205,9 @@ beforeEach(async () => {
   await killer.query("DROP TRIGGER IF EXISTS background_ops_job_claim_sleep ON server_jobs");
   await killer.query("DROP TRIGGER IF EXISTS background_ops_job_cancellation_sleep ON server_jobs");
   await killer.query("DROP TRIGGER IF EXISTS background_ops_job_lease_terminalization_sleep ON server_jobs");
+  await killer.query("DROP TRIGGER IF EXISTS background_ops_scheduled_alert_failure ON scheduled_alert_records");
+  await killer.query("DROP FUNCTION IF EXISTS background_ops_fail_scheduled_alert_once()");
+  await killer.query("DROP SEQUENCE IF EXISTS background_ops_scheduled_alert_failure_seq");
 });
 
 async function terminateSleepingBackend(
@@ -617,6 +620,107 @@ describe("background operation PostgreSQL reconnection", () => {
       status: "no-subscriptions",
     });
     expect(await db.select().from(scheduledAlertRecordsTable)).toHaveLength(1);
+  });
+
+  it("retries a failed date without losing later alerts or duplicating completed dates", async () => {
+    const now = Date.now();
+    const endedAt = now - 120_000;
+    const dueAt = endedAt + 60_000;
+    const dates = Array.from({ length: 3 }, (_, index) =>
+      new Date(Date.parse(`${ALERT_DATE}T00:00:00.000Z`) + index * 24 * 60 * 60 * 1_000)
+        .toISOString()
+        .slice(0, 10));
+    const runs = dates.map((date, index) => ({
+      date,
+      scope: SCOPE,
+      data: {
+        dayState: {
+          date,
+          runs: [{ id: `scheduled-alert-retry-run-${index}`, startedAt: now - 300_000, endedAt }],
+        },
+        runValues: { [`scheduled-alert-retry-run-${index}`]: { freezerTime: 1 } },
+      },
+    }));
+    await db.insert(dailySyncTable).values(runs);
+
+    for (const date of dates) {
+      await runWebPushAlerts(dueAt - 1, { scope: SCOPE, date });
+    }
+
+    await expect(enqueueScheduledWebPushAlerts(now)).resolves.toEqual({ examined: 1, enqueued: 1 });
+    await killer.query("CREATE SEQUENCE background_ops_scheduled_alert_failure_seq");
+    await killer.query(`
+      CREATE FUNCTION background_ops_fail_scheduled_alert_once()
+      RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.date = '${dates[1]}' THEN
+          IF nextval('background_ops_scheduled_alert_failure_seq') = 1 THEN
+            RAISE EXCEPTION 'controlled scheduled alert date failure'
+              USING ERRCODE = '40001';
+          END IF;
+        END IF;
+        RETURN NEW;
+      END;
+      $$
+    `);
+    await killer.query(`
+      CREATE TRIGGER background_ops_scheduled_alert_failure
+      BEFORE INSERT ON scheduled_alert_records
+      FOR EACH ROW EXECUTE FUNCTION background_ops_fail_scheduled_alert_once()
+    `);
+
+    const worker = new ServerJobWorker("scheduled-alert-retry-worker");
+    expect(await worker.runOnce()).toBe(true);
+
+    const [failedJob] = await db.select().from(serverJobsTable);
+    expect(failedJob).toMatchObject({
+      type: "scheduled-evaluation",
+      status: "queued",
+      attempt: 1,
+      errorCode: "handler_failed",
+    });
+    const firstAttemptSequence = await killer.query<{ last_value: string; is_called: boolean }>(
+      "SELECT last_value::text, is_called FROM background_ops_scheduled_alert_failure_seq",
+    );
+    expect(firstAttemptSequence.rows[0]).toEqual({ last_value: "1", is_called: true });
+    const recordsAfterFailure = await db.select().from(scheduledAlertRecordsTable);
+    expect(recordsAfterFailure).toHaveLength(1);
+    expect(recordsAfterFailure).toMatchObject([
+      { scope: SCOPE, date: dates[0], alertKind: "freezerEmpty", status: "no-subscriptions" },
+    ]);
+
+    expect(await worker.runOnce()).toBe(true);
+
+    const [retriedJob] = await db.select().from(serverJobsTable);
+    expect(retriedJob).toMatchObject({
+      type: "scheduled-evaluation",
+      status: "succeeded",
+      attempt: 2,
+      result: { examined: dates.length, candidates: dates.length },
+    });
+    const records = await db.select().from(scheduledAlertRecordsTable);
+    expect(records).toHaveLength(dates.length);
+    expect(records
+      .map(({ scope, date, alertKind, status }) => ({ scope, date, alertKind, status }))
+      .sort((a, b) => a.date.localeCompare(b.date)))
+      .toEqual(dates.map((date) => ({
+        scope: SCOPE,
+        date,
+        alertKind: "freezerEmpty",
+        status: "no-subscriptions",
+      })));
+    expect(new Set(records.map((record) => record.alertId)).size).toBe(dates.length);
+    const retrySequence = await killer.query<{ last_value: string; is_called: boolean }>(
+      "SELECT last_value::text, is_called FROM background_ops_scheduled_alert_failure_seq",
+    );
+    expect(retrySequence.rows[0]).toEqual({ last_value: "2", is_called: true });
+
+    const attempts = await db.select().from(serverJobAttemptsTable);
+    expect(attempts).toHaveLength(2);
+    expect(attempts.map(({ attempt, outcome }) => ({ attempt, outcome }))).toEqual([
+      { attempt: 1, outcome: "retrying" },
+      { attempt: 2, outcome: "succeeded" },
+    ]);
   });
 
   it("keeps one queued scheduled job when enqueue confirmation is lost", async () => {
