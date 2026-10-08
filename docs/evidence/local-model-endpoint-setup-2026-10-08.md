@@ -47,14 +47,27 @@ observed model-list digest matched the SHA-256 of the installed Ollama manifest.
   completion/inference request was sent, no customer content was used, no
   inference provider was called, and no production routing was changed.
 
-The endpoint is running as a workspace background process, not a managed
-Replit workflow. The workspace rejected adding another workflow at its current
-workflow limit; existing workflows were left unchanged. If this process stops
-or the workspace restarts, run:
+The endpoint remains a workspace-local service, not a managed Replit workflow.
+The workspace rejected adding another workflow at its current workflow limit;
+existing workflows were left unchanged. Replit's supported top-level
+`.replit` `onBoot` command now runs
+`bash scripts/start_local_model_eval_proxy.sh start` at workspace startup.
+The helper detaches the endpoint, suppresses its output, avoids duplicate
+launches, and removes stale process records left by a workspace restart.
+
+For manual control:
 
 ```sh
-python3 scripts/local_model_eval_proxy.py
+bash scripts/start_local_model_eval_proxy.sh status
+bash scripts/start_local_model_eval_proxy.sh stop
+bash scripts/start_local_model_eval_proxy.sh start
 ```
+
+The helper only stops a process whose command line matches this endpoint. It
+checks readiness through the loopback `/v1/models` metadata route and does not
+read or log completions. It does not expose a port or create a Replit workflow.
+If an untracked service is already answering on the local endpoint, the helper
+refuses to claim it or stop it.
 
 ## Verification and provenance
 
@@ -66,18 +79,47 @@ python3 scripts/local_model_eval_proxy.py
   Ollama `/api/version` route.
 - The final startup reached the ready state only after the pinned model digest
   check passed.
+- Workspace boot startup is configured through the documented `.replit`
+  `onBoot` setting. The configured command can be run manually to exercise the
+  same startup hook without stopping or changing any unrelated workflow.
 - Environment: development workspace; not production.
 - Git `HEAD` at capture: `060dc03e181ff45fb1e7f4762f22d14f891355d4`.
 - SHA-256 of `scripts/local_model_eval_proxy.py`:
   `d6b7eb5b954734c394c46d6db16396e877b380f35859797fd28e951a2d3edb3b`.
 - SHA-256 of `scripts/test_local_model_eval_proxy.py`:
   `2c60a55bf815b46912d410253fbc8d5bc522a4ba14657589cb27569da2a957b1`.
-- SHA-256 of `replit.nix`:
+- SHA-256 of `replit.nix` at the original endpoint capture:
   `173b9fc450cd3df7c10e51ebdbf03fb6cab38dbf3fc3c7085186b432f5adcb8f`.
 
 This setup record does not establish that comparison cases are authorized or
 ready. The provider-comparison gate review remains a separate, time-bound
 assessment.
+
+## Workspace-startup implementation verification
+
+- `python3 -m unittest discover -s scripts -p 'test_local_model_endpoint_startup.py' -v`
+  — 4 tests passed. Its lifecycle test uses a loopback-only metadata fixture
+  that advertises the already-approved digest; it verifies start, stop, the
+  configured `onBoot` command, and both listener addresses. It sends no
+  completion request and does not verify model quality.
+- The startup configuration test confirms neither endpoint port is mapped in
+  `.replit`; the live fixture checks both TCP listeners use IPv4 loopback.
+- The isolated task-validation copy did not contain the approved Qwen3 manifest
+  under `~/.ollama/models`. A real-model startup therefore failed closed at the
+  digest check. No model was downloaded, and no digest or request limit was
+  changed.
+- The Replit workspace restart event could not be triggered from the isolated
+  task runner. The exact configured `onBoot` command was exercised after a
+  stop; Replit's documented workspace-start hook and the regression test cover
+  the automatic-start configuration.
+- SHA-256 of the current `.replit`:
+  `f727806131d4d775f32172f975dc941e8666d881293fcbb5fea580fc25cfa015`.
+- SHA-256 of the current `replit.nix`:
+  `aba0b345328fa0269ab10672bc410600fd84057794cbc67dc3db2dd2290d7356`.
+- SHA-256 of the startup helper:
+  `b5968391f74651a738f68eb546ef82dc23d4ec48615023c205f2f9cf4f9e5bfe`.
+- SHA-256 of the startup test:
+  `6bf74ca63db2f2e72e683cb838721d24f98146d6b7121c6c660d82c633845ff7`.
 
 ## Repository typecheck note
 

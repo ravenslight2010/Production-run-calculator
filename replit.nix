@@ -1,5 +1,7 @@
 {pkgs}: {
   deps = [
+    pkgs.util-linux
+    pkgs.curl
     pkgs.ollama
     pkgs.libglvnd
     pkgs.libtasn1

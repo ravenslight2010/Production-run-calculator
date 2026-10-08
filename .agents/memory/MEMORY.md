@@ -151,7 +151,7 @@
 - [PostgreSQL cursor precision](queue-history-cursor-precision.md) — preserve database timestamp precision or use a stable key so keyset cursors cannot skip rows at millisecond boundaries.
 - [Owner-selected SSE topology](sse-topology-choice.md) — one always-on API process; no shared fanout without a new decision; actual deployment enforcement still needs verification.
 - [Per-pizza advisory limits](per-pizza-advisory-limits.md) — owner chose 16 oz for sauce, each applicator, and each pepperoni entry; warn only above it, never clamp or block Apply.
-- [Shell signal cleanup output](shell-signal-cleanup-output.md) — redirect child logs narrowly so temporary log removal cannot swallow signal-time cleanup warnings.
+- [Shell signal cleanup](shell-signal-cleanup-output.md) + [detached locks](detached-process-lock-inheritance.md) — redirect cleanup warnings narrowly; detached daemons must close inherited lock descriptors.
 - [Production publish workflow](production-publish-workflow.md) — production is published through Replit; use manager-authorized production evidence, never a development fixture.
 - [Project skill session refresh](skill-session-registry-refresh.md) — project skills register from `.agents/skills`, but existing chats can keep a stale skill list until a new session.
 - [Pool-exception fingerprints](source-library-pool-exception-fingerprints.md) — preserve v1 approvals as historical bytes; only pinned, fresh, owner-reviewed fingerprints can waive current recipe drift.
