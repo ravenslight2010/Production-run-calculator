@@ -1,5 +1,6 @@
 {pkgs}: {
   deps = [
+    pkgs.ollama
     pkgs.libglvnd
     pkgs.libtasn1
     pkgs.libjpeg8

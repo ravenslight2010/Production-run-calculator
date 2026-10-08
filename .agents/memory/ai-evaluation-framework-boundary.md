@@ -51,3 +51,16 @@ actually evaluated.
 **How to apply:** Add focused-selection metadata alongside the established
 source identity, and calculate quality coverage against the selected case
 count rather than unrelated cases in the full source corpus.
+
+For local inference evaluation, prefer owner-approved existing compute and an
+open-source runtime over adding a recurring paid AI provider or rented host.
+The owner explicitly accepted this Replit workspace for the current CPU-only
+endpoint setup instead of a separate dedicated host; that exception does not
+authorize production routing changes or future paid infrastructure.
+
+**Why:** The owner chose local open-source inference to avoid another monthly
+AI service and approved the workspace after learning its CPU-only limitations.
+
+**How to apply:** Reuse existing local compute when approved, state hardware
+limits and any dedicated-host deviation plainly, and get explicit approval
+before provisioning recurring infrastructure or changing production routing.

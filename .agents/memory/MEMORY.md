@@ -95,7 +95,7 @@
 - [Importer audit recovery](importer-audit-recovery.md) — retryable audit writes must be user/scope-bound and server-idempotent; never replay source imports automatically.
 - [Cross-channel auto-track claims](cross-channel-auto-track-claims.md) — shared run stamps require queued deltas to distinguish peer auto accepts from manual edits before rebasing.
 - [Push](github-git-push.md) + [cancelled runs](github-actions-job-summary-visibility.md) + [forks](github-external-fork-verification.md) — secure remotes; verify cancellation and external ownership.
-- [AI eval gates](deterministic-ai-gates.md) + [framework](ai-evaluation-framework-boundary.md) + [QLoRA](qlora-power-margin-boundary.md) — keep evidence offline; strict thresholds do not admit ties.
+- [AI eval gates](deterministic-ai-gates.md) + [framework](ai-evaluation-framework-boundary.md) + [QLoRA](qlora-power-margin-boundary.md) — keep evidence offline; prefer existing local OSS compute over recurring provider/host spend.
 - [Browser seeding](browser-fixture-seeding.md) + [assertions](browser-evidence-assertions.md) + [local fixtures](local-release-browser-fixture-base.md) + [disposable DB](browser-e2e-disposable-database.md) — seed after baselines and bind browser proof to the local API.
 - [String-reference purge safety](string-reference-purge-safety.md) — recipe stub purges must scan profiles and every historical/current run snapshot before deleting text-linked master data.
 - [Wake/offline claims](wake-sync-claim-fence.md) + [intents](offline-operational-intents.md) + [receipts](offline-command-receipts.md) — fence stale claims; adopt outcomes before finalizing.
@@ -129,7 +129,7 @@
 - [ZIP asset inventory safety](zip-asset-inventory.md) — inspect central-directory metadata only; fail closed on unsafe members and label output as review evidence, not installation approval.
 - [WebKit operational-report fixture](webkit-operational-report-fixture.md) — authoritative report smoke needs an isolated canonical snapshot and a sync-write fence after hydration.
 - [Factory baseline ownership](factory-baseline-ownership.md) — cross-service runtime defaults use dependency-free shared constants; historical blank sentinels remain explicit compatibility values.
-- [Revision proof](production-evidence-revision-binding.md) + [CI pins](ci-pinned-evidence.md) + [WebKit](webkit-nix-launch.md) + [Vitest counts](vitest-count-evidence.md) — bind evidence to revision, runner, and complete totals.
+- [Revision](production-evidence-revision-binding.md) + [CI](ci-pinned-evidence.md) + [WebKit](webkit-nix-launch.md) + [Vitest](vitest-count-evidence.md) — exact pin; local checks are diagnostic.
 - [Release retry/locks](release-finalization-retry.md) + [browser refresh](full-release-browser-refresh.md) + [cancellation](release-run-cancellation.md) + [child exits](nested-pnpm-exit-codes.md) — resume safely and preserve structured outcomes.
 - [Local PostgreSQL](local-postgres-socket-dir.md) + [ARM64 toolchain](local-arm64-toolchain.md) — use writable private sockets; preserve native Node/ShellCheck setup.
 - [Section-scoped online edits](section-scoped-online-edits.md) — transient peer locks are UX only; correctness uses row serialization, complete baselines, and durable snapshot fencing.
