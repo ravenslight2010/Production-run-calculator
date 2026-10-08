@@ -99,7 +99,28 @@ const PDF_MARGIN = 36;
 const PDF_LINE_HEIGHT = 11;
 const PDF_TEXT_WIDTH = 108;
 const PDF_ROWS_PER_PAGE = 64;
-const EVENT_SCHEMAS: Record<string, { required: string[]; allowed: string[] }> = {
+type AuditEventSchema = {
+  required: readonly string[];
+  allowed: readonly string[];
+  fieldNames?: ReadonlySet<string>;
+};
+
+const CHEESE_RECIPE_AUDIT_FIELDS = [
+  "name", "brand", "flavors", "shredderSetting", "cellulose", "notes", "components", "enabled",
+] as const;
+const DOUGH_RECIPE_AUDIT_FIELDS = [
+  "name", "notes", "components", "enabled", "brand", "flavors",
+  "doughballWeightOz", "doughballsPerTray", "doughballVariants",
+] as const;
+const SAUCE_RECIPE_AUDIT_FIELDS = [
+  "name", "notes", "components", "enabled", "brand", "flavors",
+] as const;
+const MIX_RECIPE_AUDIT_FIELDS = [
+  "name", "brand", "flavor", "batchSize", "daysEarly", "notes",
+  "amountAlreadyMade", "components", "isPrep", "enabled",
+] as const;
+
+const EVENT_SCHEMAS: Record<string, AuditEventSchema> = {
   factory_reset: { required: ["outcome"], allowed: ["outcome", "count"] },
   role_granted: { required: ["outcome"], allowed: ["outcome", "targetId"] },
   role_revoked: { required: ["outcome"], allowed: ["outcome", "targetId"] },
@@ -121,20 +142,25 @@ const EVENT_SCHEMAS: Record<string, { required: string[]; allowed: string[] }> =
   sessions_revoked: { required: ["outcome", "targetId"], allowed: ["outcome", "targetId"] },
   staff_invitation_created: { required: ["outcome"], allowed: ["outcome", "targetType", "from"] },
   staff_invitation_revoked: { required: ["outcome"], allowed: ["outcome", "targetType"] },
-  cheese_recipe_created: { required: ["fieldNames", "correlationId"], allowed: ["fieldNames", "correlationId"] },
-  cheese_recipe_updated: { required: ["fieldNames", "correlationId"], allowed: ["fieldNames", "correlationId"] },
-  cheese_recipe_deleted: { required: ["fieldNames", "correlationId"], allowed: ["fieldNames", "correlationId"] },
+  cheese_recipe_created: { required: ["fieldNames", "correlationId"], allowed: ["fieldNames", "correlationId"], fieldNames: new Set(CHEESE_RECIPE_AUDIT_FIELDS) },
+  cheese_recipe_updated: { required: ["fieldNames", "correlationId"], allowed: ["fieldNames", "correlationId"], fieldNames: new Set(CHEESE_RECIPE_AUDIT_FIELDS) },
+  cheese_recipe_deleted: { required: ["fieldNames", "correlationId"], allowed: ["fieldNames", "correlationId"], fieldNames: new Set(CHEESE_RECIPE_AUDIT_FIELDS) },
+  dough_recipe_created: { required: ["fieldNames", "correlationId"], allowed: ["fieldNames", "correlationId"], fieldNames: new Set(DOUGH_RECIPE_AUDIT_FIELDS) },
+  dough_recipe_updated: { required: ["fieldNames", "correlationId"], allowed: ["fieldNames", "correlationId"], fieldNames: new Set(DOUGH_RECIPE_AUDIT_FIELDS) },
+  dough_recipe_deleted: { required: ["fieldNames", "correlationId"], allowed: ["fieldNames", "correlationId"], fieldNames: new Set(DOUGH_RECIPE_AUDIT_FIELDS) },
+  sauce_recipe_created: { required: ["fieldNames", "correlationId"], allowed: ["fieldNames", "correlationId"], fieldNames: new Set(SAUCE_RECIPE_AUDIT_FIELDS) },
+  sauce_recipe_updated: { required: ["fieldNames", "correlationId"], allowed: ["fieldNames", "correlationId"], fieldNames: new Set(SAUCE_RECIPE_AUDIT_FIELDS) },
+  sauce_recipe_deleted: { required: ["fieldNames", "correlationId"], allowed: ["fieldNames", "correlationId"], fieldNames: new Set(SAUCE_RECIPE_AUDIT_FIELDS) },
+  mix_recipe_created: { required: ["fieldNames", "correlationId"], allowed: ["fieldNames", "correlationId"], fieldNames: new Set(MIX_RECIPE_AUDIT_FIELDS) },
+  mix_recipe_updated: { required: ["fieldNames", "correlationId"], allowed: ["fieldNames", "correlationId"], fieldNames: new Set(MIX_RECIPE_AUDIT_FIELDS) },
+  mix_recipe_deleted: { required: ["fieldNames", "correlationId"], allowed: ["fieldNames", "correlationId"], fieldNames: new Set(MIX_RECIPE_AUDIT_FIELDS) },
 };
 
-const RECIPE_AUDIT_FIELD_NAMES = new Set([
-  "name",
-  "brand",
-  "flavors",
-  "shredderSetting",
-  "cellulose",
-  "notes",
-  "components",
-  "enabled",
+const RECIPE_AUDIT_FIELD_NAMES: ReadonlySet<string> = new Set<string>([
+  ...CHEESE_RECIPE_AUDIT_FIELDS,
+  ...DOUGH_RECIPE_AUDIT_FIELDS,
+  ...SAUCE_RECIPE_AUDIT_FIELDS,
+  ...MIX_RECIPE_AUDIT_FIELDS,
 ]);
 
 function boundedString(value: unknown, max = MAX_STRING): string | undefined {
@@ -483,6 +509,13 @@ export async function writeAuditEvent(
   if (Object.keys(redacted).some((key) => !schema.allowed.includes(key)) ||
       schema.required.some((key) => redacted[key] === undefined)) {
     throw new Error("Audit evidence does not match the event schema");
+  }
+  if (
+    schema.fieldNames &&
+    (!Array.isArray(redacted.fieldNames) ||
+      redacted.fieldNames.some((field) => !schema.fieldNames!.has(field)))
+  ) {
+    throw new Error("Audit field names do not match the event schema");
   }
   await executor.insert(auditLogsTable).values({
     scope: currentScope(), actor: currentActorId(), action: safeAction,

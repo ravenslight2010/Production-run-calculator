@@ -30,6 +30,7 @@ type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
 let pool: DbModule["pool"];
 let mixesTable: DbModule["mixesTable"];
+let auditLogsTable: DbModule["auditLogsTable"];
 let dataHealsTable: DbModule["dataHealsTable"];
 let usersTable: DbModule["usersTable"];
 let userRolesTable: DbModule["userRolesTable"];
@@ -79,10 +80,12 @@ beforeAll(async () => {
   const dbMod = await import("@workspace/db");
   const routerMod = await import("./index");
   const userValidityMod = await import("../lib/userValidity");
+  const observabilityMod = await import("../lib/observability");
 
   db = dbMod.db;
   pool = dbMod.pool;
   mixesTable = dbMod.mixesTable;
+  auditLogsTable = dbMod.auditLogsTable;
   dataHealsTable = dbMod.dataHealsTable;
   usersTable = dbMod.usersTable;
   userRolesTable = dbMod.userRolesTable;
@@ -98,6 +101,7 @@ beforeAll(async () => {
     (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
     next();
   });
+  app.use(observabilityMod.observabilityMiddleware);
   app.use("/api", routerMod.default);
 
   await new Promise<void>((resolve) => {
@@ -125,7 +129,7 @@ afterAll(async () => {
 beforeEach(async () => {
   clearUserValidityCache();
   await db.execute(
-    sql`TRUNCATE ${mixesTable}, ${dataHealsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${mixesTable}, ${auditLogsTable}, ${dataHealsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
   );
   await seedRoles();
   await db.insert(usersTable).values([{ id: MANAGER, username: "mgr", passwordHash: "x" }]);
@@ -168,6 +172,99 @@ async function getMixes(): Promise<{ status: number; items: Mix[] }> {
   const body = (await res.json()) as { items: Mix[] };
   return { status: res.status, items: body.items ?? [] };
 }
+
+async function rawPostMixes(items: Partial<Mix>[]): Promise<Response> {
+  return fetch(`${baseUrl}/api/mixes`, {
+    method: "POST",
+    headers: managerHeaders(),
+    body: JSON.stringify({ items }),
+  });
+}
+
+describe("mix recipe audit attribution", () => {
+  it("records actor, changed fields, timestamps, and server correlations without mix values", async () => {
+    const original = specDerivedMix({
+      id: "audit-mix-recipe",
+      name: "PRIVATE_MIX_NAME",
+      brand: "PRIVATE_MIX_BRAND",
+      flavor: "PRIVATE_MIX_FLAVOR",
+      notes: "PRIVATE_MIX_NOTES",
+      batchSize: 3,
+      daysEarly: 2,
+      amountAlreadyMade: 1,
+      isPrep: true,
+      components: [{ ingredient: "PRIVATE_MIX_INGREDIENT", perPizza: 2 }],
+    });
+    const createdResponse = await rawPostMixes([original]);
+    expect(createdResponse.status).toBe(200);
+    const createdCorrelationId = createdResponse.headers.get("x-correlation-id");
+    expect(createdCorrelationId).toMatch(/^[0-9a-f-]{36}$/);
+    const createdItems = ((await createdResponse.json()) as { items: Mix[] }).items;
+    const createdMix = createdItems.find((mix) => mix.id === original.id);
+    expect(createdMix).toBeDefined();
+
+    const updatedResponse = await rawPostMixes([{
+      ...createdMix!,
+      name: "UPDATED_MIX_NAME",
+      notes: "UPDATED_MIX_NOTES",
+      components: [{ ingredient: "UPDATED_MIX_INGREDIENT", perPizza: 3 }],
+    }]);
+    expect(updatedResponse.status).toBe(200);
+    const updatedCorrelationId = updatedResponse.headers.get("x-correlation-id");
+    expect(updatedCorrelationId).toMatch(/^[0-9a-f-]{36}$/);
+    const updatedItems = ((await updatedResponse.json()) as { items: Mix[] }).items;
+    const updatedMix = updatedItems.find((mix) => mix.id === original.id);
+    expect(updatedMix).toBeDefined();
+
+    const noOpResponse = await rawPostMixes([updatedMix!]);
+    expect(noOpResponse.status).toBe(200);
+
+    const deletedResponse = await fetch(`${baseUrl}/api/mixes`, {
+      method: "DELETE",
+      headers: managerHeaders(),
+      body: JSON.stringify({ ids: [original.id] }),
+    });
+    expect(deletedResponse.status).toBe(200);
+    const deletedCorrelationId = deletedResponse.headers.get("x-correlation-id");
+    expect(deletedCorrelationId).toMatch(/^[0-9a-f-]{36}$/);
+
+    const resource = `mix_recipe:${original.id}`;
+    const auditRows = (await db.select().from(auditLogsTable))
+      .filter((row) => row.resource === resource)
+      .sort((left, right) => left.id - right.id);
+    const allFields = [
+      "name", "brand", "flavor", "batchSize", "daysEarly", "notes",
+      "amountAlreadyMade", "components", "isPrep", "enabled",
+    ];
+    expect(auditRows).toHaveLength(3);
+    expect(auditRows.map((row) => row.action)).toEqual([
+      "mix_recipe_created", "mix_recipe_updated", "mix_recipe_deleted",
+    ]);
+    expect(auditRows.map((row) => row.actor)).toEqual([MANAGER, MANAGER, MANAGER]);
+    expect(auditRows.every((row) => row.createdAt instanceof Date)).toBe(true);
+    expect(auditRows.map((row) => row.changes)).toEqual([
+      { fieldNames: allFields, correlationId: createdCorrelationId },
+      { fieldNames: ["name", "notes", "components"], correlationId: updatedCorrelationId },
+      { fieldNames: allFields, correlationId: deletedCorrelationId },
+    ]);
+
+    const auditPayload = JSON.stringify(auditRows.map((row) => row.changes));
+    for (const privateValue of [
+      "PRIVATE_MIX_NAME", "PRIVATE_MIX_BRAND", "PRIVATE_MIX_FLAVOR",
+      "PRIVATE_MIX_NOTES", "PRIVATE_MIX_INGREDIENT", "UPDATED_MIX_NAME",
+      "UPDATED_MIX_NOTES", "UPDATED_MIX_INGREDIENT",
+    ]) {
+      expect(auditPayload).not.toContain(privateValue);
+    }
+
+    const managerRead = await fetch(`${baseUrl}/api/audit-logs`, {
+      headers: { Authorization: `Bearer ${signLegacyTokenForTests(MANAGER)}` },
+    });
+    expect(managerRead.status).toBe(200);
+    const page = await managerRead.json() as { logs: Array<{ action: string; resource: string }> };
+    expect(page.logs.filter((row) => row.resource === resource)).toHaveLength(3);
+  });
+});
 
 function specDerivedMix(overrides: Partial<Mix> = {}): Partial<Mix> {
   return {
