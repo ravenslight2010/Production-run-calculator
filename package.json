@@ -6,7 +6,7 @@
     "prepare:publish": "node scripts/src/prepare-publish-source.mjs",
     "check:published-build": "node scripts/src/verify-published-build.mjs",
     "build:publish": "bash scripts/src/build-publish.sh",
-    "test:build-identity": "node --test scripts/src/build-source-identity.test.mjs scripts/src/verify-published-build.test.mjs scripts/src/release-source-identity.test.mjs && pnpm --filter @workspace/scripts exec tsx --test ./src/source-readiness-contract.test.mts",
+    "test:build-identity": "node --test scripts/src/build-source-identity.test.mjs scripts/src/verify-published-build.test.mjs scripts/src/release-source-identity.test.mjs && pnpm --filter @workspace/scripts exec tsx --test ./src/source-readiness-contract.test.mts ./src/prepare-published-evidence.test.mts",
     "test:build-identity:integration": "node --test scripts/src/build-source-integration.test.mjs",
     "preinstall": "sh -c 'rm -f package-lock.json yarn.lock; case \"$npm_config_user_agent\" in pnpm/*) ;; *) echo \"Use pnpm instead\" >&2; exit 1 ;; esac'",
     "build": "pnpm run typecheck && pnpm run prepare:publish --reuse-current && pnpm -r --if-present run build && node scripts/src/finalize-build-identity.mjs",

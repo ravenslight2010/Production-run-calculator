@@ -14,7 +14,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const MAX_AGE_MS = 24 * 60 * 60 * 1_000;
 
 export type SourceLibraryEvidenceImportOptions = {
-  input: string;
+  input?: string;
+  inputBytes?: Uint8Array;
   output: string;
   report: string;
   healId: string;
@@ -52,7 +53,12 @@ async function readInput(input: string): Promise<Buffer> {
 export async function importSourceLibraryReconciliationEvidence(
   options: SourceLibraryEvidenceImportOptions,
 ): Promise<void> {
-  const input = path.resolve(process.cwd(), options.input);
+  if ((options.input === undefined) === (options.inputBytes === undefined)) {
+    throw new Error("Provide exactly one source-library evidence input.");
+  }
+  const input = options.input === undefined
+    ? undefined
+    : path.resolve(process.cwd(), options.input);
   const output = path.resolve(process.cwd(), options.output);
   const report = path.resolve(process.cwd(), options.report);
   const { healId, fromDate } = options;
@@ -74,7 +80,9 @@ export async function importSourceLibraryReconciliationEvidence(
   );
 
   const [evidenceBytes, reportBytes] = await Promise.all([
-    readInput(options.input === "-" ? "-" : input),
+    options.inputBytes === undefined
+      ? readInput(options.input === "-" ? "-" : input!)
+      : Promise.resolve(Buffer.from(options.inputBytes)),
     readFile(report),
   ]);
   const poolExceptionApproval = loadSourceLibraryPoolExceptionApproval(

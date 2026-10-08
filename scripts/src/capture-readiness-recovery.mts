@@ -890,20 +890,36 @@ async function captureSample(
   }
 }
 
-async function main(): Promise<void> {
-  const mode = captureMode(argument("--mode"));
-  const url = targetUrl(requiredArgument("--url"));
-  const environment = requiredArgument("--environment");
+export type CaptureReadinessEvidenceOptions = {
+  url: string;
+  environment: "development" | "release";
+  deploymentHandoffPath?: string;
+  expectedFile?: string;
+  mode?: ReadinessCaptureMode;
+  samples?: number;
+  intervalMs?: number;
+  timeoutMs?: number;
+  outputPath?: string;
+  deploymentId?: string;
+  revision?: string;
+};
+
+export async function captureReadinessEvidence(
+  options: CaptureReadinessEvidenceOptions,
+): Promise<ReadinessEvidence> {
+  const mode = captureMode(options.mode);
+  const url = targetUrl(options.url);
+  const environment = options.environment;
   if (environment !== "development" && environment !== "release") {
     throw new Error("--environment must be development or release");
   }
-  const configuredHandoff = argument("--deployment-handoff");
+  const configuredHandoff = options.deploymentHandoffPath;
   const handoff = configuredHandoff
     ? validateReadinessDeploymentHandoff(await readFile(path.resolve(process.cwd(), configuredHandoff)))
     : validateReadinessDeploymentHandoff(await createPublishedSourceHandoff({
         url: new URL(url).origin,
         expected: validateSourceRecord(readBoundedJson(path.resolve(
-          argument("--expected-file") ?? path.join(PROJECT_ROOT, EXPECTED_RECORD_PATH),
+          options.expectedFile ?? path.join(PROJECT_ROOT, EXPECTED_RECORD_PATH),
         ))),
       }));
   // A handoff for A must never authorize collecting healthy samples at B.
@@ -913,45 +929,33 @@ async function main(): Promise<void> {
       expected: validateSourceRecord(handoff.expectedSource),
     });
   }
-  const suppliedDeploymentId = argument("--deployment-id")?.trim();
-  if (
-    suppliedDeploymentId !== undefined &&
-    suppliedDeploymentId !== handoff.deploymentId
-  ) {
-    throw new Error(
-      "Readiness deployment handoff conflicts with --deployment-id",
-    );
-  }
-  const suppliedRevision = argument("--revision")?.trim();
-  if (
-    suppliedRevision !== undefined &&
-    suppliedRevision !== handoff.deployedRevision
-  ) {
-    throw new Error(
-      "Readiness deployment handoff conflicts with --revision",
-    );
-  }
+  const suppliedDeploymentId = options.deploymentId?.trim();
+  if (suppliedDeploymentId !== undefined && suppliedDeploymentId !== handoff.deploymentId)
+    throw new Error("Readiness deployment handoff conflicts with --deployment-id");
+  const suppliedRevision = options.revision?.trim();
+  if (suppliedRevision !== undefined && suppliedRevision !== handoff.deployedRevision)
+    throw new Error("Readiness deployment handoff conflicts with --revision");
   const sampleCount = positiveInteger(
-    argument("--samples"),
+    options.samples?.toString(),
     "--samples",
     mode === "recovery" ? 12 : 3,
     READINESS_EVIDENCE_MAX_SAMPLES,
   );
   const intervalMs = positiveInteger(
-    argument("--interval-ms"),
+    options.intervalMs?.toString(),
     "--interval-ms",
     READINESS_EVIDENCE_DEFAULT_INTERVAL_MS,
     60 * 60 * 1000,
   );
   const timeoutMs = positiveInteger(
-    argument("--timeout-ms"),
+    options.timeoutMs?.toString(),
     "--timeout-ms",
     READINESS_EVIDENCE_DEFAULT_TIMEOUT_MS,
     60_000,
   );
   const outputPath = path.resolve(
     process.cwd(),
-    argument("--output") ?? DEFAULT_OUTPUT_PATH,
+    options.outputPath ?? DEFAULT_OUTPUT_PATH,
   );
   const samples: ReadinessSample[] = [];
   for (let index = 0; index < sampleCount; index += 1) {
@@ -976,9 +980,30 @@ async function main(): Promise<void> {
   });
   await mkdir(path.dirname(outputPath), { recursive: true });
   await writeFile(outputPath, `${JSON.stringify(evidence, null, 2)}\n`, "utf8");
-  process.stdout.write(
-    `Readiness evidence retained: ${outputPath} (${evidence.summary.finalState})\n`,
-  );
+  return evidence;
+}
+
+async function main(): Promise<void> {
+  const environment = requiredArgument("--environment");
+  if (environment !== "development" && environment !== "release")
+    throw new Error("--environment must be development or release");
+  const samples = argument("--samples");
+  const intervalMs = argument("--interval-ms");
+  const timeoutMs = argument("--timeout-ms");
+  const evidence = await captureReadinessEvidence({
+    url: requiredArgument("--url"),
+    environment,
+    deploymentHandoffPath: argument("--deployment-handoff"),
+    expectedFile: argument("--expected-file"),
+    mode: captureMode(argument("--mode")),
+    samples: samples === undefined ? undefined : Number(samples),
+    intervalMs: intervalMs === undefined ? undefined : Number(intervalMs),
+    timeoutMs: timeoutMs === undefined ? undefined : Number(timeoutMs),
+    outputPath: argument("--output"),
+    deploymentId: argument("--deployment-id"),
+    revision: argument("--revision"),
+  });
+  process.stdout.write(`Readiness evidence captured (${evidence.summary.finalState}).\n`);
   if (!evidence.verification.passed) process.exitCode = 1;
 }
 

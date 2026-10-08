@@ -8,6 +8,9 @@ if [[ "${REPLIT_PINNED_NODE_READY:-}" != "1" ]]; then
 fi
 node scripts/src/check-routine-node-version.mjs
 
+# This only builds and seals the source prepared for an owner-initiated Replit
+# Publish action. Published-source/readiness evidence is collected after that
+# action, against Replit's current deployment metadata.
 # Reuse the independently prepared record. If source changed after preparation,
 # fail closed and require the agent to refresh it before the owner publishes.
 pnpm run prepare:publish --reuse-current

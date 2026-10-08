@@ -1,4 +1,5 @@
 import { execFile, spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { assessmentRevision, captureReleaseIdentity, isAssessmentRevision, isDeploymentRevision, isEvidenceRevision, isSourceRevision } from "./release-source-identity.mjs";
 import { createHash } from "node:crypto";
 import {
@@ -67,6 +68,7 @@ import {
   retainedEvaluationDirectories,
 } from "./retained-evaluation-contract.mjs";
 import { validateReadinessEvidence } from "./capture-readiness-recovery.mts";
+import { preparePublishedEvidence } from "./prepare-published-evidence.mts";
 import { FULL_BROWSER_EXPECTED_CASES } from "./full-browser-case-contract.mts";
 import {
   BROWSER_MAIN_COUNT_SUMMARY_SUFFIX,
@@ -1220,7 +1222,9 @@ const sourceLibraryFromDate =
 const sourceLibraryEvidenceInput =
   (cliOptionValue("--source-library-evidence") ??
     process.env.SOURCE_LIBRARY_RECONCILIATION_EVIDENCE_INPUT?.trim()) ||
-  undefined;
+  (existsSync(resolve(rootDir, releaseEvidenceDir, SOURCE_LIBRARY_RECONCILIATION_EVIDENCE))
+    ? resolve(rootDir, releaseEvidenceDir, SOURCE_LIBRARY_RECONCILIATION_EVIDENCE)
+    : undefined);
 export function resolveSourceLibraryEvidenceEnvironment(
   configuredEnvironment: string | undefined,
   importsEvidence: boolean,
@@ -1245,10 +1249,26 @@ const configuredSourceLibraryDatabaseOwner =
   (cliOptionValue("--source-library-database-owner") ??
     process.env.SOURCE_LIBRARY_RECONCILIATION_DATABASE_OWNER?.trim()) ||
   undefined;
+function discoverCurrentPublishedHandoff(): string | undefined {
+  const candidate = resolve(
+    rootDir,
+    ".local/build-identity/published-source-handoff.json",
+  );
+  if (!existsSync(candidate)) return undefined;
+  try {
+    readSourceLibraryDeploymentHandoff(candidate);
+    return candidate;
+  } catch {
+    // A stale or malformed default record is not evidence. Leave the required
+    // identity unresolved so release validation fails closed with its normal
+    // missing-handoff message.
+    return undefined;
+  }
+}
 const configuredSourceLibraryDeploymentHandoff =
   (cliOptionValue("--source-library-deployment-handoff") ??
     process.env.SOURCE_LIBRARY_RECONCILIATION_DEPLOYMENT_HANDOFF?.trim()) ||
-  undefined;
+  discoverCurrentPublishedHandoff();
 const sourceLibraryRevisionArgs = configuredSourceLibraryRevision
   ? ["--revision", configuredSourceLibraryRevision]
   : [];
@@ -2051,6 +2071,9 @@ function printHelp(): void {
   );
   console.log(
     "  pnpm run release:check -- --verify-evidence  Verify retained evidence files",
+  );
+  console.log(
+    "  pnpm run release:check -- --prepare-published-evidence --published-url <official-primary-url>  Capture current source, readiness, and reconciliation evidence after an owner publish",
   );
   console.log(
     "  pnpm run release:check:full -- --verify-evidence  Verify full retained evidence files",
@@ -4148,6 +4171,42 @@ async function main(): Promise<void> {
   if (process.argv.includes("--help") || process.argv.includes("-h")) {
     printHelp();
     process.exit(0);
+  }
+
+  if (process.argv.includes("--prepare-published-evidence")) {
+    if ((releaseMode !== "standard" && releaseMode !== "full") ||
+        process.argv.includes("--verify-evidence")) {
+      console.error(
+        "Published evidence preparation is supported only for standard or full release mode, without --verify-evidence.",
+      );
+      process.exit(1);
+    }
+    const publishedUrl = cliOptionValue("--published-url");
+    if (!publishedUrl) {
+      console.error(
+        "Published evidence preparation requires --published-url from successful Replit deployment metadata.",
+      );
+      process.exit(1);
+    }
+    try {
+      const result = await preparePublishedEvidence({
+        url: publishedUrl,
+        evidenceDirectory: resolve(rootDir, releaseEvidenceDir),
+        expectedFile: resolve(rootDir, ".local/build-identity/expected-source.json"),
+        reportPath: sourceLibraryReport,
+        healId: sourceLibraryHealId,
+        fromDate: sourceLibraryFromDate,
+      });
+      console.log(
+        `Current published evidence prepared for ${result.appBuildId}: ${result.files.join(", ")}`,
+      );
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "evidence preparation failed";
+      console.error(`Published evidence preparation BLOCKED: ${message}`);
+      process.exitCode = 1;
+      return;
+    }
   }
 
   if (process.argv.includes("--verify-evidence")) {

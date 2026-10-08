@@ -317,22 +317,45 @@ derived from both production source and verification inputs; changing tests
 invalidates old passing evidence even when application source stays unchanged.
 Git-bound historical records remain readable through the legacy path.
 
-Create the current source-based handoff by comparing the live complete-release
-record with a separately prepared expectation:
+After the owner completes Publish, retrieve current deployment metadata with
+Replit's supported `getDeploymentInfo()` function. Continue only when the
+metadata request succeeds, the repl is deployed, the current build succeeded,
+and `primaryUrl` is present. Do not infer the URL or revision, or treat
+`REPLIT_DEPLOYMENT_ID`, `REPLIT_BUILD_ID`, screenshots, or Git branches as
+provider-verified metadata.
+
+Use that exact `primaryUrl` to prepare the source handoff plus readiness and
+source-library reconciliation evidence:
 
 ```bash
-pnpm run check:published-build -- \
-  --url '<official published URL>' \
-  --expected-file .local/build-identity/expected-source.json \
-  --handoff-output .local/build-identity/published-source-handoff.json
+pnpm run release:check -- \
+  --prepare-published-evidence \
+  --published-url '<primaryUrl from successful current Replit metadata>'
 ```
 
+The command compares the live complete-release record with the independent
+`.local/build-identity/expected-source.json`, captures readiness and bounded
+source-library reconciliation evidence from the published app, validates both
+against the same source handoff, and promotes the results only after all steps
+pass. It does not publish or issue release approval. If Replit metadata is
+unavailable, the current build failed, the live app does not match the prepared
+source, readiness is not healthy, or reconciliation evidence is missing or
+stale, preparation exits nonzero.
+
 The handoff has schema version 2 and kind
-`published-source-deployment-handoff`. It carries the application-owned build ID,
-source policy, source fingerprint, exact independent expectation and digest,
-and an expiry of at most 24 hours. The `deploymentId` compatibility field contains
-the namespaced application build ID, **not** a Replit platform UUID.
-Source matching alone is not release approval.
+`published-source-deployment-handoff`. It carries the application-owned build
+ID, source policy, source fingerprint, exact independent expectation and
+digest, and an expiry of at most 24 hours. The `deploymentId` compatibility
+field contains the namespaced application build ID, **not** a Replit platform
+UUID. The deployed identity is `source-sha256:<fingerprint>`, not a Git
+revision. The source-match receipt continues to say `productionGo: false`.
+
+The source reconciliation capture is bounded and uses the published app's
+configured database connection. Its verifier runs in a read-only transaction;
+the existing rate limiter still records its request count. The raw response is
+held only long enough to validate/import the minimized evidence and is not
+retained. A rate-limit response or concurrent capture blocks preparation; do
+not turn a partial capture into release evidence.
 The operational report may expose the same value at
 `evidence.release.revision`; malformed, absent, or expired revision metadata is
 not valid release proof. `REPLIT_GIT_COMMIT` and `GIT_COMMIT` remain
@@ -347,46 +370,23 @@ provider-verified deployment handoff; `incomplete` or `unavailable` means the
 identity values were absent or invalid. Production release checks must continue
 to require the current, validated published-deployment handoff described below.
 
-### Preferred: capture from the published Replit app
+### Published reconciliation endpoint
 
-After publishing the revision, Replit Agent can retrieve the bounded summary
-directly from the published API. The public `GET` uses the running app's own
-database connection and build identity; it does not require a manager login,
-PostgreSQL owner name, request body, or database credentials. It reports
-`published-app-runtime-connection` attestation, which means the evidence came
-from the database configured for that published app; it is not an independent
-PostgreSQL owner-name comparison. The summary contains only bounded counts and
-hashes. The verifier itself runs in a PostgreSQL `READ ONLY` transaction; the
-shared rate limiter records only its request counter in the existing rate-limit
-table. The endpoint is limited to five requests per 15 minutes and returns
-`429` with `Retry-After` when the limit is reached. A PostgreSQL advisory lock
-prevents overlapping captures across API workers; a concurrent capture returns
-`409`.
+The public `GET` uses the running app's own database connection and build
+identity; it does not require a manager login, PostgreSQL owner name, request
+body, or database credentials. Its `published-app-runtime-connection`
+attestation means the evidence came from the database configured for that
+published app; it is not an independent PostgreSQL owner-name comparison. The
+summary contains only bounded counts and hashes. The verifier runs in a
+PostgreSQL `READ ONLY` transaction; the shared rate limiter records only its
+request counter in the existing rate-limit table. The endpoint is limited to
+five requests per 15 minutes and returns `429` with `Retry-After` when that
+limit is reached. A PostgreSQL advisory lock prevents overlapping captures
+across API workers; a concurrent capture returns `409`.
 
-First create a fresh handoff using the published-build procedure above, then
-fetch and import the summary:
-
-```bash
-mkdir -p .local/build-identity
-PUBLISHED_URL='<official published URL>'
-HANDOFF=.local/build-identity/published-source-handoff.json
-CAPTURE=.local/build-identity/source-library-reconciliation.json
-curl --fail --silent --show-error --max-time 25 --max-filesize 32768 \
-  "$PUBLISHED_URL/api/profile-data/source-library-reconciliation/capture" \
-  --output "$CAPTURE"
-pnpm --filter @workspace/scripts exec tsx \
-  ./src/import-source-library-reconciliation-evidence.mts \
-  --input "$CAPTURE" \
-  --report attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json \
-  --heal-id source-library-reconciliation-2026-08-26-v2 \
-  --from-date 2026-08-26 \
-  --deployment-handoff "$HANDOFF" \
-  --output .local/build-identity/source-library-reconciliation-imported.json
-```
-
-The importer checks the captured source revision against the fresh handoff. A
-stale or mismatched published build is rejected. Do not upload raw records,
-database dumps, response logs, or credentials.
+The post-publish command uses the fresh source handoff and imports the captured
+summary against the configured source report. Do not retain or upload raw
+records, database dumps, response logs, or credentials.
 
 For investigation when the aggregate capture reports pool mismatches, the
 published app also exposes

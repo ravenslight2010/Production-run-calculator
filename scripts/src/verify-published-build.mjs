@@ -33,12 +33,12 @@ async function readBoundedJsonResponse(response, limit, label) {
   }
 }
 
-async function verifyReadiness(target, timeoutMs) {
+async function verifyReadiness(target, timeoutMs, fetchImpl) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const remaining = deadline - Date.now();
     try {
-      const response = await fetch(new URL("/api", target), {
+      const response = await fetchImpl(new URL("/api", target), {
         signal: AbortSignal.timeout(Math.min(remaining, 3_000)),
         redirect: "error",
         headers: { Accept: "application/json", "Cache-Control": "no-cache" },
@@ -66,7 +66,12 @@ async function verifyReadiness(target, timeoutMs) {
   throw new Error("Published app did not become ready before the readiness timeout.");
 }
 
-export async function verifyPublishedBuild({ url, expected, timeoutMs = 15_000 }) {
+export async function verifyPublishedBuild({
+  url,
+  expected,
+  timeoutMs = 15_000,
+  fetchImpl = fetch,
+}) {
   validateSourceRecord(expected);
   if (expected.mode !== "publish") throw new Error("The expected record must be a publish candidate.");
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60_000)
@@ -76,10 +81,15 @@ export async function verifyPublishedBuild({ url, expected, timeoutMs = 15_000 }
   if ((target.protocol !== "https:" && !(loopback && target.protocol === "http:")) ||
       target.username || target.password || target.search || target.hash)
     throw new Error("Use the official HTTPS app URL without credentials or query parameters.");
-  const response = await fetch(new URL("/api/build-info", target), {
-    signal: AbortSignal.timeout(timeoutMs), redirect: "error",
-    headers: { Accept: "application/json", "Cache-Control": "no-cache" },
-  });
+  let response;
+  try {
+    response = await fetchImpl(new URL("/api/build-info", target), {
+      signal: AbortSignal.timeout(timeoutMs), redirect: "error",
+      headers: { Accept: "application/json", "Cache-Control": "no-cache" },
+    });
+  } catch {
+    throw new Error("Published build metadata lookup failed or timed out.");
+  }
   if (response.status !== 200 || !response.headers.get("content-type")?.includes("application/json"))
     throw new Error("Published build metadata is unavailable or has an unexpected response.");
   const actual = validateBuildInfo(await readBoundedJsonResponse(response, 8192, "Published build metadata"));
@@ -91,7 +101,7 @@ export async function verifyPublishedBuild({ url, expected, timeoutMs = 15_000 }
   if (Date.parse(actual.completedAt) < Date.parse(expected.preparedAt) ||
       Date.parse(actual.completedAt) > now.getTime() + 60_000)
     throw new Error("Published build timestamps conflict with the expected record.");
-  await verifyReadiness(target, timeoutMs);
+  await verifyReadiness(target, timeoutMs, fetchImpl);
   return {
     schemaVersion: 1, kind: "published-source-match", status: "source-match",
     authority: "application-source-comparison-only", productionGo: false,
@@ -111,6 +121,18 @@ export async function createPublishedSourceHandoff(options) {
   // Never accept a supplied receipt as proof: repeat the bounded live lookup
   // against the separately prepared expectation.
   const match = await verifyPublishedBuild(options);
+  return createPublishedSourceHandoffFromMatch(match, options.expected);
+}
+
+export function createPublishedSourceHandoffFromMatch(match, expected) {
+  validateSourceRecord(expected);
+  if (expected.mode !== "publish" || match.status !== "source-match" || match.productionGo !== false ||
+      match.sourceFingerprintSha256 !== expected.sourceFingerprintSha256 ||
+      match.appBuildId !== expected.appBuildId ||
+      match.sourcePolicy !== expected.sourcePolicy ||
+      match.expectedRecordSha256 !== sourceRecordDigest(expected)) {
+    throw new Error("Published source match does not bind to the independent expectation.");
+  }
   return {
     schemaVersion: 2, kind: "published-source-deployment-handoff",
     identityAuthority: "independent-expected-source-comparison",
@@ -119,7 +141,7 @@ export async function createPublishedSourceHandoff(options) {
     sourcePolicy: match.sourcePolicy,
     sourceFingerprintSha256: match.sourceFingerprintSha256,
     expectedRecordSha256: match.expectedRecordSha256,
-    expectedSource: validateSourceRecord(options.expected),
+    expectedSource: expected,
     issuedAt: match.capturedAt, expiresAt: match.expiresAt,
   };
 }
@@ -139,10 +161,9 @@ async function main() {
   const receipt = await verifyPublishedBuild({ url: options["--url"], expected });
   writeRecord(path.resolve(options["--output"] ??
     path.join(PROJECT_ROOT, ".local/build-identity/published-source-match.json")), receipt);
-  if (options["--handoff-output"]) {
-    const handoff = await createPublishedSourceHandoff({ url: options["--url"], expected });
-    writeRecord(path.resolve(options["--handoff-output"]), handoff);
-  }
+  const handoff = createPublishedSourceHandoffFromMatch(receipt, expected);
+  writeRecord(path.resolve(options["--handoff-output"] ??
+    path.join(PROJECT_ROOT, ".local/build-identity/published-source-handoff.json")), handoff);
   console.log(JSON.stringify(receipt));
 }
 
@@ -154,6 +175,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       "Invalid prepared build-source record.",
       "The expected record must be a publish candidate.",
       "Use the official HTTPS app URL without credentials or query parameters.",
+      "Published build metadata lookup failed or timed out.",
       "Published build metadata is unavailable or has an unexpected response.",
       "Published build metadata is empty.",
       "Published build metadata exceeds its response budget.",
@@ -161,6 +183,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       "Invalid sealed build identity.",
       "Published metadata is not a complete release build.",
       "Published source does not match the expected build.",
+      "Published source match does not bind to the independent expectation.",
       "Published build timestamps conflict with the expected record.",
       "Published readiness response is empty.",
       "Published readiness response exceeds its response budget.",

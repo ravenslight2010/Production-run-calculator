@@ -39,25 +39,45 @@ Otherwise the fingerprint remains usable but the Git binding is unavailable.
 
 ## After the owner publishes
 
-Obtain the official published URL using deployment metadata, not a guessed
-domain or a development-domain environment variable. Then run:
+After the owner clicks Publish, obtain current metadata with Replit's supported
+`getDeploymentInfo()` function. Continue only when `success`, `isDeployed`, and
+`hasSuccessfulBuild` are true and `primaryUrl` is present. Use that exact
+`primaryUrl`; do not construct a domain, use `REPLIT_DOMAINS`, or substitute a
+development URL. If metadata is unavailable or the current build is not
+successful, stop without preparing deployment evidence.
+
+The deployment metadata supplies the official URL and current build status, but
+does not supply a Replit Build UUID or deployed Git revision. The app's public
+`/api/build-info` response is compared with the independent
+`.local/build-identity/expected-source.json` record; it is not used to create the
+expectation. Run one command with the metadata's `primaryUrl`:
 
 ```bash
-bash scripts/src/run-release-node.sh pnpm run check:published-build -- \
-  --url 'https://<official-published-host>'
+pnpm run release:check -- \
+  --prepare-published-evidence \
+  --published-url 'https://<primaryUrl-from-current-Replit-metadata>'
 ```
 
-Use `--expected-file <path>` to select a previously captured independent source
-record and `--output <path>` to choose a receipt location. By default the receipt
-is `.local/build-identity/published-source-match.json`.
+This command does not publish. It verifies the complete app build against the
+independent source record and waits for readiness, captures release readiness
+and bounded source-library reconciliation evidence, validates each against the
+same app build/source identity, then writes the evidence files only after all
+checks pass. A failed, stale, unavailable, mismatched, or unready source leaves the new set
+unpromoted and exits nonzero. The source-match receipt and source-based handoff
+are written to `.local/build-identity/`; readiness and reconciliation evidence
+go to the selected release evidence directory. Existing standard/full release
+checks can discover those current files automatically. Use the same `--full`
+and `--evidence-dir` options as the release check when preparing evidence for a
+non-default full-run evidence directory.
 
-The command performs public, bounded, timeout-protected GETs to `/api/build-info`
-and `/api`. It verifies the published source identity, then waits briefly for
-the live readiness endpoint to report ready. Missing/old-server metadata,
-redirects, invalid responses, partial/development builds, mismatched
-source/build/Git fields, or readiness timeout exit nonzero. A successful check
-emits a 24-hour source-match receipt without retaining the target URL or
-response body. Never derive the expected record from the response being verified.
+The handoff uses the namespaced application build ID and
+`source-sha256:<fingerprint>` identity. The `deploymentId` compatibility field
+is not a Replit platform UUID, and the source identity is not described as a Git
+revision. The reconciliation capture uses the published app's configured
+database and read-only verifier; its existing rate limiter still records the
+request count. The raw response is not retained. Rate-limit, concurrent-capture,
+or report-validation failures block promotion; resolve the reported condition
+and retry rather than accepting partial files.
 
 The endpoint is database-independent and unauthenticated. It returns only safe
 version fields, uses `Cache-Control: no-store`, and loads its sealed record once
@@ -70,12 +90,11 @@ An `app-build:…` identifier belongs to this application's artifact set; it is
 **not** Replit's internal Build UUID. Optional runtime-reported platform IDs are
 not provider-verified proof.
 
-A source-match receipt always says `productionGo: false`. It is an additional
-version-comparison check in the release preparation flow, not a replacement for
-the controlled deployment handoff, full deployed revision, production source
-reconciliation, readiness evidence, expiry, browser checks, or standard/full
-release gates. Missing legacy identity requirements remain blocked. Do not
-rewrite historical release reports or infer the older build's revision.
+A source-match receipt always says `productionGo: false`. The generated handoff,
+readiness, and reconciliation records support the release preparation flow;
+they do not replace the expiry, browser, or standard/full release gates. Missing
+current proof remains blocked. Do not rewrite historical release reports or
+infer the older build's revision.
 
 ## Local checks
 
