@@ -32,3 +32,9 @@ This task corrects the existing Gemini stream lifecycle telemetry: metrics and c
 The adapter tests cover the OpenAI-compatible response contract, Gemini timeout/cancellation, selective retry, circuit behavior, and safe metrics. Added checks assert that a proposed local URL alone does not change runtime routing or readiness, and that a mid-stream provider error is not measured as success.
 
 Reconsider local routing only after an access-controlled, independently verified gold set and an approved local endpoint/model support the same frozen Gemini-vs-local comparison described in the linked blocker report.
+
+## Evaluation-only model approval update — 2026-10-07
+
+The project owner accepted Ollama with Qwen3 8B instruct (`qwen3:8b`) as the local evaluation candidate. This is not approval to add local routing. Use only a loopback endpoint on a dedicated evaluator-controlled host, with one concurrent request, at most 32,768 context tokens, a 120-second request deadline, verified host resource limits, restricted evaluator access, and no raw prompt/response retention or payload logging. Customer/source material remains prohibited until separately authorized and reviewed.
+
+No endpoint host/service, model digest, or actual resource enforcement is verified in this evidence. Pin and record the model digest and actual endpoint operator/host before any request; complete the source-backed case review and obtain separate Phase-0 run authorization. The Gemini-only adapter and production routing remain unchanged.
