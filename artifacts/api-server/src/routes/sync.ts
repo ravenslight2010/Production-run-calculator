@@ -124,6 +124,7 @@ type SseClient = {
   watchDate: string;
   resetEpoch: number;
   lastData: unknown;
+  lastSnapshotId?: string;
   lastCanonicalRevision: number;
   lastCalcEmitMs: number;
 };
@@ -554,6 +555,7 @@ function broadcast(
   } = {},
 ): void {
   data = completeSyncData(data);
+  const snapshotId = data == null ? undefined : syncSnapshotId(data);
   const computedLiveState = computeServerLiveState(
     data,
     meta.serverTime ?? Date.now(),
@@ -570,17 +572,22 @@ function broadcast(
         // the next peer update is generated from the snapshot it now holds.
         if (data != null) {
           client.lastData = data;
+          client.lastSnapshotId = snapshotId;
           client.lastCanonicalRevision = meta.canonicalRevision ?? liveState.calculationRevision;
         }
         continue;
       }
+      // An accepted write can leave the canonical document unchanged. Do not
+      // send a redundant frame to a peer whose exact baseline is already that
+      // document; stale peers still need the normal delta/complete recovery.
+      if (snapshotId && client.lastSnapshotId === snapshotId) continue;
       const complete = {
         data,
         senderId,
         scope,
         date,
         completeness: "complete" as const,
-        snapshotId: data == null ? undefined : syncSnapshotId(data),
+        snapshotId,
         canonicalRevision: meta.canonicalRevision ?? liveState.calculationRevision,
         ...liveState,
       };
@@ -628,6 +635,7 @@ function broadcast(
         // generated against data the peer never received.
         if (data != null) {
           client.lastData = data;
+          client.lastSnapshotId = snapshotId;
           client.lastCanonicalRevision = meta.canonicalRevision ?? liveState.calculationRevision;
         }
       } catch {
@@ -2599,7 +2607,7 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
   // calendar day (see broadcast). Matches the initial-row lookup above.
   client = {
     res, clientId, scope, watchDate, resetEpoch: initialResetState.epoch,
-    lastData: data, lastCanonicalRevision: row?.canonicalRevision ?? 0,
+    lastData: data, lastSnapshotId: snapshotId, lastCanonicalRevision: row?.canonicalRevision ?? 0,
     lastCalcEmitMs: initialServerTime,
   };
   clients.add(client);

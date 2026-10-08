@@ -4299,6 +4299,127 @@ describe("/sync/events — date-scoped broadcasts", () => {
     expect(bEvents).not.toContain("sender-A");
   });
 
+  it("skips an unchanged snapshot for a current peer but sends it to a stale peer", async () => {
+    const date = "2030-03-13";
+    const seed = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "no-op-seed",
+        payload: {
+          dayState: {
+            date,
+            runs: [{ id: "no-op-run", brand: "Acme", flavor: "Pep" }],
+            shiftNotes: "initial canonical state",
+          },
+          runValues: { "no-op-run": { casesNeeded: 24 } },
+          runValuesUpdatedAt: { "no-op-run": 1 },
+        },
+      }),
+    });
+    expect(seed.status).toBe(200);
+    const seedBody = await seed.json() as { data: Record<string, any>; snapshotId: string };
+
+    const connectPeer = async (clientId: string) => {
+      const ctrl = new AbortController();
+      const response = await fetch(
+        `${baseUrl}/api/sync/events?clientId=${clientId}&today=${date}`,
+        { headers: authHeaders(), signal: ctrl.signal },
+      );
+      expect(response.status).toBe(200);
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      const readFrame = async (predicate: (frame: Record<string, any>) => boolean) => {
+        for (;;) {
+          const boundary = buffer.indexOf("\n\n");
+          if (boundary >= 0) {
+            const raw = buffer.slice(0, boundary);
+            buffer = buffer.slice(boundary + 2);
+            const line = raw.split("\n").find((entry) => entry.startsWith("data: "));
+            if (line) {
+              const frame = JSON.parse(line.slice("data: ".length)) as Record<string, any>;
+              if (predicate(frame)) return frame;
+            }
+            continue;
+          }
+          const { value, done } = await reader.read();
+          if (done) throw new Error(`SSE stream for ${clientId} ended before the expected frame`);
+          buffer += decoder.decode(value, { stream: true });
+        }
+      };
+      const initial = await readFrame((frame) => frame.initial === true);
+      return { ctrl, reader, readFrame, initial };
+    };
+
+    const stalePeer = await connectPeer("no-op-stale-peer");
+    let currentPeer: Awaited<ReturnType<typeof connectPeer>> | undefined;
+    try {
+      expect(stalePeer.initial.snapshotId).toBe(seedBody.snapshotId);
+
+      // Model a peer that missed an earlier canonical update. Its live stream
+      // still has the original snapshot, while a newly connected peer will
+      // receive the updated snapshot as its initial baseline.
+      const stalePeerData = {
+        ...seedBody.data,
+        dayState: {
+          ...seedBody.data.dayState,
+          shiftNotes: "canonical update missed by stale peer",
+        },
+      };
+      await db.update(dailySyncTable)
+        .set({ data: stalePeerData })
+        .where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, date)));
+      const resultingSnapshotId = syncSnapshotId(stalePeerData);
+      expect(resultingSnapshotId).not.toBe(seedBody.snapshotId);
+
+      currentPeer = await connectPeer("no-op-current-peer");
+      expect(currentPeer.initial.snapshotId).toBe(resultingSnapshotId);
+
+      // Re-submit the exact current canonical data. The server accepts the
+      // write but does not change the document.
+      const write = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
+        method: "PUT",
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({
+          senderId: "no-op-writer",
+          snapshotId: resultingSnapshotId,
+          payload: {
+            ...stalePeerData,
+            syncVersion: 1,
+            completeness: "complete",
+            baseSnapshotId: resultingSnapshotId,
+          },
+        }),
+      });
+      expect(write.status).toBe(200);
+      const writeBody = await write.json() as { snapshotId: string };
+      expect(writeBody.snapshotId).toBe(resultingSnapshotId);
+
+      const staleFrame = await stalePeer.readFrame((frame) => frame.senderId === "no-op-writer");
+      expect(staleFrame.snapshotId).toBe(resultingSnapshotId);
+      if (staleFrame.completeness === "partial") {
+        expect(staleFrame.baseSnapshotId).toBe(stalePeer.initial.snapshotId);
+      } else {
+        expect(staleFrame.completeness).toBe("complete");
+        expect(syncSnapshotId(staleFrame.data)).toBe(resultingSnapshotId);
+      }
+
+      const currentPeerReceivedDuplicate = await Promise.race([
+        currentPeer.readFrame((frame) => frame.senderId === "no-op-writer").then(() => true),
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 250)),
+      ]);
+      expect(currentPeerReceivedDuplicate).toBe(false);
+    } finally {
+      await stalePeer.reader.cancel().catch(() => {});
+      stalePeer.ctrl.abort();
+      if (currentPeer) {
+        await currentPeer.reader.cancel().catch(() => {});
+        currentPeer.ctrl.abort();
+      }
+    }
+  });
+
   // Regression: a schedule import writes each day via PUT /sync/:date. TODAY's
   // write must broadcast to the live view, but the server only broadcasts when
   // `date === clientToday(req)`. If the import omits `?today=`, clientToday
