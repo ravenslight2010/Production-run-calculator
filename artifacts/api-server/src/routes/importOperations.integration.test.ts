@@ -22,6 +22,7 @@ let route: typeof import("./importOperations");
 let seedRoles: () => Promise<void>;
 let recordSession: typeof import("../lib/authSessions")["recordSession"];
 let signLegacyTokenForTests: typeof import("../lib/auth")["signLegacyTokenForTests"];
+let observabilityMiddleware: typeof import("../lib/observability")["observabilityMiddleware"];
 const sessionTokens = new Map<string, string>();
 
 beforeAll(async () => {
@@ -38,6 +39,7 @@ beforeAll(async () => {
   process.env.DATABASE_URL = url.toString();
   ({ signLegacyTokenForTests } = await import("../lib/auth"));
   ({ recordSession } = await import("../lib/authSessions"));
+  ({ observabilityMiddleware } = await import("../lib/observability"));
   tables = await import("@workspace/db");
   db = tables.db; pool = tables.pool;
   route = await import("./importOperations");
@@ -46,6 +48,7 @@ beforeAll(async () => {
   const app = express();
   app.use(express.json({ limit: "1mb" }));
   app.use((req, _res, next) => { (req as any).log = { info() {}, warn() {}, error() {}, debug() {} }; next(); });
+  app.use(observabilityMiddleware);
   app.use("/api", requireAuth, route.default);
   await new Promise<void>((resolve, reject) => {
     server = app.listen(0, () => resolve());
@@ -64,7 +67,7 @@ afterAll(async () => {
 }, 120_000);
 
 beforeEach(async () => {
-  await db.execute(sql`TRUNCATE ${tables.importOperationsTable}, ${tables.importHistoryTable}, ${tables.brandProfilesTable}, ${tables.mixesTable}, ${tables.specImportAliasesTable}, ${tables.authSessionsTable}, ${tables.userRolesTable}, ${tables.usersTable} RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE ${tables.importOperationsTable}, ${tables.importHistoryTable}, ${tables.auditLogsTable}, ${tables.brandProfilesTable}, ${tables.mixesTable}, ${tables.doughRecipesTable}, ${tables.sauceRecipesTable}, ${tables.specImportAliasesTable}, ${tables.authSessionsTable}, ${tables.userRolesTable}, ${tables.usersTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
   await db.insert(tables.usersTable).values([
     { id: "inventory", username: "inventory", passwordHash: "x" },
@@ -95,13 +98,177 @@ function change(id = "mix-atomic") {
     changes: { mixes: { upsert: [{ id, name: "Atomic Mix", brand: "", flavor: "", batchSize: 1, daysEarly: 0, notes: "", amountAlreadyMade: 0, components: [], isPrep: false, enabled: true }] } },
   };
 }
-async function apply(operationId: string, body: Record<string, unknown>, user = "inventory") {
+async function apply(
+  operationId: string,
+  body: Record<string, unknown>,
+  user = "inventory",
+  extraHeaders: Record<string, string> = {},
+) {
   return fetch(`${baseUrl}/api/import-operations/${operationId}/apply`, {
-    method: "POST", headers: headers(user), body: JSON.stringify(body),
+    method: "POST", headers: { ...headers(user), ...extraHeaders }, body: JSON.stringify(body),
   });
 }
 
 describe("atomic import operations", () => {
+  it("records value-free imported create, update, and delete events for dough, sauce, and mix recipes", async () => {
+    const dough = {
+      id: "import-audit-dough",
+      name: "PRIVATE_DOUGH_NAME",
+      brand: "PRIVATE_DOUGH_BRAND",
+      flavors: ["PRIVATE_DOUGH_FLAVOR"],
+      notes: "PRIVATE_DOUGH_NOTES",
+      components: [{ ingredient: "PRIVATE_DOUGH_INGREDIENT", lbs: 10 }],
+      doughballWeightOz: 8,
+      doughballsPerTray: 30,
+      doughballVariants: [{ label: "PRIVATE_DOUGH_VARIANT", weightOz: 8, perTray: 30 }],
+    };
+    const sauce = {
+      id: "import-audit-sauce",
+      name: "PRIVATE_SAUCE_NAME",
+      brand: "PRIVATE_SAUCE_BRAND",
+      flavors: ["PRIVATE_SAUCE_FLAVOR"],
+      notes: "PRIVATE_SAUCE_NOTES",
+      components: [{ ingredient: "PRIVATE_SAUCE_INGREDIENT", lbs: 10 }],
+    };
+    const mix = {
+      id: "import-audit-mix",
+      name: "PRIVATE_MIX_NAME",
+      brand: "PRIVATE_MIX_BRAND",
+      flavor: "PRIVATE_MIX_FLAVOR",
+      batchSize: 3,
+      daysEarly: 2,
+      notes: "PRIVATE_MIX_NOTES",
+      amountAlreadyMade: 1,
+      components: [{ ingredient: "PRIVATE_MIX_INGREDIENT", perPizza: 2 }],
+      isPrep: true,
+      enabled: true,
+    };
+    const changesFor = (recipes: {
+      dough: typeof dough;
+      sauce: typeof sauce;
+      mix: typeof mix;
+    }) => ({
+      importType: "spec",
+      sourceLabel: "private-recipe-source.xlsx",
+      changes: {
+        doughRecipes: { upsert: [recipes.dough] },
+        sauceRecipes: { upsert: [recipes.sauce] },
+        mixes: { upsert: [recipes.mix] },
+      },
+    });
+    const createdResponse = await apply(
+      "import-audit-create-0001",
+      changesFor({ dough, sauce, mix }),
+      "inventory",
+      { "x-correlation-id": "client-supplied-correlation" },
+    );
+    expect(createdResponse.status).toBe(200);
+    const createdCorrelationId = createdResponse.headers.get("x-correlation-id");
+    expect(createdCorrelationId).toMatch(/^[0-9a-f-]{36}$/u);
+    expect(createdCorrelationId).not.toBe("client-supplied-correlation");
+
+    const updatedDough = { ...dough, notes: "UPDATED_DOUGH_NOTES" };
+    const updatedSauce = { ...sauce, brand: "UPDATED_SAUCE_BRAND" };
+    const updatedMix = { ...mix, batchSize: 4 };
+    const updatedResponse = await apply("import-audit-update-0001", changesFor({
+      dough: updatedDough,
+      sauce: updatedSauce,
+      mix: updatedMix,
+    }));
+    expect(updatedResponse.status).toBe(200);
+    const updatedCorrelationId = updatedResponse.headers.get("x-correlation-id");
+    expect(updatedCorrelationId).toMatch(/^[0-9a-f-]{36}$/u);
+
+    const noOpChanges = changesFor({
+      dough: updatedDough,
+      sauce: updatedSauce,
+      mix: updatedMix,
+    });
+    const noOpResponse = await apply("import-audit-noop-0001", {
+      ...noOpChanges,
+      changes: {
+        ...noOpChanges.changes,
+        doughRecipes: {
+          ...noOpChanges.changes.doughRecipes,
+          delete: ["missing-import-audit-recipe"],
+        },
+      },
+    });
+    expect(noOpResponse.status).toBe(200);
+
+    const deleteResponse = await apply("import-audit-delete-0001", {
+      importType: "spec",
+      sourceLabel: "private-recipe-source.xlsx",
+      changes: {
+        doughRecipes: { delete: [dough.id] },
+        sauceRecipes: { delete: [sauce.id] },
+        mixes: { delete: [mix.id] },
+      },
+    });
+    expect(deleteResponse.status).toBe(200);
+    const deleteCorrelationId = deleteResponse.headers.get("x-correlation-id");
+    expect(deleteCorrelationId).toMatch(/^[0-9a-f-]{36}$/u);
+
+    const auditRows = (await db.select().from(tables.auditLogsTable))
+      .sort((left, right) => left.id - right.id);
+    const families = [
+      {
+        family: "dough_recipe",
+        id: dough.id,
+        fields: [
+          "name", "notes", "components", "enabled", "brand", "flavors",
+          "doughballWeightOz", "doughballsPerTray", "doughballVariants",
+        ],
+        updatedFields: ["notes"],
+      },
+      {
+        family: "sauce_recipe",
+        id: sauce.id,
+        fields: ["name", "notes", "components", "enabled", "brand", "flavors"],
+        updatedFields: ["brand"],
+      },
+      {
+        family: "mix_recipe",
+        id: mix.id,
+        fields: [
+          "name", "brand", "flavor", "batchSize", "daysEarly", "notes",
+          "amountAlreadyMade", "components", "isPrep", "enabled",
+        ],
+        updatedFields: ["batchSize"],
+      },
+    ];
+    expect(auditRows).toHaveLength(9);
+    for (const recipe of families) {
+      const events = auditRows.filter((row) => row.resource === `${recipe.family}:${recipe.id}`);
+      expect(events.map((row) => row.action)).toEqual([
+        `${recipe.family}_created`,
+        `${recipe.family}_updated`,
+        `${recipe.family}_deleted`,
+      ]);
+      expect(events.map((row) => row.actor)).toEqual(["inventory", "inventory", "inventory"]);
+      expect(events.map((row) => row.changes)).toEqual([
+        { fieldNames: recipe.fields, correlationId: createdCorrelationId },
+        { fieldNames: recipe.updatedFields, correlationId: updatedCorrelationId },
+        { fieldNames: recipe.fields, correlationId: deleteCorrelationId },
+      ]);
+    }
+    expect(auditRows.some((row) =>
+      (row.changes as Record<string, unknown>).correlationId === noOpResponse.headers.get("x-correlation-id"),
+    )).toBe(false);
+
+    const auditPayload = JSON.stringify(auditRows.map((row) => row.changes));
+    for (const privateValue of [
+      "PRIVATE_DOUGH_NAME", "PRIVATE_DOUGH_BRAND", "PRIVATE_DOUGH_FLAVOR",
+      "PRIVATE_DOUGH_NOTES", "PRIVATE_DOUGH_INGREDIENT", "PRIVATE_DOUGH_VARIANT",
+      "UPDATED_DOUGH_NOTES", "PRIVATE_SAUCE_NAME", "PRIVATE_SAUCE_BRAND",
+      "PRIVATE_SAUCE_FLAVOR", "PRIVATE_SAUCE_NOTES", "PRIVATE_SAUCE_INGREDIENT",
+      "UPDATED_SAUCE_BRAND", "PRIVATE_MIX_NAME", "PRIVATE_MIX_BRAND",
+      "PRIVATE_MIX_FLAVOR", "PRIVATE_MIX_NOTES", "PRIVATE_MIX_INGREDIENT",
+    ]) {
+      expect(auditPayload).not.toContain(privateValue);
+    }
+  });
+
   it("rejects source evidence from a retired parser without persisting an operation", async () => {
     const response = await apply("distill-retired-parser-0001", {
       ...change("retired-parser"),
@@ -272,12 +439,13 @@ describe("atomic import operations", () => {
   });
 
   it("rolls back after failures at domain and history stages", async () => {
-    for (const stage of ["after-mixes", "after-history"]) {
+    for (const stage of ["after-mixes", "after-recipe-audit", "after-history"]) {
       route.setImportOperationFailureHookForTest((actual) => { if (actual === stage) throw new Error("injected"); });
       const response = await apply(`rollback-${stage.replace("-", "")}-001`, change());
       expect(response.status).toBe(500);
       expect(await db.select().from(tables.mixesTable)).toHaveLength(0);
       expect(await db.select().from(tables.importOperationsTable)).toHaveLength(0);
+      expect(await db.select().from(tables.auditLogsTable)).toHaveLength(0);
       route.setImportOperationFailureHookForTest();
     }
   });

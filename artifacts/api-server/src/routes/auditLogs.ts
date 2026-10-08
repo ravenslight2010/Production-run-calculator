@@ -108,14 +108,14 @@ type AuditEventSchema = {
 const CHEESE_RECIPE_AUDIT_FIELDS = [
   "name", "brand", "flavors", "shredderSetting", "cellulose", "notes", "components", "enabled",
 ] as const;
-const DOUGH_RECIPE_AUDIT_FIELDS = [
+export const DOUGH_RECIPE_AUDIT_FIELDS = [
   "name", "notes", "components", "enabled", "brand", "flavors",
   "doughballWeightOz", "doughballsPerTray", "doughballVariants",
 ] as const;
-const SAUCE_RECIPE_AUDIT_FIELDS = [
+export const SAUCE_RECIPE_AUDIT_FIELDS = [
   "name", "notes", "components", "enabled", "brand", "flavors",
 ] as const;
-const MIX_RECIPE_AUDIT_FIELDS = [
+export const MIX_RECIPE_AUDIT_FIELDS = [
   "name", "brand", "flavor", "batchSize", "daysEarly", "notes",
   "amountAlreadyMade", "components", "isPrep", "enabled",
 ] as const;

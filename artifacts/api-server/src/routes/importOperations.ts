@@ -1,4 +1,5 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { and, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import {
@@ -22,6 +23,12 @@ import { normalizeNamedRecipe } from "@workspace/named-recipes";
 import { normalizeFreezerPullItem } from "@workspace/freezer-pull";
 import { broadcastMasterDataChanged } from "./sync";
 import { SPEC_IMPORT_PARSE_VERSION } from "@workspace/spec-import";
+import {
+  writeAuditEvent,
+  DOUGH_RECIPE_AUDIT_FIELDS,
+  MIX_RECIPE_AUDIT_FIELDS,
+  SAUCE_RECIPE_AUDIT_FIELDS,
+} from "./auditLogs";
 
 const router: IRouter = Router();
 const MAX_ROWS = 500;
@@ -125,6 +132,12 @@ function ids(value: unknown): string[] {
 }
 function capability(importType: string): "manage-profiles" | "manage-inventory" {
   return ["premix", "cheese"].includes(importType) ? "manage-inventory" : "manage-profiles";
+}
+function requestCorrelationId(req: Request): string {
+  const candidate = (req as Request & { correlationId?: unknown }).correlationId;
+  return typeof candidate === "string" && candidate.length > 0 && candidate.length <= 128
+    ? candidate
+    : randomUUID();
 }
 function entityCapability(entity: string): "manage-profiles" | "manage-inventory" {
   return ["mixes", "cheeseRecipes"].includes(entity) ? "manage-inventory" : "manage-profiles";
@@ -231,6 +244,57 @@ async function captureSnapshotRows(
       : [];
   }
   return result;
+}
+
+const RECIPE_AUDIT_CONFIG = {
+  doughRecipes: { family: "dough_recipe", fields: DOUGH_RECIPE_AUDIT_FIELDS },
+  sauceRecipes: { family: "sauce_recipe", fields: SAUCE_RECIPE_AUDIT_FIELDS },
+  mixes: { family: "mix_recipe", fields: MIX_RECIPE_AUDIT_FIELDS },
+} as const;
+
+async function auditImportedRecipeChanges(
+  tx: any,
+  before: Record<string, unknown[]>,
+  after: Record<string, unknown[]>,
+  correlationId: string,
+): Promise<void> {
+  for (const [entity, config] of Object.entries(RECIPE_AUDIT_CONFIG) as [
+    keyof typeof RECIPE_AUDIT_CONFIG,
+    (typeof RECIPE_AUDIT_CONFIG)[keyof typeof RECIPE_AUDIT_CONFIG],
+  ][]) {
+    const beforeById = new Map((before[entity] ?? []).map((row: any) => [String(row.id), row]));
+    const afterById = new Map((after[entity] ?? []).map((row: any) => [String(row.id), row]));
+    const ids = new Set([...beforeById.keys(), ...afterById.keys()]);
+
+    for (const id of ids) {
+      const prior = beforeById.get(id) as Record<string, unknown> | undefined;
+      const current = afterById.get(id) as Record<string, unknown> | undefined;
+      let action: string;
+      let fieldNames: readonly string[];
+
+      if (!prior && current) {
+        action = `${config.family}_created`;
+        fieldNames = config.fields;
+      } else if (prior && !current) {
+        action = `${config.family}_deleted`;
+        fieldNames = config.fields;
+      } else if (prior && current) {
+        const changedFields = config.fields.filter((field) =>
+          !isDeepStrictEqual(prior[field], current[field]));
+        if (changedFields.length === 0) continue;
+        action = `${config.family}_updated`;
+        fieldNames = changedFields;
+      } else {
+        continue;
+      }
+
+      await writeAuditEvent(tx, {
+        action,
+        resource: `${config.family}:${id}`,
+        changes: { fieldNames, correlationId },
+      });
+    }
+  }
 }
 
 async function applyRows(tx: any, changes: ChangeSet, scope: string): Promise<void> {
@@ -450,6 +514,8 @@ router.post("/import-operations/:operationId/apply", requireAnyCapability(["mana
       await applyRows(tx, changes, scope);
       fail("after-domain-writes");
       const after = await capture(tx, changes, scope);
+      await auditImportedRecipeChanges(tx, before, after, requestCorrelationId(req));
+      fail("after-recipe-audit");
       const resultHash = hash(after);
       const result = { operationId, resultHash, affectedEntities: Object.fromEntries(
         Object.entries(after).map(([key, value]) => [key, value.length]),
