@@ -158,6 +158,12 @@ export type SyncHealthReport = {
     fullWindowObserved: boolean;
     expiresAt: string;
   };
+  syncPeerFrames: {
+    windowMs: number;
+    exactSnapshotSkipped: number;
+    partialSent: number;
+    completeSent: number;
+  };
   correlationId?: string;
 };
 

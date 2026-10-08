@@ -4,6 +4,7 @@ import type { Logger } from "pino";
 import { logger } from "./logger";
 
 const MAX_SAMPLES = 2_048;
+const MAX_COUNTER_VALUE = Number.MAX_SAFE_INTEGER;
 const REPORT_INTERVAL_MS = 60_000;
 const MAX_METRIC_VALUE = 10 * 60 * 1_000;
 const EVENT_LOOP_DELAY_DISTRIBUTION = "node.event_loop.delay_ms";
@@ -15,6 +16,12 @@ const LEGACY_SYNC_BUCKET_MS = 60_000;
 
 export type SyncPutMode = "complete" | "partial" | "fallback" | "unchanged";
 export type SseFrameMode = "complete" | "partial";
+export type SyncPeerFrameTelemetry = {
+  windowMs: number;
+  exactSnapshotSkipped: number;
+  partialSent: number;
+  completeSent: number;
+};
 
 type Distribution = {
   count: number;
@@ -75,6 +82,23 @@ function bounded(value: unknown): number {
 
 function increment(key: string): void {
   counters.set(key, (counters.get(key) ?? 0) + 1);
+}
+
+function incrementBounded(key: string): void {
+  counters.set(key, Math.min(MAX_COUNTER_VALUE, (counters.get(key) ?? 0) + 1));
+}
+
+function counterValue(key: string): number {
+  const value = counters.get(key) ?? 0;
+  return Number.isFinite(value)
+    ? Math.min(MAX_COUNTER_VALUE, Math.max(0, Math.floor(value)))
+    : 0;
+}
+
+function counterWindowMs(now: number): number {
+  return Number.isFinite(now)
+    ? Math.min(MAX_COUNTER_VALUE, Math.max(0, Math.floor(now - windowStartedAt)))
+    : 0;
 }
 
 function observe(key: string, value: number): void {
@@ -198,12 +222,30 @@ export function recordSseFrame(fields: {
   frameBytes: number;
   durationMs: number;
   outcome: "sent" | "write_failed";
+  peerUpdate?: boolean;
 }): void {
   const prefix = `sync.sse.${fields.mode}.${fields.outcome}`;
   increment(`${prefix}.count`);
+  if (fields.peerUpdate && fields.outcome === "sent") {
+    incrementBounded(`sync.sse.peer.${fields.mode}.sent.count`);
+  }
   observe(`${prefix}.frame_bytes`, fields.frameBytes);
   observe(`${prefix}.duration_ms`, fields.durationMs);
   maybeReport();
+}
+
+export function recordSsePeerFrameSkippedExactSnapshot(): void {
+  incrementBounded("sync.sse.peer.exact_snapshot.skipped.count");
+  maybeReport();
+}
+
+export function syncPeerFrameTelemetrySnapshot(now = Date.now()): SyncPeerFrameTelemetry {
+  return {
+    windowMs: counterWindowMs(now),
+    exactSnapshotSkipped: counterValue("sync.sse.peer.exact_snapshot.skipped.count"),
+    partialSent: counterValue("sync.sse.peer.partial.sent.count"),
+    completeSent: counterValue("sync.sse.peer.complete.sent.count"),
+  };
 }
 
 export function recordSyncTransaction(durationMs: number): void {

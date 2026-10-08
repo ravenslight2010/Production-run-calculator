@@ -9,7 +9,10 @@ import pg from "pg";
 import { and, eq, sql } from "drizzle-orm";
 import { signLegacyTokenForTests } from "../lib/auth";
 import { syncSnapshotId } from "../lib/syncContract";
-import { legacySyncReadinessSnapshot } from "../lib/capacityTelemetry";
+import {
+  clearCapacityTelemetryForTests,
+  legacySyncReadinessSnapshot,
+} from "../lib/capacityTelemetry";
 import { applySyncDeltaData } from "@workspace/sync-contract";
 
 const emptyCompleteSnapshotId = (date: string) => syncSnapshotId({
@@ -4329,6 +4332,7 @@ describe("/sync/events — date-scoped broadcasts", () => {
 
   it("skips an unchanged snapshot for a current peer but sends it to a stale peer", async () => {
     const date = "2030-03-13";
+    clearCapacityTelemetryForTests();
     const seed = await fetch(`${baseUrl}/api/sync/today?today=${date}`, {
       method: "PUT",
       headers: { ...authHeaders(), "content-type": "application/json" },
@@ -4338,7 +4342,7 @@ describe("/sync/events — date-scoped broadcasts", () => {
           dayState: {
             date,
             runs: [{ id: "no-op-run", brand: "Acme", flavor: "Pep" }],
-            shiftNotes: "initial canonical state",
+            shiftNotes: "private shift note that must not appear in diagnostics",
           },
           runValues: { "no-op-run": { casesNeeded: 24 } },
           runValuesUpdatedAt: { "no-op-run": 1 },
@@ -4392,7 +4396,7 @@ describe("/sync/events — date-scoped broadcasts", () => {
         ...seedBody.data,
         dayState: {
           ...seedBody.data.dayState,
-          shiftNotes: "canonical update missed by stale peer",
+          shiftNotes: "private canonical update missed by stale peer",
         },
       };
       await db.update(dailySyncTable)
@@ -4438,6 +4442,24 @@ describe("/sync/events — date-scoped broadcasts", () => {
         new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 250)),
       ]);
       expect(currentPeerReceivedDuplicate).toBe(false);
+
+      const diagnosticsResponse = await fetch(`${baseUrl}/api/sync/health?date=${date}`, {
+        headers: managerAuthHeaders(),
+      });
+      expect(diagnosticsResponse.status).toBe(200);
+      const diagnostics = await diagnosticsResponse.json() as Record<string, any>;
+      expect(diagnostics.syncPeerFrames).toMatchObject({
+        exactSnapshotSkipped: 1,
+      });
+      expect(
+        diagnostics.syncPeerFrames.partialSent + diagnostics.syncPeerFrames.completeSent,
+      ).toBe(1);
+      const diagnosticsText = JSON.stringify(diagnostics);
+      expect(diagnosticsText).not.toContain("no-op-writer");
+      expect(diagnosticsText).not.toContain("no-op-current-peer");
+      expect(diagnosticsText).not.toContain("no-op-run");
+      expect(diagnosticsText).not.toContain("private shift note");
+      expect(diagnosticsText).not.toContain("private canonical update");
     } finally {
       await stalePeer.reader.cancel().catch(() => {});
       stalePeer.ctrl.abort();

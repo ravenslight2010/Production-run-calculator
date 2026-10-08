@@ -62,10 +62,12 @@ import { consumeRunInTransaction, consumeSauceBarrelInTransaction } from "./inve
 import { logger } from "../lib/logger";
 import {
   recordSseFrame,
+  recordSsePeerFrameSkippedExactSnapshot,
   recordLegacySyncWrite,
   recordSyncPut,
   recordSyncTransaction,
   legacySyncReadinessSnapshot,
+  syncPeerFrameTelemetrySnapshot,
   syncRunCountBucket,
   type SyncPutMode,
 } from "../lib/capacityTelemetry";
@@ -580,7 +582,10 @@ function broadcast(
       // An accepted write can leave the canonical document unchanged. Do not
       // send a redundant frame to a peer whose exact baseline is already that
       // document; stale peers still need the normal delta/complete recovery.
-      if (snapshotId && client.lastSnapshotId === snapshotId) continue;
+      if (snapshotId && client.lastSnapshotId === snapshotId) {
+        recordSsePeerFrameSkippedExactSnapshot();
+        continue;
+      }
       const complete = {
         data,
         senderId,
@@ -629,6 +634,7 @@ function broadcast(
           frameBytes: Buffer.byteLength(frameText),
           durationMs: performance.now() - frameStartedAt,
           outcome: "sent",
+          peerUpdate: true,
         });
         // Advance only after the write succeeds. A failed stream must not
         // poison its baseline and cause the next recipient delta to be
@@ -2833,6 +2839,7 @@ router.get(
         date,
         new Date(),
         legacySyncReadinessSnapshot(legacyCompleteWritesRejected() ? "reject" : "accept"),
+        syncPeerFrameTelemetrySnapshot(),
       );
       logger.info({
         event: "sync_health_check",

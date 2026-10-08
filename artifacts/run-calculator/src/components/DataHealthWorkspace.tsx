@@ -264,6 +264,33 @@ export default function DataHealthWorkspace({ onNavigate }: Props) {
                   Evidence expires {new Date(syncHealthQuery.data.legacySyncReadiness.expiresAt).toLocaleString()}.
                 </p>
               </div>
+              <div data-testid="sync-peer-frames" className="rounded border border-border bg-background/60 px-2 py-2">
+                <div className="font-medium">Peer update frames</div>
+                <div className="mt-1 grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-3">
+                  <p>
+                    Exact-snapshot updates skipped:{" "}
+                    <span className="font-medium text-foreground">
+                      {syncHealthQuery.data.syncPeerFrames.exactSnapshotSkipped}
+                    </span>
+                  </p>
+                  <p>
+                    Partial frames sent:{" "}
+                    <span className="font-medium text-foreground">
+                      {syncHealthQuery.data.syncPeerFrames.partialSent}
+                    </span>
+                  </p>
+                  <p>
+                    Complete frames sent:{" "}
+                    <span className="font-medium text-foreground">
+                      {syncHealthQuery.data.syncPeerFrames.completeSent}
+                    </span>
+                  </p>
+                </div>
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  Current telemetry window: {Math.round(syncHealthQuery.data.syncPeerFrames.windowMs / 1_000)} seconds.
+                  Counts reset when the server reports its capacity telemetry window.
+                </p>
+              </div>
               <div className="space-y-1">
                 {syncHealthQuery.data.checks.map((check) => (
                   <div key={check.name} className="rounded border border-border bg-background/60 px-2 py-1.5">

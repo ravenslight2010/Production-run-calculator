@@ -9,11 +9,13 @@ import {
   legacySyncReadinessSnapshot,
   recordLegacySyncWrite,
   recordSseFrame,
+  recordSsePeerFrameSkippedExactSnapshot,
   recordSyncParserRejection,
   recordSyncPut,
   recordSyncTransaction,
   reportCapacityTelemetry,
   syncRunCountBucket,
+  syncPeerFrameTelemetrySnapshot,
 } from "./capacityTelemetry";
 
 beforeEach(() => clearCapacityTelemetryForTests());
@@ -116,6 +118,27 @@ describe("capacity telemetry", () => {
     expect(syncRunCountBucket({ dayState: { runs: [{}] } })).toBe("1-5");
     expect(syncRunCountBucket({ dayState: { runs: Array(20).fill({}) } })).toBe("6-20");
     expect(syncRunCountBucket({ dayState: { runs: Array(80).fill({}) } })).toBe("21-50");
+  });
+
+  it("exposes fixed peer-frame counts without payloads or peer identifiers", () => {
+    recordSseFrame({ mode: "complete", frameBytes: 800, durationMs: 2, outcome: "sent", peerUpdate: true });
+    recordSseFrame({ mode: "partial", frameBytes: 240, durationMs: 1, outcome: "sent", peerUpdate: true });
+    recordSsePeerFrameSkippedExactSnapshot();
+
+    const snapshot = syncPeerFrameTelemetrySnapshot();
+    expect(snapshot).toMatchObject({
+      exactSnapshotSkipped: 1,
+      partialSent: 1,
+      completeSent: 1,
+    });
+    expect(snapshot.windowMs).toBeGreaterThanOrEqual(0);
+    expect(Object.keys(snapshot).sort()).toEqual([
+      "completeSent",
+      "exactSnapshotSkipped",
+      "partialSent",
+      "windowMs",
+    ]);
+    expect(JSON.stringify(snapshot)).not.toMatch(/private-peer-7|private-run-9|private shift note/i);
   });
 
   it("keeps percentile samples representative across the whole report window", () => {
