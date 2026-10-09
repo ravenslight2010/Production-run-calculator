@@ -415,6 +415,19 @@ router.put(
             );
           }
         }
+        const selectionIsUnchanged =
+          existingAllocations.length === requested.size &&
+          oldByLot.size === requested.size &&
+          [...requested].every(([lotId, cases]) => oldByLot.get(lotId) === cases) &&
+          existingAllocations.every(
+            (allocation) =>
+              allocation.runDate === runDate &&
+              allocation.productKey === product.productKey &&
+              allocation.brand === product.brand &&
+              allocation.flavor === product.flavor,
+          );
+        if (selectionIsUnchanged) return listLedger(tx);
+
         for (const allocation of existingAllocations) {
           await tx
             .update(freezerSurplusLotsTable)

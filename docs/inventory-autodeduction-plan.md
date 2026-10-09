@@ -23,7 +23,7 @@ The status and priorities below supersede the implementation-status snapshot in 
 |---|---|---|
 | Actual-case run consumption | **Implemented in source; verification partial** | Server uses persisted `actualCases` when positive, with planned-value fallback; focused integration coverage for the scaled quantity was not located. |
 | Mix/prep-mix and surplus | **Implemented for recorded day-start events** | `inventory.integration.test.ts` covers idempotent drawdown, rollback/retry, and surplus creation; broader reconciliation remains. |
-| Freezer pull | **Core path implemented; parity coverage partial** | Server allocation updates the dated surplus and finished-case inventory. Existing tests cover allocation idempotency and generic location transfers; add combined balance/stock assertions. |
+| Freezer pull | **Core path implemented; allocation parity verified** | `freezerSurplus.integration.test.ts` verifies dated surplus and finished-case stock through confirmation, allocation, identical retry, replacement, release, and over-allocation rejection, including inventory-ledger movement counts. |
 | Packaging | **Formula paths implemented; verification partial** | `computeRunLines` covers package lines and `computeDailySupplyConsumptionLines` covers daily supplies; focused tests do not assert every item/mode combination. |
 | Waste, stoppage loss, returns, accepted final total | **Open** | Define the physical event, accepted quantity, correction, and audit rules before adding stock mutations. |
 | QC packaging lots | **Gated** | Depends on approved QC lot/check scope. |
@@ -115,11 +115,11 @@ Similar to Feature A but for mixes specifically.
 
 ## C. Freezer Pull → Inventory Sync (Medium)
 
-**Status**: Core server path built; direct parity-test coverage is partial.
+**Status**: Core server path built; direct parity-test coverage is in place.
 
 **Current behavior**: Allocation updates the dated freezer surplus lot/allocation and the finished-case inventory stock. Replacing or releasing an allocation restores the prior quantity before applying the new selection.
 
-**Key invariant**: This changes finished-case stock/allocation only; it does not deduct the underlying ingredients again. Existing API tests cover allocation idempotency and over-allocation. Add assertions that surplus balance and finished-case inventory remain in parity through confirm, replacement, and release.
+**Key invariant**: This changes finished-case stock/allocation only; it does not deduct the underlying ingredients again. The server integration test asserts that surplus balance, finished-case on-hand stock, and net inventory-ledger movements stay aligned through confirm, allocation, identical retry, replacement, release, and over-allocation rejection.
 
 ---
 

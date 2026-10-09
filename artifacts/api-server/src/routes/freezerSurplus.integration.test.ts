@@ -18,6 +18,10 @@ let db: DbModule["db"];
 let pool: DbModule["pool"];
 let freezerSurplusLotsTable: DbModule["freezerSurplusLotsTable"];
 let freezerSurplusAllocationsTable: DbModule["freezerSurplusAllocationsTable"];
+let inventoryItemsTable: DbModule["inventoryItemsTable"];
+let inventoryLotsTable: DbModule["inventoryLotsTable"];
+let inventoryLedgerTable: DbModule["inventoryLedgerTable"];
+let inventoryLocationsTable: DbModule["inventoryLocationsTable"];
 let dailySyncTable: DbModule["dailySyncTable"];
 let usersTable: DbModule["usersTable"];
 let userRolesTable: DbModule["userRolesTable"];
@@ -68,6 +72,10 @@ beforeAll(async () => {
   pool = dbMod.pool;
   freezerSurplusLotsTable = dbMod.freezerSurplusLotsTable;
   freezerSurplusAllocationsTable = dbMod.freezerSurplusAllocationsTable;
+  inventoryItemsTable = dbMod.inventoryItemsTable;
+  inventoryLotsTable = dbMod.inventoryLotsTable;
+  inventoryLedgerTable = dbMod.inventoryLedgerTable;
+  inventoryLocationsTable = dbMod.inventoryLocationsTable;
   dailySyncTable = dbMod.dailySyncTable;
   usersTable = dbMod.usersTable;
   userRolesTable = dbMod.userRolesTable;
@@ -108,9 +116,14 @@ beforeEach(async () => {
   clearSandboxCache();
   await db.execute(sql`
     TRUNCATE ${freezerSurplusAllocationsTable}, ${freezerSurplusLotsTable},
+      ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryItemsTable}, ${inventoryLocationsTable},
       ${dailySyncTable}, ${userRolesTable}, ${usersTable}, ${rolesTable}
       RESTART IDENTITY CASCADE
   `);
+  await db.insert(inventoryLocationsTable).values([
+    { scope: "live", name: "Test Freezer", isOnsite: false },
+    { scope: "sandbox", name: "Test Freezer", isOnsite: false },
+  ]);
   await seedRoles();
   await db.insert(usersTable).values([
     { id: MANAGER, username: MANAGER, passwordHash: "x" },
@@ -145,6 +158,50 @@ async function ledger(userId = MANAGER) {
     lots: Array<{ id: string; productionDate: string; remainingCases: number; totalCases: number }>;
     allocations: Array<{ lotId: string; runId: string; cases: number }>;
   };
+}
+
+async function finishedInventoryBalance(scope = "live") {
+  const items = await db.select().from(inventoryItemsTable);
+  const item = items.find(
+    (row) => row.scope === scope && row.key === "finished:acme:pepperoni",
+  );
+  if (!item) return { onHand: 0, nonFreezerOnHand: 0, ledgerNet: 0, movementCount: 0 };
+
+  const [lots, movements, locations] = await Promise.all([
+    db.select().from(inventoryLotsTable),
+    db.select().from(inventoryLedgerTable),
+    db.select().from(inventoryLocationsTable),
+  ]);
+  const freezerLocationIds = new Set(
+    locations.filter((location) => location.scope === scope && !location.isOnsite).map((location) => location.id),
+  );
+  const itemLots = lots.filter((lot) => lot.scope === scope && lot.itemId === item.id);
+  return {
+    onHand: itemLots
+      .filter((lot) => lot.locationId != null && freezerLocationIds.has(lot.locationId))
+      .reduce((sum, lot) => sum + lot.qtyRemaining, 0),
+    nonFreezerOnHand: itemLots
+      .filter((lot) => lot.locationId == null || !freezerLocationIds.has(lot.locationId))
+      .reduce((sum, lot) => sum + lot.qtyRemaining, 0),
+    ledgerNet: movements
+      .filter((movement) => movement.scope === scope && movement.itemId === item.id)
+      .reduce((sum, movement) => sum + movement.qtyDelta, 0),
+    movementCount: movements.filter(
+      (movement) => movement.scope === scope && movement.itemId === item.id,
+    ).length,
+  };
+}
+
+async function expectFreezerParity(expectedCases: number, expectedMovements: number) {
+  const loaded = await ledger();
+  expect(loaded.lots.reduce((sum, lot) => sum + lot.remainingCases, 0)).toBe(expectedCases);
+  const inventory = await finishedInventoryBalance();
+  expect(inventory).toEqual({
+    onHand: expectedCases,
+    nonFreezerOnHand: 0,
+    ledgerNet: expectedCases,
+    movementCount: expectedMovements,
+  });
 }
 
 async function confirm(userId: string, overrides: Record<string, unknown> = {}) {
@@ -211,6 +268,7 @@ describe("dated freezer surplus API", () => {
   it("supports idempotent partial allocation, revision, release, and effective demand", async () => {
     const lotResponse = await confirm(MANAGER);
     const lotId = ((await lotResponse.json()) as { createdLot: { id: string } }).createdLot.id;
+    await expectFreezerParity(20, 1);
     await seedRun("run-1");
 
     expect((await allocate(MANAGER, "run-1", [{ lotId, cases: 12 }])).status).toBe(200);
@@ -219,18 +277,24 @@ describe("dated freezer surplus API", () => {
     expect(loaded.allocations).toEqual([
       expect.objectContaining({ lotId, runId: "run-1", cases: 12 }),
     ]);
+    await expectFreezerParity(8, 2);
 
-    // Repeating the same PUT replaces the run selection instead of spending again.
+    // Retrying the same PUT leaves both balances and the stock-movement ledger unchanged.
     expect((await allocate(MANAGER, "run-1", [{ lotId, cases: 12 }])).status).toBe(200);
-    expect((await ledger()).lots[0].remainingCases).toBe(8);
+    await expectFreezerParity(8, 2);
 
     expect((await allocate(MANAGER, "run-1", [{ lotId, cases: 5 }])).status).toBe(200);
     loaded = await ledger();
     expect(loaded.lots[0].remainingCases).toBe(15);
     expect(loaded.allocations[0].cases).toBe(5);
+    await expectFreezerParity(15, 4);
 
     expect((await allocate(MANAGER, "run-1", [])).status).toBe(200);
-    expect((await ledger()).lots[0].remainingCases).toBe(20);
+    await expectFreezerParity(20, 5);
+
+    // A repeated release is also a no-op.
+    expect((await allocate(MANAGER, "run-1", [])).status).toBe(200);
+    await expectFreezerParity(20, 5);
   });
 
   it("rejects mismatches and protects a lot from concurrent over-allocation", async () => {
@@ -241,16 +305,18 @@ describe("dated freezer surplus API", () => {
     expect(
       (await allocate(MANAGER, "run-1", [{ lotId, cases: 1 }], { flavor: "Cheese" })).status,
     ).toBe(400);
+    await expectFreezerParity(20, 1);
     expect(
       (await allocate(MANAGER, "run-1", [{ lotId, cases: 21 }])).status,
     ).toBe(400);
+    await expectFreezerParity(20, 1);
 
     const [first, second] = await Promise.all([
       allocate(MANAGER, "run-a", [{ lotId, cases: 15 }]),
       allocate(MANAGER, "run-b", [{ lotId, cases: 15 }]),
     ]);
     expect([first.status, second.status].sort()).toEqual([200, 400]);
-    expect((await ledger()).lots[0].remainingCases).toBe(5);
+    await expectFreezerParity(5, 2);
   });
 
   it("rejects a pull after a run has started", async () => {
@@ -258,6 +324,6 @@ describe("dated freezer surplus API", () => {
     const lotId = ((await lotResponse.json()) as { createdLot: { id: string } }).createdLot.id;
     await seedRun("started-run", { startedAt: "2026-08-29T10:00:00.000Z" });
     expect((await allocate(MANAGER, "started-run", [{ lotId, cases: 1 }])).status).toBe(409);
-    expect((await ledger()).lots[0].remainingCases).toBe(20);
+    await expectFreezerParity(20, 1);
   });
 });
