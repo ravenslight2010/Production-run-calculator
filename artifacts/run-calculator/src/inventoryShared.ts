@@ -1280,7 +1280,8 @@ export const declinePasswordReset = (id: string) =>
     { method: "POST" },
   );
 
-export const fetchInventory = () => api<InventoryItem[]>("/inventory");
+export const fetchInventory = (signal?: AbortSignal) =>
+  api<InventoryItem[]>("/inventory", signal ? { signal } : undefined);
 
 // Server-authority warehouse advisory snapshot. The server pre-computes the
 // reorder list, use-first list, and transfer warnings from canonical sync data

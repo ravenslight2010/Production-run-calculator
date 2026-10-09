@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Loader2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, Loader2, RefreshCw } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { specImportRecipeDisplayKind } from "@/storage";
 import {
   computeRunLines,
@@ -18,11 +19,13 @@ type Props = {
   forceUpdateProfileKeys: ReadonlySet<string>;
 };
 
-type InventoryLoad =
-  | { status: "idle" }
-  | { status: "loading" }
-  | { status: "ready"; items: InventoryItem[] }
-  | { status: "unavailable"; message: string };
+type InventorySnapshot = {
+  items: InventoryItem[];
+  loadedAt: number;
+};
+
+const INVENTORY_REQUEST_TIMEOUT_MS = 15_000;
+const INVENTORY_REFRESH_INTERVAL_MS = 60_000;
 
 const classifyRecipe = (recipe: ParsedSpecImport["recipes"][number]) =>
   specImportRecipeDisplayKind(recipe);
@@ -31,14 +34,28 @@ function formatQuantity(value: number): string {
   return Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
+function formatSnapshotTime(timestamp: number): string {
+  return new Date(timestamp).toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+}
+
+function inventoryErrorMessage(error: unknown): string {
+  return error instanceof Error && error.message.trim()
+    ? error.message
+    : "Inventory data could not be loaded.";
+}
+
 function stockSummary(
   line: RunLine,
   plannedCases: number | null,
-  inventory: InventoryLoad,
+  snapshot: InventorySnapshot | null,
+  loading: boolean,
 ): string {
-  if (inventory.status === "idle" || inventory.status === "loading") return "Checking stock…";
-  if (inventory.status === "unavailable") return "Stock level unavailable";
-  const stock = inventory.items.find((item) => item.key === line.key);
+  if (!snapshot && loading) return "Checking stock…";
+  if (!snapshot) return "Stock level unavailable";
+  const stock = snapshot.items.find((item) => item.key === line.key);
   if (!stock) return "Not tracked in Inventory";
   if (!Number.isFinite(Number(stock.onHand))) return "Stock level unavailable";
   if (plannedCases === null) {
@@ -60,29 +77,55 @@ export function SpecImportInventoryImpact({
     () => projectSpecImportForIncludedProducts(run, parsed, forceUpdateProfileKeys, classifyRecipe),
     [run, parsed, forceUpdateProfileKeys],
   );
-  const [inventory, setInventory] = useState<InventoryLoad>({ status: "idle" });
+  const hasReadyProjection = projections.some((projection) => projection.status === "ready");
+  const [inventorySnapshot, setInventorySnapshot] = useState<InventorySnapshot | null>(null);
+  const [inventoryLoading, setInventoryLoading] = useState(false);
+  const [inventoryError, setInventoryError] = useState<string | null>(null);
+  const inventoryRequestRef = useRef<Promise<void> | null>(null);
 
-  useEffect(() => {
-    if (!visible || !projections.some((projection) => projection.status === "ready")) return;
-    let active = true;
-    setInventory({ status: "loading" });
-    // This is deliberately the inventory GET helper. The preview does not
-    // call any adjustment, restock, transfer, or consumption operation.
-    void fetchInventory()
+  const refreshInventory = useCallback((): Promise<void> => {
+    if (inventoryRequestRef.current) return inventoryRequestRef.current;
+
+    setInventoryLoading(true);
+    setInventoryError(null);
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(
+      () => controller.abort(),
+      INVENTORY_REQUEST_TIMEOUT_MS,
+    );
+    const request = fetchInventory(controller.signal)
       .then((items) => {
-        if (active) setInventory({ status: "ready", items });
+        setInventorySnapshot({ items, loadedAt: Date.now() });
       })
       .catch((error: unknown) => {
-        if (!active) return;
-        setInventory({
-          status: "unavailable",
-          message: error instanceof Error ? error.message : "Inventory data could not be loaded.",
-        });
+        setInventoryError(
+          controller.signal.aborted
+            ? "The stock request timed out. Try refreshing again."
+            : inventoryErrorMessage(error),
+        );
+      })
+      .finally(() => {
+        window.clearTimeout(timeoutId);
+        inventoryRequestRef.current = null;
+        setInventoryLoading(false);
       });
+    inventoryRequestRef.current = request;
+    return request;
+  }, []);
+
+  useEffect(() => {
+    if (!visible || !hasReadyProjection) return;
+    // This is deliberately the inventory GET helper. The preview does not
+    // call any adjustment, restock, transfer, or consumption operation.
+    void refreshInventory();
+    const intervalId = window.setInterval(
+      () => void refreshInventory(),
+      INVENTORY_REFRESH_INTERVAL_MS,
+    );
     return () => {
-      active = false;
+      window.clearInterval(intervalId);
     };
-  }, [visible, projections]);
+  }, [visible, hasReadyProjection, refreshInventory]);
 
   if (!visible) return null;
 
@@ -96,7 +139,7 @@ export function SpecImportInventoryImpact({
         <h3 id="spec-import-stock-impact-title" className="text-sm font-semibold text-foreground">
           Projected stock impact by included product
         </h3>
-        {inventory.status === "loading" && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-label="Loading stock" />}
+        {inventoryLoading && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-label="Loading stock" />}
       </div>
       <p className="text-xs text-muted-foreground">
         Read-only ingredient and packaging demand for every included product. A planned case count
@@ -104,11 +147,44 @@ export function SpecImportInventoryImpact({
         shortage is estimated. This preview does not reserve or change stock.
       </p>
 
-      {inventory.status === "unavailable" && projections.some((projection) => projection.status === "ready") && (
-        <p className="flex items-start gap-1.5 text-xs text-amber-700" data-testid="spec-import-stock-data-unavailable">
-          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          Stock levels are unavailable, so shortages cannot be confirmed. {inventory.message}
-        </p>
+      {hasReadyProjection && (
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-[11px] text-muted-foreground" data-testid="status-stock-snapshot">
+              {inventorySnapshot
+                ? `Stock snapshot last loaded ${formatSnapshotTime(inventorySnapshot.loadedAt)}.`
+                : "Stock snapshot has not loaded yet."}
+            </p>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => void refreshInventory()}
+              disabled={inventoryLoading}
+              data-testid="button-refresh-stock"
+              aria-label="Refresh stock levels"
+            >
+              {inventoryLoading
+                ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                : <RefreshCw className="mr-1 h-3.5 w-3.5" />}
+              {inventoryLoading ? "Refreshing…" : "Refresh stock"}
+            </Button>
+          </div>
+          {inventoryError && (
+            <p
+              className="flex items-start gap-1.5 text-xs text-amber-700"
+              data-testid={inventorySnapshot
+                ? "spec-import-stock-refresh-error"
+                : "spec-import-stock-data-unavailable"}
+              role="status"
+            >
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              {inventorySnapshot
+                ? `Stock refresh failed. Showing the last successful snapshot. ${inventoryError}`
+                : `Stock levels are unavailable, so shortages cannot be confirmed. ${inventoryError}`}
+            </p>
+          )}
+        </>
       )}
 
       {projections.length === 0 ? (
@@ -153,7 +229,7 @@ export function SpecImportInventoryImpact({
                           {formatQuantity(line.qty)} {line.unit}
                         </span>
                         <span className="basis-full text-right text-[11px] text-muted-foreground">
-                          {stockSummary(line, projection.plannedCases, inventory)}
+                          {stockSummary(line, projection.plannedCases, inventorySnapshot, inventoryLoading)}
                         </span>
                       </li>
                     ))}

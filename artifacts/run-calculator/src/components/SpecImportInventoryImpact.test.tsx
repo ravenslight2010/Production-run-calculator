@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { DEFAULT_VALUES } from "@/types";
 import { SpecImportInventoryImpact } from "./SpecImportInventoryImpact";
 
@@ -31,21 +31,21 @@ vi.mock("@/storage", () => ({
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.clearAllMocks();
 });
 
 describe("SpecImportInventoryImpact", () => {
-  it("reads stock for the preview and never invokes an inventory mutation", async () => {
-    inventoryApi.fetchInventory.mockResolvedValue([]);
+  const renderPreview = (visible = true) => {
     const values = {
       ...DEFAULT_VALUES,
       casesNeeded: 1,
       pizzasPerCase: 10,
     };
 
-    render(
+    return render(
       <SpecImportInventoryImpact
-        visible
+        visible={visible}
         run={{ brand: "Acme", flavor: "Supreme", values }}
         parsed={{
           profiles: [{
@@ -59,16 +59,86 @@ describe("SpecImportInventoryImpact", () => {
         forceUpdateProfileKeys={new Set()}
       />,
     );
+  };
+
+  it("allows a manual stock refresh and never invokes an inventory mutation", async () => {
+    inventoryApi.fetchInventory.mockResolvedValue([]);
+    renderPreview();
 
     expect((await screen.findAllByText("Not tracked in Inventory")).length).toBeGreaterThan(0);
-    expect(inventoryApi.fetchInventory).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("status-stock-snapshot").textContent)
+      .toMatch(/^Stock snapshot last loaded /);
+    fireEvent.click(screen.getByTestId("button-refresh-stock"));
+    await waitFor(() => {
+      expect(inventoryApi.fetchInventory).toHaveBeenCalledTimes(2);
+      expect(screen.getByTestId("button-refresh-stock")).toHaveProperty("disabled", false);
+    });
     for (const [name, mutation] of Object.entries(inventoryApi)) {
       if (name === "fetchInventory") continue;
       expect(mutation).not.toHaveBeenCalled();
     }
   });
 
-  it("shows each included product and does not infer a shortage for per-case demand", async () => {
+  it("refreshes stock every minute while visible and stops polling when closed", async () => {
+    vi.useFakeTimers();
+    inventoryApi.fetchInventory.mockResolvedValue([]);
+    const preview = renderPreview();
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(inventoryApi.fetchInventory).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(inventoryApi.fetchInventory).toHaveBeenCalledTimes(2);
+
+    preview.unmount();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(120_000);
+    });
+    expect(inventoryApi.fetchInventory).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the last successful snapshot and reports a failed refresh", async () => {
+    inventoryApi.fetchInventory
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce(new Error("Connection timed out"));
+    renderPreview();
+
+    expect((await screen.findAllByText("Not tracked in Inventory")).length).toBeGreaterThan(0);
+    const loadedAt = screen.getByTestId("status-stock-snapshot").textContent;
+    fireEvent.click(screen.getByTestId("button-refresh-stock"));
+
+    const error = await screen.findByTestId("spec-import-stock-refresh-error");
+    expect(error.textContent).toContain("Stock refresh failed.");
+    expect(error.textContent).toContain("Connection timed out");
+    expect(screen.getByTestId("status-stock-snapshot").textContent).toBe(loadedAt);
+    expect((await screen.findAllByText("Not tracked in Inventory")).length).toBeGreaterThan(0);
+  });
+
+  it("reports a stalled stock request and makes refresh available again", async () => {
+    vi.useFakeTimers();
+    inventoryApi.fetchInventory.mockImplementation((signal?: AbortSignal) =>
+      new Promise((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(new Error("Request aborted")), { once: true });
+      }),
+    );
+    renderPreview();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+
+    expect(screen.getByTestId("spec-import-stock-data-unavailable").textContent)
+      .toContain("The stock request timed out. Try refreshing again.");
+    expect(screen.getByTestId("button-refresh-stock")).toHaveProperty("disabled", false);
+  });
+
+  it("shows every included product and does not infer a shortage for per-case demand", async () => {
     inventoryApi.fetchInventory.mockResolvedValue([
       { key: "ingredient:Pepperoni:lbs", onHand: 0 },
     ]);
@@ -123,7 +193,7 @@ describe("SpecImportInventoryImpact", () => {
     }
   });
 
-  it("marks stock levels unavailable when the read-only inventory request fails", async () => {
+  it("marks stock unavailable when the read-only inventory request fails", async () => {
     inventoryApi.fetchInventory.mockRejectedValue(new Error("Inventory service offline"));
 
     render(
