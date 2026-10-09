@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { signLegacyTokenForTests } from "../lib/auth";
 import { syncSnapshotId } from "../lib/syncContract";
 import {
@@ -415,15 +415,23 @@ describe("completed-run inventory corrections from sync writes", () => {
     ]);
   });
 
-  it("keeps merged source and target baselines combined for later run corrections", async () => {
+  it("keeps multiple merged source and target baselines combined for later run corrections", async () => {
     const runId = "inventory-correction-after-merge";
-    const sourceKey = "ingredient:Old Cheese:batches";
+    const firstSourceKey = "ingredient:Old Cheese:batches";
+    const secondSourceKey = "ingredient:Alternate Cheese:batches";
     const targetKey = "ingredient:New Cheese:batches";
-    const [source] = await db.insert(inventoryItemsTable).values({
+    const [firstSource] = await db.insert(inventoryItemsTable).values({
       scope: "live",
-      key: sourceKey,
+      key: firstSourceKey,
       category: "ingredient",
       name: "Old Cheese",
+      unit: "batches",
+    }).returning();
+    const [secondSource] = await db.insert(inventoryItemsTable).values({
+      scope: "live",
+      key: secondSourceKey,
+      category: "ingredient",
+      name: "Alternate Cheese",
       unit: "batches",
     }).returning();
     const [target] = await db.insert(inventoryItemsTable).values({
@@ -435,7 +443,11 @@ describe("completed-run inventory corrections from sync writes", () => {
     }).returning();
     await db.insert(inventoryLotsTable).values([
       {
-        scope: "live", itemId: source.id, qtyReceived: 100, qtyRemaining: 100,
+        scope: "live", itemId: firstSource.id, qtyReceived: 100, qtyRemaining: 100,
+        lotNumber: "", receivedDate: DATE,
+      },
+      {
+        scope: "live", itemId: secondSource.id, qtyReceived: 100, qtyRemaining: 100,
         lotNumber: "", receivedDate: DATE,
       },
       {
@@ -444,16 +456,16 @@ describe("completed-run inventory corrections from sync writes", () => {
       },
     ]);
 
-    // Both applicators consume different inventory IDs before the merge. After
-    // the merge, the corrected run uses the target name for both lines.
+    // Three applicators consume different inventory IDs before the merge.
+    // After the merge, the corrected run uses the target name for every line.
     const originalValues = {
       ...RUN_VALUES,
-      app1OzPerPizza: 0,
       app1BatchLbs: 16,
       app1Type: "Old Cheese",
-      app2OzPerPizza: 0,
       app2BatchLbs: 16,
-      app2Type: "New Cheese",
+      app2Type: "Alternate Cheese",
+      app3BatchLbs: 16,
+      app3Type: "New Cheese",
     };
     await db.update(dailySyncTable).set({
       data: {
@@ -484,36 +496,48 @@ describe("completed-run inventory corrections from sync writes", () => {
 
     const [claimBeforeMerge] = await db.select().from(inventoryConsumedRunsTable)
       .where(eq(inventoryConsumedRunsTable.runId, runId));
-    const sourceBaselineQty = claimBeforeMerge.baselineLines?.find((line) => line.itemId === source.id)?.qty;
-    const targetBaselineQty = claimBeforeMerge.baselineLines?.find((line) => line.itemId === target.id)?.qty;
-    expect(sourceBaselineQty).toBe(1.25);
-    expect(targetBaselineQty).toBe(1.25);
+    expect(claimBeforeMerge.baselineLines).toEqual(expect.arrayContaining([
+      { itemId: firstSource.id, qty: 1.25 },
+      { itemId: secondSource.id, qty: 1.25 },
+      { itemId: target.id, qty: 1.25 },
+    ]));
+    expect(claimBeforeMerge.baselineLines).toHaveLength(3);
 
     const merged = await fetch(`${baseUrl}/api/inventory/merge`, {
       method: "POST",
       headers: { ...managerAuthHeaders(), "content-type": "application/json" },
       body: JSON.stringify({
-        merges: [{
-          fromKey: sourceKey,
-          toKey: targetKey,
-          toName: "New Cheese",
-          unit: "batches",
-          category: "ingredient",
-        }],
+        merges: [
+          {
+            fromKey: firstSourceKey,
+            toKey: targetKey,
+            toName: "New Cheese",
+            unit: "batches",
+            category: "ingredient",
+          },
+          {
+            fromKey: secondSourceKey,
+            toKey: targetKey,
+            toName: "New Cheese",
+            unit: "batches",
+            category: "ingredient",
+          },
+        ],
       }),
     });
     expect(merged.status).toBe(200);
-    expect(await merged.json()).toMatchObject({ merged: 1 });
-    expect(await db.select().from(inventoryItemsTable).where(eq(inventoryItemsTable.id, source.id)))
+    expect(await merged.json()).toMatchObject({ merged: 2 });
+    expect(await db.select().from(inventoryItemsTable)
+      .where(inArray(inventoryItemsTable.id, [firstSource.id, secondSource.id])))
       .toHaveLength(0);
 
     const [claimAfterMerge] = await db.select().from(inventoryConsumedRunsTable)
       .where(eq(inventoryConsumedRunsTable.runId, runId));
     expect(claimAfterMerge.baselineLines).toEqual([
-      { itemId: target.id, qty: 2.5 },
+      { itemId: target.id, qty: 3.75 },
     ]);
     const onHandAfterMerge = await onHandForItem(target.id);
-    expect(onHandAfterMerge).toBe(197.5);
+    expect(onHandAfterMerge).toBe(296.25);
 
     const saveCorrection = async (senderId: string) => {
       const read = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
@@ -525,6 +549,7 @@ describe("completed-run inventory corrections from sync writes", () => {
       const nextValues = {
         ...current.runValues[runId],
         app1Type: "New Cheese",
+        app2Type: "New Cheese",
       };
       return fetch(`${baseUrl}/api/sync/today?today=${DATE}&epoch=0`, {
         method: "PUT",
@@ -553,31 +578,34 @@ describe("completed-run inventory corrections from sync writes", () => {
 
     const corrected = await saveCorrection("inventory-correction-after-merge");
     expect(corrected.status).toBe(200);
-    // The run now consumes 3.75 batches total. Only the 1.25 increase
+    // The run now consumes 5.625 batches total. Only the 1.875 increase
     // beyond the combined original baseline is drawn from the merged stock.
-    expect(await onHandForItem(target.id)).toBe(196.25);
+    expect(await onHandForItem(target.id)).toBe(294.375);
     const correctionLedger = (await db.select().from(inventoryLedgerTable))
       .filter((entry) => entry.runId === runId);
     const originalConsumption = correctionLedger.filter((entry) =>
       entry.type === "consume" && entry.note === "Auto-deducted on run completion",
     );
-    expect(originalConsumption).toHaveLength(2);
+    expect(originalConsumption).toHaveLength(3);
     expect(originalConsumption.every((entry) => entry.itemId === target.id)).toBe(true);
     expect(originalConsumption.map((entry) => entry.qtyDelta).sort((a, b) => a - b))
-      .toEqual([-1.25, -1.25]);
+      .toEqual([-1.25, -1.25, -1.25]);
     expect(correctionLedger.filter((entry) =>
       entry.type === "adjust" && entry.note.startsWith("Run consumption correction:"),
     ).map((entry) => ({ itemId: entry.itemId, qtyDelta: entry.qtyDelta })))
-      .toEqual([{ itemId: target.id, qtyDelta: -1.25 }]);
+      .toEqual([{ itemId: target.id, qtyDelta: -1.875 }]);
 
     const targetLedger = (await db.select().from(inventoryLedgerTable))
       .filter((entry) => entry.itemId === target.id);
     expect(targetLedger.some((entry) => entry.note === "Merged from Old Cheese" && entry.qtyDelta === 0))
       .toBe(true);
+    expect(targetLedger.some((entry) =>
+      entry.note === "Merged from Alternate Cheese" && entry.qtyDelta === 0,
+    )).toBe(true);
 
     const retry = await saveCorrection("inventory-correction-after-merge-retry");
     expect(retry.status).toBe(200);
-    expect(await onHandForItem(target.id)).toBe(196.25);
+    expect(await onHandForItem(target.id)).toBe(294.375);
     const retryLedger = (await db.select().from(inventoryLedgerTable))
       .filter((entry) => entry.runId === runId);
     expect(retryLedger.filter((entry) =>
