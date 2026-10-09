@@ -14,15 +14,35 @@ import {
 } from "@workspace/name-match";
 
 /** Shared by the web parser, API evidence exporter, and distillation validator. */
-export const SPEC_IMPORT_PARSE_VERSION = "42";
+export const SPEC_IMPORT_PARSE_VERSION = "43";
 
 // ── Core data shapes ────────────────────────────────────────────────────────
 
-export type RecipeRow = { ingredient: string; lbs: number };
+/**
+ * A cell address tied to the workbook currently being reviewed. This contains
+ * location only — never cell contents — and is transient review metadata.
+ */
+export type SpecImportSourceLocation = {
+  sheet: string;
+  cell: string;
+  /** Present when the review contains more than one workbook. */
+  file?: string;
+};
+
+export type SpecImportSourceLocations = Record<string, SpecImportSourceLocation[]>;
+
+export type RecipeRow = {
+  ingredient: string;
+  lbs: number;
+  /** Ingredient and amount cells used to form this row. */
+  sourceLocations?: SpecImportSourceLocation[];
+};
 
 export type ParsedApplicator = {
   type: string;
   ozPerPizza: number;
+  /** Cells supporting the type, amount, and optional recipe name. */
+  sourceLocations?: SpecImportSourceLocations;
   /**
    * Exact cheese/mix recipe linked to this physical slot. Optional for legacy
    * workbooks, which continue to resolve links from the applicator type.
@@ -49,6 +69,8 @@ export type ParsedPepperoni = {
   type: string;
   sticks: number;
   ozPerPizza: number;
+  /** Cells supporting the type and any stated quantities. */
+  sourceLocations?: SpecImportSourceLocations;
   /** Batch size in lbs one made pepperoni batch weighs, when the sheet states it. */
   batchLbs?: number;
 };
@@ -57,6 +79,8 @@ export type ParsedPepperoni = {
 export type ParsedProfile = {
   brand: string;
   flavor: string;
+  /** Cell-level provenance for values parsed deterministically. */
+  sourceLocations?: SpecImportSourceLocations;
   dieType?: string;
   sauceOzPerPizza?: number;
   /**
@@ -112,12 +136,19 @@ export type ParsedProfile = {
 };
 
 /** One brand+flavor profile a recipe should be tied to. */
-export type ParsedRecipeTarget = { brand: string; flavor: string };
+export type ParsedRecipeTarget = {
+  brand: string;
+  flavor: string;
+  /** Cell(s) containing this target declaration. */
+  sourceLocations?: SpecImportSourceLocation[];
+};
 
 /** One dough / sauce / cheese recipe, as interpreted by the AI. */
 export type ParsedRecipe = {
   kind: "dough" | "sauce" | "cheese";
   name: string;
+  /** Cell-level provenance for values parsed deterministically. */
+  sourceLocations?: SpecImportSourceLocations;
   /**
    * Unit label reported by the source parse for every numeric ingredient row.
    * Provenance only: consumers must never convert or reinterpret `rows` from it.
@@ -285,6 +316,49 @@ export type ParsedSpecImport = {
   unresolved?: SpecImportUnresolved[];
 };
 
+/**
+ * Remove transient cell-address metadata before values leave the active review.
+ * This keeps source locations out of applied imports, reusable snapshots, and
+ * import history while leaving every parsed/applied value unchanged.
+ */
+export function stripSpecImportSourceLocations(
+  parsed: ParsedSpecImport,
+): ParsedSpecImport {
+  return {
+    ...parsed,
+    profiles: (parsed.profiles ?? []).map((profile) => {
+      const out = { ...profile };
+      delete out.sourceLocations;
+      out.applicators = (profile.applicators ?? []).map((applicator) => {
+        const row = { ...applicator };
+        delete row.sourceLocations;
+        return row;
+      });
+      out.pepperonis = (profile.pepperonis ?? []).map((pepperoni) => {
+        const row = { ...pepperoni };
+        delete row.sourceLocations;
+        return row;
+      });
+      return out;
+    }),
+    recipes: (parsed.recipes ?? []).map((recipe) => {
+      const out = { ...recipe };
+      delete out.sourceLocations;
+      out.rows = (recipe.rows ?? []).map((row) => {
+        const ingredient = { ...row };
+        delete ingredient.sourceLocations;
+        return ingredient;
+      });
+      out.targets = recipe.targets?.map((target) => {
+        const targetOut = { ...target };
+        delete targetOut.sourceLocations;
+        return targetOut;
+      });
+      return out;
+    }),
+  };
+}
+
 export type SpecImportUnresolved = {
   source: string;
   row?: number;
@@ -303,6 +377,100 @@ const deterministicCell = (value: unknown): string =>
 
 const deterministicKey = (value: string): string =>
   deterministicCell(value).toLowerCase().replace(/[^a-z0-9]+/g, "");
+
+function deterministicColumnName(zeroBased: number): string | undefined {
+  if (!Number.isSafeInteger(zeroBased) || zeroBased < 0 || zeroBased >= 16_384) return undefined;
+  let n = zeroBased + 1;
+  let out = "";
+  while (n > 0) {
+    const remainder = (n - 1) % 26;
+    out = String.fromCharCode(65 + remainder) + out;
+    n = Math.floor((n - 1) / 26);
+  }
+  return out;
+}
+
+function deterministicSourceLocation(
+  grid: SheetGrid,
+  zeroBasedRow: number,
+  zeroBasedColumn: number,
+): SpecImportSourceLocation | undefined {
+  const rawSheetName = String(grid.name ?? "");
+  const sheet = rawSheetName.slice(0, 80);
+  const column = deterministicColumnName(zeroBasedColumn);
+  if (
+    !rawSheetName.trim() ||
+    !column ||
+    !Number.isSafeInteger(zeroBasedRow) ||
+    zeroBasedRow < 0 ||
+    zeroBasedRow >= 1_048_576
+  ) return undefined;
+  return { sheet, cell: `${column}${zeroBasedRow + 1}` };
+}
+
+function mergeSourceLocations(
+  ...lists: ReadonlyArray<ReadonlyArray<SpecImportSourceLocation> | undefined>
+): SpecImportSourceLocation[] | undefined {
+  const seen = new Set<string>();
+  const merged: SpecImportSourceLocation[] = [];
+  for (const locations of lists) {
+    for (const location of locations ?? []) {
+      const key = `${location.file ?? ""}\u0000${location.sheet}\u0000${location.cell}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(location);
+    }
+  }
+  return merged.length ? merged : undefined;
+}
+
+function mergeObjectSourceLocations<T extends object>(
+  prev: T,
+  next: T,
+  prevLocations?: SpecImportSourceLocations,
+  nextLocations?: SpecImportSourceLocations,
+  fields: readonly string[] = [...new Set([
+    ...Object.keys(prevLocations ?? {}),
+    ...Object.keys(nextLocations ?? {}),
+  ])],
+): SpecImportSourceLocations | undefined {
+  const out: SpecImportSourceLocations = {};
+  for (const field of fields) {
+    const prevValue = (prev as Record<string, unknown>)[field];
+    const nextValue = (next as Record<string, unknown>)[field];
+    const locations =
+      nextValue === undefined
+        ? prevLocations?.[field]
+        : prevValue !== undefined && Object.is(prevValue, nextValue)
+          ? mergeSourceLocations(prevLocations?.[field], nextLocations?.[field])
+          : nextLocations?.[field];
+    if (locations?.length) out[field] = locations;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+function mergeRetainedObjectSourceLocations<T extends object>(
+  retained: T,
+  other: T,
+  retainedLocations?: SpecImportSourceLocations,
+  otherLocations?: SpecImportSourceLocations,
+  fields: readonly string[] = [...new Set([
+    ...Object.keys(retainedLocations ?? {}),
+    ...Object.keys(otherLocations ?? {}),
+  ])],
+): SpecImportSourceLocations | undefined {
+  const out: SpecImportSourceLocations = {};
+  for (const field of fields) {
+    const retainedValue = (retained as Record<string, unknown>)[field];
+    const otherValue = (other as Record<string, unknown>)[field];
+    const locations =
+      Object.is(retainedValue, otherValue)
+        ? mergeSourceLocations(retainedLocations?.[field], otherLocations?.[field])
+        : retainedLocations?.[field];
+    if (locations?.length) out[field] = locations;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
 
 function deterministicNumber(value: string): number | undefined {
   const cleaned = deterministicCell(value).replace(/,/g, "");
@@ -326,7 +494,10 @@ function deterministicRecipeKind(sheetName: string): ParsedRecipe["kind"] | null
   return null;
 }
 
-function deterministicTargets(value: string): ParsedRecipeTarget[] {
+function deterministicTargets(
+  value: string,
+  sourceLocation?: SpecImportSourceLocation,
+): ParsedRecipeTarget[] {
   const colon = value.indexOf(":");
   if (colon <= 0) return [];
   const brand = value.slice(0, colon).trim();
@@ -334,7 +505,11 @@ function deterministicTargets(value: string): ParsedRecipeTarget[] {
   return value
     .slice(colon + 1)
     .split(",")
-    .map((flavor) => ({ brand, flavor: flavor.trim() }))
+    .map((flavor) => ({
+      brand,
+      flavor: flavor.trim(),
+      ...(sourceLocation ? { sourceLocations: [sourceLocation] } : {}),
+    }))
     .filter((target) => target.flavor);
 }
 
@@ -342,9 +517,9 @@ function parseDeterministicProfiles(
   grid: SheetGrid,
   unresolved: SpecImportUnresolved[],
 ): ParsedProfile[] {
-  const nonEmpty = grid.rows.filter((row) => row.some((cell) => deterministicCell(cell)));
-  if (nonEmpty.length === 0) return [];
-  const header = nonEmpty[0].map(deterministicCell);
+  const headerRowIndex = grid.rows.findIndex((row) => row.some((cell) => deterministicCell(cell)));
+  if (headerRowIndex < 0) return [];
+  const header = grid.rows[headerRowIndex].map(deterministicCell);
   const brandIndex = deterministicHeaderIndex(header, "Brand");
   const flavorIndex = deterministicHeaderIndex(header, "Flavor");
   if (brandIndex < 0 || flavorIndex < 0) return [];
@@ -380,8 +555,9 @@ function parseDeterministicProfiles(
   }
 
   const profiles: ParsedProfile[] = [];
-  for (let rowIndex = 1; rowIndex < nonEmpty.length; rowIndex++) {
-    const row = nonEmpty[rowIndex].map(deterministicCell);
+  for (let rowIndex = headerRowIndex + 1; rowIndex < grid.rows.length; rowIndex++) {
+    const row = grid.rows[rowIndex].map(deterministicCell);
+    if (row.every((cell) => !cell)) continue;
     const brand = row[brandIndex] ?? "";
     const flavor = row[flavorIndex] ?? "";
     if (!brand && !flavor) continue;
@@ -394,31 +570,64 @@ function parseDeterministicProfiles(
       });
       continue;
     }
+    const profileSources: SpecImportSourceLocations = {};
+    const addProfileSource = (field: string, columnIndex: number): void => {
+      const location = deterministicSourceLocation(grid, rowIndex, columnIndex);
+      if (location) profileSources[field] = [location];
+    };
+    addProfileSource("brand", brandIndex);
+    addProfileSource("flavor", flavorIndex);
     const profile: ParsedProfile = {
       brand,
       flavor,
+      sourceLocations: profileSources,
       applicators: [],
       pepperonis: [],
-      ...(dieIndex >= 0 && row[dieIndex] ? { dieType: row[dieIndex] } : {}),
-      ...(doughIndex >= 0 && row[doughIndex] ? { doughName: row[doughIndex] } : {}),
-      ...(sauceIndex >= 0 && row[sauceIndex] ? { sauceName: row[sauceIndex] } : {}),
+      ...(dieIndex >= 0 && row[dieIndex]
+        ? (addProfileSource("dieType", dieIndex), { dieType: row[dieIndex] })
+        : {}),
+      ...(doughIndex >= 0 && row[doughIndex]
+        ? (addProfileSource("doughName", doughIndex), { doughName: row[doughIndex] })
+        : {}),
+      ...(sauceIndex >= 0 && row[sauceIndex]
+        ? (addProfileSource("sauceName", sauceIndex), { sauceName: row[sauceIndex] })
+        : {}),
       ...(sauceOzIndex >= 0 && deterministicNumber(row[sauceOzIndex]) !== undefined
-        ? { sauceOzPerPizza: deterministicNumber(row[sauceOzIndex]) }
+        ? (addProfileSource("sauceOzPerPizza", sauceOzIndex),
+          { sauceOzPerPizza: deterministicNumber(row[sauceOzIndex]) })
         : {}),
       ...(doughballIndex >= 0 && deterministicNumber(row[doughballIndex]) !== undefined
-        ? { targetDoughballWeight: deterministicNumber(row[doughballIndex]) }
+        ? (addProfileSource("targetDoughballWeight", doughballIndex),
+          { targetDoughballWeight: deterministicNumber(row[doughballIndex]) })
         : {}),
       ...(trayIndex >= 0 && deterministicNumber(row[trayIndex]) !== undefined
-        ? { doughballsPerTray: deterministicNumber(row[trayIndex]) }
+        ? (addProfileSource("doughballsPerTray", trayIndex),
+          { doughballsPerTray: deterministicNumber(row[trayIndex]) })
         : {}),
     };
+    const finishSlotSources = (
+      source: Record<string, SpecImportSourceLocation[]>,
+    ): SpecImportSourceLocations | undefined =>
+      Object.keys(source).length ? source : undefined;
     for (const [slot, columns] of [...appColumns.entries()].sort(([a], [b]) => a - b)) {
       const type = columns.type >= 0 ? row[columns.type] ?? "" : "";
       if (!type) continue;
       const oz = columns.oz >= 0 ? deterministicNumber(row[columns.oz] ?? "") : undefined;
+      const sourceLocations: SpecImportSourceLocations = {};
+      const typeLocation = deterministicSourceLocation(grid, rowIndex, columns.type);
+      const ozLocation = oz !== undefined && columns.oz >= 0
+        ? deterministicSourceLocation(grid, rowIndex, columns.oz)
+        : undefined;
+      const recipeLocation = columns.recipe >= 0 && row[columns.recipe]
+        ? deterministicSourceLocation(grid, rowIndex, columns.recipe)
+        : undefined;
+      if (typeLocation) sourceLocations.type = [typeLocation];
+      if (ozLocation) sourceLocations.ozPerPizza = [ozLocation];
+      if (recipeLocation) sourceLocations.recipeName = [recipeLocation];
       profile.applicators.push({
         type,
         ozPerPizza: oz ?? 0,
+        ...(finishSlotSources(sourceLocations) ? { sourceLocations: finishSlotSources(sourceLocations) } : {}),
         ...(columns.recipe >= 0 && row[columns.recipe]
           ? { recipeName: row[columns.recipe] }
           : {}),
@@ -428,10 +637,24 @@ function parseDeterministicProfiles(
     for (const [, columns] of [...pepColumns.entries()].sort(([a], [b]) => a - b)) {
       const type = columns.type >= 0 ? row[columns.type] ?? "" : "";
       if (!type) continue;
+      const sticks = columns.sticks >= 0 ? deterministicNumber(row[columns.sticks] ?? "") : undefined;
+      const oz = columns.oz >= 0 ? deterministicNumber(row[columns.oz] ?? "") : undefined;
+      const sourceLocations: SpecImportSourceLocations = {};
+      const typeLocation = deterministicSourceLocation(grid, rowIndex, columns.type);
+      const sticksLocation = sticks !== undefined && columns.sticks >= 0
+        ? deterministicSourceLocation(grid, rowIndex, columns.sticks)
+        : undefined;
+      const ozLocation = oz !== undefined && columns.oz >= 0
+        ? deterministicSourceLocation(grid, rowIndex, columns.oz)
+        : undefined;
+      if (typeLocation) sourceLocations.type = [typeLocation];
+      if (sticksLocation) sourceLocations.sticks = [sticksLocation];
+      if (ozLocation) sourceLocations.ozPerPizza = [ozLocation];
       profile.pepperonis.push({
         type,
-        sticks: columns.sticks >= 0 ? deterministicNumber(row[columns.sticks] ?? "") ?? 0 : 0,
-        ozPerPizza: columns.oz >= 0 ? deterministicNumber(row[columns.oz] ?? "") ?? 0 : 0,
+        sticks: sticks ?? 0,
+        ozPerPizza: oz ?? 0,
+        ...(finishSlotSources(sourceLocations) ? { sourceLocations: finishSlotSources(sourceLocations) } : {}),
       });
     }
     profiles.push(profile);
@@ -475,6 +698,11 @@ function parseDeterministicRecipeSheet(
       current = {
         kind,
         name: recipeMatch[1].trim(),
+        sourceLocations: {
+          ...(deterministicSourceLocation(grid, rowIndex, 0)
+            ? { name: [deterministicSourceLocation(grid, rowIndex, 0)!] }
+            : {}),
+        },
         rows: [],
       };
       continue;
@@ -491,26 +719,52 @@ function parseDeterministicRecipeSheet(
     if (!inIngredients) {
       if (/^Ingredient$/i.test(first)) {
         current.rowsUnit = deterministicCell(row[1]) || undefined;
+        const unitLocation = row[1]
+          ? deterministicSourceLocation(grid, rowIndex, 1)
+          : undefined;
+        if (unitLocation) {
+          current.sourceLocations = {
+            ...current.sourceLocations,
+            rowsUnit: [unitLocation],
+          };
+        }
         inIngredients = true;
         continue;
       }
-      const targets = deterministicTargets(first);
+      const targetLocation = deterministicSourceLocation(grid, rowIndex, 0);
+      const targets = deterministicTargets(first, targetLocation);
       if (targets.length) {
         current.targets = [...(current.targets ?? []), ...targets];
+        const targetSources = mergeSourceLocations(
+          current.sourceLocations?.targets,
+          ...targets.map((target) => target.sourceLocations),
+        );
+        if (targetSources) {
+          current.sourceLocations = {
+            ...current.sourceLocations,
+            targets: targetSources,
+          };
+        }
         continue;
       }
       const key = deterministicKey(first);
       const value = deterministicNumber(row[1] ?? "");
       if (kind === "dough" && key === deterministicKey("Target Doughball Weight (oz)") && value !== undefined) {
         current.doughballOz = value;
+        const location = deterministicSourceLocation(grid, rowIndex, 1);
+        if (location) current.sourceLocations = { ...current.sourceLocations, doughballOz: [location] };
         continue;
       }
       if (kind === "dough" && key === deterministicKey("Doughballs Per Tray") && value !== undefined) {
         current.doughballsPerTray = value;
+        const location = deterministicSourceLocation(grid, rowIndex, 1);
+        if (location) current.sourceLocations = { ...current.sourceLocations, doughballsPerTray: [location] };
         continue;
       }
       if (kind === "cheese" && key === deterministicKey("Applicator Slot") && value !== undefined) {
         current.app = Math.round(value);
+        const location = deterministicSourceLocation(grid, rowIndex, 1);
+        if (location) current.sourceLocations = { ...current.sourceLocations, app: [location] };
         continue;
       }
       unresolved.push({
@@ -531,7 +785,18 @@ function parseDeterministicRecipeSheet(
       });
       continue;
     }
-    current.rows.push({ ingredient: first, lbs: amount });
+    current.rows.push({
+      ingredient: first,
+      lbs: amount,
+      sourceLocations: mergeSourceLocations(
+        deterministicSourceLocation(grid, rowIndex, 0)
+          ? [deterministicSourceLocation(grid, rowIndex, 0)!]
+          : undefined,
+        deterministicSourceLocation(grid, rowIndex, 1)
+          ? [deterministicSourceLocation(grid, rowIndex, 1)!]
+          : undefined,
+      ),
+    });
   }
   flush();
   for (const recipe of recipes) {
@@ -539,6 +804,18 @@ function parseDeterministicRecipeSheet(
     if (targets.length === 1) {
       recipe.brand = targets[0].brand;
       recipe.flavor = targets[0].flavor;
+      const locations = mergeSourceLocations(
+        recipe.sourceLocations?.brand,
+        recipe.sourceLocations?.flavor,
+        targets[0].sourceLocations,
+      );
+      if (locations) {
+        recipe.sourceLocations = {
+          ...recipe.sourceLocations,
+          brand: locations,
+          flavor: locations,
+        };
+      }
     }
   }
   return recipes;
@@ -657,13 +934,22 @@ function unionApplicators(
       if (!(dup.batchLbs != null && dup.batchLbs > 0) && a.batchLbs != null && a.batchLbs > 0) {
         dup.batchLbs = a.batchLbs;
       }
+      const sourceLocations = mergeRetainedObjectSourceLocations(
+        dup,
+        a,
+        dup.sourceLocations,
+        a.sourceLocations,
+        ["type", "ozPerPizza", "recipeName", "batchLbs", "slot"],
+      );
+      if (sourceLocations) dup.sourceLocations = sourceLocations;
+      else delete dup.sourceLocations;
       continue;
     }
     out.push({ ...a });
   }
   // A 0-oz entry alongside a same-type entry with a real weight is a partial
   // re-emit (the weight cell fell in the other chunk), not a second station.
-  return out.filter(
+  const merged = out.filter(
     (a) =>
       (a.ozPerPizza ?? 0) > 0 ||
       !out.some(
@@ -673,6 +959,25 @@ function unionApplicators(
           (b.ozPerPizza ?? 0) > 0,
       ),
   );
+  for (const partial of out) {
+    if ((partial.ozPerPizza ?? 0) > 0) continue;
+    const retained = merged.find(
+      (candidate) =>
+        candidate !== partial &&
+        applicatorTypeKey(candidate.type) === applicatorTypeKey(partial.type) &&
+        (candidate.ozPerPizza ?? 0) > 0,
+    );
+    if (!retained) continue;
+    const sourceLocations = mergeRetainedObjectSourceLocations(
+      retained,
+      partial,
+      retained.sourceLocations,
+      partial.sourceLocations,
+      ["type"],
+    );
+    if (sourceLocations) retained.sourceLocations = sourceLocations;
+  }
+  return merged;
 }
 
 /** Pepperoni mirror of {@link unionApplicators}. Pure. */
@@ -694,17 +999,42 @@ function unionPepperonis(
       if (!(dup.batchLbs != null && dup.batchLbs > 0) && p.batchLbs != null && p.batchLbs > 0) {
         dup.batchLbs = p.batchLbs;
       }
+      const sourceLocations = mergeRetainedObjectSourceLocations(
+        dup,
+        p,
+        dup.sourceLocations,
+        p.sourceLocations,
+        ["type", "sticks", "ozPerPizza", "batchLbs"],
+      );
+      if (sourceLocations) dup.sourceLocations = sourceLocations;
+      else delete dup.sourceLocations;
       continue;
     }
     out.push({ ...p });
   }
   const hasData = (p: ParsedPepperoni): boolean =>
     (p.ozPerPizza ?? 0) > 0 || (p.sticks ?? 0) > 0;
-  return out.filter(
+  const merged = out.filter(
     (p) =>
       hasData(p) ||
       !out.some((b) => b !== p && typeKey(b.type) === typeKey(p.type) && hasData(b)),
   );
+  for (const partial of out) {
+    if (hasData(partial)) continue;
+    const retained = merged.find(
+      (candidate) => candidate !== partial && typeKey(candidate.type) === typeKey(partial.type) && hasData(candidate),
+    );
+    if (!retained) continue;
+    const sourceLocations = mergeRetainedObjectSourceLocations(
+      retained,
+      partial,
+      retained.sourceLocations,
+      partial.sourceLocations,
+      ["type"],
+    );
+    if (sourceLocations) retained.sourceLocations = sourceLocations;
+  }
+  return merged;
 }
 
 /**
@@ -736,7 +1066,66 @@ function mergeProfilePair(
         : (prev.applicators ?? []);
     merged.pepperonis = next.pepperonis?.length ? next.pepperonis : prev.pepperonis ?? [];
   }
+  const sourceLocations = mergeObjectSourceLocations(
+    prev as ParsedProfile & Record<string, unknown>,
+    next as ParsedProfile & Record<string, unknown>,
+    prev.sourceLocations,
+    next.sourceLocations,
+    [
+      "brand",
+      "flavor",
+      "dieType",
+      "sauceOzPerPizza",
+      "doughName",
+      "sauceName",
+      "targetDoughballWeight",
+      "doughballsPerTray",
+    ],
+  );
+  if (sourceLocations) merged.sourceLocations = sourceLocations;
+  else delete merged.sourceLocations;
   return merged;
+}
+
+function mergeRecipeTargetsWithSources(
+  prev: ParsedRecipe,
+  next: ParsedRecipe,
+): ParsedRecipeTarget[] {
+  const targets = new Map<string, ParsedRecipeTarget>();
+  const add = (target: ParsedRecipeTarget): void => {
+    const brand = (target.brand ?? "").trim();
+    const flavor = (target.flavor ?? "").trim();
+    if (!brand || !flavor) return;
+    const key = `${brand.toLowerCase()}\u0000${flavor.toLowerCase()}`;
+    const existing = targets.get(key);
+    targets.set(
+      key,
+      existing
+        ? {
+            ...existing,
+            sourceLocations: mergeSourceLocations(
+              existing.sourceLocations,
+              target.sourceLocations,
+            ),
+          }
+        : { ...target, brand, flavor },
+    );
+  };
+  for (const recipe of [prev, next]) {
+    if (recipe.brand && recipe.flavor) {
+      add({
+        brand: recipe.brand,
+        flavor: recipe.flavor,
+        sourceLocations: mergeSourceLocations(
+          recipe.sourceLocations?.brand,
+          recipe.sourceLocations?.flavor,
+          recipe.sourceLocations?.targets,
+        ),
+      });
+    }
+    for (const target of recipe.targets ?? []) add(target);
+  }
+  return [...targets.values()];
 }
 
 /**
@@ -763,16 +1152,23 @@ function mergeRecipePair(prev: ParsedRecipe, next: ParsedRecipe): ParsedRecipe {
 
   // Union the explicit flavor-level targets of BOTH sides (recipeTargets folds
   // each side's singular brand+flavor in as well).
-  const targets: ParsedRecipeTarget[] = [];
-  const seenTargets = new Set<string>();
-  for (const t of [...recipeTargets(prev), ...recipeTargets(next)]) {
-    const key = `${t.brand.toLowerCase()}\u0000${t.flavor.toLowerCase()}`;
-    if (seenTargets.has(key)) continue;
-    seenTargets.add(key);
-    targets.push(t);
-  }
+  const targets = mergeRecipeTargetsWithSources(prev, next);
   if (targets.length) merged.targets = targets;
   else delete merged.targets;
+
+  const sourceLocations = mergeObjectSourceLocations(
+    prev as ParsedRecipe & Record<string, unknown>,
+    next as ParsedRecipe & Record<string, unknown>,
+    prev.sourceLocations,
+    next.sourceLocations,
+    ["name", "brand", "flavor", "rowsUnit", "doughballOz", "doughBatchYield", "doughballsPerTray", "app"],
+  ) ?? {};
+  if (next.rows?.length && next.rowsUnit == null) delete sourceLocations.rowsUnit;
+  const targetLocations = mergeSourceLocations(...targets.map((target) => target.sourceLocations));
+  if (targetLocations) sourceLocations.targets = targetLocations;
+  else delete sourceLocations.targets;
+  if (Object.keys(sourceLocations).length) merged.sourceLocations = sourceLocations;
+  else delete merged.sourceLocations;
 
   // Union brand anchors, folding in each side's flavorless singular brand
   // (recipeTargets drops those, but recipeApplyTargets fans them per brand).
@@ -2583,8 +2979,17 @@ export function dedupeSpecImportCheeseRecipes(
       ...keep,
       brand: undefined,
       flavor: undefined,
-      targets: [...recipeTargets(keep), ...recipeTargets(r)],
+      targets: mergeRecipeTargetsWithSources(keep, r),
     };
+    const targetLocations = mergeSourceLocations(
+      ...(withTargets.targets ?? []).map((target) => target.sourceLocations),
+    );
+    const sourceLocations = { ...withTargets.sourceLocations };
+    delete sourceLocations.brand;
+    delete sourceLocations.flavor;
+    if (targetLocations) sourceLocations.targets = targetLocations;
+    else delete sourceLocations.targets;
+    withTargets.sourceLocations = Object.keys(sourceLocations).length ? sourceLocations : undefined;
     const brandAnchors = [
       ...new Set(
         [...(keep.brandAnchors ?? []), ...(r.brandAnchors ?? [])]
@@ -2594,7 +2999,7 @@ export function dedupeSpecImportCheeseRecipes(
     ];
     survivors[at] = {
       ...withTargets,
-      targets: recipeTargets(withTargets),
+      targets: withTargets.targets ?? [],
       ...(brandAnchors.length ? { brandAnchors } : {}),
     };
     merged = true;

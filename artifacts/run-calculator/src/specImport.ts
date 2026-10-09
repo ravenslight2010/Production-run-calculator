@@ -71,6 +71,7 @@ import {
   type SpecImportSkipped,
   type SpecImportSummary,
   type SpecImportUnresolved,
+  type SpecImportSourceLocation,
   type SpecMatchKnown,
   type OverflowColumnRow,
   type TruncatedCell,
@@ -78,6 +79,7 @@ import {
   type ImportMergeAliasMap,
   resolveImportName,
   SPEC_IMPORT_PARSE_VERSION,
+  stripSpecImportSourceLocations,
 } from "@workspace/spec-import";
 import {
   buildImportReview,
@@ -384,10 +386,15 @@ export async function readWorkbookGrids(data: ArrayBuffer): Promise<SheetGrid[]>
   for (const name of wb.SheetNames) {
     const ws = wb.Sheets[name];
     if (!ws) continue;
+    const usedRange = ws["!ref"] ? XLSX.utils.decode_range(ws["!ref"]) : null;
+    if (!usedRange) continue;
     const rows = XLSX.utils.sheet_to_json<unknown[]>(ws, {
       header: 1,
       defval: "",
-      blankrows: false,
+      // Preserve blank rows and the A1 origin so deterministic row indices
+      // continue to match the workbook's actual Excel coordinates.
+      blankrows: true,
+      range: { s: { r: 0, c: 0 }, e: usedRange.e },
     });
     grids.push({
       name,
@@ -395,6 +402,64 @@ export async function readWorkbookGrids(data: ArrayBuffer): Promise<SheetGrid[]>
     });
   }
   return grids;
+}
+
+function attributeSourceFile(
+  parsed: ParsedSpecImport,
+  file?: string,
+): ParsedSpecImport {
+  const name = file?.trim().slice(0, 128);
+  if (!name) return parsed;
+  const addFile = (locations?: SpecImportSourceLocation[]) =>
+    locations?.map((location) => ({ ...location, file: name }));
+  const addMap = (
+    map?: Record<string, SpecImportSourceLocation[]>,
+  ): Record<string, SpecImportSourceLocation[]> | undefined => {
+    if (!map) return undefined;
+    const out: Record<string, SpecImportSourceLocation[]> = {};
+    for (const [field, locations] of Object.entries(map)) {
+      const withFile = addFile(locations);
+      if (withFile?.length) out[field] = withFile;
+    }
+    return Object.keys(out).length ? out : undefined;
+  };
+  return {
+    ...parsed,
+    profiles: parsed.profiles.map((profile) => ({
+      ...profile,
+      ...(profile.sourceLocations ? { sourceLocations: addMap(profile.sourceLocations) } : {}),
+      applicators: profile.applicators.map((applicator) => ({
+        ...applicator,
+        ...(applicator.sourceLocations
+          ? { sourceLocations: addMap(applicator.sourceLocations) }
+          : {}),
+      })),
+      pepperonis: profile.pepperonis.map((pepperoni) => ({
+        ...pepperoni,
+        ...(pepperoni.sourceLocations
+          ? { sourceLocations: addMap(pepperoni.sourceLocations) }
+          : {}),
+      })),
+    })),
+    recipes: parsed.recipes.map((recipe) => ({
+      ...recipe,
+      ...(recipe.sourceLocations ? { sourceLocations: addMap(recipe.sourceLocations) } : {}),
+      rows: recipe.rows.map((row) => ({
+        ...row,
+        ...(row.sourceLocations ? { sourceLocations: addFile(row.sourceLocations) } : {}),
+      })),
+      ...(recipe.targets
+        ? {
+            targets: recipe.targets.map((target) => ({
+              ...target,
+              ...(target.sourceLocations
+                ? { sourceLocations: addFile(target.sourceLocations) }
+                : {}),
+            })),
+          }
+        : {}),
+    })),
+  };
 }
 
 function recipeKindToAliasKind(kind: "dough" | "sauce" | "cheese"): SpecAliasKind {
@@ -696,7 +761,7 @@ async function parseWorkbookCore(
   known: ReturnType<typeof loadSpecImportKnown>,
   aliases: SpecImportAlias[],
   signal?: AbortSignal,
-  options: { allowAi: boolean } = { allowAi: false },
+  options: { allowAi: boolean; sourceFile?: string } = { allowAi: false },
 ): Promise<ParseCore> {
   if (signal?.aborted) throw signal.reason ?? new DOMException("Import cancelled", "AbortError");
   // Cheap pre-AI guard: the xlsx reader does NOT throw on garbage bytes (a
@@ -709,7 +774,8 @@ async function parseWorkbookCore(
   }
   const deterministic = parseDeterministicSpecWorkbook(grids);
   if (!options.allowAi) {
-    const canonical = canonicalizeParsed(deterministic.parsed, known, aliases);
+    const sourced = attributeSourceFile(deterministic.parsed, options.sourceFile);
+    const canonical = canonicalizeParsed(sourced, known, aliases);
     return {
       parsed: canonical.parsed,
       resolved: canonical.resolved,
@@ -801,12 +867,12 @@ async function parseWorkbookCore(
         // Keep the original result (empty + note) — the note still surfaces.
       }
     }
-    rawList.push({
+    rawList.push(stripSpecImportSourceLocations({
       profiles: ai.profiles,
       recipes: ai.recipes,
       ...(ai.note ? { note: ai.note } : {}),
       ...(ai.warnings?.length ? { warnings: ai.warnings } : {}),
-    });
+    }));
   }
 
   if (!rawList.length) {
@@ -1459,6 +1525,8 @@ async function sha256Hex(bytes: ArrayBuffer | Uint8Array): Promise<string> {
  * be reused.
  * v40→v41: remove the accidental unary-plus coercion that appended literal
  * "NaN" to the production parse system prompt.
+  * v42→v43: deterministic workbook parses carry bounded cell addresses through
+  * review; addresses are stripped before Apply and never enter saved parses.
  * v14→v15: snap-to-existing link passes no longer silently rename imported
  * recipes onto merely SIMILAR pool names (word reorder / single typo / family
  * fold) — those become declinable review suggestions; only exact loose-key
@@ -1892,10 +1960,18 @@ export async function prepareSpecImport(
   // table) even when reusing a cached AI parse. Both are cheap (no AI calls)
   // and must reflect the raw workbook content, not the possibly-stale snapshot.
   const grids = await readWorkbookGrids(data);
+  const deterministic = snapshot ? parseDeterministicSpecWorkbook(grids) : null;
   const sourceEvidence = sourceEvidenceFromGrids(grids);
   const doughCustomerAssignments = parseDoughCustomerAssignmentsFromGrids(grids);
   const doughVariantsFromTable = parseDoughVariantTableFromGrids(grids);
-  if (snapshot) {
+  if (
+    snapshot &&
+    !(
+      options.allowAi !== true &&
+      deterministic?.supported &&
+      deterministic.unresolved.length === 0
+    )
+  ) {
     const reused = await buildReusedPrepared(
       snapshot.data,
       known,
@@ -1916,7 +1992,7 @@ export async function prepareSpecImport(
   }
   const allowAi = options.allowAi === true;
   const { parsed: rawParsed, resolved, droppedRows, truncatedCells, overflowRows, aiFallbackGrids } =
-    await parseWorkbookCore(grids, known, aliases, signal, { allowAi });
+    await parseWorkbookCore(grids, known, aliases, signal, { allowAi, sourceFile: name });
 
   // Fold "new" names onto existing saved ones (no dupes) + conservative cross-fill.
   const { parsed: linked, matchAliases, linkSuggestions } = await linkParsed(
@@ -2060,25 +2136,38 @@ export async function prepareSpecImportMulti(
   // (see prepareSpecImport). Must run before the parse loop — it releases the
   // buffers as it goes, and the hash needs the original bytes.
   const { sourceHash, snapshot } = await findReusableParse(names ?? [], buffers);
+  let snapshotGrids: SheetGrid[][] | undefined;
   if (snapshot) {
-    onProgress?.(buffers.length, buffers.length);
-    const sourceEvidenceParts: Array<{ sourceText: string; parseVersion: string } | undefined> = [];
+    const currentGrids: SheetGrid[][] = [];
     for (let i = 0; i < buffers.length; i++) {
-      sourceEvidenceParts.push(sourceEvidenceFromGrids(await readWorkbookGrids(buffers[i])));
-      buffers[i] = new ArrayBuffer(0);
+      currentGrids.push(await readWorkbookGrids(buffers[i]));
     }
-    const reused = await buildReusedPrepared(
-      snapshot.data,
-      known,
-      aliases,
-      sourceHash,
-      await ingredientMergeAliasesPromise,
-    );
-    const sourceEvidence = combineSourceEvidence(sourceEvidenceParts);
-    return {
-      ...reused,
-      ...(sourceEvidence ? { sourceEvidence } : {}),
-    };
+    const fullyDeterministic = options.allowAi !== true &&
+      currentGrids.length === buffers.length &&
+      currentGrids.every((grids) => {
+        const result = parseDeterministicSpecWorkbook(grids);
+        return result.supported && result.unresolved.length === 0;
+      });
+    if (!fullyDeterministic) {
+      onProgress?.(buffers.length, buffers.length);
+      const sourceEvidenceParts = currentGrids.map(sourceEvidenceFromGrids);
+      for (let i = 0; i < buffers.length; i++) buffers[i] = new ArrayBuffer(0);
+      const reused = await buildReusedPrepared(
+        snapshot.data,
+        known,
+        aliases,
+        sourceHash,
+        await ingredientMergeAliasesPromise,
+      );
+      const sourceEvidence = combineSourceEvidence(sourceEvidenceParts);
+      return {
+        ...reused,
+        ...(sourceEvidence ? { sourceEvidence } : {}),
+      };
+    }
+    // Deterministic layouts are cheap and must be parsed from the workbook
+    // currently under review so locations never point at a stale cached parse.
+    snapshotGrids = currentGrids;
   }
 
   const parsedList: ParsedSpecImport[] = [];
@@ -2114,7 +2203,7 @@ export async function prepareSpecImportMulti(
       // and CPU-heavy, and back-to-back parses on a big batch can freeze the
       // tab long enough for the browser to kill the page mid-import.
       await new Promise((r) => setTimeout(r, 0));
-      const grids = await readWorkbookGrids(buffers[i]);
+      const grids = snapshotGrids?.[i] ?? await readWorkbookGrids(buffers[i]);
       sourceEvidenceParts.push(sourceEvidenceFromGrids(grids));
       // Deterministic customer-section parse — must happen BEFORE the buffer is
       // freed in the finally block below.
@@ -2144,6 +2233,7 @@ export async function prepareSpecImportMulti(
       }
       const core = await parseWorkbookCore(grids, known, aliases, signal, {
         allowAi: options.allowAi === true,
+        sourceFile: label,
       });
       parsedList.push(core.parsed);
       parsedLabels.push(label);

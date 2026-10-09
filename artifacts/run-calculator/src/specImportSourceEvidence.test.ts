@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as XLSX from "xlsx";
 import {
   gridsToPromptText,
+  parseDeterministicSpecWorkbook,
   PROMPT_MAX_CELL_CHARS,
   splitGridsForPrompt,
   type ParsedSpecImport,
@@ -234,6 +235,48 @@ beforeEach(() => {
 });
 
 describe("spec Apply source evidence", () => {
+  it("attaches current workbook locations to deterministic values without an AI parse", async () => {
+    const buffer = workbookBuffer(
+      [
+        ["Brand", "Flavor", "Die Type", "Sauce oz/pizza"],
+        ["Acme", "Classic", "12 inch", "0.5"],
+      ],
+      "Profiles",
+    );
+
+    const prepared = await prepareSpecImport(buffer, "spec.xlsx");
+
+    expect(parseSpy).not.toHaveBeenCalled();
+    expect(prepared.parsed.profiles[0].sourceLocations).toMatchObject({
+      brand: [{ file: "spec.xlsx", sheet: "Profiles", cell: "A2" }],
+      flavor: [{ file: "spec.xlsx", sheet: "Profiles", cell: "B2" }],
+      dieType: [{ file: "spec.xlsx", sheet: "Profiles", cell: "C2" }],
+      sauceOzPerPizza: [{ file: "spec.xlsx", sheet: "Profiles", cell: "D2" }],
+    });
+  });
+
+  it("keeps real Excel row numbers when the workbook reader encounters blank rows", async () => {
+    const worksheet: XLSX.WorkSheet = {
+      B2: { t: "s", v: "Brand" },
+      C2: { t: "s", v: "Flavor" },
+      B4: { t: "s", v: "Acme" },
+      C4: { t: "s", v: "Classic" },
+      "!ref": "B2:C4",
+    };
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Profiles");
+    const bytes = XLSX.write(workbook, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
+
+    const grids = await readWorkbookGrids(bytes);
+    const result = parseDeterministicSpecWorkbook(grids);
+
+    expect(grids[0].rows).toHaveLength(4);
+    expect(result.parsed.profiles[0].sourceLocations).toMatchObject({
+      brand: [{ sheet: "Profiles", cell: "B4" }],
+      flavor: [{ sheet: "Profiles", cell: "C4" }],
+    });
+  });
+
   it("carries the current single-file source only on the final Apply", async () => {
     const buffer = workbookBuffer([["raw source", "single-file marker"]]);
     const prepared = await prepareSpecImportWithAi(buffer, "single.xlsx");

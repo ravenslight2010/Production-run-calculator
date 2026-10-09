@@ -16,8 +16,10 @@ import {
   crossFamilyRoutingSuggestionKey,
   repointProfileNamedRecipes,
   reviewRecipeRowsUnit,
+  stripSpecImportSourceLocations,
   specImportNameMatchKey,
   specImportOmittedWarningCount,
+  type SpecImportSourceLocation,
   type NamedRecipeRename,
   type ParsedProfile,
   type ParsedRecipe,
@@ -356,26 +358,70 @@ function buildRecipeItems(
 // user can spot a misparse (wrong die/oz) at a glance and uncheck or re-upload.
 function profileSummary(p: ParsedProfile): string {
   const parts: string[] = [];
-  if (p.dieType) parts.push(`Die ${p.dieType}`);
+  const fieldSource = (field: string) =>
+    sourceLocationText(p.sourceLocations?.[field]);
+  if (p.dieType) parts.push(`Die ${p.dieType} (${fieldSource("dieType")})`);
+  if (p.doughName) parts.push(`Dough ${p.doughName} (${fieldSource("doughName")})`);
   if (p.sauceOzPerPizza != null) {
     // Include the named bought/ready-made sauce (e.g. "BBQ Sauce") so the user
     // can see at a glance that the sheet's sauce name was read — otherwise a
     // successfully imported sauce name is invisible on this screen.
     parts.push(
       p.sauceName
-        ? `Sauce ${p.sauceOzPerPizza} oz (${p.sauceName})`
-        : `Sauce ${p.sauceOzPerPizza} oz`,
+        ? `Sauce ${p.sauceOzPerPizza} oz (${fieldSource("sauceOzPerPizza")}); ${p.sauceName} (${fieldSource("sauceName")})`
+        : `Sauce ${p.sauceOzPerPizza} oz (${fieldSource("sauceOzPerPizza")})`,
     );
   } else if (p.sauceName) {
-    parts.push(`Sauce: ${p.sauceName}`);
+    parts.push(`Sauce: ${p.sauceName} (${fieldSource("sauceName")})`);
+  }
+  if (p.targetDoughballWeight != null) {
+    parts.push(`Doughball ${p.targetDoughballWeight} oz (${fieldSource("targetDoughballWeight")})`);
+  }
+  if (p.doughballsPerTray != null) {
+    parts.push(`Doughballs/tray ${p.doughballsPerTray} (${fieldSource("doughballsPerTray")})`);
   }
   for (const a of p.applicators ?? []) {
-    if (a.type) parts.push(`${a.type} ${a.ozPerPizza} oz`);
+    if (a.type) {
+      parts.push(
+        `${a.type} (${sourceLocationsForFields(a.sourceLocations, "type")}) ${a.ozPerPizza} oz (${sourceLocationsForFields(a.sourceLocations, "ozPerPizza")})`,
+      );
+    }
   }
   for (const pp of p.pepperonis ?? []) {
-    if (pp.type) parts.push(`${pp.type} ${pp.sticks} stk · ${pp.ozPerPizza} oz`);
+    if (pp.type) {
+      parts.push(
+        `${pp.type} (${sourceLocationsForFields(pp.sourceLocations, "type")}) ${pp.sticks} stk (${sourceLocationsForFields(pp.sourceLocations, "sticks")}) · ${pp.ozPerPizza} oz (${sourceLocationsForFields(pp.sourceLocations, "ozPerPizza")})`,
+      );
+    }
   }
   return parts.join(" · ");
+}
+
+function sourceLocationText(locations?: readonly SpecImportSourceLocation[]): string {
+  if (!locations?.length) return "location unverified";
+  return locations
+    .map((location) => {
+      const workbook = location.file ? `${location.file} · ` : "";
+      return `${workbook}${location.sheet}!${location.cell}`;
+    })
+    .join(", ");
+}
+
+function sourceLocationsForFields(
+  sourceLocations: Record<string, SpecImportSourceLocation[]> | undefined,
+  ...fields: string[]
+): string {
+  const seen = new Set<string>();
+  const locations: SpecImportSourceLocation[] = [];
+  for (const field of fields) {
+    for (const location of sourceLocations?.[field] ?? []) {
+      const key = `${location.file ?? ""}\u0000${location.sheet}\u0000${location.cell}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      locations.push(location);
+    }
+  }
+  return sourceLocationText(locations);
 }
 
 // A row with a real ingredient name is the minimum useful recipe data. This
@@ -393,9 +439,30 @@ function recipeRowsPreview(r: ParsedRecipe, amountLabel = "lb"): string {
   const usableRows = (r.rows ?? []).filter((row) => (row.ingredient ?? "").trim());
   const shown = usableRows
     .slice(0, 4)
-    .map((row) => `${row.ingredient} ${row.lbs} ${amountLabel}`);
+    .map(
+      (row) =>
+        `${row.ingredient} ${row.lbs} ${amountLabel} (${sourceLocationText(row.sourceLocations)})`,
+    );
   const extra = usableRows.length - shown.length;
   return shown.join(" · ") + (extra > 0 ? ` · +${extra} more` : "");
+}
+
+function recipeMetadataPreview(r: ParsedRecipe): string {
+  const parts: string[] = [];
+  if (r.doughballOz != null) {
+    parts.push(
+      `Doughball ${r.doughballOz} oz (${sourceLocationText(r.sourceLocations?.doughballOz)})`,
+    );
+  }
+  if (r.doughballsPerTray != null) {
+    parts.push(
+      `Doughballs/tray ${r.doughballsPerTray} (${sourceLocationText(r.sourceLocations?.doughballsPerTray)})`,
+    );
+  }
+  if (r.app != null) {
+    parts.push(`Applicator ${r.app} (${sourceLocationText(r.sourceLocations?.app)})`);
+  }
+  return parts.join(" · ");
 }
 
 // Editable review/summary screen for the Excel spec-sheet importer. The manager
@@ -821,7 +888,7 @@ export default function SpecImportDialog({
       });
     const out: ParsedSpecImport = { profiles: outProfiles, recipes: outRecipes };
     if (prepared?.parsed.note) out.note = prepared.parsed.note;
-    return out;
+    return stripSpecImportSourceLocations(out);
   }, [profiles, recipes, prepared]);
 
   const discrepancies = useMemo(
@@ -1602,6 +1669,13 @@ function ProfileRow({
         {summary && (
           <div className="mt-1.5 text-xs text-muted-foreground">Read: {summary}</div>
         )}
+        <div
+          className="mt-1 text-xs text-muted-foreground"
+          data-testid={`spec-profile-source-${item.key}`}
+        >
+          Brand: {sourceLocationText(item.orig.sourceLocations?.brand)} · Flavor:{" "}
+          {sourceLocationText(item.orig.sourceLocations?.flavor)}
+        </div>
         <SpecImportAmountWarnings profile={item.orig} rowKey={item.key} />
         {warnings.length > 0 && (
           <ul className="mt-2 space-y-1">
@@ -1685,6 +1759,13 @@ function ProfileRow({
               Read: {summary}
             </div>
           )}
+          <div
+            className="mt-1 text-xs text-muted-foreground"
+            data-testid={`spec-profile-source-${item.key}`}
+          >
+            Brand: {sourceLocationText(item.orig.sourceLocations?.brand)} · Flavor:{" "}
+            {sourceLocationText(item.orig.sourceLocations?.flavor)}
+          </div>
           <SpecImportAmountWarnings profile={item.orig} rowKey={item.key} />
 
           {warnings.length > 0 && (
@@ -1771,6 +1852,7 @@ function RecipeRow({
     item.kind === "mix" ? "oz/pizza" : "lb",
   );
   const rowsUnitReview = reviewRecipeRowsUnit(item.orig);
+  const recipeMetadata = recipeMetadataPreview(item.orig);
   // SPEC-WINS: a linked Dough/Sauce pick with parsed rows always replaces the
   // existing recipe's ingredients on Apply — no opt-in checkbox. Linked mixes
   // follow the same explicit update decision: sheet components and per-pizza
@@ -1860,6 +1942,20 @@ function RecipeRow({
               ))}
             </select>
           </div>
+          <div
+            className="mt-1 text-xs text-muted-foreground"
+            data-testid={`spec-recipe-source-name-${item.key}`}
+          >
+            Recipe name: {sourceLocationText(item.orig.sourceLocations?.name)}
+          </div>
+          {recipeMetadata && (
+            <div
+              className="mt-1 text-xs text-muted-foreground"
+              data-testid={`spec-recipe-source-metadata-${item.key}`}
+            >
+              {recipeMetadata}
+            </div>
+          )}
 
           {existingOptions.length > 0 && (
             <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -1931,6 +2027,8 @@ function RecipeRow({
               <span className="font-medium text-foreground">
                 {rowsUnitReview.reportedUnit}
               </span>
+              {" · Source: "}
+              {sourceLocationText(item.orig.sourceLocations?.rowsUnit)}
             </div>
           ) : (
             <div
@@ -1946,6 +2044,9 @@ function RecipeRow({
                   ? "The workbook did not clearly state whether these row values are pounds or ounces."
                   : `The reported row unit “${rowsUnitReview.reportedUnit}” is ambiguous.`}{" "}
                 Review before applying; the values will stay exactly as reported.
+              </p>
+              <p className="mt-1 text-xs text-amber-700">
+                Row unit source: {sourceLocationText(item.orig.sourceLocations?.rowsUnit)}
               </p>
               <fieldset className="mt-2">
                 <legend className="text-xs font-medium text-foreground">

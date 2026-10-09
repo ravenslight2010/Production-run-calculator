@@ -351,4 +351,83 @@ describe("SpecImportDialog two-step wizard", () => {
     fireEvent.click(next);
     expect(screen.getByTestId("spec-recipe-name-rk0")).toBeTruthy();
   });
+
+  it("shows verified workbook cells during review and strips locations before Apply", () => {
+    const profile: ParsedProfile = {
+      brand: "Aldo Foods",
+      flavor: "Classic",
+      dieType: "12 inch",
+      sourceLocations: {
+        brand: [{ file: "spec.xlsx", sheet: "Profiles", cell: "A2" }],
+        flavor: [{ file: "spec.xlsx", sheet: "Profiles", cell: "B2" }],
+        dieType: [{ file: "spec.xlsx", sheet: "Profiles", cell: "C2" }],
+      },
+      applicators: [],
+      pepperonis: [],
+    };
+    const recipe: ParsedRecipe = {
+      kind: "dough",
+      name: "House Dough",
+      sourceLocations: {
+        name: [{ file: "spec.xlsx", sheet: "Dough Recipes", cell: "A1" }],
+        doughballOz: [{ file: "spec.xlsx", sheet: "Dough Recipes", cell: "B2" }],
+        rowsUnit: [{ file: "spec.xlsx", sheet: "Dough Recipes", cell: "B3" }],
+      },
+      doughballOz: 8.25,
+      rowsUnit: "lb",
+      rows: [{
+        ingredient: "Flour",
+        lbs: 40,
+        sourceLocations: [
+          { file: "spec.xlsx", sheet: "Dough Recipes", cell: "A3" },
+          { file: "spec.xlsx", sheet: "Dough Recipes", cell: "B3" },
+        ],
+      }],
+    };
+    const onConfirm = vi.fn();
+    renderDialog(makePrepared([profile], [recipe]), onConfirm);
+
+    expect(screen.getByTestId("spec-profile-source-pk0").textContent)
+      .toContain("spec.xlsx · Profiles!A2");
+    expect(screen.getByTestId("spec-profile-source-pk0").textContent)
+      .toContain("spec.xlsx · Profiles!B2");
+    expect(screen.getByText(/Die 12 inch .*spec\.xlsx · Profiles!C2/)).toBeTruthy();
+
+    fireEvent.click(screen.getByText("Next"));
+    expect(screen.getByTestId("spec-recipe-source-name-rk0").textContent)
+      .toContain("spec.xlsx · Dough Recipes!A1");
+    expect(screen.getByTestId("spec-recipe-source-metadata-rk0").textContent)
+      .toContain("Doughball 8.25 oz (spec.xlsx · Dough Recipes!B2)");
+    expect(screen.getByTestId("spec-recipe-rows-unit-rk0").textContent)
+      .toContain("spec.xlsx · Dough Recipes!B3");
+    expect(screen.getByText(/Flour 40 lb .*Dough Recipes!A3.*Dough Recipes!B3/)).toBeTruthy();
+    fireEvent.click(screen.getByText(/^Apply/));
+
+    const applied = onConfirm.mock.calls[0][0] as ParsedSpecImport;
+    expect(applied.profiles[0]).not.toHaveProperty("sourceLocations");
+    expect(applied.recipes[0]).not.toHaveProperty("sourceLocations");
+    expect(applied.recipes[0].rows[0]).not.toHaveProperty("sourceLocations");
+  });
+
+  it("labels AI-only locations as unverified", () => {
+    const profile: ParsedProfile = {
+      brand: "AI Brand",
+      flavor: "AI Flavor",
+      applicators: [],
+      pepperonis: [],
+    };
+    const recipe: ParsedRecipe = {
+      kind: "dough",
+      name: "AI Dough",
+      rows: [{ ingredient: "Flour", lbs: 40 }],
+    };
+    renderDialog(makePrepared([profile], [recipe]));
+
+    expect(screen.getByTestId("spec-profile-source-pk0").textContent)
+      .toContain("location unverified");
+    fireEvent.click(screen.getByText("Next"));
+    expect(screen.getByTestId("spec-recipe-source-name-rk0").textContent)
+      .toContain("location unverified");
+    expect(screen.getByText(/Flour 40 lb \(location unverified\)/)).toBeTruthy();
+  });
 });
