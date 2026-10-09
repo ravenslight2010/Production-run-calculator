@@ -193,6 +193,55 @@ describe("SpecImportInventoryImpact", () => {
     }
   });
 
+  it("compares shared stock with combined demand while retaining each product's quantity", async () => {
+    inventoryApi.fetchInventory.mockResolvedValue([
+      { key: "packaging:cartons:cases", onHand: 75 },
+    ]);
+
+    render(
+      <SpecImportInventoryImpact
+        visible
+        run={{
+          brand: "Acme",
+          flavor: "Supreme",
+          values: {
+            ...DEFAULT_VALUES,
+            casesNeeded: 5,
+            pizzasPerCase: 10,
+            cartoned: "yes",
+            cartonsPerCase: 1,
+            cartonSize: 1,
+          },
+        }}
+        parsed={{
+          profiles: [
+            {
+              brand: "Acme",
+              flavor: "Supreme",
+              pizzasPerCase: 10,
+              applicators: [],
+              pepperonis: [],
+            },
+            {
+              brand: "Acme",
+              flavor: "Supreme",
+              pizzasPerCase: 10,
+              applicators: [],
+              pepperonis: [],
+            },
+          ],
+          recipes: [],
+        }}
+        forceUpdateProfileKeys={new Set()}
+      />,
+    );
+
+    expect((await screen.findAllByText("50 cases"))).toHaveLength(2);
+    expect(screen.getAllByText(/Combined planned demand: 100 cases across 2 planned products/))
+      .toHaveLength(2);
+    expect(screen.getAllByText(/Short by 25 cases · 75 cases on hand/)).toHaveLength(2);
+  });
+
   it("marks stock unavailable when the read-only inventory request fails", async () => {
     inventoryApi.fetchInventory.mockRejectedValue(new Error("Inventory service offline"));
 

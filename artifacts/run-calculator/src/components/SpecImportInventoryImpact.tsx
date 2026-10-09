@@ -3,6 +3,10 @@ import { AlertTriangle, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { specImportRecipeDisplayKind } from "@/storage";
 import {
+  aggregateInventoryDemandForPlannedProducts,
+  type AggregatedProductInventoryDemand,
+} from "@workspace/inventory-math";
+import {
   computeRunLines,
   fetchInventory,
   type InventoryItem,
@@ -50,6 +54,7 @@ function inventoryErrorMessage(error: unknown): string {
 function stockSummary(
   line: RunLine,
   plannedCases: number | null,
+  combinedDemand: AggregatedProductInventoryDemand | undefined,
   snapshot: InventorySnapshot | null,
   loading: boolean,
 ): string {
@@ -61,10 +66,14 @@ function stockSummary(
   if (plannedCases === null) {
     return `${formatQuantity(stock.onHand)} ${line.unit} on hand · shortage not estimated without a planned case count`;
   }
-  const shortage = Math.max(0, line.qty - stock.onHand);
+  if (!combinedDemand || !Number.isFinite(combinedDemand.qty)) return "Stock level unavailable";
+  const shortage = Math.max(0, combinedDemand.qty - stock.onHand);
+  const productScope = combinedDemand.productCount > 1
+    ? ` across ${combinedDemand.productCount} planned products`
+    : " for this product";
   return shortage > 1e-6
-    ? `Short by ${formatQuantity(shortage)} ${line.unit} · ${formatQuantity(stock.onHand)} on hand`
-    : `${formatQuantity(stock.onHand)} ${line.unit} on hand · covers this product's projected demand`;
+    ? `Combined planned demand: ${formatQuantity(combinedDemand.qty)} ${line.unit}${productScope} · Short by ${formatQuantity(shortage)} ${line.unit} · ${formatQuantity(stock.onHand)} ${line.unit} on hand`
+    : `Combined planned demand: ${formatQuantity(combinedDemand.qty)} ${line.unit}${productScope} · ${formatQuantity(stock.onHand)} ${line.unit} on hand covers demand`;
 }
 
 export function SpecImportInventoryImpact({
@@ -76,6 +85,23 @@ export function SpecImportInventoryImpact({
   const projections = useMemo(
     () => projectSpecImportForIncludedProducts(run, parsed, forceUpdateProfileKeys, classifyRecipe),
     [run, parsed, forceUpdateProfileKeys],
+  );
+  const productLines = useMemo(
+    () => projections.map((projection) =>
+      projection.status === "ready" ? computeRunLines(projection.values) : [],
+    ),
+    [projections],
+  );
+  const plannedDemandByKey = useMemo(
+    () => new Map(
+      aggregateInventoryDemandForPlannedProducts(
+        projections.map((projection, index) => ({
+          lines: productLines[index] ?? [],
+          plannedCases: projection.plannedCases,
+        })),
+      ).map((line) => [line.key, line]),
+    ),
+    [projections, productLines],
   );
   const hasReadyProjection = projections.some((projection) => projection.status === "ready");
   const [inventorySnapshot, setInventorySnapshot] = useState<InventorySnapshot | null>(null);
@@ -194,7 +220,7 @@ export function SpecImportInventoryImpact({
       ) : (
         <ul className="max-h-72 space-y-2 overflow-y-auto" data-testid="spec-import-stock-impact-products">
           {projections.map((projection, index) => {
-            const lines = projection.status === "ready" ? computeRunLines(projection.values) : [];
+            const lines = productLines[index] ?? [];
             return (
               <li
                 key={`${projection.profileLabel}-${index}`}
@@ -229,7 +255,13 @@ export function SpecImportInventoryImpact({
                           {formatQuantity(line.qty)} {line.unit}
                         </span>
                         <span className="basis-full text-right text-[11px] text-muted-foreground">
-                          {stockSummary(line, projection.plannedCases, inventorySnapshot, inventoryLoading)}
+                          {stockSummary(
+                            line,
+                            projection.plannedCases,
+                            plannedDemandByKey.get(line.key),
+                            inventorySnapshot,
+                            inventoryLoading,
+                          )}
                         </span>
                       </li>
                     ))}

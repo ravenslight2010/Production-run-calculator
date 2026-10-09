@@ -5,6 +5,7 @@ import {
   substitutionsForIngredient,
   computeRunConsumptionLines,
   computeRunDemandImpact,
+  aggregateInventoryDemandForPlannedProducts,
   computeSummaryStats,
   computeCheesePull,
   computeCheesePerPizzaOz,
@@ -614,6 +615,49 @@ describe("computeRunDemandImpact", () => {
       shortage: null,
       stockStatus: "unavailable",
     }));
+  });
+});
+
+describe("aggregateInventoryDemandForPlannedProducts", () => {
+  it("combines matching item keys and excludes products without a positive planned case count", () => {
+    const ingredient = {
+      key: "ingredient:Mozzarella:lbs",
+      name: "Mozzarella",
+      category: "ingredient" as const,
+      unit: "lbs",
+    };
+    const cartons = {
+      key: "packaging:cartons:cases",
+      name: "Cartons",
+      category: "packaging" as const,
+      unit: "cases",
+    };
+
+    expect(aggregateInventoryDemandForPlannedProducts([
+      {
+        plannedCases: 5,
+        lines: [{ ...ingredient, qty: 12 }, { ...cartons, qty: 5 }],
+      },
+      {
+        plannedCases: 2,
+        lines: [{ ...ingredient, qty: 8 }],
+      },
+      {
+        plannedCases: null,
+        lines: [{ ...ingredient, qty: 100 }],
+      },
+      {
+        plannedCases: 0,
+        lines: [{ ...ingredient, qty: 50 }],
+      },
+      {
+        plannedCases: Number.NaN,
+        lines: [{ ...ingredient, qty: 25 }],
+      },
+    ])).toEqual([
+      { ...ingredient, qty: 20, productCount: 2 },
+      { ...cartons, qty: 5, productCount: 1 },
+    ]);
   });
 });
 

@@ -514,6 +514,50 @@ export type RunDemandImpactLine = {
   stockStatus: "covered" | "short" | "untracked" | "unavailable";
 };
 
+export type PlannedProductInventoryDemand = {
+  lines: readonly RunLine[];
+  plannedCases: number | null;
+};
+
+export type AggregatedProductInventoryDemand = RunLine & {
+  productCount: number;
+};
+
+/**
+ * Sum demand by inventory item across products with an explicit positive case
+ * count. Per-case-only products remain visible to callers but are excluded from
+ * these shortage-comparison totals.
+ */
+export function aggregateInventoryDemandForPlannedProducts(
+  products: readonly PlannedProductInventoryDemand[],
+): AggregatedProductInventoryDemand[] {
+  const demandByKey = new Map<string, AggregatedProductInventoryDemand>();
+
+  for (const product of products) {
+    if (
+      product.plannedCases === null ||
+      !Number.isFinite(product.plannedCases) ||
+      product.plannedCases <= 0
+    ) {
+      continue;
+    }
+
+    const seenKeys = new Set<string>();
+    for (const line of product.lines) {
+      const existing = demandByKey.get(line.key);
+      if (existing) {
+        existing.qty += line.qty;
+        if (!seenKeys.has(line.key)) existing.productCount += 1;
+      } else {
+        demandByKey.set(line.key, { ...line, productCount: 1 });
+      }
+      seenKeys.add(line.key);
+    }
+  }
+
+  return [...demandByKey.values()];
+}
+
 /**
  * Compare canonical inventory demand for the same run before and after a
  * reviewed setup change. This is a read-only projection: it only calculates
