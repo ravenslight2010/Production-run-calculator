@@ -594,7 +594,7 @@ export default function QcWorkflowTab({
       ...(historyParams.station ? { station: historyParams.station } : {}),
     };
     try {
-      const blob = await exportQcHistoryCsv(params);
+      const blob = await exportQcHistoryCsv(params, { responseType: "blob" });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
@@ -1069,13 +1069,17 @@ export default function QcWorkflowTab({
                     {runQuery.data?.hasMore && <span>More run history is available in scoped history below.</span>}
                     {runQuery.data?.signoff && <span>Last sign-off · {formatTime(runQuery.data.signoff.createdAt)}</span>}
                   </div>
-                  <div className="mt-3"><Textarea label="Sign-off note (optional)" value={signoffNote} onChange={setSignoffNote} placeholder="QC disposition or shift handoff note" rows={2} /></div>
-                  <MutationAlert error={signoffMutation.error} onRetry={submitSignoff} />
-                  <button type="button" className={`${actionClass} mt-3 w-full`} onClick={submitSignoff} disabled={!canRecordQc || !runId || !runItems?.length || signoffMutation.isPending}>
-                    {signoffMutation.isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                    {signedOff ? "Sign off reviewed set again" : "Sign off reviewed set"}
-                  </button>
-                  {signedOff && <p className="mt-2 text-center text-[11px] text-[#397065] dark:text-emerald-300">This is advisory QC evidence only. Production sequencing and shipping status are unchanged.</p>}
+                  {canManageQc && (
+                    <>
+                      <div className="mt-3"><Textarea label="Sign-off note (optional)" value={signoffNote} onChange={setSignoffNote} placeholder="QC disposition or shift handoff note" rows={2} /></div>
+                      <MutationAlert error={signoffMutation.error} onRetry={submitSignoff} />
+                      <button type="button" className={`${actionClass} mt-3 w-full`} onClick={submitSignoff} disabled={!runId || !runItems?.length || signoffMutation.isPending}>
+                        {signoffMutation.isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                        {signedOff ? "Sign off reviewed set again" : "Sign off reviewed set"}
+                      </button>
+                      {signedOff && <p className="mt-2 text-center text-[11px] text-[#397065] dark:text-emerald-300">This is advisory QC evidence only. Production sequencing and shipping status are unchanged.</p>}
+                    </>
+                  )}
                 </>
               )}
             </section>
