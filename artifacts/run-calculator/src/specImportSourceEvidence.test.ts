@@ -401,6 +401,40 @@ describe("spec Apply source evidence", () => {
     expect(prepared.sourceEvidence?.sourceText).not.toContain("1/2");
   });
 
+  it("does not add a manager-entered formula replacement to source evidence", async () => {
+    const prepared = await prepareSpecImport(
+      formulaWorkbookBuffer(),
+      "manual-formula-replacement.xlsx",
+    );
+    const reviewedValue = 9.25;
+    const reviewed: SpecImportPrepared = {
+      ...prepared,
+      parsed: {
+        ...prepared.parsed,
+        profiles: prepared.parsed.profiles.map((profile) => ({
+          ...profile,
+          sauceOzPerPizza: reviewedValue,
+        })),
+      },
+    };
+    const fetchSpy = await installApplyFetch();
+
+    await commitSpecImport(
+      reviewed,
+      undefined,
+      undefined,
+      "import-spec-manual-formula-replacement",
+    );
+
+    const body = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string) as Record<string, any>;
+    expect(body.sourceEvidence.sourceText).not.toContain("1/2");
+    expect(body.sourceEvidence.sourceText).not.toContain(String(reviewedValue));
+    expect(body).not.toHaveProperty("sourcePreviewCells");
+    expect(body).not.toHaveProperty("missingFormulaResults");
+    expect(body.changes).not.toHaveProperty("sourceEvidence");
+    expect(prepared.parsed.profiles[0].sauceOzPerPizza).toBeUndefined();
+  });
+
   it("builds exact source-cell previews for each workbook in a multi-file review", async () => {
     const first = workbookBuffer(
       [["Brand", "Flavor"], ["Acme", "Classic"]],

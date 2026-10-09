@@ -237,6 +237,86 @@ describe("SpecImportDialog flavor-correction warnings", () => {
     expect(screen.getByTestId("spec-source-preview-value").textContent)
       .toBe("No saved result in workbook");
   });
+
+  it("validates and applies a manager-entered value without adding source evidence", () => {
+    const prepared = makePrepared([
+      {
+        ...profile("Acme", "Classic"),
+        sourceLocations: {
+          brand: [{ file: "spec.xlsx", sheet: "Profiles", cell: "A2" }],
+          flavor: [{ file: "spec.xlsx", sheet: "Profiles", cell: "B2" }],
+        },
+      },
+    ]);
+    prepared.missingFormulaResults = [{
+      field: "Sauce oz/pizza",
+      location: { file: "spec.xlsx", sheet: "Profiles", cell: "D2" },
+      hasSavedResult: false,
+      brand: "Acme",
+      flavor: "Classic",
+    }];
+    prepared.sourcePreviewCells = [{
+      file: "spec.xlsx",
+      sheet: "Profiles",
+      cell: "D2",
+      value: "",
+      formula: "1/2",
+      hasSavedResult: false,
+    }];
+    const onConfirm = vi.fn();
+    renderDialog(prepared, onConfirm);
+
+    const valueInput = screen.getByRole("textbox", {
+      name: "Manual value for Sauce oz/pizza · Acme — Classic",
+    });
+    const nextButton = screen.getByRole("button", { name: "Next" });
+    fireEvent.change(valueInput, { target: { value: "-0.5" } });
+    expect(nextButton).toHaveProperty("disabled", true);
+    expect(screen.getByRole("alert").textContent).toBe("Enter a number of 0 or more.");
+
+    fireEvent.change(valueInput, { target: { value: "0.75" } });
+    expect(nextButton).toHaveProperty("disabled", false);
+    fireEvent.click(nextButton);
+    fireEvent.click(screen.getByRole("button", { name: /^Apply/ }));
+
+    const applied = onConfirm.mock.calls[0]?.[0] as ParsedSpecImport;
+    expect(applied.profiles[0].sauceOzPerPizza).toBe(0.75);
+    expect(applied.profiles[0]).not.toHaveProperty("sourceLocations");
+    expect(applied.profiles[0]).not.toHaveProperty("formula");
+    expect(applied).not.toHaveProperty("sourceEvidence");
+  });
+
+  it("lets a manager supply a missing profile identity before applying", () => {
+    const prepared = makePrepared([]);
+    prepared.missingFormulaResults = [{
+      field: "Brand",
+      location: { file: "spec.xlsx", sheet: "Profiles", cell: "A2" },
+      hasSavedResult: false,
+      flavor: "Classic",
+    }];
+    prepared.sourcePreviewCells = [{
+      file: "spec.xlsx",
+      sheet: "Profiles",
+      cell: "A2",
+      value: "",
+      formula: "A1",
+      hasSavedResult: false,
+    }];
+    const onConfirm = vi.fn();
+    renderDialog(prepared, onConfirm);
+
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Manual value for Brand · Classic" }),
+      { target: { value: "Acme" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Apply/ }));
+
+    const applied = onConfirm.mock.calls[0]?.[0] as ParsedSpecImport;
+    expect(applied.profiles).toHaveLength(1);
+    expect(applied.profiles[0]).toMatchObject({ brand: "Acme", flavor: "Classic" });
+    expect(applied.profiles[0]).not.toHaveProperty("sourceLocations");
+  });
 });
 
 describe("SpecImportDialog recipe row unit review", () => {

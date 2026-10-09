@@ -124,6 +124,169 @@ type ProfileItem = {
   forceUpdate: boolean;
 };
 
+type MissingFormulaOverrideTarget = {
+  property: string;
+  valueType: "text" | "number" | "integer";
+  collection?: "applicators" | "pepperonis";
+  slot?: number;
+};
+
+type MissingFormulaReviewRow = {
+  warning: SpecImportMissingFormulaResult;
+  key: string;
+  target?: MissingFormulaOverrideTarget;
+  profileKey?: string;
+};
+
+function missingFormulaReviewKey(warning: SpecImportMissingFormulaResult): string {
+  return JSON.stringify([
+    warning.location.file ?? "",
+    warning.location.sheet,
+    warning.location.cell.toUpperCase(),
+    warning.field,
+  ]);
+}
+
+function missingFormulaOverrideTarget(field: string): MissingFormulaOverrideTarget | undefined {
+  const key = field.trim().replace(/\s+/g, " ").toLowerCase();
+  const profileFields: Record<string, MissingFormulaOverrideTarget> = {
+    brand: { property: "brand", valueType: "text" },
+    flavor: { property: "flavor", valueType: "text" },
+    "die type": { property: "dieType", valueType: "text" },
+    "sauce oz/pizza": { property: "sauceOzPerPizza", valueType: "number" },
+    "sauce oz per pizza": { property: "sauceOzPerPizza", valueType: "number" },
+    "dough recipe": { property: "doughName", valueType: "text" },
+    "sauce recipe": { property: "sauceName", valueType: "text" },
+    "target doughball weight (oz)": { property: "targetDoughballWeight", valueType: "number" },
+    "doughballs per tray": { property: "doughballsPerTray", valueType: "integer" },
+  };
+  const profileField = profileFields[key];
+  if (profileField) return profileField;
+
+  const applicator = key.match(/^applicator\s*(\d+)\s*(type|oz\/pizza|recipe)$/);
+  if (applicator) {
+    const [, rawSlot, column] = applicator;
+    return {
+      collection: "applicators",
+      slot: Number(rawSlot),
+      property: column === "type" ? "type" : column === "recipe" ? "recipeName" : "ozPerPizza",
+      valueType: column === "oz/pizza" ? "number" : "text",
+    };
+  }
+
+  const pepperoni = key.match(/^pepperoni\s*(\d+)\s*(type|sticks|oz\/pizza)$/);
+  if (pepperoni) {
+    const [, rawSlot, column] = pepperoni;
+    return {
+      collection: "pepperonis",
+      slot: Number(rawSlot),
+      property: column === "type" ? "type" : column === "sticks" ? "sticks" : "ozPerPizza",
+      valueType: column === "sticks" ? "integer" : column === "oz/pizza" ? "number" : "text",
+    };
+  }
+  return undefined;
+}
+
+function validateMissingFormulaOverride(
+  target: MissingFormulaOverrideTarget,
+  value: string,
+): string | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (target.valueType === "text") {
+    if (trimmed.length > 200) return "Enter 200 characters or fewer.";
+    if (/[\u0000-\u001f\u007f]/.test(trimmed)) return "Remove control characters from this value.";
+    return undefined;
+  }
+  if (!/^(?:\d+(?:\.\d+)?|\.\d+)$/.test(trimmed)) {
+    return target.valueType === "integer"
+      ? "Enter a whole number of 0 or more."
+      : "Enter a number of 0 or more.";
+  }
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed) || parsed < 0 || (target.valueType === "integer" && !Number.isInteger(parsed))) {
+    return target.valueType === "integer"
+      ? "Enter a whole number of 0 or more."
+      : "Enter a number of 0 or more.";
+  }
+  return undefined;
+}
+
+function applyMissingFormulaOverride(
+  profile: ParsedProfile,
+  target: MissingFormulaOverrideTarget,
+  value: string,
+): ParsedProfile {
+  const trimmed = value.trim();
+  if (!trimmed || validateMissingFormulaOverride(target, trimmed)) return profile;
+  const parsedValue = target.valueType === "text" ? trimmed : Number(trimmed);
+  if (!target.collection) {
+    return { ...profile, [target.property]: parsedValue } as ParsedProfile;
+  }
+
+  const slot = target.slot ?? 1;
+  if (target.collection === "applicators") {
+    const items = [...(profile.applicators ?? [])];
+    const bySlot = items.findIndex((item) => item.slot === slot);
+    const existingIndex = bySlot >= 0
+      ? bySlot
+      : items.findIndex((item, index) => item.slot == null && index === slot - 1);
+    const current = existingIndex >= 0
+      ? items[existingIndex]
+      : { type: "", ozPerPizza: 0, slot };
+    const updated = {
+      ...current,
+      [target.property]: parsedValue,
+    } as NonNullable<ParsedProfile["applicators"]>[number];
+    if (existingIndex >= 0) items[existingIndex] = updated;
+    else items.push(updated);
+    return { ...profile, applicators: items };
+  }
+
+  const items = [...(profile.pepperonis ?? [])];
+  const existingIndex = items[slot - 1] ? slot - 1 : -1;
+  const current = existingIndex >= 0
+    ? items[existingIndex]
+    : { type: "", sticks: 0, ozPerPizza: 0 };
+  const updated = {
+    ...current,
+    [target.property]: parsedValue,
+  } as NonNullable<ParsedProfile["pepperonis"]>[number];
+  if (existingIndex >= 0) items[existingIndex] = updated;
+  else items.push(updated);
+  return { ...profile, pepperonis: items };
+}
+
+function sameSourceRow(
+  warning: SpecImportMissingFormulaResult,
+  profile: ParsedProfile,
+): boolean {
+  const row = warning.location.cell.match(/\d+$/)?.[0];
+  if (!row) return false;
+  return Object.values(profile.sourceLocations ?? {}).some((locations) =>
+    locations?.some((location) =>
+      location.sheet === warning.location.sheet &&
+      location.cell.match(/\d+$/)?.[0] === row &&
+      (warning.location.file == null || location.file === warning.location.file),
+    ),
+  );
+}
+
+function profileForMissingFormulaWarning(
+  warning: SpecImportMissingFormulaResult,
+  profiles: readonly ProfileItem[],
+): ProfileItem | undefined {
+  const brand = warning.brand?.trim().toLowerCase();
+  const flavor = warning.flavor?.trim().toLowerCase();
+  const matchesIdentity = (profile: ProfileItem) =>
+    (!brand || profile.baseOrig.brand.trim().toLowerCase() === brand) &&
+    (!flavor || profile.baseOrig.flavor.trim().toLowerCase() === flavor);
+  const rowMatch = profiles.filter((profile) => sameSourceRow(warning, profile.baseOrig));
+  if (rowMatch.length === 1) return rowMatch[0];
+  const identityMatches = brand && flavor ? profiles.filter(matchesIdentity) : [];
+  return identityMatches.length === 1 ? identityMatches[0] : undefined;
+}
+
 // One editable recipe row. `orig` keeps rows/targets/doughballOz/app; name + kind
 // + include are editable (fixes "no name" and "cheese read as sauce").
 // `brand`/`flavor` let the user attach a recipe that the AI left tied to no
@@ -212,7 +375,42 @@ function buildProfileItems(prepared: SpecImportPrepared): ProfileItem[] {
     tombstoned: true,
     forceUpdate: false,
   }));
-  return [...kept, ...skipped];
+  const profiles = [...kept, ...skipped];
+  const syntheticRows = new Set<string>();
+  for (const warning of prepared.missingFormulaResults ?? []) {
+    const target = missingFormulaOverrideTarget(warning.field);
+    if (target?.property !== "brand" && target?.property !== "flavor") continue;
+    if (profileForMissingFormulaWarning(warning, profiles)) continue;
+    const rowKey = JSON.stringify([
+      warning.location.file ?? "",
+      warning.location.sheet,
+      warning.location.cell.match(/\d+$/)?.[0] ?? warning.location.cell,
+    ]);
+    if (syntheticRows.has(rowKey)) continue;
+    syntheticRows.add(rowKey);
+    const unresolvedProfile: ParsedProfile = {
+      brand: warning.brand ?? "",
+      flavor: warning.flavor ?? "",
+      // This review-only row anchor lets related missing identity warnings
+      // target the same draft profile. It is stripped before the import applies.
+      sourceLocations: { formulaReview: [warning.location] },
+      applicators: [],
+      pepperonis: [],
+    };
+    profiles.push({
+      key: `formula-profile-${profiles.length}`,
+      orig: unresolvedProfile,
+      baseOrig: unresolvedProfile,
+      brand: unresolvedProfile.brand,
+      flavor: unresolvedProfile.flavor,
+      dieType: "",
+      dieTouched: false,
+      include: true,
+      tombstoned: false,
+      forceUpdate: false,
+    });
+  }
+  return profiles;
 }
 
 /**
@@ -423,21 +621,52 @@ function MissingFormulaResultRow({
   warning,
   sourcePreviewCells,
   onOpenSourceCell,
+  manualValue,
+  manualValueError,
+  manualValueLabel,
+  manualValueInputMode,
+  onManualValue,
 }: {
   warning: SpecImportMissingFormulaResult;
   sourcePreviewCells: readonly SpecImportSourcePreviewCell[];
   onOpenSourceCell: (cell: SpecImportSourcePreviewCell) => void;
+  manualValue?: string;
+  manualValueError?: string;
+  manualValueLabel?: string;
+  manualValueInputMode?: "text" | "decimal" | "numeric";
+  onManualValue?: (value: string) => void;
 }) {
   const profile = [warning.brand, warning.flavor].filter(Boolean).join(" — ");
   const preview = sourcePreviewForLocation(warning.location, sourcePreviewCells);
   return (
     <li className="flex flex-wrap items-center justify-between gap-2 text-xs text-amber-800">
-      <span>
-        <span className="font-medium">{warning.field}</span>
-        {profile ? ` · ${profile}` : ""}
-        {" · "}
-        {sourceLocationText([warning.location])}
-      </span>
+      <div className="min-w-0">
+        <span>
+          <span className="font-medium">{warning.field}</span>
+          {profile ? ` · ${profile}` : ""}
+          {" · "}
+          {sourceLocationText([warning.location])}
+        </span>
+        {manualValueLabel && onManualValue && (
+          <label className="mt-2 flex flex-wrap items-center gap-2">
+            <span className="font-medium">Manual value for {warning.field}</span>
+            <input
+              type="text"
+              inputMode={manualValueInputMode}
+              value={manualValue ?? ""}
+              onChange={(event) => onManualValue(event.target.value)}
+              aria-label={manualValueLabel}
+              aria-invalid={!!manualValueError}
+              className="w-40 rounded border border-amber-700/30 bg-background px-2 py-1 text-foreground outline-none focus:ring-2 focus:ring-amber-500"
+            />
+            {manualValueError && (
+              <span role="alert" className="text-destructive">
+                {manualValueError}
+              </span>
+            )}
+          </label>
+        )}
+      </div>
       {preview && (
         <button
           type="button"
@@ -571,6 +800,7 @@ export default function SpecImportDialog({
   // reviews everything else (recipes, die types, the diff, notes, mappings).
   const [step, setStep] = useState<1 | 2>(1);
   const [activeSourceCellKey, setActiveSourceCellKey] = useState<string | null>(null);
+  const [manualFormulaValues, setManualFormulaValues] = useState<Record<string, string>>({});
   const sourcePreviewRef = useRef<HTMLElement>(null);
   /**
    * Lower-cased mix names whose new ingredient additions the manager has
@@ -583,6 +813,7 @@ export default function SpecImportDialog({
   useEffect(() => {
     if (prepared) {
       setActiveSourceCellKey(null);
+      setManualFormulaValues({});
       setProfiles(buildProfileItems(prepared));
       // existingRecipeNamesByKind is intentionally NOT a dependency: this
       // effect must only reset the review when a NEW prepared payload arrives,
@@ -602,6 +833,7 @@ export default function SpecImportDialog({
       setStep(1);
     } else {
       setActiveSourceCellKey(null);
+      setManualFormulaValues({});
       setProfiles([]);
       setRecipes([]);
       setRemovedProfiles([]);
@@ -612,13 +844,30 @@ export default function SpecImportDialog({
   }, [prepared]);
 
   useEffect(() => {
-    if (!open) setActiveSourceCellKey(null);
+    if (!open) {
+      setActiveSourceCellKey(null);
+      setManualFormulaValues({});
+    }
   }, [open]);
 
   const brands = prepared?.brands ?? [];
   const flavorsByBrand = prepared?.flavorsByBrand ?? {};
   const sourcePreviewCells = prepared?.sourcePreviewCells ?? [];
   const missingFormulaResults = prepared?.missingFormulaResults ?? [];
+  const missingFormulaRows: MissingFormulaReviewRow[] = missingFormulaResults.map((warning) => ({
+    warning,
+    key: missingFormulaReviewKey(warning),
+    target: missingFormulaOverrideTarget(warning.field),
+    profileKey: profileForMissingFormulaWarning(warning, profiles)?.key,
+  }));
+  const manualFormulaErrors = new Map(
+    missingFormulaRows.flatMap((row) => {
+      if (!row.target) return [];
+      const error = validateMissingFormulaOverride(row.target, manualFormulaValues[row.key] ?? "");
+      return error ? [[row.key, error] as const] : [];
+    }),
+  );
+  const hasInvalidManualFormulaValues = manualFormulaErrors.size > 0;
   const uniqueSourcePreviewCells = [
     ...new Map(
       sourcePreviewCells.map((cell) => [sourcePreviewCellKey(cell), cell]),
@@ -640,6 +889,26 @@ export default function SpecImportDialog({
     setProfiles((prev) => prev.map((p) => (p.key === key ? { ...p, ...patch } : p)));
   const setRecipe = (key: string, patch: Partial<RecipeItem>) =>
     setRecipes((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  const onMissingFormulaValue = (row: MissingFormulaReviewRow, value: string) => {
+    setManualFormulaValues((current) => ({ ...current, [row.key]: value }));
+    if (row.profileKey && row.target?.property === "brand") {
+      setProfile(row.profileKey, { brand: value });
+    } else if (row.profileKey && row.target?.property === "flavor") {
+      setProfile(row.profileKey, { flavor: value });
+    }
+  };
+  const profileWithManualFormulaValues = (
+    item: ProfileItem,
+    source: ParsedProfile,
+  ): ParsedProfile =>
+    missingFormulaRows.reduce((current, row) => {
+      if (!row.target || row.profileKey !== item.key) return current;
+      const value = manualFormulaValues[row.key] ?? "";
+      if (!value.trim() || validateMissingFormulaOverride(row.target, value)) return current;
+      // The manager's entry is applied as a profile value only. Its formula,
+      // cell citation, and source location remain untouched review-only data.
+      return applyMissingFormulaOverride(current, row.target, value);
+    }, source);
 
   // A checked product can't advance until it has both a brand and a flavor —
   // step 2 (and the diff) are computed from the CONFIRMED product names.
@@ -670,12 +939,15 @@ export default function SpecImportDialog({
     // value inherited under a stale grouping. The effective die also feeds the
     // fill so a sibling can inherit from a user-set die.
     const effectiveDie = (p: ProfileItem) =>
-      (p.dieTouched ? p.dieType : p.baseOrig.dieType ?? "").trim();
+      (p.dieTouched
+        ? p.dieType
+        : profileWithManualFormulaValues(p, p.baseOrig).dieType ?? "").trim();
     const includedEdited = profiles
       .filter((p) => p.include)
       .map((p): ParsedProfile => {
+        const baseWithManualValues = profileWithManualFormulaValues(p, p.baseOrig);
         const out: ParsedProfile = {
-          ...p.baseOrig,
+          ...baseWithManualValues,
           brand: p.brand.trim(),
           flavor: p.flavor.trim(),
         };
@@ -687,7 +959,8 @@ export default function SpecImportDialog({
     const filled = crossFillSpecImport({ profiles: includedEdited, recipes: [] }).parsed.profiles;
     let fi = 0;
     const nextProfiles = profiles.map((p): ProfileItem => {
-      const baseSauce = p.baseOrig.sauceOzPerPizza;
+      const baseWithManualValues = profileWithManualFormulaValues(p, p.baseOrig);
+      const baseSauce = baseWithManualValues.sauceOzPerPizza;
       if (!p.include) {
         // Excluded rows aren't cross-filled and aren't applied; reset derived
         // state to the pristine parse so re-including then re-advancing is clean.
@@ -700,7 +973,7 @@ export default function SpecImportDialog({
       const f = filled[fi++];
       const die = p.dieTouched ? p.dieType : effectiveDie(p) || (f.dieType ?? "");
       const sauce = baseSauce == null ? f.sauceOzPerPizza : baseSauce;
-      const orig: ParsedProfile = { ...p.baseOrig };
+      const orig: ParsedProfile = { ...baseWithManualValues };
       if (sauce != null) orig.sauceOzPerPizza = sauce;
       else delete orig.sauceOzPerPizza;
       return { ...p, dieType: die, orig };
@@ -932,7 +1205,11 @@ export default function SpecImportDialog({
       profiles
         .filter((p) => p.include)
         .map((p): ParsedProfile => {
-          const out: ParsedProfile = { ...p.orig, brand: p.brand.trim(), flavor: p.flavor.trim() };
+          const out: ParsedProfile = {
+            ...profileWithManualFormulaValues(p, p.orig),
+            brand: p.brand.trim(),
+            flavor: p.flavor.trim(),
+          };
           const die = p.dieType.trim();
           if (die) out.dieType = die;
           else delete out.dieType;
@@ -1280,20 +1557,35 @@ export default function SpecImportDialog({
                   </div>
                   <p className="mt-1 text-xs text-amber-700">
                     The importer did not calculate or substitute these supported spec values.
-                    Review the source cells before applying.
+                    Review the source cells and, if known, enter a replacement value. The formula
+                    itself is never evaluated.
                   </p>
                   <ul className="mt-2 space-y-1">
-                    {missingFormulaResults.map((warning) => (
+                    {missingFormulaRows.map((row) => (
                       <MissingFormulaResultRow
-                        key={JSON.stringify([
-                          warning.location.file ?? "",
-                          warning.location.sheet,
-                          warning.location.cell,
-                          warning.field,
-                        ])}
-                        warning={warning}
+                        key={row.key}
+                        warning={row.warning}
                         sourcePreviewCells={sourcePreviewCells}
                         onOpenSourceCell={openSourceCell}
+                        manualValue={row.profileKey && row.target ? manualFormulaValues[row.key] ?? "" : undefined}
+                        manualValueError={manualFormulaErrors.get(row.key)}
+                        manualValueLabel={
+                          row.profileKey && row.target
+                            ? `Manual value for ${row.warning.field}${row.warning.brand || row.warning.flavor ? ` · ${[row.warning.brand, row.warning.flavor].filter(Boolean).join(" — ")}` : ""}`
+                            : undefined
+                        }
+                        manualValueInputMode={
+                          row.target?.valueType === "number"
+                            ? "decimal"
+                            : row.target?.valueType === "integer"
+                              ? "numeric"
+                              : "text"
+                        }
+                        onManualValue={
+                          row.profileKey && row.target
+                            ? (value) => onMissingFormulaValue(row, value)
+                            : undefined
+                        }
                       />
                     ))}
                   </ul>
@@ -1751,7 +2043,8 @@ export default function SpecImportDialog({
                 !!error ||
                 !prepared ||
                 (nothingParsed && !anyRemovalsChecked) ||
-                includedProfileMissing
+                includedProfileMissing ||
+                hasInvalidManualFormulaValues
               }
               className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
@@ -1782,6 +2075,7 @@ export default function SpecImportDialog({
                 !prepared ||
                 ((nothingParsed || includedCount === 0) && !anyRemovalsChecked) ||
                 attentionCount > 0 ||
+                hasInvalidManualFormulaValues ||
                 (requiresDestructiveConfirmation && !destructiveChangesConfirmed)
               }
               className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
