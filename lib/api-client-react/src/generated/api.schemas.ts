@@ -5185,6 +5185,41 @@ export interface FreezerSurplusLedger {
   allocations: FreezerSurplusAllocation[];
 }
 
+export type FreezerSurplusAdjustmentEventType = typeof FreezerSurplusAdjustmentEventType[keyof typeof FreezerSurplusAdjustmentEventType];
+
+
+export const FreezerSurplusAdjustmentEventType = {
+  damage: 'damage',
+  return: 'return',
+  correction: 'correction',
+} as const;
+
+export interface FreezerSurplusAdjustment {
+  eventId: string;
+  lotId: string;
+  eventType: FreezerSurplusAdjustmentEventType;
+  /**
+     * @minimum 1
+     * @maximum 1000000
+     */
+  cases: number;
+  /**
+     * @minLength 1
+     * @maxLength 300
+     */
+  reason: string;
+  actorId: string;
+  /** @nullable */
+  runId?: string | null;
+  /** @nullable */
+  correctsEventId?: string | null;
+  createdAt: string;
+}
+
+export interface FreezerSurplusAdjustmentList {
+  adjustments: FreezerSurplusAdjustment[];
+}
+
 export interface ConfirmFreezerSurplusInput {
   /**
      * @minLength 1
@@ -5227,10 +5262,44 @@ export interface ReplaceFreezerSurplusAllocationInput {
   allocations: FreezerSurplusAllocationSelection[];
 }
 
+export type RecordFreezerSurplusAdjustmentInputEventType = typeof RecordFreezerSurplusAdjustmentInputEventType[keyof typeof RecordFreezerSurplusAdjustmentInputEventType];
+
+
+export const RecordFreezerSurplusAdjustmentInputEventType = {
+  damage: 'damage',
+  return: 'return',
+  correction: 'correction',
+} as const;
+
+/**
+ * runId is required only for eventType=return. correctsEventId is required only for eventType=correction. Both are rejected for incompatible event types.
+ */
+export interface RecordFreezerSurplusAdjustmentInput {
+  eventId: string;
+  eventType: RecordFreezerSurplusAdjustmentInputEventType;
+  /**
+     * @minimum 1
+     * @maximum 1000000
+     */
+  cases: number;
+  /**
+     * @minLength 1
+     * @maxLength 300
+     */
+  reason: string;
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  runId?: string;
+  correctsEventId?: string;
+}
+
 export interface FreezerSurplusMutationResponse {
   lots: FreezerSurplusLot[];
   allocations: FreezerSurplusAllocation[];
   createdLot?: FreezerSurplusLot | null;
+  createdAdjustment?: FreezerSurplusAdjustment | null;
 }
 
 export interface MixSurplusLot {

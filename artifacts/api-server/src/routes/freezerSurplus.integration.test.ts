@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
-import { sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import pg from "pg";
@@ -18,6 +18,7 @@ let db: DbModule["db"];
 let pool: DbModule["pool"];
 let freezerSurplusLotsTable: DbModule["freezerSurplusLotsTable"];
 let freezerSurplusAllocationsTable: DbModule["freezerSurplusAllocationsTable"];
+let freezerSurplusAdjustmentsTable: DbModule["freezerSurplusAdjustmentsTable"];
 let inventoryItemsTable: DbModule["inventoryItemsTable"];
 let inventoryLotsTable: DbModule["inventoryLotsTable"];
 let inventoryLedgerTable: DbModule["inventoryLedgerTable"];
@@ -38,6 +39,7 @@ let baseUrl: string;
 
 const MANAGER = "surplus-manager";
 const SANDBOX_MANAGER = "surplus-sandbox";
+const OPERATOR = "surplus-operator";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 
 beforeAll(async () => {
@@ -72,6 +74,7 @@ beforeAll(async () => {
   pool = dbMod.pool;
   freezerSurplusLotsTable = dbMod.freezerSurplusLotsTable;
   freezerSurplusAllocationsTable = dbMod.freezerSurplusAllocationsTable;
+  freezerSurplusAdjustmentsTable = dbMod.freezerSurplusAdjustmentsTable;
   inventoryItemsTable = dbMod.inventoryItemsTable;
   inventoryLotsTable = dbMod.inventoryLotsTable;
   inventoryLedgerTable = dbMod.inventoryLedgerTable;
@@ -115,7 +118,7 @@ beforeEach(async () => {
   clearUserValidityCache();
   clearSandboxCache();
   await db.execute(sql`
-    TRUNCATE ${freezerSurplusAllocationsTable}, ${freezerSurplusLotsTable},
+    TRUNCATE ${freezerSurplusAdjustmentsTable}, ${freezerSurplusAllocationsTable}, ${freezerSurplusLotsTable},
       ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryItemsTable}, ${inventoryLocationsTable},
       ${dailySyncTable}, ${userRolesTable}, ${usersTable}, ${rolesTable}
       RESTART IDENTITY CASCADE
@@ -128,10 +131,12 @@ beforeEach(async () => {
   await db.insert(usersTable).values([
     { id: MANAGER, username: MANAGER, passwordHash: "x" },
     { id: SANDBOX_MANAGER, username: SANDBOX_MANAGER, passwordHash: "x", sandbox: true },
+    { id: OPERATOR, username: OPERATOR, passwordHash: "x" },
   ]);
   await db.insert(userRolesTable).values([
     { userId: MANAGER, role: "manager" },
     { userId: SANDBOX_MANAGER, role: "manager" },
+    { userId: OPERATOR, role: "operator" },
   ]);
 });
 
@@ -157,6 +162,24 @@ async function ledger(userId = MANAGER) {
   return (await response.json()) as {
     lots: Array<{ id: string; productionDate: string; remainingCases: number; totalCases: number }>;
     allocations: Array<{ lotId: string; runId: string; cases: number }>;
+  };
+}
+
+async function adjustmentHistory(userId = MANAGER) {
+  const response = await req(userId, "GET", "/api/freezer-surplus/adjustments");
+  expect(response.status).toBe(200);
+  return (await response.json()) as {
+    adjustments: Array<{
+      eventId: string;
+      lotId: string;
+      eventType: "damage" | "return" | "correction";
+      cases: number;
+      reason: string;
+      actorId: string;
+      runId?: string;
+      correctsEventId?: string;
+      createdAt: string;
+    }>;
   };
 }
 
@@ -229,19 +252,66 @@ async function allocate(
   });
 }
 
+const DAMAGE_EVENT_ID = "7b49117a-4a62-4b6e-9c1b-2712f5d2654e";
+const DAMAGE_CORRECTION_ID = "9d93c272-e654-441b-8c5c-618f21b43479";
+const RETURN_EVENT_ID = "681d17d8-e49f-43c5-8ce1-96767f8fc633";
+const RETURN_CORRECTION_ID = "cf991a0c-5f83-4450-b823-0e41e5ec1998";
+
+async function adjust(
+  userId: string,
+  lotId: string,
+  body: Record<string, unknown>,
+) {
+  return req(userId, "POST", `/api/freezer-surplus/lots/${encodeURIComponent(lotId)}/adjustments`, body);
+}
+
 async function seedRun(
   id: string,
   overrides: Record<string, unknown> = {},
 ): Promise<void> {
-  await db.insert(dailySyncTable).values({
-    date: "2026-08-29",
-    scope: "live",
-    data: {
-      dayState: {
-        runs: [{ id, brand: "Acme", flavor: "Pepperoni", casesNeeded: 500, ...overrides }],
-      },
+  const [existing] = await db
+    .select()
+    .from(dailySyncTable)
+    .where(and(eq(dailySyncTable.date, "2026-08-29"), eq(dailySyncTable.scope, "live")))
+    .limit(1);
+  const data = existing?.data as { dayState?: { runs?: unknown[] } } | null;
+  const runs = Array.isArray(data?.dayState?.runs) ? data.dayState.runs : [];
+  const nextData = {
+    ...(data ?? {}),
+    dayState: {
+      ...(data?.dayState ?? {}),
+      runs: [...runs, { id, brand: "Acme", flavor: "Pepperoni", casesNeeded: 500, ...overrides }],
     },
-  });
+  };
+  if (existing) {
+    await db
+      .update(dailySyncTable)
+      .set({ data: nextData })
+      .where(and(eq(dailySyncTable.date, "2026-08-29"), eq(dailySyncTable.scope, "live")));
+  } else {
+    await db.insert(dailySyncTable).values({
+      date: "2026-08-29",
+      scope: "live",
+      data: nextData,
+    });
+  }
+}
+
+async function markRunStarted(id: string): Promise<void> {
+  const [row] = await db
+    .select()
+    .from(dailySyncTable)
+    .where(and(eq(dailySyncTable.date, "2026-08-29"), eq(dailySyncTable.scope, "live")))
+    .limit(1);
+  if (!row) throw new Error("Expected the seeded run day to exist");
+  const data = row.data as { dayState?: { runs?: Array<Record<string, unknown>> } };
+  const runs = (data.dayState?.runs ?? []).map((run) =>
+    run.id === id ? { ...run, startedAt: "2026-08-29T10:00:00.000Z" } : run,
+  );
+  await db
+    .update(dailySyncTable)
+    .set({ data: { ...data, dayState: { ...data.dayState, runs } } })
+    .where(and(eq(dailySyncTable.date, "2026-08-29"), eq(dailySyncTable.scope, "live")));
 }
 
 describe("dated freezer surplus API", () => {
@@ -393,5 +463,211 @@ describe("dated freezer surplus API", () => {
     await seedRun("started-run", { startedAt: "2026-08-29T10:00:00.000Z" });
     expect((await allocate(MANAGER, "started-run", [{ lotId, cases: 1 }])).status).toBe(409);
     await expectFreezerParity(20, 1);
+  });
+
+  it("records damage atomically and appends an idempotent linked correction", async () => {
+    const lotResponse = await confirm(MANAGER);
+    const lotId = ((await lotResponse.json()) as { createdLot: { id: string } }).createdLot.id;
+    const damageBody = {
+      eventId: DAMAGE_EVENT_ID,
+      eventType: "damage",
+      cases: 3,
+      reason: "Three cases were damaged in freezer storage",
+    };
+
+    expect((await adjust(OPERATOR, lotId, damageBody)).status).toBe(403);
+    expect((await req(OPERATOR, "GET", "/api/freezer-surplus/adjustments")).status).toBe(403);
+    expect((await adjust(MANAGER, lotId, { ...damageBody, eventId: "not-a-uuid" })).status).toBe(400);
+    const firstAttempts = await Promise.all([
+      adjust(MANAGER, lotId, damageBody),
+      adjust(MANAGER, lotId, damageBody),
+    ]);
+    expect(firstAttempts.map((response) => response.status).sort()).toEqual([200, 201]);
+    await expectFreezerParity(17, 2);
+
+    const loaded = await ledger();
+    expect(loaded.lots[0].remainingCases).toBe(17);
+    const history = await adjustmentHistory();
+    expect(history.adjustments).toEqual([
+      expect.objectContaining({
+        eventId: DAMAGE_EVENT_ID,
+        lotId,
+        eventType: "damage",
+        cases: 3,
+        reason: damageBody.reason,
+        actorId: MANAGER,
+      }),
+    ]);
+    const movement = (await db.select().from(inventoryLedgerTable)).at(-1);
+    expect(movement).toMatchObject({
+      type: "adjust",
+      qtyDelta: -3,
+      note: `Finished-case damage: ${damageBody.reason}`,
+    });
+
+    expect((await adjust(MANAGER, lotId, damageBody)).status).toBe(200);
+    await expectFreezerParity(17, 2);
+    expect(
+      (await adjust(MANAGER, lotId, { ...damageBody, cases: 2 })).status,
+    ).toBe(409);
+    expect(
+      (
+        await adjust(MANAGER, lotId, {
+          ...damageBody,
+          eventId: "0d2d2ba7-cac7-42cc-bfdb-388cf3a9fef6",
+          cases: 18,
+        })
+      ).status,
+    ).toBe(409);
+    await expectFreezerParity(17, 2);
+
+    const correctionBody = {
+      eventId: DAMAGE_CORRECTION_ID,
+      eventType: "correction",
+      cases: 1,
+      reason: "One case was incorrectly included in the damage count",
+      correctsEventId: DAMAGE_EVENT_ID,
+    };
+    expect((await adjust(MANAGER, lotId, correctionBody)).status).toBe(201);
+    await expectFreezerParity(18, 3);
+    expect((await adjust(MANAGER, lotId, correctionBody)).status).toBe(200);
+    expect(
+      (
+        await adjust(MANAGER, lotId, {
+          ...correctionBody,
+          eventId: "e31ab479-f222-4c36-9f9f-919ea89116f0",
+          cases: 3,
+        })
+      ).status,
+    ).toBe(409);
+    const correctedHistory = await adjustmentHistory();
+    expect(correctedHistory.adjustments.map((event) => event.eventType)).toEqual(["damage", "correction"]);
+    expect(correctedHistory.adjustments[1]).toMatchObject({
+      correctsEventId: DAMAGE_EVENT_ID,
+      actorId: MANAGER,
+      cases: 1,
+    });
+    await expectFreezerParity(18, 3);
+  });
+
+  it("rolls back a damage event when freezer inventory cannot cover the quantity", async () => {
+    const lotResponse = await confirm(MANAGER, { cases: 6 });
+    const lotId = ((await lotResponse.json()) as { createdLot: { id: string } }).createdLot.id;
+    const stockLots = await db.select().from(inventoryLotsTable);
+    const stockLot = stockLots.find((candidate) => candidate.scope === "live");
+    if (!stockLot) throw new Error("Expected the confirmed freezer inventory lot");
+    await db
+      .update(inventoryLotsTable)
+      .set({ qtyRemaining: 1 })
+      .where(eq(inventoryLotsTable.id, stockLot.id));
+
+    expect(
+      (
+        await adjust(MANAGER, lotId, {
+          eventId: "09f02711-4382-4b93-90fb-5bf9734ac12b",
+          eventType: "damage",
+          cases: 2,
+          reason: "Two cases damaged",
+        })
+      ).status,
+    ).toBe(409);
+
+    const loaded = await ledger();
+    expect(loaded.lots[0].remainingCases).toBe(6);
+    expect((await adjustmentHistory()).adjustments).toEqual([]);
+    expect(await db.select().from(freezerSurplusAdjustmentsTable)).toHaveLength(0);
+    expect((await db.select().from(inventoryLotsTable)).find((candidate) => candidate.id === stockLot.id)?.qtyRemaining).toBe(1);
+    expect(await db.select().from(inventoryLedgerTable)).toHaveLength(1);
+  });
+
+  it("limits returns to started-run allocations and exposes manager-only correction history", async () => {
+    const lotResponse = await confirm(MANAGER);
+    const lotId = ((await lotResponse.json()) as { createdLot: { id: string } }).createdLot.id;
+    await seedRun("return-run");
+    await seedRun("unstarted-return-run");
+    expect((await allocate(MANAGER, "return-run", [{ lotId, cases: 8 }])).status).toBe(200);
+    expect((await allocate(MANAGER, "unstarted-return-run", [{ lotId, cases: 2 }])).status).toBe(200);
+    await markRunStarted("return-run");
+    await expectFreezerParity(10, 3);
+
+    const returnBody = {
+      eventId: RETURN_EVENT_ID,
+      eventType: "return",
+      cases: 3,
+      reason: "Three unused cases returned from the started run",
+      runId: "return-run",
+    };
+    expect((await adjust(MANAGER, lotId, returnBody)).status).toBe(201);
+    await expectFreezerParity(13, 4);
+    expect((await adjust(MANAGER, lotId, returnBody)).status).toBe(200);
+    expect(
+      (
+        await adjust(MANAGER, lotId, {
+          ...returnBody,
+          eventId: "3344e236-dd3e-47f0-83ee-86c7f50a27d3",
+          cases: 6,
+        })
+      ).status,
+    ).toBe(409);
+    expect(
+      (
+        await adjust(MANAGER, lotId, {
+          ...returnBody,
+          eventId: "b39b06dd-8833-48c8-9861-e948384b1e63",
+          runId: "unstarted-return-run",
+          cases: 1,
+        })
+      ).status,
+    ).toBe(409);
+    expect(
+      (
+        await adjust(MANAGER, lotId, {
+          ...returnBody,
+          eventId: "b46b2553-900f-4c56-94a5-e3da565597e4",
+          runId: "missing-run",
+          cases: 1,
+        })
+      ).status,
+    ).toBe(409);
+    expect(
+      (
+        await adjust(SANDBOX_MANAGER, lotId, {
+          ...returnBody,
+          eventId: "80b6f02a-0d91-4315-94d2-6c5cc6fa5987",
+        })
+      ).status,
+    ).toBe(404);
+    expect((await adjustmentHistory(SANDBOX_MANAGER)).adjustments).toEqual([]);
+    await expectFreezerParity(13, 4);
+
+    const correctionBody = {
+      eventId: RETURN_CORRECTION_ID,
+      eventType: "correction",
+      cases: 1,
+      reason: "One returned case was entered twice",
+      correctsEventId: RETURN_EVENT_ID,
+    };
+    expect((await adjust(MANAGER, lotId, correctionBody)).status).toBe(201);
+    await expectFreezerParity(12, 5);
+    const finalReturn = {
+      ...returnBody,
+      eventId: "4e21f7ed-36cb-40b1-b12b-7806bfc53ead",
+      cases: 6,
+    };
+    expect((await adjust(MANAGER, lotId, finalReturn)).status).toBe(201);
+    await expectFreezerParity(18, 6);
+
+    const history = await adjustmentHistory();
+    expect(history.adjustments.map((event) => event.eventType)).toEqual([
+      "return",
+      "correction",
+      "return",
+    ]);
+    expect(history.adjustments[0]).toMatchObject({
+      runId: "return-run",
+      actorId: MANAGER,
+    });
+    expect(history.adjustments[1]).toMatchObject({ correctsEventId: RETURN_EVENT_ID });
+    expect(await db.select().from(freezerSurplusAdjustmentsTable)).toHaveLength(3);
   });
 });

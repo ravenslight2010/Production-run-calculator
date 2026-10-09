@@ -2013,6 +2013,25 @@ paths:
         "400":
           description: Invalid or non-positive surplus
 
+  /freezer-surplus/adjustments:
+    get:
+      operationId: listFreezerSurplusAdjustments
+      tags: [freezerSurplus]
+      summary: List the scoped finished-case freezer adjustment audit
+      description: >-
+        Returns append-only damage, return, and correction events, including
+        the authenticated manager and reason, limited to the 500 most recent
+        events. Requires manage-inventory.
+      responses:
+        "200":
+          description: Scoped finished-case adjustment history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FreezerSurplusAdjustmentList"
+        "403":
+          description: Missing manage-inventory capability
+
   /freezer-surplus/allocations/{runId}:
     put:
       operationId: replaceFreezerSurplusAllocation
@@ -2043,6 +2062,55 @@ paths:
           description: Invalid input, mismatch, or unavailable surplus
         "409":
           description: Run has started or the requested lot balance changed
+
+  /freezer-surplus/lots/{lotId}/adjustments:
+    post:
+      operationId: recordFreezerSurplusAdjustment
+      tags: [freezerSurplus]
+      summary: Record freezer damage, a run return, or a correction
+      description: >-
+        Manager-only physical event. Damage reduces currently available cases.
+        A return must name a started or completed run with an allocation from
+        this dated lot and cannot exceed the allocation less prior returns.
+        Corrections append a compensating event linked to an earlier damage or
+        return; the original event is never edited or deleted. Every event uses
+        a stable eventId for retry safety and updates the dated lot and freezer
+        inventory in the same transaction without deducting ingredients.
+      parameters:
+        - name: lotId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 120
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecordFreezerSurplusAdjustmentInput"
+      responses:
+        "200":
+          description: Idempotent replay of the already-recorded event
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FreezerSurplusMutationResponse"
+        "201":
+          description: The event and matching stock adjustment were recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FreezerSurplusMutationResponse"
+        "400":
+          description: Invalid event type, quantity, reason, or event references
+        "403":
+          description: Missing manage-inventory capability
+        "404":
+          description: The dated freezer lot is unavailable in this scope
+        "409":
+          description: The event conflicts with current stock or a prior event
 
 
   /mix-surplus:
@@ -10323,6 +10391,55 @@ components:
           items:
             $ref: "#/components/schemas/FreezerSurplusAllocation"
 
+    FreezerSurplusAdjustment:
+      type: object
+      required:
+        - eventId
+        - lotId
+        - eventType
+        - cases
+        - reason
+        - actorId
+        - createdAt
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        lotId:
+          type: string
+        eventType:
+          type: string
+          enum: [damage, return, correction]
+        cases:
+          type: integer
+          minimum: 1
+          maximum: 1000000
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 300
+        actorId:
+          type: string
+        runId:
+          type: string
+          nullable: true
+        correctsEventId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    FreezerSurplusAdjustmentList:
+      type: object
+      required:
+        - adjustments
+      properties:
+        adjustments:
+          type: array
+          items:
+            $ref: "#/components/schemas/FreezerSurplusAdjustment"
+
     ConfirmFreezerSurplusInput:
       type: object
       required:
@@ -10385,6 +10502,40 @@ components:
           items:
             $ref: "#/components/schemas/FreezerSurplusAllocationSelection"
 
+    RecordFreezerSurplusAdjustmentInput:
+      type: object
+      required:
+        - eventId
+        - eventType
+        - cases
+        - reason
+      description: >-
+        runId is required only for eventType=return. correctsEventId is required
+        only for eventType=correction. Both are rejected for incompatible event
+        types.
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+          enum: [damage, return, correction]
+        cases:
+          type: integer
+          minimum: 1
+          maximum: 1000000
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 300
+        runId:
+          type: string
+          minLength: 1
+          maxLength: 120
+        correctsEventId:
+          type: string
+          format: uuid
+
     FreezerSurplusMutationResponse:
       type: object
       required:
@@ -10403,6 +10554,10 @@ components:
           nullable: true
           allOf:
             - $ref: "#/components/schemas/FreezerSurplusLot"
+        createdAdjustment:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/FreezerSurplusAdjustment"
 
 
     MixSurplusLot:

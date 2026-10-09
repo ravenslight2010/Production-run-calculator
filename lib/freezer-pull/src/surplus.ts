@@ -21,6 +21,18 @@ export type FreezerSurplusAllocation = SurplusProduct & {
   cases: number;
 };
 
+export type FreezerSurplusAdjustment = {
+  eventId: string;
+  lotId: string;
+  eventType: "damage" | "return" | "correction";
+  cases: number;
+  reason: string;
+  actorId: string;
+  runId?: string;
+  correctsEventId?: string;
+  createdAt: string;
+};
+
 export type FreezerSurplusLedger = {
   lots: FreezerSurplusLot[];
   allocations: FreezerSurplusAllocation[];

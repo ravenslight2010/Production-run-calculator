@@ -73,6 +73,10 @@ export const confirmFreezerSurplusBodyFlavorMax = 120;
 export const confirmFreezerSurplusBodyCasesMax = 1000000;
 export const confirmFreezerSurplusResponseLotsItemRemainingCasesMin = 0;
 export const confirmFreezerSurplusResponseCreatedLotOneRemainingCasesMin = 0;
+export const confirmFreezerSurplusResponseCreatedAdjustmentOneCasesMax = 1000000;
+export const confirmFreezerSurplusResponseCreatedAdjustmentOneReasonMax = 300;
+export const listFreezerSurplusAdjustmentsResponseAdjustmentsItemCasesMax = 1000000;
+export const listFreezerSurplusAdjustmentsResponseAdjustmentsItemReasonMax = 300;
 export const replaceFreezerSurplusAllocationPathRunIdMax = 120;
 export const replaceFreezerSurplusAllocationBodyBrandMax = 120;
 export const replaceFreezerSurplusAllocationBodyFlavorMax = 120;
@@ -81,6 +85,16 @@ export const replaceFreezerSurplusAllocationBodyAllocationsItemCasesMax = 100000
 export const replaceFreezerSurplusAllocationBodyAllocationsMax = 500;
 export const replaceFreezerSurplusAllocationResponseLotsItemRemainingCasesMin = 0;
 export const replaceFreezerSurplusAllocationResponseCreatedLotOneRemainingCasesMin = 0;
+export const replaceFreezerSurplusAllocationResponseCreatedAdjustmentOneCasesMax = 1000000;
+export const replaceFreezerSurplusAllocationResponseCreatedAdjustmentOneReasonMax = 300;
+export const recordFreezerSurplusAdjustmentPathLotIdMax = 120;
+export const recordFreezerSurplusAdjustmentBodyCasesMax = 1000000;
+export const recordFreezerSurplusAdjustmentBodyReasonMax = 300;
+export const recordFreezerSurplusAdjustmentBodyRunIdMax = 120;
+export const recordFreezerSurplusAdjustmentResponseLotsItemRemainingCasesMin = 0;
+export const recordFreezerSurplusAdjustmentResponseCreatedLotOneRemainingCasesMin = 0;
+export const recordFreezerSurplusAdjustmentResponseCreatedAdjustmentOneCasesMax = 1000000;
+export const recordFreezerSurplusAdjustmentResponseCreatedAdjustmentOneReasonMax = 300;
 export const listMixSurplusResponseLotsItemAmountMadeMin = 0;
 export const listMixSurplusResponseLotsItemAmountUsedMin = 0;
 export const listMixSurplusResponseLotsItemAmountRemainingMin = 0;
@@ -3079,6 +3093,8 @@ export const ConfirmFreezerSurplusBody = zod.object({
 
 
 
+
+
 export const ConfirmFreezerSurplusResponse = zod.object({
   "lots": zod.array(zod.object({
   "id": zod.string(),
@@ -3107,7 +3123,41 @@ export const ConfirmFreezerSurplusResponse = zod.object({
   "productionDate": zod.coerce.date(),
   "totalCases": zod.int().min(1),
   "remainingCases": zod.int().min(confirmFreezerSurplusResponseCreatedLotOneRemainingCasesMin)
+}),zod.null()]).optional(),
+  "createdAdjustment": zod.union([zod.object({
+  "eventId": zod.uuid(),
+  "lotId": zod.string(),
+  "eventType": zod.enum(['damage', 'return', 'correction']),
+  "cases": zod.int().min(1).max(confirmFreezerSurplusResponseCreatedAdjustmentOneCasesMax),
+  "reason": zod.string().min(1).max(confirmFreezerSurplusResponseCreatedAdjustmentOneReasonMax),
+  "actorId": zod.string(),
+  "runId": zod.string().nullish(),
+  "correctsEventId": zod.string().nullish(),
+  "createdAt": zod.coerce.date()
 }),zod.null()]).optional()
+})
+
+
+/**
+ * Returns append-only damage, return, and correction events, including the authenticated manager and reason, limited to the 500 most recent events. Requires manage-inventory.
+ * @summary List the scoped finished-case freezer adjustment audit
+ */
+
+
+
+
+export const ListFreezerSurplusAdjustmentsResponse = zod.object({
+  "adjustments": zod.array(zod.object({
+  "eventId": zod.uuid(),
+  "lotId": zod.string(),
+  "eventType": zod.enum(['damage', 'return', 'correction']),
+  "cases": zod.int().min(1).max(listFreezerSurplusAdjustmentsResponseAdjustmentsItemCasesMax),
+  "reason": zod.string().min(1).max(listFreezerSurplusAdjustmentsResponseAdjustmentsItemReasonMax),
+  "actorId": zod.string(),
+  "runId": zod.string().nullish(),
+  "correctsEventId": zod.string().nullish(),
+  "createdAt": zod.coerce.date()
+}))
 })
 
 
@@ -3145,6 +3195,8 @@ export const ReplaceFreezerSurplusAllocationBody = zod.object({
 
 
 
+
+
 export const ReplaceFreezerSurplusAllocationResponse = zod.object({
   "lots": zod.array(zod.object({
   "id": zod.string(),
@@ -3173,6 +3225,94 @@ export const ReplaceFreezerSurplusAllocationResponse = zod.object({
   "productionDate": zod.coerce.date(),
   "totalCases": zod.int().min(1),
   "remainingCases": zod.int().min(replaceFreezerSurplusAllocationResponseCreatedLotOneRemainingCasesMin)
+}),zod.null()]).optional(),
+  "createdAdjustment": zod.union([zod.object({
+  "eventId": zod.uuid(),
+  "lotId": zod.string(),
+  "eventType": zod.enum(['damage', 'return', 'correction']),
+  "cases": zod.int().min(1).max(replaceFreezerSurplusAllocationResponseCreatedAdjustmentOneCasesMax),
+  "reason": zod.string().min(1).max(replaceFreezerSurplusAllocationResponseCreatedAdjustmentOneReasonMax),
+  "actorId": zod.string(),
+  "runId": zod.string().nullish(),
+  "correctsEventId": zod.string().nullish(),
+  "createdAt": zod.coerce.date()
+}),zod.null()]).optional()
+})
+
+
+/**
+ * Manager-only physical event. Damage reduces currently available cases. A return must name a started or completed run with an allocation from this dated lot and cannot exceed the allocation less prior returns. Corrections append a compensating event linked to an earlier damage or return; the original event is never edited or deleted. Every event uses a stable eventId for retry safety and updates the dated lot and freezer inventory in the same transaction without deducting ingredients.
+ * @summary Record freezer damage, a run return, or a correction
+ */
+
+
+
+export const RecordFreezerSurplusAdjustmentParams = zod.object({
+  "lotId": zod.coerce.string().min(1).max(recordFreezerSurplusAdjustmentPathLotIdMax)
+})
+
+
+
+
+
+
+export const RecordFreezerSurplusAdjustmentBody = zod.object({
+  "eventId": zod.uuid(),
+  "eventType": zod.enum(['damage', 'return', 'correction']),
+  "cases": zod.int().min(1).max(recordFreezerSurplusAdjustmentBodyCasesMax),
+  "reason": zod.string().min(1).max(recordFreezerSurplusAdjustmentBodyReasonMax),
+  "runId": zod.string().min(1).max(recordFreezerSurplusAdjustmentBodyRunIdMax).optional(),
+  "correctsEventId": zod.uuid().optional()
+}).describe('runId is required only for eventType=return. correctsEventId is required only for eventType=correction. Both are rejected for incompatible event types.')
+
+
+
+
+
+
+
+
+
+
+export const RecordFreezerSurplusAdjustmentResponse = zod.object({
+  "lots": zod.array(zod.object({
+  "id": zod.string(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "productKey": zod.string(),
+  "productionDate": zod.coerce.date(),
+  "totalCases": zod.int().min(1),
+  "remainingCases": zod.int().min(recordFreezerSurplusAdjustmentResponseLotsItemRemainingCasesMin)
+})),
+  "allocations": zod.array(zod.object({
+  "id": zod.string(),
+  "lotId": zod.string(),
+  "runId": zod.string(),
+  "runDate": zod.coerce.date(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "productKey": zod.string(),
+  "cases": zod.int().min(1)
+})),
+  "createdLot": zod.union([zod.object({
+  "id": zod.string(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "productKey": zod.string(),
+  "productionDate": zod.coerce.date(),
+  "totalCases": zod.int().min(1),
+  "remainingCases": zod.int().min(recordFreezerSurplusAdjustmentResponseCreatedLotOneRemainingCasesMin)
+}),zod.null()]).optional(),
+  "createdAdjustment": zod.union([zod.object({
+  "eventId": zod.uuid(),
+  "lotId": zod.string(),
+  "eventType": zod.enum(['damage', 'return', 'correction']),
+  "cases": zod.int().min(1).max(recordFreezerSurplusAdjustmentResponseCreatedAdjustmentOneCasesMax),
+  "reason": zod.string().min(1).max(recordFreezerSurplusAdjustmentResponseCreatedAdjustmentOneReasonMax),
+  "actorId": zod.string(),
+  "runId": zod.string().nullish(),
+  "correctsEventId": zod.string().nullish(),
+  "createdAt": zod.coerce.date()
 }),zod.null()]).optional()
 })
 

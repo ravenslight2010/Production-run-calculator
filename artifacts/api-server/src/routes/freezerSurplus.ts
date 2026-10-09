@@ -1,20 +1,24 @@
 import { randomUUID } from "node:crypto";
 import { Router, type IRouter, type Request, type Response } from "express";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   db,
   dailySyncTable,
+  freezerSurplusAdjustmentsTable,
   freezerSurplusAllocationsTable,
   freezerSurplusLotsTable,
   inventoryItemsTable,
   inventoryLotsTable,
   inventoryLedgerTable,
   inventoryLocationsTable,
+  type FreezerSurplusAdjustmentRow,
   type FreezerSurplusAllocationRow,
   type FreezerSurplusLotRow,
 } from "@workspace/db";
 import {
   ConfirmFreezerSurplusBody,
+  RecordFreezerSurplusAdjustmentBody,
+  RecordFreezerSurplusAdjustmentParams,
   ReplaceFreezerSurplusAllocationBody,
   ReplaceFreezerSurplusAllocationParams,
 } from "@workspace/api-zod";
@@ -23,6 +27,7 @@ import {
   normalizePositiveCases,
   normalizeSurplusProduct,
   type FreezerSurplusAllocation,
+  type FreezerSurplusAdjustment,
   type FreezerSurplusLedger,
   type FreezerSurplusLot,
 } from "@workspace/freezer-pull";
@@ -145,6 +150,7 @@ async function addFinishedInventoryStock(
   itemId: number,
   freezerLocationId: number | null,
   cases: number,
+  note = "Freezer surplus lot confirmed",
 ): Promise<void> {
   if (freezerLocationId == null) return;
   const [existingLot] = await tx
@@ -180,8 +186,56 @@ async function addFinishedInventoryStock(
     type: "restock",
     qtyDelta: cases,
     runId: null,
-    note: "Freezer surplus lot confirmed",
+    note,
   });
+}
+
+async function removeFinishedInventoryStock(
+  tx: DbExecutor,
+  scope: string,
+  itemId: number,
+  freezerLocationId: number,
+  cases: number,
+  note: string,
+): Promise<void> {
+  const lots = await tx
+    .select()
+    .from(inventoryLotsTable)
+    .where(
+      and(
+        eq(inventoryLotsTable.itemId, itemId),
+        eq(inventoryLotsTable.locationId, freezerLocationId),
+        eq(inventoryLotsTable.scope, scope),
+      ),
+    )
+    .for("update");
+  const onHand = lots.reduce((sum, lot) => sum + lot.qtyRemaining, 0);
+  if (onHand < cases) {
+    throw new SurplusRequestError("Freezer finished-case stock is lower than the requested adjustment.", 409);
+  }
+  let casesToRemove = cases;
+  for (const lot of lots) {
+    if (casesToRemove <= 0) break;
+    const removed = Math.min(lot.qtyRemaining, casesToRemove);
+    if (removed <= 0) continue;
+    await tx
+      .update(inventoryLotsTable)
+      .set({ qtyRemaining: lot.qtyRemaining - removed })
+      .where(eq(inventoryLotsTable.id, lot.id));
+    await tx.insert(inventoryLedgerTable).values({
+      scope,
+      itemId,
+      lotId: lot.id,
+      type: "adjust",
+      qtyDelta: -removed,
+      runId: null,
+      note,
+    });
+    casesToRemove -= removed;
+  }
+  if (casesToRemove > 0) {
+    throw new SurplusRequestError("Freezer finished-case stock changed while applying the adjustment.", 409);
+  }
 }
 
 function toApiLot(row: FreezerSurplusLotRow): FreezerSurplusLot {
@@ -213,6 +267,22 @@ function toApiAllocation(
   };
 }
 
+function toApiAdjustment(
+  row: FreezerSurplusAdjustmentRow,
+): FreezerSurplusAdjustment {
+  return {
+    eventId: row.eventId,
+    lotId: row.lotId,
+    eventType: row.eventType as FreezerSurplusAdjustment["eventType"],
+    cases: row.cases,
+    reason: row.reason,
+    actorId: row.actorId,
+    ...(row.runId ? { runId: row.runId } : {}),
+    ...(row.correctsEventId ? { correctsEventId: row.correctsEventId } : {}),
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
 async function listLedger(executor: { select: typeof db.select } = db): Promise<FreezerSurplusLedger> {
   const scope = currentScope();
   const [lots, allocations] = await Promise.all([
@@ -231,6 +301,16 @@ async function listLedger(executor: { select: typeof db.select } = db): Promise<
   };
 }
 
+async function listAdjustments(executor: { select: typeof db.select } = db) {
+  const rows = await executor
+    .select()
+    .from(freezerSurplusAdjustmentsTable)
+    .where(eq(freezerSurplusAdjustmentsTable.scope, currentScope()))
+    .orderBy(desc(freezerSurplusAdjustmentsTable.id))
+    .limit(500);
+  return rows.reverse().map(toApiAdjustment);
+}
+
 function validateDate(value: unknown, field: string): string {
   if (!isValidSurplusDate(value)) {
     throw new SurplusRequestError(`${field} must be a valid YYYY-MM-DD date`);
@@ -246,6 +326,19 @@ router.get("/freezer-surplus", async (req: Request, res: Response) => {
     res.status(500).json({ error: "Couldn't load finished-case freezer surplus" });
   }
 });
+
+router.get(
+  "/freezer-surplus/adjustments",
+  requireCapability("manage-inventory"),
+  async (req: Request, res: Response) => {
+    try {
+      res.json({ adjustments: await listAdjustments() });
+    } catch (err) {
+      req.log.error({ err }, "freezer_surplus_adjustment_history_failed");
+      res.status(500).json({ error: "Couldn't load finished-case adjustment history" });
+    }
+  },
+);
 
 router.post("/freezer-surplus", requireCapability("manage-inventory"), async (req: Request, res: Response) => {
   const rawProductionDate =
@@ -301,6 +394,294 @@ router.post("/freezer-surplus", requireCapability("manage-inventory"), async (re
     res.status(500).json({ error: "Couldn't save the finished-case surplus. Try again." });
   }
 });
+
+router.post(
+  "/freezer-surplus/lots/:lotId/adjustments",
+  requireCapability("manage-inventory"),
+  async (req: Request, res: Response) => {
+    const path = RecordFreezerSurplusAdjustmentParams.safeParse(req.params);
+    const parsed = RecordFreezerSurplusAdjustmentBody.safeParse(req.body);
+    if (!path.success || !parsed.success) {
+      res.status(400).json({ error: "Invalid finished-case freezer adjustment." });
+      return;
+    }
+    if (!req.userId) {
+      res.status(401).json({ error: "Authentication is required to adjust freezer stock." });
+      return;
+    }
+
+    const lotId = path.data.lotId.trim();
+    const { eventId, eventType, cases } = parsed.data;
+    const reason = parsed.data.reason.trim();
+    const runId = parsed.data.runId?.trim() || undefined;
+    const correctsEventId = parsed.data.correctsEventId;
+    if (
+      !lotId ||
+      !reason ||
+      (parsed.data.runId !== undefined && !runId) ||
+      (eventType === "damage" && (runId !== undefined || correctsEventId !== undefined)) ||
+      (eventType === "return" && (!runId || correctsEventId !== undefined)) ||
+      (eventType === "correction" && (runId !== undefined || !correctsEventId))
+    ) {
+      res.status(400).json({ error: "The adjustment fields do not match the selected event type." });
+      return;
+    }
+
+    const scope = currentScope();
+    const actorId = req.userId;
+    try {
+      const result = await db.transaction(async (tx) => {
+        // Serialize retries by stable event identity, even if a malformed client
+        // retries the same key against a different lot.
+        const idempotencyLock = `freezer-surplus-adjustment:${scope}:${eventId}`;
+        await tx.execute(
+          sql`SELECT pg_advisory_xact_lock(hashtextextended(${idempotencyLock}, 0))`,
+        );
+
+        const [priorEvent] = await tx
+          .select()
+          .from(freezerSurplusAdjustmentsTable)
+          .where(
+            and(
+              eq(freezerSurplusAdjustmentsTable.scope, scope),
+              eq(freezerSurplusAdjustmentsTable.eventId, eventId),
+            ),
+          )
+          .limit(1);
+        if (priorEvent) {
+          const sameRequest =
+            priorEvent.lotId === lotId &&
+            priorEvent.eventType === eventType &&
+            priorEvent.cases === cases &&
+            priorEvent.reason === reason &&
+            priorEvent.runId === (runId ?? null) &&
+            priorEvent.correctsEventId === (correctsEventId ?? null) &&
+            priorEvent.actorId === actorId;
+          if (!sameRequest) {
+            throw new SurplusRequestError("This event ID was already used for a different adjustment.", 409);
+          }
+          return {
+            ledger: await listLedger(tx),
+            event: priorEvent,
+            replayed: true,
+          };
+        }
+
+        let returnAllocations: FreezerSurplusAllocationRow[] = [];
+        let runRows: Array<{ data: unknown }> = [];
+        if (eventType === "return") {
+          // Match the allocation route's lock set and ordering before locking a
+          // lot, so run state/allocation changes cannot race this return.
+          [returnAllocations, runRows] = await Promise.all([
+            tx
+              .select()
+              .from(freezerSurplusAllocationsTable)
+              .where(
+                and(
+                  eq(freezerSurplusAllocationsTable.scope, scope),
+                  eq(freezerSurplusAllocationsTable.runId, runId!),
+                ),
+              )
+              .for("update"),
+            tx
+              .select({ data: dailySyncTable.data })
+              .from(dailySyncTable)
+              .where(eq(dailySyncTable.scope, scope))
+              .for("update"),
+          ]);
+        }
+
+        const [lot] = await tx
+          .select()
+          .from(freezerSurplusLotsTable)
+          .where(
+            and(
+              eq(freezerSurplusLotsTable.scope, scope),
+              eq(freezerSurplusLotsTable.id, lotId),
+            ),
+          )
+          .for("update")
+          .limit(1);
+        if (!lot) throw new SurplusRequestError("The dated freezer lot is unavailable.", 404);
+
+        const [item] = await tx
+          .select({ id: inventoryItemsTable.id })
+          .from(inventoryItemsTable)
+          .where(
+            and(
+              eq(inventoryItemsTable.key, finishedItemKey(lot.brand, lot.flavor)),
+              eq(inventoryItemsTable.scope, scope),
+            ),
+          )
+          .limit(1);
+        const freezerLocationId = await getFreezerLocationId(tx, scope);
+        if (freezerLocationId == null) {
+          throw new SurplusRequestError("A freezer inventory location is required before adjusting cases.", 409);
+        }
+        const inventoryItem = item ?? (
+          eventType === "return" ||
+          (eventType === "correction" && parsed.data.correctsEventId !== undefined)
+            ? await ensureFinishedInventoryItem(tx, scope, lot.brand, lot.flavor)
+            : null
+        );
+
+        const lotAdjustments = await tx
+          .select()
+          .from(freezerSurplusAdjustmentsTable)
+          .where(
+            and(
+              eq(freezerSurplusAdjustmentsTable.scope, scope),
+              eq(freezerSurplusAdjustmentsTable.lotId, lotId),
+            ),
+          )
+          .for("update");
+
+        let stockDirection: 1 | -1;
+        let linkedRunId: string | null = null;
+        if (eventType === "damage") {
+          stockDirection = -1;
+        } else if (eventType === "return") {
+          const run = runRows
+            .flatMap((row) => {
+              const raw = row.data as { dayState?: { runs?: unknown[] } } | null;
+              return Array.isArray(raw?.dayState?.runs) ? raw.dayState.runs : [];
+            })
+            .find(
+              (candidate) =>
+                candidate &&
+                typeof candidate === "object" &&
+                (candidate as { id?: unknown }).id === runId,
+            ) as { startedAt?: unknown; endedAt?: unknown } | undefined;
+          if (!run?.startedAt && !run?.endedAt) {
+            throw new SurplusRequestError("A return requires a run that has started or finished.", 409);
+          }
+          const allocation = returnAllocations.find((candidate) => candidate.lotId === lotId);
+          if (!allocation) {
+            throw new SurplusRequestError("The run has no allocation from this dated freezer lot.", 409);
+          }
+          const priorReturns = lotAdjustments.filter(
+            (entry) => entry.eventType === "return" && entry.runId === runId,
+          );
+          const priorReturnIds = new Set(priorReturns.map((entry) => entry.eventId));
+          const returnedCases = priorReturns.reduce((sum, entry) => sum + entry.cases, 0);
+          const correctedCases = lotAdjustments
+            .filter(
+              (entry) =>
+                entry.eventType === "correction" &&
+                entry.correctsEventId !== null &&
+                priorReturnIds.has(entry.correctsEventId),
+            )
+            .reduce((sum, entry) => sum + entry.cases, 0);
+          const stillReturned = returnedCases - correctedCases;
+          if (cases > allocation.cases - stillReturned) {
+            throw new SurplusRequestError("The return exceeds this run's unreturned allocation from the lot.", 409);
+          }
+          stockDirection = 1;
+          linkedRunId = runId!;
+        } else {
+          const original = lotAdjustments.find((entry) => entry.eventId === correctsEventId);
+          if (!original || original.eventType === "correction") {
+            throw new SurplusRequestError("A correction must reference a damage or return event from this lot.", 409);
+          }
+          const alreadyCorrected = lotAdjustments
+            .filter(
+              (entry) =>
+                entry.eventType === "correction" &&
+                entry.correctsEventId === original.eventId,
+            )
+            .reduce((sum, entry) => sum + entry.cases, 0);
+          if (cases > original.cases - alreadyCorrected) {
+            throw new SurplusRequestError("The correction exceeds the original event's uncorrected cases.", 409);
+          }
+          stockDirection = original.eventType === "damage" ? 1 : -1;
+        }
+
+        const newRemainingCases = lot.remainingCases + stockDirection * cases;
+        if (newRemainingCases < 0) {
+          throw new SurplusRequestError("The damage exceeds cases currently available in this dated lot.", 409);
+        }
+        if (newRemainingCases > lot.totalCases) {
+          throw new SurplusRequestError("The adjustment would exceed the original cases in this dated lot.", 409);
+        }
+        if (!inventoryItem && stockDirection < 0) {
+          throw new SurplusRequestError("Finished-case inventory is not available for this freezer lot.", 409);
+        }
+
+        await tx
+          .update(freezerSurplusLotsTable)
+          .set({ remainingCases: newRemainingCases, updatedAt: new Date() })
+          .where(
+            and(
+              eq(freezerSurplusLotsTable.id, lotId),
+              eq(freezerSurplusLotsTable.scope, scope),
+            ),
+          );
+
+        if (stockDirection > 0) {
+          const restoredItem =
+            inventoryItem ?? await ensureFinishedInventoryItem(tx, scope, lot.brand, lot.flavor);
+          await addFinishedInventoryStock(
+            tx,
+            scope,
+            restoredItem.id,
+            freezerLocationId,
+            cases,
+            eventType === "correction"
+              ? `Finished-case adjustment correction: ${reason}`
+              : `Finished-case return: ${reason}`,
+          );
+        } else {
+          await removeFinishedInventoryStock(
+            tx,
+            scope,
+            inventoryItem!.id,
+            freezerLocationId,
+            cases,
+            eventType === "correction"
+              ? `Finished-case adjustment correction: ${reason}`
+              : `Finished-case damage: ${reason}`,
+          );
+        }
+
+        const [event] = await tx
+          .insert(freezerSurplusAdjustmentsTable)
+          .values({
+            scope,
+            eventId,
+            lotId,
+            eventType,
+            cases,
+            reason,
+            runId: linkedRunId,
+            correctsEventId: correctsEventId ?? null,
+            actorId,
+          })
+          .returning();
+        if (!event) throw new Error("Freezer adjustment event insert returned no row");
+        return {
+          ledger: await listLedger(tx),
+          event,
+          replayed: false,
+        };
+      });
+
+      req.log.info(
+        { operation: "adjust", scope, lotId, eventId, eventType, cases },
+        "freezer_surplus_operation",
+      );
+      res
+        .status(result.replayed ? 200 : 201)
+        .json({ ...result.ledger, createdAdjustment: toApiAdjustment(result.event) });
+    } catch (err) {
+      if (err instanceof SurplusRequestError) {
+        res.status(err.status).json({ error: err.message });
+        return;
+      }
+      req.log.error({ err, operation: "adjust", scope, lotId, eventId }, "freezer_surplus_operation_failed");
+      res.status(500).json({ error: "Couldn't adjust finished-case freezer stock. Try again." });
+    }
+  },
+);
 
 router.put(
   "/freezer-surplus/allocations/:runId",

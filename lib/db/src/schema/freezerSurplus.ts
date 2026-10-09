@@ -1,6 +1,7 @@
 import {
   integer,
   pgTable,
+  serial,
   text,
   timestamp,
   uniqueIndex,
@@ -52,6 +53,31 @@ export const freezerSurplusAllocationsTable = pgTable(
   ],
 );
 
+// Append-only physical freezer events. Each caller-supplied eventId is unique
+// within a scope so a network retry cannot apply the same stock movement twice.
+// Corrections link to an earlier damage/return event rather than editing it.
+export const freezerSurplusAdjustmentsTable = pgTable(
+  "freezer_surplus_adjustments",
+  {
+    id: serial("id").primaryKey(),
+    scope: text("scope").notNull().default("live"),
+    eventId: text("event_id").notNull(),
+    lotId: text("lot_id").notNull(),
+    eventType: text("event_type").notNull(), // damage | return | correction
+    cases: integer("cases").notNull(),
+    reason: text("reason").notNull(),
+    runId: text("run_id"),
+    correctsEventId: text("corrects_event_id"),
+    actorId: text("actor_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("freezer_surplus_adjustments_scope_event_idx").on(t.scope, t.eventId),
+  ],
+);
+
 export type FreezerSurplusLotRow = typeof freezerSurplusLotsTable.$inferSelect;
 export type FreezerSurplusAllocationRow =
   typeof freezerSurplusAllocationsTable.$inferSelect;
+export type FreezerSurplusAdjustmentRow =
+  typeof freezerSurplusAdjustmentsTable.$inferSelect;

@@ -91,6 +91,7 @@ import type {
   FollowUpRunSuggestion200,
   ForgotPasswordRequest,
   FreezerPullItemList,
+  FreezerSurplusAdjustmentList,
   FreezerSurplusLedger,
   FreezerSurplusMutationResponse,
   GetBuildInfo503,
@@ -189,6 +190,7 @@ import type {
   QualityCheckRecord,
   QualityCheckRecordInput,
   QualityCheckResult,
+  RecordFreezerSurplusAdjustmentInput,
   RecordMixSurplusInput,
   ReplaceFreezerSurplusAllocationInput,
   ReplaceMixSurplusAllocationInput,
@@ -7614,6 +7616,108 @@ export const useConfirmFreezerSurplus = <TError = ErrorType<void>,
       return useMutation(getConfirmFreezerSurplusMutationOptions(options), queryClient);
     }
 
+export const getListFreezerSurplusAdjustmentsUrl = () => {
+
+
+
+
+  return `/api/freezer-surplus/adjustments`
+}
+
+/**
+ * Returns append-only damage, return, and correction events, including the authenticated manager and reason, limited to the 500 most recent events. Requires manage-inventory.
+ * @summary List the scoped finished-case freezer adjustment audit
+ */
+export const listFreezerSurplusAdjustments = async ( options?: Parameters<typeof customFetch>[1]): Promise<FreezerSurplusAdjustmentList> => {
+
+  return customFetch<FreezerSurplusAdjustmentList>(getListFreezerSurplusAdjustmentsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListFreezerSurplusAdjustmentsQueryKey = () => {
+    return [
+    `/api/freezer-surplus/adjustments`
+    ] as const;
+    }
+
+
+export const getListFreezerSurplusAdjustmentsQueryOptions = <TData = Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>, TError = ErrorType<void>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListFreezerSurplusAdjustmentsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>> = ({ signal }) => listFreezerSurplusAdjustments({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListFreezerSurplusAdjustmentsQueryResult = NonNullable<Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>>
+export type ListFreezerSurplusAdjustmentsQueryError = ErrorType<void>
+
+
+export function useListFreezerSurplusAdjustments<TData = Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>, TError = ErrorType<void>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>,
+          TError,
+          Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListFreezerSurplusAdjustments<TData = Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>,
+          TError,
+          Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListFreezerSurplusAdjustments<TData = Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List the scoped finished-case freezer adjustment audit
+ */
+
+export function useListFreezerSurplusAdjustments<TData = Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>, TError = ErrorType<void>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFreezerSurplusAdjustments>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListFreezerSurplusAdjustmentsQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
 export const getReplaceFreezerSurplusAllocationUrl = (runId: string,) => {
 
 
@@ -7701,6 +7805,96 @@ export const useReplaceFreezerSurplusAllocation = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getReplaceFreezerSurplusAllocationMutationOptions(options), queryClient);
+    }
+
+export const getRecordFreezerSurplusAdjustmentUrl = (lotId: string,) => {
+
+
+
+
+  return `/api/freezer-surplus/lots/${lotId}/adjustments`
+}
+
+/**
+ * Manager-only physical event. Damage reduces currently available cases. A return must name a started or completed run with an allocation from this dated lot and cannot exceed the allocation less prior returns. Corrections append a compensating event linked to an earlier damage or return; the original event is never edited or deleted. Every event uses a stable eventId for retry safety and updates the dated lot and freezer inventory in the same transaction without deducting ingredients.
+ * @summary Record freezer damage, a run return, or a correction
+ */
+export const recordFreezerSurplusAdjustment = async (lotId: string,
+    recordFreezerSurplusAdjustmentInput: RecordFreezerSurplusAdjustmentInput, options?: Parameters<typeof customFetch>[1]): Promise<FreezerSurplusMutationResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<FreezerSurplusMutationResponse>(getRecordFreezerSurplusAdjustmentUrl(lotId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(recordFreezerSurplusAdjustmentInput)
+  }
+);}
+
+
+
+
+
+export const getRecordFreezerSurplusAdjustmentMutationKey = () => ['recordFreezerSurplusAdjustment'] as const;
+
+export const getRecordFreezerSurplusAdjustmentMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordFreezerSurplusAdjustment>>, TError,RecordFreezerSurplusAdjustmentMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof recordFreezerSurplusAdjustment>>, TError,RecordFreezerSurplusAdjustmentMutationVariables, TContext> => {
+
+const mutationKey = getRecordFreezerSurplusAdjustmentMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof recordFreezerSurplusAdjustment>>, RecordFreezerSurplusAdjustmentMutationVariables> = (props) => {
+          const {lotId,data} = props ?? {};
+
+          return  recordFreezerSurplusAdjustment(lotId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RecordFreezerSurplusAdjustmentMutationResult = NonNullable<Awaited<ReturnType<typeof recordFreezerSurplusAdjustment>>>
+    export type RecordFreezerSurplusAdjustmentMutationBody = BodyType<RecordFreezerSurplusAdjustmentInput>
+    export type RecordFreezerSurplusAdjustmentMutationError = ErrorType<void>
+    export type RecordFreezerSurplusAdjustmentMutationVariables = {lotId: string;data: BodyType<RecordFreezerSurplusAdjustmentInput>}
+
+    /**
+ * @summary Record freezer damage, a run return, or a correction
+ */
+export const useRecordFreezerSurplusAdjustment = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordFreezerSurplusAdjustment>>, TError,RecordFreezerSurplusAdjustmentMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof recordFreezerSurplusAdjustment>>,
+        TError,
+        RecordFreezerSurplusAdjustmentMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRecordFreezerSurplusAdjustmentMutationOptions(options), queryClient);
     }
 
 export const getListMixSurplusUrl = () => {
