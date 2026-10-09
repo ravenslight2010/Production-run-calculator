@@ -496,6 +496,89 @@ export function computeRunConsumptionLines(
   return computeRunLines(vals, defaultPepTypes).map((l) => ({ itemKey: l.key, qty: l.qty }));
 }
 
+export type InventoryDemandStock = {
+  key: string;
+  onHand: number;
+};
+
+export type RunDemandImpactLine = {
+  key: string;
+  name: string;
+  category: InventoryCategory;
+  unit: string;
+  beforeQty: number;
+  afterQty: number;
+  deltaQty: number;
+  onHand: number | null;
+  shortage: number | null;
+  stockStatus: "covered" | "short" | "untracked" | "unavailable";
+};
+
+/**
+ * Compare canonical inventory demand for the same run before and after a
+ * reviewed setup change. This is a read-only projection: it only calculates
+ * demand and compares it with the supplied stock snapshot.
+ *
+ * `inventory === null` means the stock request failed or was unavailable.
+ * An empty inventory list instead means the request succeeded but the changed
+ * item key is not tracked.
+ */
+export function computeRunDemandImpact(input: {
+  before: RunLinesInput;
+  after: RunLinesInput;
+  inventory: readonly InventoryDemandStock[] | null;
+}, defaultPepTypes: readonly string[]): RunDemandImpactLine[] {
+  const beforeLines = computeRunLines(input.before, defaultPepTypes);
+  const afterLines = computeRunLines(input.after, defaultPepTypes);
+  const beforeByKey = new Map(beforeLines.map((line) => [line.key, line]));
+  const afterByKey = new Map(afterLines.map((line) => [line.key, line]));
+  const inventoryByKey = input.inventory === null
+    ? null
+    : new Map(input.inventory.map((item) => [item.key, item.onHand]));
+  const keys = new Set([...beforeByKey.keys(), ...afterByKey.keys()]);
+  const impact: RunDemandImpactLine[] = [];
+
+  for (const key of keys) {
+    const before = beforeByKey.get(key);
+    const after = afterByKey.get(key);
+    const beforeQty = before?.qty ?? 0;
+    const afterQty = after?.qty ?? 0;
+    const deltaQty = afterQty - beforeQty;
+    if (Math.abs(deltaQty) <= 1e-6) continue;
+
+    const line = after ?? before!;
+    const stockValue = inventoryByKey?.get(key);
+    const hasStock = inventoryByKey !== null && inventoryByKey.has(key);
+    const validStock = hasStock && Number.isFinite(stockValue);
+    const onHand = validStock ? stockValue! : null;
+    const shortage = onHand === null ? null : Math.max(0, afterQty - onHand);
+    impact.push({
+      key,
+      name: line.name,
+      category: line.category,
+      unit: line.unit,
+      beforeQty,
+      afterQty,
+      deltaQty,
+      onHand,
+      shortage,
+      stockStatus: inventoryByKey === null
+        ? "unavailable"
+        : !hasStock
+          ? "untracked"
+          : !validStock
+            ? "unavailable"
+            : shortage! > 1e-6
+              ? "short"
+              : "covered",
+    });
+  }
+
+  return impact.sort((a, b) =>
+    a.category.localeCompare(b.category) || a.name.localeCompare(b.name) || a.unit.localeCompare(b.unit),
+  );
+}
+
 // ── Mix component consumption (Feature B) ───────────────────────────────────
 //
 // Computes inventory deduction lines for the FRESH portion of a mix plan entry.

@@ -39,6 +39,8 @@ import {
 } from "@/storage";
 import { useAccessibleDialog } from "./useAccessibleDialog";
 import { SpecImportAmountWarnings } from "./SpecImportAmountWarnings";
+import { SpecImportInventoryImpact } from "./SpecImportInventoryImpact";
+import type { SpecImportImpactRun } from "@/specImportInventoryImpact";
 
 type Props = {
   open: boolean;
@@ -59,6 +61,8 @@ type Props = {
    * (e.g. a single "Aldo's Standard Cheese Mix").
    */
   existingRecipeNamesByKind: Record<SpecImportDisplayKind, string[]>;
+  /** Current selected run, used only as the explicit demand basis for the read-only stock preview. */
+  inventoryImpactRun?: SpecImportImpactRun | null;
   /**
    * Confirm with the edited, kept-only import the user chose to apply.
    * `learnedRenames` are the step-1 brand/flavor renames turned into learnable
@@ -482,6 +486,7 @@ export default function SpecImportDialog({
   canUseAiTools,
   onUseAiFallback,
   existingRecipeNamesByKind,
+  inventoryImpactRun = null,
   onConfirm,
 }: Props) {
   const dialogRef = useAccessibleDialog<HTMLDivElement>(open, onClose);
@@ -1442,6 +1447,19 @@ export default function SpecImportDialog({
                   ) : null}
                 </section>
               ) : null}
+
+              {step === 2 && (
+                <SpecImportInventoryImpact
+                  visible={open && step === 2}
+                  parsed={edited}
+                  run={inventoryImpactRun}
+                  forceUpdateProfileKeys={new Set(
+                    profiles
+                      .filter((profile) => profile.include && profile.forceUpdate)
+                      .map((profile) => `${profile.brand.trim().toLowerCase()}\u0000${profile.flavor.trim().toLowerCase()}`),
+                  )}
+                />
+              )}
 
               {step === 2 && prepared.note && (
                 <div className="rounded-md border border-amber-400/60 bg-amber-500/10 p-3">

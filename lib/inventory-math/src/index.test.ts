@@ -4,6 +4,7 @@ import {
   applySubstitutions,
   substitutionsForIngredient,
   computeRunConsumptionLines,
+  computeRunDemandImpact,
   computeSummaryStats,
   computeCheesePull,
   computeCheesePerPizzaOz,
@@ -553,6 +554,66 @@ describe("aggregateRunDemand", () => {
 
   it("returns an empty list for no runs", () => {
     expect(aggregateRunDemand([], PEP)).toEqual([]);
+  });
+});
+
+describe("computeRunDemandImpact", () => {
+  it("compares canonical ingredient and packaging demand with known or untracked stock", () => {
+    const before = baseVals({
+      casesNeeded: 2,
+      pizzasPerCase: 10,
+      cartoned: "yes",
+      cartonsPerCase: 1,
+      pep1Type: "Pepperoni",
+      pep1OzPerPizza: 1,
+    }) as unknown as RunLinesInput;
+    const after = {
+      ...before,
+      pizzasPerCase: 12,
+      pep1OzPerPizza: 2,
+      cartonSize: 2,
+    } as RunLinesInput;
+
+    const impact = computeRunDemandImpact(
+      {
+        before,
+        after,
+        inventory: [{ key: "ingredient:Pepperoni:lbs", onHand: 1.5 }],
+      },
+      PEP,
+    );
+
+    expect(impact).toEqual([
+      expect.objectContaining({
+        key: "ingredient:Pepperoni:lbs",
+        beforeQty: 1.875,
+        afterQty: 4.5,
+        deltaQty: 2.625,
+        onHand: 1.5,
+        shortage: 3,
+        stockStatus: "short",
+      }),
+      expect.objectContaining({
+        key: "packaging:cartons:cases",
+        beforeQty: 20,
+        afterQty: 12,
+        deltaQty: -8,
+        onHand: null,
+        shortage: null,
+        stockStatus: "untracked",
+      }),
+    ]);
+  });
+
+  it("reports stock as unavailable rather than treating a failed load as zero", () => {
+    const run = baseVals({ casesNeeded: 1, pizzasPerCase: 10, pep1Type: "Pepperoni", pep1OzPerPizza: 1 }) as unknown as RunLinesInput;
+    const impact = computeRunDemandImpact({ before: run, after: { ...run, pep1OzPerPizza: 2 }, inventory: null }, PEP);
+    expect(impact).toContainEqual(expect.objectContaining({
+      key: "ingredient:Pepperoni:lbs",
+      onHand: null,
+      shortage: null,
+      stockStatus: "unavailable",
+    }));
   });
 });
 

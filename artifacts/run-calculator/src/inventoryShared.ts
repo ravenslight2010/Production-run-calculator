@@ -10,6 +10,7 @@ import {
 import {
   computeRunLines as computeRunLinesShared,
   computeRunConsumptionLines as computeRunConsumptionLinesShared,
+  computeRunDemandImpact as computeRunDemandImpactShared,
   deriveCandidateItems as deriveCandidateItemsShared,
   aggregateRunDemand as aggregateRunDemandShared,
   computeTransferNeeds,
@@ -116,6 +117,21 @@ export const computeRunLines = (vals: FormValues) =>
 
 export const computeRunConsumptionLines = (vals: FormValues) =>
   computeRunConsumptionLinesShared(toRunLinesInput(vals), DEFAULT_PEP_TYPES);
+
+/** Compare two run forms through the same canonical math and substitution overlay as inventory consumption. */
+export const computeRunDemandImpact = (
+  before: FormValues,
+  after: FormValues,
+  items: readonly Pick<InventoryItem, "key" | "onHand">[] | null,
+) =>
+  computeRunDemandImpactShared(
+    {
+      before: toRunLinesInput(before),
+      after: toRunLinesInput(after),
+      inventory: items?.map(({ key, onHand }) => ({ key, onHand })) ?? null,
+    },
+    DEFAULT_PEP_TYPES,
+  );
 
 export type WarehouseCoverageStatus = "covered" | "short" | "conversion" | "missing";
 export type WarehouseTransferSource = {

@@ -140,12 +140,12 @@ LINK    Frontline "Deluxe" → cheese recipe "4-Cheese" (was unlinked)
 **How**: Reuse the saved-sheet store + reconcilers (`@workspace/spec-reconcile`, `@workspace/mix-reconcile`) into a single "cross-import health" view: which products have spec+premix+cheese+shipping all landed, which are missing pieces.
 
 ### 9. Import → Inventory Tie-in (new)
-**Status:** Open — preview only; no stock mutation.
+**Status:** Implemented for the currently selected run. The review compares before/after demand with a read-only stock snapshot; no stock mutation.
 **What**: Recipes set up by imports drive inventory consumption lines automatically.
 
 **Why**: When a spec import defines dough/sauce/cheese/app recipes, `computeRunConsumptionLines` already turns them into inventory keys. The gap: no visibility that "this import means we'll need X lbs of ingredient Y on runs of this product."
 
-**Add**: In the import review step, show a "projected inventory impact" section per product — which inventory items will be consumed, at what rate. Links the import system to the inventory system cleanly.
+**Current scope**: In step 2 of the spec import review, show changed ingredient and packaging demand for the selected run's planned cases, plus shortages, untracked items, or unavailable stock. Other products in a multi-profile workbook are not projected. Missing run quantities or inventory data are identified rather than guessed. The preview does not reserve stock or write inventory/consumption records.
 
 ### 10. Data Versioning / Change Detection (new)
 **Status:** Open — no source-keyed prior-versus-current change report is established.
@@ -165,7 +165,7 @@ LINK    Frontline "Deluxe" → cheese recipe "4-Cheese" (was unlinked)
 
 ### Phase 1: Foundation (standalone — no QC dependency)
 1. Complete cell-source provenance tracked by active task #2854.
-2. **Import → inventory impact preview** using reviewed changes and existing inventory math; no stock mutation.
+2. **Import → inventory impact preview** using reviewed changes and existing inventory math; no stock mutation (implemented for the selected run).
 3. **Unified cross-import health** beyond current spec/mix reconciliation.
 
 ### Phase 2: Safety & Quality

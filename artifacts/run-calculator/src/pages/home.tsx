@@ -18794,6 +18794,13 @@ export default function Home() {
               canUseAiTools,
               onUseAiFallback: () => void handleSpecAiFallback(),
               existingRecipeNamesByKind: existingImportRecipeNames,
+              inventoryImpactRun: currentRun?.brand && currentRun?.flavor
+                ? {
+                    brand: currentRun.brand,
+                    flavor: currentRun.flavor,
+                    values: form.getValues(),
+                  }
+                : null,
               onConfirm: handleSpecImportConfirm,
             }}
           />
