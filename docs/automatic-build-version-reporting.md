@@ -6,14 +6,19 @@ retroactively. GitHub is a backup and is not queried by these commands.
 ## Automatic publish preparation
 
 After each task merge, post-merge setup refreshes the prepared source record.
-If more source changes are made afterward, the agent refreshes it again before
-offering the owner a Publish action:
+After the final source edit and before offering the owner a Publish action, run
+the single readiness command:
 
 ```bash
-bash scripts/src/run-release-node.sh pnpm run prepare:publish
+pnpm run publish:ready
 ```
 
-This captures the actual production source inputs into
+`publish:ready` refreshes the prepared source record and runs the focused API and
+web publish build. It does not publish and does not run the standard or full
+release suites. If source changes afterward, run it again; Replit's publish
+build intentionally fails closed when the prepared identity is stale.
+
+Preparation captures the actual production source inputs into
 `artifacts/api-server/publish-source-record.json`, which travels with the source
 snapshot, and keeps an independent expected copy at
 `.local/build-identity/expected-source.json`. Neither contains source contents,

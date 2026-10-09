@@ -4,6 +4,7 @@
   "license": "MIT",
   "scripts": {
     "prepare:publish": "node scripts/src/prepare-publish-source.mjs",
+    "publish:ready": "bash scripts/src/run-release-node.sh pnpm run prepare:publish && bash scripts/src/run-release-node.sh pnpm run build:publish",
     "check:published-build": "node scripts/src/verify-published-build.mjs",
     "build:publish": "bash scripts/src/build-publish.sh",
     "test:build-identity": "node --test scripts/src/build-source-identity.test.mjs scripts/src/verify-published-build.test.mjs scripts/src/release-source-identity.test.mjs && pnpm --filter @workspace/scripts exec tsx --test ./src/source-readiness-contract.test.mts ./src/prepare-published-evidence.test.mts",
