@@ -14,3 +14,27 @@ A Replit build record marked failed can still correspond to the exact build curr
 **Why:** A recent Autoscale attempt was marked failed after service creation, while the same platform build ID and app source identity were live and healthy.
 
 **How to apply:** After an owner reports a publish result, check deployment metadata and the official live endpoints directly. Never ask the owner to relay IDs or republish before this check.
+
+Replit's documented Publishing Monitoring views show app/request and CPU/memory
+metrics; database Monitoring shows active-query and query-performance data.
+The standard deployment metadata and documented Monitoring views do not
+establish current Autoscale instance count or primary connection capacity.
+The production SQL tool reads a replica. The owner has confirmed build-bound
+production capacity logs as an authorized primary-observation source; retrieve
+them directly, without asking for manual uploads.
+The production sampler emits every five minutes while an instance is running;
+primary-query failures produce unavailable samples that must remain explicit
+gaps.
+
+**Why:** Deployment being published does not grant the agent direct access to
+every workspace pane or to the primary database; replica results cannot prove
+live-primary connection headroom.
+
+**How to apply:** For capacity decisions, separate what deployment metadata,
+logs, and screenshots actually show from unavailable primary/instance metrics.
+Do not infer active count from CPU or pool samples, or present replica settings
+as primary settings. Accept collector-observed primary metrics only when build
+identity matches; unavailable samples are gaps, not zeros. Known-reserve
+headroom remains estimated while provider reserves are unknown, and a quiet
+sample cannot establish headroom at a separate saturated moment. Keep the
+decision open until peak-aligned measurements and instance counts are available.

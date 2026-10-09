@@ -243,10 +243,11 @@ timeouts remain unexplained and may or may not share that cause.
 The production SQL interface reads a replica and cannot establish live-primary
 connection headroom, `max_connections`, reserved slots, or other primary
 clients. The deployment metadata identifies Autoscale but does not return the
-current instance count. Replit documents active-instance and scaling
-visibility in **Tools → Replit Cloud → Monitoring**
+current instance count. Replit documents request and resource charts in
+**Tools → Replit Cloud → Monitoring**
 ([Monitoring a deployment](https://docs.replit.com/features/publishing/monitoring-a-deployment));
-that dashboard was not queried as part of this capture.
+the documentation does not establish that an active-instance count is exposed.
+That dashboard was not queried as part of the original capture.
 
 Therefore, the current evidence establishes process-pool saturation and
 concurrent connection-establishment failures, but does not establish whether
@@ -259,6 +260,89 @@ No pool or deployment setting was changed.
 Only timestamps, build identity, status checks, allowlisted error classes,
 aggregate pool metrics, and bounded attempt counts were retained. Raw logs,
 database rows, production payloads, and credentials were not retained.
+
+### Additional dashboard review
+
+- On 2026-10-08, two user-supplied Publishing dashboard screenshots were
+  reviewed. They show CPU and memory utilization charts for “Past one day” and
+  “Past one hour”; they do not show an Autoscale instance count, deployment
+  maximum, or database connection metrics. The phone clock is visible, but the
+  screenshots do not establish an exact UTC range for either chart.
+- These screenshots therefore do not establish the active Autoscale instance
+  count or primary database ceiling, reserved slots, or baseline client usage.
+  No screenshot was copied into this report. The published build identity was
+  independently rechecked against `/api/build-info` and still matches the
+  build recorded above.
+
+
+### Replit Monitoring request-peak capture
+
+- Four later user-supplied Replit Monitoring screenshots, captured on
+  2026-10-08 around 13:09 GMT-5 with the “Past one day” range, show uptime,
+  request volume, HTTP statuses, request-duration distribution, and CPU/memory
+  utilization. A visible HTTP-status tooltip is for Oct 8, 10:00 GMT-5 and
+  reports two HTTP 200 responses. The request chart has visible bursts around
+  early morning and about 11:00 GMT-5. The screenshots contain no active
+  Autoscale instance count or database connection metrics; no raw screenshot
+  was copied into this report.
+- The published build had changed since the earlier capture. At
+  2026-10-08 18:12 UTC, `/api/build-info` reported app build
+  `app-build:a3d3e838-87ab-4ad7-9301-8dc2d534daf1`, Git revision
+  `d173e1f8bbb0ea67f105b031e9c03d80f3b9cfa6`, platform deployment
+  `411f3a0b-be0f-499a-9b85-b35deec43e5d`, and platform build
+  `91ef316e-f1ae-4b6a-afcc-2cd753f5d0c6`. The current production environment
+  inventory has no `DATABASE_POOL_MAX`; the published per-process pool max
+  therefore resolves to the source default of 10.
+- A bounded production-log capture for the post-build interval
+  2026-10-08 15:56:34.756–17:00 UTC (10:56–12:00 GMT-5), which overlaps the
+  visible late-morning request burst, returned 55 `capacity_telemetry` records.
+  Pool total reached 10 and the wait queue reached 16; 12 snapshots had a
+  nonzero queue. Filtered logs contained 54 exact pool checkout-wait matches
+  and 66 new-client connection-timeout matches, with no explicit database
+  connection-limit error.
+- This confirms pool saturation during a Monitoring-visible request burst on
+  the current build, but the logs do not identify the number of active
+  Autoscale instances and do not expose primary database settings or total
+  client usage.
+
+
+### Usage dashboard review
+
+- Two additional user-supplied screenshots dated 2026-10-08 around 14:28
+  show hosting, traffic, and storage usage totals. Replit's
+  [usage billing documentation](https://docs.replit.com/billing/about-usage-based-billing)
+  identifies compute units, requests, compute hours, and GiB-months as usage
+  measures, not simultaneous instance or database-client counts. Several
+  resource labels and the reporting-period selector are cropped, so unlabeled
+  quantities were not assigned meanings.
+- Accumulated usage cannot establish peak concurrency, primary connection
+  limits, or reserved slots. Billing quantities and raw screenshots were not
+  copied into this report.
+
+
+### Access review before production collection
+
+- The Replit documentation reviewed describes deployment Monitoring for
+  requests, statuses, latency, CPU, and memory; database Monitoring for active
+  queries and query performance; and Publishing settings for configuring
+  machine capacity. Those documented views do not provide the required
+  historical active-instance count or primary PostgreSQL connection settings.
+  The supplied Monitoring screenshots add request and resource charts but
+  still do not show instance counts or database connections.
+- The available deployment metadata confirms Autoscale and build status, but
+  has no active or peak instance count. A later bounded log lookup for the
+  original 02:26:35–03:26:35 UTC window returned no capacity-telemetry records;
+  the earlier captured aggregate remains the only retained log evidence for
+  that window.
+- The production SQL tool is read-only against a replica, not the app's live
+  primary. At the time of these dashboard-only captures, app telemetry recorded per-process pool counts only;
+  it does not expose the primary server's connection ceiling, reserved slots,
+  or total client usage. No primary-capacity comparison can be made from
+  replica results or CPU/memory charts.
+- No pool or deployment settings were changed. This task remains incomplete
+  until an authorized source provides the Autoscale count and primary
+  connection ceiling, reserved slots, and baseline client usage for one
+  matching high-load window.
 
 ## Queue trend confirmation
 
@@ -394,3 +478,101 @@ about 153–213 jobs per hour, while new work remained capped at one job per
 scope/time bucket. The exact-platform-build sample is under two hours and the
 earlier cross-platform total-row change remains unexplained; no backlog
 completion estimate is supported.
+
+### Verified identity and samples
+
+Public `/api/build-info` now reports:
+
+- App build: `app-build:5f2825e5-fc81-4663-84db-fab7acba18b5`
+- Source fingerprint: `5f09805d0289452dd9b1ae5c186a98a66eca1d5621c2370b4282fcc982b00048`
+- Git revision: `9ecc934673ae629a98c4a97d182d214855589d7c`, verified binding
+- Platform build: `fcbdaa9d-75d4-4860-ba01-fddabed5a507`
+- Completed: 2026-10-08 19:28:12.565 UTC
+
+A bounded six-hour deployment-log query for capacity sample events returned
+two `database_capacity_sample` records. Both match the live app build, source
+fingerprint, and platform build, declare production, and report an interval of
+300,000 ms. Raw logs, host identifiers, and production records were not retained.
+
+| Capture (UTC) | Primary metrics status | Client backends | Limit | Known reserved slots | Estimated ordinary slots remaining | Sampled pool max / total / idle / waiting |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-10-08 19:34:58.241 | observed; collector reports primary verified | 12 | 450 | 4 superuser + 0 role-reserved | 434 | 10 / 9 / 1 / 0 |
+| 2026-10-08 19:40:20.366 | unavailable; primary not verified for this sample | unknown | unknown | unknown | unknown | 10 / 5 / 0 / 0 |
+
+The first sample's calculation is `450 - 4 - 0 - 12 = 434`. It includes the
+diagnostic backend and reports complete state visibility. Provider-reserved
+slots remain explicitly unknown, so 434 is an estimate after known PostgreSQL
+reserves, not guaranteed usable provider capacity. The unavailable sample is
+a coverage gap, never a zero-client observation. Primary verification is
+attested by the production collector; no separate primary SQL session was used.
+
+
+### Pressure between samples and conclusion
+
+In the bounded post-build log interval 19:28:12.565–19:41:00 UTC, five
+`capacity_telemetry` records and two exact checkout-timeout matches were
+returned; no new-client-timeout match was returned by that filter. In
+particular, the 19:37:22.942 UTC pool snapshot reports 10 total clients,
+0 idle, and 20 waiting. Other returned snapshots reported no waiters.
+The primary-capacity sample at 19:34:58 preceded this saturation, and the
+next sample at 19:40:20 was unavailable. Thus the observed pressure has no
+simultaneous successful primary-capacity measurement.
+
+The deployed per-process pool maximum is directly reported as 10. Aggregate
+potential pool demand is `10 × active API processes`, but active/maximum
+Autoscale instances, processes per instance, and provider-reserved slots remain
+unknown. The logs do not separate other-client baseline usage from application
+usage. Neither a safe aggregate pool budget nor representative peak-load
+headroom can therefore be established yet.
+
+No pool or deployment setting was changed. The task remains incomplete pending
+successful primary observations covering representative peak pressure and an
+authorized Autoscale instance-count source for the same window. Retrieve the
+scheduled production logs directly after the next peak window; manual upload
+is not required. Preserve unavailable samples and sampling gaps in that review.
+
+
+## Resumed production sample review — 2026-10-09
+
+A bounded six-hour deployment-log query from 08:46:23–14:46:23 UTC returned
+71 scheduled `database_capacity_sample` entries at a configured 300,000 ms
+interval. Thirty-six contained verified primary observations and 35 reported
+the primary metrics as unavailable. The unavailable entries were retained as
+gaps, not interpreted as zero usage.
+
+All 36 observed records match the then-live `/api/build-info` app build
+`app-build:eef6e133-ec7a-4cd5-b47c-a38965fd6e44`, source fingerprint
+`c0f5a1ffc54b5e581196a250160dbad99903d0c2e634d9bb3271bc7cfd685402`, and
+platform build `872b8143-d006-4447-99d7-18c10cd1e726`. The live endpoint
+reported no Git revision (`gitBinding: unavailable`), so no revision was
+inferred.
+
+Across those 36 observed samples:
+
+- The primary reported `max_connections=450`, 4 superuser-reserved slots,
+  0 role-reserved slots, and unknown provider-reserved slots.
+- Total client backends ranged from 6 to 13. After known PostgreSQL reserves,
+  estimated ordinary slots remaining ranged from 440 to 433.
+- The collector-reported per-process pool maximum remained 10.
+- Autoscale current and maximum instance counts were null in every sample.
+
+The closest successful primary sample to the highest pool wait in this
+six-hour window occurred at 2026-10-09 13:05:31.672 UTC: 12 client backends,
+434 estimated ordinary slots remaining, pool total 9, idle 6, waiting 0.
+At 13:07:14.073 UTC, the pool telemetry showed total 10, idle 0, waiting 13,
+about 102 seconds later. No successful primary sample coincided with that
+pool-queue peak. The sample does indicate substantial known-reserve database
+headroom shortly before it, but provider reserves, other-client attribution,
+and Autoscale process count remain unknown.
+
+This improves the baseline and near-peak evidence but still cannot calculate
+aggregate application demand (`10 × active processes`) or guaranteed primary
+headroom. The task remains incomplete until a trustworthy Autoscale instance
+count and provider-reserve treatment are established and a successful primary
+sample covers representative peak pressure.
+## Build-bound production capacity collection
+
+The owner confirmed that production capacity collection is live and that
+manual uploads are no longer needed. Its scheduled interval is five minutes
+while an instance is running. This section supersedes the earlier lack of a
+primary-capacity data source, but not the missing peak/Autoscale evidence.
