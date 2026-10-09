@@ -1,4 +1,5 @@
 import { createContext, lazy, memo, Profiler, useCallback, useEffect, useId, useMemo, useRef, useState, useContext, useReducer } from "react";
+import { DEFAULT_RUN_TO_TIME } from "../runToTime";
 import { useEvent } from "../hooks/useEvent";
 import { createFrameRepeater } from "../frameRepeater";
 import {
@@ -5270,7 +5271,7 @@ export default function Home() {
   // the Get Started overview or the header menu (never auto-shown).
   const [showTour, setShowTour] = useState(false);
   const [doughSubTab, setDoughSubTab] = useState<"dough" | "crusts">("dough");
-  const [runToTime, setRunToTime] = useState(() => loadDayState().runToTime ?? "19:15");
+  const [runToTime, setRunToTime] = useState(() => loadDayState().runToTime ?? DEFAULT_RUN_TO_TIME);
 
   // Brand/flavor picker state
   const [brandInput, setBrandInput] = useState("");

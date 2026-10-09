@@ -21,6 +21,8 @@ import RecipeSubstitutionBadge from "../RecipeSubstitutionBadge";
 import { ReadOnlyRecipeCard, SecondsField, fmtMS } from "./stationShared";
 import { TickBar } from "../TickBar";
 import { fmtNum, fmtTime } from "../../utils";
+import { minutesUntilRunToTime } from "../../runToTime";
+import { RunToTimeControl } from "./RunToTimeControl";
 
 export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
   const doughLock = useManualControlLock(useHomeCtx().currentRun?.id, "dough-trays");
@@ -40,6 +42,16 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
     isDoughTimerPaused, pauseDoughTimers, resumeDoughTimers,
     nextRunPrepActive, packagingDrainActive, detectPackagingSpeedDrift,
   } = useLiveRun();
+
+  const commitRunToTime = (time: string) => {
+    if (dayStateRef.current.runToTime === time && runToTime === time) return;
+    setRunToTime(time);
+    const newDayState = { ...dayStateRef.current, runToTime: time };
+    dayStateRef.current = newDayState;
+    setDayState(newDayState);
+    saveDayState(newDayState);
+    schedulePush(newDayState, 0);
+  };
 
   // ── Shift prep phase (pre-production batch tracking) ─────────────────────
   const doughPrepBatchSec = Math.max(30,
@@ -767,11 +779,7 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                 })()}
                 {/* Run to Time card — available to all roles */}
                 {doughSubTab === "dough" && (() => {
-                  const target = new Date(nowTime);
-                  const [hrs, mins] = runToTime.split(":").map(Number);
-                  target.setHours(hrs, mins, 0, 0);
-                  if (target <= nowTime) target.setDate(target.getDate() + 1);
-                  const minutesAvailable = Math.max(0, (target.getTime() - nowTime.getTime()) / 60000);
+                  const minutesAvailable = minutesUntilRunToTime(runToTime, nowTime);
                   // Measured mixer time (low + high) beats the line-speed guess
                   // for min/batch when the operator has timed the machines.
                   const measuredSpinSec = Math.max(0, Number(v.mixerLowSec) || 0) + Math.max(0, Number(v.mixerHighSec) || 0);
@@ -810,22 +818,10 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                         </CardTitle>
                       </CardHeader>
                       <CardContent className="px-4 pb-4">
-                        <div className="flex items-center gap-3 mb-3">
+                        <div className="flex flex-wrap items-center gap-3 mb-3">
                           <span className="text-xs text-muted-foreground shrink-0">{nowLabel}</span>
                           <span className="text-xs text-muted-foreground shrink-0">→ run until</span>
-                          <input
-                            type="time"
-                            value={runToTime}
-                            onChange={(e: any) => {
-                              const t = e.target.value;
-                              setRunToTime(t);
-                              const newDs = { ...dayStateRef.current, runToTime: t };
-                              setDayState(newDs);
-                              saveDayState(newDs);
-                              schedulePush(newDs, 0);
-                            }}
-                            className="flex-1 rounded-md border border-input bg-background px-2 py-1 font-mono text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                          />
+                          <RunToTimeControl value={runToTime} onCommit={commitRunToTime} />
                           <span className="text-xs text-muted-foreground shrink-0 font-mono">{fmtNum(timePerBatchMin, 1)} min/batch</span>
                         </div>
                         <div className="responsive-metric-grid">
@@ -867,11 +863,7 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
 
                 {/* Run to Time card — crust mode */}
                 {doughSubTab === "crusts" && (() => {
-                  const target = new Date(nowTime);
-                  const [hrs, mins] = runToTime.split(":").map(Number);
-                  target.setHours(hrs, mins, 0, 0);
-                  if (target <= nowTime) target.setDate(target.getDate() + 1);
-                  const minutesAvailable = Math.max(0, (target.getTime() - nowTime.getTime()) / 60000);
+                  const minutesAvailable = minutesUntilRunToTime(runToTime, nowTime);
                   const pizzasByTime = calc.ppm * minutesAvailable;
                   const casesToOpenByTime = v.crustsPerCase > 0 ? Math.ceil(pizzasByTime / v.crustsPerCase) : 0;
                   const stacksByTime = calc.perTray > 0 ? Math.ceil(pizzasByTime / calc.perTray) : 0;
@@ -900,22 +892,10 @@ export const LiveDoughTabContent = memo(function LiveDoughTabContent() {
                         </CardTitle>
                       </CardHeader>
                       <CardContent className="px-4 pb-4">
-                        <div className="flex items-center gap-3 mb-3">
+                        <div className="flex flex-wrap items-center gap-3 mb-3">
                           <span className="text-xs text-muted-foreground shrink-0">{nowLabel}</span>
                           <span className="text-xs text-muted-foreground shrink-0">→ run until</span>
-                          <input
-                            type="time"
-                            value={runToTime}
-                            onChange={(e: any) => {
-                              const t = e.target.value;
-                              setRunToTime(t);
-                              const newDs = { ...dayStateRef.current, runToTime: t };
-                              setDayState(newDs);
-                              saveDayState(newDs);
-                              schedulePush(newDs, 0);
-                            }}
-                            className="flex-1 rounded-md border border-input bg-background px-2 py-1 font-mono text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                          />
+                          <RunToTimeControl value={runToTime} onCommit={commitRunToTime} />
                         </div>
                         <div className="responsive-metric-grid">
                           <div className="bg-muted/30 rounded-lg p-2 text-center">
