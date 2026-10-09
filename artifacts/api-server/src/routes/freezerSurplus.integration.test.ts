@@ -297,6 +297,74 @@ describe("dated freezer surplus API", () => {
     await expectFreezerParity(20, 5);
   });
 
+  it("keeps each dated lot and finished-case stock aligned through multi-lot retries, replacement, and release", async () => {
+    const firstLotResponse = await confirm(MANAGER, { productionDate: "2026-08-28", cases: 20 });
+    const firstLotId = ((await firstLotResponse.json()) as { createdLot: { id: string } }).createdLot.id;
+    const secondLotResponse = await confirm(MANAGER, { productionDate: "2026-08-29", cases: 7 });
+    const secondLotId = ((await secondLotResponse.json()) as { createdLot: { id: string } }).createdLot.id;
+    await expectFreezerParity(27, 2);
+    await seedRun("multi-lot-run");
+
+    const expectLotBalances = async (firstCases: number, secondCases: number) => {
+      const loaded = await ledger();
+      expect(loaded.lots).toHaveLength(2);
+      expect(Object.fromEntries(loaded.lots.map((lot) => [lot.id, lot.remainingCases]))).toEqual({
+        [firstLotId]: firstCases,
+        [secondLotId]: secondCases,
+      });
+      return loaded;
+    };
+
+    const initialSelection = [
+      { lotId: firstLotId, cases: 12 },
+      { lotId: secondLotId, cases: 3 },
+    ];
+    expect((await allocate(MANAGER, "multi-lot-run", initialSelection)).status).toBe(200);
+    let loaded = await expectLotBalances(8, 4);
+    expect(loaded.allocations).toHaveLength(2);
+    expect(Object.fromEntries(loaded.allocations.map((allocation) => [allocation.lotId, allocation.cases]))).toEqual({
+      [firstLotId]: 12,
+      [secondLotId]: 3,
+    });
+    await expectFreezerParity(12, 3);
+
+    // An exact retry must not change either dated lot or add inventory movements.
+    expect((await allocate(MANAGER, "multi-lot-run", initialSelection)).status).toBe(200);
+    loaded = await expectLotBalances(8, 4);
+    expect(loaded.allocations).toHaveLength(2);
+    await expectFreezerParity(12, 3);
+
+    const replacementSelection = [
+      { lotId: firstLotId, cases: 5 },
+      { lotId: secondLotId, cases: 2 },
+    ];
+    expect((await allocate(MANAGER, "multi-lot-run", replacementSelection)).status).toBe(200);
+    loaded = await expectLotBalances(15, 5);
+    expect(loaded.allocations).toHaveLength(2);
+    expect(Object.fromEntries(loaded.allocations.map((allocation) => [allocation.lotId, allocation.cases]))).toEqual({
+      [firstLotId]: 5,
+      [secondLotId]: 2,
+    });
+    await expectFreezerParity(20, 5);
+
+    // Retrying the replacement is also a no-op for stock and the movement ledger.
+    expect((await allocate(MANAGER, "multi-lot-run", replacementSelection)).status).toBe(200);
+    loaded = await expectLotBalances(15, 5);
+    expect(loaded.allocations).toHaveLength(2);
+    await expectFreezerParity(20, 5);
+
+    expect((await allocate(MANAGER, "multi-lot-run", [])).status).toBe(200);
+    loaded = await expectLotBalances(20, 7);
+    expect(loaded.allocations).toHaveLength(0);
+    await expectFreezerParity(27, 6);
+
+    // Releasing an already released run must not add another stock movement.
+    expect((await allocate(MANAGER, "multi-lot-run", [])).status).toBe(200);
+    loaded = await expectLotBalances(20, 7);
+    expect(loaded.allocations).toHaveLength(0);
+    await expectFreezerParity(27, 6);
+  });
+
   it("rejects mismatches and protects a lot from concurrent over-allocation", async () => {
     const lotResponse = await confirm(MANAGER);
     const lotId = ((await lotResponse.json()) as { createdLot: { id: string } }).createdLot.id;
