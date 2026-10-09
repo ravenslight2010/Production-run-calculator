@@ -41,8 +41,8 @@ export function RunToTimeControl({ value, onCommit }: RunToTimeControlProps) {
   };
 
   return (
-    <div className="flex min-w-[14rem] flex-1 items-start gap-2">
-      <div className="min-w-0 flex-1">
+    <div className="flex w-full min-w-0 flex-none flex-col items-stretch gap-2 sm:min-w-[14rem] sm:flex-1 sm:flex-row sm:items-start">
+      <div className="w-full min-w-0 flex-1">
         <label htmlFor={id} className="sr-only">
           Run until time, such as 7:15 PM or 19:15
         </label>
@@ -55,7 +55,10 @@ export function RunToTimeControl({ value, onCommit }: RunToTimeControlProps) {
           placeholder="7:15 PM"
           aria-invalid={error ? true : undefined}
           aria-describedby={error ? `${id}-error` : undefined}
-          onFocus={() => { editingRef.current = true; }}
+          onFocus={(event) => {
+            editingRef.current = true;
+            event.currentTarget.select();
+          }}
           onChange={(event) => {
             setDraft(event.target.value);
             setError("");
@@ -70,7 +73,7 @@ export function RunToTimeControl({ value, onCommit }: RunToTimeControlProps) {
               event.currentTarget.blur();
             }
           }}
-          className="w-full min-w-0 rounded-md border border-input bg-background px-2 py-1 font-mono text-base focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:text-sm"
+          className="h-12 w-full min-w-0 rounded-md border border-input bg-background px-3 font-mono text-base focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:text-sm"
         />
         {error && (
           <p id={`${id}-error`} role="alert" className="mt-1 text-xs text-destructive">
@@ -85,7 +88,7 @@ export function RunToTimeControl({ value, onCommit }: RunToTimeControlProps) {
         data-testid="button-run-to-time-default"
         onPointerDown={(event) => event.preventDefault()}
         onClick={setDefault}
-        className="shrink-0 whitespace-nowrap"
+        className="h-11 w-full shrink-0 whitespace-nowrap sm:w-auto"
       >
         Set default · {formatRunToTimeInput(DEFAULT_RUN_TO_TIME)}
       </Button>

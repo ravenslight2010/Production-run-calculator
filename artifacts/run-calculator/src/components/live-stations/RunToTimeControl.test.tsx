@@ -15,6 +15,10 @@ describe("RunToTimeControl", () => {
     expect(input.getAttribute("type")).toBe("text");
     expect((input as HTMLInputElement).value).toBe("7:15 PM");
 
+    fireEvent.focus(input);
+    expect((input as HTMLInputElement).selectionStart).toBe(0);
+    expect((input as HTMLInputElement).selectionEnd).toBe("7:15 PM".length);
+
     fireEvent.change(input, { target: { value: "8:30 PM" } });
     expect(onCommit).not.toHaveBeenCalled();
     fireEvent.blur(input);
