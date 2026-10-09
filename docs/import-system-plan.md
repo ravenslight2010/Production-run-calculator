@@ -1,7 +1,7 @@
 # Import System — Comprehensive Plan
 
-**Status:** Foundation built; spec, premix, and cheese multi-entity applies are transactional and support guarded recovery
-**Updated:** 2026-09-21
+**Status:** Partial — history, source-versus-landed reporting, deterministic-first supported workbook parsing, and transactional apply/guarded undo for spec/premix/cheese are implemented
+**Updated:** 2026-10-08
 **Related:** [Idea backlog](idea-backlog.md#15-import-system-improvements), [additional domain synthesis](../research/additional-domain-research-synthesis-2026-09-19.md)
 
 Spec, premix, and cheese now apply server-owned master-data changes through one operation identity and transaction. The server retains bounded before/after snapshots, returns a canonical result for idempotent retries, and permits undo only while affected rows still match that result. Saved review snapshots remain source-review artifacts, not rollback snapshots. Local-only shipping, sauce-guide, dough-guide, and schedule projections retain their existing sync boundaries.
@@ -29,19 +29,21 @@ Spec, premix, and cheese now apply server-owned master-data changes through one 
 - **Audit recovery** — pending audit records retried when they fail to save
 - **Import access gates** — capability-based (canImportSpec, canImportProfileGuide, etc.)
 - **Atomic apply and guarded undo** — spec, premix, and cheese commit server-owned changes and history together; retries reuse the same operation
+- **Source-versus-landed report** — importer history reports source/landed counts and keeps non-comparable source-only or landed-only values explicit
+- **Deterministic-first supported workbook parsing** — supported layouts parse deterministically; unsupported/ambiguous sources remain explicit review/fallback cases
 
-### What's Missing (from earlier ideas + new insights)
+### Remaining work (reconciled 2026-10-08)
 
-1. **No QC approval gate** — imports apply immediately, no "unverified" state (planned in QC dept)
-2. **Guarded undo is limited to atomic importers** — local-only guide and schedule projections retain their existing recovery paths
-3. **No structured preview diff** — review is inside dialog but no "what will CHANGE" diff view
-4. **No batch import** — one file at a time only
-5. **No template download** — can't generate a blank Excel to fill by hand
-6. **No validation rules pre-check** — data quality issues found mid-parse, not pre-flight
-7. **No import scheduling** — can't queue imports for later
-8. **No cross-importer linking** — spec/premix/cheese don't inform each other during import
-9. **No import → inventory tie-in** — imports define recipes but don't connect to inventory consumption
-10. **No data versioning** — re-importing a changed sheet overwrites; no "what changed since last import" view
+1. **QC approval gate — gated** — owned by the QC department; do not build before QC Phase 1 prerequisites are resolved.
+2. **Atomic undo — complete for spec/premix/cheese only** — local-only guide and schedule projections retain separate recovery boundaries.
+3. **Universal structured preview diff — partial** — importer review and operation history exist; a consistent before/after factory-data diff across importers remains.
+4. **Batch import — partial** — spec multi-file parsing exists; mixed/all-importer batch application remains.
+5. **Template download — open** — no maintained template-download workflow for every importer.
+6. **Shared validation pre-check — partial** — individual guards exist; comprehensive importer preflight is not established.
+7. **Import scheduling — deferred** — revisit only if a recurring source and approved workflow exist.
+8. **Cross-import health — partial** — spec/mix reconciliation exists; a unified health view across all importer types remains.
+9. **Import → inventory impact — open** — preview projected demand from reviewed recipe changes; do not mutate stock.
+10. **Re-import version diff — open** — source-keyed prior-versus-current changes are not shown.
 
 ---
 
@@ -70,6 +72,7 @@ Spec, premix, and cheese now apply server-owned master-data changes through one 
 - Guard: later edits to affected rows return a conflict and require manual review; unrelated edits do not block undo
 
 ### 3. Structured Preview Diff (new)
+**Status (2026-10-08): Partial.** Review steps, persisted source/landed reports, and scoped operation snapshots exist; one consistent before/after factory-data diff across importer types remains open.
 **What**: Before applying, show exactly what will change in the factory data.
 
 **View** (per change):
@@ -84,7 +87,8 @@ LINK    Frontline "Deluxe" → cheese recipe "4-Cheese" (was unlinked)
 **Benefit**: QC review becomes a real diff review, not a "trust the parse" review.
 
 ### 4. Batch Import (new)
-**What**: Upload multiple files (same type or mixed) in one session.
+**Status (2026-10-08): Partial.** Spec multi-file parsing exists; a mixed/all-importer batch review and apply workflow does not.
+**What**: Extend current multi-file support to consistent batch review and apply across importer types.
 
 **Flow**:
 - Multi-file picker → each file goes through its own parse → review queue
@@ -95,6 +99,7 @@ LINK    Frontline "Deluxe" → cheese recipe "4-Cheese" (was unlinked)
 **Note**: Schedule planner already handles multi-sheet day blocks; extend the pattern to all importers.
 
 ### 5. Template Download (new)
+**Status:** Open.
 **What**: Download a blank, correctly-formatted Excel template for each importer.
 
 **How**:
@@ -103,6 +108,7 @@ LINK    Frontline "Deluxe" → cheese recipe "4-Cheese" (was unlinked)
 - Templates live server-side (`GET /api/import/templates/{type}`) so they never drift from the parser
 
 ### 6. Validation Rules Pre-Check (new)
+**Status:** Partial — importer-specific guards exist; shared preflight across supported files is not established.
 **What**: Pre-flight validation before the AI parse even runs.
 
 **Examples**:
@@ -116,12 +122,14 @@ LINK    Frontline "Deluxe" → cheese recipe "4-Cheese" (was unlinked)
 **Benefit**: Fail fast on file-shape errors; the AI parse only runs on structurally valid files (saves AI cost).
 
 ### 7. Import Scheduling (deferrable)
+**Status:** Deferred unless a recurring source and owner-approved workflow are established.
 **What**: Queue a file to import at a later time.
 
 **Use cases**: Nightly spec-sheet sync, scheduled customer file drops.
 **Status**: Lower priority — requires auth/session handling for async apply. Keep as a "later" idea unless the facility has a recurring file source.
 
 ### 8. Cross-Importer Linking (new)
+**Status:** Partial — spec/mix reconciliation and name-link paths exist; a unified health view across all importer types remains.
 **What**: One import informs another.
 
 **Examples**:
@@ -132,6 +140,7 @@ LINK    Frontline "Deluxe" → cheese recipe "4-Cheese" (was unlinked)
 **How**: Reuse the saved-sheet store + reconcilers (`@workspace/spec-reconcile`, `@workspace/mix-reconcile`) into a single "cross-import health" view: which products have spec+premix+cheese+shipping all landed, which are missing pieces.
 
 ### 9. Import → Inventory Tie-in (new)
+**Status:** Open — preview only; no stock mutation.
 **What**: Recipes set up by imports drive inventory consumption lines automatically.
 
 **Why**: When a spec import defines dough/sauce/cheese/app recipes, `computeRunConsumptionLines` already turns them into inventory keys. The gap: no visibility that "this import means we'll need X lbs of ingredient Y on runs of this product."
@@ -139,6 +148,7 @@ LINK    Frontline "Deluxe" → cheese recipe "4-Cheese" (was unlinked)
 **Add**: In the import review step, show a "projected inventory impact" section per product — which inventory items will be consumed, at what rate. Links the import system to the inventory system cleanly.
 
 ### 10. Data Versioning / Change Detection (new)
+**Status:** Open — no source-keyed prior-versus-current change report is established.
 **What**: When a known sheet is re-imported, show what changed vs. the last time.
 
 **How**: Compare new parse vs. the previous snapshot for the same sourceKey:
@@ -154,18 +164,18 @@ LINK    Frontline "Deluxe" → cheese recipe "4-Cheese" (was unlinked)
 ## Recommended Build Order
 
 ### Phase 1: Foundation (standalone — no QC dependency)
-1. **Rollback / undo** (snapshot + restore + conflict guard)
-2. **Structured preview diff** (change-by-change view before apply)
-3. **Template download** (server-side, per importer)
+1. Complete cell-source provenance tracked by active task #2854.
+2. **Import → inventory impact preview** using reviewed changes and existing inventory math; no stock mutation.
+3. **Unified cross-import health** beyond current spec/mix reconciliation.
 
 ### Phase 2: Safety & Quality
-4. **Validation rules pre-check** (fail fast on file shape)
-5. **Cross-importer linking** (unified "import health" view)
-6. **Import → inventory impact** (projected consumption on review)
+4. **Structured before/after preview diff** across supported importer types.
+5. **Shared validation pre-check** (fail fast on file shape and supported data rules).
+6. **Template download** where a canonical format can be maintained.
 
 ### Phase 3: Advanced
-7. **Batch import** (multi-file queue)
-8. **Data versioning** (re-import diff vs. last time)
+7. **Batch import** beyond current spec multi-file parsing.
+8. **Data versioning** (re-import diff vs. last time).
 
 ### Phase 4: QC Integration (after QC department is built)
 9. **QC approval gate** — owned by QC dept plan (Shared Importers). Import system exposes `qc_review_status` + review queue API; QC UI lives in QC department.
@@ -198,6 +208,7 @@ LINK    Frontline "Deluxe" → cheese recipe "4-Cheese" (was unlinked)
 | `lib/db/src/schema/` | Import/audit tables (extend) |
 
 ## New Database Tables / Fields
+**Historical design sketch only:** scoped import operation/history storage already exists for spec, premix, and cheese. Do not add these proposed tables/fields without checking current schema and an approved scope.
 - `imports` table: add `qc_review_status` (`pending|verified|rejected`), `qc_reviewed_by`, `qc_reviewed_at`, `qc_review_notes`
 - `import_undo_snapshots` table: snapshot_id, entity kind, before-state JSON, imported_by, created_at
 - (QC review queue reuses the QC dept tables/API)
@@ -206,7 +217,7 @@ LINK    Frontline "Deluxe" → cheese recipe "4-Cheese" (was unlinked)
 - `GET /api/qc/import-reviews` — QC pending queue
 - `POST /api/qc/import-reviews/:id/approve` — verify
 - `POST /api/qc/import-reviews/:id/reject` — reject + rollback offer
-- `POST /api/imports/:id/rollback` — undo an import
+- Generic rollback is **not** an open feature for spec/premix/cheese; their guarded undo is implemented. Local-only guides and schedules retain separate recovery boundaries.
 - `GET /api/imports/:id/diff` — structured preview diff
 - `GET /api/import/templates/{type}` — download blank template
 - `POST /api/import/validate` — pre-flight validation
