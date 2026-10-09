@@ -5,7 +5,7 @@ import {
   type ParsedRecipe,
   type ParsedSpecImport,
 } from "@workspace/spec-import";
-import type { FormValues } from "./types";
+import { DEFAULT_VALUES, type FormValues } from "./types";
 
 export type SpecImportImpactRun = {
   brand: string;
@@ -14,8 +14,8 @@ export type SpecImportImpactRun = {
 };
 
 export type SpecImportImpactProjection =
-  | { status: "ready"; values: FormValues; profileLabel: string }
-  | { status: "unavailable"; reason: string };
+  | { status: "ready"; values: FormValues; profileLabel: string; plannedCases: number | null }
+  | { status: "unavailable"; reason: string; profileLabel: string; plannedCases: number | null };
 
 type RecipeKind = "dough" | "sauce" | "cheese" | "mix";
 type RecipeClassifier = (recipe: ParsedRecipe) => RecipeKind;
@@ -46,10 +46,10 @@ function profileFromRecipeName(
 }
 
 /**
- * Build the current selected run's post-import values without writing profiles,
- * recipes, inventory, or ledger rows. This mirrors the spec-import profile and
- * recipe links that can affect the selected run; it intentionally does not
- * invent case counts or project unrelated products in a multi-profile workbook.
+ * Build the post-import values without writing profiles, recipes, inventory,
+ * or ledger rows. A positive case count is used only for the matching selected
+ * product. Missing counts use one case as a demand basis and remain explicitly
+ * marked as per-case so callers do not estimate a shortage.
  */
 export function projectSpecImportForRun(
   run: SpecImportImpactRun | null,
@@ -58,7 +58,12 @@ export function projectSpecImportForRun(
   classifyRecipe: RecipeClassifier,
 ): SpecImportImpactProjection {
   if (!run?.brand.trim() || !run.flavor.trim()) {
-    return { status: "unavailable", reason: "Select a run with a brand and flavor to preview its demand." };
+    return {
+      status: "unavailable",
+      reason: "Select a product with a brand and flavor to preview its demand.",
+      profileLabel: run ? `${run.brand} — ${run.flavor}` : "Selected product",
+      plannedCases: null,
+    };
   }
 
   const brand = run.brand.trim();
@@ -66,7 +71,9 @@ export function projectSpecImportForRun(
   const importedProfile = parsed.profiles.find((profile) => sameProfile(profile, brand, flavor));
   const forceKey = `${brand.toLowerCase()}\u0000${flavor.toLowerCase()}`;
   const forced = forceUpdateProfileKeys.has(forceKey);
-  const before = run.values;
+  const rawCases = Number(run.values.casesNeeded);
+  const plannedCases = Number.isFinite(rawCases) && rawCases > 0 ? rawCases : null;
+  const before: FormValues = { ...run.values, casesNeeded: plannedCases ?? 1 };
   const after: FormValues = { ...before };
 
   if (importedProfile) {
@@ -80,6 +87,8 @@ export function projectSpecImportForRun(
     return {
       status: "unavailable",
       reason: `This import has no reviewed changes linked to the selected run (${brand} — ${flavor}).`,
+      profileLabel: `${brand} — ${flavor}`,
+      plannedCases,
     };
   }
 
@@ -93,20 +102,77 @@ export function projectSpecImportForRun(
     applyRecipeRows(after, recipe, classifyRecipe);
   }
 
-  if (!(Number(before.casesNeeded) > 0)) {
+  if (!(Number(after.pizzasPerCase) > 0)) {
     return {
       status: "unavailable",
-      reason: "Enter a positive case count on the selected run to calculate demand.",
-    };
-  }
-  if (!(Number(before.pizzasPerCase) > 0) || !(Number(after.pizzasPerCase) > 0)) {
-    return {
-      status: "unavailable",
-      reason: "A positive pizzas-per-case value is needed before and after the import to compare demand.",
+      reason: "A positive pizzas-per-case value is needed to project this product's demand.",
+      profileLabel: `${brand} — ${flavor}`,
+      plannedCases,
     };
   }
 
-  return { status: "ready", values: after, profileLabel: `${brand} — ${flavor}` };
+  return { status: "ready", values: after, profileLabel: `${brand} — ${flavor}`, plannedCases };
+}
+
+/**
+ * Project every profile retained in the import review. The selected run's
+ * planned case count and product-specific values are never borrowed by other
+ * products; only shared packaging settings are used as their baseline.
+ */
+export function projectSpecImportForIncludedProducts(
+  selectedRun: SpecImportImpactRun | null,
+  parsed: ParsedSpecImport,
+  forceUpdateProfileKeys: ReadonlySet<string>,
+  classifyRecipe: RecipeClassifier,
+): SpecImportImpactProjection[] {
+  if (parsed.profiles.length === 0) {
+    return selectedRun
+      ? [projectSpecImportForRun(selectedRun, parsed, forceUpdateProfileKeys, classifyRecipe)]
+      : [];
+  }
+
+  const packagingKeys: Array<keyof FormValues> = [
+    "cartoned",
+    "circles",
+    "shipper",
+    "cartonsPerCase",
+    "cartonSize",
+    "casesPerSkid",
+    "casesPerLayer",
+    "labelPosition",
+    "labelsPerRoll",
+    "topLabelsPerRoll",
+    "bottomLabelsPerRoll",
+    "gripSheets",
+    "slipSheets",
+  ];
+
+  return parsed.profiles.map((profile) => {
+    const matchesSelectedRun = sameProfile(selectedRun ?? undefined, profile.brand, profile.flavor);
+    const baseValues: FormValues = matchesSelectedRun && selectedRun
+      ? { ...selectedRun.values }
+      : { ...DEFAULT_VALUES };
+
+    if (!matchesSelectedRun && selectedRun) {
+      Object.assign(
+        baseValues,
+        Object.fromEntries(packagingKeys.map((key) => [key, selectedRun.values[key]])),
+      );
+      // A case pack is product-specific. Do not copy it from a different run;
+      // the reviewed profile must supply it for per-case demand to be useful.
+      baseValues.pizzasPerCase = 0;
+    }
+    baseValues.casesNeeded = matchesSelectedRun
+      ? Number(baseValues.casesNeeded) || 0
+      : 0;
+
+    return projectSpecImportForRun(
+      { brand: profile.brand, flavor: profile.flavor, values: baseValues },
+      parsed,
+      forceUpdateProfileKeys,
+      classifyRecipe,
+    );
+  });
 }
 
 function applyProfilePreview(
