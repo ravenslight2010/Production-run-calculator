@@ -415,6 +415,176 @@ describe("completed-run inventory corrections from sync writes", () => {
     ]);
   });
 
+  it("keeps merged source and target baselines combined for later run corrections", async () => {
+    const runId = "inventory-correction-after-merge";
+    const sourceKey = "ingredient:Old Cheese:batches";
+    const targetKey = "ingredient:New Cheese:batches";
+    const [source] = await db.insert(inventoryItemsTable).values({
+      scope: "live",
+      key: sourceKey,
+      category: "ingredient",
+      name: "Old Cheese",
+      unit: "batches",
+    }).returning();
+    const [target] = await db.insert(inventoryItemsTable).values({
+      scope: "live",
+      key: targetKey,
+      category: "ingredient",
+      name: "New Cheese",
+      unit: "batches",
+    }).returning();
+    await db.insert(inventoryLotsTable).values([
+      {
+        scope: "live", itemId: source.id, qtyReceived: 100, qtyRemaining: 100,
+        lotNumber: "", receivedDate: DATE,
+      },
+      {
+        scope: "live", itemId: target.id, qtyReceived: 100, qtyRemaining: 100,
+        lotNumber: "", receivedDate: DATE,
+      },
+    ]);
+
+    // Both applicators consume different inventory IDs before the merge. After
+    // the merge, the corrected run uses the target name for both lines.
+    const originalValues = {
+      ...RUN_VALUES,
+      app1OzPerPizza: 0,
+      app1BatchLbs: 16,
+      app1Type: "Old Cheese",
+      app2OzPerPizza: 0,
+      app2BatchLbs: 16,
+      app2Type: "New Cheese",
+    };
+    await db.update(dailySyncTable).set({
+      data: {
+        dayState: {
+          date: DATE,
+          runs: [{
+            id: runId,
+            brand: "Acme",
+            flavor: "Cheese",
+            startedAt: 1_000,
+            endedAt: 2_000,
+            actualCases: 10,
+          }],
+          substitutions: [],
+        },
+        runValues: { [runId]: originalValues },
+        runValuesUpdatedAt: { [runId]: 1 },
+      },
+    }).where(and(eq(dailySyncTable.date, DATE), eq(dailySyncTable.scope, "live")));
+
+    const consumed = await fetch(`${baseUrl}/api/inventory/consume`, {
+      method: "POST",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ runId, lines: [] }),
+    });
+    expect(consumed.status).toBe(200);
+    expect(await consumed.json()).toMatchObject({ applied: true });
+
+    const [claimBeforeMerge] = await db.select().from(inventoryConsumedRunsTable)
+      .where(eq(inventoryConsumedRunsTable.runId, runId));
+    const sourceBaselineQty = claimBeforeMerge.baselineLines?.find((line) => line.itemId === source.id)?.qty;
+    const targetBaselineQty = claimBeforeMerge.baselineLines?.find((line) => line.itemId === target.id)?.qty;
+    expect(sourceBaselineQty).toBe(1.25);
+    expect(targetBaselineQty).toBe(1.25);
+
+    const merged = await fetch(`${baseUrl}/api/inventory/merge`, {
+      method: "POST",
+      headers: { ...managerAuthHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        merges: [{
+          fromKey: sourceKey,
+          toKey: targetKey,
+          toName: "New Cheese",
+          unit: "batches",
+          category: "ingredient",
+        }],
+      }),
+    });
+    expect(merged.status).toBe(200);
+    expect(await merged.json()).toMatchObject({ merged: 1 });
+    expect(await db.select().from(inventoryItemsTable).where(eq(inventoryItemsTable.id, source.id)))
+      .toHaveLength(0);
+
+    const [claimAfterMerge] = await db.select().from(inventoryConsumedRunsTable)
+      .where(eq(inventoryConsumedRunsTable.runId, runId));
+    expect(claimAfterMerge.baselineLines).toEqual([
+      { itemId: target.id, qty: 2.5 },
+    ]);
+    const onHandAfterMerge = await onHandForItem(target.id);
+    expect(onHandAfterMerge).toBe(197.5);
+
+    const saveCorrection = async (senderId: string) => {
+      const read = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+        headers: authHeaders(),
+      });
+      expect(read.status).toBe(200);
+      const current = await read.json() as Record<string, any>;
+      const baseSnapshotId = read.headers.get("X-Sync-Snapshot");
+      const nextValues = {
+        ...current.runValues[runId],
+        app1Type: "New Cheese",
+      };
+      return fetch(`${baseUrl}/api/sync/today?today=${DATE}&epoch=0`, {
+        method: "PUT",
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({
+          senderId,
+          payload: {
+            syncVersion: 1,
+            completeness: "complete",
+            baseSnapshotId,
+            dayState: {
+              ...current.dayState,
+              runs: (current.dayState.runs as Array<Record<string, unknown>>).map((run) =>
+                run.id === runId ? { ...run, actualCases: 15 } : run,
+              ),
+            },
+            runValues: { ...current.runValues, [runId]: nextValues },
+            runValuesUpdatedAt: {
+              ...current.runValuesUpdatedAt,
+              [runId]: Number(current.runValuesUpdatedAt?.[runId] ?? 0) + 1,
+            },
+          },
+        }),
+      });
+    };
+
+    const corrected = await saveCorrection("inventory-correction-after-merge");
+    expect(corrected.status).toBe(200);
+    // The run now consumes 3.75 batches total. Only the 1.25 increase
+    // beyond the combined original baseline is drawn from the merged stock.
+    expect(await onHandForItem(target.id)).toBe(196.25);
+    const correctionLedger = (await db.select().from(inventoryLedgerTable))
+      .filter((entry) => entry.runId === runId);
+    const originalConsumption = correctionLedger.filter((entry) =>
+      entry.type === "consume" && entry.note === "Auto-deducted on run completion",
+    );
+    expect(originalConsumption).toHaveLength(2);
+    expect(originalConsumption.every((entry) => entry.itemId === target.id)).toBe(true);
+    expect(originalConsumption.map((entry) => entry.qtyDelta).sort((a, b) => a - b))
+      .toEqual([-1.25, -1.25]);
+    expect(correctionLedger.filter((entry) =>
+      entry.type === "adjust" && entry.note.startsWith("Run consumption correction:"),
+    ).map((entry) => ({ itemId: entry.itemId, qtyDelta: entry.qtyDelta })))
+      .toEqual([{ itemId: target.id, qtyDelta: -1.25 }]);
+
+    const targetLedger = (await db.select().from(inventoryLedgerTable))
+      .filter((entry) => entry.itemId === target.id);
+    expect(targetLedger.some((entry) => entry.note === "Merged from Old Cheese" && entry.qtyDelta === 0))
+      .toBe(true);
+
+    const retry = await saveCorrection("inventory-correction-after-merge-retry");
+    expect(retry.status).toBe(200);
+    expect(await onHandForItem(target.id)).toBe(196.25);
+    const retryLedger = (await db.select().from(inventoryLedgerTable))
+      .filter((entry) => entry.runId === runId);
+    expect(retryLedger.filter((entry) =>
+      entry.type === "adjust" && entry.note.startsWith("Run consumption correction:"),
+    )).toHaveLength(1);
+  });
+
   it("captures the pre-edit baseline for a run consumed before baseline snapshots existed", async () => {
     const runId = "legacy-inventory-correction";
     const [dough] = await db.insert(inventoryItemsTable).values({

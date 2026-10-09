@@ -1,7 +1,7 @@
 import { Router, type IRouter, type Request, type RequestHandler, type Response } from "express";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { and, desc, eq, gt, isNull, or, type SQL } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, or, sql, type SQL } from "drizzle-orm";
 import {
   db,
   inventoryItemsTable,
@@ -2220,6 +2220,61 @@ export type MergeReport = {
   results: MergeOutcome[];
 };
 
+async function remapCompletedRunBaselines(
+  tx: InventoryExecutor,
+  scope: ReturnType<typeof currentScope>,
+  sourceId: number,
+  targetId: number,
+): Promise<void> {
+  // Corrections lock the claim before touching inventory lots. Keep that lock
+  // order here too, and only lock claims whose immutable baseline references
+  // the item being deleted.
+  const claims = await tx.select({
+    runId: inventoryConsumedRunsTable.runId,
+    baselineLines: inventoryConsumedRunsTable.baselineLines,
+  }).from(inventoryConsumedRunsTable).where(and(
+    eq(inventoryConsumedRunsTable.scope, scope),
+    sql`${inventoryConsumedRunsTable.baselineLines} @> ${JSON.stringify([{ itemId: sourceId }])}::jsonb`,
+  )).for("update");
+
+  for (const claim of claims) {
+    const baselineLines = claim.baselineLines;
+    if (!Array.isArray(baselineLines)) continue;
+
+    let sourceFound = false;
+    let targetIndex = -1;
+    let combinedQty = 0;
+    const nextLines: Array<{ itemId: number; qty: number }> = [];
+    for (const line of baselineLines) {
+      if (line.itemId !== sourceId && line.itemId !== targetId) {
+        nextLines.push(line);
+        continue;
+      }
+      if (!Number.isFinite(line.qty) || line.qty < 0) {
+        throw new Error(`Invalid completed-run baseline quantity for inventory item ${line.itemId}`);
+      }
+      if (line.itemId === sourceId) sourceFound = true;
+      if (targetIndex === -1) targetIndex = nextLines.length;
+      combinedQty += line.qty;
+    }
+    if (!sourceFound) continue;
+    if (!Number.isFinite(combinedQty)) {
+      throw new Error(`Invalid combined completed-run baseline quantity for inventory item ${sourceId}`);
+    }
+
+    nextLines.splice(targetIndex, 0, {
+      itemId: targetId,
+      qty: Math.round(combinedQty * 1000) / 1000,
+    });
+    await tx.update(inventoryConsumedRunsTable)
+      .set({ baselineLines: nextLines })
+      .where(and(
+        eq(inventoryConsumedRunsTable.runId, claim.runId),
+        eq(inventoryConsumedRunsTable.scope, scope),
+      ));
+  }
+}
+
 export async function mergeInventoryItems(merges: MergeSpec[]): Promise<MergeReport> {
   const results: MergeOutcome[] = [];
   let merged = 0;
@@ -2263,6 +2318,10 @@ export async function mergeInventoryItems(merges: MergeSpec[]): Promise<MergeRep
         results.push({ fromKey: m.fromKey, toKey: m.toKey, status: "skipped", reason: "same-item" });
         continue;
       }
+      // Keep the original completed-run expectation attached to the surviving
+      // inventory identity. If both IDs were in one run's baseline, combine
+      // their quantities before the source item is removed.
+      await remapCompletedRunBaselines(tx, currentScope(), source.id, target.id);
       // Move lots + ledger to the target BEFORE deleting the source (ledger/lots
       // cascade-delete with the item, so re-point first or history is lost).
       await tx
