@@ -323,6 +323,143 @@ describe("ready-made sauce consumption", () => {
   });
 });
 
+describe("computeRunConsumptionLines — packaging", () => {
+  it("calculates cartoned demand for sheets, labels, cartons, shippers, and pallets", () => {
+    const lines = computeRunConsumptionLines(
+      baseVals({
+        casesNeeded: 13,
+        pizzasPerCase: 2,
+        casesPerLayer: 5,
+        cartoned: "cartoned",
+        circles: "12in",
+        shipper: "Std",
+        cartonsPerCase: 2,
+        cartonSize: 2,
+        slipSheets: "yes",
+        gripSheets: "Every other layer",
+        casesPerSkid: 10,
+        labelPosition: "both",
+        topLabelsPerRoll: 20,
+        bottomLabelsPerRoll: 10,
+      }) as unknown as RunLinesInput,
+      PEP,
+    );
+
+    expect(lines).toEqual([
+      { itemKey: "packaging:circles:12in", qty: 26 },
+      { itemKey: "packaging:shippers:Std", qty: 13 },
+      { itemKey: "packaging:cartons:cases", qty: 7 },
+      { itemKey: "packaging:shipper-labels:count", qty: 13 },
+      { itemKey: "packaging:slip-sheets:count", qty: 3 },
+      { itemKey: "packaging:grip-sheets:count", qty: 2 },
+      { itemKey: "packaging:labels-top:rolls", qty: 2 },
+      { itemKey: "packaging:labels-bottom:rolls", qty: 3 },
+      { itemKey: "packaging:pallets:count", qty: 2 },
+    ]);
+  });
+
+  it.each([
+    {
+      labelPosition: "top",
+      expectedLabels: [{ itemKey: "packaging:labels-top:rolls", qty: 2 }],
+    },
+    {
+      labelPosition: "bottom",
+      expectedLabels: [{ itemKey: "packaging:labels-bottom:rolls", qty: 2 }],
+    },
+    {
+      labelPosition: "both",
+      expectedLabels: [
+        { itemKey: "packaging:labels-top:rolls", qty: 2 },
+        { itemKey: "packaging:labels-bottom:rolls", qty: 2 },
+      ],
+    },
+  ])("uses only the selected label rolls for labeled runs ($labelPosition)", ({
+    labelPosition,
+    expectedLabels,
+  }) => {
+    const lines = computeRunConsumptionLines(
+      baseVals({
+        casesNeeded: 3,
+        pizzasPerCase: 4,
+        cartoned: "labeled",
+        circles: "12in",
+        shipper: "Std",
+        cartonsPerCase: 6,
+        slipSheets: "no",
+        casesPerSkid: 10,
+        labelPosition,
+        topLabelsPerRoll: 6,
+        bottomLabelsPerRoll: 8,
+      }) as unknown as RunLinesInput,
+      PEP,
+    );
+
+    expect(lines).toEqual([
+      { itemKey: "packaging:circles:12in", qty: 12 },
+      ...expectedLabels,
+      { itemKey: "packaging:pallets:count", qty: 1 },
+    ]);
+  });
+
+  it("falls back to the shared labels-per-roll value for top and bottom labels", () => {
+    const lines = computeRunConsumptionLines(
+      baseVals({
+        casesNeeded: 3,
+        pizzasPerCase: 4,
+        cartoned: "labeled",
+        labelPosition: "both",
+        labelsPerRoll: 5,
+      }) as unknown as RunLinesInput,
+      PEP,
+    );
+
+    expect(lines).toEqual([
+      { itemKey: "packaging:labels-top:rolls", qty: 3 },
+      { itemKey: "packaging:labels-bottom:rolls", qty: 3 },
+    ]);
+  });
+
+  it("supports the 3rd-and-5th grip-sheet pattern and no grip sheets", () => {
+    const vals = baseVals({
+      casesNeeded: 21,
+      pizzasPerCase: 1,
+      casesPerLayer: 5,
+      cartoned: "yes",
+      gripSheets: "3rd and 5th",
+      casesPerSkid: 10,
+    }) as unknown as RunLinesInput;
+
+    expect(computeRunConsumptionLines(vals, PEP)).toContainEqual({
+      itemKey: "packaging:grip-sheets:count",
+      qty: 6,
+    });
+    expect(
+      computeRunConsumptionLines({ ...vals, gripSheets: "none" }, PEP),
+    ).not.toContainEqual(expect.objectContaining({ itemKey: "packaging:grip-sheets:count" }));
+  });
+
+  it.each(["no", "n-a"])("does not consume packaging for the %s exemption mode", (cartoned) => {
+    const lines = computeRunConsumptionLines(
+      baseVals({
+        cartoned,
+        circles: "12in",
+        shipper: "Std",
+        cartonsPerCase: 6,
+        slipSheets: "yes",
+        gripSheets: "every other layer",
+        casesPerLayer: 2,
+        casesPerSkid: 10,
+        labelPosition: "both",
+        labelsPerRoll: 10,
+      }) as unknown as RunLinesInput,
+      PEP,
+    );
+
+    expect(lines).toEqual([]);
+  });
+});
+
 // Parity guard: the SAME shared overlay + summary math must produce identical
 // material totals regardless of which app calls it (replit.md parity). Both
 // platforms route through applySubstitutions then computeSummaryStats, so a
