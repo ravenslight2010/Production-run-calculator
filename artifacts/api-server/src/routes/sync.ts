@@ -58,7 +58,12 @@ import {
   buildWallClockServerClaims,
 } from "../lib/autoTrackServerTicks";
 import { applyOperationalIntent, parseOperationalIntent } from "../lib/operationalIntents";
-import { consumeRunInTransaction, consumeSauceBarrelInTransaction } from "./inventory";
+import {
+  broadcastInventoryChange,
+  consumeRunInTransaction,
+  consumeSauceBarrelInTransaction,
+  reconcileRunConsumptionInTransaction,
+} from "./inventory";
 import { logger } from "../lib/logger";
 import {
   recordSseFrame,
@@ -193,6 +198,7 @@ function requestedSnapshot(req: Request): string | undefined {
 type ProtectedUpsertResult = {
   data: unknown;
   wrote: boolean;
+  inventoryChanged?: boolean;
   partialFallback: boolean;
   retries: number;
   canonicalRevision: number;
@@ -1382,6 +1388,31 @@ async function upsertProtected(
         applyResetBoundary(m, existing?.data, date === clientTodayDate);
         const changed = currentSnapshotId !== syncSnapshotId(m);
         const canonicalRevision = (existing?.canonicalRevision ?? 0) + (changed ? 1 : 0);
+        let inventoryChanged = false;
+        if (changed && canonicalExisting) {
+          const previousRuns = (canonicalExisting as any).dayState?.runs;
+          const nextRuns = m.dayState?.runs;
+          if (Array.isArray(previousRuns) && Array.isArray(nextRuns)) {
+            const nextById = new Map(
+              nextRuns.filter((run: any) => typeof run?.id === "string")
+                .map((run: any) => [run.id, run]),
+            );
+            for (const previousRun of previousRuns) {
+              if (
+                typeof previousRun?.id !== "string" ||
+                !previousRun.endedAt
+              ) continue;
+              const nextRun = nextById.get(previousRun.id);
+              if (!nextRun?.endedAt) continue;
+              inventoryChanged = await reconcileRunConsumptionInTransaction(
+                tx,
+                previousRun.id,
+                canonicalExisting,
+                m,
+              ) || inventoryChanged;
+            }
+          }
+        }
         if (existing && changed) {
           await tx
             .update(dailySyncTable)
@@ -1399,6 +1430,7 @@ async function upsertProtected(
           // accepted signal true so conflict evidence and peer convergence
           // behavior remain intact; canonicalRevision advances only on change.
           wrote: true,
+          inventoryChanged,
           partialFallback: false,
           retries: attempt,
           canonicalRevision,
@@ -1578,6 +1610,7 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
   // Broadcast the merged result (not the raw push) so peers converge on the same
   // protected state the row was written with.
   if (result.wrote) broadcast(merged, senderId, scope, today, result);
+  if (result.inventoryChanged) broadcastInventoryChange(senderId, scope);
   const snapshotId = merged === null ? undefined : syncSnapshotId(merged);
   res.setHeader("X-Sync-Response", !result.partialFallback && snapshotId !== undefined && requestedId === snapshotId
     ? "unchanged"
@@ -2943,6 +2976,7 @@ router.put(
   if (result.wrote && date === clientToday(req)) {
     broadcast(merged, senderId, scope, date, result);
   }
+  if (result.inventoryChanged) broadcastInventoryChange(senderId, scope);
   const snapshotId = merged === null ? undefined : syncSnapshotId(merged);
   res.setHeader("X-Sync-Response", !result.partialFallback && snapshotId !== undefined && requestedId === snapshotId
     ? "unchanged"

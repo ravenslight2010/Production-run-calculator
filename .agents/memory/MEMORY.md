@@ -18,6 +18,7 @@
 - [Daily reset](daily-reset-trigger.md) + [auth identity](auth-identity-cache.md) + [sessions](account-lifecycle-sessions.md) — server owns rollover; tokens need DB rows and revocation fences.
 - [Ingredient merge](ingredient-merge.md) — user-driven merge of ingredient names across web+mobile+server; inventory-first-or-abort invariant; recipe rows renamed not combined.
 - [Inventory locks](inventory-settings-concurrency.md) + [consume idempotency](inventory-consume-idempotency.md) — lock drawdowns; mark zero-consume; finalize each run once with the same key.
+- [Completed-run stock correction](completed-run-stock-corrections.md) — reconcile saved detail edits against a durable baseline and ledger inside the serialized sync transaction.
 - [Auth](clerk-auth-gating.md) + [roles](role-gating.md) + [daily reset](daily-reset-auth-boundary.md) — cookie/bearer auth and DB roles share strict scope fences.
 - [Reset relay](password-reset-relay.md) + [session invalidation](password-change-session-invalidation.md) — manager resets and password changes revoke sessions safely.
 - [Old-schema fixtures](isolated-db-may-predate-migrations.md) + [session fixtures](session-boundary-integration-fixtures.md) — Postgres may predate migrations; bind pools after disposable URLs exist.

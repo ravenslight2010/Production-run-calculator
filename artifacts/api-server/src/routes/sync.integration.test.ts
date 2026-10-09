@@ -203,6 +203,316 @@ beforeEach(async () => {
   ]);
 });
 
+describe("completed-run inventory corrections from sync writes", () => {
+  const DATE = "2030-03-10";
+  const RUN_VALUES = {
+    casesNeeded: 10,
+    pizzasPerCase: 12,
+    casesPerLayer: 0,
+    frontlineRecipe: [],
+    sauceBarrelLbs: 0,
+    sauceOzPerPizza: 0,
+    app1OzPerPizza: 0, app1BatchLbs: 0, app1Type: "", app1CheeseRecipe: [],
+    app2OzPerPizza: 0, app2BatchLbs: 0, app2Type: "", app2CheeseRecipe: [],
+    app3OzPerPizza: 0, app3BatchLbs: 0, app3Type: "", app3CheeseRecipe: [],
+    app4OzPerPizza: 0, app4BatchLbs: 0, app4Type: "", app4CheeseRecipe: [],
+    pep1OzPerPizza: 0, pep1Sticks: 0, pep1BatchLbs: 0, pep1Type: "",
+    pep2OzPerPizza: 0, pep2Sticks: 0, pep2BatchLbs: 0, pep2Type: "",
+    crustsPerCycle: 0, cycleSpeed: 0, speedAdjustment: 0,
+    doughRecipe: [{ ingredient: "Flour", lbs: 50 }],
+    doughballWeightOz: 8,
+    doughBatchYield: 100,
+    cartoned: "yes",
+    circles: "12in",
+  };
+
+  it.each([
+    {
+      label: "increased ingredient and packaging use",
+      actualCases: 15,
+      expectedDoughOnHand: 97,
+      expectedCirclesOnHand: 820,
+      expectedDoughCorrection: -1,
+      expectedCirclesCorrection: -60,
+    },
+    {
+      label: "decreased ingredient and packaging use",
+      actualCases: 5,
+      expectedDoughOnHand: 99,
+      expectedCirclesOnHand: 940,
+      expectedDoughCorrection: 1,
+      expectedCirclesCorrection: 60,
+    },
+    {
+      label: "sets actual cases to zero",
+      actualCases: 0,
+      expectedDoughOnHand: 100,
+      expectedCirclesOnHand: 1_000,
+      expectedDoughCorrection: 2,
+      expectedCirclesCorrection: 120,
+    },
+  ])("reconciles $label and remains idempotent on a repeated saved snapshot", async ({
+    actualCases,
+    expectedDoughOnHand,
+    expectedCirclesOnHand,
+    expectedDoughCorrection,
+    expectedCirclesCorrection,
+  }) => {
+    const runId = `inventory-correction-${actualCases}`;
+    const [dough] = await db.insert(inventoryItemsTable).values({
+      scope: "live",
+      key: "ingredient:Dough:batches",
+      category: "ingredient",
+      name: "Dough",
+      unit: "batches",
+    }).returning();
+    const [circles] = await db.insert(inventoryItemsTable).values({
+      scope: "live",
+      key: "packaging:circles:12in",
+      category: "packaging",
+      name: "12-inch circles",
+      unit: "circles",
+    }).returning();
+    await db.insert(inventoryLotsTable).values([
+      { scope: "live", itemId: dough.id, qtyReceived: 100, qtyRemaining: 100, lotNumber: "", receivedDate: DATE },
+      { scope: "live", itemId: circles.id, qtyReceived: 1_000, qtyRemaining: 1_000, lotNumber: "", receivedDate: DATE },
+    ]);
+    await db.update(dailySyncTable).set({
+      data: {
+        dayState: {
+          date: DATE,
+          runs: [{
+            id: runId,
+            brand: "Acme",
+            flavor: "Cheese",
+            startedAt: 1_000,
+            endedAt: 2_000,
+            actualCases: 10,
+          }],
+          substitutions: [],
+        },
+        runValues: { [runId]: RUN_VALUES },
+        runValuesUpdatedAt: { [runId]: 1 },
+      },
+    }).where(and(eq(dailySyncTable.date, DATE), eq(dailySyncTable.scope, "live")));
+
+    const consumed = await fetch(`${baseUrl}/api/inventory/consume`, {
+      method: "POST",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ runId, lines: [] }),
+    });
+    expect(consumed.status).toBe(200);
+    expect(await consumed.json()).toMatchObject({ applied: true, consumed: 2 });
+
+    const saveRunSnapshot = async (
+      senderId: string,
+      update: (current: Record<string, any>) => Record<string, unknown>,
+    ) => {
+      const read = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+        headers: authHeaders(),
+      });
+      expect(read.status).toBe(200);
+      const current = await read.json() as Record<string, any>;
+      const baseSnapshotId = read.headers.get("X-Sync-Snapshot");
+      expect(baseSnapshotId).toMatch(/^[a-f0-9]{64}$/);
+      const payload = {
+        syncVersion: 1,
+        completeness: "complete",
+        baseSnapshotId,
+        ...update(current),
+      };
+      return fetch(`${baseUrl}/api/sync/today?today=${DATE}&epoch=0`, {
+        method: "PUT",
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({ senderId, payload }),
+      });
+    };
+    const saveActualCases = (nextActualCases: number, senderId: string) =>
+      saveRunSnapshot(senderId, (current) => ({
+        dayState: {
+          ...current.dayState,
+          runs: (current.dayState.runs as Array<Record<string, unknown>>).map((run) =>
+            run.id === runId ? { ...run, actualCases: nextActualCases } : run,
+          ),
+        },
+        runValues: current.runValues,
+        runValuesUpdatedAt: current.runValuesUpdatedAt,
+      }));
+    const saveCartoningMode = (cartoned: string, senderId: string) =>
+      saveRunSnapshot(senderId, (current) => ({
+        dayState: current.dayState,
+        runValues: {
+          ...current.runValues,
+          [runId]: { ...current.runValues[runId], cartoned },
+        },
+        runValuesUpdatedAt: {
+          ...current.runValuesUpdatedAt,
+          [runId]: (Number(current.runValuesUpdatedAt?.[runId]) || 0) + 1,
+        },
+      }));
+
+    const saved = await saveActualCases(actualCases, "inventory-correction-test");
+    expect(saved.status).toBe(200);
+    expect(await saved.json()).toMatchObject({
+      data: { dayState: { runs: [{ id: runId, actualCases }] } },
+    });
+
+    expect(await onHandForItem(dough.id)).toBe(expectedDoughOnHand);
+    expect(await onHandForItem(circles.id)).toBe(expectedCirclesOnHand);
+    const firstCorrectionEntries = await db.select().from(inventoryLedgerTable);
+    const corrections = firstCorrectionEntries.filter((entry) =>
+      entry.runId === runId && entry.type === "adjust" &&
+      entry.note.startsWith("Run consumption correction:"),
+    );
+    expect(corrections).toHaveLength(2);
+    expect(corrections.find((entry) => entry.itemId === dough.id)?.qtyDelta)
+      .toBe(expectedDoughCorrection);
+    expect(corrections.find((entry) => entry.itemId === circles.id)?.qtyDelta)
+      .toBe(expectedCirclesCorrection);
+
+    const retry = await saveActualCases(actualCases, "inventory-correction-test-retry");
+    expect(retry.status).toBe(200);
+    expect(await onHandForItem(dough.id)).toBe(expectedDoughOnHand);
+    expect(await onHandForItem(circles.id)).toBe(expectedCirclesOnHand);
+    const retryLedger = await db.select().from(inventoryLedgerTable);
+    expect(retryLedger.filter((entry) =>
+      entry.runId === runId && entry.type === "adjust" &&
+      entry.note.startsWith("Run consumption correction:"),
+    )).toHaveLength(2);
+
+    const reversed = await saveActualCases(10, "inventory-correction-test-reversal");
+    expect(reversed.status).toBe(200);
+    expect(await onHandForItem(dough.id)).toBe(98);
+    expect(await onHandForItem(circles.id)).toBe(880);
+    const reversalLedger = await db.select().from(inventoryLedgerTable);
+    const runCorrections = reversalLedger.filter((entry) =>
+      entry.runId === runId && entry.type === "adjust" &&
+      entry.note.startsWith("Run consumption correction:"),
+    );
+    expect(runCorrections).toHaveLength(4);
+    expect(runCorrections.slice(2).find((entry) => entry.itemId === dough.id)?.qtyDelta)
+      .toBe(-expectedDoughCorrection);
+    expect(runCorrections.slice(2).find((entry) => entry.itemId === circles.id)?.qtyDelta)
+      .toBe(-expectedCirclesCorrection);
+
+    const packagingDisabled = await saveCartoningMode("no", "inventory-packaging-disable");
+    expect(packagingDisabled.status).toBe(200);
+    expect(await onHandForItem(dough.id)).toBe(98);
+    expect(await onHandForItem(circles.id)).toBe(1_000);
+    const packagingRestored = await saveCartoningMode("yes", "inventory-packaging-restore");
+    expect(packagingRestored.status).toBe(200);
+    expect(await onHandForItem(dough.id)).toBe(98);
+    expect(await onHandForItem(circles.id)).toBe(880);
+    const packagingLedger = await db.select().from(inventoryLedgerTable);
+    expect(packagingLedger.filter((entry) =>
+      entry.runId === runId && entry.itemId === circles.id && entry.type === "adjust" &&
+      entry.note.startsWith("Run consumption correction:"),
+    ).map((entry) => entry.qtyDelta)).toEqual([
+      expectedCirclesCorrection,
+      -expectedCirclesCorrection,
+      120,
+      -120,
+    ]);
+  });
+
+  it("captures the pre-edit baseline for a run consumed before baseline snapshots existed", async () => {
+    const runId = "legacy-inventory-correction";
+    const [dough] = await db.insert(inventoryItemsTable).values({
+      scope: "live",
+      key: "ingredient:Dough:batches",
+      category: "ingredient",
+      name: "Dough",
+      unit: "batches",
+    }).returning();
+    const [circles] = await db.insert(inventoryItemsTable).values({
+      scope: "live",
+      key: "packaging:circles:12in",
+      category: "packaging",
+      name: "12-inch circles",
+      unit: "circles",
+    }).returning();
+    await db.insert(inventoryLotsTable).values([
+      { scope: "live", itemId: dough.id, qtyReceived: 100, qtyRemaining: 98, lotNumber: "", receivedDate: DATE },
+      { scope: "live", itemId: circles.id, qtyReceived: 1_000, qtyRemaining: 880, lotNumber: "", receivedDate: DATE },
+    ]);
+    await db.insert(inventoryConsumedRunsTable).values({ runId, scope: "live" });
+    await db.insert(inventoryLedgerTable).values([
+      {
+        itemId: dough.id, scope: "live", lotId: null, type: "consume",
+        qtyDelta: -2, runId, note: "Auto-deducted on run completion",
+      },
+      {
+        itemId: circles.id, scope: "live", lotId: null, type: "consume",
+        qtyDelta: -120, runId, note: "Auto-deducted on run completion",
+      },
+    ]);
+    await db.update(dailySyncTable).set({
+      data: {
+        dayState: {
+          date: DATE,
+          runs: [{
+            id: runId,
+            brand: "Acme",
+            flavor: "Cheese",
+            startedAt: 1_000,
+            endedAt: 2_000,
+            actualCases: 10,
+          }],
+          substitutions: [],
+        },
+        runValues: { [runId]: RUN_VALUES },
+        runValuesUpdatedAt: { [runId]: 1 },
+      },
+    }).where(and(eq(dailySyncTable.date, DATE), eq(dailySyncTable.scope, "live")));
+
+    const saveActualCases = async (senderId: string) => {
+      const read = await fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+        headers: authHeaders(),
+      });
+      const current = await read.json() as Record<string, any>;
+      const payload = {
+        syncVersion: 1,
+        completeness: "complete",
+        baseSnapshotId: read.headers.get("X-Sync-Snapshot"),
+        dayState: {
+          ...current.dayState,
+          runs: (current.dayState.runs as Array<Record<string, unknown>>).map((run) =>
+            run.id === runId ? { ...run, actualCases: 5 } : run,
+          ),
+        },
+        runValues: current.runValues,
+        runValuesUpdatedAt: current.runValuesUpdatedAt,
+      };
+      return fetch(`${baseUrl}/api/sync/today?today=${DATE}&epoch=0`, {
+        method: "PUT",
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({ senderId, payload }),
+      });
+    };
+
+    const corrected = await saveActualCases("legacy-inventory-correction");
+    expect(corrected.status).toBe(200);
+    expect(await onHandForItem(dough.id)).toBe(99);
+    expect(await onHandForItem(circles.id)).toBe(940);
+    const [claim] = await db.select().from(inventoryConsumedRunsTable)
+      .where(eq(inventoryConsumedRunsTable.runId, runId));
+    expect(claim.baselineLines).toEqual(expect.arrayContaining([
+      { itemId: dough.id, qty: 2 },
+      { itemId: circles.id, qty: 120 },
+    ]));
+
+    const retry = await saveActualCases("legacy-inventory-correction-retry");
+    expect(retry.status).toBe(200);
+    expect(await onHandForItem(dough.id)).toBe(99);
+    expect(await onHandForItem(circles.id)).toBe(940);
+    const entries = await db.select().from(inventoryLedgerTable);
+    expect(entries.filter((entry) =>
+      entry.runId === runId && entry.type === "adjust" &&
+      entry.note.startsWith("Run consumption correction:"),
+    )).toHaveLength(2);
+  });
+});
+
 describe("GET /sync/today — combined wake recovery", () => {
   const DATE = "2030-03-10";
 
@@ -591,6 +901,12 @@ describe("POST /sync/manual-section — section ownership contract", () => {
 
 function authHeaders(): Record<string, string> {
   return { authorization: `Bearer ${signLegacyTokenForTests(USER)}` };
+}
+
+async function onHandForItem(itemId: number): Promise<number> {
+  const lots = await db.select().from(inventoryLotsTable);
+  return lots.filter((lot) => lot.itemId === itemId)
+    .reduce((sum, lot) => sum + lot.qtyRemaining, 0);
 }
 
 function managerAuthHeaders(): Record<string, string> {

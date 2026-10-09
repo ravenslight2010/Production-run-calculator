@@ -1116,6 +1116,11 @@ export const LiveSummaryTabContent = memo(function LiveSummaryTabContent() {
                                   </p>
                                 )}
                               </div>
+                              {isFinished && (
+                                <p className="col-span-2 text-[11px] text-muted-foreground">
+                                  Stock adjusts automatically after saved case-count or packaging changes.
+                                </p>
+                              )}
                             </div>
                           )}
                           {/* Read-only waste display for history */}

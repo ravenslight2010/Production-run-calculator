@@ -1206,6 +1206,9 @@ describe("POST /api/inventory/consume — server-side authorization of client-su
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ applied: true, consumed: 1 });
     expect(await onHand(itemId)).toBe(98);
+    const claim = (await db.select().from(inventoryConsumedRunsTable))
+      .find((row) => row.runId === "run-legit-3");
+    expect(claim?.baselineLines).toEqual([{ itemId, qty: 2 }]);
   });
 
   it("is safe when two devices retry the same finalization concurrently", async () => {
