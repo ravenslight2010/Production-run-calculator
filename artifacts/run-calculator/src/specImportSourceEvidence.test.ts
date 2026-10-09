@@ -145,14 +145,19 @@ function workbookBuffer(rows: string[][], sheetName = "Specs"): ArrayBuffer {
   return XLSX.write(workbook, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
 }
 
-function formulaWorkbookBuffer(savedResult?: number): ArrayBuffer {
+function formulaWorkbookBuffer(
+  savedResult?: number,
+  formula = "1/2",
+  brand = "Acme",
+  flavor = "Classic",
+): ArrayBuffer {
   const worksheet = XLSX.utils.aoa_to_sheet([
     ["Brand", "Flavor", "Die Type", "Sauce oz/pizza"],
-    ["Acme", "Classic", "12 inch", ""],
+    [brand, flavor, "12 inch", ""],
   ]);
   worksheet.D2 = {
     t: "n",
-    f: "1/2",
+    f: formula,
     ...(savedResult !== undefined ? { v: savedResult } : {}),
   };
   const workbook = XLSX.utils.book_new();
@@ -316,6 +321,49 @@ describe("spec Apply source evidence", () => {
     expect(prepared.parsed).not.toHaveProperty("sourcePreviewCells");
     const savedParse = saveSheetSpy.mock.calls.at(-1)?.[1] as Record<string, unknown> | undefined;
     expect(savedParse).not.toHaveProperty("sourcePreviewCells");
+  });
+
+  it("keeps formula previews scoped to each workbook and excludes formula results from Apply evidence", async () => {
+    const first = formulaWorkbookBuffer(0.5, "1/2", "Acme", "Classic");
+    const second = formulaWorkbookBuffer(0.75, "3/4", "Beta", "Spicy");
+    const names = ["first-formula.xlsx", "second-formula.xlsx"];
+    const prepared = await prepareSpecImportMulti(
+      [first, second],
+      undefined,
+      names,
+    );
+
+    expect(parseSpy).not.toHaveBeenCalled();
+    expect(prepared.sourcePreviewCells?.filter((cell) => cell.cell === "D2")).toEqual([
+      {
+        file: names[0],
+        sheet: "Profiles",
+        cell: "D2",
+        value: "0.5",
+        formula: "1/2",
+        hasSavedResult: true,
+        savedResult: "0.5",
+      },
+      {
+        file: names[1],
+        sheet: "Profiles",
+        cell: "D2",
+        value: "0.75",
+        formula: "3/4",
+        hasSavedResult: true,
+        savedResult: "0.75",
+      },
+    ]);
+
+    const expected = [
+      await renderedSource(formulaWorkbookBuffer(undefined, "1/2", "Acme", "Classic")),
+      await renderedSource(formulaWorkbookBuffer(undefined, "3/4", "Beta", "Spicy")),
+    ].join("\n\n");
+    expect(prepared.sourceEvidence?.sourceText).toBe(expected);
+    for (const formulaDetail of ["1/2", "0.5", "3/4", "0.75"]) {
+      expect(prepared.sourceEvidence?.sourceText).not.toContain(formulaDetail);
+    }
+    await expectAppliedEvidence(prepared, expected, "import-spec-multi-formula-review-only");
   });
 
   it("does not invent or cite a result when a formula has no saved workbook result", async () => {
