@@ -200,6 +200,43 @@ describe("SpecImportDialog flavor-correction warnings", () => {
     expect(screen.queryByTestId("spec-import-warnings")).toBeNull();
     expect(screen.queryByTestId("spec-profile-warning-pk0")).toBeNull();
   });
+
+  it("warns about missing formula results and opens the cited workbook cell", () => {
+    const prepared = makePrepared([profile("Acme", "Classic")]);
+    prepared.missingFormulaResults = [{
+      field: "Sauce oz/pizza",
+      location: {
+        file: "spec.xlsx",
+        sheet: "Profiles",
+        cell: "D2",
+      },
+      hasSavedResult: false,
+      brand: "Acme",
+      flavor: "Classic",
+    }];
+    prepared.sourcePreviewCells = [{
+      file: "spec.xlsx",
+      sheet: "Profiles",
+      cell: "D2",
+      value: "",
+      formula: "1/2",
+      hasSavedResult: false,
+    }];
+    renderDialog(prepared);
+
+    const warning = screen.getByTestId("spec-import-missing-formula-results");
+    expect(within(warning).getByText("1 formula cell has no saved result")).toBeTruthy();
+    const warningRow = warning.querySelector("li");
+    expect(warningRow?.textContent).toContain("Sauce oz/pizza · Acme — Classic");
+    expect(warningRow?.textContent).toContain("spec.xlsx · Profiles!D2");
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Review missing formula result at spec.xlsx · Profiles!D2",
+    }));
+    expect(screen.getByTestId("spec-source-preview-formula").textContent).toBe("=1/2");
+    expect(screen.getByTestId("spec-source-preview-value").textContent)
+      .toBe("No saved result in workbook");
+  });
 });
 
 describe("SpecImportDialog recipe row unit review", () => {

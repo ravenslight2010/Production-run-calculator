@@ -29,6 +29,7 @@ import {
 } from "@workspace/spec-import";
 import { reviewSpecImportPerPizzaAmounts } from "@workspace/spec-import/per-pizza-review";
 import type {
+  SpecImportMissingFormulaResult,
   SpecImportPrepared,
   SpecImportSourcePreviewCell,
 } from "@/specImport";
@@ -417,6 +418,40 @@ function sourceLocationText(locations?: readonly SpecImportSourceLocation[]): st
 function sourcePreviewCellKey(cell: SpecImportSourcePreviewCell): string {
   return JSON.stringify([cell.file ?? "", cell.sheet, cell.cell.toUpperCase()]);
 }
+
+function MissingFormulaResultRow({
+  warning,
+  sourcePreviewCells,
+  onOpenSourceCell,
+}: {
+  warning: SpecImportMissingFormulaResult;
+  sourcePreviewCells: readonly SpecImportSourcePreviewCell[];
+  onOpenSourceCell: (cell: SpecImportSourcePreviewCell) => void;
+}) {
+  const profile = [warning.brand, warning.flavor].filter(Boolean).join(" — ");
+  const preview = sourcePreviewForLocation(warning.location, sourcePreviewCells);
+  return (
+    <li className="flex flex-wrap items-center justify-between gap-2 text-xs text-amber-800">
+      <span>
+        <span className="font-medium">{warning.field}</span>
+        {profile ? ` · ${profile}` : ""}
+        {" · "}
+        {sourceLocationText([warning.location])}
+      </span>
+      {preview && (
+        <button
+          type="button"
+          onClick={() => onOpenSourceCell(preview)}
+          aria-label={`Review missing formula result at ${warning.location.file ? `${warning.location.file} · ` : ""}${warning.location.sheet}!${warning.location.cell}`}
+          className="rounded border border-amber-700/30 px-2 py-1 font-medium text-amber-800 underline decoration-dotted underline-offset-2 hover:bg-amber-500/10"
+        >
+          View cell
+        </button>
+      )}
+    </li>
+  );
+}
+
 function sourceLocationsForFields(
   sourceLocations: Record<string, SpecImportSourceLocation[]> | undefined,
   ...fields: string[]
@@ -583,6 +618,7 @@ export default function SpecImportDialog({
   const brands = prepared?.brands ?? [];
   const flavorsByBrand = prepared?.flavorsByBrand ?? {};
   const sourcePreviewCells = prepared?.sourcePreviewCells ?? [];
+  const missingFormulaResults = prepared?.missingFormulaResults ?? [];
   const uniqueSourcePreviewCells = [
     ...new Map(
       sourcePreviewCells.map((cell) => [sourcePreviewCellKey(cell), cell]),
@@ -1228,6 +1264,40 @@ export default function SpecImportDialog({
                     </pre>
                   )}
                 </section>
+              )}
+
+              {missingFormulaResults.length > 0 && (
+                <div
+                  className="rounded-md border border-amber-400/60 bg-amber-500/10 p-3"
+                  data-testid="spec-import-missing-formula-results"
+                >
+                  <div className="flex items-center gap-2 text-amber-700">
+                    <AlertTriangle className="h-4 w-4 shrink-0" />
+                    <span className="text-sm font-semibold">
+                      {missingFormulaResults.length} formula cell
+                      {missingFormulaResults.length === 1 ? " has" : "s have"} no saved result
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-amber-700">
+                    The importer did not calculate or substitute these supported spec values.
+                    Review the source cells before applying.
+                  </p>
+                  <ul className="mt-2 space-y-1">
+                    {missingFormulaResults.map((warning) => (
+                      <MissingFormulaResultRow
+                        key={JSON.stringify([
+                          warning.location.file ?? "",
+                          warning.location.sheet,
+                          warning.location.cell,
+                          warning.field,
+                        ])}
+                        warning={warning}
+                        sourcePreviewCells={sourcePreviewCells}
+                        onOpenSourceCell={openSourceCell}
+                      />
+                    ))}
+                  </ul>
+                </div>
               )}
 
               {step === 1 && includedProfileMissing && (

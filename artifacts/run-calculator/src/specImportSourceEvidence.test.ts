@@ -152,14 +152,15 @@ function formulaWorkbookBuffer(
   flavor = "Classic",
 ): ArrayBuffer {
   const worksheet = XLSX.utils.aoa_to_sheet([
-    ["Brand", "Flavor", "Die Type", "Sauce oz/pizza"],
-    [brand, flavor, "12 inch", ""],
+    ["Brand", "Flavor", "Die Type", "Sauce oz/pizza", "Internal Calc"],
+    [brand, flavor, "12 inch", "", ""],
   ]);
   worksheet.D2 = {
     t: "n",
     f: formula,
     ...(savedResult !== undefined ? { v: savedResult } : {}),
   };
+  worksheet.E2 = { t: "n", f: "2*3" };
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, "Profiles");
   return XLSX.write(workbook, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
@@ -223,6 +224,7 @@ async function expectAppliedEvidence(
   }
   expect(body.changes).not.toHaveProperty("sourceEvidence");
   expect(body).not.toHaveProperty("sourcePreviewCells");
+  expect(body).not.toHaveProperty("missingFormulaResults");
 
   // Reusable snapshots contain the parsed import only, never one-time evidence
   // or review-only cell text.
@@ -231,6 +233,7 @@ async function expectAppliedEvidence(
   expect(savedParse).toBeDefined();
   expect(savedParse).not.toHaveProperty("sourceEvidence");
   expect(savedParse).not.toHaveProperty("sourcePreviewCells");
+  expect(savedParse).not.toHaveProperty("missingFormulaResults");
 }
 
 beforeEach(() => {
@@ -309,6 +312,7 @@ describe("spec Apply source evidence", () => {
       hasSavedResult: true,
       savedResult: "0.5",
     });
+    expect(prepared.missingFormulaResults).toBeUndefined();
     expect(prepared.sourceEvidence?.sourceText).not.toContain("1/2");
     expect(prepared.sourceEvidence?.sourceText).not.toContain("0.5");
 
@@ -374,7 +378,26 @@ describe("spec Apply source evidence", () => {
     expect(parseSpy).not.toHaveBeenCalled();
     expect(grids[0].rows[1][3]).toBe("");
     expect(prepared.parsed.profiles[0].sauceOzPerPizza).toBeUndefined();
-    expect(prepared.sourcePreviewCells?.some((cell) => cell.cell === "D2")).toBe(false);
+    expect(prepared.missingFormulaResults).toEqual([{
+      field: "Sauce oz/pizza",
+      location: {
+        file: "formula-without-result.xlsx",
+        sheet: "Profiles",
+        cell: "D2",
+      },
+      hasSavedResult: false,
+      brand: "Acme",
+      flavor: "Classic",
+    }]);
+    expect(prepared.sourcePreviewCells).toContainEqual({
+      file: "formula-without-result.xlsx",
+      sheet: "Profiles",
+      cell: "D2",
+      value: "",
+      formula: "1/2",
+      hasSavedResult: false,
+    });
+    expect(prepared.sourcePreviewCells?.some((cell) => cell.cell === "E2")).toBe(false);
     expect(prepared.sourceEvidence?.sourceText).not.toContain("1/2");
   });
 
@@ -476,6 +499,37 @@ describe("spec Apply source evidence", () => {
     expect(parseSpy).not.toHaveBeenCalled();
     expect(prepared.sourceEvidence?.sourceText).toBe(expected);
     await expectAppliedEvidence(prepared, expected, "import-spec-cached-single-0001");
+  });
+
+  it("rebuilds missing-formula warnings from current bytes when reusing a cached single-file parse", async () => {
+    const buffer = formulaWorkbookBuffer();
+    const names = ["cached-formula.xlsx"];
+    const hash = await hashSpecImportSource([buffer]);
+    fetchSheetsSpy.mockResolvedValue([{
+      id: 3,
+      label: "cached formula parse",
+      sourceKey: deriveSourceKey(names),
+      sourceHash: hash,
+      createdAt: 100,
+      data: fixtureParse(),
+    }]);
+
+    const prepared = await prepareSpecImportWithAi(buffer, names[0]);
+
+    expect(parseSpy).not.toHaveBeenCalled();
+    expect(prepared.parsed.profiles[0].sauceOzPerPizza).toBeUndefined();
+    expect(prepared.missingFormulaResults).toEqual([{
+      field: "Sauce oz/pizza",
+      location: {
+        file: "cached-formula.xlsx",
+        sheet: "Profiles",
+        cell: "D2",
+      },
+      hasSavedResult: false,
+      brand: "Acme",
+      flavor: "Classic",
+    }]);
+    expect(prepared.sourcePreviewCells?.some((cell) => cell.cell === "E2")).toBe(false);
   });
 
   it("rebuilds cached multi-file evidence from the selected workbooks", async () => {
