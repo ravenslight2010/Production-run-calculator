@@ -15,6 +15,12 @@ A Replit build record marked failed can still correspond to the exact build curr
 
 **How to apply:** After an owner reports a publish result, check deployment metadata and the official live endpoints directly. Never ask the owner to relay IDs or republish before this check.
 
+For published UI checks, the app's entry JavaScript may not contain screen copy because the production bundle splits screens into lazy-loaded chunks. Verify the build identity and search the full precached JavaScript set before concluding a UI change is absent.
+
+**Why:** A published production build contained the updated Run to Time control in a lazy chunk, while checking only the entry bundle falsely suggested the release was stale.
+
+**How to apply:** When confirming UI deployment, inspect the matching source revision and all precached JavaScript assets, not just the main entry file.
+
 Replit's documented Publishing Monitoring views show app/request and CPU/memory
 metrics; database Monitoring shows active-query and query-performance data.
 The standard deployment metadata and documented Monitoring views do not
