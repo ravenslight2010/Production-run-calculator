@@ -1054,6 +1054,8 @@ export const CAPABILITIES = [
   "review-incidents",
   "use-ai-tools",
   "manage-profiles",
+  "record-qc",
+  "manage-qc",
 ] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 export const CAPABILITY_LABELS: Record<Capability, string> = {
@@ -1066,6 +1068,8 @@ export const CAPABILITY_LABELS: Record<Capability, string> = {
   "review-incidents": "Review incidents",
   "use-ai-tools": "Use AI tools",
   "manage-profiles": "Manage setup profiles",
+  "record-qc": "Record and view QC workflows",
+  "manage-qc": "Manage QC settings, sign-offs, and exports",
 };
 export type RoleDefinition = {
   name: string;

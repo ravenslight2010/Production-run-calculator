@@ -4196,6 +4196,8 @@ export default function Home() {
   const canEditRules = hasCapability("edit-production-rules");
   const canManageInventory = hasCapability("manage-inventory");
   const canManageAllergens = hasCapability("manage-allergens");
+  const canRecordQc = hasCapability("record-qc");
+  const canManageQc = hasCapability("manage-qc");
   const canManageStaff = hasCapability("manage-staff");
   const canUseAiTools = hasCapability("use-ai-tools");
   const canApproveResets = hasCapability("approve-password-resets");
@@ -15710,7 +15712,7 @@ export default function Home() {
     () => overlayCurrentRunValues(persistedRunValues, currentRunId, v),
     [persistedRunValues, currentRunId, v],
   );
-  const needsWarehouseSnapshot = activeTab === "warehouse" || screenMode === "warehouse";
+  const needsWarehouseSnapshot = activeTab === "warehouse" || activeTab === "quality" || screenMode === "warehouse";
   const needsInventorySnapshot = activeTab === "inventory";
   const needsSummarySnapshot = activeTab === "summary" || screenMode === "summary";
   const persistedRunSummaryStats = useMemo(
@@ -15794,6 +15796,22 @@ export default function Home() {
     }).map((detail) => [detail.id, detail] as const)) : new Map(),
     [needsWarehouseSnapshot, activeRuns, runValuesById, runSummaryStatsById, effectiveValuesForRun],
   );
+  const qcStagedIngredients = useMemo(() => {
+    if (!currentRunId) return [];
+    const stagedItems = dayState.stagedItems ?? {};
+    const rows: NeedRow[] = activeRunNeedDetails.get(currentRunId)?.rows ?? [];
+    return rows.flatMap((row) => {
+      const area = row.area;
+      if (area !== "Dough" && area !== "Sauce" && area !== "Frontline") return [];
+      return [{
+        area,
+        name: row.label,
+        quantity: row.value,
+        unit: row.sub ?? "",
+        staged: Boolean(stagedItems[`${currentRunId}::${row.label}__${row.sub ?? ""}`]),
+      }];
+    });
+  }, [currentRunId, activeRunNeedDetails, dayState.stagedItems]);
   const scheduledWarehouseRuns = useMemo(
     () => needsWarehouseSnapshot ? scheduledDays.flatMap((day) =>
       (day.runs ?? [])
@@ -18011,9 +18029,9 @@ export default function Home() {
                     <ClipboardList className="w-4 h-4 mr-2" /> Manager action queue
                   </DropdownMenuItem>
                 )}
-                {isManager && (
+                {(canRecordQc || isManager) && (
                   <DropdownMenuItem onClick={() => setActiveTab("quality")}>
-                    <ShieldCheck className="w-4 h-4 mr-2" /> Quality history
+                    <ShieldCheck className="w-4 h-4 mr-2" /> QC workflows &amp; history
                   </DropdownMenuItem>
                 )}
                 {isManager && (
@@ -18210,7 +18228,17 @@ export default function Home() {
               </TabsContent>
 
               <TabsContent value="quality">
-                <QcQualitySurface />
+                <QcQualitySurface
+                  runId={currentRunId}
+                  profileKey={canonicalProfileKey(currentRun?.brand ?? "", currentRun?.flavor ?? "")}
+                  runIsActive={Boolean(currentRun?.startedAt && !currentRun.endedAt && !currentRun.pausedAt)}
+                  values={v}
+                  substitutions={dayState.substitutions ?? []}
+                  stagedIngredients={qcStagedIngredients}
+                  canRecordQc={canRecordQc}
+                  canManageQc={canManageQc}
+                  canViewPhotos={canManageInventory}
+                />
               </TabsContent>
 
               <ManagementDepartment staff={<DeferredStaffManagementSurface />} />

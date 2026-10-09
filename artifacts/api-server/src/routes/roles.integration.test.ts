@@ -18,6 +18,7 @@
 // must create the throwaway DB and point DATABASE_URL at it BEFORE importing the
 // router — hence the dynamic imports inside beforeAll.
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { AddressInfo } from "node:net";
@@ -42,6 +43,8 @@ const ALL_CAPS: Capability[] = [
   "manage-factory-settings",
   "manage-profiles",
   "manage-allergens",
+  "record-qc",
+  "manage-qc",
 ];
 
 // The capability set each seeded role grants (must match ROLE_SEEDS in
@@ -50,8 +53,8 @@ const ROLE_CAPS: Record<string, Capability[]> = {
   manager: [...ALL_CAPS],
   operator: [],
   supervisor: ["review-incidents", "edit-production-rules"],
-  "qc-operator": ["use-ai-tools"],
-  "qc-manager": ["use-ai-tools", "review-incidents", "manage-allergens"],
+  "qc-operator": ["use-ai-tools", "record-qc"],
+  "qc-manager": ["use-ai-tools", "review-incidents", "manage-allergens", "record-qc", "manage-qc"],
   warehouse: [],
   inventory: ["manage-inventory"],
 };
@@ -87,6 +90,8 @@ let inventoryLedgerTable: DbModule["inventoryLedgerTable"];
 let inventoryConsumedRunsTable: DbModule["inventoryConsumedRunsTable"];
 let inventorySettingsTable: DbModule["inventorySettingsTable"];
 let ingredientsTable: DbModule["ingredientsTable"];
+let brandProfilesTable: DbModule["brandProfilesTable"];
+let qcWorkflowEventsTable: DbModule["qcWorkflowEventsTable"];
 let ingredientBatchWeightsTable: DbModule["ingredientBatchWeightsTable"];
 let userRolesTable: DbModule["userRolesTable"];
 let usersTable: DbModule["usersTable"];
@@ -142,6 +147,14 @@ beforeAll(async () => {
   if (push.status !== 0) {
     throw new Error(`drizzle push failed:\n${push.stdout}\n${push.stderr}`);
   }
+  const auditProtection = spawnSync(
+    process.execPath,
+    [path.resolve(repoRoot, "lib/db/migrations/apply-audit-log-protection.mjs")],
+    { cwd: repoRoot, env: { ...process.env, DATABASE_URL: testUrlStr }, encoding: "utf8" },
+  );
+  if (auditProtection.status !== 0) {
+    throw new Error(`audit protection migration failed:\n${auditProtection.stdout}\n${auditProtection.stderr}`);
+  }
 
   // Point the app's db at the throwaway DB, THEN load the modules so the
   // singleton pool binds to it.
@@ -159,6 +172,8 @@ beforeAll(async () => {
   inventoryConsumedRunsTable = dbMod.inventoryConsumedRunsTable;
   inventorySettingsTable = dbMod.inventorySettingsTable;
   ingredientsTable = dbMod.ingredientsTable;
+  brandProfilesTable = dbMod.brandProfilesTable;
+  qcWorkflowEventsTable = dbMod.qcWorkflowEventsTable;
   ingredientBatchWeightsTable = dbMod.ingredientBatchWeightsTable;
   userRolesTable = dbMod.userRolesTable;
   usersTable = dbMod.usersTable;
@@ -210,7 +225,7 @@ async function resetRoleFixture(): Promise<void> {
   // ids reused across tests would otherwise inherit a prior test's revocation.
   clearUserValidityCache();
   await db.execute(
-    sql`TRUNCATE ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryLocationsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${inventorySettingsTable}, ${ingredientBatchWeightsTable}, ${ingredientsTable}, ${passwordResetRequestsTable}, ${auditLogsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryLocationsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${inventorySettingsTable}, ${ingredientBatchWeightsTable}, ${qcWorkflowEventsTable}, ${brandProfilesTable}, ${ingredientsTable}, ${passwordResetRequestsTable}, ${auditLogsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
   );
   // Seed the role catalog (manager/operator builtins + editable starters) so the
   // capability middleware can resolve each user's role to a capability set. Plus
@@ -1446,6 +1461,25 @@ describe("qc-manager allergen capability repair", () => {
     expect(repeated).toMatchObject({ id: "qc-manager-allergen-capability-v1", status: "skipped" });
     [role] = await db.select().from(rolesTable).where(eq(rolesTable.name, "qc-manager"));
     expect(role!.capabilities).toEqual(["use-ai-tools", "review-incidents", "manage-inventory"]);
+  });
+});
+
+describe("QC first release capability repair", () => {
+  it("adds only QC grants to existing built-in roles and leaves unrelated grants intact", async () => {
+    await db.update(rolesTable).set({ capabilities: ["use-ai-tools", "review-incidents"] })
+      .where(eq(rolesTable.name, "qc-operator"));
+    await db.update(rolesTable).set({ capabilities: ["use-ai-tools", "manage-inventory"] })
+      .where(eq(rolesTable.name, "qc-manager"));
+    const [{ qcFirstReleaseCapabilitiesRepair }, { runRegisteredRepair }] = await Promise.all([
+      import("../lib/repairs/qcFirstReleaseCapabilitiesRepair"),
+      import("../lib/repairRegistry"),
+    ]);
+    const applied = await runRegisteredRepair(qcFirstReleaseCapabilitiesRepair, db);
+    expect(applied).toMatchObject({ id: "qc-first-release-capabilities-v1", status: "applied" });
+    const [operatorRole] = await db.select().from(rolesTable).where(eq(rolesTable.name, "qc-operator"));
+    const [managerRole] = await db.select().from(rolesTable).where(eq(rolesTable.name, "qc-manager"));
+    expect(operatorRole.capabilities).toEqual(["use-ai-tools", "review-incidents", "record-qc"]);
+    expect(managerRole.capabilities).toEqual(["use-ai-tools", "manage-inventory", "record-qc", "manage-qc"]);
   });
 });
 
@@ -2969,5 +3003,265 @@ describe("restock honors the chosen destination location", () => {
       locationId: 999999,
     });
     expect(res.status).toBe(400);
+  });
+});
+
+const QC_PROFILE_KEY = "qc-brand__qc-flavor";
+
+async function seedQcWorkflowFixtures(): Promise<void> {
+  await db.insert(ingredientsTable).values([
+    { id: "qc-mozzarella", scope: "live", name: "Mozzarella", categories: ["cheese"] },
+    { id: "qc-dough", scope: "live", name: "Dough", categories: ["dough"] },
+    { id: "qc-sauce", scope: "live", name: "Sauce", categories: ["general"] },
+    { id: "qc-crust", scope: "live", name: "Crust", categories: ["dough"] },
+    { id: "qc-mozzarella", scope: "sandbox", name: "Mozzarella", categories: ["cheese"] },
+  ]);
+  await db.insert(brandProfilesTable).values([
+    {
+      key: QC_PROFILE_KEY, scope: "live", brand: "QC Brand", flavor: "QC Flavor",
+      values: {
+        app1Type: "cheese", app1CheeseRecipeName: "Mozzarella", app1OzPerPizza: 1.25,
+        frontlineRecipeName: "Sauce", sauceOzPerPizza: 2.75,
+        doughRecipeName: "Dough", targetDoughballWeight: 12, crustType: "Crust",
+      },
+      crustValues: { crustTargetWeight: 8 },
+    },
+    {
+      key: QC_PROFILE_KEY, scope: "sandbox", brand: "QC Brand", flavor: "QC Flavor",
+      values: { app1Type: "Mozzarella", app1OzPerPizza: 2.5 },
+    },
+  ]);
+}
+
+describe("QC workflows", () => {
+  it("authorizes QC recording, appends multiple lots, and scopes reads and exports", async () => {
+    await seedQcWorkflowFixtures();
+    const lot = {
+      operationId: randomUUID(), runId: "qc-scope-run", ingredientId: "qc-mozzarella",
+      station: "frontline", lotNumber: "LIVE-LOT",
+    };
+    expect((await req(OPERATOR, "POST", "/api/qc/lots", lot)).status).toBe(403);
+    expect((await req(null, "GET", "/api/qc/history")).status).toBe(401);
+    expect((await req(OPERATOR, "GET", "/api/qc/history")).status).toBe(403);
+    const first = await req(QC_OPERATOR, "POST", "/api/qc/lots", lot);
+    expect(first.status).toBe(201);
+    const firstEvent = (await first.json() as { event: {
+      actorId: string; createdAt: string; ingredientId: string; payload: Record<string, unknown>;
+    } }).event;
+    expect(firstEvent.actorId).toBe(QC_OPERATOR);
+    expect(firstEvent.ingredientId).toBe("qc-mozzarella");
+    expect(Number.isFinite(Date.parse(firstEvent.createdAt))).toBe(true);
+    expect(firstEvent.payload.lotNumber).toBe("LIVE-LOT");
+    expect((await req(QC_OPERATOR, "POST", "/api/qc/lots", {
+      ...lot, operationId: randomUUID(), lotNumber: "LIVE-LOT-2",
+    })).status).toBe(201);
+
+    await db.update(userRolesTable).set({ role: "qc-operator" })
+      .where(eq(userRolesTable.userId, SANDBOX));
+    const sandboxLot = await req(SANDBOX, "POST", "/api/qc/lots", {
+      ...lot, operationId: randomUUID(), lotNumber: "SANDBOX-LOT",
+    });
+    expect(sandboxLot.status).toBe(201);
+    const liveHistory = await req(QC_OPERATOR, "GET", "/api/qc/history?runId=qc-scope-run");
+    const sandboxHistory = await req(SANDBOX, "GET", "/api/qc/history?runId=qc-scope-run");
+    const liveItems = (await liveHistory.json() as { items: Array<{ payload: Record<string, unknown> }> }).items;
+    const sandboxItems = (await sandboxHistory.json() as { items: Array<{ payload: Record<string, unknown> }> }).items;
+    expect(liveItems.map((item) => item.payload.lotNumber).sort()).toEqual(["LIVE-LOT", "LIVE-LOT-2"]);
+    expect(sandboxItems.map((item) => item.payload.lotNumber)).toEqual(["SANDBOX-LOT"]);
+    expect((await req(QC_OPERATOR, "GET", "/api/qc/history.csv")).status).toBe(403);
+    const csv = await req(QC_MANAGER, "GET", "/api/qc/history.csv?runId=qc-scope-run");
+    expect(csv.status).toBe(200);
+    expect(csv.headers.get("content-type")).toContain("text/csv");
+    expect(await csv.text()).toContain("LIVE-LOT");
+  });
+
+  it("resolves explicit imported targets, audits reviewed overrides, and never infers crust targets", async () => {
+    await seedQcWorkflowFixtures();
+    const url = `/api/qc/targets?profileKey=${encodeURIComponent(QC_PROFILE_KEY)}`;
+    const initial = await req(QC_OPERATOR, "GET", url);
+    expect(initial.status).toBe(200);
+    const initialTargets = (await initial.json() as { targets: Array<Record<string, unknown>> }).targets;
+    expect(initialTargets.find((target) => target.ingredientId === "qc-mozzarella"))
+      .toMatchObject({ targetValue: 1.25, unit: "oz", toleranceValue: 0.1, source: "spec-import", state: "configured" });
+    expect(initialTargets.find((target) => target.ingredientId === "qc-dough"))
+      .toMatchObject({ targetValue: 12, unit: "oz", source: "spec-import", state: "configured" });
+    expect(initialTargets.find((target) => target.ingredientId === "qc-sauce"))
+      .toMatchObject({ targetValue: 2.75, unit: "oz", source: "spec-import", state: "configured" });
+    expect(initialTargets.find((target) => target.ingredientId === "qc-crust"))
+      .toMatchObject({ targetValue: null, state: "not-evaluated" });
+
+    const override = {
+      operationId: randomUUID(), profileKey: QC_PROFILE_KEY, ingredientId: "qc-mozzarella",
+      targetValue: 1.5, unit: "g", toleranceValue: 0, reason: "Reviewed scale specification",
+    };
+    expect((await req(QC_OPERATOR, "POST", "/api/qc/targets", override)).status).toBe(403);
+    expect((await req(QC_MANAGER, "POST", "/api/qc/targets", override)).status).toBe(201);
+    const overridden = await req(QC_MANAGER, "GET", url);
+    expect(((await overridden.json()) as { targets: Array<Record<string, unknown>> }).targets
+      .find((target) => target.ingredientId === "qc-mozzarella"))
+      .toMatchObject({ targetValue: 1.5, unit: "g", toleranceValue: 0, source: "qc-override", state: "configured" });
+    const mismatchedUnits = await req(QC_OPERATOR, "POST", "/api/qc/weight-checks", {
+      operationId: randomUUID(), runId: "qc-weight-run", profileKey: QC_PROFILE_KEY,
+      ingredientId: "qc-mozzarella", checkType: "30-minute", actualValue: 1.5, actualUnit: "oz",
+    });
+    expect(mismatchedUnits.status).toBe(201);
+    expect(((await mismatchedUnits.json()) as { event: { payload: Record<string, unknown> } }).event.payload)
+      .toMatchObject({
+        checkType: "30-minute", targetValue: 1.5, targetUnit: "g",
+        actualValue: 1.5, actualUnit: "oz", outcome: "not-evaluated",
+      });
+    expect((await req(QC_MANAGER, "POST", "/api/qc/targets", {
+      operationId: randomUUID(), profileKey: QC_PROFILE_KEY, ingredientId: "qc-mozzarella",
+      targetValue: null, unit: null, toleranceValue: null, reason: "Restore imported target",
+    })).status).toBe(201);
+    const restored = await req(QC_MANAGER, "GET", url);
+    expect(((await restored.json()) as { targets: Array<Record<string, unknown>> }).targets
+      .find((target) => target.ingredientId === "qc-mozzarella"))
+      .toMatchObject({ targetValue: 1.25, unit: "oz", toleranceValue: 0.1, source: "spec-import" });
+    expect((await req(MANAGER, "POST", "/api/qc/targets", {
+      operationId: randomUUID(), profileKey: QC_PROFILE_KEY, ingredientId: "qc-dough",
+      targetValue: 13, unit: "oz", toleranceValue: 0.2, reason: "App manager reviewed target",
+    })).status).toBe(201);
+    const targetAudit = await req(QC_MANAGER, "GET", "/api/qc/history?limit=10");
+    const targetEvents = (await targetAudit.json() as {
+      items: Array<{ eventType: string; actorId: string }>;
+    }).items.filter((event) => event.eventType === "target-setting");
+    expect(targetEvents).toHaveLength(3);
+    expect(targetEvents.map((event) => event.actorId).sort()).toEqual([MANAGER, QC_MANAGER, QC_MANAGER].sort());
+
+    const outOfTolerance = {
+      operationId: randomUUID(), runId: "qc-weight-run", profileKey: QC_PROFILE_KEY,
+      ingredientId: "qc-mozzarella", checkType: "pre-run", actualValue: 1.5, actualUnit: "oz",
+    };
+    expect((await req(QC_OPERATOR, "POST", "/api/qc/weight-checks", outOfTolerance)).status).toBe(400);
+    const withReason = await req(QC_OPERATOR, "POST", "/api/qc/weight-checks", {
+      ...outOfTolerance, note: "Scale drift",
+    });
+    expect(withReason.status).toBe(201);
+    expect(((await withReason.json()) as { event: { payload: Record<string, unknown> } }).event.payload)
+      .toMatchObject({ targetValue: 1.25, targetUnit: "oz", toleranceValue: 0.1, outcome: "out-of-tolerance", note: "Scale drift" });
+    const noTarget = await req(QC_OPERATOR, "POST", "/api/qc/weight-checks", {
+      operationId: randomUUID(), runId: "qc-weight-run", profileKey: QC_PROFILE_KEY,
+      ingredientId: "qc-crust", checkType: "pre-run", actualValue: 8, actualUnit: "oz",
+    });
+    expect(noTarget.status).toBe(201);
+    expect(((await noTarget.json()) as { event: { payload: Record<string, unknown> } }).event.payload)
+      .toMatchObject({ targetValue: null, outcome: "not-evaluated", targetSource: "not-configured" });
+  });
+
+  it("reopens run sign-off after new evidence and requires independent cleaning verification", async () => {
+    await seedQcWorkflowFixtures();
+    expect((await req(QC_OPERATOR, "POST", "/api/qc/lots", {
+      operationId: randomUUID(), runId: "qc-signoff-run", ingredientId: "qc-mozzarella",
+      station: "frontline", lotNumber: "LOT-BEFORE-SIGNOFF",
+    })).status).toBe(201);
+    const signoff = () => req(QC_MANAGER, "POST", "/api/qc/run-signoffs", {
+      operationId: randomUUID(), runId: "qc-signoff-run",
+    });
+    expect((await req(QC_OPERATOR, "POST", "/api/qc/run-signoffs", {
+      operationId: randomUUID(), runId: "qc-signoff-run",
+    })).status).toBe(403);
+    expect((await signoff()).status).toBe(201);
+    expect((await signoff()).status).toBe(409);
+    const cleaning = await req(QC_OPERATOR, "POST", "/api/qc/cleaning-records", {
+      operationId: randomUUID(), runId: "qc-signoff-run", method: "deep",
+      startedAt: new Date(Date.now() - 60 * 60_000).toISOString(),
+      endedAt: new Date(Date.now() - 30 * 60_000).toISOString(),
+    });
+    expect(cleaning.status).toBe(201);
+    const eventId = ((await cleaning.json()) as { event: { id: number } }).event.id;
+    const verificationPath = `/api/qc/cleaning-records/${eventId}/verification`;
+    expect((await req(QC_OPERATOR, "POST", verificationPath, { operationId: randomUUID() })).status).toBe(400);
+    expect((await req(QC_MANAGER, "POST", verificationPath, { operationId: randomUUID() })).status).toBe(201);
+    expect((await req(QC_MANAGER, "POST", verificationPath, { operationId: randomUUID() })).status).toBe(409);
+
+    expect((await req(QC_OPERATOR, "POST", "/api/qc/lots", {
+      operationId: randomUUID(), runId: "qc-signoff-run", ingredientId: "qc-mozzarella",
+      station: "frontline", lotNumber: "LOT-AFTER-SIGNOFF",
+    })).status).toBe(201);
+    const reopened = await req(QC_OPERATOR, "GET", "/api/qc/runs/qc-signoff-run");
+    expect(((await reopened.json()) as { signoff: { signedOff: boolean; reopened: boolean } }).signoff)
+      .toMatchObject({ signedOff: false, reopened: true });
+    expect((await signoff()).status).toBe(201);
+  });
+
+  it("keeps incomplete allergen states visible and appends audited corrections and redactions", async () => {
+    await seedQcWorkflowFixtures();
+    const review = await req(QC_OPERATOR, "POST", "/api/qc/allergen-reviews", {
+      operationId: randomUUID(),
+      runId: "qc-allergen-run",
+      footprintReviewed: true,
+      footprint: {
+        status: "incomplete",
+        allergens: ["milk"],
+        unknownIngredients: ["Unreviewed seasoning"],
+        missingComponents: ["sauce"],
+      },
+      stagedIngredients: [
+        { area: "Frontline", name: "Mozzarella", quantity: "24", unit: "lbs", staged: true },
+        { area: "Dough", name: "Flour", quantity: "18", unit: "lbs", staged: false },
+      ],
+      stagedIngredientsStatus: "unknown",
+      cleaningStatus: "unknown",
+      note: "Catalog review remains incomplete",
+    });
+    expect(review.status).toBe(201);
+    expect(((await review.json()) as { event: { payload: Record<string, unknown> } }).event.payload)
+      .toMatchObject({
+        footprint: {
+          status: "incomplete",
+          allergens: ["milk"],
+          unknownIngredients: ["Unreviewed seasoning"],
+          missingComponents: ["sauce"],
+        },
+        stagedIngredients: [
+          { area: "Frontline", name: "Mozzarella", quantity: "24", unit: "lbs", staged: true },
+          { area: "Dough", name: "Flour", quantity: "18", unit: "lbs", staged: false },
+        ],
+        stagedIngredientsStatus: "unknown",
+        cleaningStatus: "unknown",
+      });
+
+    const lot = await req(QC_OPERATOR, "POST", "/api/qc/lots", {
+      operationId: randomUUID(), runId: "qc-audit-run", ingredientId: "qc-mozzarella",
+      station: "frontline", lotNumber: "LOT-ORIGINAL", note: "Free-text note",
+    });
+    const originalId = ((await lot.json()) as { event: { id: number } }).event.id;
+    expect((await req(QC_OPERATOR, "POST", `/api/qc/events/${originalId}/corrections`, {
+      operationId: randomUUID(), reason: "Correct transcribed lot number",
+      replacement: { lotNumber: "LOT-CORRECTED" },
+    })).status).toBe(403);
+    expect((await req(QC_MANAGER, "POST", `/api/qc/events/${originalId}/corrections`, {
+      operationId: randomUUID(), reason: "Correct transcribed lot number",
+      replacement: { lotNumber: "LOT-CORRECTED" },
+    })).status).toBe(201);
+    expect((await req(QC_MANAGER, "POST", `/api/qc/events/${originalId}/redactions`, {
+      operationId: randomUUID(), reason: "Privacy request for free-text note",
+      fields: ["payload.note"],
+    })).status).toBe(201);
+    const history = await req(QC_OPERATOR, "GET", "/api/qc/history?runId=qc-audit-run");
+    const events = (await history.json() as {
+      items: Array<{
+        eventType: string; actorId: string; corrected?: boolean;
+        redactedFields?: string[]; payload: Record<string, unknown>;
+      }>;
+    }).items;
+    const displayedLot = events.find((event) => event.eventType === "lot");
+    expect(displayedLot).toMatchObject({
+      actorId: QC_OPERATOR,
+      corrected: true,
+      redactedFields: ["payload.note"],
+      payload: { lotNumber: "LOT-CORRECTED", note: "[redacted]" },
+    });
+    expect(events.filter((event) => event.actorId === QC_MANAGER)).toHaveLength(2);
+    const updateError = await db.update(qcWorkflowEventsTable).set({ actorId: MANAGER })
+      .where(eq(qcWorkflowEventsTable.id, originalId))
+      .then(() => null, (error: unknown) => error);
+    expect((updateError as { cause?: { message?: string } } | null)?.cause?.message)
+      .toContain("qc_workflow_events is append-only");
+    const deleteError = await db.delete(qcWorkflowEventsTable).where(eq(qcWorkflowEventsTable.id, originalId))
+      .then(() => null, (error: unknown) => error);
+    expect((deleteError as { cause?: { message?: string } } | null)?.cause?.message)
+      .toContain("qc_workflow_events is append-only");
   });
 });

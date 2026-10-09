@@ -66,4 +66,5 @@ export const RELEASED_AUTOMATIC_REPAIR_FINGERPRINTS: Readonly<Record<string, str
   "speed-adjustment-baseline-v1": "b953e8ae40fde2a7db3accb73258b58ba325279bcc6037e9781e70adecf3d7e2",
   "recipe-customer-metadata-cleanup-v1": "943f3364667c2587fff6acfc3c4f19b27a3e4ffe667af579f4bb03162dbba7a4",
   "qc-manager-allergen-capability-v1": "e9c11eab800271f9b1a2d3c4600e42c0ac9d4fed9a4cb6203c152f576736a6f0",
+  "qc-first-release-capabilities-v1": "e67b0eb1dd4b49b590959e321910f569baed7b531cd14704db7531160615aea7",
 });

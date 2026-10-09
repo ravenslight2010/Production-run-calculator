@@ -20,4 +20,6 @@ export const Capability = {
   'review-incidents': 'review-incidents',
   'use-ai-tools': 'use-ai-tools',
   'manage-allergens': 'manage-allergens',
+  'record-qc': 'record-qc',
+  'manage-qc': 'manage-qc',
 } as const;

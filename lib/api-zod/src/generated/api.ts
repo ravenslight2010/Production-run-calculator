@@ -42,6 +42,48 @@ export const identifyInventoryPhotoBodyCandidatesItemCategoryMax = 100;
 export const identifyInventoryPhotoBodyCandidatesItemNameMax = 200;
 export const identifyInventoryPhotoBodyCandidatesItemUnitMax = 50;
 export const parseSpecImagesBodyImagesMax = 10;
+export const getQcTargetsQueryProfileKeyMax = 400;
+export const setQcTargetBodyProfileKeyMax = 400;
+export const setQcTargetBodyIngredientIdMax = 200;
+export const setQcTargetBodyTargetValueExclusiveMin = 0;
+export const setQcTargetBodyToleranceValueMin = 0;
+export const setQcTargetBodyReasonMax = 500;
+export const recordQcLotBodyRunIdMax = 200;
+export const recordQcLotBodyIngredientIdMax = 200;
+export const recordQcLotBodyLotNumberMax = 200;
+export const recordQcLotBodyNoteMax = 1000;
+export const recordQcWeightCheckBodyRunIdMax = 200;
+export const recordQcWeightCheckBodyProfileKeyMax = 400;
+export const recordQcWeightCheckBodyIngredientIdMax = 200;
+export const recordQcWeightCheckBodyActualValueExclusiveMin = 0;
+export const recordQcWeightCheckBodyActualValueMax = 1000000;
+export const recordQcWeightCheckBodyNoteMax = 1000;
+export const getQcRunPathRunIdMax = 200;
+export const recordQcAllergenReviewBodyRunIdMax = 200;
+export const recordQcAllergenReviewBodyFootprintAllergensMax = 9;
+export const recordQcAllergenReviewBodyFootprintUnknownIngredientsItemMax = 200;
+export const recordQcAllergenReviewBodyFootprintUnknownIngredientsMax = 100;
+export const recordQcAllergenReviewBodyFootprintMissingComponentsItemMax = 100;
+export const recordQcAllergenReviewBodyFootprintMissingComponentsMax = 30;
+export const recordQcAllergenReviewBodyStagedIngredientsItemNameMax = 200;
+export const recordQcAllergenReviewBodyStagedIngredientsItemQuantityMax = 50;
+export const recordQcAllergenReviewBodyStagedIngredientsItemUnitMax = 30;
+export const recordQcAllergenReviewBodyStagedIngredientsMax = 200;
+export const recordQcAllergenReviewBodyNoteMax = 1000;
+export const recordQcCleaningBodyRunIdMax = 200;
+export const recordQcCleaningBodyNoteMax = 1000;
+export const verifyQcCleaningBodyNoteMax = 1000;
+export const signoffQcRunBodyRunIdMax = 200;
+export const signoffQcRunBodyNoteMax = 1000;
+export const getQcHistoryQueryRunIdMax = 200;
+export const getQcHistoryQueryIngredientIdMax = 200;
+export const getQcHistoryQueryLimitDefault = 50;
+export const getQcHistoryQueryLimitMax = 100;
+export const exportQcHistoryCsvQueryRunIdMax = 200;
+export const exportQcHistoryCsvQueryIngredientIdMax = 200;
+export const correctQcEventBodyReasonMax = 500;
+export const redactQcEventBodyReasonMax = 500;
+export const redactQcEventBodyFieldsMax = 4;
 export const wasteInsightBodyPlannedItemsItemKeyMax = 200;
 export const wasteInsightBodyPlannedItemsItemCategoryMax = 100;
 export const wasteInsightBodyPlannedItemsItemNameMax = 200;
@@ -711,7 +753,7 @@ export const SignUpResponse = zod.object({
   "user": zod.object({
   "userId": zod.string(),
   "role": zod.string().describe('The name of the role assigned to this user.'),
-  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login "Get Started" overview.'),
@@ -745,7 +787,7 @@ export const AcceptStaffInvitationResponse = zod.object({
   "user": zod.object({
   "userId": zod.string(),
   "role": zod.string().describe('The name of the role assigned to this user.'),
-  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login "Get Started" overview.'),
@@ -793,7 +835,7 @@ export const SignInResponse = zod.object({
   "user": zod.object({
   "userId": zod.string(),
   "role": zod.string().describe('The name of the role assigned to this user.'),
-  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login "Get Started" overview.'),
@@ -832,7 +874,7 @@ export const ChangePasswordResponse = zod.object({
   "user": zod.object({
   "userId": zod.string(),
   "role": zod.string().describe('The name of the role assigned to this user.'),
-  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login "Get Started" overview.'),
@@ -1678,6 +1720,514 @@ export const ListQualityChecksResponseItem = zod.object({
   "createdAt": zod.string().describe('ISO-8601 timestamp the check was recorded')
 }).describe('A persisted quality check in the manager history.')
 export const ListQualityChecksResponse = zod.array(ListQualityChecksResponseItem)
+
+
+/**
+ * Uses the authenticated facility scope. An ingredient without one unambiguous explicit target is returned as not-evaluated; crust targets are included only if the import contract provides an explicit value.
+ * @summary Resolve explicit imported and reviewed QC weight targets
+ */
+
+
+
+export const GetQcTargetsQueryParams = zod.object({
+  "profileKey": zod.coerce.string().min(1).max(getQcTargetsQueryProfileKeyMax)
+})
+
+export const GetQcTargetsResponse = zod.object({
+  "profileKey": zod.string(),
+  "targets": zod.array(zod.object({
+  "ingredientId": zod.string(),
+  "ingredientName": zod.string(),
+  "targetValue": zod.number().nullable(),
+  "unit": zod.string().nullable(),
+  "toleranceValue": zod.number().nullable(),
+  "source": zod.enum(['spec-import', 'qc-override', 'not-configured']),
+  "state": zod.enum(['configured', 'not-evaluated']),
+  "reason": zod.string().optional(),
+  "overrideEventId": zod.int().optional()
+}))
+})
+
+
+/**
+ * Manager-only, append-only target setting. A null target, unit, and tolerance together clear the override and restore spec-import resolution.
+ * @summary Add a reviewed QC target override or clear an existing override
+ */
+
+
+
+
+
+
+
+export const SetQcTargetBody = zod.object({
+  "operationId": zod.uuid(),
+  "profileKey": zod.string().min(1).max(setQcTargetBodyProfileKeyMax),
+  "ingredientId": zod.string().min(1).max(setQcTargetBodyIngredientIdMax),
+  "targetValue": zod.number().gt(setQcTargetBodyTargetValueExclusiveMin).nullable(),
+  "unit": zod.union([zod.literal('oz'),zod.literal('g'),zod.literal('lb'),zod.literal('kg'),zod.literal(null)]).nullable(),
+  "toleranceValue": zod.number().min(setQcTargetBodyToleranceValueMin).nullable(),
+  "reason": zod.string().min(1).max(setQcTargetBodyReasonMax)
+})
+
+export const SetQcTargetResponse = zod.object({
+  "event": zod.object({
+  "id": zod.int(),
+  "operationId": zod.uuid(),
+  "recordId": zod.uuid(),
+  "eventType": zod.enum(['lot', 'weight', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "runId": zod.string().nullable(),
+  "profileKey": zod.string().nullable(),
+  "ingredientId": zod.string().nullable(),
+  "ingredientName": zod.string().nullable(),
+  "station": zod.string().nullable(),
+  "relatedEventId": zod.string().nullable(),
+  "actorId": zod.string().nullable(),
+  "payload": zod.record(zod.string(), zod.unknown()),
+  "createdAt": zod.coerce.date(),
+  "corrected": zod.boolean().optional(),
+  "redactedFields": zod.array(zod.string()).optional()
+})
+})
+
+
+/**
+ * Multiple lots for the same run and ingredient are retained as separate events.
+ * @summary Record an ingredient lot for a production run
+ */
+
+
+
+
+
+
+export const RecordQcLotBody = zod.object({
+  "operationId": zod.uuid(),
+  "runId": zod.string().min(1).max(recordQcLotBodyRunIdMax),
+  "ingredientId": zod.string().min(1).max(recordQcLotBodyIngredientIdMax),
+  "station": zod.enum(['dough', 'sauce', 'frontline', 'warehouse', 'packaging', 'other']),
+  "lotNumber": zod.string().min(1).max(recordQcLotBodyLotNumberMax),
+  "note": zod.string().max(recordQcLotBodyNoteMax).optional()
+})
+
+export const RecordQcLotResponse = zod.object({
+  "event": zod.object({
+  "id": zod.int(),
+  "operationId": zod.uuid(),
+  "recordId": zod.uuid(),
+  "eventType": zod.enum(['lot', 'weight', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "runId": zod.string().nullable(),
+  "profileKey": zod.string().nullable(),
+  "ingredientId": zod.string().nullable(),
+  "ingredientName": zod.string().nullable(),
+  "station": zod.string().nullable(),
+  "relatedEventId": zod.string().nullable(),
+  "actorId": zod.string().nullable(),
+  "payload": zod.record(zod.string(), zod.unknown()),
+  "createdAt": zod.coerce.date(),
+  "corrected": zod.boolean().optional(),
+  "redactedFields": zod.array(zod.string()).optional()
+})
+})
+
+
+/**
+ * The server resolves and snapshots the target. Missing, conflicting, or unit-mismatched targets produce not-evaluated, never an inferred result. Out-of-tolerance results require a note.
+ * @summary Record a pre-run or 30-minute ingredient weight check
+ */
+
+
+
+
+
+
+
+export const RecordQcWeightCheckBody = zod.object({
+  "operationId": zod.uuid(),
+  "runId": zod.string().min(1).max(recordQcWeightCheckBodyRunIdMax),
+  "profileKey": zod.string().min(1).max(recordQcWeightCheckBodyProfileKeyMax),
+  "ingredientId": zod.string().min(1).max(recordQcWeightCheckBodyIngredientIdMax),
+  "checkType": zod.enum(['pre-run', '30-minute']),
+  "actualValue": zod.number().gt(recordQcWeightCheckBodyActualValueExclusiveMin).max(recordQcWeightCheckBodyActualValueMax),
+  "actualUnit": zod.enum(['oz', 'g', 'lb', 'kg']),
+  "note": zod.string().max(recordQcWeightCheckBodyNoteMax).optional()
+})
+
+export const RecordQcWeightCheckResponse = zod.object({
+  "event": zod.object({
+  "id": zod.int(),
+  "operationId": zod.uuid(),
+  "recordId": zod.uuid(),
+  "eventType": zod.enum(['lot', 'weight', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "runId": zod.string().nullable(),
+  "profileKey": zod.string().nullable(),
+  "ingredientId": zod.string().nullable(),
+  "ingredientName": zod.string().nullable(),
+  "station": zod.string().nullable(),
+  "relatedEventId": zod.string().nullable(),
+  "actorId": zod.string().nullable(),
+  "payload": zod.record(zod.string(), zod.unknown()),
+  "createdAt": zod.coerce.date(),
+  "corrected": zod.boolean().optional(),
+  "redactedFields": zod.array(zod.string()).optional()
+})
+})
+
+
+/**
+ * @summary Read QC records and review state for one run
+ */
+
+
+
+export const GetQcRunParams = zod.object({
+  "runId": zod.coerce.string().min(1).max(getQcRunPathRunIdMax)
+})
+
+export const GetQcRunResponse = zod.object({
+  "runId": zod.string(),
+  "items": zod.array(zod.object({
+  "id": zod.int(),
+  "operationId": zod.uuid(),
+  "recordId": zod.uuid(),
+  "eventType": zod.enum(['lot', 'weight', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "runId": zod.string().nullable(),
+  "profileKey": zod.string().nullable(),
+  "ingredientId": zod.string().nullable(),
+  "ingredientName": zod.string().nullable(),
+  "station": zod.string().nullable(),
+  "relatedEventId": zod.string().nullable(),
+  "actorId": zod.string().nullable(),
+  "payload": zod.record(zod.string(), zod.unknown()),
+  "createdAt": zod.coerce.date(),
+  "corrected": zod.boolean().optional(),
+  "redactedFields": zod.array(zod.string()).optional()
+})),
+  "hasMore": zod.boolean(),
+  "nextCursor": zod.int().nullable(),
+  "signoff": zod.union([zod.object({
+  "eventId": zod.int(),
+  "actorId": zod.string().nullable(),
+  "createdAt": zod.coerce.date(),
+  "note": zod.string(),
+  "signedOff": zod.boolean(),
+  "reopened": zod.boolean()
+}),zod.null()])
+})
+
+
+/**
+ * Snapshots the visible run footprint and its unknown/incomplete state. This does not change the manual run allergen field or block production.
+ * @summary Record the non-blocking pre-run allergen and staged-ingredient review
+ */
+
+
+
+
+
+
+
+
+
+
+
+
+
+export const RecordQcAllergenReviewBody = zod.object({
+  "operationId": zod.uuid(),
+  "runId": zod.string().min(1).max(recordQcAllergenReviewBodyRunIdMax),
+  "footprintReviewed": zod.literal(true),
+  "footprint": zod.object({
+  "status": zod.enum(['complete', 'incomplete', 'unavailable']),
+  "allergens": zod.array(zod.enum(['egg', 'soy', 'milk', 'wheat', 'peanuts', 'tree nuts', 'fish', 'shellfish', 'sesame'])).max(recordQcAllergenReviewBodyFootprintAllergensMax),
+  "unknownIngredients": zod.array(zod.string().min(1).max(recordQcAllergenReviewBodyFootprintUnknownIngredientsItemMax)).max(recordQcAllergenReviewBodyFootprintUnknownIngredientsMax),
+  "missingComponents": zod.array(zod.string().min(1).max(recordQcAllergenReviewBodyFootprintMissingComponentsItemMax)).max(recordQcAllergenReviewBodyFootprintMissingComponentsMax)
+}),
+  "stagedIngredients": zod.array(zod.object({
+  "area": zod.enum(['Dough', 'Sauce', 'Frontline']),
+  "name": zod.string().min(1).max(recordQcAllergenReviewBodyStagedIngredientsItemNameMax),
+  "quantity": zod.string().min(1).max(recordQcAllergenReviewBodyStagedIngredientsItemQuantityMax),
+  "unit": zod.string().min(1).max(recordQcAllergenReviewBodyStagedIngredientsItemUnitMax),
+  "staged": zod.boolean()
+})).max(recordQcAllergenReviewBodyStagedIngredientsMax),
+  "stagedIngredientsStatus": zod.enum(['reviewed', 'not-reviewed', 'unknown']),
+  "cleaningStatus": zod.enum(['verified', 'unverified', 'unknown', 'not-applicable']),
+  "note": zod.string().max(recordQcAllergenReviewBodyNoteMax).optional()
+})
+
+export const RecordQcAllergenReviewResponse = zod.object({
+  "event": zod.object({
+  "id": zod.int(),
+  "operationId": zod.uuid(),
+  "recordId": zod.uuid(),
+  "eventType": zod.enum(['lot', 'weight', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "runId": zod.string().nullable(),
+  "profileKey": zod.string().nullable(),
+  "ingredientId": zod.string().nullable(),
+  "ingredientName": zod.string().nullable(),
+  "station": zod.string().nullable(),
+  "relatedEventId": zod.string().nullable(),
+  "actorId": zod.string().nullable(),
+  "payload": zod.record(zod.string(), zod.unknown()),
+  "createdAt": zod.coerce.date(),
+  "corrected": zod.boolean().optional(),
+  "redactedFields": zod.array(zod.string()).optional()
+})
+})
+
+
+/**
+ * Cleaning is recorded without creating a production or shipping hold.
+ * @summary Record cleaning method and timing
+ */
+
+
+
+
+export const RecordQcCleaningBody = zod.object({
+  "operationId": zod.uuid(),
+  "runId": zod.string().min(1).max(recordQcCleaningBodyRunIdMax),
+  "method": zod.enum(['standard', 'deep', 'chemical', 'other']),
+  "startedAt": zod.coerce.date(),
+  "endedAt": zod.coerce.date(),
+  "note": zod.string().max(recordQcCleaningBodyNoteMax).optional()
+})
+
+export const RecordQcCleaningResponse = zod.object({
+  "event": zod.object({
+  "id": zod.int(),
+  "operationId": zod.uuid(),
+  "recordId": zod.uuid(),
+  "eventType": zod.enum(['lot', 'weight', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "runId": zod.string().nullable(),
+  "profileKey": zod.string().nullable(),
+  "ingredientId": zod.string().nullable(),
+  "ingredientName": zod.string().nullable(),
+  "station": zod.string().nullable(),
+  "relatedEventId": zod.string().nullable(),
+  "actorId": zod.string().nullable(),
+  "payload": zod.record(zod.string(), zod.unknown()),
+  "createdAt": zod.coerce.date(),
+  "corrected": zod.boolean().optional(),
+  "redactedFields": zod.array(zod.string()).optional()
+})
+})
+
+
+/**
+ * @summary Independently verify a cleaning record
+ */
+
+
+
+export const VerifyQcCleaningParams = zod.object({
+  "eventId": zod.coerce.number().int().min(1)
+})
+
+
+
+
+export const VerifyQcCleaningBody = zod.object({
+  "operationId": zod.uuid(),
+  "note": zod.string().max(verifyQcCleaningBodyNoteMax).optional()
+})
+
+export const VerifyQcCleaningResponse = zod.object({
+  "event": zod.object({
+  "id": zod.int(),
+  "operationId": zod.uuid(),
+  "recordId": zod.uuid(),
+  "eventType": zod.enum(['lot', 'weight', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "runId": zod.string().nullable(),
+  "profileKey": zod.string().nullable(),
+  "ingredientId": zod.string().nullable(),
+  "ingredientName": zod.string().nullable(),
+  "station": zod.string().nullable(),
+  "relatedEventId": zod.string().nullable(),
+  "actorId": zod.string().nullable(),
+  "payload": zod.record(zod.string(), zod.unknown()),
+  "createdAt": zod.coerce.date(),
+  "corrected": zod.boolean().optional(),
+  "redactedFields": zod.array(zod.string()).optional()
+})
+})
+
+
+/**
+ * A new QC record after sign-off reopens review for that run.
+ * @summary Sign off the current QC record set for a run
+ */
+
+
+
+
+export const SignoffQcRunBody = zod.object({
+  "operationId": zod.uuid(),
+  "runId": zod.string().min(1).max(signoffQcRunBodyRunIdMax),
+  "note": zod.string().max(signoffQcRunBodyNoteMax).optional()
+})
+
+export const SignoffQcRunResponse = zod.object({
+  "event": zod.object({
+  "id": zod.int(),
+  "operationId": zod.uuid(),
+  "recordId": zod.uuid(),
+  "eventType": zod.enum(['lot', 'weight', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "runId": zod.string().nullable(),
+  "profileKey": zod.string().nullable(),
+  "ingredientId": zod.string().nullable(),
+  "ingredientName": zod.string().nullable(),
+  "station": zod.string().nullable(),
+  "relatedEventId": zod.string().nullable(),
+  "actorId": zod.string().nullable(),
+  "payload": zod.record(zod.string(), zod.unknown()),
+  "createdAt": zod.coerce.date(),
+  "corrected": zod.boolean().optional(),
+  "redactedFields": zod.array(zod.string()).optional()
+})
+})
+
+
+/**
+ * @summary Read bounded, facility-scoped QC history
+ */
+
+
+
+
+
+
+export const GetQcHistoryQueryParams = zod.object({
+  "from": zod.coerce.string().optional().describe('Inclusive ISO date or timestamp'),
+  "to": zod.coerce.string().optional().describe('Inclusive ISO date or timestamp'),
+  "runId": zod.coerce.string().max(getQcHistoryQueryRunIdMax).optional(),
+  "ingredientId": zod.coerce.string().max(getQcHistoryQueryIngredientIdMax).optional(),
+  "station": zod.enum(['dough', 'sauce', 'frontline', 'warehouse', 'packaging', 'other']).optional(),
+  "limit": zod.coerce.number().int().min(1).max(getQcHistoryQueryLimitMax).default(getQcHistoryQueryLimitDefault),
+  "cursor": zod.coerce.number().int().min(1).optional()
+})
+
+export const GetQcHistoryResponse = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.int(),
+  "operationId": zod.uuid(),
+  "recordId": zod.uuid(),
+  "eventType": zod.enum(['lot', 'weight', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "runId": zod.string().nullable(),
+  "profileKey": zod.string().nullable(),
+  "ingredientId": zod.string().nullable(),
+  "ingredientName": zod.string().nullable(),
+  "station": zod.string().nullable(),
+  "relatedEventId": zod.string().nullable(),
+  "actorId": zod.string().nullable(),
+  "payload": zod.record(zod.string(), zod.unknown()),
+  "createdAt": zod.coerce.date(),
+  "corrected": zod.boolean().optional(),
+  "redactedFields": zod.array(zod.string()).optional()
+})),
+  "hasMore": zod.boolean(),
+  "nextCursor": zod.int().nullable()
+})
+
+
+/**
+ * QC manager or app manager capability required.
+ * @summary Export full filtered QC history as CSV
+ */
+
+
+
+
+export const ExportQcHistoryCsvQueryParams = zod.object({
+  "from": zod.coerce.string().optional(),
+  "to": zod.coerce.string().optional(),
+  "runId": zod.coerce.string().max(exportQcHistoryCsvQueryRunIdMax).optional(),
+  "ingredientId": zod.coerce.string().max(exportQcHistoryCsvQueryIngredientIdMax).optional(),
+  "station": zod.enum(['dough', 'sauce', 'frontline', 'warehouse', 'packaging', 'other']).optional()
+})
+
+export const ExportQcHistoryCsvResponse = zod.unknown()
+
+
+/**
+ * @summary Append an audited correction to a QC record
+ */
+
+
+
+export const CorrectQcEventParams = zod.object({
+  "eventId": zod.coerce.number().int().min(1)
+})
+
+
+
+
+export const CorrectQcEventBody = zod.object({
+  "operationId": zod.uuid(),
+  "reason": zod.string().min(1).max(correctQcEventBodyReasonMax),
+  "replacement": zod.record(zod.string(), zod.unknown())
+})
+
+export const CorrectQcEventResponse = zod.object({
+  "event": zod.object({
+  "id": zod.int(),
+  "operationId": zod.uuid(),
+  "recordId": zod.uuid(),
+  "eventType": zod.enum(['lot', 'weight', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "runId": zod.string().nullable(),
+  "profileKey": zod.string().nullable(),
+  "ingredientId": zod.string().nullable(),
+  "ingredientName": zod.string().nullable(),
+  "station": zod.string().nullable(),
+  "relatedEventId": zod.string().nullable(),
+  "actorId": zod.string().nullable(),
+  "payload": zod.record(zod.string(), zod.unknown()),
+  "createdAt": zod.coerce.date(),
+  "corrected": zod.boolean().optional(),
+  "redactedFields": zod.array(zod.string()).optional()
+})
+})
+
+
+/**
+ * @summary Append a privacy redaction event for selected QC fields
+ */
+
+
+
+export const RedactQcEventParams = zod.object({
+  "eventId": zod.coerce.number().int().min(1)
+})
+
+
+
+
+
+export const RedactQcEventBody = zod.object({
+  "operationId": zod.uuid(),
+  "reason": zod.string().min(1).max(redactQcEventBodyReasonMax),
+  "fields": zod.array(zod.enum(['actorId', 'ingredientName', 'payload.note', 'payload.lotNumber'])).min(1).max(redactQcEventBodyFieldsMax)
+})
+
+export const RedactQcEventResponse = zod.object({
+  "event": zod.object({
+  "id": zod.int(),
+  "operationId": zod.uuid(),
+  "recordId": zod.uuid(),
+  "eventType": zod.enum(['lot', 'weight', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "runId": zod.string().nullable(),
+  "profileKey": zod.string().nullable(),
+  "ingredientId": zod.string().nullable(),
+  "ingredientName": zod.string().nullable(),
+  "station": zod.string().nullable(),
+  "relatedEventId": zod.string().nullable(),
+  "actorId": zod.string().nullable(),
+  "payload": zod.record(zod.string(), zod.unknown()),
+  "createdAt": zod.coerce.date(),
+  "corrected": zod.boolean().optional(),
+  "redactedFields": zod.array(zod.string()).optional()
+})
+})
 
 
 /**
@@ -6999,7 +7549,7 @@ export const UpdateIncidentWorkflowResponse = zod.object({
 export const GetMeResponse = zod.object({
   "userId": zod.string(),
   "role": zod.string().describe('The name of the role assigned to this user.'),
-  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login "Get Started" overview.'),
@@ -7020,7 +7570,7 @@ export const GetMeResponse = zod.object({
 export const MarkOnboardingSeenResponse = zod.object({
   "userId": zod.string(),
   "role": zod.string().describe('The name of the role assigned to this user.'),
-  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login "Get Started" overview.'),
@@ -7041,7 +7591,7 @@ export const MarkOnboardingSeenResponse = zod.object({
 export const MarkTourCompletedResponse = zod.object({
   "userId": zod.string(),
   "role": zod.string().describe('The name of the role assigned to this user.'),
-  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login "Get Started" overview.'),
@@ -7066,7 +7616,7 @@ export const SetNotificationPrefsBody = zod.object({
 export const SetNotificationPrefsResponse = zod.object({
   "userId": zod.string(),
   "role": zod.string().describe('The name of the role assigned to this user.'),
-  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login "Get Started" overview.'),
@@ -7091,7 +7641,7 @@ export const SetFloorModeBody = zod.object({
 export const SetFloorModeResponse = zod.object({
   "userId": zod.string(),
   "role": zod.string().describe('The name of the role assigned to this user.'),
-  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login "Get Started" overview.'),
@@ -7110,7 +7660,7 @@ export const SetFloorModeResponse = zod.object({
  */
 export const ListRolesResponseItem = zod.object({
   "name": zod.string().describe('Unique role name (also its identifier).'),
-  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')),
   "builtin": zod.boolean().describe('Whether this is a built-in role. The "manager" role is protected (cannot be deleted and must keep the manage-staff capability) and "operator" is the default no-capability role. Built-in roles cannot be deleted.')
 })
 export const ListRolesResponse = zod.array(ListRolesResponseItem)
@@ -7124,12 +7674,12 @@ export const ListRolesResponse = zod.array(ListRolesResponseItem)
 
 export const CreateRoleBody = zod.object({
   "name": zod.string().min(1).max(createRoleBodyNameMax),
-  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.'))
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.'))
 })
 
 export const CreateRoleResponse = zod.object({
   "name": zod.string().describe('Unique role name (also its identifier).'),
-  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')),
   "builtin": zod.boolean().describe('Whether this is a built-in role. The "manager" role is protected (cannot be deleted and must keep the manage-staff capability) and "operator" is the default no-capability role. Built-in roles cannot be deleted.')
 })
 
@@ -7145,13 +7695,13 @@ export const UpdateRoleParams = zod.object({
 
 
 export const UpdateRoleBody = zod.object({
-  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')),
   "name": zod.string().min(1).max(updateRoleBodyNameMax).optional().describe('Optional new name for the role (rename). When present and different from the path name, the role is renamed and every staff assignment is moved to the new name. Built-in roles cannot be renamed.')
 })
 
 export const UpdateRoleResponse = zod.object({
   "name": zod.string().describe('Unique role name (also its identifier).'),
-  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')),
   "builtin": zod.boolean().describe('Whether this is a built-in role. The "manager" role is protected (cannot be deleted and must keep the manage-staff capability) and "operator" is the default no-capability role. Built-in roles cannot be deleted.')
 })
 
@@ -7172,7 +7722,7 @@ export const DeleteRoleResponse = zod.void()
 export const ListStaffResponseItem = zod.object({
   "userId": zod.string(),
   "role": zod.string().describe('The name of the role assigned to this user.'),
-  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login "Get Started" overview.'),
@@ -7201,7 +7751,7 @@ export const SetStaffRoleBody = zod.object({
 export const SetStaffRoleResponse = zod.object({
   "userId": zod.string(),
   "role": zod.string().describe('The name of the role assigned to this user.'),
-  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login "Get Started" overview.'),

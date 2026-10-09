@@ -81,6 +81,7 @@ import type {
   DuplicateReviewList,
   ExportAuditLogsCsvParams,
   ExportAuditLogsPdfParams,
+  ExportQcHistoryCsvParams,
   FacilityKnowledgeList,
   FieldCheckIngestResult,
   FieldCheckObservationBatch,
@@ -98,6 +99,8 @@ import type {
   GetOperationalRunViewParams,
   GetProfileDataHealthWorkspace200,
   GetProfileNameLinkCleanupAudit200,
+  GetQcHistoryParams,
+  GetQcTargetsParams,
   GetShiftHandoffDigestParams,
   GetSignupCodeStatus200,
   GetSyncTodayParams,
@@ -186,6 +189,19 @@ import type {
   ProfileDataHealthApplyResult,
   PutSyncToday200,
   PutSyncTodayParams,
+  QcAllergenReviewInput,
+  QcCleaningInput,
+  QcCorrectionInput,
+  QcEventResponse,
+  QcHistoryResponse,
+  QcLotInput,
+  QcNoteInput,
+  QcRedactionInput,
+  QcRunResponse,
+  QcRunSignoffInput,
+  QcTargetInput,
+  QcTargetsResponse,
+  QcWeightCheckInput,
   QualityCheckPhotoInput,
   QualityCheckRecord,
   QualityCheckRecordInput,
@@ -4098,6 +4114,1234 @@ export function useListQualityChecks<TData = Awaited<ReturnType<typeof listQuali
 
 
 
+
+export const getGetQcTargetsUrl = (params: GetQcTargetsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/qc/targets?${stringifiedParams}` : `/api/qc/targets`
+}
+
+/**
+ * Uses the authenticated facility scope. An ingredient without one unambiguous explicit target is returned as not-evaluated; crust targets are included only if the import contract provides an explicit value.
+ * @summary Resolve explicit imported and reviewed QC weight targets
+ */
+export const getQcTargets = async (params: GetQcTargetsParams, options?: Parameters<typeof customFetch>[1]): Promise<QcTargetsResponse> => {
+
+  return customFetch<QcTargetsResponse>(getGetQcTargetsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetQcTargetsQueryKey = (params?: GetQcTargetsParams,) => {
+    return [
+    `/api/qc/targets`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetQcTargetsQueryOptions = <TData = Awaited<ReturnType<typeof getQcTargets>>, TError = ErrorType<void>>(params: GetQcTargetsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcTargets>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetQcTargetsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getQcTargets>>> = ({ signal }) => getQcTargets(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getQcTargets>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetQcTargetsQueryResult = NonNullable<Awaited<ReturnType<typeof getQcTargets>>>
+export type GetQcTargetsQueryError = ErrorType<void>
+
+
+export function useGetQcTargets<TData = Awaited<ReturnType<typeof getQcTargets>>, TError = ErrorType<void>>(
+ params: GetQcTargetsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcTargets>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getQcTargets>>,
+          TError,
+          Awaited<ReturnType<typeof getQcTargets>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetQcTargets<TData = Awaited<ReturnType<typeof getQcTargets>>, TError = ErrorType<void>>(
+ params: GetQcTargetsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcTargets>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getQcTargets>>,
+          TError,
+          Awaited<ReturnType<typeof getQcTargets>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetQcTargets<TData = Awaited<ReturnType<typeof getQcTargets>>, TError = ErrorType<void>>(
+ params: GetQcTargetsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcTargets>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Resolve explicit imported and reviewed QC weight targets
+ */
+
+export function useGetQcTargets<TData = Awaited<ReturnType<typeof getQcTargets>>, TError = ErrorType<void>>(
+ params: GetQcTargetsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcTargets>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetQcTargetsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSetQcTargetUrl = () => {
+
+
+
+
+  return `/api/qc/targets`
+}
+
+/**
+ * Manager-only, append-only target setting. A null target, unit, and tolerance together clear the override and restore spec-import resolution.
+ * @summary Add a reviewed QC target override or clear an existing override
+ */
+export const setQcTarget = async (qcTargetInput: QcTargetInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<QcEventResponse>(getSetQcTargetUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(qcTargetInput)
+  }
+);}
+
+
+
+
+
+export const getSetQcTargetMutationKey = () => ['setQcTarget'] as const;
+
+export const getSetQcTargetMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setQcTarget>>, TError,SetQcTargetMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof setQcTarget>>, TError,SetQcTargetMutationVariables, TContext> => {
+
+const mutationKey = getSetQcTargetMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setQcTarget>>, SetQcTargetMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  setQcTarget(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetQcTargetMutationResult = NonNullable<Awaited<ReturnType<typeof setQcTarget>>>
+    export type SetQcTargetMutationBody = BodyType<QcTargetInput>
+    export type SetQcTargetMutationError = ErrorType<void>
+    export type SetQcTargetMutationVariables = {data: BodyType<QcTargetInput>}
+
+    /**
+ * @summary Add a reviewed QC target override or clear an existing override
+ */
+export const useSetQcTarget = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setQcTarget>>, TError,SetQcTargetMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof setQcTarget>>,
+        TError,
+        SetQcTargetMutationVariables,
+        TContext
+      > => {
+      return useMutation(getSetQcTargetMutationOptions(options), queryClient);
+    }
+
+export const getRecordQcLotUrl = () => {
+
+
+
+
+  return `/api/qc/lots`
+}
+
+/**
+ * Multiple lots for the same run and ingredient are retained as separate events.
+ * @summary Record an ingredient lot for a production run
+ */
+export const recordQcLot = async (qcLotInput: QcLotInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<QcEventResponse>(getRecordQcLotUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(qcLotInput)
+  }
+);}
+
+
+
+
+
+export const getRecordQcLotMutationKey = () => ['recordQcLot'] as const;
+
+export const getRecordQcLotMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordQcLot>>, TError,RecordQcLotMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof recordQcLot>>, TError,RecordQcLotMutationVariables, TContext> => {
+
+const mutationKey = getRecordQcLotMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof recordQcLot>>, RecordQcLotMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  recordQcLot(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RecordQcLotMutationResult = NonNullable<Awaited<ReturnType<typeof recordQcLot>>>
+    export type RecordQcLotMutationBody = BodyType<QcLotInput>
+    export type RecordQcLotMutationError = ErrorType<void>
+    export type RecordQcLotMutationVariables = {data: BodyType<QcLotInput>}
+
+    /**
+ * @summary Record an ingredient lot for a production run
+ */
+export const useRecordQcLot = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordQcLot>>, TError,RecordQcLotMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof recordQcLot>>,
+        TError,
+        RecordQcLotMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRecordQcLotMutationOptions(options), queryClient);
+    }
+
+export const getRecordQcWeightCheckUrl = () => {
+
+
+
+
+  return `/api/qc/weight-checks`
+}
+
+/**
+ * The server resolves and snapshots the target. Missing, conflicting, or unit-mismatched targets produce not-evaluated, never an inferred result. Out-of-tolerance results require a note.
+ * @summary Record a pre-run or 30-minute ingredient weight check
+ */
+export const recordQcWeightCheck = async (qcWeightCheckInput: QcWeightCheckInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<QcEventResponse>(getRecordQcWeightCheckUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(qcWeightCheckInput)
+  }
+);}
+
+
+
+
+
+export const getRecordQcWeightCheckMutationKey = () => ['recordQcWeightCheck'] as const;
+
+export const getRecordQcWeightCheckMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordQcWeightCheck>>, TError,RecordQcWeightCheckMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof recordQcWeightCheck>>, TError,RecordQcWeightCheckMutationVariables, TContext> => {
+
+const mutationKey = getRecordQcWeightCheckMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof recordQcWeightCheck>>, RecordQcWeightCheckMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  recordQcWeightCheck(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RecordQcWeightCheckMutationResult = NonNullable<Awaited<ReturnType<typeof recordQcWeightCheck>>>
+    export type RecordQcWeightCheckMutationBody = BodyType<QcWeightCheckInput>
+    export type RecordQcWeightCheckMutationError = ErrorType<void>
+    export type RecordQcWeightCheckMutationVariables = {data: BodyType<QcWeightCheckInput>}
+
+    /**
+ * @summary Record a pre-run or 30-minute ingredient weight check
+ */
+export const useRecordQcWeightCheck = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordQcWeightCheck>>, TError,RecordQcWeightCheckMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof recordQcWeightCheck>>,
+        TError,
+        RecordQcWeightCheckMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRecordQcWeightCheckMutationOptions(options), queryClient);
+    }
+
+export const getGetQcRunUrl = (runId: string,) => {
+
+
+
+
+  return `/api/qc/runs/${runId}`
+}
+
+/**
+ * @summary Read QC records and review state for one run
+ */
+export const getQcRun = async (runId: string, options?: Parameters<typeof customFetch>[1]): Promise<QcRunResponse> => {
+
+  return customFetch<QcRunResponse>(getGetQcRunUrl(runId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetQcRunQueryKey = (runId: string,) => {
+    return [
+    `/api/qc/runs/${runId}`
+    ] as const;
+    }
+
+
+export const getGetQcRunQueryOptions = <TData = Awaited<ReturnType<typeof getQcRun>>, TError = ErrorType<void>>(runId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcRun>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetQcRunQueryKey(runId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getQcRun>>> = ({ signal }) => getQcRun(runId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: runId !== null && runId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getQcRun>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetQcRunQueryResult = NonNullable<Awaited<ReturnType<typeof getQcRun>>>
+export type GetQcRunQueryError = ErrorType<void>
+
+
+export function useGetQcRun<TData = Awaited<ReturnType<typeof getQcRun>>, TError = ErrorType<void>>(
+ runId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcRun>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getQcRun>>,
+          TError,
+          Awaited<ReturnType<typeof getQcRun>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetQcRun<TData = Awaited<ReturnType<typeof getQcRun>>, TError = ErrorType<void>>(
+ runId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcRun>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getQcRun>>,
+          TError,
+          Awaited<ReturnType<typeof getQcRun>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetQcRun<TData = Awaited<ReturnType<typeof getQcRun>>, TError = ErrorType<void>>(
+ runId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcRun>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Read QC records and review state for one run
+ */
+
+export function useGetQcRun<TData = Awaited<ReturnType<typeof getQcRun>>, TError = ErrorType<void>>(
+ runId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcRun>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetQcRunQueryOptions(runId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getRecordQcAllergenReviewUrl = () => {
+
+
+
+
+  return `/api/qc/allergen-reviews`
+}
+
+/**
+ * Snapshots the visible run footprint and its unknown/incomplete state. This does not change the manual run allergen field or block production.
+ * @summary Record the non-blocking pre-run allergen and staged-ingredient review
+ */
+export const recordQcAllergenReview = async (qcAllergenReviewInput: QcAllergenReviewInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<QcEventResponse>(getRecordQcAllergenReviewUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(qcAllergenReviewInput)
+  }
+);}
+
+
+
+
+
+export const getRecordQcAllergenReviewMutationKey = () => ['recordQcAllergenReview'] as const;
+
+export const getRecordQcAllergenReviewMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordQcAllergenReview>>, TError,RecordQcAllergenReviewMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof recordQcAllergenReview>>, TError,RecordQcAllergenReviewMutationVariables, TContext> => {
+
+const mutationKey = getRecordQcAllergenReviewMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof recordQcAllergenReview>>, RecordQcAllergenReviewMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  recordQcAllergenReview(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RecordQcAllergenReviewMutationResult = NonNullable<Awaited<ReturnType<typeof recordQcAllergenReview>>>
+    export type RecordQcAllergenReviewMutationBody = BodyType<QcAllergenReviewInput>
+    export type RecordQcAllergenReviewMutationError = ErrorType<void>
+    export type RecordQcAllergenReviewMutationVariables = {data: BodyType<QcAllergenReviewInput>}
+
+    /**
+ * @summary Record the non-blocking pre-run allergen and staged-ingredient review
+ */
+export const useRecordQcAllergenReview = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordQcAllergenReview>>, TError,RecordQcAllergenReviewMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof recordQcAllergenReview>>,
+        TError,
+        RecordQcAllergenReviewMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRecordQcAllergenReviewMutationOptions(options), queryClient);
+    }
+
+export const getRecordQcCleaningUrl = () => {
+
+
+
+
+  return `/api/qc/cleaning-records`
+}
+
+/**
+ * Cleaning is recorded without creating a production or shipping hold.
+ * @summary Record cleaning method and timing
+ */
+export const recordQcCleaning = async (qcCleaningInput: QcCleaningInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<QcEventResponse>(getRecordQcCleaningUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(qcCleaningInput)
+  }
+);}
+
+
+
+
+
+export const getRecordQcCleaningMutationKey = () => ['recordQcCleaning'] as const;
+
+export const getRecordQcCleaningMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordQcCleaning>>, TError,RecordQcCleaningMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof recordQcCleaning>>, TError,RecordQcCleaningMutationVariables, TContext> => {
+
+const mutationKey = getRecordQcCleaningMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof recordQcCleaning>>, RecordQcCleaningMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  recordQcCleaning(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RecordQcCleaningMutationResult = NonNullable<Awaited<ReturnType<typeof recordQcCleaning>>>
+    export type RecordQcCleaningMutationBody = BodyType<QcCleaningInput>
+    export type RecordQcCleaningMutationError = ErrorType<void>
+    export type RecordQcCleaningMutationVariables = {data: BodyType<QcCleaningInput>}
+
+    /**
+ * @summary Record cleaning method and timing
+ */
+export const useRecordQcCleaning = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordQcCleaning>>, TError,RecordQcCleaningMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof recordQcCleaning>>,
+        TError,
+        RecordQcCleaningMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRecordQcCleaningMutationOptions(options), queryClient);
+    }
+
+export const getVerifyQcCleaningUrl = (eventId: number,) => {
+
+
+
+
+  return `/api/qc/cleaning-records/${eventId}/verification`
+}
+
+/**
+ * @summary Independently verify a cleaning record
+ */
+export const verifyQcCleaning = async (eventId: number,
+    qcNoteInput: QcNoteInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<QcEventResponse>(getVerifyQcCleaningUrl(eventId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(qcNoteInput)
+  }
+);}
+
+
+
+
+
+export const getVerifyQcCleaningMutationKey = () => ['verifyQcCleaning'] as const;
+
+export const getVerifyQcCleaningMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof verifyQcCleaning>>, TError,VerifyQcCleaningMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof verifyQcCleaning>>, TError,VerifyQcCleaningMutationVariables, TContext> => {
+
+const mutationKey = getVerifyQcCleaningMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof verifyQcCleaning>>, VerifyQcCleaningMutationVariables> = (props) => {
+          const {eventId,data} = props ?? {};
+
+          return  verifyQcCleaning(eventId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type VerifyQcCleaningMutationResult = NonNullable<Awaited<ReturnType<typeof verifyQcCleaning>>>
+    export type VerifyQcCleaningMutationBody = BodyType<QcNoteInput>
+    export type VerifyQcCleaningMutationError = ErrorType<void>
+    export type VerifyQcCleaningMutationVariables = {eventId: number;data: BodyType<QcNoteInput>}
+
+    /**
+ * @summary Independently verify a cleaning record
+ */
+export const useVerifyQcCleaning = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof verifyQcCleaning>>, TError,VerifyQcCleaningMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof verifyQcCleaning>>,
+        TError,
+        VerifyQcCleaningMutationVariables,
+        TContext
+      > => {
+      return useMutation(getVerifyQcCleaningMutationOptions(options), queryClient);
+    }
+
+export const getSignoffQcRunUrl = () => {
+
+
+
+
+  return `/api/qc/run-signoffs`
+}
+
+/**
+ * A new QC record after sign-off reopens review for that run.
+ * @summary Sign off the current QC record set for a run
+ */
+export const signoffQcRun = async (qcRunSignoffInput: QcRunSignoffInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<QcEventResponse>(getSignoffQcRunUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(qcRunSignoffInput)
+  }
+);}
+
+
+
+
+
+export const getSignoffQcRunMutationKey = () => ['signoffQcRun'] as const;
+
+export const getSignoffQcRunMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signoffQcRun>>, TError,SignoffQcRunMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof signoffQcRun>>, TError,SignoffQcRunMutationVariables, TContext> => {
+
+const mutationKey = getSignoffQcRunMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof signoffQcRun>>, SignoffQcRunMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  signoffQcRun(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SignoffQcRunMutationResult = NonNullable<Awaited<ReturnType<typeof signoffQcRun>>>
+    export type SignoffQcRunMutationBody = BodyType<QcRunSignoffInput>
+    export type SignoffQcRunMutationError = ErrorType<void>
+    export type SignoffQcRunMutationVariables = {data: BodyType<QcRunSignoffInput>}
+
+    /**
+ * @summary Sign off the current QC record set for a run
+ */
+export const useSignoffQcRun = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signoffQcRun>>, TError,SignoffQcRunMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof signoffQcRun>>,
+        TError,
+        SignoffQcRunMutationVariables,
+        TContext
+      > => {
+      return useMutation(getSignoffQcRunMutationOptions(options), queryClient);
+    }
+
+export const getGetQcHistoryUrl = (params?: GetQcHistoryParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/qc/history?${stringifiedParams}` : `/api/qc/history`
+}
+
+/**
+ * @summary Read bounded, facility-scoped QC history
+ */
+export const getQcHistory = async (params?: GetQcHistoryParams, options?: Parameters<typeof customFetch>[1]): Promise<QcHistoryResponse> => {
+
+  return customFetch<QcHistoryResponse>(getGetQcHistoryUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetQcHistoryQueryKey = (params?: GetQcHistoryParams,) => {
+    return [
+    `/api/qc/history`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetQcHistoryQueryOptions = <TData = Awaited<ReturnType<typeof getQcHistory>>, TError = ErrorType<void>>(params?: GetQcHistoryParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcHistory>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetQcHistoryQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getQcHistory>>> = ({ signal }) => getQcHistory(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getQcHistory>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetQcHistoryQueryResult = NonNullable<Awaited<ReturnType<typeof getQcHistory>>>
+export type GetQcHistoryQueryError = ErrorType<void>
+
+
+export function useGetQcHistory<TData = Awaited<ReturnType<typeof getQcHistory>>, TError = ErrorType<void>>(
+ params: undefined |  GetQcHistoryParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcHistory>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getQcHistory>>,
+          TError,
+          Awaited<ReturnType<typeof getQcHistory>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetQcHistory<TData = Awaited<ReturnType<typeof getQcHistory>>, TError = ErrorType<void>>(
+ params?: GetQcHistoryParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcHistory>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getQcHistory>>,
+          TError,
+          Awaited<ReturnType<typeof getQcHistory>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetQcHistory<TData = Awaited<ReturnType<typeof getQcHistory>>, TError = ErrorType<void>>(
+ params?: GetQcHistoryParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcHistory>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Read bounded, facility-scoped QC history
+ */
+
+export function useGetQcHistory<TData = Awaited<ReturnType<typeof getQcHistory>>, TError = ErrorType<void>>(
+ params?: GetQcHistoryParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getQcHistory>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetQcHistoryQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getExportQcHistoryCsvUrl = (params?: ExportQcHistoryCsvParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/qc/history.csv?${stringifiedParams}` : `/api/qc/history.csv`
+}
+
+/**
+ * QC manager or app manager capability required.
+ * @summary Export full filtered QC history as CSV
+ */
+export const exportQcHistoryCsv = async (params?: ExportQcHistoryCsvParams, options?: Parameters<typeof customFetch>[1]): Promise<Blob> => {
+
+  return customFetch<Blob>(getExportQcHistoryCsvUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getExportQcHistoryCsvQueryKey = (params?: ExportQcHistoryCsvParams,) => {
+    return [
+    `/api/qc/history.csv`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getExportQcHistoryCsvQueryOptions = <TData = Awaited<ReturnType<typeof exportQcHistoryCsv>>, TError = ErrorType<void>>(params?: ExportQcHistoryCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportQcHistoryCsv>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getExportQcHistoryCsvQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof exportQcHistoryCsv>>> = ({ signal }) => exportQcHistoryCsv(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof exportQcHistoryCsv>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ExportQcHistoryCsvQueryResult = NonNullable<Awaited<ReturnType<typeof exportQcHistoryCsv>>>
+export type ExportQcHistoryCsvQueryError = ErrorType<void>
+
+
+export function useExportQcHistoryCsv<TData = Awaited<ReturnType<typeof exportQcHistoryCsv>>, TError = ErrorType<void>>(
+ params: undefined |  ExportQcHistoryCsvParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportQcHistoryCsv>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof exportQcHistoryCsv>>,
+          TError,
+          Awaited<ReturnType<typeof exportQcHistoryCsv>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useExportQcHistoryCsv<TData = Awaited<ReturnType<typeof exportQcHistoryCsv>>, TError = ErrorType<void>>(
+ params?: ExportQcHistoryCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportQcHistoryCsv>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof exportQcHistoryCsv>>,
+          TError,
+          Awaited<ReturnType<typeof exportQcHistoryCsv>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useExportQcHistoryCsv<TData = Awaited<ReturnType<typeof exportQcHistoryCsv>>, TError = ErrorType<void>>(
+ params?: ExportQcHistoryCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportQcHistoryCsv>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Export full filtered QC history as CSV
+ */
+
+export function useExportQcHistoryCsv<TData = Awaited<ReturnType<typeof exportQcHistoryCsv>>, TError = ErrorType<void>>(
+ params?: ExportQcHistoryCsvParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportQcHistoryCsv>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getExportQcHistoryCsvQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCorrectQcEventUrl = (eventId: number,) => {
+
+
+
+
+  return `/api/qc/events/${eventId}/corrections`
+}
+
+/**
+ * @summary Append an audited correction to a QC record
+ */
+export const correctQcEvent = async (eventId: number,
+    qcCorrectionInput: QcCorrectionInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<QcEventResponse>(getCorrectQcEventUrl(eventId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(qcCorrectionInput)
+  }
+);}
+
+
+
+
+
+export const getCorrectQcEventMutationKey = () => ['correctQcEvent'] as const;
+
+export const getCorrectQcEventMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof correctQcEvent>>, TError,CorrectQcEventMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof correctQcEvent>>, TError,CorrectQcEventMutationVariables, TContext> => {
+
+const mutationKey = getCorrectQcEventMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof correctQcEvent>>, CorrectQcEventMutationVariables> = (props) => {
+          const {eventId,data} = props ?? {};
+
+          return  correctQcEvent(eventId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CorrectQcEventMutationResult = NonNullable<Awaited<ReturnType<typeof correctQcEvent>>>
+    export type CorrectQcEventMutationBody = BodyType<QcCorrectionInput>
+    export type CorrectQcEventMutationError = ErrorType<void>
+    export type CorrectQcEventMutationVariables = {eventId: number;data: BodyType<QcCorrectionInput>}
+
+    /**
+ * @summary Append an audited correction to a QC record
+ */
+export const useCorrectQcEvent = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof correctQcEvent>>, TError,CorrectQcEventMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof correctQcEvent>>,
+        TError,
+        CorrectQcEventMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCorrectQcEventMutationOptions(options), queryClient);
+    }
+
+export const getRedactQcEventUrl = (eventId: number,) => {
+
+
+
+
+  return `/api/qc/events/${eventId}/redactions`
+}
+
+/**
+ * @summary Append a privacy redaction event for selected QC fields
+ */
+export const redactQcEvent = async (eventId: number,
+    qcRedactionInput: QcRedactionInput, options?: Parameters<typeof customFetch>[1]): Promise<QcEventResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<QcEventResponse>(getRedactQcEventUrl(eventId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(qcRedactionInput)
+  }
+);}
+
+
+
+
+
+export const getRedactQcEventMutationKey = () => ['redactQcEvent'] as const;
+
+export const getRedactQcEventMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof redactQcEvent>>, TError,RedactQcEventMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof redactQcEvent>>, TError,RedactQcEventMutationVariables, TContext> => {
+
+const mutationKey = getRedactQcEventMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof redactQcEvent>>, RedactQcEventMutationVariables> = (props) => {
+          const {eventId,data} = props ?? {};
+
+          return  redactQcEvent(eventId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RedactQcEventMutationResult = NonNullable<Awaited<ReturnType<typeof redactQcEvent>>>
+    export type RedactQcEventMutationBody = BodyType<QcRedactionInput>
+    export type RedactQcEventMutationError = ErrorType<void>
+    export type RedactQcEventMutationVariables = {eventId: number;data: BodyType<QcRedactionInput>}
+
+    /**
+ * @summary Append a privacy redaction event for selected QC fields
+ */
+export const useRedactQcEvent = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof redactQcEvent>>, TError,RedactQcEventMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof redactQcEvent>>,
+        TError,
+        RedactQcEventMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRedactQcEventMutationOptions(options), queryClient);
+    }
 
 export const getWasteInsightUrl = () => {
 

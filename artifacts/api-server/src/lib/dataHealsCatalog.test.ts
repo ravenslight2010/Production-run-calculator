@@ -51,6 +51,7 @@ describe("historical automatic repair registration", () => {
       "speed-adjustment-baseline-v1",
       "recipe-customer-metadata-cleanup-v1",
       "qc-manager-allergen-capability-v1",
+      "qc-first-release-capabilities-v1",
     ]);
     expect(repairs.every((repair) => repair.mode === "automatic" && !repair.managerAllowed)).toBe(true);
     expect(repairs.every((repair) =>

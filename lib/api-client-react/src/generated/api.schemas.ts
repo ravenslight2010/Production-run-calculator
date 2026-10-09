@@ -2747,6 +2747,8 @@ export const Capability = {
   'review-incidents': 'review-incidents',
   'use-ai-tools': 'use-ai-tools',
   'manage-allergens': 'manage-allergens',
+  'record-qc': 'record-qc',
+  'manage-qc': 'manage-qc',
 } as const;
 
 /**
@@ -2801,6 +2803,423 @@ export interface ChangePasswordCredentials {
      * @maxLength 200
      */
   newPassword: string;
+}
+
+export type QcEventEventType = typeof QcEventEventType[keyof typeof QcEventEventType];
+
+
+export const QcEventEventType = {
+  lot: 'lot',
+  weight: 'weight',
+  'allergen-review': 'allergen-review',
+  cleaning: 'cleaning',
+  'cleaning-verification': 'cleaning-verification',
+  'target-setting': 'target-setting',
+  'run-signoff': 'run-signoff',
+  correction: 'correction',
+  redaction: 'redaction',
+} as const;
+
+export type QcEventPayload = { [key: string]: unknown };
+
+export interface QcEvent {
+  id: number;
+  operationId: string;
+  recordId: string;
+  eventType: QcEventEventType;
+  /** @nullable */
+  runId: string | null;
+  /** @nullable */
+  profileKey: string | null;
+  /** @nullable */
+  ingredientId: string | null;
+  /** @nullable */
+  ingredientName: string | null;
+  /** @nullable */
+  station: string | null;
+  /** @nullable */
+  relatedEventId: string | null;
+  /** @nullable */
+  actorId: string | null;
+  payload: QcEventPayload;
+  createdAt: string;
+  corrected?: boolean;
+  redactedFields?: string[];
+}
+
+export interface QcEventResponse {
+  event: QcEvent;
+}
+
+export type QcTargetSource = typeof QcTargetSource[keyof typeof QcTargetSource];
+
+
+export const QcTargetSource = {
+  'spec-import': 'spec-import',
+  'qc-override': 'qc-override',
+  'not-configured': 'not-configured',
+} as const;
+
+export type QcTargetState = typeof QcTargetState[keyof typeof QcTargetState];
+
+
+export const QcTargetState = {
+  configured: 'configured',
+  'not-evaluated': 'not-evaluated',
+} as const;
+
+export interface QcTarget {
+  ingredientId: string;
+  ingredientName: string;
+  /** @nullable */
+  targetValue: number | null;
+  /** @nullable */
+  unit: string | null;
+  /** @nullable */
+  toleranceValue: number | null;
+  source: QcTargetSource;
+  state: QcTargetState;
+  reason?: string;
+  overrideEventId?: number;
+}
+
+export interface QcTargetsResponse {
+  profileKey: string;
+  targets: QcTarget[];
+}
+
+/**
+ * @nullable
+ */
+export type QcTargetInputUnit = typeof QcTargetInputUnit[keyof typeof QcTargetInputUnit] | null;
+
+
+export const QcTargetInputUnit = {
+  oz: 'oz',
+  g: 'g',
+  lb: 'lb',
+  kg: 'kg',
+} as const;
+
+export interface QcTargetInput {
+  operationId: string;
+  /**
+     * @minLength 1
+     * @maxLength 400
+     */
+  profileKey: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  ingredientId: string;
+  /**
+     * @exclusiveMinimum 0
+     * @nullable
+     */
+  targetValue: number | null;
+  /** @nullable */
+  unit: QcTargetInputUnit;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  toleranceValue: number | null;
+  /**
+     * @minLength 1
+     * @maxLength 500
+     */
+  reason: string;
+}
+
+export type QcLotInputStation = typeof QcLotInputStation[keyof typeof QcLotInputStation];
+
+
+export const QcLotInputStation = {
+  dough: 'dough',
+  sauce: 'sauce',
+  frontline: 'frontline',
+  warehouse: 'warehouse',
+  packaging: 'packaging',
+  other: 'other',
+} as const;
+
+export interface QcLotInput {
+  operationId: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  runId: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  ingredientId: string;
+  station: QcLotInputStation;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  lotNumber: string;
+  /** @maxLength 1000 */
+  note?: string;
+}
+
+export type QcWeightCheckInputCheckType = typeof QcWeightCheckInputCheckType[keyof typeof QcWeightCheckInputCheckType];
+
+
+export const QcWeightCheckInputCheckType = {
+  'pre-run': 'pre-run',
+  '30-minute': '30-minute',
+} as const;
+
+export type QcWeightCheckInputActualUnit = typeof QcWeightCheckInputActualUnit[keyof typeof QcWeightCheckInputActualUnit];
+
+
+export const QcWeightCheckInputActualUnit = {
+  oz: 'oz',
+  g: 'g',
+  lb: 'lb',
+  kg: 'kg',
+} as const;
+
+export interface QcWeightCheckInput {
+  operationId: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  runId: string;
+  /**
+     * @minLength 1
+     * @maxLength 400
+     */
+  profileKey: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  ingredientId: string;
+  checkType: QcWeightCheckInputCheckType;
+  /**
+     * @maximum 1000000
+     * @exclusiveMinimum 0
+     */
+  actualValue: number;
+  actualUnit: QcWeightCheckInputActualUnit;
+  /** @maxLength 1000 */
+  note?: string;
+}
+
+export type QcAllergenReviewInputFootprintStatus = typeof QcAllergenReviewInputFootprintStatus[keyof typeof QcAllergenReviewInputFootprintStatus];
+
+
+export const QcAllergenReviewInputFootprintStatus = {
+  complete: 'complete',
+  incomplete: 'incomplete',
+  unavailable: 'unavailable',
+} as const;
+
+export type QcAllergenReviewInputFootprintAllergensItem = typeof QcAllergenReviewInputFootprintAllergensItem[keyof typeof QcAllergenReviewInputFootprintAllergensItem];
+
+
+export const QcAllergenReviewInputFootprintAllergensItem = {
+  egg: 'egg',
+  soy: 'soy',
+  milk: 'milk',
+  wheat: 'wheat',
+  peanuts: 'peanuts',
+  tree_nuts: 'tree nuts',
+  fish: 'fish',
+  shellfish: 'shellfish',
+  sesame: 'sesame',
+} as const;
+
+export type QcAllergenReviewInputFootprint = {
+  status: QcAllergenReviewInputFootprintStatus;
+  /** @maxItems 9 */
+  allergens: QcAllergenReviewInputFootprintAllergensItem[];
+  /**
+     * @maxItems 100
+     * @items.minLength 1
+     * @items.maxLength 200
+     */
+  unknownIngredients: string[];
+  /**
+     * @maxItems 30
+     * @items.minLength 1
+     * @items.maxLength 100
+     */
+  missingComponents: string[];
+};
+
+export type QcAllergenReviewInputStagedIngredientsItemArea = typeof QcAllergenReviewInputStagedIngredientsItemArea[keyof typeof QcAllergenReviewInputStagedIngredientsItemArea];
+
+
+export const QcAllergenReviewInputStagedIngredientsItemArea = {
+  Dough: 'Dough',
+  Sauce: 'Sauce',
+  Frontline: 'Frontline',
+} as const;
+
+export type QcAllergenReviewInputStagedIngredientsItem = {
+  area: QcAllergenReviewInputStagedIngredientsItemArea;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  name: string;
+  /**
+     * @minLength 1
+     * @maxLength 50
+     */
+  quantity: string;
+  /**
+     * @minLength 1
+     * @maxLength 30
+     */
+  unit: string;
+  staged: boolean;
+};
+
+export type QcAllergenReviewInputStagedIngredientsStatus = typeof QcAllergenReviewInputStagedIngredientsStatus[keyof typeof QcAllergenReviewInputStagedIngredientsStatus];
+
+
+export const QcAllergenReviewInputStagedIngredientsStatus = {
+  reviewed: 'reviewed',
+  'not-reviewed': 'not-reviewed',
+  unknown: 'unknown',
+} as const;
+
+export type QcAllergenReviewInputCleaningStatus = typeof QcAllergenReviewInputCleaningStatus[keyof typeof QcAllergenReviewInputCleaningStatus];
+
+
+export const QcAllergenReviewInputCleaningStatus = {
+  verified: 'verified',
+  unverified: 'unverified',
+  unknown: 'unknown',
+  'not-applicable': 'not-applicable',
+} as const;
+
+export interface QcAllergenReviewInput {
+  operationId: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  runId: string;
+  footprintReviewed: true;
+  footprint: QcAllergenReviewInputFootprint;
+  /** @maxItems 200 */
+  stagedIngredients: QcAllergenReviewInputStagedIngredientsItem[];
+  stagedIngredientsStatus: QcAllergenReviewInputStagedIngredientsStatus;
+  cleaningStatus: QcAllergenReviewInputCleaningStatus;
+  /** @maxLength 1000 */
+  note?: string;
+}
+
+export type QcCleaningInputMethod = typeof QcCleaningInputMethod[keyof typeof QcCleaningInputMethod];
+
+
+export const QcCleaningInputMethod = {
+  standard: 'standard',
+  deep: 'deep',
+  chemical: 'chemical',
+  other: 'other',
+} as const;
+
+export interface QcCleaningInput {
+  operationId: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  runId: string;
+  method: QcCleaningInputMethod;
+  startedAt: string;
+  endedAt: string;
+  /** @maxLength 1000 */
+  note?: string;
+}
+
+export interface QcNoteInput {
+  operationId: string;
+  /** @maxLength 1000 */
+  note?: string;
+}
+
+export interface QcRunSignoffInput {
+  operationId: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  runId: string;
+  /** @maxLength 1000 */
+  note?: string;
+}
+
+export type QcRunResponseSignoff = {
+  eventId: number;
+  /** @nullable */
+  actorId: string | null;
+  createdAt: string;
+  note: string;
+  signedOff: boolean;
+  reopened: boolean;
+} | null;
+
+export interface QcRunResponse {
+  runId: string;
+  items: QcEvent[];
+  hasMore: boolean;
+  /** @nullable */
+  nextCursor: number | null;
+  signoff: QcRunResponseSignoff;
+}
+
+export interface QcHistoryResponse {
+  items: QcEvent[];
+  hasMore: boolean;
+  /** @nullable */
+  nextCursor: number | null;
+}
+
+export type QcCorrectionInputReplacement = { [key: string]: unknown };
+
+export interface QcCorrectionInput {
+  operationId: string;
+  /**
+     * @minLength 1
+     * @maxLength 500
+     */
+  reason: string;
+  replacement: QcCorrectionInputReplacement;
+}
+
+export type QcRedactionInputFieldsItem = typeof QcRedactionInputFieldsItem[keyof typeof QcRedactionInputFieldsItem];
+
+
+export const QcRedactionInputFieldsItem = {
+  actorId: 'actorId',
+  ingredientName: 'ingredientName',
+  payloadnote: 'payload.note',
+  payloadlotNumber: 'payload.lotNumber',
+} as const;
+
+export interface QcRedactionInput {
+  operationId: string;
+  /**
+     * @minLength 1
+     * @maxLength 500
+     */
+  reason: string;
+  /**
+     * @minItems 1
+     * @maxItems 4
+     */
+  fields: QcRedactionInputFieldsItem[];
 }
 
 export interface RoleDefinition {
@@ -6988,6 +7407,81 @@ export const ListQualityChecksStatus = {
   pass: 'pass',
   warn: 'warn',
   fail: 'fail',
+} as const;
+
+export type GetQcTargetsParams = {
+/**
+ * @minLength 1
+ * @maxLength 400
+ */
+profileKey: string;
+};
+
+export type GetQcHistoryParams = {
+/**
+ * Inclusive ISO date or timestamp
+ */
+from?: string;
+/**
+ * Inclusive ISO date or timestamp
+ */
+to?: string;
+/**
+ * @maxLength 200
+ */
+runId?: string;
+/**
+ * @maxLength 200
+ */
+ingredientId?: string;
+station?: GetQcHistoryStation;
+/**
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
+/**
+ * @minimum 1
+ */
+cursor?: number;
+};
+
+export type GetQcHistoryStation = typeof GetQcHistoryStation[keyof typeof GetQcHistoryStation];
+
+
+export const GetQcHistoryStation = {
+  dough: 'dough',
+  sauce: 'sauce',
+  frontline: 'frontline',
+  warehouse: 'warehouse',
+  packaging: 'packaging',
+  other: 'other',
+} as const;
+
+export type ExportQcHistoryCsvParams = {
+from?: string;
+to?: string;
+/**
+ * @maxLength 200
+ */
+runId?: string;
+/**
+ * @maxLength 200
+ */
+ingredientId?: string;
+station?: ExportQcHistoryCsvStation;
+};
+
+export type ExportQcHistoryCsvStation = typeof ExportQcHistoryCsvStation[keyof typeof ExportQcHistoryCsvStation];
+
+
+export const ExportQcHistoryCsvStation = {
+  dough: 'dough',
+  sauce: 'sauce',
+  frontline: 'frontline',
+  warehouse: 'warehouse',
+  packaging: 'packaging',
+  other: 'other',
 } as const;
 
 export type ListFinalizedOperationalReportsParams = {

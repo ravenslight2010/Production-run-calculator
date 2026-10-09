@@ -1,8 +1,8 @@
 # Allergen Tracking — Plan
 
-**Status:** Ingredient mappings and an incomplete-safe, read-only run footprint are implemented; QC verification, cleaning gates, declarations, and reporting remain planned
-**Updated:** 2026-10-05
-**Dependencies:** stable ingredient identity and durable QC ownership must precede automatic rollups or production-blocking cleaning controls. See the [QC plan](qc-department-plan.md) and [additional domain synthesis](../research/additional-domain-research-synthesis-2026-09-19.md).
+**Status:** Ingredient mappings, incomplete-safe run footprint, advisory QC checklist, and independent cleaning verification are implemented; blocking gates, declarations, and reporting remain deferred
+**Updated:** 2026-10-09
+**Dependencies:** ingredient identity and durable QC ownership support the current advisory checklist; production-blocking cleaning controls and label claims remain deferred pending separate approval. See the [QC plan](qc-department-plan.md) and [additional domain synthesis](../research/additional-domain-research-synthesis-2026-09-19.md).
 
 ## Current State
 
@@ -16,13 +16,12 @@
 | Ingredient allergen mapping | Ingredient master data | Managers and `qc-manager` can maintain the nine tracked allergens; an explicit reviewed flag distinguishes reviewed-empty from unknown |
 | Derived run footprint | Live run view | Read-only footprint uses recipe ingredients, active day substitutions, and selected pepperoni types; missing or unreviewed mappings remain visibly incomplete |
 
-### What's Missing
-- No allergen verification during production (QC doesn't check allergen compliance)
-- No reviewer identity or change history for mapping edits
-- No allergen declaration on shipping labels
-- No allergen cleaning verification after allergen runs
-- No cross-contact risk assessment
+### What's Missing or Deferred
+- No reviewed audit history for edits to ingredient allergen mappings
+- No allergen declaration on shipping labels; no regulatory or food-safety label claims
+- No cross-contact risk assessment or analytics
 - No allergen report for a production day
+- No production or shipping block based on checklist or cleaning status
 
 ---
 
@@ -41,42 +40,32 @@ Each ingredient in the system can be tagged with allergens. When a run's recipe 
 - The live run view computes a separate, read-only footprint from effective recipe ingredients, including active day substitutions and selected pepperoni types.
 - The footprint names contributing ingredients and marks missing recipe rows, absent catalog identities, or unreviewed mappings as incomplete.
 - The existing run `allergen` field remains manually entered and continues to drive sequencing warnings. The footprint does not set or validate it.
-- This foundation does not block runs, verify cleaning, release QC holds, or make label or food-safety claims.
+- This footprint does not block runs, release QC holds, or make label or food-safety claims. Phase 1 cleaning records are advisory and independently verified.
 
-### 2. Allergen Verification (QC)
-Before an allergen run starts, QC verifies:
-- Line was properly cleaned after previous allergen run
-- Correct ingredients are staged (no cross-contact)
-- Allergen badge matches what's actually on the line
+### 2. Allergen Pre-Run Review (Phase 1 — advisory)
 
-**Checklist**:
-- [ ] Previous run allergen status: ___
-- [ ] Cleaning completed: Yes / No
-- [ ] Cleaning verified by: ___
-- [ ] Current run allergens confirmed: ___
-- [ ] Staged ingredients match recipe: ___
+The QC checklist records review of the existing derived run footprint, ingredient mappings that are unknown or incomplete, staged ingredients, and relevant cleaning status. It snapshots what the reviewer saw and who recorded the review. It does not set or validate the manually entered run-allergen field, change sequencing warnings, or block production or shipping.
 
-### 3. Cleaning Verification
-After an allergen run ends, before the next non-allergen run starts:
-- Log cleaning start/end time
-- Log who performed cleaning
-- Log cleaning method (standard / deep / chemical)
-- Log verification (visual inspection, swab test, etc.)
-- System blocks non-allergen run start until cleaning is logged
+Unknown or incomplete mappings stay visible in the checklist snapshot; they are never converted into a “clear” result. A reviewed-empty ingredient mapping means none of the nine tracked allergens, while missing or unreviewed mapping remains unknown.
 
-### 4. Cross-Contact Risk
+### 3. Cleaning Record and Verification (Phase 1 — advisory)
+
+Cleaning records capture method, start/end time, authenticated cleaner, and server timestamp. An independent authenticated person verifies the record; self-verification is rejected. The checklist may also record the cleaning status relevant to that pre-run review. Neither record blocks a run or shipping.
+
+### 4. Cross-Contact Risk (deferred)
 When multiple runs are scheduled:
 - Flag if allergen run is followed by non-allergen run without cleaning window
 - Suggest reordering (allergen runs at end of day)
 - Alert if shared equipment isn't cleaned between allergen types
 
-### 5. Allergen Declaration for Labels
-Auto-generate allergen statement from run's ingredient allergen mapping:
+### 5. Allergen Declaration for Labels (deferred)
+
+No label declaration is generated in Phase 1. Any future declaration wording, cross-contact statement, or label integration requires a separate regulatory and product approval; examples below are discussion-only, not approved claims:
 - "Contains: Egg, Soy, Milk"
 - "May contain: Peanuts" (if cross-contact risk)
 - Feed into label verification system (QC department)
 
-### 6. Daily Allergen Report
+### 6. Daily Allergen Report (deferred)
 End-of-day summary of allergen activity:
 - Which runs were allergen runs
 - Cleaning status between runs
@@ -86,20 +75,18 @@ End-of-day summary of allergen activity:
 
 ## Build Order
 
-### Phase 1: Foundation
-1. Add persisted ingredient mappings and explicit reviewed state — **implemented**
-2. Display a separate incomplete-safe run footprint — **implemented**
-3. Derive or override the manual run allergen field — **deferred; requires a separate owner decision**
+### Phase 1: Foundation and advisory QC — implemented
+1. Persist ingredient mappings with explicit reviewed state.
+2. Display a separate incomplete-safe run footprint.
+3. Record the advisory pre-run footprint/staged-ingredient/cleaning review.
+4. Record cleaning details with a different authenticated verifier.
+5. Keep the manual run-allergen field and its sequencing behavior unchanged.
 
-### Phase 2: QC Verification
-4. Allergen pre-run checklist (QC)
-5. Cleaning verification form
-6. System block on non-allergen run start without cleaning
-
-### Phase 3: Labeling & Reporting
-7. Auto-generate allergen declaration for labels
-8. Daily allergen report
-9. Cross-contact risk alerts
+### Phase 2: Later Gates and Reporting — deferred
+4. Cross-contact risk review or analytics
+5. Allergen declaration and label integration, after a separate regulatory/product decision
+6. Daily allergen report
+7. Any production or shipping gate requires a separate approval and is explicitly outside Phase 1
 
 ---
 

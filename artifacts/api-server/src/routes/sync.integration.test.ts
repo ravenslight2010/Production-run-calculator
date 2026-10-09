@@ -43,6 +43,7 @@ let inventoryLotsTable: DbModule["inventoryLotsTable"];
 let inventoryLedgerTable: DbModule["inventoryLedgerTable"];
 let inventoryConsumedRunsTable: DbModule["inventoryConsumedRunsTable"];
 let qualityChecksTable: DbModule["qualityChecksTable"];
+let qcWorkflowEventsTable: DbModule["qcWorkflowEventsTable"];
 let operationalIntentLedgerTable: DbModule["operationalIntentLedgerTable"];
 let completedRunHistoryTable: DbModule["completedRunHistoryTable"];
 let applicatorBatchEvidenceTable: DbModule["applicatorBatchEvidenceTable"];
@@ -105,6 +106,7 @@ beforeAll(async () => {
   inventoryLedgerTable = dbMod.inventoryLedgerTable;
   inventoryConsumedRunsTable = dbMod.inventoryConsumedRunsTable;
   qualityChecksTable = dbMod.qualityChecksTable;
+  qcWorkflowEventsTable = dbMod.qcWorkflowEventsTable;
   operationalIntentLedgerTable = dbMod.operationalIntentLedgerTable;
   completedRunHistoryTable = dbMod.completedRunHistoryTable;
   applicatorBatchEvidenceTable = dbMod.applicatorBatchEvidenceTable;
@@ -183,7 +185,7 @@ function dayRow(date: string) {
 
 beforeEach(async () => {
   injectedSseWriteFailures = 0;
-  await db.execute(sql`TRUNCATE ${dailySyncTable}, ${dataResetTable}, ${operationalIntentLedgerTable}, ${completedRunHistoryTable}, ${applicatorBatchEvidenceTable}, ${dataHealsTable}, ${syncConflictLogsTable}, ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE ${dailySyncTable}, ${dataResetTable}, ${operationalIntentLedgerTable}, ${completedRunHistoryTable}, ${applicatorBatchEvidenceTable}, ${dataHealsTable}, ${syncConflictLogsTable}, ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${qcWorkflowEventsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
   await db.insert(usersTable).values([
     { id: USER, username: "user", passwordHash: "x" },
@@ -1122,6 +1124,16 @@ describe("factory purge retains QC history", () => {
       { scope: "live", productType: "pizza", status: "pass", summary: "Live retained check", reviewerId: MANAGER },
       { scope: "sandbox", productType: "pizza", status: "review", summary: "Sandbox retained check", reviewerId: SANDBOX },
     ]);
+    await db.insert(qcWorkflowEventsTable).values([
+      {
+        scope: "live", operationId: "purge-live-qc", recordId: "purge-live-qc-record",
+        eventType: "lot", runId: "purge-run", actorId: MANAGER, payload: { lotNumber: "Live QC retained" },
+      },
+      {
+        scope: "sandbox", operationId: "purge-sandbox-qc", recordId: "purge-sandbox-qc-record",
+        eventType: "lot", runId: "purge-run", actorId: SANDBOX, payload: { lotNumber: "Sandbox QC retained" },
+      },
+    ]);
     await db.insert(inventoryItemsTable).values([
       { scope: "live", key: "purge-live-item", category: "ingredient", name: "Live fixture", unit: "lbs" },
       { scope: "sandbox", key: "purge-sandbox-item", category: "ingredient", name: "Sandbox fixture", unit: "lbs" },
@@ -1138,6 +1150,9 @@ describe("factory purge retains QC history", () => {
     const checks = await db.select().from(qualityChecksTable);
     expect(checks.map((row) => row.summary).sort()).toEqual(["Live retained check", "Sandbox retained check"]);
     expect(checks.map((row) => row.reviewerId).sort()).toEqual([MANAGER, SANDBOX].sort());
+    const workflowEvents = await db.select().from(qcWorkflowEventsTable);
+    expect(workflowEvents.map((row) => row.payload.lotNumber).sort())
+      .toEqual(["Live QC retained", "Sandbox QC retained"]);
     const items = await db.select().from(inventoryItemsTable);
     expect(items.map((row) => row.scope)).toEqual([scope === "live" ? "sandbox" : "live"]);
   });

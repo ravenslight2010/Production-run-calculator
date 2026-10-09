@@ -342,4 +342,12 @@ export const LEGACY_REPAIR_SOURCE_CONTRACTS: Readonly<
     behavior: "add-only-if-absent",
     preservesOtherCapabilities: true,
   },
+  "qc-first-release-capabilities-v1": {
+    targetCapabilities: {
+      "qc-operator": ["record-qc"],
+      "qc-manager": ["record-qc", "manage-qc"],
+    },
+    behavior: "add-only-if-absent",
+    preservesOtherCapabilities: true,
+  },
 });

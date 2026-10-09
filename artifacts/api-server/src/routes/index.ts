@@ -125,6 +125,10 @@ export const readAuthorizationInventory: readonly ReadAuthorization[] = [
     "/inventory/count-observations/:id", "/inventory/count-observations",
     "/inventory/quality-checks",
   ]),
+  ...reads(["record-qc"], "all", "scoped", [
+    "/qc/targets", "/qc/runs/:runId", "/qc/history",
+  ]),
+  ...reads(["manage-qc"], "all", "scoped", ["/qc/history.csv"]),
   ...reads(["manage-profiles", "manage-inventory"], "any", "scoped", [
     "/import-history", "/import-operations/:operationId",
   ]),
@@ -266,6 +270,14 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
   ]),
   ...writes("capability-gated", "scoped", "allowed", "manage-allergens", [
     "PUT /ingredients/:id/allergen-mapping",
+  ]),
+  ...writes("capability-gated", "scoped", "allowed", "record-qc", [
+    "POST /qc/lots", "POST /qc/weight-checks", "POST /qc/allergen-reviews",
+    "POST /qc/cleaning-records", "POST /qc/cleaning-records/:recordId/verification",
+  ]),
+  ...writes("capability-gated", "scoped", "allowed", "manage-qc", [
+    "POST /qc/targets", "POST /qc/run-signoffs",
+    "POST /qc/events/:eventId/corrections", "POST /qc/events/:eventId/redactions",
   ]),
   ...writes("capability-gated", "scoped", "allowed", "use-ai-tools", [
     "POST /inventory/identify-photo", "POST /inventory/quality-photo", "POST /inventory/production-sheet-photo",
