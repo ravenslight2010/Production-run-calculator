@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { X, FileSpreadsheet, Loader2, CheckCircle2, AlertTriangle } from "lucide-react";
 import {
   recipeApplyIssue,
@@ -28,7 +28,10 @@ import {
   type SpecImportAlias,
 } from "@workspace/spec-import";
 import { reviewSpecImportPerPizzaAmounts } from "@workspace/spec-import/per-pizza-review";
-import type { SpecImportPrepared } from "@/specImport";
+import type {
+  SpecImportPrepared,
+  SpecImportSourcePreviewCell,
+} from "@/specImport";
 import { buildDiscrepancies, importReviewSignature } from "@/specImport";
 import {
   profileExistsForImport,
@@ -411,6 +414,9 @@ function sourceLocationText(locations?: readonly SpecImportSourceLocation[]): st
     .join(", ");
 }
 
+function sourcePreviewCellKey(cell: SpecImportSourcePreviewCell): string {
+  return JSON.stringify([cell.file ?? "", cell.sheet, cell.cell.toUpperCase()]);
+}
 function sourceLocationsForFields(
   sourceLocations: Record<string, SpecImportSourceLocation[]> | undefined,
   ...fields: string[]
@@ -428,10 +434,42 @@ function sourceLocationsForFields(
   return sourceLocationText(locations);
 }
 
-// A row with a real ingredient name is the minimum useful recipe data. This
-// deliberately mirrors the mix collector, which skips blank ingredient rows
-// before building components. A blank parsed row must never make a linked mix
-// look like it will overwrite the manager's saved components.
+function SourceCellNavigation({
+  source,
+  previewCells,
+  onOpen,
+}: {
+  source: unknown;
+  previewCells: readonly SpecImportSourcePreviewCell[];
+  onOpen: (cell: SpecImportSourcePreviewCell) => void;
+}) {
+  const matches = sourceLocationsIn(source)
+    .map((location) => sourcePreviewForLocation(location, previewCells))
+    .filter((cell): cell is SpecImportSourcePreviewCell => !!cell);
+  const unique = [...new Map(matches.map((cell) => [sourcePreviewCellKey(cell), cell])).values()];
+  if (!unique.length) return null;
+
+  return (
+    <details className="mt-1">
+      <summary className="w-fit cursor-pointer text-xs font-medium text-primary underline decoration-dotted underline-offset-2">
+        View cited cells
+      </summary>
+      <div className="mt-1 flex flex-wrap gap-1.5">
+        {unique.map((cell) => (
+          <button
+            key={sourcePreviewCellKey(cell)}
+            type="button"
+            onClick={() => onOpen(cell)}
+            aria-label={`Open ${cell.file ? `${cell.file} · ` : ""}${cell.sheet}!${cell.cell}`}
+            className="rounded border border-border px-2 py-1 text-xs text-foreground hover:bg-muted"
+          >
+            {cell.file ? `${cell.file} · ` : ""}{cell.sheet}!{cell.cell}
+          </button>
+        ))}
+      </div>
+    </details>
+  );
+}
 function hasUsableIngredientRows(r: ParsedRecipe): boolean {
   return (r.rows ?? []).some((row) => (row.ingredient ?? "").trim().length > 0);
 }
@@ -497,6 +535,8 @@ export default function SpecImportDialog({
   // Two-step review: step 1 confirms product brand/flavor names only; step 2
   // reviews everything else (recipes, die types, the diff, notes, mappings).
   const [step, setStep] = useState<1 | 2>(1);
+  const [activeSourceCellKey, setActiveSourceCellKey] = useState<string | null>(null);
+  const sourcePreviewRef = useRef<HTMLElement>(null);
   /**
    * Lower-cased mix names whose new ingredient additions the manager has
    * accepted (checked). Unchecked = skip silently at commit time.
@@ -507,6 +547,7 @@ export default function SpecImportDialog({
 
   useEffect(() => {
     if (prepared) {
+      setActiveSourceCellKey(null);
       setProfiles(buildProfileItems(prepared));
       // existingRecipeNamesByKind is intentionally NOT a dependency: this
       // effect must only reset the review when a NEW prepared payload arrives,
@@ -525,6 +566,7 @@ export default function SpecImportDialog({
       setDestructiveChangesConfirmed(false);
       setStep(1);
     } else {
+      setActiveSourceCellKey(null);
       setProfiles([]);
       setRecipes([]);
       setRemovedProfiles([]);
@@ -534,8 +576,29 @@ export default function SpecImportDialog({
     }
   }, [prepared]);
 
+  useEffect(() => {
+    if (!open) setActiveSourceCellKey(null);
+  }, [open]);
+
   const brands = prepared?.brands ?? [];
   const flavorsByBrand = prepared?.flavorsByBrand ?? {};
+  const sourcePreviewCells = prepared?.sourcePreviewCells ?? [];
+  const uniqueSourcePreviewCells = [
+    ...new Map(
+      sourcePreviewCells.map((cell) => [sourcePreviewCellKey(cell), cell]),
+    ).values(),
+  ];
+  const activeSourceCell = uniqueSourcePreviewCells.find(
+    (cell) => sourcePreviewCellKey(cell) === activeSourceCellKey,
+  );
+  const openSourceCell = (cell: SpecImportSourcePreviewCell) =>
+    setActiveSourceCellKey(sourcePreviewCellKey(cell));
+
+  useEffect(() => {
+    if (activeSourceCellKey) {
+      sourcePreviewRef.current?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
+    }
+  }, [activeSourceCellKey]);
 
   const setProfile = (key: string, patch: Partial<ProfileItem>) =>
     setProfiles((prev) => prev.map((p) => (p.key === key ? { ...p, ...patch } : p)));
@@ -1082,6 +1145,64 @@ export default function SpecImportDialog({
                 </div>
               </div>
 
+              {activeSourceCell && (
+                <section
+                  ref={sourcePreviewRef}
+                  role="region"
+                  aria-label="Workbook source cell preview"
+                  data-testid="spec-source-preview"
+                  className="rounded-lg border border-primary/40 bg-primary/5 p-3"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-foreground">Workbook source cell</p>
+                      <p className="mt-0.5 break-words text-xs text-muted-foreground">
+                        {activeSourceCell.file ? `${activeSourceCell.file} · ` : ""}
+                        {activeSourceCell.sheet}!{activeSourceCell.cell}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setActiveSourceCellKey(null)}
+                      aria-label="Close workbook preview"
+                      className="shrink-0 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+                    >
+                      Close
+                    </button>
+                  </div>
+                  {uniqueSourcePreviewCells.length > 1 && (
+                    <label className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <span>Navigate to another cited cell:</span>
+                      <select
+                        value={sourcePreviewCellKey(activeSourceCell)}
+                        onChange={(event) => {
+                          const next = uniqueSourcePreviewCells.find(
+                            (cell) => sourcePreviewCellKey(cell) === event.target.value,
+                          );
+                          if (next) openSourceCell(next);
+                        }}
+                        aria-label="Navigate to another cited workbook cell"
+                        data-testid="spec-source-preview-navigation"
+                        className="min-w-0 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+                      >
+                        {uniqueSourcePreviewCells.map((cell) => (
+                          <option key={sourcePreviewCellKey(cell)} value={sourcePreviewCellKey(cell)}>
+                            {cell.file ? `${cell.file} · ` : ""}
+                            {cell.sheet}!{cell.cell}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  <pre
+                    data-testid="spec-source-preview-value"
+                    className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-background p-2 text-sm text-foreground"
+                  >
+                    {activeSourceCell.value.length > 0 ? activeSourceCell.value : "(blank cell)"}
+                  </pre>
+                </section>
+              )}
+
               {step === 1 && includedProfileMissing && (
                 <div className="rounded-md border border-amber-400/60 bg-amber-500/10 p-2 text-xs text-amber-700">
                   A checked product is missing its brand or flavor. Fill both in (or uncheck
@@ -1166,6 +1287,8 @@ export default function SpecImportDialog({
                         onBrand={(brand) => setProfile(p.key, { brand })}
                         onFlavor={(flavor) => setProfile(p.key, { flavor })}
                         onDieType={(dieType) => setProfile(p.key, { dieType, dieTouched: true })}
+                        sourcePreviewCells={sourcePreviewCells}
+                        onOpenSourceCell={openSourceCell}
                       />
                     ))}
                   </ul>
@@ -1245,6 +1368,8 @@ export default function SpecImportDialog({
                           onFlavor={(flavor) => setProfile(p.key, { flavor })}
                           onDieType={(dieType) => setProfile(p.key, { dieType, dieTouched: true })}
                           onForceUpdate={(forceUpdate) => setProfile(p.key, { forceUpdate })}
+                          sourcePreviewCells={sourcePreviewCells}
+                          onOpenSourceCell={openSourceCell}
                         />
                       ))}
                   </ul>
@@ -1295,6 +1420,8 @@ export default function SpecImportDialog({
                           onConfirmRowsUnit={(confirmedRowsUnit) =>
                             setRecipe(r.key, { confirmedRowsUnit })
                           }
+                          sourcePreviewCells={sourcePreviewCells}
+                          onOpenSourceCell={openSourceCell}
                         />
                       );
                     })}
@@ -1614,6 +1741,8 @@ function ProfileRow({
   onFlavor,
   onDieType,
   onForceUpdate,
+  sourcePreviewCells,
+  onOpenSourceCell,
 }: {
   item: ProfileItem;
   /** "names" = step 1 (include + brand/flavor + grounding); "die" = step 2 die-only. */
@@ -1627,6 +1756,8 @@ function ProfileRow({
   onDieType: (v: string) => void;
   /** Step-2 only: called when the "force update" checkbox changes. */
   onForceUpdate?: (v: boolean) => void;
+  sourcePreviewCells: readonly SpecImportSourcePreviewCell[];
+  onOpenSourceCell: (cell: SpecImportSourcePreviewCell) => void;
 }) {
   const brand = item.brand.trim();
   const flavor = item.flavor.trim();
@@ -1694,6 +1825,11 @@ function ProfileRow({
           Brand: {sourceLocationText(item.orig.sourceLocations?.brand)} · Flavor:{" "}
           {sourceLocationText(item.orig.sourceLocations?.flavor)}
         </div>
+        <SourceCellNavigation
+          source={item.orig}
+          previewCells={sourcePreviewCells}
+          onOpen={onOpenSourceCell}
+        />
         <SpecImportAmountWarnings profile={item.orig} rowKey={item.key} />
         {warnings.length > 0 && (
           <ul className="mt-2 space-y-1">
@@ -1784,6 +1920,11 @@ function ProfileRow({
             Brand: {sourceLocationText(item.orig.sourceLocations?.brand)} · Flavor:{" "}
             {sourceLocationText(item.orig.sourceLocations?.flavor)}
           </div>
+          <SourceCellNavigation
+            source={item.orig}
+            previewCells={sourcePreviewCells}
+            onOpen={onOpenSourceCell}
+          />
           <SpecImportAmountWarnings profile={item.orig} rowKey={item.key} />
 
           {warnings.length > 0 && (
@@ -1830,6 +1971,8 @@ function RecipeRow({
   onKind,
   onLinkExisting,
   onConfirmRowsUnit,
+  sourcePreviewCells,
+  onOpenSourceCell,
 }: {
   item: RecipeItem;
   /** Existing saved recipes of this kind the user can reuse instead of creating one. */
@@ -1845,6 +1988,8 @@ function RecipeRow({
   onKind: (v: SpecImportDisplayKind) => void;
   onLinkExisting: (v: string) => void;
   onConfirmRowsUnit: (v: "lbs" | "oz" | undefined) => void;
+  sourcePreviewCells: readonly SpecImportSourcePreviewCell[];
+  onOpenSourceCell: (cell: SpecImportSourcePreviewCell) => void;
 }) {
   const linked = item.linkExisting?.trim() ?? "";
   // Effective name: the linked recipe when reusing, else the (editable) parsed name.
@@ -1966,6 +2111,11 @@ function RecipeRow({
           >
             Recipe name: {sourceLocationText(item.orig.sourceLocations?.name)}
           </div>
+          <SourceCellNavigation
+            source={item.orig}
+            previewCells={sourcePreviewCells}
+            onOpen={onOpenSourceCell}
+          />
           {recipeMetadata && (
             <div
               className="mt-1 text-xs text-muted-foreground"
@@ -2168,4 +2318,60 @@ function RecipeRow({
       </div>
     </li>
   );
+}
+
+function sourceLocationsIn(value: unknown): SpecImportSourceLocation[] {
+  const locations: SpecImportSourceLocation[] = [];
+  const visit = (current: unknown): void => {
+    if (Array.isArray(current)) {
+      for (const item of current) visit(item);
+      return;
+    }
+    if (!current || typeof current !== "object") return;
+    const record = current as Record<string, unknown>;
+    const raw = record.sourceLocations;
+    const lists = Array.isArray(raw)
+      ? [raw]
+      : raw && typeof raw === "object"
+        ? Object.values(raw as Record<string, unknown>).filter(Array.isArray)
+        : [];
+    for (const list of lists) {
+      for (const candidate of list) {
+        if (
+          candidate &&
+          typeof candidate === "object" &&
+          typeof (candidate as SpecImportSourceLocation).sheet === "string" &&
+          typeof (candidate as SpecImportSourceLocation).cell === "string"
+        ) {
+          locations.push(candidate as SpecImportSourceLocation);
+        }
+      }
+    }
+    for (const [key, nested] of Object.entries(record)) {
+      if (key !== "sourceLocations") visit(nested);
+    }
+  };
+  visit(value);
+
+  const unique = new Map<string, SpecImportSourceLocation>();
+  for (const location of locations) {
+    const key = `${location.file ?? ""}\0${location.sheet}\0${location.cell.toUpperCase()}`;
+    unique.set(key, location);
+  }
+  return [...unique.values()];
+}
+
+function sourcePreviewForLocation(
+  location: SpecImportSourceLocation,
+  cells: readonly SpecImportSourcePreviewCell[],
+): SpecImportSourcePreviewCell | undefined {
+  const workbookCount = new Set(cells.map((cell) => cell.file ?? "")).size;
+  if (!location.file && workbookCount !== 1) return undefined;
+  const matches = cells.filter(
+    (cell) =>
+      cell.sheet === location.sheet &&
+      cell.cell.toUpperCase() === location.cell.trim().toUpperCase() &&
+      (!location.file || cell.file === location.file),
+  );
+  return matches.length === 1 ? matches[0] : undefined;
 }

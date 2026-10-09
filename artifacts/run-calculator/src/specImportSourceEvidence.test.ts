@@ -130,6 +130,7 @@ import {
   hashSpecImportSource,
   prepareSpecImport,
   prepareSpecImportFromText,
+  prepareSpecImportMulti,
   prepareSpecImportMultiWithAi,
   prepareSpecImportWithAi,
   readWorkbookGrids,
@@ -201,13 +202,15 @@ async function expectAppliedEvidence(
     });
   }
   expect(body.changes).not.toHaveProperty("sourceEvidence");
+  expect(body).not.toHaveProperty("sourcePreviewCells");
 
-  // Reusable snapshots contain the parsed import only, never the evidence
-  // attached to the one-time Apply request.
+  // Reusable snapshots contain the parsed import only, never one-time evidence
+  // or review-only cell text.
   expect(prepared.parsed).not.toHaveProperty("sourceEvidence");
   const savedParse = saveSheetSpy.mock.calls.at(-1)?.[1] as Record<string, unknown> | undefined;
   expect(savedParse).toBeDefined();
   expect(savedParse).not.toHaveProperty("sourceEvidence");
+  expect(savedParse).not.toHaveProperty("sourcePreviewCells");
 }
 
 beforeEach(() => {
@@ -252,6 +255,49 @@ describe("spec Apply source evidence", () => {
       flavor: [{ file: "spec.xlsx", sheet: "Profiles", cell: "B2" }],
       dieType: [{ file: "spec.xlsx", sheet: "Profiles", cell: "C2" }],
       sauceOzPerPizza: [{ file: "spec.xlsx", sheet: "Profiles", cell: "D2" }],
+    });
+    expect(prepared.sourcePreviewCells).toContainEqual({
+      file: "spec.xlsx",
+      sheet: "Profiles",
+      cell: "A2",
+      value: "Acme",
+    });
+    expect(prepared.sourcePreviewCells).toContainEqual({
+      file: "spec.xlsx",
+      sheet: "Profiles",
+      cell: "D2",
+      value: "0.5",
+    });
+    const expected = await renderedSource(buffer);
+    await expectAppliedEvidence(prepared, expected, "import-spec-preview-memory-0001");
+  });
+
+  it("builds exact source-cell previews for each workbook in a multi-file review", async () => {
+    const first = workbookBuffer(
+      [["Brand", "Flavor"], ["Acme", "Classic"]],
+      "Profiles",
+    );
+    const second = workbookBuffer(
+      [["Brand", "Flavor"], ["Beta", "Spicy"]],
+      "Products",
+    );
+    const prepared = await prepareSpecImportMulti(
+      [first, second],
+      undefined,
+      ["first.xlsx", "second.xlsx"],
+    );
+
+    expect(prepared.sourcePreviewCells).toContainEqual({
+      file: "first.xlsx",
+      sheet: "Profiles",
+      cell: "A2",
+      value: "Acme",
+    });
+    expect(prepared.sourcePreviewCells).toContainEqual({
+      file: "second.xlsx",
+      sheet: "Products",
+      cell: "A2",
+      value: "Beta",
     });
   });
 
@@ -365,6 +411,7 @@ describe("spec Apply source evidence", () => {
     const expected = "=== SHEET: Photographed spec sheets ===\nraw text\tphoto marker";
 
     expect(prepared.sourceEvidence?.sourceText).toBe(expected);
+    expect(prepared.sourcePreviewCells).toBeUndefined();
     await expectAppliedEvidence(prepared, expected, "import-spec-text-source-0001");
   });
 

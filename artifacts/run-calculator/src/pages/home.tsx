@@ -13826,6 +13826,8 @@ export default function Home() {
     const controller = new AbortController();
     specImportAbortRef.current = controller;
     setSpecImportPrepared(null);
+    specImportBuffersRef.current = [];
+    specImportSourceNamesRef.current = [];
     setSpecImportError(null);
     setSpecImportProgress(files.length > 1 ? { done: 0, total: files.length } : null);
     setSpecImportLoading(true);
@@ -13897,6 +13899,9 @@ export default function Home() {
       destructiveReviewSignature,
       profilesMarkedForRemoval: profilesToRemove,
     };
+    // The workbook preview is transient UI data: keep it out of the commit
+    // pipeline, saved parse snapshots, and import-history summaries.
+    delete toCommit.sourcePreviewCells;
     // Imported recipes can introduce ingredients that duplicate standalone ones,
     // so kick off a merge check afterwards (only when recipes were actually
     // imported). Capture before clearing the prepared payload.
@@ -14277,6 +14282,8 @@ export default function Home() {
       }
       setShowSpecImport(false);
       setSpecImportPrepared(null);
+      specImportBuffersRef.current = [];
+      specImportSourceNamesRef.current = [];
       // Duplicate review remains an explicit action from the merge surface;
       // imports never start a scan or spend provider budget in the background.
       // Auto-run spec cross-reference with the newly saved sheet.

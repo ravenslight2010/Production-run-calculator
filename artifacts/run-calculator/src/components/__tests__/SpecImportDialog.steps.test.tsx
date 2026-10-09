@@ -430,4 +430,77 @@ describe("SpecImportDialog two-step wizard", () => {
       .toContain("location unverified");
     expect(screen.getByText(/Flour 40 lb \(location unverified\)/)).toBeTruthy();
   });
+
+  it("opens cited cells, navigates across workbook sheets, and clears the preview when review ends", () => {
+    const profile: ParsedProfile = {
+      brand: "Aldo Foods",
+      flavor: "Classic",
+      sourceLocations: {
+        brand: [{ file: "spec.xlsx", sheet: "Profiles", cell: "A2" }],
+      },
+      applicators: [],
+      pepperonis: [],
+    };
+    const recipe: ParsedRecipe = {
+      kind: "dough",
+      name: "House Dough",
+      sourceLocations: {
+        name: [{ file: "spec.xlsx", sheet: "Dough Recipes", cell: "B2" }],
+      },
+      rows: [{ ingredient: "Flour", lbs: 40 }],
+    };
+    const prepared = makePrepared([profile], [recipe]);
+    prepared.sourcePreviewCells = [
+      { file: "spec.xlsx", sheet: "Profiles", cell: "A2", value: "Aldo Foods" },
+      { file: "spec.xlsx", sheet: "Dough Recipes", cell: "B2", value: "House Dough" },
+    ];
+    const props = {
+      onClose: () => {},
+      loading: false,
+      error: null,
+      prepared,
+      applying: false,
+      existingRecipeNamesByKind: { dough: [], sauce: [], cheese: [], mix: [] },
+      onConfirm: () => {},
+    };
+    const view = render(<SpecImportDialog open={true} {...props} />);
+
+    fireEvent.click(screen.getByText("View cited cells"));
+    fireEvent.click(screen.getByRole("button", { name: "Open spec.xlsx · Profiles!A2" }));
+    expect(screen.getByTestId("spec-source-preview").textContent)
+      .toContain("spec.xlsx · Profiles!A2");
+    expect(screen.getByTestId("spec-source-preview-value").textContent).toBe("Aldo Foods");
+
+    fireEvent.change(screen.getByLabelText("Navigate to another cited workbook cell"), {
+      target: { value: JSON.stringify(["spec.xlsx", "Dough Recipes", "B2"]) },
+    });
+    expect(screen.getByTestId("spec-source-preview").textContent)
+      .toContain("spec.xlsx · Dough Recipes!B2");
+    expect(screen.getByTestId("spec-source-preview-value").textContent).toBe("House Dough");
+
+    view.rerender(<SpecImportDialog open={false} {...props} prepared={null} />);
+    expect(screen.queryByTestId("spec-source-preview")).toBeNull();
+    view.rerender(<SpecImportDialog open={true} {...props} />);
+    expect(screen.queryByTestId("spec-source-preview")).toBeNull();
+  });
+
+  it("does not preview a cited location that is absent from the source workbook", () => {
+    const profile: ParsedProfile = {
+      brand: "Aldo Foods",
+      flavor: "Classic",
+      sourceLocations: {
+        brand: [{ file: "spec.xlsx", sheet: "Profiles", cell: "Z99" }],
+      },
+      applicators: [],
+      pepperonis: [],
+    };
+    const prepared = makePrepared([profile]);
+    prepared.sourcePreviewCells = [
+      { file: "spec.xlsx", sheet: "Profiles", cell: "A2", value: "Aldo Foods" },
+    ];
+    renderDialog(prepared);
+
+    expect(screen.queryByRole("button", { name: /Profiles!Z99/ })).toBeNull();
+    expect(screen.queryByTestId("spec-source-preview")).toBeNull();
+  });
 });

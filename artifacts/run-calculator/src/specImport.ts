@@ -192,6 +192,11 @@ function assertNamedRecipeWriteLanded(
 export type SpecImportPrepared = {
   /** Canonicalized, ready-to-apply parse result. */
   parsed: ParsedSpecImport;
+  /**
+   * Exact cited cell values from the current source workbook(s), retained only
+   * for the active review UI. Never pass this field to commit or history.
+   */
+  sourcePreviewCells?: SpecImportSourcePreviewCell[];
   summary: SpecImportSummary;
   /** New label→canonical mappings learned this import (persisted on confirm). */
   newAliases: SpecImportAlias[];
@@ -293,6 +298,13 @@ export type SpecImportPrepared = {
    * landed on, ensuring every row in the yield table appears in the pool.
    */
   doughVariantsFromTable?: DoughVariantTableEntry[];
+};
+
+export type SpecImportSourcePreviewCell = {
+  file?: string;
+  sheet: string;
+  cell: string;
+  value: string;
 };
 
 /**
@@ -402,6 +414,117 @@ export async function readWorkbookGrids(data: ArrayBuffer): Promise<SheetGrid[]>
     });
   }
   return grids;
+}
+
+type SourcePreviewWorkbook = {
+  file?: string;
+  sheets: SheetGrid[];
+};
+
+function sourceLocationsInParsed(parsed: ParsedSpecImport): SpecImportSourceLocation[] {
+  const found: SpecImportSourceLocation[] = [];
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    if (!value || typeof value !== "object") return;
+    const record = value as Record<string, unknown>;
+    const sources = record.sourceLocations;
+    const lists = Array.isArray(sources)
+      ? [sources]
+      : sources && typeof sources === "object"
+        ? Object.values(sources as Record<string, unknown>).filter(Array.isArray)
+        : [];
+    for (const list of lists) {
+      for (const candidate of list) {
+        if (
+          candidate &&
+          typeof candidate === "object" &&
+          typeof (candidate as SpecImportSourceLocation).sheet === "string" &&
+          typeof (candidate as SpecImportSourceLocation).cell === "string"
+        ) {
+          found.push(candidate as SpecImportSourceLocation);
+        }
+      }
+    }
+    for (const [key, nested] of Object.entries(record)) {
+      if (key !== "sourceLocations") visit(nested);
+    }
+  };
+  visit(parsed);
+  return found;
+}
+
+/**
+ * Build a small, review-only allowlist from cells that are both cited by the
+ * parsed data and present at the exact address in the current workbook. Do not
+ * expose whole sheets or accept model-provided cell text as preview content.
+ */
+function buildSourcePreviewCells(
+  parsed: ParsedSpecImport,
+  workbooks: SourcePreviewWorkbook[],
+): SpecImportSourcePreviewCell[] {
+  const verified = new Map<string, SpecImportSourcePreviewCell>();
+  for (const location of sourceLocationsInParsed(parsed)) {
+    const file = location.file?.trim();
+    const candidates = file
+      ? workbooks.filter((workbook) => workbook.file === file)
+      : workbooks.length === 1
+        ? workbooks
+        : [];
+    if (candidates.length !== 1) continue;
+
+    const address = location.cell.trim().toUpperCase();
+    if (!/^[A-Z]{1,3}[1-9]\d{0,6}$/.test(address)) continue;
+    let coordinates: XLSX.CellAddress;
+    try {
+      coordinates = XLSX.utils.decode_cell(address);
+    } catch {
+      continue;
+    }
+    if (
+      !Number.isInteger(coordinates.r) ||
+      !Number.isInteger(coordinates.c) ||
+      coordinates.r < 0 ||
+      coordinates.r >= 1_048_576 ||
+      coordinates.c < 0 ||
+      coordinates.c >= 16_384 ||
+      XLSX.utils.encode_cell(coordinates) !== address
+    ) {
+      continue;
+    }
+
+    const workbook = candidates[0];
+    const sheet = workbook.sheets.find((candidate) => candidate.name === location.sheet);
+    const value = sheet?.rows[coordinates.r]?.[coordinates.c];
+    if (typeof value !== "string") continue;
+
+    const preview: SpecImportSourcePreviewCell = {
+      ...(workbook.file ? { file: workbook.file } : {}),
+      sheet: location.sheet,
+      cell: address,
+      value,
+    };
+    const key = `${preview.file ?? ""}\0${preview.sheet}\0${preview.cell}`;
+    verified.set(key, preview);
+  }
+  return [...verified.values()];
+}
+
+function retainCitedSourcePreviewCells(
+  parsed: ParsedSpecImport,
+  candidates: readonly SpecImportSourcePreviewCell[],
+): SpecImportSourcePreviewCell[] {
+  const cited = new Set(
+    sourceLocationsInParsed(parsed).map(
+      (location) =>
+        `${location.file?.trim() ?? ""}\0${location.sheet}\0${location.cell.trim().toUpperCase()}`,
+    ),
+  );
+  return candidates.filter((cell) =>
+    cited.has(`${cell.file ?? ""}\0${cell.sheet}\0${cell.cell.toUpperCase()}`),
+  );
 }
 
 function attributeSourceFile(
@@ -1946,7 +2069,7 @@ export async function prepareSpecImport(
   data: ArrayBuffer,
   name?: string,
   signal?: AbortSignal,
-  options: { allowAi?: boolean } = {},
+  options: { allowAi?: boolean; includeSourcePreview?: boolean } = {},
 ): Promise<SpecImportPrepared> {
   if (signal?.aborted) throw signal.reason ?? new DOMException("Import cancelled", "AbortError");
   const ingredientMergeAliasesPromise = fetchIngredientMergeAliasesBestEffort();
@@ -1982,9 +2105,17 @@ export async function prepareSpecImport(
     // Detect new mix ingredients even on a reused parse — the mixes pool may
     // have changed since the snapshot was taken (manager added a mix).
     const newMixIngredients = await computeNewMixIngredients(reused.parsed);
+    const sourcePreviewCells =
+      options.includeSourcePreview === false
+        ? []
+        : buildSourcePreviewCells(reused.parsed, [{
+            file: name?.trim().slice(0, 128) || undefined,
+            sheets: grids,
+          }]);
     return {
       ...reused,
       ...(sourceEvidence ? { sourceEvidence } : {}),
+      ...(sourcePreviewCells.length > 0 ? { sourcePreviewCells } : {}),
       ...(newMixIngredients.length > 0 ? { newMixIngredients } : {}),
       ...(doughCustomerAssignments.length > 0 ? { doughCustomerAssignments } : {}),
       ...(doughVariantsFromTable.length > 0 ? { doughVariantsFromTable } : {}),
@@ -2053,6 +2184,13 @@ export async function prepareSpecImport(
   // Detect new ingredient rows on existing mixes — best-effort, after all
   // other work so it doesn't slow the AI parse path.
   const newMixIngredients = await computeNewMixIngredients(parsed);
+  const sourcePreviewCells =
+    options.includeSourcePreview === false
+      ? []
+      : buildSourcePreviewCells(parsed, [{
+          file: name?.trim().slice(0, 128) || undefined,
+          sheets: grids,
+        }]);
 
   return {
     parsed,
@@ -2071,6 +2209,7 @@ export async function prepareSpecImport(
     },
     ...(sourceHash ? { sourceHash } : {}),
     ...(sourceEvidence ? { sourceEvidence } : {}),
+    ...(sourcePreviewCells.length > 0 ? { sourcePreviewCells } : {}),
     ...(aiFallbackGrids ? { aiFallbackGrids } : {}),
     ...(rawParsed.unresolved?.length ? { unresolved: rawParsed.unresolved } : {}),
     ...(note ? { note } : {}),
@@ -2109,7 +2248,10 @@ export async function prepareSpecImportFromText(
   const ws = XLSX.utils.aoa_to_sheet(rows);
   XLSX.utils.book_append_sheet(wb, ws, "Photographed spec sheets");
   const bytes = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
-  return prepareSpecImportWithAi(bytes, name, signal);
+  return prepareSpecImport(bytes, name, signal, {
+    allowAi: true,
+    includeSourcePreview: false,
+  });
 }
 
 /** Hard cap on files per import so one batch can't fan out into a flood of AI calls. */
@@ -2127,7 +2269,7 @@ export async function prepareSpecImportMulti(
   onProgress?: (done: number, total: number) => void,
   names?: string[],
   signal?: AbortSignal,
-  options: { allowAi?: boolean } = {},
+  options: { allowAi?: boolean; includeSourcePreview?: boolean } = {},
 ): Promise<SpecImportPrepared> {
   const ingredientMergeAliasesPromise = fetchIngredientMergeAliasesBestEffort();
   const { known, aliases } = await loadSpecImportContext();
@@ -2160,9 +2302,20 @@ export async function prepareSpecImportMulti(
         await ingredientMergeAliasesPromise,
       );
       const sourceEvidence = combineSourceEvidence(sourceEvidenceParts);
+      const sourcePreviewCells =
+        options.includeSourcePreview === false
+          ? []
+          : buildSourcePreviewCells(
+              reused.parsed,
+              currentGrids.map((sheets, i) => ({
+                file: names?.[i]?.trim().slice(0, 128) || `File ${i + 1}`,
+                sheets,
+              })),
+            );
       return {
         ...reused,
         ...(sourceEvidence ? { sourceEvidence } : {}),
+        ...(sourcePreviewCells.length > 0 ? { sourcePreviewCells } : {}),
       };
     }
     // Deterministic layouts are cheap and must be parsed from the workbook
@@ -2184,6 +2337,7 @@ export async function prepareSpecImportMulti(
   const allUnresolved: SpecImportUnresolved[] = [];
   const allFallbackGrids: SheetGrid[] = [];
   const sourceEvidenceParts: Array<{ sourceText: string; parseVersion: string } | undefined> = [];
+  const sourcePreviewCandidates: SpecImportSourcePreviewCell[] = [];
   // Collected deterministic customer assignments from every file's header
   // section (merged across files — a multi-workbook dough import may split
   // the assignment list across sheets).
@@ -2235,6 +2389,12 @@ export async function prepareSpecImportMulti(
         allowAi: options.allowAi === true,
         sourceFile: label,
       });
+      sourcePreviewCandidates.push(
+        ...buildSourcePreviewCells(core.parsed, [{
+          file: label.trim().slice(0, 128),
+          sheets: grids,
+        }]),
+      );
       parsedList.push(core.parsed);
       parsedLabels.push(label);
       allResolved.push(...core.resolved);
@@ -2363,6 +2523,10 @@ export async function prepareSpecImportMulti(
   // Detect new ingredient rows on existing mixes — best-effort, after all
   // other work so it doesn't slow the AI parse path.
   const newMixIngredients = await computeNewMixIngredients(parsed);
+  const sourcePreviewCells =
+    options.includeSourcePreview === false
+      ? []
+      : retainCitedSourcePreviewCells(parsed, sourcePreviewCandidates);
   // A skipped file means the reviewed/applied parse no longer represents the
   // complete selected source set. Never retain evidence for only the files
   // that happened to parse successfully.
@@ -2386,6 +2550,7 @@ export async function prepareSpecImportMulti(
     },
     ...(sourceHash ? { sourceHash } : {}),
     ...(sourceEvidence ? { sourceEvidence } : {}),
+    ...(sourcePreviewCells.length > 0 ? { sourcePreviewCells } : {}),
     ...(note ? { note } : {}),
     ...(profilesRemovedFromWorkbook.length > 0 ? { profilesRemovedFromWorkbook } : {}),
     ...(newMixIngredients.length > 0 ? { newMixIngredients } : {}),
