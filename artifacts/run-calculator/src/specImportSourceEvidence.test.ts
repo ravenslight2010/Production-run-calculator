@@ -145,6 +145,21 @@ function workbookBuffer(rows: string[][], sheetName = "Specs"): ArrayBuffer {
   return XLSX.write(workbook, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
 }
 
+function formulaWorkbookBuffer(savedResult?: number): ArrayBuffer {
+  const worksheet = XLSX.utils.aoa_to_sheet([
+    ["Brand", "Flavor", "Die Type", "Sauce oz/pizza"],
+    ["Acme", "Classic", "12 inch", ""],
+  ]);
+  worksheet.D2 = {
+    t: "n",
+    f: "1/2",
+    ...(savedResult !== undefined ? { v: savedResult } : {}),
+  };
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Profiles");
+  return XLSX.write(workbook, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
+}
+
 function fixtureParse(extra: Record<string, unknown> = {}): ParsedSpecImport {
   return {
     profiles: [{
@@ -268,8 +283,51 @@ describe("spec Apply source evidence", () => {
       cell: "D2",
       value: "0.5",
     });
+    const typedCell = prepared.sourcePreviewCells?.find((cell) => cell.cell === "D2");
+    expect(typedCell).not.toHaveProperty("formula");
+    expect(typedCell).not.toHaveProperty("savedResult");
     const expected = await renderedSource(buffer);
     await expectAppliedEvidence(prepared, expected, "import-spec-preview-memory-0001");
+  });
+
+  it("shows a formula and saved result only in the active review", async () => {
+    const prepared = await prepareSpecImport(formulaWorkbookBuffer(0.5), "formula.xlsx");
+    const formulaCell = prepared.sourcePreviewCells?.find((cell) => cell.cell === "D2");
+
+    expect(parseSpy).not.toHaveBeenCalled();
+    expect(formulaCell).toMatchObject({
+      file: "formula.xlsx",
+      sheet: "Profiles",
+      cell: "D2",
+      value: "0.5",
+      formula: "1/2",
+      hasSavedResult: true,
+      savedResult: "0.5",
+    });
+    expect(prepared.sourceEvidence?.sourceText).not.toContain("1/2");
+    expect(prepared.sourceEvidence?.sourceText).not.toContain("0.5");
+
+    const fetchSpy = await installApplyFetch();
+    await commitSpecImport(prepared, undefined, undefined, "import-spec-formula-review-only");
+    const body = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string) as Record<string, any>;
+    expect(body.sourceEvidence.sourceText).not.toContain("1/2");
+    expect(body.sourceEvidence.sourceText).not.toContain("0.5");
+    expect(body).not.toHaveProperty("sourcePreviewCells");
+    expect(prepared.parsed).not.toHaveProperty("sourcePreviewCells");
+    const savedParse = saveSheetSpy.mock.calls.at(-1)?.[1] as Record<string, unknown> | undefined;
+    expect(savedParse).not.toHaveProperty("sourcePreviewCells");
+  });
+
+  it("does not invent or cite a result when a formula has no saved workbook result", async () => {
+    const buffer = formulaWorkbookBuffer();
+    const grids = await readWorkbookGrids(buffer);
+    const prepared = await prepareSpecImport(buffer, "formula-without-result.xlsx");
+
+    expect(parseSpy).not.toHaveBeenCalled();
+    expect(grids[0].rows[1][3]).toBe("");
+    expect(prepared.parsed.profiles[0].sauceOzPerPizza).toBeUndefined();
+    expect(prepared.sourcePreviewCells?.some((cell) => cell.cell === "D2")).toBe(false);
+    expect(prepared.sourceEvidence?.sourceText).not.toContain("1/2");
   });
 
   it("builds exact source-cell previews for each workbook in a multi-file review", async () => {

@@ -484,6 +484,64 @@ describe("SpecImportDialog two-step wizard", () => {
     expect(screen.queryByTestId("spec-source-preview")).toBeNull();
   });
 
+  it("shows a formula separately from its saved result", () => {
+    const profile: ParsedProfile = {
+      brand: "Aldo Foods",
+      flavor: "Classic",
+      sourceLocations: {
+        brand: [{ file: "spec.xlsx", sheet: "Profiles", cell: "A2" }],
+      },
+      applicators: [],
+      pepperonis: [],
+    };
+    const prepared = makePrepared([profile]);
+    prepared.sourcePreviewCells = [{
+      file: "spec.xlsx",
+      sheet: "Profiles",
+      cell: "A2",
+      value: "0.5",
+      formula: "1/2",
+      hasSavedResult: true,
+      savedResult: "0.5",
+    }];
+    renderDialog(prepared);
+
+    fireEvent.click(screen.getByText("View cited cells"));
+    fireEvent.click(screen.getByRole("button", { name: "Open spec.xlsx · Profiles!A2" }));
+
+    expect(screen.getByTestId("spec-source-preview-formula").textContent).toBe("=1/2");
+    expect(screen.getByTestId("spec-source-preview-value").textContent).toBe("0.5");
+  });
+
+  it("states when a formula has no saved result instead of showing a calculated value", () => {
+    const missingResultProfile: ParsedProfile = {
+      brand: "Aldo Foods",
+      flavor: "Classic",
+      sourceLocations: {
+        brand: [{ file: "spec.xlsx", sheet: "Profiles", cell: "D2" }],
+      },
+      applicators: [],
+      pepperonis: [],
+    };
+    const missingResultPrepared = makePrepared([missingResultProfile]);
+    missingResultPrepared.sourcePreviewCells = [{
+      file: "spec.xlsx",
+      sheet: "Profiles",
+      cell: "D2",
+      value: "",
+      formula: "1/2",
+      hasSavedResult: false,
+    }];
+    renderDialog(missingResultPrepared);
+
+    fireEvent.click(screen.getByText("View cited cells"));
+    fireEvent.click(screen.getByRole("button", { name: "Open spec.xlsx · Profiles!D2" }));
+
+    expect(screen.getByTestId("spec-source-preview-formula").textContent).toBe("=1/2");
+    expect(screen.getByTestId("spec-source-preview-value").textContent)
+      .toBe("No saved result in workbook");
+  });
+
   it("does not preview a cited location that is absent from the source workbook", () => {
     const profile: ParsedProfile = {
       brand: "Aldo Foods",

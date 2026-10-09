@@ -193,7 +193,7 @@ export type SpecImportPrepared = {
   /** Canonicalized, ready-to-apply parse result. */
   parsed: ParsedSpecImport;
   /**
-   * Exact cited cell values from the current source workbook(s), retained only
+   * Cited values and formula details from the current workbook(s), retained only
    * for the active review UI. Never pass this field to commit or history.
    */
   sourcePreviewCells?: SpecImportSourcePreviewCell[];
@@ -240,7 +240,7 @@ export type SpecImportPrepared = {
    * re-running the AI (whose read of the same sheet can drift between calls).
    */
   sourceHash?: string;
-  /** Exact bounded source text used by this review, retained only on Apply. */
+  /** Bounded review source text with formula-cell results redacted before Apply. */
   sourceEvidence?: { sourceText: string; parseVersion: string };
   /**
    * Previously learned "use existing recipe" picks (sheet blend/mix name →
@@ -305,6 +305,12 @@ export type SpecImportSourcePreviewCell = {
   sheet: string;
   cell: string;
   value: string;
+  /** Present only for formula-backed cells in the active review. */
+  formula?: string;
+  /** Distinguishes a missing cached result from a saved blank result. */
+  hasSavedResult?: boolean;
+  /** Workbook-saved result shown only while the active review is open. */
+  savedResult?: string;
 };
 
 /**
@@ -391,13 +397,35 @@ export function mapSpecAliasToAiCorrection(
   };
 }
 
-/** Read an .xlsx File/Blob into flat sheet grids (string cells). */
-export async function readWorkbookGrids(data: ArrayBuffer, sourceFile?: string): Promise<SheetGrid[]> {
+type WorkbookFormulaCell = {
+  formula: string;
+  hasSavedResult: boolean;
+};
+
+type WorkbookSourceData = {
+  grids: SheetGrid[];
+  formulasBySheet: Map<string, Map<string, WorkbookFormulaCell>>;
+};
+
+/** Read workbook values and transient formula metadata without evaluating formulas. */
+function readWorkbookSourceData(data: ArrayBuffer, sourceFile?: string): WorkbookSourceData {
   const wb = XLSX.read(data, { type: "array" });
   const grids: SheetGrid[] = [];
+  const formulasBySheet = new Map<string, Map<string, WorkbookFormulaCell>>();
   for (const name of wb.SheetNames) {
     const ws = wb.Sheets[name];
     if (!ws) continue;
+    const formulaCells = new Map<string, WorkbookFormulaCell>();
+    for (const [address, rawCell] of Object.entries(ws)) {
+      if (address.startsWith("!") || !rawCell || typeof rawCell !== "object") continue;
+      const cell = rawCell as XLSX.CellObject;
+      if (typeof cell.f !== "string" || !cell.f) continue;
+      formulaCells.set(address.toUpperCase(), {
+        formula: cell.f,
+        hasSavedResult: cell.v !== undefined && cell.v !== null,
+      });
+    }
+    formulasBySheet.set(name, formulaCells);
     const usedRange = ws["!ref"] ? XLSX.utils.decode_range(ws["!ref"]) : null;
     if (!usedRange) continue;
     const rows = XLSX.utils.sheet_to_json<unknown[]>(ws, {
@@ -414,12 +442,18 @@ export async function readWorkbookGrids(data: ArrayBuffer, sourceFile?: string):
       ...(sourceFile?.trim() ? { sourceFile: sourceFile.trim() } : {}),
     });
   }
-  return grids;
+  return { grids, formulasBySheet };
+}
+
+/** Read an .xlsx File/Blob into flat sheet grids (string cells). */
+export async function readWorkbookGrids(data: ArrayBuffer, sourceFile?: string): Promise<SheetGrid[]> {
+  return readWorkbookSourceData(data, sourceFile).grids;
 }
 
 type SourcePreviewWorkbook = {
   file?: string;
   sheets: SheetGrid[];
+  formulasBySheet?: Map<string, Map<string, WorkbookFormulaCell>>;
 };
 
 function sourceLocationsInParsed(parsed: ParsedSpecImport): SpecImportSourceLocation[] {
@@ -500,12 +534,20 @@ function buildSourcePreviewCells(
     const sheet = workbook.sheets.find((candidate) => candidate.name === location.sheet);
     const value = sheet?.rows[coordinates.r]?.[coordinates.c];
     if (typeof value !== "string") continue;
+    const formulaCell = workbook.formulasBySheet?.get(location.sheet)?.get(address);
 
     const preview: SpecImportSourcePreviewCell = {
       ...(workbook.file ? { file: workbook.file } : {}),
       sheet: location.sheet,
       cell: address,
       value,
+      ...(formulaCell
+        ? {
+            formula: formulaCell.formula,
+            hasSavedResult: formulaCell.hasSavedResult,
+            ...(formulaCell.hasSavedResult ? { savedResult: value } : {}),
+          }
+        : {}),
     };
     const key = `${preview.file ?? ""}\0${preview.sheet}\0${preview.cell}`;
     verified.set(key, preview);
@@ -1668,14 +1710,39 @@ function fitsApplySourceEvidenceLimit(sourceText: string): boolean {
     new TextEncoder().encode(sourceText).byteLength <= MAX_APPLY_SOURCE_EVIDENCE_BYTES;
 }
 
-function sourceEvidenceFromGrids(grids: SheetGrid[]): { sourceText: string; parseVersion: string } | undefined {
+function redactFormulaResultsFromGrids(
+  grids: SheetGrid[],
+  formulasBySheet?: Map<string, Map<string, WorkbookFormulaCell>>,
+): SheetGrid[] {
+  if (!formulasBySheet?.size) return grids;
+  return grids.map((grid) => {
+    const formulaCells = formulasBySheet.get(grid.name);
+    if (!formulaCells?.size) return grid;
+    const rows = grid.rows.map((row) => [...row]);
+    for (const address of formulaCells.keys()) {
+      const coordinates = XLSX.utils.decode_cell(address);
+      if (rows[coordinates.r]?.[coordinates.c] !== undefined) {
+        rows[coordinates.r][coordinates.c] = "";
+      }
+    }
+    return { ...grid, rows };
+  });
+}
+
+function sourceEvidenceFromGrids(
+  grids: SheetGrid[],
+  formulasBySheet?: Map<string, Map<string, WorkbookFormulaCell>>,
+): { sourceText: string; parseVersion: string } | undefined {
   if (
     grids.length > 24 ||
     grids.some((grid) => grid.rows.length > 1000) ||
     findTruncatedCells(grids).length > 0 ||
     findOverflowColumnRows(grids).length > 0
   ) return undefined;
-  const { chunks, droppedRows } = splitGridsForPrompt(grids);
+  // Formula results remain useful for parsing and the active review, but are
+  // never copied into the source text retained by an approved Apply operation.
+  const evidenceGrids = redactFormulaResultsFromGrids(grids, formulasBySheet);
+  const { chunks, droppedRows } = splitGridsForPrompt(evidenceGrids);
   if (!chunks.length || droppedRows > 0) return undefined;
   const sourceText = chunks.map((chunk) => gridsToPromptText(chunk)).join("\n\n");
   if (!sourceText.trim() || !fitsApplySourceEvidenceLimit(sourceText)) return undefined;
@@ -2083,9 +2150,10 @@ export async function prepareSpecImport(
   // Always read grids for the deterministic parses (customer section, variant
   // table) even when reusing a cached AI parse. Both are cheap (no AI calls)
   // and must reflect the raw workbook content, not the possibly-stale snapshot.
-  const grids = await readWorkbookGrids(data);
+  const workbookData = readWorkbookSourceData(data);
+  const grids = workbookData.grids;
   const deterministic = snapshot ? parseDeterministicSpecWorkbook(grids) : null;
-  const sourceEvidence = sourceEvidenceFromGrids(grids);
+  const sourceEvidence = sourceEvidenceFromGrids(grids, workbookData.formulasBySheet);
   const doughCustomerAssignments = parseDoughCustomerAssignmentsFromGrids(grids);
   const doughVariantsFromTable = parseDoughVariantTableFromGrids(grids);
   if (
@@ -2112,6 +2180,7 @@ export async function prepareSpecImport(
         : buildSourcePreviewCells(reused.parsed, [{
             file: name?.trim().slice(0, 128) || undefined,
             sheets: grids,
+            formulasBySheet: workbookData.formulasBySheet,
           }]);
     return {
       ...reused,
@@ -2191,6 +2260,7 @@ export async function prepareSpecImport(
       : buildSourcePreviewCells(parsed, [{
           file: name?.trim().slice(0, 128) || undefined,
           sheets: grids,
+          formulasBySheet: workbookData.formulasBySheet,
         }]);
 
   return {
@@ -2279,12 +2349,13 @@ export async function prepareSpecImportMulti(
   // (see prepareSpecImport). Must run before the parse loop — it releases the
   // buffers as it goes, and the hash needs the original bytes.
   const { sourceHash, snapshot } = await findReusableParse(names ?? [], buffers);
-  let snapshotGrids: SheetGrid[][] | undefined;
+  let snapshotWorkbooks: WorkbookSourceData[] | undefined;
   if (snapshot) {
-    const currentGrids: SheetGrid[][] = [];
+    const currentWorkbooks: WorkbookSourceData[] = [];
     for (let i = 0; i < buffers.length; i++) {
-      currentGrids.push(await readWorkbookGrids(buffers[i]));
+      currentWorkbooks.push(readWorkbookSourceData(buffers[i]));
     }
+    const currentGrids = currentWorkbooks.map((workbook) => workbook.grids);
     const fullyDeterministic = options.allowAi !== true &&
       currentGrids.length === buffers.length &&
       currentGrids.every((grids) => {
@@ -2293,7 +2364,9 @@ export async function prepareSpecImportMulti(
       });
     if (!fullyDeterministic) {
       onProgress?.(buffers.length, buffers.length);
-      const sourceEvidenceParts = currentGrids.map(sourceEvidenceFromGrids);
+      const sourceEvidenceParts = currentWorkbooks.map((workbook) =>
+        sourceEvidenceFromGrids(workbook.grids, workbook.formulasBySheet),
+      );
       for (let i = 0; i < buffers.length; i++) buffers[i] = new ArrayBuffer(0);
       const reused = await buildReusedPrepared(
         snapshot.data,
@@ -2308,9 +2381,10 @@ export async function prepareSpecImportMulti(
           ? []
           : buildSourcePreviewCells(
               reused.parsed,
-              currentGrids.map((sheets, i) => ({
+              currentWorkbooks.map((workbook, i) => ({
                 file: names?.[i]?.trim().slice(0, 128) || `File ${i + 1}`,
-                sheets,
+                sheets: workbook.grids,
+                formulasBySheet: workbook.formulasBySheet,
               })),
             );
       return {
@@ -2321,7 +2395,7 @@ export async function prepareSpecImportMulti(
     }
     // Deterministic layouts are cheap and must be parsed from the workbook
     // currently under review so locations never point at a stale cached parse.
-    snapshotGrids = currentGrids;
+    snapshotWorkbooks = currentWorkbooks;
   }
 
   const parsedList: ParsedSpecImport[] = [];
@@ -2358,8 +2432,9 @@ export async function prepareSpecImportMulti(
       // and CPU-heavy, and back-to-back parses on a big batch can freeze the
       // tab long enough for the browser to kill the page mid-import.
       await new Promise((r) => setTimeout(r, 0));
-      const grids = snapshotGrids?.[i] ?? await readWorkbookGrids(buffers[i]);
-      sourceEvidenceParts.push(sourceEvidenceFromGrids(grids));
+      const workbookData = snapshotWorkbooks?.[i] ?? readWorkbookSourceData(buffers[i]);
+      const grids = workbookData.grids;
+      sourceEvidenceParts.push(sourceEvidenceFromGrids(grids, workbookData.formulasBySheet));
       // Deterministic customer-section parse — must happen BEFORE the buffer is
       // freed in the finally block below.
       for (const a of parseDoughCustomerAssignmentsFromGrids(grids)) {
@@ -2394,6 +2469,7 @@ export async function prepareSpecImportMulti(
         ...buildSourcePreviewCells(core.parsed, [{
           file: label.trim().slice(0, 128),
           sheets: grids,
+          formulasBySheet: workbookData.formulasBySheet,
         }]),
       );
       parsedList.push(core.parsed);

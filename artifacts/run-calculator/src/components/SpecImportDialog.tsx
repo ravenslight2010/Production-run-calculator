@@ -1194,12 +1194,39 @@ export default function SpecImportDialog({
                       </select>
                     </label>
                   )}
-                  <pre
-                    data-testid="spec-source-preview-value"
-                    className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-background p-2 text-sm text-foreground"
-                  >
-                    {activeSourceCell.value.length > 0 ? activeSourceCell.value : "(blank cell)"}
-                  </pre>
+                  {activeSourceCell.formula !== undefined ? (
+                    <div className="mt-2 space-y-2">
+                      <div>
+                        <p className="text-xs font-medium text-muted-foreground">Formula</p>
+                        <pre
+                          data-testid="spec-source-preview-formula"
+                          className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-background p-2 text-sm text-foreground"
+                        >
+                          {activeSourceCell.formula.startsWith("=")
+                            ? activeSourceCell.formula
+                            : `=${activeSourceCell.formula}`}
+                        </pre>
+                      </div>
+                      <div>
+                        <p className="text-xs font-medium text-muted-foreground">Saved result</p>
+                        <pre
+                          data-testid="spec-source-preview-value"
+                          className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-background p-2 text-sm text-foreground"
+                        >
+                          {activeSourceCell.hasSavedResult
+                            ? activeSourceCell.savedResult || "(blank saved result)"
+                            : "No saved result in workbook"}
+                        </pre>
+                      </div>
+                    </div>
+                  ) : (
+                    <pre
+                      data-testid="spec-source-preview-value"
+                      className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-background p-2 text-sm text-foreground"
+                    >
+                      {activeSourceCell.value.length > 0 ? activeSourceCell.value : "(blank cell)"}
+                    </pre>
+                  )}
                 </section>
               )}
 
