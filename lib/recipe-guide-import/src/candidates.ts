@@ -88,6 +88,7 @@ export type DoughGuideCandidate = {
   matchedDoughRecipeName: string | null;
   flavors: string[] | null;
   sourceLine: string;
+  sourceCell?: DoughGuideRow["sourceCell"];
 };
 
 export function buildDoughCandidates(
@@ -105,5 +106,6 @@ export function buildDoughCandidates(
     matchedDoughRecipeName: matchGuideName(row.doughRecipeName, doughRecipeNames),
     flavors: row.flavors,
     sourceLine: row.sourceLine,
+    sourceCell: row.sourceCell,
   }));
 }

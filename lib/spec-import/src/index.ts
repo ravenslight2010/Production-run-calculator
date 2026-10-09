@@ -4146,11 +4146,15 @@ export function mergeSpecAliases(
   ];
 }
 
+export * from "./workbookSource";
+
 // ── Workbook → compact prompt text ───────────────────────────────────────────
 
 export type SheetGrid = {
   name: string;
   rows: string[][];
+  /** Transient uploaded filename used only to label review-time cell citations. */
+  sourceFile?: string;
   /**
    * Zero-based row indices that the xlsx writer should render bold.
    * Optional — callers that don't need styling omit it.

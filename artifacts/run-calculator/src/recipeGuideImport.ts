@@ -199,8 +199,9 @@ export async function prepareSauceGuideImport(
 export async function prepareDoughGuideImport(
   buffer: ArrayBuffer,
   extraDoughNames: string[] = [],
+  sourceName?: string,
 ): Promise<DoughGuideImportPrepared> {
-  const grids = await readWorkbookGrids(buffer);
+  const grids = await readWorkbookGrids(buffer, sourceName);
   const sanity = gridSanityIssue(grids);
   if (sanity) throw new Error(sanity);
   const rows = parseDoughGuide(grids);

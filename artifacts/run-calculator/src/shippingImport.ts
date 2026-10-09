@@ -12,7 +12,7 @@
 // All pure logic lives in @workspace/shipping-import. Web-only (parity paused).
 
 import {
-  parseShippingGuide,
+  parseShippingGuideWithSources,
   buildShippingCandidates,
   type ShippingCandidate,
   type ShippingPatch,
@@ -34,11 +34,11 @@ export type ShippingImportPrepared = {
  * Read the guide workbook → parse → map → match. Throws with a plain-language
  * message when the file is unreadable or doesn't look like the guide.
  */
-export async function prepareShippingImport(buffer: ArrayBuffer): Promise<ShippingImportPrepared> {
-  const grids = await readWorkbookGrids(buffer);
+export async function prepareShippingImport(buffer: ArrayBuffer, sourceName?: string): Promise<ShippingImportPrepared> {
+  const grids = await readWorkbookGrids(buffer, sourceName);
   const sanity = gridSanityIssue(grids);
   if (sanity) throw new Error(sanity);
-  const rows = parseShippingGuide(grids);
+  const rows = parseShippingGuideWithSources(grids);
   if (rows.length === 0) {
     throw new Error(
       "This workbook doesn't look like the Shipping & Palletizing Guide — no PIZZA/BOX table was found.",

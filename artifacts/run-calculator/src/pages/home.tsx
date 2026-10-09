@@ -13542,7 +13542,7 @@ export default function Home() {
     try {
       const buf = await file.arrayBuffer();
       const { runExcel } = await loadWorkbookWorkflow();
-      const parsed = runExcel.parseRunWorkbook(buf);
+      const parsed = runExcel.parseRunWorkbook(buf, file.name);
       // Multi-sheet schedule planner: keep only runs dated today-or-later (the
       // user's chosen behavior) and route to the multi-date override commit.
       const result = parsed.multiDay ? runExcel.filterImportFromDate(parsed, todayStr()) : parsed;
@@ -14582,7 +14582,7 @@ export default function Home() {
     setShowShippingImport(true);
     try {
       const buffer = await file.arrayBuffer();
-      const prepared = await (await loadWorkbookWorkflow()).shippingImport.prepareShippingImport(buffer);
+      const prepared = await (await loadWorkbookWorkflow()).shippingImport.prepareShippingImport(buffer, file.name);
       if (gen !== shippingImportGenRef.current) return;
       setShippingImportPrepared(prepared);
     } catch (err) {
@@ -14783,7 +14783,7 @@ export default function Home() {
       const extraDoughNames = serverDoughRecipes
         .map((r) => (typeof r?.name === "string" ? r.name.trim() : ""))
         .filter((name): name is string => name.length > 0);
-      const prepared = await (await loadWorkbookWorkflow()).recipeGuideImport.prepareDoughGuideImport(buffer, extraDoughNames);
+      const prepared = await (await loadWorkbookWorkflow()).recipeGuideImport.prepareDoughGuideImport(buffer, extraDoughNames, file.name);
       if (gen !== doughGuideImportGenRef.current) return;
       setDoughGuideImportPrepared(prepared);
     } catch (err) {
@@ -15063,7 +15063,7 @@ export default function Home() {
     try {
       const buf = await file.arrayBuffer();
       const { runExcel } = await loadWorkbookWorkflow();
-      const parsed = runExcel.parseRunWorkbook(buf);
+      const parsed = runExcel.parseRunWorkbook(buf, file.name);
       // A multi-sheet planner spans many days, so it can't load into the single
       // open editor day — route it to the multi-date override commit instead
       // (today-or-later only), exactly like the toolbar import.

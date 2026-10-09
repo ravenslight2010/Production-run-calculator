@@ -9,6 +9,7 @@
 // The title row ("Pizza to Dough List") and blank rows are skipped.
 
 import type { SheetGrid } from "@workspace/spec-import";
+import { workbookCellReference, type WorkbookCellReference } from "@workspace/spec-import";
 
 export type DoughGuideRow = {
   /**
@@ -24,6 +25,8 @@ export type DoughGuideRow = {
   flavors: string[] | null;
   /** Raw source text, for display in the review dialog. */
   sourceLine: string;
+  /** Exact workbook cell that contains this deterministic assignment. */
+  sourceCell?: WorkbookCellReference;
 };
 
 const norm = (s: unknown) => String(s ?? "").replace(/\s+/g, " ").trim();
@@ -86,7 +89,8 @@ export function parseDoughGuide(grids: ReadonlyArray<SheetGrid>): DoughGuideRow[
   const rows: DoughGuideRow[] = [];
 
   for (const grid of grids) {
-    for (const row of grid.rows) {
+    for (let rowIndex = 0; rowIndex < grid.rows.length; rowIndex++) {
+      const row = grid.rows[rowIndex] ?? [];
       const cell = norm(row[0] ?? "");
       if (!cell) continue;
       // Skip title / header rows
@@ -132,7 +136,13 @@ export function parseDoughGuide(grids: ReadonlyArray<SheetGrid>): DoughGuideRow[
             .filter(Boolean);
 
       if (brandRaw) {
-        rows.push({ brand: brandRaw, doughRecipeName: recipeName, flavors, sourceLine: cell });
+        rows.push({
+          brand: brandRaw,
+          doughRecipeName: recipeName,
+          flavors,
+          sourceLine: cell,
+          sourceCell: workbookCellReference(grid.name, rowIndex, 0, grid.sourceFile),
+        });
       }
     }
   }

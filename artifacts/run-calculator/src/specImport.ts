@@ -392,7 +392,7 @@ export function mapSpecAliasToAiCorrection(
 }
 
 /** Read an .xlsx File/Blob into flat sheet grids (string cells). */
-export async function readWorkbookGrids(data: ArrayBuffer): Promise<SheetGrid[]> {
+export async function readWorkbookGrids(data: ArrayBuffer, sourceFile?: string): Promise<SheetGrid[]> {
   const wb = XLSX.read(data, { type: "array" });
   const grids: SheetGrid[] = [];
   for (const name of wb.SheetNames) {
@@ -411,6 +411,7 @@ export async function readWorkbookGrids(data: ArrayBuffer): Promise<SheetGrid[]>
     grids.push({
       name,
       rows: rows.map(r => (Array.isArray(r) ? r.map(c => (c == null ? "" : String(c))) : [])),
+      ...(sourceFile?.trim() ? { sourceFile: sourceFile.trim() } : {}),
     });
   }
   return grids;

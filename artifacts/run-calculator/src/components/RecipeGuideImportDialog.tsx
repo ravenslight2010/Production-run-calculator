@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { X, Loader2, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
 import type { SauceGuideCandidate, DoughGuideCandidate } from "@workspace/recipe-guide-import";
 import type { SauceGuideImportPrepared, DoughGuideImportPrepared } from "@/recipeGuideImport";
+import { WorkbookSourceCitation } from "./WorkbookSourceCitation";
 import { loadProfile } from "@/storage";
 import { useAccessibleDialog } from "./useAccessibleDialog";
 
@@ -587,6 +588,14 @@ export function DoughGuideImportDialog({
                               Neither brand nor dough recipe was auto-matched — pick a known dough recipe above before applying.
                             </p>
                           )}
+                          <WorkbookSourceCitation
+                            source={c.sourceCell}
+                            label="Workbook assignment"
+                            unverified={
+                              (!!brand && brand.trim().toLowerCase() !== c.guideBrandName.trim().toLowerCase()) ||
+                              recipe.trim().toLowerCase() !== c.guideName.trim().toLowerCase()
+                            }
+                          />
                         </div>
                       </div>
                     </div>

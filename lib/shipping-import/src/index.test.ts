@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   parseShippingGuide,
+  parseShippingGuideWithSources,
   shippingPatchFromRow,
   mapShipper,
   mapCircles,
@@ -197,5 +198,34 @@ describe("buildShippingCandidates + describeShippingPatch", () => {
       "Pizzas/case: 12",
       "Cases/skid: 60",
     ]);
+  });
+
+  it("attaches exact sheet/cell sources to deterministic patch values", () => {
+    const [sheet] = grid([
+      HEADER,
+      ["Aldo's", '12" shipper', "", "12''", "12", "60", "N/A", "Regular", "Lucia's", "", ""],
+    ]);
+    const rows = parseShippingGuideWithSources(
+      [{
+        ...sheet!,
+        sourceFile: "shipping.xlsx",
+      }],
+    );
+    expect(rows[0]?.sourceCells).toMatchObject({
+      name: { file: "shipping.xlsx", sheet: "Sheet1", cell: "A2" },
+      box: { file: "shipping.xlsx", sheet: "Sheet1", cell: "B2" },
+      pizzasPerCase: { file: "shipping.xlsx", sheet: "Sheet1", cell: "E2" },
+    });
+    const [candidate] = buildShippingCandidates(rows, ["Aldo's"]);
+    expect(candidate?.patchSources?.shipper).toEqual({
+      file: "shipping.xlsx",
+      sheet: "Sheet1",
+      cell: "B2",
+    });
+    expect(candidate?.patchSources?.pizzasPerCase).toEqual({
+      file: "shipping.xlsx",
+      sheet: "Sheet1",
+      cell: "E2",
+    });
   });
 });

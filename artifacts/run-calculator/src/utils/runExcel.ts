@@ -141,7 +141,7 @@ export function buildRunWorkbook(rows: RunExportRow[]): XLSX.WorkBook {
 // ---------------------------------------------------------------------------
 
 export type ImportRow = {
-  rowNumber: number; // 1-based spreadsheet row (excluding header)
+  rowNumber: number; // 1-based spreadsheet row number
   brand: string;
   flavor: string;
   casesPlanned: number;
@@ -150,6 +150,12 @@ export type ImportRow = {
   // day (YYYY-MM-DD) this run is planned for. Absent for the flat single-day
   // import format (where the user picks one target date in the dialog).
   date?: string;
+  /** Review-only cell coordinates; commit payloads intentionally omit them. */
+  source?: {
+    file?: string;
+    sheet: string;
+    cells: Partial<Record<"brand" | "flavor" | "casesPlanned" | "notes" | "date", string | string[]>>;
+  };
 };
 
 // A row that could not be turned into a run. `date` (when present, on schedule
@@ -165,17 +171,6 @@ export type ImportParseResult = {
   // picker). Absent/false for the flat single-sheet format.
   multiDay?: boolean;
 };
-
-function pick(obj: Record<string, unknown>, keys: string[]): string {
-  for (const k of Object.keys(obj)) {
-    const norm = k.trim().toLowerCase();
-    if (keys.some((want) => norm === want)) {
-      const v = obj[k];
-      return v == null ? "" : String(v).trim();
-    }
-  }
-  return "";
-}
 
 /**
  * True when a cell's text is purely a number (allowing thousands separators,
@@ -193,9 +188,9 @@ export function isNumericLikeCell(s: string): boolean {
 }
 
 /** Parse an xlsx ArrayBuffer/Uint8Array into validated import rows + per-row errors. */
-export function parseRunWorkbook(data: ArrayBuffer | Uint8Array): ImportParseResult {
+export function parseRunWorkbook(data: ArrayBuffer | Uint8Array, sourceFile?: string): ImportParseResult {
   const wb = XLSX.read(data, { type: "array" });
-  return parseWorkbookObject(wb);
+  return parseWorkbookObject(wb, sourceFile);
 }
 
 /**
@@ -206,8 +201,8 @@ export function parseRunWorkbook(data: ArrayBuffer | Uint8Array): ImportParseRes
  *    the dialog).
  * Used by the array path (web) and the base64 path (mobile).
  */
-export function parseWorkbookObject(wb: XLSX.WorkBook): ImportParseResult {
-  if (workbookIsSchedule(wb)) return parseScheduleWorkbook(wb);
+export function parseWorkbookObject(wb: XLSX.WorkBook, sourceFile?: string): ImportParseResult {
+  if (workbookIsSchedule(wb)) return parseScheduleWorkbook(wb, sourceFile);
   const sheetName = wb.SheetNames[0];
   const rows: ImportRow[] = [];
   const errors: ImportParseError[] = [];
@@ -215,13 +210,32 @@ export function parseWorkbookObject(wb: XLSX.WorkBook): ImportParseResult {
     return { rows, errors: [{ rowNumber: 0, message: "No sheets found in file." }] };
   }
   const ws = wb.Sheets[sheetName];
-  const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: "" });
-  raw.forEach((obj, i) => {
-    const rowNumber = i + 2; // +1 for header row, +1 for 1-based spreadsheet rows
-    const brand = pick(obj, ["brand"]);
-    const flavor = pick(obj, ["flavor"]);
-    const casesStr = pick(obj, ["cases planned", "cases", "casesplanned", "casesneeded", "cases needed"]);
-    const notes = pick(obj, ["notes"]);
+  const usedRange = ws["!ref"] ? XLSX.utils.decode_range(ws["!ref"]) : null;
+  if (!usedRange) return { rows, errors: [{ rowNumber: 0, message: "No rows found in file." }] };
+  const raw = XLSX.utils.sheet_to_json<unknown[]>(ws, {
+    header: 1,
+    raw: true,
+    defval: "",
+    blankrows: true,
+    range: { s: { r: 0, c: 0 }, e: usedRange.e },
+  });
+  const header = raw[0] ?? [];
+  const column = (keys: string[]) => {
+    const wanted = new Set(keys);
+    return header.findIndex((value) => wanted.has(String(value ?? "").trim().toLowerCase()));
+  };
+  const brandCol = column(["brand"]);
+  const flavorCol = column(["flavor"]);
+  const casesCol = column(["cases planned", "cases", "casesplanned", "casesneeded", "cases needed"]);
+  const notesCol = column(["notes"]);
+  const value = (row: unknown[], col: number) => col < 0 ? "" : String(row[col] ?? "").trim();
+  raw.forEach((row, i) => {
+    if (i === 0) return;
+    const rowNumber = i + 1;
+    const brand = value(row, brandCol);
+    const flavor = value(row, flavorCol);
+    const casesStr = value(row, casesCol);
+    const notes = value(row, notesCol);
     if (!brand && !flavor && !casesStr) return; // skip blank rows silently
     // Stray numeric/subtotal cells (e.g. a running total "0.08" landing in the
     // Brand column, or a numeric-only Flavor with no brand) are not real runs —
@@ -236,7 +250,19 @@ export function parseWorkbookObject(wb: XLSX.WorkBook): ImportParseResult {
       errors.push({ rowNumber, message: `Invalid Cases Planned "${casesStr}"` });
       return;
     }
-    rows.push({ rowNumber, brand, flavor, casesPlanned: Math.round(casesPlanned), notes });
+    const sourceCells: NonNullable<ImportRow["source"]>["cells"] = {};
+    if (brandCol >= 0) sourceCells.brand = XLSX.utils.encode_cell({ r: i, c: brandCol });
+    if (flavorCol >= 0) sourceCells.flavor = XLSX.utils.encode_cell({ r: i, c: flavorCol });
+    if (casesCol >= 0) sourceCells.casesPlanned = XLSX.utils.encode_cell({ r: i, c: casesCol });
+    if (notesCol >= 0) sourceCells.notes = XLSX.utils.encode_cell({ r: i, c: notesCol });
+    rows.push({
+      rowNumber,
+      brand,
+      flavor,
+      casesPlanned: Math.round(casesPlanned),
+      notes,
+      source: { ...(sourceFile?.trim() ? { file: sourceFile.trim() } : {}), sheet: sheetName, cells: sourceCells },
+    });
   });
   return { rows, errors };
 }
@@ -329,6 +355,18 @@ export function workbookIsSchedule(wb: XLSX.WorkBook): boolean {
   return false;
 }
 
+function sheetRows(ws: XLSX.WorkSheet): unknown[][] {
+  const usedRange = ws["!ref"] ? XLSX.utils.decode_range(ws["!ref"]) : null;
+  if (!usedRange) return [];
+  return XLSX.utils.sheet_to_json<unknown[]>(ws, {
+    header: 1,
+    raw: true,
+    defval: "",
+    blankrows: true,
+    range: { s: { r: 0, c: 0 }, e: usedRange.e },
+  });
+}
+
 function buildScheduleNotes(
   row: unknown[],
   customerCol: number,
@@ -351,14 +389,14 @@ function buildScheduleNotes(
  * run row gets the date of the block it sits under; rows with no resolvable date
  * or no brand are reported as errors. Always returns `multiDay: true`.
  */
-export function parseScheduleWorkbook(wb: XLSX.WorkBook): ImportParseResult {
+export function parseScheduleWorkbook(wb: XLSX.WorkBook, sourceFile?: string): ImportParseResult {
   const rows: ImportRow[] = [];
   const errors: ImportParseError[] = [];
   let rowCounter = 0; // synthetic 1-based counter across all sheets (UI/merge display)
   for (const name of wb.SheetNames) {
     const ws = wb.Sheets[name];
     if (!ws) continue;
-    const aoa = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, raw: true, defval: "" });
+    const aoa = sheetRows(ws);
     let i = 0;
     while (i < aoa.length) {
       const header = aoa[i];
@@ -373,10 +411,13 @@ export function parseScheduleWorkbook(wb: XLSX.WorkBook): ImportParseResult {
       const shipCol = findHeaderCol(header, ["ship", "ship date", "shipdate"]);
       const poCol = findHeaderCol(header, ["po", "po #", "po#", "po number"]);
       let date: string | null = null;
-      for (const c of header) {
-        const d = coerceCellDate(c);
+      let dateCol = -1;
+      for (let c = 0; c < header.length; c++) {
+        const value = header[c];
+        const d = coerceCellDate(value);
         if (d) {
           date = d;
+          dateCol = c;
           break;
         }
       }
@@ -416,6 +457,22 @@ export function parseScheduleWorkbook(wb: XLSX.WorkBook): ImportParseResult {
           flavor,
           casesPlanned: Math.round(casesPlanned),
           notes: buildScheduleNotes(r, customerCol, shipCol, poCol),
+          source: {
+            ...(sourceFile?.trim() ? { file: sourceFile.trim() } : {}),
+            sheet: name,
+            cells: {
+              brand: XLSX.utils.encode_cell({ r: j, c: brandCol }),
+              flavor: XLSX.utils.encode_cell({ r: j, c: flavorCol }),
+              casesPlanned: XLSX.utils.encode_cell({ r: j, c: unitsCol }),
+              ...(() => {
+                const noteCols = [customerCol, poCol, shipCol].filter((c) => c >= 0);
+                return noteCols.length
+                  ? { notes: noteCols.map((c) => XLSX.utils.encode_cell({ r: j, c })) }
+                  : {};
+              })(),
+              ...(dateCol >= 0 ? { date: XLSX.utils.encode_cell({ r: i, c: dateCol }) } : {}),
+            },
+          },
         });
       }
       i = j; // resume at the next header (or end)

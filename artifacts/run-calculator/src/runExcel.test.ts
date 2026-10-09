@@ -216,6 +216,7 @@ import {
   filterImportFromDate,
   skipAlreadyRanRuns,
   isNumericLikeCell,
+  parseRunWorkbook,
 } from "@/utils/runExcel";
 
 // 2026-06-22 and 2026-06-29 as Excel 1900-system serials.
@@ -266,6 +267,29 @@ describe("parseScheduleWorkbook", () => {
       casesPlanned: 300,
     });
     expect(res.rows[0].notes).toBe("Bernatello's • PO 401072 • Ship 2026-07-03");
+  });
+
+  it("retains exact source cells for dated rows and the date header", () => {
+    const res = parseScheduleWorkbook(
+      wbWith({
+        "Week 1": [
+          HEADER(SERIAL_20260622),
+          ["", "", "Lucias", "Pepperoni", 300, "Bernatello's", SHIP_SERIAL, 401072],
+        ],
+      }),
+      "schedule.xlsx",
+    );
+    expect(res.rows[0]?.source).toEqual({
+      file: "schedule.xlsx",
+      sheet: "Week 1",
+      cells: {
+        brand: "C2",
+        flavor: "D2",
+        casesPlanned: "E2",
+        notes: ["F2", "H2", "G2"],
+        date: "B1",
+      },
+    });
   });
 
   it("handles multiple day-blocks across sheets with their own dates", () => {
@@ -324,6 +348,28 @@ describe("parseScheduleWorkbook", () => {
     expect(res.rows[0].brand).toBe("Acme");
     // Numeric junk must NOT surface as a brand candidate nor inflate the skip count.
     expect(res.errors).toHaveLength(0);
+  });
+});
+
+describe("parseRunWorkbook source cells", () => {
+  it("preserves physical row numbers across blank rows and cites the imported values", () => {
+    const wb = wbWith({
+      Sheet1: [
+        ["Brand", "Flavor", "Cases Planned", "Notes"],
+        [],
+        ["Acme", "Classic", 12, "rush"],
+      ],
+    });
+    const bytes = XLSX.write(wb, { type: "array", bookType: "xlsx" });
+    const parsed = parseRunWorkbook(bytes, "runs.xlsx");
+    expect(parsed.rows[0]).toMatchObject({
+      rowNumber: 3,
+      source: {
+        file: "runs.xlsx",
+        sheet: "Sheet1",
+        cells: { brand: "A3", flavor: "B3", casesPlanned: "C3", notes: "D3" },
+      },
+    });
   });
 });
 

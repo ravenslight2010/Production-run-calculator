@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   parsePremixWorkbook,
+  parsePremixWorkbookWithSources,
   groundPremix,
   splitPremixName,
   premixMatchName,
@@ -103,6 +104,20 @@ describe("parsePremixWorkbook", () => {
     const flat = mix.components.find((c) => c.ingredient === "1/8 Green Pepper");
     expect(flat?.perPizza).toBe(0);
     expect(flat?.perBatch).toBe(10);
+  });
+
+  it("attaches review-only sheet and cell coordinates without changing the ordinary parse result", () => {
+    const withSource = parsePremixWorkbookWithSources([{ ...BOBOS, sourceFile: "premix.xlsx" }])[0]!;
+    expect(withSource.sourceEvidence).toMatchObject({
+      name: { file: "premix.xlsx", sheet: "Bobos Deluxe", cell: "A1" },
+      batchSize: { file: "premix.xlsx", sheet: "Bobos Deluxe", cell: "C9" },
+    });
+    expect(withSource.sourceEvidence?.components[0]).toMatchObject({
+      ingredient: { cell: "A3", sheet: "Bobos Deluxe", file: "premix.xlsx" },
+      perPizza: { cell: "B3", sheet: "Bobos Deluxe", file: "premix.xlsx" },
+      perBatch: { cell: "C3", sheet: "Bobos Deluxe", file: "premix.xlsx" },
+    });
+    expect(parsePremixWorkbook([BOBOS])[0]).not.toHaveProperty("sourceEvidence");
   });
 
   it("parses two horizontal blocks on one tab (incl. the 'Pert Pizza' typo)", () => {
