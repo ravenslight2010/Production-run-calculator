@@ -536,6 +536,8 @@ export * from './qcRedactionInput';
 export * from './qcRedactionInputFieldsItem';
 export * from './qcRunResponse';
 export * from './qcRunResponseSignoff';
+export * from './qcRunResponseWeightCheckEventsItem';
+export * from './qcRunResponseWeightCheckEventsItemCheckType';
 export * from './qcRunSignoffInput';
 export * from './qcTarget';
 export * from './qcTargetInput';

@@ -1905,6 +1905,12 @@ export const GetQcRunResponse = zod.object({
 })),
   "hasMore": zod.boolean(),
   "nextCursor": zod.int().nullable(),
+  "weightCheckEvents": zod.array(zod.object({
+  "ingredientId": zod.string(),
+  "checkType": zod.enum(['pre-run', '30-minute']),
+  "createdAt": zod.coerce.date()
+})).describe('Weight-check timeline entries for run cadence reminders, newest first. The server returns at most 5000 records.'),
+  "weightCheckEventsComplete": zod.boolean().describe('False when the 5000-record limit truncated the timeline.'),
   "signoff": zod.union([zod.object({
   "eventId": zod.int(),
   "actorId": zod.string().nullable(),

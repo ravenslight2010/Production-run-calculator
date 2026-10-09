@@ -56,13 +56,20 @@ import {
   useVerifyQcCleaning,
 } from "@workspace/api-client-react";
 import type { IngredientSubstitution } from "@workspace/inventory-math";
-import type { FormValues } from "../types";
+import type { FormValues, RunMeta } from "../types";
 import { useMasterDataSlice } from "../masterData";
 import { collectRunAllergenComponents } from "../runAllergenFootprint";
+import {
+  deriveQcWeightCheckReminders,
+  hasConfiguredQcWeightReminderTarget,
+  QC_WEIGHT_CHECK_OVERDUE_GRACE_MS,
+} from "../qcWeightCheckSchedule";
 import QualityHistoryTab from "./QualityHistoryTab";
 
 export type QcWorkflowTabProps = {
   runId: string;
+  runStartedAt: number | null;
+  runStoppages: RunMeta["stoppages"];
   profileKey: string;
   runIsActive: boolean;
   values: FormValues;
@@ -238,8 +245,16 @@ function formatTime(value: string): string {
     : date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
+function formatMinutes(value: number): string {
+  const minutes = Math.ceil(Math.max(0, value) / 60_000);
+  if (minutes <= 1) return "less than 1 minute";
+  return `${minutes} minutes`;
+}
+
 export default function QcWorkflowTab({
   runId,
+  runStartedAt,
+  runStoppages,
   profileKey,
   runIsActive,
   values,
@@ -251,6 +266,7 @@ export default function QcWorkflowTab({
 }: QcWorkflowTabProps) {
   const queryClient = useQueryClient();
   const [view, setView] = useState<ViewName>("lots");
+  const [clockNowMs, setClockNowMs] = useState(() => Date.now());
   const [selectedIngredient, setSelectedIngredient] = useState("");
   const [lotNumber, setLotNumber] = useState("");
   const [lotStation, setLotStation] = useState("dough");
@@ -265,6 +281,12 @@ export default function QcWorkflowTab({
   useEffect(() => {
     setCheckType(runIsActive ? "30-minute" : "pre-run");
   }, [runId, runIsActive]);
+  useEffect(() => {
+    if (!runIsActive) return;
+    setClockNowMs(Date.now());
+    const timer = window.setInterval(() => setClockNowMs(Date.now()), 15_000);
+    return () => window.clearInterval(timer);
+  }, [runId, runIsActive, runStartedAt]);
   const [reviewStaged, setReviewStaged] = useState<QcAllergenReviewInput["stagedIngredientsStatus"]>("unknown");
   const [reviewCleaning, setReviewCleaning] = useState<QcAllergenReviewInput["cleaningStatus"]>("unknown");
   const [reviewNote, setReviewNote] = useState("");
@@ -371,6 +393,48 @@ export default function QcWorkflowTab({
   const targets = targetsQuery.data?.targets;
   const runItems = runQuery.data?.items;
   const historyItems = historyQuery.data?.items;
+  const runEvidenceMatchesSelection = runQuery.data?.runId === runId;
+  const weightCheckEventsComplete = runQuery.data?.weightCheckEventsComplete
+    ?? !runQuery.data?.hasMore;
+  const weightCheckTimeline = useMemo(
+    () => runQuery.data?.weightCheckEvents
+      ? runQuery.data.weightCheckEvents.map((event) => ({
+        eventType: "weight",
+        ingredientId: event.ingredientId,
+        payload: { checkType: event.checkType },
+        createdAt: event.createdAt,
+      }))
+      : runItems?.filter((event) => event.eventType === "weight") ?? [],
+    [runItems, runQuery.data?.weightCheckEvents],
+  );
+  const hasConfiguredWeightTarget = targets
+    ? hasConfiguredQcWeightReminderTarget(targets)
+    : false;
+  const weightCheckReminders = useMemo(() => {
+    if (
+      !runIsActive
+      || runStartedAt === null
+      || !targets
+      || !runEvidenceMatchesSelection
+      || !weightCheckEventsComplete
+    ) return [];
+    return deriveQcWeightCheckReminders({
+      runStartedAt,
+      pauses: runStoppages ?? [],
+      targets,
+      events: weightCheckTimeline,
+      now: clockNowMs,
+    });
+  }, [
+    clockNowMs,
+    runEvidenceMatchesSelection,
+    runIsActive,
+    runStartedAt,
+    runStoppages,
+    targets,
+    weightCheckEventsComplete,
+    weightCheckTimeline,
+  ]);
   const weightTarget = targets?.find((target) => target.ingredientId === weightIngredient);
   const deviation = weightTarget?.state === "configured"
     && weightTarget.targetValue !== null
@@ -628,6 +692,69 @@ export default function QcWorkflowTab({
         </div>
       ) : (
         <>
+          {runIsActive && runStartedAt !== null && (
+            <section
+              className={`${panelClass} p-4 sm:p-5`}
+              aria-labelledby="qc-weight-reminders-title"
+              data-testid="qc-weight-reminders"
+            >
+              <div className="flex items-start gap-3">
+                <Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-[#397065] dark:text-emerald-300" />
+                <div className="min-w-0 flex-1">
+                  <h2 id="qc-weight-reminders-title" className="text-sm font-bold">30-minute weight checks</h2>
+                  <p className="mt-1 text-xs text-muted-foreground">Advisory reminders only. They do not pause production or hold shipping.</p>
+                  {targetsQuery.isError ? (
+                    <p className="mt-3 text-xs text-amber-900 dark:text-amber-200" role="status">Weight-check timing is unavailable because QC targets could not be loaded.</p>
+                  ) : runQuery.isError ? (
+                    <div className="mt-3">
+                      <QueryFailure message="QC check history could not be loaded, so timing is unavailable." retry={() => void runQuery.refetch()} />
+                    </div>
+                  ) : targetsQuery.isLoading || !targets || runQuery.isLoading || !runEvidenceMatchesSelection ? (
+                    <p className="mt-3 text-xs text-muted-foreground" role="status">Loading configured weight checks…</p>
+                  ) : !hasConfiguredWeightTarget ? (
+                    <p className="mt-3 text-xs text-muted-foreground" role="status">No configured weight targets need timed checks.</p>
+                  ) : !weightCheckEventsComplete ? (
+                    <p className="mt-3 text-xs text-amber-900 dark:text-amber-200" role="status">Weight-check timing is unavailable because this run has more weight records than can be summarized.</p>
+                  ) : weightCheckReminders.length === 0 ? (
+                    <p className="mt-3 text-xs text-muted-foreground" role="status">No configured weight targets need timed checks.</p>
+                  ) : (
+                    <ul className="mt-3 grid gap-2 sm:grid-cols-2" aria-label="Next weight check times">
+                      {weightCheckReminders.map((reminder) => {
+                        const overdueAt = reminder.nextCheckAt + QC_WEIGHT_CHECK_OVERDUE_GRACE_MS;
+                        const status = clockNowMs > overdueAt
+                          ? "overdue"
+                          : clockNowMs >= reminder.nextCheckAt
+                            ? "due"
+                            : "upcoming";
+                        const statusText = status === "overdue"
+                          ? `Overdue · ${formatMinutes(clockNowMs - reminder.nextCheckAt)} past due`
+                          : status === "due"
+                            ? "Due now"
+                            : `Due in ${formatMinutes(reminder.nextCheckAt - clockNowMs)}`;
+                        return (
+                          <li
+                            key={reminder.ingredientId}
+                            className="flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-background/70 px-3 py-2.5"
+                            data-testid={`qc-weight-reminder-${reminder.ingredientId}`}
+                          >
+                            <span className="min-w-0 truncate text-xs font-semibold">{reminder.ingredientName}</span>
+                            <span className="flex shrink-0 items-center gap-2">
+                              <StatusPill tone={status === "overdue" ? "rose" : status === "due" ? "amber" : "neutral"}>
+                                {statusText}
+                              </StatusPill>
+                              <time className="text-[10px] text-muted-foreground" dateTime={new Date(reminder.nextCheckAt).toISOString()}>
+                                {new Date(reminder.nextCheckAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
+                              </time>
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            </section>
+          )}
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(18rem,.75fr)]">
             <section className={`${panelClass} overflow-hidden`} aria-labelledby="qc-record-title">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 px-4 py-3.5 sm:px-5">

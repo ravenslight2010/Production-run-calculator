@@ -3160,6 +3160,20 @@ export interface QcRunSignoffInput {
   note?: string;
 }
 
+export type QcRunResponseWeightCheckEventsItemCheckType = typeof QcRunResponseWeightCheckEventsItemCheckType[keyof typeof QcRunResponseWeightCheckEventsItemCheckType];
+
+
+export const QcRunResponseWeightCheckEventsItemCheckType = {
+  'pre-run': 'pre-run',
+  '30-minute': '30-minute',
+} as const;
+
+export type QcRunResponseWeightCheckEventsItem = {
+  ingredientId: string;
+  checkType: QcRunResponseWeightCheckEventsItemCheckType;
+  createdAt: string;
+};
+
 export type QcRunResponseSignoff = {
   eventId: number;
   /** @nullable */
@@ -3176,6 +3190,10 @@ export interface QcRunResponse {
   hasMore: boolean;
   /** @nullable */
   nextCursor: number | null;
+  /** Weight-check timeline entries for run cadence reminders, newest first. The server returns at most 5000 records. */
+  weightCheckEvents: QcRunResponseWeightCheckEventsItem[];
+  /** False when the 5000-record limit truncated the timeline. */
+  weightCheckEventsComplete: boolean;
   signoff: QcRunResponseSignoff;
 }
 

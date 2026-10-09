@@ -18231,6 +18231,8 @@ export default function Home() {
               <TabsContent value="quality">
                 <QcQualitySurface
                   runId={currentRunId}
+                  runStartedAt={currentRun?.startedAt ?? null}
+                  runStoppages={currentRun?.stoppages}
                   profileKey={canonicalProfileKey(currentRun?.brand ?? "", currentRun?.flavor ?? "")}
                   runIsActive={Boolean(currentRun?.startedAt && !currentRun.endedAt && !currentRun.pausedAt)}
                   values={v}

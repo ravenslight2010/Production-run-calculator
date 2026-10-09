@@ -3147,6 +3147,26 @@ describe("QC workflows", () => {
     expect(noTarget.status).toBe(201);
     expect(((await noTarget.json()) as { event: { payload: Record<string, unknown> } }).event.payload)
       .toMatchObject({ targetValue: null, outcome: "not-evaluated", targetSource: "not-configured" });
+
+    const savedRun = await req(QC_OPERATOR, "GET", "/api/qc/runs/qc-weight-run");
+    expect(savedRun.status).toBe(200);
+    const savedRunData = await savedRun.json() as {
+      runId: string;
+      weightCheckEventsComplete: boolean;
+      weightCheckEvents: Array<{ ingredientId: string; checkType: string; createdAt: string }>;
+    };
+    expect(savedRunData.runId).toBe("qc-weight-run");
+    expect(savedRunData.weightCheckEventsComplete).toBe(true);
+    expect(savedRunData.weightCheckEvents).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        ingredientId: "qc-mozzarella",
+        checkType: "30-minute",
+      }),
+      expect.objectContaining({
+        ingredientId: "qc-crust",
+        checkType: "pre-run",
+      }),
+    ]));
   });
 
   it("reopens run sign-off after new evidence and requires independent cleaning verification", async () => {

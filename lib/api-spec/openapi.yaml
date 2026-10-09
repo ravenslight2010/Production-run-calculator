@@ -7952,7 +7952,7 @@ components:
 
     QcRunResponse:
       type: object
-      required: [runId, items, hasMore, nextCursor, signoff]
+      required: [runId, items, hasMore, nextCursor, weightCheckEvents, weightCheckEventsComplete, signoff]
       properties:
         runId: { type: string }
         items:
@@ -7960,6 +7960,21 @@ components:
           items: { $ref: "#/components/schemas/QcEvent" }
         hasMore: { type: boolean }
         nextCursor: { type: integer, nullable: true }
+        weightCheckEvents:
+          description: >-
+            Weight-check timeline entries for run cadence reminders, newest first.
+            The server returns at most 5000 records.
+          type: array
+          items:
+            type: object
+            required: [ingredientId, checkType, createdAt]
+            properties:
+              ingredientId: { type: string }
+              checkType: { type: string, enum: [pre-run, 30-minute] }
+              createdAt: { type: string, format: date-time }
+        weightCheckEventsComplete:
+          description: False when the 5000-record limit truncated the timeline.
+          type: boolean
         signoff:
           oneOf:
             - type: object

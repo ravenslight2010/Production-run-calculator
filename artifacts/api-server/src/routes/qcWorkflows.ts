@@ -19,6 +19,7 @@ const MAX_RUN_ID = 200;
 const MAX_PROFILE_KEY = 400;
 const MAX_HISTORY_PAGE = 100;
 const MAX_RUN_PAGE = 200;
+const MAX_RUN_WEIGHT_CHECK_EVENTS = 5_000;
 const MAX_EXPORT_PAGE = 500;
 const UNIT = z.enum(["oz", "g", "lb", "kg"]);
 const STATION = z.enum(["dough", "sauce", "frontline", "warehouse", "packaging", "other"]);
@@ -791,6 +792,11 @@ router.get("/qc/runs/:runId", requireCapability("record-qc"), async (req, res) =
       eq(qcWorkflowEventsTable.scope, scope),
       eq(qcWorkflowEventsTable.runId, parsedRunId.data),
     )).orderBy(desc(qcWorkflowEventsTable.id)).limit(limit + 1);
+    const weightRows = await db.select().from(qcWorkflowEventsTable).where(and(
+      eq(qcWorkflowEventsTable.scope, scope),
+      eq(qcWorkflowEventsTable.runId, parsedRunId.data),
+      eq(qcWorkflowEventsTable.eventType, "weight"),
+    )).orderBy(desc(qcWorkflowEventsTable.id)).limit(MAX_RUN_WEIGHT_CHECK_EVENTS + 1);
     const [latestSignoff] = await db.select().from(qcWorkflowEventsTable).where(and(
       eq(qcWorkflowEventsTable.scope, scope),
       eq(qcWorkflowEventsTable.runId, parsedRunId.data),
@@ -807,6 +813,18 @@ router.get("/qc/runs/:runId", requireCapability("record-qc"), async (req, res) =
     const hasMore = rows.length > limit;
     const pageRows = rows.slice(0, limit);
     const items = await hydrateEvents(pageRows);
+    const weightCheckEventsComplete = weightRows.length <= MAX_RUN_WEIGHT_CHECK_EVENTS;
+    const hydratedWeightRows = await hydrateEvents(weightRows.slice(0, MAX_RUN_WEIGHT_CHECK_EVENTS));
+    const weightCheckEvents = hydratedWeightRows.flatMap((event) => {
+      const checkType = event.payload.checkType;
+      return event.ingredientId && (checkType === "pre-run" || checkType === "30-minute")
+        ? [{
+          ingredientId: event.ingredientId,
+          checkType,
+          createdAt: event.createdAt,
+        }]
+        : [];
+    });
     const signoff = latestSignoff;
     const reviewedThroughId = signoff
       ? Number(signoff.payload.reviewedThroughId ?? 0)
@@ -818,6 +836,8 @@ router.get("/qc/runs/:runId", requireCapability("record-qc"), async (req, res) =
       items,
       hasMore,
       nextCursor: hasMore ? pageRows[pageRows.length - 1]?.id ?? null : null,
+      weightCheckEvents,
+      weightCheckEventsComplete,
       signoff: signoff
         ? {
           eventId: signoff.id,

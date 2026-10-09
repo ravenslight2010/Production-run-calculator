@@ -7,6 +7,7 @@
  */
 import type { QcEvent } from './qcEvent';
 import type { QcRunResponseSignoff } from './qcRunResponseSignoff';
+import type { QcRunResponseWeightCheckEventsItem } from './qcRunResponseWeightCheckEventsItem';
 
 export interface QcRunResponse {
   runId: string;
@@ -14,5 +15,9 @@ export interface QcRunResponse {
   hasMore: boolean;
   /** @nullable */
   nextCursor: number | null;
+  /** Weight-check timeline entries for run cadence reminders, newest first. The server returns at most 5000 records. */
+  weightCheckEvents: QcRunResponseWeightCheckEventsItem[];
+  /** False when the 5000-record limit truncated the timeline. */
+  weightCheckEventsComplete: boolean;
   signoff: QcRunResponseSignoff;
 }
