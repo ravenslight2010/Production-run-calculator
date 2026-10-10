@@ -64,24 +64,13 @@ function isHealthDiagnosticModule(source: string): boolean {
   );
 }
 
-function directDatabaseTransactions(
-  source: string,
-  bindings = importedDatabaseBindings(source),
-): string[] {
-  return bindings.filter((binding) =>
-    new RegExp(`\\b${binding.replaceAll("$", "\\$")}\\s*\\.\\s*transaction\\s*\\(`).test(source)
-  );
-}
+type NamedFunction = {
+  name: string;
+  node: ts.FunctionLikeDeclaration;
+};
 
-function namedFunctionBodies(source: string): Array<{ name: string; body: string }> {
-  const sourceFile = ts.createSourceFile(
-    "architecture-check.ts",
-    source,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TS,
-  );
-  const functions: Array<{ name: string; body: string }> = [];
+function namedFunctions(sourceFile: ts.SourceFile): NamedFunction[] {
+  const functions: NamedFunction[] = [];
 
   const visit = (node: ts.Node): void => {
     if (
@@ -107,7 +96,7 @@ function namedFunctionBodies(source: string): Array<{ name: string; body: string
         functionName = node.name.text;
       }
       if (functionName && node.body) {
-        functions.push({ name: functionName, body: node.body.getText(sourceFile) });
+        functions.push({ name: functionName, node });
       }
     }
     ts.forEachChild(node, visit);
@@ -116,14 +105,186 @@ function namedFunctionBodies(source: string): Array<{ name: string; body: string
   return functions;
 }
 
+function aliasedDatabaseTransactions(
+  sourceFile: ts.SourceFile,
+  databaseBindings: string[],
+): { databaseNames: Set<string>; transactionNames: Set<string> } {
+  const databaseNames = new Set(databaseBindings);
+  const transactionNames = new Set<string>();
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isVariableDeclaration(node) &&
+        ts.isIdentifier(node.name) &&
+        node.initializer
+      ) {
+        const initializer = node.initializer;
+        const aliasesDatabase =
+          ts.isIdentifier(initializer) && databaseNames.has(initializer.text);
+        const aliasesTransaction =
+          ts.isIdentifier(initializer) && transactionNames.has(initializer.text);
+        const referencesDatabaseTransaction =
+          ts.isPropertyAccessExpression(initializer) &&
+          initializer.name.text === "transaction" &&
+          ts.isIdentifier(initializer.expression) &&
+          databaseNames.has(initializer.expression.text);
+
+        if (aliasesDatabase && !databaseNames.has(node.name.text)) {
+          databaseNames.add(node.name.text);
+          changed = true;
+        }
+        if (
+          (aliasesTransaction || referencesDatabaseTransaction) &&
+          !transactionNames.has(node.name.text)
+        ) {
+          transactionNames.add(node.name.text);
+          changed = true;
+        }
+      }
+      if (
+        ts.isVariableDeclaration(node) &&
+        ts.isObjectBindingPattern(node.name) &&
+        node.initializer &&
+        ts.isIdentifier(node.initializer) &&
+        databaseNames.has(node.initializer.text)
+      ) {
+        for (const element of node.name.elements) {
+          const importedName = element.propertyName ?? element.name;
+          if (
+            ts.isIdentifier(importedName) &&
+            importedName.text === "transaction" &&
+            ts.isIdentifier(element.name) &&
+            !transactionNames.has(element.name.text)
+          ) {
+            transactionNames.add(element.name.text);
+            changed = true;
+          }
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+  }
+
+  return { databaseNames, transactionNames };
+}
+
+function functionCalls(functionNode: ts.FunctionLikeDeclaration): Set<string> {
+  const calls = new Set<string>();
+  if (!functionNode.body) return calls;
+
+  const visit = (node: ts.Node): void => {
+    if (node !== functionNode.body && ts.isFunctionLike(node)) return;
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+      calls.add(node.expression.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(functionNode.body);
+  return calls;
+}
+
+function functionOpensDatabaseTransaction(
+  functionNode: ts.FunctionLikeDeclaration,
+  databaseBindings: Set<string>,
+  transactionAliases: Set<string>,
+): boolean {
+  if (!functionNode.body) return false;
+  let opensTransaction = false;
+
+  const visit = (node: ts.Node): void => {
+    if (
+      opensTransaction ||
+      (node !== functionNode.body && ts.isFunctionLike(node))
+    ) return;
+    if (ts.isCallExpression(node)) {
+      const expression = node.expression;
+      if (
+        ts.isIdentifier(expression) &&
+        transactionAliases.has(expression.text)
+      ) {
+        opensTransaction = true;
+        return;
+      }
+      if (
+        ts.isPropertyAccessExpression(expression) &&
+        expression.name.text === "transaction" &&
+        ts.isIdentifier(expression.expression) &&
+        databaseBindings.has(expression.expression.text)
+      ) {
+        opensTransaction = true;
+        return;
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(functionNode.body);
+  return opensTransaction;
+}
+
+function hasDatabaseTransactionOnPathFromDiagnosticWriter(source: string): boolean {
+  const sourceFile = ts.createSourceFile(
+    "architecture-check.ts",
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const { databaseNames, transactionNames: transactionAliases } =
+    aliasedDatabaseTransactions(
+      sourceFile,
+      importedDatabaseBindings(source),
+    );
+  const functions = namedFunctions(sourceFile);
+  const functionsByName = new Map<string, NamedFunction[]>();
+  for (const fn of functions) {
+    const sameName = functionsByName.get(fn.name) ?? [];
+    sameName.push(fn);
+    functionsByName.set(fn.name, sameName);
+  }
+
+  const transactionFunctions = new Set(
+    functions
+      .filter((fn) =>
+        functionOpensDatabaseTransaction(
+          fn.node,
+          databaseNames,
+          transactionAliases,
+        )
+      )
+      .map((fn) => fn.name),
+  );
+  const callsByFunction = new Map(
+    functions.map((fn) => [fn, functionCalls(fn.node)]),
+  );
+  const isTransactionReachable = (
+    fn: NamedFunction,
+    visited: Set<NamedFunction>,
+  ): boolean => {
+    if (transactionFunctions.has(fn.name)) return true;
+    if (visited.has(fn)) return false;
+    visited.add(fn);
+    for (const calledName of callsByFunction.get(fn) ?? []) {
+      for (const calledFunction of functionsByName.get(calledName) ?? []) {
+        if (isTransactionReachable(calledFunction, visited)) return true;
+      }
+    }
+    return false;
+  };
+
+  return functions.some(
+    (fn) =>
+      /diagnostic|persist|write|record|store/i.test(fn.name) &&
+      isTransactionReachable(fn, new Set()),
+  );
+}
+
 function diagnosticPersistenceViolation(source: string): boolean {
   if (!isHealthDiagnosticModule(source)) return false;
-
-  const bindings = importedDatabaseBindings(source);
-  return namedFunctionBodies(source).some(({ name, body }) =>
-    /diagnostic|persist|write|record|store/i.test(name) &&
-    directDatabaseTransactions(body, bindings).length > 0
-  );
+  return hasDatabaseTransactionOnPathFromDiagnosticWriter(source);
 }
 
 describe("shared health-diagnostic persistence architecture", () => {
@@ -137,6 +298,48 @@ describe("shared health-diagnostic persistence architecture", () => {
     `;
 
     expect(diagnosticPersistenceViolation(bypass)).toBe(true);
+  });
+
+  it("rejects transaction aliases and neutral helpers reachable from diagnostic writers", () => {
+    const aliasedTransaction = `
+      import { db as database } from "@workspace/db";
+      export type WorkerDiagnostic = { status: "ok" };
+      const openTransaction = database.transaction;
+      export async function persistDiagnostic() {
+        return openTransaction(async (tx) => tx);
+      }
+    `;
+    const destructuredTransaction = `
+      import { db as database } from "@workspace/db";
+      export type WorkerDiagnostic = { status: "ok" };
+      const { transaction: openTransaction } = database;
+      export async function persistDiagnostic() {
+        return openTransaction(async (tx) => tx);
+      }
+    `;
+    const aliasedDatabase = `
+      import { db } from "@workspace/db";
+      export type WorkerDiagnostic = { status: "ok" };
+      const database = db;
+      export async function persistDiagnostic() {
+        return database.transaction(async (tx) => tx);
+      }
+    `;
+    const helperMediatedTransaction = `
+      import { db } from "@workspace/db";
+      export type WorkerDiagnostic = { status: "ok" };
+      async function saveRow() {
+        return db.transaction(async (tx) => tx);
+      }
+      export async function recordDiagnostic() {
+        return saveRow();
+      }
+    `;
+
+    expect(diagnosticPersistenceViolation(aliasedTransaction)).toBe(true);
+    expect(diagnosticPersistenceViolation(destructuredTransaction)).toBe(true);
+    expect(diagnosticPersistenceViolation(aliasedDatabase)).toBe(true);
+    expect(diagnosticPersistenceViolation(helperMediatedTransaction)).toBe(true);
   });
 
   it("permits coordinator-backed diagnostic stores and ordinary transactions", () => {
