@@ -34,28 +34,29 @@ provider-key tests must not silently change the hard-versus-soft readiness polic
 
 ## Live peer SSE topology requirement
 
-Live peer updates over `/api/sync/events` are supported only while exactly one
-API process serves requests. The SSE client registry is process-local; there is
-no cross-instance fanout. Do not horizontally scale the API or claim that a
-client connected to one process receives an immediate update written through
-another. Reconnecting can fetch canonical state, but that is recovery, not
-cross-instance live delivery.
+The current `/api/sync/events` implementation keeps its SSE client registry
+process-local, with no cross-instance fanout. A client receives immediate
+updates only when the write reaches the same process that holds its stream.
+Reconnecting can fetch canonical state, but that is recovery, not
+cross-instance live delivery. A shared-fanout path must be implemented and
+verified before claiming immediate peer delivery across processes.
 
-The owner considered one always-on API process but decided on 2026-10-10 not to
-switch the published service to a VM. Autoscale remains the selected deployment
-type; no shared-fanout design has been approved. Live peer SSE is therefore
-unsupported on the current topology. Do not treat a successful build, sticky
-routing, or the one-Node-command-per-server run configuration as proof of
-cross-process delivery.
+The owner decided on 2026-10-10 not to switch the published service to a VM;
+Autoscale remains selected. The owner confirmed immediate peer updates remain
+required and approved PostgreSQL outbox plus `LISTEN/NOTIFY` as the shared-fanout
+design direction. This approval does not enable the feature: live peer SSE
+remains unsupported until the connection budget is safe and cross-process
+delivery/replay has passed verification. Do not treat a successful build,
+sticky routing, or the one-Node-command-per-server run configuration as proof
+of cross-process delivery.
 
-Before reporting this operating requirement as enforced, retain a dated,
-sanitized read-only deployment check tied to the published deployment. It must
-show that the deployment is always on, that no more than one serving API
-process can handle requests, and what the current and peak process counts are.
-Record the deployment type and bounded build/revision identity when available;
-do not retain URLs, credentials, request data, or raw logs. The usual deployment
-metadata reports deployment type and build status, but does not itself prove
-instance counts, capacity settings, or the number of Node processes.
+Before reporting cross-process peer SSE as supported, retain dated, sanitized
+evidence tied to the published deployment that establishes the maximum and
+current/peak serving-process counts needed for the connection budget, then pass
+the cross-process delivery and replay checks. Record deployment type and
+bounded build/revision identity when available; do not retain URLs, credentials,
+request data, or raw logs. Deployment metadata alone does not prove instance
+counts, capacity settings, or the number of Node processes.
 
 The read-only recheck recorded in
 [the uptime decision record](uptime-and-operational-backlog-decision-2026-10-02.md#owner-decision-and-current-enforcement)
@@ -64,7 +65,8 @@ after the owner reported publishing twice, still found an active public
 Autoscale deployment with a successful build, despite the checked-in `vm`
 target. On 2026-10-10, the owner decided not to switch to VM. The checked-in
 target has been returned to `autoscale`, and a metadata recheck still reports
-Autoscale with a successful build. No shared-fanout design is approved.
+Autoscale with a successful build. The owner approved PostgreSQL outbox plus
+`LISTEN/NOTIFY` as a design direction, but did not enable live peer SSE.
 Replit documents that Autoscale
 can add machines up to a configured maximum and scale down to zero; it has no
 always-on minimum. A maximum of one would not satisfy the always-on requirement.
@@ -74,16 +76,24 @@ current/peak counts. Sanitized probes on 2026-10-09 returned HTTP 200 from
 process count. The bounded deployment-log summary contained one "Server
 listening" line in the last 48 hours, which also does not establish current or
 peak process counts. The active published topology is therefore **NOT
-ENFORCED / NOT VERIFIED** for live peer SSE. The owner has declined the VM
-change, and has not approved shared fanout. Keep live peer SSE unsupported on
-the current Autoscale deployment. The sanitized observation and owner decision
-are retained in
+ENFORCED / NOT VERIFIED** for live peer SSE. A sanitized 2026-10-10 capacity-log
+review found eight primary-observed samples matching the live build between
+14:24 and 14:59 UTC: `max_connections=450`, four known reserved slots, 6–13
+client backends, and a per-process pool max of 10. The sampled pool totals were
+4–10 with zero waiters. This short window does not establish peak headroom;
+provider reserves and Autoscale current/maximum serving-process counts remain
+unknown. Earlier evidence showed a 10-client pool with 13 waiting requests.
+Because a PostgreSQL listener adds one persistent connection per process or
+consumes one slot from each existing pool, no safe aggregate budget is proven.
+Keep live peer SSE unsupported on the current Autoscale deployment until that
+budget and cross-process replay/recovery are verified. The sanitized observation
+and owner decision are retained in
 [`release-evidence/sse-topology-observation-2026-10-09.json`](../release-evidence/sse-topology-observation-2026-10-09.json).
 
 If this evidence cannot be produced, keep the gap explicit and do not represent
-live peer SSE as supported on the current topology. Any future topology change
-or shared-fanout design requires a new owner decision and verification; neither
-is currently approved.
+live peer SSE as supported on the current topology. The PostgreSQL outbox plus
+`LISTEN/NOTIFY` design direction is owner-approved, but implementation and
+support still require a safe capacity budget and verification.
 This deployment constraint is not a `/readyz` check: optional AI and
 background-worker warnings remain warnings and do not fail core readiness.
 

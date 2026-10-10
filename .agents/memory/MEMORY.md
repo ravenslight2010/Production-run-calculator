@@ -148,7 +148,7 @@
 - [Task-platform evidence limits](task-platform-evidence-limits.md) — use real dependencies where available; Drafts and follow-ups may still run concurrently.
 - [Roadmap synthesis](roadmap-synthesis.md) — answer broad “what next” questions from imported research and plans, reconciled against current evidence.
 - [PostgreSQL cursor precision](queue-history-cursor-precision.md) — preserve database timestamp precision or use a stable key so keyset cursors cannot skip rows at millisecond boundaries.
-- [SSE topology](sse-topology-choice.md) + [Replit publish](production-publish-workflow.md) — owner retained Autoscale; peer SSE stays unsupported absent an approved shared-fanout design.
+- [SSE topology](sse-topology-choice.md) + [Replit publish](production-publish-workflow.md) — owner approved PostgreSQL outbox/NOTIFY direction; peer SSE stays unsupported pending safe capacity and replay proof.
 - [Per-pizza advisory limits](per-pizza-advisory-limits.md) — owner chose 16 oz for sauce, each applicator, and each pepperoni entry; warn only above it, never clamp or block Apply.
 - [Signal cleanup](shell-signal-cleanup-output.md) + [detached locks](detached-process-lock-inheritance.md) — show cleanup warnings; close inherited lock descriptors.
 - [Project skill session refresh](skill-session-registry-refresh.md) — project skills register from `.agents/skills`, but existing chats can keep a stale skill list until a new session.

@@ -51,8 +51,28 @@
   "ownerDecision": {
     "date": "2026-10-10",
     "willSwitchToVm": false,
-    "sharedFanoutApproved": false,
+    "immediatePeerUpdatesRequired": true,
+    "sharedFanoutApproved": true,
+    "selectedSharedFanoutDesign": "PostgreSQL outbox with LISTEN/NOTIFY wake-ups",
     "livePeerSseSupported": false
+  },
+  "capacityBudgetReview": {
+    "captureWindowUtc": ["2026-10-10T14:24:35.856Z", "2026-10-10T14:59:39.627Z"],
+    "environment": "production",
+    "source": "Sanitized deployment capacity logs matched against the live /api/build-info response",
+    "sampleCount": 8,
+    "primaryObservedSamples": 8,
+    "postgresMaxConnections": 450,
+    "knownReservedSlots": 4,
+    "clientBackendsRange": [6, 13],
+    "perProcessPoolMax": 10,
+    "sampledPoolTotalRange": [4, 10],
+    "sampledPoolWaitingRange": [0, 0],
+    "autoscaleCurrentProcesses": null,
+    "autoscaleMaximumProcesses": null,
+    "providerReservedSlots": "unknown",
+    "representsPeakHeadroom": false,
+    "rawLogsRetained": false
   },
   "publishingSettings": {
     "documentedTargetControl": "Publishing > Adjust settings > Deployment type dropdown",
@@ -67,7 +87,7 @@
   },
   "conclusion": {
     "livePeerSseSupported": false,
-    "status": "UNSUPPORTED BY OWNER DECISION",
-    "reason": "The owner decided not to switch to a VM and has not approved shared fanout. The checked-in and active deployment target is Autoscale, which may scale to zero and does not provide cross-process SSE fanout."
+    "status": "DESIGN APPROVED; SUPPORT BLOCKED BY CAPACITY AND VALIDATION",
+    "reason": "The owner requires immediate peer updates while retaining Autoscale and approved a PostgreSQL outbox with LISTEN/NOTIFY wake-ups. Autoscale process limits and peak-aligned database headroom are unknown, so implementation and live support remain disabled."
   }
 }

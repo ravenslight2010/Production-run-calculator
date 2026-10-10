@@ -3,7 +3,7 @@
 **Captured:** 2026-10-02
 **Repository revision reviewed:** `d143c7ff5f95e8da2e8f8b15c41ed53c4ee5a3ed`
 **Environment checked:** Production deployment metadata and health-only HTTP probes; no credentials, operational payloads, or raw logs retained
-**Decision (updated 2026-10-10):** The owner decided not to switch to a VM. Autoscale remains the deployment choice; shared fanout has not been approved. The checked-in target is `autoscale`, matching the active deployment metadata. Live peer SSE is explicitly unsupported on this topology.
+**Decision (updated 2026-10-10):** The owner confirmed that immediate peer updates remain required while retaining Autoscale, declined a VM switch, and approved PostgreSQL outbox plus `LISTEN/NOTIFY` as the shared-fanout design direction. The checked-in target is `autoscale`, matching the active deployment metadata. The design is not implemented or enabled: live peer SSE remains unsupported until a safe connection budget and cross-process delivery/recovery evidence are established.
 
 ## Current evidence and limits
 
@@ -16,7 +16,8 @@
 | Replit deployment metadata (read-only check, 2026-10-09) | An active public deployment with a successful build and type `autoscale`; metadata does not expose instance or process counts | Current/peak serving-machine count, effective Autoscale maximum, process count on the published build, or deployed source revision |
 | Replit deployment metadata after two owner-reported publishes (read-only check, 2026-10-09) | Deployment still reports `autoscale` with a successful build; sanitized `/api/livez` and `/api/readyz` probes returned HTTP 200; a bounded 48-hour log summary found one `Server listening` line | Whether Publishing settings were changed, current/peak serving-machine count, process count, or deployed source revision |
 | Sanitized SSE topology observation (`release-evidence/sse-topology-observation-2026-10-09.json`) | Captures the active deployment type, health statuses, and minimized log counts; explicitly records live peer SSE as unsupported | Provider deployment ID, deployed revision, and serving-process counts remain unavailable |
-| Owner decision and checked-in deployment configuration (2026-10-10) | Owner declined a VM change; `.replit` selects `autoscale`, matching the latest read-only metadata recheck | Whether the current process count or Autoscale maximum would support live peer SSE; shared fanout is not approved |
+| Owner decision and checked-in deployment configuration (2026-10-10) | Owner declined a VM change, confirmed immediate peer updates remain required, and approved PostgreSQL outbox plus `LISTEN/NOTIFY` as the design direction; `.replit` selects `autoscale` | Whether the current process count or Autoscale maximum permits a safe connection budget; live peer SSE remains unsupported |
+| Sanitized production capacity logs and live build-info comparison (2026-10-10 14:24–14:59 UTC) | Eight primary-observed samples match the live build; PostgreSQL reported 450 maximum connections, 4 known reserved slots, 6–13 client backends, and per-process pool max 10 (sampled pool total 4–10, waiting 0) | Only a 35-minute window; it does not establish representative peak headroom, provider reserves, or current/maximum Autoscale processes |
 | Replit [machine configuration](https://docs.replit.com/features/publishing/machine-configuration) and [deployment types](https://docs.replit.com/features/publishing/deployment-types) documentation (checked 2026-10-05) | Autoscale supports a configurable maximum but can scale to zero; Reserved VM is continuously running on a dedicated VM | A configured maximum of one does not provide an always-on guarantee; one VM alone does not prove that its run command starts only one API process |
 | Sanitized production probe and diagnostics (rechecked 2026-10-02) | `/api/livez` returned 200; `/api/readyz` returned 503. `process`, `startup`, `database`, `auditProtection`, and `dependencies` were `ok`, while `backgroundWorkers` was `error`. The allowlisted worker diagnostics showed `web-push-schedule` with 5 recent failures against a threshold of 3, status `warning`, and generic code `operation_failed` | The raw worker exception, exact deployed source revision, or whether the failure rate will persist |
 | Checked-out readiness implementation and route tests | Commit `263514fe814ba16eb83f4fef83be9deb04816db6` maps optional AI and sustained worker failures to warnings; only startup, database, and audit-protection failures block readiness. The route tests cover warning-only HTTP 200 and required-failure HTTP 503 behavior | That production is running this implementation |
@@ -47,14 +48,34 @@ Do not treat sticky sessions as a verified solution. Replit's Autoscale document
 | **One always-on API process** | Keeps immediate in-memory fanout within one process; fewer database pools and simpler operations | Gives up scale-to-zero; one process is a failure point; a single process must be enforced, not assumed from Autoscale | The owner accepts the availability/cost tradeoff and the platform can verify one process |
 | **Autoscale with shared cross-process fanout** | Retains Autoscale behavior while delivering live events to clients connected to other processes | Requires a shared event path, outage/replay behavior, cross-process tests, and a database-connection budget based on maximum server count | Scale-out or scale-to-zero is required and live peer updates must continue across processes |
 
+### Shared-fanout options and failure/replay requirements
+
+The owner selected **PostgreSQL outbox plus `LISTEN/NOTIFY`** as the design
+direction. It reuses the existing database and can provide durable ordered
+replay, but adds outbox writes and a persistent listener connection per API
+process (or reserves one connection from that process's existing pool). The
+outbox, not `NOTIFY`, must be the replay source: notifications are wake-up
+hints and may be missed while a listener is disconnected. Each process must
+drain the outbox after its last processed cursor, tolerate duplicate wake-ups,
+and detect a cursor older than retained events. A retention gap must trigger a
+canonical state reconciliation or reconnect, never silent continuation.
+Transient lock, reset, rollover, and master-data invalidations also need a
+durable replay representation or an authoritative state reconciliation path.
+
+A managed event broker could avoid reserving a PostgreSQL listener connection,
+but would add a new service, credentials/configuration, and operating cost;
+durability and replay guarantees would depend on the selected broker. It was
+not selected. A single always-on API process avoids shared fanout but gives up
+the owner's retained Autoscale choice, so it was also not selected.
+
 ### Owner decision and current enforcement
 
 On 2026-10-03 the owner selected one always-on API process. On 2026-10-10 the
-owner decided not to switch the deployment to a VM. Autoscale remains selected,
-and no shared-fanout design has been approved. Since the process-local client
-set has no cross-instance fanout, live peer SSE is explicitly unsupported on
-the current deployment. Reconnect recovery does not make multi-process live
-delivery supported.
+owner declined the VM switch, retained Autoscale, confirmed that immediate
+cross-process peer updates remain required, and approved PostgreSQL outbox plus
+`LISTEN/NOTIFY` as the shared-fanout design direction. This is not permission to
+enable an unbudgeted listener or to claim support: the runtime still has only a
+process-local client set, so live peer SSE remains unsupported.
 
 The 2026-10-05 check was read-only and bounded to the checked-in deployment
 target, published deployment metadata, and current Replit deployment
@@ -68,14 +89,24 @@ exactly one always-on instance. Thus the published deployment is
 if configured, would still not establish always-on operation.
 
 On 2026-10-09 the owner approved changing to one always-on VM, but on
-2026-10-10 decided not to make that change. The checked-in `.replit` target is
-now `autoscale`, matching the latest read-only deployment metadata recheck.
-Autoscale can scale to zero and may add servers; the available metadata does
-not expose its effective maximum or current/peak process counts. The prior
-sanitized health probes and bounded log summary do not establish those values.
-No shared-fanout design has been approved. Therefore live peer SSE remains
-unsupported. Reconsider support only after a new owner-approved topology
-decision and evidence for that topology.
+2026-10-10 declined that change and selected the PostgreSQL outbox plus
+`LISTEN/NOTIFY` direction instead. The checked-in `.replit` target remains
+`autoscale`, matching the latest deployment metadata. A bounded production-log
+review on 2026-10-10 found eight primary-observed capacity samples from the live
+build between 14:24 and 14:59 UTC: `max_connections=450`, four known reserved
+slots, 6–13 client backends, and a per-process pool maximum of 10. Sampled pool
+totals were 4–10 with zero waiters. This short window does not establish peak
+headroom; provider reserves and Autoscale current/maximum process counts remain
+unknown. Earlier production evidence also captured a saturated 10-client pool
+with 13 waiting requests without a simultaneous primary-capacity sample.
+
+Therefore the selected design is not yet safe to implement or enable. A
+listener needs one persistent database connection per process (or one reserved
+slot from each existing pool); aggregate demand cannot be bounded without the
+Autoscale maximum and process count, and reserving a connection from a pool
+that has saturated is not free. Keep live peer SSE unsupported until peak-aligned
+capacity evidence establishes a safe budget and the approved design passes
+cross-process delivery, replay, and recovery checks.
 
 The topology result does not alter soft readiness: optional AI and
 background-worker warnings remain non-blocking; startup, database, and audit
@@ -84,8 +115,8 @@ protection remain the core readiness gates.
 ### Evidence and acceptance checks required before a deployment change
 
 1. Identify the exact production build/revision and correlate it with readiness behavior. Obtain a safe, sanitized explanation for the current `backgroundWorkers: error`; do not infer it from the response status.
-2. For the selected single-process policy, obtain dated deployment control-plane evidence for always-on status, maximum serving-process count, and current/peak counts. A minimum of one or sticky routing alone is insufficient. If the target cannot guarantee one always-on process or the counts cannot be observed, record the policy as unverified and obtain separate owner approval before changing deployment configuration.
-3. In an isolated environment with two API processes sharing one test database, verify the selected design. For shared fanout, cover a day-state write, manual-section acquired/released, configuration invalidation, reset, and rollover across processes, including scope/date isolation and duplicate/loss behavior. For a single-process choice, verify the platform constraint rather than relying on affinity.
+2. Obtain peak-aligned primary capacity and authoritative Autoscale maximum/current/peak serving-process counts. Include known database/provider reserves, other services, and the per-process pool maximum; compute total demand before adding a listener or changing pool settings. If process counts or reserves remain unavailable, keep the budget unverified.
+3. In an isolated environment with two API processes sharing one test database, verify the selected design. Cover a day-state write, manual-section acquired/released, configuration invalidation, reset, and rollover across processes, including scope/date isolation, duplicate/loss behavior, listener reconnect/cursor replay, and retention-gap reconciliation. Use synthetic records.
 4. Verify authenticated SSE first-frame timing, delivery across at least two heartbeat intervals, disconnect/reconnect recovery, and proxy idle-timeout/buffering behavior. Use synthetic records and retain only sanitized statuses, timings, bounded counts, and revision identity.
 5. Calculate the database connection budget using the database ceiling/reserves, other services, maximum serving-server count, and per-process pool limit. Do not increase pool limits before this calculation.
 6. Confirm the live readiness contract on the exact deployed revision: optional AI absence and worker warnings do not block readiness; required startup, database, and audit-protection failures still do.
@@ -97,7 +128,7 @@ protection remain the core readiness gates.
 | Older proposal or claim | Disposition | Current implementation and remaining boundary |
 |---|---|---|
 | Stale complete writes can overwrite newer state; add complete/partial snapshot fences | **Stale as a code recommendation; convergence remains open** | Complete and partial writes validate snapshot preconditions under lock, with canonical fallback. Repeated-offline convergence and deployed behavior still need evidence. See `docs/sync-system-improvements-plan.md` and `docs/sync-reliability-unified-plan-2026-09-19.md`. |
-| Keep Autoscale only if all peers receive immediate SSE fanout | **Still open** | Autoscale is active and can add servers; immediate SSE fanout is process-local. The two-process test proves reconnect recovery, not cross-process delivery. |
+| Keep Autoscale only if all peers receive immediate SSE fanout | **Requirement confirmed; implementation blocked** | The owner approved PostgreSQL outbox plus `LISTEN/NOTIFY` as the design direction. The two-process test proves reconnect recovery, not cross-process delivery; the safe database connection budget is still unknown. |
 | AI or background-worker problems should make core readiness fail | **Stale for the checked-out source; production mismatch is open** | Current source treats AI as optional and worker degradation as a warning. Audit append-only protection is an additional hard readiness condition absent from the old brief. The live 503 must be reconciled against the deployed revision. |
 | Inventory consumption uses planned cases only; prep-mix and overproduction events are unrecorded | **Stale** | Run consumption scales to `actualCases`; completed-run drawdown, prep-mix physical events, packaging, freezer assets/allocations, and sauce-barrel consumption have server-owned, idempotent paths. Do not deduct finished-case surplus ingredients twice. |
 | Inventory is complete after those physical-event deductions | **Still open** | Final-total freezing, field reconciliation, waste/spoilage, stoppage waste, and returns remain. FEFO/lot genealogy and unified multi-day capacity planning are also not established as complete. Owner input is needed for waste/return events and reconciliation rules. |
@@ -112,7 +143,7 @@ protection remain the core readiness gates.
 These are disposition proposals, not work silently added to this task:
 
 1. **P1 — Reconcile the live readiness failure.** Correlate the published build revision with the checked-out readiness contract, inspect only sanitized deployment diagnostics, and resolve why production returns 503 for a worker warning. Preserve hard failures for startup, database, and audit protection.
-2. **P1 — Decide whether to support live peer updates while retaining Autoscale.** Keep peer SSE unsupported unless the owner separately approves a shared-fanout design; if approved, verify cross-process delivery, reconnect recovery, and the database connection budget before claiming support.
+2. **P1 — Establish the connection budget for the approved live peer-fanout design.** Keep peer SSE unsupported until Autoscale process limits and peak-aligned primary capacity establish safe headroom; then prove cross-process delivery, replay, and reconnect recovery before claiming support.
 3. **P2 — Close inventory completion and reconciliation gaps.** Freeze the accepted final consumption basis and define audited waste/returns handling; keep all stock mutations in the existing server-authoritative idempotent transaction paths. Confirm reason codes and physical workflow with the owner first.
 4. **P2 — Set QC and allergen product rules before building controls.** Decide required checks, accountable roles, retention/export requirements, cleaning-verification evidence, and which conditions may block production. Implement these as a bounded QC/allergen phase only after those owner decisions.
 
