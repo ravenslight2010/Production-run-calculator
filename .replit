@@ -4,7 +4,7 @@ onBoot = "bash scripts/start_local_model_eval_proxy.sh start"
 [deployment]
 router = "application"
 deploymentTarget = "autoscale"
-build = "pnpm run build:publish"
+build = "pnpm run publish:ready"
 run = ["sh", "-c", "pnpm --filter @workspace/db run apply-audit-log-protection && exec node --enable-source-maps artifacts/api-server/dist/index.mjs"]
 
 [deployment.postBuild]
