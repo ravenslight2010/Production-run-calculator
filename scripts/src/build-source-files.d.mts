@@ -6,7 +6,7 @@ export interface SourceSnapshot {
   sourcePolicy: typeof SOURCE_POLICY;
   sourceFingerprintSha256: string;
   files: string[];
-  gitBlobs: Map<string, string>;
+  gitFilesSha256: Map<string, { mode: string; size: number; sha256: string }>;
 }
 
 export function fingerprintSource(root: string): SourceSnapshot;

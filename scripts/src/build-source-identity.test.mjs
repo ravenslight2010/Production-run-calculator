@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, rmSync, symlinkSync } from "node:fs";
 import path from "node:path";
@@ -85,18 +86,28 @@ test("Git binding is verified only for clean tracked build inputs; backup is nev
   git(["add", "."]);
   git(["-c", "user.name=Identity Fixture", "-c", "user.email=identity@invalid.example",
     "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "-m", "Fixture"]);
-  assert.equal(createSourceRecord(root).gitRevision, git(["rev-parse", "HEAD"]).trim());
+  const initialRevision = git(["rev-parse", "HEAD"]).trim();
+  assert.equal(createSourceRecord(root).gitRevision, initialRevision);
+  const captured = fingerprintSource(root);
+  const capturedFile = captured.gitFilesSha256.get("lib/math/src/index.ts");
+  assert.equal(capturedFile.sha256,
+    createHash("sha256").update(readFileSync(path.join(root, "lib/math/src/index.ts"))).digest("hex"));
+  assert.equal(verifiedGitRevision(root, captured), initialRevision);
   put(root, "docs/note.md", "Non-build documentation");
   assert.equal(createSourceRecord(root).gitBinding, "verified");
   put(root, "lib/math/src/index.ts", "dirty productive source");
+  const dirtyCapture = fingerprintSource(root);
+  assert.equal(verifiedGitRevision(root, dirtyCapture), null,
+    "working-tree bytes absent from the committed tree cannot be bound");
   assert.equal(createSourceRecord(root).gitBinding, "unavailable");
-  const captured = fingerprintSource(root);
   put(root, "lib/math/src/index.ts", "a different commit's source");
   git(["add", "lib/math/src/index.ts"]);
   git(["-c", "user.name=Identity Fixture", "-c", "user.email=identity@invalid.example",
     "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "-m", "Advance"]);
   // A now-clean checkout at another HEAD cannot prove the earlier captured bytes.
   assert.equal(verifiedGitRevision(root, captured), null);
+  assert.equal(verifiedGitRevision(root, dirtyCapture), null,
+    "captured bytes that were never committed cannot bind to the new commit");
   rmSync(path.join(root, "lib/math/src/index.ts"));
   assert.equal(createSourceRecord(root).gitBinding, "unavailable");
 });
