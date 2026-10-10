@@ -81,8 +81,7 @@
 - [Correcting-import cleanup](correcting-import-alias-cleanup.md) — corrections remove bad aliases when safe and learn the reverse.
 - [Profile write gating](profile-write-gating.md) — gate saves by capability; defer boot heals and treat queued 403s as terminal.
 - [Master-data health and audit](master-data-health-ownership.md) + [boundary](master-data-audit-boundary.md) — bounded read-only reviews preserve owned legacy rows and report coverage gaps.
-- [Visual baselines](visual-regression-baselines.md) + [browser evidence](release-browser-evidence.md) — review masked, isolated evidence explicitly.
-- [A11y coverage](a11y-coverage-gate.md) + [dialog fixtures](a11y-dialog-browser-fixtures.md) — verify coverage and interactive dialog states.
+- [Browser evidence](visual-regression-baselines.md) + [assertions](release-browser-evidence.md) + [a11y](a11y-coverage-gate.md) + [dialog fixtures](a11y-dialog-browser-fixtures.md) + [startup/IDs](browser-peer-startup-ordering.md) — review isolated evidence, assert stable fixtures, and verify accessibility states.
 - [Sync identity](sync-snapshot-identity.md) + [HTTP](sync-http-failure-handling.md) + [partial writes](partial-sync-contract.md) — stable hashes; non-OK is never ack; partial writes recover.
 - [SSE cleanup](sse-disconnect-registration.md) + [sleep/wake](sleep-wake-sync-fences.md) + [complete writes](complete-sync-snapshot-fencing.md) — clean before awaits; lock-fence complete writes.
 - [Sync reset](sync-reset-boundary-hardening.md) + [fixture isolation](sync-integration-reset-isolation.md) — fence writes by epoch; keep reset endpoints out of shared fixtures.
@@ -95,7 +94,7 @@
 - [Push](github-git-push.md) + [cancelled runs](github-actions-job-summary-visibility.md) + [forks](github-external-fork-verification.md) — secure remotes; verify cancellation and external ownership.
 - [AI gates](deterministic-ai-gates.md) + [evaluation](ai-evaluation-framework-boundary.md) + [QLoRA](qlora-power-margin-boundary.md) — offline gates; ties fail; use ignored caches for local weights.
 - [Local model memory headroom](local-model-memory-headroom.md) — verify available RAM at the required context on the actual evaluator; a 16-GiB cap did not guarantee Qwen3 8B fit.
-- [seed](browser-fixture-seeding.md) + [proof](browser-evidence-assertions.md) + [base](local-release-browser-fixture-base.md) + [DB](browser-e2e-disposable-database.md) — baseline; local API proof.
+- [seed](browser-fixture-seeding.md) + [base](local-release-browser-fixture-base.md) + [DB](browser-e2e-disposable-database.md) — deterministic data and disposable API database for browser proof.
 - [String-reference purge safety](string-reference-purge-safety.md) — recipe stub purges must scan profiles and every historical/current run snapshot before deleting text-linked master data.
 - [Wake/offline claims](wake-sync-claim-fence.md) + [intents](offline-operational-intents.md) + [receipts](offline-command-receipts.md) — fence stale claims; adopt outcomes before finalizing.
 - [Warehouse and Inventory boundary](warehouse-inventory-boundary.md) — Warehouse prepares production; Inventory maintains stock records; keep destinations and permissions distinct.
@@ -124,7 +123,7 @@
 - [Case-based input validity](case-based-production-input-validity.md) — without positive pizzas-per-case, suppress Sauce/Frontline needs, buffers, exports, and claims.
 - [Server operational projection](server-operational-projection.md) — live timer/counter read models travel beside the sync snapshot, never inside its hashed persisted document.
 - [Packaging calc receipts](packaging-calc-receipts.md) — packaging corrections revoke only that run’s stale Calc receipt; preserve the projection high-water mark.
-- [Browser startup](browser-peer-startup-ordering.md) + [evidence](browser-evidence-assertions.md) + [fixture IDs](browser-fixture-server-identifiers.md) — assert startup, labels, and stable IDs.
+- [Fixture IDs](browser-fixture-server-identifiers.md) — use stable server-generated IDs in browser fixtures.
 - [Source-heal stale-client fence](source-heal-stale-client-fence.md) — a source repair is not durable while sleeping clients can replay unfenced full-pool recipe writes.
 - [Acknowledged master-data propagation](acknowledged-master-data-propagation.md) — recipe saves must refresh pending runs; cache effects alone can look like bootstrap.
 - [ZIP asset inventory safety](zip-asset-inventory.md) — inspect central-directory metadata only; fail closed on unsafe members and label output as review evidence, not installation approval.
@@ -157,3 +156,4 @@
 - [Sandbox network](codeexecution-network-globals.md) + [DB test startup](disposable-database-test-startup.md) — verify AbortSignal; extend fixture startup timeout before diagnosing failure.
 - [QC/allergen Phase 1](qc-allergen-phase1-decisions.md) — record-first, non-blocking workflow with explicit target, role, sign-off, and retention rules.
 - [Run to Time policy](run-to-time-operator-policy.md) — elapsed targets mean reached today; reset restores the standard evening target rather than copying now.
+- [MPL web-push approval](mpl-web-push-approval.md) — approval is limited to `web-push@3.6.7`; do not generalize it to other packages or versions.
