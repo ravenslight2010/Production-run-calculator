@@ -9462,6 +9462,7 @@ export default function Home() {
           canonicalRevision?: number;
           masterDataChanged?: boolean;
           configurationInvalidated?: boolean;
+          canonicalReconcile?: boolean;
           family?: "master-data" | "profiles" | "factory-data" | "die-types" | "supervisor-pin" | "name-links" | "merged-away";
           senderId?: string | null;
         };
@@ -9566,10 +9567,10 @@ export default function Home() {
             ? mergeSparseServerRunMap(serverRunLinesRef.current, msg.runLines)
             : msg.runLines;
         }
-        if (msg.initial) {
+        if (msg.initial || msg.canonicalReconcile) {
           // An initial frame is also the reconnect baseline: refresh every
           // independent configuration family in case its nudge was missed while
-          // this live stream was disconnected.
+          // this live stream was disconnected or its outbox cursor expired.
           reconcileConfigurationBaseline();
         } else if (
           (msg.configurationInvalidated || msg.masterDataChanged) &&

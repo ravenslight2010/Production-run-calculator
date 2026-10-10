@@ -33,9 +33,29 @@ The 2026-09-21 branch map is an ancestry snapshot, not current deployment or top
 
 ## SSE fanout boundary
 
-`artifacts/api-server/src/routes/sync.ts` stores open `/sync/events` connections in a process-local `Set`. Day-state writes, manual-section lock notices, reset/rollover notices, and master-data invalidation notices write to that local set; there is no shared SSE broker in this route. A write handled by another process therefore does not immediately fan out to that process's connected clients.
+`artifacts/api-server/src/routes/sync.ts` still stores open `/sync/events`
+connections in a process-local `Set`, but the current checkout now adds a
+PostgreSQL outbox and per-process `LISTEN/NOTIFY` wake-up listener. Day-state
+writes, reset/rollover changes, and their ordered cursors are recorded in the
+canonical transaction. Each process drains durable outbox rows by scope cursor,
+uses notifications only to wake the drain, polls as a backstop, and reconciles
+canonical day/configuration state if retention has passed its cursor. Manual
+section notices and configuration invalidations are also persisted as outbox
+events. Open peer SSE support remains unverified until the separate
+cross-process proof passes.
 
-The SSE handler rereads canonical day state and reset state on its approximately 15-second heartbeat, but its day-state event is not a general cross-process replay mechanism. Heartbeat projections are accepted by the client only when their snapshot ID matches the client's current snapshot. The source test in `sync.convergence.integration.test.ts` asserts that a connected second-process peer does not receive another process's write within one second, then verifies a reconnect receives a complete canonical snapshot. On 2026-10-05 the focused test passed four times (16.8s, 14.0s, 16.4s, and 13.8s) using separate runner-created local PostgreSQL clusters. Only sanitized status and timing were retained; the runner ignores inherited database URLs, and no production database was used. This verifies the test's API-process boundary, not production routing, proxy behavior, or instance count.
+The SSE handler rereads canonical day state and reset state on its approximately
+15-second heartbeat; heartbeat projections are accepted by the client only when
+their snapshot ID matches the client's current snapshot. The existing source
+test in `sync.convergence.integration.test.ts` was written to assert that a
+connected second-process peer does not receive another process's write within
+one second, then verifies reconnect receives a complete canonical snapshot. It
+does not yet prove the new outbox listener's cross-process delivery. On
+2026-10-05 the focused test passed four times (16.8s, 14.0s, 16.4s, and 13.8s)
+using separate runner-created local PostgreSQL clusters. Only sanitized status
+and timing were retained; the runner ignores inherited database URLs, and no
+production database was used. This verifies the prior API-process boundary, not
+the new listener, production routing, proxy behavior, or instance count.
 
 The server-research note's suggestion to check proxy buffering and idle timeouts remains valid, but no proxy-specific behavior is inferred here. The deployment documentation reviewed does not guarantee SSE affinity, buffering behavior, or stream duration.
 
@@ -73,9 +93,11 @@ the owner's retained Autoscale choice, so it was also not selected.
 On 2026-10-03 the owner selected one always-on API process. On 2026-10-10 the
 owner declined the VM switch, retained Autoscale, confirmed that immediate
 cross-process peer updates remain required, and approved PostgreSQL outbox plus
-`LISTEN/NOTIFY` as the shared-fanout design direction. This is not permission to
-enable an unbudgeted listener or to claim support: the runtime still has only a
-process-local client set, so live peer SSE remains unsupported.
+`LISTEN/NOTIFY` as the shared-fanout design direction. The owner later confirmed
+that the database connection-budget gate passed, allowing implementation to
+proceed. Live peer SSE remains unsupported until the separate cross-process
+proof passes; the owner confirmation does not replace deployment-bound capacity
+evidence in the release handoff.
 
 The 2026-10-05 check was read-only and bounded to the checked-in deployment
 target, published deployment metadata, and current Replit deployment
@@ -100,13 +122,12 @@ headroom; provider reserves and Autoscale current/maximum process counts remain
 unknown. Earlier production evidence also captured a saturated 10-client pool
 with 13 waiting requests without a simultaneous primary-capacity sample.
 
-Therefore the selected design is not yet safe to implement or enable. A
-listener needs one persistent database connection per process (or one reserved
-slot from each existing pool); aggregate demand cannot be bounded without the
-Autoscale maximum and process count, and reserving a connection from a pool
-that has saturated is not free. Keep live peer SSE unsupported until peak-aligned
-capacity evidence establishes a safe budget and the approved design passes
-cross-process delivery, replay, and recovery checks.
+The earlier capacity samples alone did not establish peak headroom. The owner
+subsequently confirmed the budget gate passed, and the current checkout includes
+the outbox/listener implementation. The supporting capacity evidence has not
+been attached to this source handoff, and the separate cross-process proof is
+still pending. Keep live peer SSE unsupported until the proof passes and the
+sanitized deployment-bound budget evidence is retained.
 
 The topology result does not alter soft readiness: optional AI and
 background-worker warnings remain non-blocking; startup, database, and audit

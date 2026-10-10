@@ -118,6 +118,14 @@ import {
   isSyncRecord,
   type ManualSection,
 } from "@workspace/sync-contract";
+import {
+  appendSyncOutboxEvent,
+  isLocalSyncOutboxEvent,
+  recordSyncOutboxEvent,
+  registerSyncOutboxScope,
+  startSyncOutboxListener,
+  type StoredSyncOutboxEvent,
+} from "../lib/syncOutbox";
 export { dateInTimeZone, facilityTimeZone } from "../lib/facilityTime";
 export { detectConflicts } from "../lib/syncConflict";
 export { syncSnapshotId } from "../lib/syncContract";
@@ -152,8 +160,9 @@ function broadcastManualSectionEvent(
   ownerId: string,
   scope: Scope,
   date: string,
+  serverTime = Date.now(),
 ): void {
-  const frame = { type: "manual-section-lock", event, runId, section, ownerId, scope, date, serverTime: Date.now() };
+  const frame = { type: "manual-section-lock", event, runId, section, ownerId, scope, date, serverTime };
   for (const client of clients) {
     if (client.scope !== scope || client.watchDate !== date || client.clientId === ownerId) continue;
     try { client.res.write(`data: ${JSON.stringify(frame)}\n\n`); } catch {}
@@ -560,6 +569,10 @@ function broadcast(
     canonicalRevision?: number;
     serverTime?: number;
     operationalProjection?: ReturnType<typeof computeServerLiveState>["operationalProjection"];
+    canonicalReconcile?: boolean;
+    outboxCursor?: number;
+    force?: boolean;
+    onlyClient?: SseClient;
   } = {},
 ): void {
   data = completeSyncData(data);
@@ -573,8 +586,9 @@ function broadcast(
     ? { ...computedLiveState, operationalProjection: meta.operationalProjection ?? null }
     : computedLiveState;
   for (const client of clients) {
+    if (meta.onlyClient && client !== meta.onlyClient) continue;
     if (client.scope === scope && client.watchDate === date) {
-      if (client.clientId === senderId) {
+      if (senderId && client.clientId === senderId) {
         // The sender adopts the canonical HTTP response rather than its own
         // SSE echo, but its connection baseline must advance in lockstep so
         // the next peer update is generated from the snapshot it now holds.
@@ -588,7 +602,7 @@ function broadcast(
       // An accepted write can leave the canonical document unchanged. Do not
       // send a redundant frame to a peer whose exact baseline is already that
       // document; stale peers still need the normal delta/complete recovery.
-      if (snapshotId && client.lastSnapshotId === snapshotId) {
+      if (!meta.force && snapshotId && client.lastSnapshotId === snapshotId) {
         recordSsePeerFrameSkippedExactSnapshot();
         continue;
       }
@@ -600,6 +614,13 @@ function broadcast(
         completeness: "complete" as const,
         snapshotId,
         canonicalRevision: meta.canonicalRevision ?? liveState.calculationRevision,
+        ...(meta.canonicalReconcile ? {
+          canonicalReconcile: true,
+          masterDataChanged: true,
+          configurationInvalidated: true,
+          family: "master-data" as const,
+          ...(meta.outboxCursor === undefined ? {} : { outboxCursor: meta.outboxCursor }),
+        } : {}),
         ...liveState,
       };
       const delta = data != null ? buildSyncPeerDelta(client.lastData, data) : null;
@@ -616,7 +637,7 @@ function broadcast(
       const partialLiveState = delta
         ? compactPeerLiveState(liveState, deltaData)
         : liveState;
-      const frame = delta && syncWireBytes(delta) < syncWireBytes(complete) * 0.8
+      const frame = !meta.canonicalReconcile && delta && syncWireBytes(delta) < syncWireBytes(complete) * 0.8
         ? {
             data: deltaData,
             senderId,
@@ -627,6 +648,7 @@ function broadcast(
             snapshotId: deltaResultingSnapshotId,
             baseSnapshotId: deltaBaseSnapshotId,
             canonicalRevision: meta.canonicalRevision ?? liveState.calculationRevision,
+            ...(meta.canonicalReconcile ? { canonicalReconcile: true } : {}),
             ...partialLiveState,
           }
         : complete;
@@ -735,14 +757,25 @@ export function shouldReceiveConfigurationInvalidation(
   senderId: string,
   scope: Scope,
 ): boolean {
-  return client.scope === scope && client.clientId !== senderId;
+  return client.scope === scope && (!senderId || client.clientId !== senderId);
 }
 
 export function broadcastMasterDataChanged(
   senderId: string,
   scope: Scope = currentScope(),
   family: ConfigurationInvalidationFamily = "master-data",
+  outboxAlreadyPersisted = false,
 ): void {
+  if (!outboxAlreadyPersisted) {
+    void recordSyncOutboxEvent({
+      kind: "configuration",
+      scope,
+      senderId,
+      family,
+    }).catch(() => {
+      logger.error({ event: "sync_outbox_write", kind: "configuration" }, "Configuration invalidation could not be retained");
+    });
+  }
   const msg = `data: ${JSON.stringify(configurationInvalidationPayload(senderId, family))}\n\n`;
   for (const client of clients) {
     if (shouldReceiveConfigurationInvalidation(client, senderId, scope)) {
@@ -758,20 +791,109 @@ export function broadcastMasterDataChanged(
 function broadcastReset(scope: Scope, resetEpoch: number): void {
   const msg = `data: ${JSON.stringify({ reset: true, resetEpoch })}\n\n`;
   for (const client of clients) {
-    if (client.scope === scope) {
-      try { client.res.write(msg); } catch {}
-    }
+    if (client.scope !== scope || resetEpoch <= client.resetEpoch) continue;
+    client.resetEpoch = resetEpoch;
+    try { client.res.write(msg); } catch {}
   }
 }
 
 function broadcastRollover(scope: Scope, resetEpoch: number): void {
   for (const client of clients) {
-    if (client.scope !== scope) continue;
+    if (client.scope !== scope || resetEpoch <= client.resetEpoch) continue;
     try {
       client.res.write(`data: ${JSON.stringify({ rollover: true, resetEpoch })}\n\n`);
       client.resetEpoch = resetEpoch;
     } catch {
       clients.delete(client);
+    }
+  }
+}
+
+async function reconcileOutboxGap(scope: Scope, latestCursor: number): Promise<void> {
+  const resetState = await getResetState(scope);
+  const scopedClients = [...clients].filter((client) => client.scope === scope);
+  for (const client of scopedClients) {
+    if (resetState.epoch > client.resetEpoch) {
+      client.resetEpoch = resetState.epoch;
+      try {
+        client.res.write(`data: ${JSON.stringify({
+          [resetState.rollover ? "rollover" : "reset"]: true,
+          resetEpoch: resetState.epoch,
+        })}\n\n`);
+      } catch {}
+    }
+  }
+  for (const date of new Set(scopedClients.map((client) => client.watchDate))) {
+    const [row] = await db.select().from(dailySyncTable).where(and(
+      eq(dailySyncTable.scope, scope),
+      eq(dailySyncTable.date, date),
+    ));
+    broadcast(
+      completeSyncData(row?.data ?? emptySyncData(date)),
+      "",
+      scope,
+      date,
+      {
+        canonicalRevision: row?.canonicalRevision ?? 0,
+        force: true,
+        canonicalReconcile: true,
+        outboxCursor: latestCursor,
+      },
+    );
+  }
+}
+
+async function dispatchSyncOutboxEvent(event: StoredSyncOutboxEvent): Promise<void> {
+  if (isLocalSyncOutboxEvent(event)) return;
+  switch (event.kind) {
+    case "day-state": {
+      const [row] = await db.select().from(dailySyncTable).where(and(
+        eq(dailySyncTable.scope, event.scope),
+        eq(dailySyncTable.date, event.date),
+      ));
+      if (row) {
+        broadcast(row.data, event.senderId, event.scope, event.date, {
+          canonicalRevision: row.canonicalRevision,
+        });
+      }
+      return;
+    }
+    case "reset":
+      broadcastReset(event.scope, event.resetEpoch);
+      return;
+    case "rollover": {
+      broadcastRollover(event.scope, event.resetEpoch);
+      const [row] = await db.select().from(dailySyncTable).where(and(
+        eq(dailySyncTable.scope, event.scope),
+        eq(dailySyncTable.date, event.date),
+      ));
+      if (row) {
+        broadcast(row.data, "", event.scope, event.date, {
+          canonicalRevision: row.canonicalRevision,
+          force: true,
+        });
+      }
+      return;
+    }
+    case "manual-section":
+      if (event.event === "acquired" && Date.now() - event.createdAt.getTime() >= 35_000) return;
+      broadcastManualSectionEvent(
+        event.event,
+        event.runId,
+        event.section as ManualSection,
+        event.ownerId,
+        event.scope,
+        event.date,
+        event.createdAt.getTime(),
+      );
+      return;
+    case "configuration": {
+      const msg = `data: ${JSON.stringify(configurationInvalidationPayload(event.senderId, event.family))}\n\n`;
+      for (const client of clients) {
+        if (shouldReceiveConfigurationInvalidation(client, event.senderId, event.scope)) {
+          try { client.res.write(msg); } catch {}
+        }
+      }
     }
   }
 }
@@ -945,6 +1067,12 @@ export async function runDailyRollover(
       .set({ epoch: sql`${dataResetTable.epoch} + 1`, resetAt: new Date(nowMs) })
       .where(eq(dataResetTable.scope, scope))
       .returning();
+    await appendSyncOutboxEvent(tx, {
+      kind: "rollover",
+      scope,
+      date: toDate,
+      resetEpoch: nextReset?.epoch ?? 0,
+    });
     return {
       scope,
       fromDate: prior?.date ?? null,
@@ -1257,6 +1385,7 @@ async function upsertProtected(
   date: string,
   scope: Scope,
   payload: unknown,
+  senderId: string,
   clientTodayDate: string,
   expectedEpoch: number,
   clientIp?: string,
@@ -1423,6 +1552,15 @@ async function upsertProtected(
             .insert(dailySyncTable)
             .values({ date, scope, data: m as any, canonicalRevision, updatedAt: new Date() });
         }
+        if (changed || !existing) {
+          await appendSyncOutboxEvent(tx, {
+            kind: "day-state",
+            scope,
+            date,
+            senderId: typeof senderId === "string" ? senderId.slice(0, 160) : "",
+            canonicalRevision,
+          });
+        }
         return {
           data: m,
           // An accepted merge may intentionally preserve the canonical
@@ -1583,6 +1721,7 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
     today,
     scope,
     sanitized,
+    senderId,
     today,
     expectedEpoch,
     req.ip,
@@ -1701,6 +1840,18 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
     res.status(400).json({ error: "Complete section baseline is required" }); return;
   }
   const ownerId = String(deviceId ?? req.userId ?? "unknown");
+  await recordSyncOutboxEvent({
+    kind: "manual-section",
+    scope,
+    date,
+    senderId: ownerId.slice(0, 160),
+    event: "acquired",
+    runId: runId as string,
+    section: section as ManualSection,
+    ownerId: ownerId.slice(0, 160),
+  }).catch(() => {
+    logger.error({ event: "sync_outbox_write", kind: "manual-section" }, "Manual-section notice could not be retained");
+  });
   broadcastManualSectionEvent("acquired", runId as string, section as ManualSection, ownerId, scope, date);
   let result: { status: number; data: Record<string, any>; revision: number; duplicate: boolean; serverTime: number };
   try {
@@ -1822,12 +1973,31 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
       deviceId: (deviceId as string | undefined) ?? "unknown", baseRevision: baseRevision as number,
       canonicalRevision: revision, actionData: { runId, section, values, baseValues }, serverReceivedAt: new Date(),
     });
+    await appendSyncOutboxEvent(tx, {
+      kind: "day-state",
+      scope,
+      date,
+      senderId: ownerId.slice(0, 160),
+      canonicalRevision: revision,
+    });
     return { status: 200, data: next, revision, duplicate: false, serverTime };
     });
     if (result.status === 200 && !result.duplicate) {
       broadcast(result.data, ownerId, scope, date, { canonicalRevision: result.revision, serverTime: result.serverTime });
     }
   } finally {
+    await recordSyncOutboxEvent({
+      kind: "manual-section",
+      scope,
+      date,
+      senderId: ownerId.slice(0, 160),
+      event: "released",
+      runId: runId as string,
+      section: section as ManualSection,
+      ownerId: ownerId.slice(0, 160),
+    }).catch(() => {
+      logger.error({ event: "sync_outbox_write", kind: "manual-section" }, "Manual-section release could not be retained");
+    });
     broadcastManualSectionEvent("released", runId as string, section as ManualSection, ownerId, scope, date);
   }
   if (requestAborted) return;
@@ -1930,6 +2100,13 @@ router.post("/sync/operational-intents", async (req: Request, res: Response): Pr
               actionData: command.actionData,
               serverReceivedAt: new Date(serverTime),
             }).returning({ sequence: operationalIntentLedgerTable.sequence });
+            await appendSyncOutboxEvent(tx, {
+              kind: "day-state",
+              scope,
+              date: intent.date,
+              senderId: command.deviceId.slice(0, 160),
+              canonicalRevision,
+            });
             return {
               data: snapshot,
               outcome: "review-required" as const,
@@ -2045,6 +2222,13 @@ router.post("/sync/operational-intents", async (req: Request, res: Response): Pr
             actionData: command.actionData,
             serverReceivedAt: new Date(serverTime),
           }).returning({ sequence: operationalIntentLedgerTable.sequence });
+          await appendSyncOutboxEvent(tx, {
+            kind: "day-state",
+            scope,
+            date: intent.date,
+            senderId: command.deviceId.slice(0, 160),
+            canonicalRevision,
+          });
           return { ...applied, cursor: receipt!.sequence, canonicalRevision, serverTime };
         });
         break;
@@ -2273,6 +2457,13 @@ router.post("/sync/operational-intents", async (req: Request, res: Response): Pr
             scope, date: intent.date, intentId: intent.id, outcome: applied.outcome,
             snapshot: applied.data as any,
           }).returning({ sequence: operationalIntentLedgerTable.sequence });
+          await appendSyncOutboxEvent(tx, {
+            kind: "day-state",
+            scope,
+            date: intent.date,
+            senderId: typeof req.body?.senderId === "string" ? req.body.senderId.slice(0, 160) : "",
+            canonicalRevision: (existing?.canonicalRevision ?? 0) + 1,
+          });
           return { ...applied, cursor: receipt!.sequence };
         });
         break;
@@ -2518,6 +2709,15 @@ router.post("/sync/auto-track/claim", async (req: Request, res: Response): Promi
             actionData: command.actionData,
             serverReceivedAt: new Date(serverTime),
           });
+          if (applied.outcome === "accepted") {
+            await appendSyncOutboxEvent(tx, {
+              kind: "day-state",
+              scope,
+              date,
+              senderId: typeof req.body?.senderId === "string" ? req.body.senderId.slice(0, 160) : "",
+              canonicalRevision,
+            });
+          }
           return { ...applied, canonicalRevision, serverTime, duplicate: false };
         });
         break;
@@ -2594,6 +2794,7 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
+  await registerSyncOutboxScope(scope);
   res.flushHeaders();
 
   const [[row], initialResetState] = await Promise.all([
@@ -2644,12 +2845,49 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
 
   // Record the client's local date so broadcasts only reach peers on the SAME
   // calendar day (see broadcast). Matches the initial-row lookup above.
-  client = {
+  const registeredClient: SseClient = {
     res, clientId, scope, watchDate, resetEpoch: initialResetState.epoch,
     lastData: data, lastSnapshotId: snapshotId, lastCanonicalRevision: row?.canonicalRevision ?? 0,
     lastCalcEmitMs: initialServerTime,
   };
-  clients.add(client);
+  client = registeredClient;
+  clients.add(registeredClient);
+
+  // Close the gap between the initial canonical read and stream registration.
+  // A write committed in that interval may have been drained before this client
+  // entered the process-local registry, so reconcile only this new stream once.
+  try {
+    const [[registeredRow], registeredReset] = await Promise.all([
+      db.select().from(dailySyncTable)
+        .where(and(eq(dailySyncTable.date, watchDate), eq(dailySyncTable.scope, scope))),
+      getResetState(scope),
+    ]);
+    if (closed) return;
+    if (registeredReset.epoch > registeredClient.resetEpoch) {
+      registeredClient.resetEpoch = registeredReset.epoch;
+      res.write(`data: ${JSON.stringify({
+        [registeredReset.rollover ? "rollover" : "reset"]: true,
+        resetEpoch: registeredReset.epoch,
+      })}\n\n`);
+    }
+    const registeredData = completeSyncData(registeredRow?.data ?? emptySyncData(watchDate));
+    const registeredSnapshotId = syncSnapshotId(registeredData);
+    const registeredRevision = registeredRow?.canonicalRevision ?? 0;
+    if (
+      registeredSnapshotId !== registeredClient.lastSnapshotId
+      || registeredRevision !== registeredClient.lastCanonicalRevision
+    ) {
+      broadcast(registeredData, "", scope, watchDate, {
+        canonicalRevision: registeredRevision,
+        force: true,
+        canonicalReconcile: true,
+        onlyClient: registeredClient,
+      });
+    }
+  } catch (error) {
+    req.log.warn({ err: error, event: "sync_stream_registration_reconcile" },
+      "Initial sync stream reconciliation failed; the stream remains open for retry");
+  }
 
   // Refresh schedule leases on the established heartbeat. A schedule never
   // outlives its SSE freshness window: a failed read simply sends a normal
@@ -2955,6 +3193,7 @@ router.put(
     date,
     scope,
     sanitized,
+    senderId,
     clientToday(req),
     expectedEpoch,
     req.ip,
@@ -3034,8 +3273,10 @@ router.post(
         .set({ epoch: sql`${dataResetTable.epoch} + 1`, resetAt: new Date() })
         .where(eq(dataResetTable.scope, scope))
         .returning();
+      const epoch = row?.epoch ?? 0;
+      await appendSyncOutboxEvent(tx, { kind: "reset", scope, resetEpoch: epoch });
        await logAuditEvent(scope, req.userId ?? "", "factory_reset", "daily_sync", { outcome: "success" }, undefined, undefined, tx);
-       return row?.epoch ?? 0;
+       return epoch;
     });
     broadcastReset(scope, epoch);
     res.json({ ok: true, epoch });
@@ -3127,7 +3368,9 @@ router.post(
         .set({ epoch: sql`${dataResetTable.epoch} + 1`, resetAt: new Date() })
         .where(eq(dataResetTable.scope, scope))
         .returning();
-      return row?.epoch ?? 0;
+      const epoch = row?.epoch ?? 0;
+      await appendSyncOutboxEvent(tx, { kind: "reset", scope, resetEpoch: epoch });
+      return epoch;
     });
     broadcastReset(scope, epoch);
     res.json({ ok: true, epoch });
@@ -3308,6 +3551,15 @@ export async function runAutoTrackServerTicks(opts: {
           updatedAt: new Date(serverTime),
         })
           .where(and(eq(dailySyncTable.date, row.date), eq(dailySyncTable.scope, scope)));
+        if (acceptedHere > 0) {
+          await appendSyncOutboxEvent(tx, {
+            kind: "day-state",
+            scope,
+            date: row.date,
+            senderId: "server:tick",
+            canonicalRevision,
+          });
+        }
         return {
           data,
           claims: rawClaims.length,
@@ -3374,6 +3626,15 @@ export function startDailyRolloverScheduler(
   ));
   timer.unref();
   return { stop: () => clearInterval(timer) };
+}
+
+const stopSyncOutboxListener = startSyncOutboxListener(
+  dispatchSyncOutboxEvent,
+  reconcileOutboxGap,
+);
+
+export function stopSyncOutboxFanout(): void {
+  stopSyncOutboxListener();
 }
 
 export default router;

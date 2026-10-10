@@ -2,6 +2,7 @@
 // per file below.
 export * from "./runs";
 export * from "./sync";
+export * from "./syncOutbox";
 export * from "./applicatorBatchEvidence";
 export * from "./operationalReports";
 export * from "./operationalIntentLedger";

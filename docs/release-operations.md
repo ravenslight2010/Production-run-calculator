@@ -34,19 +34,22 @@ provider-key tests must not silently change the hard-versus-soft readiness polic
 
 ## Live peer SSE topology requirement
 
-The current `/api/sync/events` implementation keeps its SSE client registry
-process-local, with no cross-instance fanout. A client receives immediate
-updates only when the write reaches the same process that holds its stream.
-Reconnecting can fetch canonical state, but that is recovery, not
-cross-instance live delivery. A shared-fanout path must be implemented and
-verified before claiming immediate peer delivery across processes.
+The `/api/sync/events` registry remains process-local. The current checkout now
+uses a PostgreSQL outbox with per-scope ordered cursors and `LISTEN/NOTIFY`
+wake-ups; each API process drains durable rows, catches up after reconnect, and
+reconciles canonical state when a retained cursor has a gap. Notifications are
+bounded wake-up hints, not the replay source. This implementation does not by
+itself establish supported live peer SSE: the separate cross-process
+delivery/replay proof must pass before that support claim is made.
 
 The owner decided on 2026-10-10 not to switch the published service to a VM;
 Autoscale remains selected. The owner confirmed immediate peer updates remain
 required and approved PostgreSQL outbox plus `LISTEN/NOTIFY` as the shared-fanout
-design direction. This approval does not enable the feature: live peer SSE
-remains unsupported until the connection budget is safe and cross-process
-delivery/replay has passed verification. Do not treat a successful build,
+design direction. The owner subsequently confirmed that the database
+connection-budget gate passed, allowing implementation to proceed. That
+confirmation is not a substitute for retaining deployment-bound capacity
+evidence. Live peer SSE remains unsupported until the separate cross-process
+delivery/replay proof has passed. Do not treat a successful build,
 sticky routing, or the one-Node-command-per-server run configuration as proof
 of cross-process delivery.
 
@@ -80,20 +83,21 @@ ENFORCED / NOT VERIFIED** for live peer SSE. A sanitized 2026-10-10 capacity-log
 review found eight primary-observed samples matching the live build between
 14:24 and 14:59 UTC: `max_connections=450`, four known reserved slots, 6–13
 client backends, and a per-process pool max of 10. The sampled pool totals were
-4–10 with zero waiters. This short window does not establish peak headroom;
-provider reserves and Autoscale current/maximum serving-process counts remain
-unknown. Earlier evidence showed a 10-client pool with 13 waiting requests.
-Because a PostgreSQL listener adds one persistent connection per process or
-consumes one slot from each existing pool, no safe aggregate budget is proven.
-Keep live peer SSE unsupported on the current Autoscale deployment until that
-budget and cross-process replay/recovery are verified. The sanitized observation
+4–10 with zero waiters. This short window alone does not establish peak
+headroom; provider reserves and Autoscale current/maximum serving-process counts
+were not visible in that observation. Earlier evidence showed a 10-client pool
+with 13 waiting requests. The owner later confirmed that the connection-budget
+gate passed, but supporting sanitized capacity evidence has not been retained
+in this handoff. Keep live peer SSE unsupported until the separate
+cross-process replay/recovery proof passes and deployment-bound capacity
+evidence is retained. The sanitized observation
 and owner decision are retained in
 [`release-evidence/sse-topology-observation-2026-10-09.json`](../release-evidence/sse-topology-observation-2026-10-09.json).
 
-If this evidence cannot be produced, keep the gap explicit and do not represent
-live peer SSE as supported on the current topology. The PostgreSQL outbox plus
-`LISTEN/NOTIFY` design direction is owner-approved, but implementation and
-support still require a safe capacity budget and verification.
+The PostgreSQL outbox and cursor-drain implementation is present in the current
+checkout. If the deployment-bound capacity evidence or separate cross-process
+proof is unavailable, keep the gap explicit and do not represent live peer SSE
+as supported on the current topology.
 This deployment constraint is not a `/readyz` check: optional AI and
 background-worker warnings remain warnings and do not fail core readiness.
 

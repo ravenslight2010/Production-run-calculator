@@ -6,7 +6,11 @@ import { sandboxAllowed, seedSandboxUser } from "./lib/sandbox";
 import { recordStartupEvent, recordStartupSlowWarning } from "./lib/observability";
 import { runMasterDataHealthScan } from "./lib/masterDataHealth";
 import { classifyStartupRepairFailure } from "./lib/startupRepairFailure";
-import { startAutoTrackServerTicks, startDailyRolloverScheduler } from "./routes/sync";
+import {
+  startAutoTrackServerTicks,
+  startDailyRolloverScheduler,
+  stopSyncOutboxFanout,
+} from "./routes/sync";
 import { startWebPushAlertScheduler } from "./lib/webPush";
 import { startServerJobWorkerLoop } from "./lib/serverJobs";
 import { startAuthRetentionScheduler } from "./lib/authRetention";
@@ -96,6 +100,7 @@ async function startServer(): Promise<void> {
     stopImportSourceRetentionScheduler = undefined;
     stopDatabaseCapacityCollection?.();
     stopDatabaseCapacityCollection = undefined;
+    stopSyncOutboxFanout();
 
     const forceExit = setTimeout(() => {
       logger.error({ signal }, "API server did not stop within 5 seconds");

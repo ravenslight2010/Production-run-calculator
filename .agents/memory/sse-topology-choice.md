@@ -8,17 +8,19 @@ remain required while retaining Autoscale, declined a VM switch, and approved
 PostgreSQL outbox plus `LISTEN/NOTIFY` as the shared-fanout design direction.
 Live peer SSE remains unsupported until implementation is safe and verified.
 
-**Why:** The owner selected the shared-fanout direction, but the per-process
-database pool can saturate and the Autoscale serving-process maximum is
-unavailable. A listener consumes a persistent connection per process or one
-slot from the existing pool, so the aggregate budget is not established.
+On 2026-10-10 the owner confirmed that the database connection-budget gate
+passed, allowing the outbox implementation to proceed. The supporting sanitized
+capacity evidence is not attached to this source handoff.
 
-**How to apply:** Keep `.replit` aligned with Autoscale and describe live peer
-SSE as unsupported until peak-aligned primary capacity and Autoscale process
-limits prove a safe connection budget, and cross-process delivery/replay tests
-pass. The approved design direction is a durable PostgreSQL outbox with
-`LISTEN/NOTIFY` as a wake-up hint; notifications are not the replay source.
-Preserve soft readiness for optional AI/workers.
+**Why:** The owner decision cleared the implementation gate, but the prior
+capacity samples alone did not prove the aggregate production budget or the
+behavior of cross-process replay.
+
+**How to apply:** Proceed with the approved durable PostgreSQL outbox and
+`LISTEN/NOTIFY` wake-up design after the owner's budget confirmation, but keep
+peer SSE unsupported until sanitized deployment-bound capacity evidence and
+cross-process delivery/replay proof are retained. Notifications are not the
+replay source. Preserve soft readiness for optional AI/workers.
 
 The current published Autoscale deployment does not enforce one always-on API
 process. Replit documents a configurable Autoscale maximum but permits scaling

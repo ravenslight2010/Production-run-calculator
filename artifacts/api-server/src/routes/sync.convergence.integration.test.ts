@@ -19,7 +19,7 @@ import type { AddressInfo } from "node:net";
 import { fork, spawnSync, type ChildProcess } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { signLegacyTokenForTests } from "../lib/auth";
 import { rebaseStaleSyncIntent } from "@workspace/sync-contract/stale-base-recovery";
 
@@ -57,6 +57,8 @@ let pool: DbModule["pool"];
 let dailySyncTable: DbModule["dailySyncTable"];
 let dataResetTable: DbModule["dataResetTable"];
 let syncConflictLogsTable: DbModule["syncConflictLogsTable"];
+let syncOutboxCursorsTable: DbModule["syncOutboxCursorsTable"];
+let syncOutboxEventsTable: DbModule["syncOutboxEventsTable"];
 let usersTable: DbModule["usersTable"];
 let userRolesTable: DbModule["userRolesTable"];
 let rolesTable: DbModule["rolesTable"];
@@ -157,6 +159,8 @@ beforeAll(async () => {
   dailySyncTable = dbMod.dailySyncTable;
   dataResetTable = dbMod.dataResetTable;
   syncConflictLogsTable = dbMod.syncConflictLogsTable;
+  syncOutboxCursorsTable = dbMod.syncOutboxCursorsTable;
+  syncOutboxEventsTable = dbMod.syncOutboxEventsTable;
   usersTable = dbMod.usersTable;
   userRolesTable = dbMod.userRolesTable;
   rolesTable = dbMod.rolesTable;
@@ -194,7 +198,7 @@ afterAll(async () => {
 }, 60_000);
 
 beforeEach(async () => {
-  await db.execute(sql`TRUNCATE ${dailySyncTable}, ${dataResetTable}, ${syncConflictLogsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE ${dailySyncTable}, ${dataResetTable}, ${syncConflictLogsTable}, ${syncOutboxEventsTable}, ${syncOutboxCursorsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
   await db.insert(usersTable).values([
     { id: OPERATOR, username: "soak-operator", passwordHash: "x" },
@@ -603,6 +607,68 @@ const fixture = (): SyncPayload => ({
 });
 
 describe("multi-client sync convergence soak", () => {
+  it("commits sync state and its durable outbox cursor in the same transaction", async () => {
+    const writer = new SimulatedClient("outbox-writer");
+    expect(await writer.pull()).toBe(true);
+    writer.state = fixture();
+    expect((await writer.push())?.ok).toBe(true);
+
+    const [day] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, TODAY)));
+    const events = await db.select().from(syncOutboxEventsTable)
+      .where(eq(syncOutboxEventsTable.scope, "live"))
+      .orderBy(asc(syncOutboxEventsTable.cursor));
+    const [cursor] = await db.select().from(syncOutboxCursorsTable)
+      .where(eq(syncOutboxCursorsTable.scope, "live"));
+    expect(day?.data).toMatchObject({
+      dayState: { runs: [{ id: "run-main" }] },
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      cursor: 1,
+      kind: "day-state",
+      date: TODAY,
+      senderId: "outbox-writer",
+    });
+    expect(cursor?.cursor).toBe(events[0]!.cursor);
+  }, 30_000);
+
+  it("keeps per-scope cursors ordered and rolls them back with failed writes", async () => {
+    await expect(db.transaction(async (tx) => {
+      await tx.insert(dailySyncTable).values({
+        scope: "live",
+        date: TODAY,
+        data: fixture() as any,
+      });
+      await (await import("../lib/syncOutbox")).appendSyncOutboxEvent(tx, {
+        kind: "day-state",
+        scope: "live",
+        date: TODAY,
+        senderId: "rolled-back",
+        canonicalRevision: 1,
+      });
+      throw new Error("intentional test rollback");
+    })).rejects.toThrow("intentional test rollback");
+    expect(await db.select().from(syncOutboxCursorsTable)).toHaveLength(0);
+    expect(await db.select().from(syncOutboxEventsTable)).toHaveLength(0);
+    expect(await db.select().from(dailySyncTable)).toHaveLength(0);
+
+    const { appendSyncOutboxEvent } = await import("../lib/syncOutbox");
+    const cursors = await Promise.all(["first", "second"].map((senderId) =>
+      db.transaction((tx) => appendSyncOutboxEvent(tx, {
+        kind: "configuration",
+        scope: "live",
+        senderId,
+        family: "master-data",
+      })),
+    ));
+    expect([...cursors].sort((a, b) => a - b)).toEqual([1, 2]);
+    const events = await db.select().from(syncOutboxEventsTable)
+      .where(eq(syncOutboxEventsTable.scope, "live"))
+      .orderBy(asc(syncOutboxEventsTable.cursor));
+    expect(events.map((event) => event.cursor)).toEqual([1, 2]);
+  }, 30_000);
+
   it("keeps the canonical break plan when reconnect replays a stale queued snapshot", async () => {
     const client = new SimulatedClient("break-offline");
     expect(await client.pull()).toBe(true);
