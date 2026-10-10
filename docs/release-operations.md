@@ -41,12 +41,12 @@ client connected to one process receives an immediate update written through
 another. Reconnecting can fetch canonical state, but that is recovery, not
 cross-instance live delivery.
 
-The owner selected one always-on API process. This is also a single failure
-domain: a process or machine failure interrupts API service and live streams,
-and this design gives up Autoscale's scale-to-zero behavior and horizontal
-availability. Do not treat a configured minimum of one, a successful build, or
-sticky routing as proof that the published service has exactly one always-on
-API process.
+The owner considered one always-on API process but decided on 2026-10-10 not to
+switch the published service to a VM. Autoscale remains the selected deployment
+type; no shared-fanout design has been approved. Live peer SSE is therefore
+unsupported on the current topology. Do not treat a successful build, sticky
+routing, or the one-Node-command-per-server run configuration as proof of
+cross-process delivery.
 
 Before reporting this operating requirement as enforced, retain a dated,
 sanitized read-only deployment check tied to the published deployment. It must
@@ -59,20 +59,31 @@ instance counts, capacity settings, or the number of Node processes.
 
 The read-only recheck recorded in
 [the uptime decision record](uptime-and-operational-backlog-decision-2026-10-02.md#owner-decision-and-current-enforcement)
-found the published deployment is Autoscale. Replit documents that Autoscale
+found the published deployment is Autoscale. A subsequent check on 2026-10-09,
+after the owner reported publishing twice, still found an active public
+Autoscale deployment with a successful build, despite the checked-in `vm`
+target. On 2026-10-10, the owner decided not to switch to VM. The checked-in
+target has been returned to `autoscale`, and a metadata recheck still reports
+Autoscale with a successful build. No shared-fanout design is approved.
+Replit documents that Autoscale
 can add machines up to a configured maximum and scale down to zero; it has no
 always-on minimum. A maximum of one would not satisfy the always-on requirement.
 The available deployment metadata did not expose the configured maximum or
-current/peak counts. The current published topology is therefore **NOT
-ENFORCED / NOT VERIFIED** for live peer SSE.
+current/peak counts. Sanitized probes on 2026-10-09 returned HTTP 200 from
+`/api/livez` and `/api/readyz`; these health results do not establish target or
+process count. The bounded deployment-log summary contained one "Server
+listening" line in the last 48 hours, which also does not establish current or
+peak process counts. The active published topology is therefore **NOT
+ENFORCED / NOT VERIFIED** for live peer SSE. The owner has declined the VM
+change, and has not approved shared fanout. Keep live peer SSE unsupported on
+the current Autoscale deployment. The sanitized observation and owner decision
+are retained in
+[`release-evidence/sse-topology-observation-2026-10-09.json`](../release-evidence/sse-topology-observation-2026-10-09.json).
 
 If this evidence cannot be produced, keep the gap explicit and do not represent
-live peer SSE as supported on the current topology. A move to a continuously
-running single-machine target such as Reserved VM requires a separate owner
-approval and a later publish; operators must then verify the actual process
-count and serving behavior. If horizontal scale is required instead, shared
-fanout needs its own owner-approved architecture decision and verification.
-Neither a topology change nor shared fanout is part of this release guidance.
+live peer SSE as supported on the current topology. Any future topology change
+or shared-fanout design requires a new owner decision and verification; neither
+is currently approved.
 This deployment constraint is not a `/readyz` check: optional AI and
 background-worker warnings remain warnings and do not fail core readiness.
 

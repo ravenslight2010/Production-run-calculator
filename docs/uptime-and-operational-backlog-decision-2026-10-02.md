@@ -3,7 +3,7 @@
 **Captured:** 2026-10-02
 **Repository revision reviewed:** `d143c7ff5f95e8da2e8f8b15c41ed53c4ee5a3ed`
 **Environment checked:** Production deployment metadata and health-only HTTP probes; no credentials, operational payloads, or raw logs retained
-**Decision (updated 2026-10-05):** The owner selected one always-on API process for live peer SSE. The current published Autoscale deployment cannot enforce that policy. No deployment configuration or runtime code was changed; a separate owner-approved deployment decision is required before treating the constraint as enforced.
+**Decision (updated 2026-10-10):** The owner decided not to switch to a VM. Autoscale remains the deployment choice; shared fanout has not been approved. The checked-in target is `autoscale`, matching the active deployment metadata. Live peer SSE is explicitly unsupported on this topology.
 
 ## Current evidence and limits
 
@@ -13,6 +13,10 @@
 | Replit deployment metadata (rechecked 2026-10-02) | An active, public Autoscale deployment with a successful build | Serving-server count, maximum concurrency, affinity, or source/build revision; the supported metadata includes no revision field |
 | Replit [deployment-type documentation](https://docs.replit.com/features/publishing/deployment-types) | Autoscale can scale from zero and add servers to handle traffic; it does not inherently provide session affinity | Whether more than one server was serving this deployment during the probe |
 | Replit deployment metadata and checked-in `.replit` (read-only recheck, 2026-10-05) | Deployment is active with a successful build and type `autoscale`; `.replit` also selects `autoscale` and starts one Node command per serving machine | Effective Autoscale maximum, current/peak serving-machine count, always-on status, process count on the published build, or deployed source revision |
+| Replit deployment metadata (read-only check, 2026-10-09) | An active public deployment with a successful build and type `autoscale`; metadata does not expose instance or process counts | Current/peak serving-machine count, effective Autoscale maximum, process count on the published build, or deployed source revision |
+| Replit deployment metadata after two owner-reported publishes (read-only check, 2026-10-09) | Deployment still reports `autoscale` with a successful build; sanitized `/api/livez` and `/api/readyz` probes returned HTTP 200; a bounded 48-hour log summary found one `Server listening` line | Whether Publishing settings were changed, current/peak serving-machine count, process count, or deployed source revision |
+| Sanitized SSE topology observation (`release-evidence/sse-topology-observation-2026-10-09.json`) | Captures the active deployment type, health statuses, and minimized log counts; explicitly records live peer SSE as unsupported | Provider deployment ID, deployed revision, and serving-process counts remain unavailable |
+| Owner decision and checked-in deployment configuration (2026-10-10) | Owner declined a VM change; `.replit` selects `autoscale`, matching the latest read-only metadata recheck | Whether the current process count or Autoscale maximum would support live peer SSE; shared fanout is not approved |
 | Replit [machine configuration](https://docs.replit.com/features/publishing/machine-configuration) and [deployment types](https://docs.replit.com/features/publishing/deployment-types) documentation (checked 2026-10-05) | Autoscale supports a configurable maximum but can scale to zero; Reserved VM is continuously running on a dedicated VM | A configured maximum of one does not provide an always-on guarantee; one VM alone does not prove that its run command starts only one API process |
 | Sanitized production probe and diagnostics (rechecked 2026-10-02) | `/api/livez` returned 200; `/api/readyz` returned 503. `process`, `startup`, `database`, `auditProtection`, and `dependencies` were `ok`, while `backgroundWorkers` was `error`. The allowlisted worker diagnostics showed `web-push-schedule` with 5 recent failures against a threshold of 3, status `warning`, and generic code `operation_failed` | The raw worker exception, exact deployed source revision, or whether the failure rate will persist |
 | Checked-out readiness implementation and route tests | Commit `263514fe814ba16eb83f4fef83be9deb04816db6` maps optional AI and sustained worker failures to warnings; only startup, database, and audit-protection failures block readiness. The route tests cover warning-only HTTP 200 and required-failure HTTP 503 behavior | That production is running this implementation |
@@ -45,12 +49,12 @@ Do not treat sticky sessions as a verified solution. Replit's Autoscale document
 
 ### Owner decision and current enforcement
 
-On 2026-10-03 the owner selected **one always-on API process** (Option A). This
-supersedes the earlier 2026-10-02 recommendation to defer topology selection.
-The contract is exact: live peer SSE is supported only while exactly one API
-process serves requests. The process-local client set has no cross-instance
-fanout, so a write handled elsewhere does not immediately reach an existing
-stream. Reconnect recovery does not make multi-process live delivery supported.
+On 2026-10-03 the owner selected one always-on API process. On 2026-10-10 the
+owner decided not to switch the deployment to a VM. Autoscale remains selected,
+and no shared-fanout design has been approved. Since the process-local client
+set has no cross-instance fanout, live peer SSE is explicitly unsupported on
+the current deployment. Reconnect recovery does not make multi-process live
+delivery supported.
 
 The 2026-10-05 check was read-only and bounded to the checked-in deployment
 target, published deployment metadata, and current Replit deployment
@@ -63,15 +67,15 @@ exactly one always-on instance. Thus the published deployment is
 **NOT ENFORCED / NOT VERIFIED** for the owner's SSE policy. A maximum of one,
 if configured, would still not establish always-on operation.
 
-No deployment change or publish was performed. Moving to a continuously running
-single-machine target such as Reserved VM is a separate owner-approved
-deployment decision; after any approved change, verify the actual Node process
-count and serving-machine counts from deployment evidence. If the requirement
-is instead to retain horizontal scale, shared fanout requires a separate owner
-decision and implementation. Until an approved topology change is published
-and verified, do not claim the current published deployment supports live peer
-SSE. The single-process choice also means one failure domain and gives up
-Autoscale scale-to-zero and horizontal availability.
+On 2026-10-09 the owner approved changing to one always-on VM, but on
+2026-10-10 decided not to make that change. The checked-in `.replit` target is
+now `autoscale`, matching the latest read-only deployment metadata recheck.
+Autoscale can scale to zero and may add servers; the available metadata does
+not expose its effective maximum or current/peak process counts. The prior
+sanitized health probes and bounded log summary do not establish those values.
+No shared-fanout design has been approved. Therefore live peer SSE remains
+unsupported. Reconsider support only after a new owner-approved topology
+decision and evidence for that topology.
 
 The topology result does not alter soft readiness: optional AI and
 background-worker warnings remain non-blocking; startup, database, and audit
@@ -108,7 +112,7 @@ protection remain the core readiness gates.
 These are disposition proposals, not work silently added to this task:
 
 1. **P1 — Reconcile the live readiness failure.** Correlate the published build revision with the checked-out readiness contract, inspect only sanitized deployment diagnostics, and resolve why production returns 503 for a worker warning. Preserve hard failures for startup, database, and audit protection.
-2. **P1 — Match live sync to the chosen Autoscale policy.** After confirming server counts and the required peer-update latency, either enforce one always-on process or add shared fanout with two-process coverage and canonical reconnect recovery.
+2. **P1 — Decide whether to support live peer updates while retaining Autoscale.** Keep peer SSE unsupported unless the owner separately approves a shared-fanout design; if approved, verify cross-process delivery, reconnect recovery, and the database connection budget before claiming support.
 3. **P2 — Close inventory completion and reconciliation gaps.** Freeze the accepted final consumption basis and define audited waste/returns handling; keep all stock mutations in the existing server-authoritative idempotent transaction paths. Confirm reason codes and physical workflow with the owner first.
 4. **P2 — Set QC and allergen product rules before building controls.** Decide required checks, accountable roles, retention/export requirements, cleaning-verification evidence, and which conditions may block production. Implement these as a bounded QC/allergen phase only after those owner decisions.
 

@@ -1,18 +1,21 @@
 ---
 name: Owner-selected SSE topology
-description: Owner's single-process SSE decision and limits on related work.
+description: Owner's deployment choice and limits on live peer SSE support.
 ---
 
-The owner-provided SSE brief dated 2026-10-03 selects Option A: one always-on
-API process/instance. Do not implement shared fanout or claim multi-instance
-live peer updates without a new owner decision.
+The owner decided on 2026-10-10 not to switch the production deployment to a
+VM; Autoscale remains the selected target. Shared fanout has not been approved,
+so live peer SSE must remain unsupported unless the owner makes a new topology
+decision.
 
-**Why:** The owner explicitly chose the simpler single-process operating model
-instead of authorizing a shared broker.
+**Why:** The owner declined the availability and deployment tradeoff of a VM,
+and has not authorized the separate shared-fanout architecture needed for
+cross-process SSE on Autoscale.
 
-**How to apply:** Document this requirement and separately verify the actual
-deployment constraint. The owner's choice is not proof that a published
-deployment already enforces it. Preserve soft readiness for optional AI/workers.
+**How to apply:** Keep `.replit` aligned with Autoscale and describe live peer
+SSE as unsupported. Do not implement shared fanout or claim multi-instance
+delivery without explicit approval. Preserve soft readiness for optional
+AI/workers.
 
 The current published Autoscale deployment does not enforce one always-on API
 process. Replit documents a configurable Autoscale maximum but permits scaling

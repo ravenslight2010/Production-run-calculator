@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "kind": "sse-topology-observation",
+  "capturedDate": "2026-10-09",
+  "latestMetadataRecheckDate": "2026-10-10",
+  "environment": "production",
+  "captureMethod": [
+    "Replit deployment metadata",
+    "Replit deployment metadata recheck on 2026-10-10",
+    "Read-only GET /api/livez and /api/readyz probes",
+    "Sanitized 48-hour deployment-log summary"
+  ],
+  "deployment": {
+    "active": true,
+    "public": true,
+    "reportedType": "autoscale",
+    "buildSuccessful": true,
+    "deploymentId": "unknown",
+    "sourceRevision": "unknown",
+    "ownerReportedPublishActions": 2
+  },
+  "healthProbes": {
+    "livez": {
+      "httpStatus": 200,
+      "status": "ok"
+    },
+    "readyz": {
+      "httpStatus": 200,
+      "status": "ok"
+    }
+  },
+  "deploymentLogSummary": {
+    "lookbackHours": 48,
+    "filter": "server listening|deployment|build succeeded|starting application",
+    "summaryMatchedLineCount": 2,
+    "serverListeningLineCount": 1,
+    "rawLogsRetained": false,
+    "provesCurrentOrPeakProcessCount": false
+  },
+  "servingProcessEvidence": {
+    "alwaysOnVerified": false,
+    "maximumServingApiProcesses": null,
+    "currentServingApiProcesses": null,
+    "peakServingApiProcesses": null,
+    "evidenceAvailable": false
+  },
+  "checkedInConfiguration": {
+    "deploymentTarget": "autoscale",
+    "runCommandStartsOneNodeApiWithExec": true
+  },
+  "ownerDecision": {
+    "date": "2026-10-10",
+    "willSwitchToVm": false,
+    "sharedFanoutApproved": false,
+    "livePeerSseSupported": false
+  },
+  "publishingSettings": {
+    "documentedTargetControl": "Publishing > Adjust settings > Deployment type dropdown",
+    "ownerReportsControlNotVisible": true,
+    "visualCaptureAvailable": false
+  },
+  "sanitization": {
+    "productionUrlRetained": false,
+    "rawResponseBodiesRetained": false,
+    "rawLogsRetained": false,
+    "credentialsOrRequestDataRetained": false
+  },
+  "conclusion": {
+    "livePeerSseSupported": false,
+    "status": "UNSUPPORTED BY OWNER DECISION",
+    "reason": "The owner decided not to switch to a VM and has not approved shared fanout. The checked-in and active deployment target is Autoscale, which may scale to zero and does not provide cross-process SSE fanout."
+  }
+}
