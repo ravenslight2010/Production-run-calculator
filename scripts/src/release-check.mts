@@ -1347,12 +1347,17 @@ export function resolveSourceLibraryReleaseDatabaseOwner(
   environment: SourceLibraryEvidenceEnvironment,
   configuredDatabaseOwner: string | undefined,
   deploymentHandoffPath?: string,
+  importsPublishedAppRuntimeEvidence = false,
 ): string | undefined {
   const owner = resolveSourceLibraryDatabaseOwner(
     configuredDatabaseOwner,
     deploymentHandoffPath,
   );
-  if (environment === "release" && owner === undefined) {
+  if (
+    environment === "release" &&
+    owner === undefined &&
+    !(importsPublishedAppRuntimeEvidence && deploymentHandoffPath?.trim())
+  ) {
     throw new Error(
       "Production source-library evidence requires --source-library-database-owner or --source-library-deployment-handoff with the approved PostgreSQL database owner.",
     );
@@ -4295,6 +4300,7 @@ async function main(): Promise<void> {
           sourceLibraryEnvironment,
           configuredSourceLibraryDatabaseOwner,
           configuredSourceLibraryDeploymentHandoff,
+          sourceLibraryEvidenceInput !== undefined,
         );
       }
       const sourceLibraryRevision = hasProductionSourceLibraryReconciliation
@@ -4385,6 +4391,7 @@ async function main(): Promise<void> {
         sourceLibraryEnvironment,
         configuredSourceLibraryDatabaseOwner,
         configuredSourceLibraryDeploymentHandoff,
+        sourceLibraryEvidenceInput !== undefined,
       );
     }
     sourceLibraryRevision = hasProductionSourceLibraryReconciliation

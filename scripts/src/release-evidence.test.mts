@@ -1023,6 +1023,51 @@ async function run(): Promise<void> {
       ),
       "approved_source_owner",
     );
+    const runtimeHandoffPath = join(
+      handoffDirectory,
+      "published-runtime-handoff.json",
+    );
+    await writeFile(
+      runtimeHandoffPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        kind: "published-deployment-handoff",
+        deploymentId: "published-runtime-evidence-test",
+        deployedRevision: "d".repeat(40),
+        issuedAt,
+        expiresAt: new Date(
+          Date.parse(issuedAt) + 60 * 60 * 1_000,
+        ).toISOString(),
+      }),
+    );
+    assert.equal(
+      resolveSourceLibraryReleaseDatabaseOwner(
+        "release",
+        undefined,
+        runtimeHandoffPath,
+        true,
+      ),
+      undefined,
+    );
+    assert.throws(
+      () =>
+        resolveSourceLibraryReleaseDatabaseOwner(
+          "release",
+          undefined,
+          runtimeHandoffPath,
+        ),
+      /approved PostgreSQL database owner/,
+    );
+    assert.throws(
+      () =>
+        resolveSourceLibraryReleaseDatabaseOwner(
+          "release",
+          undefined,
+          undefined,
+          true,
+        ),
+      /approved PostgreSQL database owner/,
+    );
     assert.throws(
       () =>
         resolveSourceLibraryReleaseDatabaseOwner(
