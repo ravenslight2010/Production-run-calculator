@@ -102,10 +102,18 @@ It verifies local event delivery, scoping, duplicate/missed notification
 handling, listener recovery, and canonical reconnect recovery against a
 disposable database. Re-run with
 `bash scripts/src/run-isolated-sync-convergence.sh src/routes/sync.convergence.integration.test.ts`.
-It is not published-deployment evidence: serving-process limits and peak-aligned
-database capacity remain unknown. Keep live peer SSE **NOT SUPPORTED** until
-those deployment-bound capacity facts are retained and the deployed topology is
-verified.
+It is not published-deployment evidence. A 2026-10-10 read-only production
+recheck is retained in
+[`evidence/sse-topology-observation-2026-10-10.json`](evidence/sse-topology-observation-2026-10-10.json):
+the live build revision is verified and 43 primary-observed capacity samples
+match its source fingerprint, but Autoscale maximum/current/peak API-process
+counts and provider-reserved database slots remain unknown. The highest sampled
+pool wait was 2, aligned with 13 database client backends, a 450-connection
+limit, and 4 known reserved slots; this sample window does not establish
+representative peak headroom. No separate non-production deployed topology was
+available for cross-instance testing. Keep live peer SSE **NOT SUPPORTED** until
+deployment-bound process counts and peak-aligned capacity establish a safe
+budget and the deployed topology is verified.
 This deployment constraint is not a `/readyz` check: optional AI and
 background-worker warnings remain warnings and do not fail core readiness.
 
