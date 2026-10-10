@@ -70,6 +70,7 @@ let testDatabaseUrl: string;
 
 const OPERATOR = "soak-operator";
 const MANAGER = "soak-manager";
+const SANDBOX_MANAGER = "soak-sandbox-manager";
 const TODAY = "2031-06-15";
 const TOMORROW = "2031-06-16";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
@@ -203,10 +204,12 @@ beforeEach(async () => {
   await db.insert(usersTable).values([
     { id: OPERATOR, username: "soak-operator", passwordHash: "x" },
     { id: MANAGER, username: "soak-manager", passwordHash: "x" },
+    { id: SANDBOX_MANAGER, username: "soak-sandbox-manager", passwordHash: "x", sandbox: true },
   ]);
   await db.insert(userRolesTable).values([
     { userId: OPERATOR, role: "operator" },
     { userId: MANAGER, role: "manager" },
+    { userId: SANDBOX_MANAGER, role: "manager" },
   ]);
 });
 
@@ -222,8 +225,10 @@ async function startIsolatedSyncProcess(): Promise<{ child: ChildProcess; baseUr
     env: {
       ...process.env,
       DATABASE_URL: testDatabaseUrl,
-      // Keep synthetic keep-alive frames outside the 400ms no-data assertion.
+      SYNC_OUTBOX_LISTENER_TEST_ENABLED: "1",
+      // Keep auxiliary heartbeat and calculation frames out of event assertions.
       AUTO_TRACK_HEARTBEAT_MS: "5000",
+      LIVE_CALC_TICK_MS: "60000",
     },
     stdio: ["ignore", "ignore", "ignore", "ipc"],
   });
@@ -280,53 +285,196 @@ async function stopIsolatedSyncProcess(child: ChildProcess): Promise<void> {
   });
 }
 
+type FrameReadState = {
+  buffer: string;
+  pendingChunk?: ReturnType<ReadableStreamDefaultReader<Uint8Array>["read"]>;
+};
+
 async function readDataFrame(
   reader: ReadableStreamDefaultReader<Uint8Array>,
-  state: { buffer: string },
+  state: FrameReadState,
   timeoutMs = 5_000,
 ): Promise<Record<string, unknown>> {
-  const read = async (): Promise<Record<string, unknown>> => {
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    const timedOut = new Promise<never>((_, reject) => {
+      timeout = setTimeout(
+        () => reject(new Error("timed out waiting for data frame")),
+        timeoutMs,
+      );
+    });
     for (;;) {
       const match = state.buffer.match(/data: (.+)\n\n/);
       if (match) {
         state.buffer = state.buffer.slice(match.index! + match[0].length);
         return JSON.parse(match[1]) as Record<string, unknown>;
       }
-      const chunk = await reader.read();
+      const pendingChunk = state.pendingChunk ?? reader.read();
+      state.pendingChunk = pendingChunk;
+      const chunk = await Promise.race([pendingChunk, timedOut]);
+      if (state.pendingChunk === pendingChunk) state.pendingChunk = undefined;
       if (chunk.done) throw new Error("stream closed");
       state.buffer += new TextDecoder().decode(chunk.value);
     }
-  };
-  let timeout: NodeJS.Timeout | undefined;
-  try {
-    return await Promise.race([
-      read(),
-      new Promise<never>((_, reject) => {
-        timeout = setTimeout(
-          () => reject(new Error("timed out waiting for data frame")),
-          timeoutMs,
-        );
-      }),
-    ]);
   } finally {
     if (timeout) clearTimeout(timeout);
   }
 }
 
-async function expectNoDataFrame(
+function isSyncOutboxFrame(frame: Record<string, unknown>): boolean {
+  return frame.reset === true
+    || frame.rollover === true
+    || (frame.type === "master-data" && frame.configurationInvalidated === true)
+    || (
+      frame.scope === "live"
+      && typeof frame.date === "string"
+      && frame.data !== null
+      && typeof frame.data === "object"
+    );
+}
+
+async function readMatchingFrame(
   reader: ReadableStreamDefaultReader<Uint8Array>,
-  state: { buffer: string },
+  state: FrameReadState,
+  predicate: (frame: Record<string, unknown>) => boolean,
+  timeoutMs = 5_000,
+): Promise<Record<string, unknown>> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new Error("timed out waiting for matching data frame");
+    let frame: Record<string, unknown>;
+    try {
+      frame = await readDataFrame(reader, state, remaining);
+    } catch (error) {
+      if (error instanceof Error && error.message === "timed out waiting for data frame") {
+        throw new Error("timed out waiting for matching data frame");
+      }
+      throw error;
+    }
+    if (predicate(frame)) return frame;
+  }
+}
+
+async function expectNoSyncOutboxFrame(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  state: FrameReadState,
   timeoutMs: number,
 ): Promise<void> {
   try {
-    const frame = await readDataFrame(reader, state, timeoutMs);
-    throw new Error(`unexpected data frame: ${JSON.stringify(frame)}`);
+    const frame = await readMatchingFrame(reader, state, isSyncOutboxFrame, timeoutMs);
+    throw new Error(`unexpected sync outbox frame: ${JSON.stringify(frame)}`);
   } catch (error) {
-    if (error instanceof Error && error.message === "timed out waiting for data frame") {
+    if (error instanceof Error && error.message === "timed out waiting for matching data frame") {
       return;
     }
     throw error;
   }
+}
+
+type OpenSyncStream = {
+  reader: ReadableStreamDefaultReader<Uint8Array>;
+  state: FrameReadState;
+  initial: Record<string, unknown>;
+  close: () => Promise<void>;
+};
+
+async function openSyncStream(
+  baseUrl: string,
+  today: string,
+  clientId: string,
+  user = OPERATOR,
+): Promise<OpenSyncStream> {
+  const response = await fetch(
+    `${baseUrl}/api/sync/events?today=${today}&clientId=${clientId}`,
+    { headers: headers(user) },
+  );
+  expect(response.status).toBe(200);
+  const reader = response.body!.getReader();
+  const state: FrameReadState = { buffer: "" };
+  const initial = await readDataFrame(reader, state);
+  expect(initial).toMatchObject({
+    initial: true,
+    completeness: "complete",
+  });
+  return { reader, state, initial, close: () => reader.cancel() };
+}
+
+let rolloverRequestSequence = 0;
+async function runRolloverInProcess(
+  child: ChildProcess,
+  options: { nowMs: number; timeZone: string },
+): Promise<{ rolled: boolean; epoch: number; toDate: string }> {
+  const requestId = `rollover-${++rolloverRequestSequence}`;
+  type ResponseMessage = {
+    type?: string;
+    requestId?: string;
+    ok?: boolean;
+    result?: { rolled?: boolean; epoch?: number; toDate?: string };
+  };
+  const result = await new Promise<ResponseMessage>((resolve, reject) => {
+    const finish = (error?: Error, response?: ResponseMessage) => {
+      clearTimeout(timeout);
+      child.off("error", onError);
+      child.off("exit", onExit);
+      child.off("message", onMessage);
+      if (error) reject(error);
+      else resolve(response!);
+    };
+    const timeout = setTimeout(
+      () => finish(new Error("rollover fixture operation timed out")),
+      10_000,
+    );
+    const onError = (error: Error) => finish(error);
+    const onExit = (code: number | null) =>
+      finish(new Error(`isolated sync process exited during rollover (${code})`));
+    const onMessage = (message: unknown) => {
+      if (
+        message
+        && typeof message === "object"
+        && (message as ResponseMessage).type === "operation-result"
+        && (message as ResponseMessage).requestId === requestId
+      ) {
+        finish(undefined, message as ResponseMessage);
+      }
+    };
+    child.on("error", onError);
+    child.on("exit", onExit);
+    child.on("message", onMessage);
+    child.send({ type: "run-daily-rollover", requestId, options });
+  });
+  if (!result.ok || !result.result) throw new Error("isolated rollover operation failed");
+  return {
+    rolled: result.result.rolled === true,
+    epoch: Number(result.result.epoch),
+    toDate: String(result.result.toDate),
+  };
+}
+
+async function syncOutboxListenerPids(): Promise<number[]> {
+  const result = await pool.query<{ pid: number }>(
+    `SELECT pid
+     FROM pg_stat_activity
+     WHERE datname = current_database()
+       AND state = 'idle'
+       AND query LIKE 'LISTEN sync_outbox%'
+     ORDER BY pid`,
+  );
+  return result.rows.map(({ pid }) => Number(pid));
+}
+
+async function waitForSyncOutboxListeners(
+  count: number,
+  timeoutMs = 10_000,
+  predicate: (pids: number[]) => boolean = () => true,
+): Promise<number[]> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const pids = await syncOutboxListenerPids();
+    if (pids.length === count && predicate(pids)) return pids;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error("sync outbox listener count did not converge");
 }
 
 function clone<T>(value: T): T {
@@ -769,54 +917,281 @@ describe("multi-client sync convergence soak", () => {
     });
   }, 30_000);
 
-  it("documents the cross-process fanout boundary and complete reconnect recovery", async () => {
-    const isolated = await startIsolatedSyncProcess();
+  it("delivers scoped outbox events between API processes and recovers lost notifications", async () => {
+    const processA = await startIsolatedSyncProcess();
+    let processB: Awaited<ReturnType<typeof startIsolatedSyncProcess>> | undefined;
+    const streams: OpenSyncStream[] = [];
     try {
-      const stream = await fetch(`${isolated.baseUrl}/api/sync/events?today=${TODAY}&clientId=process-b-peer`, {
-        headers: headers(),
-      });
-      expect(stream.status).toBe(200);
-      const reader = stream.body!.getReader();
-      const readState = { buffer: "" };
-      const initial = await readDataFrame(reader, readState);
-      expect(initial).toMatchObject({ initial: true, completeness: "complete" });
+      await waitForSyncOutboxListeners(1);
+      const processAPids = await syncOutboxListenerPids();
+      processB = await startIsolatedSyncProcess();
+      const bothPids = await waitForSyncOutboxListeners(2);
+      const processBPid = bothPids.find((pid) => !processAPids.includes(pid));
+      expect(processBPid).toBeTypeOf("number");
 
-      const writer = new SimulatedClient("process-a-writer");
-      expect(await writer.pull()).toBe(true);
-      writer.state = fixture();
-      const write = await writer.push();
-      expect(write?.ok).toBe(true);
-
-      await expectNoDataFrame(reader, readState, CROSS_PROCESS_SILENCE_WINDOW_MS);
-      await reader.cancel();
-
-      const recoveredStream = await fetch(
-        `${isolated.baseUrl}/api/sync/events?today=${TODAY}&clientId=process-b-reconnect`,
-        { headers: headers() },
+      const todayPeer = await openSyncStream(processB.baseUrl, TODAY, "process-b-today-peer");
+      const tomorrowPeer = await openSyncStream(processB.baseUrl, TOMORROW, "process-b-tomorrow-peer");
+      const sandboxPeer = await openSyncStream(
+        processB.baseUrl,
+        TODAY,
+        "process-b-sandbox-peer",
+        SANDBOX_MANAGER,
       );
-      expect(recoveredStream.status).toBe(200);
-      const recoveredReader = recoveredStream.body!.getReader();
-      const recovered = await readDataFrame(recoveredReader, { buffer: "" });
-      expect(recovered).toMatchObject({
+      streams.push(todayPeer, tomorrowPeer, sandboxPeer);
+
+      const initialWrite = await fetch(
+        `${processA.baseUrl}/api/sync/today?today=${TODAY}&epoch=0`,
+        {
+          method: "PUT",
+          headers: { ...headers(), "content-type": "application/json" },
+          body: JSON.stringify({ senderId: "process-a-writer", payload: fixture() }),
+        },
+      );
+      expect(initialWrite.status).toBe(200);
+      const dayStateEvent = await readMatchingFrame(
+        todayPeer.reader,
+        todayPeer.state,
+        (frame) => frame.senderId === "process-a-writer" && frame.date === TODAY,
+      );
+      expect(dayStateEvent).toMatchObject({
+        senderId: "process-a-writer",
+        data: {
+          dayState: { runs: [{ id: "run-main", brand: "Acme", flavor: "Pepperoni" }] },
+          runValues: { "run-main": { casesNeeded: 240 } },
+        },
+      });
+      await expectNoSyncOutboxFrame(tomorrowPeer.reader, tomorrowPeer.state, CROSS_PROCESS_SILENCE_WINDOW_MS);
+      await expectNoSyncOutboxFrame(sandboxPeer.reader, sandboxPeer.state, CROSS_PROCESS_SILENCE_WINDOW_MS);
+
+      const [dayCursor] = await db.select({ cursor: syncOutboxCursorsTable.cursor })
+        .from(syncOutboxCursorsTable)
+        .where(eq(syncOutboxCursorsTable.scope, "live"));
+      await pool.query("SELECT pg_notify('sync_outbox', $1)", [
+        JSON.stringify({ scope: "live", cursor: dayCursor!.cursor }),
+      ]);
+      await pool.query("SELECT pg_notify('sync_outbox', $1)", [
+        JSON.stringify({ scope: "live", cursor: dayCursor!.cursor }),
+      ]);
+      await expectNoSyncOutboxFrame(todayPeer.reader, todayPeer.state, 350);
+
+      // Kill process B's dedicated LISTEN connection, commit a real API write,
+      // then prove the recovered listener brings the peer to canonical state.
+      const killed = await pool.query<{ terminated: boolean }>(
+        "SELECT pg_terminate_backend($1) AS terminated",
+        [processBPid],
+      );
+      expect(killed.rows[0]?.terminated).toBe(true);
+      await waitForSyncOutboxListeners(1);
+      const updated = clone(fixture());
+      (updated.runValues as Record<string, Record<string, unknown>>)["run-main"]!.casesNeeded = 321;
+      (updated.runValuesUpdatedAt as Record<string, number>)["run-main"] = Date.now() + 10_000;
+      const disconnectedWrite = await fetch(
+        `${processA.baseUrl}/api/sync/today?today=${TODAY}&epoch=0`,
+        {
+          method: "PUT",
+          headers: { ...headers(), "content-type": "application/json" },
+          body: JSON.stringify({ senderId: "process-a-recovery-writer", payload: updated }),
+        },
+      );
+      expect(disconnectedWrite.status).toBe(200);
+      const disconnectedResult = await disconnectedWrite.json() as {
+        data?: { runValues?: Record<string, { casesNeeded?: number }> };
+      };
+      expect(disconnectedResult.data?.runValues?.["run-main"]?.casesNeeded).toBe(321);
+      await waitForSyncOutboxListeners(2, 10_000, (pids) => !pids.includes(processBPid!));
+      const recoveredDayState = await readMatchingFrame(
+        todayPeer.reader,
+        todayPeer.state,
+        (frame) => (
+          frame.senderId === "process-a-recovery-writer"
+          || frame.canonicalReconcile === true
+        ) && frame.date === TODAY,
+        8_000,
+      );
+      expect(
+        recoveredDayState.senderId === "process-a-recovery-writer"
+        || recoveredDayState.canonicalReconcile === true,
+      ).toBe(true);
+      expect(
+        (recoveredDayState.data as { runValues?: Record<string, { casesNeeded?: number }> })
+          ?.runValues?.["run-main"]?.casesNeeded,
+      ).toBe(321);
+
+      // A durable event with no NOTIFY at all must still be delivered by the
+      // periodic cursor drain; it carries only bounded invalidation metadata.
+      let missedCursor = 0;
+      await db.transaction(async (tx) => {
+        await tx.insert(syncOutboxCursorsTable).values({ scope: "live", cursor: 0 })
+          .onConflictDoNothing();
+        const [current] = await tx.select().from(syncOutboxCursorsTable)
+          .where(eq(syncOutboxCursorsTable.scope, "live")).for("update");
+        missedCursor = current!.cursor + 1;
+        await tx.update(syncOutboxCursorsTable)
+          .set({ cursor: missedCursor, updatedAt: new Date() })
+          .where(eq(syncOutboxCursorsTable.scope, "live"));
+        await tx.insert(syncOutboxEventsTable).values({
+          scope: "live",
+          cursor: missedCursor,
+          kind: "configuration",
+          date: null,
+          senderId: "missed-notification-writer",
+          payload: { family: "profiles", origin: "no-notify-test" },
+        });
+      });
+      const polledMissedNotification = await readMatchingFrame(
+        todayPeer.reader,
+        todayPeer.state,
+        (frame) => (
+          frame.type === "master-data"
+          && frame.family === "profiles"
+          && frame.senderId === "missed-notification-writer"
+        ),
+        8_000,
+      );
+      expect(polledMissedNotification).toMatchObject({
+        type: "master-data",
+        configurationInvalidated: true,
+        family: "profiles",
+        senderId: "missed-notification-writer",
+      });
+
+      const resetResponse = await fetch(`${processA.baseUrl}/api/sync/reset`, {
+        method: "POST",
+        headers: headers(MANAGER),
+      });
+      expect(resetResponse.status).toBe(200);
+      const resetResult = await resetResponse.json() as { epoch: number };
+      expect(resetResult.epoch).toBe(1);
+      expect(await readMatchingFrame(
+        todayPeer.reader,
+        todayPeer.state,
+        (frame) => frame.reset === true && frame.resetEpoch === 1,
+      )).toMatchObject({
+        reset: true,
+        resetEpoch: 1,
+      });
+      expect(await readMatchingFrame(
+        tomorrowPeer.reader,
+        tomorrowPeer.state,
+        (frame) => frame.reset === true && frame.resetEpoch === 1,
+      )).toMatchObject({
+        reset: true,
+        resetEpoch: 1,
+      });
+      await expectNoSyncOutboxFrame(sandboxPeer.reader, sandboxPeer.state, 350);
+
+      const blankDay = (date: string) => ({
+        dayState: { date, runs: [] },
+        runValues: {},
+      });
+      await db.insert(dailySyncTable).values([
+        { scope: "live", date: "2031-06-14", data: blankDay("2031-06-14") as any },
+        { scope: "live", date: TODAY, data: blankDay(TODAY) as any },
+      ]);
+      const rollover = await runRolloverInProcess(processA.child, {
+        nowMs: Date.UTC(2031, 5, 15, 18),
+        timeZone: "UTC",
+      });
+      expect(rollover).toMatchObject({ rolled: true, epoch: 2, toDate: TODAY });
+      expect(await readMatchingFrame(
+        todayPeer.reader,
+        todayPeer.state,
+        (frame) => frame.rollover === true && frame.resetEpoch === 2,
+      )).toMatchObject({
+        rollover: true,
+        resetEpoch: 2,
+      });
+      expect(await readMatchingFrame(
+        todayPeer.reader,
+        todayPeer.state,
+        (frame) => frame.scope === "live" && frame.date === TODAY && typeof frame.data === "object",
+      )).toMatchObject({
+        data: { dayState: { date: TODAY, runs: [] } },
+      });
+      expect(await readMatchingFrame(
+        tomorrowPeer.reader,
+        tomorrowPeer.state,
+        (frame) => frame.rollover === true && frame.resetEpoch === 2,
+      )).toMatchObject({
+        rollover: true,
+        resetEpoch: 2,
+      });
+      await expectNoSyncOutboxFrame(tomorrowPeer.reader, tomorrowPeer.state, 350);
+      await expectNoSyncOutboxFrame(sandboxPeer.reader, sandboxPeer.state, 350);
+
+      const masterDataResponse = await fetch(`${processA.baseUrl}/api/dough-recipes`, {
+        method: "POST",
+        headers: {
+          ...headers(MANAGER),
+          "content-type": "application/json",
+          "x-client-id": "process-a-recipe-writer",
+        },
+        body: JSON.stringify({
+          items: [{
+            id: "fanout-dough-recipe",
+            name: "Fanout Test Dough",
+            components: [{ ingredient: "Flour", lbs: 10 }],
+            enabled: true,
+          }],
+        }),
+      });
+      expect(masterDataResponse.status).toBe(200);
+      expect(await readMatchingFrame(
+        todayPeer.reader,
+        todayPeer.state,
+        (frame) => frame.family === "master-data" && frame.senderId === "process-a-recipe-writer",
+      )).toMatchObject({
+        type: "master-data",
+        configurationInvalidated: true,
+        family: "master-data",
+        senderId: "process-a-recipe-writer",
+      });
+      expect(await readMatchingFrame(
+        tomorrowPeer.reader,
+        tomorrowPeer.state,
+        (frame) => frame.family === "master-data" && frame.senderId === "process-a-recipe-writer",
+      )).toMatchObject({
+        type: "master-data",
+        configurationInvalidated: true,
+        family: "master-data",
+        senderId: "process-a-recipe-writer",
+      });
+      await expectNoSyncOutboxFrame(sandboxPeer.reader, sandboxPeer.state, 350);
+
+      // A fresh stream on process B must begin from current canonical state;
+      // this is reconnect recovery, distinct from event delivery.
+      const reconnectPeer = await openSyncStream(
+        processB.baseUrl,
+        TODAY,
+        "process-b-canonical-reconnect",
+      );
+      streams.push(reconnectPeer);
+      const canonicalReconnect = reconnectPeer.initial;
+      expect(canonicalReconnect).toMatchObject({
         initial: true,
         completeness: "complete",
         data: {
-          dayState: {
-            runs: [{ id: "run-main", brand: "Acme", flavor: "Pepperoni" }],
-          },
-          runValues: {
-            "run-main": {
-              casesNeeded: 240,
-              casesPerSkid: 48,
-              skidsCompleted: 1,
-              casesOnCurrentSkid: 12,
-            },
-          },
+          dayState: { date: TODAY, rolloverEpoch: 2, runs: [] },
+          runValues: {},
         },
       });
-      await recoveredReader.cancel();
+
+      console.info("[sync peer fanout evidence]", JSON.stringify({
+        apiProcesses: 2,
+        isolatedDisposableDatabase: true,
+        dayStateCrossProcess: true,
+        dateAndScopeIsolation: true,
+        duplicateNotificationIdempotence: true,
+        listenerRecoveryAfterBackendTermination: true,
+        missedNotificationPollingRecovery: true,
+        resetAndRolloverCrossProcess: true,
+        masterDataCrossProcess: true,
+        canonicalReconnectRecovery: true,
+      }));
     } finally {
-      await stopIsolatedSyncProcess(isolated.child);
+      await Promise.all(streams.map((stream) => stream.close().catch(() => {})));
+      if (processB) await stopIsolatedSyncProcess(processB.child);
+      await stopIsolatedSyncProcess(processA.child);
     }
   }, 30_000);
 

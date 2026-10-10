@@ -95,9 +95,17 @@ and owner decision are retained in
 [`release-evidence/sse-topology-observation-2026-10-09.json`](../release-evidence/sse-topology-observation-2026-10-09.json).
 
 The PostgreSQL outbox and cursor-drain implementation is present in the current
-checkout. If the deployment-bound capacity evidence or separate cross-process
-proof is unavailable, keep the gap explicit and do not represent live peer SSE
-as supported on the current topology.
+checkout. The isolated two-process cross-process proof passed on 2026-10-10 and
+is retained in
+[`evidence/sync-peer-fanout-2026-10-10.json`](evidence/sync-peer-fanout-2026-10-10.json).
+It verifies local event delivery, scoping, duplicate/missed notification
+handling, listener recovery, and canonical reconnect recovery against a
+disposable database. Re-run with
+`bash scripts/src/run-isolated-sync-convergence.sh src/routes/sync.convergence.integration.test.ts`.
+It is not published-deployment evidence: serving-process limits and peak-aligned
+database capacity remain unknown. Keep live peer SSE **NOT SUPPORTED** until
+those deployment-bound capacity facts are retained and the deployed topology is
+verified.
 This deployment constraint is not a `/readyz` check: optional AI and
 background-worker warnings remain warnings and do not fail core readiness.
 
