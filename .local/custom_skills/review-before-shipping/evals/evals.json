@@ -1,0 +1,53 @@
+{
+  "skill_name": "review-before-shipping",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Before I open this pull request, verify that the repository changes are safe to commit and that the checks are green.",
+      "expected_output": "Routes the request to verify-before-commit and does not substitute a production-readiness decision.",
+      "assertions": [
+        {
+          "name": "routes commit verification",
+          "description": "Uses verify-before-commit as the owner for commit, push, pull-request, and green-build verification."
+        },
+        {
+          "name": "avoids release decision",
+          "description": "Does not issue a production GO/NO-GO decision."
+        }
+      ],
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "We plan to publish this app. Review the shipping risks and gather the repository release evidence.",
+      "expected_output": "Performs the bounded shipping-risk review and routes repository-specific evidence gathering to release-checklist.",
+      "assertions": [
+        {
+          "name": "reviews owned risks",
+          "description": "Checks secrets, authorization, sensitive data, dependencies, reversibility, and deployment fit."
+        },
+        {
+          "name": "routes release evidence",
+          "description": "Uses release-checklist for repository-specific commands and retained release evidence."
+        }
+      ],
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Is the current revision production-ready? Give me a final GO or NO-GO.",
+      "expected_output": "Routes the final decision to production-go, which composes the shipping review and release checklist.",
+      "assertions": [
+        {
+          "name": "routes final decision",
+          "description": "Uses production-go as the single owner of the final GO/NO-GO decision."
+        },
+        {
+          "name": "requires composed evidence",
+          "description": "Does not declare GO without both shipping-risk and release-checklist evidence."
+        }
+      ],
+      "files": []
+    }
+  ]
+}
