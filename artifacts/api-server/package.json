@@ -66,6 +66,7 @@
     "@types/express": "^5.0.6",
     "@types/node": "catalog:",
     "@types/pg": "^8.23.1",
+    "@workspace/typescript-api-v6": "workspace:*",
     "esbuild": "^0.28.2",
     "esbuild-plugin-pino": "^2.3.3",
     "pg": "^8.23.1",

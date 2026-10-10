@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import ts from "@workspace/typescript-api-v6";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const databaseMocks = vi.hoisted(() => ({
@@ -63,14 +64,66 @@ function isHealthDiagnosticModule(source: string): boolean {
   );
 }
 
-function directDatabaseTransactions(source: string): string[] {
-  return importedDatabaseBindings(source).filter((binding) =>
+function directDatabaseTransactions(
+  source: string,
+  bindings = importedDatabaseBindings(source),
+): string[] {
+  return bindings.filter((binding) =>
     new RegExp(`\\b${binding.replaceAll("$", "\\$")}\\s*\\.\\s*transaction\\s*\\(`).test(source)
   );
 }
 
+function namedFunctionBodies(source: string): Array<{ name: string; body: string }> {
+  const sourceFile = ts.createSourceFile(
+    "architecture-check.ts",
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const functions: Array<{ name: string; body: string }> = [];
+
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isFunctionDeclaration(node) ||
+      ts.isMethodDeclaration(node) ||
+      ts.isFunctionExpression(node) ||
+      ts.isArrowFunction(node)
+    ) {
+      const parent = node.parent;
+      const parentName =
+        (ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)
+          ? parent.name.text
+          : ts.isPropertyAssignment(parent) && ts.isIdentifier(parent.name)
+            ? parent.name.text
+            : undefined);
+      let functionName = parentName;
+      if (
+        (ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node)) &&
+        node.name
+      ) {
+        functionName = node.name.text;
+      } else if (ts.isMethodDeclaration(node) && ts.isIdentifier(node.name)) {
+        functionName = node.name.text;
+      }
+      if (functionName && node.body) {
+        functions.push({ name: functionName, body: node.body.getText(sourceFile) });
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return functions;
+}
+
 function diagnosticPersistenceViolation(source: string): boolean {
-  return isHealthDiagnosticModule(source) && directDatabaseTransactions(source).length > 0;
+  if (!isHealthDiagnosticModule(source)) return false;
+
+  const bindings = importedDatabaseBindings(source);
+  return namedFunctionBodies(source).some(({ name, body }) =>
+    /diagnostic|persist|write|record|store/i.test(name) &&
+    directDatabaseTransactions(body, bindings).length > 0
+  );
 }
 
 describe("shared health-diagnostic persistence architecture", () => {
@@ -102,9 +155,17 @@ describe("shared health-diagnostic persistence architecture", () => {
         return db.transaction(async (tx) => tx);
       }
     `;
+    const diagnosticModuleWithOrdinaryTransaction = `
+      import { db } from "@workspace/db";
+      export type WorkerDiagnostic = { status: "ok" };
+      export async function updateInventory() {
+        return db.transaction(async (tx) => tx);
+      }
+    `;
 
     expect(diagnosticPersistenceViolation(coordinated)).toBe(false);
     expect(diagnosticPersistenceViolation(ordinaryTransaction)).toBe(false);
+    expect(diagnosticPersistenceViolation(diagnosticModuleWithOrdinaryTransaction)).toBe(false);
   });
 
   it("keeps production diagnostic stores behind the shared coordinator", () => {

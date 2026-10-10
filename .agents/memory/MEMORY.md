@@ -11,6 +11,7 @@
 - [Dough families](dough-family-collapse.md) + [customer matching](doughball-variant-customers-matching.md) + [weights](dough-weight-server-pool.md) — specific flavors first; fill only unset weights.
 - [Near-dup scan](near-dup-scan-perf.md) + [print/share](recipe-print-share.md) + [import matcher](name-match-near-dup.md) — share one matcher; loose matches auto-rename; aborts preserve clipboard.
 - [AI JSON bounded retry](ai-json-retry.md) — AI routes must use the shared 2-attempt retry helper; retry malformed JSON + free 429 rejections (backoff→friendly 429), never other provider throws.
+- [Diagnostic persistence scope](diagnostic-persistence-scope.md) — architecture checks must distinguish diagnostic writes from unrelated transactions in the same module.
 - [src](die-size-source.md) + [heal](die-type-master-heal.md) + [defaults](die-defaults-switch-aware.md) + [pick](die-picker-e2e-names.md) — crust owns die; bought crusts none; picks switch-aware.
 - [Frontline is sauce](frontline-is-sauce.md) + [ready-made](ready-made-sauce.md) — "frontline" IS the UI Sauce Recipe; sauce w/o rows (BBQ) = bought as-is, consume ingredient lbs not Sauce batches.
 - [Web-only](web-mobile-parity.md) + [screens](cast-screens.md) + [live sync](live-sync-web-mobile.md) — station displays stay web-only; sync uses non-clobber merges and a 10 MB JSON limit.
@@ -87,8 +88,7 @@
 - [Sync reset](sync-reset-boundary-hardening.md) + [fixture isolation](sync-integration-reset-isolation.md) — fence writes by epoch; keep reset endpoints out of shared fixtures.
 - [Formula import safety](formula-import-safety.md) + [workbook layouts](source-workbook-layouts.md) — preserve units and fail closed on unsupported layouts.
 - [Apply-source retention](apply-source-evidence-retention.md) — formula and cached-result text stays review-only; do not send formula-cell results with Apply evidence.
-- [Gate budgets](release-check-shard-budget.md) + [browser cases](browser-release-case-contract.md) + [container proof](container-image-release-evidence.md) — bound gates; bind proof to revision.
-- [Release evidence](release-evidence.md) — bind proof to source, revision, and runner; keep synthetic proof separate.
+- [Release gates](release-check-shard-budget.md) + [browser](browser-release-case-contract.md) + [container](container-image-release-evidence.md) + [evidence](release-evidence.md) — bound gates and bind proof to source and revision.
 - [Source](source-reconciliation-evidence-boundary.md) + [captures](large-source-audit-captures.md) + [CLI](source-audit-cli-paths.md) — bind evidence to its DB, report, revision, and provenance.
 - [Importer audit recovery](importer-audit-recovery.md) — retryable audit writes must be user/scope-bound and server-idempotent; never replay source imports automatically.
 - [Cross-channel auto-track claims](cross-channel-auto-track-claims.md) — shared run stamps require queued deltas to distinguish peer auto accepts from manual edits before rebasing.
