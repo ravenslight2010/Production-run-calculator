@@ -449,7 +449,10 @@ import {
   confirmFreezerSurplus,
   fetchFreezerSurplus,
   getFreezerSurplusRemainingMs,
+  recordFreezerSurplusAdjustment,
   replaceFreezerSurplusAllocation,
+  type FreezerSurplusAdjustment,
+  type FreezerSurplusAdjustmentInput,
 } from "../freezerSurplus";
 import { useMixes } from "../hooks/useMixes";
 import { useOptimisticMixUpdates } from "../hooks/useOptimisticMixUpdates";
@@ -3857,6 +3860,26 @@ export default function Home() {
       setFreezerSurplusBusy(false);
     }
   }
+
+  const adjustFinishedCaseStock = useEvent(async (
+    lotId: string,
+    input: FreezerSurplusAdjustmentInput,
+  ): Promise<FreezerSurplusAdjustment> => {
+    setFreezerSurplusBusy(true);
+    setFreezerSurplusError(null);
+    try {
+      const result = await recordFreezerSurplusAdjustment(lotId, input);
+      setFreezerSurplus(result.ledger);
+      return result.adjustment;
+    } catch (error) {
+      setFreezerSurplusError(
+        error instanceof Error ? error.message : "Couldn't adjust finished-case stock.",
+      );
+      throw error;
+    } finally {
+      setFreezerSurplusBusy(false);
+    }
+  });
 
   const replaceRunSurplus = useEvent(async (
     run: RunMeta,
@@ -15957,13 +15980,13 @@ export default function Home() {
     activePackagingRows, activeRunNeedDetails, activeRunValues, activeRuns, activeWarehouseRows,
     cycleCountSchedules, dayState, freezerPullPlan, freezerSurplus, freezerSurplusBusy,
     freezerSurplusError, freezerSurplusLoaded, isSupervisor, markCountedMutation,
-    refreshFreezerSurplus, replaceRunSurplus, runValuesById, scheduledDays, scheduledValues,
+    adjustFinishedCaseStock, refreshFreezerSurplus, replaceRunSurplus, runValuesById, scheduledDays, scheduledValues,
     setPinError, setPinInput, setScheduleDeleteConfirm, setScheduledDays, setScheduleView,
     setShowPinDialog, setShowScheduleDialog, todayScheduledValues, toggleStagedItem,
   }), [activePackagingRows, activeRunNeedDetails, activeRunValues, activeRuns, activeWarehouseRows,
     cycleCountSchedules, dayState, freezerPullPlan, freezerSurplus, freezerSurplusBusy,
     freezerSurplusError, freezerSurplusLoaded, isSupervisor, markCountedMutation,
-    refreshFreezerSurplus, replaceRunSurplus, runValuesById, scheduledDays, scheduledValues,
+    adjustFinishedCaseStock, refreshFreezerSurplus, replaceRunSurplus, runValuesById, scheduledDays, scheduledValues,
     todayScheduledValues, toggleStagedItem]);
   const inventoryTabCtxValue = useMemo<InventoryTabContextValue>(() => ({
     candidates: inventoryCandidates, runValsList: inventoryRunValues,

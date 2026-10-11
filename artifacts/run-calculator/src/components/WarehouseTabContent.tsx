@@ -34,7 +34,7 @@ export default memo(function WarehouseTabContent() {
     cycleCountSchedules, dayState, freezerPullPlan,
     freezerSurplus, freezerSurplusBusy, freezerSurplusError, freezerSurplusLoaded,
     isSupervisor, markCountedMutation,
-    refreshFreezerSurplus, replaceRunSurplus, runValuesById,
+    adjustFinishedCaseStock, refreshFreezerSurplus, replaceRunSurplus, runValuesById,
     scheduledDays, scheduledValues, setPinError, setPinInput, setScheduleDeleteConfirm,
     setScheduledDays, setScheduleView, setShowPinDialog, setShowScheduleDialog,
     todayScheduledValues, toggleStagedItem,
@@ -90,6 +90,7 @@ export default memo(function WarehouseTabContent() {
                     await replaceRunSurplus(run, allocations);
                     await refreshFreezerSurplus();
                   }}
+                  onAdjust={adjustFinishedCaseStock}
                 />
                 {/* Pull Out Freezer: for each upcoming scheduled run within an
                     item's days-early window whose recipe uses a tagged

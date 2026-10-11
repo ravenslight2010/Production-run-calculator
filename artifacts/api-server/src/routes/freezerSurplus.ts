@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Router, type IRouter, type Request, type Response } from "express";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import {
   db,
   dailySyncTable,
@@ -26,6 +26,7 @@ import {
   isValidSurplusDate,
   normalizePositiveCases,
   normalizeSurplusProduct,
+  surplusProductKey,
   type FreezerSurplusAllocation,
   type FreezerSurplusAdjustment,
   type FreezerSurplusLedger,
@@ -70,19 +71,94 @@ function finishedItemName(brand: string, flavor: string): string {
 // Structural type that accepts both db and PgTransaction
 type DbExecutor = { select: typeof db.select; insert: typeof db.insert; update: typeof db.update; delete: typeof db.delete };
 
-async function ensureFinishedInventoryItem(
+async function findFinishedInventoryItem(
   tx: DbExecutor,
   scope: string,
   brand: string,
   flavor: string,
-): Promise<{ id: number }> {
+  preferredItemId?: number | null,
+): Promise<{ id: number } | null> {
+  if (preferredItemId != null) {
+    const [preferred] = await tx
+      .select({ id: inventoryItemsTable.id })
+      .from(inventoryItemsTable)
+      .where(
+        and(
+          eq(inventoryItemsTable.id, preferredItemId),
+          eq(inventoryItemsTable.scope, scope),
+        ),
+      )
+      .limit(1);
+    if (preferred) return preferred;
+  }
   const key = finishedItemKey(brand, flavor);
   const [existing] = await tx
     .select({ id: inventoryItemsTable.id })
     .from(inventoryItemsTable)
     .where(and(eq(inventoryItemsTable.key, key), eq(inventoryItemsTable.scope, scope)))
     .limit(1);
-  if (existing) return { id: existing.id };
+  if (existing) return existing;
+  const [linkedLot] = await tx
+    .select({ inventoryItemId: freezerSurplusLotsTable.inventoryItemId })
+    .from(freezerSurplusLotsTable)
+    .where(
+      and(
+        eq(freezerSurplusLotsTable.scope, scope),
+        eq(freezerSurplusLotsTable.productKey, surplusProductKey(brand, flavor)),
+        isNotNull(freezerSurplusLotsTable.inventoryItemId),
+      ),
+    )
+    .limit(1);
+  if (linkedLot?.inventoryItemId != null) {
+    const [mergedItem] = await tx
+      .select({ id: inventoryItemsTable.id })
+      .from(inventoryItemsTable)
+      .where(
+        and(
+          eq(inventoryItemsTable.id, linkedLot.inventoryItemId),
+          eq(inventoryItemsTable.scope, scope),
+        ),
+      )
+      .limit(1);
+    if (mergedItem) return mergedItem;
+  }
+  const [mergeMarker] = await tx
+    .select({ itemId: inventoryLedgerTable.itemId })
+    .from(inventoryLedgerTable)
+    .where(
+      and(
+        eq(inventoryLedgerTable.scope, scope),
+        eq(inventoryLedgerTable.note, `Merged from ${finishedItemName(brand, flavor)}`),
+      ),
+    )
+    .orderBy(desc(inventoryLedgerTable.id))
+    .limit(1);
+  if (mergeMarker) {
+    const [mergedItem] = await tx
+      .select({ id: inventoryItemsTable.id })
+      .from(inventoryItemsTable)
+      .where(
+        and(
+          eq(inventoryItemsTable.id, mergeMarker.itemId),
+          eq(inventoryItemsTable.scope, scope),
+        ),
+      )
+      .limit(1);
+    if (mergedItem) return mergedItem;
+  }
+  return null;
+}
+
+async function ensureFinishedInventoryItem(
+  tx: DbExecutor,
+  scope: string,
+  brand: string,
+  flavor: string,
+  preferredItemId?: number | null,
+): Promise<{ id: number }> {
+  const existing = await findFinishedInventoryItem(tx, scope, brand, flavor, preferredItemId);
+  if (existing) return existing;
+  const key = finishedItemKey(brand, flavor);
   const [created] = await tx
     .insert(inventoryItemsTable)
     .values({
@@ -362,6 +438,7 @@ router.post("/freezer-surplus", requireCapability("manage-inventory"), async (re
   try {
     const now = new Date();
     const result = await db.transaction(async (tx) => {
+        const item = await ensureFinishedInventoryItem(tx, currentScope(), product.brand, product.flavor);
       const [row] = await tx
         .insert(freezerSurplusLotsTable)
         .values({
@@ -370,6 +447,7 @@ router.post("/freezer-surplus", requireCapability("manage-inventory"), async (re
           brand: product.brand,
           flavor: product.flavor,
           productKey: product.productKey,
+          inventoryItemId: item.id,
           productionDate,
           totalCases: cases,
           remainingCases: cases,
@@ -379,7 +457,6 @@ router.post("/freezer-surplus", requireCapability("manage-inventory"), async (re
         .returning();
       if (!row) throw new Error("Lot insert returned no row");
       // Feature C: create + restock the finished-case inventory at the freezer location
-      const item = await ensureFinishedInventoryItem(tx, currentScope(), product.brand, product.flavor);
       const freezerLoc = await getFreezerLocationId(tx, currentScope());
       await addFinishedInventoryStock(tx, currentScope(), item.id, freezerLoc, cases);
       return { row, ledger: await listLedger(tx) };
@@ -504,16 +581,24 @@ router.post(
           .limit(1);
         if (!lot) throw new SurplusRequestError("The dated freezer lot is unavailable.", 404);
 
-        const [item] = await tx
-          .select({ id: inventoryItemsTable.id })
-          .from(inventoryItemsTable)
-          .where(
-            and(
-              eq(inventoryItemsTable.key, finishedItemKey(lot.brand, lot.flavor)),
-              eq(inventoryItemsTable.scope, scope),
-            ),
-          )
-          .limit(1);
+        const item = await findFinishedInventoryItem(
+          tx,
+          scope,
+          lot.brand,
+          lot.flavor,
+          lot.inventoryItemId,
+        );
+        if (item && lot.inventoryItemId == null) {
+          await tx
+            .update(freezerSurplusLotsTable)
+            .set({ inventoryItemId: item.id })
+            .where(
+              and(
+                eq(freezerSurplusLotsTable.id, lotId),
+                eq(freezerSurplusLotsTable.scope, scope),
+              ),
+            );
+        }
         const freezerLocationId = await getFreezerLocationId(tx, scope);
         if (freezerLocationId == null) {
           throw new SurplusRequestError("A freezer inventory location is required before adjusting cases.", 409);

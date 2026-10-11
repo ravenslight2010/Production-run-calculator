@@ -19,6 +19,9 @@ export const freezerSurplusLotsTable = pgTable(
     brand: text("brand").notNull(),
     flavor: text("flavor").notNull().default(""),
     productKey: text("product_key").notNull(),
+    // Stable inventory identity survives inventory-item merges, unlike the
+    // display/product key used by freezer allocations.
+    inventoryItemId: integer("inventory_item_id"),
     productionDate: text("production_date").notNull(),
     totalCases: integer("total_cases").notNull(),
     remainingCases: integer("remaining_cases").notNull(),

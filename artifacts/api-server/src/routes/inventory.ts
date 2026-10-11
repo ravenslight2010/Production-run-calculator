@@ -16,6 +16,7 @@ import {
   qualityChecksTable,
   dailySyncTable,
   mixSurplusLotsTable,
+  freezerSurplusLotsTable,
   type InventoryLot,
   type InventoryLocation,
 } from "@workspace/db";
@@ -2275,6 +2276,14 @@ async function remapCompletedRunBaselines(
   }
 }
 
+function finishedInventoryKeyForSurplusLot(brand: string, flavor: string): string {
+  const normalizedBrand = brand.trim().toLowerCase();
+  const normalizedFlavor = flavor.trim().toLowerCase();
+  return normalizedFlavor
+    ? `finished:${normalizedBrand}:${normalizedFlavor}`
+    : `finished:${normalizedBrand}`;
+}
+
 export async function mergeInventoryItems(merges: MergeSpec[]): Promise<MergeReport> {
   const results: MergeOutcome[] = [];
   let merged = 0;
@@ -2322,6 +2331,38 @@ export async function mergeInventoryItems(merges: MergeSpec[]): Promise<MergeRep
       // inventory identity. If both IDs were in one run's baseline, combine
       // their quantities before the source item is removed.
       await remapCompletedRunBaselines(tx, currentScope(), source.id, target.id);
+      // Finished-case lots retain their original product identity for matching,
+      // while this pointer follows the surviving inventory item through merges.
+      // Backfill legacy null pointers when the source still has its generated key.
+      const surplusLots = await tx
+        .select({
+          id: freezerSurplusLotsTable.id,
+          brand: freezerSurplusLotsTable.brand,
+          flavor: freezerSurplusLotsTable.flavor,
+          inventoryItemId: freezerSurplusLotsTable.inventoryItemId,
+        })
+        .from(freezerSurplusLotsTable)
+        .where(and(
+          eq(freezerSurplusLotsTable.scope, currentScope()),
+          or(
+            eq(freezerSurplusLotsTable.inventoryItemId, source.id),
+            isNull(freezerSurplusLotsTable.inventoryItemId),
+          ),
+        ));
+      for (const lot of surplusLots) {
+        if (
+          lot.inventoryItemId === source.id ||
+          finishedInventoryKeyForSurplusLot(lot.brand, lot.flavor) === source.key
+        ) {
+          await tx
+            .update(freezerSurplusLotsTable)
+            .set({ inventoryItemId: target.id })
+            .where(and(
+              eq(freezerSurplusLotsTable.id, lot.id),
+              eq(freezerSurplusLotsTable.scope, currentScope()),
+            ));
+        }
+      }
       // Move lots + ledger to the target BEFORE deleting the source (ledger/lots
       // cascade-delete with the item, so re-point first or history is lost).
       await tx

@@ -183,10 +183,10 @@ async function adjustmentHistory(userId = MANAGER) {
   };
 }
 
-async function finishedInventoryBalance(scope = "live") {
+async function finishedInventoryBalance(scope = "live", itemKey = "finished:acme:pepperoni") {
   const items = await db.select().from(inventoryItemsTable);
   const item = items.find(
-    (row) => row.scope === scope && row.key === "finished:acme:pepperoni",
+    (row) => row.scope === scope && row.key === itemKey,
   );
   if (!item) return { onHand: 0, nonFreezerOnHand: 0, ledgerNet: 0, movementCount: 0 };
 
@@ -548,6 +548,112 @@ describe("dated freezer surplus API", () => {
       cases: 1,
     });
     await expectFreezerParity(18, 3);
+  });
+
+  it("keeps finished-case adjustments on the surviving inventory item after a merge", async () => {
+    const lotResponse = await confirm(MANAGER, { cases: 10 });
+    const lotBody = await lotResponse.json() as { createdLot: Record<string, unknown> & { id: string } };
+    const lotId = lotBody.createdLot.id;
+    expect(lotBody.createdLot).not.toHaveProperty("inventoryItemId");
+    const source = (await db.select().from(inventoryItemsTable)).find(
+      (item) => item.scope === "live" && item.key === "finished:acme:pepperoni",
+    );
+    if (!source) throw new Error("Expected the finished-case inventory item");
+    await db
+      .update(freezerSurplusLotsTable)
+      .set({ inventoryItemId: null })
+      .where(eq(freezerSurplusLotsTable.id, lotId));
+
+    const mergedResponse = await req(MANAGER, "POST", "/api/inventory/merge", {
+      merges: [{
+        fromKey: source.key,
+        toKey: "finished:acme:pepperoni-survivor",
+        toName: "Acme Pepperoni Cases",
+        unit: "cases",
+        category: "ingredient",
+      }],
+    });
+    expect(mergedResponse.status).toBe(200);
+    const target = (await db.select().from(inventoryItemsTable)).find(
+      (item) => item.scope === "live" && item.key === "finished:acme:pepperoni-survivor",
+    );
+    if (!target) throw new Error("Expected the surviving finished-case inventory item");
+    const [linkedLot] = await db
+      .select()
+      .from(freezerSurplusLotsTable)
+      .where(eq(freezerSurplusLotsTable.id, lotId));
+    expect(linkedLot?.inventoryItemId).toBe(target.id);
+    // Simulate a lot whose merge happened before the durable pointer existed.
+    await db
+      .update(freezerSurplusLotsTable)
+      .set({ inventoryItemId: null })
+      .where(eq(freezerSurplusLotsTable.id, lotId));
+
+    const damage = {
+      eventId: "7e0c283b-a912-4f8f-920b-0fc5d7381a45",
+      eventType: "damage",
+      cases: 2,
+      reason: "Two cases damaged after item merge",
+    };
+    const first = await adjust(MANAGER, lotId, damage);
+    expect(first.status).toBe(201);
+    expect((await adjust(MANAGER, lotId, damage)).status).toBe(200);
+
+    expect((await ledger()).lots[0].remainingCases).toBe(8);
+    const [relinkedLot] = await db
+      .select()
+      .from(freezerSurplusLotsTable)
+      .where(eq(freezerSurplusLotsTable.id, lotId));
+    expect(relinkedLot?.inventoryItemId).toBe(target.id);
+    expect(await finishedInventoryBalance("live", target.key)).toEqual({
+      onHand: 8,
+      nonFreezerOnHand: 0,
+      ledgerNet: 8,
+      movementCount: 3, // initial restock, merge marker, and one damage movement
+    });
+    expect(await db.select().from(freezerSurplusAdjustmentsTable)).toHaveLength(1);
+
+    await seedRun("edited-after-adjustment-run");
+    const syncPath = "/api/sync/today?today=2026-08-29";
+    const baselineResponse = await req(MANAGER, "GET", syncPath);
+    expect(baselineResponse.status).toBe(200);
+    const baseline = await baselineResponse.json() as Record<string, any>;
+    const baseSnapshotId = baselineResponse.headers.get("X-Sync-Snapshot");
+    expect(baseSnapshotId).toMatch(/^[a-f0-9]{64}$/);
+    const payload = {
+      syncVersion: 1,
+      completeness: "complete",
+      baseSnapshotId,
+      dayState: {
+        ...baseline.dayState,
+        runs: (baseline.dayState.runs as Array<Record<string, unknown>>).map((run) =>
+          run.id === "edited-after-adjustment-run"
+            ? { ...run, actualCases: 510 }
+            : run,
+        ),
+      },
+      runValues: {
+        ...(baseline.runValues as Record<string, Record<string, unknown>>),
+        "edited-after-adjustment-run": { casesNeeded: 510 },
+      },
+      runValuesUpdatedAt: {
+        ...(baseline.runValuesUpdatedAt as Record<string, number>),
+        "edited-after-adjustment-run": Date.now(),
+      },
+    };
+    const syncWrite = await req(
+      MANAGER,
+      "PUT",
+      `${syncPath}&epoch=0`,
+      { senderId: "freezer-adjustment-sync-test", payload },
+    );
+    expect(syncWrite.status).toBe(200);
+    expect(await finishedInventoryBalance("live", target.key)).toEqual({
+      onHand: 8,
+      nonFreezerOnHand: 0,
+      ledgerNet: 8,
+      movementCount: 3,
+    });
   });
 
   it("rolls back a damage event when freezer inventory cannot cover the quantity", async () => {
