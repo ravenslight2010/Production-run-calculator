@@ -340,23 +340,28 @@ semantic drift.
 | Corpus harness library `--noEmit` | Pass, 0.80s | Pass, 0.16s |
 | Generated API client/Zod forced build | Pass | Pass |
 | Diagnostic count in checks above | 0 | 0 |
-| Declaration file count | 719 | 719 |
-| Declaration files with textual differences | baseline | 204 |
-| Declaration contract comparison | baseline | Pass (195 formatting-only, 9 approved semantic, 0 unexplained) |
+| Declaration file count | 729 | 729 |
+| Declaration files with textual differences | baseline | 205 |
+| Declaration contract comparison | baseline | Pass (9 exact-hash-approved semantic changes, 0 unexplained) |
 
 The declaration differences break down as:
 
 - 2 `api-client-react` generated declarations,
 - 142 `api-zod` generated declarations, and
-- 60 database schema declarations.
+- 61 database schema declarations.
 
-There were 2,664 removed and 2,664 added diff lines. Inspected database differences were
-double-quote to single-quote changes in string literal types. Generated API declarations
-also changed some quoted literal renderings to template-literal or single-quoted forms.
-The two builds typechecked successfully. Formatting normalization accounts for 195 changed
-files, and exact hash-pinned review accounts for the remaining 9. A production switch must
-continue to block any new declaration output until it is fixed or receives the same
-contract-owner review.
+The 2026-09-15 capture had 2,664 removed and 2,664 added diff lines. Inspected database
+differences were double-quote to single-quote changes in string literal types. Generated
+API declarations also changed some quoted literal renderings to template-literal or
+single-quoted forms. The two builds typechecked successfully. Formatting normalization
+accounts for the remaining changed files, and exact hash-pinned review covers the 9
+semantic changes. A production switch must continue to block any new declaration output
+until it is fixed or receives the same contract-owner review.
+
+The declaration totals above were refreshed on 2026-10-11 from the release-check
+TypeScript 7 reproduction artifact (run 38098999889, Linux x64). The formatting-only count
+and diff-line metrics remain from the 2026-09-15 capture until that reproduction is rerun
+on the supported runner.
 
 The advisory release lane captures one cold and one warm measurement for every TypeScript
 6/7 comparison check and aggregates up to five prior successful, revision-bound CI

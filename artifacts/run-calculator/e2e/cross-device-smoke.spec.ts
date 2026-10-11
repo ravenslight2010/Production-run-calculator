@@ -58,25 +58,48 @@ async function dismissOnboarding(page: Page): Promise<void> {
 }
 
 async function seedPendingRun(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const dayKey = "run-calc-day";
-    const day = JSON.parse(localStorage.getItem(dayKey) ?? "{}") as {
-      date?: string;
-      runs?: Array<Record<string, unknown>>;
-      currentIndex?: number;
-    };
-    const id = `smoke-run-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    const today = new Date().toISOString().slice(0, 10);
+  const runId = `smoke-run-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const date = new Date().toISOString().slice(0, 10);
+  // Lifecycle commands run through the server's operational-intent reducer,
+  // which only applies a start to a run the canonical row already owns —
+  // anything else comes back `review-required` and the start is dropped. A
+  // device that creates a run syncs it before Start, so the fixture must
+  // register the same run canonically (as the multi-device and sync-convergence
+  // harnesses do) rather than seeding only this device's local copy.
+  await page.evaluate(async ({ id, day }) => {
+    const epochResponse = await fetch("/api/sync/reset-epoch", { cache: "no-store" });
+    const epochBody = await epochResponse.json() as { epoch?: number };
+    const epoch = typeof epochBody.epoch === "number" ? epochBody.epoch : 0;
+    const response = await fetch(`/api/sync/today?today=${day}&epoch=${epoch}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "cross-device-smoke",
+        payload: {
+          dayState: {
+            date: day,
+            currentIndex: 0,
+            runs: [{ id, brand: "Smoke", flavor: "Lifecycle" }],
+          },
+          runValues: {},
+          runValuesUpdatedAt: {},
+        },
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(`cross-device smoke canonical fixture PUT failed: ${response.status}`);
+    }
+  }, { id: runId, day: date });
+  await page.evaluate(({ id, day }) => {
     localStorage.setItem(
-      dayKey,
+      "run-calc-day",
       JSON.stringify({
-        ...day,
-        date: today,
+        date: day,
         runs: [{ id, brand: "Smoke", flavor: "Lifecycle" }],
         currentIndex: 0,
       }),
     );
-  });
+  }, { id: runId, day: date });
   // Home reads the day state during mount, so reload after seeding rather than
   // trying to mutate React state from the fixture.
   await page.reload({ waitUntil: "domcontentloaded" });

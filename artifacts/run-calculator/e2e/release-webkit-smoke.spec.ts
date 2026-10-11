@@ -20,6 +20,10 @@ const PASSWORD = "TestPass123!";
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 const testUsernames = new Set<string>();
 
+// Make the controlled transport failure deterministic instead of allowing the
+// service worker to satisfy the sync request before Playwright's route.
+test.use({ serviceWorkers: "block" });
+
 function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
@@ -61,22 +65,80 @@ async function promoteToManager(username: string): Promise<void> {
   }
 }
 
-async function seedPendingRun(page: Page): Promise<string> {
+async function seedPendingRun(
+  page: Page,
+  options: { operationalView?: boolean } = {},
+): Promise<string> {
   const runId = uniqueTestId("webkit_run");
-  await page.evaluate((id) => {
+  const date = new Date().toISOString().slice(0, 10);
+  // The server's operational-intent reducer only applies a lifecycle command to
+  // a run the canonical row already owns; otherwise it answers `review-required`
+  // and the optimistic start is rolled back. Register the run canonically first
+  // (as the multi-device and sync-convergence harnesses do) so the WebKit
+  // lifecycle journey exercises the real reducer instead of a rejected command.
+  await page.evaluate(async ({ id, day, operationalView }) => {
+    const epochResponse = await fetch("/api/sync/reset-epoch", { cache: "no-store" });
+    const epochBody = await epochResponse.json() as { epoch?: number };
+    const epoch = typeof epochBody.epoch === "number" ? epochBody.epoch : 0;
+    const run = {
+      id,
+      brand: "WebKit",
+      flavor: "Release Smoke",
+      ...(operationalView ? { startedAt: Date.now() - 60_000 } : {}),
+    };
+    const response = await fetch(`/api/sync/today?today=${day}&epoch=${epoch}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "webkit-release-smoke",
+        payload: {
+          dayState: {
+            date: day,
+            currentIndex: 0,
+            resetAt: 0,
+            runs: [run],
+          },
+          runValues: operationalView
+            ? {
+                [id]: {
+                  pizzasPerCase: 10,
+                  casesPerSkid: 20,
+                  casesNeeded: 100,
+                  crustsPerCycle: 4,
+                  cycleSpeed: 10,
+                  speedAdjustment: 1,
+                  freezerTime: 10,
+                  tempFreezerTime: 30,
+                  tempCrustsPerCycle: 5,
+                  tempCycleSpeed: 12,
+                },
+              }
+            : {},
+          runValuesUpdatedAt: operationalView ? { [id]: Date.now() } : {},
+          ...(operationalView
+            ? { packagingProgress: { [id]: { skidsCompleted: 2, casesOnCurrentSkid: 3 } } }
+            : {}),
+        },
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(`WebKit smoke canonical fixture PUT failed: ${response.status}`);
+    }
+  }, { id: runId, day: date, operationalView: options.operationalView ?? false });
+  await page.evaluate(({ id, day }) => {
     for (const key of Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))) {
       if (key?.startsWith("run-calc-run-")) localStorage.removeItem(key);
     }
     localStorage.setItem(
       "run-calc-day",
       JSON.stringify({
-        date: new Date().toISOString().slice(0, 10),
+        date: day,
         runs: [{ id, brand: "WebKit", flavor: "Release Smoke", seeded: false }],
         currentIndex: 0,
         resetAt: 0,
       }),
     );
-  }, runId);
+  }, { id: runId, day: date });
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
   return runId;
@@ -109,6 +171,7 @@ test.beforeEach(async () => {
   try {
     await db.connect();
     await db.query("DELETE FROM daily_sync WHERE date = $1", [today()]);
+    await db.query("DELETE FROM completed_run_history WHERE date = $1", [today()]);
   } finally {
     await db.end().catch(() => {});
   }
@@ -121,6 +184,7 @@ test.afterAll(async () => {
     await db.connect();
     await cleanupTestUsers(db, testUsernames);
     await db.query("DELETE FROM daily_sync WHERE date = $1", [today()]);
+    await db.query("DELETE FROM completed_run_history WHERE date = $1", [today()]);
   } finally {
     await db.end().catch(() => {});
   }
@@ -139,7 +203,11 @@ test("authenticates and preserves current-run start, pause, resume, and reload",
 
   await page.getByRole("button", { name: /pause run/i }).click();
   const stopTunnelNo = page.getByTestId("pause-stop-tunnel-no");
-  if (await stopTunnelNo.isVisible().catch(() => false)) await stopTunnelNo.click();
+  if (await stopTunnelNo.isVisible().catch(() => false)) {
+    // WebKit can remount this optional prompt while the pause write is
+    // acknowledged. The persisted pausedAt assertion remains authoritative.
+    await stopTunnelNo.click({ timeout: 2_000 }).catch(() => {});
+  }
   await expect(page.getByTestId("resume-run")).toBeVisible();
   await expect.poll(async () => (await selectedRun(page)).pausedAt).toBeTruthy();
 
@@ -173,7 +241,10 @@ test("recovers a failed sync pull after the browser reconnects", async ({ page }
     await route.continue();
   });
 
-  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  // Use browser connectivity transitions so the app's real online recovery
+  // listener runs; a synthetic focus event does not trigger that path.
+  await page.context().setOffline(true);
+  await page.context().setOffline(false);
   await failedPullObserved;
   await page.unroute("**/api/sync/today?*");
   const recoveredPull = page.waitForResponse(
@@ -181,7 +252,8 @@ test("recovers a failed sync pull after the browser reconnects", async ({ page }
       response.request().method() === "GET" &&
       response.url().includes("/api/sync/today"),
   );
-  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await page.context().setOffline(true);
+  await page.context().setOffline(false);
   await recoveredPull;
   await expect(page.locator('[title="Sync connected"]')).toBeVisible();
   expect(failedPull).toBe(true);
@@ -191,12 +263,30 @@ test("manager can preview an authoritative operational report", async ({ page })
   const username = uniqueTestId("e2e_webkit_report");
   testUsernames.add(username);
   await signUp(page, username);
+  const runId = await seedPendingRun(page, { operationalView: true });
   await promoteToManager(username);
+  // The report must read the canonical server snapshot, not a later browser
+  // write from the freshly hydrated page.
+  await page.route("**/api/sync/today**", async (route) => {
+    if (route.request().method() === "GET") await route.continue();
+    else await route.abort();
+  });
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
 
+  const operationalView = await page.request.get(
+    `/api/reports/operational-view?date=${today()}&runId=${encodeURIComponent(runId)}`,
+  );
+  expect(
+    operationalView.status(),
+    `Operational view fixture returned ${operationalView.status()}: ${(await operationalView.text()).slice(0, 2_000)}`,
+  ).toBe(200);
+
   await page.getByTitle("More").click();
   await page.getByRole("menuitem", { name: "Summary", exact: true }).click();
+  const reportDetails = page.getByTestId("summary-report-details");
+  await expect(reportDetails).toBeVisible();
+  await reportDetails.locator("summary").click();
   const report = page.getByTestId("operational-report");
   await expect(report).toBeVisible();
 
