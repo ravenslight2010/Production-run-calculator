@@ -30,10 +30,11 @@ import {
 // unless that run was explicitly deleted:
 //
 //   - Run VALUES are a per-run last-writer-wins register keyed on the per-run
-//     edit stamp (runValuesUpdatedAt). An incoming value is accepted ONLY when
-//     its stamp is STRICTLY NEWER than what's stored; equal/older stamps keep the
-//     stored value (this blocks the empty-value-with-equal-stamp corruption). A
-//     run present in the store but omitted from the push keeps its stored value.
+//     edit stamp (runValuesUpdatedAt) for writes without a validated base. An
+//     exact current-base snapshot is the stronger causal signal: changed values
+//     from it are accepted and stamped with server time. Client timestamps are
+//     never allowed to advance beyond server time. A run present in the store
+//     but omitted from the push keeps its stored value.
 //
 //   - The run LIST (dayState.runs) is union-merged by run id: incoming runs
 //     first (the pusher's current ordering), then any stored run the push
@@ -65,6 +66,65 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 
 function asNumber(v: unknown): number {
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
+}
+function runValueStampAtServerTime(value: unknown, nowMs: number): number {
+  const stamp = asNumber(value);
+  return stamp > nowMs ? nowMs : stamp;
+}
+const MAX_RUN_VALUE_STAMP_SKEW_MS = 5 * 60 * 1000;
+function capFutureRunValueStamps(
+  payload: Record<string, unknown>,
+  nowMs: number,
+): Record<string, unknown> {
+  if (!isPlainObject(payload.runValuesUpdatedAt)) return payload;
+  let changed = false;
+  const stamps: Record<string, unknown> = { ...payload.runValuesUpdatedAt };
+  for (const [runId, value] of Object.entries(stamps)) {
+    if (typeof value !== "number" || !Number.isFinite(value) || value <= nowMs) continue;
+    // A small clock lead is normalized to server time. A much larger lead is
+    // not evidence that an unbased value is newer, so give it no LWW weight.
+    // Exact current-base writes are separately accepted by snapshot identity
+    // and stamped with server time below.
+    stamps[runId] = value - nowMs <= MAX_RUN_VALUE_STAMP_SKEW_MS ? nowMs : 0;
+    changed = true;
+  }
+  return changed ? { ...payload, runValuesUpdatedAt: stamps } : payload;
+}
+function stampRunValuesAtServerTime(
+  payload: Record<string, unknown>,
+  nowMs: number,
+): Record<string, unknown> {
+  const values = isPlainObject(payload.runValues) ? payload.runValues : {};
+  const stamps = isPlainObject(payload.runValuesUpdatedAt)
+    ? { ...payload.runValuesUpdatedAt }
+    : {};
+  for (const runId of Object.keys(values)) stamps[runId] = nowMs;
+  return { ...payload, runValuesUpdatedAt: stamps };
+}
+const MAX_BREAK_STAMP_SKEW_MS = 5 * 60 * 1000;
+function validBreakStamp(value: unknown, nowMs = Date.now()): number {
+  const stamp = asNumber(value);
+  return stamp > 0 && stamp <= nowMs + MAX_BREAK_STAMP_SKEW_MS ? stamp : 0;
+}
+function mergeBreakSchedule(
+  incomingDay: unknown,
+  existingDay: unknown,
+  nowMs: number,
+): Record<string, unknown> {
+  const incoming = isPlainObject(incomingDay) ? incomingDay : undefined;
+  const existing = isPlainObject(existingDay) ? existingDay : undefined;
+  const hasIncomingBreaks = !!incoming && Object.prototype.hasOwnProperty.call(incoming, "breaks");
+  const hasExistingBreaks = !!existing && Object.prototype.hasOwnProperty.call(existing, "breaks");
+  const incomingStamp = validBreakStamp(incoming?.breaksUpdatedAt, nowMs);
+  const existingStamp = validBreakStamp(existing?.breaksUpdatedAt, nowMs);
+
+  if (hasIncomingBreaks && (!hasExistingBreaks || incomingStamp > existingStamp)) {
+    return { breaks: incoming!.breaks, breaksUpdatedAt: incomingStamp };
+  }
+  if (hasExistingBreaks) {
+    return { breaks: existing!.breaks, breaksUpdatedAt: existingStamp };
+  }
+  return {};
 }
 
 function asArray(v: unknown): unknown[] {
@@ -225,15 +285,40 @@ const CURRENT_BLANK_RUN_VALUE: Record<string, unknown> = {
   app1BatchesMade: 0,
   app1BatchAnchorNetSec: 0,
   app1BatchCorrectionGeneration: 0,
+  app1StockLbs: 0,
+  app1StockAnchorNetSec: 0,
+  app1StockCorrectionGeneration: 0,
   app2BatchesMade: 0,
   app2BatchAnchorNetSec: 0,
   app2BatchCorrectionGeneration: 0,
+  app2StockLbs: 0,
+  app2StockAnchorNetSec: 0,
+  app2StockCorrectionGeneration: 0,
   app3BatchesMade: 0,
   app3BatchAnchorNetSec: 0,
   app3BatchCorrectionGeneration: 0,
+  app3StockLbs: 0,
+  app3StockAnchorNetSec: 0,
+  app3StockCorrectionGeneration: 0,
   app4BatchesMade: 0,
   app4BatchAnchorNetSec: 0,
   app4BatchCorrectionGeneration: 0,
+  app4StockLbs: 0,
+  app4StockAnchorNetSec: 0,
+  app4StockCorrectionGeneration: 0,
+  applicatorStockInitialized: false,
+  pep1StockLbs: 0,
+  pep1StockAnchorNetSec: 0,
+  pep1StockCorrectionGeneration: 0,
+  pep1bStockLbs: 0,
+  pep1bStockAnchorNetSec: 0,
+  pep1bStockCorrectionGeneration: 0,
+  pep2StockLbs: 0,
+  pep2StockAnchorNetSec: 0,
+  pep2StockCorrectionGeneration: 0,
+  pep2bStockLbs: 0,
+  pep2bStockAnchorNetSec: 0,
+  pep2bStockCorrectionGeneration: 0,
   app1OzPerPizza: 0,
   app1BatchLbs: 0,
   app2OzPerPizza: 0,
@@ -339,8 +424,19 @@ function isBlankRunValue(v: unknown): boolean {
     "app4BatchesMade",
     "app4BatchAnchorNetSec",
     "app4BatchCorrectionGeneration",
+    "app1StockLbs", "app1StockAnchorNetSec", "app1StockCorrectionGeneration",
+    "app2StockLbs", "app2StockAnchorNetSec", "app2StockCorrectionGeneration",
+    "app3StockLbs", "app3StockAnchorNetSec", "app3StockCorrectionGeneration",
+    "app4StockLbs", "app4StockAnchorNetSec", "app4StockCorrectionGeneration",
+    "pep1StockLbs", "pep1StockAnchorNetSec", "pep1StockCorrectionGeneration",
+    "pep1bStockLbs", "pep1bStockAnchorNetSec", "pep1bStockCorrectionGeneration",
+    "pep2StockLbs", "pep2StockAnchorNetSec", "pep2StockCorrectionGeneration",
+    "pep2bStockLbs", "pep2bStockAnchorNetSec", "pep2bStockCorrectionGeneration",
   ]) {
     if (!(field in withMachineDefaults)) withMachineDefaults[field] = 0;
+  }
+  if (!("applicatorStockInitialized" in withMachineDefaults)) {
+    withMachineDefaults.applicatorStockInitialized = false;
   }
   for (const [k, def] of Object.entries(FACTORY_TIMING_DEFAULTS)) {
     if (withMachineDefaults[k] === HISTORICAL_ZERO_TIMING_SENTINEL) {
@@ -523,18 +619,31 @@ function preserveAndInvalidateAutoTrackCoordination(
 
 /**
  * Merge `incoming` against the already-stored `existing` payload so that:
- *   - a run's stored VALUE only changes on a strictly-newer-stamped edit, and
+ *   - a run's stored VALUE changes on a strictly-newer stamp, or on a changed
+ *     value from a caller-validated current-base snapshot, and
  *   - a stored RUN is never dropped by a push that omits it (additive run list),
  *   - unless the run was explicitly deleted (tombstoned), or the caller is
  *     replacing a future scheduled-day row.
  * Returns a new payload object. Non-object payloads are returned unchanged.
  */
 export function protectRunValues(
-  incoming: unknown,
+  incomingInput: unknown,
   existing: unknown,
-  options: { allowRunListReplacement?: boolean } = {},
+  options: {
+    allowRunListReplacement?: boolean;
+    acceptCurrentBaseRunValueEdits?: boolean;
+    nowMs?: number;
+  } = {},
 ): unknown {
-  if (!isPlainObject(incoming)) return incoming;
+  if (!isPlainObject(incomingInput)) return incomingInput;
+  const nowMs = Number.isFinite(options.nowMs) ? Number(options.nowMs) : Date.now();
+  let incoming = capFutureRunValueStamps(incomingInput, nowMs);
+  if (options.acceptCurrentBaseRunValueEdits && !isPlainObject(existing)) {
+    // A first complete snapshot has no stored value to compare against. The
+    // accepted base identity is its causal proof, so issue server-time stamps
+    // rather than preserving a client clock that could be arbitrarily ahead.
+    incoming = stampRunValuesAtServerTime(incoming, nowMs);
+  }
   // Nothing stored yet (first write for this scope+date): the payload was
   // already sanitized by the route, but still canonicalize the legacy
   // runValues pair from packagingProgress before storing/returning it.
@@ -544,13 +653,23 @@ export function protectRunValues(
       undefined,
       tombstonedRunIds(incoming),
     );
-    // Preserve the established first-write identity behavior for legacy
-    // payloads that do not carry the new independent register.
-    if (!progress) return incoming;
+    const incomingValues = isPlainObject(incoming.runValues) ? incoming.runValues : {};
+    const hasUntrustedStockValues = Object.values(incomingValues).some((candidate) =>
+      isPlainObject(candidate)
+      && APPLICATOR_STOCK_VALUE_FIELDS.some((field) =>
+        Object.prototype.hasOwnProperty.call(candidate, field),
+      ),
+    );
+    if (!progress && !hasUntrustedStockValues) return incoming;
     const out: Record<string, unknown> = { ...incoming };
     const outVals = isPlainObject(incoming.runValues)
       ? { ...incoming.runValues }
       : {};
+    preserveCanonicalApplicatorStock(outVals, {});
+    if (isPlainObject(incoming.runValues)) out.runValues = outVals;
+    // Preserve the established first-write identity behavior for legacy
+    // payloads that do not carry the new independent register.
+    if (!progress) return out;
     overlayPackagingIntoRunValues(outVals, progress);
     out.packagingProgress = progress;
     out.runValues = outVals;
@@ -628,8 +747,8 @@ export function protectRunValues(
     // Incoming run IDs are authoritative for the new day (the reset supplies
     // the run list). Only protect values for runs the reset explicitly includes.
     for (const id of Object.keys(inVals)) {
-      const inStamp = asNumber(inUpd[id]);
-      const exStamp = asNumber(exUpd[id]);
+      const inStamp = runValueStampAtServerTime(inUpd[id], nowMs);
+      const exStamp = runValueStampAtServerTime(exUpd[id], nowMs);
       if (
         isPlainObject(exVals[id]) &&
         isBlankRunValue(inVals[id]) &&
@@ -639,14 +758,18 @@ export function protectRunValues(
         // real data on this row — preserve the real data and advance the
         // stamp so the surviving value wins the per-run LWW on every peer.
         outVals[id] = exVals[id];
-        outUpd[id]  = Math.max(inStamp, exStamp, Date.now());
+        outUpd[id]  = Math.max(inStamp, exStamp, nowMs);
       } else {
         outVals[id] = inVals[id];
-        if (inStamp > 0) outUpd[id] = inStamp;
+        if (inStamp > 0 || options.acceptCurrentBaseRunValueEdits) {
+          outUpd[id] = options.acceptCurrentBaseRunValueEdits ? nowMs : inStamp;
+        }
       }
     }
+    preserveCanonicalApplicatorStock(outVals, exVals);
     const base: Record<string, unknown> = {
       ...(incoming as Record<string, unknown>),
+      ...(inDay ? { dayState: { ...inDay, ...mergeBreakSchedule(inDay, exDay, nowMs) } } : {}),
       runValues: outVals,
       runValuesUpdatedAt: outUpd,
     };
@@ -745,17 +868,24 @@ export function protectRunValues(
   }
   const mergedRuns: unknown[] = runOrder.map((id) => runById.get(id));
 
-  // ── Per-run VALUE register merge (strictly-newer-stamp wins), additive ──────
+  // ── Per-run VALUE merge (stamp or validated base), additive ─────────────────
   const outVals: Record<string, unknown> = {};
   const outUpd: Record<string, unknown> = {};
   const valueIds = new Set<string>([...Object.keys(exVals), ...Object.keys(inVals)]);
   for (const id of valueIds) {
     if (tombstoned.has(id)) continue; // a deleted run keeps no value
-    const exStamp = asNumber(exUpd[id]);
-    const inStamp = asNumber(inUpd[id]);
+    const exStamp = runValueStampAtServerTime(exUpd[id], nowMs);
+    const inStamp = runValueStampAtServerTime(inUpd[id], nowMs);
     const inHas = Object.prototype.hasOwnProperty.call(inVals, id);
     const exHas = Object.prototype.hasOwnProperty.call(exVals, id);
-    if (inHas && inStamp > exStamp) {
+    const currentBaseValueChanged =
+      options.acceptCurrentBaseRunValueEdits
+      && inHas
+      && (!exHas || !deepEqualValue(inVals[id], exVals[id]));
+    // Snapshot identity was verified under the row lock by the route. For a
+    // changed value that causal proof outranks client clock order; the new
+    // canonical stamp is server-owned. Unchanged values keep their old stamp.
+    if (inHas && (inStamp > exStamp || currentBaseValueChanged)) {
       if (exHas && isBlankRunValue(inVals[id]) && !isBlankRunValue(exVals[id])) {
         // Empty-over-populated, even with a strictly-newer stamp. The original
         // stamp-only guard assumed the empty-value corruption ALWAYS carried an
@@ -772,11 +902,15 @@ export function protectRunValues(
         // surviving value strictly wins on every peer (and heals the offending
         // client on its next read instead of stalemating on its stale stamp).
         outVals[id] = exVals[id];
-        outUpd[id] = inStamp;
+        outUpd[id] = options.acceptCurrentBaseRunValueEdits
+          ? nowMs
+          : inStamp;
       } else {
-        // Genuine, strictly-newer edit.
+        // Genuine edit that passed timestamp ordering or the current-base fence.
         outVals[id] = inVals[id];
-        outUpd[id] = inStamp;
+        outUpd[id] = options.acceptCurrentBaseRunValueEdits
+          ? nowMs
+          : inStamp;
         // Field-level preservation: casesNeeded is the planned production target,
         // set once from the schedule and never modified during a live run. A peer
         // that synced the run without the schedule will have casesNeeded=0, and
@@ -807,6 +941,7 @@ export function protectRunValues(
       outUpd[id] = inStamp;
     }
   }
+  preserveCanonicalApplicatorStock(outVals, exVals);
 
   // Rebuild dayState with the merged run list, keeping every other incoming
   // dayState field (shiftNotes, overlays, resetAt, date, …). If the push omitted
@@ -843,7 +978,14 @@ export function protectRunValues(
     };
   })();
   const outDay = base
-    ? { ...base, runs: mergedRuns, ...(mergedPrepPhase ? { prepPhase: mergedPrepPhase } : {}) }
+    ? {
+      ...base,
+      runs: mergedRuns,
+      ...(mergedPrepPhase ? { prepPhase: mergedPrepPhase } : {}),
+      // Live payloads may omit this cold section.  Never let that omission
+      // erase an operator's configured break schedule.
+      ...mergeBreakSchedule(inDay, exDay, nowMs),
+    }
     : undefined;
 
   const out: Record<string, unknown> = {
@@ -942,6 +1084,7 @@ export function protectRunValues(
     (incoming as Record<string, unknown>).packagingProgress,
     exData.packagingProgress,
     tombstoned,
+    nowMs,
   );
   if (mergedProgress) {
     // Overlay winning counters into canonical runValues after the whole-value merge.
@@ -959,6 +1102,8 @@ export function protectRunValues(
 // Each entry records live packaging counters for one run:
 //   { skidsCompleted, casesOnCurrentSkid, correctionGeneration, updatedAt, manualOverrideUntil }
 // Precedence rules (independent of runValues LWW stamps):
+//   - An unexpired server-owned manual override preserves the stored entry
+//     against ordinary sync snapshots.
 //   - Higher correctionGeneration always wins regardless of updatedAt.
 //   - Same generation: higher updatedAt wins.
 //   - Exact tie (same generation AND same updatedAt): keep stored entry.
@@ -1003,10 +1148,15 @@ function sanitizePackagingProgressEntry(v: unknown): PackagingProgressEntry | nu
 function mergePackagingEntry(
   incoming: PackagingProgressEntry | null,
   stored: PackagingProgressEntry | null,
+  nowMs: number,
 ): PackagingProgressEntry | null {
   if (!incoming && !stored) return null;
   if (!incoming) return stored;
   if (!stored) return incoming;
+  // Accepted manual corrections establish a short server-owned hold. Ordinary
+  // snapshots may carry a newer client generation or clock, but cannot
+  // overwrite the operator's canonical pair before clients converge.
+  if (stored.manualOverrideUntil > nowMs) return stored;
   // Higher correctionGeneration always wins.
   if (incoming.correctionGeneration > stored.correctionGeneration) return incoming;
   if (stored.correctionGeneration > incoming.correctionGeneration) return stored;
@@ -1023,6 +1173,7 @@ function mergePackagingProgress(
   incoming: unknown,
   stored: unknown,
   tombstoned: Set<string>,
+  nowMs = Date.now(),
 ): Record<string, PackagingProgressEntry> | undefined {
   const inMap = isPlainObject(incoming) ? incoming : null;
   const exMap = isPlainObject(stored) ? stored : null;
@@ -1042,7 +1193,7 @@ function mergePackagingProgress(
     const exEntry = exMap ? sanitizePackagingProgressEntry(exMap[id]) : null;
     // Missing incoming metadata cannot clobber established stored metadata:
     // if incoming has no entry for this id but stored does, keep stored.
-    const winner = mergePackagingEntry(inEntry, exEntry);
+    const winner = mergePackagingEntry(inEntry, exEntry, nowMs);
     if (winner) out[id] = winner;
   }
 
@@ -1062,6 +1213,40 @@ function overlayPackagingIntoRunValues(
       skidsCompleted: entry.skidsCompleted,
       casesOnCurrentSkid: entry.casesOnCurrentSkid,
     };
+  }
+}
+
+const APPLICATOR_STOCK_VALUE_FIELDS = [
+  "applicatorStockInitialized",
+  "app1StockLbs", "app1StockAnchorNetSec", "app1StockCorrectionGeneration",
+  "app2StockLbs", "app2StockAnchorNetSec", "app2StockCorrectionGeneration",
+  "app3StockLbs", "app3StockAnchorNetSec", "app3StockCorrectionGeneration",
+  "app4StockLbs", "app4StockAnchorNetSec", "app4StockCorrectionGeneration",
+  "pep1StockLbs", "pep1StockAnchorNetSec", "pep1StockCorrectionGeneration",
+  "pep1bStockLbs", "pep1bStockAnchorNetSec", "pep1bStockCorrectionGeneration",
+  "pep2StockLbs", "pep2StockAnchorNetSec", "pep2StockCorrectionGeneration",
+  "pep2bStockLbs", "pep2bStockAnchorNetSec", "pep2bStockCorrectionGeneration",
+] as const;
+
+/** Ordinary full-run snapshots cannot rewrite the claim/manual-section registers. */
+function preserveCanonicalApplicatorStock(
+  output: Record<string, unknown>,
+  stored: Record<string, unknown>,
+): void {
+  for (const [id, candidate] of Object.entries(output)) {
+    if (!isPlainObject(candidate)) continue;
+    const previous = isPlainObject(stored[id]) ? stored[id] as Record<string, unknown> : {};
+    const values = { ...candidate };
+    for (const field of APPLICATOR_STOCK_VALUE_FIELDS) {
+      if (Object.prototype.hasOwnProperty.call(previous, field)) {
+        values[field] = previous[field];
+      } else if (previous.applicatorStockInitialized === true) {
+        values[field] = CURRENT_BLANK_RUN_VALUE[field];
+      } else {
+        delete values[field];
+      }
+    }
+    output[id] = values;
   }
 }
 
@@ -1166,6 +1351,7 @@ const KNOWN_DAYSTATE_KEYS = new Set<string>([
   "stagedItems",
   "prepPhase",
   "breaks",
+  "breaksUpdatedAt",
 ]);
 
 function sanitizeBreakSlots(value: unknown): unknown[] {
@@ -1261,6 +1447,13 @@ export function sanitizeSyncPayload(payload: unknown): unknown {
             ds[dsk] = asArray(val[dsk]).slice(0, MAX_RUNS);
           } else if (dsk === "breaks") {
             ds[dsk] = sanitizeBreakSlots(val[dsk]);
+          } else if (dsk === "breaksUpdatedAt") {
+            const stamp = asNumber(val[dsk]);
+            // Reject malformed/future clocks rather than allowing an
+            // untrusted payload to win the schedule register.
+            if (stamp > 0 && stamp <= Date.now() + MAX_BREAK_STAMP_SKEW_MS) {
+              ds[dsk] = Math.min(stamp, Date.now() + MAX_BREAK_STAMP_SKEW_MS);
+            }
           } else {
             ds[dsk] = val[dsk];
           }

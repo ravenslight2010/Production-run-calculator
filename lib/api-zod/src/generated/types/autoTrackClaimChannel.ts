@@ -21,4 +21,12 @@ export const AutoTrackClaimChannel = {
   'app2-batch': 'app2-batch',
   'app3-batch': 'app3-batch',
   'app4-batch': 'app4-batch',
+  'app1-stock': 'app1-stock',
+  'app2-stock': 'app2-stock',
+  'app3-stock': 'app3-stock',
+  'app4-stock': 'app4-stock',
+  'pep1-stock': 'pep1-stock',
+  'pep1b-stock': 'pep1b-stock',
+  'pep2-stock': 'pep2-stock',
+  'pep2b-stock': 'pep2b-stock',
 } as const;

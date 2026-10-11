@@ -50,6 +50,40 @@ describe("usePresentationCast", () => {
     expect(result.current.supported).toBe(true);
   });
 
+  it("starts the existing browser presentation for a selected station URL", async () => {
+    const requestedUrls: string[][] = [];
+    const connection = Object.assign(new EventTarget(), {
+      id: "presentation-a",
+      state: "connected",
+      close() {},
+      terminate() {},
+    });
+    class FakeRequest {
+      constructor(urls: string[]) {
+        requestedUrls.push(urls);
+      }
+      start() {
+        return Promise.resolve(connection);
+      }
+      reconnect() {
+        return Promise.reject(new Error("not used"));
+      }
+    }
+    (window as any).PresentationRequest = FakeRequest;
+    const { result } = renderHook(() => usePresentationCast(true));
+    let started: { ok: boolean; error?: string } | undefined;
+    await act(async () => {
+      started = await result.current.startCast(
+        "dashboard",
+        "https://example.test/?screen=dashboard",
+      );
+    });
+
+    expect(started).toEqual({ ok: true });
+    expect(requestedUrls).toEqual([["https://example.test/?screen=dashboard"]]);
+    expect(result.current.casts).toEqual({ dashboard: "connected" });
+  });
+
   it("reconnect attempt clears stale stored ids when reconnect fails", async () => {
     class FakeRequest {
       constructor(_urls: string[]) {}

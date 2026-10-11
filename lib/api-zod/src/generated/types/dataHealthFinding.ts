@@ -25,6 +25,8 @@ export interface DataHealthFinding {
   protectedValue: boolean;
   source: DataHealthFindingSource;
   sourceRoute: string;
+  /** @nullable */
   reconciliationCategory?: DataHealthFindingReconciliationCategory;
+  /** @nullable */
   preview?: DataHealthFindingPreview;
 }

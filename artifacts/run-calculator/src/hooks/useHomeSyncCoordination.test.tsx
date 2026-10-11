@@ -79,6 +79,45 @@ describe("useHomeSyncCoordination", () => {
     expect(source.close).toHaveBeenCalledTimes(1);
   });
 
+  it("applies peer frames through the existing station sync callback without reopening the baseline", async () => {
+    const { result } = renderHook(() => useHomeSyncCoordination());
+    let displayedCases = 12;
+    const onMessage = vi.fn<(event: MessageEvent) => boolean>((event) => {
+      const frame = JSON.parse(event.data as string) as { cases?: number };
+      if (typeof frame.cases === "number") displayedCases = frame.cases;
+      return true;
+    });
+    const onInitialBaseline = vi.fn();
+
+    let disconnect!: () => void;
+    act(() => {
+      disconnect = result.current.connectSse({
+        clientId: "screen-display",
+        getSnapshot: () => "snapshot-a",
+        onOpen: vi.fn(),
+        onMessage,
+        onError: vi.fn(),
+        onInitialBaseline,
+        onClose: vi.fn(),
+      });
+    });
+    const source = MockEventSource.instances[0]!;
+
+    await act(async () => {
+      source.emit({ initial: true, cases: 12 });
+      await Promise.resolve();
+    });
+    await act(async () => {
+      source.emit({ senderId: "production-device", cases: 18 });
+      await Promise.resolve();
+    });
+
+    expect(displayedCases).toBe(18);
+    expect(onInitialBaseline).toHaveBeenCalledTimes(1);
+    expect(onMessage).toHaveBeenCalledTimes(2);
+    act(() => disconnect());
+  });
+
   it("reconnects with the new local date and ignores late frames from yesterday", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-14T23:59:59Z"));

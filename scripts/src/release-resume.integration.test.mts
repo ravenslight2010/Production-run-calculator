@@ -7,9 +7,22 @@ import { join, resolve } from "node:path";
 import {
   promoteSourceLibraryEvidenceAtPaths,
   releaseGateLabelsForMode,
+  TYPESCRIPT_7_SUPPORTED_RUNNERS,
 } from "./release-check.mts";
 import { computeSourceLibraryEvidenceId } from "./verify-source-library-reconciliation.mts";
 import { FULL_BROWSER_EXPECTED_CASES } from "./full-browser-case-contract.mts";
+import { WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES } from "./webkit-case-contract.mts";
+import {
+  BROWSER_MAIN_COUNT_SUMMARY_SUFFIX,
+  mapReleaseStepOutcomes,
+  readLaneCatalog,
+} from "./test-results.mjs";
+import {
+  TYPESCRIPT_7_RESOURCE_BUDGETS,
+  typescript7MeasuredCheckNames,
+  typescript7ExpectedMeasurementCommandNames,
+} from "./typescript-7-resource-contract.mts";
+import { captureReleaseIdentity } from "./release-source-identity.mjs";
 
 type FixtureStep = {
   label: string;
@@ -50,13 +63,14 @@ async function runReleaseCheck(
   args: string[] = [],
   envOverrides: Record<string, string> = {},
 ): Promise<{ code: number; output: string }> {
+  const revision = captureReleaseIdentity(rootDir).revision;
   await writeFile(
     join(evidenceDir, "report-key-rotation-preflight.json"),
     `${JSON.stringify(
       {
         verifier: "report-key-rotation-preflight",
         environment: "disposable-ci",
-        revision: await getCurrentRevision(),
+        revision,
         status: "pass",
         canRotate: true,
         activeKeyId: "fixture-key",
@@ -76,11 +90,111 @@ async function runReleaseCheck(
     )}\n`,
     "utf8",
   );
+  // Fixture runs must be self-contained.  In particular, never borrow the
+  // checkout's retained comparison artifact as release proof: it may belong
+  // to another revision (or be absent in a fresh checkout).
+  const checks = typescript7MeasuredCheckNames();
+  const command = (name: string) => ({
+    name,
+    exitCode: 0,
+    elapsedMs: 1,
+    peakRssKiB: 10,
+    diagnostics: [],
+  });
+  const commands = [
+    command("frozen-install"),
+    command("typescript-6-clean"),
+    ...typescript7ExpectedMeasurementCommandNames().map(command),
+  ];
+  await writeFile(
+    join(evidenceDir, "typescript-7-comparison.json"),
+    `${JSON.stringify(
+      {
+        schemaVersion: 3,
+        sourceRevision: revision,
+        status: "PASS",
+        authoritativeCompiler: "Version 6.0.3",
+        candidateCompiler: "Version 7.0.2",
+        authoritativeOutputsChanged: false,
+        advisory: true,
+        runner: {
+          platform: process.platform,
+          arch: process.arch,
+          supported: true,
+          supportedRunners: TYPESCRIPT_7_SUPPORTED_RUNNERS,
+          nativePackage: TYPESCRIPT_7_SUPPORTED_RUNNERS.find(
+            (item) =>
+              item.platform === process.platform && item.arch === process.arch,
+          )?.nativePackage,
+          nativePackageVersion: "7.0.2",
+          nativeBinary: `node_modules/${
+            TYPESCRIPT_7_SUPPORTED_RUNNERS.find(
+              (item) =>
+                item.platform === process.platform && item.arch === process.arch,
+            )?.nativePackage
+          }/lib/tsc`,
+          nativePackages: [
+            TYPESCRIPT_7_SUPPORTED_RUNNERS.find(
+              (item) =>
+                item.platform === process.platform && item.arch === process.arch,
+            )?.nativePackage,
+          ],
+          image: "release-resume-fixture",
+          hardwareClass: "f".repeat(64),
+          logicalCpuCount: 1,
+          memoryGiB: 1,
+        },
+        commands,
+        performanceComparison: ["cold", "warm"].flatMap((mode) =>
+          checks.map((check) => ({
+            check,
+            mode,
+            elapsedMs: { baseline: 1, candidate: 1, delta: 0, ratio: 1 },
+            peakRssKiB: { baseline: 10, candidate: 10, delta: 0, ratio: 1 },
+          })),
+        ),
+        resourceBudgets: TYPESCRIPT_7_RESOURCE_BUDGETS,
+        trend: {
+          historyLimit: 5,
+          incompatibleRunnerClassSamples: 0,
+          distinctRevisionCount: 1,
+          regressedRevisions: [],
+          revisionSamples: [{ sourceRevision: revision, performanceComparison: [] }],
+        },
+        promotionAssessment: {
+          eligible: false,
+          thresholdApprovalRequired: false,
+          repeatedEvidenceMet: false,
+          resourceBudgetsMet: true,
+          resourceRegressions: [],
+        },
+        diagnosticsEqual: true,
+        declarations: {
+          baseline: [{ path: "lib/fixture/index.d.ts", sha256: "d".repeat(64) }],
+          candidate: [{ path: "lib/fixture/index.d.ts", sha256: "d".repeat(64) }],
+          changedPaths: [],
+        },
+        containment: {
+          beforeStatusSha256: "c".repeat(64),
+          afterStatusSha256: "c".repeat(64),
+        },
+        acceptanceGatesMet: true,
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
   return new Promise((resolveRun, reject) => {
     const child = spawn(process.execPath, [tsxPath, releaseCheck, ...args], {
       cwd: rootDir,
       env: {
         ...process.env,
+        CI: "true",
+        NODE_ENV: "test",
+        E2E_TEST_DB: "1",
+        RELEASE_CHECK_SKIP_PRODUCTION_SOURCE_LIBRARY_RECONCILIATION: "1",
+        SOURCE_LIBRARY_RECONCILIATION_ENVIRONMENT: "development",
         RELEASE_EVIDENCE_DIR: evidenceDir,
         RELEASE_CHECK_FIXTURE_STEPS: JSON.stringify(steps),
         ...envOverrides,
@@ -1938,8 +2052,16 @@ async function runFullModeScenario(): Promise<void> {
   const markerDir = await mkdtemp(
     join(tmpdir(), "release-resume-full-marker-"),
   );
+  const countSummaryDir = await mkdtemp(
+    join(rootDir, ".release-resume-count-summary-"),
+  );
+  const releaseStepsPath = join(countSummaryDir, "release-steps.json");
+  const countSummaryPath =
+    releaseStepsPath + BROWSER_MAIN_COUNT_SUMMARY_SUFFIX;
+  const interruptedRunId = "local:release-resume-first";
+  const resumedRunId = "local:release-resume-next";
   const marker = join(markerDir, "full-browser-started");
-  const revision = await getCurrentRevision();
+  const revision = captureReleaseIdentity(rootDir).revision;
   const browserReport = [
     "# Full Browser Release Run",
     "",
@@ -1961,6 +2083,27 @@ async function runFullModeScenario(): Promise<void> {
     `| \`e2e/example.spec.ts\` | ${FULL_BROWSER_EXPECTED_CASES} | ${FULL_BROWSER_EXPECTED_CASES} | ${FULL_BROWSER_EXPECTED_CASES} | 0 | 0 | 0 | 1ms |`,
     "",
   ].join("\n");
+  const responsiveWebkitCases =
+    WEBKIT_COMPATIBILITY_EXPECTED_CASE_IDENTITIES.map((identity) => {
+      const [file = "", projectAndTitle = ""] = identity.split(" :: ");
+      const [projectName = "", ...titleParts] =
+        projectAndTitle.split(" › ");
+      return {
+        file,
+        projectName,
+        title: titleParts.join(" › "),
+        status: "passed",
+        durationMs: 1,
+      };
+    });
+  const responsiveWebkitEvidence = `${JSON.stringify({
+    schemaVersion: 1,
+    browser: "webkit",
+    revision,
+    environment: "disposable full-mode resume fixture",
+    result: "passed",
+    cases: responsiveWebkitCases,
+  })}\n`;
   const fullBrowserScript = [
     "const fs = require('node:fs');",
     "const marker = process.env.RELEASE_RESUME_MARKER;",
@@ -2006,6 +2149,7 @@ async function runFullModeScenario(): Promise<void> {
       "clean-start/startup-web.log",
       "clean-start/startup-mockup.log",
       "browser-full/FINAL-REPORT.md",
+      "browser-compatibility/webkit-result.json",
     ]) {
       const path = join(evidenceDir, file);
       await mkdir(join(path, ".."), { recursive: true });
@@ -2013,6 +2157,8 @@ async function runFullModeScenario(): Promise<void> {
         path,
         file === "browser-full/FINAL-REPORT.md"
           ? browserReport
+          : file === "browser-compatibility/webkit-result.json"
+            ? responsiveWebkitEvidence
           : "fixture evidence\n",
         { encoding: "utf8" },
       );
@@ -2025,7 +2171,15 @@ async function runFullModeScenario(): Promise<void> {
       "utf8",
     );
 
-    const interrupted = await runReleaseCheck(evidenceDir, steps, ["--full"]);
+    const interrupted = await runReleaseCheck(
+      evidenceDir,
+      steps,
+      ["--full"],
+      {
+        TEST_RESULTS_RELEASE_STEPS_PATH: releaseStepsPath,
+        TEST_RESULTS_REPORT_ID: interruptedRunId,
+      },
+    );
     assert.equal(interrupted.code, 1, interrupted.output);
     assert.match(
       interrupted.output,
@@ -2056,6 +2210,30 @@ async function runFullModeScenario(): Promise<void> {
       "full mode must checkpoint the interrupted browser gate and blocked dependent",
     );
     assert.equal(await readFile(marker, "utf8"), "started\n");
+    await writeFile(
+      countSummaryPath,
+      `${JSON.stringify({
+        schemaVersion: 1,
+        browser: "chromium",
+        runId: interruptedRunId,
+        revision: firstCheckpoint.revision,
+        result: "passed",
+        generatedAt: new Date().toISOString(),
+        counts: {
+          total: FULL_BROWSER_EXPECTED_CASES,
+          completed: FULL_BROWSER_EXPECTED_CASES,
+          passed: FULL_BROWSER_EXPECTED_CASES,
+          failed: 0,
+          skipped: 0,
+          notRun: 0,
+        },
+      })}\n`,
+      "utf8",
+    );
+    assert.ok(
+      await readFile(countSummaryPath, "utf8"),
+      "the interrupted run fixture must seed a prior Chromium count summary",
+    );
 
     const interruptedReport = await readFile(
       join(evidenceDir, "release-check-report.md"),
@@ -2099,16 +2277,65 @@ async function runFullModeScenario(): Promise<void> {
       "an interrupted full browser gate must not produce a passing report",
     );
 
-    const resumed = await runReleaseCheck(evidenceDir, steps, [
-      "--full",
-      "--resume",
-    ]);
+    const resumed = await runReleaseCheck(
+      evidenceDir,
+      steps,
+      ["--full", "--resume"],
+      {
+        TEST_RESULTS_RELEASE_STEPS_PATH: releaseStepsPath,
+        TEST_RESULTS_REPORT_ID: resumedRunId,
+      },
+    );
     assert.equal(resumed.code, 0, resumed.output);
     assert.match(resumed.output, /Resuming after 1 completed gate\(s\)\./);
     assert.doesNotMatch(
       resumed.output,
       /Resuming after 2 completed gate\(s\)\./,
       "resume must rerun the failed full browser gate",
+    );
+    await assert.rejects(
+      readFile(countSummaryPath, "utf8"),
+      { code: "ENOENT" },
+      "resume must remove the prior run's Chromium count summary",
+    );
+    const releaseSteps = JSON.parse(
+      await readFile(releaseStepsPath, "utf8"),
+    ) as {
+      runId: string;
+      outcomes: Array<{
+        label: string;
+        status: string;
+        durationMs: number;
+        counts?: {
+          total: number;
+          completed: number;
+          passed: number;
+          failed: number;
+          skipped: number;
+          notRun: number;
+        };
+      }>;
+    };
+    assert.equal(
+      releaseSteps.runId,
+      resumedRunId,
+      "the resumed release sidecar must use the new run identity",
+    );
+    const browserOutcome = releaseSteps.outcomes.find(
+      (outcome) => outcome.label === "full browser E2E suite",
+    );
+    assert.ok(browserOutcome, "the resumed browser outcome must be recorded");
+    const mappedOutcomes = mapReleaseStepOutcomes(
+      await readLaneCatalog(),
+      [browserOutcome],
+      "release-full",
+      "PASS",
+    );
+    assert.equal(
+      mappedOutcomes.find((outcome) => outcome.laneId === "browser-main")
+        ?.counts,
+      null,
+      "browser-main counts must stay null without a fresh summary for the resumed run",
     );
 
     const report = await readFile(
@@ -2122,7 +2349,11 @@ async function runFullModeScenario(): Promise<void> {
       "resume must keep the checkpoint revision",
     );
     assert.match(report, /^Mode: full$/m);
-    assert.match(report, /^Decision: GO$/m);
+    assert.match(
+      report,
+      /^Decision: NO-GO$/m,
+      "a disposable fixture run must not present itself as production release proof",
+    );
     for (const label of [
       "fixture gate one",
       "full browser E2E suite",
@@ -2160,6 +2391,7 @@ async function runFullModeScenario(): Promise<void> {
   } finally {
     await rm(evidenceDir, { recursive: true, force: true });
     await rm(markerDir, { recursive: true, force: true });
+    await rm(countSummaryDir, { recursive: true, force: true });
   }
 }
 
@@ -2196,7 +2428,8 @@ async function runTamperedSourceLibraryPreflightCheckpointScenario(): Promise<vo
     join(tmpdir(), "release-resume-tampered-source-preflight-marker-"),
   );
   const marker = join(markerDir, "gate-started");
-  const revision = await getCurrentRevision();
+  const identity = captureReleaseIdentity(rootDir);
+  const revision = identity.revision;
   const sourcePreflightLabel =
     "source-library reconciliation database preflight";
   const steps: FixtureStep[] = [

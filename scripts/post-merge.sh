@@ -1,6 +1,14 @@
 #!/bin/bash
 set -e
 
+# Replit's nodejs-24 module can lag the patch pinned for release evidence.
+# Re-enter with the pinned executable ahead of PATH before running Corepack,
+# pnpm or any child scripts. The launcher checks the evidence contract first.
+if [[ "${REPLIT_PINNED_NODE_READY:-}" != "1" ]]; then
+  exec bash scripts/src/run-release-node.sh env REPLIT_PINNED_NODE_READY=1 bash scripts/post-merge.sh
+fi
+node scripts/src/check-routine-node-version.mjs
+
 # Artifact workflows are managed separately from this hook. During a merge,
 # their old pnpm parents can outlive the workflow restart and leave the
 # listener bound. Stop only the known artifact-dev process groups; never use
@@ -29,3 +37,7 @@ until pnpm --filter db push-force; do
   echo "db push-force failed (attempt $attempts), retrying in 15s..." >&2
   sleep 15
 done
+
+# Keep the independent publish expectation synchronized with the merged source.
+# Deployment builds reuse this exact record and fail if source changes afterward.
+pnpm run prepare:publish

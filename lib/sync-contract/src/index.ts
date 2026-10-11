@@ -11,10 +11,12 @@ export const MANUAL_SECTION_FIELDS = {
   packaging: ["skidsCompleted", "casesOnCurrentSkid"],
   dough: ["traysOnLine", "batchesReady"],
   sauce: ["sauceBarrelsMade", "sauceBarrelAnchorNetSec", "sauceBarrelCorrectionGeneration"],
-  app1: ["app1BatchesMade", "app1BatchAnchorNetSec", "app1BatchCorrectionGeneration"],
-  app2: ["app2BatchesMade", "app2BatchAnchorNetSec", "app2BatchCorrectionGeneration"],
-  app3: ["app3BatchesMade", "app3BatchAnchorNetSec", "app3BatchCorrectionGeneration"],
-  app4: ["app4BatchesMade", "app4BatchAnchorNetSec", "app4BatchCorrectionGeneration"],
+  app1: ["app1BatchesMade", "app1BatchAnchorNetSec", "app1BatchCorrectionGeneration", "app1StockLbs", "app1StockAnchorNetSec", "app1StockCorrectionGeneration"],
+  app2: ["app2BatchesMade", "app2BatchAnchorNetSec", "app2BatchCorrectionGeneration", "app2StockLbs", "app2StockAnchorNetSec", "app2StockCorrectionGeneration"],
+  app3: ["app3BatchesMade", "app3BatchAnchorNetSec", "app3BatchCorrectionGeneration", "app3StockLbs", "app3StockAnchorNetSec", "app3StockCorrectionGeneration"],
+  app4: ["app4BatchesMade", "app4BatchAnchorNetSec", "app4BatchCorrectionGeneration", "app4StockLbs", "app4StockAnchorNetSec", "app4StockCorrectionGeneration"],
+  pep1: ["pep1StockLbs", "pep1StockAnchorNetSec", "pep1StockCorrectionGeneration", "pep1bStockLbs", "pep1bStockAnchorNetSec", "pep1bStockCorrectionGeneration"],
+  pep2: ["pep2StockLbs", "pep2StockAnchorNetSec", "pep2StockCorrectionGeneration", "pep2bStockLbs", "pep2bStockAnchorNetSec", "pep2bStockCorrectionGeneration"],
 } as const;
 export type ManualSection = keyof typeof MANUAL_SECTION_FIELDS;
 export type ManualSectionField = (typeof MANUAL_SECTION_FIELDS)[ManualSection][number];
@@ -59,7 +61,9 @@ export function canonicalSyncValue(value: unknown): unknown {
   if (isSyncRecord(value)) {
     return Object.fromEntries(
       Object.entries(value)
-        .sort(([left], [right]) => left.localeCompare(right))
+        // Object-key ordering is part of the wire hash.  Do not use
+        // localeCompare: browser/server locales may produce different orders.
+        .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
         .map(([key, child]) => [key, canonicalSyncValue(child)]),
     );
   }
@@ -108,6 +112,10 @@ export function applySyncDeltaData(
   const merged: Record<string, unknown> = { ...base };
   for (const [key, value] of Object.entries(delta)) {
     if (SYNC_DELTA_MAP_SECTION_SET.has(key)) {
+      if (value === null) {
+        delete merged[key];
+        continue;
+      }
       if (!isSyncRecord(value)) return null;
       const baseSection = base[key];
       const section = { ...(isSyncRecord(baseSection) ? baseSection : {}) };

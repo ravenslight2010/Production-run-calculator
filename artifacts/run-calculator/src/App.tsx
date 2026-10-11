@@ -257,15 +257,26 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
   const handleAutomaticUpdateAndReload = useCallback(
     (generation: number) => {
       emitFieldCheckSignal("pwa-update-handoff", "success");
-      return updateAndReload(
-        registrationRef.current,
-        activateWaitingWorker,
-        () => window.location.reload(),
-        () =>
-          automaticReloadGenerationRef.current === generation
-          && getAutomaticUpdateReloadSafety()
-          && updateIdleRef.current,
-      );
+      const canReload = () =>
+        automaticReloadGenerationRef.current === generation
+        && getAutomaticUpdateReloadSafety()
+        && updateIdleRef.current;
+      if (!canReload()) return Promise.resolve();
+
+      // This path only runs after the app has already observed an installed
+      // update. Do not perform another update() discovery pass here: some
+      // browsers keep that promise pending while the waiting worker is being
+      // activated, which strands safe-idle handoffs. Activate the known
+      // waiting worker directly, or reload when the browser has already
+      // promoted it to active.
+      const registration = registrationRef.current;
+      if (registration?.waiting) {
+        return activateWaitingWorker(false, canReload).catch(() => {
+          if (canReload()) window.location.reload();
+        });
+      }
+      if (canReload()) window.location.reload();
+      return Promise.resolve();
     },
     [activateWaitingWorker],
   );
@@ -353,14 +364,19 @@ function ErrorBoundaryWithRecovery({ children }: { children: ReactNode }) {
 }
 
 function App() {
-  useEffect(() => installBrowserFailureCapture(), []);
+  const isStationDisplay =
+    new URLSearchParams(window.location.search).get("screen") !== null;
+  useEffect(() => {
+    if (isStationDisplay) return;
+    return installBrowserFailureCapture();
+  }, [isStationDisplay]);
   return (
     <WouterRouter base={basePath}>
       <QueryClientProvider client={queryClient}>
         <AppUpdatePrompt>
           <ErrorBoundaryWithRecovery>
           <AuthProvider>
-            <FieldVerificationObserver appBuild={WEB_BUILD_ID} />
+            {!isStationDisplay && <FieldVerificationObserver appBuild={WEB_BUILD_ID} />}
             <AppRoutes />
           </AuthProvider>
           </ErrorBoundaryWithRecovery>

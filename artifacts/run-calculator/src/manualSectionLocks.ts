@@ -17,10 +17,12 @@ export const MANUAL_SECTION_CONTROLS = {
   packaging: ["calculator-skids", "calculator-cases", "packaging-skids", "packaging-cases", "floor-skid-done", "floor-cases", "dough-quick-check-skids", "dough-quick-check-cases"],
   dough: ["dough-trays", "dough-batches", "dough-crust-trays", "dough-crust-batches"],
   sauce: ["sauce-batches"],
-  app1: ["applicator-1-batches"],
-  app2: ["applicator-2-batches"],
-  app3: ["applicator-3-batches"],
-  app4: ["applicator-4-batches"],
+  app1: ["applicator-1-batches", "applicator-1-stock"],
+  app2: ["applicator-2-batches", "applicator-2-stock"],
+  app3: ["applicator-3-batches", "applicator-3-stock"],
+  app4: ["applicator-4-batches", "applicator-4-stock"],
+  pep1: ["pepperoni-1-stock"],
+  pep2: ["pepperoni-2-stock"],
 } as const;
 export const USED_MANUAL_SECTION_CONTROL_IDS = Object.values(MANUAL_SECTION_CONTROLS).flat();
 export function sectionForManualControl(controlId: string): ManualSection | undefined {
@@ -36,6 +38,17 @@ const expiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const conflictTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const listeners = new Set<() => void>();
 const keyOf = (runId: string, section: ManualSection) => `${runId}:${section}`;
+const lockStateSnapshots = new Map<string, ControlLockState>();
+const snapshotFor = (runId: string, section: ManualSection): ControlLockState => {
+  const key = keyOf(runId, section);
+  const next = getControlLockState(runId, section);
+  const prior = lockStateSnapshots.get(key);
+  if (prior && prior.locked === next.locked && prior.disabled === next.disabled && prior.message === next.message) {
+    return prior;
+  }
+  lockStateSnapshots.set(key, next);
+  return next;
+};
 
 function notify(): void {
   for (const listener of listeners) listener();
@@ -50,8 +63,6 @@ export function getManualSectionLock(runId: string, section: ManualSection, now 
   const key = keyOf(runId, section);
   const lock = locks.get(key);
   if (lock && lock.expiresAt <= now) {
-    locks.delete(key);
-    notify();
     return undefined;
   }
   return lock;
@@ -138,12 +149,14 @@ export function useManualSectionLock(runId: string | undefined, section: ManualS
 }
 
 export function useControlLockState(runId: string | undefined, section: ManualSection): ControlLockState {
+  const EMPTY_LOCK_STATE = EMPTY_LOCK_STATE_VALUE;
   return useSyncExternalStore(
     subscribeManualSectionLocks,
-    () => runId ? getControlLockState(runId, section) : { locked: false, disabled: false },
-    () => ({ locked: false, disabled: false }),
+    () => runId ? snapshotFor(runId, section) : EMPTY_LOCK_STATE,
+    () => EMPTY_LOCK_STATE,
   );
 }
+const EMPTY_LOCK_STATE_VALUE: ControlLockState = Object.freeze({ locked: false, disabled: false });
 export function useManualControlLock(runId: string | undefined, controlId: string): ManualSectionLock | undefined {
   const section = sectionForManualControl(controlId);
   return useManualSectionLock(runId, section ?? "packaging");

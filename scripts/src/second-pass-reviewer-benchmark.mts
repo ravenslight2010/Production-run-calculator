@@ -60,6 +60,7 @@ type Observation = {
   falseWarnings: number;
   falseRejects: number;
   noOpVerdicts: number;
+  providerRetries: number;
   latencyMs: number;
   inputTokens: number | null;
   outputTokens: number | null;
@@ -113,12 +114,17 @@ export function retainObservationMetrics(observationInput: unknown): Observation
       requireNonNegativeInteger(observation, field),
     ]),
   ) as Pick<Observation, (typeof NON_NEGATIVE_INTEGER_METRICS)[number]>;
+  const providerRetries =
+    observation.providerRetries === undefined
+      ? 0
+      : requireNonNegativeInteger(observation, "providerRetries");
   const latencyMs = observation.latencyMs;
   if (typeof latencyMs !== "number" || !Number.isFinite(latencyMs) || latencyMs < 0) {
     throw new Error("reviewer observation metric latencyMs must be a non-negative finite number");
   }
   return {
     ...integers,
+    providerRetries,
     latencyMs,
     inputTokens: requireNullableNonNegativeInteger(observation, "inputTokens"),
     outputTokens: requireNullableNonNegativeInteger(observation, "outputTokens"),
@@ -169,6 +175,7 @@ export function evaluateReviewerEvidence(
   const falseRejects = values.reduce((sum, value) => sum + value.falseRejects, 0);
   const noOpVerdicts = values.reduce((sum, value) => sum + value.noOpVerdicts, 0);
   const reviewerFailures = values.reduce((sum, value) => sum + value.reviewerFailures, 0);
+  const providerRetries = values.reduce((sum, value) => sum + value.providerRetries, 0);
   const observedCases = values.reduce((sum, value) => sum + value.cases, 0);
   if (observedCases !== material + nonMaterial) {
     throw new Error(`reviewer observations cover ${observedCases} of ${material + nonMaterial} cases`);
@@ -236,10 +243,10 @@ export function evaluateReviewerEvidence(
     },
     latencyAndRetry: {
       addedSerialProviderRoundTripsPerMiss: 1,
-      reviewerRetries: 0,
+      reviewerRetries: providerRetries,
       reviewerFailureBehavior: "fail-open-with-no-verdict",
       measuredLatencyP95Ms: p95LatencyMs,
-      note: "The reviewer adds one serial provider round trip; provider failures are not retried.",
+      note: "One logical reviewer request may include provider-adapter retries; captured retry counts are summed here.",
     },
     decision: {
       retain: Object.values(thresholdPasses).every(Boolean),
@@ -259,6 +266,19 @@ function repositoryRoot() {
   throw new Error("repository root not found");
 }
 
+export function reviewerEvaluatorProvenance(evaluatorSha256: unknown) {
+  if (evaluatorSha256 === undefined) {
+    return {
+      state: "unavailable" as const,
+      reason: "retained historical observations predate evaluator source binding",
+    };
+  }
+  if (typeof evaluatorSha256 !== "string" || !/^[a-f0-9]{64}$/u.test(evaluatorSha256)) {
+    throw new Error("reviewer observations must contain a lowercase evaluator SHA-256 digest");
+  }
+  return { state: "hashed" as const, sha256: evaluatorSha256 };
+}
+
 export function buildReviewerBenchmark(root = repositoryRoot()) {
   const sourcePath = path.join(
     root,
@@ -267,11 +287,21 @@ export function buildReviewerBenchmark(root = repositoryRoot()) {
   const source = JSON.parse(fs.readFileSync(sourcePath, "utf8")) as { findings: FindingMap };
   const observationsPath = path.join(
     root,
-    "docs/second-pass-reviewer-live-observations-2026-09-05.json",
+    "docs/second-pass-reviewer-live-observations-2026-10-06.json",
   );
   const observationsFile = JSON.parse(fs.readFileSync(observationsPath, "utf8")) as {
+    formatVersion?: unknown;
+    capturedAt?: unknown;
+    environment?: unknown;
+    sourceRevision?: unknown;
     sourceHash: string;
     model: unknown;
+    evaluatorSha256?: unknown;
+    toolchain?: {
+      nodeVersion?: unknown;
+      pnpmVersion?: unknown;
+      pnpmLockSha256?: unknown;
+    };
     operations: Record<string, unknown>;
   };
   const sourceHash = createHash("sha256").update(fs.readFileSync(sourcePath)).digest("hex");
@@ -283,6 +313,36 @@ export function buildReviewerBenchmark(root = repositoryRoot()) {
   }
   if (typeof observationsFile.model !== "string" || observationsFile.model.trim() === "") {
     throw new Error("reviewer observations must identify the provider model");
+  }
+  if (observationsFile.formatVersion !== 2 || !observationsFile.toolchain) {
+    throw new Error("reviewer observations must come from a versioned live benchmark run");
+  }
+  if (
+    typeof observationsFile.capturedAt !== "string" ||
+    !Number.isFinite(Date.parse(observationsFile.capturedAt)) ||
+    new Date(observationsFile.capturedAt).toISOString() !== observationsFile.capturedAt ||
+    observationsFile.environment !== "candidate-workspace" ||
+    typeof observationsFile.sourceRevision !== "string" ||
+    observationsFile.sourceRevision.trim() === ""
+  ) {
+    throw new Error("reviewer observations contain incomplete capture provenance");
+  }
+  const currentLockSha256 = createHash("sha256")
+    .update(fs.readFileSync(path.join(root, "pnpm-lock.yaml")))
+    .digest("hex");
+  const observationToolchain = observationsFile.toolchain;
+  if (observationToolchain) {
+    if (
+      typeof observationToolchain.nodeVersion !== "string" ||
+      typeof observationToolchain.pnpmVersion !== "string" ||
+      typeof observationToolchain.pnpmLockSha256 !== "string" ||
+      !/^[a-f0-9]{64}$/u.test(observationToolchain.pnpmLockSha256)
+    ) {
+      throw new Error("reviewer observations contain incomplete toolchain provenance");
+    }
+    if (observationToolchain.pnpmLockSha256 !== currentLockSha256) {
+      throw new Error("reviewer observations were captured with a different pnpm lockfile");
+    }
   }
   const report = evaluateReviewerEvidence(source.findings, observationsFile.operations);
   const values = Object.values(report.measuredEffects.observationsByOperation);
@@ -301,10 +361,9 @@ export function buildReviewerBenchmark(root = repositoryRoot()) {
     },
     thresholds: ACCEPTANCE,
     dependencies: {
-      node: process.versions.node,
-      pnpmLockSha256: createHash("sha256")
-        .update(fs.readFileSync(path.join(root, "pnpm-lock.yaml")))
-        .digest("hex"),
+      node: observationToolchain.nodeVersion,
+      pnpm: observationToolchain.pnpmVersion,
+      pnpmLockSha256: observationToolchain.pnpmLockSha256,
       benchmarkReporter: "1",
       benchmarkReporterSha256: createHash("sha256")
         .update(fs.readFileSync(path.join(import.meta.dirname, "second-pass-reviewer-benchmark.mts")))
@@ -337,10 +396,7 @@ export function buildReviewerBenchmark(root = repositoryRoot()) {
       sourceSha256: sourceHash,
       evidence: { state: "hashed", sha256: observationsHash },
       evidenceType: "deterministic-reconciliation-with-provider-observations",
-      evaluator: {
-        state: "unavailable",
-        reason: "retained historical observations predate evaluator source binding",
-      },
+      evaluator: reviewerEvaluatorProvenance(observationsFile.evaluatorSha256),
     },
   });
   const output = {

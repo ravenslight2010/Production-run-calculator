@@ -26,6 +26,7 @@ import {
 } from "vitest";
 import pg from "pg";
 import express, { type Express } from "express";
+import { runWithScope } from "../lib/requestScope";
 
 // Filled in by beforeAll once the throwaway DB exists and the module is loaded.
 type DbModule = typeof import("@workspace/db");
@@ -1056,12 +1057,23 @@ const MINIMAL_RUN_VALS = {
   cartoned: "no",
 };
 
-async function seedDaySyncRun(runId: string, vals: unknown): Promise<void> {
+async function seedDaySyncRun(
+  runId: string,
+  vals: unknown,
+  options: { actualCases?: number } = {},
+): Promise<void> {
   await db.insert(dailySyncTable).values({
     date: "2026-07-03",
     scope: "live",
     data: {
-      dayState: { runs: [{ id: runId, brand: "Test", flavor: "Cheese" }] },
+      dayState: {
+        runs: [{
+          id: runId,
+          brand: "Test",
+          flavor: "Cheese",
+          ...(options.actualCases === undefined ? {} : { actualCases: options.actualCases }),
+        }],
+      },
       runValues: { [runId]: vals },
     },
   });
@@ -1103,6 +1115,43 @@ describe("POST /api/inventory/consume — server-side authorization of client-su
     });
     expect(res.status).toBe(200);
     expect(await onHand(itemId)).toBe(98); // only the real 2 batches were deducted, not 99
+  });
+
+  it.each([
+    { label: "actualCases below plan", actualCases: 5, expectedDough: 1, expectedCircles: 60 },
+    { label: "actualCases above plan", actualCases: 15, expectedDough: 3, expectedCircles: 180 },
+    { label: "zero actualCases", actualCases: 0, expectedDough: 2, expectedCircles: 120 },
+    { label: "absent actualCases", expectedDough: 2, expectedCircles: 120 },
+  ])("scales ingredient and packaging deductions for $label", async ({
+    actualCases,
+    expectedDough,
+    expectedCircles,
+  }) => {
+    const doughId = await makeItem("ingredient:Dough:batches");
+    const circlesId = await makeItem("packaging:circles:12in");
+    await addLot(doughId, 100);
+    await addLot(circlesId, 1_000);
+    await seedDaySyncRun(
+      `run-actual-cases-${actualCases ?? "absent"}`,
+      { ...MINIMAL_RUN_VALS, cartoned: "yes", circles: "12in" },
+      { actualCases },
+    );
+
+    const res = await fetch(`${baseUrl}/api/inventory/consume`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        runId: `run-actual-cases-${actualCases ?? "absent"}`,
+        lines: [
+          { itemKey: "ingredient:Dough:batches", qty: 999 },
+          { itemKey: "packaging:circles:12in", qty: 999 },
+        ],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(await onHand(doughId)).toBe(100 - expectedDough);
+    expect(await onHand(circlesId)).toBe(1_000 - expectedCircles);
   });
 
   it("ignores a client-claimed itemKey the run's recipe never actually touches", async () => {
@@ -1157,6 +1206,9 @@ describe("POST /api/inventory/consume — server-side authorization of client-su
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ applied: true, consumed: 1 });
     expect(await onHand(itemId)).toBe(98);
+    const claim = (await db.select().from(inventoryConsumedRunsTable))
+      .find((row) => row.runId === "run-legit-3");
+    expect(claim?.baselineLines).toEqual([{ itemId, qty: 2 }]);
   });
 
   it("is safe when two devices retry the same finalization concurrently", async () => {
@@ -1321,8 +1373,12 @@ describe("day-start physical inventory event against a real database", () => {
 
   it("applies a concurrent same-date mix and supply event exactly once", async () => {
     const tapeId = await makeItem("packaging:tape:count");
+    const glueId = await makeItem("packaging:glue:count");
+    const inkId = await makeItem("packaging:ink:count");
     const onionId = await makeItem("ingredient:Onion:lbs");
     await addLot(tapeId, 20);
+    await addLot(glueId, 5);
+    await addLot(inkId, 5);
     await addLot(onionId, 100);
     await db.insert(dailySyncTable).values({
       date: "2026-07-03",
@@ -1377,6 +1433,8 @@ describe("day-start physical inventory event against a real database", () => {
     expect(bodies.filter((body) => body.applied)).toHaveLength(1);
     expect(bodies.filter((body) => !body.applied)).toHaveLength(1);
     expect(await onHand(tapeId)).toBe(16);
+    expect(await onHand(glueId)).toBe(4.714);
+    expect(await onHand(inkId)).toBe(4.922);
     expect(await onHand(onionId)).toBeLessThan(100);
     const onionConsumes = (await db.select().from(inventoryLedgerTable))
       .filter((row) => row.itemId === onionId && row.type === "consume");
@@ -1388,6 +1446,64 @@ describe("day-start physical inventory event against a real database", () => {
     expect(surplus).toHaveLength(1);
     const [mix] = await db.select().from(mixesTable);
     expect(mix.amountAlreadyMade).toBeGreaterThan(0);
+  });
+
+  it("keeps same-ID mix and surplus updates inside the active scope", async () => {
+    const onionId = await makeItem("ingredient:ScopedOnion:lbs");
+    await addLot(onionId, 100);
+    const mixBase = {
+      id: "scope-isolated-mix",
+      name: "Scoped Mix",
+      brand: "Test",
+      flavor: "Scope",
+      batchSize: 40,
+      daysEarly: 1,
+      notes: "",
+      amountAlreadyMade: 0,
+      amountActualMade: 50,
+      components: [{ ingredient: "ScopedOnion", perPizza: 2 }],
+      isPrep: false,
+      enabled: true,
+    };
+    await db.insert(mixesTable).values([
+      { ...mixBase, scope: "live" },
+      { ...mixBase, scope: "sandbox", amountAlreadyMade: 7 },
+    ]);
+    await db.insert(mixSurplusLotsTable).values([
+      {
+        id: "scope-isolated-surplus", scope: "live", mixId: mixBase.id,
+        name: "Scoped Mix", brand: "Test", flavor: "Scope", productionDate: "2026-07-05",
+        amountMade: 3, amountUsed: 0, amountRemaining: 3, location: "freezer",
+      },
+      {
+        id: "scope-isolated-surplus", scope: "sandbox", mixId: mixBase.id,
+        name: "Scoped Mix", brand: "Test", flavor: "Scope", productionDate: "2026-07-05",
+        amountMade: 9, amountUsed: 2, amountRemaining: 7, location: "freezer",
+      },
+    ]);
+    await db.insert(dailySyncTable).values({
+      date: "2026-07-05",
+      scope: "live",
+      data: {
+        dayState: {
+          date: "2026-07-05",
+          runs: [{ id: "scope-run", brand: "Test", flavor: "Scope" }],
+        },
+        runValues: { "scope-run": { casesNeeded: 10, pizzasPerCase: 10 } },
+      },
+    });
+
+    const result = await runWithScope("live", () => callDayStart("2026-07-05"));
+    expect(result.body).toMatchObject({ applied: true });
+    const [liveMix] = await db.select().from(mixesTable).where(sql`${mixesTable.scope} = 'live'`);
+    const [sandboxMix] = await db.select().from(mixesTable).where(sql`${mixesTable.scope} = 'sandbox'`);
+    expect(liveMix.amountAlreadyMade).toBeGreaterThan(0);
+    expect(sandboxMix.amountAlreadyMade).toBe(7);
+    const surplus = await db.select().from(mixSurplusLotsTable);
+    const liveSurplus = surplus.find((row) => row.scope === "live");
+    const sandboxSurplus = surplus.find((row) => row.scope === "sandbox");
+    expect(liveSurplus?.amountMade).toBeGreaterThan(3);
+    expect(sandboxSurplus).toMatchObject({ amountMade: 9, amountUsed: 2, amountRemaining: 7 });
   });
 
   it("rolls back every effect on failure and lets the same event retry once", async () => {

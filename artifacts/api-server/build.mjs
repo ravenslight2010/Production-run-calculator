@@ -3,7 +3,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build as esbuild } from "esbuild";
 import esbuildPluginPino from "esbuild-plugin-pino";
-import { rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { buildSourceRecord, completeBuildStage } from "../../scripts/src/build-source-identity.mjs";
 
 // Plugins (e.g. 'esbuild-plugin-pino') may use `require` to resolve dependencies
 globalThis.require = createRequire(import.meta.url);
@@ -11,6 +13,8 @@ globalThis.require = createRequire(import.meta.url);
 const artifactDir = path.dirname(fileURLToPath(import.meta.url));
 
 async function buildAll() {
+  const root = path.resolve(artifactDir, "../..");
+  const sourceRecord = buildSourceRecord(root, process.env.NODE_ENV === "development" ? "development" : "publish");
   const distDir = path.resolve(artifactDir, "dist");
   await rm(distDir, { recursive: true, force: true });
 
@@ -118,6 +122,49 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
     `,
     },
   });
+  const reportRelativePath =
+    "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json";
+  const reportShaRelativePath =
+    "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.sha256";
+  const reportBytes = await readFile(path.resolve(root, reportRelativePath));
+  const reportSha256 = createHash("sha256").update(reportBytes).digest("hex");
+  const reviewedSha256 = (await readFile(path.resolve(root, reportShaRelativePath), "utf8")).trim();
+  if (!/^[a-f0-9]{64}$/u.test(reviewedSha256) || reviewedSha256 !== reportSha256) {
+    throw new Error("Bundled source-library reconciliation report does not match its reviewed SHA-256.");
+  }
+  await writeFile(
+    path.resolve(distDir, "source-library-reconciliation-report.json"),
+    reportBytes,
+  );
+  await writeFile(
+    path.resolve(distDir, "source-library-reconciliation-report.sha256"),
+    `${reportSha256}\n`,
+    "utf8",
+  );
+  const poolExceptionFiles = [
+    {
+      source: "docs/evidence/source-library-pool-owner-approved-differences-2026-10-08.json",
+      destination: "source-library-pool-owner-approved-differences-2026-10-08.json",
+    },
+    {
+      source: "docs/evidence/source-library-pool-owner-review-2026-10-08.md",
+      destination: "docs/evidence/source-library-pool-owner-review-2026-10-08.md",
+    },
+    {
+      source: "docs/evidence/source-library-pool-mismatch-diagnostics-2026-10-08.json",
+      destination: "docs/evidence/source-library-pool-mismatch-diagnostics-2026-10-08.json",
+    },
+    {
+      source: "docs/evidence/source-library-live-pool-capture-2026-10-08.json",
+      destination: "docs/evidence/source-library-live-pool-capture-2026-10-08.json",
+    },
+  ];
+  for (const file of poolExceptionFiles) {
+    const destination = path.resolve(distDir, file.destination);
+    await mkdir(path.dirname(destination), { recursive: true });
+    await writeFile(destination, await readFile(path.resolve(root, file.source)));
+  }
+  completeBuildStage(root, sourceRecord, "api");
 }
 
 buildAll().catch((err) => {

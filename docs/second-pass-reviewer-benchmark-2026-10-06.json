@@ -1,0 +1,243 @@
+{
+  "benchmarkVersion": 1,
+  "sourceHash": "1d8a2a3ddda96c32959e43fdcd901f3a14308bf12bc4d65ef4e2e3ce12505294",
+  "retention": {
+    "dataClass": "synthetic-and-aggregate-metrics-only",
+    "sanitization": "allowlisted-metrics; raw prompts and source/provider payloads excluded"
+  },
+  "acceptanceCriteria": {
+    "minimumUniqueMaterialCatchRate": 0.2,
+    "maximumFalseWarningRate": 0.05,
+    "maximumAddedCostRatio": 0.35,
+    "maximumAddedLatencyP95Ms": 1500,
+    "maximumReviewerFailureRate": 0.05,
+    "minimumUniqueMaterialCatches": 5
+  },
+  "corpus": {
+    "labeledCases": 304,
+    "materialCases": 101,
+    "nonMaterialCases": 203,
+    "sourceAuthority": "deterministic-reconciliation-and-human-review"
+  },
+  "pairedOutcome": {
+    "control": {
+      "uniqueMaterialCatches": 0,
+      "addedProviderCalls": 0
+    },
+    "reviewer": {
+      "uniqueMaterialCatches": 0,
+      "duplicateWarnings": 0,
+      "falseWarnings": 0,
+      "falseRejects": 0,
+      "noOpVerdicts": 304,
+      "reviewerFailures": 301,
+      "reviewerFailureRate": 0.9901315789473685,
+      "falseWarningRate": null
+    }
+  },
+  "operationEffects": {
+    "parse-spec-sheet": {
+      "addedCostRatio": 1,
+      "addedProviderCallsPerMiss": 1,
+      "cache": "reviewer-memory-only"
+    },
+    "match-import": {
+      "addedCostRatio": "full-model-after-cheap-model",
+      "addedProviderCallsPerMiss": 1,
+      "cache": "reviewer-memory-only"
+    },
+    "match-premix": {
+      "addedCostRatio": "full-model-after-cheap-model",
+      "addedProviderCallsPerMiss": 1,
+      "cache": "reviewer-memory-only"
+    },
+    "suggest-merges": {
+      "addedCostRatio": "full-model-after-cheap-model",
+      "addedProviderCallsPerMiss": 1,
+      "cache": "reviewer-memory-only"
+    },
+    "fill-missing": {
+      "addedCostRatio": "full-model-after-cheap-model",
+      "addedProviderCallsPerRequest": 1,
+      "cache": "reviewer-memory-only"
+    }
+  },
+  "measuredEffects": {
+    "observationsByOperation": {
+      "parse-spec-sheet": {
+        "cases": 76,
+        "materialCases": 76,
+        "nonMaterialCases": 0,
+        "providerCalls": 1,
+        "reviewerFailures": 76,
+        "duplicateWarnings": 0,
+        "falseWarnings": 0,
+        "falseRejects": 0,
+        "noOpVerdicts": 76,
+        "providerRetries": 0,
+        "latencyMs": 17848,
+        "inputTokens": null,
+        "outputTokens": null
+      },
+      "match-import": {
+        "cases": 22,
+        "materialCases": 22,
+        "nonMaterialCases": 0,
+        "providerCalls": 1,
+        "reviewerFailures": 22,
+        "duplicateWarnings": 0,
+        "falseWarnings": 0,
+        "falseRejects": 0,
+        "noOpVerdicts": 22,
+        "providerRetries": 0,
+        "latencyMs": 18529,
+        "inputTokens": null,
+        "outputTokens": null
+      },
+      "match-premix": {
+        "cases": 78,
+        "materialCases": 0,
+        "nonMaterialCases": 78,
+        "providerCalls": 1,
+        "reviewerFailures": 78,
+        "duplicateWarnings": 0,
+        "falseWarnings": 0,
+        "falseRejects": 0,
+        "noOpVerdicts": 78,
+        "providerRetries": 0,
+        "latencyMs": 17107,
+        "inputTokens": null,
+        "outputTokens": null
+      },
+      "suggest-merges": {
+        "cases": 3,
+        "materialCases": 3,
+        "nonMaterialCases": 0,
+        "providerCalls": 1,
+        "reviewerFailures": 0,
+        "duplicateWarnings": 0,
+        "falseWarnings": 0,
+        "falseRejects": 0,
+        "noOpVerdicts": 3,
+        "providerRetries": 0,
+        "latencyMs": 4827,
+        "inputTokens": 726,
+        "outputTokens": 147
+      },
+      "fill-missing": {
+        "cases": 125,
+        "materialCases": 0,
+        "nonMaterialCases": 125,
+        "providerCalls": 1,
+        "reviewerFailures": 125,
+        "duplicateWarnings": 0,
+        "falseWarnings": 0,
+        "falseRejects": 0,
+        "noOpVerdicts": 125,
+        "providerRetries": 0,
+        "latencyMs": 18110,
+        "inputTokens": null,
+        "outputTokens": null
+      }
+    },
+    "measuredTokens": false,
+    "addedCostRatio": null,
+    "p95LatencyMs": 18529
+  },
+  "latencyAndRetry": {
+    "addedSerialProviderRoundTripsPerMiss": 1,
+    "reviewerRetries": 0,
+    "reviewerFailureBehavior": "fail-open-with-no-verdict",
+    "measuredLatencyP95Ms": 18529,
+    "note": "One logical reviewer request may include provider-adapter retries; captured retry counts are summed here."
+  },
+  "decision": {
+    "retain": false,
+    "thresholdPasses": {
+      "uniqueMaterialCatchCount": false,
+      "uniqueMaterialCatchRate": false,
+      "falseWarningRate": false,
+      "addedCostRatio": false,
+      "addedLatencyP95": false,
+      "reviewerFailureRate": false
+    },
+    "reason": "No uniquely caught material errors exist in the labeled retained corpus.",
+    "authority": "Deterministic sanitizers, canonicalization, source evidence, and explicit human confirmation remain authoritative."
+  },
+  "evaluationManifest": {
+    "manifestVersion": 1,
+    "evaluation": {
+      "id": "second-pass-reviewer",
+      "kind": "provider-backed"
+    },
+    "corpus": {
+      "sha256": "1d8a2a3ddda96c32959e43fdcd901f3a14308bf12bc4d65ef4e2e3ce12505294",
+      "cases": 304,
+      "sourceAuthority": "deterministic-reconciliation-and-human-review"
+    },
+    "thresholds": {
+      "minimumUniqueMaterialCatchRate": 0.2,
+      "maximumFalseWarningRate": 0.05,
+      "maximumAddedCostRatio": 0.35,
+      "maximumAddedLatencyP95Ms": 1500,
+      "maximumReviewerFailureRate": 0.05,
+      "minimumUniqueMaterialCatches": 5
+    },
+    "dependencies": {
+      "node": "24.21.0",
+      "pnpm": "12.8.1",
+      "pnpmLockSha256": "3a25a065ab3926f3a4a1f5fda1121485174d2e3271965d6201aef95fce38fecd",
+      "benchmarkReporter": "1",
+      "benchmarkReporterSha256": "9f3fc59ddfcf9a7da797245796518ad7a01851667e20c6153670739820819779"
+    },
+    "provider": {
+      "identityState": "identified",
+      "name": "gemini",
+      "model": "gemini-2.5-flash"
+    },
+    "performance": {
+      "inputTokens": {
+        "state": "unavailable",
+        "reason": "provider observations did not retain complete input token counts"
+      },
+      "outputTokens": {
+        "state": "unavailable",
+        "reason": "provider observations did not retain complete output token counts"
+      },
+      "cost": {
+        "state": "unavailable",
+        "reason": "provider observations did not retain measured cost"
+      },
+      "latencyP95": {
+        "state": "measured",
+        "value": 18529,
+        "unit": "ms"
+      }
+    },
+    "execution": {
+      "retries": 0,
+      "seed": null
+    },
+    "privacy": {
+      "mode": "metadata-only",
+      "rawProviderPayloadsRetained": false,
+      "retainedEvaluationContent": "none"
+    },
+    "outcome": {
+      "state": "failed",
+      "reason": "No uniquely caught material errors exist in the labeled retained corpus."
+    },
+    "provenance": {
+      "sourceSha256": "1d8a2a3ddda96c32959e43fdcd901f3a14308bf12bc4d65ef4e2e3ce12505294",
+      "evidence": {
+        "state": "hashed",
+        "sha256": "1ab1593260f2eabb0eca0b2f4ce0c2c148fd1bfac03a022257d0c258647ad40a"
+      },
+      "evidenceType": "deterministic-reconciliation-with-provider-observations",
+      "evaluator": {
+        "state": "hashed",
+        "sha256": "53c77a1ff4944bf77f773c18cde93d7cc0342ac17400ca15b0e6d1220dba08da"
+      }
+    }
+  }
+}

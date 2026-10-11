@@ -2,6 +2,7 @@
 // per file below.
 export * from "./runs";
 export * from "./sync";
+export * from "./syncOutbox";
 export * from "./applicatorBatchEvidence";
 export * from "./operationalReports";
 export * from "./operationalIntentLedger";
@@ -47,6 +48,7 @@ export * from "./sauceRecipes";
 export * from "./cycleCountSchedules";
 export * from "./proactiveAlertSettings";
 export * from "./qualityChecks";
+export * from "./qcWorkflowEvents";
 export * from "./runTemplates";
 export * from "./runSuggestions";
 export * from "./supervisorPinSettings";

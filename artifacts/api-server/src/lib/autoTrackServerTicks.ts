@@ -2,6 +2,11 @@ import { randomUUID } from "node:crypto";
 import {
   computeAutoTrackElapsedMs,
   computeAutoTrackSchedule,
+  applicatorStockFields,
+  applicatorStockRegisterForChannel,
+  capApplicatorStock,
+  computeApplicatorStockCapacityLbs,
+  computeApplicatorStockRateLbsPerSecond,
   computeAutoTrackSuggestion,
   computeLinePhases,
   computePackagingDrainElapsedSec,
@@ -17,7 +22,12 @@ import {
 } from "@workspace/live-calc";
 import type { AutoTrackClaim, AutoTrackMutation } from "./autoTrackCoordination";
 
-const NET_CHANNELS = ["sauce-barrel", "app1-batch", "app2-batch", "app3-batch", "app4-batch"] as const;
+const NET_CHANNELS = [
+  "sauce-barrel",
+  "app1-batch", "app2-batch", "app3-batch", "app4-batch",
+  "app1-stock", "app2-stock", "app3-stock", "app4-stock",
+  "pep1-stock", "pep1b-stock", "pep2-stock", "pep2b-stock",
+] as const;
 export const WALL_CLOCK_REPLAY_CAP_MS = 6 * 60 * 60 * 1000;
 
 type Payload = {
@@ -98,7 +108,7 @@ function schedule(
   payload: Payload,
   nowMs: number,
   options: { allowEndedDrain?: boolean; allowPausedPackagingDrain?: boolean } = {},
-): { schedule: AutoTrackSchedule; values: Record<string, unknown> } | null {
+): { schedule: AutoTrackSchedule; values: Record<string, unknown>; ppm: number } | null {
   const result = computeServerCalc(payload as never, [], nowMs);
   const run = payload.dayState?.runs?.[payload.dayState.currentIndex ?? 0];
   if (!result || !run || typeof run.id !== "string") return null;
@@ -137,20 +147,50 @@ function schedule(
       )?.serverSequences as never,
     }),
     values,
+    ppm: result.calc.ppm,
   };
 }
 
 /** Builds due sauce/applicator claims entirely from canonical stored state. */
 export function buildNetSecondServerClaims(raw: unknown, nowMs = Date.now()): AutoTrackClaim[] {
   const payload = (raw && typeof raw === "object" ? raw : {}) as Payload;
-  let built: { schedule: AutoTrackSchedule; values: Record<string, unknown> } | null;
+  let built: { schedule: AutoTrackSchedule; values: Record<string, unknown>; ppm: number } | null;
   try { built = schedule(payload, nowMs); } catch { return []; }
   if (!built) return [];
-  const { schedule: plan, values } = built;
+  const { schedule: plan, values, ppm } = built;
   const baseUpdatedAt = number(payload.runValuesUpdatedAt?.[plan.runId]);
   const coordination = payload.autoTrackCoordination?.runs?.[plan.runId];
   return plan.entries.flatMap((entry) => {
     if (!(NET_CHANNELS as readonly string[]).includes(entry.channel) || !entry.dueNow) return [];
+    const register = applicatorStockRegisterForChannel(entry.channel);
+    if (register) {
+      const fields = applicatorStockFields(register);
+      const onHand = number(values[fields.stock]);
+      const capacity = computeApplicatorStockCapacityLbs(values, register);
+      const anchor = number(values[fields.anchor]);
+      const correctionGeneration = Math.max(0, number(values[fields.correctionGeneration]));
+      const cadence = Math.max(0, entry.dueAt - anchor);
+      const ozField = register.endsWith("b")
+        ? `${register.slice(0, -1)}OzPerPizzaB`
+        : `${register}OzPerPizza`;
+      const nextOnHand = capApplicatorStock(
+        onHand - cadence * computeApplicatorStockRateLbsPerSecond(values[ozField], ppm),
+        capacity,
+      );
+      const prior = coordination?.[entry.channel];
+      return [{
+        version: 1, runId: plan.runId, channel: entry.channel, generation: plan.generation,
+        sequence: prior?.generation === plan.generation ? number(prior.sequence) + 1 : 1,
+        eventId: `srv:${entry.channel}:${randomUUID()}`, dueAt: entry.dueAt,
+        nextDueAt: entry.nextDueAt > entry.dueAt ? entry.nextDueAt : entry.dueAt + cadence,
+        baseUpdatedAt, correctionGeneration,
+        mutations: [
+          { field: fields.stock, from: onHand, to: nextOnHand },
+          { field: fields.anchor, from: anchor, to: entry.dueAt },
+          { field: fields.correctionGeneration, from: correctionGeneration, to: correctionGeneration },
+        ],
+      } as AutoTrackClaim];
+    }
     const slot = entry.channel === "sauce-barrel" ? "" : entry.channel.slice(0, 4);
     const madeField = entry.channel === "sauce-barrel" ? "sauceBarrelsMade" : `${slot}BatchesMade`;
     const anchorField = entry.channel === "sauce-barrel" ? "sauceBarrelAnchorNetSec" : `${slot}BatchAnchorNetSec`;
@@ -269,19 +309,21 @@ export function buildWallClockServerClaims(raw: unknown, nowMs = Date.now()): { 
     // be replayed as paused Packaging output after reconnect or restart.
     bookkeeping.lastExpectedCases = suggestion?.expectedCasesRaw ?? -1;
   }
-  // Pre-engine records persisted only the six due refs. When adopting one of
-  // those overdue arms, preserve its already-authorized single case beat while
-  // establishing the engine's incremental baseline; subsequent beats use the
-  // normal elapsed/freezer calculation exclusively.
+  // Pre-engine records persisted only the six due refs. An overdue legacy arm
+  // may preserve a case beat only when the freezer-aware suggestion already
+  // authorizes the next case; an expired timer alone is not output evidence.
   const legacyCaseArm = old.lifecycleGeneration === plan.generation
     && typeof old.caseNextDueMs === "number"
     && !Object.prototype.hasOwnProperty.call(old, "lastExpectedCases")
     && old.caseNextDueMs <= nowMs;
-  const legacyExpected = number(values.skidsCompleted) * number(values.casesPerSkid)
-    + number(values.casesOnCurrentSkid) + 1;
-  const expectedCasesRaw = legacyCaseArm
-    ? Math.max(suggestion?.expectedCasesRaw ?? 0, legacyExpected)
-    : suggestion?.expectedCasesRaw ?? 0;
+  const suggestionExpectedCasesRaw = suggestion?.expectedCasesRaw ?? 0;
+  const currentCases = number(values.skidsCompleted) * number(values.casesPerSkid)
+    + number(values.casesOnCurrentSkid);
+  const legacyExpected = currentCases + 1;
+  const legacyCaseAlreadyAuthorized = suggestionExpectedCasesRaw >= legacyExpected;
+  const expectedCasesRaw = legacyCaseArm && legacyCaseAlreadyAuthorized
+    ? Math.max(suggestionExpectedCasesRaw, legacyExpected)
+    : suggestionExpectedCasesRaw;
   const expectedCases = number(values.casesNeeded) > 0
     ? Math.min(number(values.casesNeeded), expectedCasesRaw)
     : expectedCasesRaw;

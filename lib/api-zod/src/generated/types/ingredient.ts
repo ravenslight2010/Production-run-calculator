@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { IngredientAllergen } from './ingredientAllergen';
 import type { IngredientCategory } from './ingredientCategory';
 
 /**
@@ -16,8 +17,15 @@ export interface Ingredient {
   /** Current display name */
   name: string;
   categories: IngredientCategory[];
-  /** When set, this ingredient was merged into another ingredient's id; resolve display name by following this pointer. */
+  /**
+     * When set, this ingredient was merged into another ingredient's id; resolve display name by following this pointer.
+     * @nullable
+     */
   mergedInto?: string | null;
   /** false = soft-deleted (kept so old rows still resolve) */
   enabled: boolean;
+  /** Reviewed mapping values from the fixed ingredient-allergen vocabulary. An empty list means none of those allergens only when allergensReviewed is true. */
+  allergens: IngredientAllergen[];
+  /** Whether an authorized reviewer explicitly reviewed this mapping */
+  allergensReviewed: boolean;
 }

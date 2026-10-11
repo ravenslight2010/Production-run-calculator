@@ -19,17 +19,17 @@ Every project goes through this process. A todo list, a single-function utility,
 
 ## Checklist
 
-You MUST create a task for each of these items and complete them in order:
+Complete these items in order; they are a workflow checklist, not separate project tasks:
 
 1. **Explore project context** — check files, docs, recent commits
 2. **Offer the visual companion just-in-time** — NOT upfront. The first time a question would genuinely be clearer shown than described, offer it then (its own message); on approval its browser tab opens for you. If no visual question ever arises, never offer it. See the Visual Companion section below.
 3. **Ask clarifying questions** — one at a time, understand purpose/constraints/success criteria
 4. **Propose 2-3 approaches** — with trade-offs and your recommendation
 5. **Present design** — in sections scaled to their complexity, get user approval after each section
-6. **Write design doc** — save to `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` and commit
+6. **Record the approved design** — keep it in the conversation or the planning record permitted by the active mode; do not require a separate document or commit
 7. **Spec self-review** — quick inline check for placeholders, contradictions, ambiguity, scope (see below)
-8. **User reviews written spec** — ask user to review the spec file before proceeding
-9. **Transition to implementation** — invoke writing-plans skill to create implementation plan
+8. **User reviews the design/spec** — ask the user to review it before proceeding
+9. **Transition to planning** — invoke the writing-plans skill to create a mode-appropriate implementation plan
 
 ## Process Flow
 
@@ -40,9 +40,9 @@ digraph brainstorming {
     "Propose 2-3 approaches" [shape=box];
     "Present design sections" [shape=box];
     "User approves design?" [shape=diamond];
-    "Write design doc" [shape=box];
+    "Record approved design" [shape=box];
     "Spec self-review\n(fix inline)" [shape=box];
-    "User reviews spec?" [shape=diamond];
+    "User reviews design/spec?" [shape=diamond];
     "Invoke writing-plans skill" [shape=doublecircle];
 
     "Explore project context" -> "Ask clarifying questions";
@@ -50,15 +50,15 @@ digraph brainstorming {
     "Propose 2-3 approaches" -> "Present design sections";
     "Present design sections" -> "User approves design?";
     "User approves design?" -> "Present design sections" [label="no, revise"];
-    "User approves design?" -> "Write design doc" [label="yes"];
-    "Write design doc" -> "Spec self-review\n(fix inline)";
-    "Spec self-review\n(fix inline)" -> "User reviews spec?";
-    "User reviews spec?" -> "Write design doc" [label="changes requested"];
-    "User reviews spec?" -> "Invoke writing-plans skill" [label="approved"];
+    "User approves design?" -> "Record approved design" [label="yes"];
+    "Record approved design" -> "Spec self-review\n(fix inline)";
+    "Spec self-review\n(fix inline)" -> "User reviews design/spec?";
+    "User reviews design/spec?" -> "Record approved design" [label="changes requested"];
+    "User reviews design/spec?" -> "Invoke writing-plans skill" [label="approved"];
 }
 ```
 
-**The terminal state is invoking writing-plans.** Do NOT invoke frontend-design, mcp-builder, or any other implementation skill. The ONLY skill you invoke after brainstorming is writing-plans.
+**The next step after approval is invoking writing-plans.** Do not invoke an unrelated design or implementation skill instead. In Plan mode, writing-plans follows this repository's project-task workflow to persist the approved plan.
 
 ## The Process
 
@@ -101,15 +101,13 @@ digraph brainstorming {
 
 ## After the Design
 
-**Documentation:**
+**Recording the design:**
 
-- Write the validated design (spec) to `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`
-  - (User preferences for spec location override this default)
-- Use elements-of-style:writing-clearly-and-concisely skill if available
-- Commit the design document to git
+- Keep the validated design in the conversation unless a durable record is needed and allowed by the active mode.
+- In Plan mode, save only the project-task plan under `.local/tasks/` through the project-task workflow; do not create or commit a separate design document.
 
 **Spec Self-Review:**
-After writing the spec document, look at it with fresh eyes:
+After reviewing the approved design/spec, look at it with fresh eyes:
 
 1. **Placeholder scan:** Any "TBD", "TODO", incomplete sections, or vague requirements? Fix them.
 2. **Internal consistency:** Do any sections contradict each other? Does the architecture match the feature descriptions?
@@ -119,16 +117,15 @@ After writing the spec document, look at it with fresh eyes:
 Fix any issues inline. No need to re-review — just fix and move on.
 
 **User Review Gate:**
-After the spec review loop passes, ask the user to review the written spec before proceeding:
+After the spec review loop passes, ask the user to review the design/spec before proceeding:
 
-> "Spec written and committed to `<path>`. Please review it and let me know if you want to make any changes before we start writing out the implementation plan."
+> "The design/spec is ready for review. Please let me know if you want any changes before I write the implementation plan."
 
 Wait for the user's response. If they request changes, make them and re-run the spec review loop. Only proceed once the user approves.
 
-**Implementation:**
+**Planning handoff:**
 
-- Invoke the writing-plans skill to create a detailed implementation plan
-- Do NOT invoke any other skill. writing-plans is the next step.
+- Invoke the writing-plans skill next. It follows the current mode's planning rules; in Plan mode, it uses the project-task workflow to persist the plan.
 
 ## Key Principles
 

@@ -2,10 +2,10 @@
 // purpose (no module that binds @workspace/db at import) so it never trips the
 // integration-test DB-binding gotcha.
 //
-// The merge makes PUT /sync a per-run last-writer-wins register keyed on each
-// run's edit stamp instead of blind blob replacement, which is what stops the
-// recurring shared day-state data loss: an empty run value paired with a REAL
-// (equal or older) stamp can no longer overwrite a populated stored value.
+// Writes without a validated snapshot base use per-run last-writer-wins stamps
+// instead of blind blob replacement. Versioned writes from the exact current
+// base use snapshot causality and receive server-time stamps. The empty-value
+// guard applies to both paths so an empty run value cannot erase populated data.
 
 import { describe, it, expect } from "vitest";
 import { protectRunValues, sanitizeSyncPayload, isSyncPayloadTooLarge, capMergedResult } from "./protectRunValues";
@@ -185,6 +185,61 @@ const CURRENT_BLANK = {
 };
 
 describe("protectRunValues", () => {
+  it.each([
+    ["omitted", undefined, "stored"],
+    ["stale", 1000, "stored"],
+    ["equal", 2000, "stored"],
+    ["newer", 3000, "incoming"],
+  ])("arbitrates breaks on %s clock", (_label, stamp, winner) => {
+    const existing = {
+      dayState: { runs: [], breaks: [{ slot: 1, enabled: true }], breaksUpdatedAt: 2000 },
+      runValues: {}, runValuesUpdatedAt: {},
+    };
+    const incoming = {
+      dayState: {
+        runs: [],
+        ...(stamp === undefined ? {} : { breaks: [{ slot: 1, enabled: false }], breaksUpdatedAt: stamp }),
+      },
+      runValues: {}, runValuesUpdatedAt: {},
+    };
+    const out = protectRunValues(incoming, existing, { nowMs: 4000 }) as typeof existing;
+    expect(out.dayState.breaks?.[0]?.enabled).toBe(winner === "incoming" ? false : true);
+  });
+
+  it("applies a newer rollover reset's breaks but rejects a stale reset payload", () => {
+    const existing = {
+      dayState: { runs: [], resetAt: 100, breaks: [{ slot: 1, enabled: true }], breaksUpdatedAt: 2000 },
+      runValues: {}, runValuesUpdatedAt: {},
+    };
+    const newer = {
+      dayState: { runs: [], resetAt: 200, breaks: [{ slot: 1, enabled: false }], breaksUpdatedAt: 3000 },
+      runValues: {}, runValuesUpdatedAt: {},
+    };
+    const stale = {
+      dayState: { runs: [], resetAt: 50, breaks: [{ slot: 1, enabled: false }], breaksUpdatedAt: 1000 },
+      runValues: {}, runValuesUpdatedAt: {},
+    };
+    expect((protectRunValues(newer, existing, { allowRunListReplacement: true, nowMs: 4000 }) as any).dayState.breaks[0].enabled).toBe(false);
+    expect((protectRunValues(stale, existing, { allowRunListReplacement: true, nowMs: 4000 }) as any).dayState.breaks[0].enabled).toBe(true);
+  });
+
+  it("preserves the stored break schedule when a newer reset omits it", () => {
+    const existing = {
+      dayState: { runs: [], resetAt: 100, breaks: [{ slot: 1, enabled: true }], breaksUpdatedAt: 2000 },
+      runValues: {}, runValuesUpdatedAt: {},
+    };
+    const incoming = {
+      dayState: { runs: [], resetAt: 200 },
+      runValues: {}, runValuesUpdatedAt: {},
+    };
+    const out = protectRunValues(incoming, existing, {
+      allowRunListReplacement: true,
+      nowMs: 4000,
+    }) as typeof existing;
+    expect(out.dayState.breaks).toEqual(existing.dayState.breaks);
+    expect(out.dayState.breaksUpdatedAt).toBe(2000);
+  });
+
   it("retains cold history when a hot live payload omits it", () => {
     const existing = {
       runValues: { r1: POP },
@@ -206,6 +261,38 @@ describe("protectRunValues", () => {
     const out = protectRunValues(incoming, existing) as Payload;
     expect(out.runValues.r1).toEqual(POP);
     expect(out.runValuesUpdatedAt.r1).toBe(1000);
+  });
+
+  it.each([
+    ["equal", 2_000],
+    ["older", 1_999],
+  ])("does not replace a populated value when the incoming stamp is %s", (_label, incomingStamp) => {
+    const existing: Payload = {
+      runValues: { r1: { casesNeeded: 240 } },
+      runValuesUpdatedAt: { r1: 2_000 },
+    };
+    const incoming: Payload = {
+      runValues: { r1: { casesNeeded: 999 } },
+      runValuesUpdatedAt: { r1: incomingStamp },
+    };
+    const out = protectRunValues(incoming, existing, { nowMs: 3_000 }) as Payload;
+    expect(out.runValues.r1).toEqual(existing.runValues.r1);
+    expect(out.runValuesUpdatedAt.r1).toBe(2_000);
+  });
+
+  it("does not let a far-future client clock make an unbased stale value win", () => {
+    const nowMs = 2_000_000;
+    const existing: Payload = {
+      runValues: { r1: { casesNeeded: 240 } },
+      runValuesUpdatedAt: { r1: nowMs - 1_000 },
+    };
+    const incoming: Payload = {
+      runValues: { r1: { casesNeeded: 999 } },
+      runValuesUpdatedAt: { r1: nowMs + 86_400_000 },
+    };
+    const out = protectRunValues(incoming, existing, { nowMs }) as Payload;
+    expect(out.runValues.r1).toEqual(existing.runValues.r1);
+    expect(out.runValuesUpdatedAt.r1).toBe(nowMs - 1_000);
   });
 
   it("keeps the populated stored value when an all-default push arrives with a STRICTLY-NEWER stamp over an UNSTAMPED stored value (the production hole)", () => {
@@ -296,6 +383,56 @@ describe("protectRunValues", () => {
     const out = protectRunValues(incoming, existing) as Payload;
     expect(out.runValues.r1).toEqual({ casesNeeded: 999 });
     expect(out.runValuesUpdatedAt.r1).toBe(2000);
+  });
+
+  it("uses a validated current snapshot as value ordering and stamps accepted edits with server time", () => {
+    const nowMs = 2_000;
+    const existing: Payload = {
+      runValues: { r1: POP },
+      runValuesUpdatedAt: { r1: nowMs + 86_400_000 },
+    };
+    const incoming: Payload = {
+      runValues: { r1: { casesNeeded: 777 } },
+      runValuesUpdatedAt: { r1: nowMs + 86_400_000 },
+    };
+    const out = protectRunValues(incoming, existing, {
+      acceptCurrentBaseRunValueEdits: true,
+      nowMs,
+    }) as Payload;
+    expect(out.runValues.r1).toEqual({ casesNeeded: 777 });
+    expect(out.runValuesUpdatedAt.r1).toBe(nowMs);
+  });
+
+  it("server-stamps initial current-base values instead of retaining a fast client clock", () => {
+    const nowMs = 2_000;
+    const incoming: Payload = {
+      runValues: { r1: { casesNeeded: 12 } },
+      runValuesUpdatedAt: { r1: nowMs + 86_400_000 },
+    };
+    const out = protectRunValues(incoming, undefined, {
+      acceptCurrentBaseRunValueEdits: true,
+      nowMs,
+    }) as Payload;
+    expect(out.runValues.r1).toEqual({ casesNeeded: 12 });
+    expect(out.runValuesUpdatedAt.r1).toBe(nowMs);
+  });
+
+  it("accepts a far-future value only when an exact current snapshot proves the edit", () => {
+    const nowMs = 2_000;
+    const existing: Payload = {
+      runValues: { r1: { casesNeeded: 12 } },
+      runValuesUpdatedAt: { r1: 1_000 },
+    };
+    const incoming: Payload = {
+      runValues: { r1: { casesNeeded: 13 } },
+      runValuesUpdatedAt: { r1: nowMs + 86_400_000 },
+    };
+    const out = protectRunValues(incoming, existing, {
+      acceptCurrentBaseRunValueEdits: true,
+      nowMs,
+    }) as Payload;
+    expect(out.runValues.r1).toEqual({ casesNeeded: 13 });
+    expect(out.runValuesUpdatedAt.r1).toBe(nowMs);
   });
 
   it("preserves stored casesNeeded when a peer's newer edit carries casesNeeded=0", () => {
@@ -1141,6 +1278,48 @@ describe("packagingProgress merge (Task 974)", () => {
     // Winning entry has higher gen (2), so skidsCompleted=7, casesOnCurrentSkid=3
     expect(rv.skidsCompleted).toBe(7);
     expect(rv.casesOnCurrentSkid).toBe(3);
+  });
+
+  it("an active server manual hold preserves Packaging over newer snapshot registers", () => {
+    const storedProgress = mkProgress(1, 24, 1, 4_000, 5_000);
+    const stored = basePayload(
+      ["r1"],
+      { r1: storedProgress },
+      { r1: { casesNeeded: 100, skidsCompleted: 1, casesOnCurrentSkid: 24 } },
+    );
+    const incoming = {
+      ...basePayload(
+        ["r1"],
+        { r1: mkProgress(0, 44, 99, 9_000, 0) },
+        { r1: { casesNeeded: 200, skidsCompleted: 0, casesOnCurrentSkid: 44 } },
+      ),
+      runValuesUpdatedAt: { r1: 9_000 },
+    };
+
+    const out = protectRunValues(incoming, stored, { nowMs: 4_500 }) as Record<string, unknown>;
+    const progress = out.packagingProgress as Record<string, ProgressEntry>;
+    const values = (out.runValues as Record<string, Record<string, unknown>>).r1;
+
+    expect(progress.r1).toEqual(storedProgress);
+    expect(values).toMatchObject({
+      casesNeeded: 200,
+      skidsCompleted: 1,
+      casesOnCurrentSkid: 24,
+    });
+  });
+
+  it("newer Packaging progress wins once the server manual hold expires", () => {
+    const stored = basePayload(["r1"], { r1: mkProgress(1, 24, 1, 4_000, 5_000) });
+    const incoming = basePayload(["r1"], { r1: mkProgress(0, 44, 99, 9_000, 0) });
+
+    const out = protectRunValues(incoming, stored, { nowMs: 5_000 }) as Record<string, unknown>;
+    const progress = out.packagingProgress as Record<string, ProgressEntry>;
+
+    expect(progress.r1).toMatchObject({
+      skidsCompleted: 0,
+      casesOnCurrentSkid: 44,
+      correctionGeneration: 99,
+    });
   });
 
   it("reset path: retains only incoming run IDs but still applies precedence for shared runs", () => {

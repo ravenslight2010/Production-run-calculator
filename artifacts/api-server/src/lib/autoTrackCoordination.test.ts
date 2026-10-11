@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { applyAutoTrackClaim, parseAutoTrackClaim, type AutoTrackClaim } from "./autoTrackCoordination";
+import {
+  capApplicatorStock,
+  computeApplicatorStockRateLbsPerSecond,
+  computeServerCalc,
+} from "@workspace/live-calc";
 
 const NOW = 1_800_000_000_000;
 
@@ -38,6 +43,22 @@ function applicatorMutations(slot: 1 | 2 | 3 | 4, made: number, anchor: number, 
     { field: `${prefix}AnchorNetSec` as const, from: anchor, to: anchor + 60 },
     { field: `${prefix}CorrectionGeneration` as const, from: correctionGeneration, to: correctionGeneration },
   ];
+}
+
+function stockClaim(overrides: Partial<AutoTrackClaim> = {}): AutoTrackClaim {
+  return claim({
+    channel: "app1-stock",
+    eventId: "client-a:app1-stock:1",
+    dueAt: NOW - 16_000,
+    nextDueAt: NOW + 1_000,
+    correctionGeneration: 0,
+    mutations: [
+      { field: "app1StockLbs", from: 50, to: 49 },
+      { field: "app1StockAnchorNetSec", from: 0, to: 16 },
+      { field: "app1StockCorrectionGeneration", from: 0, to: 0 },
+    ],
+    ...overrides,
+  });
 }
 
 describe("auto-track coordination", () => {
@@ -559,5 +580,72 @@ describe("auto-track coordination", () => {
     expect(result.outcome).toBe("conflict");
     expect(result.values.sauceBarrelsMade).toBe(0);
     expect(result.inventoryConsumption).toBeUndefined();
+  });
+
+  it("accepts fractional pounds consumed at server line speed without rewriting made history", () => {
+    const stored = {
+      dayState: { runs: [{ id: "run-1", startedAt: 1, metaUpdatedAt: 2, subTab: "crusts" }] },
+      runValues: {
+        "run-1": {
+          approxLineSpeed: 30,
+          app1Type: "Cheese",
+          app1OzPerPizza: 2,
+          app1BatchLbs: 50,
+          app1CheeseRecipe: [],
+          app1BatchesMade: 7,
+          app1StockLbs: 50,
+          app1StockAnchorNetSec: 0,
+          app1StockCorrectionGeneration: 0,
+          applicatorStockInitialized: true,
+        },
+      },
+      runValuesUpdatedAt: { "run-1": 10 },
+    };
+    const ppm = computeServerCalc(stored, [], NOW)!.calc.ppm;
+    const expected = capApplicatorStock(50 - 16 * computeApplicatorStockRateLbsPerSecond(2, ppm), 50);
+    const result = applyAutoTrackClaim(stored, stockClaim({
+      mutations: [
+        { field: "app1StockLbs", from: 50, to: expected },
+        { field: "app1StockAnchorNetSec", from: 0, to: 16 },
+        { field: "app1StockCorrectionGeneration", from: 0, to: 0 },
+      ],
+    }), NOW);
+
+    expect(result.outcome).toBe("accepted");
+    expect(result.values.app1StockLbs).toBe(expected);
+    expect(result.values.app1BatchesMade).toBe(7);
+  });
+
+  it("rejects stale, paused, and competing stock claims without a second depletion", () => {
+    const stored = {
+      dayState: { runs: [{ id: "run-1", startedAt: 1, metaUpdatedAt: 2, subTab: "crusts" }] },
+      runValues: {
+        "run-1": {
+          approxLineSpeed: 30,
+          app1Type: "Cheese",
+          app1OzPerPizza: 2,
+          app1BatchLbs: 50,
+          app1CheeseRecipe: [],
+          app1StockLbs: 50,
+          app1StockAnchorNetSec: 0,
+          app1StockCorrectionGeneration: 0,
+          applicatorStockInitialized: true,
+        },
+      },
+      runValuesUpdatedAt: { "run-1": 10 },
+    };
+    const accepted = applyAutoTrackClaim(stored, stockClaim(), NOW);
+    expect(accepted.outcome).toBe("accepted");
+    expect(applyAutoTrackClaim(accepted.data, stockClaim({
+      eventId: "client-b:app1-stock:1",
+    }), NOW + 1).outcome).toBe("stale");
+    expect(applyAutoTrackClaim({
+      ...stored,
+      dayState: { runs: [{ id: "run-1", startedAt: 1, pausedAt: NOW - 1, metaUpdatedAt: 3, subTab: "crusts" }] },
+    }, stockClaim({ generation: "run-1:3" }), NOW).outcome).toBe("stale");
+    expect(applyAutoTrackClaim({
+      ...stored,
+      runValues: { "run-1": { ...stored.runValues["run-1"], app1StockCorrectionGeneration: 1, app1StockLbs: 20 } },
+    }, stockClaim(), NOW).outcome).toBe("conflict");
   });
 });

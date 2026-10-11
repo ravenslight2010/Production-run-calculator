@@ -5,9 +5,9 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { Ingredient } from './ingredient';
+import type { IngredientCatalogInput } from './ingredientCatalogInput';
 
 export interface SaveIngredientsInput {
   /** The batch of ingredients to create or rename (by id) */
-  items: Ingredient[];
+  items: IngredientCatalogInput[];
 }

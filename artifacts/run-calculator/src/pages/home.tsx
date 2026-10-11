@@ -1,4 +1,5 @@
-import { createContext, lazy, memo, Profiler, useCallback, useEffect, useId, useMemo, useRef, useState, useContext } from "react";
+import { createContext, lazy, memo, Profiler, useCallback, useEffect, useId, useMemo, useRef, useState, useContext, useReducer } from "react";
+import { DEFAULT_RUN_TO_TIME } from "../runToTime";
 import { useEvent } from "../hooks/useEvent";
 import { createFrameRepeater } from "../frameRepeater";
 import {
@@ -17,6 +18,12 @@ import {
   useHomeSyncCoordination,
 } from "../hooks/useHomeSyncCoordination";
 import { consumeForegroundRecoveryResponse } from "../foregroundRecoveryResponse";
+import { rebaseStaleSyncIntent } from "../syncStaleBaseRecovery";
+import {
+  clearPendingSyncIntent,
+  loadPendingSyncIntent,
+  savePendingSyncIntent,
+} from "../syncPendingIntent";
 import { closeTopmostImportDialog, useHomeImportDialogs } from "../hooks/useHomeImportDialogs";
 import {
   applyTemporaryOverrides,
@@ -44,6 +51,10 @@ import ScreenModeView from "../components/ScreenModeView";
 import { ForegroundRecoveryStatus } from "../components/ForegroundRecoveryStatus";
 import { VisibleTabScheduler } from "../visibleTabScheduler";
 import { incrementFloorCaseCount } from "../floorPackagingCorrection";
+import {
+  emitManualSectionError,
+  subscribeToManualSectionErrors,
+} from "../manualSectionErrors";
 import {
   hasAutomaticUpdateReloadBlockingSurface,
   isAutomaticUpdateReloadSafe,
@@ -167,16 +178,21 @@ import {
   runLabel,
 } from "../utils";
 import { normalizeScheduledDays, type ScheduledDay } from "../scheduledDays";
+import { reconcileLiveScheduleSave } from "../scheduleLiveReconciliation";
 import { fetchWithTimeout } from "../fetchWithTimeout";
 import { deriveFrontlineNeedRows } from "../frontlineRows";
 import {
+  buildMixRunSnapshotUpdates,
   isSharedRecipeRefreshEligible,
+  mergePendingRunSnapshotUpdates,
   orchestrateSharedRecipeRefresh,
   refreshNamedRecipeProfilesAndPropagate,
   runSharedRecipeRefresh,
+  shouldPropagateNamedRecipeRows,
 } from "../profileRecipeRefresh";
 import { clearActiveSubstitutions, setActiveSubstitutions, withTodaySubstitutions } from "../substitutionState";
 import { brandTagLabels } from "@workspace/name-match";
+import { normalizeSelectableName, selectableNames } from "../setupRecipeNames";
 import { computeLinePhases, pickMostActivePhase, computeEndedRunElapsedSec, type PhaseInfo } from "../linePhases";
 import {
   pauseDecisionRemainingMs,
@@ -201,6 +217,7 @@ import {
   profileHasRealData,
   backfillFromProfile,
   saveProfile,
+  saveProfileAndWaitForServer,
   mergeProfileIntoOpenForm,
   markProfileRemotelyDeleted,
   recipeRowsEqual,
@@ -291,9 +308,12 @@ import {
   freshDayState,
   isBlankRemovableRun,
   isEmptyOverPopulated,
+  isRunValueStampAheadOfServerTime,
   isPristineSeedRun,
   pickCurrentRunPushValue,
   reconcileOperationalIntentCanonical,
+  serverOwnedApp1BatchProgress,
+  serverOwnedApplicatorStockProgress,
   selectInboundRunLifecycles,
   shouldAcceptSyncDaySnapshot,
   shouldAtomicallyAdoptFirstSnapshot,
@@ -302,8 +322,10 @@ import {
   shouldResetFormOnRunSwitch,
 } from "../domain/runSyncPolicy";
 import {
+  getEqualPackagingProgress,
   loadPackagingProgress,
   overlayPackagingProgress,
+  overlayPackagingProgressForRun,
   reconcilePackagingProgress,
   recordAutomaticPackagingProgress,
   recordManualPackagingProgress,
@@ -396,6 +418,7 @@ import ProfileDataHealthCard from "../components/ProfileDataHealthCard";
 import ProfileNameLinkCleanupCard from "../components/ProfileNameLinkCleanupCard";
 import AiCorrectionsCard from "../components/AiCorrectionsCard";
 import ManageRunsPanel from "../components/ManageRunsPanel";
+import IngredientAllergenMappingManager from "../components/IngredientAllergenMappingManager";
 import ReorderCard from "../components/ReorderCard";
 import UseFirstCard from "../components/UseFirstCard";
 import ScheduledRecipeWarningCard from "../components/ScheduledRecipeWarningCard";
@@ -413,6 +436,7 @@ import { LineSetupRoleGate } from "../components/LineSetupRoleGate";
 import { DoughRoleGate } from "../components/DoughRoleGate";
 import { useFreezerPullItems } from "../hooks/useFreezerPullItems";
 import { useDropdownScrollKeeper } from "../hooks/useDropdownScrollKeeper";
+import { useIsTouchDevice } from "../hooks/use-mobile";
 import { useSupervisorPin } from "../hooks/useSupervisorPin";
 import { updateSupervisorPin } from "../supervisorPinApi";
 import {
@@ -480,6 +504,7 @@ import {
   buildBatchWeightMap,
   lookupBatchWeight,
   collectBatchWeightCandidatesFromProfile,
+  collectAcknowledgedBatchWeightSnapshotUpdates,
   filterStillCurrentBatchWeightEntries,
   enqueueBatchWeightPropagation,
   executeBatchWeightPropagation,
@@ -493,10 +518,18 @@ import ManagerActionQueue from "../components/ManagerActionQueue";
 import ShiftHandoffDigest from "../components/ShiftHandoffDigest";
 import ReportIssueDialog from "../components/ReportIssueDialog";
 import GetStartedDialog from "../components/GetStartedDialog";
+import { TouchOptionPicker, TouchSelect } from "../components/TouchOptionPicker";
 import { useGetStartedOverview } from "@workspace/onboarding";
 import GuidedTour from "../components/GuidedTour";
 import { moveEntries, relocateValues } from "@workspace/schedule-move";
 import { findScheduledRecipeIssues } from "@workspace/scheduled-recipe-check";
+import {
+  dismissSauceAutoTrackFailure as dismissSauceAutoTrackFailureState,
+  noteSauceAutoTrackFailure,
+  resolveSauceAutoTrackFailure,
+  sauceAutoTrackBarrelId,
+  type SauceAutoTrackFailure,
+} from "../sauceAutoTrackFailure";
 import {
   applyRecipeSuggestion as applyRecipeSuggestionShared,
   type RecipeFieldId,
@@ -577,6 +610,12 @@ import {
 import { syncRetryDelay } from "../syncRetry";
 
 import { usePresentationCast } from "../hooks/usePresentationCast";
+import {
+  createScreenSyncState,
+  getScreenSyncStatus,
+  reduceScreenSyncState,
+} from "../screenSyncState";
+import { detectCastGuidancePlatform, getCastGuidance } from "../castGuidance";
 import {
   getAutoTrackTiming,
   suggestedDoughStaging,
@@ -1187,6 +1226,8 @@ export function IngredientSelect({
   onRemoveOption,
   placeholder,
   optionLabels,
+  ariaLabel,
+  testId,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -1197,8 +1238,11 @@ export function IngredientSelect({
   // Optional display label per option value (e.g. brand tags for colliding
   // recipe names: "Taco Mix (Marco's)"). The VALUE stored stays the bare name.
   optionLabels?: ReadonlyMap<string, string>;
+  ariaLabel?: string;
+  testId?: string;
 }) {
   const labelOf = (opt: string) => optionLabels?.get(opt) ?? opt;
+  const isTouchDevice = useIsTouchDevice();
   const [open, setOpen] = useState(false);
   const [inputVal, setInputVal] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -1237,12 +1281,34 @@ export function IngredientSelect({
       }
     : {};
 
+  if (isTouchDevice) {
+    const accessibleLabel = (placeholder ?? "Select option").replace(/[.…]+$/, "").trim();
+    return (
+      <TouchOptionPicker
+        value={value}
+        options={(options ?? []).map((option) => ({
+          value: option,
+          label: labelOf(option),
+        }))}
+        onValueChange={onChange}
+        placeholder={placeholder}
+        title={ariaLabel ?? `Select ${accessibleLabel.toLocaleLowerCase()}`}
+        aria-label={ariaLabel ?? placeholder ?? accessibleLabel}
+        data-testid={testId}
+        onAddOption={onAddOption}
+        onRemoveOption={onRemoveOption}
+      />
+    );
+  }
+
   return (
     <div className="relative w-full">
       <button
         ref={triggerRef}
         type="button"
         onClick={openDropdown}
+        aria-label={ariaLabel}
+        data-testid={testId}
         className="flex items-center gap-1 h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm hover:bg-muted/70 transition-colors w-full justify-between"
       >
         <span className={`truncate ${value ? "text-foreground" : "text-muted-foreground"}`}>
@@ -1338,6 +1404,8 @@ function CheeseRecipeCard({
   onRemoveRecipeName,
   onRecipeNameChange,
   embedded,
+  recipePickerLabel,
+  recipePickerTestId,
 }: {
   label: string;
   batches: number;
@@ -1357,13 +1425,24 @@ function CheeseRecipeCard({
   onRemoveRecipeName: (v: string) => void;
   onRecipeNameChange: (v: string) => void;
   embedded?: boolean;
+  recipePickerLabel?: string;
+  recipePickerTestId?: string;
 }) {
   const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   const [confirmIdx, setConfirmIdx] = useState<number | null>(null);
 
   const recipeSelector = (
     <div className="w-full sm:w-auto sm:flex-1 sm:max-w-xs">
-      <IngredientSelect value={recipeName} onChange={onRecipeNameChange} options={recipeNameOptions} onAddOption={onAddRecipeName} onRemoveOption={onRemoveRecipeName} placeholder="Recipe name…" />
+      <IngredientSelect
+        value={recipeName}
+        onChange={onRecipeNameChange}
+        options={recipeNameOptions}
+        onAddOption={onAddRecipeName}
+        onRemoveOption={onRemoveRecipeName}
+        placeholder="Recipe name…"
+        ariaLabel={recipePickerLabel}
+        testId={recipePickerTestId}
+      />
     </div>
   );
 
@@ -1466,6 +1545,8 @@ export function CheesePickCard({
   recipeMissing,
   poolComponents,
   optionLabels,
+  recipePickerLabel,
+  recipePickerTestId,
 }: {
   label: string;
   batches: number;
@@ -1493,6 +1574,8 @@ export function CheesePickCard({
   recipeMissing?: boolean;
   // Optional display label per recipe name (brand tags for colliding names).
   optionLabels?: ReadonlyMap<string, string>;
+  recipePickerLabel?: string;
+  recipePickerTestId?: string;
 }) {
   const updateReloadBlockerId = useId();
   // A temporary substitution must be visible anywhere floor staff read the
@@ -1525,16 +1608,19 @@ export function CheesePickCard({
 
   const recipeSelector = (
     <div className="w-full sm:w-auto sm:flex-1 sm:max-w-xs">
-      <select
-        value={recipeName}
-        onChange={e => onRecipeNameChange(e.target.value)}
-        className="h-8 w-full px-2 rounded bg-muted/40 border border-border/40 text-xs sm:text-sm outline-none focus:border-primary/60"
-      >
-        <option value="">Pick a cheese recipe…</option>
-        {options.map(name => (
-          <option key={name} value={name}>{optionLabels?.get(name) ?? name}</option>
-        ))}
-      </select>
+        <TouchSelect
+          aria-label={recipePickerLabel ?? "Pick a cheese recipe"}
+          title={recipePickerLabel ?? "Pick a cheese recipe"}
+          value={recipeName}
+          onChange={e => onRecipeNameChange(e.target.value)}
+          data-testid={recipePickerTestId}
+          className="h-8 w-full px-2 rounded bg-muted/40 border border-border/40 text-xs sm:text-sm outline-none focus:border-primary/60"
+        >
+          <option value="">Pick a cheese recipe…</option>
+          {options.map(name => (
+            <option key={name} value={name}>{optionLabels?.get(name) ?? name}</option>
+          ))}
+        </TouchSelect>
     </div>
   );
 
@@ -1662,6 +1748,8 @@ export function MixRecipeCard({
   onRemoveRecipeName,
   onRecipeNameChange,
   recipeNameLabels,
+  recipePickerLabel,
+  recipePickerTestId,
 }: {
   label: string;
   totalRunLbs: number;
@@ -1683,6 +1771,8 @@ export function MixRecipeCard({
   onRecipeNameChange?: (v: string) => void;
   // Optional display label per recipe name (brand tags for colliding names).
   recipeNameLabels?: ReadonlyMap<string, string>;
+  recipePickerLabel?: string;
+  recipePickerTestId?: string;
 }) {
   const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   const [confirmIdx, setConfirmIdx] = useState<number | null>(null);
@@ -1693,7 +1783,17 @@ export function MixRecipeCard({
     <>
       {recipeNameOptions && onRecipeNameChange && (
         <div className="w-full sm:max-w-xs mb-3">
-          <IngredientSelect value={recipeName ?? ""} onChange={onRecipeNameChange} options={recipeNameOptions} onAddOption={onAddRecipeName} onRemoveOption={onRemoveRecipeName} placeholder="Recipe name…" optionLabels={recipeNameLabels} />
+          <IngredientSelect
+            value={recipeName ?? ""}
+            onChange={onRecipeNameChange}
+            options={recipeNameOptions}
+            onAddOption={onAddRecipeName}
+            onRemoveOption={onRemoveRecipeName}
+            placeholder="Recipe name…"
+            optionLabels={recipeNameLabels}
+            ariaLabel={recipePickerLabel}
+            testId={recipePickerTestId}
+          />
         </div>
       )}
       {fields.length === 0 ? (
@@ -1788,6 +1888,8 @@ export function DoughRecipeCard({
   onAddRecipeName,
   onRemoveRecipeName,
   onRecipeNameChange,
+  recipePickerLabel,
+  recipePickerTestId,
 }: {
   batchesNeeded: number;
   fields: { id: string }[];
@@ -1807,6 +1909,8 @@ export function DoughRecipeCard({
   onAddRecipeName: (v: string) => void;
   onRemoveRecipeName: (v: string) => void;
   onRecipeNameChange: (v: string) => void;
+  recipePickerLabel?: string;
+  recipePickerTestId?: string;
 }) {
   const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   const totalBatchWeight = totalLbsPerBatch * Math.max(1, batchesNeeded);
@@ -1833,6 +1937,8 @@ export function DoughRecipeCard({
               onAddOption={onAddRecipeName}
               onRemoveOption={onRemoveRecipeName}
               placeholder="Recipe name…"
+              ariaLabel={recipePickerLabel}
+              testId={recipePickerTestId}
             />
           </div>
           <span className="text-xs text-muted-foreground shrink-0">
@@ -1972,6 +2078,8 @@ export function FrontlineRecipeCard({
   onRemoveRecipeName,
   onRecipeNameChange,
   embedded,
+  recipePickerLabel,
+  recipePickerTestId,
 }: {
   fields: { id: string }[];
   recipe: RecipeRow[];
@@ -1988,13 +2096,24 @@ export function FrontlineRecipeCard({
   onRemoveRecipeName: (v: string) => void;
   onRecipeNameChange: (v: string) => void;
   embedded?: boolean;
+  recipePickerLabel?: string;
+  recipePickerTestId?: string;
 }) {
   const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   const [confirmIdx, setConfirmIdx] = useState<number | null>(null);
 
   const recipeSelector = (
     <div className="w-full sm:w-auto sm:flex-1 sm:max-w-xs">
-      <IngredientSelect value={recipeName} onChange={onRecipeNameChange} options={recipeNameOptions} onAddOption={onAddRecipeName} onRemoveOption={onRemoveRecipeName} placeholder="Recipe name…" />
+      <IngredientSelect
+        value={recipeName}
+        onChange={onRecipeNameChange}
+        options={recipeNameOptions}
+        onAddOption={onAddRecipeName}
+        onRemoveOption={onRemoveRecipeName}
+        placeholder="Recipe name…"
+        ariaLabel={recipePickerLabel}
+        testId={recipePickerTestId}
+      />
     </div>
   );
 
@@ -2086,6 +2205,8 @@ export function TypeDropdown({
   onAddOption,
   onRemoveOption,
   allowClear,
+  ariaLabel,
+  testId,
 }: {
   label: string;
   value: string;
@@ -2094,7 +2215,10 @@ export function TypeDropdown({
   onAddOption: (v: string) => void;
   onRemoveOption: (v: string) => void;
   allowClear?: boolean;
+  ariaLabel?: string;
+  testId?: string;
 }) {
+  const isTouchDevice = useIsTouchDevice();
   const [open, setOpen] = useState(false);
   const [inputVal, setInputVal] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -2134,6 +2258,32 @@ export function TypeDropdown({
       }
     : {};
 
+  if (isTouchDevice) {
+    const touchOptions = [
+      ...(allowClear && value ? [{ value: "", label: "— None" }] : []),
+      ...options.map((option) => ({ value: option, label: option })),
+    ];
+    const accessibleLabel = ariaLabel ?? label;
+    return (
+      <div className="flex items-center justify-between mb-2 mt-5 first:mt-0">
+        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+          {label}
+        </p>
+        <TouchOptionPicker
+          value={value}
+          options={touchOptions}
+          onValueChange={onChange}
+          placeholder="Select…"
+          title={accessibleLabel}
+          aria-label={accessibleLabel}
+          data-testid={testId}
+          onAddOption={onAddOption}
+          onRemoveOption={onRemoveOption}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="flex items-center justify-between mb-2 mt-5 first:mt-0">
       <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
@@ -2144,6 +2294,8 @@ export function TypeDropdown({
           ref={triggerRef}
           type="button"
           onClick={openDropdown}
+          aria-label={ariaLabel}
+          data-testid={testId}
           className="flex items-center gap-1 px-2 py-0.5 rounded bg-muted/40 border border-border/40 text-xs font-semibold hover:bg-muted/70 transition-colors min-w-[110px] justify-between"
         >
           <span className={value ? "text-foreground" : "text-muted-foreground/50"}>
@@ -2681,10 +2833,10 @@ const HOME_DIALOG_CARD_SCROLL_CLASS =
 
 function LiveRunHandoffGuard() {
   const { nextRunPrepActive } = useLiveRun();
-  const { currentRunId, dayState, dayStateRef, setDayState, schedulePush } =
+  const { currentRunId, dayState, dayStateRef, screenMode, setDayState, schedulePush } =
     useHomeTabCtx();
   useEffect(() => {
-    if (!nextRunPrepActive) return;
+    if (screenMode !== null || !nextRunPrepActive) return;
     if (dayState.prepPhase?.prepHandoffFromRunId === currentRunId) return;
     // First time nextRunPrepActive for this run: reset prep so the crew can log
     // next-run batches from zero with prepCarriedOver: false (so startRun will
@@ -2703,6 +2855,7 @@ function LiveRunHandoffGuard() {
   }, [
     nextRunPrepActive,
     currentRunId,
+    screenMode,
     dayState.prepPhase?.prepHandoffFromRunId,
     dayStateRef,
     setDayState,
@@ -2711,7 +2864,12 @@ function LiveRunHandoffGuard() {
   return null;
 }
 
+function loadPackagingAwareRunValues(runId: string): FormValues {
+  return overlayPackagingProgressForRun(runId, loadRunValues(runId));
+}
+
 export default function Home() {
+  const screenMode = useMemo(() => new URLSearchParams(window.location.search).get("screen"), []);
   const specImportOperationRef = useRef<string | null>(null);
   const premixImportOperationRef = useRef<string | null>(null);
   const cheeseImportOperationRef = useRef<string | null>(null);
@@ -2863,7 +3021,11 @@ export default function Home() {
         window.dispatchEvent(new CustomEvent("calculator-manual-section-pending", { detail: { runId, section } }));
       }
       if (result === "persistence-failed") {
-        window.dispatchEvent(new CustomEvent("calculator-manual-section-error", { detail: { runId, section, message: "This correction could not be saved on this device. Your counts were restored; please try again." } }));
+        emitManualSectionError({
+          runId,
+          section,
+          message: "This correction could not be saved on this device. Your counts were restored; please try again.",
+        });
       }
     });
   }, []);
@@ -2872,7 +3034,7 @@ export default function Home() {
     autoSuppressUntilRef,
     dayStateRef,
     autoSuppressMs: AUTO_SUPPRESS_MS,
-    loadRunValues,
+    loadRunValues: loadPackagingAwareRunValues,
     saveRunValues,
     markRunValuesUpdated,
     markLocalEdit: (now) => { lastLocalEditRef.current = now; },
@@ -2881,7 +3043,22 @@ export default function Home() {
     recordManualProgress: recordManualPackagingProgress,
     recordAutomaticProgress: recordAutomaticPackagingProgress,
   }), [queueManualCorrection]);
-  const persistManualPackagingProgress = packagingManager.persistManualProgress;
+  const persistManualPackagingProgress = useEvent(
+    (
+      runId: string,
+      skidsCompleted: number,
+      casesOnCurrentSkid: number,
+      manualOverrideUntil?: number,
+    ) => {
+      packagingManager.persistManualProgress(
+        runId,
+        skidsCompleted,
+        casesOnCurrentSkid,
+        manualOverrideUntil,
+      );
+      invalidateOperationalCalcForPackagingRun(runId);
+    },
+  );
   const persistAutomaticPackagingProgress = packagingManager.persistAutomaticProgress;
   useEffect(() => {
     // A correction may arrive while this device is viewing another run. Adopt
@@ -3530,7 +3707,7 @@ export default function Home() {
     setDayState(ds);
     if (ds.runToTime) setRunToTime(ds.runToTime);
     const curId = ds.runs[ds.currentIndex]?.id ?? "";
-    const vals = { ...DEFAULT_VALUES, ...loadRunValues(curId) };
+    const vals = { ...DEFAULT_VALUES, ...loadPackagingAwareRunValues(curId) };
     form.reset(vals);
     resetFieldArrays(vals);
   }
@@ -3711,7 +3888,7 @@ export default function Home() {
     resolver: zodResolver(formSchema) as Resolver<FormValues>,
     defaultValues: (() => {
       const ds = loadDayState();
-      return loadRunValues(ds.runs[ds.currentIndex]?.id ?? "");
+      return loadPackagingAwareRunValues(ds.runs[ds.currentIndex]?.id ?? "");
     })(),
     mode: "onChange",
   });
@@ -3904,7 +4081,8 @@ export default function Home() {
       const rows = (mix.components ?? [])
         .filter((c) => c.ingredient.trim())
         .map((c) => ({ ingredient: c.ingredient, lbs: c.perPizza }));
-      if (rows.length > 0) map.set(mix.name.trim().toLowerCase(), rows);
+      const name = normalizeSelectableName(mix.name);
+      if (rows.length > 0 && name) map.set(name.toLowerCase(), rows);
     }
     return map;
   }, [mixes]);
@@ -3912,7 +4090,7 @@ export default function Home() {
   // server Mixes master data — the single source for mixes across the app now
   // that the separate "Mix" recipe-type lists have been merged into Mixes.
   const serverMixNames = useMemo(
-    () => [...new Set(mixes.map((m) => m.name.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    () => selectableNames(mixes.map((m) => m.name)),
     [mixes],
   );
   // Factory-wide cheese recipes (server master-data, like Mixes but a SEPARATE
@@ -3929,7 +4107,7 @@ export default function Home() {
   const serverCheeseByName = useMemo(() => {
     const map = new Map<string, CheeseRecipe>();
     for (const r of enabledCheeseRecipes) {
-      const key = r.name.trim().toLowerCase();
+      const key = normalizeSelectableName(r.name).toLowerCase();
       if (key) map.set(key, r);
     }
     return map;
@@ -3945,33 +4123,43 @@ export default function Home() {
           ingredient: c.ingredient,
           lbs: c.lbs,
         }));
-      const key = r.name.trim().toLowerCase();
+      const key = normalizeSelectableName(r.name).toLowerCase();
       if (key) map.set(key, rows);
     }
     return map;
   }, [enabledCheeseRecipes]);
   const serverCheeseNames = useMemo(
-    () => [...new Set(enabledCheeseRecipes.map((r) => r.name.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    () => selectableNames(enabledCheeseRecipes.map((r) => r.name)),
     [enabledCheeseRecipes],
   );
   // Brand tags for cheese/mix names that collide across customers (same name
   // under 2+ brands, or a bare name whose brand-prefixed twin exists) — the
   // pickers show "Taco Mix (Marco's)" while the stored value stays the name.
   const cheeseNameBrandTags = useMemo(
-    () => brandTagLabels(enabledCheeseRecipes.map((r) => ({ name: r.name, brand: r.brand }))),
+    () => brandTagLabels(
+      enabledCheeseRecipes
+        .map((r) => ({ name: normalizeSelectableName(r.name), brand: normalizeSelectableName(r.brand) }))
+        .filter((r) => r.name),
+    ),
     [enabledCheeseRecipes],
   );
   const mixNameBrandTags = useMemo(
-    () => brandTagLabels(mixes.map((m) => ({ name: m.name, brand: m.brand ?? "" }))),
+    () => brandTagLabels(
+      mixes
+        .map((m) => ({ name: normalizeSelectableName(m.name), brand: normalizeSelectableName(m.brand) }))
+        .filter((m) => m.name),
+    ),
     [mixes],
   );
 
-  const { isManager, hasCapability } = useMe();
+  const { isManager, role: serverRole, hasCapability } = useMe();
   // Profile writes are gated on the manage-profiles capability (NOT the
   // manage-staff-derived isManager alias) so a custom role granted
   // manage-profiles can save profiles without full manager rights — matching
   // the server's POST/DELETE /brand-profiles gate exactly.
   const canManageProfiles = hasCapability("manage-profiles");
+  const [adoptedBrandsForProfilePurge, setAdoptedBrandsForProfilePurge] =
+    useState<string[] | null>(null);
   // Flip the central storage-level profile-write gate in lockstep: it stops
   // EVERY profile-writing helper (saveProfile, rename/merge fan-outs,
   // Move-to-Mixes relinks, packaging import patches, delete helpers) from
@@ -3992,10 +4180,25 @@ export default function Home() {
     profileBootHealsRef.current = true;
     applyMixSlotRecategorizeIfNeeded();
     applyProfileCleanupIfNeeded();
-    purgeOrphanedProfilesIfNeeded();
   }, [canManageProfiles]);
+  // Orphan cleanup can write profile tombstones back to the server. Do not
+  // treat a populated local Brands cache as authoritative: wait until the
+  // accepted sync merge has persisted its canonical Brands snapshot.
+  useEffect(() => {
+    if (
+      !canManageProfiles ||
+      !adoptedBrandsForProfilePurge ||
+      adoptedBrandsForProfilePurge.length === 0
+    ) {
+      return;
+    }
+    purgeOrphanedProfilesIfNeeded(adoptedBrandsForProfilePurge);
+  }, [canManageProfiles, adoptedBrandsForProfilePurge]);
   const canEditRules = hasCapability("edit-production-rules");
   const canManageInventory = hasCapability("manage-inventory");
+  const canManageAllergens = hasCapability("manage-allergens");
+  const canRecordQc = hasCapability("record-qc");
+  const canManageQc = hasCapability("manage-qc");
   const canManageStaff = hasCapability("manage-staff");
   const canUseAiTools = hasCapability("use-ai-tools");
   const canApproveResets = hasCapability("approve-password-resets");
@@ -4067,7 +4270,7 @@ export default function Home() {
       const rows = r.components
         .filter((c) => c.ingredient.trim())
         .map((c) => ({ ingredient: c.ingredient, lbs: c.lbs }));
-      const key = r.name.trim().toLowerCase();
+      const key = normalizeSelectableName(r.name).toLowerCase();
       if (key) map.set(key, rows);
     }
     return map;
@@ -4078,7 +4281,7 @@ export default function Home() {
     const map = new Map<string, number>();
     for (const r of doughRecipesList) {
       if (r.enabled === false) continue;
-      const key = r.name.trim().toLowerCase();
+      const key = normalizeSelectableName(r.name).toLowerCase();
       const oz = r.doughballWeightOz ?? 0;
       if (key && oz > 0) map.set(key, oz);
     }
@@ -4090,7 +4293,7 @@ export default function Home() {
     const map = new Map<string, number>();
     for (const r of doughRecipesList) {
       if (r.enabled === false) continue;
-      const key = r.name.trim().toLowerCase();
+      const key = normalizeSelectableName(r.name).toLowerCase();
       const n = r.doughballsPerTray ?? 0;
       if (key && n > 0) map.set(key, n);
     }
@@ -4104,7 +4307,7 @@ export default function Home() {
     const map = new Map<string, DoughballVariant[]>();
     for (const r of doughRecipesList) {
       if (r.enabled === false) continue;
-      const key = r.name.trim().toLowerCase();
+      const key = normalizeSelectableName(r.name).toLowerCase();
       const variants = normalizeDoughballVariants(r.doughballVariants);
       if (key && variants.length > 0) map.set(key, variants);
     }
@@ -4117,17 +4320,17 @@ export default function Home() {
       const rows = r.components
         .filter((c) => c.ingredient.trim())
         .map((c) => ({ ingredient: c.ingredient, lbs: c.lbs }));
-      const key = r.name.trim().toLowerCase();
+      const key = normalizeSelectableName(r.name).toLowerCase();
       if (key) map.set(key, rows);
     }
     return map;
   }, [sauceRecipesList]);
   const serverDoughNames = useMemo(
-    () => [...new Set(doughRecipesList.filter((r) => r.enabled !== false).map((r) => r.name.trim()).filter(Boolean))],
+    () => selectableNames(doughRecipesList.filter((r) => r.enabled !== false).map((r) => r.name)),
     [doughRecipesList],
   );
   const serverSauceNames = useMemo(
-    () => [...new Set(sauceRecipesList.filter((r) => r.enabled !== false).map((r) => r.name.trim()).filter(Boolean))],
+    () => selectableNames(sauceRecipesList.filter((r) => r.enabled !== false).map((r) => r.name)),
     [sauceRecipesList],
   );
   // ── Unified ingredient universe ──
@@ -4285,7 +4488,7 @@ export default function Home() {
       const flavorMatches = f ? brandMatches.filter(matchesFlavor) : brandMatches;
       const rest = f ? brandMatches.filter((r) => !matchesFlavor(r)) : [];
       const toNames = (pool: typeof brandMatches) =>
-        [...new Set(pool.map((r) => r.name.trim()).filter(Boolean))].sort((x, y) => x.localeCompare(y));
+        selectableNames(pool.map((r) => r.name));
       const first = toNames(flavorMatches);
       const firstSet = new Set(first);
       return [...first, ...toNames(rest).filter((n) => !firstSet.has(n))];
@@ -4381,9 +4584,9 @@ export default function Home() {
   );
 
   // Server-side role (distinct from the local supervisor PIN toggle below).
-  // Declared BEFORE the propagation callbacks below so they can list isManager
-  // in their deps (referencing it in a deps array before declaration would be
-  // a render-time TDZ crash — see home-render-tdz).
+  // Managers and users assigned the supervisor role have supervisor access
+  // without entering the local floor PIN. The local toggle remains useful for
+  // operator accounts that unlock the floor temporarily.
 
   // After a batch weight is saved to the server, fan the new weight into every
   // saved brand/flavor profile that uses that ingredient in a plain applicator
@@ -4397,6 +4600,11 @@ export default function Home() {
       // and only applies these open-form updates if that run is still active.
       const openForm = form.getValues() as Record<string, unknown>;
       let openFormUpdates: Partial<Record<string, number>> = {};
+      const openRunSnapshotUpdates = collectAcknowledgedBatchWeightSnapshotUpdates(
+        openForm,
+        entries,
+        DEFAULT_PEP_TYPES,
+      );
 
       // Ensure all server profiles are present in localStorage before scanning
       // (gap-fill only — never clobbers local edits). This covers the race
@@ -4445,17 +4653,24 @@ export default function Home() {
             openForm,
             entries,
             defaultPepTypes: DEFAULT_PEP_TYPES,
-            saveProfile: (brand, flavor, updates) => {
+            saveProfile: async (brand, flavor, updates) => {
               const profile = loadProfile(brand, flavor);
               if (!profile) return false;
               // Profile writes are manager-only; non-managers still get the
               // in-memory heal (open-form update below) but never persist it.
-              return canManageProfiles && saveProfile(
+              if (!canManageProfiles) return false;
+              // The local profile queue is durable, but a local save is not an
+              // acknowledgement: do not fan the profile into run snapshots
+              // until the server has echoed this exact authoritative value.
+              // A failed acknowledgement stays queued by storage for a later
+              // retry; the profile/run fan-out is deliberately not replayed
+              // from this stale in-memory snapshot.
+              await saveProfileAndWaitForServer(
                 brand,
                 flavor,
                 { ...profile, ...updates } as FormValues,
-                { authoritative: true },
               );
+              return true;
             },
             propagateToPendingRuns: propagateProfileToPendingRuns,
             // The open form is applied only by refreshOpenForm after the
@@ -4467,13 +4682,14 @@ export default function Home() {
           openFormUpdates = result.plan.openFormUpdates;
           return result;
         },
-        refreshOpenForm: () => {
+        refreshOpenForm: async () => {
           // A started run owns an immutable production snapshot. Learned
           // batch weights may update its saved profile and future pending
           // runs, but they must never hydrate the live form and autosave the
           // new weight into the active run.
           const liveRun = dayStateRef.current.runs[dayStateRef.current.currentIndex];
           if (!isSharedRecipeRefreshEligible(liveRun)) return;
+          const openRunUpdates: Record<string, unknown> = { ...openRunSnapshotUpdates };
           for (const [field, lbs] of Object.entries(openFormUpdates)) {
             if (lbs !== undefined) {
               form.setValue(
@@ -4481,8 +4697,10 @@ export default function Home() {
                 lbs as never,
                 { shouldDirty: true },
               );
+              openRunUpdates[field] = lbs;
             }
           }
+          await persistOpenPendingRunSnapshotUpdates(openRunUpdates);
         },
       });
     },
@@ -4502,6 +4720,7 @@ export default function Home() {
   // profile/run fan-out after the newer manager edit has already succeeded.
   const queueBatchWeightChanges = useCallback(
     (entries: { name: string; lbs: number }[]): Promise<void> => {
+      if (screenMode !== null) return Promise.resolve();
       const changes = normalizeBatchWeightChanges(entries);
       if (changes.length === 0) return batchWeightSaveChainRef.current;
       for (const change of changes) {
@@ -4553,7 +4772,7 @@ export default function Home() {
         });
       return batchWeightSaveChainRef.current;
     },
-    [cycleCountQc, propagateBatchWeightUpdates],
+    [cycleCountQc, propagateBatchWeightUpdates, screenMode],
   );
   const commitBatchWeightField = useCallback(
     (name: string, lbs: number): void => {
@@ -4569,6 +4788,7 @@ export default function Home() {
   // the saved recipes. Also updates the open form and pending runs.
   const propagateCheeseRecipeUpdates = useCallback(
     async (updatedRecipes: CheeseRecipe[]) => {
+      if (screenMode !== null) return;
       sharedRecipeRefreshGenerationRef.current += 1;
       acknowledgedCheeseSaveFingerprintRef.current = JSON.stringify(updatedRecipes);
       return enqueueSharedRecipeRefresh(async () => {
@@ -4685,23 +4905,33 @@ export default function Home() {
       }
           return count;
         },
-        refreshOpenForm: () => {
+        refreshOpenForm: async () => {
           const liveRun = dayStateRef.current.runs[dayStateRef.current.currentIndex];
-          if (liveRun?.startedAt || liveRun?.endedAt) return;
+          const persistedRun = liveRun
+            ? loadDayState().runs.find((run) => run.id === liveRun.id)
+            : undefined;
+          if (!isSharedRecipeRefreshEligible(liveRun) || !isSharedRecipeRefreshEligible(persistedRun)) return;
           const cv = form.getValues() as unknown as Record<string, unknown>;
+          const openRunUpdates: Record<string, unknown> = {};
           for (const slot of cheeseSlots) {
             const { nameField, rowsField } = slot;
             const recipeName = ((cv[nameField] as string) ?? "").trim();
             if (!recipeName) continue;
             const freshRows = recipeByName.get(recipeName.toLowerCase());
             if (!freshRows) continue;
-            form.setValue(rowsField as Parameters<typeof form.setValue>[0], freshRows as never, { shouldDirty: true });
-            // These rows are rendered through useFieldArray. Updating only the
-            // form value leaves the field-array snapshot stale; a later
-            // lifecycle/autosave can then publish the old recipe back to the
-            // pending run. Keep both representations in lockstep.
-            slot.replace(freshRows);
+            const currentRows = (cv[rowsField] as Array<{ ingredient: string; lbs: number }> | undefined) ?? [];
+            const copy = freshRows.map((row) => ({ ...row }));
+            if (!recipeRowsEqual(currentRows, copy)) {
+              form.setValue(rowsField as Parameters<typeof form.setValue>[0], copy as never, { shouldDirty: true });
+              // These rows are rendered through useFieldArray. Updating only the
+              // form value leaves the field-array snapshot stale; a later
+              // lifecycle/autosave can then publish the old recipe back to the
+              // pending run. Keep both representations in lockstep.
+              slot.replace(copy);
+            }
+            openRunUpdates[rowsField] = copy;
           }
+          await persistOpenPendingRunSnapshotUpdates(openRunUpdates);
         },
       });
 
@@ -4714,7 +4944,7 @@ export default function Home() {
       });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [form, canManageProfiles],
+    [form, canManageProfiles, screenMode],
   );
   // Manager-set per-die line-setting overrides (server master-data); the run
   // form's die pre-fill resolves through these first, then the built-in map.
@@ -4798,7 +5028,7 @@ export default function Home() {
   // marker-guarded so it runs once, and re-armed on failure to retry next mount.
   const doughSauceMigratedRef = useRef(false);
   useEffect(() => {
-    if (doughSauceMigratedRef.current || !canManageInventory) return;
+    if (screenMode !== null || doughSauceMigratedRef.current || !canManageInventory) return;
     const MARKER = "run-calc-dough-sauce-server-migrated-v1";
     try {
       if (localStorage.getItem(MARKER)) { doughSauceMigratedRef.current = true; return; }
@@ -4807,7 +5037,7 @@ export default function Home() {
     pushLocalDoughSauceToServer()
       .then(() => { try { localStorage.setItem(MARKER, "1"); } catch {} })
       .catch(() => { doughSauceMigratedRef.current = false; });
-  }, [canManageInventory, pushLocalDoughSauceToServer]);
+  }, [canManageInventory, pushLocalDoughSauceToServer, screenMode]);
 
   // One-time name cleanup: rename existing server dough/sauce pool entries that
   // still carry spec-sheet formatting noise (sourcing qualifiers like
@@ -4821,7 +5051,7 @@ export default function Home() {
   // rename. Manager-only, marker-guarded, re-armed on failure.
   const nameCleanupRef = useRef(false);
   useEffect(() => {
-    if (nameCleanupRef.current || !canManageInventory) return;
+    if (screenMode !== null || nameCleanupRef.current || !canManageInventory) return;
     const MARKER = "run-calc-dough-sauce-name-cleanup-v1";
     try {
       if (localStorage.getItem(MARKER)) { nameCleanupRef.current = true; return; }
@@ -4843,18 +5073,24 @@ export default function Home() {
           pending = JSON.parse(localStorage.getItem(PENDING_KEY) ?? "{}") as Record<string, string>;
         } catch {}
         const pool = await fetchNamedRecipes(kind);
-        const taken = new Set(pool.map((r) => r.name.trim().toLowerCase()));
+        const taken = new Set(
+          pool
+            .map((r) => normalizeSelectableName(r.name).toLowerCase())
+            .filter(Boolean),
+        );
         const map: Record<string, string> = { ...pending };
         const changed: NamedRecipe[] = [];
         for (const r of pool) {
-          const clean = cleanSpecNamedRecipeName(kind, r.name);
-          if (!clean || clean === r.name) continue;
+          const rawName = normalizeSelectableName(r.name);
+          if (!rawName) continue;
+          const clean = cleanSpecNamedRecipeName(kind, rawName);
+          if (!clean || clean === rawName) continue;
           const key = clean.trim().toLowerCase();
           // Same name modulo trim/case: rename in place, no re-pointing needed
           // beyond the exact-string surfaces applyRecipeNameMerge covers.
-          if (taken.has(key) && key !== r.name.trim().toLowerCase()) continue;
+          if (taken.has(key) && key !== rawName.toLowerCase()) continue;
           taken.add(key);
-          map[r.name] = clean;
+          map[rawName] = clean;
           changed.push({ ...r, name: clean });
         }
         if (Object.keys(map).length === 0) continue;
@@ -4897,7 +5133,7 @@ export default function Home() {
     })()
       .then(() => { try { localStorage.setItem(MARKER, "1"); } catch {} })
       .catch(() => { nameCleanupRef.current = false; });
-  }, [canManageInventory, cycleCountQc]);
+  }, [canManageInventory, cycleCountQc, screenMode]);
 
   // One-time phantom-name heal: a dough/sauce name in the synced option list
   // that NO recipe anywhere backs (no server-pool entry, no local preset
@@ -4909,7 +5145,7 @@ export default function Home() {
   // resurrect it. Manager-only, marker-guarded, re-armed on failure.
   const phantomNameHealRef = useRef(false);
   useEffect(() => {
-    if (phantomNameHealRef.current || !canManageInventory) return;
+    if (screenMode !== null || phantomNameHealRef.current || !canManageInventory) return;
     const MARKER = "run-calc-dough-sauce-phantom-names-heal-v1";
     try {
       if (localStorage.getItem(MARKER)) { phantomNameHealRef.current = true; return; }
@@ -4995,7 +5231,7 @@ export default function Home() {
     })()
       .then(() => { try { localStorage.setItem(MARKER, "1"); } catch {} })
       .catch(() => { phantomNameHealRef.current = false; });
-  }, [canManageInventory]);
+  }, [canManageInventory, screenMode]);
 
   // Best-effort follow-through for the one-time mix-slot cleanup migration:
   // mixes it queued (raw applicator-type mix names converted to "Mix" slots)
@@ -5004,7 +5240,7 @@ export default function Home() {
   // survives failures and retries on the next mount/session.
   const pendingMixPushRef = useRef(false);
   useEffect(() => {
-    if (pendingMixPushRef.current || !canManageInventory) return;
+    if (screenMode !== null || pendingMixPushRef.current || !canManageInventory) return;
     const pending = loadPendingServerMixPushes();
     if (pending.length === 0) { pendingMixPushRef.current = true; return; }
     pendingMixPushRef.current = true;
@@ -5020,7 +5256,7 @@ export default function Home() {
       }
       clearPendingServerMixPushes();
     })().catch(() => { pendingMixPushRef.current = false; });
-  }, [canManageInventory, cycleCountQc]);
+  }, [canManageInventory, cycleCountQc, screenMode]);
 
   const [showReportIssue, setShowReportIssue] = useState(false);
   // First-login "Get Started" overview. Auto-opens once when the server says
@@ -5035,7 +5271,7 @@ export default function Home() {
   // the Get Started overview or the header menu (never auto-shown).
   const [showTour, setShowTour] = useState(false);
   const [doughSubTab, setDoughSubTab] = useState<"dough" | "crusts">("dough");
-  const [runToTime, setRunToTime] = useState(() => loadDayState().runToTime ?? "19:15");
+  const [runToTime, setRunToTime] = useState(() => loadDayState().runToTime ?? DEFAULT_RUN_TO_TIME);
 
   // Brand/flavor picker state
   const [brandInput, setBrandInput] = useState("");
@@ -5075,7 +5311,12 @@ export default function Home() {
           ? localStorage.getItem(SUPERVISOR_PIN_KEY)
           : null);
   const noFacilityPin = resolvedPin === "";
-  const isSupervisor = isManager || role === "supervisor" || noFacilityPin;
+  const isSupervisor =
+    isManager ||
+    serverRole === "supervisor" ||
+    me?.role === "supervisor" ||
+    role === "supervisor" ||
+    noFacilityPin;
 
   // ── Glance overlay ────────────────────────────────────────────────────────
   const [showGlance, setShowGlance] = useState(false);
@@ -5165,7 +5406,6 @@ export default function Home() {
   }, [showStopDialog]);
 
   // ── Screen casting mode ────────────────────────────────────────────────────
-  const screenMode = useMemo(() => new URLSearchParams(window.location.search).get("screen"), []);
   const [showScreensDialog, setShowScreensDialog] = useState(false);
   // One-click Chromecast (Presentation API). Disabled on the cast display itself
   // (screenMode !== null) so TVs never try to reconnect/start presentations.
@@ -5192,13 +5432,24 @@ export default function Home() {
 
   // ── Online / offline ───────────────────────────────────────────────────────
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
+  const [screenSyncState, dispatchScreenSync] = useReducer(
+    reduceScreenSyncState,
+    navigator.onLine,
+    createScreenSyncState,
+  );
   useEffect(() => {
-    const on = () => setIsOnline(true);
-    const off = () => setIsOnline(false);
+    const on = () => {
+      setIsOnline(true);
+      if (screenMode !== null) dispatchScreenSync({ type: "online" });
+    };
+    const off = () => {
+      setIsOnline(false);
+      if (screenMode !== null) dispatchScreenSync({ type: "offline" });
+    };
     window.addEventListener("online", on);
     window.addEventListener("offline", off);
     return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); };
-  }, []);
+  }, [screenMode]);
 
   // Finished-case surplus is authoritative server data, not a day-state
   // overlay. Load it for every signed-in web session so Packaging can record a
@@ -5211,6 +5462,21 @@ export default function Home() {
   // failure modes and surface a clear, dismissible banner + a red status dot.
   const [syncPushFailed, setSyncPushFailed] = useState(false);
   const [writeError, setWriteError] = useState<string | null>(null);
+  useEffect(() => subscribeToManualSectionErrors(setWriteError), []);
+  const [sauceAutoTrackFailure, setSauceAutoTrackFailure] = useState<SauceAutoTrackFailure | null>(null);
+  const reportSauceAutoTrackFailure = useCallback((claim: AutoTrackEventClaim) => {
+    setSauceAutoTrackFailure((current) =>
+      noteSauceAutoTrackFailure(current, sauceAutoTrackBarrelId(claim.runId, claim.eventId)),
+    );
+  }, []);
+  const clearSauceAutoTrackFailure = useCallback((claim: AutoTrackEventClaim) => {
+    setSauceAutoTrackFailure((current) =>
+      resolveSauceAutoTrackFailure(current, sauceAutoTrackBarrelId(claim.runId, claim.eventId)),
+    );
+  }, []);
+  const dismissSauceAutoTrackFailure = useCallback(() => {
+    setSauceAutoTrackFailure((current) => dismissSauceAutoTrackFailureState(current));
+  }, []);
   const syncDate = todayStr();
   const [syncDiagnostics, setSyncDiagnostics] = useState<SyncDiagnostic[]>(() => loadSyncDiagnostics(syncDate));
   const [lastAcknowledgedAt, setLastAcknowledgedAt] = useState<number | null>(() => {
@@ -6960,6 +7226,16 @@ export default function Home() {
   const [scheduleEditorRuns, setScheduleEditorRuns] = useState<{id: string; brand: string; flavor: string; casesNeeded: number}[]>([]);
   const [scheduleEditorRunValues, setScheduleEditorRunValues] = useState<Record<string, FormValues>>({});
   const [scheduleEditorBreaks, setScheduleEditorBreaks] = useState<DayBreaks>(() => defaultDayBreaks());
+  const [scheduleBreaksExpanded, setScheduleBreaksExpanded] = useState(false);
+  const scheduleBreakSummary = useMemo(
+    () => scheduleEditorBreaks
+      .filter((breakSlot) => breakSlot.enabled)
+      .map((breakSlot) =>
+        `Break ${breakSlot.slot} · ${breakSlot.mode === "at-time" ? breakSlot.atTime ?? "clock time" : "after run"}`,
+      )
+      .join(" · "),
+    [scheduleEditorBreaks],
+  );
   const [scheduleAdvancedRunId, setScheduleAdvancedRunId] = useState<string | null>(null);
   const [scheduleSaving, setScheduleSaving] = useState(false);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
@@ -7022,14 +7298,14 @@ export default function Home() {
     const d = new Date(); d.setDate(d.getDate() + 1);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }
-  // Run ids the schedule editor actually LOADED when it was opened. On save we
-  // may only treat a live run as "removed by the user" if the editor showed it
-  // to them (its id is in this set) — an editor opened blank ("Schedule New
-  // Day") must never delete today's existing runs it never displayed.
-  const scheduleEditorLoadedRunIdsRef = useRef<Set<string>>(new Set());
+  // Run snapshots the schedule editor actually loaded when it was opened. On
+  // save we may only treat a live run as removed if the editor showed it, while
+  // lifecycle changes that happened after opening must still be preserved.
+  const scheduleEditorLoadedRunsRef = useRef<RunMeta[]>([]);
   async function openScheduleEditor(date?: string) {
     setScheduleAdvancedRunId(null);
     setScheduleCalendarOpen(false);
+    setScheduleBreaksExpanded(false);
     // TODAY is the live day — seed the editor from the in-memory day state (the
     // freshest copy this tab has, including in-flight form edits), NOT the
     // server row. Saving routes back through the live day-state path below.
@@ -7044,7 +7320,7 @@ export default function Home() {
       setScheduleEditorBreaks(normalizeDayBreaks(dayState.breaks));
       setScheduleEditorDate(date);
       setScheduleEditorRuns(runs);
-      scheduleEditorLoadedRunIdsRef.current = new Set(runs.map(r => r.id));
+      scheduleEditorLoadedRunsRef.current = dayState.runs.map((run) => ({ ...run }));
       setScheduleEditorIsLiveDay(true);
       setScheduleView("editor");
       return;
@@ -7065,7 +7341,7 @@ export default function Home() {
                 return { id: r.id, brand: r.brand, flavor: r.flavor, casesNeeded: v.casesNeeded ?? 0 };
               })
             );
-            scheduleEditorLoadedRunIdsRef.current = new Set(payload.dayState.runs.map(r => r.id));
+            scheduleEditorLoadedRunsRef.current = payload.dayState.runs.map((run) => ({ ...run }));
             setScheduleEditorIsLiveDay(false);
             setScheduleView("editor");
             return;
@@ -7078,7 +7354,7 @@ export default function Home() {
     setScheduleEditorBreaks(defaultDayBreaks());
     setScheduleEditorDate(todayStr());
     setScheduleEditorRuns([{ id: newId, brand: "", flavor: "", casesNeeded: 0 }]);
-    scheduleEditorLoadedRunIdsRef.current = new Set();
+    scheduleEditorLoadedRunsRef.current = [];
     setScheduleEditorIsLiveDay(false);
     setScheduleView("editor");
   }
@@ -7124,27 +7400,21 @@ export default function Home() {
     if (scheduleEditorDate === todayStr()) {
       try {
         const now = Date.now();
-        const liveById = new Map(dayState.runs.map(r => [r.id, r]));
-        const editorIds = new Set(scheduleEditorRuns.map(r => r.id));
-        // Editor order first; existing runs keep their lifecycle fields
-        // (startedAt/stoppages/…) — saveDayState diff-stamps metaUpdatedAt.
-        const newRuns: RunMeta[] = scheduleEditorRuns.map(er => {
-          const live = liveById.get(er.id);
-          return live
-            ? { ...live, brand: er.brand, flavor: er.flavor }
-            : { id: er.id, brand: er.brand, flavor: er.flavor };
-        });
-        // Live runs the editor omitted: treat as user-deleted ONLY if the
-        // editor actually showed them and they never started; keep the rest.
-        for (const r of dayState.runs) {
-          if (editorIds.has(r.id)) continue;
-          if (scheduleEditorLoadedRunIdsRef.current.has(r.id) && !r.startedAt && !r.endedAt) {
-            tombstoneDeleted("runs", r.id);
-          } else {
-            newRuns.push(r);
-          }
+        const freshestDayState = dayStateRef.current;
+        const reconciliation = reconcileLiveScheduleSave(
+          scheduleEditorLoadedRunsRef.current,
+          scheduleEditorRuns,
+          freshestDayState.runs,
+        );
+        if (!reconciliation.ok) {
+          setScheduleError("Today's schedule must keep at least one run.");
+          setScheduleSaving(false);
+          return;
         }
-        if (newRuns.length === 0) { setScheduleSaving(false); return; } // never leave the day with 0 runs
+        const newRuns = reconciliation.runs;
+        for (const runId of reconciliation.removedRunIds) {
+          tombstoneDeleted("runs", runId);
+        }
         // Persist values with a fresh edit stamp ONLY when they actually
         // changed, so untouched runs don't gratuitously win the LWW merge.
         let currentValsChanged = false;
@@ -7159,9 +7429,9 @@ export default function Home() {
             if (r.id === currentRunId) currentValsChanged = true;
           }
         }
-        const prevCurId = dayState.runs[dayState.currentIndex]?.id;
+        const prevCurId = freshestDayState.runs[freshestDayState.currentIndex]?.id;
         const newIndex = Math.max(0, newRuns.findIndex(r => r.id === prevCurId));
-        const newDs = { ...dayState, runs: newRuns, currentIndex: newIndex, breaks: normalizeDayBreaks(scheduleEditorBreaks) };
+        const newDs = { ...freshestDayState, runs: newRuns, currentIndex: newIndex, breaks: normalizeDayBreaks(scheduleEditorBreaks), breaksUpdatedAt: now };
         setDayState(newDs);
         saveDayState(newDs);
         // Re-load the form if the current run's stored values changed (or the
@@ -7173,7 +7443,8 @@ export default function Home() {
           form.reset(curVals);
           resetFieldArrays(curVals);
         }
-        schedulePush(newDs, 0);
+        const response = await pushTodayCanonical(buildSyncPayload(newDs));
+        if (!response.ok) throw new Error(`schedule sync write failed: ${response.status}`);
         setScheduleView("list");
       } catch {
         setScheduleError("Couldn't save — check your connection and try again.");
@@ -7203,7 +7474,7 @@ export default function Home() {
         syncVersion: 1,
         completeness: "complete",
         baseSnapshotId: scheduleBase.snapshotId,
-        dayState: { runs, date: scheduleEditorDate, resetAt: writeDayResetAt(scheduleEditorDate, todayStr(), undefined, dayStateRef.current.resetAt, Date.now()), breaks: normalizeDayBreaks(scheduleEditorBreaks) },
+        dayState: { runs, date: scheduleEditorDate, resetAt: writeDayResetAt(scheduleEditorDate, todayStr(), undefined, dayStateRef.current.resetAt, Date.now()), breaks: normalizeDayBreaks(scheduleEditorBreaks), breaksUpdatedAt: Date.now() },
         runValues,
         brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
         brandFlavors: loadBrandFlavors(),
@@ -7515,6 +7786,7 @@ export default function Home() {
         initialSnapshot?: boolean;
         peerReceivedAt?: number;
         peerResponseBytes?: number;
+        allowForegroundCanonicalFormReset?: boolean;
       },
     ) => void
   >(() => {});
@@ -7532,6 +7804,18 @@ export default function Home() {
   // separate from the local payload signature: only the server can account for
   // protective merges and canonical normalization.
   const syncSnapshotIdRef = useRef<string>("");
+  // A partial fallback for a missing row returns the canonical empty snapshot
+  // identity, but the row still does not exist. The next write must be a
+  // complete seed against that empty identity rather than another partial
+  // delta, which the server must reject without a row to materialize.
+  const forceCompleteSyncRef = useRef(false);
+  // A snapshot ID alone does not prove that this client has successfully
+  // established a writable complete row. In particular, a missing-row
+  // fallback still returns a snapshot ID. Require one acknowledged complete
+  // write before allowing partial payloads, otherwise queued partial writes
+  // can loop against the missing-row fallback and lifecycle commands can race
+  // a row that does not exist yet.
+  const completeSyncEstablishedRef = useRef(false);
   // Exact server snapshot used as the base for peer partial frames. Never
   // substitute the locally merged React state here.
   const adoptedCanonicalSnapshotRef = useRef<SyncPayload | null>(null);
@@ -7555,6 +7839,18 @@ export default function Home() {
   const serverCalcReceiptRef = useRef<OperationalSnapshotReceipt | null>(null);
   const [serverCalcReceipt, setServerCalcReceipt] =
     useState<OperationalSnapshotReceipt | null>(null);
+  function invalidateOperationalCalcForPackagingRun(runId: string) {
+    if (serverCalcReceiptRef.current?.runId !== runId) return;
+    // The register now owns this run's corrected packaging counters. Revoke
+    // the cached calculation's display receipt so LiveRunContext falls back to
+    // those values until a fresh server projection arrives. Keep the projection
+    // ref as a monotonic watermark so a late, older frame cannot be adopted.
+    serverCalcReceiptRef.current = null;
+    setServerCalcReceipt(null);
+    serverCalcRef.current = null;
+    setServerCalc(null);
+    setServerProjection(null);
+  }
   // Operational commands have their own canonical adoption fence. A command
   // response is not terminal until this callback has installed its snapshot
   // and receipt, so ordinary snapshot writes and auto-track cannot race it.
@@ -7574,6 +7870,20 @@ export default function Home() {
     snapshotId: string | undefined,
   ) {
     if (!projection || !snapshotId || !Number.isFinite(projection.serverTimeMs)) return;
+    // A deterministic browser fixture can advance the authoritative
+    // projection clock ahead of wall time.  The ordinary SSE heartbeat and
+    // calc tick must not move that projection backwards when they arrive
+    // afterward with the real server clock.  Production heartbeats are
+    // monotonic too, so accepting a lower timestamp would otherwise make a
+    // wake/reload display regress to an older counter.
+    const previousProjection = serverProjectionRef.current;
+    if (
+      previousProjection
+      && previousProjection.runId === projection.runId
+      && previousProjection.serverTimeMs > projection.serverTimeMs
+    ) {
+      return;
+    }
     const offset = projection.serverTimeMs - Date.now();
     serverClockOffsetMsRef.current = offset;
     setServerClockOffsetMs(offset);
@@ -7667,6 +7977,7 @@ export default function Home() {
   // The normal snapshot sync remains a recovery path; this separate queue keeps
   // operator occurrence times and can be retried after a tab/browser restart.
   useEffect(() => {
+    if (screenMode !== null) return;
     setOperationalIntentCanonicalAdopter(async (data, intent, outcome) => {
       const adoptionGeneration = ++operationalAdoptionGenerationRef.current;
       operationalAdoptionInFlightRef.current += 1;
@@ -7700,7 +8011,12 @@ export default function Home() {
       const payload = data as SyncPayload;
       const acceptedFinalization =
         outcome === "accepted" && intent.action === "lifecycle" && intent.lifecycle === "end";
-      if (outcome === "accepted" && !acceptedFinalization) {
+      const acceptedStockStart =
+        outcome === "accepted"
+        && intent.action === "lifecycle"
+        && intent.lifecycle === "start"
+        && payload.runValues[intent.runId]?.applicatorStockInitialized === true;
+      if (outcome === "accepted" && !acceptedFinalization && intent.action !== "correction" && !acceptedStockStart) {
         applySyncCallbackRef.current(payload);
         adoptReceipt();
         adoptionSucceeded = true;
@@ -7809,7 +8125,7 @@ export default function Home() {
       setOperationalIntentCanonicalAdopter(undefined);
       window.removeEventListener("online", flush);
     };
-  }, []);
+  }, [screenMode]);
   // Cursor recovery complements the normal snapshot/SSE paths for a device
   // that missed accepted offline commands. It adopts canonical materialized
   // snapshots only; commands themselves are never replayed in the browser.
@@ -7830,6 +8146,9 @@ export default function Home() {
   }, [me?.sandbox, me?.userId]);
 
   function claimAutoTrackEvent(claim: AutoTrackEventClaim): Promise<AutoTrackEventResult> {
+    if (screenMode !== null) {
+      return Promise.reject(new Error("Station displays are read-only"));
+    }
     const enqueuedBaseUpdatedAt = canonicalRunValuesUpdatedAtRef.current[claim.runId] ?? 0;
     const request = autoTrackClaimQueueRef.current
       .catch(() => {})
@@ -7922,16 +8241,8 @@ export default function Home() {
     }
     return { outcome: body.outcome, state: body.state, values: body.values };
       });
-    const surfaced = request.catch((error) => {
-      if (claim.channel === "sauce-barrel") {
-        setWriteError(
-          "Automatic Sauce barrel tracking is delayed. Inventory was not advanced; the same barrel will retry when the connection is ready.",
-        );
-      }
-      throw error;
-    });
-    autoTrackClaimQueueRef.current = surfaced.then(() => {}, () => {});
-    return surfaced;
+    autoTrackClaimQueueRef.current = request.then(() => {}, () => {});
+    return request;
   }
 
   // Mirror today's substitution overlay into the shared-calc module so every
@@ -8011,8 +8322,65 @@ export default function Home() {
         initialSnapshot?: boolean;
         peerReceivedAt?: number;
         peerResponseBytes?: number;
+        allowForegroundCanonicalFormReset?: boolean;
       },
     ) => {
+      let queuedIntentReapplied = false;
+      if (options?.initialSnapshot && payload.completeness !== "partial") {
+        const scope = me ? `${me.sandbox ? "sandbox" : "live"}:${me.userId}` : "";
+        const pending = loadPendingSyncIntent(scope, payload.dayState.date ?? "");
+        if (pending) {
+          if (pending.epoch !== getStoredResetEpoch()) {
+            clearPendingSyncIntent(scope, pending.date, pending.id);
+            recordSyncEvent(
+              "stale",
+              "Discarded queued sync recovery after a reset",
+              "reset-epoch",
+            );
+          } else if (!isValidSyncSnapshotId(syncSnapshotIdRef.current)) {
+            recordSyncEvent(
+              "stale",
+              "Queued sync recovery is retained until a valid server snapshot is available",
+              "stale-base-unrecoverable",
+            );
+          } else {
+            const canonical = persistedSyncPayload(payload);
+            const recovery = rebaseStaleSyncIntent(
+              pending.baseline,
+              pending.payload,
+              canonical,
+              {
+                snapshotId: syncSnapshotIdRef.current,
+                serverTime: payload.serverTime ?? Date.now() + serverClockOffsetMsRef.current,
+              },
+            );
+            if (recovery.reappliedChanges > 0) {
+              payload = recovery.payload;
+              queuedIntentReapplied = true;
+              const saved = savePendingSyncIntent({
+                ...pending,
+                baseSnapshotId: syncSnapshotIdRef.current,
+                baseline: canonical,
+                payload: recovery.payload,
+              });
+              recordSyncEvent(
+                "merge",
+                `Recovered queued sync after reload: reapplied ${recovery.reappliedChanges} changes; retained ${recovery.retainedServerConflicts} server conflicts${saved ? "" : " (recovery copy could not be updated)"}.`,
+                "stale-base-recovered",
+              );
+            } else {
+              clearPendingSyncIntent(scope, pending.date, pending.id);
+              if (recovery.retainedServerConflicts > 0) {
+                recordSyncEvent(
+                  "merge",
+                  `Kept ${recovery.retainedServerConflicts} newer server values during queued sync recovery`,
+                  "stale-base-conflicts",
+                );
+              }
+            }
+          }
+        }
+      }
       publishAutoTrackCoordination(payload);
       isSyncApplyingRef.current = true;
       const arraysEqual = (a: string[], b: string[]) =>
@@ -8047,7 +8415,7 @@ export default function Home() {
       // before. `rejectedStale` triggers a re-push so peers converge on our edit.
       const remoteUpd = payload.runValuesUpdatedAt ?? {};
       const localUpd = loadRunValuesUpdated();
-      let rejectedStale = false;
+      let rejectedStale = queuedIntentReapplied;
       const localPackaging = loadPackagingProgress();
       // Date/reset acceptance fences packaging exactly like day/run values. A
       // stale payload from another day must never advance this independent map.
@@ -8065,6 +8433,7 @@ export default function Home() {
         !!packagingRunAtApplyStart &&
         packagingMerge.acceptedRemoteIds.has(packagingRunAtApplyStart);
       if (packagingFenceRaised) {
+        invalidateOperationalCalcForPackagingRun(packagingRunAtApplyStart!);
         const accepted = packagingMerge.merged[packagingRunAtApplyStart];
         autoSuppressUntilRef.current = Math.max(
           autoSuppressUntilRef.current,
@@ -8081,6 +8450,7 @@ export default function Home() {
       // ── Run values (only accept if we're taking the remote day) ──
       if (acceptRemoteDay) {
         const mergedUpd: Record<string, number> = { ...localUpd };
+        const runValueServerNow = Date.now() + serverClockOffsetMsRef.current;
         for (const [id, vals] of Object.entries(payload.runValues)) {
           const rTs = remoteUpd[id] ?? 0;
           const lTs = localUpd[id] ?? 0;
@@ -8100,6 +8470,7 @@ export default function Home() {
             localVals,
             rTs,
             lTs,
+            runValueServerNow,
           );
           let acceptedVals = localVals;
           if (!acceptWholeRun) {
@@ -8107,7 +8478,7 @@ export default function Home() {
             // empty-over-populated corruption, advance our stamp so the heal
             // re-push strictly wins; a genuinely-fresher local edit keeps its
             // stamp as-is (the merge already bumped re-pointed runs' stamps).
-            if (isEmptyOverPopulated(vals as FormValues, localVals)) mergedUpd[id] = Date.now();
+            if (isEmptyOverPopulated(vals as FormValues, localVals)) mergedUpd[id] = runValueServerNow;
             rejectedStale = true;
           } else {
             // Field-level preservation: casesNeeded is the planned target, set
@@ -8125,7 +8496,10 @@ export default function Home() {
               // arrives via SSE would otherwise display with decimals on screen.
               casesOnCurrentSkid: Math.round(Number(remoteVals.casesOnCurrentSkid) || 0),
             };
-            if (rTs > lTs) mergedUpd[id] = rTs;
+            if (
+              rTs > lTs
+              || isRunValueStampAheadOfServerTime(lTs, runValueServerNow)
+            ) mergedUpd[id] = rTs;
           }
           // Packaging progress is a separate causal register. Its winning pair
           // overlays whichever whole-run copy won above, so a stale automatic
@@ -8135,7 +8509,27 @@ export default function Home() {
             acceptedVals,
             packagingMerge.merged[id],
           );
+          // Server auto-track claims own only their slot counter. Merge that
+          // field even when an unrelated local edit has a newer run-wide stamp;
+          // the private ownership proof and correction generation prevent an
+          // older automatic event from overriding a manual App 1 correction.
+          const app1Progress = serverOwnedApp1BatchProgress(payload, id, localVals);
+          if (app1Progress) acceptedVals = { ...acceptedVals, ...app1Progress };
+          const stockProgress = serverOwnedApplicatorStockProgress(payload, id, localVals);
+          if (stockProgress) acceptedVals = { ...acceptedVals, ...stockProgress };
           saveRunValues(id, acceptedVals);
+        }
+        // A partial sync may carry an accepted progress register without a
+        // corresponding runValues entry. Persist that register against the
+        // same run ID so reload hydration and the shared form see the same
+        // winning counters without borrowing the selected run's snapshot.
+        for (const id of packagingMerge.acceptedRemoteIds) {
+          if (Object.prototype.hasOwnProperty.call(payload.runValues, id)) continue;
+          const progress = packagingMerge.merged[id];
+          if (!progress) continue;
+          const values = loadRunValues(id);
+          const overlaid = overlayPackagingProgress(values, progress);
+          if (!deepEqual(values, overlaid)) saveRunValues(id, overlaid);
         }
         saveRunValuesUpdated(mergedUpd);
       }
@@ -8149,7 +8543,10 @@ export default function Home() {
         formHandoffRef.current = true;
         const adopted = payload.dayState.runs[0];
         if (adopted) {
-          const adoptedValues = mergeRunDefaults(loadRunValues(adopted.id));
+          // The first canonical snapshot may carry newer automatic Packaging
+          // progress than its ordinary run values. Bind the form to the
+          // register-aware values before publishing the selected run.
+          const adoptedValues = mergeRunDefaults(loadPackagingAwareRunValues(adopted.id));
           lastFormRunIdRef.current = "";
           form.reset(adoptedValues);
           resetFieldArrays(adoptedValues);
@@ -8353,9 +8750,17 @@ export default function Home() {
             : mergePrepPhaseClient(prev.prepPhase, remotePrepPhase);
           const remoteBreaks = normalizeDayBreaks((payload.dayState as Record<string, unknown>).breaks);
           const localBreaks = normalizeDayBreaks(prev.breaks);
-          const mergedBreaks: DayBreaks = isReset
-            ? remoteBreaks
-            : (Object.prototype.hasOwnProperty.call(payload.dayState, "breaks") ? remoteBreaks : localBreaks);
+          const remoteBreakStamp = Number((payload.dayState as Record<string, unknown>).breaksUpdatedAt);
+          const localBreakStamp = Number((prev as Record<string, unknown>).breaksUpdatedAt);
+          const remoteBreaksAreNewer = Number.isFinite(remoteBreakStamp)
+            && remoteBreakStamp > 0
+            && remoteBreakStamp > (Number.isFinite(localBreakStamp) ? localBreakStamp : 0);
+          const mergedBreaks: DayBreaks = isReset || remoteBreaksAreNewer ? remoteBreaks : localBreaks;
+          const mergedBreaksUpdatedAt = isReset
+            ? (remoteBreakStamp > 0 ? remoteBreakStamp : undefined)
+            : remoteBreaksAreNewer
+            ? remoteBreakStamp
+            : (Number.isFinite(localBreakStamp) && localBreakStamp > 0 ? localBreakStamp : undefined);
           const newDs = {
             ...prev,
             runs: newRuns,
@@ -8368,6 +8773,7 @@ export default function Home() {
             stagedItems: mergedStaged,
             prepPhase: mergedPrepPhase,
             breaks: mergedBreaks,
+            ...(mergedBreaksUpdatedAt ? { breaksUpdatedAt: mergedBreaksUpdatedAt } : {}),
           };
           // Skip the re-render when nothing actually changed (sync echoes its own
           // pushes ~every 10s); a fresh object every time reset open-menu scroll.
@@ -8425,22 +8831,51 @@ export default function Home() {
         const curRemoteTs = currentId ? (remoteUpd[currentId] ?? 0) : 0;
         const adoptedPackaging =
           !!currentId && packagingMerge.acceptedRemoteIds.has(currentId);
-        if (adoptedPackaging) {
+        const localEditQuietMs = Date.now() - lastLocalEditRef.current;
+        const equalPackagingEcho =
+          !!currentId &&
+          !adoptedPackaging &&
+          getEqualPackagingProgress(
+            localPackaging,
+            payload.packagingProgress,
+            currentId,
+          );
+        if (adoptedPackaging || equalPackagingEcho) {
           const progress = packagingMerge.merged[currentId!];
           autoSuppressUntilRef.current = Math.max(
             autoSuppressUntilRef.current,
             progress?.manualOverrideUntil ?? 0,
           );
         }
-        if (currentId && payload.runValues[currentId] && (adoptedPackaging || (
-          curLocalTs <= curRemoteTs &&
-          Date.now() - lastLocalEditRef.current > 2000 &&
-          pushAcknowledgedRef.current
-        ))
-          // Never blank the live form by resetting it to an all-default remote
-          // value while our stored copy is still populated (the same
-          // empty-over-populated corruption guarded on the run-values loop above).
-          && !isEmptyOverPopulated(payload.runValues[currentId] as FormValues, loadRunValues(currentId))) {
+        const currentRunValues = currentId
+          ? payload.runValues[currentId] as FormValues | undefined
+          : undefined;
+        const emptyOverPopulatedFormReset =
+          !!currentId &&
+          !!currentRunValues &&
+          isEmptyOverPopulated(currentRunValues, loadRunValues(currentId));
+        const canResetLiveForm = Boolean(
+          currentId &&
+          (currentRunValues || adoptedPackaging) &&
+          (
+            adoptedPackaging ||
+            (
+              curLocalTs <= curRemoteTs &&
+              // A successful foreground pull has already resolved this run's
+              // LWW merge. Its canonical value may bypass the ordinary quiet/
+              // acknowledgment guard, but a strictly newer local edit remains.
+              (
+                options?.allowForegroundCanonicalFormReset ||
+                (
+                  localEditQuietMs > 2000 &&
+                  pushAcknowledgedRef.current
+                )
+              )
+            )
+          ) &&
+          !emptyOverPopulatedFormReset,
+        );
+        if (canResetLiveForm) {
           // Read the already-reconciled durable copy rather than the raw payload:
           // the whole-run LWW and packaging register may have selected different
           // sides, and the form must adopt that combined result atomically.
@@ -8465,6 +8900,59 @@ export default function Home() {
             resetFieldArrays(merged);
           }
         }
+        // Equal packaging versions do not appear in acceptedRemoteIds, but
+        // they still confirm the durable register as the winner. Reconcile
+        // only its two owned fields so an idle echo cannot reset unrelated
+        // active-form edits (or clear their RHF dirty state).
+        if (currentId && equalPackagingEcho) {
+          const values = form.getValues();
+          if (values.skidsCompleted !== equalPackagingEcho.skidsCompleted) {
+            form.setValue("skidsCompleted", equalPackagingEcho.skidsCompleted, {
+              shouldDirty: false,
+              shouldTouch: false,
+              shouldValidate: false,
+            });
+          }
+          if (values.casesOnCurrentSkid !== equalPackagingEcho.casesOnCurrentSkid) {
+            form.setValue("casesOnCurrentSkid", equalPackagingEcho.casesOnCurrentSkid, {
+              shouldDirty: false,
+              shouldTouch: false,
+              shouldValidate: false,
+            });
+          }
+        }
+        if (currentId && payload.runValues[currentId]) {
+          const app1Progress = serverOwnedApp1BatchProgress(
+            payload,
+            currentId,
+            form.getValues(),
+          );
+          if (app1Progress) {
+            for (const [field, value] of Object.entries(app1Progress)) {
+              const key = field as "app1BatchesMade" | "app1BatchCorrectionGeneration";
+              if (form.getValues(key) !== value) {
+                form.setValue(key, value, {
+                  shouldDirty: false,
+                  shouldTouch: false,
+                  shouldValidate: false,
+                });
+              }
+            }
+          }
+          const stockProgress = serverOwnedApplicatorStockProgress(payload, currentId, form.getValues());
+          if (stockProgress) {
+            for (const [field, value] of Object.entries(stockProgress)) {
+              const key = field as keyof FormValues;
+              if (form.getValues(key) !== value) {
+                form.setValue(key, value as never, {
+                  shouldDirty: false,
+                  shouldTouch: false,
+                  shouldValidate: false,
+                });
+              }
+            }
+          }
+        }
       }
 
       // ── Brands ──
@@ -8484,6 +8972,9 @@ export default function Home() {
         const merged = dropDeleted(preDrop, deletedMap, "brands").sort((a, b) => a.localeCompare(b));
         saveList(BRANDS_KEY, merged);
         setBrands(prev => (arraysEqual(prev, merged) ? prev : merged));
+        setAdoptedBrandsForProfilePurge((current) =>
+          current && arraysEqual(current, merged) ? current : merged,
+        );
       }
 
       // ── Brand flavors ──
@@ -8723,6 +9214,7 @@ export default function Home() {
   // calls within the same day return applied=false with zero side-effects.
   // Managers-only gate on the server; non-managers get a harmless 403.
   useEffect(() => {
+    if (screenMode !== null) return;
     (async () => {
       try {
         await fetch("/api/inventory/consume-day-start", {
@@ -8734,7 +9226,7 @@ export default function Home() {
         /* best-effort — daily reset will retry next boot if needed */
       }
     })();
-  }, []);
+  }, [screenMode]);
 
     // ── Factory KV: startup fetch + write-through hook registration ──
   // Fetch all migrated factory-wide keys from the server on login, hydrate
@@ -8751,11 +9243,11 @@ export default function Home() {
         // Only flush after comparing each durable operation with the server
         // timestamp. A pre-read flush could let a sleeping device overwrite a
         // setting that another device saved while it was offline.
-        void flushFactoryQueue();
+        if (screenMode === null) void flushFactoryQueue();
         // One-time migration heals: push localStorage data to the server for
         // devices that had data before the factory-KV migration. Best-effort —
         // failures leave the marker unset so the heal retries on the next load.
-        void runFactoryKvMigration(data);
+        if (screenMode === null) void runFactoryKvMigration(data);
       } catch {
         // Offline / error — keep whatever is in localStorage already
       }
@@ -8763,12 +9255,13 @@ export default function Home() {
     // Register write-through: every storage mutation for a cached factory key
     // bumps the local stamp and fires a server PUT.
     setKvMutationHook(({ key, value }) => {
+      if (screenMode !== null) return;
       if (FACTORY_KV_CACHED_KEYS.has(key)) {
         putFactoryKey(key, value);
       }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [screenMode]);
 
   // ── Brand+flavor profile pool reconcile (boot) ──
   // Profiles live in their own factory-wide server pool with per-profile
@@ -8781,6 +9274,7 @@ export default function Home() {
   // recovery keep long-lived tabs converged; queued pushes retry on each pass.
   // Best-effort — a fetch failure changes nothing locally.
   useEffect(() => {
+    if (screenMode !== null) return;
     let cancelled = false;
     const pass = async () => {
       try {
@@ -8795,7 +9289,7 @@ export default function Home() {
     };
     void pass();
     return () => { cancelled = true; };
-  }, []);
+  }, [screenMode]);
 
   // Dough pause/resume is immediate in the hook; this listener durably queues
   // the corresponding server-visible control without coupling the hook to Home.
@@ -8826,15 +9320,17 @@ export default function Home() {
         if (!current()) return;
       }
       if (families.has("profiles")) {
-        try {
-          const result = await reconcileProfilesFromServerDetailed();
+        if (screenMode === null) {
+          try {
+            const result = await reconcileProfilesFromServerDetailed();
+            if (!current()) return;
+            if (result.changed) {
+              setDieTypes(healDieTypesFromProfiles());
+              applyProfileReconcileRef.current(result);
+            }
+          } catch {}
           if (!current()) return;
-          if (result.changed) {
-            setDieTypes(healDieTypesFromProfiles());
-            applyProfileReconcileRef.current(result);
-          }
-        } catch {}
-        if (!current()) return;
+        }
       }
       if (families.has("factory-data")) {
         try {
@@ -8842,7 +9338,7 @@ export default function Home() {
           if (!current()) return;
           hydrateFromServer(data);
           refreshFactoryDataConsumers();
-          await flushFactoryQueue();
+          if (screenMode === null) await flushFactoryQueue();
         } catch {}
         if (!current()) return;
       }
@@ -8930,6 +9426,7 @@ export default function Home() {
       getSnapshot: () => syncSnapshotIdRef.current,
       onOpen: () => {
       setSyncConnected(true);
+      if (screenMode !== null) dispatchScreenSync({ type: "stream-open" });
       recordSyncEvent("connected", "Live sync connection opened");
       // The coordination hook routes stream drops through the foreground
       // recovery owner. Do not start a second reconnect push here; the initial
@@ -8965,6 +9462,7 @@ export default function Home() {
           canonicalRevision?: number;
           masterDataChanged?: boolean;
           configurationInvalidated?: boolean;
+          canonicalReconcile?: boolean;
           family?: "master-data" | "profiles" | "factory-data" | "die-types" | "supervisor-pin" | "name-links" | "merged-away";
           senderId?: string | null;
         };
@@ -9069,10 +9567,10 @@ export default function Home() {
             ? mergeSparseServerRunMap(serverRunLinesRef.current, msg.runLines)
             : msg.runLines;
         }
-        if (msg.initial) {
+        if (msg.initial || msg.canonicalReconcile) {
           // An initial frame is also the reconnect baseline: refresh every
           // independent configuration family in case its nudge was missed while
-          // this live stream was disconnected.
+          // this live stream was disconnected or its outbox cursor expired.
           reconcileConfigurationBaseline();
         } else if (
           (msg.configurationInvalidated || msg.masterDataChanged) &&
@@ -9144,15 +9642,20 @@ export default function Home() {
           });
           if (!msg.initial) recordSyncEvent("merge", "Remote state merged into this device");
         } else if (msg.initial) {
-          // The server explicitly has no row. Settle the local automatic seed
-          // to default values before opening the baseline gate, so stale form
-          // contents cannot become a shared first run.
-          const seedId = dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id ?? "";
+          // A missing initial row is an authoritative empty baseline. Replace
+          // the local day snapshot before opening the writer gate; merely
+          // resetting the form leaves the stale run in localStorage, where the
+          // next normal merge can republish it after a reset-epoch reload.
+          const emptyDay = freshDayState();
+          dayStateRef.current = emptyDay;
+          setDayState(emptyDay);
+          saveDayState(emptyDay, { stampMeta: false });
+          saveRunValuesUpdated({});
+          savePackagingProgress({});
           formHandoffRef.current = true;
           lastFormRunIdRef.current = "";
           form.reset(DEFAULT_VALUES);
           resetFieldArrays(DEFAULT_VALUES);
-          lastFormRunIdRef.current = seedId;
           formHandoffRef.current = false;
         }
         return true;
@@ -9166,11 +9669,20 @@ export default function Home() {
       // effect. Fence automatic pushes until that reconnect delivers its own
       // initial snapshot.
       setSyncConnected(false);
+      if (screenMode !== null) dispatchScreenSync({ type: "stream-error" });
       // The browser stream can't read the HTTP status, so a drop may be the daily reset
       // signing us out. Re-check /me; if the session is gone we land on login.
       revalidate();
     },
     onInitialBaseline: (shouldPush) => {
+      if (screenMode !== null) {
+        // The coordinator calls this only after the canonical baseline has
+        // been accepted and applied. A read-only display must not echo it.
+        dispatchScreenSync({ type: "canonical-adopted" });
+        pushAcknowledgedRef.current = true;
+        setSyncPendingCount(0);
+        return;
+      }
       // applySyncCallbackRef clears its sync-apply suppression in a frame.
       // The manager opens this gate only after Home has merged the baseline.
       if (shouldPush) requestAnimationFrame(() => {
@@ -9183,7 +9695,9 @@ export default function Home() {
         schedulePush(dayStateRef.current, 0);
       });
     },
-    onClose: () => {},
+    onClose: () => {
+      if (screenMode !== null) dispatchScreenSync({ type: "stream-closed" });
+    },
     });
     return () => {
       cancelled = true;
@@ -9206,6 +9720,7 @@ export default function Home() {
     let cancelled = false;
 
     const foregroundRegistration = registerForegroundRecovery(visibleTabScheduler, async ({ classify }): Promise<boolean> => {
+      if (screenMode !== null) dispatchScreenSync({ type: "recovery-started" });
       const recoveryOwner = synchronizationStateMachineRef.current.beginWake();
       foregroundRecoveryOwnerRef.current = recoveryOwner;
       const isCurrentRecovery = () =>
@@ -9284,6 +9799,12 @@ export default function Home() {
             isCurrent: isCurrentRecovery,
             adoptUnchanged: (body) => {
               adoptOperationalRevision(body.canonicalRevision);
+              if (body.operationalProjection) {
+                adoptOperationalProjection(
+                  body.operationalProjection,
+                  body.snapshotId,
+                );
+              }
               syncSnapshotIdRef.current = body.snapshotId;
               pushAcknowledgedRef.current = true;
             },
@@ -9306,6 +9827,7 @@ export default function Home() {
           setIsOnline(true);
           if (recovery.kind === "unchanged") {
             reconciled = true;
+            if (screenMode !== null) dispatchScreenSync({ type: "recovery-succeeded" });
             return true;
           }
           const payload = recovery.payload;
@@ -9349,11 +9871,17 @@ export default function Home() {
                 lastSyncSigRef.current = "";
               },
               applyGeneralMerge: (canonicalPayload) => {
-                applySyncCallbackRef.current(canonicalPayload);
+                applySyncCallbackRef.current(canonicalPayload, {
+                  allowForegroundCanonicalFormReset: true,
+                });
               },
-              reconcileProfiles: reconcileProfilesFromServerDetailed,
+              reconcileProfiles: () => screenMode === null
+                ? reconcileProfilesFromServerDetailed()
+                : Promise.resolve(
+                    { changed: false } as Awaited<ReturnType<typeof reconcileProfilesFromServerDetailed>>,
+                  ),
               applyProfiles: (profileResult) => {
-                if (!profileResult.changed) return;
+                if (screenMode !== null || !profileResult.changed) return;
                 setDieTypes(healDieTypesFromProfiles());
                 applyProfileReconcileRef.current(profileResult);
               },
@@ -9361,7 +9889,7 @@ export default function Home() {
               applyFactory: async (factoryData) => {
                 hydrateFromServer(factoryData);
                 refreshFactoryDataConsumers();
-                await flushFactoryQueue();
+                if (screenMode === null) await flushFactoryQueue();
               },
               isCurrent: isCurrentRecovery,
             });
@@ -9372,6 +9900,7 @@ export default function Home() {
            pushAcknowledgedRef.current = true;
          if (!isCurrentRecovery()) return false;
          reconciled = true;
+          if (screenMode !== null) dispatchScreenSync({ type: "recovery-succeeded" });
           return true;
          } catch (error) {
             classify(
@@ -9391,6 +9920,7 @@ export default function Home() {
              foregroundStopIntentRef.current?.runId,
            );
            setSyncFailedCount((count) => count + 1);
+           if (screenMode !== null) dispatchScreenSync({ type: "recovery-failed" });
            showForegroundRecoveryNotice(
              "failed",
              "Couldn't confirm the current production state. Your local work is retained and tracking is paused. Retry recovery when connected.",
@@ -9506,6 +10036,7 @@ export default function Home() {
   // across a device that was offline during the merge. Best-effort: a failure
   // just leaves the existing local/sync behavior unchanged.
   useEffect(() => {
+    if (screenMode !== null) return;
     let cancelled = false;
     (async () => {
       let remoteNames: string[];
@@ -9541,7 +10072,7 @@ export default function Home() {
       prune(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS, setMixIngredients);
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [screenMode]);
 
   // Periodic push every 30 s — ensures sync recovers automatically even with no user activity
   useEffect(() => {
@@ -9557,6 +10088,7 @@ export default function Home() {
   // Target Doughball Weight rides along (falling back to any weight the preset
   // already carried) so the weight follows the recipe name.
   useEffect(() => {
+    if (screenMode !== null) return;
     const name = v.doughRecipeName?.trim();
     if (!name || (v.doughRecipe ?? []).length === 0) return;
     const presets = loadDoughRecipePresets();
@@ -9566,7 +10098,7 @@ export default function Home() {
       ? { rows: v.doughRecipe ?? [], doughballWeightOz: ballOz }
       : { rows: v.doughRecipe ?? [] };
     saveDoughRecipePresets(presets);
-  }, [v.doughRecipeName, v.doughRecipe, v.targetDoughballWeight]);
+  }, [v.doughRecipeName, v.doughRecipe, v.targetDoughballWeight, screenMode]);
 
   // Self-heal: a run form pointing at a pool dough recipe that KNOWS its
   // doughball weight, while the form still sits at 0 oz, adopts the pool
@@ -9621,15 +10153,17 @@ export default function Home() {
 
   // Auto-save frontline (sauce) recipe preset
   useEffect(() => {
+    if (screenMode !== null) return;
     const name = v.frontlineRecipeName?.trim();
     if (!name || (v.frontlineRecipe ?? []).length === 0) return;
     const presets = loadFrontlineRecipePresets();
     presets[name] = v.frontlineRecipe ?? [];
     saveFrontlineRecipePresets(presets);
-  }, [v.frontlineRecipeName, v.frontlineRecipe]);
+  }, [v.frontlineRecipeName, v.frontlineRecipe, screenMode]);
 
   // Auto-save cheese blend recipe presets (one per applicator, shared pool by name)
   useEffect(() => {
+    if (screenMode !== null) return;
     const saves: [string | undefined, RecipeRow[]][] = [
       [v.app1CheeseRecipeName, v.app1CheeseRecipe ?? []],
       [v.app2CheeseRecipeName, v.app2CheeseRecipe ?? []],
@@ -9645,7 +10179,7 @@ export default function Home() {
       changed = true;
     }
     if (changed) saveCheeseRecipePresets(presets);
-  }, [v.app1CheeseRecipeName, v.app1CheeseRecipe, v.app2CheeseRecipeName, v.app2CheeseRecipe, v.app3CheeseRecipeName, v.app3CheeseRecipe, v.app4CheeseRecipeName, v.app4CheeseRecipe]);
+  }, [v.app1CheeseRecipeName, v.app1CheeseRecipe, v.app2CheeseRecipeName, v.app2CheeseRecipe, v.app3CheeseRecipeName, v.app3CheeseRecipe, v.app4CheeseRecipeName, v.app4CheeseRecipe, screenMode]);
 
   // Daily rollover is server-owned. The initial SSE frame and the reset-epoch
   // handshake are the only current-day bootstrap authorities: they adopt the
@@ -9691,9 +10225,14 @@ export default function Home() {
     res: Response,
     applyToLiveDay: boolean,
     shouldConsume?: () => boolean,
-  ): Promise<{ body: unknown; stale: boolean }> {
+  ): Promise<{ body: unknown; stale: boolean; recoverableConflict: boolean }> {
     const result = await consumeSyncWriteResponse<SyncPayload>(res, {
       shouldConsume,
+      onServerTime: (serverTime) => {
+        const offset = serverTime - Date.now();
+        serverClockOffsetMsRef.current = offset;
+        setServerClockOffsetMs(offset);
+      },
       onStale: (body) => {
         handleStaleSyncWrite(body);
       },
@@ -9701,11 +10240,29 @@ export default function Home() {
         ? (canonical) => applySyncCallbackRef.current(canonical)
         : undefined,
     });
+    if (result.malformed) {
+      throw new Error("sync write returned a malformed response");
+    }
+    if (res.status === 409 && !result.recoverableConflict) {
+      throw new Error("sync write returned a non-recoverable conflict");
+    }
     const snapshot = result.body?.snapshotId;
     adoptOperationalRevision(
       (result.body as { canonicalRevision?: unknown } | null | undefined)?.canonicalRevision,
     );
     if (typeof snapshot === "string") syncSnapshotIdRef.current = snapshot;
+    const partialFallbackBody = result.body as
+      | { partialFallback?: boolean; data?: unknown }
+      | null
+      | undefined;
+    if (partialFallbackBody?.partialFallback) {
+      // A fallback is a full canonical rebase. The next write must be complete:
+      // an empty baseline can have a snapshot ID even when no daily row exists,
+      // and a partial replay cannot create that row.
+      forceCompleteSyncRef.current = true;
+      completeSyncEstablishedRef.current = false;
+      lastSyncSigRef.current = "";
+    }
     if (
       result.body?.data
       && typeof result.body.data === "object"
@@ -9714,19 +10271,13 @@ export default function Home() {
     ) {
       adoptedCanonicalSnapshotRef.current = persistedSyncPayload(result.body.data);
     }
-    const partialFallbackBody = result.body as
-      | { partialFallback?: boolean; data?: unknown }
-      | null
-      | undefined;
-    if (partialFallbackBody?.partialFallback && partialFallbackBody.data === null) {
-      // A partial write against a missing row has no valid snapshot identity.
-      // Clear the partial baseline so the queued recovery push is complete.
-      syncSnapshotIdRef.current = "";
-      lastSyncSigRef.current = "";
+    if (!partialFallbackBody?.partialFallback) {
+      completeSyncEstablishedRef.current = true;
     }
     if (result.body?.data && typeof result.body.data === "object") {
       const canonical = result.body.data as SyncPayload;
       canonicalRunValuesUpdatedAtRef.current = { ...(canonical.runValuesUpdatedAt ?? {}) };
+      if (!partialFallbackBody?.partialFallback) forceCompleteSyncRef.current = false;
     }
     const operationalProjection = (
       result.body as (typeof result.body & { operationalProjection?: unknown }) | null | undefined
@@ -9743,31 +10294,93 @@ export default function Home() {
   }
 
   async function pushTodayCanonical(payload: SyncPayload): Promise<Response> {
-    let res = await writeToday({
+    if (screenMode !== null) throw new Error("Station displays are read-only");
+    const scope = me ? `${me.sandbox ? "sandbox" : "live"}:${me.userId}` : "";
+    const date = payload.dayState.date ?? todayStr();
+    const work = {
       payload,
+      baseSnapshot: adoptedCanonicalSnapshotRef.current ?? undefined,
+      pendingIntentId: genId(),
+    };
+    if (scope && work.baseSnapshot) {
+      const saved = savePendingSyncIntent({
+        version: 1,
+        id: work.pendingIntentId,
+        scope,
+        date,
+        epoch: getStoredResetEpoch(),
+        baseSnapshotId: payload.baseSnapshotId ?? syncSnapshotIdRef.current,
+        baseline: persistedSyncPayload(work.baseSnapshot),
+        payload,
+      });
+      if (!saved) {
+        recordSyncEvent(
+          "failure",
+          "Offline recovery context could not be saved for a page reload",
+          "pending-intent-storage",
+        );
+      }
+    }
+    let res = await writeToday({
+      payload: work.payload,
       clientId: clientId.current,
       snapshotId: syncSnapshotIdRef.current,
       epoch: getStoredResetEpoch(),
     });
     let result = await consumeCanonicalSyncWriteResponse(res, true);
+    if (!res.ok && !result.recoverableConflict) throw new Error(`sync write failed: ${res.status}`);
+    if (result.stale) throw new Error("sync write was rejected by the reset boundary");
     // A stale base can return successful transport with the authoritative
     // canonical snapshot instead of applying this write. Adopt it first, then
     // rebuild once from the reconciled local state so only edits still eligible
     // after canonical adoption are replayed against the new exact base.
     const partialFallbackBody = result.body as
-      | { partialFallback?: boolean; data?: unknown }
+      | { partialFallback?: boolean; data?: SyncPayload; snapshotId?: string; serverTime?: number }
       | null
       | undefined;
     if (shouldReplaySyncWrite(partialFallbackBody)) {
-      const recoveryPayload = buildSyncPayload(dayStateRef.current);
+      if (!partialFallbackBody?.data) {
+        throw new Error("Stale sync response omitted its canonical data");
+      }
+      const recovery = rebasePendingSyncWork(
+        work,
+        partialFallbackBody.data,
+        partialFallbackBody.snapshotId,
+        partialFallbackBody.serverTime,
+      );
+      if (recovery.reappliedChanges === 0) {
+        clearPendingSyncIntent(scope, date, work.pendingIntentId);
+        return res;
+      }
       res = await writeToday({
-        payload: recoveryPayload,
+        payload: work.payload,
         clientId: clientId.current,
         snapshotId: syncSnapshotIdRef.current,
         epoch: getStoredResetEpoch(),
       });
       result = await consumeCanonicalSyncWriteResponse(res, true);
+      const secondFallback = result.body as
+        | { partialFallback?: boolean; data?: SyncPayload; snapshotId?: string; serverTime?: number }
+        | null
+        | undefined;
+      if (!res.ok && !result.recoverableConflict) {
+        throw new Error(`sync recovery write failed: ${res.status}`);
+      }
+      if (result.stale) throw new Error("sync recovery write was rejected by the reset boundary");
+      if (shouldReplaySyncWrite(secondFallback)) {
+        if (!secondFallback?.data) {
+          throw new Error("Repeated stale sync response omitted canonical data");
+        }
+        rebasePendingSyncWork(
+          work,
+          secondFallback.data,
+          secondFallback.snapshotId,
+          secondFallback.serverTime,
+        );
+        throw new Error("sync write remained stale after canonical rebase");
+      }
     }
+    clearPendingSyncIntent(scope, date, work.pendingIntentId);
     return res;
   }
 
@@ -9781,10 +10394,47 @@ export default function Home() {
       queuedAtPerf?: number;
       queuedAtEpoch?: number;
       trigger?: SyncMeasurementTrigger;
+      baseSnapshot?: SyncPayload;
+      pendingIntentId?: string;
+      recoveryBlocked?: boolean;
     },
   ) {
+    if (screenMode !== null) return;
     if (generation !== syncPushGenerationRef.current) return;
-    const work = { payload, sig, ...timing };
+    const pendingScope = me ? `${me.sandbox ? "sandbox" : "live"}:${me.userId}` : "";
+    const pendingDate = payload.dayState.date ?? todayStr();
+    const priorIntent = loadPendingSyncIntent(pendingScope, pendingDate);
+    const matchesPriorIntent = priorIntent
+      && JSON.stringify(priorIntent.payload) === JSON.stringify(payload);
+    const baseSnapshot =
+      timing?.baseSnapshot
+      ?? (matchesPriorIntent ? priorIntent.baseline : undefined)
+      ?? adoptedCanonicalSnapshotRef.current
+      ?? undefined;
+    const pendingIntentId =
+      timing?.pendingIntentId
+      ?? (matchesPriorIntent ? priorIntent.id : undefined)
+      ?? genId();
+    const work = { payload, sig, ...timing, baseSnapshot, pendingIntentId };
+    if (pendingScope && baseSnapshot) {
+      const saved = savePendingSyncIntent({
+        version: 1,
+        id: pendingIntentId,
+        scope: pendingScope,
+        date: pendingDate,
+        epoch: getStoredResetEpoch(),
+        baseSnapshotId: payload.baseSnapshotId ?? syncSnapshotIdRef.current,
+        baseline: persistedSyncPayload(baseSnapshot),
+        payload,
+      });
+      if (!saved) {
+        recordSyncEvent(
+          "failure",
+          "Offline recovery context could not be saved for a page reload",
+          "pending-intent-storage",
+        );
+      }
+    }
     // A local edit, focus event, and online event can all arrive while a
     // request is retrying. Keep only the newest payload; never start a second
     // retry chain for the same tab.
@@ -9827,6 +10477,8 @@ export default function Home() {
       ...(timing?.queuedAtEpoch ? { syncMeta: { queuedAt: timing.queuedAtEpoch } } : {}),
     });
     const requestBytes = new Blob([requestBody]).size;
+    let responseStatus = 0;
+    let recoverableConflictResponse = false;
     writeToday({
       payload,
       clientId: clientId.current,
@@ -9835,6 +10487,7 @@ export default function Home() {
       signal: controller.signal,
       queuedAtEpoch: timing?.queuedAtEpoch,
     }).then(async (res) => {
+      responseStatus = res.status;
       if (generation !== syncPushGenerationRef.current) return;
       // Authentication failures are permanent for this request. Retrying them
       // only creates a storm while the session is being repaired.
@@ -9854,45 +10507,119 @@ export default function Home() {
         setSyncRetryWaiting(false);
         return;
       }
-      // Any other non-success response must follow the retry path below.
+      // Any non-success response other than the documented canonical 409
+      // fallback must follow the retry path below.
       // consumeCanonicalSyncWriteResponse intentionally does not throw for
       // HTTP errors so callers can safely inspect their response bodies; a
       // sync write must not be recorded as acknowledged just because the
       // server returned parseable JSON with a 5xx status.
-      if (!res.ok) throw new Error(`Sync write failed: ${res.status}`);
+      if (!res.ok && res.status !== 409) throw new Error(`Sync write failed: ${res.status}`);
       const mergeStartedAt = typeof performance === "undefined" ? null : performance.now();
       let canonicalResult = await consumeCanonicalSyncWriteResponse(
         res,
         true,
         () => generation === syncPushGenerationRef.current,
       );
+      recoverableConflictResponse = canonicalResult.recoverableConflict;
       if (generation !== syncPushGenerationRef.current) return;
+      if (!res.ok && !canonicalResult.recoverableConflict) {
+        throw new Error(`Sync write failed: ${res.status}`);
+      }
       // A stale base is successful transport, but it did not persist this
       // local change. Canonical response consumption runs first; rebuild from
       // that reconciled state and replay once against its exact snapshot.
       const partialFallbackBody = canonicalResult.body as
-        | { partialFallback?: boolean; data?: unknown }
+        | { partialFallback?: boolean; data?: SyncPayload; snapshotId?: string; serverTime?: number }
         | null
         | undefined;
+      let replayedAfterPartialFallback = false;
+      let recoveredWithoutReplay = false;
       if (shouldReplaySyncWrite(partialFallbackBody)) {
-        const recoveryPayload = buildSyncPayload(dayStateRef.current);
-        res = await writeToday({
-          payload: recoveryPayload,
-          clientId: clientId.current,
-          snapshotId: syncSnapshotIdRef.current,
-          epoch: getStoredResetEpoch(),
-          signal: controller.signal,
-          queuedAtEpoch: timing?.queuedAtEpoch,
-        });
-        if (!res.ok) throw new Error(`Sync recovery write failed: ${res.status}`);
-        canonicalResult = await consumeCanonicalSyncWriteResponse(
-          res,
-          true,
-          () => generation === syncPushGenerationRef.current,
+        replayedAfterPartialFallback = true;
+        if (!partialFallbackBody?.data) {
+          work.recoveryBlocked = true;
+          throw new Error("Stale sync response omitted its canonical data");
+        }
+        let recovery = rebasePendingSyncWork(
+          work,
+          partialFallbackBody.data,
+          partialFallbackBody.snapshotId,
+          partialFallbackBody.serverTime,
         );
-        if (generation !== syncPushGenerationRef.current) return;
+        if (recovery.reappliedChanges > 0) {
+          res = await writeToday({
+            payload: work.payload,
+            clientId: clientId.current,
+            snapshotId: syncSnapshotIdRef.current,
+            epoch: getStoredResetEpoch(),
+            signal: controller.signal,
+            queuedAtEpoch: timing?.queuedAtEpoch,
+          });
+          responseStatus = res.status;
+          recoverableConflictResponse = false;
+          if (!res.ok && res.status !== 409) {
+            throw new Error(`Sync recovery write failed: ${res.status}`);
+          }
+          canonicalResult = await consumeCanonicalSyncWriteResponse(
+            res,
+            true,
+            () => generation === syncPushGenerationRef.current,
+          );
+          recoverableConflictResponse = canonicalResult.recoverableConflict;
+          if (generation !== syncPushGenerationRef.current) return;
+          if (!res.ok && !canonicalResult.recoverableConflict) {
+            throw new Error(`Sync recovery write failed: ${res.status}`);
+          }
+          const secondFallback = canonicalResult.body as
+            | { partialFallback?: boolean; data?: SyncPayload; snapshotId?: string; serverTime?: number }
+            | null
+            | undefined;
+          if (shouldReplaySyncWrite(secondFallback)) {
+            if (!secondFallback?.data) {
+              work.recoveryBlocked = true;
+              throw new Error("Repeated stale sync response omitted canonical data");
+            }
+            // Preserve the intent against the newest canonical response before
+            // the bounded retry loop resumes. Never retry this same stale body.
+            recovery = rebasePendingSyncWork(
+              work,
+              secondFallback.data,
+              secondFallback.snapshotId,
+              secondFallback.serverTime,
+            );
+            if (recovery.reappliedChanges > 0) {
+              throw new Error("sync write remained stale after a second canonical rebase");
+            }
+            recoveredWithoutReplay = true;
+          }
+        } else {
+          recoveredWithoutReplay = true;
+        }
       }
       const { stale } = canonicalResult;
+      if (recoveredWithoutReplay && !stale) {
+        clearPendingSyncIntent(pendingScope, pendingDate, work.pendingIntentId);
+        pushAcknowledgedRef.current = true;
+        setSyncPushFailed(false);
+        setSyncPendingCount(0);
+        setSyncFailedCount(0);
+        setSyncRetryWaiting(false);
+        const queued = syncPushQueueRef.current.finish({ drainQueued: true });
+        if (queued) {
+          const freshPayload = buildSyncPayload(dayStateRef.current);
+          pushAcknowledgedRef.current = false;
+          setSyncPendingCount(1);
+          doFetch(
+            freshPayload,
+            3,
+            JSON.stringify(freshPayload),
+            syncPushGenerationRef.current,
+            false,
+            queued,
+          );
+        }
+        return;
+      }
       const acknowledgedAt = typeof performance === "undefined" ? null : performance.now();
       pushAcknowledgedRef.current = true;
       if (stale) {
@@ -9949,19 +10676,61 @@ export default function Home() {
         currentRunId,
         syncWriteFieldCheck(res),
       );
+      clearPendingSyncIntent(pendingScope, pendingDate, work.pendingIntentId);
       // Record the synced signature ONLY after a successful PUT, so a failed
       // push is never treated as synced (which would block its retry).
-      if (sig !== undefined) lastSyncSigRef.current = sig;
-      if (payload.history !== undefined) {
-        lastSyncedHistorySigRef.current = JSON.stringify(payload.history);
+       if (work.sig !== undefined) lastSyncSigRef.current = work.sig;
+       if (payload.history !== undefined) {
+         lastSyncedHistorySigRef.current = JSON.stringify(payload.history);
+         if (work.payload.history !== payload.history) {
+           lastSyncedHistorySigRef.current = JSON.stringify(work.payload.history ?? payload.history);
+         }
+       } else if (work.payload.history !== undefined) {
+         lastSyncedHistorySigRef.current = JSON.stringify(work.payload.history);
       }
       setSyncRetryWaiting(false);
       const queued = syncPushQueueRef.current.finish({ drainQueued: true });
       if (queued) {
-        doFetch(queued.payload, 3, queued.sig, syncPushGenerationRef.current, false, queued);
+        // A missing-row fallback may have queued several partial payloads
+        // before its complete seed finished. Those payloads all target the
+        // pre-seed snapshot and can recreate the fallback loop. Rebuild from
+        // the current ref against the newly adopted snapshot instead, and
+        // keep lifecycle actions behind this replacement write.
+        if (replayedAfterPartialFallback) {
+          const freshPayload = buildSyncPayload(dayStateRef.current);
+          const freshSig = JSON.stringify(freshPayload);
+          pushAcknowledgedRef.current = false;
+          doFetch(
+            freshPayload,
+            3,
+            freshSig,
+            syncPushGenerationRef.current,
+            false,
+            queued,
+          );
+        } else {
+          doFetch(queued.payload, 3, queued.sig, syncPushGenerationRef.current, false, queued);
+        }
       }
     }).catch(() => {
       if (generation !== syncPushGenerationRef.current) return;
+      if (responseStatus === 409 && !recoverableConflictResponse) {
+        work.recoveryBlocked = true;
+      }
+      if (work.recoveryBlocked) {
+        setSyncRetryWaiting(false);
+        setSyncPushFailed(true);
+        setSyncPendingCount(0);
+        setSyncFailedCount((count) => count + 1);
+        recordSyncEvent(
+          "stale",
+          "Stale sync change was retained locally because it could not be safely rebased",
+          "stale-base-unrecoverable",
+          currentRunId,
+        );
+        syncPushQueueRef.current.finish({ drainQueued: false });
+        return;
+      }
       if (retriesLeft > 0) {
         setSyncRetryWaiting(true);
         const retryDelay = syncRetryDelay(3 - retriesLeft);
@@ -10005,7 +10774,10 @@ export default function Home() {
     const packagingProgress: NonNullable<SyncPayload["packagingProgress"]> = {};
     const storedPackagingProgress = loadPackagingProgress();
     const pushRuns: RunMeta[] = [];
-    const canSendPartial = Boolean(syncSnapshotIdRef.current);
+    const canSendPartial =
+      Boolean(syncSnapshotIdRef.current)
+      && completeSyncEstablishedRef.current
+      && !forceCompleteSyncRef.current;
     const baselineStamps = canonicalRunValuesUpdatedAtRef.current;
     const localStamps = loadRunValuesUpdated();
     for (const run of ds.runs) {
@@ -10027,9 +10799,9 @@ export default function Home() {
       const value =
         run.id === curId
           ? (formHandoffRef.current
-              ? loadRunValues(run.id)
-              : pickCurrentRunPushValue(form.getValues(), loadRunValues(run.id)))
-          : loadRunValues(run.id);
+              ? loadPackagingAwareRunValues(run.id)
+              : pickCurrentRunPushValue(form.getValues(), loadPackagingAwareRunValues(run.id)))
+          : loadPackagingAwareRunValues(run.id);
       // NEVER push the untouched auto-created placeholder run. Every fresh
       // device/browser starts with one (freshDayState), and pushing it lets the
       // server's additive run-list union pin a blank "Unnamed Run" into every
@@ -10044,9 +10816,14 @@ export default function Home() {
       // recipe/setup values remain on the server and protectRunValues treats
       // omitted run IDs as unchanged. Keep the current form if autosave has
       // not stamped a keystroke yet.
-      const currentFormChanged = run.id === curId && !deepEqual(value, loadRunValues(run.id));
+      const currentFormChanged = run.id === curId && !deepEqual(value, loadPackagingAwareRunValues(run.id));
+      const hasCanonicalValueBaseline = Object.prototype.hasOwnProperty.call(
+        baselineStamps,
+        run.id,
+      );
       if (
         !canSendPartial ||
+        !hasCanonicalValueBaseline ||
         localStamps[run.id] !== baselineStamps[run.id] ||
         currentFormChanged
       ) {
@@ -10066,17 +10843,17 @@ export default function Home() {
     }
     // Brand+flavor profiles are NOT in the sync payload anymore — they live in
     // their own stamped factory-wide server pool (see profileServerSync.ts).
-    // Name lists, presets, tombstones, packaging settings, and stop reasons are
-    // NOT in the sync payload anymore — they live in the factory KV store
-    // (/api/factory-data) and are replicated via write-through PUTs + startup
-    // fetch (see factoryDataSync.ts).
+    // Name lists, presets, packaging settings, and stop reasons live in the
+    // factory KV store. Run tombstones are also retained in live sync because
+    // the server's additive same-day run merge needs them atomically with the
+    // shortened run list to prevent a stale peer from restoring removed runs.
     const history = loadHistory();
     const historySig = JSON.stringify(history);
     return {
       syncVersion: 1,
       completeness: canSendPartial ? "partial" : "complete",
       baseSnapshotId: syncSnapshotIdRef.current,
-      dayState: { runs: fencePendingEndSnapshots(overlayRunMetaStamps(pushRuns)), shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [], substitutionLog: ds.substitutionLog ?? [], stagedItems: ds.stagedItems ?? {}, prepPhase: ds.prepPhase, breaks: normalizeDayBreaks(ds.breaks) },
+      dayState: { runs: fencePendingEndSnapshots(overlayRunMetaStamps(pushRuns)), shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [], substitutionLog: ds.substitutionLog ?? [], stagedItems: ds.stagedItems ?? {}, prepPhase: ds.prepPhase, breaks: normalizeDayBreaks(ds.breaks), breaksUpdatedAt: ds.breaksUpdatedAt },
       runValues: fenceActiveManualSectionValues(fencePendingOperationalValues(runValues)),
       runValuesUpdatedAt,
       ...(() => {
@@ -10087,6 +10864,9 @@ export default function Home() {
       })(),
       ...(Object.keys(packagingProgress).length > 0 ? { packagingProgress } : {}),
       ...(historySig !== lastSyncedHistorySigRef.current ? { history } : {}),
+      deletedItems: loadDeletedItems(),
+      deletedStamps: loadDeletedStamps(),
+      undeletedStamps: loadUndeletedStamps(),
     };
   }
 
@@ -10099,6 +10879,7 @@ export default function Home() {
     delay = SYNC_EDIT_DEBOUNCE_MS,
     trigger: SyncMeasurementTrigger = "edit",
   ) {
+    if (screenMode !== null) return;
     // Keep every timer-driven/debounced write asleep with the document. The
     // foreground reconciliation barrier pulls canonical state first, then
     // replays this pending local delta after adoption.
@@ -10118,11 +10899,30 @@ export default function Home() {
       syncApplyPushPendingRef.current = true;
       return;
     }
-    if (formHandoffRef.current) return;
+    if (formHandoffRef.current) {
+      return;
+    }
     // Automatic pushes (open/reconnect, interval, visibility, and local edits)
     // may occur before SSE has told us whether today's server row exists. Keep
     // one pending recovery push instead of letting any of them race that read.
-    if (!requestBaselinePush()) return;
+    if (!requestBaselinePush()) {
+      return;
+    }
+    const currentSignature = JSON.stringify(
+      buildSyncPayload(dayStateRef.current),
+    );
+    if (
+      pushAcknowledgedRef.current
+      && currentSignature === lastSyncSigRef.current
+    ) {
+      if (pushTimerRef.current) {
+        clearTimeout(pushTimerRef.current);
+        pushTimerRef.current = null;
+      }
+      syncPushTimingRef.current = null;
+      setSyncPendingCount(0);
+      return;
+    }
     if (pushTimerRef.current) clearTimeout(pushTimerRef.current);
     if (!syncPushTimingRef.current) {
       syncPushTimingRef.current = {
@@ -10140,6 +10940,18 @@ export default function Home() {
         syncPushTimingRef.current = null;
         return;
       }
+      // The timer may already be queued when a wake/reset raises the fence.
+      // Re-check it here; the schedulePush guard ran before this callback was
+      // delayed and cannot protect a callback that is already in the queue.
+      if (
+        foregroundSyncBarrierRef.current
+        || operationalAdoptionInFlightRef.current > 0
+        || formHandoffRef.current
+      ) {
+        foregroundPushPendingRef.current = true;
+        syncPushTimingRef.current = null;
+        return;
+      }
       // Never push a stale-dated day into today's sync row. A tab left open
       // across midnight still holds yesterday's runs until the server-owned
       // baseline is adopted;
@@ -10147,12 +10959,12 @@ export default function Home() {
       // clock) would leak yesterday's runs into today's row. Skip until the
       // canonical current-day baseline swaps in the fresh day. The SSE-onopen
       // reconnect re-push is the main offender here.
-      if (ds.date && ds.date !== todayStr()) {
+      if (dayStateRef.current.date && dayStateRef.current.date !== todayStr()) {
         syncPushTimingRef.current = null;
         pushAcknowledgedRef.current = true;
         return;
       }
-      const payload = buildSyncPayload(ds);
+      const payload = buildSyncPayload(dayStateRef.current);
       // Skip re-pushing an unchanged state (idle periodic/reconnect pushes).
       // Without this, a second open tab keeps broadcasting its stale copy and
       // clobbers the other tab's edits ("keeps resetting / loses changes").
@@ -10172,9 +10984,19 @@ export default function Home() {
     }, delay);
   }
   function retryLatestSync(): void {
+    if (screenMode !== null) return;
     const payload = latestSyncPayloadRef.current;
     if (!payload) {
       recordSyncEvent("local", "No retained change is available to retry");
+      return;
+    }
+    if (
+      document.hidden
+      || foregroundSyncBarrierRef.current
+      || operationalAdoptionInFlightRef.current > 0
+      || formHandoffRef.current
+    ) {
+      foregroundPushPendingRef.current = true;
       return;
     }
     setSyncPushFailed(false);
@@ -10186,6 +11008,86 @@ export default function Home() {
     syncPushQueueRef.current.reset();
     setSyncPendingCount(1);
     doFetch(payload, 0, JSON.stringify(payload));
+  }
+  function rebasePendingSyncWork(
+    work: {
+      payload: SyncPayload;
+      baseSnapshot?: SyncPayload;
+      pendingIntentId?: string;
+      sig?: string;
+      recoveryBlocked?: boolean;
+    },
+    canonicalInput: SyncPayload,
+    snapshotId: string | undefined,
+    serverTime?: number,
+  ): { reappliedChanges: number; retainedServerConflicts: number } {
+    try {
+      if (!work.baseSnapshot) throw new Error("Stale sync write has no captured canonical baseline");
+      if (!snapshotId) throw new Error("Stale sync response omitted its canonical snapshot identity");
+
+      const canonical = persistedSyncPayload(canonicalInput);
+      const recovery = rebaseStaleSyncIntent(work.baseSnapshot, work.payload, canonical, {
+        snapshotId,
+        serverTime,
+      });
+      work.baseSnapshot = canonical;
+      work.payload = recovery.payload;
+      work.sig = JSON.stringify(recovery.payload);
+      work.recoveryBlocked = false;
+      latestSyncPayloadRef.current = recovery.payload;
+
+      const scope = me ? `${me.sandbox ? "sandbox" : "live"}:${me.userId}` : "";
+      const date = recovery.payload.dayState.date ?? todayStr();
+      const pending = loadPendingSyncIntent(scope, date);
+      let durable = false;
+      if (recovery.reappliedChanges > 0 && scope && work.pendingIntentId) {
+        if (!pending || pending.id === work.pendingIntentId) {
+          durable = savePendingSyncIntent({
+            version: 1,
+            id: work.pendingIntentId,
+            scope,
+            date,
+            epoch: getStoredResetEpoch(),
+            baseSnapshotId: snapshotId,
+            baseline: canonical,
+            payload: recovery.payload,
+          });
+        }
+      } else if (scope && work.pendingIntentId) {
+        clearPendingSyncIntent(scope, date, work.pendingIntentId);
+      }
+
+      if (recovery.reappliedChanges > 0) {
+        applySyncCallbackRef.current(recovery.payload);
+        recordSyncEvent(
+          "merge",
+          `Recovered stale-base write: reapplied ${recovery.reappliedChanges} changes; retained ${recovery.retainedServerConflicts} server conflicts${durable ? "" : " (reload recovery copy unavailable)"}.`,
+          "stale-base-recovered",
+          currentRunId,
+        );
+      } else if (recovery.retainedServerConflicts > 0) {
+        recordSyncEvent(
+          "merge",
+          `Kept ${recovery.retainedServerConflicts} newer server values during stale-base recovery`,
+          "stale-base-conflicts",
+          currentRunId,
+        );
+      } else {
+        recordSyncEvent(
+          "merge",
+          "Canonical server state already included the queued intent; no stale snapshot was replayed",
+          "stale-base-recovered",
+          currentRunId,
+        );
+      }
+      return {
+        reappliedChanges: recovery.reappliedChanges,
+        retainedServerConflicts: recovery.retainedServerConflicts,
+      };
+    } catch (error) {
+      work.recoveryBlocked = true;
+      throw error;
+    }
   }
   function resetFieldArrays(vals: FormValues) {
     replaceCheese1(vals.app1CheeseRecipe ?? []);
@@ -10215,6 +11117,7 @@ export default function Home() {
     propagateProfileToPendingRuns,
     schedulePush: (state, delay, trigger) => schedulePush(state, delay, trigger),
     flashSaved,
+    readOnly: screenMode !== null,
   });
 
   // ── Unified setup editing: edit once, updates everywhere ──────────────────
@@ -10231,6 +11134,13 @@ export default function Home() {
     savedValues?: FormValues,
     sharedRefreshGeneration?: number,
   ) {
+    if (screenMode !== null) return;
+    // Capture the selected run before any profile queue/bootstrap work. Both
+    // pending runs are eligible for shared recipe refresh, so checking only
+    // eligibility after an await can apply the old run's refresh to whichever
+    // pending run the operator selected in the meantime.
+    const originatingRunId =
+      dayStateRef.current?.runs[dayStateRef.current.currentIndex]?.id;
     // Boot reconciliation is best-effort background work. If an acknowledged
     // manager save arrived after it started, abandon the stale pass before it
     // can flush or fan out old profile rows.
@@ -10281,6 +11191,7 @@ export default function Home() {
     const liveDay = dayStateRef.current;
     const liveRun = liveDay?.runs[liveDay.currentIndex];
     if (!liveRun) return;
+    if (liveRun.id !== originatingRunId) return;
     if (
       (liveRun.brand ?? "").trim().toLowerCase() !== brand.trim().toLowerCase() ||
       (liveRun.flavor ?? "").trim().toLowerCase() !== flavor.trim().toLowerCase()
@@ -10298,7 +11209,7 @@ export default function Home() {
     if (liveRun.startedAt || liveRun.endedAt || persistedRun?.startedAt || persistedRun?.endedAt) return;
     // Start is the immutable snapshot boundary. Shared setup/profile changes
     // continue updating future work, but never rewrite production or history.
-    runSharedRecipeRefresh(liveRun, () => {
+    await runSharedRecipeRefresh(liveRun, async () => {
       const profile = loadProfile(liveRun.brand, liveRun.flavor);
       if (!profile) return;
       // Same guard as the spec-import reload: a mix recipe name must never land
@@ -10310,14 +11221,21 @@ export default function Home() {
       const current = form.getValues();
       const merged = mergeProfileIntoOpenForm(current, profile);
       if (merged === current) return;
-      const now = Date.now();
-      saveRunValues(liveRun.id, merged);
-      markRunValuesUpdated(liveRun.id, now);
-      lastLocalEditRef.current = now;
+      // Bulk profile propagation deliberately skips the selected run. Persist
+      // only the profile-owned changes here so the durable pending snapshot
+      // cannot be left behind the refreshed form or overwrite unrelated edits.
+      const openRunUpdates: Record<string, unknown> = {};
+      for (const field of Object.keys(DEFAULT_VALUES) as (keyof FormValues)[]) {
+        if (!deepEqual(current[field], merged[field])) {
+          openRunUpdates[field] = merged[field];
+        }
+      }
       lastFormRunIdRef.current = liveRun.id;
       form.reset(merged);
       resetFieldArrays(merged);
-      schedulePush(dayStateRef.current, 0);
+      await persistOpenPendingRunSnapshotUpdates(openRunUpdates, {
+        expectedRunId: liveRun.id,
+      });
       toast({
         title: "Run form updated",
         description: `This run now uses the saved setup for ${liveRun.brand} — ${liveRun.flavor}.`,
@@ -10365,9 +11283,75 @@ export default function Home() {
   // (cases needed, temp overrides) and progress are never touched
   // (mergeProfileIntoOpenForm skips them), and untouched runs are never
   // re-stamped, so this can't clobber operator-entered data.
+  async function persistOpenPendingRunSnapshotUpdates(
+    updates: Record<string, unknown>,
+    options: { pushCanonicalIfUnchanged?: boolean; expectedRunId?: string } = {},
+  ): Promise<void> {
+    if (screenMode !== null) return;
+    if (Object.keys(updates).length === 0) return;
+    const liveDay = dayStateRef.current;
+    const liveRun = liveDay.runs[liveDay.currentIndex];
+    if (options.expectedRunId && liveRun?.id !== options.expectedRunId) return;
+    if (!isSharedRecipeRefreshEligible(liveRun)) return;
+    const persistedRun = loadDayState().runs.find((run) => run.id === liveRun.id);
+    if (!isSharedRecipeRefreshEligible(persistedRun)) return;
+
+    const next = mergePendingRunSnapshotUpdates(
+      persistedRun,
+      loadRunValues(liveRun.id) as unknown as Record<string, unknown>,
+      updates,
+    );
+    if (!next) {
+      if (!options.pushCanonicalIfUnchanged) return;
+      const current = dayStateRef.current;
+      const currentRun = current.runs[current.currentIndex];
+      const currentPersistedRun = loadDayState().runs.find((run) => run.id === liveRun.id);
+      if (
+        currentRun?.id !== liveRun.id
+        || !isSharedRecipeRefreshEligible(currentRun)
+        || !isSharedRecipeRefreshEligible(currentPersistedRun)
+      ) return;
+      const now = Date.now();
+      markRunValuesUpdated(liveRun.id, now);
+      lastLocalEditRef.current = now;
+      try {
+        await pushTodayCanonical(buildSyncPayload(current));
+      } catch {
+        schedulePush(dayStateRef.current, 0);
+      }
+      return;
+    }
+    const now = Date.now();
+    saveRunValues(liveRun.id, next as unknown as FormValues);
+    markRunValuesUpdated(liveRun.id, now);
+    lastLocalEditRef.current = now;
+
+    // The form edits above are now durable locally before Start can consume
+    // this run. Publish a fresh payload so the server response is adopted here
+    // and by peers; if Start wins after this boundary, its newer lifecycle
+    // stamp remains authoritative at the sync merge.
+    try {
+      const current = dayStateRef.current;
+      const currentRun = current.runs[current.currentIndex];
+      const currentPersistedRun = loadDayState().runs.find((run) => run.id === liveRun.id);
+      if (
+        currentRun?.id !== liveRun.id
+        || !isSharedRecipeRefreshEligible(currentRun)
+        || !isSharedRecipeRefreshEligible(currentPersistedRun)
+      ) return;
+      await pushTodayCanonical(buildSyncPayload(current));
+    } catch {
+      // Keep the exact field patch and value stamp locally. The normal sync
+      // queue retries it without turning this pending refresh into a lifecycle
+      // or whole-profile write.
+      schedulePush(dayStateRef.current, 0);
+    }
+  }
+
   const propagateSigRef = useRef<Map<string, string>>(new Map());
   const profilePropagationChainsRef = useRef<Map<string, Promise<void>>>(new Map());
   async function propagateProfileToPendingRuns(brand: string, flavor: string) {
+    if (screenMode !== null) return;
     const b = (brand ?? "").trim();
     const f = (flavor ?? "").trim();
     if (!b && !f) return;
@@ -10386,6 +11370,7 @@ export default function Home() {
     }
   }
   async function propagateProfileToPendingRunsNow(b: string, f: string) {
+    if (screenMode !== null) return;
     const profile = loadProfile(b, f);
     if (!profile) return;
     // Cheap dedup: nav-saves fire on every tab change — skip the fan-out when
@@ -10514,7 +11499,9 @@ export default function Home() {
     recipeName: string,
     rows: ReadonlyArray<{ ingredient: string; lbs: number }>,
     kind: "cheese" | "mix" | "dough" | "sauce" = "cheese",
+    previousPoolSignature?: string,
   ) {
+    if (screenMode !== null) return;
     const nameLc = recipeName.trim().toLowerCase();
     if (!nameLc || rows.length === 0) return;
     const ds = dayStateRef.current;
@@ -10535,18 +11522,31 @@ export default function Home() {
       const stored = loadRunValues(run.id);
       const next = { ...stored };
       let runChanged = false;
-      const slots = kind === "cheese" ? [1, 2, 3, 4] as const : [0] as const;
+      // Mix recipes are attached to the same applicator slots as cheese
+      // recipes. The legacy mixRecipe/mixRecipeName fields are not the
+      // canonical slot links used by pending runs.
+      const slots = kind === "cheese" || kind === "mix"
+        ? [1, 2, 3, 4] as const
+        : [0] as const;
       for (const slot of slots) {
         const nameField = kind === "cheese"
           ? `app${slot}CheeseRecipeName` as keyof FormValues
-          : kind === "mix" ? "mixRecipeName" as keyof FormValues
+          : kind === "mix" ? `app${slot}CheeseRecipeName` as keyof FormValues
           : kind === "dough" ? "doughRecipeName" as keyof FormValues : "frontlineRecipeName" as keyof FormValues;
         const rowsField = kind === "cheese"
           ? `app${slot}CheeseRecipe` as keyof FormValues
-          : kind === "mix" ? "mixRecipe" as keyof FormValues
+          : kind === "mix" ? `app${slot}CheeseRecipe` as keyof FormValues
           : kind === "dough" ? "doughRecipe" as keyof FormValues : "frontlineRecipe" as keyof FormValues;
         if (String(stored[nameField] ?? "").trim().toLowerCase() !== nameLc) continue;
         const currentRows = (stored[rowsField] as Array<{ ingredient: string; lbs: number }> | undefined) ?? [];
+        if (
+          (kind === "dough" || kind === "sauce")
+          && !shouldPropagateNamedRecipeRows(
+            currentRows,
+            previousPoolSignature,
+            Boolean(run.brand?.trim() && run.flavor?.trim()),
+          )
+        ) continue;
         if (recipeRowsEqual(currentRows, rows)) continue;
         next[rowsField] = rows.map((row) => ({ ingredient: row.ingredient, lbs: row.lbs })) as never;
         runChanged = true;
@@ -10596,6 +11596,13 @@ export default function Home() {
     canonicalItems: NamedRecipe[],
     submittedItems: NamedRecipe[],
   ) {
+    if (screenMode !== null) return;
+    // Capture before profile bootstrap: that GET can be delayed while the
+    // operator switches runs. The acknowledged refresh belongs to the run
+    // selected when this save was applied, not whichever run is selected after
+    // bootstrap completes.
+    const initiatingRunId =
+      dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id;
     sharedRecipeRefreshGenerationRef.current += 1;
     return enqueueSharedRecipeRefresh(async () => {
       // The profile cache can still be empty while the authenticated bootstrap
@@ -10613,9 +11620,16 @@ export default function Home() {
       const acknowledgedNames = new Set(
         canonicalItems
           .filter((item) => submittedIds.has(item.id))
-          .map((item) => item.name.trim().toLowerCase()),
+          .map((item) => normalizeSelectableName(item.name).toLowerCase())
+          .filter(Boolean),
       );
-      await applyNamedPoolChange(kind, canonicalItems, undefined, acknowledgedNames);
+      await applyNamedPoolChange(
+        kind,
+        canonicalItems,
+        undefined,
+        acknowledgedNames,
+        initiatingRunId,
+      );
     });
   }
   async function applyNamedPoolChange(
@@ -10623,7 +11637,11 @@ export default function Home() {
     list: NamedRecipe[],
     backgroundGeneration?: number,
     acknowledgedNames?: ReadonlySet<string>,
+    initiatingRunId?: string,
   ) {
+    if (screenMode !== null) return;
+    const refreshRunId =
+      initiatingRunId ?? dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id;
     const onNamedProfileSaved = (brand: string, flavor: string) => {
       // A manager acknowledgement is authoritative even when the profile was
       // already touched by the boot reconciler. Clear the propagation
@@ -10641,7 +11659,8 @@ export default function Home() {
     const byKey = new Map<string, NamedRecipePoolPatch>();
     for (const r of list) {
       if (r.enabled === false) continue;
-      const key = r.name.trim().toLowerCase();
+      const name = normalizeSelectableName(r.name);
+      const key = name.toLowerCase();
       if (!key) continue;
       const rows = normalizeRecipeRowsForCompare(r.components);
       const weight = kind === "dough" ? Number(r.doughballWeightOz ?? 0) : 0;
@@ -10661,7 +11680,7 @@ export default function Home() {
           : "";
       snap.set(key, JSON.stringify({ rows, weight, perTray, variantSig }));
       byKey.set(key, {
-        name: r.name,
+        name,
         rows,
         ...(weight > 0 ? { doughballWeightOz: weight } : {}),
         ...(perTray > 0 ? { doughballsPerTray: perTray } : {}),
@@ -10710,27 +11729,30 @@ export default function Home() {
     let formUpdated = false;
     const touched = await orchestrateSharedRecipeRefresh({
       getCurrentRun: () => dayStateRef.current.runs[dayStateRef.current.currentIndex],
+      initiatingRunId: refreshRunId,
         refreshProfiles: () => refreshNamedRecipeProfilesAndPropagate(
         kind,
         changed,
         undefined,
         onNamedProfileSaved,
       ),
-      refreshOpenForm: () => {
+      refreshOpenForm: async () => {
         const liveRun = dayStateRef.current.runs[dayStateRef.current.currentIndex];
+        if (!liveRun || liveRun.id !== refreshRunId) return;
         const persistedRun = liveRun
           ? loadDayState().runs.find((run) => run.id === liveRun.id)
           : undefined;
-        if (liveRun?.startedAt || liveRun?.endedAt || persistedRun?.startedAt || persistedRun?.endedAt) return;
+        if (!isSharedRecipeRefreshEligible(liveRun) || !isSharedRecipeRefreshEligible(persistedRun)) return;
         const linkedRaw = kind === "dough" ? form.getValues("doughRecipeName") : form.getValues("frontlineRecipeName");
         const linked = String(linkedRaw ?? "").trim().toLowerCase();
         const hit = linked
           ? changed.find((c) => c.name.trim().toLowerCase() === linked)
           : undefined;
+        const openRunUpdates: Record<string, unknown> = {};
         if (hit) {
           const curRows = (kind === "dough" ? form.getValues("doughRecipe") : form.getValues("frontlineRecipe")) ?? [];
-          if (!recipeRowsEqual(curRows, hit.rows)) {
-            const copy = hit.rows.map((row) => ({ ...row }));
+          const copy = hit.rows.map((row) => ({ ...row }));
+          if (!recipeRowsEqual(curRows, copy)) {
             if (kind === "dough") {
               form.setValue("doughRecipe", copy, { shouldDirty: true });
               replaceDough(copy);
@@ -10740,6 +11762,7 @@ export default function Home() {
             }
             formUpdated = true;
           }
+          openRunUpdates[kind === "dough" ? "doughRecipe" : "frontlineRecipe"] = copy;
         }
         if (!hit) return;
         // Weight/per-tray are per-flavor — pool values only fill a blank form,
@@ -10754,10 +11777,20 @@ export default function Home() {
           form.setValue("doughballsPerTray", wantTray, { shouldDirty: true });
           formUpdated = true;
         }
+        if (Object.keys(openRunUpdates).length > 0) {
+          await persistOpenPendingRunSnapshotUpdates(openRunUpdates, {
+            expectedRunId: refreshRunId,
+          });
+        }
       },
     });
     for (const recipe of changed) {
-      await propagateRecipeRowsToPendingRuns(recipe.name, recipe.rows, kind);
+      await propagateRecipeRowsToPendingRuns(
+        recipe.name,
+        recipe.rows,
+        kind,
+        prev.get(recipe.name.trim().toLowerCase()),
+      );
     }
     if (!formUpdated && touched.length === 0) return;
     const label = kind === "dough" ? "dough" : "sauce";
@@ -10769,23 +11802,41 @@ export default function Home() {
     });
   }
   useEffect(() => {
+    if (screenMode !== null) return;
     // First-load reconciliation must share the acknowledgement queue. A
     // manager save can update the pool while this effect is starting; letting
     // the initial heal run independently can publish an older profile snapshot
     // after the acknowledged recipe edit.
     const backgroundGeneration = sharedRecipeRefreshGenerationRef.current;
+    const initiatingRunId =
+      dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id;
     void enqueueSharedRecipeRefresh(() =>
-      applyNamedPoolChange("dough", doughRecipesList, backgroundGeneration),
+      applyNamedPoolChange(
+        "dough",
+        doughRecipesList,
+        backgroundGeneration,
+        undefined,
+        initiatingRunId,
+      ),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doughRecipesList]);
+  }, [doughRecipesList, screenMode]);
   useEffect(() => {
+    if (screenMode !== null) return;
     const backgroundGeneration = sharedRecipeRefreshGenerationRef.current;
+    const initiatingRunId =
+      dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id;
     void enqueueSharedRecipeRefresh(() =>
-      applyNamedPoolChange("sauce", sauceRecipesList, backgroundGeneration),
+      applyNamedPoolChange(
+        "sauce",
+        sauceRecipesList,
+        backgroundGeneration,
+        undefined,
+        initiatingRunId,
+      ),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sauceRecipesList]);
+  }, [sauceRecipesList, screenMode]);
 
   // Cheese / mix recipe rows — parallel one-time boot heal + ongoing empty-row
   // healing. Cheese and mix pools don't have a diff-and-update watcher like
@@ -10812,12 +11863,14 @@ export default function Home() {
     canonicalItems: typeof mixes,
     submittedItems: typeof mixes,
   ) {
+    if (screenMode !== null) return;
     sharedRecipeRefreshGenerationRef.current += 1;
     // Set this before awaited profile hydration. The pool observer runs from
     // the same React update and must not launch a second background repair for
     // an already acknowledged save.
     acknowledgedMixSaveFingerprintRef.current = JSON.stringify(canonicalItems);
     return enqueueSharedRecipeRefresh(async () => {
+      const selectedRunId = dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id;
       // See applyAcknowledgedNamedRecipeSave: pool saves are allowed to arrive
       // before the profile-cache bootstrap has completed.
       try {
@@ -10860,11 +11913,55 @@ export default function Home() {
             lbs: Math.max(0, component.perPizza ?? 0),
           }))
           .filter((row) => row.ingredient);
+        // A linked profile refresh updates the selected form, but the normal
+        // form autosave is not the acknowledgement boundary. Persist the
+        // recipe-only patch into this pending run's own snapshot now, so the
+        // source view and peers don't wait for a later form edit. Keep the
+        // selected-run identity and lifecycle fences intact across hydration.
+        const currentDay = dayStateRef.current;
+        const selectedRun = currentDay.runs[currentDay.currentIndex];
+        const persistedSelectedRun = selectedRun
+          ? loadDayState().runs.find((run) => run.id === selectedRun.id)
+          : undefined;
+        if (
+          selectedRunId
+          && selectedRun?.id === selectedRunId
+          && isSharedRecipeRefreshEligible(selectedRun)
+          && isSharedRecipeRefreshEligible(persistedSelectedRun)
+        ) {
+          const updates = buildMixRunSnapshotUpdates(
+            loadRunValues(selectedRun.id) as unknown as Record<string, unknown>,
+            recipe.name,
+            rows,
+          );
+          if (lastFormRunIdRef.current === selectedRun.id) {
+            const slotReplacers = [
+              ["app1CheeseRecipe", replaceCheese1],
+              ["app2CheeseRecipe", replaceCheese2],
+              ["app3CheeseRecipe", replaceCheese3],
+              ["app4CheeseRecipe", replaceCheese4],
+            ] as const;
+            for (const [field, replace] of slotReplacers) {
+              const nextRows = updates[field] as { ingredient: string; lbs: number }[] | undefined;
+              if (!nextRows) continue;
+              form.setValue(
+                field as Parameters<typeof form.setValue>[0],
+                nextRows as never,
+                { shouldDirty: true },
+              );
+              replace(nextRows);
+            }
+          }
+          await persistOpenPendingRunSnapshotUpdates(updates, {
+            pushCanonicalIfUnchanged: true,
+          });
+        }
         await propagateRecipeRowsToPendingRuns(recipe.name, rows, "mix");
       }
     });
   }
   useEffect(() => {
+    if (screenMode !== null) return;
     const markerKey = "run-calc-cheese-mix-row-heal-v1";
     const backgroundGeneration = sharedRecipeRefreshGenerationRef.current;
     const refresh = async () => {
@@ -10898,16 +11995,18 @@ export default function Home() {
         // Ongoing pass — recipe edits are authoritative for linked pending work,
         // not just for profiles whose rows happened to be empty.
         for (const r of cheeseRecipesList) {
-          if (r.enabled === false || !r.name.trim()) continue;
+          const name = normalizeSelectableName(r.name);
+          if (r.enabled === false || !name) continue;
           const rows = normalizeRecipeRowsForCompare(r.components);
           if (rows.length === 0) continue;
-          remember(refreshCheeseOrMixProfileRows(r.name, rows));
+          remember(refreshCheeseOrMixProfileRows(name, rows));
         }
         for (const m of mixes) {
-          if (!m.name.trim()) continue;
+          const name = normalizeSelectableName(m.name);
+          if (!name) continue;
           const rows = mixRows(m);
           if (rows.length === 0) continue;
-          remember(refreshCheeseOrMixProfileRows(m.name, rows));
+          remember(refreshCheeseOrMixProfileRows(name, rows));
         }
       } else {
         // First-time full heal — wait for pool data, run once per mount.
@@ -10915,16 +12014,18 @@ export default function Home() {
         if (cheeseMixFullHealDoneRef.current) return;
         cheeseMixFullHealDoneRef.current = true;
         for (const r of cheeseRecipesList) {
-          if (r.enabled === false || !r.name.trim()) continue;
+          const name = normalizeSelectableName(r.name);
+          if (r.enabled === false || !name) continue;
           const rows = normalizeRecipeRowsForCompare(r.components);
           if (rows.length === 0) continue;
-          remember(refreshCheeseOrMixProfileRows(r.name, rows));
+          remember(refreshCheeseOrMixProfileRows(name, rows));
         }
         for (const m of mixes) {
-          if (!m.name.trim()) continue;
+          const name = normalizeSelectableName(m.name);
+          if (!name) continue;
           const rows = mixRows(m);
           if (rows.length === 0) continue;
-          remember(refreshCheeseOrMixProfileRows(m.name, rows));
+          remember(refreshCheeseOrMixProfileRows(name, rows));
         }
         localStorage.setItem(markerKey, "1");
       }
@@ -10942,13 +12043,14 @@ export default function Home() {
     // an acknowledged manager save.
     void enqueueSharedRecipeRefresh(refresh);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cheeseRecipesList, mixes]);
+  }, [cheeseRecipesList, mixes, screenMode]);
 
   // Seed the currently-open form's mix applicator slots from server data
   // whenever the mixes pool changes and a slot has a name set but all-zero
   // recipe rows. Covers: page load before mixes arrive from the server, and
   // the first session after a premix import without re-picking the name.
   useEffect(() => {
+    if (screenMode !== null) return;
     const liveDay = loadDayState();
     const liveRun = liveDay.runs[liveDay.currentIndex] ?? dayStateRef.current.runs[dayStateRef.current.currentIndex];
     runSharedRecipeRefresh(liveRun, () => {
@@ -10980,12 +12082,13 @@ export default function Home() {
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serverMixRowsByName]);
+  }, [serverMixRowsByName, screenMode]);
   // For mix applicators, the recipe rows' lbs field stores oz/pizza per
   // ingredient. Their sum should always equal appNOzPerPizza. Auto-sync
   // appNOzPerPizza from the row sum whenever it drifts (e.g. after the user
   // edits recipe rows or loads a profile where the total was never matched).
   useEffect(() => {
+    if (screenMode !== null) return;
     const slots = [
       { typeField: "app1Type", recipeField: "app1CheeseRecipe", ozField: "app1OzPerPizza" },
       { typeField: "app2Type", recipeField: "app2CheeseRecipe", ozField: "app2OzPerPizza" },
@@ -11009,6 +12112,7 @@ export default function Home() {
     v.app2Type, v.app2CheeseRecipe,
     v.app3Type, v.app3CheeseRecipe,
     v.app4Type, v.app4CheeseRecipe,
+    screenMode,
   ]);
 
   // One-time boot heal: write preTunnelMin = postTunnelMin = 2.5 into every
@@ -11018,6 +12122,7 @@ export default function Home() {
   // manager (the marker is only set then, so a manager device still heals
   // later); non-managers just get the open-form fix on every boot.
   useEffect(() => {
+    if (screenMode !== null) return;
     const MARKER = "run-calc-tunnel-pre-post-default-v1";
     const alreadyHealed = !!localStorage.getItem(MARKER);
     if (!alreadyHealed && canManageProfiles) {
@@ -11056,7 +12161,7 @@ export default function Home() {
   // Re-runs when canManageProfiles resolves (marker keeps the persist loop
   // one-time); form ref is stable.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canManageProfiles]);
+  }, [canManageProfiles, screenMode]);
 
   // (3) Promote the open form's hand-tweaked dough/sauce rows into the shared
   // server-pool recipe ("Update shared recipe" on the drift indicator). Uses
@@ -11069,7 +12174,9 @@ export default function Home() {
     const name = String((kind === "dough" ? vals.doughRecipeName : vals.frontlineRecipeName) ?? "").trim();
     if (!name) return;
     const list = kind === "dough" ? doughRecipesList : sauceRecipesList;
-    const target = list.find((r) => r.enabled !== false && r.name.trim().toLowerCase() === name.toLowerCase());
+    const target = list.find(
+      (r) => r.enabled !== false && normalizeSelectableName(r.name).toLowerCase() === name.toLowerCase(),
+    );
     if (!target) return;
     const rows = normalizeRecipeRowsForCompare((kind === "dough" ? vals.doughRecipe : vals.frontlineRecipe) ?? []);
     const next: NamedRecipe = { ...target, components: rows };
@@ -11121,7 +12228,7 @@ export default function Home() {
   } = useRunLifecycleManager({
     dayStateRef, setDayState, saveDayState, form, lastFormRunIdRef, formHandoffRef, currentRun, currentRunId,
     flushFormWrites: flushPendingHomeFormWrites,
-    loadRunValues, saveRunValues, markRunValuesUpdated,
+    loadRunValues: loadPackagingAwareRunValues, saveRunValues, markRunValuesUpdated,
     canManageProfiles, saveProfile, propagateProfileToPendingRuns, resetFieldArrays,
     setDoughSubTab, setActiveStopId, setConfirmDeleteStopId, setActiveTab,
     foregroundSyncBarrierRef, foregroundStopIntentRef, setPendingForegroundStopRunId,
@@ -11143,6 +12250,7 @@ export default function Home() {
     getRunInsightsSignal: () => runInsightsAbortControllerRef.current.signal,
     genId, applyResumeToRun, canChoosePauseTunnelPolicy,
     pauseDecisionRemainingMs, shouldClosePauseDecision, schedulePush,
+    syncWritePending: () => !pushAcknowledgedRef.current,
   });
 
   // ── Temporary ingredient substitutions (day-state overlay) ─────────────────
@@ -11232,6 +12340,9 @@ export default function Home() {
       runs: [...dayState.runs, { id: newId, brand: "", flavor: "" }],
       currentIndex: newIndex,
     };
+    // schedulePush builds its payload from the synchronous ref so a queued
+    // write cannot capture the previous run list before React re-renders.
+    dayStateRef.current = newDs;
     setDayState(newDs);
     saveDayState(newDs);
     // Settle the form for the new run explicitly (like switchToRun does) so
@@ -12435,7 +13546,7 @@ export default function Home() {
     try {
       const buf = await file.arrayBuffer();
       const { runExcel } = await loadWorkbookWorkflow();
-      const parsed = runExcel.parseRunWorkbook(buf);
+      const parsed = runExcel.parseRunWorkbook(buf, file.name);
       // Multi-sheet schedule planner: keep only runs dated today-or-later (the
       // user's chosen behavior) and route to the multi-date override commit.
       const result = parsed.multiDay ? runExcel.filterImportFromDate(parsed, todayStr()) : parsed;
@@ -12719,6 +13830,8 @@ export default function Home() {
     const controller = new AbortController();
     specImportAbortRef.current = controller;
     setSpecImportPrepared(null);
+    specImportBuffersRef.current = [];
+    specImportSourceNamesRef.current = [];
     setSpecImportError(null);
     setSpecImportProgress(files.length > 1 ? { done: 0, total: files.length } : null);
     setSpecImportLoading(true);
@@ -12790,6 +13903,9 @@ export default function Home() {
       destructiveReviewSignature,
       profilesMarkedForRemoval: profilesToRemove,
     };
+    // The workbook preview is transient UI data: keep it out of the commit
+    // pipeline, saved parse snapshots, and import-history summaries.
+    delete toCommit.sourcePreviewCells;
     // Imported recipes can introduce ingredients that duplicate standalone ones,
     // so kick off a merge check afterwards (only when recipes were actually
     // imported). Capture before clearing the prepared payload.
@@ -13170,6 +14286,8 @@ export default function Home() {
       }
       setShowSpecImport(false);
       setSpecImportPrepared(null);
+      specImportBuffersRef.current = [];
+      specImportSourceNamesRef.current = [];
       // Duplicate review remains an explicit action from the merge surface;
       // imports never start a scan or spend provider budget in the background.
       // Auto-run spec cross-reference with the newly saved sheet.
@@ -13468,7 +14586,7 @@ export default function Home() {
     setShowShippingImport(true);
     try {
       const buffer = await file.arrayBuffer();
-      const prepared = await (await loadWorkbookWorkflow()).shippingImport.prepareShippingImport(buffer);
+      const prepared = await (await loadWorkbookWorkflow()).shippingImport.prepareShippingImport(buffer, file.name);
       if (gen !== shippingImportGenRef.current) return;
       setShippingImportPrepared(prepared);
     } catch (err) {
@@ -13666,8 +14784,10 @@ export default function Home() {
         file.arrayBuffer(),
         fetchNamedRecipes("dough").catch(() => [] as NamedRecipe[]),
       ]);
-      const extraDoughNames = serverDoughRecipes.map((r) => r.name).filter(Boolean);
-      const prepared = await (await loadWorkbookWorkflow()).recipeGuideImport.prepareDoughGuideImport(buffer, extraDoughNames);
+      const extraDoughNames = serverDoughRecipes
+        .map((r) => (typeof r?.name === "string" ? r.name.trim() : ""))
+        .filter((name): name is string => name.length > 0);
+      const prepared = await (await loadWorkbookWorkflow()).recipeGuideImport.prepareDoughGuideImport(buffer, extraDoughNames, file.name);
       if (gen !== doughGuideImportGenRef.current) return;
       setDoughGuideImportPrepared(prepared);
     } catch (err) {
@@ -13947,7 +15067,7 @@ export default function Home() {
     try {
       const buf = await file.arrayBuffer();
       const { runExcel } = await loadWorkbookWorkflow();
-      const parsed = runExcel.parseRunWorkbook(buf);
+      const parsed = runExcel.parseRunWorkbook(buf, file.name);
       // A multi-sheet planner spans many days, so it can't load into the single
       // open editor day — route it to the multi-date override commit instead
       // (today-or-later only), exactly like the toolbar import.
@@ -14594,7 +15714,7 @@ export default function Home() {
     () => overlayCurrentRunValues(persistedRunValues, currentRunId, v),
     [persistedRunValues, currentRunId, v],
   );
-  const needsWarehouseSnapshot = activeTab === "warehouse" || screenMode === "warehouse";
+  const needsWarehouseSnapshot = activeTab === "warehouse" || activeTab === "quality" || screenMode === "warehouse";
   const needsInventorySnapshot = activeTab === "inventory";
   const needsSummarySnapshot = activeTab === "summary" || screenMode === "summary";
   const persistedRunSummaryStats = useMemo(
@@ -14678,6 +15798,22 @@ export default function Home() {
     }).map((detail) => [detail.id, detail] as const)) : new Map(),
     [needsWarehouseSnapshot, activeRuns, runValuesById, runSummaryStatsById, effectiveValuesForRun],
   );
+  const qcStagedIngredients = useMemo(() => {
+    if (!currentRunId) return [];
+    const stagedItems = dayState.stagedItems ?? {};
+    const rows: NeedRow[] = activeRunNeedDetails.get(currentRunId)?.rows ?? [];
+    return rows.flatMap((row) => {
+      const area = row.area;
+      if (area !== "Dough" && area !== "Sauce" && area !== "Frontline") return [];
+      return [{
+        area,
+        name: row.label,
+        quantity: row.value,
+        unit: row.sub ?? "",
+        staged: Boolean(stagedItems[`${currentRunId}::${row.label}__${row.sub ?? ""}`]),
+      }];
+    });
+  }, [currentRunId, activeRunNeedDetails, dayState.stagedItems]);
   const scheduledWarehouseRuns = useMemo(
     () => needsWarehouseSnapshot ? scheduledDays.flatMap((day) =>
       (day.runs ?? [])
@@ -14926,7 +16062,7 @@ export default function Home() {
     resumeRun, revalidate, role, ruleViolations, runStatus, runSummaryStatsById, runToTime, runValuesById,
     saucePoolDrift, sauceRecipesList, sauceWeightsOpen, saveCatalogEntry, saveScheduledDay,
     savedFlashRef, savedFlashTimer, scheduleAdvancedRunId, scheduleDeleteConfirm, scheduleEditorDate, scheduleEditorIsLiveDay,
-    scheduleEditorLoadedRunIdsRef, scheduleEditorRunValues, scheduleEditorRuns, scheduleImportInputRef, scheduleMove, scheduleMoveDate,
+    scheduleEditorLoadedRunsRef, scheduleEditorRunValues, scheduleEditorRuns, scheduleImportInputRef, scheduleMove, scheduleMoveDate,
     scheduleMoving, schedulePush, scheduleSaving, scheduleView, scheduledDays, screenMode,
     serverCheeseByName, serverCheeseNames, serverCheeseRowsByName, serverDoughNames, serverDoughRowsByName, serverDoughTrayByName,
     serverDoughVariantsByName, serverDoughWeightByName, serverMixNames, serverMixRowsByName, serverPin, serverSauceNames,
@@ -14957,7 +16093,7 @@ export default function Home() {
     setShowShippingImport, setShowSpecImport, setShowStopDialog, setShowTour, setSkidStacking,
     setSpecImportApplying, setSpecImportError, setSpecImportLoading, setSpecImportPrepared, setSpecImportProgress, setSpecReconcileSignal,
     setStopNotes, setStopReason, setStopReasonsList, setSwipeCue, setSyncConnected, setSyncPushFailed,
-    setUndoBusy, setWriteError, setupEditorBrand,
+    setUndoBusy, setWriteError, dismissSauceAutoTrackFailure, setupEditorBrand,
     setupEditorFlavor, setupEditorOpen, sheetListSignal, shipper, shipperList, shippingImportApplying,
     shippingImportError, shippingImportFileNameRef, shippingImportGenRef, shippingImportInputRef, shippingImportLoading, shippingImportPrepared,
     showAlertSettings, showBrandDrop, showCheeseImport, showEditReasonsDialog, showFlavorDrop, showFloorMode,
@@ -14973,7 +16109,7 @@ export default function Home() {
     toggleAck, toggleFloorModeEnabled, toggleFullscreen, toggleMergeSource,
     toggleMergeSuggestSelected, toggleStagedItem, tomorrowStr, undoBusy, unifiedIngredientUniverse, unreviewedIncidentCount,
     upcomingRunLabels, updateAdvancedArray, updateAdvancedField, updateDrainingRunValues, updateRunMeta, updateStop,
-    v, ve, writeError,
+    v, ve, writeError, sauceAutoTrackFailure,
   }), [
     // ── Reactive state values that actually live in this context object ──
     // setState dispatches (set*), refs (*Ref), plain-function callbacks, and
@@ -15105,7 +16241,7 @@ export default function Home() {
       staleCleanupSuggestions, stopNotes, stopReason, stopReasonsList, strictViolations,
       swipeCue, syncConnected, syncPushFailed,
       templatesLoaded, undoBusy, unifiedIngredientUniverse, unreviewedIncidentCount,
-      upcomingRunLabels, v, ve, writeError,
+      upcomingRunLabels, v, ve, writeError, sauceAutoTrackFailure,
     ]
   );
 
@@ -15239,6 +16375,10 @@ export default function Home() {
       {/* ── Screens / Cast Dialog ───────────────────────────────────────── */}
       {showScreensDialog && (() => {
         const base = window.location.origin + window.location.pathname;
+        const castGuidance = getCastGuidance(
+          detectCastGuidancePlatform(navigator.userAgent, navigator.maxTouchPoints ?? 0),
+          castSupported,
+        );
         const screens = [
           {
             key: "dashboard",
@@ -15298,15 +16438,7 @@ export default function Home() {
                 <button type="button" aria-label="Close cast to screens" onClick={() => setShowScreensDialog(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
               </div>
               <p className="text-xs text-muted-foreground mt-3">Open any URL below on another device or browser tab. Each screen stays live-synced automatically.</p>
-              {castSupported ? (
-                <p className="text-xs text-muted-foreground mt-1.5">
-                  Have a Chromecast? Tap <span className="font-semibold text-foreground">Cast</span> to send a screen straight to a TV — you can cast different screens to different devices at the same time. For AirPlay or Miracast TVs, use the QR code / URL or your device's screen mirroring.
-                </p>
-              ) : (
-                <p className="text-xs text-muted-foreground mt-1.5">
-                  One-click casting needs Chrome or Edge. In this browser, use the QR code or URL on the TV's browser — or use AirPlay / Miracast screen mirroring from your device.
-                </p>
-              )}
+              <p className="text-xs text-muted-foreground mt-1.5">{castGuidance}</p>
               <div className="space-y-3 overflow-y-auto overscroll-contain flex-1 mt-3">
                 {screens.map(s => (
                   <div key={s.key} className="flex items-start gap-4 p-4 rounded-lg bg-muted/20 border border-border/50">
@@ -15532,6 +16664,7 @@ export default function Home() {
           pepTypes: "Pep Types", dieTypes: "Die Types", "ingredient-weights": "Ingredient Weights",
           rules: "Rules", dieDefaults: "Die Defaults", freezer: "Freezer Pull",
            cycleCount: "Cycle Counts", staff: "Staff", audit: "Data Health & Audit", pin: "Change PIN",
+          allergens: "Allergen Mappings",
           import: "Import", setupProfiles: "Setup Profiles", merge: "Merge",
           "ai-corrections": "AI Memory", times: "Shift Times", runs: "Manage Runs",
         };
@@ -15547,7 +16680,10 @@ export default function Home() {
           {
             key: "lists",
             label: "Lists",
-            subTabs: ["brands", "flavors", "pepTypes", "ingredientTypes", "dieTypes", "ingredient-weights"],
+            subTabs: [
+              "brands", "flavors", "pepTypes", "ingredientTypes", "dieTypes", "ingredient-weights",
+              ...(canManageAllergens ? ["allergens"] : []),
+            ],
           },
           {
             key: "settings",
@@ -16211,6 +17347,10 @@ export default function Home() {
                   );
                 })()}
 
+                {manageCategory === "allergens" && canManageAllergens && (
+                  <IngredientAllergenMappingManager />
+                )}
+
                 {/* Setup Profiles: launch the standalone brand/flavor profile editor */}
                 {manageCategory === "setupProfiles" && isSupervisor && (
                   <div className="space-y-3">
@@ -16832,7 +17972,7 @@ export default function Home() {
                   {managerAttentionTotal > 0 && (
                     <span
                       aria-label={`${managerAttentionTotal} manager actions need attention`}
-                      className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center leading-none ring-2 ring-background"
+                      className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] px-1 rounded-full bg-amber-700 text-white text-[10px] font-bold flex items-center justify-center leading-none ring-2 ring-background"
                     >
                       {managerAttentionTotal}
                     </span>
@@ -16862,6 +18002,9 @@ export default function Home() {
                 <DropdownMenuItem onClick={() => setActiveTab("summary")}>
                   <BarChart2 className="w-4 h-4 mr-2" /> Summary
                 </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setActiveTab("setup")}>
+                  <Settings className="w-4 h-4 mr-2" /> Setup
+                </DropdownMenuItem>
                 <DropdownMenuItem
                   onPointerEnter={preloadWarehouseInventorySurface}
                   onFocus={preloadWarehouseInventorySurface}
@@ -16888,9 +18031,9 @@ export default function Home() {
                     <ClipboardList className="w-4 h-4 mr-2" /> Manager action queue
                   </DropdownMenuItem>
                 )}
-                {isManager && (
+                {(canRecordQc || isManager) && (
                   <DropdownMenuItem onClick={() => setActiveTab("quality")}>
-                    <ShieldCheck className="w-4 h-4 mr-2" /> Quality history
+                    <ShieldCheck className="w-4 h-4 mr-2" /> QC workflows &amp; history
                   </DropdownMenuItem>
                 )}
                 {isManager && (
@@ -16913,9 +18056,6 @@ export default function Home() {
                     )}
                   </DropdownMenuItem>
                 )}
-                <DropdownMenuItem onClick={() => setActiveTab("setup")}>
-                  <Settings className="w-4 h-4 mr-2" /> Setup
-                </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setShowAlertSettings(true)}>
                   <Bell className="w-4 h-4 mr-2" /> Alerts &amp; Floor Mode
                 </DropdownMenuItem>
@@ -17090,7 +18230,19 @@ export default function Home() {
               </TabsContent>
 
               <TabsContent value="quality">
-                <QcQualitySurface />
+                <QcQualitySurface
+                  runId={currentRunId}
+                  runStartedAt={currentRun?.startedAt ?? null}
+                  runStoppages={currentRun?.stoppages}
+                  profileKey={canonicalProfileKey(currentRun?.brand ?? "", currentRun?.flavor ?? "")}
+                  runIsActive={Boolean(currentRun?.startedAt && !currentRun.endedAt && !currentRun.pausedAt)}
+                  values={v}
+                  substitutions={dayState.substitutions ?? []}
+                  stagedIngredients={qcStagedIngredients}
+                  canRecordQc={canRecordQc}
+                  canManageQc={canManageQc}
+                  canViewPhotos={canManageInventory}
+                />
               </TabsContent>
 
               <ManagementDepartment staff={<DeferredStaffManagementSurface />} />
@@ -17681,6 +18833,13 @@ export default function Home() {
               canUseAiTools,
               onUseAiFallback: () => void handleSpecAiFallback(),
               existingRecipeNamesByKind: existingImportRecipeNames,
+              inventoryImpactRun: currentRun?.brand && currentRun?.flavor
+                ? {
+                    brand: currentRun.brand,
+                    flavor: currentRun.flavor,
+                    values: form.getValues(),
+                  }
+                : null,
               onConfirm: handleSpecImportConfirm,
             }}
           />
@@ -18197,7 +19356,10 @@ export default function Home() {
                             <CalendarDays className="w-4 h-4 text-muted-foreground" />
                           </Button>
                         </PopoverTrigger>
-                        <PopoverContent align="start" className="w-auto p-0">
+                        <PopoverContent
+                          align="start"
+                          className="z-[71] max-h-[var(--radix-popover-content-available-height)] w-auto overflow-y-auto overscroll-contain p-0"
+                        >
                           <Calendar
                             mode="single"
                             selected={scheduleEditorDate ? new Date(`${scheduleEditorDate}T12:00:00`) : undefined}
@@ -18221,87 +19383,109 @@ export default function Home() {
                     {/* Fixed standard breaks. Operators can see the saved plan,
                         while managers and authorized supervisors can edit it. */}
                     <div className="rounded-lg border border-border/50 bg-muted/20 p-3 space-y-3" data-testid="schedule-breaks">
-                      <div>
-                        <label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Standard breaks</label>
-                        <p className="text-[11px] text-muted-foreground mt-1">Each planned break is fixed at 30 minutes. A clock-time break never pauses production automatically.</p>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Standard breaks</label>
+                          <p className="text-[11px] text-muted-foreground mt-1">Each planned break is fixed at 30 minutes. A clock-time break never pauses production automatically.</p>
+                          <p className="text-[11px] text-primary/90 mt-1" data-testid="schedule-break-summary">
+                            {scheduleBreakSummary || "No breaks configured yet."}
+                          </p>
+                        </div>
+                        {isSupervisor && (
+                          <button
+                            type="button"
+                            aria-expanded={scheduleBreaksExpanded}
+                            aria-controls="schedule-break-fields"
+                            data-testid="schedule-break-toggle"
+                            onClick={() => setScheduleBreaksExpanded(prev => !prev)}
+                            className="shrink-0 rounded-md border border-primary/50 px-2.5 py-1.5 text-xs font-semibold text-primary hover:bg-primary/10 transition-colors sm:hidden"
+                          >
+                            {scheduleBreaksExpanded ? "Hide breaks" : "Add breaks"}
+                          </button>
+                        )}
                       </div>
-                      {scheduleEditorBreaks.map((breakSlot, index) => (
-                        <div key={breakSlot.slot} className="grid grid-cols-[auto_1fr] gap-2 items-center">
-                          <span className="text-xs font-semibold text-muted-foreground">Break {breakSlot.slot}</span>
-                          <div className="grid grid-cols-2 gap-2">
-                            <select
-                              aria-label={`Break ${breakSlot.slot} placement`}
-                              value={!breakSlot.enabled ? "off" : breakSlot.mode}
-                              disabled={!isSupervisor}
-                              onChange={e => setScheduleEditorBreaks(prev => prev.map((item, i) => i === index
-                                ? { ...item, enabled: e.target.value !== "off", mode: e.target.value === "at-time" ? "at-time" : "after-run" }
-                                : item) as DayBreaks)}
-                              className="h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-xs outline-none disabled:opacity-60"
-                            >
-                              <option value="off">Not scheduled</option>
-                              <option value="after-run">After a run</option>
-                              <option value="at-time">At a clock time</option>
-                            </select>
-                            {breakSlot.enabled && breakSlot.mode === "after-run" ? (
-                              <select
-                                aria-label={`Break ${breakSlot.slot} run`}
-                                value={breakSlot.runId ?? ""}
+                      <div
+                        id="schedule-break-fields"
+                        className={`${scheduleBreaksExpanded ? "block" : "hidden"} sm:block space-y-3`}
+                      >
+                        {scheduleEditorBreaks.map((breakSlot, index) => (
+                          <div key={breakSlot.slot} className="grid grid-cols-[auto_1fr] gap-2 items-center">
+                            <span className="text-xs font-semibold text-muted-foreground">Break {breakSlot.slot}</span>
+                            <div className="grid grid-cols-2 gap-2">
+                              <TouchSelect
+                                aria-label={`Break ${breakSlot.slot} placement`}
+                                value={!breakSlot.enabled ? "off" : breakSlot.mode}
                                 disabled={!isSupervisor}
-                                onChange={e => setScheduleEditorBreaks(prev => prev.map((item, i) => i === index ? { ...item, runId: e.target.value || undefined } : item) as DayBreaks)}
+                                onChange={e => setScheduleEditorBreaks(prev => prev.map((item, i) => i === index
+                                  ? { ...item, enabled: e.target.value !== "off", mode: e.target.value === "at-time" ? "at-time" : "after-run" }
+                                  : item) as DayBreaks)}
                                 className="h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-xs outline-none disabled:opacity-60"
                               >
-                                <option value="">Select run…</option>
-                                {scheduleEditorRuns.map((run, runIndex) => <option key={run.id} value={run.id}>Run {runIndex + 1} — {run.brand || "Unnamed"}</option>)}
-                              </select>
-                            ) : (
-                              <input
-                                aria-label={`Break ${breakSlot.slot} time`}
-                                type="time"
-                                value={breakSlot.atTime ?? ""}
-                                disabled={!isSupervisor || !breakSlot.enabled}
-                                onChange={e => setScheduleEditorBreaks(prev => prev.map((item, i) => i === index ? { ...item, atTime: e.target.value || undefined } : item) as DayBreaks)}
-                                className="h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-xs outline-none disabled:opacity-60"
-                              />
+                                <option value="off">Not scheduled</option>
+                                <option value="after-run">After a run</option>
+                                <option value="at-time">At a clock time</option>
+                              </TouchSelect>
+                              {breakSlot.enabled && breakSlot.mode === "after-run" ? (
+                                <TouchSelect
+                                  aria-label={`Break ${breakSlot.slot} run`}
+                                  value={breakSlot.runId ?? ""}
+                                  disabled={!isSupervisor}
+                                  onChange={e => setScheduleEditorBreaks(prev => prev.map((item, i) => i === index ? { ...item, runId: e.target.value || undefined } : item) as DayBreaks)}
+                                  className="h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-xs outline-none disabled:opacity-60"
+                                >
+                                  <option value="">Select run…</option>
+                                  {scheduleEditorRuns.map((run, runIndex) => <option key={run.id} value={run.id}>Run {runIndex + 1} — {run.brand || "Unnamed"}</option>)}
+                                </TouchSelect>
+                              ) : (
+                                <input
+                                  aria-label={`Break ${breakSlot.slot} time`}
+                                  type="time"
+                                  value={breakSlot.atTime ?? ""}
+                                  disabled={!isSupervisor || !breakSlot.enabled}
+                                  onChange={e => setScheduleEditorBreaks(prev => prev.map((item, i) => i === index ? { ...item, atTime: e.target.value || undefined } : item) as DayBreaks)}
+                                  className="h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-xs outline-none disabled:opacity-60"
+                                />
+                              )}
+                            </div>
+                            {breakSlot.enabled && breakSlot.mode === "after-run" && !breakSlot.runId && (
+                              <p className="col-start-2 text-[11px] text-amber-400">Choose a run so this break is not left unassigned.</p>
+                            )}
+                            {breakSlot.enabled && breakSlot.mode === "after-run" && breakSlot.runId
+                              && !scheduleEditorRuns.some(run => run.id === breakSlot.runId) && (
+                              <p className="col-start-2 text-[11px] text-amber-400">The selected run was deleted or is no longer assigned.</p>
+                            )}
+                            {breakSlot.enabled && breakSlot.mode === "at-time" && !isValidLocalTime(breakSlot.atTime) && (
+                              <p className="col-start-2 text-[11px] text-amber-400">Enter a valid local time.</p>
                             )}
                           </div>
-                          {breakSlot.enabled && breakSlot.mode === "after-run" && !breakSlot.runId && (
-                            <p className="col-start-2 text-[11px] text-amber-400">Choose a run so this break is not left unassigned.</p>
-                          )}
-                          {breakSlot.enabled && breakSlot.mode === "after-run" && breakSlot.runId
-                            && !scheduleEditorRuns.some(run => run.id === breakSlot.runId) && (
-                            <p className="col-start-2 text-[11px] text-amber-400">The selected run was deleted or is no longer assigned.</p>
-                          )}
-                          {breakSlot.enabled && breakSlot.mode === "at-time" && !isValidLocalTime(breakSlot.atTime) && (
-                            <p className="col-start-2 text-[11px] text-amber-400">Enter a valid local time.</p>
-                          )}
-                        </div>
-                      ))}
-                      {(() => {
-                        const preview = calculateDayTimeline({
-                          date: scheduleEditorDate || todayStr(),
-                          productionStartTime,
-                          runs: scheduleEditorRuns.map(run => ({
-                            run: { id: run.id, brand: run.brand, flavor: run.flavor },
-                            durationSec: estimatedRunDurationSec(scheduleEditorRunValues[run.id]),
-                          })),
-                          breaks: scheduleEditorBreaks,
-                          nowMs: Date.now(),
-                        });
-                        return (
-                          <div className="pt-2 border-t border-border/30 text-[11px] text-muted-foreground" data-testid="schedule-break-preview">
-                            <span className="font-semibold">Preview:</span>{" "}
-                            {preview.breaks.filter(item => item.break.enabled).map(item =>
-                              item.status === "unassigned"
-                                ? `Break ${item.slot} unassigned`
-                                : item.startMs ? `Break ${item.slot} ${new Date(item.startMs).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
-                                : `Break ${item.slot} pending`,
-                            ).join(" · ") || "No breaks scheduled"}
-                            {preview.projectedFinishMs && (
-                              <span className="ml-2">· day finish {new Date(preview.projectedFinishMs).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
-                            )}
-                          </div>
-                        );
-                      })()}
+                        ))}
+                        {(() => {
+                          const preview = calculateDayTimeline({
+                            date: scheduleEditorDate || todayStr(),
+                            productionStartTime,
+                            runs: scheduleEditorRuns.map(run => ({
+                              run: { id: run.id, brand: run.brand, flavor: run.flavor },
+                              durationSec: estimatedRunDurationSec(scheduleEditorRunValues[run.id]),
+                            })),
+                            breaks: scheduleEditorBreaks,
+                            nowMs: Date.now(),
+                          });
+                          return (
+                            <div className="pt-2 border-t border-border/30 text-[11px] text-muted-foreground" data-testid="schedule-break-preview">
+                              <span className="font-semibold">Preview:</span>{" "}
+                              {preview.breaks.filter(item => item.break.enabled).map(item =>
+                                item.status === "unassigned"
+                                  ? `Break ${item.slot} unassigned`
+                                  : item.startMs ? `Break ${item.slot} ${new Date(item.startMs).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
+                                  : `Break ${item.slot} pending`,
+                              ).join(" · ") || "No breaks scheduled"}
+                              {preview.projectedFinishMs && (
+                                <span className="ml-2">· day finish {new Date(preview.projectedFinishMs).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </div>
                     </div>
                     {/* Runs */}
                     <div>
@@ -18353,7 +19537,8 @@ export default function Home() {
                             <div className="grid grid-cols-2 gap-2">
                               <div>
                                 <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Brand</label>
-                                <select
+                                <TouchSelect
+                                  aria-label="Schedule brand"
                                   value={run.brand}
                                   onChange={e => {
                                     const brand = e.target.value;
@@ -18368,11 +19553,12 @@ export default function Home() {
                                 >
                                   <option value="">— Brand —</option>
                                   {brands.map(b => <option key={b} value={b}>{b}</option>)}
-                                </select>
+                                </TouchSelect>
                               </div>
                               <div>
                                 <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Flavor</label>
-                                <select
+                                <TouchSelect
+                                  aria-label="Schedule flavor"
                                   value={run.flavor}
                                   onChange={e => {
                                     const flavor = e.target.value;
@@ -18388,7 +19574,7 @@ export default function Home() {
                                 >
                                   <option value="">— Flavor —</option>
                                   {(brandFlavors[run.brand] ?? []).map(f => <option key={f} value={f}>{f}</option>)}
-                                </select>
+                                </TouchSelect>
                               </div>
                             </div>
                             <div>
@@ -18487,14 +19673,15 @@ export default function Home() {
                       </div>
                       <div className="mt-3">
                         <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Die Type</label>
-                        <select
+                        <TouchSelect
+                          aria-label="Die type"
                           value={scheduleEditorRunValues[scheduleAdvancedRunId]?.dieType ?? ""}
                           onChange={e => updateAdvancedField(scheduleAdvancedRunId!, "dieType", e.target.value)}
                           className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                         >
                           <option value="">— Select —</option>
                           {dieTypes.map(d => <option key={d} value={d}>{d}</option>)}
-                        </select>
+                        </TouchSelect>
                       </div>
                     </section>
                     {/* ── Dough Recipe ───────────────────────────────────────── */}
@@ -18502,25 +19689,26 @@ export default function Home() {
                       <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-3 pb-1 border-b border-border/30">Dough Recipe</h3>
                       <div className="mb-2">
                         <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Recipe Name</label>
-                        <select
+                        <TouchSelect
+                          aria-label="Dough recipe name"
                           value={scheduleEditorRunValues[scheduleAdvancedRunId]?.doughRecipeName ?? ""}
                           onChange={e => updateAdvancedField(scheduleAdvancedRunId!, "doughRecipeName", e.target.value)}
                           className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                         >
                           <option value="">— Select —</option>
                           {doughRecipeNames.map(n => <option key={n} value={n}>{n}</option>)}
-                        </select>
+                        </TouchSelect>
                       </div>
                       <div className="space-y-1.5">
                         {(scheduleEditorRunValues[scheduleAdvancedRunId]?.doughRecipe ?? []).map((row, ri) => (
                           <div key={ri} className="flex gap-2 items-center">
-                            <select value={row.ingredient}
+                            <TouchSelect aria-label="Dough ingredient" value={row.ingredient}
                               onChange={e => { const rows = [...(scheduleEditorRunValues[scheduleAdvancedRunId]?.doughRecipe ?? [])]; rows[ri] = { ...rows[ri], ingredient: e.target.value }; updateAdvancedArray(scheduleAdvancedRunId!, "doughRecipe", rows); }}
                               className="flex-1 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                             >
                               <option value="">— Ingredient —</option>
                               {doughIngredients.map(i => <option key={i} value={i}>{i}</option>)}
-                            </select>
+                            </TouchSelect>
                             <input type="number" min="0" step="0.1" value={row.lbs || ""}
                               onChange={e => { const rows = [...(scheduleEditorRunValues[scheduleAdvancedRunId]?.doughRecipe ?? [])]; rows[ri] = { ...rows[ri], lbs: Number(e.target.value) || 0 }; updateAdvancedArray(scheduleAdvancedRunId!, "doughRecipe", rows); }}
                               placeholder="lbs" className="w-20 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors"
@@ -18548,13 +19736,13 @@ export default function Home() {
                         {([1, 2, 3, 4] as const).map(n => (
                           <div key={n} className="rounded-md bg-muted/20 p-2.5 space-y-2">
                             <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Applicator {n}</p>
-                            <select value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[`app${n}Type` as keyof FormValues] as string) ?? ""}
+                            <TouchSelect aria-label={`Applicator ${n} type`} value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[`app${n}Type` as keyof FormValues] as string) ?? ""}
                               onChange={e => updateAdvancedField(scheduleAdvancedRunId!, `app${n}Type` as keyof FormValues, e.target.value)}
                               className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                             >
                               <option value="">— Type —</option>
                               {ingredientTypeOptions.map(t => <option key={t} value={t}>{t}</option>)}
-                            </select>
+                            </TouchSelect>
                             <div className="grid grid-cols-2 gap-2">
                               <div>
                                 <label className="text-[10px] text-muted-foreground mb-0.5 block">Oz / Pizza</label>
@@ -18576,13 +19764,13 @@ export default function Home() {
                         {([1, 2] as const).map(n => (
                           <div key={n} className="rounded-md bg-muted/20 p-2.5 space-y-2">
                             <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Pepperoni {n}</p>
-                            <select value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[`pep${n}Type` as keyof FormValues] as string) ?? ""}
+                            <TouchSelect aria-label={`Pepperoni ${n} type`} value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[`pep${n}Type` as keyof FormValues] as string) ?? ""}
                               onChange={e => updateAdvancedField(scheduleAdvancedRunId!, `pep${n}Type` as keyof FormValues, e.target.value)}
                               className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                             >
                               <option value="">— Type —</option>
                               {pepTypes.map(p => <option key={p} value={p}>{p}</option>)}
-                            </select>
+                            </TouchSelect>
                             <div className="grid grid-cols-3 gap-2">
                               <div>
                                 <label className="text-[10px] text-muted-foreground mb-0.5 block">Sticks</label>
@@ -18622,24 +19810,24 @@ export default function Home() {
                             <div key={n}>
                               <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2">App {n} Recipe</p>
                               <div className="mb-2">
-                                <select value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[nameField] as string) ?? ""}
+                                <TouchSelect aria-label={`App ${n} recipe name`} value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[nameField] as string) ?? ""}
                                   onChange={e => updateAdvancedField(scheduleAdvancedRunId!, nameField, e.target.value)}
                                   className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                                 >
                                   <option value="">— Recipe Name —</option>
                                   {cheeseRecipeNames.map(r => <option key={r} value={r}>{r}</option>)}
-                                </select>
+                                </TouchSelect>
                               </div>
                               <div className="space-y-1.5">
                                 {rows.map((row, ri) => (
                                   <div key={ri} className="flex gap-2 items-center">
-                                    <select value={row.ingredient}
+                                    <TouchSelect aria-label={`App ${n} ingredient`} value={row.ingredient}
                                       onChange={e => { const next = [...rows]; next[ri] = { ...next[ri], ingredient: e.target.value }; updateAdvancedArray(scheduleAdvancedRunId!, recipeField, next); }}
                                       className="flex-1 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                                     >
                                       <option value="">— Ingredient —</option>
                                       {cheeseIngredients.map(i => <option key={i} value={i}>{i}</option>)}
-                                    </select>
+                                    </TouchSelect>
                                     <input type="number" min="0" step="0.1" value={row.lbs || ""}
                                       onChange={e => { const next = [...rows]; next[ri] = { ...next[ri], lbs: Number(e.target.value) || 0 }; updateAdvancedArray(scheduleAdvancedRunId!, recipeField, next); }}
                                       placeholder="lbs" className="w-20 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors"
@@ -18658,24 +19846,24 @@ export default function Home() {
                     <section>
                       <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-3 pb-1 border-b border-border/30">Frontline Recipe</h3>
                       <div className="mb-2">
-                        <select value={scheduleEditorRunValues[scheduleAdvancedRunId]?.frontlineRecipeName ?? ""}
+                        <TouchSelect aria-label="Frontline recipe name" value={scheduleEditorRunValues[scheduleAdvancedRunId]?.frontlineRecipeName ?? ""}
                           onChange={e => updateAdvancedField(scheduleAdvancedRunId!, "frontlineRecipeName", e.target.value)}
                           className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                         >
                           <option value="">— Select —</option>
                           {frontlineRecipeNames.map(r => <option key={r} value={r}>{r}</option>)}
-                        </select>
+                        </TouchSelect>
                       </div>
                       <div className="space-y-1.5">
                         {(scheduleEditorRunValues[scheduleAdvancedRunId]?.frontlineRecipe ?? []).map((row, ri) => (
                           <div key={ri} className="flex gap-2 items-center">
-                            <select value={row.ingredient}
+                            <TouchSelect aria-label="Frontline ingredient" value={row.ingredient}
                               onChange={e => { const rows = [...(scheduleEditorRunValues[scheduleAdvancedRunId]?.frontlineRecipe ?? [])]; rows[ri] = { ...rows[ri], ingredient: e.target.value }; updateAdvancedArray(scheduleAdvancedRunId!, "frontlineRecipe", rows); }}
                               className="flex-1 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                             >
                               <option value="">— Ingredient —</option>
                               {frontlineIngredients.map(i => <option key={i} value={i}>{i}</option>)}
-                            </select>
+                            </TouchSelect>
                             <input type="number" min="0" step="0.1" value={row.lbs || ""}
                               onChange={e => { const rows = [...(scheduleEditorRunValues[scheduleAdvancedRunId]?.frontlineRecipe ?? [])]; rows[ri] = { ...rows[ri], lbs: Number(e.target.value) || 0 }; updateAdvancedArray(scheduleAdvancedRunId!, "frontlineRecipe", rows); }}
                               placeholder="lbs" className="w-20 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors"
@@ -18737,6 +19925,8 @@ export default function Home() {
         autoTrackWakeRebaseReason={autoTrackWakeRebaseReason}
         autoTrackWakeAcknowledgement={foregroundSyncAcknowledgement}
         claimAutoTrackEvent={claimAutoTrackEvent}
+        onAutomaticClaimFailure={reportSauceAutoTrackFailure}
+        onAutomaticClaimSuccess={clearSauceAutoTrackFailure}
         onAutoTrackProgressChange={(enabled) => {
           updateRunMeta(currentRunId, { autoTrackDisabled: !enabled });
         }}
@@ -18746,6 +19936,7 @@ export default function Home() {
         serverClockOffsetMs={serverClockOffsetMs}
         operationalOnline={isOnline}
         operationalSyncConnected={syncConnected}
+        screenSyncStatus={getScreenSyncStatus(screenSyncState)}
       >
         {/* Always-mounted: resets prepPhase once per run at depletion handoff */}
         <LiveRunHandoffGuard />
@@ -19077,16 +20268,27 @@ function FloorModeView() {
                   {(packagingLock || packagingConflict) && <p role="status" aria-live="polite" className="col-span-3 text-center text-xs text-amber-200">{packagingConflict ?? sectionLockedMessage(packagingLock)}</p>}
                   <button type="button" data-testid="floor-cases-minus" aria-label="Correct cases down by one" onClick={() => {
                     runUnlockedManualSectionAction(() => !!getManualSectionLock(currentRun?.id ?? "", "packaging")?.peer, () => {
-                      const nextCases = Math.max(0, v.casesOnCurrentSkid - 1);
-                      persistManualPackagingProgress(currentRun?.id ?? "", v.skidsCompleted, nextCases);
+                      const before = {
+                        skidsCompleted: Number(form.getValues("skidsCompleted")) || 0,
+                        casesOnCurrentSkid: Number(form.getValues("casesOnCurrentSkid")) || 0,
+                      };
+                      const nextCases = Math.max(0, before.casesOnCurrentSkid - 1);
+                      persistManualPackagingProgress(currentRun?.id ?? "", before.skidsCompleted, nextCases, undefined, before);
                       form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
                     });
                   }} disabled={!!packagingLock} className="min-h-12 rounded-xl text-lg font-bold disabled:cursor-not-allowed disabled:opacity-40" style={{ background: "rgba(255,255,255,0.08)" }}>−1 case</button>
                   <div className="flex items-center justify-center text-center text-xs font-bold tracking-wide" style={{ color: "rgba(255,255,255,0.65)" }}>CORRECT<br />COUNT</div>
                   <button type="button" data-testid="floor-cases-plus" aria-label="Correct cases up by one" onClick={() => {
                     runUnlockedManualSectionAction(() => !!getManualSectionLock(currentRun?.id ?? "", "packaging")?.peer, () => {
-                      const nextCases = incrementFloorCaseCount(v.casesOnCurrentSkid, v.casesPerSkid);
-                      persistManualPackagingProgress(currentRun?.id ?? "", v.skidsCompleted, nextCases);
+                      const before = {
+                        skidsCompleted: Number(form.getValues("skidsCompleted")) || 0,
+                        casesOnCurrentSkid: Number(form.getValues("casesOnCurrentSkid")) || 0,
+                      };
+                      const nextCases = incrementFloorCaseCount(
+                        before.casesOnCurrentSkid,
+                        Number(form.getValues("casesPerSkid")) || 0,
+                      );
+                      persistManualPackagingProgress(currentRun?.id ?? "", before.skidsCompleted, nextCases, undefined, before);
                       form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
                     });
                   }} disabled={!!packagingLock || (v.casesPerSkid > 0 && v.casesOnCurrentSkid >= v.casesPerSkid)} className="min-h-12 rounded-xl text-lg font-bold disabled:cursor-not-allowed disabled:opacity-40" style={{ background: "rgba(255,255,255,0.08)" }}>+1 case</button>
@@ -19142,8 +20344,12 @@ function FloorModeView() {
                         () => !!getManualSectionLock(currentRun?.id ?? "", "packaging")?.peer,
                         () => {
                           navigator.vibrate?.(15);
-                          const nextSkids = v.skidsCompleted + 1;
-                          persistManualPackagingProgress(currentRun?.id ?? "", nextSkids, 0);
+                          const before = {
+                            skidsCompleted: Number(form.getValues("skidsCompleted")) || 0,
+                            casesOnCurrentSkid: Number(form.getValues("casesOnCurrentSkid")) || 0,
+                          };
+                          const nextSkids = before.skidsCompleted + 1;
+                          persistManualPackagingProgress(currentRun?.id ?? "", nextSkids, 0, undefined, before);
                           form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
                           form.setValue("casesOnCurrentSkid", 0, { shouldDirty: true });
                         },

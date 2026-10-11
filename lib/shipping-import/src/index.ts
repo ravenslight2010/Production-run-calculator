@@ -11,7 +11,7 @@
 // that can't be mapped confidently is OMITTED from the patch so the brand's
 // current setting is kept (never guessed).
 
-import type { SheetGrid } from "@workspace/spec-import";
+import { workbookCellReference, type SheetGrid, type WorkbookCellReference } from "@workspace/spec-import";
 import { buildNearDupNameMatcher, looseNameKey } from "@workspace/name-match";
 
 /** One parsed guide row (raw cell text, trimmed). */
@@ -24,6 +24,8 @@ export type ShippingGuideRow = {
   casesPerSkid: string;
   gripSheets: string;
   stacking: string;
+  /** Source cells are transient evidence for the active import review. */
+  sourceCells?: Partial<Record<"name" | "box" | "circle" | "pizzasPerCase" | "casesPerSkid" | "gripSheets" | "stacking", WorkbookCellReference>>;
 };
 
 /**
@@ -54,6 +56,8 @@ export type ShippingCandidate = {
    * "4 - 3PACK" pizzas/case.
    */
   unmapped: string[];
+  sourceCell?: WorkbookCellReference;
+  patchSources?: Partial<Record<keyof ShippingPatch, WorkbookCellReference>>;
 };
 
 const norm = (s: unknown) => String(s ?? "").replace(/\s+/g, " ").trim();
@@ -67,7 +71,10 @@ const headerKey = (s: string) => norm(s).toUpperCase().replace(/[^A-Z]/g, "");
  * Tolerates the sheet's own typo ("GRIPSHEEETS") and minor punctuation
  * differences by matching on letter prefixes.
  */
-function findColumns(rows: string[][]): { headerIdx: number; cols: Record<keyof Omit<ShippingGuideRow, "name">, number> & { name: number } } | null {
+function findColumns(rows: string[][]): {
+  headerIdx: number;
+  cols: Record<"box" | "circle" | "pizzasPerCase" | "casesPerSkid" | "gripSheets" | "stacking", number> & { name: number };
+} | null {
   for (let i = 0; i < Math.min(rows.length, 20); i++) {
     const row = rows[i] ?? [];
     const keys = row.map((c) => headerKey(c));
@@ -96,7 +103,10 @@ function findColumns(rows: string[][]): { headerIdx: number; cols: Record<keyof 
  * sheet and takes the first one with a recognizable header. Returns [] when
  * nothing looks like the guide.
  */
-export function parseShippingGuide(grids: ReadonlyArray<SheetGrid>): ShippingGuideRow[] {
+function parseShippingGuideInternal(
+  grids: ReadonlyArray<SheetGrid>,
+  includeSources: boolean,
+): ShippingGuideRow[] {
   for (const grid of grids) {
     const found = findColumns(grid.rows);
     if (!found) continue;
@@ -107,6 +117,16 @@ export function parseShippingGuide(grids: ReadonlyArray<SheetGrid>): ShippingGui
       const cell = (idx: number) => (idx >= 0 ? norm(row[idx]) : "");
       const name = cell(cols.name);
       if (!name) continue; // spacer row
+      let sourceCells: ShippingGuideRow["sourceCells"];
+      if (includeSources) {
+        sourceCells = {
+          name: workbookCellReference(grid.name, r, cols.name, grid.sourceFile),
+        };
+        for (const key of ["box", "circle", "pizzasPerCase", "casesPerSkid", "gripSheets", "stacking"] as const) {
+          const column = cols[key];
+          if (column >= 0) sourceCells[key] = workbookCellReference(grid.name, r, column, grid.sourceFile);
+        }
+      }
       out.push({
         name,
         box: cell(cols.box),
@@ -115,11 +135,22 @@ export function parseShippingGuide(grids: ReadonlyArray<SheetGrid>): ShippingGui
         casesPerSkid: cell(cols.casesPerSkid),
         gripSheets: cell(cols.gripSheets),
         stacking: cell(cols.stacking),
+        ...(sourceCells ? { sourceCells } : {}),
       });
     }
     if (out.length > 0) return out;
   }
   return [];
+}
+
+/** Parse values only, keeping the legacy parser result free of review metadata. */
+export function parseShippingGuide(grids: ReadonlyArray<SheetGrid>): ShippingGuideRow[] {
+  return parseShippingGuideInternal(grids, false);
+}
+
+/** Parse values with transient source coordinates for the active review. */
+export function parseShippingGuideWithSources(grids: ReadonlyArray<SheetGrid>): ShippingGuideRow[] {
+  return parseShippingGuideInternal(grids, true);
 }
 
 const isNA = (s: string) => {
@@ -250,12 +281,29 @@ export function buildShippingCandidates(
 ): ShippingCandidate[] {
   return rows.map((row, i) => {
     const { patch, unmapped } = shippingPatchFromRow(row);
+    const sourceCells = row.sourceCells;
+    const patchSources: NonNullable<ShippingCandidate["patchSources"]> = {};
+    const sourceFor: Partial<Record<keyof ShippingPatch, "box" | "circle" | "pizzasPerCase" | "casesPerSkid" | "gripSheets" | "stacking">> = {
+      shipper: "box",
+      circles: "circle",
+      skidStacking: "stacking",
+      gripSheets: "gripSheets",
+      pizzasPerCase: "pizzasPerCase",
+      casesPerSkid: "casesPerSkid",
+    };
+    for (const key of Object.keys(patch) as (keyof ShippingPatch)[]) {
+      const sourceKey = sourceFor[key];
+      const source = sourceKey ? sourceCells?.[sourceKey] : undefined;
+      if (source) patchSources[key] = source;
+    }
     return {
       id: `ship-${i}`,
       guideName: row.name,
       brand: matchShippingBrand(row.name, brands),
       patch,
       unmapped,
+      ...(sourceCells?.name ? { sourceCell: sourceCells.name } : {}),
+      ...(Object.keys(patchSources).length ? { patchSources } : {}),
     };
   });
 }

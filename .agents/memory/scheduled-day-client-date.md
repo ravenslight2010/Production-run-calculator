@@ -43,6 +43,17 @@ the fallback only triggers on non-format-matching input. Receivers also keep a
 `remoteDateOk` guard (`!remoteDate || remoteDate===todayStr()`); the `!remoteDate`
 leg is legacy tolerance — server date-scoping is the real defense.
 
+**Background scheduler rule:** a job with no requesting client cannot safely
+discard `daily_sync` rows by comparing them with server UTC. Preserve
+date-specific evaluation and coalesce queue work at the scope/time-bucket level
+instead, unless the product defines an authoritative facility-day source.
+
+**Why:** a UTC-past row can still be the operator's current local day, and
+cross-date freezer alerts can remain actionable after a run ends.
+
+**How to apply:** for server-side polling and scheduled jobs that traverse dated
+sync rows, do not add a UTC "today" cutoff as a backlog fix.
+
 **Easy-to-miss caller: the schedule-import PUTs.** The web Excel import commit paths
 (`commitMultiDayImport` + single-day `commitExcelImport` in `home.tsx`) write each
 day via `PUT /sync/${date}`. Two distinct bugs made **today's** imported runs never

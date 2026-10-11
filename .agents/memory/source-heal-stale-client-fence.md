@@ -23,3 +23,14 @@ the authoritative pool and must not retry its stale body. Only after that fence
 is deployed should a fresh, manager-approved, fingerprinted one-time repair
 restore affected production rows and be verified read-only against the live
 database.
+
+Post-heal differences are not automatically data poison. The production owner
+reviewed a later set of cheese-recipe differences and confirmed the changed
+values were proper corrections.
+
+**Why:** A source snapshot can become stale after an intentional manager edit;
+restoring it merely to clear a reconciliation warning would erase valid data.
+
+**How to apply:** Before repairing any row updated after a prior heal, show the
+owner the exact bounded differences, treat their decision as authoritative,
+and preserve the current value when they identify it as intentional.

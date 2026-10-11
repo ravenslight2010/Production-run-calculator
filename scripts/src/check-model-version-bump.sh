@@ -153,14 +153,25 @@ if [ -n "${SANITIZER_MEANINGFUL_CHANGE}" ]; then
 fi
 
 # ── Step 4: extract SPEC_PARSE_VERSION at base and target, compare values ─────
-# Use `git show REF:FILE` to read the file at each ref and extract the version
+# Use `git show REF:FILE` to read the effective version at each ref, including
+# the shared constant used by current clients and the literal used by older ones.
 # string (e.g. "22"). This avoids false-positives from comments or unchanged
 # re-assignments — the version value must actually differ.
 
 extract_version() {
   local ref="$1"
-  git show "${ref}:${SPEC_FILE}" 2>/dev/null \
+  local version
+  version=$(git show "${ref}:${SPEC_FILE}" 2>/dev/null \
     | grep -E 'SPEC_PARSE_VERSION\s*=\s*"[^"]+"' \
+    | grep -oE '"[^"]+"' \
+    | head -1 \
+    || true)
+  if [ -n "${version}" ]; then
+    printf '%s\n' "${version}"
+    return
+  fi
+  git show "${ref}:${SANITIZER_FILE}" 2>/dev/null \
+    | grep -E 'SPEC_IMPORT_PARSE_VERSION\s*=\s*"[^"]+"' \
     | grep -oE '"[^"]+"' \
     | head -1 \
     || true
@@ -169,9 +180,9 @@ extract_version() {
 BASE_VERSION=$(extract_version "${DIFF_BASE}")
 TARGET_VERSION=$(extract_version "${DIFF_TARGET}")
 
-if [ -z "${BASE_VERSION}" ] && [ -z "${TARGET_VERSION}" ]; then
-  echo "WARNING: could not read SPEC_PARSE_VERSION from either ref — skipping version-bump check."
-  exit 0
+if [ -z "${TARGET_VERSION}" ]; then
+  echo "FAIL: could not read the effective parse version at the target revision."
+  exit 1
 fi
 
 if [ "${BASE_VERSION}" != "${TARGET_VERSION}" ] && [ -n "${TARGET_VERSION}" ]; then

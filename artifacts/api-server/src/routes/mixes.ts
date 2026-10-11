@@ -1,10 +1,13 @@
 import { Router, type IRouter, type Request, type Response } from "express";
+import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, mixesTable, type MixRow } from "@workspace/db";
 import { SaveMixesBody, DeleteMixesBody } from "@workspace/api-zod";
 import { normalizeMix, type Mix } from "@workspace/mixes";
 import { requireCapability } from "../middlewares/requireCapability";
 import { currentScope } from "../lib/requestScope";
+import { writeAuditEvent } from "./auditLogs";
 import { invalidateMasterDataBootstrapCache } from "./masterDataBootstrap";
 import { broadcastMasterDataChanged } from "./sync";
 
@@ -18,6 +21,25 @@ import { broadcastMasterDataChanged } from "./sync";
 // inventory master-data, not a separate capability.
 
 const MAX_BATCH = 500;
+const MIX_RECIPE_AUDIT_FIELDS = [
+  "name",
+  "brand",
+  "flavor",
+  "batchSize",
+  "daysEarly",
+  "notes",
+  "amountAlreadyMade",
+  "components",
+  "isPrep",
+  "enabled",
+] as const;
+
+function requestCorrelationId(req: Request): string {
+  const candidate = (req as Request & { correlationId?: unknown }).correlationId;
+  return typeof candidate === "string" && candidate.length > 0 && candidate.length <= 128
+    ? candidate
+    : randomUUID();
+}
 
 class RecipeRevisionConflict extends Error {
   constructor(readonly rejectedIds: string[]) {
@@ -76,6 +98,13 @@ function toDbValues(item: Mix) {
   };
 }
 
+function changedRecipeFields(next: Mix, existing: MixRow): string[] {
+  const previous = toApiItem(existing);
+  return MIX_RECIPE_AUDIT_FIELDS.filter(
+    (field) => !isDeepStrictEqual(next[field], previous[field]),
+  );
+}
+
 function nextRevision(previous?: Date): Date {
   return new Date(Math.max(Date.now(), (previous?.getTime() ?? 0) + 1));
 }
@@ -119,6 +148,7 @@ router.post(
     }
 
     try {
+      const correlationId = requestCorrelationId(req);
       await db.transaction(async (tx) => {
         await tx.execute(
           sql`SELECT pg_advisory_xact_lock(hashtext(${"mixes:" + currentScope()}))`,
@@ -149,8 +179,16 @@ router.post(
           const existing = existingById.get(mix.id);
           const values = toDbValues(mix);
           values.updatedAt = nextRevision(existing?.updatedAt);
+          const fieldNames = existing
+            ? changedRecipeFields(mix, existing)
+            : [...MIX_RECIPE_AUDIT_FIELDS];
           if (!existing) {
             await tx.insert(mixesTable).values(values);
+            await writeAuditEvent(tx, {
+              action: "mix_recipe_created",
+              resource: `mix_recipe:${mix.id}`,
+              changes: { fieldNames, correlationId },
+            });
             continue;
           }
           if (
@@ -181,6 +219,13 @@ router.post(
                 eq(mixesTable.scope, currentScope()),
               ),
             );
+          if (fieldNames.length > 0) {
+            await writeAuditEvent(tx, {
+              action: "mix_recipe_updated",
+              resource: `mix_recipe:${mix.id}`,
+              changes: { fieldNames, correlationId },
+            });
+          }
         }
       });
       invalidateMasterDataBootstrapCache();
@@ -219,14 +264,28 @@ router.delete(
 
     try {
       if (ids.length > 0) {
-        await db
-          .delete(mixesTable)
-          .where(
-            and(
-              inArray(mixesTable.id, ids),
-              eq(mixesTable.scope, currentScope()),
-            ),
-          );
+        const correlationId = requestCorrelationId(req);
+        await db.transaction(async (tx) => {
+          const deletedRows = await tx
+            .delete(mixesTable)
+            .where(
+              and(
+                inArray(mixesTable.id, ids),
+                eq(mixesTable.scope, currentScope()),
+              ),
+            )
+            .returning({ id: mixesTable.id });
+          for (const row of deletedRows) {
+            await writeAuditEvent(tx, {
+              action: "mix_recipe_deleted",
+              resource: `mix_recipe:${row.id}`,
+              changes: {
+                fieldNames: [...MIX_RECIPE_AUDIT_FIELDS],
+                correlationId,
+              },
+            });
+          }
+        });
       }
       invalidateMasterDataBootstrapCache();
       broadcastMasterDataChanged(req.header("x-client-id") ?? "", currentScope(), "master-data");

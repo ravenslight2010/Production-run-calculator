@@ -53,7 +53,17 @@ export function toMixScheduledRun(input: MixPlanRunInput): {
   ingredients: string[];
   ingredientOzPerPizza: Record<string, number>;
 } {
-  const vals = input.values;
+  // Saved profiles are partial by design. The web form supplies zero-valued
+  // defaults for fields such as casesPerLayer, but the server receives only
+  // the persisted profile fields plus casesNeeded for scheduled runs. Fill
+  // those numeric defaults before the shared summary math so an omitted field
+  // cannot turn the whole scheduled plan into NaN/null JSON.
+  const vals = {
+    ...input.values,
+    casesNeeded: Number(input.values.casesNeeded) || 0,
+    pizzasPerCase: Number(input.values.pizzasPerCase) || 0,
+    casesPerLayer: Number(input.values.casesPerLayer) || 0,
+  } as SummaryStatsInput;
   // DB rows may legitimately lack optional recipe fields; the lib guards reads.
   const s = computeSummaryStats(
     vals as unknown as SummaryStatsInput,
@@ -73,10 +83,21 @@ export function toMixScheduledRun(input: MixPlanRunInput): {
       ingredientOzPerPizza[type] = (ingredientOzPerPizza[type] ?? 0) + oz;
     }
   };
+  const addPep = (type: unknown, oz: unknown) => {
+    const name = String(type ?? "").trim();
+    const amount = Number(oz) || 0;
+    if (name && amount > 0) {
+      ingredientOzPerPizza[name] = (ingredientOzPerPizza[name] ?? 0) + amount;
+    }
+  };
   addSlot(vals.app1CheeseRecipe, String(vals.app1Type ?? ""), Number(vals.app1OzPerPizza) || 0);
   addSlot(vals.app2CheeseRecipe, String(vals.app2Type ?? ""), Number(vals.app2OzPerPizza) || 0);
   addSlot(vals.app3CheeseRecipe, String(vals.app3Type ?? ""), Number(vals.app3OzPerPizza) || 0);
   addSlot(vals.app4CheeseRecipe, String(vals.app4Type ?? ""), Number(vals.app4OzPerPizza) || 0);
+  addPep(vals.pep1Type, vals.pep1OzPerPizza);
+  addPep(vals.pep1TypeB, vals.pep1OzPerPizzaB);
+  addPep(vals.pep2Type, vals.pep2OzPerPizza);
+  addPep(vals.pep2TypeB, vals.pep2OzPerPizzaB);
   return {
     date: input.date,
     brand: input.brand,

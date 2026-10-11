@@ -1,6 +1,10 @@
 import type { FormValues, PackagingProgress } from "./types";
 
 const PACKAGING_PROGRESS_KEY = "run-calc-packaging-progress";
+// Older clients incorrectly used epoch milliseconds as correction generations.
+// The API assigns small per-run ordinals, so normalize those legacy values
+// before comparing them with canonical server progress.
+const LEGACY_TIMESTAMP_GENERATION_THRESHOLD = 1_000_000_000;
 
 function finiteNonNegative(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) && value >= 0
@@ -28,7 +32,9 @@ export function normalizePackagingProgress(value: unknown): PackagingProgress | 
   return {
     skidsCompleted: Math.floor(skidsCompleted),
     casesOnCurrentSkid: Math.round(casesOnCurrentSkid),
-    correctionGeneration,
+    correctionGeneration: correctionGeneration >= LEGACY_TIMESTAMP_GENERATION_THRESHOLD
+      ? 0
+      : Math.floor(correctionGeneration),
     updatedAt,
     manualOverrideUntil,
   };
@@ -45,6 +51,24 @@ export function comparePackagingProgress(
     return candidate.updatedAt > current.updatedAt ? 1 : -1;
   }
   return 0;
+}
+
+/**
+ * Return the durable winner only when an inbound register is an equal-version
+ * echo for this run. Equal versions are intentionally not "accepted" by the
+ * LWW merge, but the active form may still have drifted from its durable copy.
+ */
+export function getEqualPackagingProgress(
+  local: Record<string, PackagingProgress>,
+  remote: Record<string, PackagingProgress> | undefined,
+  runId: string,
+): PackagingProgress | undefined {
+  const current = local[runId];
+  const candidate = normalizePackagingProgress(remote?.[runId]);
+  if (!current || !candidate || comparePackagingProgress(candidate, current) !== 0) {
+    return undefined;
+  }
+  return current;
 }
 
 export function loadPackagingProgress(): Record<string, PackagingProgress> {
@@ -73,6 +97,13 @@ function nextTimestamp(now: number, previous: number | undefined): number {
   return Math.max(now, (previous ?? 0) + 1);
 }
 
+function nextCorrectionGeneration(previous: number | undefined): number {
+  const generation = previous ?? 0;
+  return generation >= Number.MAX_SAFE_INTEGER
+    ? Number.MAX_SAFE_INTEGER
+    : Math.floor(generation) + 1;
+}
+
 export function recordManualPackagingProgress(args: {
   runId: string;
   skidsCompleted: number;
@@ -86,7 +117,7 @@ export function recordManualPackagingProgress(args: {
   const progress: PackagingProgress = {
     skidsCompleted: Math.max(0, Math.floor(Number(args.skidsCompleted) || 0)),
     casesOnCurrentSkid: Math.max(0, Math.round(Number(args.casesOnCurrentSkid) || 0)),
-    correctionGeneration: nextTimestamp(now, previous?.correctionGeneration),
+    correctionGeneration: nextCorrectionGeneration(previous?.correctionGeneration),
     updatedAt: nextTimestamp(now, previous?.updatedAt),
     manualOverrideUntil: Math.max(now, args.manualOverrideUntil),
   };
@@ -155,4 +186,18 @@ export function overlayPackagingProgress(
     skidsCompleted: progress.skidsCompleted,
     casesOnCurrentSkid: progress.casesOnCurrentSkid,
   };
+}
+
+/**
+ * Apply only the progress register owned by this run. Run values are stored
+ * independently from the register, so callers that hydrate a form after a
+ * reload must never look up progress from the currently selected run or from
+ * another run's snapshot.
+ */
+export function overlayPackagingProgressForRun(
+  runId: string,
+  values: FormValues,
+  progressByRun: Record<string, PackagingProgress> = loadPackagingProgress(),
+): FormValues {
+  return overlayPackagingProgress(values, progressByRun[runId]);
 }

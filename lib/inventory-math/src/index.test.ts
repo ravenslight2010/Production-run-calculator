@@ -4,6 +4,8 @@ import {
   applySubstitutions,
   substitutionsForIngredient,
   computeRunConsumptionLines,
+  computeRunDemandImpact,
+  aggregateInventoryDemandForPlannedProducts,
   computeSummaryStats,
   computeCheesePull,
   computeCheesePerPizzaOz,
@@ -323,6 +325,143 @@ describe("ready-made sauce consumption", () => {
   });
 });
 
+describe("computeRunConsumptionLines — packaging", () => {
+  it("calculates cartoned demand for sheets, labels, cartons, shippers, and pallets", () => {
+    const lines = computeRunConsumptionLines(
+      baseVals({
+        casesNeeded: 13,
+        pizzasPerCase: 2,
+        casesPerLayer: 5,
+        cartoned: "cartoned",
+        circles: "12in",
+        shipper: "Std",
+        cartonsPerCase: 2,
+        cartonSize: 2,
+        slipSheets: "yes",
+        gripSheets: "Every other layer",
+        casesPerSkid: 10,
+        labelPosition: "both",
+        topLabelsPerRoll: 20,
+        bottomLabelsPerRoll: 10,
+      }) as unknown as RunLinesInput,
+      PEP,
+    );
+
+    expect(lines).toEqual([
+      { itemKey: "packaging:circles:12in", qty: 26 },
+      { itemKey: "packaging:shippers:Std", qty: 13 },
+      { itemKey: "packaging:cartons:cases", qty: 7 },
+      { itemKey: "packaging:shipper-labels:count", qty: 13 },
+      { itemKey: "packaging:slip-sheets:count", qty: 3 },
+      { itemKey: "packaging:grip-sheets:count", qty: 2 },
+      { itemKey: "packaging:labels-top:rolls", qty: 2 },
+      { itemKey: "packaging:labels-bottom:rolls", qty: 3 },
+      { itemKey: "packaging:pallets:count", qty: 2 },
+    ]);
+  });
+
+  it.each([
+    {
+      labelPosition: "top",
+      expectedLabels: [{ itemKey: "packaging:labels-top:rolls", qty: 2 }],
+    },
+    {
+      labelPosition: "bottom",
+      expectedLabels: [{ itemKey: "packaging:labels-bottom:rolls", qty: 2 }],
+    },
+    {
+      labelPosition: "both",
+      expectedLabels: [
+        { itemKey: "packaging:labels-top:rolls", qty: 2 },
+        { itemKey: "packaging:labels-bottom:rolls", qty: 2 },
+      ],
+    },
+  ])("uses only the selected label rolls for labeled runs ($labelPosition)", ({
+    labelPosition,
+    expectedLabels,
+  }) => {
+    const lines = computeRunConsumptionLines(
+      baseVals({
+        casesNeeded: 3,
+        pizzasPerCase: 4,
+        cartoned: "labeled",
+        circles: "12in",
+        shipper: "Std",
+        cartonsPerCase: 6,
+        slipSheets: "no",
+        casesPerSkid: 10,
+        labelPosition,
+        topLabelsPerRoll: 6,
+        bottomLabelsPerRoll: 8,
+      }) as unknown as RunLinesInput,
+      PEP,
+    );
+
+    expect(lines).toEqual([
+      { itemKey: "packaging:circles:12in", qty: 12 },
+      ...expectedLabels,
+      { itemKey: "packaging:pallets:count", qty: 1 },
+    ]);
+  });
+
+  it("falls back to the shared labels-per-roll value for top and bottom labels", () => {
+    const lines = computeRunConsumptionLines(
+      baseVals({
+        casesNeeded: 3,
+        pizzasPerCase: 4,
+        cartoned: "labeled",
+        labelPosition: "both",
+        labelsPerRoll: 5,
+      }) as unknown as RunLinesInput,
+      PEP,
+    );
+
+    expect(lines).toEqual([
+      { itemKey: "packaging:labels-top:rolls", qty: 3 },
+      { itemKey: "packaging:labels-bottom:rolls", qty: 3 },
+    ]);
+  });
+
+  it("supports the 3rd-and-5th grip-sheet pattern and no grip sheets", () => {
+    const vals = baseVals({
+      casesNeeded: 21,
+      pizzasPerCase: 1,
+      casesPerLayer: 5,
+      cartoned: "yes",
+      gripSheets: "3rd and 5th",
+      casesPerSkid: 10,
+    }) as unknown as RunLinesInput;
+
+    expect(computeRunConsumptionLines(vals, PEP)).toContainEqual({
+      itemKey: "packaging:grip-sheets:count",
+      qty: 6,
+    });
+    expect(
+      computeRunConsumptionLines({ ...vals, gripSheets: "none" }, PEP),
+    ).not.toContainEqual(expect.objectContaining({ itemKey: "packaging:grip-sheets:count" }));
+  });
+
+  it.each(["no", "n-a"])("does not consume packaging for the %s exemption mode", (cartoned) => {
+    const lines = computeRunConsumptionLines(
+      baseVals({
+        cartoned,
+        circles: "12in",
+        shipper: "Std",
+        cartonsPerCase: 6,
+        slipSheets: "yes",
+        gripSheets: "every other layer",
+        casesPerLayer: 2,
+        casesPerSkid: 10,
+        labelPosition: "both",
+        labelsPerRoll: 10,
+      }) as unknown as RunLinesInput,
+      PEP,
+    );
+
+    expect(lines).toEqual([]);
+  });
+});
+
 // Parity guard: the SAME shared overlay + summary math must produce identical
 // material totals regardless of which app calls it (replit.md parity). Both
 // platforms route through applySubstitutions then computeSummaryStats, so a
@@ -416,6 +555,109 @@ describe("aggregateRunDemand", () => {
 
   it("returns an empty list for no runs", () => {
     expect(aggregateRunDemand([], PEP)).toEqual([]);
+  });
+});
+
+describe("computeRunDemandImpact", () => {
+  it("compares canonical ingredient and packaging demand with known or untracked stock", () => {
+    const before = baseVals({
+      casesNeeded: 2,
+      pizzasPerCase: 10,
+      cartoned: "yes",
+      cartonsPerCase: 1,
+      pep1Type: "Pepperoni",
+      pep1OzPerPizza: 1,
+    }) as unknown as RunLinesInput;
+    const after = {
+      ...before,
+      pizzasPerCase: 12,
+      pep1OzPerPizza: 2,
+      cartonSize: 2,
+    } as RunLinesInput;
+
+    const impact = computeRunDemandImpact(
+      {
+        before,
+        after,
+        inventory: [{ key: "ingredient:Pepperoni:lbs", onHand: 1.5 }],
+      },
+      PEP,
+    );
+
+    expect(impact).toEqual([
+      expect.objectContaining({
+        key: "ingredient:Pepperoni:lbs",
+        beforeQty: 1.875,
+        afterQty: 4.5,
+        deltaQty: 2.625,
+        onHand: 1.5,
+        shortage: 3,
+        stockStatus: "short",
+      }),
+      expect.objectContaining({
+        key: "packaging:cartons:cases",
+        beforeQty: 20,
+        afterQty: 12,
+        deltaQty: -8,
+        onHand: null,
+        shortage: null,
+        stockStatus: "untracked",
+      }),
+    ]);
+  });
+
+  it("reports stock as unavailable rather than treating a failed load as zero", () => {
+    const run = baseVals({ casesNeeded: 1, pizzasPerCase: 10, pep1Type: "Pepperoni", pep1OzPerPizza: 1 }) as unknown as RunLinesInput;
+    const impact = computeRunDemandImpact({ before: run, after: { ...run, pep1OzPerPizza: 2 }, inventory: null }, PEP);
+    expect(impact).toContainEqual(expect.objectContaining({
+      key: "ingredient:Pepperoni:lbs",
+      onHand: null,
+      shortage: null,
+      stockStatus: "unavailable",
+    }));
+  });
+});
+
+describe("aggregateInventoryDemandForPlannedProducts", () => {
+  it("combines matching item keys and excludes products without a positive planned case count", () => {
+    const ingredient = {
+      key: "ingredient:Mozzarella:lbs",
+      name: "Mozzarella",
+      category: "ingredient" as const,
+      unit: "lbs",
+    };
+    const cartons = {
+      key: "packaging:cartons:cases",
+      name: "Cartons",
+      category: "packaging" as const,
+      unit: "cases",
+    };
+
+    expect(aggregateInventoryDemandForPlannedProducts([
+      {
+        plannedCases: 5,
+        lines: [{ ...ingredient, qty: 12 }, { ...cartons, qty: 5 }],
+      },
+      {
+        plannedCases: 2,
+        lines: [{ ...ingredient, qty: 8 }],
+      },
+      {
+        plannedCases: null,
+        lines: [{ ...ingredient, qty: 100 }],
+      },
+      {
+        plannedCases: 0,
+        lines: [{ ...ingredient, qty: 50 }],
+      },
+      {
+        plannedCases: Number.NaN,
+        lines: [{ ...ingredient, qty: 25 }],
+      },
+    ])).toEqual([
+      { ...ingredient, qty: 20, productCount: 2 },
+      { ...cartons, qty: 5, productCount: 1 },
+    ]);
   });
 });
 

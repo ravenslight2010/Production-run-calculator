@@ -3,7 +3,9 @@ import {
   buildIngredientUniverse,
   buildIngredientIndex,
   coerceLbs,
+  deriveRunAllergenFootprint,
   hydrateRecipeRows,
+  ingredientAllergenReviewPending,
   normalizeIngredient,
   pickerNamesForCategory,
   resolveActiveIngredient,
@@ -21,6 +23,8 @@ function mkIngredient(overrides: Partial<Ingredient> = {}): Ingredient {
     categories: ["cheese"],
     mergedInto: null,
     enabled: true,
+    allergens: [],
+    allergensReviewed: false,
     ...overrides,
   };
 }
@@ -57,6 +61,8 @@ describe("normalizeIngredient", () => {
       categories: [],
       mergedInto: null,
       enabled: true,
+      allergens: [],
+      allergensReviewed: false,
     });
   });
 
@@ -82,6 +88,44 @@ describe("normalizeIngredient", () => {
   it("captures mergedInto when a non-blank string", () => {
     const result = normalizeIngredient({ id: "x1", name: "Flour", mergedInto: "  target-1  " });
     expect(result?.mergedInto).toBe("target-1");
+  });
+
+  it("distinguishes an unreviewed ingredient from an explicit reviewed empty mapping", () => {
+    const unknown = normalizeIngredient({ id: "x1", name: "Flour" });
+    const reviewedNone = normalizeIngredient({
+      id: "x2",
+      name: "Water",
+      allergens: [],
+      allergensReviewed: true,
+    });
+    expect(unknown).toMatchObject({ allergens: [], allergensReviewed: false });
+    expect(reviewedNone).toMatchObject({ allergens: [], allergensReviewed: true });
+  });
+
+  it("fails closed when the mapping contains an unrecognized allergen value", () => {
+    const ingredient = normalizeIngredient({
+      id: "x1",
+      name: "Flour",
+      allergens: ["wheat", "not-a-tracked-allergen"],
+      allergensReviewed: true,
+    });
+    expect(ingredient).toMatchObject({
+      allergens: ["wheat"],
+      allergensReviewed: false,
+    });
+  });
+});
+
+describe("ingredientAllergenReviewPending", () => {
+  it("keeps unknown distinct from reviewed-empty and treats uncertain values as pending", () => {
+    expect(ingredientAllergenReviewPending({ allergens: [], allergensReviewed: false })).toBe(true);
+    expect(ingredientAllergenReviewPending({ allergens: [], allergensReviewed: true })).toBe(false);
+    expect(
+      ingredientAllergenReviewPending({
+        allergens: ["wheat", "unrecognized"] as Ingredient["allergens"],
+        allergensReviewed: true,
+      }),
+    ).toBe(true);
   });
 });
 
@@ -340,5 +384,111 @@ describe("buildIngredientUniverse", () => {
     expect(catalog[0].name).toBe("Mozzarella");
     expect(rows).toEqual([[{ ingredient: "Flour" }]]);
     expect(lists).toEqual([["Salt"]]);
+  });
+});
+
+describe("deriveRunAllergenFootprint", () => {
+  const catalog = [
+    normalizeIngredient({
+      id: "flour",
+      name: "Flour",
+      allergens: ["wheat"],
+      allergensReviewed: true,
+    })!,
+    normalizeIngredient({
+      id: "salt",
+      name: "Salt",
+      allergens: [],
+      allergensReviewed: true,
+    })!,
+    normalizeIngredient({ id: "oil", name: "Oil" })!,
+    normalizeIngredient({
+      id: "retired-cheese",
+      name: "Old Cheese",
+      mergedInto: "cheese",
+      enabled: false,
+      allergens: ["milk"],
+      allergensReviewed: true,
+    })!,
+    normalizeIngredient({
+      id: "cheese",
+      name: "Cheese Blend",
+      allergens: [],
+      allergensReviewed: true,
+    })!,
+  ];
+
+  it("reports known contributors and keeps missing, unreviewed, and empty components incomplete", () => {
+    const result = deriveRunAllergenFootprint(
+      [
+        {
+          label: "Dough",
+          configured: true,
+          ingredients: [{ ingredientId: "flour", ingredient: "Flour" }],
+        },
+        {
+          label: "Sauce",
+          configured: true,
+          ingredients: [{ ingredient: "  sAlT " }],
+        },
+        {
+          label: "Applicator 1",
+          configured: true,
+          ingredients: [
+            { ingredientId: "oil", ingredient: "Oil" },
+            { ingredientId: "unknown-id", ingredient: "Ghost Ingredient" },
+          ],
+        },
+        {
+          label: "Applicator 2",
+          configured: true,
+          ingredients: [],
+        },
+        {
+          label: "Pepperoni 1",
+          configured: false,
+          ingredients: [{ ingredient: "Unused Pep" }],
+        },
+      ],
+      catalog,
+    );
+
+    expect(result).toMatchObject({
+      allergens: [{ allergen: "wheat", ingredientNames: ["Flour"] }],
+      unknownIngredients: [
+        { name: "Ghost Ingredient", reason: "missing-catalog", components: ["Applicator 1"] },
+        { name: "Oil", reason: "not-reviewed", components: ["Applicator 1"] },
+      ],
+      missingComponents: ["Applicator 2"],
+      hasRecipeData: true,
+      isComplete: false,
+    });
+  });
+
+  it("retains reviewed allergens from merged recipe identities and checks every identity in the chain", () => {
+    const result = deriveRunAllergenFootprint(
+      [
+        {
+          label: "Applicator 1",
+          configured: true,
+          ingredients: [{ ingredientId: "retired-cheese", ingredient: "Old Cheese" }],
+        },
+      ],
+      catalog,
+    );
+    expect(result.allergens).toEqual([
+      { allergen: "milk", ingredientNames: ["Cheese Blend"] },
+    ]);
+    expect(result.isComplete).toBe(true);
+  });
+
+  it("never calls an empty recipe input complete", () => {
+    expect(deriveRunAllergenFootprint([], catalog)).toMatchObject({
+      allergens: [],
+      unknownIngredients: [],
+      missingComponents: [],
+      hasRecipeData: false,
+      isComplete: false,
+    });
   });
 });

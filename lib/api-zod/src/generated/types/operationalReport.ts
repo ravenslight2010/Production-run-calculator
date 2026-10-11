@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { OperationalReportEvidence } from './operationalReportEvidence';
 import type { OperationalReportIncidents } from './operationalReportIncidents';
 import type { OperationalReportInventory } from './operationalReportInventory';
 import type { OperationalReportQuality } from './operationalReportQuality';
@@ -21,4 +22,5 @@ export interface OperationalReport {
   quality: OperationalReportQuality;
   incidents: OperationalReportIncidents;
   inventory: OperationalReportInventory;
+  evidence?: OperationalReportEvidence;
 }

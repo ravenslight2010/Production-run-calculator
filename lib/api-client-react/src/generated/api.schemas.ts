@@ -5,6 +5,547 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+export type SourceLibraryReconciliationCaptureRequestDeploymentHandoffSchemaVersion = typeof SourceLibraryReconciliationCaptureRequestDeploymentHandoffSchemaVersion[keyof typeof SourceLibraryReconciliationCaptureRequestDeploymentHandoffSchemaVersion];
+
+
+export const SourceLibraryReconciliationCaptureRequestDeploymentHandoffSchemaVersion = {
+  NUMBER_2: 2,
+} as const;
+
+export type SourceLibraryReconciliationCaptureRequestDeploymentHandoffKind = typeof SourceLibraryReconciliationCaptureRequestDeploymentHandoffKind[keyof typeof SourceLibraryReconciliationCaptureRequestDeploymentHandoffKind];
+
+
+export const SourceLibraryReconciliationCaptureRequestDeploymentHandoffKind = {
+  'published-source-deployment-handoff': 'published-source-deployment-handoff',
+} as const;
+
+export type SourceLibraryReconciliationCaptureRequestDeploymentHandoffSourcePolicy = typeof SourceLibraryReconciliationCaptureRequestDeploymentHandoffSourcePolicy[keyof typeof SourceLibraryReconciliationCaptureRequestDeploymentHandoffSourcePolicy];
+
+
+export const SourceLibraryReconciliationCaptureRequestDeploymentHandoffSourcePolicy = {
+  'production-source-v2': 'production-source-v2',
+} as const;
+
+export type SourceLibraryReconciliationCaptureRequestDeploymentHandoffIdentityAuthority = typeof SourceLibraryReconciliationCaptureRequestDeploymentHandoffIdentityAuthority[keyof typeof SourceLibraryReconciliationCaptureRequestDeploymentHandoffIdentityAuthority];
+
+
+export const SourceLibraryReconciliationCaptureRequestDeploymentHandoffIdentityAuthority = {
+  'independent-expected-source-comparison': 'independent-expected-source-comparison',
+} as const;
+
+export type SourceLibraryReconciliationCaptureRequestDeploymentHandoffExpectedSource = { [key: string]: unknown };
+
+/**
+ * Fresh published schema-v2 source deployment handoff, independently validated by the server.
+ */
+export type SourceLibraryReconciliationCaptureRequestDeploymentHandoff = {
+  schemaVersion: SourceLibraryReconciliationCaptureRequestDeploymentHandoffSchemaVersion;
+  kind: SourceLibraryReconciliationCaptureRequestDeploymentHandoffKind;
+  /**
+     * @minLength 1
+     * @maxLength 128
+     */
+  deploymentId: string;
+  /** @pattern ^source-sha256:[a-f0-9]{64}$ */
+  deployedRevision: string;
+  /** @pattern ^app-build:[a-f0-9-]{36}$ */
+  appBuildId: string;
+  sourcePolicy: SourceLibraryReconciliationCaptureRequestDeploymentHandoffSourcePolicy;
+  /** @pattern ^[a-f0-9]{64}$ */
+  sourceFingerprintSha256: string;
+  identityAuthority: SourceLibraryReconciliationCaptureRequestDeploymentHandoffIdentityAuthority;
+  /** @pattern ^[a-f0-9]{64}$ */
+  expectedRecordSha256: string;
+  expectedSource: SourceLibraryReconciliationCaptureRequestDeploymentHandoffExpectedSource;
+  /**
+     * @minLength 1
+     * @maxLength 128
+     * @pattern ^[A-Za-z_][A-Za-z0-9_$-]*$
+     */
+  databaseOwner?: string;
+  issuedAt: string;
+  expiresAt: string;
+  [key: string]: unknown;
+ };
+
+export interface SourceLibraryReconciliationCaptureRequest {
+  /** Fresh published schema-v2 source deployment handoff, independently validated by the server. */
+  deploymentHandoff: SourceLibraryReconciliationCaptureRequestDeploymentHandoff;
+  /**
+     * @minLength 1
+     * @maxLength 128
+     * @pattern ^[A-Za-z_][A-Za-z0-9_$-]*$
+     */
+  expectedDatabaseOwner: string;
+}
+
+export interface SourceLibraryCaptureError {
+  /** @maxLength 160 */
+  error: string;
+}
+
+export type SourceLibraryPoolExceptionSummaryId = typeof SourceLibraryPoolExceptionSummaryId[keyof typeof SourceLibraryPoolExceptionSummaryId];
+
+
+export const SourceLibraryPoolExceptionSummaryId = {
+  'source-library-pool-owner-approved-differences-2026-10-08-v1': 'source-library-pool-owner-approved-differences-2026-10-08-v1',
+} as const;
+
+export type SourceLibraryPoolExceptionSummarySha256 = typeof SourceLibraryPoolExceptionSummarySha256[keyof typeof SourceLibraryPoolExceptionSummarySha256];
+
+
+export const SourceLibraryPoolExceptionSummarySha256 = {
+  '42cf3d8d482a07657eeae5725710b098bb7f8de19a4f45d6356f670378cd2137': '42cf3d8d482a07657eeae5725710b098bb7f8de19a4f45d6356f670378cd2137',
+} as const;
+
+export interface SourceLibraryPoolExceptionSummary {
+  id: SourceLibraryPoolExceptionSummaryId;
+  sha256: SourceLibraryPoolExceptionSummarySha256;
+  /**
+     * @minimum 0
+     * @maximum 68
+     */
+  approvedMismatches: number;
+  /**
+     * @minimum 0
+     * @maximum 68
+     */
+  unresolvedMismatches: number;
+}
+
+export type SourceLibraryReconciliationEvidenceVerifier = typeof SourceLibraryReconciliationEvidenceVerifier[keyof typeof SourceLibraryReconciliationEvidenceVerifier];
+
+
+export const SourceLibraryReconciliationEvidenceVerifier = {
+  'source-library-reconciliation': 'source-library-reconciliation',
+} as const;
+
+export type SourceLibraryReconciliationEvidenceEnvironment = typeof SourceLibraryReconciliationEvidenceEnvironment[keyof typeof SourceLibraryReconciliationEvidenceEnvironment];
+
+
+export const SourceLibraryReconciliationEvidenceEnvironment = {
+  release: 'release',
+} as const;
+
+export type SourceLibraryReconciliationEvidenceDatabaseAttestation = typeof SourceLibraryReconciliationEvidenceDatabaseAttestation[keyof typeof SourceLibraryReconciliationEvidenceDatabaseAttestation];
+
+
+export const SourceLibraryReconciliationEvidenceDatabaseAttestation = {
+  'external-owner-check': 'external-owner-check',
+  'published-app-runtime-connection': 'published-app-runtime-connection',
+} as const;
+
+export type SourceLibraryReconciliationEvidenceRepairBoundary = {
+  fromDate: string;
+};
+
+export type SourceLibraryReconciliationEvidenceReportFormatVersion = typeof SourceLibraryReconciliationEvidenceReportFormatVersion[keyof typeof SourceLibraryReconciliationEvidenceReportFormatVersion];
+
+
+export const SourceLibraryReconciliationEvidenceReportFormatVersion = {
+  NUMBER_1: 1,
+} as const;
+
+export type SourceLibraryReconciliationEvidenceReport = {
+  /** @pattern ^[a-f0-9]{64}$ */
+  sha256: string;
+  formatVersion: SourceLibraryReconciliationEvidenceReportFormatVersion;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  automaticProposals: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  stubs: number;
+};
+
+export type SourceLibraryReconciliationEvidenceMarkerResultCounts = {
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  replacements: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  aliasesInserted: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  repointedProfiles: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  repointedRuns: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  deletedStubs: number;
+};
+
+export type SourceLibraryReconciliationEvidenceMarker = {
+  present: boolean;
+  resultValid: boolean;
+  resultWithinBounds: boolean;
+  resultCounts: SourceLibraryReconciliationEvidenceMarkerResultCounts;
+  appliedAtPresent: boolean;
+};
+
+export type SourceLibraryReconciliationEvidencePools = {
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  expected: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  exactMatches: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  guardedRenames: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  missing: number;
+  /**
+     * Raw field-mismatch count before approved exceptions are applied.
+     * @minimum 0
+     * @maximum 1000000
+     */
+  mismatches: number;
+};
+
+export type SourceLibraryReconciliationEvidenceAliases = {
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  expected: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  exactMatches: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  missing: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  mismatches: number;
+};
+
+export type SourceLibraryReconciliationEvidenceProtectedHistory = {
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  references: number;
+};
+
+export type SourceLibraryReconciliationEvidenceStubs = {
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  expected: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  canonicalExact: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  canonicalMissing: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  canonicalMismatches: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  deletedExpected: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  remainingProtected: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  unexpectedlyDeleted: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  unexpectedlyRemaining: number;
+};
+
+export type SourceLibraryReconciliationEvidenceIdempotencyFingerprintAlgorithm = typeof SourceLibraryReconciliationEvidenceIdempotencyFingerprintAlgorithm[keyof typeof SourceLibraryReconciliationEvidenceIdempotencyFingerprintAlgorithm];
+
+
+export const SourceLibraryReconciliationEvidenceIdempotencyFingerprintAlgorithm = {
+  sha256: 'sha256',
+} as const;
+
+export type SourceLibraryReconciliationEvidenceIdempotencyFingerprint = {
+  algorithm: SourceLibraryReconciliationEvidenceIdempotencyFingerprintAlgorithm;
+  /** @pattern ^[a-f0-9]{64}$ */
+  value: string;
+};
+
+export type SourceLibraryReconciliationEvidenceFailuresItem = {
+  /** @pattern ^[A-Za-z0-9_-]{1,80}$ */
+  check: string;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  count: number;
+};
+
+export interface SourceLibraryReferenceCounts {
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  inspected: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  canonical: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  stale: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  nonCanonical: number;
+}
+
+export interface SourceLibraryReconciliationEvidence {
+  verifier: SourceLibraryReconciliationEvidenceVerifier;
+  environment: SourceLibraryReconciliationEvidenceEnvironment;
+  databaseAttestation: SourceLibraryReconciliationEvidenceDatabaseAttestation;
+  /**
+     * @minLength 1
+     * @maxLength 128
+     */
+  revision: string;
+  capturedAt: string;
+  /** @pattern ^[a-f0-9]{64}$ */
+  evidenceId: string;
+  /**
+     * @minLength 1
+     * @maxLength 128
+     */
+  healId: string;
+  repairBoundary: SourceLibraryReconciliationEvidenceRepairBoundary;
+  report: SourceLibraryReconciliationEvidenceReport;
+  poolExceptions: SourceLibraryPoolExceptionSummary;
+  marker: SourceLibraryReconciliationEvidenceMarker;
+  pools: SourceLibraryReconciliationEvidencePools;
+  aliases: SourceLibraryReconciliationEvidenceAliases;
+  profiles: SourceLibraryReferenceCounts;
+  pendingRuns: SourceLibraryReferenceCounts;
+  protectedHistory: SourceLibraryReconciliationEvidenceProtectedHistory;
+  stubs: SourceLibraryReconciliationEvidenceStubs;
+  idempotencyFingerprint: SourceLibraryReconciliationEvidenceIdempotencyFingerprint;
+  ok: boolean;
+  /** @maxItems 20 */
+  failures: SourceLibraryReconciliationEvidenceFailuresItem[];
+}
+
+export type SourceLibraryPoolMismatchDescriptorTable = typeof SourceLibraryPoolMismatchDescriptorTable[keyof typeof SourceLibraryPoolMismatchDescriptorTable];
+
+
+export const SourceLibraryPoolMismatchDescriptorTable = {
+  dough_recipes: 'dough_recipes',
+  sauce_recipes: 'sauce_recipes',
+  cheese_recipes: 'cheese_recipes',
+  mixes: 'mixes',
+} as const;
+
+export type SourceLibraryPoolMismatchDescriptorMismatchType = typeof SourceLibraryPoolMismatchDescriptorMismatchType[keyof typeof SourceLibraryPoolMismatchDescriptorMismatchType];
+
+
+export const SourceLibraryPoolMismatchDescriptorMismatchType = {
+  missing: 'missing',
+  renamed: 'renamed',
+  'field-mismatch': 'field-mismatch',
+} as const;
+
+export type SourceLibraryPoolMismatchDescriptorDifferingFieldsItem = typeof SourceLibraryPoolMismatchDescriptorDifferingFieldsItem[keyof typeof SourceLibraryPoolMismatchDescriptorDifferingFieldsItem];
+
+
+export const SourceLibraryPoolMismatchDescriptorDifferingFieldsItem = {
+  name: 'name',
+  components: 'components',
+  doughballVariants: 'doughballVariants',
+  doughballWeightOz: 'doughballWeightOz',
+  doughballsPerTray: 'doughballsPerTray',
+  brand: 'brand',
+  flavors: 'flavors',
+  shredderSetting: 'shredderSetting',
+  cellulose: 'cellulose',
+  notes: 'notes',
+  flavor: 'flavor',
+  daysEarly: 'daysEarly',
+} as const;
+
+export interface SourceLibraryPoolMismatchDescriptor {
+  table: SourceLibraryPoolMismatchDescriptorTable;
+  /**
+     * @minLength 1
+     * @maxLength 128
+     */
+  id: string;
+  /**
+     * @minLength 1
+     * @maxLength 256
+     */
+  sourceName: string;
+  mismatchType: SourceLibraryPoolMismatchDescriptorMismatchType;
+  /** @maxItems 8 */
+  differingFields: SourceLibraryPoolMismatchDescriptorDifferingFieldsItem[];
+}
+
+export type SourceLibraryReconciliationDiagnosticsVerifier = typeof SourceLibraryReconciliationDiagnosticsVerifier[keyof typeof SourceLibraryReconciliationDiagnosticsVerifier];
+
+
+export const SourceLibraryReconciliationDiagnosticsVerifier = {
+  'source-library-reconciliation-diagnostics': 'source-library-reconciliation-diagnostics',
+} as const;
+
+export type SourceLibraryReconciliationDiagnosticsEnvironment = typeof SourceLibraryReconciliationDiagnosticsEnvironment[keyof typeof SourceLibraryReconciliationDiagnosticsEnvironment];
+
+
+export const SourceLibraryReconciliationDiagnosticsEnvironment = {
+  release: 'release',
+} as const;
+
+export type SourceLibraryReconciliationDiagnosticsDatabaseAttestation = typeof SourceLibraryReconciliationDiagnosticsDatabaseAttestation[keyof typeof SourceLibraryReconciliationDiagnosticsDatabaseAttestation];
+
+
+export const SourceLibraryReconciliationDiagnosticsDatabaseAttestation = {
+  'published-app-runtime-connection': 'published-app-runtime-connection',
+} as const;
+
+export type SourceLibraryReconciliationDiagnosticsReport = {
+  /** @pattern ^[a-f0-9]{64}$ */
+  sha256: string;
+};
+
+export type SourceLibraryReconciliationDiagnosticsPools = {
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  expected: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  exactMatches: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  guardedRenames: number;
+  /**
+     * @minimum 0
+     * @maximum 1000000
+     */
+  missing: number;
+  /**
+     * Raw field-mismatch count before approved exceptions are applied.
+     * @minimum 0
+     * @maximum 1000000
+     */
+  mismatches: number;
+};
+
+export type SourceLibraryReconciliationDiagnosticsMismatchDetailsMaxItems = typeof SourceLibraryReconciliationDiagnosticsMismatchDetailsMaxItems[keyof typeof SourceLibraryReconciliationDiagnosticsMismatchDetailsMaxItems];
+
+
+export const SourceLibraryReconciliationDiagnosticsMismatchDetailsMaxItems = {
+  NUMBER_10: 10,
+} as const;
+
+export type SourceLibraryReconciliationDiagnosticsMismatchDetails = {
+  maxItems: SourceLibraryReconciliationDiagnosticsMismatchDetailsMaxItems;
+  /**
+     * @minimum 0
+     * @maximum 68
+     */
+  total: number;
+  /**
+     * @minimum 0
+     * @maximum 10
+     */
+  returned: number;
+  /**
+     * @minimum 0
+     * @maximum 68
+     */
+  omitted: number;
+  /** @maxItems 10 */
+  items: SourceLibraryPoolMismatchDescriptor[];
+};
+
+export interface SourceLibraryReconciliationDiagnostics {
+  verifier: SourceLibraryReconciliationDiagnosticsVerifier;
+  environment: SourceLibraryReconciliationDiagnosticsEnvironment;
+  databaseAttestation: SourceLibraryReconciliationDiagnosticsDatabaseAttestation;
+  /** @pattern ^source-sha256:[a-f0-9]{64}$ */
+  revision: string;
+  capturedAt: string;
+  report: SourceLibraryReconciliationDiagnosticsReport;
+  pools: SourceLibraryReconciliationDiagnosticsPools;
+  poolExceptions: SourceLibraryPoolExceptionSummary;
+  mismatchDetails: SourceLibraryReconciliationDiagnosticsMismatchDetails;
+}
+
+/**
+ * Exact bounded source text retained privately with a live spec Apply.
+ */
+export type ImportOperationApplyInputSourceEvidence = {
+  /**
+     * @minLength 1
+     * @maxLength 100000
+     */
+  sourceText: string;
+  /**
+     * @minLength 1
+     * @maxLength 24
+     */
+  parseVersion: string;
+};
+
 /**
  * Reviewed entity batches keyed by supported master-data domain.
  */
@@ -13,16 +554,76 @@ export type ImportOperationApplyInputChanges = { [key: string]: unknown };
 export interface ImportOperationApplyInput {
   /** @maxLength 40 */
   importType: string;
-  /** @maxLength 300 */
+  /**
+     * @maxLength 300
+     * @nullable
+     */
   sourceKey?: string | null;
   /** @maxLength 300 */
   sourceLabel: string;
-  /** @pattern ^[a-f0-9]{64}$ */
+  /**
+     * @nullable
+     * @pattern ^[a-f0-9]{64}$
+     */
   requestHash?: string | null;
-  /** @pattern ^[a-f0-9]{64}$ */
+  /**
+     * @nullable
+     * @pattern ^[a-f0-9]{64}$
+     */
   expectedStateHash?: string | null;
+  /** Exact bounded source text retained privately with a live spec Apply. */
+  sourceEvidence?: ImportOperationApplyInputSourceEvidence;
   /** Reviewed entity batches keyed by supported master-data domain. */
   changes: ImportOperationApplyInputChanges;
+}
+
+export type DistillationApplyEvidenceRecordImportType = typeof DistillationApplyEvidenceRecordImportType[keyof typeof DistillationApplyEvidenceRecordImportType];
+
+
+export const DistillationApplyEvidenceRecordImportType = {
+  spec: 'spec',
+} as const;
+
+export type DistillationApplyEvidenceRecordScope = typeof DistillationApplyEvidenceRecordScope[keyof typeof DistillationApplyEvidenceRecordScope];
+
+
+export const DistillationApplyEvidenceRecordScope = {
+  live: 'live',
+} as const;
+
+export type DistillationApplyEvidenceRecordStatus = typeof DistillationApplyEvidenceRecordStatus[keyof typeof DistillationApplyEvidenceRecordStatus];
+
+
+export const DistillationApplyEvidenceRecordStatus = {
+  applied: 'applied',
+} as const;
+
+export type DistillationApplyEvidenceRecordActorCapability = typeof DistillationApplyEvidenceRecordActorCapability[keyof typeof DistillationApplyEvidenceRecordActorCapability];
+
+
+export const DistillationApplyEvidenceRecordActorCapability = {
+  'manage-profiles': 'manage-profiles',
+} as const;
+
+export type DistillationApplyEvidenceRecordAppliedValues = { [key: string]: unknown };
+
+export interface DistillationApplyEvidenceRecord {
+  operationId: string;
+  importType: DistillationApplyEvidenceRecordImportType;
+  scope: DistillationApplyEvidenceRecordScope;
+  status: DistillationApplyEvidenceRecordStatus;
+  /** @nullable */
+  undoneAt: string | null;
+  actorCapability: DistillationApplyEvidenceRecordActorCapability;
+  /** @pattern ^[a-f0-9]{64}$ */
+  actorIdSha256: string;
+  /** @pattern ^[a-f0-9]{64}$ */
+  sourceSha256: string;
+  appliedAt: string;
+  /** @minLength 1 */
+  sourceText: string;
+  parseVersion: string;
+  appliedValues: DistillationApplyEvidenceRecordAppliedValues;
 }
 
 export interface ImportOperationUndoInput {
@@ -46,15 +647,18 @@ export type ImportOperationResponseOperationResult = { [key: string]: unknown };
 export type ImportOperationResponseOperation = {
   operationId: string;
   importType: string;
+  /** @nullable */
   sourceKey?: string | null;
   sourceLabel?: string;
   status: ImportOperationResponseOperationStatus;
   requestHash: string;
+  /** @nullable */
   resultHash?: string | null;
   affectedEntities?: ImportOperationResponseOperationAffectedEntities;
   result?: ImportOperationResponseOperationResult;
   createdAt?: number;
   updatedAt?: number;
+  /** @nullable */
   undoneAt?: number | null;
 };
 
@@ -278,6 +882,14 @@ export const AutoTrackClaimChannel = {
   'app2-batch': 'app2-batch',
   'app3-batch': 'app3-batch',
   'app4-batch': 'app4-batch',
+  'app1-stock': 'app1-stock',
+  'app2-stock': 'app2-stock',
+  'app3-stock': 'app3-stock',
+  'app4-stock': 'app4-stock',
+  'pep1-stock': 'pep1-stock',
+  'pep1b-stock': 'pep1b-stock',
+  'pep2-stock': 'pep2-stock',
+  'pep2b-stock': 'pep2b-stock',
 } as const;
 
 export interface AutoTrackClaim {
@@ -460,6 +1072,8 @@ export const ManualSectionEditRequestSection = {
   app2: 'app2',
   app3: 'app3',
   app4: 'app4',
+  pep1: 'pep1',
+  pep2: 'pep2',
 } as const;
 
 /**
@@ -548,12 +1162,18 @@ export type ManualApp1EditValues = {
   app1BatchesMade?: number;
   app1BatchAnchorNetSec?: number;
   app1BatchCorrectionGeneration?: number;
+  app1StockLbs?: number;
+  app1StockAnchorNetSec?: number;
+  app1StockCorrectionGeneration?: number;
 };
 
 export type ManualApp1EditBaseValues = {
   app1BatchesMade: number;
   app1BatchAnchorNetSec: number;
   app1BatchCorrectionGeneration: number;
+  app1StockLbs: number;
+  app1StockAnchorNetSec: number;
+  app1StockCorrectionGeneration: number;
 };
 
 export type ManualApp1Edit = ManualSectionEditRequestBase & {
@@ -566,12 +1186,18 @@ export type ManualApp2EditValues = {
   app2BatchesMade?: number;
   app2BatchAnchorNetSec?: number;
   app2BatchCorrectionGeneration?: number;
+  app2StockLbs?: number;
+  app2StockAnchorNetSec?: number;
+  app2StockCorrectionGeneration?: number;
 };
 
 export type ManualApp2EditBaseValues = {
   app2BatchesMade: number;
   app2BatchAnchorNetSec: number;
   app2BatchCorrectionGeneration: number;
+  app2StockLbs: number;
+  app2StockAnchorNetSec: number;
+  app2StockCorrectionGeneration: number;
 };
 
 export type ManualApp2Edit = ManualSectionEditRequestBase & {
@@ -584,12 +1210,18 @@ export type ManualApp3EditValues = {
   app3BatchesMade?: number;
   app3BatchAnchorNetSec?: number;
   app3BatchCorrectionGeneration?: number;
+  app3StockLbs?: number;
+  app3StockAnchorNetSec?: number;
+  app3StockCorrectionGeneration?: number;
 };
 
 export type ManualApp3EditBaseValues = {
   app3BatchesMade: number;
   app3BatchAnchorNetSec: number;
   app3BatchCorrectionGeneration: number;
+  app3StockLbs: number;
+  app3StockAnchorNetSec: number;
+  app3StockCorrectionGeneration: number;
 };
 
 export type ManualApp3Edit = ManualSectionEditRequestBase & {
@@ -602,18 +1234,72 @@ export type ManualApp4EditValues = {
   app4BatchesMade?: number;
   app4BatchAnchorNetSec?: number;
   app4BatchCorrectionGeneration?: number;
+  app4StockLbs?: number;
+  app4StockAnchorNetSec?: number;
+  app4StockCorrectionGeneration?: number;
 };
 
 export type ManualApp4EditBaseValues = {
   app4BatchesMade: number;
   app4BatchAnchorNetSec: number;
   app4BatchCorrectionGeneration: number;
+  app4StockLbs: number;
+  app4StockAnchorNetSec: number;
+  app4StockCorrectionGeneration: number;
 };
 
 export type ManualApp4Edit = ManualSectionEditRequestBase & {
   section?: 'app4';
   values?: ManualApp4EditValues;
   baseValues?: ManualApp4EditBaseValues;
+};
+
+export type ManualPep1EditValues = {
+  pep1StockLbs?: number;
+  pep1StockAnchorNetSec?: number;
+  pep1StockCorrectionGeneration?: number;
+  pep1bStockLbs?: number;
+  pep1bStockAnchorNetSec?: number;
+  pep1bStockCorrectionGeneration?: number;
+};
+
+export type ManualPep1EditBaseValues = {
+  pep1StockLbs: number;
+  pep1StockAnchorNetSec: number;
+  pep1StockCorrectionGeneration: number;
+  pep1bStockLbs: number;
+  pep1bStockAnchorNetSec: number;
+  pep1bStockCorrectionGeneration: number;
+};
+
+export type ManualPep1Edit = ManualSectionEditRequestBase & {
+  section?: 'pep1';
+  values?: ManualPep1EditValues;
+  baseValues?: ManualPep1EditBaseValues;
+};
+
+export type ManualPep2EditValues = {
+  pep2StockLbs?: number;
+  pep2StockAnchorNetSec?: number;
+  pep2StockCorrectionGeneration?: number;
+  pep2bStockLbs?: number;
+  pep2bStockAnchorNetSec?: number;
+  pep2bStockCorrectionGeneration?: number;
+};
+
+export type ManualPep2EditBaseValues = {
+  pep2StockLbs: number;
+  pep2StockAnchorNetSec: number;
+  pep2StockCorrectionGeneration: number;
+  pep2bStockLbs: number;
+  pep2bStockAnchorNetSec: number;
+  pep2bStockCorrectionGeneration: number;
+};
+
+export type ManualPep2Edit = ManualSectionEditRequestBase & {
+  section?: 'pep2';
+  values?: ManualPep2EditValues;
+  baseValues?: ManualPep2EditBaseValues;
 };
 
 export type ManualSectionEditRequest = (ManualPackagingEdit & {
@@ -798,6 +1484,58 @@ export type ManualSectionEditRequest = (ManualPackagingEdit & {
      * @pattern ^[A-Za-z0-9:_-]{1,160}$
      */
   deviceId: string;
+}) | (ManualPep1Edit & {
+  /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
+  id: string;
+  date: string;
+  /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
+  runId: string;
+  section: ManualSectionEditRequestSection;
+  /** Only fields belonging to section */
+  values: ManualSectionEditRequestValues;
+  /** Complete baseline for every field in section */
+  baseValues: ManualSectionEditRequestBaseValues;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  observedGeneration: string;
+  /** @minimum 0 */
+  baseRevision: number;
+  /** @minimum 0 */
+  resetEpoch: number;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     * @pattern ^[A-Za-z0-9:_-]{1,160}$
+     */
+  deviceId: string;
+}) | (ManualPep2Edit & {
+  /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
+  id: string;
+  date: string;
+  /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
+  runId: string;
+  section: ManualSectionEditRequestSection;
+  /** Only fields belonging to section */
+  values: ManualSectionEditRequestValues;
+  /** Complete baseline for every field in section */
+  baseValues: ManualSectionEditRequestBaseValues;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  observedGeneration: string;
+  /** @minimum 0 */
+  baseRevision: number;
+  /** @minimum 0 */
+  resetEpoch: number;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     * @pattern ^[A-Za-z0-9:_-]{1,160}$
+     */
+  deviceId: string;
 });
 
 export type ManualSectionEditResponseOutcome = typeof ManualSectionEditResponseOutcome[keyof typeof ManualSectionEditResponseOutcome];
@@ -877,8 +1615,233 @@ export interface OperationalIntentReceipt {
   snapshot?: SyncPayload | null;
 }
 
+export type BuildInfoSchemaVersion = typeof BuildInfoSchemaVersion[keyof typeof BuildInfoSchemaVersion];
+
+
+export const BuildInfoSchemaVersion = {
+  NUMBER_1: 1,
+} as const;
+
+export type BuildInfoKind = typeof BuildInfoKind[keyof typeof BuildInfoKind];
+
+
+export const BuildInfoKind = {
+  'app-build-info': 'app-build-info',
+} as const;
+
+export type BuildInfoSourcePolicy = typeof BuildInfoSourcePolicy[keyof typeof BuildInfoSourcePolicy];
+
+
+export const BuildInfoSourcePolicy = {
+  'production-source-v2': 'production-source-v2',
+} as const;
+
+export type BuildInfoGitBinding = typeof BuildInfoGitBinding[keyof typeof BuildInfoGitBinding];
+
+
+export const BuildInfoGitBinding = {
+  verified: 'verified',
+  unavailable: 'unavailable',
+} as const;
+
+export type BuildInfoBuildMode = typeof BuildInfoBuildMode[keyof typeof BuildInfoBuildMode];
+
+
+export const BuildInfoBuildMode = {
+  release: 'release',
+  development: 'development',
+} as const;
+
+export type BuildInfoPlatformIdentitySource = typeof BuildInfoPlatformIdentitySource[keyof typeof BuildInfoPlatformIdentitySource];
+
+
+export const BuildInfoPlatformIdentitySource = {
+  'runtime-reported': 'runtime-reported',
+  unavailable: 'unavailable',
+} as const;
+
+export interface BuildInfo {
+  schemaVersion: BuildInfoSchemaVersion;
+  kind: BuildInfoKind;
+  /**
+     * Application-owned artifact-set ID, not a Replit Build UUID.
+     * @pattern ^app-build:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$
+     */
+  appBuildId: string;
+  sourcePolicy: BuildInfoSourcePolicy;
+  /** @pattern ^[a-f0-9]{64}$ */
+  sourceFingerprintSha256: string;
+  /**
+     * @nullable
+     * @pattern ^[a-f0-9]{40}$
+     */
+  gitRevision: string | null;
+  gitBinding: BuildInfoGitBinding;
+  completedAt: string;
+  buildMode: BuildInfoBuildMode;
+  /**
+     * @nullable
+     * @pattern ^[A-Za-z0-9._:-]{1,128}$
+     */
+  platformDeploymentId: string | null;
+  /**
+     * @nullable
+     * @pattern ^[A-Za-z0-9._:-]{1,128}$
+     */
+  platformBuildId: string | null;
+  platformIdentitySource: BuildInfoPlatformIdentitySource;
+}
+
+/**
+ * `ok` means core-ready; `starting` or `degraded` means a hard readiness gate failed.
+ */
+export type HealthStatusStatus = typeof HealthStatusStatus[keyof typeof HealthStatusStatus];
+
+
+export const HealthStatusStatus = {
+  ok: 'ok',
+  starting: 'starting',
+  degraded: 'degraded',
+} as const;
+
+export type HealthStatusChecksProcess = typeof HealthStatusChecksProcess[keyof typeof HealthStatusChecksProcess];
+
+
+export const HealthStatusChecksProcess = {
+  ok: 'ok',
+  warning: 'warning',
+  error: 'error',
+  pending: 'pending',
+} as const;
+
+export type HealthStatusChecksStartup = typeof HealthStatusChecksStartup[keyof typeof HealthStatusChecksStartup];
+
+
+export const HealthStatusChecksStartup = {
+  ok: 'ok',
+  warning: 'warning',
+  error: 'error',
+  pending: 'pending',
+} as const;
+
+export type HealthStatusChecksDatabase = typeof HealthStatusChecksDatabase[keyof typeof HealthStatusChecksDatabase];
+
+
+export const HealthStatusChecksDatabase = {
+  ok: 'ok',
+  warning: 'warning',
+  error: 'error',
+  pending: 'pending',
+} as const;
+
+export type HealthStatusChecksAuditProtection = typeof HealthStatusChecksAuditProtection[keyof typeof HealthStatusChecksAuditProtection];
+
+
+export const HealthStatusChecksAuditProtection = {
+  ok: 'ok',
+  warning: 'warning',
+  error: 'error',
+  pending: 'pending',
+} as const;
+
+export type HealthStatusChecksDependencies = typeof HealthStatusChecksDependencies[keyof typeof HealthStatusChecksDependencies];
+
+
+export const HealthStatusChecksDependencies = {
+  ok: 'ok',
+  warning: 'warning',
+  error: 'error',
+  pending: 'pending',
+} as const;
+
+export type HealthStatusChecksBackgroundWorkers = typeof HealthStatusChecksBackgroundWorkers[keyof typeof HealthStatusChecksBackgroundWorkers];
+
+
+export const HealthStatusChecksBackgroundWorkers = {
+  ok: 'ok',
+  warning: 'warning',
+  error: 'error',
+  pending: 'pending',
+} as const;
+
+/**
+ * Statuses for core gates and optional dependencies. A warning on dependencies or backgroundWorkers does not block HTTP 200.
+ */
+export type HealthStatusChecks = {
+  process: HealthStatusChecksProcess;
+  startup: HealthStatusChecksStartup;
+  database: HealthStatusChecksDatabase;
+  auditProtection: HealthStatusChecksAuditProtection;
+  dependencies: HealthStatusChecksDependencies;
+  backgroundWorkers: HealthStatusChecksBackgroundWorkers;
+  [key: string]: unknown;
+};
+
+export type HealthStatusCapabilitiesAiStatus = typeof HealthStatusCapabilitiesAiStatus[keyof typeof HealthStatusCapabilitiesAiStatus];
+
+
+export const HealthStatusCapabilitiesAiStatus = {
+  configured: 'configured',
+  not_configured: 'not_configured',
+  pending: 'pending',
+} as const;
+
+export type HealthStatusCapabilitiesAiDetail = typeof HealthStatusCapabilitiesAiDetail[keyof typeof HealthStatusCapabilitiesAiDetail];
+
+
+export const HealthStatusCapabilitiesAiDetail = {
+  ai_provider_not_configured: 'ai_provider_not_configured',
+} as const;
+
+/**
+ * AI credential configuration, not remote provider reachability.
+ */
+export type HealthStatusCapabilitiesAi = {
+  status: HealthStatusCapabilitiesAiStatus;
+  detail?: HealthStatusCapabilitiesAiDetail;
+};
+
+export type HealthStatusCapabilities = {
+  /** AI credential configuration, not remote provider reachability. */
+  ai: HealthStatusCapabilitiesAi;
+};
+
+export type HealthStatusStartupPhase = typeof HealthStatusStartupPhase[keyof typeof HealthStatusStartupPhase];
+
+
+export const HealthStatusStartupPhase = {
+  starting: 'starting',
+  ready: 'ready',
+  failed: 'failed',
+} as const;
+
+export type HealthStatusStartup = {
+  phase: HealthStatusStartupPhase;
+  /** @nullable */
+  stage: string | null;
+  durationMs: number;
+  errorCode?: string;
+};
+
+/**
+ * Bounded operational diagnostics; excludes provider credentials and request payloads.
+ */
+export type HealthStatusDiagnostics = { [key: string]: unknown };
+
+/**
+ * Readiness response. HTTP 200 means startup, database, and required audit protection are ready, even when optional checks report warnings. HTTP 503 is reserved for a failed core readiness gate.
+ */
 export interface HealthStatus {
-  status: string;
+  /** `ok` means core-ready; `starting` or `degraded` means a hard readiness gate failed. */
+  status: HealthStatusStatus;
+  /** Statuses for core gates and optional dependencies. A warning on dependencies or backgroundWorkers does not block HTTP 200. */
+  checks: HealthStatusChecks;
+  capabilities: HealthStatusCapabilities;
+  startup?: HealthStatusStartup;
+  /** Bounded operational diagnostics; excludes provider credentials and request payloads. */
+  diagnostics?: HealthStatusDiagnostics;
+  correlationId: string;
+  timestamp: string;
 }
 
 export type SyncPeerFrameCompleteness = typeof SyncPeerFrameCompleteness[keyof typeof SyncPeerFrameCompleteness];
@@ -1075,6 +2038,9 @@ export interface SyncUnchangedResponse {
   rollover: boolean;
   /** @minimum 0 */
   canonicalRevision?: number;
+  /** @minimum 0 */
+  serverTime?: number;
+  operationalProjection?: OperationalProjection | null;
 }
 
 export type SyncRecoveryPayload = SyncPayload & {
@@ -1662,8 +2628,11 @@ export interface QualityCheckRecord {
   confidence: number;
   summary: string;
   issues: QualityIssue[];
+  /** @nullable */
   notes?: string | null;
+  /** @nullable */
   thumbnail?: string | null;
+  /** @nullable */
   reviewerName?: string | null;
   /** ISO-8601 timestamp the check was recorded */
   createdAt: string;
@@ -1777,6 +2746,9 @@ export const Capability = {
   'approve-password-resets': 'approve-password-resets',
   'review-incidents': 'review-incidents',
   'use-ai-tools': 'use-ai-tools',
+  'manage-allergens': 'manage-allergens',
+  'record-qc': 'record-qc',
+  'manage-qc': 'manage-qc',
 } as const;
 
 /**
@@ -1831,6 +2803,441 @@ export interface ChangePasswordCredentials {
      * @maxLength 200
      */
   newPassword: string;
+}
+
+export type QcEventEventType = typeof QcEventEventType[keyof typeof QcEventEventType];
+
+
+export const QcEventEventType = {
+  lot: 'lot',
+  weight: 'weight',
+  'allergen-review': 'allergen-review',
+  cleaning: 'cleaning',
+  'cleaning-verification': 'cleaning-verification',
+  'target-setting': 'target-setting',
+  'run-signoff': 'run-signoff',
+  correction: 'correction',
+  redaction: 'redaction',
+} as const;
+
+export type QcEventPayload = { [key: string]: unknown };
+
+export interface QcEvent {
+  id: number;
+  operationId: string;
+  recordId: string;
+  eventType: QcEventEventType;
+  /** @nullable */
+  runId: string | null;
+  /** @nullable */
+  profileKey: string | null;
+  /** @nullable */
+  ingredientId: string | null;
+  /** @nullable */
+  ingredientName: string | null;
+  /** @nullable */
+  station: string | null;
+  /** @nullable */
+  relatedEventId: string | null;
+  /** @nullable */
+  actorId: string | null;
+  payload: QcEventPayload;
+  createdAt: string;
+  corrected?: boolean;
+  redactedFields?: string[];
+}
+
+export interface QcEventResponse {
+  event: QcEvent;
+}
+
+export type QcTargetSource = typeof QcTargetSource[keyof typeof QcTargetSource];
+
+
+export const QcTargetSource = {
+  'spec-import': 'spec-import',
+  'qc-override': 'qc-override',
+  'not-configured': 'not-configured',
+} as const;
+
+export type QcTargetState = typeof QcTargetState[keyof typeof QcTargetState];
+
+
+export const QcTargetState = {
+  configured: 'configured',
+  'not-evaluated': 'not-evaluated',
+} as const;
+
+export interface QcTarget {
+  ingredientId: string;
+  ingredientName: string;
+  /** @nullable */
+  targetValue: number | null;
+  /** @nullable */
+  unit: string | null;
+  /** @nullable */
+  toleranceValue: number | null;
+  source: QcTargetSource;
+  state: QcTargetState;
+  reason?: string;
+  overrideEventId?: number;
+}
+
+export interface QcTargetsResponse {
+  profileKey: string;
+  targets: QcTarget[];
+}
+
+/**
+ * @nullable
+ */
+export type QcTargetInputUnit = typeof QcTargetInputUnit[keyof typeof QcTargetInputUnit] | null;
+
+
+export const QcTargetInputUnit = {
+  oz: 'oz',
+  g: 'g',
+  lb: 'lb',
+  kg: 'kg',
+} as const;
+
+export interface QcTargetInput {
+  operationId: string;
+  /**
+     * @minLength 1
+     * @maxLength 400
+     */
+  profileKey: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  ingredientId: string;
+  /**
+     * @exclusiveMinimum 0
+     * @nullable
+     */
+  targetValue: number | null;
+  /** @nullable */
+  unit: QcTargetInputUnit;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  toleranceValue: number | null;
+  /**
+     * @minLength 1
+     * @maxLength 500
+     */
+  reason: string;
+}
+
+export type QcLotInputStation = typeof QcLotInputStation[keyof typeof QcLotInputStation];
+
+
+export const QcLotInputStation = {
+  dough: 'dough',
+  sauce: 'sauce',
+  frontline: 'frontline',
+  warehouse: 'warehouse',
+  packaging: 'packaging',
+  other: 'other',
+} as const;
+
+export interface QcLotInput {
+  operationId: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  runId: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  ingredientId: string;
+  station: QcLotInputStation;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  lotNumber: string;
+  /** @maxLength 1000 */
+  note?: string;
+}
+
+export type QcWeightCheckInputCheckType = typeof QcWeightCheckInputCheckType[keyof typeof QcWeightCheckInputCheckType];
+
+
+export const QcWeightCheckInputCheckType = {
+  'pre-run': 'pre-run',
+  '30-minute': '30-minute',
+} as const;
+
+export type QcWeightCheckInputActualUnit = typeof QcWeightCheckInputActualUnit[keyof typeof QcWeightCheckInputActualUnit];
+
+
+export const QcWeightCheckInputActualUnit = {
+  oz: 'oz',
+  g: 'g',
+  lb: 'lb',
+  kg: 'kg',
+} as const;
+
+export interface QcWeightCheckInput {
+  operationId: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  runId: string;
+  /**
+     * @minLength 1
+     * @maxLength 400
+     */
+  profileKey: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  ingredientId: string;
+  checkType: QcWeightCheckInputCheckType;
+  /**
+     * @maximum 1000000
+     * @exclusiveMinimum 0
+     */
+  actualValue: number;
+  actualUnit: QcWeightCheckInputActualUnit;
+  /** @maxLength 1000 */
+  note?: string;
+}
+
+export type QcAllergenReviewInputFootprintStatus = typeof QcAllergenReviewInputFootprintStatus[keyof typeof QcAllergenReviewInputFootprintStatus];
+
+
+export const QcAllergenReviewInputFootprintStatus = {
+  complete: 'complete',
+  incomplete: 'incomplete',
+  unavailable: 'unavailable',
+} as const;
+
+export type QcAllergenReviewInputFootprintAllergensItem = typeof QcAllergenReviewInputFootprintAllergensItem[keyof typeof QcAllergenReviewInputFootprintAllergensItem];
+
+
+export const QcAllergenReviewInputFootprintAllergensItem = {
+  egg: 'egg',
+  soy: 'soy',
+  milk: 'milk',
+  wheat: 'wheat',
+  peanuts: 'peanuts',
+  tree_nuts: 'tree nuts',
+  fish: 'fish',
+  shellfish: 'shellfish',
+  sesame: 'sesame',
+} as const;
+
+export type QcAllergenReviewInputFootprint = {
+  status: QcAllergenReviewInputFootprintStatus;
+  /** @maxItems 9 */
+  allergens: QcAllergenReviewInputFootprintAllergensItem[];
+  /**
+     * @maxItems 100
+     * @items.minLength 1
+     * @items.maxLength 200
+     */
+  unknownIngredients: string[];
+  /**
+     * @maxItems 30
+     * @items.minLength 1
+     * @items.maxLength 100
+     */
+  missingComponents: string[];
+};
+
+export type QcAllergenReviewInputStagedIngredientsItemArea = typeof QcAllergenReviewInputStagedIngredientsItemArea[keyof typeof QcAllergenReviewInputStagedIngredientsItemArea];
+
+
+export const QcAllergenReviewInputStagedIngredientsItemArea = {
+  Dough: 'Dough',
+  Sauce: 'Sauce',
+  Frontline: 'Frontline',
+} as const;
+
+export type QcAllergenReviewInputStagedIngredientsItem = {
+  area: QcAllergenReviewInputStagedIngredientsItemArea;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  name: string;
+  /**
+     * @minLength 1
+     * @maxLength 50
+     */
+  quantity: string;
+  /**
+     * @minLength 1
+     * @maxLength 30
+     */
+  unit: string;
+  staged: boolean;
+};
+
+export type QcAllergenReviewInputStagedIngredientsStatus = typeof QcAllergenReviewInputStagedIngredientsStatus[keyof typeof QcAllergenReviewInputStagedIngredientsStatus];
+
+
+export const QcAllergenReviewInputStagedIngredientsStatus = {
+  reviewed: 'reviewed',
+  'not-reviewed': 'not-reviewed',
+  unknown: 'unknown',
+} as const;
+
+export type QcAllergenReviewInputCleaningStatus = typeof QcAllergenReviewInputCleaningStatus[keyof typeof QcAllergenReviewInputCleaningStatus];
+
+
+export const QcAllergenReviewInputCleaningStatus = {
+  verified: 'verified',
+  unverified: 'unverified',
+  unknown: 'unknown',
+  'not-applicable': 'not-applicable',
+} as const;
+
+export interface QcAllergenReviewInput {
+  operationId: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  runId: string;
+  footprintReviewed: true;
+  footprint: QcAllergenReviewInputFootprint;
+  /** @maxItems 200 */
+  stagedIngredients: QcAllergenReviewInputStagedIngredientsItem[];
+  stagedIngredientsStatus: QcAllergenReviewInputStagedIngredientsStatus;
+  cleaningStatus: QcAllergenReviewInputCleaningStatus;
+  /** @maxLength 1000 */
+  note?: string;
+}
+
+export type QcCleaningInputMethod = typeof QcCleaningInputMethod[keyof typeof QcCleaningInputMethod];
+
+
+export const QcCleaningInputMethod = {
+  standard: 'standard',
+  deep: 'deep',
+  chemical: 'chemical',
+  other: 'other',
+} as const;
+
+export interface QcCleaningInput {
+  operationId: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  runId: string;
+  method: QcCleaningInputMethod;
+  startedAt: string;
+  endedAt: string;
+  /** @maxLength 1000 */
+  note?: string;
+}
+
+export interface QcNoteInput {
+  operationId: string;
+  /** @maxLength 1000 */
+  note?: string;
+}
+
+export interface QcRunSignoffInput {
+  operationId: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  runId: string;
+  /** @maxLength 1000 */
+  note?: string;
+}
+
+export type QcRunResponseWeightCheckEventsItemCheckType = typeof QcRunResponseWeightCheckEventsItemCheckType[keyof typeof QcRunResponseWeightCheckEventsItemCheckType];
+
+
+export const QcRunResponseWeightCheckEventsItemCheckType = {
+  'pre-run': 'pre-run',
+  '30-minute': '30-minute',
+} as const;
+
+export type QcRunResponseWeightCheckEventsItem = {
+  ingredientId: string;
+  checkType: QcRunResponseWeightCheckEventsItemCheckType;
+  createdAt: string;
+};
+
+export type QcRunResponseSignoff = {
+  eventId: number;
+  /** @nullable */
+  actorId: string | null;
+  createdAt: string;
+  note: string;
+  signedOff: boolean;
+  reopened: boolean;
+} | null;
+
+export interface QcRunResponse {
+  runId: string;
+  items: QcEvent[];
+  hasMore: boolean;
+  /** @nullable */
+  nextCursor: number | null;
+  /** Weight-check timeline entries for run cadence reminders, newest first. The server returns at most 5000 records. */
+  weightCheckEvents: QcRunResponseWeightCheckEventsItem[];
+  /** False when the 5000-record limit truncated the timeline. */
+  weightCheckEventsComplete: boolean;
+  signoff: QcRunResponseSignoff;
+}
+
+export interface QcHistoryResponse {
+  items: QcEvent[];
+  hasMore: boolean;
+  /** @nullable */
+  nextCursor: number | null;
+}
+
+export type QcCorrectionInputReplacement = { [key: string]: unknown };
+
+export interface QcCorrectionInput {
+  operationId: string;
+  /**
+     * @minLength 1
+     * @maxLength 500
+     */
+  reason: string;
+  replacement: QcCorrectionInputReplacement;
+}
+
+export type QcRedactionInputFieldsItem = typeof QcRedactionInputFieldsItem[keyof typeof QcRedactionInputFieldsItem];
+
+
+export const QcRedactionInputFieldsItem = {
+  actorId: 'actorId',
+  ingredientName: 'ingredientName',
+  payloadnote: 'payload.note',
+  payloadlotNumber: 'payload.lotNumber',
+} as const;
+
+export interface QcRedactionInput {
+  operationId: string;
+  /**
+     * @minLength 1
+     * @maxLength 500
+     */
+  reason: string;
+  /**
+     * @minItems 1
+     * @maxItems 4
+     */
+  fields: QcRedactionInputFieldsItem[];
 }
 
 export interface RoleDefinition {
@@ -1978,9 +3385,15 @@ export interface SavedSpecSheetData {
 export interface SavedSpecSheet {
   id: number;
   label: string;
-  /** Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots. */
+  /**
+     * Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.
+     * @nullable
+     */
   sourceKey?: string | null;
-  /** SHA-256 content fingerprint of the imported file bytes (per-file hashes sorted and re-hashed for multi-file imports). A re-import of the exact same file reuses this snapshot's parse instead of re-running the AI. Null for legacy snapshots. */
+  /**
+     * SHA-256 content fingerprint of the imported file bytes (per-file hashes sorted and re-hashed for multi-file imports). A re-import of the exact same file reuses this snapshot's parse instead of re-running the AI. Null for legacy snapshots.
+     * @nullable
+     */
   sourceHash?: string | null;
   /** Epoch milliseconds the snapshot was saved */
   createdAt: number;
@@ -2030,9 +3443,15 @@ export interface SavedShippingGuideData {
 export interface SavedShippingGuide {
   id: number;
   label: string;
-  /** Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots. */
+  /**
+     * Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.
+     * @nullable
+     */
   sourceKey?: string | null;
-  /** SHA-256 content fingerprint of the imported file bytes. Null for legacy snapshots. */
+  /**
+     * SHA-256 content fingerprint of the imported file bytes. Null for legacy snapshots.
+     * @nullable
+     */
   sourceHash?: string | null;
   /** Epoch milliseconds the snapshot was saved */
   createdAt: number;
@@ -2156,7 +3575,10 @@ export type SavedPremixSheetData = SavedMix[];
 export interface SavedPremixSheet {
   id: number;
   label: string;
-  /** Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots. */
+  /**
+     * Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.
+     * @nullable
+     */
   sourceKey?: string | null;
   /** Epoch milliseconds the snapshot was saved */
   createdAt: number;
@@ -2189,7 +3611,10 @@ export interface SavedCheeseRecipe {
 export interface SavedCheeseSheet {
   id: number;
   label: string;
-  /** Stable per-file identity; retention keeps two versions per source key. */
+  /**
+     * Stable per-file identity; retention keeps two versions per source key.
+     * @nullable
+     */
   sourceKey?: string | null;
   /** Epoch milliseconds the snapshot was saved */
   createdAt: number;
@@ -2480,6 +3905,26 @@ export const OperationalReportInventoryAvailability = {
   unavailable: 'unavailable',
 } as const;
 
+export type OperationalReportEvidenceReleaseIdentityStatus = typeof OperationalReportEvidenceReleaseIdentityStatus[keyof typeof OperationalReportEvidenceReleaseIdentityStatus];
+
+
+export const OperationalReportEvidenceReleaseIdentityStatus = {
+  'reported-unverified': 'reported-unverified',
+  incomplete: 'incomplete',
+  unavailable: 'unavailable',
+} as const;
+
+export type OperationalReportEvidenceReleaseIdentitySource = typeof OperationalReportEvidenceReleaseIdentitySource[keyof typeof OperationalReportEvidenceReleaseIdentitySource];
+
+
+export const OperationalReportEvidenceReleaseIdentitySource = {
+  'runtime-environment': 'runtime-environment',
+  unavailable: 'unavailable',
+} as const;
+
+/**
+ * @nullable
+ */
 export type OperationalReportQualityValue = {
   checks?: number;
   issues?: number;
@@ -2489,10 +3934,14 @@ export type OperationalReportQualityValue = {
 
 export type OperationalReportQuality = {
   availability: OperationalReportQualityAvailability;
+  /** @nullable */
   value: OperationalReportQualityValue;
   note?: string;
 };
 
+/**
+ * @nullable
+ */
 export type OperationalReportIncidentsValue = {
   total?: number;
   unresolved?: number;
@@ -2500,18 +3949,56 @@ export type OperationalReportIncidentsValue = {
 
 export type OperationalReportIncidents = {
   availability: OperationalReportIncidentsAvailability;
+  /** @nullable */
   value: OperationalReportIncidentsValue;
   note?: string;
 };
 
+/**
+ * @nullable
+ */
 export type OperationalReportInventoryValue = {
   flaggedItems?: number;
 } | null;
 
 export type OperationalReportInventory = {
   availability: OperationalReportInventoryAvailability;
+  /** @nullable */
   value: OperationalReportInventoryValue;
   note?: string;
+};
+
+/**
+ * Runtime-reported identity is informational only and is not provider-verified release proof.
+ */
+export type OperationalReportEvidenceRelease = {
+  version: string;
+  revision: string;
+  environment: string;
+  /**
+     * @maxLength 128
+     * @nullable
+     */
+  deploymentId?: string | null;
+  /**
+     * @nullable
+     * @pattern ^[a-f0-9]{40}$
+     */
+  deployedRevision?: string | null;
+  identityStatus?: OperationalReportEvidenceReleaseIdentityStatus;
+  identitySource?: OperationalReportEvidenceReleaseIdentitySource;
+};
+
+export type OperationalReportEvidenceRecovery = {
+  generatedAt?: string;
+  source?: string;
+  complete?: boolean;
+};
+
+export type OperationalReportEvidence = {
+  /** Runtime-reported identity is informational only and is not provider-verified release proof. */
+  release?: OperationalReportEvidenceRelease;
+  recovery?: OperationalReportEvidenceRecovery;
 };
 
 export interface OperationalReport {
@@ -2524,6 +4011,7 @@ export interface OperationalReport {
   quality: OperationalReportQuality;
   incidents: OperationalReportIncidents;
   inventory: OperationalReportInventory;
+  evidence?: OperationalReportEvidence;
 }
 
 export type FinalizedOperationalReport = FinalizedOperationalReportSummary & {
@@ -2616,6 +4104,9 @@ export type OperationalRunViewElapsed = {
   phase: OperationalRunViewElapsedPhase;
 };
 
+/**
+ * @nullable
+ */
 export type OperationalRunViewPacePaceStatus = typeof OperationalRunViewPacePaceStatus[keyof typeof OperationalRunViewPacePaceStatus] | null;
 
 
@@ -2627,6 +4118,7 @@ export const OperationalRunViewPacePaceStatus = {
 
 export type OperationalRunViewPace = {
   ppm: number;
+  /** @nullable */
   paceStatus: OperationalRunViewPacePaceStatus;
   paceDelta: number;
   catchUpPpm: number | null;
@@ -2788,8 +4280,11 @@ export interface ShiftHandoffItem {
   status: ShiftHandoffItemStatus;
   title: string;
   detail: string;
+  /** @nullable */
   affectedRun: string | null;
+  /** @nullable */
   affectedProduct: string | null;
+  /** @nullable */
   occurredAt: string | null;
   sourcePath: string;
   historical: boolean;
@@ -3102,7 +4597,10 @@ export interface ImportAlias {
   externalName: string;
   /** The saved name the imported name resolves to */
   canonicalName: string;
-  /** For flavor aliases, the canonical parent brand the flavor belongs to; null/omitted for brand aliases. */
+  /**
+     * For flavor aliases, the canonical parent brand the flavor belongs to; null/omitted for brand aliases.
+     * @nullable
+     */
   brandContext?: string | null;
 }
 
@@ -3121,6 +4619,7 @@ export interface ImportHistorySummary {
   unresolved?: string[];
   skipped?: string[];
   followUp?: string[];
+  /** @nullable */
   snapshotId?: number | null;
   [key: string]: unknown;
  }
@@ -3151,12 +4650,16 @@ export const ImportHistoryStatus = {
 export interface ImportHistory {
   id: number;
   importType: ImportHistoryImportType;
+  /** @nullable */
   sourceKey?: string | null;
   sourceLabel: string;
+  /** @nullable */
   customerScope?: string | null;
   status: ImportHistoryStatus;
   summary: ImportHistorySummary;
+  /** @nullable */
   snapshotId?: number | null;
+  /** @nullable */
   operationId?: string | null;
   /** Epoch milliseconds */
   createdAt: number;
@@ -3336,6 +4839,7 @@ export interface FacilityKnowledge {
 
 export type FacilityKnowledgeHealthFindingEntry = FacilityKnowledge & ({
   id: number;
+  /** @nullable */
   source?: string | null;
 });
 
@@ -3453,12 +4957,16 @@ export interface ProfileDataHealthApplyResult {
   before: ProfileDataHealthReport;
   after: ProfileDataHealthReport;
   applied: ProfileDataHealthRepair[];
+  /** @nullable */
   batchId?: string | null;
   summary: ProfileDataHealthApplyResultSummary;
 }
 
 export type ProfileDataHealthWorkspaceSummary = {[key: string]: number};
 
+/**
+ * @nullable
+ */
 export type ProfileDataHealthWorkspaceCleanupHistory = { [key: string]: unknown } | null;
 
 export type ProfileDataHealthWorkspaceRepairBatchesItem = { [key: string]: unknown };
@@ -3490,6 +4998,9 @@ export const DataHealthFindingSource = {
   cleanup: 'cleanup',
 } as const;
 
+/**
+ * @nullable
+ */
 export type DataHealthFindingReconciliationCategory = typeof DataHealthFindingReconciliationCategory[keyof typeof DataHealthFindingReconciliationCategory] | null;
 
 
@@ -3502,6 +5013,9 @@ export const DataHealthFindingReconciliationCategory = {
   'unexpected-stub': 'unexpected-stub',
 } as const;
 
+/**
+ * @nullable
+ */
 export type DataHealthFindingPreview = { [key: string]: unknown } | null;
 
 export interface DataHealthFinding {
@@ -3518,7 +5032,9 @@ export interface DataHealthFinding {
   protectedValue: boolean;
   source: DataHealthFindingSource;
   sourceRoute: string;
+  /** @nullable */
   reconciliationCategory?: DataHealthFindingReconciliationCategory;
+  /** @nullable */
   preview?: DataHealthFindingPreview;
 }
 
@@ -3676,6 +5192,7 @@ export type SourceLibraryReconciliationStatusHealResult = {
 export type SourceLibraryReconciliationStatusHeal = {
   id: string;
   fromDate: string;
+  /** @nullable */
   appliedAt: string | null;
   markerValid: boolean;
   result: SourceLibraryReconciliationStatusHealResult;
@@ -3727,16 +5244,53 @@ export interface ProfileDataHealthWorkspace {
   findings: DataHealthFinding[];
   safeRepairs: ProfileDataHealthRepair[];
   summary: ProfileDataHealthWorkspaceSummary;
+  /** @nullable */
   cleanupHistory: ProfileDataHealthWorkspaceCleanupHistory;
   repairBatches: ProfileDataHealthWorkspaceRepairBatchesItem[];
   aiRetention: AiRetentionReport;
   sourceReconciliation: SourceLibraryReconciliationStatus;
 }
 
+export type AuditLogChangesFieldNamesItem = typeof AuditLogChangesFieldNamesItem[keyof typeof AuditLogChangesFieldNamesItem];
+
+
+export const AuditLogChangesFieldNamesItem = {
+  name: 'name',
+  brand: 'brand',
+  flavors: 'flavors',
+  shredderSetting: 'shredderSetting',
+  cellulose: 'cellulose',
+  notes: 'notes',
+  components: 'components',
+  enabled: 'enabled',
+} as const;
+
 /**
  * Allowlisted, redacted evidence object no larger than 8192 bytes.
  */
-export type AuditLogChanges = { [key: string]: unknown };
+export type AuditLogChanges = {
+  count?: number;
+  outcome?: string;
+  /** @maxLength 200 */
+  reasonCode?: string;
+  targetId?: string | number;
+  /** @maxLength 200 */
+  targetType?: string;
+  /** @maxLength 200 */
+  authorizedBy?: string;
+  /** @maxLength 200 */
+  from?: string;
+  /** @maxLength 200 */
+  to?: string;
+  /** @maxLength 200 */
+  method?: string;
+  /** @maxLength 200 */
+  requestId?: string;
+  /** @maxItems 8 */
+  fieldNames?: AuditLogChangesFieldNamesItem[];
+  /** @maxLength 128 */
+  correlationId?: string;
+};
 
 export interface AuditLog {
   id: number;
@@ -3744,7 +5298,10 @@ export interface AuditLog {
   actor: string;
   /** Allowlisted action name */
   action: string;
-  /** Resource identifier */
+  /**
+     * Resource identifier
+     * @nullable
+     */
   resource: string | null;
   /** Allowlisted, redacted evidence object no larger than 8192 bytes. */
   changes: AuditLogChanges;
@@ -3756,7 +5313,10 @@ export interface AuditLogPage {
   logs: AuditLog[];
   /** Number of records in this page */
   count: number;
-  /** Opaque cursor limited to 200 characters */
+  /**
+     * Opaque cursor limited to 200 characters
+     * @nullable
+     */
   nextCursor: string | null;
 }
 
@@ -3950,21 +5510,45 @@ export interface ProductionRule {
   type: ProductionRuleType;
   enforcement: ProductionRuleEnforcement;
   enabled: boolean;
-  /** Run field key (required-field, numeric-range) */
+  /**
+     * Run field key (required-field, numeric-range)
+     * @nullable
+     */
   field?: string | null;
-  /** Inclusive lower bound (numeric-range) */
+  /**
+     * Inclusive lower bound (numeric-range)
+     * @nullable
+     */
   min?: number | null;
-  /** Inclusive upper bound (numeric-range) */
+  /**
+     * Inclusive upper bound (numeric-range)
+     * @nullable
+     */
   max?: number | null;
-  /** Run attribute key for the transition (sequence) */
+  /**
+     * Run attribute key for the transition (sequence)
+     * @nullable
+     */
   attribute?: string | null;
-  /** Disallowed preceding attribute value (sequence) */
+  /**
+     * Disallowed preceding attribute value (sequence)
+     * @nullable
+     */
   before?: string | null;
-  /** Disallowed following attribute value (sequence) */
+  /**
+     * Disallowed following attribute value (sequence)
+     * @nullable
+     */
   after?: string | null;
-  /** Exceptions: when the current run matches any of these conditions the rule is waived entirely (no warning, no block). Applies to any type. */
+  /**
+     * Exceptions: when the current run matches any of these conditions the rule is waived entirely (no warning, no block). Applies to any type.
+     * @nullable
+     */
   bypass?: RuleBypassCondition[] | null;
-  /** Exceptions: ordered step labels a manager attaches to a (strict) rule. When the rule is violated and not bypassed, the operator must acknowledge every step before Start unblocks for that run. */
+  /**
+     * Exceptions: ordered step labels a manager attaches to a (strict) rule. When the rule is violated and not bypassed, the operator must acknowledge every step before Start unblocks for that run.
+     * @nullable
+     */
   checklist?: string[] | null;
 }
 
@@ -4038,6 +5622,41 @@ export interface FreezerSurplusLedger {
   allocations: FreezerSurplusAllocation[];
 }
 
+export type FreezerSurplusAdjustmentEventType = typeof FreezerSurplusAdjustmentEventType[keyof typeof FreezerSurplusAdjustmentEventType];
+
+
+export const FreezerSurplusAdjustmentEventType = {
+  damage: 'damage',
+  return: 'return',
+  correction: 'correction',
+} as const;
+
+export interface FreezerSurplusAdjustment {
+  eventId: string;
+  lotId: string;
+  eventType: FreezerSurplusAdjustmentEventType;
+  /**
+     * @minimum 1
+     * @maximum 1000000
+     */
+  cases: number;
+  /**
+     * @minLength 1
+     * @maxLength 300
+     */
+  reason: string;
+  actorId: string;
+  /** @nullable */
+  runId?: string | null;
+  /** @nullable */
+  correctsEventId?: string | null;
+  createdAt: string;
+}
+
+export interface FreezerSurplusAdjustmentList {
+  adjustments: FreezerSurplusAdjustment[];
+}
+
 export interface ConfirmFreezerSurplusInput {
   /**
      * @minLength 1
@@ -4080,10 +5699,44 @@ export interface ReplaceFreezerSurplusAllocationInput {
   allocations: FreezerSurplusAllocationSelection[];
 }
 
+export type RecordFreezerSurplusAdjustmentInputEventType = typeof RecordFreezerSurplusAdjustmentInputEventType[keyof typeof RecordFreezerSurplusAdjustmentInputEventType];
+
+
+export const RecordFreezerSurplusAdjustmentInputEventType = {
+  damage: 'damage',
+  return: 'return',
+  correction: 'correction',
+} as const;
+
+/**
+ * runId is required only for eventType=return. correctsEventId is required only for eventType=correction. Both are rejected for incompatible event types.
+ */
+export interface RecordFreezerSurplusAdjustmentInput {
+  eventId: string;
+  eventType: RecordFreezerSurplusAdjustmentInputEventType;
+  /**
+     * @minimum 1
+     * @maximum 1000000
+     */
+  cases: number;
+  /**
+     * @minLength 1
+     * @maxLength 300
+     */
+  reason: string;
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  runId?: string;
+  correctsEventId?: string;
+}
+
 export interface FreezerSurplusMutationResponse {
   lots: FreezerSurplusLot[];
   allocations: FreezerSurplusAllocation[];
   createdLot?: FreezerSurplusLot | null;
+  createdAdjustment?: FreezerSurplusAdjustment | null;
 }
 
 export interface MixSurplusLot {
@@ -4137,10 +5790,7 @@ export interface RecordMixSurplusInput {
      */
   mixId: string;
   productionDate: string;
-  /**
-     * @minimum 0.1
-     * @exclusiveMinimum
-     */
+  /** @exclusiveMinimum 0.1 */
   amountMade: number;
 }
 
@@ -4188,9 +5838,15 @@ export interface DieLineDefaultsEntry {
   freezerTime: number;
   /** "Extra Case Buffer" in the UI */
   casesPerLayer: number;
-  /** Pre-tunnel dwell time override in minutes. Absent = use the app's built-in per-die-size default (3.5 min for 7", 2.0 min for 12"). */
+  /**
+     * Pre-tunnel dwell time override in minutes. Absent = use the app's built-in per-die-size default (3.5 min for 7", 2.0 min for 12").
+     * @nullable
+     */
   preTunnelMin?: number | null;
-  /** Post-tunnel dwell time override in minutes. Absent = use the app's built-in per-die-size default (3.0 min for 7", 2.0 min for 12"). */
+  /**
+     * Post-tunnel dwell time override in minutes. Absent = use the app's built-in per-die-size default (3.0 min for 7", 2.0 min for 12").
+     * @nullable
+     */
   postTunnelMin?: number | null;
 }
 
@@ -4474,6 +6130,21 @@ export const IngredientCategory = {
   general: 'general',
 } as const;
 
+export type IngredientAllergen = typeof IngredientAllergen[keyof typeof IngredientAllergen];
+
+
+export const IngredientAllergen = {
+  egg: 'egg',
+  soy: 'soy',
+  milk: 'milk',
+  wheat: 'wheat',
+  peanuts: 'peanuts',
+  tree_nuts: 'tree nuts',
+  fish: 'fish',
+  shellfish: 'shellfish',
+  sesame: 'sesame',
+} as const;
+
 /**
  * A factory-wide catalog entry (Task #102). Recipe rows reference an ingredient by id; renaming/merging/deleting is a server operation that updates every reference with no client-side rewrite.
  */
@@ -4483,19 +6154,40 @@ export interface Ingredient {
   /** Current display name */
   name: string;
   categories: IngredientCategory[];
-  /** When set, this ingredient was merged into another ingredient's id; resolve display name by following this pointer. */
+  /**
+     * When set, this ingredient was merged into another ingredient's id; resolve display name by following this pointer.
+     * @nullable
+     */
   mergedInto?: string | null;
   /** false = soft-deleted (kept so old rows still resolve) */
   enabled: boolean;
+  /** Reviewed mapping values from the fixed ingredient-allergen vocabulary. An empty list means none of those allergens only when allergensReviewed is true. */
+  allergens: IngredientAllergen[];
+  /** Whether an authorized reviewer explicitly reviewed this mapping */
+  allergensReviewed: boolean;
 }
 
 export interface IngredientList {
   items: Ingredient[];
 }
 
+export interface IngredientCatalogInput {
+  id: string;
+  name: string;
+  categories: IngredientCategory[];
+  /** @nullable */
+  mergedInto?: string | null;
+  enabled: boolean;
+}
+
 export interface SaveIngredientsInput {
   /** The batch of ingredients to create or rename (by id) */
-  items: Ingredient[];
+  items: IngredientCatalogInput[];
+}
+
+export interface UpdateIngredientAllergenMappingInput {
+  allergens: IngredientAllergen[];
+  reviewed: boolean;
 }
 
 export interface DeleteIngredientsInput {
@@ -4692,7 +6384,10 @@ export interface CycleCountSchedule {
   section: string;
   /** How many days may elapse between counts (default 7) */
   cadenceDays: number;
-  /** Date last counted (YYYY-MM-DD), or null if never counted */
+  /**
+     * Date last counted (YYYY-MM-DD), or null if never counted
+     * @nullable
+     */
   lastCountedAt: string | null;
   enabled: boolean;
 }
@@ -4745,7 +6440,10 @@ export interface SpecImportAlias {
   externalName: string;
   /** The saved canonical name the label resolves to */
   canonicalName: string;
-  /** Disambiguator within a kind (e.g. the canonical brand for a flavor alias); null/omitted otherwise. */
+  /**
+     * Disambiguator within a kind (e.g. the canonical brand for a flavor alias); null/omitted otherwise.
+     * @nullable
+     */
   context?: string | null;
 }
 
@@ -5669,6 +7367,18 @@ export type ClientTodayParameter = string;
 
 export type SyncSnapshotParameter = string;
 
+export type GetBuildInfo503Status = typeof GetBuildInfo503Status[keyof typeof GetBuildInfo503Status];
+
+
+export const GetBuildInfo503Status = {
+  unavailable: 'unavailable',
+} as const;
+
+export type GetBuildInfo503 = {
+  error: string;
+  status: GetBuildInfo503Status;
+};
+
 export type CheckUsernameAvailableParams = {
 /**
  * @minLength 1
@@ -5715,6 +7425,81 @@ export const ListQualityChecksStatus = {
   pass: 'pass',
   warn: 'warn',
   fail: 'fail',
+} as const;
+
+export type GetQcTargetsParams = {
+/**
+ * @minLength 1
+ * @maxLength 400
+ */
+profileKey: string;
+};
+
+export type GetQcHistoryParams = {
+/**
+ * Inclusive ISO date or timestamp
+ */
+from?: string;
+/**
+ * Inclusive ISO date or timestamp
+ */
+to?: string;
+/**
+ * @maxLength 200
+ */
+runId?: string;
+/**
+ * @maxLength 200
+ */
+ingredientId?: string;
+station?: GetQcHistoryStation;
+/**
+ * @minimum 1
+ * @maximum 100
+ */
+limit?: number;
+/**
+ * @minimum 1
+ */
+cursor?: number;
+};
+
+export type GetQcHistoryStation = typeof GetQcHistoryStation[keyof typeof GetQcHistoryStation];
+
+
+export const GetQcHistoryStation = {
+  dough: 'dough',
+  sauce: 'sauce',
+  frontline: 'frontline',
+  warehouse: 'warehouse',
+  packaging: 'packaging',
+  other: 'other',
+} as const;
+
+export type ExportQcHistoryCsvParams = {
+from?: string;
+to?: string;
+/**
+ * @maxLength 200
+ */
+runId?: string;
+/**
+ * @maxLength 200
+ */
+ingredientId?: string;
+station?: ExportQcHistoryCsvStation;
+};
+
+export type ExportQcHistoryCsvStation = typeof ExportQcHistoryCsvStation[keyof typeof ExportQcHistoryCsvStation];
+
+
+export const ExportQcHistoryCsvStation = {
+  dough: 'dough',
+  sauce: 'sauce',
+  frontline: 'frontline',
+  warehouse: 'warehouse',
+  packaging: 'packaging',
+  other: 'other',
 } as const;
 
 export type ListFinalizedOperationalReportsParams = {
@@ -6044,4 +7829,22 @@ export type ListOperationalIntentReceipts200 = {
   cursor: number;
   hasMore: boolean;
   mutations: OperationalIntentReceipt[];
+};
+
+export type ListDistillationApplyEvidenceParams = {
+/**
+ * @minimum 1
+ * @maximum 20
+ */
+limit?: number;
+/**
+ * @maxLength 512
+ */
+cursor?: string;
+};
+
+export type ListDistillationApplyEvidence200 = {
+  records: DistillationApplyEvidenceRecord[];
+  /** @nullable */
+  nextCursor: string | null;
 };

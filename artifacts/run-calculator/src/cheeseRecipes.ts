@@ -22,7 +22,7 @@ import { adoptMasterDataConflict } from "./masterData";
 
 export class StaleCheeseRecipeSnapshotError extends Error {
   constructor(readonly canonicalItems: CheeseRecipe[], readonly rejectedIds: string[]) {
-    super("The cheese recipe list changed before this save completed");
+    super("The cheese recipes changed before this save completed. Reopen the import review or editor to use the latest recipes; this save was not applied.");
   }
 }
 
@@ -53,6 +53,9 @@ export async function saveCheeseRecipes(items: CheeseRecipe[]): Promise<CheeseRe
         : [];
       adoptMasterDataConflict("cheeseRecipes", canonicalItems);
       throw new StaleCheeseRecipeSnapshotError(canonicalItems, rejectedIds);
+    }
+    if (res.status === 409) {
+      throw new Error("The cheese recipes changed before this save completed. Reopen the import review or editor to use the latest recipes; this save was not applied.");
     }
     throw new Error(`Save cheese recipes failed (${res.status})`);
   }

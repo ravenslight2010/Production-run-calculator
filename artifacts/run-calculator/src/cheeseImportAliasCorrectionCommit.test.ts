@@ -8,6 +8,7 @@ const fetchSpecImportAliases = vi.fn(async () => []);
 const saveSpecImportAliases = vi.fn(async () => {});
 const deleteSpecImportAliases = vi.fn(async () => {});
 const saveAiCorrections = vi.fn(async () => {});
+const logCorrectionWriteFailure = vi.fn();
 
 vi.mock("./cheeseRecipes", () => ({
   fetchCheeseRecipes: (...a: unknown[]) => fetchCheeseRecipes(...(a as [])),
@@ -23,6 +24,7 @@ vi.mock("./specImportAliases", () => ({
 }));
 vi.mock("./aiCorrections", () => ({
   saveAiCorrections: (...a: unknown[]) => saveAiCorrections(...(a as [])),
+  logCorrectionWriteFailure: (...a: unknown[]) => logCorrectionWriteFailure(...a),
 }));
 vi.mock("./specImport", () => ({ readWorkbookGrids: async () => [] }));
 
@@ -137,5 +139,24 @@ describe("commitCheeseImport correcting aliases", () => {
         }),
       ]),
     );
+  });
+
+  it("returns a non-blocking warning when reviewed aliases fail to save", async () => {
+    saveSpecImportAliases.mockRejectedValueOnce(new Error("do not expose correction text"));
+
+    const result = await commitCheeseImport(prepared, [], [
+      {
+        kind: "appType",
+        externalName: "Reviewed blend label",
+        canonicalName: "Canonical blend",
+      },
+    ]);
+
+    expect(result.warning).toMatch(/name mappings were not saved/i);
+    expect(logCorrectionWriteFailure).toHaveBeenCalledWith({
+      store: "spec-import-aliases",
+      failure: "request",
+      correctionCount: 1,
+    });
   });
 });

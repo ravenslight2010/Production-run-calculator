@@ -17,4 +17,6 @@ export const ManualSectionEditRequestSection = {
   app2: 'app2',
   app3: 'app3',
   app4: 'app4',
+  pep1: 'pep1',
+  pep2: 'pep2',
 } as const;

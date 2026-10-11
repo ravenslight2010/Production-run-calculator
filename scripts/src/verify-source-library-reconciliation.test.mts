@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -8,10 +9,19 @@ import {
   ownedFields,
   parseReport,
   preflightSourceLibraryReconciliation,
+  resolveSourceLibraryDatabaseOwner,
   resolveSourceLibraryRevision,
+  readSourceLibraryDeploymentHandoff,
   assertProductionSourceLibraryCapture,
   assertBoundedSourceLibraryReconciliationEvidence,
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_V2_ID,
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
+  DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS,
+  fingerprintSourceLibraryPoolField,
   isRetryableSourceLibraryDatabaseError,
+  inspectSourceLibraryPoolMismatchDiagnostics,
+  loadSourceLibraryPoolExceptionApproval,
   SOURCE_LIBRARY_PREFLIGHT_DB_ATTEMPTS,
   stable,
   verifySourceLibraryReconciliation,
@@ -28,7 +38,7 @@ const report = parseReport(JSON.parse(reportBytes.toString("utf8")));
 const queries: string[] = [];
 const rootDir = path.resolve(new URL("../../", import.meta.url).pathname);
 const verifierPath = path.resolve(
-  new URL("./verify-source-library-reconciliation.mts", import.meta.url).pathname,
+  new URL("./verify-source-library-reconciliation-cli.mts", import.meta.url).pathname,
 );
 const importerPath = path.resolve(
   new URL("./import-source-library-reconciliation-evidence.mts", import.meta.url).pathname,
@@ -113,6 +123,7 @@ assert.doesNotThrow(() =>
     revisionArgumentProvided: true,
     outputPath: undefined,
     preflight: false,
+    configuredDatabaseOwner: "approved_source_owner",
     environment: { DATABASE_URL: "postgresql://production.example/app" },
   }),
 );
@@ -124,6 +135,7 @@ assert.throws(
       revisionArgumentProvided: true,
       outputPath: undefined,
       preflight: false,
+      configuredDatabaseOwner: "approved_source_owner",
       environment: { DATABASE_URL: "postgresql://production.example/app" },
     }),
   /explicit --environment release/,
@@ -136,6 +148,7 @@ assert.throws(
       revisionArgumentProvided: true,
       outputPath: undefined,
       preflight: false,
+      configuredDatabaseOwner: "approved_source_owner",
       environment: {
         DATABASE_URL: "postgresql://production.example/app",
         SOURCE_LIBRARY_VERIFIER_QUERY_FIXTURE: "/tmp/fixture.json",
@@ -151,6 +164,7 @@ assert.throws(
       revisionArgumentProvided: true,
       outputPath: undefined,
       preflight: true,
+      configuredDatabaseOwner: "approved_source_owner",
       environment: { DATABASE_URL: "postgresql://production.example/app" },
     }),
   /does not support --preflight/,
@@ -163,10 +177,112 @@ assert.throws(
       revisionArgumentProvided: false,
       outputPath: undefined,
       preflight: false,
+      configuredDatabaseOwner: "approved_source_owner",
       environment: { DATABASE_URL: "postgresql://production.example/app" },
     }),
-  /requires --revision on the command line/,
+  /requires --revision or --deployment-handoff on the command line/,
 );
+
+const handoffDirectory = await mkdtemp(
+  path.join(tmpdir(), "source-library-handoff-"),
+);
+try {
+  const handoffPath = path.join(handoffDirectory, "deployment-handoff.json");
+  const issuedAt = new Date(Date.now() - 1_000).toISOString();
+  await writeFile(
+    handoffPath,
+    JSON.stringify({
+      schemaVersion: 1,
+      kind: "published-deployment-handoff",
+      deploymentId: "published-source-evidence-test",
+      deployedRevision: "b".repeat(40),
+      databaseOwner: "approved_source_owner",
+      issuedAt,
+      expiresAt: new Date(Date.parse(issuedAt) + 60 * 60 * 1_000).toISOString(),
+    }),
+  );
+  assert.equal(
+    readSourceLibraryDeploymentHandoff(handoffPath).deployedRevision,
+    "b".repeat(40),
+  );
+  assert.equal(
+    readSourceLibraryDeploymentHandoff(handoffPath).databaseOwner,
+    "approved_source_owner",
+  );
+  assert.equal(
+    resolveSourceLibraryDatabaseOwner(undefined, handoffPath),
+    "approved_source_owner",
+  );
+  assert.equal(
+    resolveSourceLibraryRevision("release", undefined, handoffPath),
+    "b".repeat(40),
+  );
+  assert.doesNotThrow(() =>
+    assertProductionSourceLibraryCapture({
+      environmentArgument: "release",
+      configuredRevision: undefined,
+      revisionArgumentProvided: false,
+      deploymentHandoffArgumentProvided: true,
+      deploymentHandoffPath: handoffPath,
+      outputPath: undefined,
+      preflight: false,
+      configuredDatabaseOwner: resolveSourceLibraryDatabaseOwner(
+        undefined,
+        handoffPath,
+      ),
+      environment: { DATABASE_URL: "postgresql://production.example/app" },
+    }),
+  );
+  assert.throws(
+    () => resolveSourceLibraryRevision("release", "c".repeat(40), handoffPath),
+    /conflicts with the deployed revision/,
+  );
+  assert.throws(
+    () =>
+      resolveSourceLibraryDatabaseOwner(
+        "different_source_owner",
+        handoffPath,
+      ),
+    (error: unknown) =>
+      error instanceof Error &&
+      error.message ===
+        "Source-library database owner conflicts with the database owner in the deployment handoff." &&
+      !error.message.includes("approved_source_owner") &&
+      !error.message.includes("different_source_owner"),
+  );
+  assert.throws(
+    () =>
+      assertProductionSourceLibraryCapture({
+        environmentArgument: "release",
+        configuredRevision: undefined,
+        revisionArgumentProvided: false,
+        deploymentHandoffArgumentProvided: true,
+        deploymentHandoffPath: handoffPath,
+        outputPath: undefined,
+        preflight: false,
+        configuredDatabaseOwner: "different_source_owner",
+        environment: { DATABASE_URL: "postgresql://production.example/app" },
+      }),
+    /database owner in the deployment handoff/,
+  );
+  await writeFile(
+    handoffPath,
+    JSON.stringify({
+      schemaVersion: 1,
+      kind: "published-deployment-handoff",
+      deploymentId: "published-source-evidence-test",
+      deployedRevision: "b".repeat(40),
+      issuedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1_000).toISOString(),
+      expiresAt: new Date(Date.now() - 24 * 60 * 60 * 1_000).toISOString(),
+    }),
+  );
+  assert.throws(
+    () => readSourceLibraryDeploymentHandoff(handoffPath),
+    /handoff is stale/,
+  );
+} finally {
+  await rm(handoffDirectory, { recursive: true, force: true });
+}
 
 const rowsByTable = new Map<string, Array<Record<string, unknown>>>();
 for (const proposal of report.proposals) {
@@ -321,6 +437,328 @@ assert.throws(
 assert.match(output.idempotencyFingerprint.value, /^[a-f0-9]{64}$/);
 assert.ok(queries.length > 0);
 
+const ownerApprovedPoolExceptions = loadSourceLibraryPoolExceptionApproval(
+  path.resolve(rootDir, DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS),
+  reportBytes,
+);
+assert.equal(
+  ownerApprovedPoolExceptions.sha256,
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
+);
+assert.equal(ownerApprovedPoolExceptions.approvedDifferences.length, 10);
+assert.equal(ownerApprovedPoolExceptions.formatVersion, 1);
+assert.equal(ownerApprovedPoolExceptions.historical, true);
+const exceptionTamperDirectory = await mkdtemp(
+  path.join(tmpdir(), "source-library-pool-exception-tamper-"),
+);
+try {
+  const exceptionBytes = await readFile(
+    path.resolve(rootDir, DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS),
+  );
+  const tamperedManifest = JSON.parse(exceptionBytes.toString("utf8"));
+  tamperedManifest.approvedDifferences.pop();
+  const tamperedPath = path.join(exceptionTamperDirectory, "exceptions.json");
+  await writeFile(tamperedPath, JSON.stringify(tamperedManifest));
+  assert.throws(
+    () =>
+      loadSourceLibraryPoolExceptionApproval(tamperedPath, reportBytes),
+    /not a pinned owner-approved version/u,
+    "changing the approved exception list must invalidate its pinned SHA-256",
+  );
+} finally {
+  await rm(exceptionTamperDirectory, { recursive: true, force: true });
+}
+const changedApprovedRows: Array<{
+  row: Record<string, unknown>;
+  components: unknown;
+  brand: unknown;
+  hadComponents: boolean;
+  hadBrand: boolean;
+}> = [];
+for (const exception of ownerApprovedPoolExceptions.approvedDifferences) {
+  const row = rowsByTable
+    .get(exception.table)!
+    .find((candidate) => candidate.id === exception.id)!;
+  changedApprovedRows.push({
+    row,
+    components: row.components,
+    brand: row.brand,
+    hadComponents: Object.prototype.hasOwnProperty.call(row, "components"),
+    hadBrand: Object.prototype.hasOwnProperty.call(row, "brand"),
+  });
+  if (exception.differingFields.includes("components")) {
+    row.components = [{ lbs: 999 }];
+  }
+  if (exception.differingFields.includes("brand")) {
+    row.brand = "Owner-approved correction";
+  }
+}
+const ownerApprovedOutput = await verifySourceLibraryReconciliation(
+  report,
+  reportBytes,
+  "source-library-reconciliation-2026-08-26-v1",
+  query,
+  "2026-08-26",
+  "development",
+  "development-unbound",
+  undefined,
+  undefined,
+  ownerApprovedPoolExceptions,
+);
+assert.equal(ownerApprovedOutput.pools.mismatches, 10);
+assert.deepEqual(ownerApprovedOutput.poolExceptions, {
+  id: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
+  sha256: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
+  approvedMismatches: 0,
+  unresolvedMismatches: 10,
+});
+assert.equal(ownerApprovedOutput.ok, false);
+assert.deepEqual(ownerApprovedOutput.failures, [{ check: "pools", count: 10 }]);
+const ownerApprovedDiagnostics = await inspectSourceLibraryPoolMismatchDiagnostics(
+  report,
+  query,
+  ownerApprovedPoolExceptions,
+  reportBytes,
+);
+assert.equal(ownerApprovedDiagnostics.counts.mismatches, 10);
+assert.deepEqual(ownerApprovedDiagnostics.poolExceptions, {
+  id: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
+  sha256: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
+  approvedMismatches: 0,
+  unresolvedMismatches: 10,
+});
+
+const freshFingerprintDiagnostics = await inspectSourceLibraryPoolMismatchDiagnostics(
+  report,
+  query,
+);
+assert.equal(freshFingerprintDiagnostics.items.length, 10);
+assert.ok(
+  freshFingerprintDiagnostics.items.every(
+    (item) =>
+      item.mismatchType === "field-mismatch" &&
+      item.fieldFingerprints !== undefined &&
+      Object.keys(item.fieldFingerprints).sort().join(",") ===
+        [...item.differingFields].sort().join(",") &&
+      Object.values(item.fieldFingerprints).every((fingerprint) =>
+        /^[a-f0-9]{64}$/u.test(fingerprint),
+      ),
+  ),
+);
+assert.equal(
+  fingerprintSourceLibraryPoolField({ b: 2, a: 1 }),
+  fingerprintSourceLibraryPoolField({ a: 1, b: 2 }),
+  "fingerprints must be deterministic across object key order",
+);
+assert.notEqual(
+  fingerprintSourceLibraryPoolField("approved value"),
+  fingerprintSourceLibraryPoolField("later edit"),
+);
+const syntheticV2Approval = {
+  id: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_V2_ID,
+  sha256: "f".repeat(64),
+  sourceReportSha256: createHash("sha256").update(reportBytes).digest("hex"),
+  formatVersion: 2 as const,
+  historical: false,
+  approvedDifferences: freshFingerprintDiagnostics.items,
+};
+const fingerprintBoundOutput = await verifySourceLibraryReconciliation(
+  report,
+  reportBytes,
+  "source-library-reconciliation-2026-08-26-v1",
+  query,
+  "2026-08-26",
+  "development",
+  "development-unbound",
+  undefined,
+  undefined,
+  syntheticV2Approval,
+);
+assert.equal(fingerprintBoundOutput.poolExceptions.approvedMismatches, 10);
+assert.equal(fingerprintBoundOutput.poolExceptions.unresolvedMismatches, 0);
+assert.equal(fingerprintBoundOutput.ok, true);
+
+const changedFingerprintDescriptor = freshFingerprintDiagnostics.items[0]!;
+const changedFingerprintRow = rowsByTable
+  .get(changedFingerprintDescriptor.table)!
+  .find((row) => row.id === changedFingerprintDescriptor.id)!;
+const fingerprintField = changedFingerprintDescriptor.differingFields[0]!;
+const originalFingerprintValue = changedFingerprintRow[fingerprintField];
+changedFingerprintRow[fingerprintField] = fingerprintField === "components"
+  ? [{ lbs: 123456 }]
+  : "Fingerprint changed sentinel";
+const changedFingerprintOutput = await verifySourceLibraryReconciliation(
+  report,
+  reportBytes,
+  "source-library-reconciliation-2026-08-26-v1",
+  query,
+  "2026-08-26",
+  "development",
+  "development-unbound",
+  undefined,
+  undefined,
+  syntheticV2Approval,
+);
+assert.equal(changedFingerprintOutput.poolExceptions.approvedMismatches, 9);
+assert.equal(changedFingerprintOutput.poolExceptions.unresolvedMismatches, 1);
+assert.equal(changedFingerprintOutput.ok, false);
+changedFingerprintRow[fingerprintField] = originalFingerprintValue;
+
+const additionalDriftRow = rowsByTable.get("cheese_recipes")!.find(
+  (row) =>
+    !ownerApprovedPoolExceptions.approvedDifferences.some(
+      (exception) => exception.id === row.id,
+    ) &&
+    report.proposals.some((proposal) => {
+      const candidate = proposal as Record<string, any>;
+      return candidate.table === "cheese_recipes" &&
+        candidate.before.id === row.id &&
+        Object.prototype.hasOwnProperty.call(candidate.after, "brand");
+    }),
+)!;
+const originalAdditionalDriftBrand = additionalDriftRow.brand;
+additionalDriftRow.brand = "Unapproved additional drift";
+const unresolvedDriftOutput = await verifySourceLibraryReconciliation(
+  report,
+  reportBytes,
+  "source-library-reconciliation-2026-08-26-v1",
+  query,
+  "2026-08-26",
+  "development",
+  "development-unbound",
+  undefined,
+  undefined,
+  ownerApprovedPoolExceptions,
+);
+assert.equal(unresolvedDriftOutput.poolExceptions.approvedMismatches, 0);
+assert.equal(unresolvedDriftOutput.poolExceptions.unresolvedMismatches, 11);
+assert.equal(unresolvedDriftOutput.ok, false);
+assert.deepEqual(unresolvedDriftOutput.failures, [{ check: "pools", count: 11 }]);
+const unresolvedDiagnostics = await inspectSourceLibraryPoolMismatchDiagnostics(
+  report,
+  query,
+  ownerApprovedPoolExceptions,
+  reportBytes,
+);
+assert.equal(unresolvedDiagnostics.counts.mismatches, 11);
+assert.deepEqual(unresolvedDiagnostics.poolExceptions, {
+  id: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
+  sha256: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
+  approvedMismatches: 0,
+  unresolvedMismatches: 11,
+});
+additionalDriftRow.brand = originalAdditionalDriftBrand;
+for (const saved of changedApprovedRows) {
+  if (saved.hadComponents) saved.row.components = saved.components;
+  else delete saved.row.components;
+  if (saved.hadBrand) saved.row.brand = saved.brand;
+  else delete saved.row.brand;
+}
+
+const runtimeQueryStart = queries.length;
+const runtimeAttestedOutput = await verifySourceLibraryReconciliation(
+  report,
+  reportBytes,
+  "source-library-reconciliation-2026-08-26-v1",
+  query,
+  "2026-08-26",
+  "release",
+  "source-sha256:" + "a".repeat(64),
+  undefined,
+  "published-app-runtime-connection",
+);
+assert.equal(
+  runtimeAttestedOutput.databaseAttestation,
+  "published-app-runtime-connection",
+);
+assert.equal(
+  runtimeAttestedOutput.failures.some(({ check }) => check === "databaseOwner"),
+  false,
+);
+assert.equal(
+  queries.slice(runtimeQueryStart).some((text) => text.includes("FROM pg_database")),
+  false,
+  "published-app capture must attest through its executing DB connection, not query an external owner name",
+);
+
+const componentMismatchProposal = report.proposals.find(
+  (proposal) =>
+    proposal.classification === "automatic" &&
+    proposal.action === "replace-components-from-approved-source",
+) as Record<string, any> | undefined;
+const missingProposal = report.proposals.find(
+  (proposal) => {
+    const candidate = proposal as Record<string, any>;
+    return candidate.classification === "automatic" &&
+      candidate.action === "replace-components-from-approved-source" &&
+      candidate.before.id !== componentMismatchProposal?.before.id;
+  },
+) as Record<string, any> | undefined;
+assert.ok(componentMismatchProposal);
+assert.ok(missingProposal);
+const privateComponentSentinel = "private-diagnostic-component-sentinel";
+const diagnosticQuery = async (text: string, values?: readonly unknown[]) => {
+  const result = await query(text, values);
+  let rows = result.rows;
+  if (text.includes(`FROM ${componentMismatchProposal.table}`)) {
+    rows = rows.map((row) => {
+      const candidate = row as Record<string, unknown>;
+      return candidate.id === componentMismatchProposal.before.id
+        ? { ...candidate, components: [{ ingredient: privateComponentSentinel, lbs: 999 }] }
+        : row;
+    });
+  }
+  if (text.includes(`FROM ${missingProposal.table}`)) {
+    rows = rows.filter(
+      (row) =>
+        (row as Record<string, unknown>).id !== missingProposal.before.id,
+    );
+  }
+  return { rows };
+};
+const poolDiagnostics = await inspectSourceLibraryPoolMismatchDiagnostics(
+  report,
+  diagnosticQuery,
+);
+assert.equal(poolDiagnostics.counts.mismatches, 1);
+assert.equal(poolDiagnostics.counts.missing, 1);
+assert.equal(poolDiagnostics.total, 2);
+assert.equal(poolDiagnostics.returned, 2);
+assert.equal(poolDiagnostics.omitted, 0);
+assert.deepEqual(
+  poolDiagnostics.items.find(
+    (item) => item.id === componentMismatchProposal.before.id,
+  )?.differingFields,
+  ["components"],
+);
+assert.equal(
+  poolDiagnostics.items.find((item) => item.id === missingProposal.before.id)
+    ?.mismatchType,
+  "missing",
+);
+assert.doesNotMatch(
+  JSON.stringify(poolDiagnostics),
+  new RegExp(privateComponentSentinel),
+  "diagnostics must not return current recipe component values",
+);
+
+const cappedDiagnostics = await inspectSourceLibraryPoolMismatchDiagnostics(
+  report,
+  async (text) => {
+    if (text.includes("FROM dough_recipes") ||
+        text.includes("FROM sauce_recipes") ||
+        text.includes("FROM cheese_recipes") ||
+        text.includes("FROM mixes")) {
+      return { rows: [] };
+    }
+    throw new Error(`Unexpected diagnostics query: ${text}`);
+  },
+);
+assert.equal(cappedDiagnostics.total, 68);
+assert.equal(cappedDiagnostics.returned, 10);
+assert.equal(cappedDiagnostics.omitted, 58);
+assert.equal(cappedDiagnostics.items.length, 10);
+
 const preflight = await preflightSourceLibraryReconciliation(
   report,
   reportBytes,
@@ -412,6 +850,7 @@ type CliQueryFixture = {
   dailyRunRows: Array<Record<string, unknown>>;
   aliasRows: Array<Record<string, unknown>>;
   markerRows: Array<Record<string, unknown>>;
+  databaseOwnerRows: Array<Record<string, unknown>>;
 };
 
 function createCliFixture(scenario: CliScenario): {
@@ -544,6 +983,7 @@ function createCliFixture(scenario: CliScenario): {
           deletedStubs: 0,
         },
       }],
+      databaseOwnerRows: [{ databaseOwner: "approved_source_owner" }],
     },
   };
 }
@@ -554,9 +994,10 @@ import fs from "node:fs";
 const databaseModule = \`
   import fs from "node:fs";
 
-  const fixture = JSON.parse(
-    fs.readFileSync(process.env.SOURCE_LIBRARY_VERIFIER_QUERY_FIXTURE, "utf8"),
-  );
+  const fixturePath =
+    process.env.SOURCE_LIBRARY_TEST_QUERY_FIXTURE ??
+    process.env.SOURCE_LIBRARY_VERIFIER_QUERY_FIXTURE;
+  const fixture = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
   const query = async (text) => {
     if (text.startsWith("BEGIN TRANSACTION READ ONLY") || text === "ROLLBACK") {
       return { rows: [] };
@@ -565,6 +1006,7 @@ const databaseModule = \`
     if (text.includes("FROM brand_profiles")) return { rows: fixture.profileRows };
     if (text.includes("FROM daily_sync")) return { rows: fixture.dailyRunRows };
     if (text.includes("FROM spec_import_aliases")) return { rows: fixture.aliasRows };
+    if (text.includes("FROM pg_database")) return { rows: fixture.databaseOwnerRows };
     if (text.startsWith("SELECT id, name, components FROM cheese_recipes")) {
       return { rows: fixture.stubRows };
     }
@@ -634,10 +1076,15 @@ function runVerifierCli(
   return runScriptCli(verifierPath, args, env);
 }
 
-function assertBoundedCliEvidence(value: Record<string, unknown>) {
+function assertBoundedCliEvidence(
+  value: Record<string, unknown>,
+  expectedEnvironment = "development",
+  expectedRevision?: string,
+) {
   assert.deepEqual(Object.keys(value).sort(), [
     "aliases",
     "capturedAt",
+      "databaseAttestation",
     "environment",
     "evidenceId",
     "failures",
@@ -646,6 +1093,7 @@ function assertBoundedCliEvidence(value: Record<string, unknown>) {
     "marker",
     "ok",
     "pendingRuns",
+    "poolExceptions",
     "pools",
     "profiles",
     "protectedHistory",
@@ -656,7 +1104,10 @@ function assertBoundedCliEvidence(value: Record<string, unknown>) {
     "verifier",
   ]);
   assert.equal(value.verifier, "source-library-reconciliation");
-  assert.equal(value.environment, "development");
+  assert.equal(value.environment, expectedEnvironment);
+  if (expectedRevision !== undefined) {
+    assert.equal(value.revision, expectedRevision);
+  }
   const expectedSummaryKeys: Record<string, string[]> = {
     repairBoundary: ["fromDate"],
     marker: [
@@ -665,6 +1116,12 @@ function assertBoundedCliEvidence(value: Record<string, unknown>) {
       "resultCounts",
       "resultValid",
       "resultWithinBounds",
+    ],
+    poolExceptions: [
+      "approvedMismatches",
+      "id",
+      "sha256",
+      "unresolvedMismatches",
     ],
     pools: ["exactMatches", "expected", "guardedRenames", "mismatches", "missing"],
     aliases: ["exactMatches", "expected", "mismatches", "missing"],
@@ -829,6 +1286,8 @@ try {
       "development",
       "--revision",
       "a".repeat(40),
+      "--database-owner",
+      "approved_source_owner",
       "--preflight",
       "--output",
       recoveredPreflightOutputPath,
@@ -851,6 +1310,202 @@ try {
     "a recovered preflight must retain the requested release revision",
   );
 
+  const productionRevision = "c".repeat(40);
+  const productionFixture = createCliFixture("pass");
+  const productionReportPath = path.join(cliRoot, "production-report.json");
+  const productionQueriesPath = path.join(cliRoot, "production-queries.json");
+  const productionPreflightOutputPath = path.join(
+    cliRoot,
+    "production-preflight-output.json",
+  );
+  const productionOutputPath = path.join(cliRoot, "production-output.json");
+  await writeFile(productionReportPath, productionFixture.reportBytes);
+  await writeFile(
+    productionQueriesPath,
+    JSON.stringify(productionFixture.fixture),
+  );
+  const productionFixtureEnvironment = {
+    DATABASE_URL: "postgresql://approved-production.example/app",
+    SOURCE_LIBRARY_TEST_QUERY_FIXTURE: productionQueriesPath,
+    NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --loader=${loaderPath}`.trim(),
+  };
+  const productionPreflightResult = await runVerifierCli(
+    [
+      "--report",
+      productionReportPath,
+      "--heal-id",
+      "source-library-reconciliation-2026-08-26-v1",
+      "--from-date",
+      "2026-08-26",
+      "--environment",
+      "release",
+      "--revision",
+      productionRevision,
+      "--database-owner",
+      "approved_source_owner",
+      "--preflight",
+      "--output",
+      productionPreflightOutputPath,
+    ],
+    productionFixtureEnvironment,
+  );
+  assert.equal(productionPreflightResult.code, 0, productionPreflightResult.stderr);
+  const productionPreflightOutput = JSON.parse(
+    await readFile(productionPreflightOutputPath, "utf8"),
+  ) as Record<string, unknown>;
+  assert.equal(productionPreflightOutput.environment, "release");
+  assert.equal(productionPreflightOutput.revision, productionRevision);
+  assert.equal(productionPreflightOutput.database, "approved-matching");
+  assert.equal(productionPreflightOutput.ok, true);
+  assert.deepEqual(productionPreflightOutput.observed, {
+    poolRows: 68,
+    aliasesExact: 25,
+    aliasesMissing: 0,
+    aliasesMismatched: 0,
+    markerPresent: true,
+    markerValid: true,
+  });
+  assert.deepEqual(
+    Object.keys(productionPreflightOutput).sort(),
+    [
+      "capturedAt",
+      "database",
+      "environment",
+      "expected",
+      "failures",
+      "healId",
+      "observed",
+      "ok",
+      "report",
+      "revision",
+      "verifier",
+    ],
+    "production preflight must retain only aggregate diagnostics",
+  );
+  const productionResult = await runVerifierCli(
+    [
+      "--report",
+      productionReportPath,
+      "--heal-id",
+      "source-library-reconciliation-2026-08-26-v1",
+      "--from-date",
+      "2026-08-26",
+      "--capture-production",
+      "--environment",
+      "release",
+      "--revision",
+      productionRevision,
+      "--database-owner",
+      "approved_source_owner",
+      "--output",
+      productionOutputPath,
+    ],
+    productionFixtureEnvironment,
+  );
+  assert.equal(productionResult.code, 0, productionResult.stderr);
+  const productionOutput = JSON.parse(
+    await readFile(productionOutputPath, "utf8"),
+  ) as Record<string, unknown>;
+  assertBoundedCliEvidence(productionOutput, "release", productionRevision);
+  assert.equal(productionOutput.ok, true);
+
+  const wrongOwnerFixture = createCliFixture("pass");
+  wrongOwnerFixture.fixture.databaseOwnerRows = [{
+    databaseOwner: "unrelated_database_owner",
+  }];
+  const wrongOwnerQueriesPath = path.join(cliRoot, "wrong-owner-queries.json");
+  const wrongOwnerPreflightOutputPath = path.join(
+    cliRoot,
+    "wrong-owner-preflight-output.json",
+  );
+  const wrongOwnerOutputPath = path.join(cliRoot, "wrong-owner-output.json");
+  await writeFile(
+    wrongOwnerQueriesPath,
+    JSON.stringify(wrongOwnerFixture.fixture),
+  );
+  const wrongOwnerPreflightResult = await runVerifierCli(
+    [
+      "--report",
+      productionReportPath,
+      "--heal-id",
+      "source-library-reconciliation-2026-08-26-v1",
+      "--from-date",
+      "2026-08-26",
+      "--environment",
+      "release",
+      "--revision",
+      productionRevision,
+      "--database-owner",
+      "approved_source_owner",
+      "--preflight",
+      "--output",
+      wrongOwnerPreflightOutputPath,
+    ],
+    {
+      DATABASE_URL: "postgresql://approved-production.example/app",
+      SOURCE_LIBRARY_TEST_QUERY_FIXTURE: wrongOwnerQueriesPath,
+      NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --loader=${loaderPath}`.trim(),
+    },
+  );
+  assert.equal(wrongOwnerPreflightResult.code, 1);
+  const wrongOwnerPreflightOutput = JSON.parse(
+    await readFile(wrongOwnerPreflightOutputPath, "utf8"),
+  ) as Record<string, unknown>;
+  assert.equal(wrongOwnerPreflightOutput.database, "unverified");
+  assert.equal(wrongOwnerPreflightOutput.ok, false);
+  assert.deepEqual(wrongOwnerPreflightOutput.failures, [{
+    check: "databaseOwner",
+    count: 1,
+  }]);
+  assert.equal(
+    wrongOwnerPreflightOutput.expected &&
+      (wrongOwnerPreflightOutput.expected as Record<string, unknown>).poolRows,
+    68,
+  );
+  assert.equal(
+    wrongOwnerPreflightOutput.observed &&
+      (wrongOwnerPreflightOutput.observed as Record<string, unknown>).poolRows,
+    68,
+  );
+  const wrongOwnerCaptureResult = await runVerifierCli(
+    [
+      "--report",
+      productionReportPath,
+      "--heal-id",
+      "source-library-reconciliation-2026-08-26-v1",
+      "--from-date",
+      "2026-08-26",
+      "--capture-production",
+      "--environment",
+      "release",
+      "--revision",
+      productionRevision,
+      "--database-owner",
+      "approved_source_owner",
+      "--output",
+      wrongOwnerOutputPath,
+    ],
+    {
+      DATABASE_URL: "postgresql://approved-production.example/app",
+      SOURCE_LIBRARY_TEST_QUERY_FIXTURE: wrongOwnerQueriesPath,
+      NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --loader=${loaderPath}`.trim(),
+    },
+  );
+  assert.equal(wrongOwnerCaptureResult.code, 1);
+  const wrongOwnerOutput = JSON.parse(
+    await readFile(wrongOwnerOutputPath, "utf8"),
+  ) as Record<string, unknown>;
+  assert.equal(wrongOwnerOutput.ok, false);
+  assert.deepEqual(wrongOwnerOutput.failures, [{
+    check: "databaseOwner",
+    count: 1,
+  }]);
+  assert.doesNotMatch(
+    JSON.stringify(wrongOwnerOutput),
+    /approved_source_owner|unrelated_database_owner/,
+    "wrong-owner evidence must remain summary-only",
+  );
+
   const exhaustedPreflightOutputPath = path.join(cliRoot, "exhausted-preflight-output.json");
   const exhaustedPreflightResult = await runVerifierCli(
     [
@@ -861,15 +1516,18 @@ try {
       "--from-date",
       "2026-08-26",
       "--environment",
-      "development",
+      "release",
       "--revision",
       "b".repeat(40),
+      "--database-owner",
+      "approved_source_owner",
       "--preflight",
       "--output",
       exhaustedPreflightOutputPath,
     ],
     {
-      SOURCE_LIBRARY_VERIFIER_QUERY_FIXTURE: preflightQueriesPath,
+      DATABASE_URL: "postgresql://approved-production.example/app",
+      SOURCE_LIBRARY_TEST_QUERY_FIXTURE: preflightQueriesPath,
       SOURCE_LIBRARY_VERIFIER_CONNECT_FAILURES: "3",
       NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --loader=${loaderPath}`.trim(),
     },
@@ -901,13 +1559,18 @@ try {
       "--from-date",
       "2026-08-26",
       "--environment",
-      "development",
+      "release",
+      "--revision",
+      productionRevision,
+      "--database-owner",
+      "approved_source_owner",
       "--preflight",
       "--output",
       partialOutputPath,
     ],
     {
-      SOURCE_LIBRARY_VERIFIER_QUERY_FIXTURE: partialQueriesPath,
+      DATABASE_URL: "postgresql://approved-production.example/app",
+      SOURCE_LIBRARY_TEST_QUERY_FIXTURE: partialQueriesPath,
       NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --loader=${loaderPath}`.trim(),
     },
   );
@@ -915,8 +1578,50 @@ try {
   const partialOutput = JSON.parse(
     await readFile(partialOutputPath, "utf8"),
   ) as Record<string, unknown>;
+  assert.equal(partialOutput.environment, "release");
+  assert.equal(partialOutput.revision, productionRevision);
   assert.equal(partialOutput.database, "partial-fixture");
   assert.equal(partialOutput.ok, false);
+
+  const missingMarkerFixture = createCliFixture("pass");
+  missingMarkerFixture.fixture.markerRows = [];
+  const missingMarkerQueriesPath = path.join(cliRoot, "missing-marker-queries.json");
+  const missingMarkerOutputPath = path.join(cliRoot, "missing-marker-output.json");
+  await writeFile(
+    missingMarkerQueriesPath,
+    JSON.stringify(missingMarkerFixture.fixture),
+  );
+  const missingMarkerResult = await runVerifierCli(
+    [
+      "--report",
+      productionReportPath,
+      "--heal-id",
+      "source-library-reconciliation-2026-08-26-v1",
+      "--from-date",
+      "2026-08-26",
+      "--environment",
+      "release",
+      "--revision",
+      productionRevision,
+      "--database-owner",
+      "approved_source_owner",
+      "--preflight",
+      "--output",
+      missingMarkerOutputPath,
+    ],
+    {
+      DATABASE_URL: "postgresql://approved-production.example/app",
+      SOURCE_LIBRARY_TEST_QUERY_FIXTURE: missingMarkerQueriesPath,
+      NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --loader=${loaderPath}`.trim(),
+    },
+  );
+  assert.equal(missingMarkerResult.code, 1);
+  const missingMarkerOutput = JSON.parse(
+    await readFile(missingMarkerOutputPath, "utf8"),
+  ) as Record<string, unknown>;
+  assert.equal(missingMarkerOutput.database, "partial-fixture");
+  assert.equal(missingMarkerOutput.ok, false);
+  assert.deepEqual(missingMarkerOutput.failures, [{ check: "marker", count: 1 }]);
 
   const failedCaptureOutputPath = path.join(cliRoot, "failed-production-capture.json");
   const failedImportOutputPath = path.join(cliRoot, "failed-production-import.json");
@@ -933,6 +1638,8 @@ try {
       "release",
       "--revision",
       "a".repeat(40),
+      "--database-owner",
+      "approved_source_owner",
       "--output",
       failedCaptureOutputPath,
     ],

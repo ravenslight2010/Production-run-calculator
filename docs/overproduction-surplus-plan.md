@@ -1,10 +1,10 @@
 # Overproduction & Surplus Management Plan
 
-**Status:** Basic freezer surplus confirmation, allocation, and lot persistence built; actual-production deduction and broader disposition/analytics remain planned
-**Updated:** 2026-09-19
+**Status:** Actual-case run deduction exists in source and freezer surplus confirmation/allocation are implemented; direct scaling coverage, separate event history, and broader disposition/analytics remain
+**Updated:** 2026-10-08
 **Related:** [Inventory auto-deduction](inventory-autodeduction-plan.md), [idea backlog](idea-backlog.md#3-overproduction--surplus-management), [additional domain synthesis](../research/additional-domain-research-synthesis-2026-09-19.md)
 
-Surplus confirmation must charge excess ingredient consumption once through the server-authoritative inventory path. Reusing or allocating that finished surplus is a lot movement or offset, not a second ingredient charge.
+**Current behavior (2026-10-08):** completed-run inventory consumption uses persisted `actualCases` when positive and charges excess production once. Confirming finished-case surplus creates the dated freezer asset; it does not trigger another ingredient deduction. Allocation updates the surplus and finished-case inventory paths without charging ingredients again. See the reconciliation in [inventory auto-deduction](inventory-autodeduction-plan.md).
 
 ## Current State
 
@@ -21,7 +21,7 @@ Surplus confirmation must charge excess ingredient consumption once through the 
 ### What's Missing
 
 1. **Real-time overproduction detection** — only captured AFTER run ends
-2. **Ingredient-level overages** — dough, sauce, cheese tracked separately from finished cases
+2. **Separate ingredient-level overage records/reporting** — run consumption already scales recipe lines to actual cases; standalone overage event/history is not built
 3. **Decision flow** — no guided "what to do with excess" (store/donate/ship early/discard)
 4. **Surplus history** — no trend analysis or pattern detection
 5. **Cross-brand surplus** — no aggregate view across all brands/flavors
@@ -31,7 +31,7 @@ Surplus confirmation must charge excess ingredient consumption once through the 
 
 ---
 
-## Proposed System
+## Future product proposal (not shipped scope or approval)
 
 ### 1. Real-Time Overproduction Detection
 **Trigger**: During a run, when `casesCompleted` exceeds `casesNeeded` by more than a configurable threshold.
@@ -112,7 +112,7 @@ Manager settings for overproduction tolerance:
 
 ---
 
-## Critical: Inventory Auto-Adjustment on Overproduction
+## Historical inventory proposal (superseded by actual-case run consumption)
 
 ### The Problem
 Currently, `POST /inventory/consume` deducts ingredients based on the **planned** `casesNeeded`, not the **actual** `casesCompleted`. When overproduction happens:

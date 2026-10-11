@@ -1,12 +1,17 @@
 import { defineConfig, devices } from "@playwright/test";
 import { resolveChromiumExecutable } from "./e2e/chromium";
 import { requireDedicatedTestDatabase } from "./e2e/isolation";
+import {
+  releaseBrowserBaseUrl,
+  releaseBrowserWebServers,
+} from "./playwright.release-servers";
 
-const baseURL =
+const baseURL = releaseBrowserBaseUrl(
   process.env.PLAYWRIGHT_BASE_URL ??
   (process.env.REPLIT_DEV_DOMAIN
     ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-    : "http://127.0.0.1:5173");
+    : "http://127.0.0.1:5173"),
+);
 
 // The recipe-refresh suite edits shared master data and clears live-day rows.
 // Its command supplies the approved test-mode flags, but those flags are not
@@ -15,7 +20,9 @@ const baseURL =
 requireDedicatedTestDatabase("recipe-refresh Playwright setup");
 
 export default defineConfig({
+  webServer: releaseBrowserWebServers(),
   testDir: "./e2e",
+  globalSetup: "./e2e/global-setup.ts",
   testMatch: "recipe-refresh-start-freeze.spec.ts",
   timeout: 90_000,
   globalTimeout: 360_000,

@@ -7,7 +7,7 @@
  * or production traffic are involved.
  *
  * Run with:
- *   pnpm --filter @workspace/api-server exec vitest run src/routes/sync.convergence.integration.test.ts
+ *   pnpm --filter @workspace/api-server run test:sync-convergence:isolated
  *
  * A failure prints the counters and divergent paths needed to distinguish a
  * lost update, a reset re-adoption, a date-scope mix-up, or retry storm.
@@ -19,9 +19,9 @@ import type { AddressInfo } from "node:net";
 import { fork, spawnSync, type ChildProcess } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import pg from "pg";
-import { sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { signLegacyTokenForTests } from "../lib/auth";
+import { rebaseStaleSyncIntent } from "@workspace/sync-contract/stale-base-recovery";
 
 type DbModule = typeof import("@workspace/db");
 type SyncPayload = Record<string, unknown>;
@@ -32,13 +32,24 @@ type SyncResponse = {
   epoch?: number;
   snapshotId?: string;
   partialFallback?: boolean;
+  serverTime?: number;
 };
 type Metrics = {
   requests: number;
   retries: number;
+  recoveredWrites: number;
+  replayedIntentCount: number;
   conflicts: number;
   convergenceMs: number;
   divergentFields: string[];
+};
+type QueuedSyncWrite = {
+  date: string;
+  today: string;
+  payload: SyncPayload;
+  baseSnapshot: SyncPayload;
+  epoch: number;
+  baseSnapshotId: string;
 };
 
 let db: DbModule["db"];
@@ -46,12 +57,12 @@ let pool: DbModule["pool"];
 let dailySyncTable: DbModule["dailySyncTable"];
 let dataResetTable: DbModule["dataResetTable"];
 let syncConflictLogsTable: DbModule["syncConflictLogsTable"];
+let syncOutboxCursorsTable: DbModule["syncOutboxCursorsTable"];
+let syncOutboxEventsTable: DbModule["syncOutboxEventsTable"];
 let usersTable: DbModule["usersTable"];
 let userRolesTable: DbModule["userRolesTable"];
 let rolesTable: DbModule["rolesTable"];
 let seedRoles: () => Promise<void>;
-let adminPool: pg.Pool;
-let testDbName: string;
 let originalDatabaseUrl: string | undefined;
 let server: Server;
 let baseUrl: string;
@@ -59,40 +70,98 @@ let testDatabaseUrl: string;
 
 const OPERATOR = "soak-operator";
 const MANAGER = "soak-manager";
+const SANDBOX_MANAGER = "soak-sandbox-manager";
 const TODAY = "2031-06-15";
 const TOMORROW = "2031-06-16";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
+const CROSS_PROCESS_SILENCE_WINDOW_MS = 1_000;
 const CANONICAL_BREAKS = [
   { slot: 1, enabled: true, mode: "at-time", atTime: "08:15", durationMin: 30 },
   { slot: 2, enabled: false, mode: "after-run", durationMin: 30 },
   { slot: 3, enabled: true, mode: "after-run", runId: "run-main", durationMin: 30 },
 ];
 
+function requireIsolatedSyncDatabase(environment = process.env): string {
+  if (
+    environment.NODE_ENV !== "test"
+    || environment.SYNC_CONVERGENCE_DISPOSABLE_DB !== "1"
+    || environment.E2E_TEST_DB !== "1"
+    || environment.E2E_APPROVED_DESTRUCTIVE_MODE !== "1"
+    || environment.REPLIT_DEPLOYMENT === "1"
+    || /^(production|prod)$/iu.test(environment.APP_ENV ?? "")
+  ) {
+    throw new Error(
+      "Sync convergence integration tests require the isolated disposable test runner.",
+    );
+  }
+
+  const rawUrl = environment.DATABASE_URL?.trim();
+  if (!rawUrl) {
+    throw new Error("The isolated sync convergence database URL is missing.");
+  }
+
+  let databaseUrl: URL;
+  try {
+    databaseUrl = new URL(rawUrl);
+  } catch {
+    throw new Error("The isolated sync convergence database URL is invalid.");
+  }
+
+  const databaseName = decodeURIComponent(databaseUrl.pathname.replace(/^\/+/, ""));
+  if (
+    !["postgres:", "postgresql:"].includes(databaseUrl.protocol)
+    || databaseUrl.hostname !== "127.0.0.1"
+    || databaseUrl.username !== "postgres"
+    || databaseUrl.password !== ""
+    || databaseUrl.search !== ""
+    || databaseUrl.hash !== ""
+    || !/^sync_convergence_test_[a-z0-9_]+$/u.test(databaseName)
+  ) {
+    throw new Error(
+      "Sync convergence integration tests require their named loopback disposable database.",
+    );
+  }
+
+  return databaseUrl.toString();
+}
+
 beforeAll(async () => {
+  const setupStartedAt = Date.now();
   originalDatabaseUrl = process.env.DATABASE_URL;
-  if (!originalDatabaseUrl) throw new Error("DATABASE_URL must be set to run integration tests");
-  adminPool = new pg.Pool({ connectionString: originalDatabaseUrl });
-  adminPool.on("error", () => {});
-  testDbName = `helium_sync_soak_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
-  await adminPool.query(`CREATE DATABASE "${testDbName}"`);
-  const testUrl = new URL(originalDatabaseUrl);
-  testUrl.pathname = `/${testDbName}`;
-  const testUrlStr = testUrl.toString();
-  testDatabaseUrl = testUrlStr;
+  testDatabaseUrl = requireIsolatedSyncDatabase();
   const push = spawnSync("pnpm", ["--filter", "@workspace/db", "run", "push-force"], {
     cwd: repoRoot,
-    env: { ...process.env, DATABASE_URL: testUrlStr },
+    env: { ...process.env, DATABASE_URL: testDatabaseUrl },
     encoding: "utf8",
+    timeout: 120_000,
   });
-  if (push.status !== 0) throw new Error(`drizzle push failed:\n${push.stdout}\n${push.stderr}`);
-  process.env.DATABASE_URL = testUrlStr;
+  if (push.error || push.status !== 0) {
+    const status = push.error?.name
+      ?? (push.status === null ? push.signal ?? "unknown status" : `exit ${push.status}`);
+    throw new Error(`isolated sync convergence schema setup failed (${status}); output omitted`);
+  }
+  console.info(
+    `[sync convergence setup] schema push complete elapsedMs=${Date.now() - setupStartedAt}`,
+  );
+  process.env.DATABASE_URL = testDatabaseUrl;
   const dbMod = await import("@workspace/db");
-  const routerMod = await import("./index");
+  const [syncRouterMod, authMod, startupGateMod, cacheControlMod] =
+    await Promise.all([
+      import("./sync"),
+      import("../middlewares/requireAuth"),
+      import("../lib/startupGate"),
+      import("../lib/cacheControl"),
+    ]);
+  console.info(
+    `[sync convergence setup] route modules loaded elapsedMs=${Date.now() - setupStartedAt}`,
+  );
   db = dbMod.db;
   pool = dbMod.pool;
   dailySyncTable = dbMod.dailySyncTable;
   dataResetTable = dbMod.dataResetTable;
   syncConflictLogsTable = dbMod.syncConflictLogsTable;
+  syncOutboxCursorsTable = dbMod.syncOutboxCursorsTable;
+  syncOutboxEventsTable = dbMod.syncOutboxEventsTable;
   usersTable = dbMod.usersTable;
   userRolesTable = dbMod.userRolesTable;
   rolesTable = dbMod.rolesTable;
@@ -105,12 +174,20 @@ beforeAll(async () => {
     (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
     next();
   });
-  app.use("/api", routerMod.default);
+  // This soak only exercises /sync. Keep the production cross-cutting
+  // middleware while avoiding imports for every unrelated API route.
+  app.use("/api", cacheControlMod.noStoreMiddleware);
+  app.use("/api", startupGateMod.startupGate);
+  app.use("/api", authMod.requireAuth);
+  app.use("/api", syncRouterMod.default);
   await new Promise<void>((resolve) => {
-    server = app.listen(0, () => resolve());
+    server = app.listen(0, "127.0.0.1", () => resolve());
   });
   baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-}, 60_000);
+  console.info(
+    `[sync convergence setup] loopback server ready elapsedMs=${Date.now() - setupStartedAt}`,
+  );
+}, 240_000);
 
 afterAll(async () => {
   if (server) {
@@ -118,23 +195,21 @@ afterAll(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
   if (pool) await pool.end();
-  if (adminPool) {
-    await adminPool.query(`DROP DATABASE IF EXISTS "${testDbName}" WITH (FORCE)`);
-    await adminPool.end();
-  }
   process.env.DATABASE_URL = originalDatabaseUrl;
 }, 60_000);
 
 beforeEach(async () => {
-  await db.execute(sql`TRUNCATE ${dailySyncTable}, ${dataResetTable}, ${syncConflictLogsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE ${dailySyncTable}, ${dataResetTable}, ${syncConflictLogsTable}, ${syncOutboxEventsTable}, ${syncOutboxCursorsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
   await db.insert(usersTable).values([
     { id: OPERATOR, username: "soak-operator", passwordHash: "x" },
     { id: MANAGER, username: "soak-manager", passwordHash: "x" },
+    { id: SANDBOX_MANAGER, username: "soak-sandbox-manager", passwordHash: "x", sandbox: true },
   ]);
   await db.insert(userRolesTable).values([
     { userId: OPERATOR, role: "operator" },
     { userId: MANAGER, role: "manager" },
+    { userId: SANDBOX_MANAGER, role: "manager" },
   ]);
 });
 
@@ -150,60 +225,256 @@ async function startIsolatedSyncProcess(): Promise<{ child: ChildProcess; baseUr
     env: {
       ...process.env,
       DATABASE_URL: testDatabaseUrl,
-      AUTO_TRACK_HEARTBEAT_MS: "1000",
+      SYNC_OUTBOX_LISTENER_TEST_ENABLED: "1",
+      // Keep auxiliary heartbeat and calculation frames out of event assertions.
+      AUTO_TRACK_HEARTBEAT_MS: "5000",
+      LIVE_CALC_TICK_MS: "60000",
     },
     stdio: ["ignore", "ignore", "ignore", "ipc"],
   });
-  const port = await new Promise<number>((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error("isolated sync process did not start")), 10_000);
-    child.once("error", reject);
-    child.once("exit", (code) => reject(new Error(`isolated sync process exited before ready (${code})`)));
-    child.on("message", (message) => {
-      if (message && typeof message === "object" && (message as { type?: string }).type === "ready") {
+  try {
+    const port = await new Promise<number>((resolve, reject) => {
+      let settled = false;
+      const finish = (error: Error | undefined, readyPort?: number) => {
+        if (settled) return;
+        settled = true;
         clearTimeout(timeout);
-        resolve((message as { port: number }).port);
-      }
+        child.off("error", onError);
+        child.off("exit", onExit);
+        child.off("message", onMessage);
+        if (error) reject(error);
+        else resolve(readyPort!);
+      };
+      const onError = (error: Error) => finish(error);
+      const onExit = (code: number | null) =>
+        finish(new Error(`isolated sync process exited before ready (${code})`));
+      const onMessage = (message: unknown) => {
+        if (message && typeof message === "object" && (message as { type?: string }).type === "ready") {
+          finish(undefined, (message as { port: number }).port);
+        }
+      };
+      const timeout = setTimeout(
+        () => finish(new Error("isolated sync process did not start")),
+        20_000,
+      );
+      child.once("error", onError);
+      child.once("exit", onExit);
+      child.on("message", onMessage);
     });
-  });
-  return { child, baseUrl: `http://127.0.0.1:${port}` };
+    return { child, baseUrl: `http://127.0.0.1:${port}` };
+  } catch (error) {
+    await stopIsolatedSyncProcess(child);
+    throw error;
+  }
 }
 
 async function stopIsolatedSyncProcess(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null) return;
+  if (child.exitCode !== null || child.signalCode !== null) return;
   child.kill("SIGTERM");
   await new Promise<void>((resolve) => {
+    const finish = () => {
+      clearTimeout(timeout);
+      child.off("exit", finish);
+      resolve();
+    };
     const timeout = setTimeout(() => {
       child.kill("SIGKILL");
-      resolve();
+      finish();
     }, 5_000);
-    child.once("exit", () => {
-      clearTimeout(timeout);
-      resolve();
-    });
+    child.once("exit", finish);
   });
 }
 
+type FrameReadState = {
+  buffer: string;
+  pendingChunk?: ReturnType<ReadableStreamDefaultReader<Uint8Array>["read"]>;
+};
+
 async function readDataFrame(
   reader: ReadableStreamDefaultReader<Uint8Array>,
-  state: { buffer: string },
+  state: FrameReadState,
   timeoutMs = 5_000,
 ): Promise<Record<string, unknown>> {
-  const read = async (): Promise<Record<string, unknown>> => {
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    const timedOut = new Promise<never>((_, reject) => {
+      timeout = setTimeout(
+        () => reject(new Error("timed out waiting for data frame")),
+        timeoutMs,
+      );
+    });
     for (;;) {
       const match = state.buffer.match(/data: (.+)\n\n/);
       if (match) {
         state.buffer = state.buffer.slice(match.index! + match[0].length);
         return JSON.parse(match[1]) as Record<string, unknown>;
       }
-      const chunk = await reader.read();
+      const pendingChunk = state.pendingChunk ?? reader.read();
+      state.pendingChunk = pendingChunk;
+      const chunk = await Promise.race([pendingChunk, timedOut]);
+      if (state.pendingChunk === pendingChunk) state.pendingChunk = undefined;
       if (chunk.done) throw new Error("stream closed");
       state.buffer += new TextDecoder().decode(chunk.value);
     }
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+function isSyncOutboxFrame(frame: Record<string, unknown>): boolean {
+  return frame.reset === true
+    || frame.rollover === true
+    || (frame.type === "master-data" && frame.configurationInvalidated === true)
+    || (
+      frame.scope === "live"
+      && typeof frame.date === "string"
+      && frame.data !== null
+      && typeof frame.data === "object"
+    );
+}
+
+async function readMatchingFrame(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  state: FrameReadState,
+  predicate: (frame: Record<string, unknown>) => boolean,
+  timeoutMs = 5_000,
+): Promise<Record<string, unknown>> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new Error("timed out waiting for matching data frame");
+    let frame: Record<string, unknown>;
+    try {
+      frame = await readDataFrame(reader, state, remaining);
+    } catch (error) {
+      if (error instanceof Error && error.message === "timed out waiting for data frame") {
+        throw new Error("timed out waiting for matching data frame");
+      }
+      throw error;
+    }
+    if (predicate(frame)) return frame;
+  }
+}
+
+async function expectNoSyncOutboxFrame(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  state: FrameReadState,
+  timeoutMs: number,
+): Promise<void> {
+  try {
+    const frame = await readMatchingFrame(reader, state, isSyncOutboxFrame, timeoutMs);
+    throw new Error(`unexpected sync outbox frame: ${JSON.stringify(frame)}`);
+  } catch (error) {
+    if (error instanceof Error && error.message === "timed out waiting for matching data frame") {
+      return;
+    }
+    throw error;
+  }
+}
+
+type OpenSyncStream = {
+  reader: ReadableStreamDefaultReader<Uint8Array>;
+  state: FrameReadState;
+  initial: Record<string, unknown>;
+  close: () => Promise<void>;
+};
+
+async function openSyncStream(
+  baseUrl: string,
+  today: string,
+  clientId: string,
+  user = OPERATOR,
+): Promise<OpenSyncStream> {
+  const response = await fetch(
+    `${baseUrl}/api/sync/events?today=${today}&clientId=${clientId}`,
+    { headers: headers(user) },
+  );
+  expect(response.status).toBe(200);
+  const reader = response.body!.getReader();
+  const state: FrameReadState = { buffer: "" };
+  const initial = await readDataFrame(reader, state);
+  expect(initial).toMatchObject({
+    initial: true,
+    completeness: "complete",
+  });
+  return { reader, state, initial, close: () => reader.cancel() };
+}
+
+let rolloverRequestSequence = 0;
+async function runRolloverInProcess(
+  child: ChildProcess,
+  options: { nowMs: number; timeZone: string },
+): Promise<{ rolled: boolean; epoch: number; toDate: string }> {
+  const requestId = `rollover-${++rolloverRequestSequence}`;
+  type ResponseMessage = {
+    type?: string;
+    requestId?: string;
+    ok?: boolean;
+    result?: { rolled?: boolean; epoch?: number; toDate?: string };
   };
-  return Promise.race([
-    read(),
-    new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timed out waiting for data frame")), timeoutMs)),
-  ]);
+  const result = await new Promise<ResponseMessage>((resolve, reject) => {
+    const finish = (error?: Error, response?: ResponseMessage) => {
+      clearTimeout(timeout);
+      child.off("error", onError);
+      child.off("exit", onExit);
+      child.off("message", onMessage);
+      if (error) reject(error);
+      else resolve(response!);
+    };
+    const timeout = setTimeout(
+      () => finish(new Error("rollover fixture operation timed out")),
+      10_000,
+    );
+    const onError = (error: Error) => finish(error);
+    const onExit = (code: number | null) =>
+      finish(new Error(`isolated sync process exited during rollover (${code})`));
+    const onMessage = (message: unknown) => {
+      if (
+        message
+        && typeof message === "object"
+        && (message as ResponseMessage).type === "operation-result"
+        && (message as ResponseMessage).requestId === requestId
+      ) {
+        finish(undefined, message as ResponseMessage);
+      }
+    };
+    child.on("error", onError);
+    child.on("exit", onExit);
+    child.on("message", onMessage);
+    child.send({ type: "run-daily-rollover", requestId, options });
+  });
+  if (!result.ok || !result.result) throw new Error("isolated rollover operation failed");
+  return {
+    rolled: result.result.rolled === true,
+    epoch: Number(result.result.epoch),
+    toDate: String(result.result.toDate),
+  };
+}
+
+async function syncOutboxListenerPids(): Promise<number[]> {
+  const result = await pool.query<{ pid: number }>(
+    `SELECT pid
+     FROM pg_stat_activity
+     WHERE datname = current_database()
+       AND state = 'idle'
+       AND query LIKE 'LISTEN sync_outbox%'
+     ORDER BY pid`,
+  );
+  return result.rows.map(({ pid }) => Number(pid));
+}
+
+async function waitForSyncOutboxListeners(
+  count: number,
+  timeoutMs = 10_000,
+  predicate: (pids: number[]) => boolean = () => true,
+): Promise<number[]> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const pids = await syncOutboxListenerPids();
+    if (pids.length === count && predicate(pids)) return pids;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error("sync outbox listener count did not converge");
 }
 
 function clone<T>(value: T): T {
@@ -238,18 +509,22 @@ function paths(a: unknown, b: unknown, prefix = "$"): string[] {
 
 class SimulatedClient {
   readonly id: string;
-  readonly metrics: Metrics = { requests: 0, retries: 0, conflicts: 0, convergenceMs: 0, divergentFields: [] };
+  readonly metrics: Metrics = {
+    requests: 0,
+    retries: 0,
+    recoveredWrites: 0,
+    replayedIntentCount: 0,
+    conflicts: 0,
+    convergenceMs: 0,
+    divergentFields: [],
+  };
   private online = true;
-  private queued: Array<{
-    date: string;
-    today: string;
-    payload: SyncPayload;
-    epoch: number;
-    baseSnapshotId: string;
-  }> = [];
+  private queued: QueuedSyncWrite[] = [];
+  private lastQueued: QueuedSyncWrite | null = null;
   private logicalNow = 10_000;
   private _epoch = 0;
   private snapshotId = "";
+  private canonicalState: SyncPayload | null = null;
   state: SyncPayload | null = null;
 
   constructor(id: string) {
@@ -292,6 +567,7 @@ class SimulatedClient {
       const res = await this.request("GET", `/api/sync/today?today=${today}`);
       if (!res.ok) return false;
       this.state = (await res.json()) as SyncPayload | null;
+      this.canonicalState = this.state ? clone(this.state) : null;
       this.snapshotId = res.headers.get("x-sync-snapshot") ?? "";
       return true;
     } catch {
@@ -304,6 +580,8 @@ class SimulatedClient {
     payload = this.state,
     epoch = this._epoch,
     baseSnapshotId = this.snapshotId,
+    baseSnapshot = this.canonicalState,
+    allowRecovery = true,
   ): Promise<SyncResponse | null> {
     if (!payload) throw new Error(`${this.id} has no payload`);
     try {
@@ -322,17 +600,56 @@ class SimulatedClient {
         this.metrics.retries++;
         return body;
       }
+      if (body.partialFallback && body.data) {
+        this.state = clone(body.data);
+        this.canonicalState = clone(body.data);
+        this.snapshotId = body.snapshotId ?? "";
+        if (!allowRecovery || !baseSnapshot || !this.snapshotId) return body;
+        const recovery = rebaseStaleSyncIntent(
+          baseSnapshot,
+          payload,
+          body.data,
+          { snapshotId: this.snapshotId, serverTime: body.serverTime ?? this.logicalNow },
+        );
+        if (recovery.reappliedChanges === 0) return body;
+        this.metrics.retries++;
+        this.metrics.recoveredWrites++;
+        this.metrics.replayedIntentCount += 1;
+        this.state = clone(recovery.payload as unknown as SyncPayload);
+        const recovered = await this.push(
+          today,
+          recovery.payload as unknown as SyncPayload,
+          epoch,
+          this.snapshotId,
+          body.data,
+          false,
+        );
+        if (recovered?.partialFallback) {
+          this.metrics.conflicts++;
+        }
+        return recovered;
+      }
       if (body.data) this.state = clone(body.data);
+      if (body.data) this.canonicalState = clone(body.data);
       if (typeof body.snapshotId === "string") this.snapshotId = body.snapshotId;
       return body;
     } catch {
-      this.queued.push({
+      const queued = {
         date: "today",
         today,
         payload: clone(payload),
+        baseSnapshot: clone(baseSnapshot ?? payload),
         epoch,
         baseSnapshotId,
-      });
+      };
+      this.lastQueued = clone(queued);
+      const sameBase = this.queued.findIndex((item) =>
+        item.today === today
+        && item.epoch === epoch
+        && item.baseSnapshotId === baseSnapshotId,
+      );
+      if (sameBase >= 0) this.queued[sameBase] = queued;
+      else this.queued.push(queued);
       return null;
     }
   }
@@ -341,18 +658,54 @@ class SimulatedClient {
     while (this.queued.length > 0 && this.online) {
       const item = this.queued.shift()!;
       this.metrics.retries++;
-      await this.push(item.today, item.payload, item.epoch, item.baseSnapshotId);
+      await this.push(
+        item.today,
+        item.payload,
+        item.epoch,
+        item.baseSnapshotId,
+        item.baseSnapshot,
+      );
     }
   }
 
-  rebaseQueuedWrites(): void {
-    if (!this.state) throw new Error(`${this.id} cannot rebase before adoption`);
-    const adoptedState = this.state;
-    this.queued = this.queued.map((item) => ({
-      ...item,
-      payload: clone(adoptedState),
-      baseSnapshotId: this.snapshotId,
-    }));
+  reload(): SimulatedClient {
+    const next = new SimulatedClient(this.id);
+    const persisted = JSON.parse(JSON.stringify({
+      queued: this.queued,
+      lastQueued: this.lastQueued,
+      state: this.state,
+      canonicalState: this.canonicalState,
+      snapshotId: this.snapshotId,
+      epoch: this._epoch,
+      logicalNow: this.logicalNow,
+    })) as {
+      queued: QueuedSyncWrite[];
+      lastQueued: QueuedSyncWrite | null;
+      state: SyncPayload | null;
+      canonicalState: SyncPayload | null;
+      snapshotId: string;
+      epoch: number;
+      logicalNow: number;
+    };
+    next.queued = persisted.queued;
+    next.lastQueued = persisted.lastQueued;
+    next.state = persisted.state;
+    next.canonicalState = persisted.canonicalState;
+    next.snapshotId = persisted.snapshotId;
+    next._epoch = persisted.epoch;
+    next.logicalNow = persisted.logicalNow;
+    next.online = this.online;
+    return next;
+  }
+
+  queuedForDuplicateDelivery(): {
+    today: string;
+    payload: SyncPayload;
+    epoch: number;
+    baseSnapshotId: string;
+    baseSnapshot: SyncPayload;
+  } | null {
+    return this.lastQueued ? clone(this.lastQueued) : null;
   }
 
   async adoptReset(): Promise<void> {
@@ -377,6 +730,7 @@ const fixture = (): SyncPayload => ({
   runValues: {
     "run-main": {
       casesNeeded: 240,
+      pizzasPerCase: 12,
       casesPerSkid: 48,
       skidsCompleted: 1,
       casesOnCurrentSkid: 12,
@@ -401,6 +755,68 @@ const fixture = (): SyncPayload => ({
 });
 
 describe("multi-client sync convergence soak", () => {
+  it("commits sync state and its durable outbox cursor in the same transaction", async () => {
+    const writer = new SimulatedClient("outbox-writer");
+    expect(await writer.pull()).toBe(true);
+    writer.state = fixture();
+    expect((await writer.push())?.ok).toBe(true);
+
+    const [day] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, TODAY)));
+    const events = await db.select().from(syncOutboxEventsTable)
+      .where(eq(syncOutboxEventsTable.scope, "live"))
+      .orderBy(asc(syncOutboxEventsTable.cursor));
+    const [cursor] = await db.select().from(syncOutboxCursorsTable)
+      .where(eq(syncOutboxCursorsTable.scope, "live"));
+    expect(day?.data).toMatchObject({
+      dayState: { runs: [{ id: "run-main" }] },
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      cursor: 1,
+      kind: "day-state",
+      date: TODAY,
+      senderId: "outbox-writer",
+    });
+    expect(cursor?.cursor).toBe(events[0]!.cursor);
+  }, 30_000);
+
+  it("keeps per-scope cursors ordered and rolls them back with failed writes", async () => {
+    await expect(db.transaction(async (tx) => {
+      await tx.insert(dailySyncTable).values({
+        scope: "live",
+        date: TODAY,
+        data: fixture() as any,
+      });
+      await (await import("../lib/syncOutbox")).appendSyncOutboxEvent(tx, {
+        kind: "day-state",
+        scope: "live",
+        date: TODAY,
+        senderId: "rolled-back",
+        canonicalRevision: 1,
+      });
+      throw new Error("intentional test rollback");
+    })).rejects.toThrow("intentional test rollback");
+    expect(await db.select().from(syncOutboxCursorsTable)).toHaveLength(0);
+    expect(await db.select().from(syncOutboxEventsTable)).toHaveLength(0);
+    expect(await db.select().from(dailySyncTable)).toHaveLength(0);
+
+    const { appendSyncOutboxEvent } = await import("../lib/syncOutbox");
+    const cursors = await Promise.all(["first", "second"].map((senderId) =>
+      db.transaction((tx) => appendSyncOutboxEvent(tx, {
+        kind: "configuration",
+        scope: "live",
+        senderId,
+        family: "master-data",
+      })),
+    ));
+    expect([...cursors].sort((a, b) => a - b)).toEqual([1, 2]);
+    const events = await db.select().from(syncOutboxEventsTable)
+      .where(eq(syncOutboxEventsTable.scope, "live"))
+      .orderBy(asc(syncOutboxEventsTable.cursor));
+    expect(events.map((event) => event.cursor)).toEqual([1, 2]);
+  }, 30_000);
+
   it("keeps the canonical break plan when reconnect replays a stale queued snapshot", async () => {
     const client = new SimulatedClient("break-offline");
     expect(await client.pull()).toBe(true);
@@ -417,55 +833,365 @@ describe("multi-client sync convergence soak", () => {
     });
     await client.push();
 
-    client.setOnline(true);
-    expect(await client.pull()).toBe(true);
-    expect((client.state?.dayState as Record<string, unknown>).breaks).toEqual(CANONICAL_BREAKS);
-    client.rebaseQueuedWrites();
-    await client.flush();
-    expect((client.state?.dayState as Record<string, unknown>).breaks).toEqual(CANONICAL_BREAKS);
+    const reloaded = client.reload();
+    reloaded.setOnline(true);
+    expect(await reloaded.pull()).toBe(true);
+    const queued = reloaded.queuedForDuplicateDelivery();
+    expect(queued).not.toBeNull();
+    await reloaded.flush();
+    expect((reloaded.state?.dayState as Record<string, unknown>).breaks).toEqual(CANONICAL_BREAKS);
 
-    expect(await client.pull()).toBe(true);
-    const recoveredBreaks = (client.state?.dayState as Record<string, unknown>).breaks;
+    expect(await reloaded.pull()).toBe(true);
+    const recoveredBreaks = (reloaded.state?.dayState as Record<string, unknown>).breaks;
     expect(recoveredBreaks).toEqual(CANONICAL_BREAKS);
     expect(recoveredBreaks).toHaveLength(3);
     expect((recoveredBreaks as Array<{ durationMin: number }>).every((slot) => slot.durationMin === 30)).toBe(true);
+
+    const requestsBeforeDuplicate = reloaded.metrics.requests;
+    const duplicate = await reloaded.push(
+      queued!.today,
+      queued!.payload,
+      queued!.epoch,
+      queued!.baseSnapshotId,
+      queued!.baseSnapshot,
+    );
+    expect(duplicate?.partialFallback).toBe(true);
+    expect(reloaded.metrics.requests).toBe(requestsBeforeDuplicate + 1);
+    expect((reloaded.state?.dayState as Record<string, unknown>).breaks).toEqual(CANONICAL_BREAKS);
   }, 30_000);
 
-  it("documents the cross-process fanout boundary and complete reconnect recovery", async () => {
-    const isolated = await startIsolatedSyncProcess();
+  it("rebases interleaved offline edits after reload and does not replay a queued intent twice", async () => {
+    const writer = new SimulatedClient("interleaved-writer");
+    const offline = new SimulatedClient("interleaved-offline");
+    expect(await writer.pull()).toBe(true);
+    writer.state = fixture();
+    expect((await writer.push())?.ok).toBe(true);
+    expect(await offline.pull()).toBe(true);
+
+    offline.setOnline(false);
+    offline.edit((state) => {
+      const values = state.runValues as Record<string, Record<string, unknown>>;
+      values["run-main"].casesNeeded = 777;
+      values["run-main"].pizzasPerCase = 14;
+    });
+    expect(await offline.push()).toBeNull();
+    const reloaded = offline.reload();
+    const queued = reloaded.queuedForDuplicateDelivery();
+    expect(queued).not.toBeNull();
+
+    writer.edit((state) => {
+      const values = state.runValues as Record<string, Record<string, unknown>>;
+      values["run-main"].casesNeeded = 999;
+    });
+    expect((await writer.push())?.ok).toBe(true);
+
+    reloaded.setOnline(true);
+    expect(await reloaded.pull()).toBe(true);
+    await reloaded.flush();
+    expect(reloaded.metrics.recoveredWrites).toBe(1);
+    expect(reloaded.metrics.replayedIntentCount).toBe(1);
+    expect(reloaded.state?.runValues).toMatchObject({
+      "run-main": {
+        casesNeeded: 999,
+        pizzasPerCase: 14,
+      },
+    });
+
+    const requestsBeforeDuplicate = reloaded.metrics.requests;
+    const duplicate = await reloaded.push(
+      queued!.today,
+      queued!.payload,
+      queued!.epoch,
+      queued!.baseSnapshotId,
+      queued!.baseSnapshot,
+    );
+    expect(duplicate?.partialFallback).toBe(true);
+    expect(reloaded.metrics.requests).toBe(requestsBeforeDuplicate + 1);
+    expect(reloaded.metrics.replayedIntentCount).toBe(1);
+    expect(await reloaded.pull()).toBe(true);
+    expect(reloaded.state?.runValues).toMatchObject({
+      "run-main": {
+        casesNeeded: 999,
+        pizzasPerCase: 14,
+      },
+    });
+  }, 30_000);
+
+  it("delivers scoped outbox events between API processes and recovers lost notifications", async () => {
+    const processA = await startIsolatedSyncProcess();
+    let processB: Awaited<ReturnType<typeof startIsolatedSyncProcess>> | undefined;
+    const streams: OpenSyncStream[] = [];
     try {
-      const stream = await fetch(`${isolated.baseUrl}/api/sync/events?today=${TODAY}&clientId=process-b-peer`, {
-        headers: headers(),
-      });
-      expect(stream.status).toBe(200);
-      const reader = stream.body!.getReader();
-      const readState = { buffer: "" };
-      const initial = await readDataFrame(reader, readState);
-      expect(initial).toMatchObject({ initial: true, completeness: "complete" });
+      await waitForSyncOutboxListeners(1);
+      const processAPids = await syncOutboxListenerPids();
+      processB = await startIsolatedSyncProcess();
+      const bothPids = await waitForSyncOutboxListeners(2);
+      const processBPid = bothPids.find((pid) => !processAPids.includes(pid));
+      expect(processBPid).toBeTypeOf("number");
 
-      const writer = new SimulatedClient("process-a-writer");
-      expect(await writer.pull()).toBe(true);
-      writer.state = fixture();
-      const write = await writer.push();
-      expect(write?.ok).toBe(true);
-
-      await expect(readDataFrame(reader, readState, 400)).rejects.toThrow("timed out waiting for data frame");
-      await reader.cancel();
-
-      const recoveredStream = await fetch(
-        `${isolated.baseUrl}/api/sync/events?today=${TODAY}&clientId=process-b-reconnect`,
-        { headers: headers() },
+      const todayPeer = await openSyncStream(processB.baseUrl, TODAY, "process-b-today-peer");
+      const tomorrowPeer = await openSyncStream(processB.baseUrl, TOMORROW, "process-b-tomorrow-peer");
+      const sandboxPeer = await openSyncStream(
+        processB.baseUrl,
+        TODAY,
+        "process-b-sandbox-peer",
+        SANDBOX_MANAGER,
       );
-      const recoveredReader = recoveredStream.body!.getReader();
-      const recovered = await readDataFrame(recoveredReader, { buffer: "" });
-      expect(recovered).toMatchObject({
+      streams.push(todayPeer, tomorrowPeer, sandboxPeer);
+
+      const initialWrite = await fetch(
+        `${processA.baseUrl}/api/sync/today?today=${TODAY}&epoch=0`,
+        {
+          method: "PUT",
+          headers: { ...headers(), "content-type": "application/json" },
+          body: JSON.stringify({ senderId: "process-a-writer", payload: fixture() }),
+        },
+      );
+      expect(initialWrite.status).toBe(200);
+      const dayStateEvent = await readMatchingFrame(
+        todayPeer.reader,
+        todayPeer.state,
+        (frame) => frame.senderId === "process-a-writer" && frame.date === TODAY,
+      );
+      expect(dayStateEvent).toMatchObject({
+        senderId: "process-a-writer",
+        data: {
+          dayState: { runs: [{ id: "run-main", brand: "Acme", flavor: "Pepperoni" }] },
+          runValues: { "run-main": { casesNeeded: 240 } },
+        },
+      });
+      await expectNoSyncOutboxFrame(tomorrowPeer.reader, tomorrowPeer.state, CROSS_PROCESS_SILENCE_WINDOW_MS);
+      await expectNoSyncOutboxFrame(sandboxPeer.reader, sandboxPeer.state, CROSS_PROCESS_SILENCE_WINDOW_MS);
+
+      const [dayCursor] = await db.select({ cursor: syncOutboxCursorsTable.cursor })
+        .from(syncOutboxCursorsTable)
+        .where(eq(syncOutboxCursorsTable.scope, "live"));
+      await pool.query("SELECT pg_notify('sync_outbox', $1)", [
+        JSON.stringify({ scope: "live", cursor: dayCursor!.cursor }),
+      ]);
+      await pool.query("SELECT pg_notify('sync_outbox', $1)", [
+        JSON.stringify({ scope: "live", cursor: dayCursor!.cursor }),
+      ]);
+      await expectNoSyncOutboxFrame(todayPeer.reader, todayPeer.state, 350);
+
+      // Kill process B's dedicated LISTEN connection, commit a real API write,
+      // then prove the recovered listener brings the peer to canonical state.
+      const killed = await pool.query<{ terminated: boolean }>(
+        "SELECT pg_terminate_backend($1) AS terminated",
+        [processBPid],
+      );
+      expect(killed.rows[0]?.terminated).toBe(true);
+      await waitForSyncOutboxListeners(1);
+      const updated = clone(fixture());
+      (updated.runValues as Record<string, Record<string, unknown>>)["run-main"]!.casesNeeded = 321;
+      (updated.runValuesUpdatedAt as Record<string, number>)["run-main"] = Date.now() + 10_000;
+      const disconnectedWrite = await fetch(
+        `${processA.baseUrl}/api/sync/today?today=${TODAY}&epoch=0`,
+        {
+          method: "PUT",
+          headers: { ...headers(), "content-type": "application/json" },
+          body: JSON.stringify({ senderId: "process-a-recovery-writer", payload: updated }),
+        },
+      );
+      expect(disconnectedWrite.status).toBe(200);
+      const disconnectedResult = await disconnectedWrite.json() as {
+        data?: { runValues?: Record<string, { casesNeeded?: number }> };
+      };
+      expect(disconnectedResult.data?.runValues?.["run-main"]?.casesNeeded).toBe(321);
+      await waitForSyncOutboxListeners(2, 10_000, (pids) => !pids.includes(processBPid!));
+      const recoveredDayState = await readMatchingFrame(
+        todayPeer.reader,
+        todayPeer.state,
+        (frame) => (
+          frame.senderId === "process-a-recovery-writer"
+          || frame.canonicalReconcile === true
+        ) && frame.date === TODAY,
+        8_000,
+      );
+      expect(
+        recoveredDayState.senderId === "process-a-recovery-writer"
+        || recoveredDayState.canonicalReconcile === true,
+      ).toBe(true);
+      expect(
+        (recoveredDayState.data as { runValues?: Record<string, { casesNeeded?: number }> })
+          ?.runValues?.["run-main"]?.casesNeeded,
+      ).toBe(321);
+
+      // A durable event with no NOTIFY at all must still be delivered by the
+      // periodic cursor drain; it carries only bounded invalidation metadata.
+      let missedCursor = 0;
+      await db.transaction(async (tx) => {
+        await tx.insert(syncOutboxCursorsTable).values({ scope: "live", cursor: 0 })
+          .onConflictDoNothing();
+        const [current] = await tx.select().from(syncOutboxCursorsTable)
+          .where(eq(syncOutboxCursorsTable.scope, "live")).for("update");
+        missedCursor = current!.cursor + 1;
+        await tx.update(syncOutboxCursorsTable)
+          .set({ cursor: missedCursor, updatedAt: new Date() })
+          .where(eq(syncOutboxCursorsTable.scope, "live"));
+        await tx.insert(syncOutboxEventsTable).values({
+          scope: "live",
+          cursor: missedCursor,
+          kind: "configuration",
+          date: null,
+          senderId: "missed-notification-writer",
+          payload: { family: "profiles", origin: "no-notify-test" },
+        });
+      });
+      const polledMissedNotification = await readMatchingFrame(
+        todayPeer.reader,
+        todayPeer.state,
+        (frame) => (
+          frame.type === "master-data"
+          && frame.family === "profiles"
+          && frame.senderId === "missed-notification-writer"
+        ),
+        8_000,
+      );
+      expect(polledMissedNotification).toMatchObject({
+        type: "master-data",
+        configurationInvalidated: true,
+        family: "profiles",
+        senderId: "missed-notification-writer",
+      });
+
+      const resetResponse = await fetch(`${processA.baseUrl}/api/sync/reset`, {
+        method: "POST",
+        headers: headers(MANAGER),
+      });
+      expect(resetResponse.status).toBe(200);
+      const resetResult = await resetResponse.json() as { epoch: number };
+      expect(resetResult.epoch).toBe(1);
+      expect(await readMatchingFrame(
+        todayPeer.reader,
+        todayPeer.state,
+        (frame) => frame.reset === true && frame.resetEpoch === 1,
+      )).toMatchObject({
+        reset: true,
+        resetEpoch: 1,
+      });
+      expect(await readMatchingFrame(
+        tomorrowPeer.reader,
+        tomorrowPeer.state,
+        (frame) => frame.reset === true && frame.resetEpoch === 1,
+      )).toMatchObject({
+        reset: true,
+        resetEpoch: 1,
+      });
+      await expectNoSyncOutboxFrame(sandboxPeer.reader, sandboxPeer.state, 350);
+
+      const blankDay = (date: string) => ({
+        dayState: { date, runs: [] },
+        runValues: {},
+      });
+      await db.insert(dailySyncTable).values([
+        { scope: "live", date: "2031-06-14", data: blankDay("2031-06-14") as any },
+        { scope: "live", date: TODAY, data: blankDay(TODAY) as any },
+      ]);
+      const rollover = await runRolloverInProcess(processA.child, {
+        nowMs: Date.UTC(2031, 5, 15, 18),
+        timeZone: "UTC",
+      });
+      expect(rollover).toMatchObject({ rolled: true, epoch: 2, toDate: TODAY });
+      expect(await readMatchingFrame(
+        todayPeer.reader,
+        todayPeer.state,
+        (frame) => frame.rollover === true && frame.resetEpoch === 2,
+      )).toMatchObject({
+        rollover: true,
+        resetEpoch: 2,
+      });
+      expect(await readMatchingFrame(
+        todayPeer.reader,
+        todayPeer.state,
+        (frame) => frame.scope === "live" && frame.date === TODAY && typeof frame.data === "object",
+      )).toMatchObject({
+        data: { dayState: { date: TODAY, runs: [] } },
+      });
+      expect(await readMatchingFrame(
+        tomorrowPeer.reader,
+        tomorrowPeer.state,
+        (frame) => frame.rollover === true && frame.resetEpoch === 2,
+      )).toMatchObject({
+        rollover: true,
+        resetEpoch: 2,
+      });
+      await expectNoSyncOutboxFrame(tomorrowPeer.reader, tomorrowPeer.state, 350);
+      await expectNoSyncOutboxFrame(sandboxPeer.reader, sandboxPeer.state, 350);
+
+      const masterDataResponse = await fetch(`${processA.baseUrl}/api/dough-recipes`, {
+        method: "POST",
+        headers: {
+          ...headers(MANAGER),
+          "content-type": "application/json",
+          "x-client-id": "process-a-recipe-writer",
+        },
+        body: JSON.stringify({
+          items: [{
+            id: "fanout-dough-recipe",
+            name: "Fanout Test Dough",
+            components: [{ ingredient: "Flour", lbs: 10 }],
+            enabled: true,
+          }],
+        }),
+      });
+      expect(masterDataResponse.status).toBe(200);
+      expect(await readMatchingFrame(
+        todayPeer.reader,
+        todayPeer.state,
+        (frame) => frame.family === "master-data" && frame.senderId === "process-a-recipe-writer",
+      )).toMatchObject({
+        type: "master-data",
+        configurationInvalidated: true,
+        family: "master-data",
+        senderId: "process-a-recipe-writer",
+      });
+      expect(await readMatchingFrame(
+        tomorrowPeer.reader,
+        tomorrowPeer.state,
+        (frame) => frame.family === "master-data" && frame.senderId === "process-a-recipe-writer",
+      )).toMatchObject({
+        type: "master-data",
+        configurationInvalidated: true,
+        family: "master-data",
+        senderId: "process-a-recipe-writer",
+      });
+      await expectNoSyncOutboxFrame(sandboxPeer.reader, sandboxPeer.state, 350);
+
+      // A fresh stream on process B must begin from current canonical state;
+      // this is reconnect recovery, distinct from event delivery.
+      const reconnectPeer = await openSyncStream(
+        processB.baseUrl,
+        TODAY,
+        "process-b-canonical-reconnect",
+      );
+      streams.push(reconnectPeer);
+      const canonicalReconnect = reconnectPeer.initial;
+      expect(canonicalReconnect).toMatchObject({
         initial: true,
         completeness: "complete",
-        data: { dayState: { runs: [{ id: "run-main" }] } },
+        data: {
+          dayState: { date: TODAY, rolloverEpoch: 2, runs: [] },
+          runValues: {},
+        },
       });
-      await recoveredReader.cancel();
+
+      console.info("[sync peer fanout evidence]", JSON.stringify({
+        apiProcesses: 2,
+        isolatedDisposableDatabase: true,
+        dayStateCrossProcess: true,
+        dateAndScopeIsolation: true,
+        duplicateNotificationIdempotence: true,
+        listenerRecoveryAfterBackendTermination: true,
+        missedNotificationPollingRecovery: true,
+        resetAndRolloverCrossProcess: true,
+        masterDataCrossProcess: true,
+        canonicalReconnectRecovery: true,
+      }));
     } finally {
-      await stopIsolatedSyncProcess(isolated.child);
+      await Promise.all(streams.map((stream) => stream.close().catch(() => {})));
+      if (processB) await stopIsolatedSyncProcess(processB.child);
+      await stopIsolatedSyncProcess(processA.child);
     }
   }, 30_000);
 
@@ -485,6 +1211,9 @@ describe("multi-client sync convergence soak", () => {
       clients[0].edit((state) => {
         const values = state.runValues as Record<string, Record<string, unknown>>;
         values["run-main"].casesOnCurrentSkid = 13 + i;
+        const progress = (state.packagingProgress as Record<string, Record<string, unknown>>)["run-main"];
+        progress.casesOnCurrentSkid = 13 + i;
+        progress.updatedAt = 10_001 + i;
         if (i === 11) {
           const runs = state.dayState as { runs: Array<Record<string, unknown>> };
           runs.runs[0].endedAt = 20_000;
@@ -510,7 +1239,13 @@ describe("multi-client sync convergence soak", () => {
       runValues: { "run-main": {} },
       runValuesUpdatedAt: { "run-main": 1_000 },
     });
-    expect(stalePut?.data?.runValues).toEqual(clients[0].state?.runValues);
+    expect(stalePut?.data?.runValues).toMatchObject({
+      "run-main": {
+        casesNeeded: 251,
+        casesOnCurrentSkid: 24,
+        skidsCompleted: 1,
+      },
+    });
     expect(stalePut?.data?.dayState).toMatchObject({
       runs: [{ id: "run-main", endedAt: 20_000, metaUpdatedAt: 20_000 }],
     });

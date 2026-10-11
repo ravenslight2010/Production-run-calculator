@@ -1,3 +1,5 @@
+import { computeFrontlineEffectiveBatchWeight } from "./stagedSupply";
+
 export type SuggestedDoughStagingReturn = { trays: number | null; batches: number | null };
 export function suggestedDoughStaging(traysNeeded: number, batchesNeeded: number): SuggestedDoughStagingReturn {
   return {
@@ -93,9 +95,7 @@ export function computeAppSlotInfo(input: {
   const configuredBatchLbs = recipeLbs > 0 ? recipeLbs : input.batchLbs;
   // Frontline operational batches are never represented above 50 lb. Missing,
   // invalid, and oversized configured weights all use the safe 50 lb unit.
-  const effectiveBatchLbs = configuredBatchLbs > 0 && configuredBatchLbs <= 50
-    ? configuredBatchLbs
-    : 50;
+  const effectiveBatchLbs = computeFrontlineEffectiveBatchWeight(configuredBatchLbs);
   const type = String(input.type).trim();
   const productionPizzas = input.casesNeeded > 0 && input.pizzasPerCase > 0
     ? input.casesNeeded * input.pizzasPerCase

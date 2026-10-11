@@ -3,13 +3,31 @@ import { X, Upload, Sparkles, History } from "lucide-react";
 import { exactMatch, fuzzyMatch, mergeImportRuns, collectImportAliases, type ImportParseResult } from "@/runExcelReview";
 import { requestMatchImport } from "@/matchImport";
 import { fetchImportAliases, saveImportAliases } from "@/importAliases";
-import { saveAiCorrections } from "@/aiCorrections";
+import {
+  notifyCorrectionWriteFailure,
+  saveAiCorrections,
+} from "@/aiCorrections";
 import { useAccessibleDialog } from "./useAccessibleDialog";
 import AiStatusNotice from "./AiStatusNotice";
 import type { AiStatus } from "../aiStatus";
+import { WorkbookSourceCitation } from "./WorkbookSourceCitation";
 
 const SKIP = "";
 const CREATE = "__create__";
+
+function importRowSource(
+  row: ImportParseResult["rows"][number],
+  field: "brand" | "flavor" | "casesPlanned" | "notes" | "date",
+) {
+  const cell = row.source?.cells[field];
+  if (!row.source || !cell) return null;
+  const cells: string[] = Array.isArray(cell) ? cell : [cell];
+  return cells.map((address) => ({
+    file: row.source!.file,
+    sheet: row.source!.sheet,
+    cell: address,
+  }));
+}
 
 export type ImportCommitRunEntry = { brand: string; flavor: string; casesPlanned: number; notes: string };
 
@@ -413,7 +431,13 @@ export default function ExcelImportDialog({
       create: CREATE,
     });
     if (aliases.length > 0) {
-      void saveImportAliases(aliases).catch(() => {});
+      void saveImportAliases(aliases).catch(() => {
+        notifyCorrectionWriteFailure({
+          store: "schedule-import-aliases",
+          failure: "request",
+          correctionCount: aliases.length,
+        });
+      });
       // Also record each confirmed name fix in the factory-wide corrections pool
       // (additive — alongside the import-specific aliases above) so every other
       // name-resolving AI helper honors it too. Brand/flavor domains.
@@ -569,9 +593,29 @@ export default function ExcelImportDialog({
                   const key = cand.toLowerCase();
                   const cur = brandChoice[key] ?? SKIP;
                   const sugg = chipValues(aliasBrandMatch[key], aiBrandMatch[key], fuzzyMatch(cand, brands));
+                  const brandRows = rows.filter((row) => row.brand.toLowerCase() === key);
+                  const selected = cur === CREATE ? cand : cur === SKIP ? "" : cur;
+                  const matchUnverified = !!selected &&
+                    selected.toLowerCase() !== cand.toLowerCase() &&
+                    aliasBrandMatch[key]?.toLowerCase() !== selected.toLowerCase();
                   return (
                     <div key={key} className="rounded-md border border-border p-2.5">
                       <p className="text-sm font-medium text-foreground mb-2">“{cand}”</p>
+                      {brandRows.slice(0, 3).flatMap((row, index) =>
+                        (importRowSource(row, "brand") ?? []).map((source) => (
+                          <WorkbookSourceCitation
+                            key={`${index}-${source.sheet}-${source.cell}`}
+                            source={source}
+                            label="Brand cell"
+                            unverified={matchUnverified}
+                          />
+                        )),
+                      )}
+                      {brandRows.length > 3 && (
+                        <p className="mb-2 text-[11px] text-muted-foreground">
+                          And {brandRows.length - 3} more row source{brandRows.length === 4 ? "" : "s"}.
+                        </p>
+                      )}
                       <div className="flex flex-wrap gap-1.5">
                         {sugg.map((s) => (
                           <button
@@ -631,6 +675,14 @@ export default function ExcelImportDialog({
               <div className="space-y-2">
                 {uniqueFlavors.map((f) => {
                   const cur = flavorChoice[f.key] ?? SKIP;
+                  const flavorRows = rows.filter((row) =>
+                    row.flavor.toLowerCase() === f.flavor.toLowerCase() &&
+                    resolveBrandName(row.brand)?.toLowerCase() === f.brandName.toLowerCase(),
+                  );
+                  const selected = cur === CREATE ? f.flavor : cur === SKIP ? "" : cur;
+                  const matchUnverified = !!selected &&
+                    selected.toLowerCase() !== f.flavor.toLowerCase() &&
+                    aliasFlavorMatch[f.key]?.toLowerCase() !== selected.toLowerCase();
                   const sugg = chipValues(
                     aliasFlavorMatch[f.key],
                     aiFlavorMatch[f.key],
@@ -641,6 +693,21 @@ export default function ExcelImportDialog({
                       <p className="text-sm font-medium text-foreground mb-2">
                         {f.brandName} → “{f.flavor}”
                       </p>
+                      {flavorRows.slice(0, 3).flatMap((row, index) =>
+                        (importRowSource(row, "flavor") ?? []).map((source) => (
+                          <WorkbookSourceCitation
+                            key={`${index}-${source.sheet}-${source.cell}`}
+                            source={source}
+                            label="Flavor cell"
+                            unverified={matchUnverified}
+                          />
+                        )),
+                      )}
+                      {flavorRows.length > 3 && (
+                        <p className="mb-2 text-[11px] text-muted-foreground">
+                          And {flavorRows.length - 3} more row source{flavorRows.length === 4 ? "" : "s"}.
+                        </p>
+                      )}
                       <div className="flex flex-wrap gap-1.5">
                         {sugg.map((s) => (
                           <button
@@ -704,6 +771,56 @@ export default function ExcelImportDialog({
 
           {uniqueBrands.length === 0 && uniqueFlavors.length === 0 && (
             <p className="text-sm text-muted-foreground">All brands &amp; flavors matched existing entries.</p>
+          )}
+          {rows.length > 0 && (
+            <details className="rounded-md border border-border p-3" data-testid="excel-import-source-rows">
+              <summary className="cursor-pointer text-sm font-semibold text-foreground">
+                Parsed rows and workbook cells ({rows.length})
+              </summary>
+              <ul className="mt-2 space-y-2">
+                {rows.map((row, index) => {
+                  const finalBrand = brandChoice[row.brand.toLowerCase()] ?? SKIP;
+                  const brandMatchUnverified = !!finalBrand &&
+                    finalBrand !== CREATE &&
+                    finalBrand !== SKIP &&
+                    finalBrand.toLowerCase() !== row.brand.toLowerCase() &&
+                    aliasBrandMatch[row.brand.toLowerCase()]?.toLowerCase() !== finalBrand.toLowerCase();
+                  const brandForFlavor = resolveBrandName(row.brand);
+                  const flavorKey = row.flavor
+                    ? `${(brandForFlavor ?? "").toLowerCase()}|||${row.flavor.toLowerCase()}`
+                    : "";
+                  const finalFlavor = flavorKey ? flavorChoice[flavorKey] ?? SKIP : SKIP;
+                  const flavorMatchUnverified = !!finalFlavor &&
+                    finalFlavor !== CREATE &&
+                    finalFlavor !== SKIP &&
+                    finalFlavor.toLowerCase() !== row.flavor.toLowerCase() &&
+                    aliasFlavorMatch[flavorKey]?.toLowerCase() !== finalFlavor.toLowerCase();
+                  return (
+                    <li key={`${row.source?.sheet ?? "sheet"}-${row.rowNumber}-${index}`} className="border-t border-border/60 pt-2">
+                      <p className="text-xs font-medium text-foreground">
+                        {row.brand}{row.flavor ? ` · ${row.flavor}` : ""} · {row.casesPlanned} cases
+                        {row.date ? ` · ${row.date}` : ""}
+                      </p>
+                      <div className="mt-1 space-y-0.5">
+                        {(["brand", "flavor", "casesPlanned", "notes", "date"] as const).flatMap((field) =>
+                          (importRowSource(row, field) ?? []).map((source) => (
+                            <WorkbookSourceCitation
+                              key={`${field}-${source.sheet}-${source.cell}`}
+                              source={source}
+                              label={`${field} cell`}
+                              unverified={
+                                (field === "brand" && brandMatchUnverified) ||
+                                (field === "flavor" && flavorMatchUnverified)
+                              }
+                            />
+                          )),
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </details>
           )}
         </div>
 

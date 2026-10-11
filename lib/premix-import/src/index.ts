@@ -28,8 +28,10 @@ import {
   pickAlias,
   type CanonicalResult,
   type SheetGrid,
+  type WorkbookCellReference,
   type SpecImportAlias,
   type SpecMixDraft,
+  workbookCellReference,
 } from "@workspace/spec-import";
 import {
   isCelluloseIngredient,
@@ -50,6 +52,25 @@ export type ParsedPremixComponent = {
   perPizza: number;
   /** Per-batch amount (lbs) straight from the sheet; kept for reference/debug. */
   perBatch: number;
+};
+
+export type PremixSourceEvidence = {
+  name?: WorkbookCellReference;
+  batchSize?: WorkbookCellReference;
+  daysEarly?: WorkbookCellReference;
+  productBrand?: WorkbookCellReference;
+  productFlavor?: WorkbookCellReference;
+  productMatchVerified?: boolean;
+  resolvedBrand?: string;
+  resolvedFlavor?: string;
+  components: {
+    ingredientName: string;
+    perPizzaValue: number;
+    perBatchValue: number;
+    ingredient: WorkbookCellReference;
+    perPizza: WorkbookCellReference;
+    perBatch: WorkbookCellReference;
+  }[];
 };
 
 export type ParsedPremix = {
@@ -87,6 +108,8 @@ export type ParsedPremix = {
   productFlavor?: string;
   /** True when product marker rows were present, including intentionally blank markers. */
   productMarked?: boolean;
+  /** Review-only source references. premixToMix deliberately does not persist these. */
+  sourceEvidence?: PremixSourceEvidence;
 };
 
 // ── Cell helpers ─────────────────────────────────────────────────────────────
@@ -168,19 +191,23 @@ function pickNameFromCell(raw: string): string {
  * ...) — a block anchored below another block's footer must not steal a
  * summary label as its name.
  */
-function findBlockName(rows: string[][], headerRow: number, ingredientCol: number): string {
+function findBlockName(
+  rows: string[][],
+  headerRow: number,
+  ingredientCol: number,
+): { name: string; row?: number } {
   for (let r = headerRow - 1; r >= 0 && r >= headerRow - 4; r--) {
     const v = pickNameFromCell(cell(rows, r, ingredientCol));
-    if (v && !STOP_LABEL_RE.test(norm(v))) return v;
+    if (v && !STOP_LABEL_RE.test(norm(v))) return { name: v, row: r };
   }
-  return "";
+  return { name: "" };
 }
 
 function findDaysEarly(
   rows: string[][],
   startCol: number,
   endCol: number,
-): { daysEarly: number; notes?: string; noteRow: number | null } {
+): { daysEarly: number; notes?: string; noteRow: number | null; noteCol: number | null } {
   for (let r = 0; r < rows.length; r++) {
     const row = rows[r] ?? [];
     const lastCol = Math.min(endCol, row.length);
@@ -201,11 +228,12 @@ function findDaysEarly(
           daysEarly: Number.isFinite(days) ? days : 0,
           notes: notes || undefined,
           noteRow: r,
+          noteCol: c,
         };
       }
     }
   }
-  return { daysEarly: 0, noteRow: null };
+  return { daysEarly: 0, noteRow: null, noteCol: null };
 }
 
 function findProductMarkers(
@@ -240,15 +268,19 @@ function findLocalDaysEarly(
   headerRow: number,
   ingredientCol: number,
   blockEndCol: number,
-): { daysEarly: number; notes?: string; noteRow: number | null } {
+): { daysEarly: number; notes?: string; noteRow: number | null; noteCol: number | null } {
   const start = Math.max(0, headerRow - 6);
   const localRows = rows.slice(start, headerRow + 1);
   const result = findDaysEarly(localRows, ingredientCol, blockEndCol);
-  return { ...result, noteRow: result.noteRow == null ? null : result.noteRow + start };
+  return {
+    ...result,
+    noteRow: result.noteRow == null ? null : result.noteRow + start,
+  };
 }
 
 type ParsedBlock = {
   premix: ParsedPremix;
+  sourceEvidence: PremixSourceEvidence;
   /**
    * True when this block is a pull ANNOTATION mini-table, not a real mix: the
    * standalone "Pull N Days Early" note sits where the name would be, the
@@ -271,20 +303,24 @@ function parseBlock(
   const ingredientCol = perPizzaCol - 1;
   if (ingredientCol < 0) return null;
 
-  const name = findBlockName(rows, anchor.row, ingredientCol);
+  const blockName = findBlockName(rows, anchor.row, ingredientCol);
+  const name = blockName.name;
 
   const components: ParsedPremixComponent[] = [];
+  const componentRows: number[] = [];
   // Ingredients whose OWN cell carries the "Pull N days early" note (the note
   // shares the cell, e.g. "***Pull 3 Days Early***\nScrambled Egg").
   const notedIngredients: string[] = [];
   let firstComponentIngredient = "";
   let batchSize = 0;
+  let totalRow: number | undefined;
   for (let r = anchor.row + 1; r < rows.length; r++) {
     const label = cell(rows, r, ingredientCol);
     const n = norm(label);
     if (TOTAL_RE.test(n)) {
       // The block's Total row carries the per-batch pounds and ends the table.
       batchSize = parseNum(cell(rows, r, perBatchCol)) ?? 0;
+      totalRow = r;
       break;
     }
     if (!label) continue; // blank spacer row
@@ -300,6 +336,7 @@ function parseBlock(
       perPizza: perPizza ?? 0,
       perBatch: perBatch ?? 0,
     });
+    componentRows.push(r);
     if (!firstComponentIngredient) firstComponentIngredient = ingredient;
     if (DAYS_EARLY_RE.test(label)) notedIngredients.push(ingredient);
   }
@@ -307,10 +344,18 @@ function parseBlock(
   if (!name && components.length === 0) return null;
 
   const markers = findProductMarkers(rows, anchor.row, ingredientCol);
-  const { daysEarly, notes, noteRow } =
+  const { daysEarly, notes, noteRow, noteCol } =
     markers.productMarked
       ? findLocalDaysEarly(rows, anchor.row, ingredientCol, blockEndCol)
       : findDaysEarly(rows, ingredientCol, blockEndCol);
+  const findMarkerCell = (marker: "product brand" | "product flavor"): WorkbookCellReference | undefined => {
+    for (let r = Math.max(0, anchor.row - 6); r < anchor.row; r++) {
+      if (norm(cell(rows, r, ingredientCol)).toLowerCase() === marker) {
+        return workbookCellReference(grid.name, r, ingredientCol + 1, grid.sourceFile);
+      }
+    }
+    return undefined;
+  };
 
   // Which ingredient does the pull note point at?
   // 1) An ingredient whose own cell carries the note wins.
@@ -359,6 +404,27 @@ function parseBlock(
       sheetName: grid.name,
       ...markers,
     },
+    sourceEvidence: {
+      ...(blockName.row !== undefined
+        ? { name: workbookCellReference(grid.name, blockName.row, ingredientCol, grid.sourceFile) }
+        : {}),
+      ...(totalRow !== undefined
+        ? { batchSize: workbookCellReference(grid.name, totalRow, perBatchCol, grid.sourceFile) }
+        : {}),
+      ...(noteRow != null && noteCol != null
+        ? { daysEarly: workbookCellReference(grid.name, noteRow, noteCol, grid.sourceFile) }
+        : {}),
+      ...(findMarkerCell("product brand") ? { productBrand: findMarkerCell("product brand") } : {}),
+      ...(findMarkerCell("product flavor") ? { productFlavor: findMarkerCell("product flavor") } : {}),
+      components: componentRows.map((row, index) => ({
+        ingredientName: components[index]?.ingredient ?? "",
+        perPizzaValue: components[index]?.perPizza ?? 0,
+        perBatchValue: components[index]?.perBatch ?? 0,
+        ingredient: workbookCellReference(grid.name, row, ingredientCol, grid.sourceFile),
+        perPizza: workbookCellReference(grid.name, row, perPizzaCol, grid.sourceFile),
+        perBatch: workbookCellReference(grid.name, row, perBatchCol, grid.sourceFile),
+      })),
+    },
     isPullAnnotation,
     ingredientCol,
     anchorRow: anchor.row,
@@ -371,7 +437,7 @@ function parseBlock(
  * header). Fully deterministic — no AI, no quantity guessing. Blocks with no
  * name and no components are skipped.
  */
-export function parsePremixWorkbook(grids: ReadonlyArray<SheetGrid>): ParsedPremix[] {
+function parsePremixWorkbookCore(grids: ReadonlyArray<SheetGrid>): ParsedPremix[] {
   const out: ParsedPremix[] = [];
   for (const grid of grids) {
     const anchors = findAnchors(grid.rows);
@@ -392,7 +458,10 @@ export function parsePremixWorkbook(grids: ReadonlyArray<SheetGrid>): ParsedPrem
     // mixes. An annotation-only sheet (no real block) keeps the block as-is so
     // the pull suggestion still has a carrier in the review UI.
     const real = blocks.filter((b) => !b.isPullAnnotation);
-    for (const b of real) out.push(b.premix);
+    for (const b of real) {
+      b.premix.sourceEvidence = b.sourceEvidence;
+      out.push(b.premix);
+    }
     for (const b of blocks) {
       if (!b.isPullAnnotation) continue;
       let target: ParsedBlock | null = null;
@@ -422,11 +491,28 @@ export function parsePremixWorkbook(grids: ReadonlyArray<SheetGrid>): ParsedPrem
         seen.add(key);
         target.premix.pullIngredients.push(ing);
       }
-      if (b.premix.daysEarly > 0) target.premix.pullDaysEarly = b.premix.daysEarly;
+      if (b.premix.daysEarly > 0) {
+        target.premix.pullDaysEarly = b.premix.daysEarly;
+        target.premix.sourceEvidence = {
+          ...target.premix.sourceEvidence,
+          daysEarly: b.sourceEvidence.daysEarly,
+          components: target.premix.sourceEvidence?.components ?? [],
+        };
+      }
       if (!target.premix.notes && b.premix.notes) target.premix.notes = b.premix.notes;
     }
   }
   return out;
+}
+
+/** Parse a premix workbook and attach transient coordinates for review. */
+export function parsePremixWorkbookWithSources(grids: ReadonlyArray<SheetGrid>): ParsedPremix[] {
+  return parsePremixWorkbookCore(grids);
+}
+
+/** Parse premix values without attaching any review-only source data. */
+export function parsePremixWorkbook(grids: ReadonlyArray<SheetGrid>): ParsedPremix[] {
+  return parsePremixWorkbookCore(grids).map(({ sourceEvidence: _sourceEvidence, ...mix }) => mix);
 }
 
 // ── Name grounding (deterministic, alias → exact → fuzzy → new) ───────────────
@@ -1200,6 +1286,9 @@ export function mergePremixIntoMixes(
     );
     const merged: Mix = {
       ...m,
+      // A parsed workbook is not a new server revision. Keep the baseline
+      // unless the caller supplied its own (possibly stale) revision.
+      updatedAt: m.updatedAt ?? prev.updatedAt,
       components: [
         ...m.components,
         ...(importedHasCellulose

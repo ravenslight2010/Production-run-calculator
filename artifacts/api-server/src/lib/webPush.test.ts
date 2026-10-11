@@ -1,22 +1,33 @@
 import { describe, expect, it, vi } from "vitest";
-import { getServerJobDefinition } from "./serverJobs";
+import {
+  getScheduledEvaluationQueueDiagnostics,
+  getServerJobDefinition,
+} from "./serverJobs";
 
 const mocks = vi.hoisted(() => ({
   calc: vi.fn(),
   elapsed: vi.fn(),
+  dbSelect: vi.fn(),
+  enqueueServerJob: vi.fn(),
 }));
 
 vi.mock("@workspace/db", () => ({
-  db: {},
-  dailySyncTable: {}, usersTable: {}, webPushDeliveriesTable: {}, webPushSubscriptionsTable: {},
+  db: { select: mocks.dbSelect },
+  dailySyncTable: { scope: { name: "scope" }, date: { name: "date" } },
+  usersTable: {}, webPushDeliveriesTable: {}, webPushSubscriptionsTable: {},
 }));
 vi.mock("@workspace/live-calc", () => ({ computeServerCalc: mocks.calc, computeAutoTrackElapsedMs: mocks.elapsed }));
-vi.mock("../lib/logger", () => ({ logger: { error: vi.fn(), warn: vi.fn() } }));
+vi.mock("../lib/logger", () => ({ logger: { error: vi.fn(), info: vi.fn(), warn: vi.fn() } }));
 vi.mock("web-push", () => ({ default: { setVapidDetails: vi.fn(), sendNotification: vi.fn() } }));
+vi.mock("./serverJobs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./serverJobs")>();
+  return { ...actual, enqueueServerJob: mocks.enqueueServerJob };
+});
 
 const {
   alertCandidates,
   deferredCandidate,
+  enqueueScheduledWebPushAlerts,
   freezerCandidates,
   pendingFreezerArms,
   scheduledEvaluationIdempotencyKey,
@@ -32,7 +43,12 @@ describe("server web-push alert candidates", () => {
     const enqueue = vi.fn()
       .mockRejectedValueOnce(Object.assign(new Error("connection terminated"), { code: "57P01" }))
       .mockResolvedValueOnce({ examined: 1, enqueued: 0 });
-    const scheduler = startWebPushAlertScheduler({ now, enqueue });
+    const sampleQueue = vi.fn(async () => ({
+      started: [],
+      cleared: [],
+      diagnostics: getScheduledEvaluationQueueDiagnostics(),
+    }));
+    const scheduler = startWebPushAlertScheduler({ now, enqueue, sampleQueue });
 
     try {
       await vi.advanceTimersByTimeAsync(0);
@@ -45,6 +61,43 @@ describe("server web-push alert candidates", () => {
     expect(now).toHaveBeenCalledTimes(1);
     expect(enqueue).toHaveBeenCalledTimes(2);
     expect(enqueue.mock.calls.map(([scheduledAt]) => scheduledAt)).toEqual([59_999, 59_999]);
+  });
+
+  it("logs only the transition into a scheduled-queue warning with aggregate counts", async () => {
+    vi.useFakeTimers();
+    const diagnostic = {
+      ...getScheduledEvaluationQueueDiagnostics(),
+      status: "warning" as const,
+      queued: 3,
+      running: 1,
+      warningCodes: ["backlog_stalled" as const],
+    };
+    const sampleQueue = vi.fn()
+      .mockResolvedValueOnce({
+        started: ["backlog_stalled" as const],
+        cleared: [],
+        diagnostics: diagnostic,
+      })
+      .mockResolvedValue({
+        started: [],
+        cleared: [],
+        diagnostics: diagnostic,
+      });
+    const enqueue = vi.fn(async () => ({ examined: 0, enqueued: 0 }));
+    const scheduler = startWebPushAlertScheduler({ enqueue, sampleQueue });
+
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(60_000);
+    } finally {
+      scheduler.stop();
+      vi.useRealTimers();
+    }
+
+    const { logger } = await import("../lib/logger");
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(vi.mocked(logger.warn).mock.calls)).toMatch(/scheduled_evaluation_queue_monitor/);
+    expect(JSON.stringify(vi.mocked(logger.warn).mock.calls)).not.toMatch(/scope|idempotency|customer-visible-label/i);
   });
 
   it("does not emit live timing alerts while paused or ended", () => {
@@ -126,11 +179,40 @@ describe("server web-push alert candidates", () => {
     });
   });
 
-  it("deduplicates scheduled evaluation by date and time bucket", () => {
-    const first = scheduledEvaluationIdempotencyKey("2026-01-01", 120_001, 60_000);
-    expect(scheduledEvaluationIdempotencyKey("2026-01-01", 179_999, 60_000)).toBe(first);
-    expect(scheduledEvaluationIdempotencyKey("2026-01-01", 180_000, 60_000)).not.toBe(first);
-    expect(scheduledEvaluationIdempotencyKey("2026-01-02", 120_001, 60_000)).not.toBe(first);
+  it("deduplicates scheduled evaluation by scope and time bucket, not date", () => {
+    const first = scheduledEvaluationIdempotencyKey("live", 120_001, 60_000);
+    expect(scheduledEvaluationIdempotencyKey("live", 179_999, 60_000)).toBe(first);
+    expect(scheduledEvaluationIdempotencyKey("live", 180_000, 60_000)).not.toBe(first);
+    expect(scheduledEvaluationIdempotencyKey("sandbox", 120_001, 60_000)).not.toBe(first);
+  });
+
+  it("coalesces repeated time-bucketed scheduled evaluations for each distinct scope", async () => {
+    const grouped = vi.fn().mockResolvedValue([{ scope: "live" }, { scope: "sandbox" }]);
+    const from = vi.fn().mockReturnValue({ groupBy: grouped });
+    mocks.dbSelect.mockReturnValue({ from });
+    mocks.enqueueServerJob
+      .mockResolvedValueOnce({ created: true })
+      .mockResolvedValueOnce({ created: true })
+      .mockResolvedValueOnce({ created: false })
+      .mockResolvedValueOnce({ created: false });
+
+    await expect(enqueueScheduledWebPushAlerts(120_001, 60_000))
+      .resolves.toEqual({ examined: 2, enqueued: 2 });
+    await expect(enqueueScheduledWebPushAlerts(179_999, 60_000))
+      .resolves.toEqual({ examined: 2, enqueued: 0 });
+
+    expect(grouped).toHaveBeenCalledTimes(2);
+    expect(mocks.enqueueServerJob).toHaveBeenCalledTimes(4);
+    expect(mocks.enqueueServerJob.mock.calls.map(([job]) => ({
+      scope: job.scope,
+      idempotencyKey: job.idempotencyKey,
+      scheduledFor: job.input.scheduledFor,
+    }))).toEqual([
+      { scope: "live", idempotencyKey: scheduledEvaluationIdempotencyKey("live", 120_001, 60_000), scheduledFor: 120_001 },
+      { scope: "sandbox", idempotencyKey: scheduledEvaluationIdempotencyKey("sandbox", 120_001, 60_000), scheduledFor: 120_001 },
+      { scope: "live", idempotencyKey: scheduledEvaluationIdempotencyKey("live", 179_999, 60_000), scheduledFor: 179_999 },
+      { scope: "sandbox", idempotencyKey: scheduledEvaluationIdempotencyKey("sandbox", 179_999, 60_000), scheduledFor: 179_999 },
+    ]);
   });
 
   it("registers scheduled evaluation as an executable bounded server job", () => {

@@ -20,20 +20,44 @@ export interface ProductionRule {
   type: ProductionRuleType;
   enforcement: ProductionRuleEnforcement;
   enabled: boolean;
-  /** Run field key (required-field, numeric-range) */
+  /**
+     * Run field key (required-field, numeric-range)
+     * @nullable
+     */
   field?: string | null;
-  /** Inclusive lower bound (numeric-range) */
+  /**
+     * Inclusive lower bound (numeric-range)
+     * @nullable
+     */
   min?: number | null;
-  /** Inclusive upper bound (numeric-range) */
+  /**
+     * Inclusive upper bound (numeric-range)
+     * @nullable
+     */
   max?: number | null;
-  /** Run attribute key for the transition (sequence) */
+  /**
+     * Run attribute key for the transition (sequence)
+     * @nullable
+     */
   attribute?: string | null;
-  /** Disallowed preceding attribute value (sequence) */
+  /**
+     * Disallowed preceding attribute value (sequence)
+     * @nullable
+     */
   before?: string | null;
-  /** Disallowed following attribute value (sequence) */
+  /**
+     * Disallowed following attribute value (sequence)
+     * @nullable
+     */
   after?: string | null;
-  /** Exceptions: when the current run matches any of these conditions the rule is waived entirely (no warning, no block). Applies to any type. */
+  /**
+     * Exceptions: when the current run matches any of these conditions the rule is waived entirely (no warning, no block). Applies to any type.
+     * @nullable
+     */
   bypass?: RuleBypassCondition[] | null;
-  /** Exceptions: ordered step labels a manager attaches to a (strict) rule. When the rule is violated and not bypassed, the operator must acknowledge every step before Start unblocks for that run. */
+  /**
+     * Exceptions: ordered step labels a manager attaches to a (strict) rule. When the rule is violated and not bypassed, the operator must acknowledge every step before Start unblocks for that run.
+     * @nullable
+     */
   checklist?: string[] | null;
 }

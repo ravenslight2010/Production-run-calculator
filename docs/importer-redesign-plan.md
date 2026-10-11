@@ -1,7 +1,7 @@
 # Importer Redesign — Plan
 
-**Status:** Planned redesign over a substantial importer foundation; atomic multi-entity apply is complete for spec, premix, and cheese, while cell provenance and verification reports remain incomplete
-**Updated:** 2026-09-21
+**Status:** Partial — deterministic-first parsing is implemented for supported workbook layouts and atomic apply/guarded undo is complete for spec, premix, and cheese; source-cell provenance and full verification reports remain incomplete
+**Updated:** 2026-10-08
 
 The existing review snapshots remain source-review artifacts. Spec, premix, and cheese use a separate server-owned operation record for transactional apply, idempotent retry, and conflict-guarded undo; other importer projections retain their existing boundaries.
 
@@ -17,29 +17,31 @@ The existing review snapshots remain source-review artifacts. Spec, premix, and 
 
 ```
 Excel/photo → SheetGrid[] text
-  → POST /ai/parse-spec-sheet (AI parse — NO deterministic fallback for free-form)
+  → deterministic-first parse for supported workbook layouts
+  → explicit AI-assisted parse/review for photos, unsupported layouts, or unresolved ambiguity
   → server sanitize (deterministic coerce/bounds/drop)
   → client merge chunks + alias apply + ingredient links + discrepancies
-  → review dialog (AI match suggestions + fuzzy fallback + second-pass AI review)
-  → apply (manager-gated atomic operation for spec/premix/cheese) → history + source snapshot
+  → human review (matching and unresolved values remain reviewable)
+  → manager-gated atomic apply for spec/premix/cheese; other importer projections keep their own boundaries
+  → import history + source/landed report + saved review snapshot
 ```
 
-**AI is used for**: first-pass parse (spec/premix/cheese/shipping), brand/flavor match suggestions, merge suggestions, second-pass review.
-**Deterministic today**: sanitization, **learned merge/rename alias application (specImportAliases, mergeAliases, mergedAway)**, chunk merging, ingredient link passes, discrepancy computation, corpus harness (deterministic layers only), spec-export round-trip.
+**AI is used for**: explicitly supported fallback parsing, photo imports, unresolved match suggestions, merge suggestions, and review assistance.
+**Deterministic today**: supported workbook parse paths, sanitization, learned merge/rename aliases, chunk merging, ingredient link passes, discrepancy computation, corpus harness, source-versus-landed reporting, and spec-export round-trip.
 
-**The key architectural problem**: free-form spreadsheets have NO deterministic fallback — the comment says so explicitly: "there is no usable fallback for a free-form spreadsheet." The whole pipeline depends on AI for the first pass, so AI cost, rate limits, and hallucination risk are baked in.
+**Remaining architecture gaps**: deterministic parsing does not cover every importer/layout; cell-level source locations are not yet surfaced (active task #2854); a full round-trip/corpus verification report and universal before/after diff remain open. Do not describe supported workbook parsing as AI-first, or imply that the existing source/landed report is a signed verification report.
 
 ---
 
-## The Redesign: Deterministic-First, AI-Fallback
+## Remaining Redesign: Broader Deterministic Coverage, Provenance, and Verification
 
 ```
 Excel/photo → SheetGrid[] text
-  → LAYER 1: Deterministic parse (structured-template detection + grid heuristics)
-  → LAYER 2: Cell-level provenance tracking (every value tagged with source cell)
-  → LAYER 3: Auto-match + auto-verify (confident items auto-apply, exceptions flagged)
-  → LAYER 4: AI only for UNRECOGNIZED layouts (fallback, not default)
-  → verify report (round-trip diff + corpus checks) → apply → history
+  → LAYER 1: deterministic parse for supported layouts (implemented in a bounded scope)
+  → LAYER 2: cell-level provenance tracking (active task #2854)
+  → LAYER 3: broader auto-match + auto-verify (not implemented as an auto-apply path)
+  → LAYER 4: AI assistance for unsupported layouts and unresolved values
+  → full verification report (round-trip diff + corpus checks) → apply → history (partial)
 ```
 
 ### 1. Deterministic Template Parse (Layer 1 — the big de-AI win)
@@ -130,7 +132,7 @@ After apply, generate a structured verification report:
 
 | Aspect | Today | After Redesign |
 |--------|-------|----------------|
-| First parse | AI-first, no fallback | Deterministic-first, AI fallback |
+| First parse | Deterministic-first for supported workbook layouts; explicit fallback for unsupported/ambiguous cases | Broader deterministic coverage remains |
 | Free-form CSV | AI parse | AI parse (unchanged) |
 | Template file | AI parse | Deterministic parse (no AI) |
 | Import review | Review everything | Auto-verify + review exceptions only |
@@ -144,15 +146,15 @@ After apply, generate a structured verification report:
 ## Build Order
 
 ### Phase 1: Verifiability Foundation (do first — enables everything)
-1. **Cell-level provenance** — extend parsed model + review UI + snapshot
-2. **Auto-verify rule engine** — deterministic cross-field checks per importer
-3. **Verification report** — round-trip diff + reconciliation tables
+1. **Cell-level provenance** — active task #2854 extends parsed model/review evidence
+2. **Auto-verify rule engine** — deterministic cross-field checks per importer remain open
+3. **Full verification report** — round-trip diff + corpus checks remain; source/landed reconciliation is only partial coverage
 
 ### Phase 2: Deterministic Parse
-4. **Template download** (from import plan) + canonical template definitions per importer
-5. **Template detection** — structural match against expected format
-6. **Deterministic cell parser** for template files
-7. **Grid heuristics** for semi-structured files
+4. Extend deterministic parsing only to additional supported importer/layout pairs; supported layouts already use deterministic-first parsing
+5. Template download and canonical template definitions remain open
+6. Expand deterministic cell parsing with fail-closed shape tests
+7. Add grid heuristics only where a corpus-backed layout supports them
 
 ### Phase 3: Automation
 8. **Auto-apply tier** — confident items apply without review

@@ -89,6 +89,17 @@ app.use(observabilityMiddleware);
 
 app.use(cors(buildCorsOptions()));
 app.use(cookieParser());
+app.use(
+  "/api/profile-data/source-library-reconciliation/capture",
+  (_req, res, next) => {
+    res.setHeader("Cache-Control", "no-store");
+    next();
+  },
+);
+app.use(
+  "/api/profile-data/source-library-reconciliation/capture",
+  express.json({ limit: "8kb" }),
+);
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 

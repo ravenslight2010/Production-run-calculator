@@ -38,6 +38,7 @@ let db: DbModule["db"];
 let pool: DbModule["pool"];
 let doughRecipesTable: DbModule["doughRecipesTable"];
 let sauceRecipesTable: DbModule["sauceRecipesTable"];
+let auditLogsTable: DbModule["auditLogsTable"];
 let usersTable: DbModule["usersTable"];
 let userRolesTable: DbModule["userRolesTable"];
 let rolesTable: DbModule["rolesTable"];
@@ -80,11 +81,13 @@ beforeAll(async () => {
   const dbMod = await import("@workspace/db");
   const routerMod = await import("./index");
   const userValidityMod = await import("../lib/userValidity");
+  const observabilityMod = await import("../lib/observability");
   clearUserValidityCache = userValidityMod.clearUserValidityCache;
   db = dbMod.db;
   pool = dbMod.pool;
   doughRecipesTable = dbMod.doughRecipesTable;
   sauceRecipesTable = dbMod.sauceRecipesTable;
+  auditLogsTable = dbMod.auditLogsTable;
   usersTable = dbMod.usersTable;
   userRolesTable = dbMod.userRolesTable;
   rolesTable = dbMod.rolesTable;
@@ -97,6 +100,7 @@ beforeAll(async () => {
     (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
     next();
   });
+  app.use(observabilityMod.observabilityMiddleware);
   app.use("/api", routerMod.default);
 
   await new Promise<void>((resolve) => {
@@ -124,7 +128,7 @@ afterAll(async () => {
 beforeEach(async () => {
   clearUserValidityCache();
   await db.execute(
-    sql`TRUNCATE ${doughRecipesTable}, ${sauceRecipesTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${doughRecipesTable}, ${sauceRecipesTable}, ${auditLogsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
   );
   await seedRoles();
   await db.insert(usersTable).values([{ id: MANAGER, username: "manager-dough", passwordHash: "x" }]);
@@ -183,6 +187,149 @@ function namedRecipe(overrides: Partial<NamedRecipe> = {}): NamedRecipe {
     ...overrides,
   };
 }
+
+async function rawPostNamedRecipe(path: string, item: NamedRecipe, headers: Record<string, string> = {}): Promise<Response> {
+  return fetch(`${baseUrl}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...AUTH(), ...headers },
+    body: JSON.stringify({ items: [item] }),
+  });
+}
+
+async function rawDeleteNamedRecipe(path: string, id: string): Promise<Response> {
+  return fetch(`${baseUrl}${path}`, {
+    method: "DELETE",
+    headers: { "content-type": "application/json", ...AUTH() },
+    body: JSON.stringify({ ids: [id] }),
+  });
+}
+
+describe("dough and sauce recipe audit attribution", () => {
+  const cases = [
+    {
+      family: "dough_recipe",
+      path: "/api/dough-recipes",
+      recipe: namedRecipe({
+        id: "audit-dough-recipe",
+        name: "PRIVATE_DOUGH_NAME",
+        brand: "PRIVATE_DOUGH_BRAND",
+        flavors: ["PRIVATE_DOUGH_FLAVOR"],
+        notes: "PRIVATE_DOUGH_NOTES",
+        components: [{ ingredient: "PRIVATE_DOUGH_INGREDIENT", lbs: 10 }],
+        doughballWeightOz: 8,
+        doughballsPerTray: 30,
+      }),
+      createdFields: [
+        "name", "notes", "components", "enabled", "brand", "flavors",
+        "doughballWeightOz", "doughballsPerTray", "doughballVariants",
+      ],
+      privateValues: [
+        "PRIVATE_DOUGH_NAME", "PRIVATE_DOUGH_BRAND", "PRIVATE_DOUGH_FLAVOR",
+        "PRIVATE_DOUGH_NOTES", "PRIVATE_DOUGH_INGREDIENT", "UPDATED_DOUGH_NAME",
+        "UPDATED_DOUGH_NOTES", "UPDATED_DOUGH_INGREDIENT",
+      ],
+      updatedName: "UPDATED_DOUGH_NAME",
+      updatedNotes: "UPDATED_DOUGH_NOTES",
+      updatedIngredient: "UPDATED_DOUGH_INGREDIENT",
+    },
+    {
+      family: "sauce_recipe",
+      path: "/api/sauce-recipes",
+      recipe: namedRecipe({
+        id: "audit-sauce-recipe",
+        name: "PRIVATE_SAUCE_NAME",
+        brand: "PRIVATE_SAUCE_BRAND",
+        flavors: ["PRIVATE_SAUCE_FLAVOR"],
+        notes: "PRIVATE_SAUCE_NOTES",
+        components: [{ ingredient: "PRIVATE_SAUCE_INGREDIENT", lbs: 10 }],
+      }),
+      createdFields: ["name", "notes", "components", "enabled", "brand", "flavors"],
+      privateValues: [
+        "PRIVATE_SAUCE_NAME", "PRIVATE_SAUCE_BRAND", "PRIVATE_SAUCE_FLAVOR",
+        "PRIVATE_SAUCE_NOTES", "PRIVATE_SAUCE_INGREDIENT", "UPDATED_SAUCE_NAME",
+        "UPDATED_SAUCE_NOTES", "UPDATED_SAUCE_INGREDIENT",
+      ],
+      updatedName: "UPDATED_SAUCE_NAME",
+      updatedNotes: "UPDATED_SAUCE_NOTES",
+      updatedIngredient: "UPDATED_SAUCE_INGREDIENT",
+    },
+  ] as const;
+
+  it.each(cases)("records $family creates, meaningful updates, and deletions without recipe values", async ({
+    family,
+    path,
+    recipe: original,
+    createdFields,
+    privateValues,
+    updatedName,
+    updatedNotes,
+    updatedIngredient,
+  }) => {
+    const createdResponse = await rawPostNamedRecipe(path, original, {
+      "x-correlation-id": "client-supplied-correlation",
+    });
+    expect(createdResponse.status).toBe(200);
+    const createdCorrelationId = createdResponse.headers.get("x-correlation-id");
+    expect(createdCorrelationId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(createdCorrelationId).not.toBe("client-supplied-correlation");
+    const createdItems = ((await createdResponse.json()) as { items: NamedRecipe[] }).items;
+    const createdRecipe = createdItems.find((item) => item.id === original.id);
+    expect(createdRecipe).toBeDefined();
+
+    const updatedResponse = await rawPostNamedRecipe(path, {
+      ...createdRecipe!,
+      name: updatedName,
+      notes: updatedNotes,
+      components: [{ ingredient: updatedIngredient, lbs: 12 }],
+    });
+    expect(updatedResponse.status).toBe(200);
+    const updatedCorrelationId = updatedResponse.headers.get("x-correlation-id");
+    expect(updatedCorrelationId).toMatch(/^[0-9a-f-]{36}$/);
+    const updatedItems = ((await updatedResponse.json()) as { items: NamedRecipe[] }).items;
+    const updatedRecipe = updatedItems.find((item) => item.id === original.id);
+    expect(updatedRecipe).toBeDefined();
+
+    // Saving the same snapshot is not a meaningful recipe update and must not
+    // add an extra history row.
+    const noOpResponse = await rawPostNamedRecipe(path, updatedRecipe!);
+    expect(noOpResponse.status).toBe(200);
+
+    const deletedResponse = await rawDeleteNamedRecipe(path, original.id);
+    expect(deletedResponse.status).toBe(200);
+    const deletedCorrelationId = deletedResponse.headers.get("x-correlation-id");
+    expect(deletedCorrelationId).toMatch(/^[0-9a-f-]{36}$/);
+
+    const resource = `${family}:${original.id}`;
+    const auditRows = (await db.select().from(auditLogsTable))
+      .filter((row) => row.resource === resource)
+      .sort((left, right) => left.id - right.id);
+    expect(auditRows).toHaveLength(3);
+    expect(auditRows.map((row) => row.action)).toEqual([
+      `${family}_created`,
+      `${family}_updated`,
+      `${family}_deleted`,
+    ]);
+    expect(auditRows.map((row) => row.actor)).toEqual([MANAGER, MANAGER, MANAGER]);
+    expect(auditRows.every((row) => row.createdAt instanceof Date)).toBe(true);
+    expect(auditRows.map((row) => row.changes)).toEqual([
+      { fieldNames: createdFields, correlationId: createdCorrelationId },
+      { fieldNames: ["name", "notes", "components"], correlationId: updatedCorrelationId },
+      { fieldNames: createdFields, correlationId: deletedCorrelationId },
+    ]);
+
+    const auditPayload = JSON.stringify(auditRows.map((row) => row.changes));
+    for (const privateValue of privateValues) expect(auditPayload).not.toContain(privateValue);
+
+    const managerRead = await fetch(`${baseUrl}/api/audit-logs`, { headers: AUTH() });
+    expect(managerRead.status).toBe(200);
+    const page = await managerRead.json() as { logs: Array<{ action: string; resource: string }> };
+    expect(page.logs.filter((row) => row.resource === resource).map((row) => row.action).sort()).toEqual([
+      `${family}_created`,
+      `${family}_deleted`,
+      `${family}_updated`,
+    ].sort());
+  });
+});
 
 describe("POST /dough-recipes — customer preservation on re-import (Bug 1 regression)", () => {
   it("customers survive when the re-import variants have no customers (replace mode)", async () => {

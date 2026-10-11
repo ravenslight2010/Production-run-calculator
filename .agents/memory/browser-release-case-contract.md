@@ -5,6 +5,8 @@ description: Keep the browser release count synchronized with the cases included
 
 The full browser release evidence contract must exactly match the Chromium cases selected by the authoritative release config. Device-tagged checks need an explicit per-case decision: dedicated physical-device journeys stay in their device lane, while a retained skipped sentinel may remain in the Chromium contract.
 
+Focused diagnostic journeys should use a separate isolated Playwright config rather than filtering the release config: the release reporter still enforces the full case count, and its web build expects an approved publish identity.
+
 **Why:** Treating the unfiltered discovery count as the release count makes a complete run look incomplete and prevents the duration reporter from retaining revision-bound evidence.
 
-**How to apply:** Encode device-case exclusions in the authoritative release config, then require Playwright discovery, the duration reporter, release checker, and retained report to agree. Update the declared count whenever included coverage changes.
+**How to apply:** Encode device-case exclusions in the authoritative release config, then require Playwright discovery, the duration reporter, release checker, and retained report to agree. Update the declared count whenever included coverage changes. For focused checks, keep real auth and the disposable database but use a standalone config with local development servers.

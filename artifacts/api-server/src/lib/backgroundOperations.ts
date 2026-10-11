@@ -20,8 +20,14 @@ const sharedBackgroundOperationPersistence = createSharedDiagnosticPersistence({
   timeoutMessage: "background operation diagnostics timed out",
 });
 
+/** Test-only visibility for the process fence; production callers must not use it. */
+export function getBackgroundOperationProcessEpochForTests(): number {
+  return PROCESS_INSTANCE_STARTED_AT;
+}
+
 export type BackgroundOperationName =
   | "auth-retention"
+  | "import-source-retention"
   | "daily-rollover"
   | "server-job-run"
   | "server-job-prune"
@@ -78,6 +84,7 @@ export function createBackgroundOperationBackoff(options: {
 
 const operationNames: BackgroundOperationName[] = [
   "auth-retention",
+  "import-source-retention",
   "daily-rollover",
   "server-job-run",
   "server-job-prune",

@@ -29,6 +29,7 @@ import {
   API_SHARD_TIMEOUT_MS,
   assertApiIntegrationTestShardInventory,
   RELEASE_CHECK_API_SHARD_STEPS,
+  RELEASE_CHECK_API_SYNC_CONVERGENCE_STEP,
   releaseGateLabelsForMode,
 } from "./release-check.mts";
 
@@ -308,9 +309,50 @@ async function run(): Promise<void> {
     "missing assignments must report the affected integration test path",
   );
 
+  const missingSyncConvergenceFixtureScripts = {
+    ...apiPackageJson.scripts,
+    [API_RELEASE_INTEGRATION_SCRIPT_NAMES.dedicated.syncConvergence[0]]:
+      "bash ../../scripts/src/run-isolated-sync-convergence.sh",
+  };
+  assert.match(
+    apiIntegrationTestShardInventoryErrors(
+      apiIntegrationTestPaths,
+      missingSyncConvergenceFixtureScripts,
+    ).join("\n"),
+    /src\/routes\/sync\.convergence\.integration\.test\.ts/,
+    "the isolated convergence test must be named by its dedicated release script",
+  );
+
   assert.equal(RELEASE_CHECK_API_SHARD_STEPS.length, 7);
   const standardReleaseGateInventory = releaseGateLabelsForMode("standard");
   const fullReleaseGateInventory = releaseGateLabelsForMode("full");
+  assert.equal(
+    RELEASE_CHECK_API_SYNC_CONVERGENCE_STEP.args.at(-1),
+    API_RELEASE_INTEGRATION_SCRIPT_NAMES.dedicated.syncConvergence[0],
+    "the isolated convergence release lane must invoke its dedicated API test script",
+  );
+  assert.equal(
+    RELEASE_CHECK_API_SYNC_CONVERGENCE_STEP.group,
+    "api-test-shards",
+    "the isolated convergence lane must share the bounded API test concurrency limit",
+  );
+  assert.equal(
+    RELEASE_CHECK_API_SYNC_CONVERGENCE_STEP.timeoutMs,
+    API_SHARD_TIMEOUT_MS,
+    "the isolated convergence lane must use the bounded API shard timeout",
+  );
+  assert.ok(
+    standardReleaseGateInventory.includes(
+      RELEASE_CHECK_API_SYNC_CONVERGENCE_STEP.label,
+    ),
+    "the standard release must run isolated API sync convergence",
+  );
+  assert.ok(
+    fullReleaseGateInventory.includes(
+      RELEASE_CHECK_API_SYNC_CONVERGENCE_STEP.label,
+    ),
+    "the full release must run isolated API sync convergence",
+  );
   assert.ok(
     standardReleaseGateInventory.includes("browser calendar tests"),
     "the standard release must retain the isolated desktop-and-phone calendar gate",

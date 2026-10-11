@@ -14,7 +14,10 @@ export const DEFAULT_MANAGER_CAPABILITIES = [
   "manage-factory-settings",
   "manage-profiles",
 ] as const;
-export type E2ECapability = (typeof DEFAULT_MANAGER_CAPABILITIES)[number];
+export type E2ECapability =
+  | (typeof DEFAULT_MANAGER_CAPABILITIES)[number]
+  | "record-qc"
+  | "manage-qc";
 
 type JsonRecord = Record<string, unknown>;
 type PlaywrightRequestFactory = {

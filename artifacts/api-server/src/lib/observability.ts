@@ -46,7 +46,7 @@ const sharedCacheMaintenancePersistence = createSharedDiagnosticPersistence({
 });
 
 const OPERATION_NAMES: Array<[RegExp, string]> = [
-  [/^\/(?:api\/)?(?:healthz|readyz|livez)\/?$/, "health"],
+  [/^\/(?:api\/)?(?:healthz|readyz|livez|build-info)\/?$/, "health"],
   [/^\/api\/?$/, "health"],
   [/\/sync(?:\/|$)/, "sync"],
   [/\/(?:ai|photo|quality|label|waste)/, "ai"],

@@ -1,5 +1,6 @@
 import { createContext, lazy, memo, Profiler, useCallback, useEffect, useId, useMemo, useRef, useState, useContext } from "react";
 import { useEvent } from "../hooks/useEvent";
+import { useIsTouchDevice } from "../hooks/use-mobile";
 import { createFrameRepeater } from "../frameRepeater";
 import {
   flushPendingHomeFormWrites,
@@ -64,6 +65,7 @@ import { LivePackagingTabContent } from "../components/live-stations/LivePackagi
 import { LiveDoughTabContent } from "../components/live-stations/LiveDoughTabContent";
 import { AUTO_SUPPRESS_MS, fmtMS } from "../components/live-stations/stationShared";
 import { MixAlreadyMadeInput } from "../components/MixAlreadyMadeInput";
+import { TouchOptionPicker, TouchSelect } from "../components/TouchOptionPicker";
 import { PrepMixMissingAmountsWarning } from "../components/PrepMixMissingAmountsWarning";
 import { useForm, useFieldArray } from "react-hook-form";
 import type { Resolver } from "react-hook-form";
@@ -848,6 +850,8 @@ export function IngredientSelect({
   onRemoveOption,
   placeholder,
   optionLabels,
+  ariaLabel,
+  testId,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -858,8 +862,11 @@ export function IngredientSelect({
   // Optional display label per option value (e.g. brand tags for colliding
   // recipe names: "Taco Mix (Marco's)"). The VALUE stored stays the bare name.
   optionLabels?: ReadonlyMap<string, string>;
+  ariaLabel?: string;
+  testId?: string;
 }) {
   const labelOf = (opt: string) => optionLabels?.get(opt) ?? opt;
+  const isTouchDevice = useIsTouchDevice();
   const [open, setOpen] = useState(false);
   const [inputVal, setInputVal] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -898,12 +905,34 @@ export function IngredientSelect({
       }
     : {};
 
+  if (isTouchDevice) {
+    const accessibleLabel = (placeholder ?? "Select option").replace(/[.…]+$/, "").trim();
+    return (
+      <TouchOptionPicker
+        value={value}
+        options={(options ?? []).map((option) => ({
+          value: option,
+          label: labelOf(option),
+        }))}
+        onValueChange={onChange}
+        placeholder={placeholder}
+        title={ariaLabel ?? `Select ${accessibleLabel.toLocaleLowerCase()}`}
+        aria-label={ariaLabel ?? placeholder ?? accessibleLabel}
+        data-testid={testId}
+        onAddOption={onAddOption}
+        onRemoveOption={onRemoveOption}
+      />
+    );
+  }
+
   return (
     <div className="relative w-full">
       <button
         ref={triggerRef}
         type="button"
         onClick={openDropdown}
+        aria-label={ariaLabel}
+        data-testid={testId}
         className="flex items-center gap-1 h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm hover:bg-muted/70 transition-colors w-full justify-between"
       >
         <span className={`truncate ${value ? "text-foreground" : "text-muted-foreground"}`}>
@@ -1127,6 +1156,8 @@ export function CheesePickCard({
   recipeMissing,
   poolComponents,
   optionLabels,
+  recipePickerLabel,
+  recipePickerTestId,
 }: {
   label: string;
   batches: number;
@@ -1154,6 +1185,8 @@ export function CheesePickCard({
   recipeMissing?: boolean;
   // Optional display label per recipe name (brand tags for colliding names).
   optionLabels?: ReadonlyMap<string, string>;
+  recipePickerLabel?: string;
+  recipePickerTestId?: string;
 }) {
   const updateReloadBlockerId = useId();
   // A temporary substitution must be visible anywhere floor staff read the
@@ -1186,16 +1219,18 @@ export function CheesePickCard({
 
   const recipeSelector = (
     <div className="w-full sm:w-auto sm:flex-1 sm:max-w-xs">
-      <select
+      <TouchSelect
         value={recipeName}
         onChange={e => onRecipeNameChange(e.target.value)}
+        aria-label={recipePickerLabel ?? "Pick a cheese recipe"}
+        data-testid={recipePickerTestId}
         className="h-8 w-full px-2 rounded bg-muted/40 border border-border/40 text-xs sm:text-sm outline-none focus:border-primary/60"
       >
         <option value="">Pick a cheese recipe…</option>
         {options.map(name => (
           <option key={name} value={name}>{optionLabels?.get(name) ?? name}</option>
         ))}
-      </select>
+      </TouchSelect>
     </div>
   );
 
@@ -1323,6 +1358,8 @@ export function MixRecipeCard({
   onRemoveRecipeName,
   onRecipeNameChange,
   recipeNameLabels,
+  recipePickerLabel,
+  recipePickerTestId,
 }: {
   label: string;
   totalRunLbs: number;
@@ -1344,6 +1381,8 @@ export function MixRecipeCard({
   onRecipeNameChange?: (v: string) => void;
   // Optional display label per recipe name (brand tags for colliding names).
   recipeNameLabels?: ReadonlyMap<string, string>;
+  recipePickerLabel?: string;
+  recipePickerTestId?: string;
 }) {
   const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   const [confirmIdx, setConfirmIdx] = useState<number | null>(null);
@@ -1354,7 +1393,7 @@ export function MixRecipeCard({
     <>
       {recipeNameOptions && onRecipeNameChange && (
         <div className="w-full sm:max-w-xs mb-3">
-          <IngredientSelect value={recipeName ?? ""} onChange={onRecipeNameChange} options={recipeNameOptions} onAddOption={onAddRecipeName} onRemoveOption={onRemoveRecipeName} placeholder="Recipe name…" optionLabels={recipeNameLabels} />
+          <IngredientSelect value={recipeName ?? ""} onChange={onRecipeNameChange} options={recipeNameOptions} onAddOption={onAddRecipeName} onRemoveOption={onRemoveRecipeName} placeholder="Recipe name…" optionLabels={recipeNameLabels} ariaLabel={recipePickerLabel} testId={recipePickerTestId} />
         </div>
       )}
       {fields.length === 0 ? (
@@ -1449,6 +1488,8 @@ export function DoughRecipeCard({
   onAddRecipeName,
   onRemoveRecipeName,
   onRecipeNameChange,
+  recipePickerLabel,
+  recipePickerTestId,
 }: {
   batchesNeeded: number;
   fields: { id: string }[];
@@ -1468,6 +1509,8 @@ export function DoughRecipeCard({
   onAddRecipeName: (v: string) => void;
   onRemoveRecipeName: (v: string) => void;
   onRecipeNameChange: (v: string) => void;
+  recipePickerLabel?: string;
+  recipePickerTestId?: string;
 }) {
   const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   const totalBatchWeight = totalLbsPerBatch * Math.max(1, batchesNeeded);
@@ -1494,6 +1537,8 @@ export function DoughRecipeCard({
               onAddOption={onAddRecipeName}
               onRemoveOption={onRemoveRecipeName}
               placeholder="Recipe name…"
+              ariaLabel={recipePickerLabel}
+              testId={recipePickerTestId}
             />
           </div>
           <span className="text-xs text-muted-foreground shrink-0">
@@ -1633,6 +1678,8 @@ export function FrontlineRecipeCard({
   onRemoveRecipeName,
   onRecipeNameChange,
   embedded,
+  recipePickerLabel,
+  recipePickerTestId,
 }: {
   fields: { id: string }[];
   recipe: RecipeRow[];
@@ -1649,13 +1696,15 @@ export function FrontlineRecipeCard({
   onRemoveRecipeName: (v: string) => void;
   onRecipeNameChange: (v: string) => void;
   embedded?: boolean;
+  recipePickerLabel?: string;
+  recipePickerTestId?: string;
 }) {
   const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   const [confirmIdx, setConfirmIdx] = useState<number | null>(null);
 
   const recipeSelector = (
     <div className="w-full sm:w-auto sm:flex-1 sm:max-w-xs">
-      <IngredientSelect value={recipeName} onChange={onRecipeNameChange} options={recipeNameOptions} onAddOption={onAddRecipeName} onRemoveOption={onRemoveRecipeName} placeholder="Recipe name…" />
+      <IngredientSelect value={recipeName} onChange={onRecipeNameChange} options={recipeNameOptions} onAddOption={onAddRecipeName} onRemoveOption={onRemoveRecipeName} placeholder="Recipe name…" ariaLabel={recipePickerLabel} testId={recipePickerTestId} />
     </div>
   );
 
@@ -1747,6 +1796,8 @@ export function TypeDropdown({
   onAddOption,
   onRemoveOption,
   allowClear,
+  ariaLabel,
+  testId,
 }: {
   label: string;
   value: string;
@@ -1755,7 +1806,10 @@ export function TypeDropdown({
   onAddOption: (v: string) => void;
   onRemoveOption: (v: string) => void;
   allowClear?: boolean;
+  ariaLabel?: string;
+  testId?: string;
 }) {
+  const isTouchDevice = useIsTouchDevice();
   const [open, setOpen] = useState(false);
   const [inputVal, setInputVal] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -1795,6 +1849,27 @@ export function TypeDropdown({
       }
     : {};
 
+  if (isTouchDevice) {
+    const touchOptions = [
+      ...(allowClear && value ? [{ value: "", label: "— None" }] : []),
+      ...options.map((option) => ({ value: option, label: option })),
+    ];
+    const accessibleLabel = ariaLabel ?? label;
+    return (
+      <TouchOptionPicker
+        value={value}
+        options={touchOptions}
+        onValueChange={onChange}
+        placeholder="Select…"
+        title={accessibleLabel}
+        aria-label={accessibleLabel}
+        data-testid={testId}
+        onAddOption={onAddOption}
+        onRemoveOption={onRemoveOption}
+      />
+    );
+  }
+
   return (
     <div className="flex items-center justify-between mb-2 mt-5 first:mt-0">
       <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
@@ -1805,6 +1880,8 @@ export function TypeDropdown({
           ref={triggerRef}
           type="button"
           onClick={openDropdown}
+          aria-label={ariaLabel}
+          data-testid={testId}
           className="flex items-center gap-1 px-2 py-0.5 rounded bg-muted/40 border border-border/40 text-xs font-semibold hover:bg-muted/70 transition-colors min-w-[110px] justify-between"
         >
           <span className={value ? "text-foreground" : "text-muted-foreground/50"}>
@@ -2269,16 +2346,27 @@ function FloorModeView() {
                   {(packagingLock || packagingConflict) && <p role="status" aria-live="polite" className="col-span-3 text-center text-xs text-amber-200">{packagingConflict ?? sectionLockedMessage(packagingLock)}</p>}
                   <button type="button" data-testid="floor-cases-minus" aria-label="Correct cases down by one" onClick={() => {
                     runUnlockedManualSectionAction(() => !!getManualSectionLock(currentRun?.id ?? "", "packaging")?.peer, () => {
-                      const nextCases = Math.max(0, v.casesOnCurrentSkid - 1);
-                      persistManualPackagingProgress(currentRun?.id ?? "", v.skidsCompleted, nextCases);
+                      const before = {
+                        skidsCompleted: Number(form.getValues("skidsCompleted")) || 0,
+                        casesOnCurrentSkid: Number(form.getValues("casesOnCurrentSkid")) || 0,
+                      };
+                      const nextCases = Math.max(0, before.casesOnCurrentSkid - 1);
+                      persistManualPackagingProgress(currentRun?.id ?? "", before.skidsCompleted, nextCases, undefined, before);
                       form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
                     });
                   }} disabled={!!packagingLock} className="min-h-12 rounded-xl text-lg font-bold disabled:cursor-not-allowed disabled:opacity-40" style={{ background: "rgba(255,255,255,0.08)" }}>−1 case</button>
                   <div className="flex items-center justify-center text-center text-xs font-bold tracking-wide" style={{ color: "rgba(255,255,255,0.65)" }}>CORRECT<br />COUNT</div>
                   <button type="button" data-testid="floor-cases-plus" aria-label="Correct cases up by one" onClick={() => {
                     runUnlockedManualSectionAction(() => !!getManualSectionLock(currentRun?.id ?? "", "packaging")?.peer, () => {
-                      const nextCases = incrementFloorCaseCount(v.casesOnCurrentSkid, v.casesPerSkid);
-                      persistManualPackagingProgress(currentRun?.id ?? "", v.skidsCompleted, nextCases);
+                      const before = {
+                        skidsCompleted: Number(form.getValues("skidsCompleted")) || 0,
+                        casesOnCurrentSkid: Number(form.getValues("casesOnCurrentSkid")) || 0,
+                      };
+                      const nextCases = incrementFloorCaseCount(
+                        before.casesOnCurrentSkid,
+                        Number(form.getValues("casesPerSkid")) || 0,
+                      );
+                      persistManualPackagingProgress(currentRun?.id ?? "", before.skidsCompleted, nextCases, undefined, before);
                       form.setValue("casesOnCurrentSkid", nextCases, { shouldDirty: true });
                     });
                   }} disabled={!!packagingLock || (v.casesPerSkid > 0 && v.casesOnCurrentSkid >= v.casesPerSkid)} className="min-h-12 rounded-xl text-lg font-bold disabled:cursor-not-allowed disabled:opacity-40" style={{ background: "rgba(255,255,255,0.08)" }}>+1 case</button>
@@ -2334,8 +2422,12 @@ function FloorModeView() {
                         () => !!getManualSectionLock(currentRun?.id ?? "", "packaging")?.peer,
                         () => {
                           navigator.vibrate?.(15);
-                          const nextSkids = v.skidsCompleted + 1;
-                          persistManualPackagingProgress(currentRun?.id ?? "", nextSkids, 0);
+                          const before = {
+                            skidsCompleted: Number(form.getValues("skidsCompleted")) || 0,
+                            casesOnCurrentSkid: Number(form.getValues("casesOnCurrentSkid")) || 0,
+                          };
+                          const nextSkids = before.skidsCompleted + 1;
+                          persistManualPackagingProgress(currentRun?.id ?? "", nextSkids, 0, undefined, before);
                           form.setValue("skidsCompleted", nextSkids, { shouldDirty: true });
                           form.setValue("casesOnCurrentSkid", 0, { shouldDirty: true });
                         },

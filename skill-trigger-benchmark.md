@@ -1,16 +1,17 @@
 # Skill trigger benchmark
 
-- Skills: **31**
-- Coverage: **26** project-owned, **5** managed curated fixtures
-- Prompts: **124** (62 should-trigger, 62 near-miss should-not-trigger)
+- Skills: **33**
+- Coverage: **28** project-owned, **5** managed curated fixtures
+- Prompts: **132** (66 should-trigger, 66 near-miss should-not-trigger)
 - Catalog validation: **PASS** (every prompt targets an available skill; managed fixtures are intentional and documented)
-- Runtime model rates: **blocked** (the complete 124-prompt run and balanced held-out run were attempted with three repetitions, but every subprocess failed because `claude` is unavailable)
+- Runtime model rates: **unavailable for the current corpus** (the current 132-prompt inventory has no model evaluation; the retained historical attempt covered 124 prompts and failed before model evaluation)
 
-## Runtime attempt
+## Historical runtime attempt
 
-The runtime attempt targeted this 124-prompt corpus: 124 prompts × 3 repetitions (372 attempts). A deterministic balanced held-out split (one positive and one near-miss per skill) was also exercised: 62 prompts × 3 repetitions (186 attempts). Every attempt failed before model evaluation with `[Errno 2] No such file or directory: 'claude'`.
+The retained attempt targeted the previous 31-skill/124-prompt corpus: 124 prompts × 3 repetitions (372 attempts). A deterministic balanced held-out split was also exercised: 62 prompts × 3 repetitions (186 attempts). Every attempt failed before model evaluation with `[Errno 2] No such file or directory: 'claude'`.
+No model-backed evaluation is recorded for the current 132-prompt corpus. The retained attempt is historical and is not evidence for the current or newly added prompts.
 
-Because `run_eval.py` records failed subprocesses as non-triggers, its resulting 0/3 rates are synthetic failure output, not model observations. Precision, recall, false-positive, and false-negative rates are therefore **unavailable** for every skill.
+Because `run_eval.py` records failed subprocesses as non-triggers, its resulting 0/3 rates are synthetic failure output, not model observations. They are not attributed to the current prompt inventory. Current precision, recall, false-positive, and false-negative rates are **unavailable** for every skill.
 
 ## Preflight findings
 
@@ -32,7 +33,7 @@ The nine previously flagged skills were reviewed individually. Seven positive ca
 
 ## Per-skill runtime metrics
 
-Runtime precision, recall, false-positive rate, and false-negative rate are **unavailable** for every skill because all attempts failed before model evaluation. The evaluator's 0/3 output is synthetic and is not included as evidence.
+Runtime precision, recall, false-positive rate, and false-negative rate are **unavailable** for every skill because no model evaluation is recorded for the current prompt inventory. The historical evaluator's 0/3 output is synthetic and is not included as current-corpus evidence.
 
 | Skill | Precision | Recall | False-positive rate | False-negative rate | Signals |
 | --- | --- | --- | --- | --- | --- |
@@ -48,6 +49,7 @@ Runtime precision, recall, false-positive rate, and false-negative rate are **un
 | `evidence-hygiene` | N/A | N/A | N/A | N/A | none |
 | `external-skill-import` | N/A | N/A | N/A | N/A | none |
 | `import-bug-investigation` | N/A | N/A | N/A | N/A | none |
+| `media-prompt-quality` | N/A | N/A | N/A | N/A | none |
 | `operational-browser-verification` | N/A | N/A | N/A | N/A | none |
 | `production-go` | N/A | N/A | N/A | N/A | none |
 | `property-based-testing` | N/A | N/A | N/A | N/A | none |
@@ -60,6 +62,7 @@ Runtime precision, recall, false-positive rate, and false-negative rate are **un
 | `sync-invariant-check` | N/A | N/A | N/A | N/A | none |
 | `test-gap-triage` | N/A | N/A | N/A | N/A | none |
 | `verify-before-commit` | N/A | N/A | N/A | N/A | none |
+| `writing-plans` | N/A | N/A | N/A | N/A | none |
 | `writing-quality-editor` | N/A | N/A | N/A | N/A | none |
 | `wrong-number-triage` | N/A | N/A | N/A | N/A | none |
 | `ad-creative` | N/A | N/A | N/A | N/A | none |

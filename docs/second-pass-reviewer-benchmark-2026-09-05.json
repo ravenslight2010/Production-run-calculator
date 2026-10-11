@@ -26,10 +26,10 @@
     },
     "reviewer": {
       "uniqueMaterialCatches": 0,
-      "duplicateWarnings": 3,
+      "duplicateWarnings": 0,
       "falseWarnings": 0,
       "falseRejects": 0,
-      "noOpVerdicts": 301,
+      "noOpVerdicts": 304,
       "reviewerFailures": 301,
       "reviewerFailureRate": 0.9901315789473685,
       "falseWarningRate": null
@@ -74,7 +74,8 @@
         "falseWarnings": 0,
         "falseRejects": 0,
         "noOpVerdicts": 76,
-        "latencyMs": 20732,
+        "providerRetries": 0,
+        "latencyMs": 16795,
         "inputTokens": null,
         "outputTokens": null
       },
@@ -88,7 +89,8 @@
         "falseWarnings": 0,
         "falseRejects": 0,
         "noOpVerdicts": 22,
-        "latencyMs": 14851,
+        "providerRetries": 0,
+        "latencyMs": 19084,
         "inputTokens": null,
         "outputTokens": null
       },
@@ -102,7 +104,8 @@
         "falseWarnings": 0,
         "falseRejects": 0,
         "noOpVerdicts": 78,
-        "latencyMs": 24169,
+        "providerRetries": 0,
+        "latencyMs": 17048,
         "inputTokens": null,
         "outputTokens": null
       },
@@ -112,13 +115,14 @@
         "nonMaterialCases": 0,
         "providerCalls": 1,
         "reviewerFailures": 0,
-        "duplicateWarnings": 3,
+        "duplicateWarnings": 0,
         "falseWarnings": 0,
         "falseRejects": 0,
-        "noOpVerdicts": 0,
-        "latencyMs": 9619,
-        "inputTokens": null,
-        "outputTokens": null
+        "noOpVerdicts": 3,
+        "providerRetries": 0,
+        "latencyMs": 10590,
+        "inputTokens": 726,
+        "outputTokens": 148
       },
       "fill-missing": {
         "cases": 125,
@@ -130,21 +134,22 @@
         "falseWarnings": 0,
         "falseRejects": 0,
         "noOpVerdicts": 125,
-        "latencyMs": 18479,
+        "providerRetries": 0,
+        "latencyMs": 17644,
         "inputTokens": null,
         "outputTokens": null
       }
     },
     "measuredTokens": false,
     "addedCostRatio": null,
-    "p95LatencyMs": 24169
+    "p95LatencyMs": 19084
   },
   "latencyAndRetry": {
     "addedSerialProviderRoundTripsPerMiss": 1,
     "reviewerRetries": 0,
     "reviewerFailureBehavior": "fail-open-with-no-verdict",
-    "measuredLatencyP95Ms": 24169,
-    "note": "The reviewer adds one serial provider round trip; provider failures are not retried."
+    "measuredLatencyP95Ms": 19084,
+    "note": "One logical reviewer request may include provider-adapter retries; captured retry counts are summed here."
   },
   "decision": {
     "retain": false,
@@ -179,10 +184,11 @@
       "minimumUniqueMaterialCatches": 5
     },
     "dependencies": {
-      "node": "24.20.0",
-      "pnpmLockSha256": "40a1ce559dd9f805a52343d5f595b3773db8c5e07bda08a9beae129476ff2c6b",
+      "node": "24.21.0",
+      "pnpm": "12.8.1",
+      "pnpmLockSha256": "3a25a065ab3926f3a4a1f5fda1121485174d2e3271965d6201aef95fce38fecd",
       "benchmarkReporter": "1",
-      "benchmarkReporterSha256": "b9810c0b72d4dbbd2155f2ba552da6218d630c82ce63fa609835c6811155ec39"
+      "benchmarkReporterSha256": "4a390c7d217b98072e8563e0d6d08699063e4d18bc39a8e86c2f37a27846c2fe"
     },
     "provider": {
       "identityState": "identified",
@@ -204,7 +210,7 @@
       },
       "latencyP95": {
         "state": "measured",
-        "value": 24169,
+        "value": 19084,
         "unit": "ms"
       }
     },
@@ -225,12 +231,12 @@
       "sourceSha256": "1d8a2a3ddda96c32959e43fdcd901f3a14308bf12bc4d65ef4e2e3ce12505294",
       "evidence": {
         "state": "hashed",
-        "sha256": "0e3145c637fa4c0bb561057bdb774d7053f1058da3c10a23417a971316e0ceb8"
+        "sha256": "58639d8159b281bbfe4d057ae77380606ace110aa123a4c091a67038ca405bce"
       },
       "evidenceType": "deterministic-reconciliation-with-provider-observations",
       "evaluator": {
-        "state": "unavailable",
-        "reason": "retained historical observations predate evaluator source binding"
+        "state": "hashed",
+        "sha256": "53c77a1ff4944bf77f773c18cde93d7cc0342ac17400ca15b0e6d1220dba08da"
       }
     }
   }

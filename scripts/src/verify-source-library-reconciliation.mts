@@ -7,7 +7,7 @@
  * Output is JSON only so the result can be retained by release automation.
  */
 import crypto from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { captureReleaseIdentity, isDeploymentRevision } from "./release-source-identity.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,13 +16,22 @@ import {
   RELEASE_PREFLIGHT_DB_ATTEMPTS,
   runReleasePreflightDatabaseRetry,
 } from "./release-preflight-db-retry.mts";
+import {
+  validateReadinessDeploymentHandoff,
+  type ReadinessDeploymentHandoff,
+} from "./capture-readiness-recovery.mts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const DEFAULT_REPORT = "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json";
 export const DEFAULT_HEAL_ID = "source-library-reconciliation-2026-08-26-v2";
 export const DEFAULT_FROM_DATE = "2026-08-26";
+export const DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS =
+  "docs/evidence/source-library-pool-owner-approved-differences-2026-10-08.json";
+export const APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256 =
+  "42cf3d8d482a07657eeae5725710b098bb7f8de19a4f45d6356f670378cd2137";
 export const SOURCE_LIBRARY_EVIDENCE_ENVIRONMENTS = ["development", "release"] as const;
 export type SourceLibraryEvidenceEnvironment = (typeof SOURCE_LIBRARY_EVIDENCE_ENVIRONMENTS)[number];
+const DATABASE_OWNER_MAX_LENGTH = 128;
 const SOURCE_LINK_FIELDS = [
   "doughRecipeName",
   "frontlineRecipeName",
@@ -59,6 +68,42 @@ type Report = {
   findings: { allZeroStubs: unknown[] };
 };
 
+export const SOURCE_LIBRARY_POOL_DIAGNOSTIC_MAX_ITEMS = 10;
+
+export type SourceLibraryPoolMismatchDescriptor = {
+  table: RecipeTable;
+  id: string;
+  sourceName: string;
+  mismatchType: "missing" | "renamed" | "field-mismatch";
+  differingFields: string[];
+  fieldFingerprints?: Record<string, string>;
+};
+
+export type SourceLibraryPoolMismatchDiagnostics = {
+  counts: {
+    expected: number;
+    exactMatches: number;
+    guardedRenames: number;
+    missing: number;
+    mismatches: number;
+  };
+  maxItems: number;
+  total: number;
+  returned: number;
+  omitted: number;
+  items: SourceLibraryPoolMismatchDescriptor[];
+  poolExceptions: VerificationOutput["poolExceptions"];
+};
+
+export type SourceLibraryPoolExceptionApproval = {
+  id: string;
+  sha256: string;
+  sourceReportSha256: string;
+  formatVersion: 1 | 2;
+  historical: boolean;
+  approvedDifferences: SourceLibraryPoolMismatchDescriptor[];
+};
+
 type Mapping = { old: string; canonical: string; table: RecipeTable | "cheese_recipes" };
 type ReferenceObservation = {
   scope: "profile" | "pending" | "protected";
@@ -77,10 +122,356 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isFiniteNumber = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
 
+export const APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID =
+  "source-library-pool-owner-approved-differences-2026-10-08-v1";
+export const APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_V2_ID =
+  "source-library-pool-owner-approved-differences-2026-10-08-v2";
+// Keep unset until a fresh production capture and a new owner-review record
+// bind the exact v2 manifest bytes. A v1 digest is historical, not an active
+// release exception.
+export const APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_V2_SHA256: string | null = null;
+const OWNER_REVIEW_PATH =
+  "docs/evidence/source-library-pool-owner-review-2026-10-08.md";
+const DIAGNOSTICS_PATH =
+  "docs/evidence/source-library-pool-mismatch-diagnostics-2026-10-08.json";
+const LIVE_CAPTURE_PATH =
+  "docs/evidence/source-library-live-pool-capture-2026-10-08.json";
+
+function readApprovedEvidence(
+  pathFromRoot: string,
+  expectedSha256: unknown,
+  evidenceRoot = ROOT,
+): Buffer {
+  const resolved = path.resolve(evidenceRoot, pathFromRoot);
+  const stats = fs.lstatSync(resolved);
+  if (!stats.isFile() || stats.isSymbolicLink()) {
+    return reportError(`Approved source-library evidence is not a regular file: ${pathFromRoot}`);
+  }
+  const bytes = fs.readFileSync(resolved);
+  if (typeof expectedSha256 !== "string" || sha256(bytes) !== expectedSha256) {
+    return reportError(`Approved source-library evidence hash does not match: ${pathFromRoot}`);
+  }
+  return bytes;
+}
+
+function parsePoolMismatchDescriptor(value: unknown): SourceLibraryPoolMismatchDescriptor {
+  const hasFingerprints = isRecord(value) &&
+    Object.prototype.hasOwnProperty.call(value, "fieldFingerprints");
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(
+      value,
+      hasFingerprints
+        ? ["table", "id", "sourceName", "mismatchType", "differingFields", "fieldFingerprints"]
+        : ["table", "id", "sourceName", "mismatchType", "differingFields"],
+    ) ||
+    value.table !== "cheese_recipes" ||
+    typeof value.id !== "string" ||
+    value.id.length === 0 ||
+    typeof value.sourceName !== "string" ||
+    value.sourceName.length === 0 ||
+    value.mismatchType !== "field-mismatch" ||
+    !Array.isArray(value.differingFields) ||
+    value.differingFields.length === 0 ||
+    value.differingFields.some((field) => field !== "brand" && field !== "components") ||
+    new Set(value.differingFields).size !== value.differingFields.length
+  ) {
+    return reportError("Approved source-library pool exception contains an invalid mismatch descriptor");
+  }
+  let fieldFingerprints: Record<string, string> | undefined;
+  if (hasFingerprints) {
+    if (
+      value.mismatchType !== "field-mismatch" ||
+      !isRecord(value.fieldFingerprints) ||
+      Object.keys(value.fieldFingerprints).sort().join(",") !==
+        [...value.differingFields as string[]].sort().join(",") ||
+      Object.values(value.fieldFingerprints).some(
+        (fingerprint) => typeof fingerprint !== "string" || !/^[a-f0-9]{64}$/u.test(fingerprint),
+      )
+    ) {
+      return reportError("Approved source-library pool exception has invalid value fingerprints");
+    }
+    fieldFingerprints = value.fieldFingerprints as Record<string, string>;
+  }
+  return {
+    table: "cheese_recipes",
+    id: value.id,
+    sourceName: value.sourceName,
+    mismatchType: "field-mismatch",
+    differingFields: value.differingFields as string[],
+    ...(fieldFingerprints ? { fieldFingerprints } : {}),
+  };
+}
+
+function isVersionedPoolEvidencePath(value: unknown, extension: ".json" | ".md"): value is string {
+  return typeof value === "string" &&
+    value.startsWith("docs/evidence/source-library-pool-") &&
+    value.endsWith(extension) &&
+    !value.split("/").some((part) => part === "." || part === "..") &&
+    !path.isAbsolute(value);
+}
+
+/**
+ * Load the owner-approved exception set. Version 1 remains readable as
+ * historical evidence, but has no value fingerprints and cannot waive current
+ * pool drift. New active versions must be fingerprint-bound and separately
+ * pinned after fresh owner review.
+ */
+export function loadSourceLibraryPoolExceptionApproval(
+  exceptionPath: string,
+  reportBytes: Buffer,
+  evidenceRoot = ROOT,
+): SourceLibraryPoolExceptionApproval {
+  const resolvedPath = path.isAbsolute(exceptionPath)
+    ? exceptionPath
+    : path.resolve(process.cwd(), exceptionPath);
+  const stats = fs.lstatSync(resolvedPath);
+  if (!stats.isFile() || stats.isSymbolicLink()) {
+    return reportError("Source-library pool exception manifest must be a regular file");
+  }
+  const exceptionBytes = fs.readFileSync(resolvedPath);
+  const exceptionSha256 = sha256(exceptionBytes);
+  if (exceptionBytes.byteLength > 64 * 1024) {
+    return reportError("Source-library pool exception manifest exceeds its size bound");
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(exceptionBytes.toString("utf8"));
+  } catch {
+    return reportError("Source-library pool exception manifest is not valid JSON");
+  }
+  const isHistoricalV1 =
+    isRecord(value) &&
+    value.formatVersion === 1 &&
+    value.id === APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID &&
+    exceptionSha256 === APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256;
+  const isPinnedV2 =
+    isRecord(value) &&
+    value.formatVersion === 2 &&
+    value.id === APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_V2_ID &&
+    APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_V2_SHA256 !== null &&
+    exceptionSha256 === APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_V2_SHA256;
+  if (!isHistoricalV1 && !isPinnedV2) {
+    return reportError("Source-library pool exception manifest is not a pinned owner-approved version");
+  }
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "format",
+      "formatVersion",
+      "id",
+      "sourceReportSha256",
+      "ownerApproval",
+      "reviewedEvidence",
+      "approvedDifferences",
+    ]) ||
+    value.format !== "source-library-pool-owner-approved-differences" ||
+    (value.formatVersion !== 1 && value.formatVersion !== 2) ||
+    (isHistoricalV1 && value.formatVersion !== 1) ||
+    (isPinnedV2 && value.formatVersion !== 2) ||
+    (isHistoricalV1 && value.id !== APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID) ||
+    (isPinnedV2 && value.id !== APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_V2_ID) ||
+    value.sourceReportSha256 !== sha256(reportBytes) ||
+    !isRecord(value.ownerApproval) ||
+    !hasExactKeys(value.ownerApproval, ["decision", "recordPath", "recordSha256"]) ||
+    value.ownerApproval.decision !== "intentional-differences-no-data-heal" ||
+    (isHistoricalV1 && value.ownerApproval.recordPath !== OWNER_REVIEW_PATH) ||
+    (isPinnedV2 &&
+      !isVersionedPoolEvidencePath(value.ownerApproval.recordPath, ".md")) ||
+    !isRecord(value.reviewedEvidence) ||
+    !hasExactKeys(value.reviewedEvidence, [
+      "diagnosticsPath",
+      "diagnosticsSha256",
+      "capturePath",
+      "captureSha256",
+    ]) ||
+    (isHistoricalV1 && value.reviewedEvidence.diagnosticsPath !== DIAGNOSTICS_PATH) ||
+    (isHistoricalV1 && value.reviewedEvidence.capturePath !== LIVE_CAPTURE_PATH) ||
+    (isPinnedV2 &&
+      !isVersionedPoolEvidencePath(value.reviewedEvidence.diagnosticsPath, ".json")) ||
+    (isPinnedV2 &&
+      !isVersionedPoolEvidencePath(value.reviewedEvidence.capturePath, ".json")) ||
+    !Array.isArray(value.approvedDifferences) ||
+    (isHistoricalV1 && value.approvedDifferences.length !== 10) ||
+    (isPinnedV2 && value.approvedDifferences.length === 0)
+  ) {
+    return reportError("Source-library pool exception manifest does not match its approved contract");
+  }
+  const ownerReviewBytes = readApprovedEvidence(
+    value.ownerApproval.recordPath as string,
+    value.ownerApproval.recordSha256,
+    evidenceRoot,
+  );
+  const ownerReviewText = ownerReviewBytes.toString("utf8");
+  if (
+    !ownerReviewText.includes("intentional differences") ||
+    !ownerReviewText.includes(String(value.id)) ||
+    (isPinnedV2 &&
+      (!ownerReviewText.includes("value fingerprints") ||
+        !ownerReviewText.includes("fresh production capture") ||
+        !ownerReviewText.includes(String(value.reviewedEvidence.diagnosticsPath)) ||
+        !ownerReviewText.includes(String(value.reviewedEvidence.diagnosticsSha256)) ||
+        !ownerReviewText.includes(String(value.reviewedEvidence.capturePath)) ||
+        !ownerReviewText.includes(String(value.reviewedEvidence.captureSha256))))
+  ) {
+    return reportError("Owner-review evidence does not authorize this source-library exception");
+  }
+
+  const diagnosticsBytes = readApprovedEvidence(
+    value.reviewedEvidence.diagnosticsPath as string,
+    value.reviewedEvidence.diagnosticsSha256,
+    evidenceRoot,
+  );
+  const captureBytes = readApprovedEvidence(
+    value.reviewedEvidence.capturePath as string,
+    value.reviewedEvidence.captureSha256,
+    evidenceRoot,
+  );
+  let diagnostics: unknown;
+  let capture: unknown;
+  try {
+    diagnostics = JSON.parse(diagnosticsBytes.toString("utf8"));
+    capture = JSON.parse(captureBytes.toString("utf8"));
+  } catch {
+    return reportError("Reviewed source-library evidence is not valid JSON");
+  }
+  try {
+    assertBoundedSourceLibraryReconciliationEvidence(capture);
+  } catch {
+    return reportError("Reviewed live-pool capture does not match the bounded evidence contract");
+  }
+  if (
+    !isRecord(diagnostics) ||
+    diagnostics.verifier !== "source-library-reconciliation-diagnostics" ||
+    diagnostics.environment !== "release" ||
+    diagnostics.databaseAttestation !== "published-app-runtime-connection" ||
+    !isRecord(diagnostics.report) ||
+    diagnostics.report.sha256 !== value.sourceReportSha256 ||
+    !isRecord(diagnostics.pools) ||
+    !isRecord(diagnostics.mismatchDetails) ||
+    !Array.isArray(diagnostics.mismatchDetails.items) ||
+    !isRecord(capture) ||
+    capture.verifier !== "source-library-reconciliation" ||
+    capture.environment !== "release" ||
+    capture.databaseAttestation !== "published-app-runtime-connection" ||
+    capture.ok !== false ||
+    !isRecord(capture.report) ||
+    capture.report.sha256 !== value.sourceReportSha256 ||
+    !isRecord(capture.pools) ||
+    !Array.isArray(capture.failures)
+  ) {
+    return reportError("Reviewed source-library evidence does not match the approved report and mismatch counts");
+  }
+  if (isHistoricalV1) {
+    if (
+      diagnostics.pools.expected !== 68 ||
+      diagnostics.pools.exactMatches !== 58 ||
+      diagnostics.pools.guardedRenames !== 0 ||
+      diagnostics.pools.missing !== 0 ||
+      diagnostics.pools.mismatches !== 10 ||
+      diagnostics.mismatchDetails.total !== 10 ||
+      diagnostics.mismatchDetails.returned !== 10 ||
+      diagnostics.mismatchDetails.omitted !== 0 ||
+      capture.pools.mismatches !== 10 ||
+      stable(capture.failures) !== stable([{ check: "pools", count: 10 }])
+    ) {
+      return reportError("Reviewed historical source-library evidence has unexpected mismatch counts");
+    }
+  } else {
+    const diagnosticPools = diagnostics.pools as Record<string, unknown>;
+    const mismatchDetails = diagnostics.mismatchDetails as Record<string, unknown>;
+    const capturePools = capture.pools as Record<string, unknown>;
+    if (
+      typeof diagnostics.revision !== "string" ||
+      diagnostics.revision !== capture.revision ||
+      typeof diagnostics.capturedAt !== "string" ||
+      typeof capture.capturedAt !== "string" ||
+      !Number.isFinite(Date.parse(diagnostics.capturedAt)) ||
+      !Number.isFinite(Date.parse(capture.capturedAt)) ||
+      Math.abs(Date.parse(diagnostics.capturedAt) - Date.parse(capture.capturedAt)) >
+        30 * 60_000 ||
+      !Number.isSafeInteger(diagnosticPools.expected) ||
+      !Number.isSafeInteger(diagnosticPools.exactMatches) ||
+      !Number.isSafeInteger(diagnosticPools.guardedRenames) ||
+      !Number.isSafeInteger(diagnosticPools.missing) ||
+      !Number.isSafeInteger(diagnosticPools.mismatches) ||
+      diagnosticPools.expected !==
+        Number(diagnosticPools.exactMatches) +
+          Number(diagnosticPools.guardedRenames) +
+          Number(diagnosticPools.missing) +
+          Number(diagnosticPools.mismatches) ||
+      mismatchDetails.total !== diagnosticPools.mismatches ||
+      mismatchDetails.returned !== diagnosticPools.mismatches ||
+      mismatchDetails.omitted !== 0 ||
+      capturePools.mismatches !== diagnosticPools.mismatches ||
+      stable(capture.failures) !==
+        stable([{ check: "pools", count: diagnosticPools.mismatches }])
+    ) {
+      return reportError("Fresh version 2 source-library evidence has inconsistent capture identity or counts");
+    }
+  }
+  const approvedDifferences = value.approvedDifferences.map((item) =>
+    parsePoolMismatchDescriptor(item),
+  );
+  const diagnosticDifferences = diagnostics.mismatchDetails.items.map((item) =>
+    parsePoolMismatchDescriptor(item),
+  );
+  if (isPinnedV2) {
+    for (const item of [...approvedDifferences, ...diagnosticDifferences]) {
+      if (item.mismatchType !== "field-mismatch" || item.fieldFingerprints === undefined) {
+        return reportError("Version 2 source-library exceptions require a fingerprint for every approved field");
+      }
+    }
+  }
+  if (
+    stable(approvedDifferences) !== stable(diagnosticDifferences) ||
+    new Set(approvedDifferences.map((item) => `${item.table}\u0000${item.id}`)).size !==
+      approvedDifferences.length
+  ) {
+    return reportError("Approved source-library exceptions do not exactly match the owner-reviewed diagnostic");
+  }
+  return {
+    id: String(value.id),
+    sha256: exceptionSha256,
+    sourceReportSha256: value.sourceReportSha256 as string,
+    formatVersion: value.formatVersion as 1 | 2,
+    historical: isHistoricalV1,
+    approvedDifferences,
+  };
+}
+
 function stable(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`;
-  if (!isRecord(value)) return JSON.stringify(value);
+  if (!isRecord(value)) return JSON.stringify(value) ?? "undefined";
   return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stable(value[key])}`).join(",")}}`;
+}
+
+/**
+ * Hash one canonical recipe-field value. Only the digest leaves the read-only
+ * verifier; the raw value is never added to retained diagnostics or approval
+ * evidence.
+ */
+export function fingerprintSourceLibraryPoolField(value: unknown): string {
+  return sha256(`source-library-pool-field-fingerprint-v1\u0000${stable(value)}`);
+}
+
+export function countApprovedSourceLibraryPoolMismatches(
+  mismatches: readonly SourceLibraryPoolMismatchDescriptor[],
+  approval: SourceLibraryPoolExceptionApproval | undefined,
+): number {
+  if (!approval || approval.formatVersion !== 2 || approval.historical) return 0;
+  const approved = new Map(
+    approval.approvedDifferences.map((difference) => [
+      `${difference.table}\u0000${difference.id}`,
+      stable(difference),
+    ]),
+  );
+  return mismatches.filter(
+    (mismatch) =>
+      mismatch.mismatchType === "field-mismatch" &&
+      mismatch.fieldFingerprints !== undefined &&
+      approved.get(`${mismatch.table}\u0000${mismatch.id}`) === stable(mismatch),
+  ).length;
 }
 
 function reportError(message: string): never {
@@ -349,9 +740,42 @@ function boundedCount(value: unknown) {
   return isFiniteNumber(value) && Number.isInteger(value) && value >= 0;
 }
 
+function validDatabaseOwner(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= DATABASE_OWNER_MAX_LENGTH &&
+    /^[A-Za-z_][A-Za-z0-9_$-]*$/u.test(value)
+  );
+}
+
+async function checkDatabaseOwner(
+  query: ReadOnlyQuery,
+  environment: SourceLibraryEvidenceEnvironment,
+  expectedDatabaseOwner: string | undefined,
+): Promise<boolean> {
+  // Development fixture verification intentionally remains independent of a
+  // production deployment's owner configuration. Release verification must
+  // always have an explicit, externally approved owner to compare with the
+  // owner reported by PostgreSQL.
+  if (environment !== "release" && expectedDatabaseOwner === undefined) {
+    return true;
+  }
+  if (!validDatabaseOwner(expectedDatabaseOwner)) return false;
+  const result = await query(
+    `SELECT pg_get_userbyid(datdba) AS "databaseOwner"
+       FROM pg_database
+      WHERE datname = current_database()
+      LIMIT 1`,
+  );
+  return result.rows.length === 1 &&
+    result.rows[0]?.databaseOwner === expectedDatabaseOwner;
+}
+
 function comparePoolRows(report: Report, rowsByTable: Record<RecipeTable, Array<Record<string, unknown>>>) {
   const counts = { expected: 0, exactMatches: 0, guardedRenames: 0, missing: 0, mismatches: 0 };
   const fingerprintRows: unknown[] = [];
+  const mismatchDescriptors: SourceLibraryPoolMismatchDescriptor[] = [];
   for (const raw of report.proposals) {
     const proposal = raw as unknown as Proposal;
     const row = rowsByTable[proposal.table].find((candidate) => candidate.id === proposal.before.id);
@@ -359,11 +783,25 @@ function comparePoolRows(report: Report, rowsByTable: Record<RecipeTable, Array<
     if (!row) {
       counts.missing++;
       fingerprintRows.push([proposal.table, proposal.before.id, "missing"]);
+      mismatchDescriptors.push({
+        table: proposal.table,
+        id: proposal.before.id,
+        sourceName: proposal.before.name,
+        mismatchType: "missing",
+        differingFields: [],
+      });
       continue;
     }
     if (row.name !== proposal.before.name) {
       counts.guardedRenames++;
       fingerprintRows.push([proposal.table, proposal.before.id, "guarded-rename"]);
+      mismatchDescriptors.push({
+        table: proposal.table,
+        id: proposal.before.id,
+        sourceName: proposal.before.name,
+        mismatchType: "renamed",
+        differingFields: ["name"],
+      });
       continue;
     }
     if (proposal.action === "link-source-identity") {
@@ -378,10 +816,109 @@ function comparePoolRows(report: Report, rowsByTable: Record<RecipeTable, Array<
       fingerprintRows.push([proposal.table, proposal.before.id, expected]);
     } else {
       counts.mismatches++;
-      fingerprintRows.push([proposal.table, proposal.before.id, actual]);
+      const differingFields = Object.keys(expected).filter(
+        (field) => stable(expected[field]) !== stable(actual[field]),
+      );
+      const fieldFingerprints = Object.fromEntries(
+        differingFields.map((field) => [
+          field,
+          fingerprintSourceLibraryPoolField(actual[field]),
+        ]),
+      );
+      fingerprintRows.push([proposal.table, proposal.before.id, fieldFingerprints]);
+      mismatchDescriptors.push({
+        table: proposal.table,
+        id: proposal.before.id,
+        sourceName: proposal.before.name,
+        mismatchType: "field-mismatch",
+        differingFields,
+        fieldFingerprints,
+      });
     }
   }
-  return { counts, fingerprintRows };
+  return { counts, fingerprintRows, mismatchDescriptors };
+}
+
+async function readPoolState(report: Report, query: ReadOnlyQuery) {
+  const proposals = report.proposals as unknown as Proposal[];
+  const idsByTable = Object.fromEntries(TABLES.map((table) => [
+    table,
+    [...new Set(proposals.filter((proposal) => proposal.table === table).map((proposal) => proposal.before.id))],
+  ])) as Record<RecipeTable, string[]>;
+  const rowsByTable = {} as Record<RecipeTable, Array<Record<string, unknown>>>;
+  // A pg client owns one connection. Keep these SELECTs sequential so the
+  // verifier itself does not create concurrent-query warnings or ambiguity.
+  for (const table of TABLES) rowsByTable[table] = await selectPoolRows(query, table, idsByTable[table]);
+  return comparePoolRows(report, rowsByTable);
+}
+
+function classifyPoolMismatchDescriptors(
+  mismatchDescriptors: SourceLibraryPoolMismatchDescriptor[],
+  reportBytes: Buffer | undefined,
+  poolExceptionApproval: SourceLibraryPoolExceptionApproval | undefined,
+): VerificationOutput["poolExceptions"] {
+  const fieldMismatches = mismatchDescriptors.filter(
+    (mismatch) => mismatch.mismatchType === "field-mismatch",
+  );
+  if (!poolExceptionApproval) {
+    return {
+      id: null,
+      sha256: null,
+      approvedMismatches: 0,
+      unresolvedMismatches: fieldMismatches.length,
+    };
+  }
+  if (
+    !reportBytes ||
+    poolExceptionApproval.sourceReportSha256 !== sha256(reportBytes)
+  ) {
+    return reportError(
+      "Source-library pool exception approval targets a different source report",
+    );
+  }
+  const approvedMismatches = countApprovedSourceLibraryPoolMismatches(
+    fieldMismatches,
+    poolExceptionApproval,
+  );
+  return {
+    id: poolExceptionApproval.id,
+    sha256: poolExceptionApproval.sha256,
+    approvedMismatches,
+    unresolvedMismatches: fieldMismatches.length - approvedMismatches,
+  };
+}
+
+export async function inspectSourceLibraryPoolMismatchDiagnostics(
+  reportInput: unknown,
+  query: ReadOnlyQuery,
+  poolExceptionApproval?: SourceLibraryPoolExceptionApproval,
+  reportBytes?: Buffer,
+): Promise<SourceLibraryPoolMismatchDiagnostics> {
+  const report = parseReport(reportInput);
+  const poolState = await readPoolState(report, query);
+  const total =
+    poolState.counts.guardedRenames +
+    poolState.counts.missing +
+    poolState.counts.mismatches;
+  const items = poolState.mismatchDescriptors
+    .sort((left, right) =>
+      left.table.localeCompare(right.table) || left.id.localeCompare(right.id),
+    )
+    .slice(0, SOURCE_LIBRARY_POOL_DIAGNOSTIC_MAX_ITEMS);
+  const poolExceptions = classifyPoolMismatchDescriptors(
+    poolState.mismatchDescriptors,
+    reportBytes,
+    poolExceptionApproval,
+  );
+  return {
+    counts: poolState.counts,
+    maxItems: SOURCE_LIBRARY_POOL_DIAGNOSTIC_MAX_ITEMS,
+    total,
+    returned: items.length,
+    omitted: total - items.length,
+    items,
+    poolExceptions,
+  };
 }
 
 function compareAliases(aliasState: Awaited<ReturnType<typeof selectAliases>>) {
@@ -497,12 +1034,27 @@ function markerCheck(marker: Record<string, unknown> | undefined, report: Report
 export type VerificationOutput = {
   verifier: "source-library-reconciliation";
   environment: SourceLibraryEvidenceEnvironment;
+  /**
+   * New captures identify how the database target was attested. Older retained
+   * evidence omitted this field and remains interpretable as the historical
+   * external-owner-check path.
+   */
+  databaseAttestation?:
+    | "external-owner-check"
+    | "development-no-owner-check"
+    | "published-app-runtime-connection";
   revision: string;
   capturedAt: string;
   evidenceId: string;
   healId: string;
   repairBoundary: { fromDate: string };
   report: { sha256: string; formatVersion: number; automaticProposals: number; stubs: number };
+  poolExceptions: {
+    id: string | null;
+    sha256: string | null;
+    approvedMismatches: number;
+    unresolvedMismatches: number;
+  };
   marker: ReturnType<typeof markerCheck>;
   pools: ReturnType<typeof comparePoolRows>["counts"];
   aliases: ReturnType<typeof compareAliases>["counts"];
@@ -518,12 +1070,14 @@ export type VerificationOutput = {
 export const SOURCE_LIBRARY_EVIDENCE_KEYS = [
   "verifier",
   "environment",
+  "databaseAttestation",
   "revision",
   "capturedAt",
   "evidenceId",
   "healId",
   "repairBoundary",
   "report",
+  "poolExceptions",
   "marker",
   "pools",
   "aliases",
@@ -535,6 +1089,13 @@ export const SOURCE_LIBRARY_EVIDENCE_KEYS = [
   "ok",
   "failures",
 ] as const;
+
+const PRIOR_SOURCE_LIBRARY_EVIDENCE_KEYS = SOURCE_LIBRARY_EVIDENCE_KEYS.filter(
+  (key) => key !== "poolExceptions",
+);
+const LEGACY_SOURCE_LIBRARY_EVIDENCE_KEYS = SOURCE_LIBRARY_EVIDENCE_KEYS.filter(
+  (key) => key !== "databaseAttestation" && key !== "poolExceptions",
+);
 
 const SOURCE_LIBRARY_EVIDENCE_MAX_COUNT = 1_000_000;
 
@@ -581,11 +1142,21 @@ function assertBoundedSummary(
 export function assertBoundedSourceLibraryReconciliationEvidence(
   value: unknown,
 ): asserts value is VerificationOutput {
+  const hasCurrentShape =
+    isRecord(value) && hasExactKeys(value, SOURCE_LIBRARY_EVIDENCE_KEYS);
+  const hasPriorShape =
+    isRecord(value) && hasExactKeys(value, PRIOR_SOURCE_LIBRARY_EVIDENCE_KEYS);
+  const hasLegacyShape =
+    isRecord(value) && hasExactKeys(value, LEGACY_SOURCE_LIBRARY_EVIDENCE_KEYS);
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, SOURCE_LIBRARY_EVIDENCE_KEYS) ||
+    (!hasCurrentShape && !hasPriorShape && !hasLegacyShape) ||
     value.verifier !== "source-library-reconciliation" ||
     (value.environment !== "development" && value.environment !== "release") ||
+    (hasCurrentShape &&
+      value.databaseAttestation !== "external-owner-check" &&
+      value.databaseAttestation !== "development-no-owner-check" &&
+      value.databaseAttestation !== "published-app-runtime-connection") ||
     !boundedEvidenceString(value.revision) ||
     !boundedEvidenceString(value.capturedAt) ||
     !/^[a-f0-9]{64}$/u.test(String(value.evidenceId ?? "")) ||
@@ -676,6 +1247,32 @@ export function assertBoundedSourceLibraryReconciliationEvidence(
     "unexpectedlyDeleted",
     "unexpectedlyRemaining",
   ], "stubs");
+  if (Object.prototype.hasOwnProperty.call(value, "poolExceptions")) {
+    const poolExceptions = value.poolExceptions;
+    if (
+      !isRecord(poolExceptions) ||
+      !hasExactKeys(poolExceptions, [
+        "id",
+        "sha256",
+        "approvedMismatches",
+        "unresolvedMismatches",
+      ]) ||
+      !(
+        (poolExceptions.id === null && poolExceptions.sha256 === null) ||
+        (typeof poolExceptions.id === "string" &&
+          poolExceptions.id.length > 0 &&
+          /^[a-f0-9]{64}$/u.test(String(poolExceptions.sha256 ?? "")))
+      ) ||
+      !boundedEvidenceCount(poolExceptions.approvedMismatches) ||
+      !boundedEvidenceCount(poolExceptions.unresolvedMismatches) ||
+      poolExceptions.approvedMismatches + poolExceptions.unresolvedMismatches !==
+        (value.pools as Record<string, unknown>).mismatches
+    ) {
+      throw new Error(
+        "Source-library reconciliation evidence contains an invalid pool-exception summary.",
+      );
+    }
+  }
   for (const key of [
     "replacements",
     "aliasesInserted",
@@ -993,11 +1590,11 @@ function preflightMarkerIsValid(
 /**
  * Cheap, bounded identity check used before expensive release gates.
  *
- * This checks only live recipe IDs, alias identities, and the marker shape. It
- * does not inspect recipe payloads, references, or mutate the database. A
- * complete identity match is not a substitute for the full verifier below; it
- * only prevents a partial fixture database from allowing expensive release
- * work to start.
+ * This checks only live recipe IDs, alias identities, the marker shape, and
+ * the approved owner of a release database. It does not inspect recipe
+ * payloads, references, or mutate the database. A complete identity match is
+ * not a substitute for the full verifier below; it only prevents a partial or
+ * wrong-owner database from allowing expensive release work to start.
  */
 export async function preflightSourceLibraryReconciliation(
   report: Report,
@@ -1006,6 +1603,7 @@ export async function preflightSourceLibraryReconciliation(
   query: ReadOnlyQuery,
   environment: SourceLibraryEvidenceEnvironment,
   revision: string,
+  expectedDatabaseOwner?: string,
 ): Promise<SourceLibraryPreflightOutput> {
   const proposals = report.proposals as unknown as Proposal[];
   const idsByTable = Object.fromEntries(
@@ -1032,6 +1630,11 @@ export async function preflightSourceLibraryReconciliation(
     );
   }
   const aliases = compareAliases(await selectAliases(query, report));
+  const databaseOwnerAttested = await checkDatabaseOwner(
+    query,
+    environment,
+    expectedDatabaseOwner,
+  );
   const markerResult = await query(
     'SELECT applied_at AS "appliedAt", result FROM data_heals WHERE id = $1 LIMIT 1',
     [healId],
@@ -1050,6 +1653,7 @@ export async function preflightSourceLibraryReconciliation(
   const failureCandidates: Array<[string, number]> = [
     ["databaseShape", expectedPoolRows - observedPoolRows],
     ["aliases", aliases.counts.missing + aliases.counts.mismatches],
+    ["databaseOwner", Number(!databaseOwnerAttested)],
     ["marker", Number(!marker.valid)],
   ];
   const failures = failureCandidates
@@ -1109,22 +1713,32 @@ export async function verifySourceLibraryReconciliation(
   fromDate = DEFAULT_FROM_DATE,
   environment: SourceLibraryEvidenceEnvironment = "development",
   revision = "development-unbound",
+  expectedDatabaseOwner?: string,
+  databaseAttestation:
+    | "external-owner-check"
+    | "development-no-owner-check"
+    | "published-app-runtime-connection" =
+    environment === "development" && expectedDatabaseOwner === undefined
+      ? "development-no-owner-check"
+      : "external-owner-check",
+  poolExceptionApproval?: SourceLibraryPoolExceptionApproval,
 ): Promise<VerificationOutput> {
-  const proposals = report.proposals as unknown as Proposal[];
-  const idsByTable = Object.fromEntries(TABLES.map((table) => [
-    table,
-    [...new Set(proposals.filter((proposal) => proposal.table === table).map((proposal) => proposal.before.id))],
-  ])) as Record<RecipeTable, string[]>;
-  const rowsByTable = {} as Record<RecipeTable, Array<Record<string, unknown>>>;
-  // A pg client owns one connection. Keep these SELECTs sequential so the
-  // verifier itself does not create concurrent-query warnings or ambiguity.
-  for (const table of TABLES) rowsByTable[table] = await selectPoolRows(query, table, idsByTable[table]);
+  const poolState = await readPoolState(report, query);
+  const poolExceptions = classifyPoolMismatchDescriptors(
+    poolState.mismatchDescriptors,
+    reportBytes,
+    poolExceptionApproval,
+  );
   const stubs = report.findings.allZeroStubs as Stub[];
   const stubRows = await selectStubRows(query, stubs);
   const mappings = buildMappings(report);
   const references = await selectReferences(query, mappings, fromDate);
   const aliases = compareAliases(await selectAliases(query, report));
-  const poolState = comparePoolRows(report, rowsByTable);
+  const databaseOwnerAttested =
+    databaseAttestation === "published-app-runtime-connection" ||
+    databaseAttestation === "development-no-owner-check"
+      ? true
+      : await checkDatabaseOwner(query, environment, expectedDatabaseOwner);
   const pendingSummary = summarizeReferences(references.runs.filter((reference) => reference.scope === "pending"));
   const profileSummary = summarizeReferences(references.profiles);
   const protectedReferences = references.runs.filter((reference) => reference.scope === "protected");
@@ -1137,7 +1751,11 @@ export async function verifySourceLibraryReconciliation(
 
   const failureCandidates: Array<[string, number]> = [
     ["marker", Number(!marker.present || !marker.appliedAtPresent || !marker.resultValid || !marker.resultWithinBounds)],
-    ["pools", poolState.counts.missing + poolState.counts.mismatches],
+    ["databaseOwner", Number(!databaseOwnerAttested)],
+    [
+      "pools",
+      poolState.counts.missing + poolExceptions.unresolvedMismatches,
+    ],
     ["aliases", aliases.counts.missing + aliases.counts.mismatches],
     ["profiles", profileSummary.stale + profileSummary.nonCanonical],
     ["pendingRuns", pendingSummary.stale + pendingSummary.nonCanonical],
@@ -1146,9 +1764,12 @@ export async function verifySourceLibraryReconciliation(
   const failures = failureCandidates.filter(([, count]) => count > 0).map(([check, count]) => ({ check, count }));
   const fingerprintInput = {
     reportSha256: sha256(reportBytes),
+    poolExceptionSha256: poolExceptionApproval?.sha256 ?? null,
     healId,
+    databaseAttestation,
     marker: marker.resultCounts,
     pool: poolState.counts,
+    poolExceptions,
     poolObservations: poolState.fingerprintRows,
     aliases: aliases.counts,
     aliasObservations: aliases.observations,
@@ -1162,6 +1783,7 @@ export async function verifySourceLibraryReconciliation(
   const output: Omit<VerificationOutput, "evidenceId"> = {
     verifier: "source-library-reconciliation",
     environment,
+    databaseAttestation,
     revision,
     capturedAt,
     healId,
@@ -1172,6 +1794,7 @@ export async function verifySourceLibraryReconciliation(
       automaticProposals: report.proposals.length,
       stubs: stubs.length,
     },
+    poolExceptions,
     marker,
     pools: poolState.counts,
     aliases: aliases.counts,
@@ -1189,24 +1812,6 @@ export async function verifySourceLibraryReconciliation(
   };
 }
 
-function argument(name: string, fallback?: string) {
-  const index = process.argv.indexOf(name);
-  if (index < 0) return fallback;
-  const value = process.argv[index + 1];
-  if (!value || value.startsWith("--")) throw new Error(`Missing value for ${name}`);
-  return value;
-}
-
-function outputPathArgument(): string | undefined {
-  const value = argument("--output");
-  return value ? path.resolve(process.cwd(), value) : undefined;
-}
-
-async function writeOutput(outputPath: string | undefined, output: unknown): Promise<void> {
-  if (!outputPath) return;
-  fs.writeFileSync(outputPath, `${JSON.stringify(output)}\n`, "utf8");
-}
-
 export const SOURCE_LIBRARY_PREFLIGHT_DB_ATTEMPTS = RELEASE_PREFLIGHT_DB_ATTEMPTS;
 export const isRetryableSourceLibraryDatabaseError =
   isRetryableReleasePreflightDatabaseError;
@@ -1222,7 +1827,7 @@ type ReadOnlyPool = {
   connect: () => Promise<ReadOnlyPoolClient>;
 };
 
-async function runSourceLibraryReadOnlyCheck<T>(
+export async function runSourceLibraryReadOnlyCheck<T>(
   pool: ReadOnlyPool,
   retryConnectionFailures: boolean,
   check: (query: ReadOnlyQuery) => Promise<T>,
@@ -1257,53 +1862,123 @@ function dateFromHealId(healId: string) {
 }
 
 function currentRevision(): string {
-  return execFileSync("git", ["rev-parse", "HEAD"], {
-    cwd: ROOT,
-    encoding: "utf8",
-  }).trim();
+  return captureReleaseIdentity(ROOT).sourceRevision;
 }
 
 export function resolveSourceLibraryRevision(
   environment: SourceLibraryEvidenceEnvironment,
   configuredRevision: string | undefined,
+  deploymentHandoffPath?: string,
+  now?: Date,
 ): string {
-  const revision = configuredRevision?.trim() ||
+  const explicitRevision = configuredRevision?.trim() || undefined;
+  const handoffRevision = deploymentHandoffPath
+    ? readSourceLibraryDeploymentHandoff(deploymentHandoffPath, now).deployedRevision
+    : undefined;
+  if (
+    explicitRevision !== undefined &&
+    handoffRevision !== undefined &&
+    explicitRevision !== handoffRevision
+  ) {
+    throw new Error(
+      "Source-library revision conflicts with the deployed revision in the deployment handoff.",
+    );
+  }
+  const revision =
+    explicitRevision ||
+    handoffRevision ||
     (environment === "development" ? currentRevision() : undefined);
   if (!revision) {
     throw new Error(
-      "Missing --revision for release evidence; pass the exact deployed 40-character Git commit SHA",
+      "Missing deployed source identity for release evidence; pass --revision or --deployment-handoff with source-sha256 identity (legacy exact deployed 40-character Git commit SHA remains readable)",
     );
   }
-  if (!/^[a-f0-9]{40}$/u.test(revision)) {
-    throw new Error("Invalid --revision; expected the full 40-character Git commit SHA");
+  if (!isDeploymentRevision(revision)) {
+    throw new Error(
+      "Invalid --revision; expected source-sha256 identity or legacy full 40-character Git commit SHA; pass the exact deployed source identity.",
+    );
   }
   return revision;
+}
+
+export function resolveSourceLibraryDatabaseOwner(
+  configuredDatabaseOwner: string | undefined,
+  deploymentHandoffPath?: string,
+  now?: Date,
+): string | undefined {
+  const explicitOwner = configuredDatabaseOwner?.trim() || undefined;
+  const handoffOwner = deploymentHandoffPath
+    ? readSourceLibraryDeploymentHandoff(deploymentHandoffPath, now).databaseOwner
+    : undefined;
+  if (
+    explicitOwner !== undefined &&
+    handoffOwner !== undefined &&
+    explicitOwner !== handoffOwner
+  ) {
+    throw new Error(
+      "Source-library database owner conflicts with the database owner in the deployment handoff.",
+    );
+  }
+  return explicitOwner ?? handoffOwner;
+}
+
+export function readSourceLibraryDeploymentHandoff(
+  handoffPath: string,
+  now?: Date,
+): ReadinessDeploymentHandoff {
+  const resolvedPath = path.resolve(process.cwd(), handoffPath);
+  const stats = fs.lstatSync(resolvedPath);
+  if (!stats.isFile() || stats.isSymbolicLink()) {
+    throw new Error(
+      "Source-library deployment handoff must be a regular file.",
+    );
+  }
+  return validateReadinessDeploymentHandoff(fs.readFileSync(resolvedPath), { now });
 }
 
 export function assertProductionSourceLibraryCapture(options: {
   environmentArgument: string | undefined;
   configuredRevision: string | undefined;
   revisionArgumentProvided: boolean;
+  deploymentHandoffArgumentProvided?: boolean;
+  deploymentHandoffPath?: string;
   outputPath: string | undefined;
   preflight: boolean;
+  configuredDatabaseOwner?: string;
   environment: NodeJS.ProcessEnv;
 }): void {
+  const databaseOwner = resolveSourceLibraryDatabaseOwner(
+    options.configuredDatabaseOwner,
+    options.deploymentHandoffPath,
+  );
   if (options.environmentArgument !== "release") {
     throw new Error(
       "Production source-library capture requires the explicit --environment release flag.",
     );
   }
-  if (!options.configuredRevision?.trim()) {
+  if (!options.configuredRevision?.trim() && !options.deploymentHandoffPath?.trim()) {
     throw new Error(
-      "Production source-library capture requires the explicit --revision deployed Git SHA.",
+      "Production source-library capture requires --revision or --deployment-handoff with the deployed source identity.",
     );
   }
-  if (!options.revisionArgumentProvided) {
+  if (!validDatabaseOwner(databaseOwner)) {
     throw new Error(
-      "Production source-library capture requires --revision on the command line; do not rely on an ambient revision variable.",
+      "Production source-library capture requires --database-owner or --deployment-handoff with the approved PostgreSQL database owner.",
     );
   }
-  resolveSourceLibraryRevision("release", options.configuredRevision);
+  if (
+    !options.revisionArgumentProvided &&
+    options.deploymentHandoffArgumentProvided !== true
+  ) {
+    throw new Error(
+      "Production source-library capture requires --revision or --deployment-handoff on the command line; do not rely on an ambient revision variable.",
+    );
+  }
+  resolveSourceLibraryRevision(
+    "release",
+    options.configuredRevision,
+    options.deploymentHandoffPath,
+  );
   if (options.preflight) {
     throw new Error(
       "Production source-library capture does not support --preflight; capture the full bounded verifier result.",
@@ -1324,121 +1999,10 @@ export function assertProductionSourceLibraryCapture(options: {
   }
 }
 
-async function main() {
-  const reportArgument = argument("--report");
-  const reportPath = reportArgument
-    ? path.resolve(process.cwd(), reportArgument)
-    : path.resolve(ROOT, DEFAULT_REPORT);
-  const healId = argument("--heal-id", DEFAULT_HEAL_ID)!;
-  const fromDate = argument("--from-date", dateFromHealId(healId) ?? DEFAULT_FROM_DATE)!;
-  const environmentArgument = argument(
-    "--environment",
-    process.env.SOURCE_LIBRARY_RECONCILIATION_ENVIRONMENT,
-  );
-  if (environmentArgument === undefined) {
-    throw new Error(
-      "Missing --environment; choose development or release so source-library evidence cannot be compared across databases",
-    );
-  }
-  const environment = parseSourceLibraryEvidenceEnvironment(environmentArgument);
-  const captureProduction = process.argv.includes("--capture-production");
-  const revisionArgumentProvided = process.argv.includes("--revision");
-  const configuredRevisionArgument =
-    argument("--revision", process.env.SOURCE_LIBRARY_RECONCILIATION_REVISION);
-  const revision = resolveSourceLibraryRevision(
-    environment,
-    configuredRevisionArgument,
-  );
-  const outputPath = outputPathArgument();
-  const preflightOnly = process.argv.includes("--preflight");
-  if (captureProduction) {
-    assertProductionSourceLibraryCapture({
-      environmentArgument,
-      configuredRevision: configuredRevisionArgument,
-      revisionArgumentProvided,
-      outputPath,
-      preflight: preflightOnly,
-      environment: process.env,
-    });
-  }
-  if (!/^\d{4}-\d{2}-\d{2}$/u.test(fromDate)) throw new Error("Invalid --from-date; expected YYYY-MM-DD");
-  const reportBytes = fs.readFileSync(reportPath);
-  const report = parseReport(JSON.parse(reportBytes.toString("utf8")));
-  const { pool } = await import("@workspace/db");
-  const output = await runSourceLibraryReadOnlyCheck<
-    SourceLibraryPreflightOutput | VerificationOutput
-  >(pool, preflightOnly, (query) =>
-    preflightOnly
-      ? preflightSourceLibraryReconciliation(
-          report,
-          reportBytes,
-          healId,
-          query,
-          environment,
-          revision,
-        )
-      : verifySourceLibraryReconciliation(
-          report,
-          reportBytes,
-          healId,
-          query,
-          fromDate,
-          environment,
-          revision,
-        ),
-  );
-  if (!preflightOnly) {
-    assertBoundedSourceLibraryReconciliationEvidence(output);
-  }
-  await writeOutput(outputPath, output);
-  process.stdout.write(`${JSON.stringify(output)}\n`);
-  if (!output.ok) process.exitCode = 1;
-}
-
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
-  main().catch((error) => {
-    const environmentIndex = process.argv.indexOf("--environment");
-    const requestedEnvironment =
-      environmentIndex >= 0 && process.argv[environmentIndex + 1]
-        ? process.argv[environmentIndex + 1]
-        : process.env.SOURCE_LIBRARY_RECONCILIATION_ENVIRONMENT;
-    const revisionIndex = process.argv.indexOf("--revision");
-    const requestedRevision =
-      revisionIndex >= 0 && process.argv[revisionIndex + 1]
-        ? process.argv[revisionIndex + 1]
-        : process.env.SOURCE_LIBRARY_RECONCILIATION_REVISION;
-    const output = {
-      verifier: process.argv.includes("--preflight")
-        ? "source-library-reconciliation-preflight"
-        : "source-library-reconciliation",
-      environment: requestedEnvironment ?? "unknown",
-      revision: requestedRevision ?? "unknown",
-      capturedAt: new Date().toISOString(),
-      ok: false,
-      failures: [{ check: "input-or-database", count: 1 }],
-      error: error instanceof Error ? error.message : "Verification failed",
-    };
-    const outputArgument = process.argv.indexOf("--output");
-    const outputPath =
-      outputArgument >= 0 && process.argv[outputArgument + 1]
-        ? path.resolve(process.cwd(), process.argv[outputArgument + 1])
-        : undefined;
-    // A failed production capture is not evidence. In particular, do not leave
-    // a failure-shaped JSON file for the importer or release checker to treat
-    // as a retained artifact. Development verifier failures still write their
-    // bounded diagnostic because the fixture tests use that output to explain
-    // a failed gate.
-    if (outputPath && !process.argv.includes("--capture-production")) {
-      try {
-        fs.writeFileSync(outputPath, `${JSON.stringify(output)}\n`, "utf8");
-      } catch {
-        // Preserve the original verifier error on stdout/stderr if evidence
-        // cannot be written; the release gate still fails closed.
-      }
-    }
-    process.stdout.write(`${JSON.stringify(output)}\n`);
-    process.exitCode = 1;
-  });
-}
-
-export { parseReport, stable, ownedFields, normalizedName };
+export {
+  parseReport,
+  stable,
+  ownedFields,
+  normalizedName,
+  validDatabaseOwner as isValidSourceLibraryDatabaseOwner,
+};

@@ -7,6 +7,11 @@
  */
 import * as zod from 'zod';
 
+export const getBuildInfoResponseAppBuildIdRegExp = new RegExp('^app-build:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$');
+export const getBuildInfoResponseSourceFingerprintSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const getBuildInfoResponseGitRevisionRegExp = new RegExp('^[a-f0-9]{40}$');
+export const getBuildInfoResponsePlatformDeploymentIdRegExp = new RegExp('^[A-Za-z0-9._:-]{1,128}$');
+export const getBuildInfoResponsePlatformBuildIdRegExp = new RegExp('^[A-Za-z0-9._:-]{1,128}$');
 export const signUpBodyOneUsernameMin = 3;
 export const signUpBodyOneUsernameMax = 64;
 export const signUpBodyOnePasswordMin = 6;
@@ -37,14 +42,62 @@ export const identifyInventoryPhotoBodyCandidatesItemCategoryMax = 100;
 export const identifyInventoryPhotoBodyCandidatesItemNameMax = 200;
 export const identifyInventoryPhotoBodyCandidatesItemUnitMax = 50;
 export const parseSpecImagesBodyImagesMax = 10;
+export const getQcTargetsQueryProfileKeyMax = 400;
+export const setQcTargetBodyProfileKeyMax = 400;
+export const setQcTargetBodyIngredientIdMax = 200;
+export const setQcTargetBodyTargetValueExclusiveMin = 0;
+export const setQcTargetBodyToleranceValueMin = 0;
+export const setQcTargetBodyReasonMax = 500;
+export const recordQcLotBodyRunIdMax = 200;
+export const recordQcLotBodyIngredientIdMax = 200;
+export const recordQcLotBodyLotNumberMax = 200;
+export const recordQcLotBodyNoteMax = 1000;
+export const recordQcWeightCheckBodyRunIdMax = 200;
+export const recordQcWeightCheckBodyProfileKeyMax = 400;
+export const recordQcWeightCheckBodyIngredientIdMax = 200;
+export const recordQcWeightCheckBodyActualValueExclusiveMin = 0;
+export const recordQcWeightCheckBodyActualValueMax = 1000000;
+export const recordQcWeightCheckBodyNoteMax = 1000;
+export const getQcRunPathRunIdMax = 200;
+export const recordQcAllergenReviewBodyRunIdMax = 200;
+export const recordQcAllergenReviewBodyFootprintAllergensMax = 9;
+export const recordQcAllergenReviewBodyFootprintUnknownIngredientsItemMax = 200;
+export const recordQcAllergenReviewBodyFootprintUnknownIngredientsMax = 100;
+export const recordQcAllergenReviewBodyFootprintMissingComponentsItemMax = 100;
+export const recordQcAllergenReviewBodyFootprintMissingComponentsMax = 30;
+export const recordQcAllergenReviewBodyStagedIngredientsItemNameMax = 200;
+export const recordQcAllergenReviewBodyStagedIngredientsItemQuantityMax = 50;
+export const recordQcAllergenReviewBodyStagedIngredientsItemUnitMax = 30;
+export const recordQcAllergenReviewBodyStagedIngredientsMax = 200;
+export const recordQcAllergenReviewBodyNoteMax = 1000;
+export const recordQcCleaningBodyRunIdMax = 200;
+export const recordQcCleaningBodyNoteMax = 1000;
+export const verifyQcCleaningBodyNoteMax = 1000;
+export const signoffQcRunBodyRunIdMax = 200;
+export const signoffQcRunBodyNoteMax = 1000;
+export const getQcHistoryQueryRunIdMax = 200;
+export const getQcHistoryQueryIngredientIdMax = 200;
+export const getQcHistoryQueryLimitDefault = 50;
+export const getQcHistoryQueryLimitMax = 100;
+export const exportQcHistoryCsvQueryRunIdMax = 200;
+export const exportQcHistoryCsvQueryIngredientIdMax = 200;
+export const correctQcEventBodyReasonMax = 500;
+export const redactQcEventBodyReasonMax = 500;
+export const redactQcEventBodyFieldsMax = 4;
 export const wasteInsightBodyPlannedItemsItemKeyMax = 200;
 export const wasteInsightBodyPlannedItemsItemCategoryMax = 100;
 export const wasteInsightBodyPlannedItemsItemNameMax = 200;
 export const wasteInsightBodyPlannedItemsItemUnitMax = 50;
 export const exportOperationalReportBodyRunsMax = 600;
+export const exportOperationalReportResponseEvidenceReleaseDeploymentIdMax = 128;
+export const exportOperationalReportResponseEvidenceReleaseDeployedRevisionRegExp = new RegExp('^[a-f0-9]{40}$');
 export const finalizeOperationalReportBodyRunsMax = 600;
+export const finalizeOperationalReportResponseTwoReportEvidenceReleaseDeploymentIdMax = 128;
+export const finalizeOperationalReportResponseTwoReportEvidenceReleaseDeployedRevisionRegExp = new RegExp('^[a-f0-9]{40}$');
 export const searchFinalizedOperationalReportsQueryLimitDefault = 100;
 export const searchFinalizedOperationalReportsQueryLimitMax = 100;
+export const getFinalizedOperationalReportResponseTwoReportEvidenceReleaseDeploymentIdMax = 128;
+export const getFinalizedOperationalReportResponseTwoReportEvidenceReleaseDeployedRevisionRegExp = new RegExp('^[a-f0-9]{40}$');
 export const aiParseSpecSheetResponseProfilesItemTargetDoughballWeightExclusiveMin = 0;
 export const aiParseSpecSheetResponseProfilesItemApplicatorsItemSlotMax = 4;
 export const listDuplicateReviewsResponseGroupsItemGroupKeyMax = 500;
@@ -62,6 +115,10 @@ export const confirmFreezerSurplusBodyFlavorMax = 120;
 export const confirmFreezerSurplusBodyCasesMax = 1000000;
 export const confirmFreezerSurplusResponseLotsItemRemainingCasesMin = 0;
 export const confirmFreezerSurplusResponseCreatedLotOneRemainingCasesMin = 0;
+export const confirmFreezerSurplusResponseCreatedAdjustmentOneCasesMax = 1000000;
+export const confirmFreezerSurplusResponseCreatedAdjustmentOneReasonMax = 300;
+export const listFreezerSurplusAdjustmentsResponseAdjustmentsItemCasesMax = 1000000;
+export const listFreezerSurplusAdjustmentsResponseAdjustmentsItemReasonMax = 300;
 export const replaceFreezerSurplusAllocationPathRunIdMax = 120;
 export const replaceFreezerSurplusAllocationBodyBrandMax = 120;
 export const replaceFreezerSurplusAllocationBodyFlavorMax = 120;
@@ -70,6 +127,16 @@ export const replaceFreezerSurplusAllocationBodyAllocationsItemCasesMax = 100000
 export const replaceFreezerSurplusAllocationBodyAllocationsMax = 500;
 export const replaceFreezerSurplusAllocationResponseLotsItemRemainingCasesMin = 0;
 export const replaceFreezerSurplusAllocationResponseCreatedLotOneRemainingCasesMin = 0;
+export const replaceFreezerSurplusAllocationResponseCreatedAdjustmentOneCasesMax = 1000000;
+export const replaceFreezerSurplusAllocationResponseCreatedAdjustmentOneReasonMax = 300;
+export const recordFreezerSurplusAdjustmentPathLotIdMax = 120;
+export const recordFreezerSurplusAdjustmentBodyCasesMax = 1000000;
+export const recordFreezerSurplusAdjustmentBodyReasonMax = 300;
+export const recordFreezerSurplusAdjustmentBodyRunIdMax = 120;
+export const recordFreezerSurplusAdjustmentResponseLotsItemRemainingCasesMin = 0;
+export const recordFreezerSurplusAdjustmentResponseCreatedLotOneRemainingCasesMin = 0;
+export const recordFreezerSurplusAdjustmentResponseCreatedAdjustmentOneCasesMax = 1000000;
+export const recordFreezerSurplusAdjustmentResponseCreatedAdjustmentOneReasonMax = 300;
 export const listMixSurplusResponseLotsItemAmountMadeMin = 0;
 export const listMixSurplusResponseLotsItemAmountUsedMin = 0;
 export const listMixSurplusResponseLotsItemAmountRemainingMin = 0;
@@ -123,6 +190,199 @@ export const deleteRunTemplatesBodyThreeItemsItemRevisionMax = 9007199254740991;
 export const deleteRunTemplatesResponseTemplatesItemRevisionMin = 0;
 export const deleteRunTemplatesResponseTemplatesItemRevisionMax = 9007199254740991;
 export const deleteRunTemplatesResponseTemplatesItemDeletedDefault = false;
+export const getPublishedSourceLibraryReconciliationCaptureResponseRevisionMax = 128;
+export const getPublishedSourceLibraryReconciliationCaptureResponseEvidenceIdRegExp = new RegExp('^[a-f0-9]{64}$');
+export const getPublishedSourceLibraryReconciliationCaptureResponseHealIdMax = 128;
+export const getPublishedSourceLibraryReconciliationCaptureResponseReportSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const getPublishedSourceLibraryReconciliationCaptureResponseReportAutomaticProposalsMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseReportAutomaticProposalsMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseReportStubsMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseReportStubsMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePoolExceptionsApprovedMismatchesMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePoolExceptionsApprovedMismatchesMax = 68;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePoolExceptionsUnresolvedMismatchesMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePoolExceptionsUnresolvedMismatchesMax = 68;
+export const getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsReplacementsMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsReplacementsMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsAliasesInsertedMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsAliasesInsertedMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsRepointedProfilesMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsRepointedProfilesMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsRepointedRunsMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsRepointedRunsMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsDeletedStubsMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsDeletedStubsMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePoolsExpectedMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePoolsExpectedMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePoolsExactMatchesMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePoolsExactMatchesMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePoolsGuardedRenamesMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePoolsGuardedRenamesMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePoolsMissingMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePoolsMissingMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePoolsMismatchesMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePoolsMismatchesMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseAliasesExpectedMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseAliasesExpectedMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseAliasesExactMatchesMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseAliasesExactMatchesMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseAliasesMissingMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseAliasesMissingMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseAliasesMismatchesMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseAliasesMismatchesMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseProfilesInspectedMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseProfilesInspectedMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseProfilesCanonicalMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseProfilesCanonicalMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseProfilesStaleMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseProfilesStaleMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseProfilesNonCanonicalMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseProfilesNonCanonicalMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePendingRunsInspectedMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePendingRunsInspectedMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePendingRunsCanonicalMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePendingRunsCanonicalMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePendingRunsStaleMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePendingRunsStaleMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePendingRunsNonCanonicalMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponsePendingRunsNonCanonicalMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseProtectedHistoryReferencesMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseProtectedHistoryReferencesMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseStubsExpectedMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseStubsExpectedMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseStubsCanonicalExactMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseStubsCanonicalExactMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseStubsCanonicalMissingMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseStubsCanonicalMissingMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseStubsCanonicalMismatchesMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseStubsCanonicalMismatchesMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseStubsDeletedExpectedMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseStubsDeletedExpectedMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseStubsRemainingProtectedMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseStubsRemainingProtectedMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseStubsUnexpectedlyDeletedMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseStubsUnexpectedlyDeletedMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseStubsUnexpectedlyRemainingMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseStubsUnexpectedlyRemainingMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseIdempotencyFingerprintValueRegExp = new RegExp('^[a-f0-9]{64}$');
+export const getPublishedSourceLibraryReconciliationCaptureResponseFailuresItemCheckRegExp = new RegExp('^[A-Za-z0-9_-]{1,80}$');
+export const getPublishedSourceLibraryReconciliationCaptureResponseFailuresItemCountMin = 0;
+export const getPublishedSourceLibraryReconciliationCaptureResponseFailuresItemCountMax = 1000000;
+export const getPublishedSourceLibraryReconciliationCaptureResponseFailuresMax = 20;
+export const captureSourceLibraryReconciliationBodyDeploymentHandoffDeploymentIdMax = 128;
+export const captureSourceLibraryReconciliationBodyDeploymentHandoffDeployedRevisionRegExp = new RegExp('^source-sha256:[a-f0-9]{64}$');
+export const captureSourceLibraryReconciliationBodyDeploymentHandoffAppBuildIdRegExp = new RegExp('^app-build:[a-f0-9-]{36}$');
+export const captureSourceLibraryReconciliationBodyDeploymentHandoffSourceFingerprintSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const captureSourceLibraryReconciliationBodyDeploymentHandoffExpectedRecordSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const captureSourceLibraryReconciliationBodyDeploymentHandoffDatabaseOwnerMax = 128;
+export const captureSourceLibraryReconciliationBodyDeploymentHandoffDatabaseOwnerRegExp = new RegExp('^[A-Za-z_][A-Za-z0-9_$-]*$');
+export const captureSourceLibraryReconciliationBodyExpectedDatabaseOwnerMax = 128;
+export const captureSourceLibraryReconciliationBodyExpectedDatabaseOwnerRegExp = new RegExp('^[A-Za-z_][A-Za-z0-9_$-]*$');
+export const captureSourceLibraryReconciliationResponseRevisionMax = 128;
+export const captureSourceLibraryReconciliationResponseEvidenceIdRegExp = new RegExp('^[a-f0-9]{64}$');
+export const captureSourceLibraryReconciliationResponseHealIdMax = 128;
+export const captureSourceLibraryReconciliationResponseReportSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const captureSourceLibraryReconciliationResponseReportAutomaticProposalsMin = 0;
+export const captureSourceLibraryReconciliationResponseReportAutomaticProposalsMax = 1000000;
+export const captureSourceLibraryReconciliationResponseReportStubsMin = 0;
+export const captureSourceLibraryReconciliationResponseReportStubsMax = 1000000;
+export const captureSourceLibraryReconciliationResponsePoolExceptionsApprovedMismatchesMin = 0;
+export const captureSourceLibraryReconciliationResponsePoolExceptionsApprovedMismatchesMax = 68;
+export const captureSourceLibraryReconciliationResponsePoolExceptionsUnresolvedMismatchesMin = 0;
+export const captureSourceLibraryReconciliationResponsePoolExceptionsUnresolvedMismatchesMax = 68;
+export const captureSourceLibraryReconciliationResponseMarkerResultCountsReplacementsMin = 0;
+export const captureSourceLibraryReconciliationResponseMarkerResultCountsReplacementsMax = 1000000;
+export const captureSourceLibraryReconciliationResponseMarkerResultCountsAliasesInsertedMin = 0;
+export const captureSourceLibraryReconciliationResponseMarkerResultCountsAliasesInsertedMax = 1000000;
+export const captureSourceLibraryReconciliationResponseMarkerResultCountsRepointedProfilesMin = 0;
+export const captureSourceLibraryReconciliationResponseMarkerResultCountsRepointedProfilesMax = 1000000;
+export const captureSourceLibraryReconciliationResponseMarkerResultCountsRepointedRunsMin = 0;
+export const captureSourceLibraryReconciliationResponseMarkerResultCountsRepointedRunsMax = 1000000;
+export const captureSourceLibraryReconciliationResponseMarkerResultCountsDeletedStubsMin = 0;
+export const captureSourceLibraryReconciliationResponseMarkerResultCountsDeletedStubsMax = 1000000;
+export const captureSourceLibraryReconciliationResponsePoolsExpectedMin = 0;
+export const captureSourceLibraryReconciliationResponsePoolsExpectedMax = 1000000;
+export const captureSourceLibraryReconciliationResponsePoolsExactMatchesMin = 0;
+export const captureSourceLibraryReconciliationResponsePoolsExactMatchesMax = 1000000;
+export const captureSourceLibraryReconciliationResponsePoolsGuardedRenamesMin = 0;
+export const captureSourceLibraryReconciliationResponsePoolsGuardedRenamesMax = 1000000;
+export const captureSourceLibraryReconciliationResponsePoolsMissingMin = 0;
+export const captureSourceLibraryReconciliationResponsePoolsMissingMax = 1000000;
+export const captureSourceLibraryReconciliationResponsePoolsMismatchesMin = 0;
+export const captureSourceLibraryReconciliationResponsePoolsMismatchesMax = 1000000;
+export const captureSourceLibraryReconciliationResponseAliasesExpectedMin = 0;
+export const captureSourceLibraryReconciliationResponseAliasesExpectedMax = 1000000;
+export const captureSourceLibraryReconciliationResponseAliasesExactMatchesMin = 0;
+export const captureSourceLibraryReconciliationResponseAliasesExactMatchesMax = 1000000;
+export const captureSourceLibraryReconciliationResponseAliasesMissingMin = 0;
+export const captureSourceLibraryReconciliationResponseAliasesMissingMax = 1000000;
+export const captureSourceLibraryReconciliationResponseAliasesMismatchesMin = 0;
+export const captureSourceLibraryReconciliationResponseAliasesMismatchesMax = 1000000;
+export const captureSourceLibraryReconciliationResponseProfilesInspectedMin = 0;
+export const captureSourceLibraryReconciliationResponseProfilesInspectedMax = 1000000;
+export const captureSourceLibraryReconciliationResponseProfilesCanonicalMin = 0;
+export const captureSourceLibraryReconciliationResponseProfilesCanonicalMax = 1000000;
+export const captureSourceLibraryReconciliationResponseProfilesStaleMin = 0;
+export const captureSourceLibraryReconciliationResponseProfilesStaleMax = 1000000;
+export const captureSourceLibraryReconciliationResponseProfilesNonCanonicalMin = 0;
+export const captureSourceLibraryReconciliationResponseProfilesNonCanonicalMax = 1000000;
+export const captureSourceLibraryReconciliationResponsePendingRunsInspectedMin = 0;
+export const captureSourceLibraryReconciliationResponsePendingRunsInspectedMax = 1000000;
+export const captureSourceLibraryReconciliationResponsePendingRunsCanonicalMin = 0;
+export const captureSourceLibraryReconciliationResponsePendingRunsCanonicalMax = 1000000;
+export const captureSourceLibraryReconciliationResponsePendingRunsStaleMin = 0;
+export const captureSourceLibraryReconciliationResponsePendingRunsStaleMax = 1000000;
+export const captureSourceLibraryReconciliationResponsePendingRunsNonCanonicalMin = 0;
+export const captureSourceLibraryReconciliationResponsePendingRunsNonCanonicalMax = 1000000;
+export const captureSourceLibraryReconciliationResponseProtectedHistoryReferencesMin = 0;
+export const captureSourceLibraryReconciliationResponseProtectedHistoryReferencesMax = 1000000;
+export const captureSourceLibraryReconciliationResponseStubsExpectedMin = 0;
+export const captureSourceLibraryReconciliationResponseStubsExpectedMax = 1000000;
+export const captureSourceLibraryReconciliationResponseStubsCanonicalExactMin = 0;
+export const captureSourceLibraryReconciliationResponseStubsCanonicalExactMax = 1000000;
+export const captureSourceLibraryReconciliationResponseStubsCanonicalMissingMin = 0;
+export const captureSourceLibraryReconciliationResponseStubsCanonicalMissingMax = 1000000;
+export const captureSourceLibraryReconciliationResponseStubsCanonicalMismatchesMin = 0;
+export const captureSourceLibraryReconciliationResponseStubsCanonicalMismatchesMax = 1000000;
+export const captureSourceLibraryReconciliationResponseStubsDeletedExpectedMin = 0;
+export const captureSourceLibraryReconciliationResponseStubsDeletedExpectedMax = 1000000;
+export const captureSourceLibraryReconciliationResponseStubsRemainingProtectedMin = 0;
+export const captureSourceLibraryReconciliationResponseStubsRemainingProtectedMax = 1000000;
+export const captureSourceLibraryReconciliationResponseStubsUnexpectedlyDeletedMin = 0;
+export const captureSourceLibraryReconciliationResponseStubsUnexpectedlyDeletedMax = 1000000;
+export const captureSourceLibraryReconciliationResponseStubsUnexpectedlyRemainingMin = 0;
+export const captureSourceLibraryReconciliationResponseStubsUnexpectedlyRemainingMax = 1000000;
+export const captureSourceLibraryReconciliationResponseIdempotencyFingerprintValueRegExp = new RegExp('^[a-f0-9]{64}$');
+export const captureSourceLibraryReconciliationResponseFailuresItemCheckRegExp = new RegExp('^[A-Za-z0-9_-]{1,80}$');
+export const captureSourceLibraryReconciliationResponseFailuresItemCountMin = 0;
+export const captureSourceLibraryReconciliationResponseFailuresItemCountMax = 1000000;
+export const captureSourceLibraryReconciliationResponseFailuresMax = 20;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponseRevisionRegExp = new RegExp('^source-sha256:[a-f0-9]{64}$');
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponseReportSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsExpectedMin = 0;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsExpectedMax = 1000000;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsExactMatchesMin = 0;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsExactMatchesMax = 1000000;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsGuardedRenamesMin = 0;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsGuardedRenamesMax = 1000000;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsMissingMin = 0;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsMissingMax = 1000000;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsMismatchesMin = 0;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsMismatchesMax = 1000000;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolExceptionsApprovedMismatchesMin = 0;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolExceptionsApprovedMismatchesMax = 68;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolExceptionsUnresolvedMismatchesMin = 0;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolExceptionsUnresolvedMismatchesMax = 68;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsTotalMin = 0;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsTotalMax = 68;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsReturnedMin = 0;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsReturnedMax = 10;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsOmittedMin = 0;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsOmittedMax = 68;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsItemsItemIdMax = 128;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsItemsItemSourceNameMax = 256;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsItemsItemDifferingFieldsMax = 8;
+export const getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsItemsMax = 10;
 export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesConversationTurnsMin = 0;
 export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesRetiredFacilityFactsMin = 0;
 export const getProfileDataHealthWorkspaceResponseWorkspaceAiRetentionCandidatesIncidentGeneratedTextToLabelMin = 0;
@@ -153,6 +413,16 @@ export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationS
 export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryUnexpectedStubsMin = 0;
 export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryProtectedHistoryReferencesMin = 0;
 export const getProfileDataHealthWorkspaceResponseWorkspaceSourceReconciliationSummaryOmittedFindingsMin = 0;
+export const listAuditLogsResponseLogsItemChangesReasonCodeMax = 200;
+export const listAuditLogsResponseLogsItemChangesTargetIdOneMax = 200;
+export const listAuditLogsResponseLogsItemChangesTargetTypeMax = 200;
+export const listAuditLogsResponseLogsItemChangesAuthorizedByMax = 200;
+export const listAuditLogsResponseLogsItemChangesFromMax = 200;
+export const listAuditLogsResponseLogsItemChangesToMax = 200;
+export const listAuditLogsResponseLogsItemChangesMethodMax = 200;
+export const listAuditLogsResponseLogsItemChangesRequestIdMax = 200;
+export const listAuditLogsResponseLogsItemChangesFieldNamesMax = 8;
+export const listAuditLogsResponseLogsItemChangesCorrelationIdMax = 128;
 export const listServerJobsResponseProgressMin = 0;
 export const listServerJobsResponseProgressMax = 100;
 export const createServerJobBodyTypeRegExp = new RegExp('^[a-z][a-z0-9-]{1,63}$');
@@ -237,6 +507,8 @@ export const getSyncTodayResponseOneTwoResetEpochMin = 0;
 export const getSyncTodayResponseTwoSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
 export const getSyncTodayResponseTwoResetEpochMin = 0;
 export const getSyncTodayResponseTwoCanonicalRevisionMin = 0;
+export const getSyncTodayResponseTwoServerTimeMin = 0;
+export const getSyncTodayResponseTwoOperationalProjectionOneCalculationRevisionMin = 0;
 export const putSyncTodayQueryEpochMin = 0;
 export const putSyncTodayBodySnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
 export const putSyncTodayBodyPayloadTwoBaseSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
@@ -304,17 +576,29 @@ export const submitManualSectionEditBodySevenOneObservedGenerationMax = 160;
 export const submitManualSectionEditBodySevenOneBaseRevisionMin = 0;
 export const submitManualSectionEditBodySevenOneResetEpochMin = 0;
 export const submitManualSectionEditBodySevenOneDeviceIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
-export const submitManualSectionEditBodyEightIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
-export const submitManualSectionEditBodyEightRunIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
-export const submitManualSectionEditBodyEightValuesMinOne = 0;
-export const submitManualSectionEditBodyEightValuesMaxOne = 1000000;
-export const submitManualSectionEditBodyEightBaseValuesMinOne = 0;
-export const submitManualSectionEditBodyEightBaseValuesMaxOne = 1000000;
-export const submitManualSectionEditBodyEightObservedGenerationMax = 160;
-export const submitManualSectionEditBodyEightBaseRevisionMin = 0;
-export const submitManualSectionEditBodyEightResetEpochMin = 0;
-export const submitManualSectionEditBodyEightDeviceIdMax = 160;
-export const submitManualSectionEditBodyEightDeviceIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyEightOneIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyEightOneRunIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyEightOneObservedGenerationMax = 160;
+export const submitManualSectionEditBodyEightOneBaseRevisionMin = 0;
+export const submitManualSectionEditBodyEightOneResetEpochMin = 0;
+export const submitManualSectionEditBodyEightOneDeviceIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyNineOneIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyNineOneRunIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyNineOneObservedGenerationMax = 160;
+export const submitManualSectionEditBodyNineOneBaseRevisionMin = 0;
+export const submitManualSectionEditBodyNineOneResetEpochMin = 0;
+export const submitManualSectionEditBodyNineOneDeviceIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyOnezeroIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyOnezeroRunIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
+export const submitManualSectionEditBodyOnezeroValuesMinOne = 0;
+export const submitManualSectionEditBodyOnezeroValuesMaxOne = 1000000;
+export const submitManualSectionEditBodyOnezeroBaseValuesMinOne = 0;
+export const submitManualSectionEditBodyOnezeroBaseValuesMaxOne = 1000000;
+export const submitManualSectionEditBodyOnezeroObservedGenerationMax = 160;
+export const submitManualSectionEditBodyOnezeroBaseRevisionMin = 0;
+export const submitManualSectionEditBodyOnezeroResetEpochMin = 0;
+export const submitManualSectionEditBodyOnezeroDeviceIdMax = 160;
+export const submitManualSectionEditBodyOnezeroDeviceIdRegExp = new RegExp('^[A-Za-z0-9:_-]{1,160}$');
 export const submitManualSectionEditResponseCanonicalRevisionMin = 0;
 export const submitManualSectionEditResponseServerTimeMin = 0;
 export const submitManualSectionEditResponseSnapshotIdRegExp = new RegExp('^[a-f0-9]{64}$');
@@ -347,6 +631,13 @@ export const applyImportOperationBodySourceKeyMax = 300;
 export const applyImportOperationBodySourceLabelMax = 300;
 export const applyImportOperationBodyRequestHashRegExp = new RegExp('^[a-f0-9]{64}$');
 export const applyImportOperationBodyExpectedStateHashRegExp = new RegExp('^[a-f0-9]{64}$');
+export const applyImportOperationBodySourceEvidenceSourceTextMax = 100000;
+export const applyImportOperationBodySourceEvidenceParseVersionMax = 24;
+export const listDistillationApplyEvidenceQueryLimitDefault = 20;
+export const listDistillationApplyEvidenceQueryLimitMax = 20;
+export const listDistillationApplyEvidenceQueryCursorMax = 512;
+export const listDistillationApplyEvidenceResponseRecordsItemActorIdSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const listDistillationApplyEvidenceResponseRecordsItemSourceSha256RegExp = new RegExp('^[a-f0-9]{64}$');
 export const getImportOperationPathOperationIdMin = 16;
 export const getImportOperationPathOperationIdMax = 120;
 export const undoImportOperationPathOperationIdMin = 16;
@@ -356,12 +647,89 @@ export const undoImportOperationBodyExpectedResultHashRegExp = new RegExp('^[a-f
 
 
 /**
- * Returns server health status
+ * Public, database-independent version metadata loaded from the sealed build artifact. Application build IDs are not platform Build UUIDs. Runtime-reported platform IDs are informational, not verified handoffs. A source match alone never authorizes production release.
+ * @summary Immutable application build version
+ */
+
+
+export const GetBuildInfoResponse = zod.object({
+  "schemaVersion": zod.literal(1),
+  "kind": zod.enum(['app-build-info']),
+  "appBuildId": zod.string().regex(getBuildInfoResponseAppBuildIdRegExp).describe('Application-owned artifact-set ID, not a Replit Build UUID.'),
+  "sourcePolicy": zod.enum(['production-source-v2']),
+  "sourceFingerprintSha256": zod.string().regex(getBuildInfoResponseSourceFingerprintSha256RegExp),
+  "gitRevision": zod.string().regex(getBuildInfoResponseGitRevisionRegExp).nullable(),
+  "gitBinding": zod.enum(['verified', 'unavailable']),
+  "completedAt": zod.coerce.date(),
+  "buildMode": zod.enum(['release', 'development']),
+  "platformDeploymentId": zod.string().regex(getBuildInfoResponsePlatformDeploymentIdRegExp).nullable(),
+  "platformBuildId": zod.string().regex(getBuildInfoResponsePlatformBuildIdRegExp).nullable(),
+  "platformIdentitySource": zod.enum(['runtime-reported', 'unavailable'])
+})
+
+
+/**
+ * Reports core API readiness and optional capability degradation. Startup completion, database reachability, and required audit-log protection are hard readiness gates. An unavailable AI credential or degraded background workers are reported as warnings and do not by themselves make the core API unready. The AI signal reports credential configuration only; it does not probe the remote provider.
  * @summary Health check
  */
 export const HealthCheckResponse = zod.object({
-  "status": zod.string()
-})
+  "status": zod.enum(['ok', 'starting', 'degraded']).describe('`ok` means core-ready; `starting` or `degraded` means a hard readiness gate failed.'),
+  "checks": zod.object({
+  "process": zod.enum(['ok', 'warning', 'error', 'pending']),
+  "startup": zod.enum(['ok', 'warning', 'error', 'pending']),
+  "database": zod.enum(['ok', 'warning', 'error', 'pending']),
+  "auditProtection": zod.enum(['ok', 'warning', 'error', 'pending']),
+  "dependencies": zod.enum(['ok', 'warning', 'error', 'pending']),
+  "backgroundWorkers": zod.enum(['ok', 'warning', 'error', 'pending'])
+}).describe('Statuses for core gates and optional dependencies. A warning on dependencies or backgroundWorkers does not block HTTP 200.'),
+  "capabilities": zod.object({
+  "ai": zod.object({
+  "status": zod.enum(['configured', 'not_configured', 'pending']),
+  "detail": zod.enum(['ai_provider_not_configured']).optional()
+}).describe('AI credential configuration, not remote provider reachability.')
+}),
+  "startup": zod.object({
+  "phase": zod.enum(['starting', 'ready', 'failed']),
+  "stage": zod.string().nullable(),
+  "durationMs": zod.number(),
+  "errorCode": zod.string().optional()
+}).optional(),
+  "diagnostics": zod.record(zod.string(), zod.unknown()).optional().describe('Bounded operational diagnostics; excludes provider credentials and request payloads.'),
+  "correlationId": zod.string(),
+  "timestamp": zod.coerce.date()
+}).describe('Readiness response. HTTP 200 means startup, database, and required audit protection are ready, even when optional checks report warnings. HTTP 503 is reserved for a failed core readiness gate.')
+
+
+/**
+ * Canonical readiness probe. Returns 503 only while startup, database, or required audit-log protection is not ready. AI credential and background-worker degradation are non-blocking warnings.
+ * @summary Core API readiness
+ */
+export const ReadinessCheckResponse = zod.object({
+  "status": zod.enum(['ok', 'starting', 'degraded']).describe('`ok` means core-ready; `starting` or `degraded` means a hard readiness gate failed.'),
+  "checks": zod.object({
+  "process": zod.enum(['ok', 'warning', 'error', 'pending']),
+  "startup": zod.enum(['ok', 'warning', 'error', 'pending']),
+  "database": zod.enum(['ok', 'warning', 'error', 'pending']),
+  "auditProtection": zod.enum(['ok', 'warning', 'error', 'pending']),
+  "dependencies": zod.enum(['ok', 'warning', 'error', 'pending']),
+  "backgroundWorkers": zod.enum(['ok', 'warning', 'error', 'pending'])
+}).describe('Statuses for core gates and optional dependencies. A warning on dependencies or backgroundWorkers does not block HTTP 200.'),
+  "capabilities": zod.object({
+  "ai": zod.object({
+  "status": zod.enum(['configured', 'not_configured', 'pending']),
+  "detail": zod.enum(['ai_provider_not_configured']).optional()
+}).describe('AI credential configuration, not remote provider reachability.')
+}),
+  "startup": zod.object({
+  "phase": zod.enum(['starting', 'ready', 'failed']),
+  "stage": zod.string().nullable(),
+  "durationMs": zod.number(),
+  "errorCode": zod.string().optional()
+}).optional(),
+  "diagnostics": zod.record(zod.string(), zod.unknown()).optional().describe('Bounded operational diagnostics; excludes provider credentials and request payloads.'),
+  "correlationId": zod.string(),
+  "timestamp": zod.coerce.date()
+}).describe('Readiness response. HTTP 200 means startup, database, and required audit protection are ready, even when optional checks report warnings. HTTP 503 is reserved for a failed core readiness gate.')
 
 
 /**
@@ -385,7 +753,7 @@ export const SignUpResponse = zod.object({
   "user": zod.object({
   "userId": zod.string(),
   "role": zod.string().describe('The name of the role assigned to this user.'),
-  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login "Get Started" overview.'),
@@ -419,7 +787,7 @@ export const AcceptStaffInvitationResponse = zod.object({
   "user": zod.object({
   "userId": zod.string(),
   "role": zod.string().describe('The name of the role assigned to this user.'),
-  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login "Get Started" overview.'),
@@ -467,7 +835,7 @@ export const SignInResponse = zod.object({
   "user": zod.object({
   "userId": zod.string(),
   "role": zod.string().describe('The name of the role assigned to this user.'),
-  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login "Get Started" overview.'),
@@ -506,7 +874,7 @@ export const ChangePasswordResponse = zod.object({
   "user": zod.object({
   "userId": zod.string(),
   "role": zod.string().describe('The name of the role assigned to this user.'),
-  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login "Get Started" overview.'),
@@ -1355,6 +1723,520 @@ export const ListQualityChecksResponse = zod.array(ListQualityChecksResponseItem
 
 
 /**
+ * Uses the authenticated facility scope. An ingredient without one unambiguous explicit target is returned as not-evaluated; crust targets are included only if the import contract provides an explicit value.
+ * @summary Resolve explicit imported and reviewed QC weight targets
+ */
+
+
+
+export const GetQcTargetsQueryParams = zod.object({
+  "profileKey": zod.coerce.string().min(1).max(getQcTargetsQueryProfileKeyMax)
+})
+
+export const GetQcTargetsResponse = zod.object({
+  "profileKey": zod.string(),
+  "targets": zod.array(zod.object({
+  "ingredientId": zod.string(),
+  "ingredientName": zod.string(),
+  "targetValue": zod.number().nullable(),
+  "unit": zod.string().nullable(),
+  "toleranceValue": zod.number().nullable(),
+  "source": zod.enum(['spec-import', 'qc-override', 'not-configured']),
+  "state": zod.enum(['configured', 'not-evaluated']),
+  "reason": zod.string().optional(),
+  "overrideEventId": zod.int().optional()
+}))
+})
+
+
+/**
+ * Manager-only, append-only target setting. A null target, unit, and tolerance together clear the override and restore spec-import resolution.
+ * @summary Add a reviewed QC target override or clear an existing override
+ */
+
+
+
+
+
+
+
+export const SetQcTargetBody = zod.object({
+  "operationId": zod.uuid(),
+  "profileKey": zod.string().min(1).max(setQcTargetBodyProfileKeyMax),
+  "ingredientId": zod.string().min(1).max(setQcTargetBodyIngredientIdMax),
+  "targetValue": zod.number().gt(setQcTargetBodyTargetValueExclusiveMin).nullable(),
+  "unit": zod.union([zod.literal('oz'),zod.literal('g'),zod.literal('lb'),zod.literal('kg'),zod.literal(null)]).nullable(),
+  "toleranceValue": zod.number().min(setQcTargetBodyToleranceValueMin).nullable(),
+  "reason": zod.string().min(1).max(setQcTargetBodyReasonMax)
+})
+
+export const SetQcTargetResponse = zod.object({
+  "event": zod.object({
+  "id": zod.int(),
+  "operationId": zod.uuid(),
+  "recordId": zod.uuid(),
+  "eventType": zod.enum(['lot', 'weight', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "runId": zod.string().nullable(),
+  "profileKey": zod.string().nullable(),
+  "ingredientId": zod.string().nullable(),
+  "ingredientName": zod.string().nullable(),
+  "station": zod.string().nullable(),
+  "relatedEventId": zod.string().nullable(),
+  "actorId": zod.string().nullable(),
+  "payload": zod.record(zod.string(), zod.unknown()),
+  "createdAt": zod.coerce.date(),
+  "corrected": zod.boolean().optional(),
+  "redactedFields": zod.array(zod.string()).optional()
+})
+})
+
+
+/**
+ * Multiple lots for the same run and ingredient are retained as separate events.
+ * @summary Record an ingredient lot for a production run
+ */
+
+
+
+
+
+
+export const RecordQcLotBody = zod.object({
+  "operationId": zod.uuid(),
+  "runId": zod.string().min(1).max(recordQcLotBodyRunIdMax),
+  "ingredientId": zod.string().min(1).max(recordQcLotBodyIngredientIdMax),
+  "station": zod.enum(['dough', 'sauce', 'frontline', 'warehouse', 'packaging', 'other']),
+  "lotNumber": zod.string().min(1).max(recordQcLotBodyLotNumberMax),
+  "note": zod.string().max(recordQcLotBodyNoteMax).optional()
+})
+
+export const RecordQcLotResponse = zod.object({
+  "event": zod.object({
+  "id": zod.int(),
+  "operationId": zod.uuid(),
+  "recordId": zod.uuid(),
+  "eventType": zod.enum(['lot', 'weight', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "runId": zod.string().nullable(),
+  "profileKey": zod.string().nullable(),
+  "ingredientId": zod.string().nullable(),
+  "ingredientName": zod.string().nullable(),
+  "station": zod.string().nullable(),
+  "relatedEventId": zod.string().nullable(),
+  "actorId": zod.string().nullable(),
+  "payload": zod.record(zod.string(), zod.unknown()),
+  "createdAt": zod.coerce.date(),
+  "corrected": zod.boolean().optional(),
+  "redactedFields": zod.array(zod.string()).optional()
+})
+})
+
+
+/**
+ * The server resolves and snapshots the target. Missing, conflicting, or unit-mismatched targets produce not-evaluated, never an inferred result. Out-of-tolerance results require a note.
+ * @summary Record a pre-run or 30-minute ingredient weight check
+ */
+
+
+
+
+
+
+
+export const RecordQcWeightCheckBody = zod.object({
+  "operationId": zod.uuid(),
+  "runId": zod.string().min(1).max(recordQcWeightCheckBodyRunIdMax),
+  "profileKey": zod.string().min(1).max(recordQcWeightCheckBodyProfileKeyMax),
+  "ingredientId": zod.string().min(1).max(recordQcWeightCheckBodyIngredientIdMax),
+  "checkType": zod.enum(['pre-run', '30-minute']),
+  "actualValue": zod.number().gt(recordQcWeightCheckBodyActualValueExclusiveMin).max(recordQcWeightCheckBodyActualValueMax),
+  "actualUnit": zod.enum(['oz', 'g', 'lb', 'kg']),
+  "note": zod.string().max(recordQcWeightCheckBodyNoteMax).optional()
+})
+
+export const RecordQcWeightCheckResponse = zod.object({
+  "event": zod.object({
+  "id": zod.int(),
+  "operationId": zod.uuid(),
+  "recordId": zod.uuid(),
+  "eventType": zod.enum(['lot', 'weight', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "runId": zod.string().nullable(),
+  "profileKey": zod.string().nullable(),
+  "ingredientId": zod.string().nullable(),
+  "ingredientName": zod.string().nullable(),
+  "station": zod.string().nullable(),
+  "relatedEventId": zod.string().nullable(),
+  "actorId": zod.string().nullable(),
+  "payload": zod.record(zod.string(), zod.unknown()),
+  "createdAt": zod.coerce.date(),
+  "corrected": zod.boolean().optional(),
+  "redactedFields": zod.array(zod.string()).optional()
+})
+})
+
+
+/**
+ * @summary Read QC records and review state for one run
+ */
+
+
+
+export const GetQcRunParams = zod.object({
+  "runId": zod.coerce.string().min(1).max(getQcRunPathRunIdMax)
+})
+
+export const GetQcRunResponse = zod.object({
+  "runId": zod.string(),
+  "items": zod.array(zod.object({
+  "id": zod.int(),
+  "operationId": zod.uuid(),
+  "recordId": zod.uuid(),
+  "eventType": zod.enum(['lot', 'weight', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "runId": zod.string().nullable(),
+  "profileKey": zod.string().nullable(),
+  "ingredientId": zod.string().nullable(),
+  "ingredientName": zod.string().nullable(),
+  "station": zod.string().nullable(),
+  "relatedEventId": zod.string().nullable(),
+  "actorId": zod.string().nullable(),
+  "payload": zod.record(zod.string(), zod.unknown()),
+  "createdAt": zod.coerce.date(),
+  "corrected": zod.boolean().optional(),
+  "redactedFields": zod.array(zod.string()).optional()
+})),
+  "hasMore": zod.boolean(),
+  "nextCursor": zod.int().nullable(),
+  "weightCheckEvents": zod.array(zod.object({
+  "ingredientId": zod.string(),
+  "checkType": zod.enum(['pre-run', '30-minute']),
+  "createdAt": zod.coerce.date()
+})).describe('Weight-check timeline entries for run cadence reminders, newest first. The server returns at most 5000 records.'),
+  "weightCheckEventsComplete": zod.boolean().describe('False when the 5000-record limit truncated the timeline.'),
+  "signoff": zod.union([zod.object({
+  "eventId": zod.int(),
+  "actorId": zod.string().nullable(),
+  "createdAt": zod.coerce.date(),
+  "note": zod.string(),
+  "signedOff": zod.boolean(),
+  "reopened": zod.boolean()
+}),zod.null()])
+})
+
+
+/**
+ * Snapshots the visible run footprint and its unknown/incomplete state. This does not change the manual run allergen field or block production.
+ * @summary Record the non-blocking pre-run allergen and staged-ingredient review
+ */
+
+
+
+
+
+
+
+
+
+
+
+
+
+export const RecordQcAllergenReviewBody = zod.object({
+  "operationId": zod.uuid(),
+  "runId": zod.string().min(1).max(recordQcAllergenReviewBodyRunIdMax),
+  "footprintReviewed": zod.literal(true),
+  "footprint": zod.object({
+  "status": zod.enum(['complete', 'incomplete', 'unavailable']),
+  "allergens": zod.array(zod.enum(['egg', 'soy', 'milk', 'wheat', 'peanuts', 'tree nuts', 'fish', 'shellfish', 'sesame'])).max(recordQcAllergenReviewBodyFootprintAllergensMax),
+  "unknownIngredients": zod.array(zod.string().min(1).max(recordQcAllergenReviewBodyFootprintUnknownIngredientsItemMax)).max(recordQcAllergenReviewBodyFootprintUnknownIngredientsMax),
+  "missingComponents": zod.array(zod.string().min(1).max(recordQcAllergenReviewBodyFootprintMissingComponentsItemMax)).max(recordQcAllergenReviewBodyFootprintMissingComponentsMax)
+}),
+  "stagedIngredients": zod.array(zod.object({
+  "area": zod.enum(['Dough', 'Sauce', 'Frontline']),
+  "name": zod.string().min(1).max(recordQcAllergenReviewBodyStagedIngredientsItemNameMax),
+  "quantity": zod.string().min(1).max(recordQcAllergenReviewBodyStagedIngredientsItemQuantityMax),
+  "unit": zod.string().min(1).max(recordQcAllergenReviewBodyStagedIngredientsItemUnitMax),
+  "staged": zod.boolean()
+})).max(recordQcAllergenReviewBodyStagedIngredientsMax),
+  "stagedIngredientsStatus": zod.enum(['reviewed', 'not-reviewed', 'unknown']),
+  "cleaningStatus": zod.enum(['verified', 'unverified', 'unknown', 'not-applicable']),
+  "note": zod.string().max(recordQcAllergenReviewBodyNoteMax).optional()
+})
+
+export const RecordQcAllergenReviewResponse = zod.object({
+  "event": zod.object({
+  "id": zod.int(),
+  "operationId": zod.uuid(),
+  "recordId": zod.uuid(),
+  "eventType": zod.enum(['lot', 'weight', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "runId": zod.string().nullable(),
+  "profileKey": zod.string().nullable(),
+  "ingredientId": zod.string().nullable(),
+  "ingredientName": zod.string().nullable(),
+  "station": zod.string().nullable(),
+  "relatedEventId": zod.string().nullable(),
+  "actorId": zod.string().nullable(),
+  "payload": zod.record(zod.string(), zod.unknown()),
+  "createdAt": zod.coerce.date(),
+  "corrected": zod.boolean().optional(),
+  "redactedFields": zod.array(zod.string()).optional()
+})
+})
+
+
+/**
+ * Cleaning is recorded without creating a production or shipping hold.
+ * @summary Record cleaning method and timing
+ */
+
+
+
+
+export const RecordQcCleaningBody = zod.object({
+  "operationId": zod.uuid(),
+  "runId": zod.string().min(1).max(recordQcCleaningBodyRunIdMax),
+  "method": zod.enum(['standard', 'deep', 'chemical', 'other']),
+  "startedAt": zod.coerce.date(),
+  "endedAt": zod.coerce.date(),
+  "note": zod.string().max(recordQcCleaningBodyNoteMax).optional()
+})
+
+export const RecordQcCleaningResponse = zod.object({
+  "event": zod.object({
+  "id": zod.int(),
+  "operationId": zod.uuid(),
+  "recordId": zod.uuid(),
+  "eventType": zod.enum(['lot', 'weight', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "runId": zod.string().nullable(),
+  "profileKey": zod.string().nullable(),
+  "ingredientId": zod.string().nullable(),
+  "ingredientName": zod.string().nullable(),
+  "station": zod.string().nullable(),
+  "relatedEventId": zod.string().nullable(),
+  "actorId": zod.string().nullable(),
+  "payload": zod.record(zod.string(), zod.unknown()),
+  "createdAt": zod.coerce.date(),
+  "corrected": zod.boolean().optional(),
+  "redactedFields": zod.array(zod.string()).optional()
+})
+})
+
+
+/**
+ * @summary Independently verify a cleaning record
+ */
+
+
+
+export const VerifyQcCleaningParams = zod.object({
+  "eventId": zod.coerce.number().int().min(1)
+})
+
+
+
+
+export const VerifyQcCleaningBody = zod.object({
+  "operationId": zod.uuid(),
+  "note": zod.string().max(verifyQcCleaningBodyNoteMax).optional()
+})
+
+export const VerifyQcCleaningResponse = zod.object({
+  "event": zod.object({
+  "id": zod.int(),
+  "operationId": zod.uuid(),
+  "recordId": zod.uuid(),
+  "eventType": zod.enum(['lot', 'weight', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "runId": zod.string().nullable(),
+  "profileKey": zod.string().nullable(),
+  "ingredientId": zod.string().nullable(),
+  "ingredientName": zod.string().nullable(),
+  "station": zod.string().nullable(),
+  "relatedEventId": zod.string().nullable(),
+  "actorId": zod.string().nullable(),
+  "payload": zod.record(zod.string(), zod.unknown()),
+  "createdAt": zod.coerce.date(),
+  "corrected": zod.boolean().optional(),
+  "redactedFields": zod.array(zod.string()).optional()
+})
+})
+
+
+/**
+ * A new QC record after sign-off reopens review for that run.
+ * @summary Sign off the current QC record set for a run
+ */
+
+
+
+
+export const SignoffQcRunBody = zod.object({
+  "operationId": zod.uuid(),
+  "runId": zod.string().min(1).max(signoffQcRunBodyRunIdMax),
+  "note": zod.string().max(signoffQcRunBodyNoteMax).optional()
+})
+
+export const SignoffQcRunResponse = zod.object({
+  "event": zod.object({
+  "id": zod.int(),
+  "operationId": zod.uuid(),
+  "recordId": zod.uuid(),
+  "eventType": zod.enum(['lot', 'weight', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "runId": zod.string().nullable(),
+  "profileKey": zod.string().nullable(),
+  "ingredientId": zod.string().nullable(),
+  "ingredientName": zod.string().nullable(),
+  "station": zod.string().nullable(),
+  "relatedEventId": zod.string().nullable(),
+  "actorId": zod.string().nullable(),
+  "payload": zod.record(zod.string(), zod.unknown()),
+  "createdAt": zod.coerce.date(),
+  "corrected": zod.boolean().optional(),
+  "redactedFields": zod.array(zod.string()).optional()
+})
+})
+
+
+/**
+ * @summary Read bounded, facility-scoped QC history
+ */
+
+
+
+
+
+
+export const GetQcHistoryQueryParams = zod.object({
+  "from": zod.coerce.string().optional().describe('Inclusive ISO date or timestamp'),
+  "to": zod.coerce.string().optional().describe('Inclusive ISO date or timestamp'),
+  "runId": zod.coerce.string().max(getQcHistoryQueryRunIdMax).optional(),
+  "ingredientId": zod.coerce.string().max(getQcHistoryQueryIngredientIdMax).optional(),
+  "station": zod.enum(['dough', 'sauce', 'frontline', 'warehouse', 'packaging', 'other']).optional(),
+  "limit": zod.coerce.number().int().min(1).max(getQcHistoryQueryLimitMax).default(getQcHistoryQueryLimitDefault),
+  "cursor": zod.coerce.number().int().min(1).optional()
+})
+
+export const GetQcHistoryResponse = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.int(),
+  "operationId": zod.uuid(),
+  "recordId": zod.uuid(),
+  "eventType": zod.enum(['lot', 'weight', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "runId": zod.string().nullable(),
+  "profileKey": zod.string().nullable(),
+  "ingredientId": zod.string().nullable(),
+  "ingredientName": zod.string().nullable(),
+  "station": zod.string().nullable(),
+  "relatedEventId": zod.string().nullable(),
+  "actorId": zod.string().nullable(),
+  "payload": zod.record(zod.string(), zod.unknown()),
+  "createdAt": zod.coerce.date(),
+  "corrected": zod.boolean().optional(),
+  "redactedFields": zod.array(zod.string()).optional()
+})),
+  "hasMore": zod.boolean(),
+  "nextCursor": zod.int().nullable()
+})
+
+
+/**
+ * QC manager or app manager capability required.
+ * @summary Export full filtered QC history as CSV
+ */
+
+
+
+
+export const ExportQcHistoryCsvQueryParams = zod.object({
+  "from": zod.coerce.string().optional(),
+  "to": zod.coerce.string().optional(),
+  "runId": zod.coerce.string().max(exportQcHistoryCsvQueryRunIdMax).optional(),
+  "ingredientId": zod.coerce.string().max(exportQcHistoryCsvQueryIngredientIdMax).optional(),
+  "station": zod.enum(['dough', 'sauce', 'frontline', 'warehouse', 'packaging', 'other']).optional()
+})
+
+export const ExportQcHistoryCsvResponse = zod.unknown()
+
+
+/**
+ * @summary Append an audited correction to a QC record
+ */
+
+
+
+export const CorrectQcEventParams = zod.object({
+  "eventId": zod.coerce.number().int().min(1)
+})
+
+
+
+
+export const CorrectQcEventBody = zod.object({
+  "operationId": zod.uuid(),
+  "reason": zod.string().min(1).max(correctQcEventBodyReasonMax),
+  "replacement": zod.record(zod.string(), zod.unknown())
+})
+
+export const CorrectQcEventResponse = zod.object({
+  "event": zod.object({
+  "id": zod.int(),
+  "operationId": zod.uuid(),
+  "recordId": zod.uuid(),
+  "eventType": zod.enum(['lot', 'weight', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "runId": zod.string().nullable(),
+  "profileKey": zod.string().nullable(),
+  "ingredientId": zod.string().nullable(),
+  "ingredientName": zod.string().nullable(),
+  "station": zod.string().nullable(),
+  "relatedEventId": zod.string().nullable(),
+  "actorId": zod.string().nullable(),
+  "payload": zod.record(zod.string(), zod.unknown()),
+  "createdAt": zod.coerce.date(),
+  "corrected": zod.boolean().optional(),
+  "redactedFields": zod.array(zod.string()).optional()
+})
+})
+
+
+/**
+ * @summary Append a privacy redaction event for selected QC fields
+ */
+
+
+
+export const RedactQcEventParams = zod.object({
+  "eventId": zod.coerce.number().int().min(1)
+})
+
+
+
+
+
+export const RedactQcEventBody = zod.object({
+  "operationId": zod.uuid(),
+  "reason": zod.string().min(1).max(redactQcEventBodyReasonMax),
+  "fields": zod.array(zod.enum(['actorId', 'ingredientName', 'payload.note', 'payload.lotNumber'])).min(1).max(redactQcEventBodyFieldsMax)
+})
+
+export const RedactQcEventResponse = zod.object({
+  "event": zod.object({
+  "id": zod.int(),
+  "operationId": zod.uuid(),
+  "recordId": zod.uuid(),
+  "eventType": zod.enum(['lot', 'weight', 'allergen-review', 'cleaning', 'cleaning-verification', 'target-setting', 'run-signoff', 'correction', 'redaction']),
+  "runId": zod.string().nullable(),
+  "profileKey": zod.string().nullable(),
+  "ingredientId": zod.string().nullable(),
+  "ingredientName": zod.string().nullable(),
+  "station": zod.string().nullable(),
+  "relatedEventId": zod.string().nullable(),
+  "actorId": zod.string().nullable(),
+  "payload": zod.record(zod.string(), zod.unknown()),
+  "createdAt": zod.coerce.date(),
+  "corrected": zod.boolean().optional(),
+  "redactedFields": zod.array(zod.string()).optional()
+})
+})
+
+
+/**
  * Reads current inventory and the configured expiry lead time, flags lots that are expired or expiring soon, and (when anything is flagged) asks the AI for a plain-language run-order suggestion to consume the at-risk stock first. Grounded in the real inventory data and the shared facility memory. Read-only — never applies any change.
  * @summary Flag items trending toward expiry and suggest run-order to use them first
  */
@@ -1538,6 +2420,9 @@ export const ExportOperationalReportBody = zod.object({
 }).describe('One run as shaped by the client for the production summary.')).max(exportOperationalReportBodyRunsMax).optional().describe('Legacy compatibility input. Ignored; canonical daily-sync snapshots are the sole production source.')
 })
 
+
+
+
 export const ExportOperationalReportResponse = zod.object({
   "scope": zod.enum(['day', 'week']),
   "date": zod.string(),
@@ -1587,7 +2472,23 @@ export const ExportOperationalReportResponse = zod.object({
   "flaggedItems": zod.int().optional()
 }).nullable(),
   "note": zod.string().optional()
-})
+}),
+  "evidence": zod.object({
+  "release": zod.object({
+  "version": zod.string(),
+  "revision": zod.string(),
+  "environment": zod.string(),
+  "deploymentId": zod.string().max(exportOperationalReportResponseEvidenceReleaseDeploymentIdMax).nullish(),
+  "deployedRevision": zod.string().regex(exportOperationalReportResponseEvidenceReleaseDeployedRevisionRegExp).nullish(),
+  "identityStatus": zod.enum(['reported-unverified', 'incomplete', 'unavailable']).optional(),
+  "identitySource": zod.enum(['runtime-environment', 'unavailable']).optional()
+}).optional().describe('Runtime-reported identity is informational only and is not provider-verified release proof.'),
+  "recovery": zod.object({
+  "generatedAt": zod.coerce.date().optional(),
+  "source": zod.string().optional(),
+  "complete": zod.boolean().optional()
+}).optional()
+}).optional()
 })
 
 
@@ -1611,6 +2512,9 @@ export const FinalizeOperationalReportBody = zod.object({
   "stoppageCount": zod.number().describe('Number of discrete stoppages on the run')
 }).describe('One run as shaped by the client for the production summary.')).max(finalizeOperationalReportBodyRunsMax).optional().describe('Legacy compatibility input. Ignored; canonical daily-sync snapshots are the sole production source.')
 })
+
+
+
 
 export const FinalizeOperationalReportResponse = zod.object({
   "id": zod.uuid(),
@@ -1678,7 +2582,23 @@ export const FinalizeOperationalReportResponse = zod.object({
   "flaggedItems": zod.int().optional()
 }).nullable(),
   "note": zod.string().optional()
-})
+}),
+  "evidence": zod.object({
+  "release": zod.object({
+  "version": zod.string(),
+  "revision": zod.string(),
+  "environment": zod.string(),
+  "deploymentId": zod.string().max(finalizeOperationalReportResponseTwoReportEvidenceReleaseDeploymentIdMax).nullish(),
+  "deployedRevision": zod.string().regex(finalizeOperationalReportResponseTwoReportEvidenceReleaseDeployedRevisionRegExp).nullish(),
+  "identityStatus": zod.enum(['reported-unverified', 'incomplete', 'unavailable']).optional(),
+  "identitySource": zod.enum(['runtime-environment', 'unavailable']).optional()
+}).optional().describe('Runtime-reported identity is informational only and is not provider-verified release proof.'),
+  "recovery": zod.object({
+  "generatedAt": zod.coerce.date().optional(),
+  "source": zod.string().optional(),
+  "complete": zod.boolean().optional()
+}).optional()
+}).optional()
 })
 }))
 
@@ -1749,6 +2669,9 @@ export const GetFinalizedOperationalReportParams = zod.object({
   "id": zod.uuid()
 })
 
+
+
+
 export const GetFinalizedOperationalReportResponse = zod.object({
   "id": zod.uuid(),
   "reportScope": zod.enum(['day', 'week']),
@@ -1815,7 +2738,23 @@ export const GetFinalizedOperationalReportResponse = zod.object({
   "flaggedItems": zod.int().optional()
 }).nullable(),
   "note": zod.string().optional()
-})
+}),
+  "evidence": zod.object({
+  "release": zod.object({
+  "version": zod.string(),
+  "revision": zod.string(),
+  "environment": zod.string(),
+  "deploymentId": zod.string().max(getFinalizedOperationalReportResponseTwoReportEvidenceReleaseDeploymentIdMax).nullish(),
+  "deployedRevision": zod.string().regex(getFinalizedOperationalReportResponseTwoReportEvidenceReleaseDeployedRevisionRegExp).nullish(),
+  "identityStatus": zod.enum(['reported-unverified', 'incomplete', 'unavailable']).optional(),
+  "identitySource": zod.enum(['runtime-environment', 'unavailable']).optional()
+}).optional().describe('Runtime-reported identity is informational only and is not provider-verified release proof.'),
+  "recovery": zod.object({
+  "generatedAt": zod.coerce.date().optional(),
+  "source": zod.string().optional(),
+  "complete": zod.boolean().optional()
+}).optional()
+}).optional()
 })
 }))
 
@@ -1901,7 +2840,7 @@ export const GetOperationalRunViewResponse = zod.object({
 }),
   "pace": zod.object({
   "ppm": zod.number(),
-  "paceStatus": zod.enum(['on-pace', 'ahead', 'behind']).nullable(),
+  "paceStatus": zod.union([zod.literal('on-pace'),zod.literal('ahead'),zod.literal('behind'),zod.literal(null)]).nullable(),
   "paceDelta": zod.number(),
   "catchUpPpm": zod.union([zod.number(),zod.null()])
 }),
@@ -2710,6 +3649,8 @@ export const ConfirmFreezerSurplusBody = zod.object({
 
 
 
+
+
 export const ConfirmFreezerSurplusResponse = zod.object({
   "lots": zod.array(zod.object({
   "id": zod.string(),
@@ -2730,7 +3671,7 @@ export const ConfirmFreezerSurplusResponse = zod.object({
   "productKey": zod.string(),
   "cases": zod.int().min(1)
 })),
-  "createdLot": zod.object({
+  "createdLot": zod.union([zod.object({
   "id": zod.string(),
   "brand": zod.string(),
   "flavor": zod.string(),
@@ -2738,7 +3679,41 @@ export const ConfirmFreezerSurplusResponse = zod.object({
   "productionDate": zod.coerce.date(),
   "totalCases": zod.int().min(1),
   "remainingCases": zod.int().min(confirmFreezerSurplusResponseCreatedLotOneRemainingCasesMin)
-}).nullish()
+}),zod.null()]).optional(),
+  "createdAdjustment": zod.union([zod.object({
+  "eventId": zod.uuid(),
+  "lotId": zod.string(),
+  "eventType": zod.enum(['damage', 'return', 'correction']),
+  "cases": zod.int().min(1).max(confirmFreezerSurplusResponseCreatedAdjustmentOneCasesMax),
+  "reason": zod.string().min(1).max(confirmFreezerSurplusResponseCreatedAdjustmentOneReasonMax),
+  "actorId": zod.string(),
+  "runId": zod.string().nullish(),
+  "correctsEventId": zod.string().nullish(),
+  "createdAt": zod.coerce.date()
+}),zod.null()]).optional()
+})
+
+
+/**
+ * Returns append-only damage, return, and correction events, including the authenticated manager and reason, limited to the 500 most recent events. Requires manage-inventory.
+ * @summary List the scoped finished-case freezer adjustment audit
+ */
+
+
+
+
+export const ListFreezerSurplusAdjustmentsResponse = zod.object({
+  "adjustments": zod.array(zod.object({
+  "eventId": zod.uuid(),
+  "lotId": zod.string(),
+  "eventType": zod.enum(['damage', 'return', 'correction']),
+  "cases": zod.int().min(1).max(listFreezerSurplusAdjustmentsResponseAdjustmentsItemCasesMax),
+  "reason": zod.string().min(1).max(listFreezerSurplusAdjustmentsResponseAdjustmentsItemReasonMax),
+  "actorId": zod.string(),
+  "runId": zod.string().nullish(),
+  "correctsEventId": zod.string().nullish(),
+  "createdAt": zod.coerce.date()
+}))
 })
 
 
@@ -2776,6 +3751,8 @@ export const ReplaceFreezerSurplusAllocationBody = zod.object({
 
 
 
+
+
 export const ReplaceFreezerSurplusAllocationResponse = zod.object({
   "lots": zod.array(zod.object({
   "id": zod.string(),
@@ -2796,7 +3773,7 @@ export const ReplaceFreezerSurplusAllocationResponse = zod.object({
   "productKey": zod.string(),
   "cases": zod.int().min(1)
 })),
-  "createdLot": zod.object({
+  "createdLot": zod.union([zod.object({
   "id": zod.string(),
   "brand": zod.string(),
   "flavor": zod.string(),
@@ -2804,7 +3781,95 @@ export const ReplaceFreezerSurplusAllocationResponse = zod.object({
   "productionDate": zod.coerce.date(),
   "totalCases": zod.int().min(1),
   "remainingCases": zod.int().min(replaceFreezerSurplusAllocationResponseCreatedLotOneRemainingCasesMin)
-}).nullish()
+}),zod.null()]).optional(),
+  "createdAdjustment": zod.union([zod.object({
+  "eventId": zod.uuid(),
+  "lotId": zod.string(),
+  "eventType": zod.enum(['damage', 'return', 'correction']),
+  "cases": zod.int().min(1).max(replaceFreezerSurplusAllocationResponseCreatedAdjustmentOneCasesMax),
+  "reason": zod.string().min(1).max(replaceFreezerSurplusAllocationResponseCreatedAdjustmentOneReasonMax),
+  "actorId": zod.string(),
+  "runId": zod.string().nullish(),
+  "correctsEventId": zod.string().nullish(),
+  "createdAt": zod.coerce.date()
+}),zod.null()]).optional()
+})
+
+
+/**
+ * Manager-only physical event. Damage reduces currently available cases. A return must name a started or completed run with an allocation from this dated lot and cannot exceed the allocation less prior returns. Corrections append a compensating event linked to an earlier damage or return; the original event is never edited or deleted. Every event uses a stable eventId for retry safety and updates the dated lot and freezer inventory in the same transaction without deducting ingredients.
+ * @summary Record freezer damage, a run return, or a correction
+ */
+
+
+
+export const RecordFreezerSurplusAdjustmentParams = zod.object({
+  "lotId": zod.coerce.string().min(1).max(recordFreezerSurplusAdjustmentPathLotIdMax)
+})
+
+
+
+
+
+
+export const RecordFreezerSurplusAdjustmentBody = zod.object({
+  "eventId": zod.uuid(),
+  "eventType": zod.enum(['damage', 'return', 'correction']),
+  "cases": zod.int().min(1).max(recordFreezerSurplusAdjustmentBodyCasesMax),
+  "reason": zod.string().min(1).max(recordFreezerSurplusAdjustmentBodyReasonMax),
+  "runId": zod.string().min(1).max(recordFreezerSurplusAdjustmentBodyRunIdMax).optional(),
+  "correctsEventId": zod.uuid().optional()
+}).describe('runId is required only for eventType=return. correctsEventId is required only for eventType=correction. Both are rejected for incompatible event types.')
+
+
+
+
+
+
+
+
+
+
+export const RecordFreezerSurplusAdjustmentResponse = zod.object({
+  "lots": zod.array(zod.object({
+  "id": zod.string(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "productKey": zod.string(),
+  "productionDate": zod.coerce.date(),
+  "totalCases": zod.int().min(1),
+  "remainingCases": zod.int().min(recordFreezerSurplusAdjustmentResponseLotsItemRemainingCasesMin)
+})),
+  "allocations": zod.array(zod.object({
+  "id": zod.string(),
+  "lotId": zod.string(),
+  "runId": zod.string(),
+  "runDate": zod.coerce.date(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "productKey": zod.string(),
+  "cases": zod.int().min(1)
+})),
+  "createdLot": zod.union([zod.object({
+  "id": zod.string(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "productKey": zod.string(),
+  "productionDate": zod.coerce.date(),
+  "totalCases": zod.int().min(1),
+  "remainingCases": zod.int().min(recordFreezerSurplusAdjustmentResponseCreatedLotOneRemainingCasesMin)
+}),zod.null()]).optional(),
+  "createdAdjustment": zod.union([zod.object({
+  "eventId": zod.uuid(),
+  "lotId": zod.string(),
+  "eventType": zod.enum(['damage', 'return', 'correction']),
+  "cases": zod.int().min(1).max(recordFreezerSurplusAdjustmentResponseCreatedAdjustmentOneCasesMax),
+  "reason": zod.string().min(1).max(recordFreezerSurplusAdjustmentResponseCreatedAdjustmentOneReasonMax),
+  "actorId": zod.string(),
+  "runId": zod.string().nullish(),
+  "correctsEventId": zod.string().nullish(),
+  "createdAt": zod.coerce.date()
+}),zod.null()]).optional()
 })
 
 
@@ -2908,7 +3973,7 @@ export const RecordMixSurplusResponse = zod.object({
   "lbs": zod.number().min(recordMixSurplusResponseBalancesItemLbsMin),
   "productionDates": zod.array(zod.coerce.date())
 })),
-  "createdLot": zod.object({
+  "createdLot": zod.union([zod.object({
   "id": zod.string(),
   "mixId": zod.string(),
   "name": zod.string(),
@@ -2920,7 +3985,7 @@ export const RecordMixSurplusResponse = zod.object({
   "amountMade": zod.number().min(recordMixSurplusResponseCreatedLotOneAmountMadeMin),
   "amountUsed": zod.number().min(recordMixSurplusResponseCreatedLotOneAmountUsedMin),
   "amountRemaining": zod.number().min(recordMixSurplusResponseCreatedLotOneAmountRemainingMin)
-}).nullish()
+}),zod.null()]).optional()
 })
 
 
@@ -2986,7 +4051,7 @@ export const ReplaceMixSurplusAllocationsResponse = zod.object({
   "lbs": zod.number().min(replaceMixSurplusAllocationsResponseBalancesItemLbsMin),
   "productionDates": zod.array(zod.coerce.date())
 })),
-  "createdLot": zod.object({
+  "createdLot": zod.union([zod.object({
   "id": zod.string(),
   "mixId": zod.string(),
   "name": zod.string(),
@@ -2998,7 +4063,7 @@ export const ReplaceMixSurplusAllocationsResponse = zod.object({
   "amountMade": zod.number().min(replaceMixSurplusAllocationsResponseCreatedLotOneAmountMadeMin),
   "amountUsed": zod.number().min(replaceMixSurplusAllocationsResponseCreatedLotOneAmountUsedMin),
   "amountRemaining": zod.number().min(replaceMixSurplusAllocationsResponseCreatedLotOneAmountRemainingMin)
-}).nullish()
+}),zod.null()]).optional()
 })
 
 
@@ -3054,7 +4119,7 @@ export const VoidMixSurplusLotResponse = zod.object({
   "lbs": zod.number().min(voidMixSurplusLotResponseBalancesItemLbsMin),
   "productionDates": zod.array(zod.coerce.date())
 })),
-  "createdLot": zod.object({
+  "createdLot": zod.union([zod.object({
   "id": zod.string(),
   "mixId": zod.string(),
   "name": zod.string(),
@@ -3066,7 +4131,7 @@ export const VoidMixSurplusLotResponse = zod.object({
   "amountMade": zod.number().min(voidMixSurplusLotResponseCreatedLotOneAmountMadeMin),
   "amountUsed": zod.number().min(voidMixSurplusLotResponseCreatedLotOneAmountUsedMin),
   "amountRemaining": zod.number().min(voidMixSurplusLotResponseCreatedLotOneAmountRemainingMin)
-}).nullish()
+}),zod.null()]).optional()
 })
 
 
@@ -3530,7 +4595,9 @@ export const ListIngredientsResponse = zod.object({
   "name": zod.string().describe('Current display name'),
   "categories": zod.array(zod.enum(['cheese', 'dough', 'frontline', 'mix', 'pep', 'general']).describe('Which recipe surface(s) an ingredient applies to. "general" ingredients are also offered on every other category\'s picker.')),
   "mergedInto": zod.string().nullish().describe('When set, this ingredient was merged into another ingredient\'s id; resolve display name by following this pointer.'),
-  "enabled": zod.boolean().describe('false = soft-deleted (kept so old rows still resolve)')
+  "enabled": zod.boolean().describe('false = soft-deleted (kept so old rows still resolve)'),
+  "allergens": zod.array(zod.enum(['egg', 'soy', 'milk', 'wheat', 'peanuts', 'tree nuts', 'fish', 'shellfish', 'sesame'])).describe('Reviewed mapping values from the fixed ingredient-allergen vocabulary. An empty list means none of those allergens only when allergensReviewed is true.'),
+  "allergensReviewed": zod.boolean().describe('Whether an authorized reviewer explicitly reviewed this mapping')
 }).describe('A factory-wide catalog entry (Task #102). Recipe rows reference an ingredient by id; renaming/merging/deleting is a server operation that updates every reference with no client-side rewrite.'))
 })
 
@@ -3541,12 +4608,12 @@ export const ListIngredientsResponse = zod.object({
  */
 export const SaveIngredientsBody = zod.object({
   "items": zod.array(zod.object({
-  "id": zod.string().describe('Stable client-generated id'),
-  "name": zod.string().describe('Current display name'),
+  "id": zod.string(),
+  "name": zod.string(),
   "categories": zod.array(zod.enum(['cheese', 'dough', 'frontline', 'mix', 'pep', 'general']).describe('Which recipe surface(s) an ingredient applies to. "general" ingredients are also offered on every other category\'s picker.')),
-  "mergedInto": zod.string().nullish().describe('When set, this ingredient was merged into another ingredient\'s id; resolve display name by following this pointer.'),
-  "enabled": zod.boolean().describe('false = soft-deleted (kept so old rows still resolve)')
-}).describe('A factory-wide catalog entry (Task #102). Recipe rows reference an ingredient by id; renaming/merging/deleting is a server operation that updates every reference with no client-side rewrite.')).describe('The batch of ingredients to create or rename (by id)')
+  "mergedInto": zod.string().nullish(),
+  "enabled": zod.boolean()
+})).describe('The batch of ingredients to create or rename (by id)')
 })
 
 export const SaveIngredientsResponse = zod.object({
@@ -3555,7 +4622,9 @@ export const SaveIngredientsResponse = zod.object({
   "name": zod.string().describe('Current display name'),
   "categories": zod.array(zod.enum(['cheese', 'dough', 'frontline', 'mix', 'pep', 'general']).describe('Which recipe surface(s) an ingredient applies to. "general" ingredients are also offered on every other category\'s picker.')),
   "mergedInto": zod.string().nullish().describe('When set, this ingredient was merged into another ingredient\'s id; resolve display name by following this pointer.'),
-  "enabled": zod.boolean().describe('false = soft-deleted (kept so old rows still resolve)')
+  "enabled": zod.boolean().describe('false = soft-deleted (kept so old rows still resolve)'),
+  "allergens": zod.array(zod.enum(['egg', 'soy', 'milk', 'wheat', 'peanuts', 'tree nuts', 'fish', 'shellfish', 'sesame'])).describe('Reviewed mapping values from the fixed ingredient-allergen vocabulary. An empty list means none of those allergens only when allergensReviewed is true.'),
+  "allergensReviewed": zod.boolean().describe('Whether an authorized reviewer explicitly reviewed this mapping')
 }).describe('A factory-wide catalog entry (Task #102). Recipe rows reference an ingredient by id; renaming/merging/deleting is a server operation that updates every reference with no client-side rewrite.'))
 })
 
@@ -3574,9 +4643,35 @@ export const DeleteIngredientsResponse = zod.object({
   "name": zod.string().describe('Current display name'),
   "categories": zod.array(zod.enum(['cheese', 'dough', 'frontline', 'mix', 'pep', 'general']).describe('Which recipe surface(s) an ingredient applies to. "general" ingredients are also offered on every other category\'s picker.')),
   "mergedInto": zod.string().nullish().describe('When set, this ingredient was merged into another ingredient\'s id; resolve display name by following this pointer.'),
-  "enabled": zod.boolean().describe('false = soft-deleted (kept so old rows still resolve)')
+  "enabled": zod.boolean().describe('false = soft-deleted (kept so old rows still resolve)'),
+  "allergens": zod.array(zod.enum(['egg', 'soy', 'milk', 'wheat', 'peanuts', 'tree nuts', 'fish', 'shellfish', 'sesame'])).describe('Reviewed mapping values from the fixed ingredient-allergen vocabulary. An empty list means none of those allergens only when allergensReviewed is true.'),
+  "allergensReviewed": zod.boolean().describe('Whether an authorized reviewer explicitly reviewed this mapping')
 }).describe('A factory-wide catalog entry (Task #102). Recipe rows reference an ingredient by id; renaming/merging/deleting is a server operation that updates every reference with no client-side rewrite.'))
 })
+
+
+/**
+ * Sets the reviewed mapping for one existing ingredient within the authenticated facility scope. Only callers with manage-allergens may write this mapping. This is a mapping record, not a food-label claim or cleaning clearance.
+ * @summary Review an ingredient's mapped allergens
+ */
+export const UpdateIngredientAllergenMappingParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const UpdateIngredientAllergenMappingBody = zod.object({
+  "allergens": zod.array(zod.enum(['egg', 'soy', 'milk', 'wheat', 'peanuts', 'tree nuts', 'fish', 'shellfish', 'sesame'])),
+  "reviewed": zod.boolean()
+})
+
+export const UpdateIngredientAllergenMappingResponse = zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "name": zod.string().describe('Current display name'),
+  "categories": zod.array(zod.enum(['cheese', 'dough', 'frontline', 'mix', 'pep', 'general']).describe('Which recipe surface(s) an ingredient applies to. "general" ingredients are also offered on every other category\'s picker.')),
+  "mergedInto": zod.string().nullish().describe('When set, this ingredient was merged into another ingredient\'s id; resolve display name by following this pointer.'),
+  "enabled": zod.boolean().describe('false = soft-deleted (kept so old rows still resolve)'),
+  "allergens": zod.array(zod.enum(['egg', 'soy', 'milk', 'wheat', 'peanuts', 'tree nuts', 'fish', 'shellfish', 'sesame'])).describe('Reviewed mapping values from the fixed ingredient-allergen vocabulary. An empty list means none of those allergens only when allergensReviewed is true.'),
+  "allergensReviewed": zod.boolean().describe('Whether an authorized reviewer explicitly reviewed this mapping')
+}).describe('A factory-wide catalog entry (Task #102). Recipe rows reference an ingredient by id; renaming/merging/deleting is a server operation that updates every reference with no client-side rewrite.')
 
 
 /**
@@ -3594,7 +4689,9 @@ export const MergeIngredientsResponse = zod.object({
   "name": zod.string().describe('Current display name'),
   "categories": zod.array(zod.enum(['cheese', 'dough', 'frontline', 'mix', 'pep', 'general']).describe('Which recipe surface(s) an ingredient applies to. "general" ingredients are also offered on every other category\'s picker.')),
   "mergedInto": zod.string().nullish().describe('When set, this ingredient was merged into another ingredient\'s id; resolve display name by following this pointer.'),
-  "enabled": zod.boolean().describe('false = soft-deleted (kept so old rows still resolve)')
+  "enabled": zod.boolean().describe('false = soft-deleted (kept so old rows still resolve)'),
+  "allergens": zod.array(zod.enum(['egg', 'soy', 'milk', 'wheat', 'peanuts', 'tree nuts', 'fish', 'shellfish', 'sesame'])).describe('Reviewed mapping values from the fixed ingredient-allergen vocabulary. An empty list means none of those allergens only when allergensReviewed is true.'),
+  "allergensReviewed": zod.boolean().describe('Whether an authorized reviewer explicitly reviewed this mapping')
 }).describe('A factory-wide catalog entry (Task #102). Recipe rows reference an ingredient by id; renaming/merging/deleting is a server operation that updates every reference with no client-side rewrite.'))
 })
 
@@ -4347,6 +5444,352 @@ export const ApplyProfileDataHealthRepairsResponse = zod.object({
 
 
 /**
+ * Public read-only capture for Replit Agent. Runs the reviewed verifier through this published API process's configured database connection and binds the result to this process's build identity. It attests to the database configured for the published app, not to an independently supplied PostgreSQL owner name. Returns raw, approved, and unresolved pool mismatch counts with the pinned exception ID and digest, plus aggregate counts and hashes. Any unresolved pool difference keeps the verification result false. It never returns source rows or credentials. Rate limited and unavailable outside production.
+ * @summary Capture a bounded reconciliation summary from the published app
+ */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+export const GetPublishedSourceLibraryReconciliationCaptureResponse = zod.object({
+  "verifier": zod.enum(['source-library-reconciliation']),
+  "environment": zod.enum(['release']),
+  "databaseAttestation": zod.enum(['external-owner-check', 'published-app-runtime-connection']),
+  "revision": zod.string().min(1).max(getPublishedSourceLibraryReconciliationCaptureResponseRevisionMax),
+  "capturedAt": zod.coerce.date(),
+  "evidenceId": zod.string().regex(getPublishedSourceLibraryReconciliationCaptureResponseEvidenceIdRegExp),
+  "healId": zod.string().min(1).max(getPublishedSourceLibraryReconciliationCaptureResponseHealIdMax),
+  "repairBoundary": zod.object({
+  "fromDate": zod.coerce.date()
+}),
+  "report": zod.object({
+  "sha256": zod.string().regex(getPublishedSourceLibraryReconciliationCaptureResponseReportSha256RegExp),
+  "formatVersion": zod.literal(1),
+  "automaticProposals": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseReportAutomaticProposalsMin).max(getPublishedSourceLibraryReconciliationCaptureResponseReportAutomaticProposalsMax),
+  "stubs": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseReportStubsMin).max(getPublishedSourceLibraryReconciliationCaptureResponseReportStubsMax)
+}),
+  "poolExceptions": zod.object({
+  "id": zod.enum(['source-library-pool-owner-approved-differences-2026-10-08-v1']),
+  "sha256": zod.enum(['42cf3d8d482a07657eeae5725710b098bb7f8de19a4f45d6356f670378cd2137']),
+  "approvedMismatches": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponsePoolExceptionsApprovedMismatchesMin).max(getPublishedSourceLibraryReconciliationCaptureResponsePoolExceptionsApprovedMismatchesMax),
+  "unresolvedMismatches": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponsePoolExceptionsUnresolvedMismatchesMin).max(getPublishedSourceLibraryReconciliationCaptureResponsePoolExceptionsUnresolvedMismatchesMax)
+}),
+  "marker": zod.object({
+  "present": zod.boolean(),
+  "resultValid": zod.boolean(),
+  "resultWithinBounds": zod.boolean(),
+  "resultCounts": zod.object({
+  "replacements": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsReplacementsMin).max(getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsReplacementsMax),
+  "aliasesInserted": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsAliasesInsertedMin).max(getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsAliasesInsertedMax),
+  "repointedProfiles": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsRepointedProfilesMin).max(getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsRepointedProfilesMax),
+  "repointedRuns": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsRepointedRunsMin).max(getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsRepointedRunsMax),
+  "deletedStubs": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsDeletedStubsMin).max(getPublishedSourceLibraryReconciliationCaptureResponseMarkerResultCountsDeletedStubsMax)
+}),
+  "appliedAtPresent": zod.boolean()
+}),
+  "pools": zod.object({
+  "expected": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponsePoolsExpectedMin).max(getPublishedSourceLibraryReconciliationCaptureResponsePoolsExpectedMax),
+  "exactMatches": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponsePoolsExactMatchesMin).max(getPublishedSourceLibraryReconciliationCaptureResponsePoolsExactMatchesMax),
+  "guardedRenames": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponsePoolsGuardedRenamesMin).max(getPublishedSourceLibraryReconciliationCaptureResponsePoolsGuardedRenamesMax),
+  "missing": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponsePoolsMissingMin).max(getPublishedSourceLibraryReconciliationCaptureResponsePoolsMissingMax),
+  "mismatches": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponsePoolsMismatchesMin).max(getPublishedSourceLibraryReconciliationCaptureResponsePoolsMismatchesMax).describe('Raw field-mismatch count before approved exceptions are applied.')
+}),
+  "aliases": zod.object({
+  "expected": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseAliasesExpectedMin).max(getPublishedSourceLibraryReconciliationCaptureResponseAliasesExpectedMax),
+  "exactMatches": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseAliasesExactMatchesMin).max(getPublishedSourceLibraryReconciliationCaptureResponseAliasesExactMatchesMax),
+  "missing": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseAliasesMissingMin).max(getPublishedSourceLibraryReconciliationCaptureResponseAliasesMissingMax),
+  "mismatches": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseAliasesMismatchesMin).max(getPublishedSourceLibraryReconciliationCaptureResponseAliasesMismatchesMax)
+}),
+  "profiles": zod.object({
+  "inspected": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseProfilesInspectedMin).max(getPublishedSourceLibraryReconciliationCaptureResponseProfilesInspectedMax),
+  "canonical": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseProfilesCanonicalMin).max(getPublishedSourceLibraryReconciliationCaptureResponseProfilesCanonicalMax),
+  "stale": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseProfilesStaleMin).max(getPublishedSourceLibraryReconciliationCaptureResponseProfilesStaleMax),
+  "nonCanonical": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseProfilesNonCanonicalMin).max(getPublishedSourceLibraryReconciliationCaptureResponseProfilesNonCanonicalMax)
+}),
+  "pendingRuns": zod.object({
+  "inspected": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponsePendingRunsInspectedMin).max(getPublishedSourceLibraryReconciliationCaptureResponsePendingRunsInspectedMax),
+  "canonical": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponsePendingRunsCanonicalMin).max(getPublishedSourceLibraryReconciliationCaptureResponsePendingRunsCanonicalMax),
+  "stale": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponsePendingRunsStaleMin).max(getPublishedSourceLibraryReconciliationCaptureResponsePendingRunsStaleMax),
+  "nonCanonical": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponsePendingRunsNonCanonicalMin).max(getPublishedSourceLibraryReconciliationCaptureResponsePendingRunsNonCanonicalMax)
+}),
+  "protectedHistory": zod.object({
+  "references": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseProtectedHistoryReferencesMin).max(getPublishedSourceLibraryReconciliationCaptureResponseProtectedHistoryReferencesMax)
+}),
+  "stubs": zod.object({
+  "expected": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseStubsExpectedMin).max(getPublishedSourceLibraryReconciliationCaptureResponseStubsExpectedMax),
+  "canonicalExact": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseStubsCanonicalExactMin).max(getPublishedSourceLibraryReconciliationCaptureResponseStubsCanonicalExactMax),
+  "canonicalMissing": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseStubsCanonicalMissingMin).max(getPublishedSourceLibraryReconciliationCaptureResponseStubsCanonicalMissingMax),
+  "canonicalMismatches": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseStubsCanonicalMismatchesMin).max(getPublishedSourceLibraryReconciliationCaptureResponseStubsCanonicalMismatchesMax),
+  "deletedExpected": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseStubsDeletedExpectedMin).max(getPublishedSourceLibraryReconciliationCaptureResponseStubsDeletedExpectedMax),
+  "remainingProtected": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseStubsRemainingProtectedMin).max(getPublishedSourceLibraryReconciliationCaptureResponseStubsRemainingProtectedMax),
+  "unexpectedlyDeleted": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseStubsUnexpectedlyDeletedMin).max(getPublishedSourceLibraryReconciliationCaptureResponseStubsUnexpectedlyDeletedMax),
+  "unexpectedlyRemaining": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseStubsUnexpectedlyRemainingMin).max(getPublishedSourceLibraryReconciliationCaptureResponseStubsUnexpectedlyRemainingMax)
+}),
+  "idempotencyFingerprint": zod.object({
+  "algorithm": zod.enum(['sha256']),
+  "value": zod.string().regex(getPublishedSourceLibraryReconciliationCaptureResponseIdempotencyFingerprintValueRegExp)
+}),
+  "ok": zod.boolean(),
+  "failures": zod.array(zod.object({
+  "check": zod.string().regex(getPublishedSourceLibraryReconciliationCaptureResponseFailuresItemCheckRegExp),
+  "count": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseFailuresItemCountMin).max(getPublishedSourceLibraryReconciliationCaptureResponseFailuresItemCountMax)
+})).max(getPublishedSourceLibraryReconciliationCaptureResponseFailuresMax)
+})
+
+
+/**
+ * Manager-only and live-scope only. Validates a fresh schema-v2 published source handoff against the immutable identity of this running API build, then runs the reviewed verifier in one read-only production transaction. Returns only its bounded summary; no source rows or report payloads are persisted or logged. A 200 response may have ok=false and remains a valid capture result.
+ * @summary Capture bounded production source-library reconciliation evidence
+ */
+
+
+
+
+
+
+
+export const CaptureSourceLibraryReconciliationBody = zod.object({
+  "deploymentHandoff": zod.object({
+  "schemaVersion": zod.literal(2),
+  "kind": zod.enum(['published-source-deployment-handoff']),
+  "deploymentId": zod.string().min(1).max(captureSourceLibraryReconciliationBodyDeploymentHandoffDeploymentIdMax),
+  "deployedRevision": zod.string().regex(captureSourceLibraryReconciliationBodyDeploymentHandoffDeployedRevisionRegExp),
+  "appBuildId": zod.string().regex(captureSourceLibraryReconciliationBodyDeploymentHandoffAppBuildIdRegExp),
+  "sourcePolicy": zod.enum(['production-source-v2']),
+  "sourceFingerprintSha256": zod.string().regex(captureSourceLibraryReconciliationBodyDeploymentHandoffSourceFingerprintSha256RegExp),
+  "identityAuthority": zod.enum(['independent-expected-source-comparison']),
+  "expectedRecordSha256": zod.string().regex(captureSourceLibraryReconciliationBodyDeploymentHandoffExpectedRecordSha256RegExp),
+  "expectedSource": zod.record(zod.string(), zod.unknown()),
+  "databaseOwner": zod.string().min(1).max(captureSourceLibraryReconciliationBodyDeploymentHandoffDatabaseOwnerMax).regex(captureSourceLibraryReconciliationBodyDeploymentHandoffDatabaseOwnerRegExp).optional(),
+  "issuedAt": zod.coerce.date(),
+  "expiresAt": zod.coerce.date()
+}).describe('Fresh published schema-v2 source deployment handoff, independently validated by the server.'),
+  "expectedDatabaseOwner": zod.string().min(1).max(captureSourceLibraryReconciliationBodyExpectedDatabaseOwnerMax).regex(captureSourceLibraryReconciliationBodyExpectedDatabaseOwnerRegExp)
+})
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+export const CaptureSourceLibraryReconciliationResponse = zod.object({
+  "verifier": zod.enum(['source-library-reconciliation']),
+  "environment": zod.enum(['release']),
+  "databaseAttestation": zod.enum(['external-owner-check', 'published-app-runtime-connection']),
+  "revision": zod.string().min(1).max(captureSourceLibraryReconciliationResponseRevisionMax),
+  "capturedAt": zod.coerce.date(),
+  "evidenceId": zod.string().regex(captureSourceLibraryReconciliationResponseEvidenceIdRegExp),
+  "healId": zod.string().min(1).max(captureSourceLibraryReconciliationResponseHealIdMax),
+  "repairBoundary": zod.object({
+  "fromDate": zod.coerce.date()
+}),
+  "report": zod.object({
+  "sha256": zod.string().regex(captureSourceLibraryReconciliationResponseReportSha256RegExp),
+  "formatVersion": zod.literal(1),
+  "automaticProposals": zod.int().min(captureSourceLibraryReconciliationResponseReportAutomaticProposalsMin).max(captureSourceLibraryReconciliationResponseReportAutomaticProposalsMax),
+  "stubs": zod.int().min(captureSourceLibraryReconciliationResponseReportStubsMin).max(captureSourceLibraryReconciliationResponseReportStubsMax)
+}),
+  "poolExceptions": zod.object({
+  "id": zod.enum(['source-library-pool-owner-approved-differences-2026-10-08-v1']),
+  "sha256": zod.enum(['42cf3d8d482a07657eeae5725710b098bb7f8de19a4f45d6356f670378cd2137']),
+  "approvedMismatches": zod.int().min(captureSourceLibraryReconciliationResponsePoolExceptionsApprovedMismatchesMin).max(captureSourceLibraryReconciliationResponsePoolExceptionsApprovedMismatchesMax),
+  "unresolvedMismatches": zod.int().min(captureSourceLibraryReconciliationResponsePoolExceptionsUnresolvedMismatchesMin).max(captureSourceLibraryReconciliationResponsePoolExceptionsUnresolvedMismatchesMax)
+}),
+  "marker": zod.object({
+  "present": zod.boolean(),
+  "resultValid": zod.boolean(),
+  "resultWithinBounds": zod.boolean(),
+  "resultCounts": zod.object({
+  "replacements": zod.int().min(captureSourceLibraryReconciliationResponseMarkerResultCountsReplacementsMin).max(captureSourceLibraryReconciliationResponseMarkerResultCountsReplacementsMax),
+  "aliasesInserted": zod.int().min(captureSourceLibraryReconciliationResponseMarkerResultCountsAliasesInsertedMin).max(captureSourceLibraryReconciliationResponseMarkerResultCountsAliasesInsertedMax),
+  "repointedProfiles": zod.int().min(captureSourceLibraryReconciliationResponseMarkerResultCountsRepointedProfilesMin).max(captureSourceLibraryReconciliationResponseMarkerResultCountsRepointedProfilesMax),
+  "repointedRuns": zod.int().min(captureSourceLibraryReconciliationResponseMarkerResultCountsRepointedRunsMin).max(captureSourceLibraryReconciliationResponseMarkerResultCountsRepointedRunsMax),
+  "deletedStubs": zod.int().min(captureSourceLibraryReconciliationResponseMarkerResultCountsDeletedStubsMin).max(captureSourceLibraryReconciliationResponseMarkerResultCountsDeletedStubsMax)
+}),
+  "appliedAtPresent": zod.boolean()
+}),
+  "pools": zod.object({
+  "expected": zod.int().min(captureSourceLibraryReconciliationResponsePoolsExpectedMin).max(captureSourceLibraryReconciliationResponsePoolsExpectedMax),
+  "exactMatches": zod.int().min(captureSourceLibraryReconciliationResponsePoolsExactMatchesMin).max(captureSourceLibraryReconciliationResponsePoolsExactMatchesMax),
+  "guardedRenames": zod.int().min(captureSourceLibraryReconciliationResponsePoolsGuardedRenamesMin).max(captureSourceLibraryReconciliationResponsePoolsGuardedRenamesMax),
+  "missing": zod.int().min(captureSourceLibraryReconciliationResponsePoolsMissingMin).max(captureSourceLibraryReconciliationResponsePoolsMissingMax),
+  "mismatches": zod.int().min(captureSourceLibraryReconciliationResponsePoolsMismatchesMin).max(captureSourceLibraryReconciliationResponsePoolsMismatchesMax).describe('Raw field-mismatch count before approved exceptions are applied.')
+}),
+  "aliases": zod.object({
+  "expected": zod.int().min(captureSourceLibraryReconciliationResponseAliasesExpectedMin).max(captureSourceLibraryReconciliationResponseAliasesExpectedMax),
+  "exactMatches": zod.int().min(captureSourceLibraryReconciliationResponseAliasesExactMatchesMin).max(captureSourceLibraryReconciliationResponseAliasesExactMatchesMax),
+  "missing": zod.int().min(captureSourceLibraryReconciliationResponseAliasesMissingMin).max(captureSourceLibraryReconciliationResponseAliasesMissingMax),
+  "mismatches": zod.int().min(captureSourceLibraryReconciliationResponseAliasesMismatchesMin).max(captureSourceLibraryReconciliationResponseAliasesMismatchesMax)
+}),
+  "profiles": zod.object({
+  "inspected": zod.int().min(captureSourceLibraryReconciliationResponseProfilesInspectedMin).max(captureSourceLibraryReconciliationResponseProfilesInspectedMax),
+  "canonical": zod.int().min(captureSourceLibraryReconciliationResponseProfilesCanonicalMin).max(captureSourceLibraryReconciliationResponseProfilesCanonicalMax),
+  "stale": zod.int().min(captureSourceLibraryReconciliationResponseProfilesStaleMin).max(captureSourceLibraryReconciliationResponseProfilesStaleMax),
+  "nonCanonical": zod.int().min(captureSourceLibraryReconciliationResponseProfilesNonCanonicalMin).max(captureSourceLibraryReconciliationResponseProfilesNonCanonicalMax)
+}),
+  "pendingRuns": zod.object({
+  "inspected": zod.int().min(captureSourceLibraryReconciliationResponsePendingRunsInspectedMin).max(captureSourceLibraryReconciliationResponsePendingRunsInspectedMax),
+  "canonical": zod.int().min(captureSourceLibraryReconciliationResponsePendingRunsCanonicalMin).max(captureSourceLibraryReconciliationResponsePendingRunsCanonicalMax),
+  "stale": zod.int().min(captureSourceLibraryReconciliationResponsePendingRunsStaleMin).max(captureSourceLibraryReconciliationResponsePendingRunsStaleMax),
+  "nonCanonical": zod.int().min(captureSourceLibraryReconciliationResponsePendingRunsNonCanonicalMin).max(captureSourceLibraryReconciliationResponsePendingRunsNonCanonicalMax)
+}),
+  "protectedHistory": zod.object({
+  "references": zod.int().min(captureSourceLibraryReconciliationResponseProtectedHistoryReferencesMin).max(captureSourceLibraryReconciliationResponseProtectedHistoryReferencesMax)
+}),
+  "stubs": zod.object({
+  "expected": zod.int().min(captureSourceLibraryReconciliationResponseStubsExpectedMin).max(captureSourceLibraryReconciliationResponseStubsExpectedMax),
+  "canonicalExact": zod.int().min(captureSourceLibraryReconciliationResponseStubsCanonicalExactMin).max(captureSourceLibraryReconciliationResponseStubsCanonicalExactMax),
+  "canonicalMissing": zod.int().min(captureSourceLibraryReconciliationResponseStubsCanonicalMissingMin).max(captureSourceLibraryReconciliationResponseStubsCanonicalMissingMax),
+  "canonicalMismatches": zod.int().min(captureSourceLibraryReconciliationResponseStubsCanonicalMismatchesMin).max(captureSourceLibraryReconciliationResponseStubsCanonicalMismatchesMax),
+  "deletedExpected": zod.int().min(captureSourceLibraryReconciliationResponseStubsDeletedExpectedMin).max(captureSourceLibraryReconciliationResponseStubsDeletedExpectedMax),
+  "remainingProtected": zod.int().min(captureSourceLibraryReconciliationResponseStubsRemainingProtectedMin).max(captureSourceLibraryReconciliationResponseStubsRemainingProtectedMax),
+  "unexpectedlyDeleted": zod.int().min(captureSourceLibraryReconciliationResponseStubsUnexpectedlyDeletedMin).max(captureSourceLibraryReconciliationResponseStubsUnexpectedlyDeletedMax),
+  "unexpectedlyRemaining": zod.int().min(captureSourceLibraryReconciliationResponseStubsUnexpectedlyRemainingMin).max(captureSourceLibraryReconciliationResponseStubsUnexpectedlyRemainingMax)
+}),
+  "idempotencyFingerprint": zod.object({
+  "algorithm": zod.enum(['sha256']),
+  "value": zod.string().regex(captureSourceLibraryReconciliationResponseIdempotencyFingerprintValueRegExp)
+}),
+  "ok": zod.boolean(),
+  "failures": zod.array(zod.object({
+  "check": zod.string().regex(captureSourceLibraryReconciliationResponseFailuresItemCheckRegExp),
+  "count": zod.int().min(captureSourceLibraryReconciliationResponseFailuresItemCountMin).max(captureSourceLibraryReconciliationResponseFailuresItemCountMax)
+})).max(captureSourceLibraryReconciliationResponseFailuresMax)
+})
+
+
+/**
+ * Public read-only diagnostics for Replit Agent. Runs the pool comparison through this published API process's configured database connection and binds the result to this process's build identity. Returns raw, approved, and unresolved mismatch counts using the same pinned exception set as the release verifier, plus at most ten pool table names, stable record IDs, approved source names, mismatch types, and differing field names. It never returns current values, ingredient names, recipe rows, credentials, or database-owner names. Shares the published capture rate limit and is unavailable outside production. This response is diagnostic only, not retained release evidence.
+ * @summary Inspect bounded pool mismatch descriptors from the published app
+ */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+export const GetPublishedSourceLibraryReconciliationDiagnosticsResponse = zod.object({
+  "verifier": zod.enum(['source-library-reconciliation-diagnostics']),
+  "environment": zod.enum(['release']),
+  "databaseAttestation": zod.enum(['published-app-runtime-connection']),
+  "revision": zod.string().regex(getPublishedSourceLibraryReconciliationDiagnosticsResponseRevisionRegExp),
+  "capturedAt": zod.coerce.date(),
+  "report": zod.object({
+  "sha256": zod.string().regex(getPublishedSourceLibraryReconciliationDiagnosticsResponseReportSha256RegExp)
+}),
+  "pools": zod.object({
+  "expected": zod.int().min(getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsExpectedMin).max(getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsExpectedMax),
+  "exactMatches": zod.int().min(getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsExactMatchesMin).max(getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsExactMatchesMax),
+  "guardedRenames": zod.int().min(getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsGuardedRenamesMin).max(getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsGuardedRenamesMax),
+  "missing": zod.int().min(getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsMissingMin).max(getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsMissingMax),
+  "mismatches": zod.int().min(getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsMismatchesMin).max(getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsMismatchesMax).describe('Raw field-mismatch count before approved exceptions are applied.')
+}),
+  "poolExceptions": zod.object({
+  "id": zod.enum(['source-library-pool-owner-approved-differences-2026-10-08-v1']),
+  "sha256": zod.enum(['42cf3d8d482a07657eeae5725710b098bb7f8de19a4f45d6356f670378cd2137']),
+  "approvedMismatches": zod.int().min(getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolExceptionsApprovedMismatchesMin).max(getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolExceptionsApprovedMismatchesMax),
+  "unresolvedMismatches": zod.int().min(getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolExceptionsUnresolvedMismatchesMin).max(getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolExceptionsUnresolvedMismatchesMax)
+}),
+  "mismatchDetails": zod.object({
+  "maxItems": zod.literal(10),
+  "total": zod.int().min(getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsTotalMin).max(getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsTotalMax),
+  "returned": zod.int().min(getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsReturnedMin).max(getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsReturnedMax),
+  "omitted": zod.int().min(getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsOmittedMin).max(getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsOmittedMax),
+  "items": zod.array(zod.object({
+  "table": zod.enum(['dough_recipes', 'sauce_recipes', 'cheese_recipes', 'mixes']),
+  "id": zod.string().min(1).max(getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsItemsItemIdMax),
+  "sourceName": zod.string().min(1).max(getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsItemsItemSourceNameMax),
+  "mismatchType": zod.enum(['missing', 'renamed', 'field-mismatch']),
+  "differingFields": zod.array(zod.enum(['name', 'components', 'doughballVariants', 'doughballWeightOz', 'doughballsPerTray', 'brand', 'flavors', 'shredderSetting', 'cellulose', 'notes', 'flavor', 'daysEarly'])).max(getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsItemsItemDifferingFieldsMax)
+})).max(getPublishedSourceLibraryReconciliationDiagnosticsResponseMismatchDetailsItemsMax)
+})
+})
+
+
+/**
  * @summary Read the manager data-health workspace
  */
 
@@ -4395,7 +5838,7 @@ export const GetProfileDataHealthWorkspaceResponse = zod.object({
   "protectedValue": zod.boolean(),
   "source": zod.enum(['profile-health', 'master-data', 'saved-spec', 'cleanup']),
   "sourceRoute": zod.string(),
-  "reconciliationCategory": zod.enum(['pool-mismatch', 'alias-gap', 'stale-profile-link', 'stale-pending-run-link', 'protected-stub', 'unexpected-stub']).nullish(),
+  "reconciliationCategory": zod.union([zod.literal('pool-mismatch'),zod.literal('alias-gap'),zod.literal('stale-profile-link'),zod.literal('stale-pending-run-link'),zod.literal('protected-stub'),zod.literal('unexpected-stub'),zod.literal(null)]).nullish(),
   "preview": zod.record(zod.string(), zod.unknown()).nullish()
 })),
   "safeRepairs": zod.array(zod.object({
@@ -4523,6 +5966,18 @@ export const ListAuditLogsQueryParams = zod.object({
   "cursor": zod.coerce.string().optional().describe('Opaque stable cursor, limited to 200 characters.')
 })
 
+
+
+
+
+
+
+
+
+
+
+
+
 export const ListAuditLogsResponse = zod.object({
   "logs": zod.array(zod.object({
   "id": zod.int(),
@@ -4530,7 +5985,18 @@ export const ListAuditLogsResponse = zod.object({
   "action": zod.string().describe('Allowlisted action name'),
   "resource": zod.string().nullable().describe('Resource identifier'),
   "changes": zod.object({
-
+  "count": zod.int().optional(),
+  "outcome": zod.string().optional(),
+  "reasonCode": zod.string().max(listAuditLogsResponseLogsItemChangesReasonCodeMax).optional(),
+  "targetId": zod.union([zod.string().max(listAuditLogsResponseLogsItemChangesTargetIdOneMax),zod.int()]).optional(),
+  "targetType": zod.string().max(listAuditLogsResponseLogsItemChangesTargetTypeMax).optional(),
+  "authorizedBy": zod.string().max(listAuditLogsResponseLogsItemChangesAuthorizedByMax).optional(),
+  "from": zod.string().max(listAuditLogsResponseLogsItemChangesFromMax).optional(),
+  "to": zod.string().max(listAuditLogsResponseLogsItemChangesToMax).optional(),
+  "method": zod.string().max(listAuditLogsResponseLogsItemChangesMethodMax).optional(),
+  "requestId": zod.string().max(listAuditLogsResponseLogsItemChangesRequestIdMax).optional(),
+  "fieldNames": zod.array(zod.enum(['name', 'brand', 'flavors', 'shredderSetting', 'cellulose', 'notes', 'components', 'enabled'])).max(listAuditLogsResponseLogsItemChangesFieldNamesMax).optional(),
+  "correlationId": zod.string().max(listAuditLogsResponseLogsItemChangesCorrelationIdMax).optional()
 }).describe('Allowlisted, redacted evidence object no larger than 8192 bytes.'),
   "createdAt": zod.coerce.date()
 })).describe('At most 200 records, ordered newest first by server timestamp and ID.'),
@@ -4570,7 +6036,7 @@ export const ExportAuditLogsPdfResponse = zod.unknown()
  * @summary View the completed name-link cleanup result
  */
 export const GetProfileNameLinkCleanupAuditResponse = zod.object({
-  "heal": zod.object({
+  "heal": zod.union([zod.object({
   "id": zod.string(),
   "appliedAt": zod.coerce.date(),
   "summary": zod.object({
@@ -4584,7 +6050,7 @@ export const GetProfileNameLinkCleanupAuditResponse = zod.object({
   "mix": zod.int()
 })
 })
-}).nullable()
+}),zod.null()])
 })
 
 
@@ -6089,7 +7555,7 @@ export const UpdateIncidentWorkflowResponse = zod.object({
 export const GetMeResponse = zod.object({
   "userId": zod.string(),
   "role": zod.string().describe('The name of the role assigned to this user.'),
-  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login "Get Started" overview.'),
@@ -6110,7 +7576,7 @@ export const GetMeResponse = zod.object({
 export const MarkOnboardingSeenResponse = zod.object({
   "userId": zod.string(),
   "role": zod.string().describe('The name of the role assigned to this user.'),
-  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login "Get Started" overview.'),
@@ -6131,7 +7597,7 @@ export const MarkOnboardingSeenResponse = zod.object({
 export const MarkTourCompletedResponse = zod.object({
   "userId": zod.string(),
   "role": zod.string().describe('The name of the role assigned to this user.'),
-  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login "Get Started" overview.'),
@@ -6156,7 +7622,7 @@ export const SetNotificationPrefsBody = zod.object({
 export const SetNotificationPrefsResponse = zod.object({
   "userId": zod.string(),
   "role": zod.string().describe('The name of the role assigned to this user.'),
-  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login "Get Started" overview.'),
@@ -6181,7 +7647,7 @@ export const SetFloorModeBody = zod.object({
 export const SetFloorModeResponse = zod.object({
   "userId": zod.string(),
   "role": zod.string().describe('The name of the role assigned to this user.'),
-  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login "Get Started" overview.'),
@@ -6200,7 +7666,7 @@ export const SetFloorModeResponse = zod.object({
  */
 export const ListRolesResponseItem = zod.object({
   "name": zod.string().describe('Unique role name (also its identifier).'),
-  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')),
   "builtin": zod.boolean().describe('Whether this is a built-in role. The "manager" role is protected (cannot be deleted and must keep the manage-staff capability) and "operator" is the default no-capability role. Built-in roles cannot be deleted.')
 })
 export const ListRolesResponse = zod.array(ListRolesResponseItem)
@@ -6214,12 +7680,12 @@ export const ListRolesResponse = zod.array(ListRolesResponseItem)
 
 export const CreateRoleBody = zod.object({
   "name": zod.string().min(1).max(createRoleBodyNameMax),
-  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.'))
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.'))
 })
 
 export const CreateRoleResponse = zod.object({
   "name": zod.string().describe('Unique role name (also its identifier).'),
-  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')),
   "builtin": zod.boolean().describe('Whether this is a built-in role. The "manager" role is protected (cannot be deleted and must keep the manage-staff capability) and "operator" is the default no-capability role. Built-in roles cannot be deleted.')
 })
 
@@ -6235,13 +7701,13 @@ export const UpdateRoleParams = zod.object({
 
 
 export const UpdateRoleBody = zod.object({
-  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')),
   "name": zod.string().min(1).max(updateRoleBodyNameMax).optional().describe('Optional new name for the role (rename). When present and different from the path name, the role is renamed and every staff assignment is moved to the new name. Built-in roles cannot be renamed.')
 })
 
 export const UpdateRoleResponse = zod.object({
   "name": zod.string().describe('Unique role name (also its identifier).'),
-  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')),
   "builtin": zod.boolean().describe('Whether this is a built-in role. The "manager" role is protected (cannot be deleted and must keep the manage-staff capability) and "operator" is the default no-capability role. Built-in roles cannot be deleted.')
 })
 
@@ -6262,7 +7728,7 @@ export const DeleteRoleResponse = zod.void()
 export const ListStaffResponseItem = zod.object({
   "userId": zod.string(),
   "role": zod.string().describe('The name of the role assigned to this user.'),
-  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login "Get Started" overview.'),
@@ -6291,7 +7757,7 @@ export const SetStaffRoleBody = zod.object({
 export const SetStaffRoleResponse = zod.object({
   "userId": zod.string(),
   "role": zod.string().describe('The name of the role assigned to this user.'),
-  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools', 'manage-allergens', 'record-qc', 'manage-qc']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login "Get Started" overview.'),
@@ -6506,6 +7972,8 @@ export const GetSyncTodayQueryParams = zod.object({
 
 
 
+
+
 export const GetSyncTodayResponse = zod.union([zod.object({
   "dayState": zod.record(zod.string(), zod.unknown()),
   "runValues": zod.record(zod.string(), zod.unknown())
@@ -6517,7 +7985,57 @@ export const GetSyncTodayResponse = zod.union([zod.object({
   "snapshotId": zod.string().regex(getSyncTodayResponseTwoSnapshotIdRegExp),
   "resetEpoch": zod.int().min(getSyncTodayResponseTwoResetEpochMin),
   "rollover": zod.boolean(),
-  "canonicalRevision": zod.int().min(getSyncTodayResponseTwoCanonicalRevisionMin).optional()
+  "canonicalRevision": zod.int().min(getSyncTodayResponseTwoCanonicalRevisionMin).optional(),
+  "serverTime": zod.int().min(getSyncTodayResponseTwoServerTimeMin).optional(),
+  "operationalProjection": zod.union([zod.object({
+  "version": zod.literal(1),
+  "runId": zod.string(),
+  "lifecycleGeneration": zod.string(),
+  "serverTimeMs": zod.number(),
+  "capturedAtServerMs": zod.number(),
+  "calculationRevision": zod.int().min(getSyncTodayResponseTwoOperationalProjectionOneCalculationRevisionMin),
+  "effectiveElapsedSec": zod.number(),
+  "timers": zod.object({
+  "nextBatchInSec": zod.number(),
+  "pressRemainingSec": zod.number(),
+  "freezerElapsedSec": zod.number(),
+  "freezerRemainingSec": zod.number()
+}),
+  "counters": zod.object({
+  "casesCompleted": zod.number(),
+  "casesInFreezer": zod.number(),
+  "casesOnLine": zod.number(),
+  "casesLeftToRun": zod.number(),
+  "pressCasesLeft": zod.number(),
+  "traysOnLine": zod.number(),
+  "batchesReady": zod.number(),
+  "sauceBarrelsMade": zod.number(),
+  "app1BatchesMade": zod.number(),
+  "app2BatchesMade": zod.number(),
+  "app3BatchesMade": zod.number(),
+  "app4BatchesMade": zod.number()
+}),
+  "facts": zod.object({
+  "runStatus": zod.enum(['pending', 'running', 'paused', 'ended']),
+  "pressDone": zod.boolean(),
+  "paceStatus": zod.union([zod.enum(['on-pace', 'ahead', 'behind']),zod.null()]),
+  "paceDelta": zod.number()
+}),
+  "calc": zod.record(zod.string(), zod.unknown()),
+  "due": zod.object({
+  "runId": zod.string(),
+  "generation": zod.string(),
+  "atMs": zod.number(),
+  "entries": zod.array(zod.object({
+  "channel": zod.string(),
+  "dueAt": zod.number(),
+  "dueNow": zod.boolean(),
+  "nextDueAt": zod.number(),
+  "canonical": zod.boolean(),
+  "sequence": zod.number().optional()
+}))
+})
+}).describe('Server-owned live operational read model returned beside the canonical sync snapshot.'),zod.null()]).optional()
 })])
 
 
@@ -6660,7 +8178,7 @@ export const ClaimAutoTrackEventBody = zod.object({
   "claim": zod.object({
   "version": zod.literal(1),
   "runId": zod.string().min(1).max(claimAutoTrackEventBodyClaimRunIdMax),
-  "channel": zod.enum(['case', 'tray-consume', 'tray-produce', 'batch-consume', 'batch-produce', 'hopper', 'sauce-barrel', 'app1-batch', 'app2-batch', 'app3-batch', 'app4-batch']),
+  "channel": zod.enum(['case', 'tray-consume', 'tray-produce', 'batch-consume', 'batch-produce', 'hopper', 'sauce-barrel', 'app1-batch', 'app2-batch', 'app3-batch', 'app4-batch', 'app1-stock', 'app2-stock', 'app3-stock', 'app4-stock', 'pep1-stock', 'pep1b-stock', 'pep2-stock', 'pep2b-stock']),
   "generation": zod.string().min(1).max(claimAutoTrackEventBodyClaimGenerationMax),
   "sequence": zod.int().min(1).max(claimAutoTrackEventBodyClaimSequenceMax),
   "eventId": zod.string().min(1).max(claimAutoTrackEventBodyClaimEventIdMax),
@@ -6710,6 +8228,16 @@ export const ClaimAutoTrackEventResponse = zod.object({
 export const SubmitManualSectionEditQueryParams = zod.object({
   "today": zod.date().optional()
 })
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -6824,12 +8352,18 @@ export const SubmitManualSectionEditBody = zod.union([zod.object({
   "values": zod.object({
   "app1BatchesMade": zod.number().optional(),
   "app1BatchAnchorNetSec": zod.number().optional(),
-  "app1BatchCorrectionGeneration": zod.number().optional()
+  "app1BatchCorrectionGeneration": zod.number().optional(),
+  "app1StockLbs": zod.number().optional(),
+  "app1StockAnchorNetSec": zod.number().optional(),
+  "app1StockCorrectionGeneration": zod.number().optional()
 }).optional(),
   "baseValues": zod.object({
   "app1BatchesMade": zod.number(),
   "app1BatchAnchorNetSec": zod.number(),
-  "app1BatchCorrectionGeneration": zod.number()
+  "app1BatchCorrectionGeneration": zod.number(),
+  "app1StockLbs": zod.number(),
+  "app1StockAnchorNetSec": zod.number(),
+  "app1StockCorrectionGeneration": zod.number()
 }).optional()
 })),zod.object({
   "id": zod.string().regex(submitManualSectionEditBodyFiveOneIdRegExp),
@@ -6844,12 +8378,18 @@ export const SubmitManualSectionEditBody = zod.union([zod.object({
   "values": zod.object({
   "app2BatchesMade": zod.number().optional(),
   "app2BatchAnchorNetSec": zod.number().optional(),
-  "app2BatchCorrectionGeneration": zod.number().optional()
+  "app2BatchCorrectionGeneration": zod.number().optional(),
+  "app2StockLbs": zod.number().optional(),
+  "app2StockAnchorNetSec": zod.number().optional(),
+  "app2StockCorrectionGeneration": zod.number().optional()
 }).optional(),
   "baseValues": zod.object({
   "app2BatchesMade": zod.number(),
   "app2BatchAnchorNetSec": zod.number(),
-  "app2BatchCorrectionGeneration": zod.number()
+  "app2BatchCorrectionGeneration": zod.number(),
+  "app2StockLbs": zod.number(),
+  "app2StockAnchorNetSec": zod.number(),
+  "app2StockCorrectionGeneration": zod.number()
 }).optional()
 })),zod.object({
   "id": zod.string().regex(submitManualSectionEditBodySixOneIdRegExp),
@@ -6864,12 +8404,18 @@ export const SubmitManualSectionEditBody = zod.union([zod.object({
   "values": zod.object({
   "app3BatchesMade": zod.number().optional(),
   "app3BatchAnchorNetSec": zod.number().optional(),
-  "app3BatchCorrectionGeneration": zod.number().optional()
+  "app3BatchCorrectionGeneration": zod.number().optional(),
+  "app3StockLbs": zod.number().optional(),
+  "app3StockAnchorNetSec": zod.number().optional(),
+  "app3StockCorrectionGeneration": zod.number().optional()
 }).optional(),
   "baseValues": zod.object({
   "app3BatchesMade": zod.number(),
   "app3BatchAnchorNetSec": zod.number(),
-  "app3BatchCorrectionGeneration": zod.number()
+  "app3BatchCorrectionGeneration": zod.number(),
+  "app3StockLbs": zod.number(),
+  "app3StockAnchorNetSec": zod.number(),
+  "app3StockCorrectionGeneration": zod.number()
 }).optional()
 })),zod.object({
   "id": zod.string().regex(submitManualSectionEditBodySevenOneIdRegExp),
@@ -6884,24 +8430,82 @@ export const SubmitManualSectionEditBody = zod.union([zod.object({
   "values": zod.object({
   "app4BatchesMade": zod.number().optional(),
   "app4BatchAnchorNetSec": zod.number().optional(),
-  "app4BatchCorrectionGeneration": zod.number().optional()
+  "app4BatchCorrectionGeneration": zod.number().optional(),
+  "app4StockLbs": zod.number().optional(),
+  "app4StockAnchorNetSec": zod.number().optional(),
+  "app4StockCorrectionGeneration": zod.number().optional()
 }).optional(),
   "baseValues": zod.object({
   "app4BatchesMade": zod.number(),
   "app4BatchAnchorNetSec": zod.number(),
-  "app4BatchCorrectionGeneration": zod.number()
+  "app4BatchCorrectionGeneration": zod.number(),
+  "app4StockLbs": zod.number(),
+  "app4StockAnchorNetSec": zod.number(),
+  "app4StockCorrectionGeneration": zod.number()
+}).optional()
+})),zod.object({
+  "id": zod.string().regex(submitManualSectionEditBodyEightOneIdRegExp),
+  "date": zod.coerce.date(),
+  "runId": zod.string().regex(submitManualSectionEditBodyEightOneRunIdRegExp),
+  "observedGeneration": zod.string().min(1).max(submitManualSectionEditBodyEightOneObservedGenerationMax),
+  "baseRevision": zod.int().min(submitManualSectionEditBodyEightOneBaseRevisionMin),
+  "resetEpoch": zod.int().min(submitManualSectionEditBodyEightOneResetEpochMin),
+  "deviceId": zod.string().min(1).regex(submitManualSectionEditBodyEightOneDeviceIdRegExp)
+}).and(zod.object({
+  "section": zod.literal("pep1").optional(),
+  "values": zod.object({
+  "pep1StockLbs": zod.number().optional(),
+  "pep1StockAnchorNetSec": zod.number().optional(),
+  "pep1StockCorrectionGeneration": zod.number().optional(),
+  "pep1bStockLbs": zod.number().optional(),
+  "pep1bStockAnchorNetSec": zod.number().optional(),
+  "pep1bStockCorrectionGeneration": zod.number().optional()
+}).optional(),
+  "baseValues": zod.object({
+  "pep1StockLbs": zod.number(),
+  "pep1StockAnchorNetSec": zod.number(),
+  "pep1StockCorrectionGeneration": zod.number(),
+  "pep1bStockLbs": zod.number(),
+  "pep1bStockAnchorNetSec": zod.number(),
+  "pep1bStockCorrectionGeneration": zod.number()
+}).optional()
+})),zod.object({
+  "id": zod.string().regex(submitManualSectionEditBodyNineOneIdRegExp),
+  "date": zod.coerce.date(),
+  "runId": zod.string().regex(submitManualSectionEditBodyNineOneRunIdRegExp),
+  "observedGeneration": zod.string().min(1).max(submitManualSectionEditBodyNineOneObservedGenerationMax),
+  "baseRevision": zod.int().min(submitManualSectionEditBodyNineOneBaseRevisionMin),
+  "resetEpoch": zod.int().min(submitManualSectionEditBodyNineOneResetEpochMin),
+  "deviceId": zod.string().min(1).regex(submitManualSectionEditBodyNineOneDeviceIdRegExp)
+}).and(zod.object({
+  "section": zod.literal("pep2").optional(),
+  "values": zod.object({
+  "pep2StockLbs": zod.number().optional(),
+  "pep2StockAnchorNetSec": zod.number().optional(),
+  "pep2StockCorrectionGeneration": zod.number().optional(),
+  "pep2bStockLbs": zod.number().optional(),
+  "pep2bStockAnchorNetSec": zod.number().optional(),
+  "pep2bStockCorrectionGeneration": zod.number().optional()
+}).optional(),
+  "baseValues": zod.object({
+  "pep2StockLbs": zod.number(),
+  "pep2StockAnchorNetSec": zod.number(),
+  "pep2StockCorrectionGeneration": zod.number(),
+  "pep2bStockLbs": zod.number(),
+  "pep2bStockAnchorNetSec": zod.number(),
+  "pep2bStockCorrectionGeneration": zod.number()
 }).optional()
 }))]).and(zod.object({
-  "id": zod.string().regex(submitManualSectionEditBodyEightIdRegExp),
+  "id": zod.string().regex(submitManualSectionEditBodyOnezeroIdRegExp),
   "date": zod.coerce.date(),
-  "runId": zod.string().regex(submitManualSectionEditBodyEightRunIdRegExp),
-  "section": zod.enum(['packaging', 'dough', 'sauce', 'app1', 'app2', 'app3', 'app4']),
-  "values": zod.record(zod.string(), zod.number().min(submitManualSectionEditBodyEightValuesMinOne).max(submitManualSectionEditBodyEightValuesMaxOne)).describe('Only fields belonging to section'),
-  "baseValues": zod.record(zod.string(), zod.number().min(submitManualSectionEditBodyEightBaseValuesMinOne).max(submitManualSectionEditBodyEightBaseValuesMaxOne)).describe('Complete baseline for every field in section'),
-  "observedGeneration": zod.string().min(1).max(submitManualSectionEditBodyEightObservedGenerationMax),
-  "baseRevision": zod.int().min(submitManualSectionEditBodyEightBaseRevisionMin),
-  "resetEpoch": zod.int().min(submitManualSectionEditBodyEightResetEpochMin),
-  "deviceId": zod.string().min(1).max(submitManualSectionEditBodyEightDeviceIdMax).regex(submitManualSectionEditBodyEightDeviceIdRegExp)
+  "runId": zod.string().regex(submitManualSectionEditBodyOnezeroRunIdRegExp),
+  "section": zod.enum(['packaging', 'dough', 'sauce', 'app1', 'app2', 'app3', 'app4', 'pep1', 'pep2']),
+  "values": zod.record(zod.string(), zod.number().min(submitManualSectionEditBodyOnezeroValuesMinOne).max(submitManualSectionEditBodyOnezeroValuesMaxOne)).describe('Only fields belonging to section'),
+  "baseValues": zod.record(zod.string(), zod.number().min(submitManualSectionEditBodyOnezeroBaseValuesMinOne).max(submitManualSectionEditBodyOnezeroBaseValuesMaxOne)).describe('Complete baseline for every field in section'),
+  "observedGeneration": zod.string().min(1).max(submitManualSectionEditBodyOnezeroObservedGenerationMax),
+  "baseRevision": zod.int().min(submitManualSectionEditBodyOnezeroBaseRevisionMin),
+  "resetEpoch": zod.int().min(submitManualSectionEditBodyOnezeroResetEpochMin),
+  "deviceId": zod.string().min(1).max(submitManualSectionEditBodyOnezeroDeviceIdMax).regex(submitManualSectionEditBodyOnezeroDeviceIdRegExp)
 }))
 
 
@@ -7043,12 +8647,18 @@ export const ApplyImportOperationParams = zod.object({
 
 
 
+
+
 export const ApplyImportOperationBody = zod.object({
   "importType": zod.string().max(applyImportOperationBodyImportTypeMax),
   "sourceKey": zod.string().max(applyImportOperationBodySourceKeyMax).nullish(),
   "sourceLabel": zod.string().max(applyImportOperationBodySourceLabelMax),
   "requestHash": zod.string().regex(applyImportOperationBodyRequestHashRegExp).nullish(),
   "expectedStateHash": zod.string().regex(applyImportOperationBodyExpectedStateHashRegExp).nullish(),
+  "sourceEvidence": zod.object({
+  "sourceText": zod.string().min(1).max(applyImportOperationBodySourceEvidenceSourceTextMax),
+  "parseVersion": zod.string().min(1).max(applyImportOperationBodySourceEvidenceParseVersionMax)
+}).optional().describe('Exact bounded source text retained privately with a live spec Apply.'),
   "changes": zod.record(zod.string(), zod.unknown()).describe('Reviewed entity batches keyed by supported master-data domain.')
 })
 
@@ -7067,6 +8677,40 @@ export const ApplyImportOperationResponse = zod.object({
   "updatedAt": zod.int().optional(),
   "undoneAt": zod.int().nullish()
 })
+})
+
+
+/**
+ * @summary Read eligible live spec Apply evidence for private export
+ */
+
+
+
+
+export const ListDistillationApplyEvidenceQueryParams = zod.object({
+  "limit": zod.coerce.number().int().min(1).max(listDistillationApplyEvidenceQueryLimitMax).default(listDistillationApplyEvidenceQueryLimitDefault),
+  "cursor": zod.coerce.string().max(listDistillationApplyEvidenceQueryCursorMax).optional()
+})
+
+
+
+
+export const ListDistillationApplyEvidenceResponse = zod.object({
+  "records": zod.array(zod.object({
+  "operationId": zod.string(),
+  "importType": zod.enum(['spec']),
+  "scope": zod.enum(['live']),
+  "status": zod.enum(['applied']),
+  "undoneAt": zod.string().nullable(),
+  "actorCapability": zod.enum(['manage-profiles']),
+  "actorIdSha256": zod.string().regex(listDistillationApplyEvidenceResponseRecordsItemActorIdSha256RegExp),
+  "sourceSha256": zod.string().regex(listDistillationApplyEvidenceResponseRecordsItemSourceSha256RegExp),
+  "appliedAt": zod.coerce.date(),
+  "sourceText": zod.string().min(1),
+  "parseVersion": zod.string(),
+  "appliedValues": zod.record(zod.string(), zod.unknown())
+})),
+  "nextCursor": zod.string().nullable()
 })
 
 

@@ -4,6 +4,7 @@ import { useAccessibleDialog } from "./useAccessibleDialog";
 import { describeShippingPatch, type ShippingCandidate, type ShippingPatch } from "@workspace/shipping-import";
 import type { ShippingImportPrepared } from "@/shippingImport";
 import { loadProfile } from "@/storage";
+import { WorkbookSourceCitation } from "./WorkbookSourceCitation";
 
 type Props = {
   open: boolean;
@@ -198,6 +199,20 @@ export default function ShippingImportDialog({
                         {Object.keys(c.patch).length === 0 && (
                           <span className="text-[11px] text-muted-foreground">Nothing recognizable to apply.</span>
                         )}
+                      </div>
+                      <div className="pl-6 space-y-0.5">
+                        <WorkbookSourceCitation
+                          source={c.sourceCell}
+                          label="Brand source"
+                          unverified={!!brand && brand.trim().toLowerCase() !== c.guideName.trim().toLowerCase()}
+                        />
+                        {(Object.keys(c.patchSources ?? {}) as (keyof ShippingPatch)[]).map((key) => (
+                          <WorkbookSourceCitation
+                            key={key}
+                            source={c.patchSources?.[key]}
+                            label={`${key} source`}
+                          />
+                        ))}
                       </div>
                       {brand && brandFlavors.length > 0 && (
                         <div className="pl-6 flex flex-wrap items-center gap-1.5">

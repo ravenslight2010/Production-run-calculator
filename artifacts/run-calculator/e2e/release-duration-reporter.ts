@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { captureReleaseIdentity } from "../../../scripts/src/release-source-identity.mjs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { relative, resolve } from "node:path";
@@ -76,14 +76,7 @@ function currentRevision(): string {
   const configured = process.env.RELEASE_REVISION?.trim();
   if (configured) return configured;
 
-  try {
-    return execFileSync("git", ["rev-parse", "HEAD"], {
-      cwd: repositoryRoot,
-      encoding: "utf8",
-    }).trim();
-  } catch {
-    return "unknown";
-  }
+  return captureReleaseIdentity(repositoryRoot).revision;
 }
 
 function relativeFilePath(file: string): string {
@@ -488,6 +481,58 @@ export function formatFullBrowserReport(
   ].join("\n");
 }
 
+export function formatFullBrowserCountSummary(
+  cases: Iterable<CaseRecord>,
+  fullResult: FullResult["status"],
+  revision: string,
+  runId: string,
+  generatedAt: string,
+): string {
+  const summaries = summarizeCases(cases);
+  const counts = {
+    total: summaries.reduce((total, summary) => total + summary.cases, 0),
+    completed: summaries.reduce((total, summary) => total + summary.completed, 0),
+    passed: summaries.reduce((total, summary) => total + summary.passed, 0),
+    failed: summaries.reduce((total, summary) => total + summary.failed, 0),
+    skipped: summaries.reduce((total, summary) => total + summary.skipped, 0),
+    notRun: summaries.reduce((total, summary) => total + summary.notRun, 0),
+  };
+  return `${JSON.stringify({
+    schemaVersion: 1,
+    browser: "chromium",
+    runId,
+    revision,
+    result: fullResult,
+    generatedAt,
+    counts,
+  })}\n`;
+}
+
+async function writeFullBrowserCountSummary(
+  cases: Iterable<CaseRecord>,
+  fullResult: FullResult["status"],
+  revision: string,
+): Promise<void> {
+  const configuredPath =
+    process.env.PLAYWRIGHT_RELEASE_COUNT_SUMMARY_PATH?.trim();
+  const runId = process.env.TEST_RESULTS_REPORT_ID?.trim();
+  if (!configuredPath || !runId) return;
+
+  const path = resolve(repositoryRoot, configuredPath);
+  await mkdir(resolve(path, ".."), { recursive: true });
+  await writeFile(
+    path,
+    formatFullBrowserCountSummary(
+      cases,
+      fullResult,
+      revision,
+      runId,
+      new Date().toISOString(),
+    ),
+    "utf8",
+  );
+}
+
 export default class ReleaseDurationReporter implements Reporter {
   private readonly cases = new Map<string, CaseRecord>();
   private startedAt = Date.now();
@@ -525,6 +570,12 @@ export default class ReleaseDurationReporter implements Reporter {
     if (process.argv.includes("--list")) {
       return;
     }
+    const revision = currentRevision();
+    await writeFullBrowserCountSummary(
+      this.cases.values(),
+      result.status,
+      revision,
+    );
     if (!canRetainFullBrowserReport(this.cases.values(), result.status)) {
       console.log(
         `Retained full browser duration report unchanged: run was not a complete passing ${FULL_BROWSER_EXPECTED_CASES}-case suite.`,
@@ -545,7 +596,7 @@ export default class ReleaseDurationReporter implements Reporter {
         this.cases.values(),
         result.status,
         Date.now() - this.startedAt,
-        currentRevision(),
+        revision,
         baseline,
       ),
       "utf8",

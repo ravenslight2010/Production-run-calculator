@@ -640,6 +640,20 @@ describe("buildDoughCandidates", () => {
     });
   });
 
+  it("records the original workbook cell for a deterministic dough-guide row", () => {
+    const rows = parseDoughGuide([{
+      name: "Dough Guide",
+      sourceFile: "dough.xlsx",
+      rows: [["Title"], ["Acme (all) = CRB Thin"]],
+    }]);
+    expect(rows[0]?.sourceCell).toEqual({
+      file: "dough.xlsx",
+      sheet: "Dough Guide",
+      cell: "A2",
+    });
+    expect(buildDoughCandidates(rows, brands, doughRecipes)[0]?.sourceCell).toEqual(rows[0]?.sourceCell);
+  });
+
   it("sets brand to null when brand is not in known list", () => {
     const rows = parseDoughGuide([grid(["NewBrand (all) = CRB Thin"])]);
     const candidates = buildDoughCandidates(rows, brands, doughRecipes);

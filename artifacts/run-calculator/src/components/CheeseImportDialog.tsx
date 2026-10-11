@@ -14,6 +14,7 @@ import { useAccessibleDialog } from "./useAccessibleDialog";
 import type { CheeseRecipe } from "@workspace/cheese-recipes";
 import type { SpecImportAlias } from "@workspace/spec-import";
 import type { CheeseImportPrepared } from "@/cheeseImport";
+import { WorkbookSourceCitation } from "./WorkbookSourceCitation";
 
 type Props = {
   open: boolean;
@@ -397,9 +398,14 @@ export default function CheeseImportDialog({
                   {items.map((it) => {
                     const c = it.candidate;
                     const r = c.recipe;
+                    const evidence = prepared.sourceByRecipeId?.[it.key];
                     const isSel = selected.has(it.key);
                     const redirectTarget = redirectTargetOf(it.key);
                     const linked = !!redirectTarget || (!!c.linkTo && linkOn.has(it.key));
+                    const nameUnverified =
+                      (!!c.linkTo && !c.linkedByAlias && linked) ||
+                      !!redirectTarget ||
+                      (!!evidence?.recipeNameText && r.name !== evidence.recipeNameText);
                     return (
                       <li
                         key={it.key}
@@ -459,6 +465,38 @@ export default function CheeseImportDialog({
                                 </span>
                               </div>
                             )}
+                            <div className="mt-1 space-y-0.5">
+                              <WorkbookSourceCitation
+                                source={evidence?.recipeName}
+                                label="Recipe name"
+                                unverified={nameUnverified}
+                              />
+                              {evidence?.recipeName && (
+                                <p className="text-[11px] text-muted-foreground">
+                                  Customer source: {evidence.recipeName.file ? `${evidence.recipeName.file} · ` : ""}
+                                  {evidence.recipeName.sheet} worksheet tab
+                                </p>
+                              )}
+                              <WorkbookSourceCitation source={evidence?.shredderSetting} label="Shredder setting" />
+                              {evidence?.assignmentCells.map((source, index) => (
+                                <WorkbookSourceCitation
+                                  key={`assignment-${source.cell}-${index}`}
+                                  source={source}
+                                  label={`Flavor assignment ${index + 1}`}
+                                  unverified={nameUnverified}
+                                />
+                              ))}
+                              {evidence?.components.map((component, index) => (
+                                <div key={`${component.ingredient.cell}-${index}`} className="space-y-0.5">
+                                  <p className="text-[11px] text-foreground">
+                                    {component.ingredientName}: {component.lbsValue} lbs
+                                  </p>
+                                  <WorkbookSourceCitation source={component.ingredient} label={`Ingredient: ${component.ingredientName || index + 1}`} />
+                                  <WorkbookSourceCitation source={component.lbs} label={`Pounds: ${component.ingredientName || index + 1}`} />
+                                </div>
+                              ))}
+                              <WorkbookSourceCitation source={evidence?.cellulosePercent} label="Cellulose percent" />
+                            </div>
                             {c.subMixOf && (
                               <div
                                 className="mt-2 flex flex-wrap items-center gap-1.5 rounded-md border border-purple-400/50 bg-purple-500/10 p-2"
@@ -596,13 +634,32 @@ export default function CheeseImportDialog({
                   </p>
                   <ul className="mt-2 space-y-1">
                     {prepared.prepItems.map((p) => (
-                      <li
-                        key={`${p.blend}\u0000${p.ingredient}`}
-                        className="text-xs text-purple-800"
-                      >
+                      <li key={`${p.blend}\u0000${p.ingredient}`} className="text-xs text-purple-800">
                         <span className="font-medium">{p.ingredient}</span>
                         {p.lbs > 0 ? ` — ${p.lbs} lbs` : ""}{" "}
                         <span className="text-purple-700/80">in {p.blend}</span>
+                        <div className="mt-0.5">
+                          {prepared.sourceByPrepItem?.[
+                            `${p.blend.trim().toLowerCase()}::${p.ingredient.trim().toLowerCase()}`
+                          ]?.sources.map((source, index) => (
+                            <span key={`${source.ingredient.cell}-${index}`} className="block">
+                              <WorkbookSourceCitation
+                                source={source.ingredient}
+                                label="Ingredient"
+                                unverified={prepared.sourceByPrepItem?.[
+                                  `${p.blend.trim().toLowerCase()}::${p.ingredient.trim().toLowerCase()}`
+                                ]?.ambiguous}
+                              />
+                              <WorkbookSourceCitation
+                                source={source.lbs}
+                                label="Pounds"
+                                unverified={prepared.sourceByPrepItem?.[
+                                  `${p.blend.trim().toLowerCase()}::${p.ingredient.trim().toLowerCase()}`
+                                ]?.ambiguous}
+                              />
+                            </span>
+                          ))}
+                        </div>
                       </li>
                     ))}
                   </ul>

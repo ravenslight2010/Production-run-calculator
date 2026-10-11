@@ -6,11 +6,18 @@ import { sandboxAllowed, seedSandboxUser } from "./lib/sandbox";
 import { recordStartupEvent, recordStartupSlowWarning } from "./lib/observability";
 import { runMasterDataHealthScan } from "./lib/masterDataHealth";
 import { classifyStartupRepairFailure } from "./lib/startupRepairFailure";
-import { startAutoTrackServerTicks, startDailyRolloverScheduler } from "./routes/sync";
+import {
+  startAutoTrackServerTicks,
+  startDailyRolloverScheduler,
+  stopSyncOutboxFanout,
+} from "./routes/sync";
 import { startWebPushAlertScheduler } from "./lib/webPush";
 import { startServerJobWorkerLoop } from "./lib/serverJobs";
 import { startAuthRetentionScheduler } from "./lib/authRetention";
-import { db } from "@workspace/db";
+import { startImportSourceRetentionScheduler } from "./lib/importSourceRetention";
+import { db, pool } from "@workspace/db";
+import { startDatabaseCapacityCollection } from "./lib/databaseCapacity";
+import { getBuildInfo } from "./lib/buildInfo";
 import { setGeminiMetricsObserver } from "@workspace/integrations-openai-ai-server";
 import { sql } from "drizzle-orm";
 import {
@@ -43,6 +50,8 @@ let stopServerJobWorker: (() => void) | undefined;
 let stopWebPushAlertScheduler: (() => void) | undefined;
 let stopDailyRolloverScheduler: (() => void) | undefined;
 let stopAuthRetentionScheduler: (() => void) | undefined;
+let stopImportSourceRetentionScheduler: (() => void) | undefined;
+let stopDatabaseCapacityCollection: (() => void) | undefined;
 
 if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
@@ -87,6 +96,11 @@ async function startServer(): Promise<void> {
     stopDailyRolloverScheduler = undefined;
     stopAuthRetentionScheduler?.();
     stopAuthRetentionScheduler = undefined;
+    stopImportSourceRetentionScheduler?.();
+    stopImportSourceRetentionScheduler = undefined;
+    stopDatabaseCapacityCollection?.();
+    stopDatabaseCapacityCollection = undefined;
+    stopSyncOutboxFanout();
 
     const forceExit = setTimeout(() => {
       logger.error({ signal }, "API server did not stop within 5 seconds");
@@ -191,6 +205,7 @@ async function initializeStartup(startedAt: number): Promise<void> {
   // request pool during the long serialized suite.
   startAutoTrackServerTicks();
   if (process.env.DISABLE_BACKGROUND_AUXILIARY_SCHEDULERS !== "1") {
+    stopDatabaseCapacityCollection = startDatabaseCapacityCollection(pool, logger, getBuildInfo).stop;
     stopDailyRolloverScheduler = startDailyRolloverScheduler(
       sandboxAllowed() ? ["live", "sandbox"] : ["live"],
     ).stop;
@@ -208,6 +223,14 @@ async function initializeStartup(startedAt: number): Promise<void> {
         logger.error(
           { err: error, operation: "auth-retention", outcome: "degraded", errorCode: "auth_retention_failed" },
           "Auth retention background task failed",
+        );
+      },
+    }).stop;
+    stopImportSourceRetentionScheduler = startImportSourceRetentionScheduler({
+      onError() {
+        logger.error(
+          { event: "apply_source_retention", outcome: "degraded", errorCode: "apply_source_retention_failed" },
+          "Apply source retention cleanup failed",
         );
       },
     }).stop;

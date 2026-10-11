@@ -1,0 +1,502 @@
+{
+  "schemaVersion": 1,
+  "lanes": [
+    {
+      "id": "ci-typescript-codegen-bridge",
+      "surface": "CI typecheck and repository contract checks",
+      "command": "pnpm run check:typescript-7-codegen-bridge",
+      "trigger": "CI push to main and pull request; manual calibration workflow dispatch",
+      "runsByDefault": true,
+      "environment": ["Node.js 24", "pnpm frozen install"],
+      "prerequisites": ["generated-client bridge checks"],
+      "safety": "disposable build/check; no production data"
+    },
+    {
+      "id": "ci-typecheck",
+      "surface": "CI typecheck and repository contract checks",
+      "command": "pnpm run typecheck",
+      "trigger": "CI push to main and pull request",
+      "runsByDefault": true,
+      "environment": ["Node.js 24", "pnpm frozen install"],
+      "prerequisites": ["workspace dependencies"],
+      "safety": "static checks; no database writes"
+    },
+    {
+      "id": "ci-skill-catalog-check",
+      "surface": "CI typecheck and repository contract checks",
+      "command": "pnpm run check:skill-catalog",
+      "trigger": "CI push to main and pull request",
+      "runsByDefault": true,
+      "environment": ["Node.js 24", "pnpm frozen install"],
+      "prerequisites": ["workspace dependencies"],
+      "safety": "static checks; no database writes"
+    },
+    {
+      "id": "ci-scripts-routine",
+      "surface": "CI-wide scripts unit and contract tests",
+      "command": "pnpm --filter @workspace/scripts run test",
+      "trigger": "CI push to main and pull request; local routine suite",
+      "runsByDefault": true,
+      "localRoutine": true,
+      "environment": ["Node.js 24", "pnpm frozen install"],
+      "prerequisites": ["workspace dependencies"],
+      "safety": "unit/contract suites; uses test-owned fixtures"
+    },
+    {
+      "id": "ci-skill-catalog-tests",
+      "surface": "CI typecheck and repository contract checks",
+      "command": "pnpm --filter @workspace/scripts run test:skill-catalog",
+      "trigger": "CI push to main and pull request",
+      "runsByDefault": true,
+      "environment": ["Node.js 24", "pnpm frozen install"],
+      "prerequisites": ["workspace dependencies"],
+      "safety": "static tests; no database writes"
+    },
+    {
+      "id": "ci-client-unit",
+      "surface": "CI client and shared-library unit tests",
+      "command": "pnpm --filter @workspace/run-calculator test",
+      "trigger": "CI push to main and pull request; local routine suite",
+      "runsByDefault": true,
+      "localRoutine": true,
+      "environment": ["Node.js 24", "pnpm frozen install"],
+      "prerequisites": ["workspace dependencies"],
+      "safety": "unit tests; no live application"
+    },
+    {
+      "id": "ci-library-sweep",
+      "surface": "CI client and shared-library unit tests",
+      "command": "pnpm -r --filter \"./lib/**\" --if-present test",
+      "trigger": "CI push to main and pull request; local routine suite",
+      "runsByDefault": true,
+      "localRoutine": true,
+      "environment": ["Node.js 24", "pnpm frozen install"],
+      "prerequisites": ["workspace dependencies"],
+      "safety": "shared-library tests; no production data"
+    },
+    {
+      "id": "ci-release-concurrency-fixtures",
+      "surface": "Concurrent sync and inventory mutations",
+      "command": "pnpm --filter @workspace/scripts run test:release-concurrency",
+      "trigger": "CI push to main and pull request",
+      "runsByDefault": true,
+      "environment": ["Node.js 24", "pnpm frozen install"],
+      "prerequisites": ["workspace dependencies"],
+      "safety": "fixture-only regression test; not the disposable-Postgres concurrency lane"
+    },
+    {
+      "id": "ci-api-postgres",
+      "surface": "API route, validation, auth, and persistence contracts",
+      "command": "pnpm --filter @workspace/api-server test",
+      "trigger": "CI push to main and pull request",
+      "runsByDefault": true,
+      "environment": ["Node.js 24", "disposable PostgreSQL service"],
+      "prerequisites": ["schema applied to CI-owned disposable database"],
+      "safety": "isolated CI database only"
+    },
+    {
+      "id": "ci-schema-safe-rollback",
+      "surface": "Database schema and persisted-field verification",
+      "command": "pnpm run check:schema-safe-rollback",
+      "trigger": "CI push to main and pull request",
+      "runsByDefault": true,
+      "environment": ["Node.js 24", "pnpm frozen install"],
+      "prerequisites": ["disposable schema fixture"],
+      "safety": "disposable fixture; no production database"
+    },
+    {
+      "id": "release-standard",
+      "surface": "Standard and full release checks",
+      "command": "pnpm run release:check",
+      "trigger": "release-check pull request or workflow dispatch",
+      "runsByDefault": true,
+      "environment": ["Node.js 24", "disposable PostgreSQL service", "Chromium and WebKit"],
+      "prerequisites": ["schema applied to disposable database", "release evidence prerequisites"],
+      "safety": "bounded release gates; browser/database safety guards remain required"
+    },
+    {
+      "id": "release-full",
+      "surface": "Standard and full release checks",
+      "command": "pnpm run release:check:full",
+      "trigger": "explicit workflow dispatch with run_full enabled",
+      "runsByDefault": false,
+      "environment": ["Node.js 24", "disposable PostgreSQL service", "Chromium and WebKit"],
+      "prerequisites": ["schema applied to disposable database", "full-browser fixture prerequisites"],
+      "safety": "opt-in; destructive browser suite remains serial and isolated"
+    },
+    {
+      "id": "api-unit-isolated",
+      "surface": "API route, validation, auth, and persistence contracts",
+      "command": "pnpm --filter @workspace/api-server run test:release:unit",
+      "trigger": "focused API/release validation on request",
+      "runsByDefault": false,
+      "environment": ["Node.js 24", "pnpm frozen install"],
+      "prerequisites": ["isolated API-unit runner"],
+      "safety": "isolated unit suite"
+    },
+    {
+      "id": "api-integration-shards",
+      "surface": "API route, validation, auth, and persistence contracts",
+      "command": "pnpm --filter @workspace/api-server run test:release:integration:1|2|3",
+      "trigger": "focused API/release validation on request",
+      "runsByDefault": false,
+      "environment": ["Node.js 24", "disposable PostgreSQL database"],
+      "prerequisites": ["schema applied", "database shard capacity"],
+      "safety": "disposable database; release concurrency cap is two"
+    },
+    {
+      "id": "api-roles",
+      "surface": "API route, validation, auth, and persistence contracts",
+      "command": "pnpm --filter @workspace/api-server run test:release:roles",
+      "trigger": "focused auth/capability validation on request",
+      "runsByDefault": false,
+      "environment": ["Node.js 24", "disposable PostgreSQL database"],
+      "prerequisites": ["schema applied"],
+      "safety": "disposable database only"
+    },
+    {
+      "id": "api-sync",
+      "surface": "Sync merge, reset, LWW, and SSE",
+      "command": "pnpm --filter @workspace/api-server run test:release:sync",
+      "trigger": "sync-related changes or focused validation",
+      "runsByDefault": false,
+      "environment": ["Node.js 24", "disposable PostgreSQL database"],
+      "prerequisites": ["schema applied"],
+      "safety": "disposable database only"
+    },
+    {
+      "id": "api-sync-sse",
+      "surface": "Sync merge, reset, LWW, and SSE",
+      "command": "pnpm --filter @workspace/api-server run test:release:sync-sse",
+      "trigger": "SSE-related changes or focused validation",
+      "runsByDefault": false,
+      "environment": ["Node.js 24", "disposable PostgreSQL database"],
+      "prerequisites": ["schema applied"],
+      "safety": "disposable database only"
+    },
+    {
+      "id": "api-sync-convergence",
+      "surface": "Sync merge, reset, LWW, and SSE",
+      "command": "pnpm --filter @workspace/api-server run test:sync-convergence:isolated",
+      "trigger": "sync convergence changes or focused validation",
+      "runsByDefault": false,
+      "environment": ["Node.js 24", "disposable PostgreSQL database"],
+      "prerequisites": ["isolated sync-convergence runner", "schema applied"],
+      "safety": "isolated disposable database only"
+    },
+    {
+      "id": "api-concurrency",
+      "surface": "Concurrent sync and inventory mutations",
+      "command": "pnpm --filter @workspace/api-server run test:release:concurrency",
+      "trigger": "concurrency boundary changes or focused release validation",
+      "runsByDefault": false,
+      "environment": ["Node.js 24", "disposable PostgreSQL database"],
+      "prerequisites": ["schema applied", "180-second command budget"],
+      "safety": "isolated disposable database only"
+    },
+    {
+      "id": "api-load-workload",
+      "surface": "Bounded API application workload",
+      "command": "pnpm --filter @workspace/api-server run test:load:isolated",
+      "trigger": "manual GitHub Actions workflow dispatch only",
+      "runsByDefault": false,
+      "environment": ["Node.js 24", "job-owned disposable PostgreSQL service"],
+      "prerequisites": ["explicit API load disposable-database acknowledgement", "loopback api_load_test_admin database", "pnpm frozen install"],
+      "safety": "opt-in; unique child database is dropped after the run; four clients, four rounds, at most four sync attempts per write, 187 total API requests, twelve in-flight requests, six-minute total bound; timings are diagnostic only"
+    },
+    {
+      "id": "shared-library-focused",
+      "surface": "Pure calculations and shared decision logic",
+      "command": "Package test scripts for inventory-math, production-rules, spec-reconcile, spec-import, scheduled-recipe-check, spec-export, and corpus-harness",
+      "trigger": "owning library or consumer changes; focused validation",
+      "runsByDefault": false,
+      "environment": ["Node.js 24", "pnpm frozen install"],
+      "prerequisites": ["workspace dependencies"],
+      "safety": "deterministic unit suites; no production data"
+    },
+    {
+      "id": "import-export-focused",
+      "surface": "Import and export pipelines",
+      "command": "pnpm --filter @workspace/spec-import run test; pnpm --filter @workspace/spec-reconcile run test; pnpm --filter @workspace/spec-export run test; pnpm --filter @workspace/corpus-harness run test",
+      "trigger": "import parsing/linking/aliases/merge/export changes",
+      "runsByDefault": false,
+      "environment": ["Node.js 24", "pnpm frozen install"],
+      "prerequisites": ["workspace dependencies"],
+      "safety": "deterministic fixtures; AI/provider access is not implied"
+    },
+    {
+      "id": "import-lifecycle-integrity",
+      "surface": "Import lifecycle integrity",
+      "command": "Focused suites listed in docs/import-lifecycle-integrity-audit-2026-09-06.md",
+      "trigger": "recipe-row identity, replacement/union, merge backfill, source retention, or re-import guard changes",
+      "runsByDefault": false,
+      "environment": ["Node.js 24", "disposable database for persistence suites"],
+      "prerequisites": ["select the focused suites for the changed import boundary"],
+      "safety": "database-backed suites require existing disposable-test safeguards"
+    },
+    {
+      "id": "browser-compatibility",
+      "surface": "Browser operational journeys",
+      "command": "pnpm --filter @workspace/run-calculator run test:e2e:compatibility",
+      "trigger": "focused browser compatibility validation; full release includes selected responsive journeys",
+      "runsByDefault": false,
+      "environment": ["Chromium", "WebKit", "disposable browser database"],
+      "prerequisites": ["isolated browser fixture", "one-worker project configuration"],
+      "safety": "destructive fixture guarded; serial browser stages"
+    },
+    {
+      "id": "browser-smoke",
+      "surface": "Browser operational journeys",
+      "command": "pnpm --filter @workspace/run-calculator run test:e2e:smoke",
+      "trigger": "focused smoke validation; standard release runs its bounded smoke",
+      "runsByDefault": false,
+      "environment": ["Chromium", "disposable browser database"],
+      "prerequisites": ["browser/API fixture"],
+      "safety": "isolated browser fixture"
+    },
+    {
+      "id": "browser-webkit",
+      "surface": "Browser operational journeys",
+      "command": "pnpm --filter @workspace/run-calculator run test:e2e:webkit",
+      "trigger": "WebKit or cross-browser changes; standard release runs WebKit smoke",
+      "runsByDefault": false,
+      "environment": ["WebKit", "disposable browser database"],
+      "prerequisites": ["isolated browser fixture", "one worker"],
+      "safety": "disposable database; no destructive inherited global setup"
+    },
+    {
+      "id": "browser-main",
+      "surface": "Browser operational journeys",
+      "command": "pnpm --filter @workspace/run-calculator run test:e2e",
+      "trigger": "full browser validation on request",
+      "runsByDefault": false,
+      "environment": ["Chromium", "disposable browser database"],
+      "prerequisites": ["requireIsolatedTestDatabase guard", "full browser fixture"],
+      "safety": "destructive isolated suite; serial"
+    },
+    {
+      "id": "browser-calendar",
+      "surface": "Browser operational journeys",
+      "command": "pnpm --filter @workspace/run-calculator run test:e2e:calendar",
+      "trigger": "calendar journey changes or focused validation",
+      "runsByDefault": false,
+      "environment": ["Chromium"],
+      "prerequisites": ["calendar fixture"],
+      "safety": "focused browser fixture"
+    },
+    {
+      "id": "browser-phone",
+      "surface": "Browser operational journeys",
+      "command": "pnpm --filter @workspace/run-calculator run test:e2e:phone",
+      "trigger": "phone responsive or touch changes",
+      "runsByDefault": false,
+      "environment": ["Chromium", "disposable browser database"],
+      "prerequisites": ["isolated browser fixture"],
+      "safety": "destructive fixture guarded"
+    },
+    {
+      "id": "browser-multi-device",
+      "surface": "Browser operational journeys",
+      "command": "pnpm --filter @workspace/run-calculator run test:e2e:multi-device",
+      "trigger": "cross-device synchronization changes",
+      "runsByDefault": false,
+      "environment": ["Chromium", "disposable browser database"],
+      "prerequisites": ["isolated browser fixture"],
+      "safety": "destructive fixture guarded"
+    },
+    {
+      "id": "browser-wake-retry",
+      "surface": "Browser operational journeys",
+      "command": "pnpm --filter @workspace/run-calculator run test:e2e:wake-retry",
+      "trigger": "wake/offline recovery changes",
+      "runsByDefault": false,
+      "environment": ["Chromium", "disposable browser database"],
+      "prerequisites": ["isolated browser fixture"],
+      "safety": "destructive fixture guarded"
+    },
+    {
+      "id": "browser-department",
+      "surface": "Department and station-specific journeys",
+      "command": "pnpm --filter @workspace/run-calculator run test:e2e:department",
+      "trigger": "department/station behavior changes or workflow_dispatch",
+      "runsByDefault": false,
+      "environment": ["Chromium", "isolated browser database"],
+      "prerequisites": ["prepare:e2e:department", "department fixture"],
+      "safety": "isolated disposable database"
+    },
+    {
+      "id": "browser-dough-correction",
+      "surface": "Department and station-specific journeys",
+      "command": "pnpm --filter @workspace/run-calculator run test:e2e:dough-correction",
+      "trigger": "dough station changes or focused validation",
+      "runsByDefault": false,
+      "environment": ["Chromium"],
+      "prerequisites": ["dough correction fixture"],
+      "safety": "focused browser fixture"
+    },
+    {
+      "id": "browser-recipe-refresh",
+      "surface": "Department and station-specific journeys",
+      "command": "pnpm --filter @workspace/run-calculator run test:e2e:recipe-refresh",
+      "trigger": "recipe refresh changes or focused validation",
+      "runsByDefault": false,
+      "environment": ["Chromium", "disposable browser database"],
+      "prerequisites": ["isolated browser fixture"],
+      "safety": "destructive fixture guarded"
+    },
+    {
+      "id": "browser-ai-outage-phone",
+      "surface": "Department and station-specific journeys",
+      "command": "pnpm --filter @workspace/run-calculator run test:e2e:ai-outage:phone",
+      "trigger": "AI outage/recovery journeys or focused validation",
+      "runsByDefault": false,
+      "environment": ["Chromium", "disposable browser database"],
+      "prerequisites": ["isolated browser fixture"],
+      "safety": "destructive fixture guarded"
+    },
+    {
+      "id": "browser-management-performance",
+      "surface": "Performance and photo-count browser checks",
+      "command": "pnpm --filter @workspace/run-calculator run test:e2e:management-performance",
+      "trigger": "manager-screen performance changes",
+      "runsByDefault": false,
+      "environment": ["Chromium"],
+      "prerequisites": ["performance fixture"],
+      "safety": "bounded opt-in browser lane"
+    },
+    {
+      "id": "browser-client-performance",
+      "surface": "Performance and photo-count browser checks",
+      "command": "pnpm --filter @workspace/run-calculator run test:performance",
+      "trigger": "client performance changes",
+      "runsByDefault": false,
+      "environment": ["Node.js 24", "pnpm frozen install"],
+      "prerequisites": ["workspace dependencies"],
+      "safety": "bounded unit-level performance assertions"
+    },
+    {
+      "id": "browser-photo-count",
+      "surface": "Performance and photo-count browser checks",
+      "command": "pnpm --filter @workspace/run-calculator run test:e2e:photo-count",
+      "trigger": "photo-count behavior changes",
+      "runsByDefault": false,
+      "environment": ["Chromium"],
+      "prerequisites": ["photo-count fixture"],
+      "safety": "focused browser fixture"
+    },
+    {
+      "id": "browser-a11y",
+      "surface": "Passive field verification and accessibility",
+      "command": "pnpm --filter @workspace/run-calculator run test:e2e:a11y",
+      "trigger": "accessibility, field-observation, or manager-panel changes",
+      "runsByDefault": false,
+      "environment": ["Chromium", "disposable browser database"],
+      "prerequisites": ["isolated accessibility fixture"],
+      "safety": "separate one-worker config; no destructive inherited global setup"
+    },
+    {
+      "id": "passive-field-verification",
+      "surface": "Passive field verification",
+      "command": "Focused client/API field-check contract and scoping tests; manager Reported Issues browser coverage is in browser-a11y",
+      "trigger": "field-check ingestion, lifecycle observation, or manager-panel changes",
+      "runsByDefault": false,
+      "environment": ["Node.js 24", "disposable database for API integration coverage"],
+      "prerequisites": ["select client/API tests for the changed field-check boundary"],
+      "safety": "browser checks observe only browser-visible signals"
+    },
+    {
+      "id": "browser-visual",
+      "surface": "Visual baselines",
+      "command": "pnpm --filter @workspace/run-calculator run test:e2e:visual",
+      "trigger": "intentional geometry/hierarchy/responsive changes",
+      "runsByDefault": false,
+      "environment": ["Chromium", "approved snapshot baseline"],
+      "prerequisites": ["isolated visual fixture"],
+      "safety": "snapshot updates are local and require explicit review"
+    },
+    {
+      "id": "pwa-handoff",
+      "surface": "PWA and service-worker checks",
+      "command": "pnpm --filter @workspace/run-calculator run test:pwa-handoff",
+      "trigger": "PWA/service-worker/cache changes",
+      "runsByDefault": false,
+      "environment": ["Chromium"],
+      "prerequisites": ["PWA handoff fixture"],
+      "safety": "focused browser fixture"
+    },
+    {
+      "id": "pwa-morning",
+      "surface": "PWA and service-worker checks",
+      "command": "pnpm --filter @workspace/run-calculator run test:e2e:pwa-morning",
+      "trigger": "PWA morning handoff changes",
+      "runsByDefault": false,
+      "environment": ["Chromium", "disposable browser database"],
+      "prerequisites": ["isolated PWA fixture"],
+      "safety": "destructive fixture guarded"
+    },
+    {
+      "id": "physical-android-phone",
+      "surface": "Physical Android device checks",
+      "command": "check:e2e:ai-outage:phone:device then test:e2e:ai-outage:phone:device",
+      "trigger": "physical-device validation by request",
+      "runsByDefault": false,
+      "environment": ["PLAYWRIGHT_REAL_MOBILE_WS_ENDPOINT", "physical Android Chrome"],
+      "requiredEnv": ["PLAYWRIGHT_REAL_MOBILE_WS_ENDPOINT"],
+      "prerequisites": ["connected physical Android device", "isolated browser database"],
+      "safety": "device lane is opt-in; emulation is not equivalent"
+    },
+    {
+      "id": "physical-android-main",
+      "surface": "Physical Android device checks",
+      "command": "pnpm --filter @workspace/run-calculator run test:e2e:phone:device",
+      "trigger": "physical-device validation by request",
+      "runsByDefault": false,
+      "environment": ["PLAYWRIGHT_REAL_MOBILE_WS_ENDPOINT", "physical Android Chrome"],
+      "requiredEnv": ["PLAYWRIGHT_REAL_MOBILE_WS_ENDPOINT"],
+      "prerequisites": ["connected physical Android device", "isolated browser database"],
+      "safety": "device lane is opt-in; emulation is not equivalent"
+    },
+    {
+      "id": "physical-ios-pwa",
+      "surface": "Physical iOS Safari/PWA readiness",
+      "command": "check:e2e:ios:pwa:device then test:e2e:ios:pwa:device",
+      "trigger": "physical-device validation by request",
+      "runsByDefault": false,
+      "environment": ["PLAYWRIGHT_REAL_IOS_SAFARI_WS_ENDPOINT", "physical iOS Safari/PWA"],
+      "requiredEnv": ["PLAYWRIGHT_REAL_IOS_SAFARI_WS_ENDPOINT"],
+      "prerequisites": ["connected physical iPhone/iPad Safari tab or installed PWA"],
+      "safety": "web/PWA only; does not test a native iOS application"
+    },
+    {
+      "id": "startup-clean-start",
+      "surface": "Startup and preview health",
+      "command": "pnpm run check:clean-start",
+      "trigger": "workflow/proxy changes and standard release checks",
+      "runsByDefault": false,
+      "environment": ["artifact workflows", "isolated browser fixture"],
+      "prerequisites": ["clean-start harness and configured artifact workflows"],
+      "safety": "isolated startup and browser check; not production evidence"
+    },
+    {
+      "id": "release-concurrency-calibration",
+      "surface": "Concurrent sync and inventory mutations",
+      "command": "pnpm run check:release-concurrency",
+      "trigger": "manual GitHub Actions workflow dispatch",
+      "runsByDefault": false,
+      "environment": ["Node.js 24", "disposable PostgreSQL service"],
+      "prerequisites": ["calibration history fixtures"],
+      "safety": "manual-only; bounded disposable database lane"
+    },
+    {
+      "id": "manual-operational-notifications",
+      "surface": "Manual operational verification",
+      "owner": "Operations owner; verify external notification delivery and published deployment behavior",
+      "command": "Manual operational verification; no local command",
+      "trigger": "before relying on external delivery or production behavior",
+      "runsByDefault": false,
+      "environment": ["authorized production operations access"],
+      "prerequisites": ["owner-approved operational window"],
+      "safety": "manual only; never run against production data from local test automation"
+    }
+  ]
+}

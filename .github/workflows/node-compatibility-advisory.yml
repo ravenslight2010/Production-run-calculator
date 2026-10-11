@@ -1,0 +1,87 @@
+name: Node Compatibility Advisory
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/node-compatibility-advisory.yml"
+      - "Dockerfile"
+      - ".nvmrc"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "lib/**"
+      - "artifacts/api-server/**"
+      - "artifacts/run-calculator/**"
+      - "scripts/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: node-compatibility-advisory-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  compare:
+    name: Compare Node 24.21.0 and Node 26.10.0 (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+        env:
+          POSTGRES_DB: node_compatibility
+          POSTGRES_USER: runcalc
+          POSTGRES_PASSWORD: ci-secret
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U runcalc -d node_compatibility"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      NODE_COMPATIBILITY_RUNNER_LABEL: ubuntu-latest
+      NODE_COMPATIBILITY_ADMIN_DATABASE_URL: postgres://runcalc:ci-secret@localhost:5432/node_compatibility
+      STAFF_SIGNUP_CODE: ci-signup-code
+      INITIAL_MANAGER_USERNAME: cimanager
+      INITIAL_MANAGER_ACCESS_CODE: ci-manager-code
+      SESSION_SECRET: ci-session-secret
+      AUTH_TOKEN_SECRET: ci-auth-token-secret
+      NODE_ENV: test
+      E2E_TEST_DB: "1"
+      E2E_APPROVED_DESTRUCTIVE_MODE: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+      - name: Set up Node 24 baseline
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.21.0
+      - name: Record exact Node 24 binary
+        run: echo "NODE24_BIN=$(command -v node)" >> "$GITHUB_ENV"
+      - name: Set up Node 26 candidate
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 26.10.0
+      - name: Record comparison binaries
+        run: |
+          echo "NODE26_BIN=$(command -v node)" >> "$GITHUB_ENV"
+          echo "PNPM_BIN=$(command -v pnpm)" >> "$GITHUB_ENV"
+      - name: Run bounded same-runner comparison
+        env:
+          NODE_COMPATIBILITY_OUTPUT_DIR: ${{ runner.temp }}/node-compatibility-advisory
+        run: node scripts/src/node-compatibility-advisory.mjs
+      - name: Upload isolated advisory report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: node-compatibility-advisory-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/node-compatibility-advisory/
+          if-no-files-found: warn
+          retention-days: 14

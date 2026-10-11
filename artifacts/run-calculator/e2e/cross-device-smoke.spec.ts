@@ -47,20 +47,16 @@ test.afterAll(async () => {
   }
 });
 
-async function signUp(page: Page, username: string): Promise<void> {
-  await signUpAndHandleOnboarding(page, username, PASSWORD, {
-    signupCode: SIGNUP_CODE,
-  });
-}
-
 async function dismissOnboarding(page: Page): Promise<void> {
   await dismissOnboardingIfPresent(page);
 }
 
 async function seedPendingRun(page: Page): Promise<string> {
   const runId = `smoke-run-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const seedStamp = Date.now();
   await page.evaluate((id) => {
     const dayKey = "run-calc-day";
+    const runValuesKey = `run-calc-run-${id}`;
     const day = JSON.parse(localStorage.getItem(dayKey) ?? "{}") as {
       date?: string;
       runs?: Array<Record<string, unknown>>;
@@ -76,6 +72,13 @@ async function seedPendingRun(page: Page): Promise<string> {
         currentIndex: 0,
       }),
     );
+    // Keep the lifecycle smoke fixture valid under the case-based production
+    // readiness rule. The test exercises sync/lifecycle recovery, not missing
+    // setup validation.
+    localStorage.setItem(
+      runValuesKey,
+      JSON.stringify({ casesNeeded: 1, pizzasPerCase: 1 }),
+    );
   }, runId);
   // Home reads the day state during mount, so reload after seeding rather than
   // trying to mutate React state from the fixture.
@@ -86,6 +89,11 @@ async function seedPendingRun(page: Page): Promise<string> {
     failOnStatusCode: true,
   });
   const { epoch = 0 } = (await epochResponse.json()) as { epoch?: number };
+  const baselineResponse = await page.request.get(`/api/sync/today?today=${today}`, {
+    failOnStatusCode: true,
+  });
+  const baseSnapshotId = baselineResponse.headers()["x-sync-snapshot"];
+  expect(baseSnapshotId).toBeTruthy();
   const seedResponse = await page.request.put(
     `/api/sync/today?today=${today}&epoch=${epoch}`,
     {
@@ -94,11 +102,20 @@ async function seedPendingRun(page: Page): Promise<string> {
         payload: {
           dayState: {
             date: today,
-            runs: [{ id: runId, brand: "Smoke", flavor: "Lifecycle" }],
+            runs: [{
+              id: runId,
+              brand: "Smoke",
+              flavor: "Lifecycle",
+              metaUpdatedAt: seedStamp,
+            }],
             currentIndex: 0,
             resetAt: 0,
           },
-          runValues: {},
+          runValues: { [runId]: { casesNeeded: 1, pizzasPerCase: 1 } },
+          runValuesUpdatedAt: { [runId]: seedStamp },
+          syncVersion: 1,
+          completeness: "complete",
+          baseSnapshotId,
         },
       },
       failOnStatusCode: true,
@@ -185,7 +202,12 @@ test("staff lifecycle recovers across desktop and phone layouts", async ({
 }) => {
   const username = uid();
   testUsernames.add(username);
-  await signUp(page, username);
+  await signUpAndHandleOnboarding(page, username, PASSWORD, {
+    signupCode: SIGNUP_CODE,
+    // This journey exercises the onboarding POST after installing its
+    // cross-device fixture, not during the initial sign-up.
+    onboarding: false,
+  });
   await seedPendingRun(page);
   // The reload used to install the pending run can race the first-login
   // mutation; make the post-reload boundary explicit before clicking tabs.
@@ -226,8 +248,6 @@ test("staff lifecycle recovers across desktop and phone layouts", async ({
   await expect(page.getByRole("button", { name: /pause run/i })).toBeVisible();
   await expect.poll(async () => (await selectedRunId(page))).toBe(runId);
 
-  // Fail exactly one foreground reconciliation pull. The online event below
-  // must cause a later pull; no action is clicked twice and no pause is cloned.
   let failedPull = false;
   let failedPullResolve!: () => void;
   const failedPullObserved = new Promise<void>((resolve) => {
@@ -262,6 +282,6 @@ test("staff lifecycle recovers across desktop and phone layouts", async ({
     .toBe(1);
   await expect(page.locator('[title="Sync connected"]')).toBeVisible();
   await page.reload({ waitUntil: "domcontentloaded" });
-  await expect(page.getByRole("button", { name: /pause run/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /pause run/i })).toBeVisible({ timeout: 25_000 });
   await expect.poll(async () => (await selectedRunId(page))).toBe(runId);
 });

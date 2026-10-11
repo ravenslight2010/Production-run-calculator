@@ -7,6 +7,7 @@ import type {
   ParsedSpecImport,
   SpecImportWarning,
 } from "@workspace/spec-import";
+import { sanitizeParsedSpecImport } from "@workspace/spec-import";
 import type { SpecImportPrepared } from "@/specImport";
 import SpecImportDialog from "../SpecImportDialog";
 
@@ -76,6 +77,19 @@ function renderDialog(
 }
 
 describe("SpecImportDialog flavor-correction warnings", () => {
+  it("shows incomplete-row warnings and an accurate overflow count from a saved sanitized review", () => {
+    const parsed = sanitizeParsedSpecImport({
+      profiles: Array.from({ length: 30 }, (_, i) => ({ brand: `Brand ${i}`, flavor: "" })),
+      recipes: [{ kind: "sauce", name: "Example Sauce", rows: [{ ingredient: "Tomato", lbs: 1 }] }],
+    });
+    const restored = JSON.parse(JSON.stringify(parsed)) as ParsedSpecImport;
+    renderDialog(makePrepared(restored.profiles, restored.warnings, restored.recipes));
+    const callout = screen.getByTestId("spec-import-warnings");
+    expect(within(callout).getByText("30 items were corrected or flagged")).toBeTruthy();
+    expect(within(callout).getAllByText(/missing a flavor and will not be saved/)).toHaveLength(9);
+    expect(within(callout).getByText(/21 additional import warnings are not shown/)).toBeTruthy();
+    expect(screen.queryByTestId("spec-profile-pk0")).toBeNull();
+  });
   it("renders the top-level amber callout and attaches the per-row callout to the matching profile", () => {
     const prepared = makePrepared(
       [profile("Tombstone", "Pepperoni"), profile("DiGiorno", "Four Cheese")],
@@ -185,6 +199,123 @@ describe("SpecImportDialog flavor-correction warnings", () => {
 
     expect(screen.queryByTestId("spec-import-warnings")).toBeNull();
     expect(screen.queryByTestId("spec-profile-warning-pk0")).toBeNull();
+  });
+
+  it("warns about missing formula results and opens the cited workbook cell", () => {
+    const prepared = makePrepared([profile("Acme", "Classic")]);
+    prepared.missingFormulaResults = [{
+      field: "Sauce oz/pizza",
+      location: {
+        file: "spec.xlsx",
+        sheet: "Profiles",
+        cell: "D2",
+      },
+      hasSavedResult: false,
+      brand: "Acme",
+      flavor: "Classic",
+    }];
+    prepared.sourcePreviewCells = [{
+      file: "spec.xlsx",
+      sheet: "Profiles",
+      cell: "D2",
+      value: "",
+      formula: "1/2",
+      hasSavedResult: false,
+    }];
+    renderDialog(prepared);
+
+    const warning = screen.getByTestId("spec-import-missing-formula-results");
+    expect(within(warning).getByText("1 formula cell has no saved result")).toBeTruthy();
+    const warningRow = warning.querySelector("li");
+    expect(warningRow?.textContent).toContain("Sauce oz/pizza · Acme — Classic");
+    expect(warningRow?.textContent).toContain("spec.xlsx · Profiles!D2");
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Review missing formula result at spec.xlsx · Profiles!D2",
+    }));
+    expect(screen.getByTestId("spec-source-preview-formula").textContent).toBe("=1/2");
+    expect(screen.getByTestId("spec-source-preview-value").textContent)
+      .toBe("No saved result in workbook");
+  });
+
+  it("validates and applies a manager-entered value without adding source evidence", () => {
+    const prepared = makePrepared([
+      {
+        ...profile("Acme", "Classic"),
+        sourceLocations: {
+          brand: [{ file: "spec.xlsx", sheet: "Profiles", cell: "A2" }],
+          flavor: [{ file: "spec.xlsx", sheet: "Profiles", cell: "B2" }],
+        },
+      },
+    ]);
+    prepared.missingFormulaResults = [{
+      field: "Sauce oz/pizza",
+      location: { file: "spec.xlsx", sheet: "Profiles", cell: "D2" },
+      hasSavedResult: false,
+      brand: "Acme",
+      flavor: "Classic",
+    }];
+    prepared.sourcePreviewCells = [{
+      file: "spec.xlsx",
+      sheet: "Profiles",
+      cell: "D2",
+      value: "",
+      formula: "1/2",
+      hasSavedResult: false,
+    }];
+    const onConfirm = vi.fn();
+    renderDialog(prepared, onConfirm);
+
+    const valueInput = screen.getByRole("textbox", {
+      name: "Manual value for Sauce oz/pizza · Acme — Classic",
+    });
+    const nextButton = screen.getByRole("button", { name: "Next" });
+    fireEvent.change(valueInput, { target: { value: "-0.5" } });
+    expect(nextButton).toHaveProperty("disabled", true);
+    expect(screen.getByRole("alert").textContent).toBe("Enter a number of 0 or more.");
+
+    fireEvent.change(valueInput, { target: { value: "0.75" } });
+    expect(nextButton).toHaveProperty("disabled", false);
+    fireEvent.click(nextButton);
+    fireEvent.click(screen.getByRole("button", { name: /^Apply/ }));
+
+    const applied = onConfirm.mock.calls[0]?.[0] as ParsedSpecImport;
+    expect(applied.profiles[0].sauceOzPerPizza).toBe(0.75);
+    expect(applied.profiles[0]).not.toHaveProperty("sourceLocations");
+    expect(applied.profiles[0]).not.toHaveProperty("formula");
+    expect(applied).not.toHaveProperty("sourceEvidence");
+  });
+
+  it("lets a manager supply a missing profile identity before applying", () => {
+    const prepared = makePrepared([]);
+    prepared.missingFormulaResults = [{
+      field: "Brand",
+      location: { file: "spec.xlsx", sheet: "Profiles", cell: "A2" },
+      hasSavedResult: false,
+      flavor: "Classic",
+    }];
+    prepared.sourcePreviewCells = [{
+      file: "spec.xlsx",
+      sheet: "Profiles",
+      cell: "A2",
+      value: "",
+      formula: "A1",
+      hasSavedResult: false,
+    }];
+    const onConfirm = vi.fn();
+    renderDialog(prepared, onConfirm);
+
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Manual value for Brand · Classic" }),
+      { target: { value: "Acme" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Apply/ }));
+
+    const applied = onConfirm.mock.calls[0]?.[0] as ParsedSpecImport;
+    expect(applied.profiles).toHaveLength(1);
+    expect(applied.profiles[0]).toMatchObject({ brand: "Acme", flavor: "Classic" });
+    expect(applied.profiles[0]).not.toHaveProperty("sourceLocations");
   });
 });
 

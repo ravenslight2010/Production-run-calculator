@@ -44,15 +44,79 @@ tags:
   - name: sync
     description: Client-date-scoped live day-state synchronization
 paths:
+  /build-info:
+    get:
+      operationId: getBuildInfo
+      tags: [health]
+      security: []
+      summary: Immutable application build version
+      description: >-
+        Public, database-independent version metadata loaded from the sealed
+        build artifact. Application build IDs are not platform Build UUIDs.
+        Runtime-reported platform IDs are informational, not verified handoffs.
+        A source match alone never authorizes production release.
+      responses:
+        "200":
+          description: Valid immutable build metadata; Cache-Control is no-store.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BuildInfo"
+        "503":
+          description: Build metadata is absent or malformed; no version is inferred.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, status]
+                properties:
+                  error: { type: string }
+                  status: { type: string, enum: [unavailable] }
+
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
+      description: >-
+        Reports core API readiness and optional capability degradation.
+        Startup completion, database reachability, and required audit-log
+        protection are hard readiness gates. An unavailable AI credential or
+        degraded background workers are reported as warnings and do not by
+        themselves make the core API unready. The AI signal reports credential
+        configuration only; it does not probe the remote provider.
       responses:
         "200":
-          description: Healthy
+          description: Core API is ready; optional AI or background work may be degraded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+        "503":
+          description: Startup, database, or required audit-log protection is not ready.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /readyz:
+    get:
+      operationId: readinessCheck
+      tags: [health]
+      summary: Core API readiness
+      description: >-
+        Canonical readiness probe. Returns 503 only while startup, database,
+        or required audit-log protection is not ready. AI credential and
+        background-worker degradation are non-blocking warnings.
+      responses:
+        "200":
+          description: Core API is ready; optional capabilities may be degraded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+        "503":
+          description: Startup, database, or required audit-log protection is not ready.
           content:
             application/json:
               schema:
@@ -967,6 +1031,285 @@ paths:
                   $ref: "#/components/schemas/QualityCheckRecord"
         "403":
           description: Manager role required
+
+  /qc/targets:
+    get:
+      operationId: getQcTargets
+      tags: [inventory]
+      summary: Resolve explicit imported and reviewed QC weight targets
+      description: >-
+        Uses the authenticated facility scope. An ingredient without one
+        unambiguous explicit target is returned as not-evaluated; crust targets
+        are included only if the import contract provides an explicit value.
+      parameters:
+        - name: profileKey
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 400 }
+      responses:
+        "200":
+          description: Per-ingredient target resolution for the selected profile
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcTargetsResponse" }
+        "400": { description: Invalid profile key }
+        "403": { description: QC recording capability required }
+    post:
+      operationId: setQcTarget
+      tags: [inventory]
+      summary: Add a reviewed QC target override or clear an existing override
+      description: >-
+        Manager-only, append-only target setting. A null target, unit, and
+        tolerance together clear the override and restore spec-import resolution.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QcTargetInput" }
+      responses:
+        "201":
+          description: Audited target-setting event
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcEventResponse" }
+        "400": { description: Invalid target or tolerance }
+        "403": { description: QC manager capability required }
+
+  /qc/lots:
+    post:
+      operationId: recordQcLot
+      tags: [inventory]
+      summary: Record an ingredient lot for a production run
+      description: Multiple lots for the same run and ingredient are retained as separate events.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QcLotInput" }
+      responses:
+        "201":
+          description: Server-attributed lot record
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcEventResponse" }
+        "400": { description: Invalid lot record }
+        "403": { description: QC recording capability required }
+
+  /qc/weight-checks:
+    post:
+      operationId: recordQcWeightCheck
+      tags: [inventory]
+      summary: Record a pre-run or 30-minute ingredient weight check
+      description: >-
+        The server resolves and snapshots the target. Missing, conflicting, or
+        unit-mismatched targets produce not-evaluated, never an inferred result.
+        Out-of-tolerance results require a note.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QcWeightCheckInput" }
+      responses:
+        "201":
+          description: Server-evaluated weight-check event
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcEventResponse" }
+        "400": { description: Invalid weight or missing out-of-tolerance note }
+        "403": { description: QC recording capability required }
+
+  /qc/runs/{runId}:
+    get:
+      operationId: getQcRun
+      tags: [inventory]
+      summary: Read QC records and review state for one run
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 200 }
+      responses:
+        "200":
+          description: Scoped QC records and latest sign-off state
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcRunResponse" }
+        "400": { description: Invalid run ID or page size }
+        "403": { description: QC recording capability required }
+
+  /qc/allergen-reviews:
+    post:
+      operationId: recordQcAllergenReview
+      tags: [inventory]
+      summary: Record the non-blocking pre-run allergen and staged-ingredient review
+      description: >-
+        Snapshots the visible run footprint and its unknown/incomplete state.
+        This does not change the manual run allergen field or block production.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QcAllergenReviewInput" }
+      responses:
+        "201":
+          description: Server-attributed allergen checklist event
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcEventResponse" }
+        "400": { description: Invalid checklist response }
+        "403": { description: QC recording capability required }
+
+  /qc/cleaning-records:
+    post:
+      operationId: recordQcCleaning
+      tags: [inventory]
+      summary: Record cleaning method and timing
+      description: Cleaning is recorded without creating a production or shipping hold.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QcCleaningInput" }
+      responses:
+        "201":
+          description: Cleaning record awaiting a different authenticated verifier
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcEventResponse" }
+        "400": { description: Invalid cleaning record }
+        "403": { description: QC recording capability required }
+
+  /qc/cleaning-records/{eventId}/verification:
+    post:
+      operationId: verifyQcCleaning
+      tags: [inventory]
+      summary: Independently verify a cleaning record
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QcNoteInput" }
+      responses:
+        "201":
+          description: Second-person verification event
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcEventResponse" }
+        "400": { description: Self-verification or invalid record }
+        "403": { description: QC recording capability required }
+        "404": { description: Cleaning record not found }
+
+  /qc/run-signoffs:
+    post:
+      operationId: signoffQcRun
+      tags: [inventory]
+      summary: Sign off the current QC record set for a run
+      description: A new QC record after sign-off reopens review for that run.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QcRunSignoffInput" }
+      responses:
+        "201":
+          description: Manager-attributed run sign-off
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcEventResponse" }
+        "400": { description: Invalid run ID }
+        "403": { description: QC manager capability required }
+
+  /qc/history:
+    get:
+      operationId: getQcHistory
+      tags: [inventory]
+      summary: Read bounded, facility-scoped QC history
+      parameters:
+        - { name: from, in: query, required: false, schema: { type: string }, description: Inclusive ISO date or timestamp }
+        - { name: to, in: query, required: false, schema: { type: string }, description: Inclusive ISO date or timestamp }
+        - { name: runId, in: query, required: false, schema: { type: string, maxLength: 200 } }
+        - { name: ingredientId, in: query, required: false, schema: { type: string, maxLength: 200 } }
+        - { name: station, in: query, required: false, schema: { type: string, enum: [dough, sauce, frontline, warehouse, packaging, other] } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { name: cursor, in: query, required: false, schema: { type: integer, minimum: 1 } }
+      responses:
+        "200":
+          description: QC events with append-only corrections and redactions applied
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcHistoryResponse" }
+        "400": { description: Invalid or over-broad history query }
+        "403": { description: QC recording capability required }
+
+  /qc/history.csv:
+    get:
+      operationId: exportQcHistoryCsv
+      tags: [inventory]
+      summary: Export full filtered QC history as CSV
+      description: QC manager or app manager capability required.
+      parameters:
+        - { name: from, in: query, required: false, schema: { type: string } }
+        - { name: to, in: query, required: false, schema: { type: string } }
+        - { name: runId, in: query, required: false, schema: { type: string, maxLength: 200 } }
+        - { name: ingredientId, in: query, required: false, schema: { type: string, maxLength: 200 } }
+        - { name: station, in: query, required: false, schema: { type: string, enum: [dough, sauce, frontline, warehouse, packaging, other] } }
+      responses:
+        "200":
+          description: CSV export; correction and redaction events are applied
+          content:
+            text/csv:
+              schema: { type: string, format: binary }
+        "400": { description: Invalid or over-broad export query }
+        "403": { description: QC manager capability required }
+
+  /qc/events/{eventId}/corrections:
+    post:
+      operationId: correctQcEvent
+      tags: [inventory]
+      summary: Append an audited correction to a QC record
+      parameters:
+        - { name: eventId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QcCorrectionInput" }
+      responses:
+        "201":
+          description: Append-only correction event
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcEventResponse" }
+        "400": { description: Invalid or unsupported correction }
+        "403": { description: QC manager capability required }
+        "404": { description: Correctable QC event not found }
+
+  /qc/events/{eventId}/redactions:
+    post:
+      operationId: redactQcEvent
+      tags: [inventory]
+      summary: Append a privacy redaction event for selected QC fields
+      parameters:
+        - { name: eventId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QcRedactionInput" }
+      responses:
+        "201":
+          description: Append-only redaction event
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QcEventResponse" }
+        "400": { description: Invalid redaction }
+        "403": { description: QC manager capability required }
+        "404": { description: QC event not found }
 
   /inventory/waste-insight:
     post:
@@ -1949,6 +2292,25 @@ paths:
         "400":
           description: Invalid or non-positive surplus
 
+  /freezer-surplus/adjustments:
+    get:
+      operationId: listFreezerSurplusAdjustments
+      tags: [freezerSurplus]
+      summary: List the scoped finished-case freezer adjustment audit
+      description: >-
+        Returns append-only damage, return, and correction events, including
+        the authenticated manager and reason, limited to the 500 most recent
+        events. Requires manage-inventory.
+      responses:
+        "200":
+          description: Scoped finished-case adjustment history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FreezerSurplusAdjustmentList"
+        "403":
+          description: Missing manage-inventory capability
+
   /freezer-surplus/allocations/{runId}:
     put:
       operationId: replaceFreezerSurplusAllocation
@@ -1979,6 +2341,55 @@ paths:
           description: Invalid input, mismatch, or unavailable surplus
         "409":
           description: Run has started or the requested lot balance changed
+
+  /freezer-surplus/lots/{lotId}/adjustments:
+    post:
+      operationId: recordFreezerSurplusAdjustment
+      tags: [freezerSurplus]
+      summary: Record freezer damage, a run return, or a correction
+      description: >-
+        Manager-only physical event. Damage reduces currently available cases.
+        A return must name a started or completed run with an allocation from
+        this dated lot and cannot exceed the allocation less prior returns.
+        Corrections append a compensating event linked to an earlier damage or
+        return; the original event is never edited or deleted. Every event uses
+        a stable eventId for retry safety and updates the dated lot and freezer
+        inventory in the same transaction without deducting ingredients.
+      parameters:
+        - name: lotId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 120
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecordFreezerSurplusAdjustmentInput"
+      responses:
+        "200":
+          description: Idempotent replay of the already-recorded event
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FreezerSurplusMutationResponse"
+        "201":
+          description: The event and matching stock adjustment were recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FreezerSurplusMutationResponse"
+        "400":
+          description: Invalid event type, quantity, reason, or event references
+        "403":
+          description: Missing manage-inventory capability
+        "404":
+          description: The dated freezer lot is unavailable in this scope
+        "409":
+          description: The event conflicts with current stock or a prior event
 
 
   /mix-surplus:
@@ -2593,6 +3004,42 @@ paths:
         "403":
           description: Manager role required
 
+  /ingredients/{id}/allergen-mapping:
+    put:
+      operationId: updateIngredientAllergenMapping
+      tags: [ingredients]
+      summary: Review an ingredient's mapped allergens
+      description: >-
+        Sets the reviewed mapping for one existing ingredient within the
+        authenticated facility scope. Only callers with manage-allergens may
+        write this mapping. This is a mapping record, not a food-label claim or
+        cleaning clearance.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateIngredientAllergenMappingInput"
+      responses:
+        "200":
+          description: The updated ingredient mapping
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ingredient"
+        "400":
+          description: Invalid mapping
+        "403":
+          description: Allergen mapping capability required
+        "404":
+          description: Ingredient not found in the current facility scope
+
   /ingredients/merge:
     post:
       operationId: mergeIngredients
@@ -3135,6 +3582,209 @@ paths:
                 $ref: "#/components/schemas/ProfileDataHealthApplyResult"
         "403":
           description: Missing manager capability
+
+  /profile-data/source-library-reconciliation/capture:
+    get:
+      operationId: getPublishedSourceLibraryReconciliationCapture
+      tags: [audit]
+      summary: Capture a bounded reconciliation summary from the published app
+      description: >-
+        Public read-only capture for Replit Agent. Runs the reviewed verifier
+        through this published API process's configured database connection and
+        binds the result to this process's build identity. It attests to the
+        database configured for the published app, not to an independently
+        supplied PostgreSQL owner name. Returns raw, approved, and unresolved
+        pool mismatch counts with the pinned exception ID and digest, plus
+        aggregate counts and hashes. Any unresolved pool difference keeps the
+        verification result false. It never returns source rows or credentials.
+        Rate limited and unavailable outside production.
+      security: []
+      responses:
+        "200":
+          description: Bounded published-app capture; ok=false is a valid result
+          headers:
+            Cache-Control:
+              description: Capture responses are never cached.
+              schema:
+                type: string
+                enum: [no-store]
+            RateLimit-Limit:
+              schema: { type: integer }
+            RateLimit-Remaining:
+              schema: { type: integer }
+            RateLimit-Reset:
+              schema: { type: integer }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryReconciliationEvidence"
+        "404":
+          description: Capture is available only from the published production app
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryCaptureError"
+        "409":
+          description: Another capture is already running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryCaptureError"
+        "429":
+          description: Public capture rate limit exceeded
+          headers:
+            Retry-After:
+              schema: { type: integer }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryCaptureError"
+        "500":
+          description: Bundled report or pinned exception evidence failed integrity, or the bounded output contract failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryCaptureError"
+        "503":
+          description: Running build identity or production database is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryCaptureError"
+    post:
+      operationId: captureSourceLibraryReconciliation
+      tags: [audit]
+      summary: Capture bounded production source-library reconciliation evidence
+      description: >-
+        Manager-only and live-scope only. Validates a fresh schema-v2 published
+        source handoff against the immutable identity of this running API build,
+        then runs the reviewed verifier in one read-only production transaction.
+        Returns only its bounded summary; no source rows or report payloads are
+        persisted or logged. A 200 response may have ok=false and remains a
+        valid capture result.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SourceLibraryReconciliationCaptureRequest"
+      responses:
+        "200":
+          description: Bounded verifier evidence; ok=false is a valid verification result
+          headers:
+            Cache-Control:
+              description: Capture responses are never cached.
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryReconciliationEvidence"
+        "400":
+          description: Invalid capture request, owner identifier, or source handoff
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryCaptureError"
+        "413":
+          description: Serialized capture request exceeds the 8 KiB limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryCaptureError"
+        "401":
+          description: Authentication required
+        "403":
+          description: Manager role and live facility scope required
+        "409":
+          description: Handoff is expired or does not match this build, or another capture is running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryCaptureError"
+        "500":
+          description: Bundled report integrity or bounded output contract failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryCaptureError"
+        "503":
+          description: Running build identity or read-only production database is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryCaptureError"
+
+  /profile-data/source-library-reconciliation/diagnostics:
+    get:
+      operationId: getPublishedSourceLibraryReconciliationDiagnostics
+      tags: [audit]
+      summary: Inspect bounded pool mismatch descriptors from the published app
+      description: >-
+        Public read-only diagnostics for Replit Agent. Runs the pool comparison
+        through this published API process's configured database connection and
+        binds the result to this process's build identity. Returns raw, approved,
+        and unresolved mismatch counts using the same pinned exception set as
+        the release verifier, plus at most ten pool table names, stable record
+        IDs, approved source names, mismatch types, and differing field names.
+        It never returns current values, ingredient names, recipe rows,
+        credentials, or database-owner names. Shares the published capture rate
+        limit and is unavailable outside production. This response is diagnostic
+        only, not retained release evidence.
+      security: []
+      responses:
+        "200":
+          description: Bounded mismatch descriptors from a read-only transaction
+          headers:
+            Cache-Control:
+              description: Diagnostic responses are never cached.
+              schema:
+                type: string
+                enum: [no-store]
+            RateLimit-Limit:
+              schema: { type: integer }
+            RateLimit-Remaining:
+              schema: { type: integer }
+            RateLimit-Reset:
+              schema: { type: integer }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryReconciliationDiagnostics"
+        "404":
+          description: Diagnostics are available only from the published production app
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryCaptureError"
+        "409":
+          description: Another source-library capture is already running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryCaptureError"
+        "429":
+          description: Shared public capture rate limit exceeded
+          headers:
+            Retry-After:
+              schema: { type: integer }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryCaptureError"
+        "500":
+          description: Bundled report or pinned exception evidence failed integrity, or the bounded output contract failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryCaptureError"
+        "503":
+          description: Running build identity or production database is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceLibraryCaptureError"
 
   /profile-data/health-workspace:
     get:
@@ -4963,6 +5613,35 @@ paths:
         "400": { description: Invalid import operation }
         "403": { description: Missing importer capability }
         "409": { description: Stale review or duplicate operation with a different request }
+  /import-operations/distillation-evidence:
+    get:
+      operationId: listDistillationApplyEvidence
+      tags: [specImport]
+      summary: Read eligible live spec Apply evidence for private export
+      parameters:
+        - in: query
+          name: limit
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 20, default: 20 }
+        - in: query
+          name: cursor
+          required: false
+          schema: { type: string, maxLength: 512 }
+      responses:
+        "200":
+          description: Bounded page of eligible source-backed Apply records
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [records, nextCursor]
+                properties:
+                  records:
+                    type: array
+                    items: { $ref: "#/components/schemas/DistillationApplyEvidenceRecord" }
+                  nextCursor: { type: string, nullable: true }
+        "400": { description: Invalid limit or cursor }
+        "403": { description: Requires live scope and manage-profiles capability }
   /import-operations/{operationId}:
     get:
       operationId: getImportOperation
@@ -5018,6 +5697,313 @@ components:
       required: false
       schema: { type: string, pattern: "^[a-f0-9]{64}$" }
   schemas:
+    SourceLibraryReconciliationCaptureRequest:
+      type: object
+      required: [deploymentHandoff, expectedDatabaseOwner]
+      additionalProperties: false
+      properties:
+        deploymentHandoff:
+          type: object
+          description: Fresh published schema-v2 source deployment handoff, independently validated by the server.
+          required:
+            - schemaVersion
+            - kind
+            - deploymentId
+            - deployedRevision
+            - appBuildId
+            - sourcePolicy
+            - sourceFingerprintSha256
+            - identityAuthority
+            - expectedRecordSha256
+            - expectedSource
+            - issuedAt
+            - expiresAt
+          additionalProperties: true
+          properties:
+            schemaVersion: { type: integer, enum: [2] }
+            kind: { type: string, enum: [published-source-deployment-handoff] }
+            deploymentId: { type: string, minLength: 1, maxLength: 128 }
+            deployedRevision: { type: string, pattern: "^source-sha256:[a-f0-9]{64}$" }
+            appBuildId: { type: string, pattern: "^app-build:[a-f0-9-]{36}$" }
+            sourcePolicy: { type: string, enum: [production-source-v2] }
+            sourceFingerprintSha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+            identityAuthority: { type: string, enum: [independent-expected-source-comparison] }
+            expectedRecordSha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+            expectedSource: { type: object, additionalProperties: true }
+            databaseOwner:
+              type: string
+              minLength: 1
+              maxLength: 128
+              pattern: "^[A-Za-z_][A-Za-z0-9_$-]*$"
+            issuedAt: { type: string, format: date-time }
+            expiresAt: { type: string, format: date-time }
+        expectedDatabaseOwner:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: "^[A-Za-z_][A-Za-z0-9_$-]*$"
+    SourceLibraryCaptureError:
+      type: object
+      required: [error]
+      additionalProperties: false
+      properties:
+        error: { type: string, maxLength: 160 }
+    SourceLibraryPoolExceptionSummary:
+      type: object
+      required: [id, sha256, approvedMismatches, unresolvedMismatches]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          enum: [source-library-pool-owner-approved-differences-2026-10-08-v1]
+        sha256:
+          type: string
+          enum: [42cf3d8d482a07657eeae5725710b098bb7f8de19a4f45d6356f670378cd2137]
+        approvedMismatches: { type: integer, minimum: 0, maximum: 68 }
+        unresolvedMismatches: { type: integer, minimum: 0, maximum: 68 }
+    SourceLibraryReconciliationEvidence:
+      type: object
+      required:
+        - verifier
+        - environment
+        - databaseAttestation
+        - revision
+        - capturedAt
+        - evidenceId
+        - healId
+        - repairBoundary
+        - report
+        - poolExceptions
+        - marker
+        - pools
+        - aliases
+        - profiles
+        - pendingRuns
+        - protectedHistory
+        - stubs
+        - idempotencyFingerprint
+        - ok
+        - failures
+      additionalProperties: false
+      properties:
+        verifier: { type: string, enum: [source-library-reconciliation] }
+        environment: { type: string, enum: [release] }
+        databaseAttestation:
+          type: string
+          enum: [external-owner-check, published-app-runtime-connection]
+        revision: { type: string, minLength: 1, maxLength: 128 }
+        capturedAt: { type: string, format: date-time }
+        evidenceId: { type: string, pattern: "^[a-f0-9]{64}$" }
+        healId: { type: string, minLength: 1, maxLength: 128 }
+        repairBoundary:
+          type: object
+          required: [fromDate]
+          additionalProperties: false
+          properties:
+            fromDate: { type: string, format: date }
+        report:
+          type: object
+          required: [sha256, formatVersion, automaticProposals, stubs]
+          additionalProperties: false
+          properties:
+            sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+            formatVersion: { type: integer, enum: [1] }
+            automaticProposals: { type: integer, minimum: 0, maximum: 1000000 }
+            stubs: { type: integer, minimum: 0, maximum: 1000000 }
+        poolExceptions:
+          $ref: "#/components/schemas/SourceLibraryPoolExceptionSummary"
+        marker:
+          type: object
+          required: [present, resultValid, resultWithinBounds, resultCounts, appliedAtPresent]
+          additionalProperties: false
+          properties:
+            present: { type: boolean }
+            resultValid: { type: boolean }
+            resultWithinBounds: { type: boolean }
+            resultCounts:
+              type: object
+              required: [replacements, aliasesInserted, repointedProfiles, repointedRuns, deletedStubs]
+              additionalProperties: false
+              properties:
+                replacements: { type: integer, minimum: 0, maximum: 1000000 }
+                aliasesInserted: { type: integer, minimum: 0, maximum: 1000000 }
+                repointedProfiles: { type: integer, minimum: 0, maximum: 1000000 }
+                repointedRuns: { type: integer, minimum: 0, maximum: 1000000 }
+                deletedStubs: { type: integer, minimum: 0, maximum: 1000000 }
+            appliedAtPresent: { type: boolean }
+        pools:
+          type: object
+          required: [expected, exactMatches, guardedRenames, missing, mismatches]
+          additionalProperties: false
+          properties:
+            expected: { type: integer, minimum: 0, maximum: 1000000 }
+            exactMatches: { type: integer, minimum: 0, maximum: 1000000 }
+            guardedRenames: { type: integer, minimum: 0, maximum: 1000000 }
+            missing: { type: integer, minimum: 0, maximum: 1000000 }
+            mismatches:
+              type: integer
+              minimum: 0
+              maximum: 1000000
+              description: Raw field-mismatch count before approved exceptions are applied.
+        aliases:
+          type: object
+          required: [expected, exactMatches, missing, mismatches]
+          additionalProperties: false
+          properties:
+            expected: { type: integer, minimum: 0, maximum: 1000000 }
+            exactMatches: { type: integer, minimum: 0, maximum: 1000000 }
+            missing: { type: integer, minimum: 0, maximum: 1000000 }
+            mismatches: { type: integer, minimum: 0, maximum: 1000000 }
+        profiles:
+          $ref: "#/components/schemas/SourceLibraryReferenceCounts"
+        pendingRuns:
+          $ref: "#/components/schemas/SourceLibraryReferenceCounts"
+        protectedHistory:
+          type: object
+          required: [references]
+          additionalProperties: false
+          properties:
+            references: { type: integer, minimum: 0, maximum: 1000000 }
+        stubs:
+          type: object
+          required:
+            - expected
+            - canonicalExact
+            - canonicalMissing
+            - canonicalMismatches
+            - deletedExpected
+            - remainingProtected
+            - unexpectedlyDeleted
+            - unexpectedlyRemaining
+          additionalProperties: false
+          properties:
+            expected: { type: integer, minimum: 0, maximum: 1000000 }
+            canonicalExact: { type: integer, minimum: 0, maximum: 1000000 }
+            canonicalMissing: { type: integer, minimum: 0, maximum: 1000000 }
+            canonicalMismatches: { type: integer, minimum: 0, maximum: 1000000 }
+            deletedExpected: { type: integer, minimum: 0, maximum: 1000000 }
+            remainingProtected: { type: integer, minimum: 0, maximum: 1000000 }
+            unexpectedlyDeleted: { type: integer, minimum: 0, maximum: 1000000 }
+            unexpectedlyRemaining: { type: integer, minimum: 0, maximum: 1000000 }
+        idempotencyFingerprint:
+          type: object
+          required: [algorithm, value]
+          additionalProperties: false
+          properties:
+            algorithm: { type: string, enum: [sha256] }
+            value: { type: string, pattern: "^[a-f0-9]{64}$" }
+        ok: { type: boolean }
+        failures:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            required: [check, count]
+            additionalProperties: false
+            properties:
+              check: { type: string, pattern: "^[A-Za-z0-9_-]{1,80}$" }
+              count: { type: integer, minimum: 0, maximum: 1000000 }
+    SourceLibraryPoolMismatchDescriptor:
+      type: object
+      required: [table, id, sourceName, mismatchType, differingFields]
+      additionalProperties: false
+      properties:
+        table:
+          type: string
+          enum: [dough_recipes, sauce_recipes, cheese_recipes, mixes]
+        id: { type: string, minLength: 1, maxLength: 128 }
+        sourceName: { type: string, minLength: 1, maxLength: 256 }
+        mismatchType:
+          type: string
+          enum: [missing, renamed, field-mismatch]
+        differingFields:
+          type: array
+          maxItems: 8
+          items:
+            type: string
+            enum:
+              - name
+              - components
+              - doughballVariants
+              - doughballWeightOz
+              - doughballsPerTray
+              - brand
+              - flavors
+              - shredderSetting
+              - cellulose
+              - notes
+              - flavor
+              - daysEarly
+    SourceLibraryReconciliationDiagnostics:
+      type: object
+      required:
+        - verifier
+        - environment
+        - databaseAttestation
+        - revision
+        - capturedAt
+        - report
+        - pools
+        - poolExceptions
+        - mismatchDetails
+      additionalProperties: false
+      properties:
+        verifier:
+          type: string
+          enum: [source-library-reconciliation-diagnostics]
+        environment:
+          type: string
+          enum: [release]
+        databaseAttestation:
+          type: string
+          enum: [published-app-runtime-connection]
+        revision: { type: string, pattern: "^source-sha256:[a-f0-9]{64}$" }
+        capturedAt: { type: string, format: date-time }
+        report:
+          type: object
+          required: [sha256]
+          additionalProperties: false
+          properties:
+            sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+        pools:
+          type: object
+          required: [expected, exactMatches, guardedRenames, missing, mismatches]
+          additionalProperties: false
+          properties:
+            expected: { type: integer, minimum: 0, maximum: 1000000 }
+            exactMatches: { type: integer, minimum: 0, maximum: 1000000 }
+            guardedRenames: { type: integer, minimum: 0, maximum: 1000000 }
+            missing: { type: integer, minimum: 0, maximum: 1000000 }
+            mismatches:
+              type: integer
+              minimum: 0
+              maximum: 1000000
+              description: Raw field-mismatch count before approved exceptions are applied.
+        poolExceptions:
+          $ref: "#/components/schemas/SourceLibraryPoolExceptionSummary"
+        mismatchDetails:
+          type: object
+          required: [maxItems, total, returned, omitted, items]
+          additionalProperties: false
+          properties:
+            maxItems: { type: integer, enum: [10] }
+            total: { type: integer, minimum: 0, maximum: 68 }
+            returned: { type: integer, minimum: 0, maximum: 10 }
+            omitted: { type: integer, minimum: 0, maximum: 68 }
+            items:
+              type: array
+              maxItems: 10
+              items:
+                $ref: "#/components/schemas/SourceLibraryPoolMismatchDescriptor"
+    SourceLibraryReferenceCounts:
+      type: object
+      required: [inspected, canonical, stale, nonCanonical]
+      additionalProperties: false
+      properties:
+        inspected: { type: integer, minimum: 0, maximum: 1000000 }
+        canonical: { type: integer, minimum: 0, maximum: 1000000 }
+        stale: { type: integer, minimum: 0, maximum: 1000000 }
+        nonCanonical: { type: integer, minimum: 0, maximum: 1000000 }
     ImportOperationApplyInput:
       type: object
       required: [importType, sourceLabel, changes]
@@ -5027,10 +6013,46 @@ components:
         sourceLabel: { type: string, maxLength: 300 }
         requestHash: { type: string, nullable: true, pattern: "^[a-f0-9]{64}$" }
         expectedStateHash: { type: string, nullable: true, pattern: "^[a-f0-9]{64}$" }
+        sourceEvidence:
+          type: object
+          description: Exact bounded source text retained privately with a live spec Apply.
+          required: [sourceText, parseVersion]
+          additionalProperties: false
+          properties:
+            sourceText: { type: string, minLength: 1, maxLength: 100000 }
+            parseVersion: { type: string, minLength: 1, maxLength: 24 }
         changes:
           type: object
           description: Reviewed entity batches keyed by supported master-data domain.
           additionalProperties: true
+    DistillationApplyEvidenceRecord:
+      type: object
+      required:
+        - operationId
+        - importType
+        - scope
+        - status
+        - undoneAt
+        - actorCapability
+        - actorIdSha256
+        - sourceSha256
+        - appliedAt
+        - sourceText
+        - parseVersion
+        - appliedValues
+      properties:
+        operationId: { type: string }
+        importType: { type: string, enum: [spec] }
+        scope: { type: string, enum: [live] }
+        status: { type: string, enum: [applied] }
+        undoneAt: { type: string, nullable: true }
+        actorCapability: { type: string, enum: [manage-profiles] }
+        actorIdSha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+        sourceSha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+        appliedAt: { type: string, format: date-time }
+        sourceText: { type: string, minLength: 1 }
+        parseVersion: { type: string }
+        appliedValues: { type: object, additionalProperties: true }
     ImportOperationUndoInput:
       type: object
       properties:
@@ -5198,7 +6220,7 @@ components:
         runId: { type: string, minLength: 1, maxLength: 160 }
         channel:
           type: string
-          enum: [case, tray-consume, tray-produce, batch-consume, batch-produce, hopper, sauce-barrel, app1-batch, app2-batch, app3-batch, app4-batch]
+          enum: [case, tray-consume, tray-produce, batch-consume, batch-produce, hopper, sauce-barrel, app1-batch, app2-batch, app3-batch, app4-batch, app1-stock, app2-stock, app3-stock, app4-stock, pep1-stock, pep1b-stock, pep2-stock, pep2b-stock]
         generation: { type: string, minLength: 1, maxLength: 160 }
         sequence: { type: integer, minimum: 1, maximum: 10000000 }
         eventId: { type: string, minLength: 1, maxLength: 160 }
@@ -5289,7 +6311,7 @@ components:
         id: { type: string, pattern: "^[A-Za-z0-9:_-]{1,160}$" }
         date: { type: string, format: date }
         runId: { type: string, pattern: "^[A-Za-z0-9:_-]{1,160}$" }
-        section: { type: string, enum: [packaging, dough, sauce, app1, app2, app3, app4] }
+        section: { type: string, enum: [packaging, dough, sauce, app1, app2, app3, app4, pep1, pep2] }
         values: { type: object, minProperties: 1, additionalProperties: { type: number, minimum: 0, maximum: 1000000 }, description: Only fields belonging to section }
         baseValues: { type: object, minProperties: 2, additionalProperties: { type: number, minimum: 0, maximum: 1000000 }, description: Complete baseline for every field in section }
         observedGeneration: { type: string, minLength: 1, maxLength: 160 }
@@ -5304,6 +6326,8 @@ components:
         - $ref: "#/components/schemas/ManualApp2Edit"
         - $ref: "#/components/schemas/ManualApp3Edit"
         - $ref: "#/components/schemas/ManualApp4Edit"
+        - $ref: "#/components/schemas/ManualPep1Edit"
+        - $ref: "#/components/schemas/ManualPep2Edit"
     ManualPackagingEdit:
       allOf:
         - $ref: "#/components/schemas/ManualSectionEditRequestBase"
@@ -5334,32 +6358,48 @@ components:
         - type: object
           properties:
             section: { const: app1 }
-            values: { type: object, minProperties: 1, maxProperties: 3, additionalProperties: false, properties: { app1BatchesMade: { type: number }, app1BatchAnchorNetSec: { type: number }, app1BatchCorrectionGeneration: { type: number } } }
-            baseValues: { type: object, required: [app1BatchesMade, app1BatchAnchorNetSec, app1BatchCorrectionGeneration], minProperties: 3, maxProperties: 3, additionalProperties: false, properties: { app1BatchesMade: { type: number }, app1BatchAnchorNetSec: { type: number }, app1BatchCorrectionGeneration: { type: number } } }
+            values: { type: object, minProperties: 1, maxProperties: 6, additionalProperties: false, properties: { app1BatchesMade: { type: number }, app1BatchAnchorNetSec: { type: number }, app1BatchCorrectionGeneration: { type: number }, app1StockLbs: { type: number }, app1StockAnchorNetSec: { type: number }, app1StockCorrectionGeneration: { type: number } } }
+            baseValues: { type: object, required: [app1BatchesMade, app1BatchAnchorNetSec, app1BatchCorrectionGeneration, app1StockLbs, app1StockAnchorNetSec, app1StockCorrectionGeneration], minProperties: 6, maxProperties: 6, additionalProperties: false, properties: { app1BatchesMade: { type: number }, app1BatchAnchorNetSec: { type: number }, app1BatchCorrectionGeneration: { type: number }, app1StockLbs: { type: number }, app1StockAnchorNetSec: { type: number }, app1StockCorrectionGeneration: { type: number } } }
     ManualApp2Edit:
       allOf:
         - $ref: "#/components/schemas/ManualSectionEditRequestBase"
         - type: object
           properties:
             section: { const: app2 }
-            values: { type: object, minProperties: 1, maxProperties: 3, additionalProperties: false, properties: { app2BatchesMade: { type: number }, app2BatchAnchorNetSec: { type: number }, app2BatchCorrectionGeneration: { type: number } } }
-            baseValues: { type: object, required: [app2BatchesMade, app2BatchAnchorNetSec, app2BatchCorrectionGeneration], minProperties: 3, maxProperties: 3, additionalProperties: false, properties: { app2BatchesMade: { type: number }, app2BatchAnchorNetSec: { type: number }, app2BatchCorrectionGeneration: { type: number } } }
+            values: { type: object, minProperties: 1, maxProperties: 6, additionalProperties: false, properties: { app2BatchesMade: { type: number }, app2BatchAnchorNetSec: { type: number }, app2BatchCorrectionGeneration: { type: number }, app2StockLbs: { type: number }, app2StockAnchorNetSec: { type: number }, app2StockCorrectionGeneration: { type: number } } }
+            baseValues: { type: object, required: [app2BatchesMade, app2BatchAnchorNetSec, app2BatchCorrectionGeneration, app2StockLbs, app2StockAnchorNetSec, app2StockCorrectionGeneration], minProperties: 6, maxProperties: 6, additionalProperties: false, properties: { app2BatchesMade: { type: number }, app2BatchAnchorNetSec: { type: number }, app2BatchCorrectionGeneration: { type: number }, app2StockLbs: { type: number }, app2StockAnchorNetSec: { type: number }, app2StockCorrectionGeneration: { type: number } } }
     ManualApp3Edit:
       allOf:
         - $ref: "#/components/schemas/ManualSectionEditRequestBase"
         - type: object
           properties:
             section: { const: app3 }
-            values: { type: object, minProperties: 1, maxProperties: 3, additionalProperties: false, properties: { app3BatchesMade: { type: number }, app3BatchAnchorNetSec: { type: number }, app3BatchCorrectionGeneration: { type: number } } }
-            baseValues: { type: object, required: [app3BatchesMade, app3BatchAnchorNetSec, app3BatchCorrectionGeneration], minProperties: 3, maxProperties: 3, additionalProperties: false, properties: { app3BatchesMade: { type: number }, app3BatchAnchorNetSec: { type: number }, app3BatchCorrectionGeneration: { type: number } } }
+            values: { type: object, minProperties: 1, maxProperties: 6, additionalProperties: false, properties: { app3BatchesMade: { type: number }, app3BatchAnchorNetSec: { type: number }, app3BatchCorrectionGeneration: { type: number }, app3StockLbs: { type: number }, app3StockAnchorNetSec: { type: number }, app3StockCorrectionGeneration: { type: number } } }
+            baseValues: { type: object, required: [app3BatchesMade, app3BatchAnchorNetSec, app3BatchCorrectionGeneration, app3StockLbs, app3StockAnchorNetSec, app3StockCorrectionGeneration], minProperties: 6, maxProperties: 6, additionalProperties: false, properties: { app3BatchesMade: { type: number }, app3BatchAnchorNetSec: { type: number }, app3BatchCorrectionGeneration: { type: number }, app3StockLbs: { type: number }, app3StockAnchorNetSec: { type: number }, app3StockCorrectionGeneration: { type: number } } }
     ManualApp4Edit:
       allOf:
         - $ref: "#/components/schemas/ManualSectionEditRequestBase"
         - type: object
           properties:
             section: { const: app4 }
-            values: { type: object, minProperties: 1, maxProperties: 3, additionalProperties: false, properties: { app4BatchesMade: { type: number }, app4BatchAnchorNetSec: { type: number }, app4BatchCorrectionGeneration: { type: number } } }
-            baseValues: { type: object, required: [app4BatchesMade, app4BatchAnchorNetSec, app4BatchCorrectionGeneration], minProperties: 3, maxProperties: 3, additionalProperties: false, properties: { app4BatchesMade: { type: number }, app4BatchAnchorNetSec: { type: number }, app4BatchCorrectionGeneration: { type: number } } }
+            values: { type: object, minProperties: 1, maxProperties: 6, additionalProperties: false, properties: { app4BatchesMade: { type: number }, app4BatchAnchorNetSec: { type: number }, app4BatchCorrectionGeneration: { type: number }, app4StockLbs: { type: number }, app4StockAnchorNetSec: { type: number }, app4StockCorrectionGeneration: { type: number } } }
+            baseValues: { type: object, required: [app4BatchesMade, app4BatchAnchorNetSec, app4BatchCorrectionGeneration, app4StockLbs, app4StockAnchorNetSec, app4StockCorrectionGeneration], minProperties: 6, maxProperties: 6, additionalProperties: false, properties: { app4BatchesMade: { type: number }, app4BatchAnchorNetSec: { type: number }, app4BatchCorrectionGeneration: { type: number }, app4StockLbs: { type: number }, app4StockAnchorNetSec: { type: number }, app4StockCorrectionGeneration: { type: number } } }
+    ManualPep1Edit:
+      allOf:
+        - $ref: "#/components/schemas/ManualSectionEditRequestBase"
+        - type: object
+          properties:
+            section: { const: pep1 }
+            values: { type: object, minProperties: 1, maxProperties: 6, additionalProperties: false, properties: { pep1StockLbs: { type: number }, pep1StockAnchorNetSec: { type: number }, pep1StockCorrectionGeneration: { type: number }, pep1bStockLbs: { type: number }, pep1bStockAnchorNetSec: { type: number }, pep1bStockCorrectionGeneration: { type: number } } }
+            baseValues: { type: object, required: [pep1StockLbs, pep1StockAnchorNetSec, pep1StockCorrectionGeneration, pep1bStockLbs, pep1bStockAnchorNetSec, pep1bStockCorrectionGeneration], minProperties: 6, maxProperties: 6, additionalProperties: false, properties: { pep1StockLbs: { type: number }, pep1StockAnchorNetSec: { type: number }, pep1StockCorrectionGeneration: { type: number }, pep1bStockLbs: { type: number }, pep1bStockAnchorNetSec: { type: number }, pep1bStockCorrectionGeneration: { type: number } } }
+    ManualPep2Edit:
+      allOf:
+        - $ref: "#/components/schemas/ManualSectionEditRequestBase"
+        - type: object
+          properties:
+            section: { const: pep2 }
+            values: { type: object, minProperties: 1, maxProperties: 6, additionalProperties: false, properties: { pep2StockLbs: { type: number }, pep2StockAnchorNetSec: { type: number }, pep2StockCorrectionGeneration: { type: number }, pep2bStockLbs: { type: number }, pep2bStockAnchorNetSec: { type: number }, pep2bStockCorrectionGeneration: { type: number } } }
+            baseValues: { type: object, required: [pep2StockLbs, pep2StockAnchorNetSec, pep2StockCorrectionGeneration, pep2bStockLbs, pep2bStockAnchorNetSec, pep2bStockCorrectionGeneration], minProperties: 6, maxProperties: 6, additionalProperties: false, properties: { pep2StockLbs: { type: number }, pep2StockAnchorNetSec: { type: number }, pep2StockCorrectionGeneration: { type: number }, pep2bStockLbs: { type: number }, pep2bStockAnchorNetSec: { type: number }, pep2bStockCorrectionGeneration: { type: number } } }
     ManualSectionEditRequestBase:
       type: object
       required: [id, date, runId, observedGeneration, baseRevision, resetEpoch, deviceId]
@@ -5417,13 +6457,106 @@ components:
             - $ref: "#/components/schemas/SyncPayload"
             - type: "null"
 
+    BuildInfo:
+      type: object
+      additionalProperties: false
+      required:
+        - schemaVersion
+        - kind
+        - appBuildId
+        - sourcePolicy
+        - sourceFingerprintSha256
+        - gitRevision
+        - gitBinding
+        - completedAt
+        - buildMode
+        - platformDeploymentId
+        - platformBuildId
+        - platformIdentitySource
+      properties:
+        schemaVersion: { type: integer, enum: [1] }
+        kind: { type: string, enum: [app-build-info] }
+        appBuildId:
+          type: string
+          pattern: '^app-build:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$'
+          description: Application-owned artifact-set ID, not a Replit Build UUID.
+        sourcePolicy: { type: string, enum: [production-source-v2] }
+        sourceFingerprintSha256: { type: string, pattern: '^[a-f0-9]{64}$' }
+        gitRevision:
+          type: string
+          nullable: true
+          pattern: '^[a-f0-9]{40}$'
+        gitBinding: { type: string, enum: [verified, unavailable] }
+        completedAt: { type: string, format: date-time }
+        buildMode: { type: string, enum: [release, development] }
+        platformDeploymentId:
+          type: string
+          nullable: true
+          pattern: '^[A-Za-z0-9._:-]{1,128}$'
+        platformBuildId:
+          type: string
+          nullable: true
+          pattern: '^[A-Za-z0-9._:-]{1,128}$'
+        platformIdentitySource: { type: string, enum: [runtime-reported, unavailable] }
+
     HealthStatus:
       type: object
+      description: >-
+        Readiness response. HTTP 200 means startup, database, and required
+        audit protection are ready, even when optional checks report warnings.
+        HTTP 503 is reserved for a failed core readiness gate.
       properties:
         status:
           type: string
+          enum: [ok, starting, degraded]
+          description: "`ok` means core-ready; `starting` or `degraded` means a hard readiness gate failed."
+        checks:
+          type: object
+          description: >-
+            Statuses for core gates and optional dependencies. A warning on
+            dependencies or backgroundWorkers does not block HTTP 200.
+          properties:
+            process: { type: string, enum: [ok, warning, error, pending] }
+            startup: { type: string, enum: [ok, warning, error, pending] }
+            database: { type: string, enum: [ok, warning, error, pending] }
+            auditProtection: { type: string, enum: [ok, warning, error, pending] }
+            dependencies: { type: string, enum: [ok, warning, error, pending] }
+            backgroundWorkers: { type: string, enum: [ok, warning, error, pending] }
+          required: [process, startup, database, auditProtection, dependencies, backgroundWorkers]
+          additionalProperties:
+            type: string
+            enum: [ok, warning, error, pending]
+        capabilities:
+          type: object
+          required: [ai]
+          properties:
+            ai:
+              type: object
+              description: AI credential configuration, not remote provider reachability.
+              required: [status]
+              properties:
+                status: { type: string, enum: [configured, not_configured, pending] }
+                detail: { type: string, enum: [ai_provider_not_configured] }
+        startup:
+          type: object
+          properties:
+            phase: { type: string, enum: [starting, ready, failed] }
+            stage: { type: [string, "null"] }
+            durationMs: { type: number }
+            errorCode: { type: string }
+          required: [phase, stage, durationMs]
+        diagnostics:
+          type: object
+          description: Bounded operational diagnostics; excludes provider credentials and request payloads.
+          additionalProperties: true
+        correlationId: { type: string }
+        timestamp: { type: string, format: date-time }
       required:
         - status
+        - checks
+        - capabilities
+        - correlationId
+        - timestamp
 
     SyncPayload:
       type: object
@@ -5441,7 +6574,7 @@ components:
         completeness: { type: string, enum: [complete, partial] }
         syncVersion: { type: integer, enum: [1] }
         data:
-          oneOf:
+          anyOf:
             - $ref: "#/components/schemas/SyncPayload"
             - { type: object, additionalProperties: true }
             - { type: "null" }
@@ -5584,6 +6717,11 @@ components:
         resetEpoch: { type: integer, minimum: 0 }
         rollover: { type: boolean }
         canonicalRevision: { type: integer, minimum: 0 }
+        serverTime: { type: integer, minimum: 0 }
+        operationalProjection:
+          oneOf:
+            - $ref: "#/components/schemas/OperationalProjection"
+            - { type: "null" }
 
     SyncRecoveryPayload:
       allOf:
@@ -6655,6 +7793,236 @@ components:
           minLength: 6
           maxLength: 200
 
+    QcEvent:
+      type: object
+      required: [id, operationId, recordId, eventType, runId, profileKey, ingredientId, ingredientName, station, relatedEventId, actorId, payload, createdAt]
+      properties:
+        id: { type: integer }
+        operationId: { type: string, format: uuid }
+        recordId: { type: string, format: uuid }
+        eventType:
+          type: string
+          enum: [lot, weight, allergen-review, cleaning, cleaning-verification, target-setting, run-signoff, correction, redaction]
+        runId: { type: string, nullable: true }
+        profileKey: { type: string, nullable: true }
+        ingredientId: { type: string, nullable: true }
+        ingredientName: { type: string, nullable: true }
+        station: { type: string, nullable: true }
+        relatedEventId: { type: string, nullable: true }
+        actorId: { type: string, nullable: true }
+        payload:
+          type: object
+          additionalProperties: true
+        createdAt: { type: string, format: date-time }
+        corrected: { type: boolean }
+        redactedFields:
+          type: array
+          items: { type: string }
+
+    QcEventResponse:
+      type: object
+      required: [event]
+      properties:
+        event: { $ref: "#/components/schemas/QcEvent" }
+
+    QcTarget:
+      type: object
+      required: [ingredientId, ingredientName, targetValue, unit, toleranceValue, source, state]
+      properties:
+        ingredientId: { type: string }
+        ingredientName: { type: string }
+        targetValue: { type: number, nullable: true }
+        unit: { type: string, nullable: true }
+        toleranceValue: { type: number, nullable: true }
+        source: { type: string, enum: [spec-import, qc-override, not-configured] }
+        state: { type: string, enum: [configured, not-evaluated] }
+        reason: { type: string }
+        overrideEventId: { type: integer }
+
+    QcTargetsResponse:
+      type: object
+      required: [profileKey, targets]
+      properties:
+        profileKey: { type: string }
+        targets:
+          type: array
+          items: { $ref: "#/components/schemas/QcTarget" }
+
+    QcTargetInput:
+      type: object
+      required: [operationId, profileKey, ingredientId, targetValue, unit, toleranceValue, reason]
+      properties:
+        operationId: { type: string, format: uuid }
+        profileKey: { type: string, minLength: 1, maxLength: 400 }
+        ingredientId: { type: string, minLength: 1, maxLength: 200 }
+        targetValue: { type: number, nullable: true, exclusiveMinimum: 0 }
+        unit: { type: string, nullable: true, enum: [oz, g, lb, kg] }
+        toleranceValue: { type: number, nullable: true, minimum: 0 }
+        reason: { type: string, minLength: 1, maxLength: 500 }
+
+    QcLotInput:
+      type: object
+      required: [operationId, runId, ingredientId, station, lotNumber]
+      properties:
+        operationId: { type: string, format: uuid }
+        runId: { type: string, minLength: 1, maxLength: 200 }
+        ingredientId: { type: string, minLength: 1, maxLength: 200 }
+        station: { type: string, enum: [dough, sauce, frontline, warehouse, packaging, other] }
+        lotNumber: { type: string, minLength: 1, maxLength: 200 }
+        note: { type: string, maxLength: 1000 }
+
+    QcWeightCheckInput:
+      type: object
+      required: [operationId, runId, profileKey, ingredientId, checkType, actualValue, actualUnit]
+      properties:
+        operationId: { type: string, format: uuid }
+        runId: { type: string, minLength: 1, maxLength: 200 }
+        profileKey: { type: string, minLength: 1, maxLength: 400 }
+        ingredientId: { type: string, minLength: 1, maxLength: 200 }
+        checkType: { type: string, enum: [pre-run, 30-minute] }
+        actualValue: { type: number, exclusiveMinimum: 0, maximum: 1000000 }
+        actualUnit: { type: string, enum: [oz, g, lb, kg] }
+        note: { type: string, maxLength: 1000 }
+
+    QcAllergenReviewInput:
+      type: object
+      required: [operationId, runId, footprintReviewed, footprint, stagedIngredients, stagedIngredientsStatus, cleaningStatus]
+      properties:
+        operationId: { type: string, format: uuid }
+        runId: { type: string, minLength: 1, maxLength: 200 }
+        footprintReviewed: { type: boolean, enum: [true] }
+        footprint:
+          type: object
+          required: [status, allergens, unknownIngredients, missingComponents]
+          properties:
+            status: { type: string, enum: [complete, incomplete, unavailable] }
+            allergens:
+              type: array
+              maxItems: 9
+              items: { type: string, enum: [egg, soy, milk, wheat, peanuts, tree nuts, fish, shellfish, sesame] }
+            unknownIngredients:
+              type: array
+              maxItems: 100
+              items: { type: string, minLength: 1, maxLength: 200 }
+            missingComponents:
+              type: array
+              maxItems: 30
+              items: { type: string, minLength: 1, maxLength: 100 }
+        stagedIngredients:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            required: [area, name, quantity, unit, staged]
+            properties:
+              area: { type: string, enum: [Dough, Sauce, Frontline] }
+              name: { type: string, minLength: 1, maxLength: 200 }
+              quantity: { type: string, minLength: 1, maxLength: 50 }
+              unit: { type: string, minLength: 1, maxLength: 30 }
+              staged: { type: boolean }
+        stagedIngredientsStatus: { type: string, enum: [reviewed, not-reviewed, unknown] }
+        cleaningStatus: { type: string, enum: [verified, unverified, unknown, not-applicable] }
+        note: { type: string, maxLength: 1000 }
+
+    QcCleaningInput:
+      type: object
+      required: [operationId, runId, method, startedAt, endedAt]
+      properties:
+        operationId: { type: string, format: uuid }
+        runId: { type: string, minLength: 1, maxLength: 200 }
+        method: { type: string, enum: [standard, deep, chemical, other] }
+        startedAt: { type: string, format: date-time }
+        endedAt: { type: string, format: date-time }
+        note: { type: string, maxLength: 1000 }
+
+    QcNoteInput:
+      type: object
+      required: [operationId]
+      properties:
+        operationId: { type: string, format: uuid }
+        note: { type: string, maxLength: 1000 }
+
+    QcRunSignoffInput:
+      type: object
+      required: [operationId, runId]
+      properties:
+        operationId: { type: string, format: uuid }
+        runId: { type: string, minLength: 1, maxLength: 200 }
+        note: { type: string, maxLength: 1000 }
+
+    QcRunResponse:
+      type: object
+      required: [runId, items, hasMore, nextCursor, weightCheckEvents, weightCheckEventsComplete, signoff]
+      properties:
+        runId: { type: string }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/QcEvent" }
+        hasMore: { type: boolean }
+        nextCursor: { type: integer, nullable: true }
+        weightCheckEvents:
+          description: >-
+            Weight-check timeline entries for run cadence reminders, newest first.
+            The server returns at most 5000 records.
+          type: array
+          items:
+            type: object
+            required: [ingredientId, checkType, createdAt]
+            properties:
+              ingredientId: { type: string }
+              checkType: { type: string, enum: [pre-run, 30-minute] }
+              createdAt: { type: string, format: date-time }
+        weightCheckEventsComplete:
+          description: False when the 5000-record limit truncated the timeline.
+          type: boolean
+        signoff:
+          oneOf:
+            - type: object
+              required: [eventId, actorId, createdAt, note, signedOff, reopened]
+              properties:
+                eventId: { type: integer }
+                actorId: { type: string, nullable: true }
+                createdAt: { type: string, format: date-time }
+                note: { type: string }
+                signedOff: { type: boolean }
+                reopened: { type: boolean }
+            - type: "null"
+
+    QcHistoryResponse:
+      type: object
+      required: [items, hasMore, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/QcEvent" }
+        hasMore: { type: boolean }
+        nextCursor: { type: integer, nullable: true }
+
+    QcCorrectionInput:
+      type: object
+      required: [operationId, reason, replacement]
+      properties:
+        operationId: { type: string, format: uuid }
+        reason: { type: string, minLength: 1, maxLength: 500 }
+        replacement:
+          type: object
+          minProperties: 1
+          maxProperties: 8
+          additionalProperties: true
+
+    QcRedactionInput:
+      type: object
+      required: [operationId, reason, fields]
+      properties:
+        operationId: { type: string, format: uuid }
+        reason: { type: string, minLength: 1, maxLength: 500 }
+        fields:
+          type: array
+          minItems: 1
+          maxItems: 4
+          uniqueItems: true
+          items: { type: string, enum: [actorId, ingredientName, payload.note, payload.lotNumber] }
+
     Capability:
       type: string
       enum:
@@ -6664,6 +8032,9 @@ components:
         - approve-password-resets
         - review-incidents
         - use-ai-tools
+        - manage-allergens
+        - record-qc
+        - manage-qc
       description: >-
         A discrete permission. A role grants a set of capabilities, and a user
         holds the union of their role's capabilities.
@@ -7905,6 +9276,34 @@ components:
                       adjustmentEvents: { type: integer }
                   note: { type: string }
             note: { type: string }
+        evidence:
+          type: object
+          properties:
+            release:
+              type: object
+              description: Runtime-reported identity is informational only and is not provider-verified release proof.
+              required: [version, revision, environment]
+              properties:
+                version: { type: string }
+                revision: { type: string }
+                environment: { type: string }
+                deploymentId: { type: string, nullable: true, maxLength: 128 }
+                deployedRevision:
+                  type: string
+                  nullable: true
+                  pattern: "^[a-f0-9]{40}$"
+                identityStatus:
+                  type: string
+                  enum: [reported-unverified, incomplete, unavailable]
+                identitySource:
+                  type: string
+                  enum: [runtime-environment, unavailable]
+            recovery:
+              type: object
+              properties:
+                generatedAt: { type: string, format: date-time }
+                source: { type: string }
+                complete: { type: boolean }
 
     ShiftHandoffItem:
       type: object
@@ -8963,6 +10362,27 @@ components:
           type: object
           additionalProperties: false
           description: Allowlisted, redacted evidence object no larger than 8192 bytes.
+          properties:
+            count: { type: integer }
+            outcome: { type: string }
+            reasonCode: { type: string, maxLength: 200 }
+            targetId:
+              oneOf:
+                - { type: string, maxLength: 200 }
+                - { type: integer }
+            targetType: { type: string, maxLength: 200 }
+            authorizedBy: { type: string, maxLength: 200 }
+            from: { type: string, maxLength: 200 }
+            to: { type: string, maxLength: 200 }
+            method: { type: string, maxLength: 200 }
+            requestId: { type: string, maxLength: 200 }
+            fieldNames:
+              type: array
+              maxItems: 8
+              items:
+                type: string
+                enum: [name, brand, flavors, shredderSetting, cellulose, notes, components, enabled]
+            correlationId: { type: string, maxLength: 128 }
         createdAt: { type: string, format: date-time }
     AuditLogPage:
       type: object
@@ -9482,6 +10902,55 @@ components:
           items:
             $ref: "#/components/schemas/FreezerSurplusAllocation"
 
+    FreezerSurplusAdjustment:
+      type: object
+      required:
+        - eventId
+        - lotId
+        - eventType
+        - cases
+        - reason
+        - actorId
+        - createdAt
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        lotId:
+          type: string
+        eventType:
+          type: string
+          enum: [damage, return, correction]
+        cases:
+          type: integer
+          minimum: 1
+          maximum: 1000000
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 300
+        actorId:
+          type: string
+        runId:
+          type: string
+          nullable: true
+        correctsEventId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    FreezerSurplusAdjustmentList:
+      type: object
+      required:
+        - adjustments
+      properties:
+        adjustments:
+          type: array
+          items:
+            $ref: "#/components/schemas/FreezerSurplusAdjustment"
+
     ConfirmFreezerSurplusInput:
       type: object
       required:
@@ -9544,6 +11013,40 @@ components:
           items:
             $ref: "#/components/schemas/FreezerSurplusAllocationSelection"
 
+    RecordFreezerSurplusAdjustmentInput:
+      type: object
+      required:
+        - eventId
+        - eventType
+        - cases
+        - reason
+      description: >-
+        runId is required only for eventType=return. correctsEventId is required
+        only for eventType=correction. Both are rejected for incompatible event
+        types.
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+          enum: [damage, return, correction]
+        cases:
+          type: integer
+          minimum: 1
+          maximum: 1000000
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 300
+        runId:
+          type: string
+          minLength: 1
+          maxLength: 120
+        correctsEventId:
+          type: string
+          format: uuid
+
     FreezerSurplusMutationResponse:
       type: object
       required:
@@ -9562,6 +11065,10 @@ components:
           nullable: true
           allOf:
             - $ref: "#/components/schemas/FreezerSurplusLot"
+        createdAdjustment:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/FreezerSurplusAdjustment"
 
 
     MixSurplusLot:
@@ -10262,6 +11769,10 @@ components:
         are also offered on every other category's picker.
       enum: [cheese, dough, frontline, mix, pep, general]
 
+    IngredientAllergen:
+      type: string
+      enum: [egg, soy, milk, wheat, peanuts, tree nuts, fish, shellfish, sesame]
+
     Ingredient:
       type: object
       description: >-
@@ -10273,6 +11784,8 @@ components:
         - name
         - categories
         - enabled
+        - allergens
+        - allergensReviewed
       properties:
         id:
           type: string
@@ -10293,6 +11806,17 @@ components:
         enabled:
           type: boolean
           description: false = soft-deleted (kept so old rows still resolve)
+        allergens:
+          type: array
+          description: >-
+            Reviewed mapping values from the fixed ingredient-allergen
+            vocabulary. An empty list means none of those allergens only when
+            allergensReviewed is true.
+          items:
+            $ref: "#/components/schemas/IngredientAllergen"
+        allergensReviewed:
+          type: boolean
+          description: Whether an authorized reviewer explicitly reviewed this mapping
 
     IngredientList:
       type: object
@@ -10313,7 +11837,39 @@ components:
           type: array
           description: The batch of ingredients to create or rename (by id)
           items:
-            $ref: "#/components/schemas/Ingredient"
+            $ref: "#/components/schemas/IngredientCatalogInput"
+
+    IngredientCatalogInput:
+      type: object
+      additionalProperties: false
+      required: [id, name, categories, enabled]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        categories:
+          type: array
+          items:
+            $ref: "#/components/schemas/IngredientCategory"
+        mergedInto:
+          type: string
+          nullable: true
+        enabled:
+          type: boolean
+
+    UpdateIngredientAllergenMappingInput:
+      type: object
+      additionalProperties: false
+      required: [allergens, reviewed]
+      properties:
+        allergens:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/IngredientAllergen"
+        reviewed:
+          type: boolean
 
     DeleteIngredientsInput:
       type: object

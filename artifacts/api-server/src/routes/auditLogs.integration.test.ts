@@ -190,6 +190,35 @@ describe("operational audit HTTP boundary", () => {
     expect(secondBody.nextCursor).toBeNull();
   });
 
+  it("restricts recipe-change evidence reads to live managers", async () => {
+    await db.insert(auditLogsTable).values({
+      scope: "live",
+      actor: LIVE_MANAGER,
+      action: "cheese_recipe_updated",
+      resource: "cheese_recipe:reviewed-recipe",
+      changes: {
+        fieldNames: ["name", "components"],
+        correlationId: "01234567-89ab-cdef-0123-456789abcdef",
+      },
+    });
+
+    const managerResponse = await req(LIVE_MANAGER, "GET", "/api/audit-logs?limit=1");
+    expect(managerResponse.status).toBe(200);
+    const managerPage = await managerResponse.json() as {
+      logs: Array<{ action: string; resource: string; changes: Record<string, unknown> }>;
+    };
+    expect(managerPage.logs).toContainEqual(expect.objectContaining({
+      action: "cheese_recipe_updated",
+      resource: "cheese_recipe:reviewed-recipe",
+      changes: {
+        fieldNames: ["name", "components"],
+        correlationId: "01234567-89ab-cdef-0123-456789abcdef",
+      },
+    }));
+    expect((await req(LIVE_OPERATOR, "GET", "/api/audit-logs?limit=1")).status).toBe(403);
+    expect((await req(sandboxUserId, "GET", "/api/audit-logs?limit=1")).status).toBe(403);
+  });
+
   it("bounds CSV exports and omits private columns", async () => {
     await seedAudit(3);
     const tooLarge = await req(LIVE_MANAGER, "GET", "/api/audit-logs/export.csv?limit=5001");

@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       run_full:
-        description: Run the full browser release suite and retain full evidence
+        description: Run the full browser and phone/tablet WebKit release journeys and retain full evidence
         required: true
         default: false
         type: boolean
@@ -52,16 +52,34 @@ jobs:
       # history. The verifier's focused tests run in ordinary CI; release-check
       # refuses this switch outside this disposable CI contract.
       RELEASE_CHECK_SKIP_PRODUCTION_SOURCE_LIBRARY_RECONCILIATION: "1"
+      SOURCE_LIBRARY_RECONCILIATION_ENVIRONMENT: development
       OPERATIONAL_REPORT_SIGNING_KEYS: '{"activeKeyId":"release-check-current","keys":{"release-check-current":"release-check-disposable-signing-key-000000000000000000000000"}}'
       REPORT_KEY_ROTATION_PREFLIGHT_ENVIRONMENT: disposable-ci
       RELEASE_EVIDENCE_DIR: release-evidence
       RELEASE_CHECK_MAX_CONCURRENCY: "4"
+      TEST_RESULTS_REPORT_PATH: test-evidence/test-results.json
+      TEST_RESULTS_ARTIFACT_NAME: automated-test-results-release-standard-${{ github.run_id }}-${{ github.run_attempt }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+      - name: Initialize machine-readable test report
+        run: node scripts/src/test-results.mjs init
+
+      - name: Build production API image and verify its Node.js version
+        run: |
+          set -euo pipefail
+          api_image="release-check-api:${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          expected_node_version="v$(tr -d '\r\n' < .nvmrc)"
+          docker build --pull --target api --tag "$api_image" .
+          actual_node_version="$(docker run --rm "$api_image" node --version)"
+          if [[ "$actual_node_version" != "$expected_node_version" ]]; then
+            echo "Production API image Node.js version ${actual_node_version} does not match .nvmrc (${expected_node_version})." >&2
+            exit 1
+          fi
+          printf 'Production API image Node.js version matches .nvmrc: %s\n' "$actual_node_version"
 
       - name: Set up pnpm
         uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
@@ -71,7 +89,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: "24.20.0"
+          node-version: "24.21.0"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -94,12 +112,75 @@ jobs:
         id: run-standard-release-check
         env:
           TYPESCRIPT_7_RUNNER_IMAGE: ${{ runner.os }}-${{ runner.arch }}
-        run: pnpm run release:check
+        run: node scripts/src/test-results.mjs run --lane release-standard -- pnpm run release:check
+
+      - name: Mark standard release lane blocked when setup failed
+        if: ${{ always() && steps.run-standard-release-check.outcome == 'skipped' }}
+        run: node scripts/src/test-results.mjs block --lane release-standard
 
 
       - name: Verify release evidence allowlist
         if: always()
         run: pnpm --filter @workspace/scripts run check:release-evidence
+
+      - name: Generate standard release evidence handoff
+        if: always()
+        continue-on-error: true
+        env:
+          HANDOFF_MODE: standard
+          HANDOFF_EVIDENCE_DIR: release-evidence
+        run: |
+          mkdir -p "$HANDOFF_EVIDENCE_DIR"
+          handoff_path="$HANDOFF_EVIDENCE_DIR/release-evidence-handoff.md"
+          if revision="$(bash scripts/src/run-release-node.sh node --input-type=module -e \
+            'import { captureReleaseIdentity } from "./scripts/src/release-source-identity.mjs"; console.log(captureReleaseIdentity(process.cwd()).revision)')"; then
+            :
+          else
+            revision=""
+          fi
+          handoff_status=127
+          if [[ "$revision" =~ ^test-sha256:[a-f0-9]{64}$ ]]; then
+            if bash scripts/src/run-release-node.sh \
+              pnpm --filter @workspace/scripts exec tsx \
+              ./src/release-evidence-handoff.mts \
+              --mode "$HANDOFF_MODE" \
+              --revision "$revision" \
+              --evidence-dir "$HANDOFF_EVIDENCE_DIR" \
+              > "$handoff_path" 2>/dev/null; then
+              handoff_status=0
+            else
+              handoff_status=$?
+            fi
+          fi
+          if [[ "$handoff_status" -eq 0 ]] \
+            && grep -Fqx "# Release Evidence Handoff" "$handoff_path" \
+            && grep -Fqx "Requested mode: **$HANDOFF_MODE**" "$handoff_path" \
+            && grep -Fqx "Requested revision: \`$revision\`" "$handoff_path" \
+            && grep -Fqx "Test evidence status: **PASS**" "$handoff_path" \
+            && grep -Fq "Production GO: NOT CLAIMED" "$handoff_path"; then
+            exit 0
+          fi
+          if [[ "$handoff_status" -ne 0 ]] \
+            && grep -Fqx "# Release Evidence Handoff" "$handoff_path" \
+            && grep -Fqx "Requested mode: **$HANDOFF_MODE**" "$handoff_path" \
+            && grep -Fqx "Requested revision: \`$revision\`" "$handoff_path" \
+            && grep -Eq '^Test evidence status: \*\*(FAIL|NO-GO|MISSING|STALE|INCOMPLETE|INCOMPLETE CHECKPOINT)\*\*$' "$handoff_path" \
+            && grep -Fq "Production GO: NOT CLAIMED" "$handoff_path"; then
+            exit 0
+          fi
+          requested_revision="${revision:-unavailable}"
+          cat > "$handoff_path" <<EOF
+          # Release Evidence Handoff
+
+          Requested mode: **$HANDOFF_MODE**
+          Requested revision: \`$requested_revision\`
+          Test evidence status: **INCOMPLETE**
+          Handoff generation: **FAILED**
+
+          The revision-bound handoff could not be generated or validated. Review the retained report and checkpoint separately; this status is not a release pass.
+
+          **Production GO: NOT CLAIMED by this handoff.**
+          EOF
 
       - name: Upload standard release evidence
         if: always()
@@ -109,6 +190,15 @@ jobs:
           name: release-evidence-standard-${{ github.run_id }}
           path: release-evidence
           if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload machine-readable test report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: automated-test-results-release-standard-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-evidence/test-results.json
+          if-no-files-found: error
           retention-days: 14
 
       - name: Summarize stopped standard release check
@@ -135,7 +225,7 @@ jobs:
     name: Release gates and retained full evidence
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_full }}
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 150
     permissions:
       actions: read
       contents: read
@@ -165,16 +255,21 @@ jobs:
       # See the standard job: this excludes unavailable production history,
       # not synthetic production reconciliation evidence.
       RELEASE_CHECK_SKIP_PRODUCTION_SOURCE_LIBRARY_RECONCILIATION: "1"
+      SOURCE_LIBRARY_RECONCILIATION_ENVIRONMENT: development
       OPERATIONAL_REPORT_SIGNING_KEYS: '{"activeKeyId":"release-check-current","keys":{"release-check-current":"release-check-disposable-signing-key-000000000000000000000000"}}'
       REPORT_KEY_ROTATION_PREFLIGHT_ENVIRONMENT: disposable-ci
       RELEASE_EVIDENCE_DIR: release-evidence-full
       RELEASE_CHECK_MAX_CONCURRENCY: "4"
+      TEST_RESULTS_REPORT_PATH: test-evidence/test-results.json
+      TEST_RESULTS_ARTIFACT_NAME: automated-test-results-release-full-${{ github.run_id }}-${{ github.run_attempt }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+      - name: Initialize machine-readable test report
+        run: node scripts/src/test-results.mjs init
 
       - name: Set up pnpm
         uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
@@ -184,7 +279,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: "24.20.0"
+          node-version: "24.21.0"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -203,16 +298,90 @@ jobs:
       - name: Apply schema to disposable database
         run: pnpm --filter @workspace/db run push-force
 
+      - name: Remove stale responsive WebKit diagnostics
+        env:
+          PLAYWRIGHT_COMPATIBILITY_DEBUG_DIR: ${{ runner.temp }}/responsive-webkit-debug-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          if [[ "$PLAYWRIGHT_COMPATIBILITY_DEBUG_DIR" != "$RUNNER_TEMP"/responsive-webkit-debug-* ]]; then
+            echo "Responsive WebKit debug output must stay under the runner temporary directory." >&2
+            exit 1
+          fi
+          rm -rf -- "$PLAYWRIGHT_COMPATIBILITY_DEBUG_DIR"
+
       - name: Run release gates once and retain full evidence
         id: run-full-release-check
         env:
           TYPESCRIPT_7_RUNNER_IMAGE: ${{ runner.os }}-${{ runner.arch }}
-        run: pnpm run release:check:full
+          PLAYWRIGHT_COMPATIBILITY_DEBUG_DIR: ${{ runner.temp }}/responsive-webkit-debug-${{ github.run_id }}-${{ github.run_attempt }}
+        run: node scripts/src/test-results.mjs run --lane release-full -- pnpm run release:check:full
+
+      - name: Mark full release lane blocked when setup failed
+        if: ${{ always() && steps.run-full-release-check.outcome == 'skipped' }}
+        run: node scripts/src/test-results.mjs block --lane release-full
 
 
       - name: Verify full release evidence allowlist
         if: always()
         run: pnpm run release:check:full -- --verify-evidence
+
+      - name: Generate full release evidence handoff
+        if: always()
+        continue-on-error: true
+        env:
+          HANDOFF_MODE: full
+          HANDOFF_EVIDENCE_DIR: release-evidence-full
+        run: |
+          mkdir -p "$HANDOFF_EVIDENCE_DIR"
+          handoff_path="$HANDOFF_EVIDENCE_DIR/release-evidence-handoff.md"
+          if revision="$(bash scripts/src/run-release-node.sh node --input-type=module -e \
+            'import { captureReleaseIdentity } from "./scripts/src/release-source-identity.mjs"; console.log(captureReleaseIdentity(process.cwd()).revision)')"; then
+            :
+          else
+            revision=""
+          fi
+          handoff_status=127
+          if [[ "$revision" =~ ^test-sha256:[a-f0-9]{64}$ ]]; then
+            if bash scripts/src/run-release-node.sh \
+              pnpm --filter @workspace/scripts exec tsx \
+              ./src/release-evidence-handoff.mts \
+              --mode "$HANDOFF_MODE" \
+              --revision "$revision" \
+              --evidence-dir "$HANDOFF_EVIDENCE_DIR" \
+              > "$handoff_path" 2>/dev/null; then
+              handoff_status=0
+            else
+              handoff_status=$?
+            fi
+          fi
+          if [[ "$handoff_status" -eq 0 ]] \
+            && grep -Fqx "# Release Evidence Handoff" "$handoff_path" \
+            && grep -Fqx "Requested mode: **$HANDOFF_MODE**" "$handoff_path" \
+            && grep -Fqx "Requested revision: \`$revision\`" "$handoff_path" \
+            && grep -Fqx "Test evidence status: **PASS**" "$handoff_path" \
+            && grep -Fq "Production GO: NOT CLAIMED" "$handoff_path"; then
+            exit 0
+          fi
+          if [[ "$handoff_status" -ne 0 ]] \
+            && grep -Fqx "# Release Evidence Handoff" "$handoff_path" \
+            && grep -Fqx "Requested mode: **$HANDOFF_MODE**" "$handoff_path" \
+            && grep -Fqx "Requested revision: \`$revision\`" "$handoff_path" \
+            && grep -Eq '^Test evidence status: \*\*(FAIL|NO-GO|MISSING|STALE|INCOMPLETE|INCOMPLETE CHECKPOINT)\*\*$' "$handoff_path" \
+            && grep -Fq "Production GO: NOT CLAIMED" "$handoff_path"; then
+            exit 0
+          fi
+          requested_revision="${revision:-unavailable}"
+          cat > "$handoff_path" <<EOF
+          # Release Evidence Handoff
+
+          Requested mode: **$HANDOFF_MODE**
+          Requested revision: \`$requested_revision\`
+          Test evidence status: **INCOMPLETE**
+          Handoff generation: **FAILED**
+
+          The revision-bound handoff could not be generated or validated. Review the retained report and checkpoint separately; this status is not a release pass.
+
+          **Production GO: NOT CLAIMED by this handoff.**
+          EOF
 
       - name: Upload full release evidence
         if: always()
@@ -223,6 +392,36 @@ jobs:
           path: release-evidence-full
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Upload machine-readable test report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: automated-test-results-release-full-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-evidence/test-results.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Check for sanitized responsive WebKit diagnostics
+        if: always()
+        id: responsive-webkit-debug-artifact
+        env:
+          DEBUG_DIR: ${{ runner.temp }}/responsive-webkit-debug-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          if [[ -f "$DEBUG_DIR/manifest.json" && -f "$DEBUG_DIR/trace-summary.json" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload sanitized responsive WebKit failure diagnostics
+        if: always() && steps.responsive-webkit-debug-artifact.outputs.available == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: responsive-webkit-debug-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/responsive-webkit-debug-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 3
 
       - name: Summarize stopped full release check
         if: always()
@@ -243,3 +442,48 @@ jobs:
           REGENERATE_COMMAND: pnpm run release:check:full
         run: |
           bash scripts/src/release-stopped-summary.sh
+
+  aggregate-test-results:
+    name: Aggregate release test results
+    if: always()
+    needs:
+      - release-check-standard
+      - release-check-full
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      TEST_RESULTS_REPORT_PATH: test-evidence/merged-test-results.json
+      TEST_RESULTS_ARTIFACT_NAME: automated-test-results-merged-release-${{ github.run_id }}-${{ github.run_attempt }}
+      TEST_RESULTS_EXPECT_FULL_RELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.run_full }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      # Full dispatch also runs the standard job. Download both reports there so
+      # aggregation can retain both gate outcomes and prefer full shared lanes.
+      - name: Download release test reports from this workflow run
+        id: download-release-test-reports
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: automated-test-results-release-${{ github.event_name == 'workflow_dispatch' && inputs.run_full && '*' || 'standard' }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-evidence/reports
+      - name: Merge and validate run-level test report
+        id: merge-release-test-report
+        run: node scripts/src/test-results.mjs merge --input-dir test-evidence/reports
+      - name: Upload merged machine-readable test report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: automated-test-results-merged-release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-evidence/merged-test-results.json
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Summarize missing merged test report
+        if: ${{ always() && (steps.download-release-test-reports.outcome != 'success' || steps.merge-release-test-report.outcome != 'success') }}
+        env:
+          TEST_RESULTS_DOWNLOAD_OUTCOME: ${{ steps.download-release-test-reports.outcome }}
+          TEST_RESULTS_MERGE_OUTCOME: ${{ steps.merge-release-test-report.outcome }}
+        run: node scripts/src/test-results.mjs summarize-aggregation

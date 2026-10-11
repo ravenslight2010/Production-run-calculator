@@ -7,6 +7,8 @@ import {
   importSourceLibraryReconciliationEvidence,
 } from "./import-source-library-reconciliation-evidence.mts";
 import {
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
   DEFAULT_FROM_DATE,
   DEFAULT_HEAL_ID,
   DEFAULT_REPORT,
@@ -21,6 +23,7 @@ function evidence(reportSha256: string, overrides: Record<string, unknown> = {})
   const value = {
     verifier: "source-library-reconciliation",
     environment: "release",
+    databaseAttestation: "external-owner-check",
     revision,
     capturedAt,
     healId: DEFAULT_HEAL_ID,
@@ -50,6 +53,12 @@ function evidence(reportSha256: string, overrides: Record<string, unknown> = {})
       guardedRenames: 0,
       missing: 0,
       mismatches: 0,
+    },
+    poolExceptions: {
+      id: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
+      sha256: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
+      approvedMismatches: 0,
+      unresolvedMismatches: 0,
     },
     aliases: { expected: 0, exactMatches: 0, missing: 0, mismatches: 0 },
     profiles: { inspected: 0, canonical: 0, stale: 0, nonCanonical: 0 },
@@ -87,8 +96,20 @@ try {
     .digest("hex");
   const input = path.join(directory, "input.json");
   const output = path.join(directory, "output.json");
+  const handoffPath = path.join(directory, "deployment-handoff.json");
   const now = new Date("2026-09-08T12:01:00.000Z");
   await writeFile(input, JSON.stringify(evidence(reportSha256)));
+  await writeFile(
+    handoffPath,
+    JSON.stringify({
+      schemaVersion: 1,
+      kind: "published-deployment-handoff",
+      deploymentId: "published-source-evidence-test",
+      deployedRevision: revision,
+      issuedAt: "2026-09-08T12:00:00.000Z",
+      expiresAt: "2026-09-08T13:00:00.000Z",
+    }),
+  );
 
   await importSourceLibraryReconciliationEvidence({
     input,
@@ -100,6 +121,37 @@ try {
     now,
   });
   assert.deepEqual(await readFile(output), await readFile(input));
+  const retainedEvidence = await readFile(output);
+
+  const handoffOutput = path.join(directory, "handoff-output.json");
+  await importSourceLibraryReconciliationEvidence({
+    input,
+    output: handoffOutput,
+    report,
+    healId: DEFAULT_HEAL_ID,
+    fromDate: DEFAULT_FROM_DATE,
+    deploymentHandoffPath: handoffPath,
+    now,
+  });
+  assert.deepEqual(await readFile(handoffOutput), await readFile(input));
+  assert.doesNotMatch(
+    await readFile(handoffOutput, "utf8"),
+    /published-source-evidence-test|deployment-handoff/,
+  );
+
+  await assert.rejects(
+    importSourceLibraryReconciliationEvidence({
+      input,
+      output: handoffOutput,
+      report,
+      healId: DEFAULT_HEAL_ID,
+      fromDate: DEFAULT_FROM_DATE,
+      revision: "c".repeat(40),
+      deploymentHandoffPath: handoffPath,
+      now,
+    }),
+    /conflicts with the deployed revision/,
+  );
 
   const staleInput = path.join(directory, "stale.json");
   await writeFile(
@@ -118,6 +170,11 @@ try {
     }),
     /revision is stale or missing/,
   );
+  assert.deepEqual(
+    await readFile(output),
+    retainedEvidence,
+    "a revision mismatch must not replace retained evidence",
+  );
 
   await assert.rejects(
     importSourceLibraryReconciliationEvidence({
@@ -129,7 +186,35 @@ try {
       revision: "unknown",
       now,
     }),
-    /exact deployed 40-character Git commit SHA/,
+    /exact deployed source identity/,
+  );
+  assert.deepEqual(
+    await readFile(output),
+    retainedEvidence,
+    "an invalid deployed revision must not replace retained evidence",
+  );
+
+  const wrongReportInput = path.join(directory, "wrong-report.json");
+  await writeFile(
+    wrongReportInput,
+    JSON.stringify(evidence("f".repeat(64))),
+  );
+  await assert.rejects(
+    importSourceLibraryReconciliationEvidence({
+      input: wrongReportInput,
+      output,
+      report,
+      healId: DEFAULT_HEAL_ID,
+      fromDate: DEFAULT_FROM_DATE,
+      revision,
+      now,
+    }),
+    /wrong source report/,
+  );
+  assert.deepEqual(
+    await readFile(output),
+    retainedEvidence,
+    "a source report hash mismatch must not replace retained evidence",
   );
 
   const tamperedInput = path.join(directory, "tampered.json");
@@ -148,6 +233,11 @@ try {
     }),
     /invalid bounded content digest/,
   );
+  assert.deepEqual(
+    await readFile(output),
+    retainedEvidence,
+    "a failed content validation must not replace retained evidence",
+  );
 
   const linkedInput = path.join(directory, "linked.json");
   await symlink(input, linkedInput);
@@ -162,6 +252,11 @@ try {
       now,
     }),
     /regular file/,
+  );
+  assert.deepEqual(
+    await readFile(output),
+    retainedEvidence,
+    "a non-regular input must not replace retained evidence",
   );
 
   const stdinInput = path.join(directory, "stdin-output.json");

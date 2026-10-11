@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   parsePremixWorkbook,
+  parsePremixWorkbookWithSources,
   groundPremix,
   splitPremixName,
   premixMatchName,
@@ -103,6 +104,20 @@ describe("parsePremixWorkbook", () => {
     const flat = mix.components.find((c) => c.ingredient === "1/8 Green Pepper");
     expect(flat?.perPizza).toBe(0);
     expect(flat?.perBatch).toBe(10);
+  });
+
+  it("attaches review-only sheet and cell coordinates without changing the ordinary parse result", () => {
+    const withSource = parsePremixWorkbookWithSources([{ ...BOBOS, sourceFile: "premix.xlsx" }])[0]!;
+    expect(withSource.sourceEvidence).toMatchObject({
+      name: { file: "premix.xlsx", sheet: "Bobos Deluxe", cell: "A1" },
+      batchSize: { file: "premix.xlsx", sheet: "Bobos Deluxe", cell: "C9" },
+    });
+    expect(withSource.sourceEvidence?.components[0]).toMatchObject({
+      ingredient: { cell: "A3", sheet: "Bobos Deluxe", file: "premix.xlsx" },
+      perPizza: { cell: "B3", sheet: "Bobos Deluxe", file: "premix.xlsx" },
+      perBatch: { cell: "C3", sheet: "Bobos Deluxe", file: "premix.xlsx" },
+    });
+    expect(parsePremixWorkbook([BOBOS])[0]).not.toHaveProperty("sourceEvidence");
   });
 
   it("parses two horizontal blocks on one tab (incl. the 'Pert Pizza' typo)", () => {
@@ -764,6 +779,30 @@ describe("re-import always updates components via mergePremixIntoMixes", () => {
       ...over,
     };
   }
+
+  it("retains a stored revision for a workbook row that has no revision", () => {
+    const revision = "2026-10-08T12:00:00.000Z";
+    const existing = mkMix({ id: "saved", name: "Mix", updatedAt: revision });
+    const imported = mkMix({
+      id: "saved", name: "Mix", components: [{ ingredient: "Pepper", perPizza: 1 }],
+    });
+    const [merged] = mergePremixIntoMixes([existing], [imported]);
+    expect(merged.updatedAt).toBe(revision);
+    expect(merged.components).toEqual(imported.components);
+  });
+
+  it("keeps explicit stale revisions and leaves new recipes unstamped", () => {
+    const existing = mkMix({
+      id: "saved", name: "Mix", updatedAt: "2026-10-08T12:00:00.000Z",
+    });
+    const stale = "2026-10-07T12:00:00.000Z";
+    const merged = mergePremixIntoMixes([existing], [
+      mkMix({ id: "saved", name: "Mix", updatedAt: stale }),
+      mkMix({ id: "new", name: "New" }),
+    ]);
+    expect(merged[0].updatedAt).toBe(stale);
+    expect(merged[1].updatedAt).toBeUndefined();
+  });
 
   it("a redirect onto an existing mix updates components while preserving amountAlreadyMade, enabled, and notes", () => {
     const existing = mkMix({

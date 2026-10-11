@@ -1,16 +1,27 @@
+import { monitorEventLoopDelay } from "node:perf_hooks";
 import type { Pool, PoolClient } from "pg";
 import type { Logger } from "pino";
 import { logger } from "./logger";
 
 const MAX_SAMPLES = 2_048;
+const MAX_COUNTER_VALUE = Number.MAX_SAFE_INTEGER;
 const REPORT_INTERVAL_MS = 60_000;
 const MAX_METRIC_VALUE = 10 * 60 * 1_000;
+const EVENT_LOOP_DELAY_DISTRIBUTION = "node.event_loop.delay_ms";
+const EVENT_LOOP_DELAY_RESOLUTION_MS = 20;
+const NANOSECONDS_PER_MILLISECOND = 1_000_000;
 export const LEGACY_SYNC_READINESS_WINDOW_MS = 24 * 60 * 60 * 1_000;
 export const LEGACY_SYNC_EVIDENCE_TTL_MS = 5 * 60 * 1_000;
 const LEGACY_SYNC_BUCKET_MS = 60_000;
 
 export type SyncPutMode = "complete" | "partial" | "fallback" | "unchanged";
 export type SseFrameMode = "complete" | "partial";
+export type SyncPeerFrameTelemetry = {
+  windowMs: number;
+  exactSnapshotSkipped: number;
+  partialSent: number;
+  completeSent: number;
+};
 
 type Distribution = {
   count: number;
@@ -37,6 +48,10 @@ type CapacitySnapshot = {
 
 const counters = new Map<string, number>();
 const distributions = new Map<string, Distribution>();
+const eventLoopDelayHistogram = monitorEventLoopDelay({
+  resolution: EVENT_LOOP_DELAY_RESOLUTION_MS,
+});
+eventLoopDelayHistogram.enable();
 let windowStartedAt = Date.now();
 let lastReportAt = windowStartedAt;
 let latestPool = { total: 0, idle: 0, waiting: 0 };
@@ -69,6 +84,23 @@ function increment(key: string): void {
   counters.set(key, (counters.get(key) ?? 0) + 1);
 }
 
+function incrementBounded(key: string): void {
+  counters.set(key, Math.min(MAX_COUNTER_VALUE, (counters.get(key) ?? 0) + 1));
+}
+
+function counterValue(key: string): number {
+  const value = counters.get(key) ?? 0;
+  return Number.isFinite(value)
+    ? Math.min(MAX_COUNTER_VALUE, Math.max(0, Math.floor(value)))
+    : 0;
+}
+
+function counterWindowMs(now: number): number {
+  return Number.isFinite(now)
+    ? Math.min(MAX_COUNTER_VALUE, Math.max(0, Math.floor(now - windowStartedAt)))
+    : 0;
+}
+
 function observe(key: string, value: number): void {
   const safe = bounded(value);
   const metric = distributions.get(key) ?? { count: 0, samples: [], max: 0 };
@@ -77,10 +109,11 @@ function observe(key: string, value: number): void {
   if (metric.samples.length < MAX_SAMPLES) {
     metric.samples.push(safe);
   } else {
-    // Deterministic bounded reservoir: retain evenly spaced observations from
-    // the whole process window without storing request-level records.
-    const index = metric.count % MAX_SAMPLES;
-    metric.samples[index] = safe;
+    // Algorithm R keeps a uniform bounded sample from the entire report
+    // window. Replacing count % MAX_SAMPLES instead favors recent observations
+    // and can make a short latency burst look like the whole-window p95/p99.
+    const index = Math.floor(Math.random() * metric.count);
+    if (index < MAX_SAMPLES) metric.samples[index] = safe;
   }
   distributions.set(key, metric);
 }
@@ -88,6 +121,17 @@ function observe(key: string, value: number): void {
 function percentile(sorted: number[], fraction: number): number {
   if (sorted.length === 0) return 0;
   return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * fraction) - 1)] ?? 0;
+}
+
+function eventLoopDelayDistribution(): CapacitySnapshot["distributions"][string] | undefined {
+  if (eventLoopDelayHistogram.count === 0) return undefined;
+  return {
+    count: bounded(eventLoopDelayHistogram.count),
+    p50: bounded(eventLoopDelayHistogram.percentile(50) / NANOSECONDS_PER_MILLISECOND),
+    p95: bounded(eventLoopDelayHistogram.percentile(95) / NANOSECONDS_PER_MILLISECOND),
+    p99: bounded(eventLoopDelayHistogram.percentile(99) / NANOSECONDS_PER_MILLISECOND),
+    max: bounded(eventLoopDelayHistogram.max / NANOSECONDS_PER_MILLISECOND),
+  };
 }
 
 export function syncRunCountBucket(payload: unknown): "0" | "1-5" | "6-20" | "21-50" {
@@ -178,12 +222,30 @@ export function recordSseFrame(fields: {
   frameBytes: number;
   durationMs: number;
   outcome: "sent" | "write_failed";
+  peerUpdate?: boolean;
 }): void {
   const prefix = `sync.sse.${fields.mode}.${fields.outcome}`;
   increment(`${prefix}.count`);
+  if (fields.peerUpdate && fields.outcome === "sent") {
+    incrementBounded(`sync.sse.peer.${fields.mode}.sent.count`);
+  }
   observe(`${prefix}.frame_bytes`, fields.frameBytes);
   observe(`${prefix}.duration_ms`, fields.durationMs);
   maybeReport();
+}
+
+export function recordSsePeerFrameSkippedExactSnapshot(): void {
+  incrementBounded("sync.sse.peer.exact_snapshot.skipped.count");
+  maybeReport();
+}
+
+export function syncPeerFrameTelemetrySnapshot(now = Date.now()): SyncPeerFrameTelemetry {
+  return {
+    windowMs: counterWindowMs(now),
+    exactSnapshotSkipped: counterValue("sync.sse.peer.exact_snapshot.skipped.count"),
+    partialSent: counterValue("sync.sse.peer.partial.sent.count"),
+    completeSent: counterValue("sync.sse.peer.complete.sent.count"),
+  };
 }
 
 export function recordSyncTransaction(durationMs: number): void {
@@ -252,6 +314,8 @@ export function capacityTelemetrySnapshot(now = Date.now()): CapacitySnapshot {
       max: value.max,
     };
   }
+  const eventLoopDelay = eventLoopDelayDistribution();
+  if (eventLoopDelay) result[EVENT_LOOP_DELAY_DISTRIBUTION] = eventLoopDelay;
   return {
     windowMs: Math.max(0, now - windowStartedAt),
     counters: Object.fromEntries(counters),
@@ -270,6 +334,7 @@ export function reportCapacityTelemetry(log: Pick<Logger, "info"> = logger, now 
   }
   counters.clear();
   distributions.clear();
+  eventLoopDelayHistogram.reset();
   windowStartedAt = now;
   lastReportAt = now;
 }
@@ -281,6 +346,7 @@ function maybeReport(now = Date.now()): void {
 export function clearCapacityTelemetryForTests(now = Date.now()): void {
   counters.clear();
   distributions.clear();
+  eventLoopDelayHistogram.reset();
   latestPool = { total: 0, idle: 0, waiting: 0 };
   windowStartedAt = now;
   lastReportAt = now;

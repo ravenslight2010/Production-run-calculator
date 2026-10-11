@@ -4,10 +4,18 @@ import {
   type DayState,
   type FormValues,
   type RunMeta,
+  type SyncPayload,
 } from "../types";
 import { genId, todayStr } from "../utils";
 import { SynchronizationStateMachine } from "../synchronizationStateMachine";
 import { defaultDayBreaks } from "../dayTimeline";
+import {
+  APPLICATOR_STOCK_CHANNELS,
+  APPLICATOR_STOCK_REGISTERS,
+  applicatorStockFields,
+  applicatorStockRegisterForChannel,
+  computeApplicatorStockCapacityLbs,
+} from "@workspace/live-calc";
 
 /** React- and storage-free decisions for the live-run synchronization boundary. */
 export function deepEqual(a: unknown, b: unknown): boolean {
@@ -91,8 +99,18 @@ export function removeRunByIdFromDayState(
 
 export function shouldKeepLocalRunLifecycle(local: RunMeta | undefined, remote: RunMeta | undefined): boolean {
   if (!local || !remote) return false;
-  return (!!local.pausedAt && !local.endedAt && !remote.pausedAt && !remote.endedAt
-    && remote.startedAt === local.startedAt)
+  // Same-day lifecycle transitions are monotonic from the operator's point of
+  // view: a stale snapshot may omit a locally started or ended run, but there
+  // is no valid same-day action that turns either transition back into an
+  // unstarted/unended run. Keep that local transition even when the older
+  // snapshot carries an equal or missing stamp. The stamp comparison below
+  // still handles unrelated metadata and newer peer lifecycle changes.
+  const localTransitionIsMissingRemotely =
+    (local.startedAt !== undefined && remote.startedAt === undefined)
+    || (local.endedAt !== undefined && remote.endedAt === undefined);
+  return (localTransitionIsMissingRemotely)
+    || (!!local.pausedAt && !local.endedAt && !remote.pausedAt && !remote.endedAt
+      && remote.startedAt === local.startedAt)
     || (local.metaUpdatedAt ?? 0) > (remote.metaUpdatedAt ?? 0);
 }
 export function selectInboundRunLifecycles(local: RunMeta[], remote: RunMeta[]): RunMeta[] {
@@ -158,8 +176,150 @@ export function shouldHealFormFromStored(live: FormValues, stored: FormValues, e
 export function shouldResetFormOnRunSwitch(live: FormValues, stored: FormValues, settled: boolean): boolean {
   return !settled && !deepEqual(live, stored);
 }
-export function acceptRemoteRunValueOnSync(remote: FormValues, local: FormValues, remoteTs: number, localTs: number): boolean {
-  return !isEmptyOverPopulated(remote, local) && !(localTs > remoteTs);
+export function isRunValueStampAheadOfServerTime(stamp: number, serverNowMs: number): boolean {
+  return Number.isFinite(stamp) && stamp > serverNowMs;
+}
+export function acceptRemoteRunValueOnSync(
+  remote: FormValues,
+  local: FormValues,
+  remoteTs: number,
+  localTs: number,
+  serverNowMs = Date.now(),
+): boolean {
+  // A local stamp ahead of server time is evidence of device-clock skew, not
+  // proof that the local value is newer than the server's canonical snapshot.
+  // Current-base writes are ordered by their snapshot fence, and the server
+  // re-stamps accepted edits with its own clock; use the same clock basis here.
+  const comparableLocalTs = isRunValueStampAheadOfServerTime(localTs, serverNowMs)
+    ? 0
+    : localTs;
+  return !isEmptyOverPopulated(remote, local) && !(comparableLocalTs > remoteTs);
+}
+
+/**
+ * Select the one App 1 counter that may converge independently of whole-run
+ * LWW. A private server ownership entry must match the public accepted claim
+ * sequence and its run-value stamp; the operator's slot correction generation
+ * remains a causal fence against an older automatic event.
+ */
+export function serverOwnedApp1BatchProgress(
+  payload: Pick<SyncPayload, "runValues" | "runValuesUpdatedAt" | "autoTrackCoordination" | "autoTrackServerState">,
+  runId: string,
+  localValues: FormValues,
+): Partial<Pick<FormValues, "app1BatchesMade" | "app1BatchCorrectionGeneration">> | null {
+  const remoteValues = payload.runValues[runId];
+  const remoteStamp = Number(payload.runValuesUpdatedAt?.[runId]);
+  const coordination = payload.autoTrackCoordination?.runs?.[runId]?.["app1-batch"];
+  const ownership = payload.autoTrackServerState?.netOwnership?.[runId]?.["app1-batch"];
+  if (
+    !remoteValues
+    || !Number.isFinite(remoteStamp)
+    || remoteStamp <= 0
+    || !coordination
+    || !ownership
+    || !Number.isFinite(ownership.updatedAt)
+    || Number(ownership.updatedAt) <= 0
+    || remoteStamp < Number(ownership.updatedAt)
+    || !Number.isSafeInteger(coordination.sequence)
+    || coordination.sequence < 1
+    || coordination.generation !== ownership.generation
+    || coordination.sequence !== ownership.sequence
+    || Number(coordination.acceptedRunValuesUpdatedAt) !== remoteStamp
+    || typeof coordination.acceptedEventId !== "string"
+    || coordination.acceptedEventId.length === 0
+  ) return null;
+
+  const remoteCount = Number(remoteValues.app1BatchesMade);
+  const localCount = Number(localValues.app1BatchesMade);
+  const remoteGeneration = Number(remoteValues.app1BatchCorrectionGeneration) || 0;
+  const localGeneration = Number(localValues.app1BatchCorrectionGeneration) || 0;
+  if (
+    !Number.isSafeInteger(remoteCount)
+    || remoteCount < 0
+    || !Number.isSafeInteger(localCount)
+    || !Number.isSafeInteger(remoteGeneration)
+    || remoteGeneration < 0
+    || !Number.isSafeInteger(localGeneration)
+    || localGeneration < 0
+    || localGeneration > remoteGeneration
+    || remoteCount <= localCount
+  ) return null;
+
+  return {
+    app1BatchesMade: remoteCount,
+    ...(remoteGeneration > localGeneration
+      ? { app1BatchCorrectionGeneration: remoteGeneration }
+      : {}),
+  };
+}
+
+/** Adopt only server-proven stock claims, or a newer operator correction generation. */
+export function serverOwnedApplicatorStockProgress(
+  payload: Pick<SyncPayload, "runValues" | "runValuesUpdatedAt" | "autoTrackCoordination" | "autoTrackServerState">,
+  runId: string,
+  localValues: FormValues,
+): Partial<FormValues> | null {
+  const remoteValues = payload.runValues[runId];
+  const remoteStamp = Number(payload.runValuesUpdatedAt?.[runId]);
+  if (
+    !remoteValues
+    || remoteValues.applicatorStockInitialized !== true
+    || !Number.isFinite(remoteStamp)
+    || remoteStamp <= 0
+  ) return null;
+
+  const result: Partial<FormValues> = {};
+  for (const channel of APPLICATOR_STOCK_CHANNELS) {
+    const register = applicatorStockRegisterForChannel(channel);
+    if (!register) continue;
+    const coordination = payload.autoTrackCoordination?.runs?.[runId]?.[channel];
+    const ownership = payload.autoTrackServerState?.netOwnership?.[runId]?.[channel];
+    if (
+      !coordination
+      || !ownership
+      || !Number.isFinite(ownership.updatedAt)
+      || Number(ownership.updatedAt) <= 0
+      || remoteStamp < Number(ownership.updatedAt)
+      || !Number.isSafeInteger(coordination.sequence)
+      || coordination.sequence < 1
+      || coordination.generation !== ownership.generation
+      || coordination.sequence !== ownership.sequence
+      || Number(coordination.acceptedRunValuesUpdatedAt) !== remoteStamp
+      || typeof coordination.acceptedEventId !== "string"
+      || coordination.acceptedEventId.length === 0
+    ) continue;
+
+    const fields = applicatorStockFields(register);
+    const cap = computeApplicatorStockCapacityLbs(remoteValues as unknown as Record<string, unknown>, register);
+    const remoteStock = Number(remoteValues[fields.stock as keyof FormValues]);
+    const localStock = Number(localValues[fields.stock as keyof FormValues]);
+    const remoteAnchor = Number(remoteValues[fields.anchor as keyof FormValues]);
+    const localAnchor = Number(localValues[fields.anchor as keyof FormValues]);
+    const remoteGeneration = Number(remoteValues[fields.correctionGeneration as keyof FormValues]);
+    const localGeneration = Number(localValues[fields.correctionGeneration as keyof FormValues]);
+    if (
+      cap <= 0
+      || !Number.isFinite(remoteStock)
+      || remoteStock < 0
+      || remoteStock > cap
+      || !Number.isFinite(localStock)
+      || !Number.isFinite(remoteAnchor)
+      || remoteAnchor < 0
+      || !Number.isFinite(localAnchor)
+      || !Number.isSafeInteger(remoteGeneration)
+      || remoteGeneration < 0
+      || !Number.isSafeInteger(localGeneration)
+      || localGeneration < 0
+      || remoteGeneration < localGeneration
+      || (remoteGeneration === localGeneration && remoteStock > localStock)
+      || (remoteGeneration === localGeneration && remoteAnchor < localAnchor)
+    ) continue;
+    (result as Record<string, unknown>)[fields.stock] = remoteStock;
+    (result as Record<string, unknown>)[fields.anchor] = remoteAnchor;
+    (result as Record<string, unknown>)[fields.correctionGeneration] = remoteGeneration;
+    result.applicatorStockInitialized = true;
+  }
+  return Object.keys(result).length ? result : null;
 }
 
 type OperationalCanonicalIntent = {
@@ -182,6 +342,14 @@ const OPERATIONAL_CORRECTION_FIELDS = new Set<keyof FormValues>([
   "app2BatchesMade", "app2BatchAnchorNetSec", "app2BatchCorrectionGeneration",
   "app3BatchesMade", "app3BatchAnchorNetSec", "app3BatchCorrectionGeneration",
   "app4BatchesMade", "app4BatchAnchorNetSec", "app4BatchCorrectionGeneration",
+  "app1StockLbs", "app1StockAnchorNetSec", "app1StockCorrectionGeneration",
+  "app2StockLbs", "app2StockAnchorNetSec", "app2StockCorrectionGeneration",
+  "app3StockLbs", "app3StockAnchorNetSec", "app3StockCorrectionGeneration",
+  "app4StockLbs", "app4StockAnchorNetSec", "app4StockCorrectionGeneration",
+  "pep1StockLbs", "pep1StockAnchorNetSec", "pep1StockCorrectionGeneration",
+  "pep1bStockLbs", "pep1bStockAnchorNetSec", "pep1bStockCorrectionGeneration",
+  "pep2StockLbs", "pep2StockAnchorNetSec", "pep2StockCorrectionGeneration",
+  "pep2bStockLbs", "pep2bStockAnchorNetSec", "pep2bStockCorrectionGeneration",
 ]);
 
 /**
@@ -214,7 +382,12 @@ export function reconcileOperationalIntentCanonical(args: {
   // committed inventory in the same transaction. Adopt that exact lifecycle
   // before the outbox drops its snapshot fence. Other accepted commands already
   // match their optimistic local projection.
+  const acceptedStockStart = args.intent.action === "lifecycle"
+    && args.intent.lifecycle === "start"
+    && args.payload.runValues[args.intent.runId]?.applicatorStockInitialized === true;
   if (args.outcome === "accepted"
+    && args.intent.action !== "correction"
+    && !acceptedStockStart
     && !(args.intent.action === "lifecycle" && args.intent.lifecycle === "end")) return unchanged;
 
   let dayState = args.dayState;
@@ -257,6 +430,12 @@ export function reconcileOperationalIntentCanonical(args: {
         (restored as unknown as Record<string, unknown>)[field] = value;
         valueFields.push(field as keyof FormValues);
       }
+      const hasStockCorrection = Object.keys(args.intent.values ?? {}).some((field) =>
+        /^(app[1-4]|pep[12]b?)Stock(Lbs|AnchorNetSec|CorrectionGeneration)$/.test(field));
+      if (hasStockCorrection) {
+        restored.applicatorStockInitialized = canonical.applicatorStockInitialized === true;
+        valueFields.push("applicatorStockInitialized");
+      }
       if (valueFields.length) {
         runValues = restored;
         runValuesUpdatedAt = {
@@ -265,6 +444,32 @@ export function reconcileOperationalIntentCanonical(args: {
         };
       }
     }
+  } else if (args.intent.action === "lifecycle" && args.intent.lifecycle === "start" && acceptedStockStart) {
+    const canonical = args.payload.runValues[args.intent.runId];
+    const restored = { ...args.runValues };
+    for (const register of APPLICATOR_STOCK_REGISTERS) {
+      const fields = applicatorStockFields(register);
+      const capacity = computeApplicatorStockCapacityLbs(canonical as unknown as Record<string, unknown>, register);
+      const stock = Number(canonical[fields.stock as keyof FormValues]);
+      const anchor = Number(canonical[fields.anchor as keyof FormValues]);
+      const generation = Number(canonical[fields.correctionGeneration as keyof FormValues]);
+      if (
+        !Number.isFinite(stock) || stock < 0 || stock > capacity
+        || !Number.isFinite(anchor) || anchor < 0
+        || !Number.isSafeInteger(generation) || generation < 0
+      ) continue;
+      (restored as unknown as Record<string, unknown>)[fields.stock] = stock;
+      (restored as unknown as Record<string, unknown>)[fields.anchor] = anchor;
+      (restored as unknown as Record<string, unknown>)[fields.correctionGeneration] = generation;
+      valueFields.push(fields.stock as keyof FormValues, fields.anchor as keyof FormValues, fields.correctionGeneration as keyof FormValues);
+    }
+    restored.applicatorStockInitialized = true;
+    valueFields.push("applicatorStockInitialized");
+    runValues = restored;
+    runValuesUpdatedAt = {
+      ...args.runValuesUpdatedAt,
+      [args.intent.runId]: args.payload.runValuesUpdatedAt?.[args.intent.runId] ?? 0,
+    };
   }
 
   return { dayState, runValues, runValuesUpdatedAt, lifecycleChanged, valueFields };

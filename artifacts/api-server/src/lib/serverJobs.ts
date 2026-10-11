@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, lte, or } from "drizzle-orm";
+import { and, asc, eq, gt, lte, or, sql } from "drizzle-orm";
 import {
   db,
   serverJobAttemptsTable,
@@ -61,6 +61,202 @@ const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_INPUT_BYTES = 512 * 1024;
 const MAX_RESULT_BYTES = 512 * 1024;
 const DEFAULT_EXECUTION_TIMEOUT_MS = 5 * 60_000;
+export const SCHEDULED_EVALUATION_MONITOR_SAMPLE_INTERVAL_MS = 60_000;
+export const SCHEDULED_EVALUATION_MONITOR_WINDOW_MS = 5 * 60_000;
+const SCHEDULED_EVALUATION_MAX_DUPLICATE_GROUPS = 100;
+const SCHEDULED_EVALUATION_MAX_SAMPLES =
+  Math.ceil(SCHEDULED_EVALUATION_MONITOR_WINDOW_MS / SCHEDULED_EVALUATION_MONITOR_SAMPLE_INTERVAL_MS) + 1;
+
+export type ScheduledEvaluationQueueWarningCode =
+  | "backlog_stalled"
+  | "backlog_growing"
+  | "duplicate_time_buckets";
+
+export type ScheduledEvaluationQueueSnapshot = {
+  queued: number;
+  running: number;
+  terminalLastWindow: {
+    succeeded: number;
+    failed: number;
+    cancelled: number;
+  };
+  duplicateTimeBucketGroups: number;
+  duplicateGroupsTruncated: boolean;
+};
+
+export type ScheduledEvaluationQueueDiagnostics = ScheduledEvaluationQueueSnapshot & {
+  status: "pending" | "ok" | "warning";
+  warningCodes: ScheduledEvaluationQueueWarningCode[];
+  sampleCount: number;
+  windowMs: number;
+  lastSampleAt?: string;
+};
+
+export type ScheduledEvaluationQueueTransition = {
+  started: ScheduledEvaluationQueueWarningCode[];
+  cleared: ScheduledEvaluationQueueWarningCode[];
+  diagnostics: ScheduledEvaluationQueueDiagnostics;
+};
+
+type ScheduledEvaluationQueueSample = ScheduledEvaluationQueueSnapshot & { at: number };
+
+const EMPTY_SCHEDULED_EVALUATION_SNAPSHOT: ScheduledEvaluationQueueSnapshot = {
+  queued: 0,
+  running: 0,
+  terminalLastWindow: { succeeded: 0, failed: 0, cancelled: 0 },
+  duplicateTimeBucketGroups: 0,
+  duplicateGroupsTruncated: false,
+};
+
+function nonNegativeCount(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+}
+
+/**
+ * Bounded, process-local trend state for the scheduled-evaluation workload.
+ * Only aggregate counts are retained; job identifiers and payloads never enter
+ * this monitor.
+ */
+export function createScheduledEvaluationQueueMonitor() {
+  let samples: ScheduledEvaluationQueueSample[] = [];
+  let warningCodes = new Set<ScheduledEvaluationQueueWarningCode>();
+
+  const diagnostics = (): ScheduledEvaluationQueueDiagnostics => {
+    const latest = samples.at(-1);
+    return {
+      ...EMPTY_SCHEDULED_EVALUATION_SNAPSHOT,
+      ...(latest
+        ? {
+          queued: latest.queued,
+          running: latest.running,
+          terminalLastWindow: latest.terminalLastWindow,
+          duplicateTimeBucketGroups: latest.duplicateTimeBucketGroups,
+          duplicateGroupsTruncated: latest.duplicateGroupsTruncated,
+        }
+        : {}),
+      status: samples.length === 0 ? "pending" : warningCodes.size ? "warning" : "ok",
+      warningCodes: [...warningCodes].sort(),
+      sampleCount: samples.length,
+      windowMs: SCHEDULED_EVALUATION_MONITOR_WINDOW_MS,
+      ...(latest ? { lastSampleAt: new Date(latest.at).toISOString() } : {}),
+    };
+  };
+
+  return {
+    observe(snapshot: ScheduledEvaluationQueueSnapshot, nowMs = Date.now()): ScheduledEvaluationQueueTransition {
+      const previous = warningCodes;
+      const latest = samples.at(-1);
+      if (latest && nowMs - latest.at > SCHEDULED_EVALUATION_MONITOR_SAMPLE_INTERVAL_MS * 2) {
+        // A long sampling gap cannot prove a sustained condition. Start a new
+        // window rather than treating missing observations as evidence.
+        samples = [];
+        warningCodes = new Set();
+      }
+
+      samples.push({
+        at: nowMs,
+        queued: nonNegativeCount(snapshot.queued),
+        running: nonNegativeCount(snapshot.running),
+        terminalLastWindow: {
+          succeeded: nonNegativeCount(snapshot.terminalLastWindow.succeeded),
+          failed: nonNegativeCount(snapshot.terminalLastWindow.failed),
+          cancelled: nonNegativeCount(snapshot.terminalLastWindow.cancelled),
+        },
+        duplicateTimeBucketGroups: nonNegativeCount(snapshot.duplicateTimeBucketGroups),
+        duplicateGroupsTruncated: snapshot.duplicateGroupsTruncated === true,
+      });
+      if (samples.length > SCHEDULED_EVALUATION_MAX_SAMPLES) {
+        samples = samples.slice(-SCHEDULED_EVALUATION_MAX_SAMPLES);
+      }
+
+      const current = samples.at(-1)!;
+      const first = samples[0]!;
+      const next = new Set<ScheduledEvaluationQueueWarningCode>();
+      const windowElapsed = current.at - first.at >= SCHEDULED_EVALUATION_MONITOR_WINDOW_MS;
+      if (windowElapsed && first.queued > 0 && current.queued > 0 && current.queued >= first.queued) {
+        next.add(current.queued > first.queued ? "backlog_growing" : "backlog_stalled");
+      }
+      if (samples.length >= 2 && current.duplicateTimeBucketGroups > 0 &&
+        samples.at(-2)!.duplicateTimeBucketGroups > 0) {
+        next.add("duplicate_time_buckets");
+      }
+
+      const started = [...next].filter((code) => !previous.has(code)).sort();
+      const cleared = [...previous].filter((code) => !next.has(code)).sort();
+      warningCodes = next;
+      return { started, cleared, diagnostics: diagnostics() };
+    },
+    getDiagnostics: diagnostics,
+    clearForTests() {
+      samples = [];
+      warningCodes = new Set();
+    },
+  };
+}
+
+const scheduledEvaluationQueueMonitor = createScheduledEvaluationQueueMonitor();
+
+/**
+ * Read only bounded aggregate metrics. Duplicate keys are grouped by stored
+ * unexpired rows grouped by stored scope and canonical time bucket, across
+ * actor ids, so alternate scheduler identities cannot hide duplicate work.
+ * Raw group values are never returned.
+ */
+export async function readScheduledEvaluationQueueSnapshot(
+  nowMs = Date.now(),
+): Promise<ScheduledEvaluationQueueSnapshot> {
+  const terminalWindowStart = new Date(nowMs - SCHEDULED_EVALUATION_MONITOR_WINDOW_MS);
+  const [aggregate] = await db.select({
+    queued: sql<number>`count(*) filter (where ${serverJobsTable.status} = 'queued')::int`,
+    running: sql<number>`count(*) filter (where ${serverJobsTable.status} = 'running')::int`,
+    succeeded: sql<number>`count(*) filter (where ${serverJobsTable.status} = 'succeeded' and ${serverJobsTable.finishedAt} >= ${terminalWindowStart})::int`,
+    failed: sql<number>`count(*) filter (where ${serverJobsTable.status} = 'failed' and ${serverJobsTable.finishedAt} >= ${terminalWindowStart})::int`,
+    cancelled: sql<number>`count(*) filter (where ${serverJobsTable.status} = 'cancelled' and ${serverJobsTable.finishedAt} >= ${terminalWindowStart})::int`,
+  }).from(serverJobsTable).where(and(
+    eq(serverJobsTable.type, "scheduled-evaluation"),
+    gt(serverJobsTable.expiresAt, new Date(nowMs)),
+  ));
+
+  const bucket = sql<string>`split_part(${serverJobsTable.idempotencyKey}, ':', 3)`;
+  const duplicateGroups = await db.select({
+    scope: serverJobsTable.scope,
+    bucket,
+  }).from(serverJobsTable).where(and(
+    eq(serverJobsTable.type, "scheduled-evaluation"),
+    gt(serverJobsTable.expiresAt, new Date(nowMs)),
+    sql`${serverJobsTable.idempotencyKey} ~ '^scheduled-evaluation:[^:]+:[0-9]+$'`,
+  )).groupBy(serverJobsTable.scope, bucket).having(sql`count(*) > 1`)
+    .limit(SCHEDULED_EVALUATION_MAX_DUPLICATE_GROUPS + 1);
+
+  return {
+    queued: nonNegativeCount(aggregate?.queued ?? 0),
+    running: nonNegativeCount(aggregate?.running ?? 0),
+    terminalLastWindow: {
+      succeeded: nonNegativeCount(aggregate?.succeeded ?? 0),
+      failed: nonNegativeCount(aggregate?.failed ?? 0),
+      cancelled: nonNegativeCount(aggregate?.cancelled ?? 0),
+    },
+    duplicateTimeBucketGroups: Math.min(duplicateGroups.length, SCHEDULED_EVALUATION_MAX_DUPLICATE_GROUPS),
+    duplicateGroupsTruncated: duplicateGroups.length > SCHEDULED_EVALUATION_MAX_DUPLICATE_GROUPS,
+  };
+}
+
+export function getScheduledEvaluationQueueDiagnostics(): ScheduledEvaluationQueueDiagnostics {
+  return scheduledEvaluationQueueMonitor.getDiagnostics();
+}
+
+export async function sampleScheduledEvaluationQueue(
+  nowMs = Date.now(),
+): Promise<ScheduledEvaluationQueueTransition> {
+  return scheduledEvaluationQueueMonitor.observe(
+    await readScheduledEvaluationQueueSnapshot(nowMs),
+    nowMs,
+  );
+}
+
+export function clearScheduledEvaluationQueueMonitorForTests(): void {
+  scheduledEvaluationQueueMonitor.clearForTests();
+}
 
 function safeMessage(value: unknown): string {
   return String(value instanceof Error ? value.message : value).replace(/[\r\n]/g, " ").slice(0, 500);

@@ -17,7 +17,7 @@ import { adoptMasterDataConflict } from "./masterData";
 
 export class StaleMixSnapshotError extends Error {
   constructor(readonly canonicalItems: Mix[], readonly rejectedIds: string[]) {
-    super("The mix list changed before this save completed");
+    super("The mixes changed before this save completed. Reopen the import review or editor to use the latest mixes; this save was not applied.");
   }
 }
 
@@ -48,6 +48,9 @@ export async function saveMixes(items: Mix[]): Promise<Mix[]> {
         : [];
       adoptMasterDataConflict("mixes", canonicalItems);
       throw new StaleMixSnapshotError(canonicalItems, rejectedIds);
+    }
+    if (res.status === 409) {
+      throw new Error("The mixes changed before this save completed. Reopen the import review or editor to use the latest mixes; this save was not applied.");
     }
     throw new Error(`Save mixes failed (${res.status})`);
   }

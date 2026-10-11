@@ -22,3 +22,15 @@ scale harness is mandatory for MODEL changes; for prompt-rule changes the
 e2e-spec-roundtrip rule harness is the relevant check). When polling with
 pgrep, exclude your own wrapper (`pgrep -f pattern | grep -v $$`-style) or
 check output-file growth instead.
+
+A managed workflow can report `failed` while a child API process from that
+workflow still owns its port. Starting another copy then fails with
+`EADDRINUSE`, even though the workflow status suggests nothing is running.
+
+**Why:** Workflow state and child-process lifetime can diverge after a failed
+restart; the existing process may still be healthy and serving the old build.
+
+**How to apply:** Before retrying a port-conflict restart, inspect the workflow
+logs, listener/process owner, and endpoint response. If the listener belongs to
+the same managed workflow, use the workflow restart to replace it; do not start
+a second server or kill an unverified process.

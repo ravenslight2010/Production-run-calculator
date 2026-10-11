@@ -10,11 +10,14 @@
 import { expect, test, type Page } from "@playwright/test";
 import { Client } from "pg";
 import {
+  AuthorizedBrowserFixtures,
   cleanupTestUsers,
   requireIsolatedTestDatabase,
 } from "./isolation";
+import { requireLocalFixtureApiOrigin } from "./isolatedApiOrigin";
 import {
   MultiDeviceSession,
+  type DeviceDefinition,
   type SyncPayload,
   today,
   uniqueRunId,
@@ -234,6 +237,220 @@ test.describe("multi-device convergence", () => {
       });
     } finally {
       await session.close();
+    }
+  });
+
+  test("read-only station display adopts canonical state after reconnect @focused-only", async ({
+    browser,
+    playwright,
+  }, testInfo) => {
+    const username = `e2e_multi_${Math.random().toString(36).slice(2, 10)}`;
+    const fixtures = await AuthorizedBrowserFixtures.create(
+      playwright,
+      requireLocalFixtureApiOrigin("station display reconnect fixtures"),
+      SIGNUP_CODE,
+    );
+    const runId = uniqueRunId("station-reconnect");
+    let session: MultiDeviceSession | undefined;
+    let blockedSyncTraffic: { release: () => Promise<void> } | undefined;
+    try {
+      const account = await fixtures.createAccount({
+        username,
+        password: PASSWORD,
+        capabilities: [],
+        onboardingSeen: true,
+      });
+      const stationWrites: string[] = [];
+      let mainFrameNavigations = 0;
+      const stationDevices: DeviceDefinition[] = [
+        { name: "device-a", viewport: { width: 1280, height: 900 } },
+        {
+          name: "device-b",
+          viewport: { width: 390, height: 844 },
+          isMobile: true,
+          initialPath: "/?screen=dashboard",
+          readyTestId: "screen-sync-status",
+        },
+      ];
+      const activeSession = await MultiDeviceSession.create(browser, async (page) => {
+        await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
+        await page.context().addCookies([{
+          name: "rc_auth",
+          value: account.token,
+          url: new URL(page.url()).origin,
+        }]);
+        await page.goto("/", { waitUntil: "domcontentloaded" });
+      }, stationDevices, {
+        beforeNavigate: (page, device) => {
+          if (device !== "device-b") return;
+          page.on("request", (request) => {
+            if (!["GET", "HEAD", "OPTIONS"].includes(request.method())) {
+              stationWrites.push(`${request.method()} ${new URL(request.url()).pathname}`);
+            }
+          });
+          page.on("framenavigated", (frame) => {
+            if (frame === page.mainFrame()) mainFrameNavigations += 1;
+          });
+        },
+      });
+      session = activeSession;
+      const station = activeSession.page("device-b");
+      const operator = activeSession.page("device-a");
+      const status = station.getByTestId("screen-sync-status");
+      const surface = station.locator(".screen-mode-surface");
+
+      await activeSession.withDiagnostics(testInfo, async () => {
+        await activeSession.putToday("device-a", today(), seededPayload(runId, 40));
+
+        await operator.reload({ waitUntil: "domcontentloaded" });
+        await operator.getByTestId("tab-run").waitFor({ state: "attached" });
+        await operator.getByTestId("tab-run").click();
+        const casesNeededInput = operator.getByTestId("input-casesNeeded");
+        await expect(casesNeededInput).toHaveValue("40");
+
+        await expect(status).toHaveAttribute("data-status", "live", { timeout: 20_000 });
+        await expect(surface).toContainText("Multi-device");
+        await expect(surface.getByText("/ 40", { exact: true })).toBeVisible();
+        let stationNavigationCount = mainFrameNavigations;
+
+        // A normal operator edit must reach the station over live sync, without
+        // reloading the display page.
+        await casesNeededInput.fill("31");
+        await casesNeededInput.press("Tab");
+        await expect.poll(async () => {
+          const body = await activeSession.getToday("device-a", today());
+          const values = body.runValues as Record<string, { casesNeeded?: number }> | undefined;
+          return values?.[runId]?.casesNeeded;
+        }, { timeout: 15_000, message: "operator edit did not reach canonical sync state" })
+          .toBe(31);
+        await expect(surface.getByText("/ 31", { exact: true })).toBeVisible({
+          timeout: 15_000,
+        });
+        await expect(status).toHaveAttribute("data-status", "live");
+        expect(mainFrameNavigations).toBe(stationNavigationCount);
+
+        // BrowserContext.setOffline() can leave an established EventSource
+        // alive, so block sync and reload once to create a controlled offline
+        // baseline. The subsequent wake must recover without another reload.
+        blockedSyncTraffic = await activeSession.blockSyncTraffic("device-b");
+        await station.reload({ waitUntil: "domcontentloaded" });
+        await expect(surface.getByText("/ 31", { exact: true })).toBeVisible();
+        stationNavigationCount = mainFrameNavigations;
+
+        await station.evaluate(() => {
+          const history: Array<{ status: string | null; text: string }> = [];
+          const pageWindow = window as Window & {
+            __screenSyncHistory?: Array<{ status: string | null; text: string }>;
+            __screenSyncObserver?: MutationObserver;
+          };
+          pageWindow.__screenSyncHistory = history;
+          const capture = () => {
+            const next = {
+              status: document.querySelector('[data-testid="screen-sync-status"]')
+                ?.getAttribute("data-status") ?? null,
+              text: document.querySelector(".screen-mode-surface")?.textContent ?? "",
+            };
+            const previous = history[history.length - 1];
+            if (!previous || previous.status !== next.status || previous.text !== next.text) {
+              history.push(next);
+            }
+          };
+          const observer = new MutationObserver(capture);
+          const statusElement = document.querySelector('[data-testid="screen-sync-status"]');
+          const surfaceElement = document.querySelector(".screen-mode-surface");
+          if (statusElement) observer.observe(statusElement, {
+            attributes: true,
+            attributeFilter: ["data-status"],
+          });
+          if (surfaceElement) observer.observe(surfaceElement, {
+            childList: true,
+            characterData: true,
+            subtree: true,
+          });
+          pageWindow.__screenSyncObserver = observer;
+          capture();
+        });
+        const historyStart = await station.evaluate(() => {
+          const pageWindow = window as Window & {
+            __screenSyncHistory?: Array<{ status: string | null; text: string }>;
+          };
+          return pageWindow.__screenSyncHistory?.length ?? 0;
+        });
+        let observeRecovery = false;
+        let recoveryReadResponses = 0;
+        station.on("response", (response) => {
+          if (!observeRecovery || response.request().method() !== "GET") return;
+          if (
+            new URL(response.url()).pathname === "/api/sync/today" &&
+            response.ok()
+          ) {
+            recoveryReadResponses += 1;
+          }
+        });
+
+        await activeSession.setOffline("device-b", true);
+        await expect(status).toHaveAttribute("data-status", "stale");
+        await casesNeededInput.fill("27");
+        await casesNeededInput.press("Tab");
+        await expect.poll(async () => {
+          const body = await activeSession.getToday("device-a", today());
+          const values = body.runValues as Record<string, { casesNeeded?: number }> | undefined;
+          return values?.[runId]?.casesNeeded;
+        }, { timeout: 15_000, message: "second operator edit did not reach canonical sync state" })
+          .toBe(27);
+        await expect(status).toHaveAttribute("data-status", "stale");
+        await expect(surface.getByText("/ 31", { exact: true })).toBeVisible();
+        await expect(surface.getByText("/ 27", { exact: true })).toHaveCount(0);
+
+        observeRecovery = true;
+        await activeSession.setOffline("device-b", false);
+        await expect.poll(() => station.evaluate(() => navigator.onLine)).toBe(true);
+        await station.evaluate(() => window.dispatchEvent(new Event("focus")));
+        await expect.poll(async () => {
+          const history = await station.evaluate((offset) => {
+            const pageWindow = window as Window & {
+              __screenSyncHistory?: Array<{ status: string | null; text: string }>;
+            };
+            return pageWindow.__screenSyncHistory?.slice(offset) ?? [];
+          }, historyStart);
+          return history.some((entry) => entry.status === "reconnecting");
+        }, {
+          timeout: 10_000,
+          message: "station did not report reconnecting while sync traffic was blocked",
+        }).toBe(true);
+        await blockedSyncTraffic.release();
+        blockedSyncTraffic = undefined;
+        await station.evaluate(() => window.dispatchEvent(new Event("focus")));
+        await expect.poll(() => recoveryReadResponses, {
+          timeout: 15_000,
+          message: "station did not complete a canonical recovery read after wake",
+        }).toBeGreaterThan(0);
+        await expect(surface.getByText("/ 27", { exact: true })).toBeVisible({
+          timeout: 20_000,
+        });
+        await expect(status).toHaveAttribute("data-status", "live", {
+          timeout: 20_000,
+        });
+
+        const wakeHistory = await station.evaluate((offset) => {
+          const pageWindow = window as Window & {
+            __screenSyncHistory?: Array<{ status: string | null; text: string }>;
+          };
+          return pageWindow.__screenSyncHistory?.slice(offset) ?? [];
+        }, historyStart);
+        expect(wakeHistory.some((entry) => entry.status === "stale")).toBe(true);
+        expect(wakeHistory.some((entry) => entry.status === "reconnecting")).toBe(true);
+        const firstLiveAfterWake = wakeHistory.find((entry) => entry.status === "live");
+        expect(firstLiveAfterWake?.text).toContain("/ 27");
+        expect(firstLiveAfterWake?.text).not.toContain("/ 31");
+        expect(mainFrameNavigations).toBe(stationNavigationCount);
+
+        expect(stationWrites, "the station context must not issue write requests").toEqual([]);
+      });
+    } finally {
+      await blockedSyncTraffic?.release();
+      await session?.close();
+      await fixtures.cleanup({ syncDates: [today()] });
     }
   });
 

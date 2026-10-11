@@ -10,6 +10,7 @@ import {
 import {
   computeRunLines as computeRunLinesShared,
   computeRunConsumptionLines as computeRunConsumptionLinesShared,
+  computeRunDemandImpact as computeRunDemandImpactShared,
   deriveCandidateItems as deriveCandidateItemsShared,
   aggregateRunDemand as aggregateRunDemandShared,
   computeTransferNeeds,
@@ -116,6 +117,21 @@ export const computeRunLines = (vals: FormValues) =>
 
 export const computeRunConsumptionLines = (vals: FormValues) =>
   computeRunConsumptionLinesShared(toRunLinesInput(vals), DEFAULT_PEP_TYPES);
+
+/** Compare two run forms through the same canonical math and substitution overlay as inventory consumption. */
+export const computeRunDemandImpact = (
+  before: FormValues,
+  after: FormValues,
+  items: readonly Pick<InventoryItem, "key" | "onHand">[] | null,
+) =>
+  computeRunDemandImpactShared(
+    {
+      before: toRunLinesInput(before),
+      after: toRunLinesInput(after),
+      inventory: items?.map(({ key, onHand }) => ({ key, onHand })) ?? null,
+    },
+    DEFAULT_PEP_TYPES,
+  );
 
 export type WarehouseCoverageStatus = "covered" | "short" | "conversion" | "missing";
 export type WarehouseTransferSource = {
@@ -1031,23 +1047,29 @@ export type Role = string;
 export const CAPABILITIES = [
   "manage-staff",
   "manage-inventory",
+  "manage-allergens",
   "manage-factory-settings",
   "edit-production-rules",
   "approve-password-resets",
   "review-incidents",
   "use-ai-tools",
   "manage-profiles",
+  "record-qc",
+  "manage-qc",
 ] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 export const CAPABILITY_LABELS: Record<Capability, string> = {
   "manage-staff": "Manage staff & roles",
   "manage-inventory": "Manage inventory",
+  "manage-allergens": "Manage ingredient allergens",
   "manage-factory-settings": "Manage factory settings",
   "edit-production-rules": "Edit production rules",
   "approve-password-resets": "Approve password resets",
   "review-incidents": "Review incidents",
   "use-ai-tools": "Use AI tools",
   "manage-profiles": "Manage setup profiles",
+  "record-qc": "Record and view QC workflows",
+  "manage-qc": "Manage QC settings, sign-offs, and exports",
 };
 export type RoleDefinition = {
   name: string;
@@ -1262,7 +1284,8 @@ export const declinePasswordReset = (id: string) =>
     { method: "POST" },
   );
 
-export const fetchInventory = () => api<InventoryItem[]>("/inventory");
+export const fetchInventory = (signal?: AbortSignal) =>
+  api<InventoryItem[]>("/inventory", signal ? { signal } : undefined);
 
 // Server-authority warehouse advisory snapshot. The server pre-computes the
 // reorder list, use-first list, and transfer warnings from canonical sync data

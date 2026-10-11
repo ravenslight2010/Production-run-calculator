@@ -23,9 +23,11 @@ let dailySyncTable: DbModule["dailySyncTable"];
 let dataResetTable: DbModule["dataResetTable"];
 let completedRunHistoryTable: DbModule["completedRunHistoryTable"];
 let inventoryConsumedRunsTable: DbModule["inventoryConsumedRunsTable"];
+let qcWorkflowEventsTable: DbModule["qcWorkflowEventsTable"];
 let usersTable: DbModule["usersTable"];
 let userRolesTable: DbModule["userRolesTable"];
 let rolesTable: DbModule["rolesTable"];
+let auditLogsTable: DbModule["auditLogsTable"];
 let seedRoles: () => Promise<void>;
 let runDailyRollover: typeof import("./sync")["runDailyRollover"];
 
@@ -70,9 +72,11 @@ beforeAll(async () => {
   dataResetTable = dbMod.dataResetTable;
   completedRunHistoryTable = dbMod.completedRunHistoryTable;
   inventoryConsumedRunsTable = dbMod.inventoryConsumedRunsTable;
+  qcWorkflowEventsTable = dbMod.qcWorkflowEventsTable;
   usersTable = dbMod.usersTable;
   userRolesTable = dbMod.userRolesTable;
   rolesTable = dbMod.rolesTable;
+  auditLogsTable = dbMod.auditLogsTable;
   seedRoles = (await import("../lib/roles")).seedRoles;
   runDailyRollover = (await import("./sync")).runDailyRollover;
 
@@ -117,7 +121,7 @@ function dayRow(date: string) {
 
 beforeEach(async () => {
   await db.execute(
-    sql`TRUNCATE ${dailySyncTable}, ${dataResetTable}, ${completedRunHistoryTable}, ${inventoryConsumedRunsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${dailySyncTable}, ${dataResetTable}, ${completedRunHistoryTable}, ${inventoryConsumedRunsTable}, ${qcWorkflowEventsTable}, ${auditLogsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
   );
   await seedRoles();
   await db.insert(usersTable).values([
@@ -237,6 +241,16 @@ describe("facility-local daily rollover", () => {
 });
 
 describe("POST /sync/reset", () => {
+  it("records the authenticated manager as the factory-reset audit actor", async () => {
+    const res = await fetch(`${baseUrl}/api/sync/reset`, {
+      method: "POST",
+      headers: authHeaders(MANAGER),
+    });
+    expect(res.status).toBe(200);
+    const [entry] = await db.select().from(auditLogsTable);
+    expect(entry).toMatchObject({ action: "factory_reset", actor: MANAGER });
+  });
+
   it("is manager-only (operator is forbidden)", async () => {
     const res = await fetch(`${baseUrl}/api/sync/reset`, {
       method: "POST",
@@ -249,6 +263,16 @@ describe("POST /sync/reset", () => {
   });
 
   it("clears every daily_sync row for the scope and bumps the epoch", async () => {
+    await db.insert(qcWorkflowEventsTable).values([
+      {
+        scope: "live", operationId: "reset-retention-live", recordId: "live-qc-record",
+        eventType: "lot", runId: "reset-run", actorId: MANAGER, payload: { lotNumber: "LIVE-RETAINED" },
+      },
+      {
+        scope: "sandbox", operationId: "reset-retention-sandbox", recordId: "sandbox-qc-record",
+        eventType: "lot", runId: "reset-run", actorId: MANAGER, payload: { lotNumber: "SANDBOX-RETAINED" },
+      },
+    ]);
     const res = await fetch(`${baseUrl}/api/sync/reset`, {
       method: "POST",
       headers: authHeaders(MANAGER),
@@ -261,6 +285,9 @@ describe("POST /sync/reset", () => {
 
     const epochRes = await fetch(`${baseUrl}/api/sync/reset-epoch`, { headers: authHeaders(OPERATOR) });
     expect((await epochRes.json()) as { epoch: number }).toEqual({ epoch: 1, rollover: false });
+    const qcEvents = await db.select().from(qcWorkflowEventsTable);
+    expect(qcEvents.map((event) => event.payload.lotNumber).sort())
+      .toEqual(["LIVE-RETAINED", "SANDBOX-RETAINED"]);
   });
 
   it("increments the epoch on each reset", async () => {

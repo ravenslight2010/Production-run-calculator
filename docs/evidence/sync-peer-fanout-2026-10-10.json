@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "kind": "isolated-sync-peer-fanout",
+  "capturedAtUtc": "2026-10-10T17:11:53Z",
+  "environment": "isolated-disposable-test",
+  "source": {
+    "baseCommit": "3a41682cec7b2258c78ccabbdaea7ac2fd79df98",
+    "workingTreeSourceDigests": [
+      {
+        "path": "artifacts/api-server/src/routes/sync.convergence.integration.test.ts",
+        "sha256": "4f90023d4224ef5ccb4231ba3ca086673262ba37753b1ddeea891b1d86a83317"
+      },
+      {
+        "path": "artifacts/api-server/src/test-fixtures/syncProcessServer.mts",
+        "sha256": "48abefdf1b770d2da26f9a5d935683976416e0adecf23b0adcfdd97bbb0e6b42"
+      }
+    ]
+  },
+  "execution": {
+    "command": "bash scripts/src/run-isolated-sync-convergence.sh src/routes/sync.convergence.integration.test.ts",
+    "result": "passed",
+    "elapsedMs": 29488,
+    "testFilesPassed": 1,
+    "testsPassed": 7,
+    "apiProcesses": 2,
+    "database": "Temporary disposable PostgreSQL database created and removed by the isolated test runner",
+    "listenerIdentity": "Two distinct PostgreSQL LISTEN backend PIDs observed for the independent API processes"
+  },
+  "verified": [
+    "Day-state updates cross from API process A to an SSE peer on process B.",
+    "Day-state delivery is isolated by watched date and by live versus sandbox scope.",
+    "Duplicate PostgreSQL notifications do not duplicate peer updates.",
+    "A terminated listener reconnects and the peer reaches the canonical state.",
+    "A durable outbox event inserted without NOTIFY is delivered by cursor polling.",
+    "Reset and rollover events reach live peers across watched dates but not sandbox peers.",
+    "Master-data invalidation reaches live peers on both watched dates but not sandbox peers.",
+    "A new SSE connection on process B starts from canonical state after reconnect."
+  ],
+  "sanitization": {
+    "rawLogsRetained": false,
+    "requestPayloadsOrDatabaseRowsRetained": false,
+    "credentialsOrPersonalDataRetained": false
+  },
+  "limitations": [
+    "This is isolated fixture evidence, not a test against the published service.",
+    "It does not establish Autoscale serving-process limits or peak database connection capacity."
+  ],
+  "conclusion": {
+    "isolatedCrossProcessFanout": "VERIFIED",
+    "publishedLivePeerSse": "NOT_SUPPORTED"
+  }
+}

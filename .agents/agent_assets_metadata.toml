@@ -166,3 +166,17 @@ mtime_ms = 1789838704231
 storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:de4fa38f-10e1-481d-ab62-4ad238a33ebf/c8e25b83-6ac7-440f-a86f-db3eb75e67c0/d2cadac8-ee1e-4d8d-bbec-a2f8d14e34e1"
 storage_version_token = "1789838732263840"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "9yrX8ejih1rT48gqKVNML"
+uri = "file://release-evidence-task2593-standard-clean/release-speed-analysis.md"
+type = "text"
+title = "Release-speed analysis"
+description = "A revision-bound analysis of the complete standard test-only run, its timings, failures, historical comparisons, and coverage-preserving recommendations."
+logical_id = "fccdf452-4777-42f7-af72-fbc7560d138a"
+content_hash = "sha256:bc72db48c6061574b90e37ff988947fcfd0cd277d3a51fd06941e715bd0276db"
+size = 7200
+mtime_ms = 1790912574401
+storage_uri = "gcs://replit-rams-assets-janeway/rams/assets/repl:de4fa38f-10e1-481d-ab62-4ad238a33ebf/fccdf452-4777-42f7-af72-fbc7560d138a/94b7a86a-8039-4a0b-8955-b1f5eed01d79"
+storage_version_token = "1790912618602309"
+content_type = "text/markdown"

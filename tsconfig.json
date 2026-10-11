@@ -103,6 +103,9 @@
       "path": "./lib/ai-evaluation"
     },
     {
+      "path": "./lib/distill-dataset"
+    },
+    {
       "path": "./lib/recipe-apply"
     },
     {

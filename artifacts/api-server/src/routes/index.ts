@@ -3,6 +3,9 @@ import healthRouter from "./health";
 import authRouter from "./auth";
 import runsRouter from "./runs";
 import profileDataHealthRouter from "./profileDataHealth";
+import sourceLibraryReconciliationCaptureRouter, {
+  publicSourceLibraryReconciliationCaptureRouter,
+} from "./sourceLibraryReconciliationCapture";
 import masterDataHealthRouter from "./masterDataHealth";
 import runTemplatesRouter from "./runTemplates";
 import coreSyncRunsRouter from "./capabilities/coreSyncRuns";
@@ -51,6 +54,10 @@ export const directAuthorizationCoverageRouters = [
     authOnlyRoutes: ["GET /runs"],
   },
   { name: "profile data health", router: profileDataHealthRouter },
+  {
+    name: "source-library reconciliation capture",
+    router: sourceLibraryReconciliationCaptureRouter,
+  },
   { name: "master data health", router: masterDataHealthRouter },
   {
     name: "run templates",
@@ -114,11 +121,19 @@ export const readAuthorizationInventory: readonly ReadAuthorization[] = [
   ...reads(["manage-staff"], "all", "live-only", ["/sync/health"]),
   ...reads(["manage-inventory"], "all", "scoped", [
     "/duplicate-reviews",
+    "/freezer-surplus/adjustments",
     "/inventory/count-observations/:id", "/inventory/count-observations",
     "/inventory/quality-checks",
   ]),
+  ...reads(["record-qc"], "all", "scoped", [
+    "/qc/targets", "/qc/runs/:runId", "/qc/history",
+  ]),
+  ...reads(["manage-qc"], "all", "scoped", ["/qc/history.csv"]),
   ...reads(["manage-profiles", "manage-inventory"], "any", "scoped", [
     "/import-history", "/import-operations/:operationId",
+  ]),
+  ...reads(["manage-profiles"], "all", "live-only", [
+    "/import-operations/distillation-evidence",
   ]),
   ...reads(["manage-factory-settings"], "all", "scoped", ["/factory-data"]),
   ...reads(["review-incidents"], "all", "scoped", [
@@ -164,6 +179,7 @@ router.use(noStoreMiddleware);
 // Public lifecycle order is contractual: probes, readiness gate, then auth.
 router.use(healthRouter);
 router.use(startupGate);
+router.use(publicSourceLibraryReconciliationCaptureRouter);
 router.use(authRouter);
 
 // All capability families are authenticated. Family-owned capability checks
@@ -240,6 +256,7 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
     "POST /die-line-defaults", "DELETE /die-line-defaults", "POST /die-types", "POST /die-types/delete",
     "POST /dough-recipes", "DELETE /dough-recipes", "POST /ingredients", "DELETE /ingredients", "POST /ingredients/merge",
     "POST /freezer-pull-items", "DELETE /freezer-pull-items", "POST /freezer-surplus", "PUT /freezer-surplus/allocations/:runId",
+    "POST /freezer-surplus/lots/:lotId/adjustments",
     "POST /ingredient-batch-weights", "POST /mixes", "DELETE /mixes", "POST /photo-aliases",
     "POST /premix-sheets", "DELETE /premix-sheets/:id", "POST /cheese-sheets", "DELETE /cheese-sheets/:id",
     "POST /sauce-recipes", "DELETE /sauce-recipes", "PATCH /inventory/items/:id/production-link",
@@ -250,6 +267,17 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
     "PATCH /inventory/locations/:id", "DELETE /inventory/locations/:id", "POST /inventory/transfer",
     "POST /inventory/merge", "PUT /inventory/settings", "POST /inventory/consume-day-start",
     "POST /mix-surplus", "PUT /mix-surplus/allocations/:runDate", "DELETE /mix-surplus/lots/:id",
+  ]),
+  ...writes("capability-gated", "scoped", "allowed", "manage-allergens", [
+    "PUT /ingredients/:id/allergen-mapping",
+  ]),
+  ...writes("capability-gated", "scoped", "allowed", "record-qc", [
+    "POST /qc/lots", "POST /qc/weight-checks", "POST /qc/allergen-reviews",
+    "POST /qc/cleaning-records", "POST /qc/cleaning-records/:recordId/verification",
+  ]),
+  ...writes("capability-gated", "scoped", "allowed", "manage-qc", [
+    "POST /qc/targets", "POST /qc/run-signoffs",
+    "POST /qc/events/:eventId/corrections", "POST /qc/events/:eventId/redactions",
   ]),
   ...writes("capability-gated", "scoped", "allowed", "use-ai-tools", [
     "POST /inventory/identify-photo", "POST /inventory/quality-photo", "POST /inventory/production-sheet-photo",
@@ -273,6 +301,16 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
     "POST /staff-invitations", "DELETE /staff-invitations/:id",
     "PATCH /signup-code/status", "POST /signup-code/rotate",
   ]),
+  {
+    method: "POST",
+    path: "/profile-data/source-library-reconciliation/capture",
+    ownership: "manager-only",
+    capabilities: ["manage-staff"],
+    capabilityMatch: "all",
+    managerRole: true,
+    scope: "live-only",
+    sandbox: "denied",
+  },
   ...writes("capability-gated", "live-only", "denied", "approve-password-resets", [
     "POST /password-reset-requests/:id/approve", "POST /password-reset-requests/:id/decline",
   ]),
@@ -317,12 +355,12 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
   {
     method: "POST", path: "/server-jobs", ownership: "capability-gated", scope: "scoped", sandbox: "allowed",
     capabilities: ["manage-staff", "manage-inventory", "edit-production-rules", "approve-password-resets",
-      "review-incidents", "use-ai-tools", "manage-factory-settings", "manage-profiles"], capabilityMatch: "any",
+      "review-incidents", "use-ai-tools", "manage-factory-settings", "manage-profiles", "manage-allergens"], capabilityMatch: "any",
   },
   {
     method: "POST", path: "/server-jobs/:id/cancel", ownership: "capability-gated", scope: "scoped", sandbox: "allowed",
     capabilities: ["manage-staff", "manage-inventory", "edit-production-rules", "approve-password-resets",
-      "review-incidents", "use-ai-tools", "manage-factory-settings", "manage-profiles"], capabilityMatch: "any",
+      "review-incidents", "use-ai-tools", "manage-factory-settings", "manage-profiles", "manage-allergens"], capabilityMatch: "any",
   },
 ];
 

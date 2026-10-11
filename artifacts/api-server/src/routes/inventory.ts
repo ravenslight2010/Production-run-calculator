@@ -1,7 +1,7 @@
 import { Router, type IRouter, type Request, type RequestHandler, type Response } from "express";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { and, desc, eq, gt, isNull, or, type SQL } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, or, sql, type SQL } from "drizzle-orm";
 import {
   db,
   inventoryItemsTable,
@@ -188,6 +188,10 @@ function broadcast(senderId: string, scope: string): void {
       }
     }
   }
+}
+
+export function broadcastInventoryChange(senderId: string, scope: string): void {
+  broadcast(senderId, scope);
 }
 
 // ── Locations ────────────────────────────────────────────────────────────────
@@ -1342,45 +1346,27 @@ const SERVER_DEFAULT_PEP_TYPES = ["Pepperoni Stick", "Pepperoni Stick - NATURAL"
 async function findExpectedConsumptionForRun(
   runId: string,
   scope: ReturnType<typeof currentScope>,
+  tx?: InventoryExecutor,
 ): Promise<Map<string, number> | null> {
-  const rows = await db
-    .select({ data: dailySyncTable.data })
+  const executor = tx ?? db;
+  const rows = await executor
+    .select({ date: dailySyncTable.date, data: dailySyncTable.data })
     .from(dailySyncTable)
     .where(eq(dailySyncTable.scope, scope));
   for (const row of rows) {
-    const data = row.data as {
-      dayState?: { runs?: Array<{ id?: string; actualCases?: number }>; substitutions?: IngredientSubstitution[] };
-      runValues?: Record<string, unknown>;
-    } | null;
-    const runs = data?.dayState?.runs ?? [];
-    const matchedRun = runs.find((r) => r?.id === runId);
-    if (!matchedRun) continue;
-    const vals = data?.runValues?.[runId];
-    if (!vals || typeof vals !== "object") continue;
-    const substitutions = data?.dayState?.substitutions ?? [];
-    const effective = substitutions.length
-      ? applySubstitutions(vals as Record<string, unknown>, substitutions)
-      : vals;
-    const expectedLines = computeRunConsumptionLines(
-      effective as unknown as RunLinesInput,
-      SERVER_DEFAULT_PEP_TYPES,
-    );
-    // Feature D: scale all lines proportionally when actualCases is known.
-    // actualCases is entered by the manager after a run ends; when it differs
-    // from the planned casesNeeded, every ingredient and packaging line is
-    // scaled so inventory matches reality. Falls back to planned (no scaling)
-    // when actualCases is not set or equals casesNeeded.
-    const casesNeeded = Number((vals as Record<string, unknown>).casesNeeded) || 0;
-    const actualCases = matchedRun.actualCases;
-    if (actualCases != null && actualCases > 0 && casesNeeded > 0 && actualCases !== casesNeeded) {
-      const scale = actualCases / casesNeeded;
-      const scaled = expectedLines.map((l) => ({
-        itemKey: l.itemKey,
-        qty: Math.round(l.qty * scale * 1000) / 1000,
-      }));
-      return new Map(scaled.map((l) => [l.itemKey, l.qty]));
+    let source = row.data;
+    if (tx && expectedConsumptionFromSnapshot(source, runId)) {
+      const [locked] = await tx.select({ data: dailySyncTable.data })
+        .from(dailySyncTable)
+        .where(and(
+          eq(dailySyncTable.date, row.date),
+          eq(dailySyncTable.scope, scope),
+        ))
+        .for("update");
+      source = locked?.data ?? null;
     }
-    return new Map(expectedLines.map((l) => [l.itemKey, l.qty]));
+    const expected = expectedConsumptionFromSnapshot(source, runId);
+    if (expected) return expected;
   }
   return null;
 }
@@ -1401,6 +1387,123 @@ function canonicalIngredientId(
   return current;
 }
 
+type ResolvedConsumptionItem = { id: number; conversionFactor: number };
+
+async function resolveConsumptionItems(
+  tx: InventoryExecutor,
+  lines: ConsumeLine[],
+  scope: ReturnType<typeof currentScope>,
+): Promise<Map<string, ResolvedConsumptionItem>> {
+  const keys = [...new Set(lines.map((line) => line.itemKey))];
+  if (keys.length === 0) return new Map();
+
+  const ingredients = await tx.select({
+    id: ingredientsTable.id,
+    name: ingredientsTable.name,
+    mergedInto: ingredientsTable.mergedInto,
+  }).from(ingredientsTable).where(eq(ingredientsTable.scope, scope));
+  const allItems = await tx.select().from(inventoryItemsTable)
+    .where(eq(inventoryItemsTable.scope, scope));
+  const resolved = new Map<string, ResolvedConsumptionItem>();
+
+  for (const itemKey of keys) {
+    const parts = itemKey.match(/^ingredient:(.*):(lbs|batches)$/);
+    const expectedName = parts?.[1]?.trim().toLowerCase();
+    const expectedIngredient = expectedName
+      ? ingredients.find((ingredient) => ingredient.name.trim().toLowerCase() === expectedName)
+      : undefined;
+    const candidates = allItems
+      .filter((item) => {
+        if (item.productionIngredientId && expectedIngredient) {
+          return canonicalIngredientId(item.productionIngredientId, ingredients) ===
+            canonicalIngredientId(expectedIngredient.id, ingredients) &&
+            item.conversionFactor != null && item.conversionFactor > 0;
+        }
+        return !item.productionIngredientId && item.key === itemKey &&
+          item.conversionFactor == null;
+      })
+      .sort((a, b) => a.consumptionPriority - b.consumptionPriority || a.id - b.id);
+    const item = candidates[0];
+    if (item) resolved.set(itemKey, {
+      id: item.id,
+      conversionFactor: item.conversionFactor ?? 1,
+    });
+  }
+
+  return resolved;
+}
+
+async function baselineInventoryLines(
+  tx: InventoryExecutor,
+  lines: ConsumeLine[],
+  scope: ReturnType<typeof currentScope>,
+  resolvedItems?: Map<string, ResolvedConsumptionItem>,
+): Promise<Array<{ itemId: number; qty: number }>> {
+  const itemsByKey = resolvedItems ?? await resolveConsumptionItems(tx, lines, scope);
+  const byItem = new Map<number, number>();
+  for (const line of lines) {
+    const item = itemsByKey.get(line.itemKey);
+    if (!item || !Number.isFinite(line.qty) || line.qty <= 0) continue;
+    byItem.set(item.id, (byItem.get(item.id) ?? 0) + line.qty / item.conversionFactor);
+  }
+  return [...byItem.entries()]
+    .map(([itemId, qty]) => ({ itemId, qty: Math.round(qty * 1000) / 1000 }))
+    .filter((line) => line.qty > 0);
+}
+
+type RunConsumptionSnapshot = {
+  dayState?: {
+    runs?: Array<{ id?: string; actualCases?: number; endedAt?: number }>;
+    substitutions?: IngredientSubstitution[];
+  };
+  runValues?: Record<string, unknown>;
+  pepTypes?: unknown;
+};
+
+function expectedConsumptionFromSnapshot(
+  snapshot: unknown,
+  runId: string,
+): Map<string, number> | null {
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return null;
+  const data = snapshot as RunConsumptionSnapshot;
+  const run = data.dayState?.runs?.find((candidate) => candidate?.id === runId);
+  const values = data.runValues?.[runId];
+  if (!run || !values || typeof values !== "object" || Array.isArray(values)) return null;
+
+  const substitutions = data.dayState?.substitutions ?? [];
+  const effective = substitutions.length
+    ? applySubstitutions(values as Record<string, unknown>, substitutions)
+    : values;
+  const pepTypes = Array.isArray(data.pepTypes)
+    ? data.pepTypes.filter((value): value is string => typeof value === "string")
+    : SERVER_DEFAULT_PEP_TYPES;
+  const lines = computeRunConsumptionLines(effective as unknown as RunLinesInput, pepTypes);
+  const casesNeeded = Number((values as Record<string, unknown>).casesNeeded) || 0;
+  const actualCases = run.actualCases;
+  if (
+    actualCases != null &&
+    Number.isFinite(actualCases) &&
+    actualCases >= 0 &&
+    casesNeeded > 0 &&
+    actualCases !== casesNeeded
+  ) {
+    const scale = actualCases / casesNeeded;
+    return new Map(lines.map((line) => [
+      line.itemKey,
+      Math.round(line.qty * scale * 1000) / 1000,
+    ]));
+  }
+  return new Map(lines.map((line) => [line.itemKey, line.qty]));
+}
+
+function sameConsumptionLines(a: Map<string, number>, b: Map<string, number>): boolean {
+  if (a.size !== b.size) return false;
+  for (const [key, qty] of a) {
+    if (b.get(key) !== qty) return false;
+  }
+  return true;
+}
+
 async function autoLinkUnambiguousProducts(
   items: Array<typeof inventoryItemsTable.$inferSelect>,
 ): Promise<void> {
@@ -1417,6 +1520,147 @@ async function autoLinkUnambiguousProducts(
       .where(and(eq(inventoryItemsTable.id, item.id), eq(inventoryItemsTable.scope, currentScope())));
     item.productionIngredientId = matches[0].id;
   }
+}
+
+/**
+ * Reconcile a consumed run when its saved day-state or run settings change.
+ * The first saved consumption snapshot is immutable; current corrections are
+ * derived from that baseline and the correction ledger, so retries and reversals
+ * apply only the still-missing inventory delta.
+ */
+export async function reconcileRunConsumptionInTransaction(
+  tx: InventoryExecutor,
+  runId: string,
+  previousSnapshot: unknown,
+  nextSnapshot: unknown,
+): Promise<boolean> {
+  const scope = currentScope();
+  const previousExpected = expectedConsumptionFromSnapshot(previousSnapshot, runId);
+  const nextExpected = expectedConsumptionFromSnapshot(nextSnapshot, runId);
+  if (!previousExpected || !nextExpected || sameConsumptionLines(previousExpected, nextExpected)) {
+    return false;
+  }
+
+  const [claim] = await tx.select().from(inventoryConsumedRunsTable)
+    .where(and(
+      eq(inventoryConsumedRunsTable.runId, runId),
+      eq(inventoryConsumedRunsTable.scope, scope),
+    ))
+    .for("update");
+  if (!claim) return false;
+
+  let baselineLines = claim.baselineLines;
+  if (!Array.isArray(baselineLines)) {
+    baselineLines = await baselineInventoryLines(
+      tx,
+      [...previousExpected].map(([itemKey, qty]) => ({ itemKey, qty })),
+      scope,
+    );
+    await tx.update(inventoryConsumedRunsTable)
+      .set({ baselineLines })
+      .where(and(
+        eq(inventoryConsumedRunsTable.runId, runId),
+        eq(inventoryConsumedRunsTable.scope, scope),
+      ));
+  }
+
+  const nextLines = await baselineInventoryLines(
+    tx,
+    [...nextExpected].map(([itemKey, qty]) => ({ itemKey, qty })),
+    scope,
+  );
+  const baselineByItem = new Map(baselineLines.map((line) => [line.itemId, line.qty]));
+  const nextByItem = new Map(nextLines.map((line) => [line.itemId, line.qty]));
+  const itemIds = new Set([...baselineByItem.keys(), ...nextByItem.keys()]);
+  if (itemIds.size === 0) return false;
+
+  const ledgerRows = await tx.select({
+    itemId: inventoryLedgerTable.itemId,
+    type: inventoryLedgerTable.type,
+    qtyDelta: inventoryLedgerTable.qtyDelta,
+    note: inventoryLedgerTable.note,
+  }).from(inventoryLedgerTable).where(and(
+    eq(inventoryLedgerTable.scope, scope),
+    eq(inventoryLedgerTable.runId, runId),
+  ));
+  const initialConsumedByItem = new Map<number, number>();
+  const correctionStockDeltaByItem = new Map<number, number>();
+  for (const entry of ledgerRows) {
+    if (entry.type === "consume" && entry.note === "Auto-deducted on run completion") {
+      initialConsumedByItem.set(
+        entry.itemId,
+        (initialConsumedByItem.get(entry.itemId) ?? 0) - entry.qtyDelta,
+      );
+    } else if (entry.type === "adjust" && entry.note.startsWith("Run consumption correction:")) {
+      correctionStockDeltaByItem.set(
+        entry.itemId,
+        (correctionStockDeltaByItem.get(entry.itemId) ?? 0) + entry.qtyDelta,
+      );
+    }
+  }
+
+  const [onsite] = await tx.select({ id: inventoryLocationsTable.id })
+    .from(inventoryLocationsTable)
+    .where(and(eq(inventoryLocationsTable.scope, scope), eq(inventoryLocationsTable.isOnsite, true)))
+    .limit(1);
+  const onsiteId = onsite?.id ?? null;
+  let stockChanged = false;
+
+  for (const itemId of itemIds) {
+    const baselineExpected = baselineByItem.get(itemId) ?? 0;
+    const currentExpected = nextByItem.get(itemId) ?? 0;
+    const initialConsumed = initialConsumedByItem.get(itemId) ?? 0;
+    const desiredTotalConsumed = currentExpected >= baselineExpected
+      ? initialConsumed + currentExpected - baselineExpected
+      : Math.min(initialConsumed, currentExpected);
+    const desiredCorrectionStockDelta = initialConsumed - desiredTotalConsumed;
+    const alreadyAppliedStockDelta = correctionStockDeltaByItem.get(itemId) ?? 0;
+    const remainingStockDelta = Math.round(
+      (desiredCorrectionStockDelta - alreadyAppliedStockDelta) * 1000,
+    ) / 1000;
+    if (Math.abs(remainingStockDelta) < 0.001) continue;
+
+    let appliedDelta = remainingStockDelta;
+    let lotId: number | null = null;
+    if (remainingStockDelta < 0) {
+      const consumed = await drawDown(
+        tx,
+        itemId,
+        -remainingStockDelta,
+        onsiteLotCond(onsiteId),
+      );
+      appliedDelta = -consumed;
+    } else {
+      const [lot] = await tx.insert(inventoryLotsTable).values({
+        itemId,
+        scope,
+        locationId: onsiteId,
+        lotNumber: "",
+        qtyReceived: remainingStockDelta,
+        qtyRemaining: remainingStockDelta,
+        receivedDate: todayStr(),
+        expirationDate: null,
+      }).returning({ id: inventoryLotsTable.id });
+      lotId = lot.id;
+    }
+
+    if (appliedDelta === 0) continue;
+    await tx.insert(inventoryLedgerTable).values({
+      itemId,
+      scope,
+      lotId,
+      type: "adjust",
+      qtyDelta: appliedDelta,
+      runId,
+      note: "Run consumption correction: saved run details changed",
+    });
+    await tx.update(inventoryItemsTable)
+      .set({ updatedAt: new Date() })
+      .where(and(eq(inventoryItemsTable.id, itemId), eq(inventoryItemsTable.scope, scope)));
+    stockChanged = true;
+  }
+
+  return stockChanged;
 }
 
 // Claim + drawdown + ledger all run in one transaction. The unique runId
@@ -1447,6 +1691,8 @@ export async function consumeRunInTransaction(
   claimAlreadyAcquired = false,
 ): Promise<{ applied: boolean; consumed: number }> {
   const scope = currentScope();
+  const itemsByKey = await resolveConsumptionItems(tx, lines, scope);
+  const baselineLines = await baselineInventoryLines(tx, lines, scope, itemsByKey);
   // Production only ever pulls from onsite/line stock. Resolve this through the
   // same transaction as the drawdown; no inventory read escapes finalization.
   const [onsite] = await tx.select({ id: inventoryLocationsTable.id })
@@ -1455,73 +1701,55 @@ export async function consumeRunInTransaction(
     .limit(1);
   const onsiteCond = onsiteLotCond(onsite?.id ?? null);
   return applyRunConsumption(
-      {
-        claimRun: async (rid) => {
-           if (claimAlreadyAcquired) return true;
-          const [claim] = await tx
-            .insert(inventoryConsumedRunsTable)
-            .values({ runId: rid, scope })
-            .onConflictDoNothing({
-              target: [inventoryConsumedRunsTable.runId, inventoryConsumedRunsTable.scope],
-            })
-            .returning();
-          return Boolean(claim);
-        },
-        findItemByKey: async (itemKey) => {
-          const parts = itemKey.match(/^ingredient:(.*):(lbs|batches)$/);
-          const ingredients = await tx.select({
-            id: ingredientsTable.id, name: ingredientsTable.name, mergedInto: ingredientsTable.mergedInto,
-          }).from(ingredientsTable).where(eq(ingredientsTable.scope, scope));
-          const expectedName = parts?.[1]?.trim().toLowerCase();
-          const expectedIngredient = expectedName
-            ? ingredients.find((i) => i.name.trim().toLowerCase() === expectedName)
-            : undefined;
-          const allItems = await tx.select().from(inventoryItemsTable)
-            .where(eq(inventoryItemsTable.scope, scope));
-          const candidates = allItems
-            .filter((item) => {
-              if (item.productionIngredientId && expectedIngredient) {
-                return canonicalIngredientId(item.productionIngredientId, ingredients) ===
-                  canonicalIngredientId(expectedIngredient.id, ingredients) &&
-                  item.conversionFactor != null && item.conversionFactor > 0;
-              }
-              // Legacy canonical items are unambiguous only when their key and
-              // unit exactly match the production demand. Distinct products
-              // must use the explicit link + confirmed conversion path above.
-              return !item.productionIngredientId && item.key === itemKey &&
-                item.conversionFactor == null;
-            })
-            .sort((a, b) => a.consumptionPriority - b.consumptionPriority || a.id - b.id);
-          const item = candidates[0];
-          return item ? { id: item.id, conversionFactor: item.conversionFactor ?? 1 } : null;
-        },
-        drawDown: (itemId, qty) => drawDown(tx, itemId, qty, onsiteCond),
-        drawDownDetails: (itemId, qty) => drawDownDetails(tx, itemId, qty, onsiteCond),
-        recordConsumption: async (itemId, consumed, lots) => {
-          // Keep the legacy one-row ledger shape for old canonical items. New
-          // linked products record each lot separately so the audit trail can
-          // identify every physical lot consumed.
-          const itemRow = await tx.select({ productionIngredientId: inventoryItemsTable.productionIngredientId })
-            .from(inventoryItemsTable).where(eq(inventoryItemsTable.id, itemId));
-          const entries = itemRow[0]?.productionIngredientId && lots?.length
-            ? lots
-            : [{ lotId: null, qty: consumed }];
-          for (const entry of entries) {
-            await tx.insert(inventoryLedgerTable).values({
-              itemId,
-              scope,
-              lotId: entry.lotId,
-              type: "consume",
-              qtyDelta: -entry.qty,
-              runId,
-              note: "Auto-deducted on run completion",
-            });
-          }
-        },
+    {
+      claimRun: async (rid) => {
+        if (claimAlreadyAcquired) {
+          await tx.update(inventoryConsumedRunsTable)
+            .set({ baselineLines })
+            .where(and(
+              eq(inventoryConsumedRunsTable.runId, rid),
+              eq(inventoryConsumedRunsTable.scope, scope),
+              isNull(inventoryConsumedRunsTable.baselineLines),
+            ));
+          return true;
+        }
+        const [claim] = await tx
+          .insert(inventoryConsumedRunsTable)
+          .values({ runId: rid, scope, baselineLines })
+          .onConflictDoNothing({
+            target: [inventoryConsumedRunsTable.runId, inventoryConsumedRunsTable.scope],
+          })
+          .returning();
+        return Boolean(claim);
       },
-      runId,
-      lines,
-    );
+      findItemByKey: async (itemKey) => itemsByKey.get(itemKey) ?? null,
+      drawDown: (itemId, qty) => drawDown(tx, itemId, qty, onsiteCond),
+      drawDownDetails: (itemId, qty) => drawDownDetails(tx, itemId, qty, onsiteCond),
+      recordConsumption: async (itemId, consumed, lots) => {
+        // Keep the legacy one-row ledger shape for old canonical items. New
+        // linked products record each lot separately so the audit trail can
+        // identify every physical lot consumed.
+        const itemRow = await tx.select({ productionIngredientId: inventoryItemsTable.productionIngredientId })
+          .from(inventoryItemsTable).where(eq(inventoryItemsTable.id, itemId));
+        const entries = itemRow[0]?.productionIngredientId && lots?.length
+          ? lots
+          : [{ lotId: null, qty: consumed }];
+        for (const entry of entries) {
+          await tx.insert(inventoryLedgerTable).values({
+            itemId,
+            scope,
+            lotId: entry.lotId,
+            type: "consume",
+            qtyDelta: -entry.qty,
+            runId,
+            note: "Auto-deducted on run completion",
+          });
+        }
+      },
+    },
+    runId,
+    lines,
+  );
 }
 
 // Draw down one manually-confirmed sauce barrel. The barrel index is folded
@@ -1629,22 +1857,25 @@ router.post("/inventory/consume", async (req, res): Promise<void> => {
   // derive the ONLY lines this endpoint will ever apply from that trusted
   // state, via the same shared formula the clients use. A caller can affect
   // WHICH real run gets finalized, never HOW MUCH gets deducted.
-  const expected = await findExpectedConsumptionForRun(runId, currentScope());
-  if (!expected) {
+  const consumedRun = await db.transaction(async (tx) => {
+    const expected = await findExpectedConsumptionForRun(runId, currentScope(), tx);
+    if (!expected) return null;
+    const authoritativeLines: ConsumeLine[] = [...expected.entries()].map(([itemKey, qty]) => ({
+      itemKey,
+      qty,
+    }));
+    return consumeRunInTransaction(tx, runId, authoritativeLines);
+  });
+  if (!consumedRun) {
     res.status(403).json({ error: "runId does not match a known scheduled run" });
     return;
   }
-  const authoritativeLines: ConsumeLine[] = [...expected.entries()].map(([itemKey, qty]) => ({
-    itemKey,
-    qty,
-  }));
-  const result = await consumeRun(runId, authoritativeLines);
-  if (!result.applied) {
+  if (!consumedRun.applied) {
     res.json({ applied: false, consumed: 0 });
     return;
   }
   broadcast(headerSenderId(req), currentScope());
-  res.json({ applied: true, consumed: result.consumed });
+  res.json({ applied: true, consumed: consumedRun.consumed });
 });
 
 // ── Locations CRUD ───────────────────────────────────────────────────────────
@@ -1989,6 +2220,61 @@ export type MergeReport = {
   results: MergeOutcome[];
 };
 
+async function remapCompletedRunBaselines(
+  tx: InventoryExecutor,
+  scope: ReturnType<typeof currentScope>,
+  sourceId: number,
+  targetId: number,
+): Promise<void> {
+  // Corrections lock the claim before touching inventory lots. Keep that lock
+  // order here too, and only lock claims whose immutable baseline references
+  // the item being deleted.
+  const claims = await tx.select({
+    runId: inventoryConsumedRunsTable.runId,
+    baselineLines: inventoryConsumedRunsTable.baselineLines,
+  }).from(inventoryConsumedRunsTable).where(and(
+    eq(inventoryConsumedRunsTable.scope, scope),
+    sql`${inventoryConsumedRunsTable.baselineLines} @> ${JSON.stringify([{ itemId: sourceId }])}::jsonb`,
+  )).for("update");
+
+  for (const claim of claims) {
+    const baselineLines = claim.baselineLines;
+    if (!Array.isArray(baselineLines)) continue;
+
+    let sourceFound = false;
+    let targetIndex = -1;
+    let combinedQty = 0;
+    const nextLines: Array<{ itemId: number; qty: number }> = [];
+    for (const line of baselineLines) {
+      if (line.itemId !== sourceId && line.itemId !== targetId) {
+        nextLines.push(line);
+        continue;
+      }
+      if (!Number.isFinite(line.qty) || line.qty < 0) {
+        throw new Error(`Invalid completed-run baseline quantity for inventory item ${line.itemId}`);
+      }
+      if (line.itemId === sourceId) sourceFound = true;
+      if (targetIndex === -1) targetIndex = nextLines.length;
+      combinedQty += line.qty;
+    }
+    if (!sourceFound) continue;
+    if (!Number.isFinite(combinedQty)) {
+      throw new Error(`Invalid combined completed-run baseline quantity for inventory item ${sourceId}`);
+    }
+
+    nextLines.splice(targetIndex, 0, {
+      itemId: targetId,
+      qty: Math.round(combinedQty * 1000) / 1000,
+    });
+    await tx.update(inventoryConsumedRunsTable)
+      .set({ baselineLines: nextLines })
+      .where(and(
+        eq(inventoryConsumedRunsTable.runId, claim.runId),
+        eq(inventoryConsumedRunsTable.scope, scope),
+      ));
+  }
+}
+
 export async function mergeInventoryItems(merges: MergeSpec[]): Promise<MergeReport> {
   const results: MergeOutcome[] = [];
   let merged = 0;
@@ -2032,6 +2318,10 @@ export async function mergeInventoryItems(merges: MergeSpec[]): Promise<MergeRep
         results.push({ fromKey: m.fromKey, toKey: m.toKey, status: "skipped", reason: "same-item" });
         continue;
       }
+      // Keep the original completed-run expectation attached to the surviving
+      // inventory identity. If both IDs were in one run's baseline, combine
+      // their quantities before the source item is removed.
+      await remapCompletedRunBaselines(tx, currentScope(), source.id, target.id);
       // Move lots + ledger to the target BEFORE deleting the source (ledger/lots
       // cascade-delete with the item, so re-point first or history is lost).
       await tx
@@ -2349,7 +2639,7 @@ export async function consumeDayStart(
             await tx
               .update(mixesTable)
               .set({ amountAlreadyMade: upd.amountAlreadyMade, updatedAt: new Date() })
-              .where(eq(mixesTable.id, upd.id));
+               .where(and(eq(mixesTable.id, upd.id), eq(mixesTable.scope, scope)));
           }
         }
 
@@ -2394,7 +2684,7 @@ export async function consumeDayStart(
                   amountRemaining: Math.round((existing.amountRemaining + row.amountRemaining) * 100) / 100,
                   updatedAt: now,
                 })
-                .where(eq(mixSurplusLotsTable.id, existing.id));
+                .where(and(eq(mixSurplusLotsTable.id, existing.id), eq(mixSurplusLotsTable.scope, scope)));
             } else {
               await tx.insert(mixSurplusLotsTable).values({
                 id: randomUUID(),

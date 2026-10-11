@@ -8,6 +8,7 @@ import {
   collectBatchWeightCandidatesFromProfile,
   filterStillCurrentBatchWeightEntries,
   buildBatchWeightPropagationPlan,
+  collectAcknowledgedBatchWeightSnapshotUpdates,
   batchWeightPropagationToast,
   enqueueBatchWeightPropagation,
   executeBatchWeightPropagation,
@@ -227,6 +228,65 @@ describe("buildBatchWeightPropagationPlan", () => {
     { name: "Chicken Pep", lbs: 18 },
     { name: "BBQ", lbs: 55 },
   ];
+
+  it("persists an acknowledged open-run weight even when the form already shows it", () => {
+    expect(
+      collectAcknowledgedBatchWeightSnapshotUpdates(
+        {
+          app1Type: "Bacon",
+          app1BatchLbs: 12,
+          app1CheeseRecipe: [],
+          app2Type: "Bacon",
+          app2BatchLbs: 12,
+          app2CheeseRecipe: [{ lbs: 1 }],
+          pep1Type: "Pepperoni",
+          pep1BatchLbs: 12,
+        },
+        [{ name: "Bacon", lbs: 12 }],
+        DEFAULT_PEPS,
+      ),
+    ).toEqual({ app1BatchLbs: 12 });
+  });
+
+  it("waits for the durable profile acknowledgement before fanning out", async () => {
+    let acknowledge!: () => void;
+    const profileAcknowledgement = new Promise<void>((resolve) => {
+      acknowledge = resolve;
+    });
+    const order: string[] = [];
+    const execution = executeBatchWeightPropagation({
+      profiles: [{
+        brand: "Alpha",
+        flavor: "Supreme",
+        profile: { app1Type: "Bacon", app1BatchLbs: 5 },
+      }],
+      openForm: {},
+      entries: [{ name: "Bacon", lbs: 14 }],
+      defaultPepTypes: DEFAULT_PEPS,
+      saveProfile: async () => {
+        order.push("profile-write-started");
+        await profileAcknowledgement;
+        order.push("profile-write-acknowledged");
+        return true;
+      },
+      propagateToPendingRuns: () => {
+        order.push("run-fanout");
+      },
+      setOpenFormValue: () => {},
+      notify: () => {},
+    });
+
+    await Promise.resolve();
+    expect(order).toEqual(["profile-write-started"]);
+    acknowledge();
+    await execution;
+
+    expect(order).toEqual([
+      "profile-write-started",
+      "profile-write-acknowledged",
+      "run-fanout",
+    ]);
+  });
 
   it("updates only visible matching slots across all applicator types", () => {
     const plan = buildBatchWeightPropagationPlan(

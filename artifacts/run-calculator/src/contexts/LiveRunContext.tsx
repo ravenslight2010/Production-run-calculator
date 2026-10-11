@@ -58,6 +58,7 @@ import {
   type OperationalSnapshotReceipt,
 } from "../operationalState";
 import type { OperationalProjection } from "@workspace/live-calc";
+import type { ScreenSyncStatus } from "../screenSyncState";
 
 type RunStatus = "pending" | "running" | "paused" | "ended";
 type RunStoppage = NonNullable<RunMeta["stoppages"]>[number];
@@ -68,6 +69,7 @@ export type { Calc } from "@workspace/live-calc";
 export interface LiveRunContextValue {
   nowTime: Date;
   calc: Calc;
+  screenSyncStatus: ScreenSyncStatus;
   liveFreezerMin: number;
   elapsedBatchSec: number;
   /** Day-state-owned line-phase model; server-adopted when confirmed, local fallback. */
@@ -140,6 +142,7 @@ export interface LiveRunProviderProps {
   externalAutoSuppressRef?: React.MutableRefObject<number>;
   externalDoughAutoSuppressRef?: React.MutableRefObject<number>;
   onPackagingProgressAutoAdvance?: (
+    runId: string,
     skidsCompleted: number,
     casesOnCurrentSkid: number,
   ) => boolean;
@@ -148,6 +151,11 @@ export interface LiveRunProviderProps {
   autoTrackWakeRebaseReason?: AutoTrackWakeRebaseReason | null;
   autoTrackWakeAcknowledgement?: number;
   claimAutoTrackEvent?: (claim: AutoTrackEventClaim) => Promise<AutoTrackEventResult>;
+  onAutomaticClaimFailure?: (claim: AutoTrackEventClaim) => void;
+  onAutomaticClaimSuccess?: (
+    claim: AutoTrackEventClaim,
+    outcome: AutoTrackEventResult["outcome"],
+  ) => void;
   onAutoTrackProgressChange?: (enabled: boolean) => void;
   operationalSnapshotReceipt?: OperationalSnapshotReceipt | null;
   operationalServerCalc?: Calc | null;
@@ -155,6 +163,7 @@ export interface LiveRunProviderProps {
   serverClockOffsetMs?: number;
   operationalOnline?: boolean;
   operationalSyncConnected?: boolean;
+  screenSyncStatus?: ScreenSyncStatus;
 }
 
 // ── Context ──────────────────────────────────────────────────────────────────
@@ -189,6 +198,8 @@ export function LiveRunProvider({
   autoTrackWakeRebaseReason = null,
   autoTrackWakeAcknowledgement = 0,
   claimAutoTrackEvent,
+  onAutomaticClaimFailure,
+  onAutomaticClaimSuccess,
   onAutoTrackProgressChange,
   operationalSnapshotReceipt = null,
   operationalServerCalc = null,
@@ -196,6 +207,7 @@ export function LiveRunProvider({
   serverClockOffsetMs = 0,
   operationalOnline = true,
   operationalSyncConnected = false,
+  screenSyncStatus = "reconnecting",
 }: LiveRunProviderProps) {
   const nowTime = useClock(runStatus, autoTrackWakeAcknowledgement);
   // A selected pending run must never inherit Packaging, Sauce, or Frontline
@@ -370,16 +382,22 @@ export function LiveRunProvider({
   ]);
   const packagingDrainActive =
     runStatus === "paused" && lineHasPackagingDrain(linePhases);
+  const pausedOccupancyConfirmed =
+    runStatus === "paused" && confirmedProjection?.facts.runStatus === "paused";
   const operationalCalc =
     confirmedProjection?.calc
       ? {
           // The server frame remains authoritative for production counters,
-          // but occupancy is a time-relative display value. Rebase both
-          // windows onto the current clock so a wake/reload can drain stale
-          // freezer contents without waiting for another server frame.
+          // but running/draining occupancy is time-relative. A paused run's
+          // occupancy is fixed at its pause point: the confirmed server frame
+          // must not be replaced with a stale local pre-wake calculation.
           ...confirmedProjection.calc,
-          casesOnLine: calc.casesOnLine,
-          casesInFreezer: calc.casesInFreezer,
+          casesOnLine: pausedOccupancyConfirmed
+            ? confirmedProjection.calc.casesOnLine
+            : calc.casesOnLine,
+          casesInFreezer: pausedOccupancyConfirmed
+            ? confirmedProjection.calc.casesInFreezer
+            : calc.casesInFreezer,
         }
       : (adoptServerCalc
         ? operationalServerCalc
@@ -521,6 +539,8 @@ export function LiveRunProvider({
       autoTrackWakeRebaseReason,
       autoTrackWakeAcknowledgement,
       claimAutoTrackEvent,
+      onAutomaticClaimFailure,
+      onAutomaticClaimSuccess,
       authoritativeServerAutoTrack: true,
       autoTrackProgressEnabled: currentRun?.autoTrackDisabled !== true,
       nextRunPrepActive,
@@ -679,7 +699,7 @@ export function LiveRunProvider({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const value = useMemo<LiveRunContextValue>(
     () => ({
-      nowTime, calc: operationalCalc, liveFreezerMin, elapsedBatchSec, linePhases, currentRunDowntimeMs,
+      nowTime, calc: operationalCalc, screenSyncStatus, liveFreezerMin, elapsedBatchSec, linePhases, currentRunDowntimeMs,
       casesPct, casesFreezerPct, casesPctWithFreezer,
       currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
       showBatchDue, setShowBatchDue,
@@ -698,7 +718,7 @@ export function LiveRunProvider({
       showPaceAlert, setShowPaceAlert, paceAlertMsg,
     }),
     [
-      nowTime, operationalCalc, liveFreezerMin, elapsedBatchSec, linePhases, currentRunDowntimeMs,
+      nowTime, operationalCalc, screenSyncStatus, liveFreezerMin, elapsedBatchSec, linePhases, currentRunDowntimeMs,
       casesPct, casesFreezerPct, casesPctWithFreezer,
       currentBatchNum, secUntilNextBatch, totalBatchesNeeded,
       showBatchDue, setShowBatchDue,

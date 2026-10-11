@@ -26,6 +26,16 @@ export interface OperationalReportSection<T> {
   note?: string;
 }
 
+export interface OperationalReleaseEvidence {
+  version: string;
+  revision: string;
+  environment: string;
+  deploymentId?: string | null;
+  deployedRevision?: string | null;
+  identityStatus?: "reported-unverified" | "incomplete" | "unavailable";
+  identitySource?: "runtime-environment" | "unavailable";
+}
+
 export interface OperationalReport {
   scope: SummaryScope;
   date: string;
@@ -120,6 +130,14 @@ export interface OperationalReport {
   narrative?: {
     text: string;
     source: "ai" | "deterministic";
+  };
+  evidence?: {
+    release: OperationalReleaseEvidence;
+    recovery: {
+      generatedAt: string;
+      source: string;
+      complete: boolean;
+    };
   };
 }
 

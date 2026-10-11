@@ -1,20 +1,48 @@
 # syntax=docker/dockerfile:1
 
+ARG NODE_IMAGE=node:24.21.0-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20
+
 ########## builder: install deps, build web + api ##########
-FROM node:24-slim AS builder
-RUN apt-get update \
+FROM ${NODE_IMAGE} AS builder
+# Match the Debian package index to the snapshot date used by this pinned Node
+# image. Change the timestamp only as part of a reviewed image refresh.
+RUN snapshot=20260824T000000Z \
+  && rm -f /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources \
+  && printf '%s\n' \
+    "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/${snapshot} bookworm main" \
+    "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/${snapshot} bookworm-updates main" \
+    "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/${snapshot} bookworm-security main" \
+    > /etc/apt/sources.list \
+  && apt-get update \
   && apt-get install -y --no-install-recommends git python3 build-essential \
+  && printf '%s\n' 'Pinned Debian builder package versions:' \
+  && dpkg-query -W build-essential git g++ g++-12 gcc gcc-12 make python3 python3-minimal python3.11 python3.11-minimal \
   && rm -rf /var/lib/apt/lists/*
-RUN npm install -g pnpm@11.5.2  # keep in sync with packageManager in package.json
+# Review the snapshot and refresh procedure in docs/container-builder-security-refresh.md.
 WORKDIR /app
 
 # Copy the complete workspace dependency graph before application source. Keep
 # this list aligned with pnpm-workspace.yaml so source-only changes can reuse the
 # frozen-lockfile install layer without omitting any workspace package.
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .nvmrc ./
+RUN set -eu; \
+  expected_node_version="$(tr -d '\r\n' < .nvmrc)"; \
+  actual_node_version="$(node --version | sed 's/^v//')"; \
+  if [ "$actual_node_version" != "$expected_node_version" ]; then \
+    echo "Docker builder Node.js version ${actual_node_version} does not match .nvmrc (${expected_node_version})." >&2; \
+    exit 1; \
+  fi; \
+  pnpm_version="$(node -e 'const match = /^pnpm@(\d+\.\d+\.\d+)(?:\+.*)?$/.exec(require("./package.json").packageManager ?? ""); if (!match) throw new Error("packageManager must pin pnpm exactly"); console.log(match[1]);')"; \
+  npm install -g "pnpm@${pnpm_version}"; \
+  actual_pnpm_version="$(pnpm --version)"; \
+  if [ "$actual_pnpm_version" != "$pnpm_version" ]; then \
+    echo "Docker builder pnpm version ${actual_pnpm_version} does not match packageManager (${pnpm_version})." >&2; \
+    exit 1; \
+  fi
 COPY artifacts/api-server/package.json ./artifacts/api-server/package.json
 COPY artifacts/mockup-sandbox/package.json ./artifacts/mockup-sandbox/package.json
 COPY artifacts/run-calculator/package.json ./artifacts/run-calculator/package.json
+COPY lib/ai-evaluation/package.json ./lib/ai-evaluation/package.json
 COPY lib/ai-memory/package.json ./lib/ai-memory/package.json
 COPY lib/allergen/package.json ./lib/allergen/package.json
 COPY lib/anomaly/package.json ./lib/anomaly/package.json
@@ -28,7 +56,9 @@ COPY lib/corpus-harness/package.json ./lib/corpus-harness/package.json
 COPY lib/cycle-count/package.json ./lib/cycle-count/package.json
 COPY lib/day-summary/package.json ./lib/day-summary/package.json
 COPY lib/db/package.json ./lib/db/package.json
+COPY lib/distill-dataset/package.json ./lib/distill-dataset/package.json
 COPY lib/downtime-trends/package.json ./lib/downtime-trends/package.json
+COPY lib/factory-constants/package.json ./lib/factory-constants/package.json
 COPY lib/fill-missing/package.json ./lib/fill-missing/package.json
 COPY lib/formula-guard/package.json ./lib/formula-guard/package.json
 COPY lib/freezer-pull/package.json ./lib/freezer-pull/package.json
@@ -36,6 +66,7 @@ COPY lib/incident-cluster/package.json ./lib/incident-cluster/package.json
 COPY lib/ingredient-catalog/package.json ./lib/ingredient-catalog/package.json
 COPY lib/integrations-openai-ai-server/package.json ./lib/integrations-openai-ai-server/package.json
 COPY lib/inventory-math/package.json ./lib/inventory-math/package.json
+COPY lib/live-calc/package.json ./lib/live-calc/package.json
 COPY lib/merge-suggest/package.json ./lib/merge-suggest/package.json
 COPY lib/mixes/package.json ./lib/mixes/package.json
 COPY lib/mix-reconcile/package.json ./lib/mix-reconcile/package.json
@@ -55,6 +86,8 @@ COPY lib/shipping-import/package.json ./lib/shipping-import/package.json
 COPY lib/spec-export/package.json ./lib/spec-export/package.json
 COPY lib/spec-import/package.json ./lib/spec-import/package.json
 COPY lib/spec-reconcile/package.json ./lib/spec-reconcile/package.json
+COPY lib/sync-contract/package.json ./lib/sync-contract/package.json
+COPY lib/typescript-api-v6/package.json ./lib/typescript-api-v6/package.json
 COPY scripts/package.json ./scripts/package.json
 RUN pnpm install --frozen-lockfile
 
@@ -93,7 +126,7 @@ RUN rm -rf /app/api-runtime \
   && CI=true pnpm --filter @workspace/api-server deploy --legacy --prod /app/api-runtime
 
 ########## api: slim image for the bundled server ##########
-FROM node:24-slim AS api
+FROM ${NODE_IMAGE} AS api
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=builder /app/artifacts/api-server/dist ./artifacts/api-server/dist

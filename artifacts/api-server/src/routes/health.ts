@@ -1,7 +1,8 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
-import { HealthCheckResponse } from "@workspace/api-zod";
+import { GetBuildInfoResponse, HealthCheckResponse } from "@workspace/api-zod";
+import { getBuildInfo } from "../lib/buildInfo";
 import { isGeminiProviderConfigured } from "@workspace/integrations-openai-ai-server";
 import { logger } from "../lib/logger";
 import { getCacheMaintenanceDiagnostics } from "../lib/observability";
@@ -14,10 +15,22 @@ import {
   backgroundOperationsDegraded,
   getBackgroundOperationDiagnostics,
 } from "../lib/backgroundOperations";
+import { getScheduledEvaluationQueueDiagnostics } from "../lib/serverJobs";
 
 const router: IRouter = Router();
 
-type CheckStatus = "ok" | "error" | "pending";
+router.get("/build-info", (_req: Request, res: Response) => {
+  res.setHeader("Cache-Control", "no-store");
+  const info = getBuildInfo();
+  if (!info) {
+    res.status(503).json({ error: "Build version is unavailable.", status: "unavailable" });
+    return;
+  }
+  res.json(GetBuildInfoResponse.parse(info));
+});
+
+type CheckStatus = "ok" | "warning" | "error" | "pending";
+type AiCapabilityStatus = "configured" | "not_configured" | "pending";
 
 async function readiness(req: Request, res: Response): Promise<void> {
   const startup = getStartupHealth();
@@ -33,6 +46,9 @@ async function readiness(req: Request, res: Response): Promise<void> {
     auditProtection: { status: "pending" },
     dependencies: { status: "pending" },
     backgroundWorkers: { status: "pending" },
+  };
+  const capabilities: { ai: { status: AiCapabilityStatus; detail?: string } } = {
+    ai: { status: "pending" },
   };
 
   if (startup.phase !== "ready") {
@@ -60,23 +76,37 @@ async function readiness(req: Request, res: Response): Promise<void> {
       res.locals.auditProtection = auditProtection;
     }
 
-    // AI remains a hard readiness dependency under the existing operational
-    // policy. Only its credential detection is delegated to the active Gemini
-    // adapter so this probe cannot drift to unrelated provider keys.
+    // This is a credential-configuration signal, not a remote provider probe.
+    // AI is optional for core API traffic, so its absence is reported without
+    // preventing core readiness.
     const aiConfigured = isGeminiProviderConfigured();
     checks.dependencies = aiConfigured
       ? { status: "ok" }
-      : { status: "error", detail: "ai_provider_not_configured" };
+      : { status: "warning", detail: "ai_provider_not_configured" };
+    capabilities.ai = aiConfigured
+      ? { status: "configured" }
+      : { status: "not_configured", detail: "ai_provider_not_configured" };
     const backgroundOperationDiagnostics = await getBackgroundOperationDiagnostics();
-    checks.backgroundWorkers = backgroundOperationsDegraded(backgroundOperationDiagnostics)
-      ? { status: "error", detail: "sustained_background_worker_failures" }
+    const scheduledEvaluationQueue = getScheduledEvaluationQueueDiagnostics();
+    const backgroundOperationsWarning = backgroundOperationsDegraded(backgroundOperationDiagnostics);
+    checks.backgroundWorkers = backgroundOperationsWarning || scheduledEvaluationQueue.status === "warning"
+      ? {
+        status: "warning",
+        detail: scheduledEvaluationQueue.status === "warning"
+          ? "scheduled_evaluation_queue_warning"
+          : "sustained_background_worker_failures",
+      }
       : { status: "ok" };
     res.locals.backgroundOperationDiagnostics = backgroundOperationDiagnostics;
+    res.locals.scheduledEvaluationQueue = scheduledEvaluationQueue;
   }
 
-  const allHealthy =
+  // Only conditions required to safely serve core operational traffic block
+  // readiness. Optional AI and background-worker warnings remain visible below.
+  const coreReady =
     startup.phase === "ready" &&
-    Object.values(checks).every((c) => c.status === "ok");
+    checks.database.status === "ok" &&
+    checks.auditProtection.status === "ok";
   const flatChecks = Object.fromEntries(
     Object.entries(checks).map(([key, value]) => [key, value.status]),
   );
@@ -86,6 +116,7 @@ async function readiness(req: Request, res: Response): Promise<void> {
         cacheMaintenance: await getCacheMaintenanceDiagnostics(),
         auditProtection: res.locals.auditProtection,
         backgroundOperations: res.locals.backgroundOperationDiagnostics,
+        scheduledEvaluationQueue: res.locals.scheduledEvaluationQueue,
       }
       : undefined;
   logger.info(
@@ -93,8 +124,9 @@ async function readiness(req: Request, res: Response): Promise<void> {
       event: "health_check",
       correlationId,
       probe: "readiness",
-      outcome: allHealthy ? "success" : "degraded",
+      outcome: coreReady ? "success" : "degraded",
       checks: flatChecks,
+      capabilities: { ai: capabilities.ai.status },
       startup: {
         phase: startup.phase,
         stage: startup.stage,
@@ -106,20 +138,20 @@ async function readiness(req: Request, res: Response): Promise<void> {
     "health check completed",
   );
 
-  if (allHealthy) {
-    // Keep the existing contract for any caller that checks the shape
-    const data = HealthCheckResponse.parse({ status: "ok" });
-    res.json({
-      ...data,
+  if (coreReady) {
+    res.json(HealthCheckResponse.parse({
+      status: "ok",
       checks: flatChecks,
+      capabilities,
       diagnostics,
       correlationId,
       timestamp: new Date().toISOString(),
-    });
+    }));
   } else {
     res.status(503).json({
       status: startup.phase === "starting" ? "starting" : "degraded",
       checks: flatChecks,
+      capabilities,
       startup: {
         phase: startup.phase,
         stage: startup.stage,

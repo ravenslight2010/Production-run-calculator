@@ -13,7 +13,6 @@ DEPARTMENT_NAVIGATION_WORKFLOW="${SCRIPT_DIR}/../../.github/workflows/department
 RELEASE_CONCURRENCY_CALIBRATION_WORKFLOW="${SCRIPT_DIR}/../../.github/workflows/release-concurrency-calibration.yml"
 STABLE_BRANCH_PROTECTION_WORKFLOW="${SCRIPT_DIR}/../../.github/workflows/stable-branch-protection.yml"
 WORKFLOW_LINT_WORKFLOW="${SCRIPT_DIR}/../../.github/workflows/workflow-lint.yml"
-PROMOTION_WORKFLOW="${SCRIPT_DIR}/../../.github/workflows/promote-production.yml"
 TEST_ROOT=$(mktemp -d)
 FAKE_ACTIONLINT="${TEST_ROOT}/fake-actionlint"
 FAKE_ACTIONLINT_MARKER="${TEST_ROOT}/actionlint-called"
@@ -34,6 +33,45 @@ make_workspace_with_declarations() {
 
   mkdir -p "${workspace}/scripts/src" "${workspace}/.github/workflows"
   cp "$CHECK_SCRIPT" "${workspace}/scripts/src/check-workflows.sh"
+  cat > "${workspace}/.replit" <<'EOF'
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "release:standard"
+
+[[workflows.workflow]]
+name = "release:standard"
+
+[[workflows.workflow]]
+name = "release:full"
+
+[[workflows.workflow]]
+name = "test"
+
+[[workflows.workflow]]
+name = "test:client"
+
+[[workflows.workflow]]
+name = "typecheck"
+
+[[workflows.workflow]]
+name = "security:prod"
+
+[[workflows.workflow]]
+name = "check:clean-start"
+
+[[workflows.workflow]]
+name = "evidence:release"
+
+[[workflows.workflow]]
+name = "browser-full-159"
+EOF
   cat > "${workspace}/scripts/package.json" <<EOF
 {
   "devDependencies": {
@@ -187,26 +225,6 @@ jobs:
     steps:
       - run: echo ok
 EOF
-  cat > "${workspace}/.github/workflows/promote-production.yml" <<'EOF'
-name: Prepare production image promotion
-
-on:
-  workflow_dispatch:
-
-permissions:
-  contents: read
-
-concurrency:
-  group: fixture-promotion-${{ github.run_id }}
-  cancel-in-progress: false
-
-jobs:
-  fixture-promotion:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - run: echo ok
-EOF
   printf '%s\n' "$workspace"
 }
 
@@ -306,6 +324,22 @@ ci_typecheck_job_block() {
   ' "$CI_WORKFLOW"
 }
 
+ci_docker_job_block() {
+  awk '
+    $0 == "  docker:" {
+      found = 1
+      print
+      next
+    }
+    found && $0 ~ /^  [[:alnum:]_-]+:/ {
+      exit
+    }
+    found {
+      print
+    }
+  ' "$CI_WORKFLOW"
+}
+
 ci_schema_safe_rollback_job_block() {
   awk '
     $0 == "  schema-safe-rollback:" {
@@ -330,7 +364,7 @@ test_ci_runs_routine_scripts_tests() {
   typecheck_block=$(ci_typecheck_job_block)
   assert_contains "$typecheck_block" "      - name: Run routine scripts tests"
   assert_contains "$typecheck_block" \
-    "        run: pnpm --filter @workspace/scripts run test"
+    "        run: node scripts/src/test-results.mjs run --lane ci-scripts-routine -- pnpm --filter @workspace/scripts run test"
 
   routine_step_line=$(grep -nF -- \
     "      - name: Run routine scripts tests" "$CI_WORKFLOW" | cut -d: -f1)
@@ -346,6 +380,232 @@ test_ci_runs_routine_scripts_tests() {
   echo "PASS: CI runs routine scripts tests after catalog contracts"
 }
 
+test_ci_docker_image_check_is_build_only() {
+  local docker_block
+  local required_checks
+  local push_false_count
+
+  docker_block=$(ci_docker_job_block)
+  assert_contains "$docker_block" "name: Docker image"
+  push_false_count=$(grep -cE '^[[:space:]]+push:[[:space:]]+false$' \
+    <<<"$docker_block" || true)
+  if [[ "$push_false_count" != "3" ]]; then
+    printf 'Docker image check must keep all three targets build-only (found %s push:false entries).\n' \
+      "$push_false_count" >&2
+    return 1
+  fi
+  if grep -Eiq '^[[:space:]]+push:[[:space:]]+true|ghcr\.io|docker/login-action' \
+    <<<"$docker_block"; then
+    printf 'Docker image check must not push to a registry or log in to one.\n' >&2
+    return 1
+  fi
+
+  required_checks=$(<"${SCRIPT_DIR}/../../.github/repository-policy.md")
+  assert_contains "$required_checks" "Docker image"
+  echo "PASS: retains the required Docker image check as a build-only test"
+}
+
+test_render_image_smoke_remains_local_and_test_only() {
+  local release_configuration
+  local smoke_script
+  local scripts_package
+
+  release_configuration=$(<"${SCRIPT_DIR}/release-check.mts")
+  smoke_script=$(<"${SCRIPT_DIR}/verify-render-image.mts")
+  scripts_package=$(<"${SCRIPT_DIR}/../package.json")
+
+  assert_contains "$release_configuration" 'label: "Render image smoke"'
+  assert_contains "$release_configuration" 'args: ["run", "check:render-image"]'
+  assert_contains "$scripts_package" '"check:render-image": "tsx ./src/verify-render-image.mts"'
+  assert_contains "$smoke_script" "Building Render API image as"
+  assert_contains "$smoke_script" '"build"'
+  assert_contains "$smoke_script" '"run"'
+  if grep -Eiq 'ghcr\.io|render\.com|docker[[:space:]]+push|"push"|"login"' \
+    <<<"$smoke_script"; then
+    printf 'Render image smoke must stay a disposable local Docker test, not an external publish/deploy path.\n' >&2
+    return 1
+  fi
+  echo "PASS: keeps the Render image smoke as a local release test only"
+}
+
+test_rejects_github_package_publishing() {
+  local workspace
+  workspace=$(make_workspace package-publishing 1.7.12 1.7.12)
+  cat >> "$workspace/.github/workflows/ci.yml" <<'EOF'
+
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      packages: write
+    steps:
+      - run: echo publish
+EOF
+  run_check "$workspace"
+  [[ "$CHECK_STATUS" -eq 1 ]] || {
+    printf 'Expected package-write authority to fail the workflow guard. Output:\n%s\n' \
+      "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" \
+    "GitHub package publishing is not authorized."
+  [[ ! -e "$FAKE_ACTIONLINT_MARKER" ]] || {
+    printf 'Expected package-write authority to fail before actionlint.\n' >&2
+    return 1
+  }
+  echo "PASS: rejects GitHub package publishing authority"
+}
+
+test_rejects_registry_image_pushes() {
+  local workspace
+  workspace=$(make_workspace image-push 1.7.12 1.7.12)
+  cat >> "$workspace/.github/workflows/ci.yml" <<'EOF'
+
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          push: true
+EOF
+  run_check "$workspace"
+  [[ "$CHECK_STATUS" -eq 1 ]] || {
+    printf 'Expected a registry push to fail the workflow guard. Output:\n%s\n' \
+      "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" \
+    "push images to a registry."
+  [[ ! -e "$FAKE_ACTIONLINT_MARKER" ]] || {
+    printf 'Expected image-push authority to fail before actionlint.\n' >&2
+    return 1
+  }
+  echo "PASS: rejects registry image pushes"
+}
+
+test_rejects_production_deploy_and_promotion_authority() {
+  local workspace
+  workspace=$(make_workspace production-deployment 1.7.12 1.7.12)
+  cat > "$workspace/.github/workflows/deploy-production.yml" <<'EOF'
+name: Deploy production app
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fixture-deploy-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to production
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production
+    steps:
+      - run: echo deploy
+EOF
+  run_check "$workspace"
+  [[ "$CHECK_STATUS" -eq 1 ]] || {
+    printf 'Expected a production deploy workflow to fail the workflow guard. Output:\n%s\n' \
+      "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" \
+    "GitHub deploy/promotion workflows are not authorized."
+  assert_contains "$CHECK_OUTPUT" \
+    "workflow/job names must not claim deploy or promotion authority."
+  assert_contains "$CHECK_OUTPUT" \
+    "GitHub workflows must not target a production environment."
+  [[ ! -e "$FAKE_ACTIONLINT_MARKER" ]] || {
+    printf 'Expected production deployment authority to fail before actionlint.\n' >&2
+    return 1
+  }
+  echo "PASS: rejects production deploy and promotion workflows"
+}
+
+test_rejects_production_image_promotion_workflow() {
+  local workspace
+  workspace=$(make_workspace production-promotion 1.7.12 1.7.12)
+  cat > "$workspace/.github/workflows/promote-production.yml" <<'EOF'
+name: Prepare production image promotion
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fixture-promotion-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production
+    steps:
+      - run: echo promote
+EOF
+  run_check "$workspace"
+  [[ "$CHECK_STATUS" -eq 1 ]] || {
+    printf 'Expected a production image promotion workflow to fail the workflow guard. Output:\n%s\n' \
+      "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" \
+    "GitHub deploy/promotion workflows are not authorized."
+  [[ ! -e "$FAKE_ACTIONLINT_MARKER" ]] || {
+    printf 'Expected production promotion authority to fail before actionlint.\n' >&2
+    return 1
+  }
+  echo "PASS: rejects production image-promotion workflows"
+}
+
+test_rejects_production_image_handoff_workflow() {
+  local workspace
+  workspace=$(make_workspace production-handoff 1.7.12 1.7.12)
+  cat > "$workspace/.github/workflows/production-image-handoff.yml" <<'EOF'
+name: Prepare production image handoff
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fixture-handoff-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  handoff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo handoff
+EOF
+  run_check "$workspace"
+  [[ "$CHECK_STATUS" -eq 1 ]] || {
+    printf 'Expected a production image handoff workflow to fail the workflow guard. Output:\n%s\n' \
+      "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" \
+    "GitHub deploy/promotion workflows are not authorized."
+  [[ ! -e "$FAKE_ACTIONLINT_MARKER" ]] || {
+    printf 'Expected production handoff authority to fail before actionlint.\n' >&2
+    return 1
+  }
+  echo "PASS: rejects production image-handoff workflows"
+}
+
 test_schema_safe_rollback_ci_contract() {
   local job_block
   local scripts_package
@@ -356,7 +616,8 @@ test_schema_safe_rollback_ci_contract() {
   root_package=$(<"${SCRIPT_DIR}/../../package.json")
   assert_contains "$job_block" "    timeout-minutes: 20"
   assert_contains "$job_block" "          fetch-depth: 2"
-  assert_contains "$job_block" "        run: pnpm run check:schema-safe-rollback"
+  assert_contains "$job_block" \
+    "        run: node scripts/src/test-results.mjs run --lane ci-schema-safe-rollback -- pnpm run check:schema-safe-rollback"
   assert_contains "$job_block" "        if: always()"
   assert_contains "$job_block" "            cat rollback-rehearsal-report.md >> \"\$GITHUB_STEP_SUMMARY\""
   assert_contains "$job_block" \
@@ -434,43 +695,6 @@ test_stable_branch_protection_workflow_contract() {
     return 1
   fi
   echo "PASS: preserves stable branch protection drift-monitoring contract"
-}
-
-test_production_promotion_workflow_contract() {
-  local workflow_content
-  workflow_content=$(<"$PROMOTION_WORKFLOW")
-  assert_contains "$workflow_content" "  workflow_dispatch:"
-  assert_contains "$workflow_content" "      publisher_run_id:"
-  assert_contains "$workflow_content" "      revision:"
-  assert_contains "$workflow_content" "      artifact_digest:"
-  assert_contains "$workflow_content" "    environment: production"
-  assert_contains "$workflow_content" "      actions: read"
-  assert_contains "$workflow_content" "      contents: read"
-  assert_contains "$workflow_content" "  group: production-image-promotion"
-  assert_contains "$workflow_content" "  cancel-in-progress: false"
-  assert_contains "$workflow_content" \
-    "          ref: \${{ github.event.repository.default_branch }}"
-  assert_contains "$workflow_content" \
-    'select(.name == "Publish Docker images" and .conclusion == "success")'
-  assert_contains "$workflow_content" \
-    "          gh api \"repos/\$REPOSITORY/actions/artifacts/\$ARTIFACT_ID/zip\" >\"\$ARTIFACT_ARCHIVE\""
-  assert_contains "$workflow_content" \
-    "            sha256sum --check --strict --status"
-  assert_contains "$workflow_content" \
-    '              if len(members) != 1 or members[0].filename != expected_name:'
-  assert_contains "$workflow_content" \
-    "        run: bash scripts/src/verify-container-promotion.sh"
-  if grep -Eq '^[[:space:]]+(pull_request|pull_request_target|push|workflow_run):' \
-    "$PROMOTION_WORKFLOW"; then
-    printf 'Production promotion must remain manual-only.\n' >&2
-    return 1
-  fi
-  if grep -Eq 'packages:[[:space:]]+write|contents:[[:space:]]+write' \
-    "$PROMOTION_WORKFLOW"; then
-    printf 'Production promotion verification must remain read-only.\n' >&2
-    return 1
-  fi
-  echo "PASS: preserves digest-bound production promotion trust boundary"
 }
 
 test_rejects_floating_workflow_dependencies() {
@@ -820,6 +1044,69 @@ test_accepts_matching_versions() {
   assert_contains "$CHECK_OUTPUT" "local wrapper (scripts/package.json): 1.7.12"
   assert_contains "$CHECK_OUTPUT" "CI workflow (.github/workflows/workflow-lint.yml): 1.7.12"
   echo "PASS: accepts matching actionlint versions"
+}
+
+test_accepts_staged_project_run_workflow() {
+  local workspace
+  workspace=$(make_workspace staged-project 1.7.12 1.7.12)
+  run_check "$workspace"
+  [[ "$CHECK_STATUS" -eq 0 ]] || {
+    printf 'Expected staged Project workflow to pass. Output:\n%s\n' \
+      "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" \
+    "GitHub Actions workflow syntax and expressions are valid."
+  echo "PASS: accepts a single staged Project release workflow"
+}
+
+test_rejects_parallel_project_children() {
+  local workspace
+  workspace=$(make_workspace parallel-project 1.7.12 1.7.12)
+  awk '
+    {
+      print
+      if ($0 == "args = \"release:standard\"") {
+        print ""
+        print "[[workflows.workflow.tasks]]"
+        print "task = \"workflow.run\""
+        print "args = \"test\""
+      }
+    }
+  ' "$workspace/.replit" >"$workspace/.replit.new"
+  mv "$workspace/.replit.new" "$workspace/.replit"
+
+  run_check "$workspace"
+  [[ "$CHECK_STATUS" -ne 0 ]] || {
+    printf 'Expected parallel Project children to fail. Output:\n%s\n' \
+      "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" \
+    "the Project run button must launch only"
+  [[ ! -e "$FAKE_ACTIONLINT_MARKER" ]] || {
+    printf 'Expected Project workflow failure before actionlint.\n' >&2
+    return 1
+  }
+  echo "PASS: rejects parallel Project validation children"
+}
+
+test_rejects_full_release_as_project_default() {
+  local workspace
+  workspace=$(make_workspace full-project-default 1.7.12 1.7.12)
+  sed -i \
+    's/args = "release:standard"/args = "release:full"/' \
+    "$workspace/.replit"
+
+  run_check "$workspace"
+  [[ "$CHECK_STATUS" -ne 0 ]] || {
+    printf 'Expected full release as the default to fail. Output:\n%s\n' \
+      "$CHECK_OUTPUT" >&2
+    return 1
+  }
+  assert_contains "$CHECK_OUTPUT" \
+    "the Project run button must launch only"
+  echo "PASS: keeps the full release explicit"
 }
 
 test_accepts_quoted_ci_version_with_inline_comment() {
@@ -1379,6 +1666,9 @@ test_department_navigation_readiness_contract() {
 }
 
 test_accepts_matching_versions
+test_accepts_staged_project_run_workflow
+test_rejects_parallel_project_children
+test_rejects_full_release_as_project_default
 test_accepts_quoted_ci_version_with_inline_comment
 test_accepts_quoted_ci_version_without_comment
 test_accepts_unquoted_ci_version_with_inline_comment
@@ -1403,10 +1693,16 @@ test_rejects_missing_remaining_workflow_job_timeout
 test_rejects_non_positive_remaining_workflow_job_timeout
 test_department_navigation_readiness_contract
 test_ci_runs_routine_scripts_tests
+test_ci_docker_image_check_is_build_only
+test_render_image_smoke_remains_local_and_test_only
+test_rejects_github_package_publishing
+test_rejects_registry_image_pushes
+test_rejects_production_deploy_and_promotion_authority
+test_rejects_production_image_promotion_workflow
+test_rejects_production_image_handoff_workflow
 test_schema_safe_rollback_ci_contract
 test_release_workflow_preserves_stopped_summary_contract
 test_stable_branch_protection_workflow_contract
-test_production_promotion_workflow_contract
 test_stable_branch_protection_alert_fixture
 test_rejects_floating_workflow_dependencies
 test_rejects_mutable_service_images

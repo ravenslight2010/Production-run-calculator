@@ -6,8 +6,11 @@ import {
   saveProfile,
 } from "./storage";
 import {
+  buildMixRunSnapshotUpdates,
+  mergePendingRunSnapshotUpdates,
   orchestrateSharedRecipeRefresh,
   runSharedRecipeRefresh,
+  shouldPropagateNamedRecipeRows,
 } from "./profileRecipeRefresh";
 import { executeBatchWeightPropagation } from "./ingredientBatchWeights";
 import { DEFAULT_VALUES, PROFILE_KEY, CRUST_PROFILE_KEY } from "./types";
@@ -85,6 +88,46 @@ describe("saveProfile stale-form snapshot guard", () => {
 });
 
 describe("shared recipe snapshot boundary", () => {
+  it("propagates named recipe rows only while a run still matches the previous pool rows", () => {
+    const previousSignature = JSON.stringify({
+      rows: [{ ingredient: "Dough Flour", lbs: 10 }],
+      weight: 0,
+      perTray: 0,
+      variantSig: "",
+    });
+
+    expect(
+      shouldPropagateNamedRecipeRows(
+        [{ ingredient: "Dough Flour", lbs: 10 }],
+        previousSignature,
+        false,
+      ),
+    ).toBe(true);
+    expect(
+      shouldPropagateNamedRecipeRows(
+        [{ ingredient: "Dough Flour", lbs: 7 }],
+        previousSignature,
+        false,
+      ),
+    ).toBe(false);
+    expect(
+      shouldPropagateNamedRecipeRows(
+        [{ ingredient: "Dough Flour", lbs: 7 }],
+        undefined,
+        false,
+      ),
+    ).toBe(false);
+    // If the prior pool snapshot is absent, linked profiles still receive the
+    // authoritative profile fan-out.
+    expect(
+      shouldPropagateNamedRecipeRows(
+        [{ ingredient: "Dough Flour", lbs: 7 }],
+        undefined,
+        true,
+      ),
+    ).toBe(true);
+  });
+
   it("refreshes only runs that have never started", () => {
     expect(isRunRecipeRefreshEligible({})).toBe(true);
     expect(isRunRecipeRefreshEligible({ startedAt: 1 })).toBe(false);
@@ -212,6 +255,147 @@ describe("shared recipe snapshot boundary", () => {
     await expect(refresh).resolves.toBe(1);
     expect(profileFanOutFinished).toBe(true);
     expect(openFormRefreshes).toBe(0);
+  });
+
+  it("keeps the originating run identity across delayed refresh preparation", async () => {
+    // A profile bootstrap may finish before the shared-refresh orchestrator is
+    // invoked. The caller must pass the run identity captured before that
+    // bootstrap, or this newly selected run would be mistaken for the owner.
+    const initiatingRunId = "run-a";
+    let currentRun = { id: initiatingRunId };
+    let releasePreparation!: () => void;
+    const preparation = new Promise<void>((resolve) => {
+      releasePreparation = resolve;
+    });
+    const profileFanOuts: string[] = [];
+    let openFormRefreshes = 0;
+
+    const refresh = (async () => {
+      await preparation;
+      return orchestrateSharedRecipeRefresh({
+        getCurrentRun: () => currentRun,
+        initiatingRunId,
+        refreshProfiles: () => {
+          profileFanOuts.push("profile-updated");
+          return 1;
+        },
+        refreshOpenForm: () => {
+          openFormRefreshes += 1;
+        },
+      });
+    })();
+
+    currentRun = { id: "run-b" };
+    releasePreparation();
+
+    await expect(refresh).resolves.toBe(1);
+    expect(profileFanOuts).toEqual(["profile-updated"]);
+    expect(openFormRefreshes).toBe(0);
+  });
+
+  it("patches only requested values on the eligible pending snapshot", () => {
+    const current = {
+      app1CheeseRecipe: [{ ingredient: "Cheese", lbs: 5 }],
+      app1BatchLbs: 5,
+      casesNeeded: 100,
+      sauceBarrelsMade: 3,
+    };
+    const refreshed = mergePendingRunSnapshotUpdates(
+      { id: "pending-run" },
+      current,
+      {
+        app1CheeseRecipe: [{ ingredient: "Cheese", lbs: 12 }],
+        app1BatchLbs: 12,
+      },
+    );
+
+    expect(refreshed).toEqual({
+      app1CheeseRecipe: [{ ingredient: "Cheese", lbs: 12 }],
+      app1BatchLbs: 12,
+      casesNeeded: 100,
+      sauceBarrelsMade: 3,
+    });
+    expect(current.app1BatchLbs).toBe(5);
+  });
+
+  it("patches the selected pending mix slot without replacing unrelated run values", () => {
+    const current = {
+      app1Type: "Mix",
+      app1CheeseRecipeName: "Shared Mix",
+      app1CheeseRecipe: [
+        { ingredient: "Mix Ingredient A", lbs: 1 },
+        { ingredient: "Mix Ingredient B", lbs: 1 },
+      ],
+      app2Type: "Cheese",
+      app2CheeseRecipeName: "Shared Mix",
+      app2CheeseRecipe: [{ ingredient: "Mozzarella", lbs: 8 }],
+      casesNeeded: 100,
+      sauceBarrelsMade: 2,
+      app1BatchesMade: 3,
+      operatorNote: "keep this edit",
+    };
+    const updates = buildMixRunSnapshotUpdates(current, " shared mix ", [
+      { ingredient: "Mix Ingredient A", lbs: 4 },
+      { ingredient: "Mix Ingredient B", lbs: 1 },
+    ]);
+    const refreshed = mergePendingRunSnapshotUpdates(
+      { id: "selected-pending-run" },
+      current,
+      updates,
+    );
+
+    expect(refreshed).toEqual({
+      ...current,
+      app1CheeseRecipe: [
+        { ingredient: "Mix Ingredient A", lbs: 4 },
+        { ingredient: "Mix Ingredient B", lbs: 1 },
+      ],
+    });
+    expect(current.app1CheeseRecipe[0].lbs).toBe(1);
+  });
+
+  it.each([
+    ["started", { startedAt: 1 }],
+    ["paused", { startedAt: 1, pausedAt: 2 }],
+    ["ended", { startedAt: 1, endedAt: 3 }],
+  ] as const)("does not patch a %s run snapshot", (_status, lifecycle) => {
+    expect(
+      mergePendingRunSnapshotUpdates(
+        { id: "frozen-run", ...lifecycle },
+        { app1BatchLbs: 5 },
+        { app1BatchLbs: 12 },
+      ),
+    ).toBeUndefined();
+  });
+
+  it("waits for the open pending snapshot refresh to finish", async () => {
+    const order: string[] = [];
+    let releaseSnapshot!: () => void;
+    const snapshotPersisted = new Promise<void>((resolve) => {
+      releaseSnapshot = resolve;
+    });
+    const refresh = orchestrateSharedRecipeRefresh({
+      getCurrentRun: () => ({ id: "pending-run" }),
+      refreshProfiles: () => {
+        order.push("profiles");
+        return 1;
+      },
+      refreshOpenForm: async () => {
+        order.push("open-snapshot-start");
+        await snapshotPersisted;
+        order.push("open-snapshot-acknowledged");
+      },
+    });
+
+    await Promise.resolve();
+    expect(order).toEqual(["profiles", "open-snapshot-start"]);
+    releaseSnapshot();
+    await expect(refresh).resolves.toBe(1);
+    expect(order).toEqual([
+      "profiles",
+      "open-snapshot-start",
+      "open-snapshot-acknowledged",
+    ]);
   });
 
   it("finishes delayed batch-weight fan-out without updating the newly selected run form", async () => {

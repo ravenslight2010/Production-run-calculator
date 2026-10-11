@@ -1,0 +1,78 @@
+--- a/lib/distill-dataset/src/index.ts
++++ b/lib/distill-dataset/src/index.ts
+@@ assessTrainSafety
+   options?: {
+     criticalFields?: string[];
+     goldNonBlankFields?: string[];
++    /** Exact gold values for critical fields (enables invented-value reject). */
++    goldValues?: Record<string, unknown>;
++    /** Byte-identical production system prompt pin (C.3 soft quality). */
++    expectedSystemPrompt?: string;
++    /** Current production SPEC_PARSE_VERSION; mismatch -> quarantine. */
++    currentSchemaVersion?: number;
+     nearDuplicateOfHoldout?: boolean;
+     brandInOtherPartition?: boolean;
+   },
+ ): TrainSafetyResult {
+@@
+-    if (
+-      content.startsWith("```") || content.includes("```json")
+-    ) {
++    if (/^\s*```/i.test(content) || /```json/i.test(content)) {
+       reasons.push("assistant content contains markdown fences");
+     }
+@@ blank-poison block, after the criticalFields loop:
++    if (options?.goldValues && options.criticalFields?.length) {
++      for (const field of options.criticalFields) {
++        if (!(field in options.goldValues)) continue;
++        const v = obj[field];
++        const gold = options.goldValues[field];
++        // Numeric tolerance for floats; strict otherwise.
++        const same =
++          typeof v === "number" && typeof gold === "number"
++            ? Math.abs(v - gold) < 1e-9
++            : JSON.stringify(v) === JSON.stringify(gold);
++        if (!same) {
++          reasons.push(
++            `invented value: critical field "${field}" is ${JSON.stringify(v)} but gold is ${JSON.stringify(gold)}`,
++          );
++        }
++      }
++    }
++
++  const system = example.messages.find((m) => m.role === "system");
++  if (options?.expectedSystemPrompt !== undefined) {
++    if (!system || system.content !== options.expectedSystemPrompt) {
++      reasons.push("system prompt differs from production pin");
++    }
++  }
++  if (
++    options?.currentSchemaVersion !== undefined &&
++    example.schemaVersion !== options.currentSchemaVersion
++  ) {
++    reasons.push(
++      `schemaVersion ${example.schemaVersion} != production ${options.currentSchemaVersion}`,
++    );
++  }
+@@ after assertBrandPartitionIntegrity
++/**
++ * Exact-content leakage gate (research doc section 5): the same
++ * contentSha256 must never appear in two live partitions, even for
++ * different brands (a re-skinned workbook is still a leak).
++ * Quarantine is exempt.
++ */
++export function assertNoCrossPartitionContentDuplicates(
++  entries: DistillManifestEntry[],
++): void {
++  const seen = new Map<string, DistillPartition>();
++  for (const e of entries) {
++    if (e.partition === "quarantine") continue;
++    const prev = seen.get(e.contentSha256);
++    if (prev && prev !== e.partition) {
++      throw new Error(
++        `content hash leak: ${e.contentSha256.slice(0, 12)}... in both ${prev} and ${e.partition}`,
++      );
++    }
++    seen.set(e.contentSha256, e.partition);
++  }
++}

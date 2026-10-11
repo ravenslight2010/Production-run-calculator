@@ -1,5 +1,13 @@
-export const AUTO_TRACK_COORDINATION_VERSION = 1 as const;
+import {
+  applicatorStockFields,
+  applicatorStockRegisterForChannel,
+  capApplicatorStock,
+  computeApplicatorStockCapacityLbs,
+  computeApplicatorStockRateLbsPerSecond,
+  computeServerCalc,
+} from "@workspace/live-calc";
 
+export const AUTO_TRACK_COORDINATION_VERSION = 1 as const;
 export const AUTO_TRACK_CHANNELS = [
   "case",
   "tray-consume",
@@ -12,6 +20,14 @@ export const AUTO_TRACK_CHANNELS = [
   "app2-batch",
   "app3-batch",
   "app4-batch",
+  "app1-stock",
+  "app2-stock",
+  "app3-stock",
+  "app4-stock",
+  "pep1-stock",
+  "pep1b-stock",
+  "pep2-stock",
+  "pep2b-stock",
 ] as const;
 
 export type AutoTrackChannel = typeof AUTO_TRACK_CHANNELS[number];
@@ -50,7 +66,15 @@ export type AutoTrackMutation = {
     | "app3BatchCorrectionGeneration"
     | "app4BatchesMade"
     | "app4BatchAnchorNetSec"
-    | "app4BatchCorrectionGeneration";
+    | "app4BatchCorrectionGeneration"
+    | "app1StockLbs" | "app1StockAnchorNetSec" | "app1StockCorrectionGeneration"
+    | "app2StockLbs" | "app2StockAnchorNetSec" | "app2StockCorrectionGeneration"
+    | "app3StockLbs" | "app3StockAnchorNetSec" | "app3StockCorrectionGeneration"
+    | "app4StockLbs" | "app4StockAnchorNetSec" | "app4StockCorrectionGeneration"
+    | "pep1StockLbs" | "pep1StockAnchorNetSec" | "pep1StockCorrectionGeneration"
+    | "pep1bStockLbs" | "pep1bStockAnchorNetSec" | "pep1bStockCorrectionGeneration"
+    | "pep2StockLbs" | "pep2StockAnchorNetSec" | "pep2StockCorrectionGeneration"
+    | "pep2bStockLbs" | "pep2bStockAnchorNetSec" | "pep2bStockCorrectionGeneration";
   from: number;
   to: number;
 };
@@ -104,6 +128,14 @@ const MUTATING_FIELDS = new Set<AutoTrackMutation["field"]>([
   "app4BatchesMade",
   "app4BatchAnchorNetSec",
   "app4BatchCorrectionGeneration",
+  "app1StockLbs", "app1StockAnchorNetSec", "app1StockCorrectionGeneration",
+  "app2StockLbs", "app2StockAnchorNetSec", "app2StockCorrectionGeneration",
+  "app3StockLbs", "app3StockAnchorNetSec", "app3StockCorrectionGeneration",
+  "app4StockLbs", "app4StockAnchorNetSec", "app4StockCorrectionGeneration",
+  "pep1StockLbs", "pep1StockAnchorNetSec", "pep1StockCorrectionGeneration",
+  "pep1bStockLbs", "pep1bStockAnchorNetSec", "pep1bStockCorrectionGeneration",
+  "pep2StockLbs", "pep2StockAnchorNetSec", "pep2StockCorrectionGeneration",
+  "pep2bStockLbs", "pep2bStockAnchorNetSec", "pep2bStockCorrectionGeneration",
 ]);
 const CHANNEL_FIELDS: Record<AutoTrackChannel, ReadonlySet<AutoTrackMutation["field"]>> = {
   case: new Set(["skidsCompleted", "casesOnCurrentSkid"]),
@@ -137,6 +169,14 @@ const CHANNEL_FIELDS: Record<AutoTrackChannel, ReadonlySet<AutoTrackMutation["fi
     "app4BatchAnchorNetSec",
     "app4BatchCorrectionGeneration",
   ]),
+  "app1-stock": new Set(["app1StockLbs", "app1StockAnchorNetSec", "app1StockCorrectionGeneration"]),
+  "app2-stock": new Set(["app2StockLbs", "app2StockAnchorNetSec", "app2StockCorrectionGeneration"]),
+  "app3-stock": new Set(["app3StockLbs", "app3StockAnchorNetSec", "app3StockCorrectionGeneration"]),
+  "app4-stock": new Set(["app4StockLbs", "app4StockAnchorNetSec", "app4StockCorrectionGeneration"]),
+  "pep1-stock": new Set(["pep1StockLbs", "pep1StockAnchorNetSec", "pep1StockCorrectionGeneration"]),
+  "pep1b-stock": new Set(["pep1bStockLbs", "pep1bStockAnchorNetSec", "pep1bStockCorrectionGeneration"]),
+  "pep2-stock": new Set(["pep2StockLbs", "pep2StockAnchorNetSec", "pep2StockCorrectionGeneration"]),
+  "pep2b-stock": new Set(["pep2bStockLbs", "pep2bStockAnchorNetSec", "pep2bStockCorrectionGeneration"]),
 };
 function finiteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
@@ -169,7 +209,8 @@ export function parseAutoTrackClaim(input: unknown, now = Date.now()): AutoTrack
     || !Array.isArray(body.mutations)
     || body.mutations.length > 3
   ) return null;
-  const netTimeChannel = body.channel === "sauce-barrel" || /^app[1-4]-batch$/.test(body.channel);
+  const stockChannel = !!applicatorStockRegisterForChannel(body.channel);
+  const netTimeChannel = body.channel === "sauce-barrel" || /^app[1-4]-batch$/.test(body.channel) || stockChannel;
   if (
     netTimeChannel
       ? body.dueAt < 0 || body.nextDueAt > 1_000_000
@@ -181,7 +222,7 @@ export function parseAutoTrackClaim(input: unknown, now = Date.now()): AutoTrack
         || body.nextDueAt > now + 24 * 60 * 60_000
   ) return null;
   if (
-    (body.channel === "case" || body.channel === "sauce-barrel" || /^app[1-4]-batch$/.test(body.channel))
+    (body.channel === "case" || body.channel === "sauce-barrel" || /^app[1-4]-batch$/.test(body.channel) || stockChannel)
     && (!Number.isSafeInteger(body.correctionGeneration) || (body.correctionGeneration as number) < 0)
   ) return null;
 
@@ -239,6 +280,24 @@ export function parseAutoTrackClaim(input: unknown, now = Date.now()): AutoTrack
       || correction.from !== body.correctionGeneration
     ) return null;
   }
+  if (stockChannel) {
+    const register = applicatorStockRegisterForChannel(body.channel)!;
+    const fields = applicatorStockFields(register);
+    const byField = new Map(mutations.map((mutation) => [mutation.field, mutation]));
+    const stock = byField.get(fields.stock as AutoTrackMutation["field"]);
+    const anchor = byField.get(fields.anchor as AutoTrackMutation["field"]);
+    const correction = byField.get(fields.correctionGeneration as AutoTrackMutation["field"]);
+    if (
+      mutations.length !== 3
+      || !stock || !anchor || !correction
+      || stock.to > stock.from
+      || anchor.to < anchor.from
+      || anchor.to !== body.dueAt
+      || !Number.isSafeInteger(correction.from)
+      || correction.from !== correction.to
+      || correction.from !== body.correctionGeneration
+    ) return null;
+  }
 
   return {
     version: AUTO_TRACK_COORDINATION_VERSION,
@@ -250,7 +309,7 @@ export function parseAutoTrackClaim(input: unknown, now = Date.now()): AutoTrack
     dueAt: body.dueAt,
     nextDueAt: body.nextDueAt,
     baseUpdatedAt: body.baseUpdatedAt,
-    ...(body.channel === "case" || body.channel === "sauce-barrel" || /^app[1-4]-batch$/.test(body.channel)
+    ...(body.channel === "case" || body.channel === "sauce-barrel" || /^app[1-4]-batch$/.test(body.channel) || stockChannel
       ? { correctionGeneration: body.correctionGeneration as number }
       : {}),
     mutations,
@@ -331,7 +390,41 @@ export function applyAutoTrackClaim(
     ) outcome = "conflict";
   }
 
-  if (outcome === "accepted" && (claim.channel === "sauce-barrel" || /^app[1-4]-batch$/.test(claim.channel))) {
+  const stockRegister = applicatorStockRegisterForChannel(claim.channel);
+  if (outcome === "accepted" && stockRegister) {
+    const fields = applicatorStockFields(stockRegister);
+    const capacity = computeApplicatorStockCapacityLbs(values, stockRegister);
+    const stockMutation = claim.mutations.find(({ field }) => field === fields.stock);
+    const anchorMutation = claim.mutations.find(({ field }) => field === fields.anchor);
+    const stock = Number(values[fields.stock]);
+    const generation = values[fields.correctionGeneration] ?? 0;
+    const elapsed = anchorMutation ? anchorMutation.to - anchorMutation.from : 0;
+    const ozField = stockRegister.endsWith("b")
+      ? `${stockRegister.slice(0, -1)}OzPerPizzaB`
+      : `${stockRegister}OzPerPizza`;
+    const ppm = (() => {
+      try {
+        return Number(computeServerCalc(data as never, [], now)?.calc?.ppm) || 0;
+      } catch {
+        return 0;
+      }
+    })();
+    const expected = capApplicatorStock(
+      stock - elapsed * computeApplicatorStockRateLbsPerSecond(values[ozField], ppm),
+      capacity,
+    );
+    if (
+      values.applicatorStockInitialized !== true
+      || capacity <= 0
+      || !Number.isFinite(stock)
+      || stock < 0
+      || stock > capacity
+      || !Number.isSafeInteger(generation)
+      || generation !== claim.correctionGeneration
+      || !stockMutation
+      || Math.abs(stockMutation.to - expected) > 0.011
+    ) outcome = "conflict";
+  } else if (outcome === "accepted" && (claim.channel === "sauce-barrel" || /^app[1-4]-batch$/.test(claim.channel))) {
     const correctionField = claim.channel === "sauce-barrel"
       ? "sauceBarrelCorrectionGeneration"
       : `app${claim.channel[3]}BatchCorrectionGeneration`;

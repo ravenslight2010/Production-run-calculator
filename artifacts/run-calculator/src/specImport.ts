@@ -71,12 +71,15 @@ import {
   type SpecImportSkipped,
   type SpecImportSummary,
   type SpecImportUnresolved,
+  type SpecImportSourceLocation,
   type SpecMatchKnown,
   type OverflowColumnRow,
   type TruncatedCell,
   type ImportMergeAlias,
   type ImportMergeAliasMap,
   resolveImportName,
+  SPEC_IMPORT_PARSE_VERSION,
+  stripSpecImportSourceLocations,
 } from "@workspace/spec-import";
 import {
   buildImportReview,
@@ -125,7 +128,11 @@ import {
 } from "./parseSpecSheet";
 import { requestMatchImport } from "./matchImport";
 import { fetchMergeAliases } from "./mergeSuggest";
-import { saveAiCorrections } from "./aiCorrections";
+import {
+  logCorrectionWriteFailure,
+  saveAiCorrections,
+  type AiCorrection,
+} from "./aiCorrections";
 import { fetchMixes, saveMixes } from "./mixes";
 import { fetchCheeseRecipes, saveCheeseRecipes } from "./cheeseRecipes";
 import { addNamedRecipesToServerIfAbsent, fetchNamedRecipes, saveNamedRecipes } from "./namedRecipes";
@@ -185,6 +192,13 @@ function assertNamedRecipeWriteLanded(
 export type SpecImportPrepared = {
   /** Canonicalized, ready-to-apply parse result. */
   parsed: ParsedSpecImport;
+  /** Supported profile fields backed by formula cells that have no saved result. */
+  missingFormulaResults?: SpecImportMissingFormulaResult[];
+  /**
+   * Cited values and formula details from the current workbook(s), retained only
+   * for the active review UI. Never pass this field to commit or history.
+   */
+  sourcePreviewCells?: SpecImportSourcePreviewCell[];
   summary: SpecImportSummary;
   /** New label→canonical mappings learned this import (persisted on confirm). */
   newAliases: SpecImportAlias[];
@@ -228,6 +242,8 @@ export type SpecImportPrepared = {
    * re-running the AI (whose read of the same sheet can drift between calls).
    */
   sourceHash?: string;
+  /** Bounded review source text with formula-cell results redacted before Apply. */
+  sourceEvidence?: { sourceText: string; parseVersion: string };
   /**
    * Previously learned "use existing recipe" picks (sheet blend/mix name →
    * existing saved recipe name, lower-cased key). The review dialog uses these
@@ -286,6 +302,27 @@ export type SpecImportPrepared = {
   doughVariantsFromTable?: DoughVariantTableEntry[];
 };
 
+export type SpecImportSourcePreviewCell = {
+  file?: string;
+  sheet: string;
+  cell: string;
+  value: string;
+  /** Present only for formula-backed cells in the active review. */
+  formula?: string;
+  /** Distinguishes a missing cached result from a saved blank result. */
+  hasSavedResult?: boolean;
+  /** Workbook-saved result shown only while the active review is open. */
+  savedResult?: string;
+};
+
+export type SpecImportMissingFormulaResult = {
+  field: string;
+  location: SpecImportSourceLocation;
+  hasSavedResult: false;
+  brand?: string;
+  flavor?: string;
+};
+
 /**
  * Build the review's link suggestions from the saved learned aliases. Cheese
  * blend / mix name links are stored under the "appType" kind (the applicator /
@@ -334,33 +371,389 @@ export function buildAliasLinkSuggestions(aliases: SpecImportAlias[]): Record<st
   return out;
 }
 
-// Map a learned spec-import alias kind to a shared-corrections domain.
-function aliasKindToDomain(kind: SpecAliasKind): string {
-  if (kind === "brand") return "brand";
-  if (kind === "flavor") return "flavor";
-  if (kind === "appType" || kind === "pepType" || kind === "recipeName") return "item";
-  // dough/sauce/cheese ingredient kinds
-  return "ingredient";
+// Only mirror alias kinds that represent a name correction, and map each
+// explicitly. In particular, routing choices are not ingredient corrections.
+function aliasKindToDomain(kind: SpecAliasKind): string | null {
+  switch (kind) {
+    case "brand":
+      return "brand";
+    case "flavor":
+      return "flavor";
+    case "appType":
+    case "pepType":
+    case "recipeName":
+      return "item";
+    case "cheeseIngredient":
+    case "doughIngredient":
+    case "sauceIngredient":
+      return "ingredient";
+    case "dieType":
+      return "die";
+    case "crossFamilyRouting":
+    default:
+      return null;
+  }
 }
 
-/** Read an .xlsx File/Blob into flat sheet grids (string cells). */
-export async function readWorkbookGrids(data: ArrayBuffer): Promise<SheetGrid[]> {
+export function mapSpecAliasToAiCorrection(
+  alias: SpecImportAlias,
+): AiCorrection | null {
+  const domain = aliasKindToDomain(alias.kind);
+  if (!domain) return null;
+  return {
+    domain,
+    fromText: alias.externalName,
+    toText: alias.canonicalName,
+  };
+}
+
+type WorkbookFormulaCell = {
+  formula: string;
+  hasSavedResult: boolean;
+};
+
+type WorkbookSourceData = {
+  grids: SheetGrid[];
+  formulasBySheet: Map<string, Map<string, WorkbookFormulaCell>>;
+};
+
+/** Read workbook values and transient formula metadata without evaluating formulas. */
+function readWorkbookSourceData(data: ArrayBuffer, sourceFile?: string): WorkbookSourceData {
   const wb = XLSX.read(data, { type: "array" });
   const grids: SheetGrid[] = [];
+  const formulasBySheet = new Map<string, Map<string, WorkbookFormulaCell>>();
   for (const name of wb.SheetNames) {
     const ws = wb.Sheets[name];
     if (!ws) continue;
+    const formulaCells = new Map<string, WorkbookFormulaCell>();
+    for (const [address, rawCell] of Object.entries(ws)) {
+      if (address.startsWith("!") || !rawCell || typeof rawCell !== "object") continue;
+      const cell = rawCell as XLSX.CellObject;
+      if (typeof cell.f !== "string" || !cell.f) continue;
+      formulaCells.set(address.toUpperCase(), {
+        formula: cell.f,
+        hasSavedResult: cell.v !== undefined && cell.v !== null,
+      });
+    }
+    formulasBySheet.set(name, formulaCells);
+    const usedRange = ws["!ref"] ? XLSX.utils.decode_range(ws["!ref"]) : null;
+    if (!usedRange) continue;
     const rows = XLSX.utils.sheet_to_json<unknown[]>(ws, {
       header: 1,
       defval: "",
-      blankrows: false,
+      // Preserve blank rows and the A1 origin so deterministic row indices
+      // continue to match the workbook's actual Excel coordinates.
+      blankrows: true,
+      range: { s: { r: 0, c: 0 }, e: usedRange.e },
     });
     grids.push({
       name,
       rows: rows.map(r => (Array.isArray(r) ? r.map(c => (c == null ? "" : String(c))) : [])),
+      ...(sourceFile?.trim() ? { sourceFile: sourceFile.trim() } : {}),
     });
   }
-  return grids;
+  return { grids, formulasBySheet };
+}
+
+/** Read an .xlsx File/Blob into flat sheet grids (string cells). */
+export async function readWorkbookGrids(data: ArrayBuffer, sourceFile?: string): Promise<SheetGrid[]> {
+  return readWorkbookSourceData(data, sourceFile).grids;
+}
+
+type SourcePreviewWorkbook = {
+  file?: string;
+  sheets: SheetGrid[];
+  formulasBySheet?: Map<string, Map<string, WorkbookFormulaCell>>;
+};
+
+function deterministicWorkbookKey(value: unknown): string {
+  return String(value ?? "").replace(/\s+/g, " ").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function supportedProfileFieldLabel(header: string): string | undefined {
+  const key = deterministicWorkbookKey(header);
+  switch (key) {
+    case "brand":
+      return "Brand";
+    case "flavor":
+      return "Flavor";
+    case "dietype":
+      return "Die Type";
+    case "sauceozpizza":
+    case "sauceozperpizza":
+      return "Sauce oz/pizza";
+    case "doughrecipe":
+      return "Dough Recipe";
+    case "saucerecipe":
+      return "Sauce Recipe";
+    case "targetdoughballweightoz":
+      return "Target Doughball Weight (oz)";
+    case "doughballspertray":
+      return "Doughballs Per Tray";
+    default:
+      if (/^applicator\d+(type|ozpizza|recipe)$/.test(key)) {
+        return header.trim().replace(/\s+/g, " ");
+      }
+      if (/^pepperoni\d+(type|sticks|ozpizza)$/.test(key)) {
+        return header.trim().replace(/\s+/g, " ");
+      }
+      return undefined;
+  }
+}
+
+/**
+ * Locate missing cached results only in the documented profile-table layout
+ * and columns the deterministic spec parser understands. Formula metadata is
+ * read from the workbook as-is; formulas are never evaluated or substituted.
+ */
+function findMissingFormulaResults(workbook: SourcePreviewWorkbook): {
+  warnings: SpecImportMissingFormulaResult[];
+  previewCells: SpecImportSourcePreviewCell[];
+} {
+  const warnings: SpecImportMissingFormulaResult[] = [];
+  const previewCells: SpecImportSourcePreviewCell[] = [];
+  for (const grid of workbook.sheets) {
+    const headerRowIndex = grid.rows.findIndex((row) =>
+      row.some((cell) => String(cell ?? "").trim()),
+    );
+    if (headerRowIndex < 0) continue;
+    const headers = grid.rows[headerRowIndex].map((cell) => String(cell ?? "").trim());
+    const brandColumn = headers.findIndex((header) => deterministicWorkbookKey(header) === "brand");
+    const flavorColumn = headers.findIndex((header) => deterministicWorkbookKey(header) === "flavor");
+    if (brandColumn < 0 || flavorColumn < 0) continue;
+
+    const supportedColumns = new Map<number, string>();
+    headers.forEach((header, column) => {
+      const label = supportedProfileFieldLabel(header);
+      if (label) supportedColumns.set(column, label);
+    });
+    if (!supportedColumns.size) continue;
+
+    const formulaCells = workbook.formulasBySheet?.get(grid.name);
+    if (!formulaCells?.size) continue;
+    for (const [rawAddress, formulaCell] of formulaCells) {
+      if (formulaCell.hasSavedResult) continue;
+      const address = rawAddress.toUpperCase();
+      let coordinates: XLSX.CellAddress;
+      try {
+        coordinates = XLSX.utils.decode_cell(address);
+      } catch {
+        continue;
+      }
+      if (coordinates.r <= headerRowIndex) continue;
+      const field = supportedColumns.get(coordinates.c);
+      if (!field) continue;
+
+      const row = grid.rows[coordinates.r] ?? [];
+      const brand = String(row[brandColumn] ?? "").trim();
+      const flavor = String(row[flavorColumn] ?? "").trim();
+      const location: SpecImportSourceLocation = {
+        ...(workbook.file ? { file: workbook.file } : {}),
+        sheet: grid.name,
+        cell: address,
+      };
+      warnings.push({
+        field,
+        location,
+        hasSavedResult: false,
+        ...(brand ? { brand } : {}),
+        ...(flavor ? { flavor } : {}),
+      });
+      previewCells.push({
+        ...(workbook.file ? { file: workbook.file } : {}),
+        sheet: grid.name,
+        cell: address,
+        value: String(row[coordinates.c] ?? ""),
+        formula: formulaCell.formula,
+        hasSavedResult: false,
+      });
+    }
+  }
+  return { warnings, previewCells };
+}
+
+function mergeSourcePreviewCells(
+  ...groups: ReadonlyArray<ReadonlyArray<SpecImportSourcePreviewCell>>
+): SpecImportSourcePreviewCell[] {
+  const merged = new Map<string, SpecImportSourcePreviewCell>();
+  for (const group of groups) {
+    for (const cell of group) {
+      merged.set(`${cell.file ?? ""}\0${cell.sheet}\0${cell.cell.toUpperCase()}`, cell);
+    }
+  }
+  return [...merged.values()];
+}
+
+function sourceLocationsInParsed(parsed: ParsedSpecImport): SpecImportSourceLocation[] {
+  const found: SpecImportSourceLocation[] = [];
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    if (!value || typeof value !== "object") return;
+    const record = value as Record<string, unknown>;
+    const sources = record.sourceLocations;
+    const lists = Array.isArray(sources)
+      ? [sources]
+      : sources && typeof sources === "object"
+        ? Object.values(sources as Record<string, unknown>).filter(Array.isArray)
+        : [];
+    for (const list of lists) {
+      for (const candidate of list) {
+        if (
+          candidate &&
+          typeof candidate === "object" &&
+          typeof (candidate as SpecImportSourceLocation).sheet === "string" &&
+          typeof (candidate as SpecImportSourceLocation).cell === "string"
+        ) {
+          found.push(candidate as SpecImportSourceLocation);
+        }
+      }
+    }
+    for (const [key, nested] of Object.entries(record)) {
+      if (key !== "sourceLocations") visit(nested);
+    }
+  };
+  visit(parsed);
+  return found;
+}
+
+/**
+ * Build a small, review-only allowlist from cells that are both cited by the
+ * parsed data and present at the exact address in the current workbook. Do not
+ * expose whole sheets or accept model-provided cell text as preview content.
+ */
+function buildSourcePreviewCells(
+  parsed: ParsedSpecImport,
+  workbooks: SourcePreviewWorkbook[],
+): SpecImportSourcePreviewCell[] {
+  const verified = new Map<string, SpecImportSourcePreviewCell>();
+  for (const location of sourceLocationsInParsed(parsed)) {
+    const file = location.file?.trim();
+    const candidates = file
+      ? workbooks.filter((workbook) => workbook.file === file)
+      : workbooks.length === 1
+        ? workbooks
+        : [];
+    if (candidates.length !== 1) continue;
+
+    const address = location.cell.trim().toUpperCase();
+    if (!/^[A-Z]{1,3}[1-9]\d{0,6}$/.test(address)) continue;
+    let coordinates: XLSX.CellAddress;
+    try {
+      coordinates = XLSX.utils.decode_cell(address);
+    } catch {
+      continue;
+    }
+    if (
+      !Number.isInteger(coordinates.r) ||
+      !Number.isInteger(coordinates.c) ||
+      coordinates.r < 0 ||
+      coordinates.r >= 1_048_576 ||
+      coordinates.c < 0 ||
+      coordinates.c >= 16_384 ||
+      XLSX.utils.encode_cell(coordinates) !== address
+    ) {
+      continue;
+    }
+
+    const workbook = candidates[0];
+    const sheet = workbook.sheets.find((candidate) => candidate.name === location.sheet);
+    const value = sheet?.rows[coordinates.r]?.[coordinates.c];
+    if (typeof value !== "string") continue;
+    const formulaCell = workbook.formulasBySheet?.get(location.sheet)?.get(address);
+
+    const preview: SpecImportSourcePreviewCell = {
+      ...(workbook.file ? { file: workbook.file } : {}),
+      sheet: location.sheet,
+      cell: address,
+      value,
+      ...(formulaCell
+        ? {
+            formula: formulaCell.formula,
+            hasSavedResult: formulaCell.hasSavedResult,
+            ...(formulaCell.hasSavedResult ? { savedResult: value } : {}),
+          }
+        : {}),
+    };
+    const key = `${preview.file ?? ""}\0${preview.sheet}\0${preview.cell}`;
+    verified.set(key, preview);
+  }
+  return [...verified.values()];
+}
+
+function retainCitedSourcePreviewCells(
+  parsed: ParsedSpecImport,
+  candidates: readonly SpecImportSourcePreviewCell[],
+): SpecImportSourcePreviewCell[] {
+  const cited = new Set(
+    sourceLocationsInParsed(parsed).map(
+      (location) =>
+        `${location.file?.trim() ?? ""}\0${location.sheet}\0${location.cell.trim().toUpperCase()}`,
+    ),
+  );
+  return candidates.filter((cell) =>
+    cited.has(`${cell.file ?? ""}\0${cell.sheet}\0${cell.cell.toUpperCase()}`),
+  );
+}
+
+function attributeSourceFile(
+  parsed: ParsedSpecImport,
+  file?: string,
+): ParsedSpecImport {
+  const name = file?.trim().slice(0, 128);
+  if (!name) return parsed;
+  const addFile = (locations?: SpecImportSourceLocation[]) =>
+    locations?.map((location) => ({ ...location, file: name }));
+  const addMap = (
+    map?: Record<string, SpecImportSourceLocation[]>,
+  ): Record<string, SpecImportSourceLocation[]> | undefined => {
+    if (!map) return undefined;
+    const out: Record<string, SpecImportSourceLocation[]> = {};
+    for (const [field, locations] of Object.entries(map)) {
+      const withFile = addFile(locations);
+      if (withFile?.length) out[field] = withFile;
+    }
+    return Object.keys(out).length ? out : undefined;
+  };
+  return {
+    ...parsed,
+    profiles: parsed.profiles.map((profile) => ({
+      ...profile,
+      ...(profile.sourceLocations ? { sourceLocations: addMap(profile.sourceLocations) } : {}),
+      applicators: profile.applicators.map((applicator) => ({
+        ...applicator,
+        ...(applicator.sourceLocations
+          ? { sourceLocations: addMap(applicator.sourceLocations) }
+          : {}),
+      })),
+      pepperonis: profile.pepperonis.map((pepperoni) => ({
+        ...pepperoni,
+        ...(pepperoni.sourceLocations
+          ? { sourceLocations: addMap(pepperoni.sourceLocations) }
+          : {}),
+      })),
+    })),
+    recipes: parsed.recipes.map((recipe) => ({
+      ...recipe,
+      ...(recipe.sourceLocations ? { sourceLocations: addMap(recipe.sourceLocations) } : {}),
+      rows: recipe.rows.map((row) => ({
+        ...row,
+        ...(row.sourceLocations ? { sourceLocations: addFile(row.sourceLocations) } : {}),
+      })),
+      ...(recipe.targets
+        ? {
+            targets: recipe.targets.map((target) => ({
+              ...target,
+              ...(target.sourceLocations
+                ? { sourceLocations: addFile(target.sourceLocations) }
+                : {}),
+            })),
+          }
+        : {}),
+    })),
+  };
 }
 
 function recipeKindToAliasKind(kind: "dough" | "sauce" | "cheese"): SpecAliasKind {
@@ -662,7 +1055,7 @@ async function parseWorkbookCore(
   known: ReturnType<typeof loadSpecImportKnown>,
   aliases: SpecImportAlias[],
   signal?: AbortSignal,
-  options: { allowAi: boolean } = { allowAi: false },
+  options: { allowAi: boolean; sourceFile?: string } = { allowAi: false },
 ): Promise<ParseCore> {
   if (signal?.aborted) throw signal.reason ?? new DOMException("Import cancelled", "AbortError");
   // Cheap pre-AI guard: the xlsx reader does NOT throw on garbage bytes (a
@@ -675,7 +1068,8 @@ async function parseWorkbookCore(
   }
   const deterministic = parseDeterministicSpecWorkbook(grids);
   if (!options.allowAi) {
-    const canonical = canonicalizeParsed(deterministic.parsed, known, aliases);
+    const sourced = attributeSourceFile(deterministic.parsed, options.sourceFile);
+    const canonical = canonicalizeParsed(sourced, known, aliases);
     return {
       parsed: canonical.parsed,
       resolved: canonical.resolved,
@@ -767,12 +1161,12 @@ async function parseWorkbookCore(
         // Keep the original result (empty + note) — the note still surfaces.
       }
     }
-    rawList.push({
+    rawList.push(stripSpecImportSourceLocations({
       profiles: ai.profiles,
       recipes: ai.recipes,
       ...(ai.note ? { note: ai.note } : {}),
       ...(ai.warnings?.length ? { warnings: ai.warnings } : {}),
-    });
+    }));
   }
 
   if (!rawList.length) {
@@ -1423,6 +1817,10 @@ async function sha256Hex(bytes: ArrayBuffer | Uint8Array): Promise<string> {
  * parses invented the same descriptive flavor (e.g. "Cheese") for every code
  * block, collapsing distinct products into one profile; those parses must not
  * be reused.
+ * v40→v41: remove the accidental unary-plus coercion that appended literal
+ * "NaN" to the production parse system prompt.
+  * v42→v43: deterministic workbook parses carry bounded cell addresses through
+  * review; addresses are stripped before Apply and never enter saved parses.
  * v14→v15: snap-to-existing link passes no longer silently rename imported
  * recipes onto merely SIMILAR pool names (word reorder / single typo / family
  * fold) — those become declinable review suggestions; only exact loose-key
@@ -1430,7 +1828,63 @@ async function sha256Hex(bytes: ArrayBuffer | Uint8Array): Promise<string> {
  * cross-linked names (prod evidence: Basha's Ultra Thin 5 Cheese mix saved as
  * "Lowe's/Hannaford 5Cheese Mix"); those parses must not be reused.
  */
-export const SPEC_PARSE_VERSION = "40";
+export const SPEC_PARSE_VERSION = SPEC_IMPORT_PARSE_VERSION;
+
+const MAX_APPLY_SOURCE_EVIDENCE_CHARS = 100_000;
+const MAX_APPLY_SOURCE_EVIDENCE_BYTES = 100 * 1024;
+
+function fitsApplySourceEvidenceLimit(sourceText: string): boolean {
+  return sourceText.length <= MAX_APPLY_SOURCE_EVIDENCE_CHARS &&
+    new TextEncoder().encode(sourceText).byteLength <= MAX_APPLY_SOURCE_EVIDENCE_BYTES;
+}
+
+function redactFormulaResultsFromGrids(
+  grids: SheetGrid[],
+  formulasBySheet?: Map<string, Map<string, WorkbookFormulaCell>>,
+): SheetGrid[] {
+  if (!formulasBySheet?.size) return grids;
+  return grids.map((grid) => {
+    const formulaCells = formulasBySheet.get(grid.name);
+    if (!formulaCells?.size) return grid;
+    const rows = grid.rows.map((row) => [...row]);
+    for (const address of formulaCells.keys()) {
+      const coordinates = XLSX.utils.decode_cell(address);
+      if (rows[coordinates.r]?.[coordinates.c] !== undefined) {
+        rows[coordinates.r][coordinates.c] = "";
+      }
+    }
+    return { ...grid, rows };
+  });
+}
+
+function sourceEvidenceFromGrids(
+  grids: SheetGrid[],
+  formulasBySheet?: Map<string, Map<string, WorkbookFormulaCell>>,
+): { sourceText: string; parseVersion: string } | undefined {
+  if (
+    grids.length > 24 ||
+    grids.some((grid) => grid.rows.length > 1000) ||
+    findTruncatedCells(grids).length > 0 ||
+    findOverflowColumnRows(grids).length > 0
+  ) return undefined;
+  // Formula results remain useful for parsing and the active review, but are
+  // never copied into the source text retained by an approved Apply operation.
+  const evidenceGrids = redactFormulaResultsFromGrids(grids, formulasBySheet);
+  const { chunks, droppedRows } = splitGridsForPrompt(evidenceGrids);
+  if (!chunks.length || droppedRows > 0) return undefined;
+  const sourceText = chunks.map((chunk) => gridsToPromptText(chunk)).join("\n\n");
+  if (!sourceText.trim() || !fitsApplySourceEvidenceLimit(sourceText)) return undefined;
+  return { sourceText, parseVersion: SPEC_PARSE_VERSION };
+}
+
+function combineSourceEvidence(
+  parts: ReadonlyArray<{ sourceText: string; parseVersion: string } | undefined>,
+): { sourceText: string; parseVersion: string } | undefined {
+  if (!parts.length || parts.some((part) => !part || part.parseVersion !== SPEC_PARSE_VERSION)) return undefined;
+  const sourceText = parts.map((part) => part!.sourceText).join("\n\n");
+  if (!fitsApplySourceEvidenceLimit(sourceText)) return undefined;
+  return { sourceText, parseVersion: SPEC_PARSE_VERSION };
+}
 
 /**
  * Content fingerprint for an import's uploaded file bytes: the per-file
@@ -1811,7 +2265,7 @@ export async function prepareSpecImport(
   data: ArrayBuffer,
   name?: string,
   signal?: AbortSignal,
-  options: { allowAi?: boolean } = {},
+  options: { allowAi?: boolean; includeSourcePreview?: boolean } = {},
 ): Promise<SpecImportPrepared> {
   if (signal?.aborted) throw signal.reason ?? new DOMException("Import cancelled", "AbortError");
   const ingredientMergeAliasesPromise = fetchIngredientMergeAliasesBestEffort();
@@ -1824,10 +2278,26 @@ export async function prepareSpecImport(
   // Always read grids for the deterministic parses (customer section, variant
   // table) even when reusing a cached AI parse. Both are cheap (no AI calls)
   // and must reflect the raw workbook content, not the possibly-stale snapshot.
-  const grids = await readWorkbookGrids(data);
+  const workbookData = readWorkbookSourceData(data);
+  const grids = workbookData.grids;
+  const deterministic = snapshot ? parseDeterministicSpecWorkbook(grids) : null;
+  const sourceEvidence = sourceEvidenceFromGrids(grids, workbookData.formulasBySheet);
+  const previewWorkbook: SourcePreviewWorkbook = {
+    file: name?.trim().slice(0, 128) || undefined,
+    sheets: grids,
+    formulasBySheet: workbookData.formulasBySheet,
+  };
+  const missingFormulaReview = findMissingFormulaResults(previewWorkbook);
   const doughCustomerAssignments = parseDoughCustomerAssignmentsFromGrids(grids);
   const doughVariantsFromTable = parseDoughVariantTableFromGrids(grids);
-  if (snapshot) {
+  if (
+    snapshot &&
+    !(
+      options.allowAi !== true &&
+      deterministic?.supported &&
+      deterministic.unresolved.length === 0
+    )
+  ) {
     const reused = await buildReusedPrepared(
       snapshot.data,
       known,
@@ -1838,8 +2308,19 @@ export async function prepareSpecImport(
     // Detect new mix ingredients even on a reused parse — the mixes pool may
     // have changed since the snapshot was taken (manager added a mix).
     const newMixIngredients = await computeNewMixIngredients(reused.parsed);
+    const sourcePreviewCells = options.includeSourcePreview === false
+      ? []
+      : mergeSourcePreviewCells(
+          buildSourcePreviewCells(reused.parsed, [previewWorkbook]),
+          missingFormulaReview.previewCells,
+        );
     return {
       ...reused,
+      ...(sourceEvidence ? { sourceEvidence } : {}),
+      ...(sourcePreviewCells.length > 0 ? { sourcePreviewCells } : {}),
+      ...(missingFormulaReview.warnings.length > 0
+        ? { missingFormulaResults: missingFormulaReview.warnings }
+        : {}),
       ...(newMixIngredients.length > 0 ? { newMixIngredients } : {}),
       ...(doughCustomerAssignments.length > 0 ? { doughCustomerAssignments } : {}),
       ...(doughVariantsFromTable.length > 0 ? { doughVariantsFromTable } : {}),
@@ -1847,7 +2328,7 @@ export async function prepareSpecImport(
   }
   const allowAi = options.allowAi === true;
   const { parsed: rawParsed, resolved, droppedRows, truncatedCells, overflowRows, aiFallbackGrids } =
-    await parseWorkbookCore(grids, known, aliases, signal, { allowAi });
+    await parseWorkbookCore(grids, known, aliases, signal, { allowAi, sourceFile: name });
 
   // Fold "new" names onto existing saved ones (no dupes) + conservative cross-fill.
   const { parsed: linked, matchAliases, linkSuggestions } = await linkParsed(
@@ -1908,6 +2389,12 @@ export async function prepareSpecImport(
   // Detect new ingredient rows on existing mixes — best-effort, after all
   // other work so it doesn't slow the AI parse path.
   const newMixIngredients = await computeNewMixIngredients(parsed);
+  const sourcePreviewCells = options.includeSourcePreview === false
+    ? []
+    : mergeSourcePreviewCells(
+        buildSourcePreviewCells(parsed, [previewWorkbook]),
+        missingFormulaReview.previewCells,
+      );
 
   return {
     parsed,
@@ -1925,6 +2412,11 @@ export async function prepareSpecImport(
       ...buildAliasLinkSuggestions(aliases),
     },
     ...(sourceHash ? { sourceHash } : {}),
+    ...(sourceEvidence ? { sourceEvidence } : {}),
+    ...(sourcePreviewCells.length > 0 ? { sourcePreviewCells } : {}),
+    ...(missingFormulaReview.warnings.length > 0
+      ? { missingFormulaResults: missingFormulaReview.warnings }
+      : {}),
     ...(aiFallbackGrids ? { aiFallbackGrids } : {}),
     ...(rawParsed.unresolved?.length ? { unresolved: rawParsed.unresolved } : {}),
     ...(note ? { note } : {}),
@@ -1963,7 +2455,10 @@ export async function prepareSpecImportFromText(
   const ws = XLSX.utils.aoa_to_sheet(rows);
   XLSX.utils.book_append_sheet(wb, ws, "Photographed spec sheets");
   const bytes = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
-  return prepareSpecImportWithAi(bytes, name, signal);
+  return prepareSpecImport(bytes, name, signal, {
+    allowAi: true,
+    includeSourcePreview: false,
+  });
 }
 
 /** Hard cap on files per import so one batch can't fan out into a flood of AI calls. */
@@ -1981,7 +2476,7 @@ export async function prepareSpecImportMulti(
   onProgress?: (done: number, total: number) => void,
   names?: string[],
   signal?: AbortSignal,
-  options: { allowAi?: boolean } = {},
+  options: { allowAi?: boolean; includeSourcePreview?: boolean } = {},
 ): Promise<SpecImportPrepared> {
   const ingredientMergeAliasesPromise = fetchIngredientMergeAliasesBestEffort();
   const { known, aliases } = await loadSpecImportContext();
@@ -1990,15 +2485,56 @@ export async function prepareSpecImportMulti(
   // (see prepareSpecImport). Must run before the parse loop — it releases the
   // buffers as it goes, and the hash needs the original bytes.
   const { sourceHash, snapshot } = await findReusableParse(names ?? [], buffers);
+  let snapshotWorkbooks: WorkbookSourceData[] | undefined;
   if (snapshot) {
-    onProgress?.(buffers.length, buffers.length);
-    return buildReusedPrepared(
-      snapshot.data,
-      known,
-      aliases,
-      sourceHash,
-      await ingredientMergeAliasesPromise,
-    );
+    const currentWorkbooks: WorkbookSourceData[] = [];
+    for (let i = 0; i < buffers.length; i++) {
+      currentWorkbooks.push(readWorkbookSourceData(buffers[i]));
+    }
+    const currentGrids = currentWorkbooks.map((workbook) => workbook.grids);
+    const fullyDeterministic = options.allowAi !== true &&
+      currentGrids.length === buffers.length &&
+      currentGrids.every((grids) => {
+        const result = parseDeterministicSpecWorkbook(grids);
+        return result.supported && result.unresolved.length === 0;
+      });
+    if (!fullyDeterministic) {
+      onProgress?.(buffers.length, buffers.length);
+      const sourceEvidenceParts = currentWorkbooks.map((workbook) =>
+        sourceEvidenceFromGrids(workbook.grids, workbook.formulasBySheet),
+      );
+      const previewWorkbooks = currentWorkbooks.map((workbook, i): SourcePreviewWorkbook => ({
+        file: names?.[i]?.trim().slice(0, 128) || `File ${i + 1}`,
+        sheets: workbook.grids,
+        formulasBySheet: workbook.formulasBySheet,
+      }));
+      const missingFormulaReviews = previewWorkbooks.map(findMissingFormulaResults);
+      const missingFormulaResults = missingFormulaReviews.flatMap((review) => review.warnings);
+      for (let i = 0; i < buffers.length; i++) buffers[i] = new ArrayBuffer(0);
+      const reused = await buildReusedPrepared(
+        snapshot.data,
+        known,
+        aliases,
+        sourceHash,
+        await ingredientMergeAliasesPromise,
+      );
+      const sourceEvidence = combineSourceEvidence(sourceEvidenceParts);
+      const sourcePreviewCells = options.includeSourcePreview === false
+        ? []
+        : mergeSourcePreviewCells(
+            buildSourcePreviewCells(reused.parsed, previewWorkbooks),
+            ...missingFormulaReviews.map((review) => review.previewCells),
+          );
+      return {
+        ...reused,
+        ...(sourceEvidence ? { sourceEvidence } : {}),
+        ...(sourcePreviewCells.length > 0 ? { sourcePreviewCells } : {}),
+        ...(missingFormulaResults.length > 0 ? { missingFormulaResults } : {}),
+      };
+    }
+    // Deterministic layouts are cheap and must be parsed from the workbook
+    // currently under review so locations never point at a stale cached parse.
+    snapshotWorkbooks = currentWorkbooks;
   }
 
   const parsedList: ParsedSpecImport[] = [];
@@ -2014,6 +2550,10 @@ export async function prepareSpecImportMulti(
   const allOverflow: OverflowColumnRow[] = [];
   const allUnresolved: SpecImportUnresolved[] = [];
   const allFallbackGrids: SheetGrid[] = [];
+  const sourceEvidenceParts: Array<{ sourceText: string; parseVersion: string } | undefined> = [];
+  const sourcePreviewCandidates: SpecImportSourcePreviewCell[] = [];
+  const missingFormulaResults: SpecImportMissingFormulaResult[] = [];
+  const missingFormulaPreviewCandidates: SpecImportSourcePreviewCell[] = [];
   // Collected deterministic customer assignments from every file's header
   // section (merged across files — a multi-workbook dough import may split
   // the assignment list across sheets).
@@ -2033,7 +2573,9 @@ export async function prepareSpecImportMulti(
       // and CPU-heavy, and back-to-back parses on a big batch can freeze the
       // tab long enough for the browser to kill the page mid-import.
       await new Promise((r) => setTimeout(r, 0));
-      const grids = await readWorkbookGrids(buffers[i]);
+      const workbookData = snapshotWorkbooks?.[i] ?? readWorkbookSourceData(buffers[i]);
+      const grids = workbookData.grids;
+      sourceEvidenceParts.push(sourceEvidenceFromGrids(grids, workbookData.formulasBySheet));
       // Deterministic customer-section parse — must happen BEFORE the buffer is
       // freed in the finally block below.
       for (const a of parseDoughCustomerAssignmentsFromGrids(grids)) {
@@ -2062,7 +2604,19 @@ export async function prepareSpecImportMulti(
       }
       const core = await parseWorkbookCore(grids, known, aliases, signal, {
         allowAi: options.allowAi === true,
+        sourceFile: label,
       });
+      const previewWorkbook: SourcePreviewWorkbook = {
+        file: label.trim().slice(0, 128),
+        sheets: grids,
+        formulasBySheet: workbookData.formulasBySheet,
+      };
+      const missingFormulaReview = findMissingFormulaResults(previewWorkbook);
+      missingFormulaResults.push(...missingFormulaReview.warnings);
+      missingFormulaPreviewCandidates.push(...missingFormulaReview.previewCells);
+      sourcePreviewCandidates.push(
+        ...buildSourcePreviewCells(core.parsed, [previewWorkbook]),
+      );
       parsedList.push(core.parsed);
       parsedLabels.push(label);
       allResolved.push(...core.resolved);
@@ -2191,6 +2745,17 @@ export async function prepareSpecImportMulti(
   // Detect new ingredient rows on existing mixes — best-effort, after all
   // other work so it doesn't slow the AI parse path.
   const newMixIngredients = await computeNewMixIngredients(parsed);
+  const sourcePreviewCells = options.includeSourcePreview === false
+    ? []
+    : mergeSourcePreviewCells(
+        retainCitedSourcePreviewCells(parsed, sourcePreviewCandidates),
+        missingFormulaPreviewCandidates,
+      );
+  // A skipped file means the reviewed/applied parse no longer represents the
+  // complete selected source set. Never retain evidence for only the files
+  // that happened to parse successfully.
+  const sourceEvidence =
+    totalDropped > 0 || errors.length > 0 ? undefined : combineSourceEvidence(sourceEvidenceParts);
 
   return {
     parsed,
@@ -2208,6 +2773,9 @@ export async function prepareSpecImportMulti(
       ...buildAliasLinkSuggestions(aliases),
     },
     ...(sourceHash ? { sourceHash } : {}),
+    ...(sourceEvidence ? { sourceEvidence } : {}),
+    ...(sourcePreviewCells.length > 0 ? { sourcePreviewCells } : {}),
+    ...(missingFormulaResults.length > 0 ? { missingFormulaResults } : {}),
     ...(note ? { note } : {}),
     ...(profilesRemovedFromWorkbook.length > 0 ? { profilesRemovedFromWorkbook } : {}),
     ...(newMixIngredients.length > 0 ? { newMixIngredients } : {}),
@@ -2872,6 +3440,10 @@ export async function commitSpecImport(
   }
 
   let resultHash: string | undefined;
+  // Sanitize aliases before constructing the atomic server payload.  The
+  // payload is the commit boundary; sanitizing only after it would still
+  // persist poisoned aliases on an otherwise successful atomic import.
+  const savableAliases = sanitizeSpecAliases(prepared.newAliases);
   if (operationId) {
     const committedProjection = projection!;
     const profiles = touchedProfiles.map((profile) => ({
@@ -2892,8 +3464,8 @@ export async function commitSpecImport(
       cheeseRecipes: { upsert: atomicCheeseRecipes },
       doughRecipes: { upsert: atomicNamedRecipes.dough },
       sauceRecipes: { upsert: atomicNamedRecipes.sauce },
-      ...((prepared.newAliases.length || correctingAliasDeletes.length)
-        ? { specImportAliases: { upsert: prepared.newAliases, delete: correctingAliasDeletes } }
+      ...((savableAliases.length || correctingAliasDeletes.length)
+        ? { specImportAliases: { upsert: savableAliases, delete: correctingAliasDeletes } }
         : {}),
     });
     const committed = await applyImportOperation(operationId, {
@@ -2901,6 +3473,7 @@ export async function commitSpecImport(
       sourceKey: deriveSourceKey(prepared.sourceNames ?? []),
       sourceLabel: (prepared.sourceNames ?? []).join(", ") || "Spec sheet",
       changes,
+      ...(prepared.sourceEvidence ? { sourceEvidence: prepared.sourceEvidence } : {}),
     });
     resultHash = committed.resultHash;
     // The first pass was a side-effect-free projection. Adopt the exact same
@@ -2936,7 +3509,6 @@ export async function commitSpecImport(
   // produced them (canonicalize tracking, review links/renames, match
   // aliases), never save poisoned pairs — generic "Mix"/"cheese" names,
   // digit mismatches, cycles. Applies to the corrections mirror too.
-  const savableAliases = sanitizeSpecAliases(prepared.newAliases);
   // Surface (don't just swallow) a failed alias save: the import itself already
   // applied, but losing the learned aliases means the next re-import of this
   // sheet won't remember the user's renames / "use existing" picks. The caller
@@ -2949,20 +3521,23 @@ export async function commitSpecImport(
       // Best-effort: the import already applied; learning is a bonus — but
       // report it so the UI can warn instead of failing silently.
       aliasSaveFailed = true;
+      logCorrectionWriteFailure({
+        store: "spec-import-aliases",
+        failure: "request",
+        correctionCount: savableAliases.length,
+      });
     }
     // Mirror each learned name mapping into the factory-wide corrections pool
     // (additive — alongside the spec-import aliases above) so every other
     // name-resolving AI helper honors it too.
-    void saveAiCorrections(
-      savableAliases.map((a) => ({
-        domain: aliasKindToDomain(a.kind),
-        fromText: a.externalName,
-        toText: a.canonicalName,
-      })),
-    );
+    const sharedCorrections = savableAliases.flatMap((alias) => {
+      const correction = mapSpecAliasToAiCorrection(alias);
+      return correction ? [correction] : [];
+    });
+    if (sharedCorrections.length > 0) void saveAiCorrections(sharedCorrections);
   }
 
-  return { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes: autoLinkedOut.count, touchedProfiles, crustProfiles, appliedParsed: applyParsed, finalImportReview, aliasSaveFailed };
+  return { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes: autoLinkedOut.count, touchedProfiles, crustProfiles, appliedParsed: applyParsed, finalImportReview, aliasSaveFailed, ...(resultHash ? { resultHash } : {}) };
 }
 
 /** Build the server changes envelope without mutating local state or doing I/O. */

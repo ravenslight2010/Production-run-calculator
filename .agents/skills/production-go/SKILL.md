@@ -18,7 +18,8 @@ the decision; do not substitute this report for the checklist's required gates.
 
 Capture:
 
-- the revision or commit being assessed;
+- the independently captured source and verification-input fingerprints being assessed
+  (Git/GitHub identifiers are optional metadata, never approval prerequisites);
 - the changed surface and affected artifacts;
 - the preview URL/workflows and disposable test database;
 - the intended deployment target;
@@ -80,7 +81,7 @@ The decision has five separate dimensions:
    unit-only result is not a substitute.
 8. Keep production reconciliation and destructive release gates in separate
    trust lanes. Generate source-library reconciliation evidence through a
-   read-only production query, bind it to the exact Git revision, report hash,
+    read-only production query, bind it to the exact deployed source fingerprint, report hash,
    heal ID, repair boundary, and capture time, then import it into the
    disposable release run. The disposable CI skip by itself remains NO-GO;
    fixture or development evidence can never satisfy the production gate.
