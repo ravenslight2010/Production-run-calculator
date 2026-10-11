@@ -64,7 +64,7 @@ jobs:
       # The calculator suite budget assumes an uncontended 4-worker run.
       # This lane deliberately runs release shards at max concurrency 4,
       # so the suite competes for CPU and needs headroom over the 150s default.
-      CALCULATOR_TEST_BUDGET_MS: "240000"
+      CALCULATOR_TEST_BUDGET_MS: "270000"
 
     steps:
       - name: Checkout
@@ -189,7 +189,7 @@ jobs:
       # The calculator suite budget assumes an uncontended 4-worker run.
       # This lane deliberately runs release shards at max concurrency 4,
       # so the suite competes for CPU and needs headroom over the 150s default.
-      CALCULATOR_TEST_BUDGET_MS: "240000"
+      CALCULATOR_TEST_BUDGET_MS: "270000"
 
     steps:
       - name: Checkout
