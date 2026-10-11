@@ -20,3 +20,18 @@ that the screen is isolated from sync.
 before recreating the stream, then release it before wake recovery and verify
 both the canonical read and the adopted stream baseline. If using an inert
 route, keep it same-origin so the fixture can still inspect local storage.
+
+When a browser test injects a sync failure with Playwright request routing,
+block service workers so they cannot satisfy the request first. To test
+recovery driven by the browser's `online` event, toggle the browser context
+offline and online; dispatching a synthetic `focus` event does not exercise
+that listener.
+
+**Why:** A service worker can bypass the page route, and a synthetic focus
+event can make a recovery test pass or fail without covering the production
+connectivity path.
+
+**How to apply:** Set `serviceWorkers: "block"` for the test context, install
+the failing route before the outage, observe the rejected request, remove the
+route, and use real connectivity transitions before asserting the recovered
+request and connected state.
