@@ -1,7 +1,12 @@
 import { defineConfig, devices } from "@playwright/test";
+import {
+  releaseBrowserBaseUrl,
+  releaseBrowserWebServers,
+} from "./playwright.release-servers";
 
-const baseURL =
-  process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
+const baseURL = releaseBrowserBaseUrl(
+  process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`,
+);
 
 /**
  * WebKit is a bounded release signal, not a second copy of the full suite.
@@ -9,6 +14,7 @@ const baseURL =
  * inherit the main suite's global setup or full browser test inventory.
  */
 export default defineConfig({
+  webServer: releaseBrowserWebServers(),
   testDir: "./e2e",
   testMatch: "release-webkit-smoke.spec.ts",
   timeout: 75_000,

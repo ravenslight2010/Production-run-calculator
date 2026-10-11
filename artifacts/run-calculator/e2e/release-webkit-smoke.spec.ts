@@ -63,20 +63,51 @@ async function promoteToManager(username: string): Promise<void> {
 
 async function seedPendingRun(page: Page): Promise<string> {
   const runId = uniqueTestId("webkit_run");
-  await page.evaluate((id) => {
+  const date = new Date().toISOString().slice(0, 10);
+  // The server's operational-intent reducer only applies a lifecycle command to
+  // a run the canonical row already owns; otherwise it answers `review-required`
+  // and the optimistic start is rolled back. Register the run canonically first
+  // (as the multi-device and sync-convergence harnesses do) so the WebKit
+  // lifecycle journey exercises the real reducer instead of a rejected command.
+  await page.evaluate(async ({ id, day }) => {
+    const epochResponse = await fetch("/api/sync/reset-epoch", { cache: "no-store" });
+    const epochBody = await epochResponse.json() as { epoch?: number };
+    const epoch = typeof epochBody.epoch === "number" ? epochBody.epoch : 0;
+    const response = await fetch(`/api/sync/today?today=${day}&epoch=${epoch}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "webkit-release-smoke",
+        payload: {
+          dayState: {
+            date: day,
+            currentIndex: 0,
+            resetAt: 0,
+            runs: [{ id, brand: "WebKit", flavor: "Release Smoke" }],
+          },
+          runValues: {},
+          runValuesUpdatedAt: {},
+        },
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(`WebKit smoke canonical fixture PUT failed: ${response.status}`);
+    }
+  }, { id: runId, day: date });
+  await page.evaluate(({ id, day }) => {
     for (const key of Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))) {
       if (key?.startsWith("run-calc-run-")) localStorage.removeItem(key);
     }
     localStorage.setItem(
       "run-calc-day",
       JSON.stringify({
-        date: new Date().toISOString().slice(0, 10),
+        date: day,
         runs: [{ id, brand: "WebKit", flavor: "Release Smoke", seeded: false }],
         currentIndex: 0,
         resetAt: 0,
       }),
     );
-  }, runId);
+  }, { id: runId, day: date });
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
   return runId;

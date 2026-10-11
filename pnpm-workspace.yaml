@@ -80,6 +80,10 @@ overrides:
   image-size: ">=2.0.2"
   body-parser: "2.3.0"
   protobufjs: "7.6.5"
+  # GHSA-jqcg-44mw-7w3h: proxy-addr <2.0.8 has a critical IP-spoofing flaw,
+  # reachable via express in the API server. express allows ^2.0.7, but the
+  # frozen lock still resolved the vulnerable 2.0.7.
+  proxy-addr: "2.0.8"
   "minimatch@5>brace-expansion": "2.1.4"
   "minimatch@10>brace-expansion": "5.0.9"
   fast-uri: "3.1.6"

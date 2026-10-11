@@ -180,7 +180,7 @@
     },
     "dependencies": {
       "node": "24.20.0",
-      "pnpmLockSha256": "40a1ce559dd9f805a52343d5f595b3773db8c5e07bda08a9beae129476ff2c6b",
+      "pnpmLockSha256": "8a0f3a6546cd33a617df94b952c466b090dacec718a1a16af782403ae2d43d02",
       "benchmarkReporter": "1",
       "benchmarkReporterSha256": "b9810c0b72d4dbbd2155f2ba552da6218d630c82ce63fa609835c6811155ec39"
     },

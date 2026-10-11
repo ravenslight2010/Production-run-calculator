@@ -158,6 +158,7 @@ describe("GET /master-data/bootstrap transport savings", () => {
     await changedA.arrayBuffer();
 
     state.scope = "scope-b";
+    state.rows.set("mixes", [{ id: "b1", name: "Scope B Mix" }]);
     const unchangedB = await fetch(`${baseUrl}/master-data/bootstrap`, {
       headers: { "if-none-match": scopeBEtag as string },
     });
