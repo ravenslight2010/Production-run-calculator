@@ -65,7 +65,10 @@ async function promoteToManager(username: string): Promise<void> {
   }
 }
 
-async function seedPendingRun(page: Page): Promise<string> {
+async function seedPendingRun(
+  page: Page,
+  options: { operationalView?: boolean } = {},
+): Promise<string> {
   const runId = uniqueTestId("webkit_run");
   const date = new Date().toISOString().slice(0, 10);
   // The server's operational-intent reducer only applies a lifecycle command to
@@ -73,10 +76,16 @@ async function seedPendingRun(page: Page): Promise<string> {
   // and the optimistic start is rolled back. Register the run canonically first
   // (as the multi-device and sync-convergence harnesses do) so the WebKit
   // lifecycle journey exercises the real reducer instead of a rejected command.
-  await page.evaluate(async ({ id, day }) => {
+  await page.evaluate(async ({ id, day, operationalView }) => {
     const epochResponse = await fetch("/api/sync/reset-epoch", { cache: "no-store" });
     const epochBody = await epochResponse.json() as { epoch?: number };
     const epoch = typeof epochBody.epoch === "number" ? epochBody.epoch : 0;
+    const run = {
+      id,
+      brand: "WebKit",
+      flavor: "Release Smoke",
+      ...(operationalView ? { startedAt: Date.now() - 60_000 } : {}),
+    };
     const response = await fetch(`/api/sync/today?today=${day}&epoch=${epoch}`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
@@ -87,17 +96,35 @@ async function seedPendingRun(page: Page): Promise<string> {
             date: day,
             currentIndex: 0,
             resetAt: 0,
-            runs: [{ id, brand: "WebKit", flavor: "Release Smoke" }],
+            runs: [run],
           },
-          runValues: {},
-          runValuesUpdatedAt: {},
+          runValues: operationalView
+            ? {
+                [id]: {
+                  pizzasPerCase: 10,
+                  casesPerSkid: 20,
+                  casesNeeded: 100,
+                  crustsPerCycle: 4,
+                  cycleSpeed: 10,
+                  speedAdjustment: 1,
+                  freezerTime: 10,
+                  tempFreezerTime: 30,
+                  tempCrustsPerCycle: 5,
+                  tempCycleSpeed: 12,
+                },
+              }
+            : {},
+          runValuesUpdatedAt: operationalView ? { [id]: Date.now() } : {},
+          ...(operationalView
+            ? { packagingProgress: { [id]: { skidsCompleted: 2, casesOnCurrentSkid: 3 } } }
+            : {}),
         },
       }),
     });
     if (!response.ok) {
       throw new Error(`WebKit smoke canonical fixture PUT failed: ${response.status}`);
     }
-  }, { id: runId, day: date });
+  }, { id: runId, day: date, operationalView: options.operationalView ?? false });
   await page.evaluate(({ id, day }) => {
     for (const key of Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))) {
       if (key?.startsWith("run-calc-run-")) localStorage.removeItem(key);
@@ -236,7 +263,7 @@ test("manager can preview an authoritative operational report", async ({ page })
   const username = uniqueTestId("e2e_webkit_report");
   testUsernames.add(username);
   await signUp(page, username);
-  const runId = await seedPendingRun(page);
+  const runId = await seedPendingRun(page, { operationalView: true });
   await promoteToManager(username);
   // The report must read the canonical server snapshot, not a later browser
   // write from the freshly hydrated page.
