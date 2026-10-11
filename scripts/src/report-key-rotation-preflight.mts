@@ -32,6 +32,24 @@ export type ReportKeyRotationPreflight = {
   remediation: string | null;
 };
 
+export type ReportKeyRotationPreflightEvidence = ReportKeyRotationPreflight & {
+  verifier: typeof REPORT_KEY_ROTATION_PREFLIGHT_VERIFIER;
+  environment: string;
+  revision?: string;
+};
+
+export function createReportKeyRotationPreflightEvidence(
+  result: ReportKeyRotationPreflight,
+  options: { environment: string; revision?: string },
+): ReportKeyRotationPreflightEvidence {
+  return {
+    verifier: REPORT_KEY_ROTATION_PREFLIGHT_VERIFIER,
+    environment: options.environment,
+    ...(options.revision !== undefined ? { revision: options.revision } : {}),
+    ...result,
+  };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -172,15 +190,21 @@ export async function runReportKeyRotationPreflight(
   }
 }
 
-async function writeEvidence(path: string, result: ReportKeyRotationPreflight): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${JSON.stringify({
-    verifier: "report-key-rotation-preflight",
+function createEvidence(
+  result: ReportKeyRotationPreflight,
+): ReportKeyRotationPreflightEvidence {
+  const revision = process.env.REPORT_KEY_ROTATION_PREFLIGHT_REVISION;
+  return createReportKeyRotationPreflightEvidence(result, {
     environment: process.env.REPORT_KEY_ROTATION_PREFLIGHT_ENVIRONMENT
       ?? process.env.NODE_ENV
       ?? "unknown",
-    ...result,
-  }, null, 2)}\n`, "utf8");
+    ...(revision !== undefined ? { revision } : {}),
+  });
+}
+
+async function writeEvidence(path: string, result: ReportKeyRotationPreflight): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${JSON.stringify(createEvidence(result), null, 2)}\n`, "utf8");
 }
 
 export async function main(): Promise<void> {
@@ -191,15 +215,9 @@ export async function main(): Promise<void> {
     console.log(JSON.stringify(result, null, 2));
     if (!result.canRotate) process.exitCode = 1;
   } catch {
-    const result = {
-      verifier: "report-key-rotation-preflight",
-      status: "blocked" as const,
+    const result: ReportKeyRotationPreflight = {
+      status: "blocked",
       canRotate: false,
-      failure: "audit-unavailable" as const,
-      remediation: "The target database could not be audited. Restore database connectivity and rerun this preflight before rotating keys.",
-    };
-    if (outputPath) await writeEvidence(outputPath, {
-      ...result,
       activeKeyId: null,
       storedKeyIds: [],
       missingKeyIds: [],
@@ -209,8 +227,11 @@ export async function main(): Promise<void> {
         truncated: false,
         complete: false,
       },
-    });
-    console.log(JSON.stringify(result, null, 2));
+      failure: "audit-unavailable" as const,
+      remediation: "The target database could not be audited. Restore database connectivity and rerun this preflight before rotating keys.",
+    };
+    if (outputPath) await writeEvidence(outputPath, result);
+    console.log(JSON.stringify(createEvidence(result), null, 2));
     process.exitCode = 1;
   }
 }

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  createReportKeyRotationPreflightEvidence,
   evaluateReportKeyRotationPreflight,
   parseReportSigningKeyring,
 } from "./report-key-rotation-preflight.mts";
@@ -48,6 +49,27 @@ function run(): void {
   assert.equal(missing.failure, "missing-retained-keys");
   assert.deepEqual(missing.missingKeyIds, ["removed-historical"]);
   assert.match(missing.remediation ?? "", /removed-historical/);
+
+  const releaseRevision = "a".repeat(40);
+  const passingEvidence = createReportKeyRotationPreflightEvidence(healthy, {
+    environment: "disposable-ci",
+    revision: releaseRevision,
+  });
+  assert.equal(passingEvidence.environment, "disposable-ci");
+  assert.equal(passingEvidence.revision, releaseRevision);
+  assert.equal(passingEvidence.verifier, "report-key-rotation-preflight");
+
+  const blockedEvidence = createReportKeyRotationPreflightEvidence(missing, {
+    environment: "disposable-ci",
+    revision: releaseRevision,
+  });
+  assert.equal(blockedEvidence.status, "blocked");
+  assert.equal(blockedEvidence.revision, releaseRevision);
+
+  const unboundEvidence = createReportKeyRotationPreflightEvidence(healthy, {
+    environment: "development",
+  });
+  assert.equal(Object.hasOwn(unboundEvidence, "revision"), false);
 
   const unavailable = evaluateReportKeyRotationPreflight({
     keyring: null,
