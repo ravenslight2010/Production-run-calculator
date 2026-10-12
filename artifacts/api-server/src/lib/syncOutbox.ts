@@ -5,6 +5,7 @@ import type { PoolClient } from "pg";
 import { isManualSection, type ManualSection } from "@workspace/sync-contract";
 import type { Scope } from "./requestScope";
 import { logger } from "./logger";
+import { createBackgroundOperationBackoff, runBackgroundOperation } from "./backgroundOperations";
 
 export type SyncOutboxEvent =
   | {
@@ -64,6 +65,10 @@ const DRAIN_INTERVAL_MS = 5_000;
 const RETENTION_INTERVAL_MS = 60 * 60_000;
 const processCursors = new Map<string, number>();
 const processOrigin = randomUUID();
+
+export function clearSyncOutboxProcessCursorsForTests(): void {
+  processCursors.clear();
+}
 
 export function isLocalSyncOutboxEvent(event: StoredSyncOutboxEvent): boolean {
   return event.origin === processOrigin;
@@ -230,10 +235,11 @@ export function startSyncOutboxListener(
   let retentionTimer: NodeJS.Timeout | undefined;
   let draining = false;
   let retryDelayMs = 500;
+  const drainBackoff = createBackgroundOperationBackoff();
   const cursors = processCursors;
 
   const scheduleDrain = () => {
-    if (stopped || drainTimer) return;
+    if (stopped || drainTimer || !drainBackoff.isReady()) return;
     drainTimer = setTimeout(() => {
       drainTimer = undefined;
       void drainAll();
@@ -306,24 +312,28 @@ export function startSyncOutboxListener(
     if (stopped || draining) return;
     draining = true;
     try {
-      const result = await pool.query<{ scope: string }>(
-        "SELECT scope FROM sync_outbox_cursors ORDER BY scope ASC",
-      );
-      for (const { scope } of result.rows) {
-        if (stopped) return;
-        if (!cursors.has(scope)) {
-          // A process starts with no connected SSE clients. Seed the cursor for
-          // pre-existing scopes; new scopes first encountered later start at 0.
-          const current = await pool.query<{ cursor: string | number }>(
-            "SELECT cursor FROM sync_outbox_cursors WHERE scope = $1",
-            [scope],
-          );
-          cursors.set(scope, Number(current.rows[0]?.cursor ?? 0));
-          continue;
+      await runBackgroundOperation("sync-outbox-drain", async () => {
+        const result = await pool.query<{ scope: string }>(
+          "SELECT scope FROM sync_outbox_cursors ORDER BY scope ASC",
+        );
+        for (const { scope } of result.rows) {
+          if (stopped) return;
+          if (!cursors.has(scope)) {
+            // A process starts with no connected SSE clients. Seed the cursor for
+            // pre-existing scopes; new scopes first encountered later start at 0.
+            const current = await pool.query<{ cursor: string | number }>(
+              "SELECT cursor FROM sync_outbox_cursors WHERE scope = $1",
+              [scope],
+            );
+            cursors.set(scope, Number(current.rows[0]?.cursor ?? 0));
+            continue;
+          }
+          await drainScope(scope);
         }
-        await drainScope(scope);
-      }
-    } catch (error) {
+      });
+      drainBackoff.recordSuccess();
+    } catch {
+      drainBackoff.recordFailure();
       logger.warn({ event: "sync_outbox_drain", outcome: "retry" }, "Sync outbox drain failed; cursor retained for retry");
     } finally {
       draining = false;

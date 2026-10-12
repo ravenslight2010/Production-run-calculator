@@ -143,6 +143,17 @@ beforeAll(async () => {
     $$;
   `);
   await killer.query(`
+    CREATE OR REPLACE FUNCTION background_ops_sleep_job_finalization()
+    RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      IF OLD.status = 'running' AND NEW.status = 'succeeded' THEN
+        PERFORM pg_sleep(10);
+      END IF;
+      RETURN NEW;
+    END;
+    $$;
+  `);
+  await killer.query(`
     CREATE OR REPLACE FUNCTION background_ops_sleep_job_cancellation()
     RETURNS trigger LANGUAGE plpgsql AS $$
     BEGIN
@@ -203,6 +214,7 @@ beforeEach(async () => {
   `);
   await killer.query("DROP TRIGGER IF EXISTS background_ops_data_reset_sleep ON data_reset");
   await killer.query("DROP TRIGGER IF EXISTS background_ops_job_claim_sleep ON server_jobs");
+  await killer.query("DROP TRIGGER IF EXISTS background_ops_job_finalization_sleep ON server_jobs");
   await killer.query("DROP TRIGGER IF EXISTS background_ops_job_cancellation_sleep ON server_jobs");
   await killer.query("DROP TRIGGER IF EXISTS background_ops_job_lease_terminalization_sleep ON server_jobs");
   await killer.query("DROP TRIGGER IF EXISTS background_ops_scheduled_alert_failure ON scheduled_alert_records");
@@ -620,6 +632,161 @@ describe("background operation PostgreSQL reconnection", () => {
       status: "no-subscriptions",
     });
     expect(await db.select().from(scheduledAlertRecordsTable)).toHaveLength(1);
+  });
+
+  it("recovers a job after its success transaction loses the database connection", async () => {
+    let handlerRuns = 0;
+    registerServerJob("finalization-recovery-test", {
+      capability: "review-incidents",
+      handler: async () => ({ handlerRun: ++handlerRuns }),
+    });
+    const { job } = await enqueueServerJob({
+      scope: SCOPE,
+      actorId: "finalization-recovery-actor",
+      type: "finalization-recovery-test",
+      idempotencyKey: "finalization-recovery",
+      input: {},
+    });
+    const worker = new ServerJobWorker("finalization-recovery-worker");
+    await killer.query(`
+      CREATE TRIGGER background_ops_job_finalization_sleep
+      BEFORE UPDATE ON server_jobs
+      FOR EACH ROW EXECUTE FUNCTION background_ops_sleep_job_finalization()
+    `);
+
+    let retryPid: number | undefined;
+    const workerPass = runBackgroundOperation(
+      "server-job-run",
+      () => preserveTransientDatabaseCause(() => worker.runOnce()),
+      { delay: async () => { retryPid = await freshBackendPid(); } },
+    );
+    const terminatedPid = await terminateSleepingBackend(
+      "job success finalization",
+      "background_ops_job_finalization_sleep",
+      "server_jobs",
+    );
+
+    // The immediate recovery poll must not relabel this job as a handler
+    // failure or requeue work whose handler already ran.
+    await expect(workerPass).resolves.toBe(false);
+    expect(retryPid).toBeTypeOf("number");
+    expect(retryPid).not.toBe(terminatedPid);
+    const [leasedJob] = await db.select().from(serverJobsTable).where(eq(serverJobsTable.id, job.id));
+    expect(leasedJob).toMatchObject({ status: "running", attempt: 1 });
+    expect(handlerRuns).toBe(1);
+
+    await db.update(serverJobsTable).set({
+      leaseExpiresAt: new Date(Date.now() - 1),
+    }).where(eq(serverJobsTable.id, job.id));
+    await expect(worker.runOnce()).resolves.toBe(true);
+
+    const [completedJob] = await db.select().from(serverJobsTable).where(eq(serverJobsTable.id, job.id));
+    expect(completedJob).toMatchObject({ status: "succeeded", attempt: 2, result: { handlerRun: 2 } });
+    expect(await db.select().from(serverJobAttemptsTable).where(eq(serverJobAttemptsTable.jobId, job.id)))
+      .toMatchObject([
+        { attempt: 1, outcome: "retrying", errorCode: "lease_expired" },
+        { attempt: 2, outcome: "succeeded" },
+      ]);
+  });
+
+  it("leaves job finalization leased and retryable after a pool-acquisition timeout", async () => {
+    let handlerRuns = 0;
+    let saturatedFinalization = false;
+    const heldClients: Array<{ release(): void }> = [];
+    registerServerJob("finalization-timeout-recovery-test", {
+      capability: "review-incidents",
+      handler: async () => ({ handlerRun: ++handlerRuns }),
+    });
+    const { job } = await enqueueServerJob({
+      scope: SCOPE,
+      actorId: "finalization-timeout-actor",
+      type: "finalization-timeout-recovery-test",
+      idempotencyKey: "finalization-timeout-recovery",
+      input: {},
+    });
+    const worker = new ServerJobWorker("finalization-timeout-worker");
+    const internalWorker = worker as unknown as {
+      finish: (...args: unknown[]) => Promise<void>;
+    };
+    const originalFinish = internalWorker.finish.bind(worker);
+    internalWorker.finish = async (...args) => {
+      if (args[2] === "succeeded" && !saturatedFinalization) {
+        saturatedFinalization = true;
+        heldClients.push(await pool.connect(), await pool.connect());
+      }
+      return originalFinish(...args);
+    };
+
+    try {
+      await expect(runBackgroundOperation("server-job-run", () => worker.runOnce(), {
+        delay: async () => {
+          heldClients.splice(0).forEach((client) => client.release());
+        },
+      })).resolves.toBe(false);
+    } finally {
+      heldClients.splice(0).forEach((client) => client.release());
+    }
+
+    const [leasedJob] = await db.select().from(serverJobsTable).where(eq(serverJobsTable.id, job.id));
+    expect(leasedJob).toMatchObject({ status: "running", attempt: 1 });
+    expect(handlerRuns).toBe(1);
+
+    await db.update(serverJobsTable).set({
+      leaseExpiresAt: new Date(Date.now() - 1),
+    }).where(eq(serverJobsTable.id, job.id));
+    await expect(worker.runOnce()).resolves.toBe(true);
+
+    const [completedJob] = await db.select().from(serverJobsTable).where(eq(serverJobsTable.id, job.id));
+    expect(completedJob).toMatchObject({ status: "succeeded", attempt: 2, result: { handlerRun: 2 } });
+    expect(await db.select().from(serverJobAttemptsTable).where(eq(serverJobAttemptsTable.jobId, job.id)))
+      .toMatchObject([
+        { attempt: 1, outcome: "retrying", errorCode: "lease_expired" },
+        { attempt: 2, outcome: "succeeded" },
+      ]);
+  });
+
+  it("recovers scheduled work and job claims after bounded pool-acquisition timeouts", async () => {
+    const scheduledHolds = [await pool.connect(), await pool.connect()];
+    let scheduledAttempts = 0;
+    try {
+      await expect(runBackgroundOperation("daily-rollover", async () => {
+        scheduledAttempts += 1;
+        await db.execute(sql`SELECT 1`);
+        return "scheduled-recovered";
+      }, {
+        delay: async () => { scheduledHolds.pop()?.release(); },
+      })).resolves.toBe("scheduled-recovered");
+    } finally {
+      scheduledHolds.forEach((client) => client.release());
+    }
+    expect(scheduledAttempts).toBe(2);
+
+    registerServerJob("pool-claim-timeout-test", {
+      capability: "review-incidents",
+      handler: async () => ({ recovered: true }),
+    });
+    const { job } = await enqueueServerJob({
+      scope: SCOPE,
+      actorId: "pool-claim-timeout-actor",
+      type: "pool-claim-timeout-test",
+      idempotencyKey: "pool-claim-timeout",
+      input: {},
+    });
+    const claimHolds = [await pool.connect(), await pool.connect()];
+    const worker = new ServerJobWorker("pool-claim-timeout-worker");
+    try {
+      await expect(runBackgroundOperation("server-job-run", () => worker.runOnce(), {
+        delay: async () => { claimHolds.pop()?.release(); },
+      })).resolves.toBe(true);
+    } finally {
+      claimHolds.forEach((client) => client.release());
+    }
+    const [recovered] = await db.select().from(serverJobsTable).where(eq(serverJobsTable.id, job.id));
+    expect(recovered).toMatchObject({ status: "succeeded", attempt: 1, result: { recovered: true } });
+    expect((await getBackgroundOperationDiagnostics())["server-job-run"]).toMatchObject({
+      status: "ok",
+      recentFailureCount: 0,
+    });
   });
 
   it("retries a failed date without losing later alerts or duplicating completed dates", async () => {

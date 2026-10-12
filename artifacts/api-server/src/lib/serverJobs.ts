@@ -342,36 +342,49 @@ export class ServerJobWorker {
       // A dead worker's last attempt must not turn a bounded retry policy into
       // an endless reclaim loop. Resolve it before another worker can run it.
       if (candidate.attempt >= candidate.maxAttempts) {
-        const exhausted = await db.update(serverJobsTable).set({
-          status: "failed", finishedAt: now, leaseToken: null, leaseExpiresAt: null,
-          errorCode: "attempts_exhausted", errorMessage: "Job lease expired after its final allowed attempt",
-        }).where(candidate.status === "queued"
-          ? and(eq(serverJobsTable.id, candidate.id), eq(serverJobsTable.status, "queued"))
-          : and(eq(serverJobsTable.id, candidate.id), eq(serverJobsTable.status, "running"),
-            lte(serverJobsTable.leaseExpiresAt, now))).returning({ id: serverJobsTable.id });
-        if (exhausted[0] && candidate.attempt > 0) {
-          await db.update(serverJobAttemptsTable).set({
-            finishedAt: now, outcome: "failed", errorCode: "attempts_exhausted",
-            errorMessage: "Worker lease expired",
-          }).where(and(eq(serverJobAttemptsTable.jobId, candidate.id), eq(serverJobAttemptsTable.attempt, candidate.attempt)));
-        }
+        await db.transaction(async (tx) => {
+          const exhausted = await tx.update(serverJobsTable).set({
+            status: "failed", finishedAt: now, leaseToken: null, leaseExpiresAt: null,
+            errorCode: "attempts_exhausted", errorMessage: "Job lease expired after its final allowed attempt",
+          }).where(candidate.status === "queued"
+            ? and(eq(serverJobsTable.id, candidate.id), eq(serverJobsTable.status, "queued"))
+            : and(eq(serverJobsTable.id, candidate.id), eq(serverJobsTable.status, "running"),
+              lte(serverJobsTable.leaseExpiresAt, now))).returning({ id: serverJobsTable.id });
+          if (exhausted[0] && candidate.attempt > 0) {
+            await tx.update(serverJobAttemptsTable).set({
+              finishedAt: now, outcome: "failed", errorCode: "attempts_exhausted",
+              errorMessage: "Worker lease expired",
+            }).where(and(eq(serverJobAttemptsTable.jobId, candidate.id), eq(serverJobAttemptsTable.attempt, candidate.attempt)));
+          }
+        });
         continue;
       }
       const leaseToken = randomUUID();
-      const claimed = await db.update(serverJobsTable).set({
-        status: "running", leaseToken, leaseExpiresAt: new Date(now.getTime() + this.leaseMs),
-        startedAt: candidate.startedAt ?? now, attempt: candidate.attempt + 1,
-      }).where(candidate.status === "queued"
-        ? and(eq(serverJobsTable.id, candidate.id), eq(serverJobsTable.status, "queued"))
-        : and(eq(serverJobsTable.id, candidate.id), eq(serverJobsTable.status, "running"),
-          lte(serverJobsTable.leaseExpiresAt, now)))
-        .returning();
-      if (claimed[0]) {
-        await db.insert(serverJobAttemptsTable).values({
+      const claimedJob = await db.transaction(async (tx) => {
+        const claimed = await tx.update(serverJobsTable).set({
+          status: "running", leaseToken, leaseExpiresAt: new Date(now.getTime() + this.leaseMs),
+          startedAt: candidate.startedAt ?? now, attempt: candidate.attempt + 1,
+        }).where(candidate.status === "queued"
+          ? and(eq(serverJobsTable.id, candidate.id), eq(serverJobsTable.status, "queued"))
+          : and(eq(serverJobsTable.id, candidate.id), eq(serverJobsTable.status, "running"),
+            lte(serverJobsTable.leaseExpiresAt, now)))
+          .returning();
+        if (!claimed[0]) return undefined;
+        if (candidate.status === "running" && candidate.attempt > 0) {
+          await tx.update(serverJobAttemptsTable).set({
+            finishedAt: now, outcome: "retrying", errorCode: "lease_expired",
+            errorMessage: "Worker lease expired",
+          }).where(and(
+            eq(serverJobAttemptsTable.jobId, candidate.id),
+            eq(serverJobAttemptsTable.attempt, candidate.attempt),
+          ));
+        }
+        await tx.insert(serverJobAttemptsTable).values({
           jobId: claimed[0].id, attempt: claimed[0].attempt, workerId: this.workerId,
         }).onConflictDoNothing();
-        return { job: claimed[0], leaseToken };
-      }
+        return claimed[0];
+      });
+      if (claimedJob) return { job: claimedJob, leaseToken };
     }
     return null;
   }
@@ -407,46 +420,56 @@ export class ServerJobWorker {
       }
       const timeoutMs = definition.timeoutMs ?? DEFAULT_EXECUTION_TIMEOUT_MS;
       let timeout: NodeJS.Timeout | undefined;
-      const deadline = new Promise<never>((_, reject) => {
-        timeout = setTimeout(() => {
-          timedOut = true;
-          controller.abort();
-          reject(new Error("Job execution timed out"));
-        }, timeoutMs);
-        timeout.unref();
-      });
-      const result = await Promise.race([
-        definition.handler({
-        job: claimed.job, signal: controller.signal,
-        reportProgress: (progress, message) => this.progress(claimed.job.id, claimed.leaseToken, progress, message),
-        isCancellationRequested: async () => {
-          const row = await this.owned(claimed.job.id, claimed.leaseToken);
-          if (!row || row.cancelRequested) controller.abort();
-          return !row || row.cancelRequested;
-        },
-        commit: <T>(effect: () => Promise<T>) =>
-          this.commit(claimed.job.id, claimed.leaseToken, effect, controller, this.leaseMs, () => {
-            commitActive = true;
-          }, () => {
-            commitActive = false;
+      let result: unknown;
+      try {
+        const deadline = new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => {
+            timedOut = true;
+            controller.abort();
+            reject(new Error("Job execution timed out"));
+          }, timeoutMs);
+          timeout.unref();
+        });
+        result = await Promise.race([
+          definition.handler({
+            job: claimed.job, signal: controller.signal,
+            reportProgress: (progress, message) => this.progress(claimed.job.id, claimed.leaseToken, progress, message),
+            isCancellationRequested: async () => {
+              const row = await this.owned(claimed.job.id, claimed.leaseToken);
+              if (!row || row.cancelRequested) controller.abort();
+              return !row || row.cancelRequested;
+            },
+            commit: <T>(effect: () => Promise<T>) =>
+              this.commit(claimed.job.id, claimed.leaseToken, effect, controller, this.leaseMs, () => {
+                commitActive = true;
+              }, () => {
+                commitActive = false;
+              }),
           }),
-        }),
-        deadline,
-      ]).finally(() => { if (timeout) clearTimeout(timeout); });
-      assertBoundedJobResult(result);
+          deadline,
+        ]);
+        assertBoundedJobResult(result);
+      } catch (error) {
+        const current = await this.owned(claimed.job.id, claimed.leaseToken);
+        const cancelled = current?.cancelRequested || (controller.signal.aborted && !timedOut);
+        // An ignored AbortSignal could otherwise leave an external provider call
+        // alive while a retry performs the same protected work. Timeouts are final.
+        const retry = !cancelled && !timedOut && claimed.job.attempt < claimed.job.maxAttempts;
+        await this.finish(claimed.job, claimed.leaseToken, cancelled ? "cancelled" : retry ? "queued" : "failed",
+          undefined, timedOut ? "execution_timeout" : "handler_failed", safeMessage(error));
+        if (isTransientDatabaseConnectionError(error)) {
+          await recordBackgroundOperationFailure("server-job-run", error);
+        }
+        return true;
+      } finally {
+        if (timeout) clearTimeout(timeout);
+      }
+
+      // Keep lifecycle persistence outside the handler-error boundary. A
+      // transient failure here must leave the durable lease recoverable rather
+      // than being misclassified as a handler failure and immediately requeued.
       const row = await this.owned(claimed.job.id, claimed.leaseToken);
       await this.finish(claimed.job, claimed.leaseToken, row?.cancelRequested ? "cancelled" : "succeeded", result);
-    } catch (error) {
-      const current = await this.owned(claimed.job.id, claimed.leaseToken);
-      const cancelled = current?.cancelRequested || (controller.signal.aborted && !timedOut);
-      // An ignored AbortSignal could otherwise leave an external provider call
-      // alive while a retry performs the same protected work. Timeouts are final.
-      const retry = !cancelled && !timedOut && claimed.job.attempt < claimed.job.maxAttempts;
-      await this.finish(claimed.job, claimed.leaseToken, cancelled ? "cancelled" : retry ? "queued" : "failed",
-        undefined, timedOut ? "execution_timeout" : "handler_failed", safeMessage(error));
-      if (isTransientDatabaseConnectionError(error)) {
-        await recordBackgroundOperationFailure("server-job-run", error);
-      }
     } finally {
       clearInterval(heartbeat);
     }
@@ -528,15 +551,17 @@ export class ServerJobWorker {
   private async finish(job: ServerJobRow, leaseToken: string, status: "queued" | "succeeded" | "failed" | "cancelled",
     result?: unknown, errorCode?: string, errorMessage?: string): Promise<void> {
     const terminal = status !== "queued";
-    const updated = await db.update(serverJobsTable).set({
-      status, ...(status === "succeeded" ? { progress: 100, result } : {}),
-      ...(status === "queued" ? { leaseToken: null, leaseExpiresAt: null } : { finishedAt: new Date(), leaseToken: null, leaseExpiresAt: null }),
-      errorCode: errorCode ?? null, errorMessage: errorMessage ?? null,
-    }).where(and(eq(serverJobsTable.id, job.id), eq(serverJobsTable.status, "running"), eq(serverJobsTable.leaseToken, leaseToken)))
-      .returning({ id: serverJobsTable.id });
-    if (updated[0]) await db.update(serverJobAttemptsTable).set({
-      finishedAt: new Date(), outcome: terminal ? status : "retrying", errorCode: errorCode ?? null, errorMessage: errorMessage ?? null,
-    }).where(and(eq(serverJobAttemptsTable.jobId, job.id), eq(serverJobAttemptsTable.attempt, job.attempt)));
+    await db.transaction(async (tx) => {
+      const updated = await tx.update(serverJobsTable).set({
+        status, ...(status === "succeeded" ? { progress: 100, result } : {}),
+        ...(status === "queued" ? { leaseToken: null, leaseExpiresAt: null } : { finishedAt: new Date(), leaseToken: null, leaseExpiresAt: null }),
+        errorCode: errorCode ?? null, errorMessage: errorMessage ?? null,
+      }).where(and(eq(serverJobsTable.id, job.id), eq(serverJobsTable.status, "running"), eq(serverJobsTable.leaseToken, leaseToken)))
+        .returning({ id: serverJobsTable.id });
+      if (updated[0]) await tx.update(serverJobAttemptsTable).set({
+        finishedAt: new Date(), outcome: terminal ? status : "retrying", errorCode: errorCode ?? null, errorMessage: errorMessage ?? null,
+      }).where(and(eq(serverJobAttemptsTable.jobId, job.id), eq(serverJobAttemptsTable.attempt, job.attempt)));
+    });
   }
 }
 

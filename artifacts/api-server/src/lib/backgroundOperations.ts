@@ -31,7 +31,8 @@ export type BackgroundOperationName =
   | "daily-rollover"
   | "server-job-run"
   | "server-job-prune"
-  | "web-push-schedule";
+  | "web-push-schedule"
+  | "sync-outbox-drain";
 
 type OperationState = {
   failureTimes: number[];
@@ -89,28 +90,48 @@ const operationNames: BackgroundOperationName[] = [
   "server-job-run",
   "server-job-prune",
   "web-push-schedule",
+  "sync-outbox-drain",
 ];
 const states = new Map<BackgroundOperationName, OperationState>();
+const TRANSIENT_DATABASE_ERROR_CODES = new Set([
+  "57P01", "57P02", "57P03",
+  "08000", "08001", "08003", "08004", "08006", "08007", "08P01",
+  "ECONNRESET", "ECONNREFUSED", "EPIPE", "ETIMEDOUT",
+]);
+
+function errorCauses(error: unknown): unknown[] {
+  const causes: unknown[] = [];
+  const seen = new Set<object>();
+  let current = error;
+  for (let depth = 0; depth < 5; depth += 1) {
+    if (typeof current === "string") {
+      causes.push(current);
+      break;
+    }
+    if (!current || typeof current !== "object" || seen.has(current)) break;
+    causes.push(current);
+    seen.add(current);
+    current = (current as { cause?: unknown }).cause;
+  }
+  return causes;
+}
 
 function errorCode(error: unknown): string | undefined {
-  if (!error || typeof error !== "object") return undefined;
-  const code = (error as { code?: unknown }).code;
-  return typeof code === "string" && /^[A-Z0-9_.-]{1,64}$/i.test(code)
-    ? code
-    : undefined;
+  for (const cause of errorCauses(error)) {
+    const code = (cause as { code?: unknown }).code;
+    if (typeof code === "string" && /^[A-Z0-9_.-]{1,64}$/i.test(code)) return code;
+  }
+  return undefined;
 }
 
 export function isTransientDatabaseConnectionError(error: unknown): boolean {
-  const code = errorCode(error);
-  if (code && new Set([
-    "57P01", "57P02", "57P03",
-    "08000", "08001", "08003", "08004", "08006", "08007", "08P01",
-    "ECONNRESET", "ECONNREFUSED", "EPIPE", "ETIMEDOUT",
-  ]).has(code)) return true;
-  const rawMessage = String(error instanceof Error ? error.message : error);
-  const message = rawMessage.toLowerCase();
-  return rawMessage === "timeout exceeded when trying to connect" ||
-    /connection (?:terminated|closed|reset)|terminating connection|server closed the connection unexpectedly/.test(message);
+  return errorCauses(error).some((cause) => {
+    const code = (cause as { code?: unknown }).code;
+    if (typeof code === "string" && TRANSIENT_DATABASE_ERROR_CODES.has(code)) return true;
+    const message = String(cause instanceof Error ? cause.message : cause).toLowerCase();
+    return message === "timeout exceeded when trying to connect" ||
+      /connection (?:terminated|closed|reset)|terminating connection|server closed the connection unexpectedly/.test(message);
+  });
 }
 
 function recordSuccess(name: BackgroundOperationName, now: number): void {

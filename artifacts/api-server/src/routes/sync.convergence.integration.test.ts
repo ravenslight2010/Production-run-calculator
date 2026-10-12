@@ -1239,6 +1239,52 @@ describe("multi-client sync convergence soak", () => {
     }
   }, 30_000);
 
+  it("retries a transient outbox delivery failure without advancing its cursor", async () => {
+    const syncOutbox = await import("../lib/syncOutbox");
+    const { getBackgroundOperationDiagnostics } = await import("../lib/backgroundOperations");
+    const previousTestFlag = process.env.SYNC_OUTBOX_LISTENER_TEST_ENABLED;
+    syncOutbox.clearSyncOutboxProcessCursorsForTests();
+    await syncOutbox.registerSyncOutboxScope("live");
+
+    let attempts = 0;
+    const delivered: number[] = [];
+    process.env.SYNC_OUTBOX_LISTENER_TEST_ENABLED = "1";
+    const stop = syncOutbox.startSyncOutboxListener(async (event) => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw Object.assign(new Error("transient outbox connection failure"), { code: "08006" });
+      }
+      delivered.push(event.cursor);
+    }, async () => {});
+
+    try {
+      await waitForSyncOutboxListeners(1);
+      await syncOutbox.recordSyncOutboxEvent({
+        kind: "configuration",
+        scope: "live",
+        senderId: "outbox-recovery-test",
+        family: "master-data",
+      });
+      const deadline = Date.now() + 10_000;
+      while (attempts < 2 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+
+      expect(attempts).toBe(2);
+      expect(delivered).toEqual([1]);
+      expect((await getBackgroundOperationDiagnostics())["sync-outbox-drain"]).toMatchObject({
+        status: "ok",
+        recentFailureCount: 0,
+      });
+    } finally {
+      stop();
+      await waitForSyncOutboxListeners(0);
+      syncOutbox.clearSyncOutboxProcessCursorsForTests();
+      if (previousTestFlag === undefined) delete process.env.SYNC_OUTBOX_LISTENER_TEST_ENABLED;
+      else process.env.SYNC_OUTBOX_LISTENER_TEST_ENABLED = previousTestFlag;
+    }
+  }, 20_000);
+
   it("converges edits, offline reconnects, wake recovery, stale writes, and blank protection", async () => {
     const clients = ["A", "B", "C"].map((id) => new SimulatedClient(id));
     const start = Date.now();

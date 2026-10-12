@@ -39,9 +39,47 @@ describe("background operation connection recovery", () => {
     expect(isTransientDatabaseConnectionError(new Error("Connection terminated unexpectedly"))).toBe(true);
     expect(isTransientDatabaseConnectionError(Object.assign(new Error("reset"), { code: "ECONNRESET" }))).toBe(true);
     expect(isTransientDatabaseConnectionError(new Error("timeout exceeded when trying to connect"))).toBe(true);
-    expect(isTransientDatabaseConnectionError(new Error("Timeout exceeded when trying to connect"))).toBe(false);
+    expect(isTransientDatabaseConnectionError(new Error("Timeout exceeded when trying to connect"))).toBe(true);
+    expect(isTransientDatabaseConnectionError(new Error("query failed", {
+      cause: new Error("transaction failed", {
+        cause: Object.assign(new Error("pool checkout timed out"), { code: "08006" }),
+      }),
+    }))).toBe(true);
     expect(isTransientDatabaseConnectionError(new Error("Job execution timed out"))).toBe(false);
     expect(isTransientDatabaseConnectionError(Object.assign(new Error("bad query"), { code: "23505" }))).toBe(false);
+  });
+
+  it("recovers a wrapped pool-acquisition timeout without degrading readiness", async () => {
+    const timeout = new Error("Timeout exceeded when trying to connect");
+    const operation = vi.fn()
+      .mockRejectedValueOnce(new Error("database operation failed", { cause: timeout }))
+      .mockResolvedValueOnce("recovered");
+
+    await expect(runBackgroundOperation("daily-rollover", operation, {
+      delay: async () => {},
+    })).resolves.toBe("recovered");
+
+    expect(operation).toHaveBeenCalledTimes(2);
+    expect((await getBackgroundOperationDiagnostics())["daily-rollover"]).toMatchObject({
+      status: "ok",
+      recentFailureCount: 0,
+    });
+  });
+
+  it("reports persistent pool-acquisition timeouts after one bounded retry per pass", async () => {
+    const timeout = new Error("timeout exceeded when trying to connect");
+    const operation = vi.fn(async () => { throw timeout; });
+    for (let pass = 0; pass < BACKGROUND_OPERATION_FAILURE_THRESHOLD; pass += 1) {
+      await expect(runBackgroundOperation("web-push-schedule", operation, {
+        delay: async () => {},
+      })).rejects.toBe(timeout);
+    }
+
+    expect(operation).toHaveBeenCalledTimes(BACKGROUND_OPERATION_FAILURE_THRESHOLD * 2);
+    expect((await getBackgroundOperationDiagnostics())["web-push-schedule"]).toMatchObject({
+      status: "warning",
+      recentFailureCount: BACKGROUND_OPERATION_FAILURE_THRESHOLD,
+    });
   });
 
   it("retries a bounded pool-acquisition timeout once and clears degradation after recovery", async () => {
