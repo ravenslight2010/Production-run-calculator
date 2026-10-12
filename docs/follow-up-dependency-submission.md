@@ -1,4 +1,8 @@
-# Future-task dependency submission
+# Retired: acceptance-order task gate
+
+> **Historical record only — do not follow this procedure.** The acceptance-order/sequential-acceptance gate described below is retired. Current task rules use explicit dependency links only for genuine technical or user-outcome prerequisites; unrelated tasks do not block one another, and task number, acceptance time, or creation time does not establish priority. See `AGENTS.md`, `replit.md`, and the current project-task instructions for the active policy.
+
+## Archived proposal and evidence (not current instructions)
 
 ## Intended rule and supported boundary
 

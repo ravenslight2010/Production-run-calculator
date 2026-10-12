@@ -8,74 +8,33 @@ type Requirement = {
   contradictions?: { label: string; pattern: RegExp }[];
 };
 
-// Wording contracts only: these do not read acceptance events or decide eligibility.
-const orderingRequirements: Requirement[] = [
-  {
-    label: "universal future acceptance coverage",
-    pattern: /Clicking Accept establishes precedence[\s\S]{0,80}all future[\s\S]{0,80}manually planned[\s\S]{0,120}generated follow-ups of every category[\s\S]{0,200}standalone suggestions[\s\S]{0,80}main-workspace\s+work[\s\S]{0,80}isolated task agents/i,
-    remediation: "apply acceptance precedence to every future task origin and execution workspace",
-    contradictions: [
-      { label: "ordering applies only to generated children", pattern: /(?:ordering|acceptance[- ]order (?:policy|rule)) applies only to generated (?:children|follow-ups)/i },
-      { label: "the superseded creation-time generated-child rule is required", pattern: /Each generated child depends on every unfinished accepted task present when it is created|later generated siblings wait behind earlier generated siblings/i },
-    ],
-  },
-  {
-    label: "acceptance-first numeric verified ties",
-    pattern: /Acceptance order is primary; lower task number[\s\S]{0,50}only a verified acceptance-order tie[\s\S]{0,100}Compare\s+numeric task refs numerically, not lexicographically[\s\S]{0,260}Creation time and task number never override known acceptance order/i,
-    remediation: "use acceptance order first and numeric refs only for verified ties",
-    contradictions: [
-      { label: "creation time determines precedence", pattern: /(?:Creation time|creation order|createdAt) (?:is primary|determines precedence|establishes precedence|takes precedence)/i },
-      { label: "task number is primary", pattern: /(?:Task (?:number|ref)|lower task number|numeric task refs?) (?:is primary|determines precedence|takes precedence|always goes first)|(?:Order|sort) (?:all )?tasks by (?:task number|numeric ref) first/i },
-      { label: "task number breaks unverified order", pattern: /(?:unknown|missing|unverified) acceptance (?:order|evidence)[^.\n]{0,100}(?:fall back|fallback|use (?:the )?(?:task number|creation time))/i },
-    ],
-  },
-  {
-    label: "startup complete evidence and persisted prerequisites",
-    pattern: /Before substantive execution,[\s\S]{0,80}complete inventory and reliable acceptance-order evidence[\s\S]{0,160}every unfinished task accepted earlier is a persisted prerequisite[\s\S]{0,100}wait for those prerequisites to finish/i,
-    remediation: "require complete inventory, reliable acceptance evidence, persisted earlier prerequisites, and waiting before work",
-  },
-  {
-    label: "explicit advisory blockers",
-    pattern: /Missing evidence, missing dependency links, or unfinished prerequisites produce an explicit blocked\/advisory outcome, not a claim of compliant execution/i,
-    remediation: "report missing evidence, links, and unfinished prerequisites as blocked/advisory",
-  },
-  {
-    label: "unfinished states and drafts",
-    pattern: /Unapproved drafts do not block work; accepted work\s+awaiting merge remains unfinished; merged or archived work does not block/i,
-    remediation: "exclude drafts and finished work but include accepted work awaiting merge",
-    contradictions: [
-      { label: "unapproved drafts block work", pattern: /Unapproved drafts (?:do|should|must) block/i },
-      { label: "awaiting merge is finished", pattern: /accepted work awaiting merge (?:is finished|does not block)/i },
-    ],
-  },
-  {
-    label: "later acceptance and genuine prerequisites",
-    pattern: /Later acceptances are not retroactively added as ordering dependencies[\s\S]{0,100}Preserve genuine prerequisite dependencies rather than erasing them/i,
-    remediation: "exclude retroactive ordering edges while preserving genuine prerequisites",
-    contradictions: [
-      { label: "later acceptance retroactively blocks earlier work", pattern: /Later acceptances (?:are|must be) retroactively added|(?:Erase|remove) (?:all )?genuine prerequisite dependencies/i },
-    ],
-  },
-  {
-    label: "unknown acceptance provenance",
-    pattern: /Creation\/update timestamps are not acceptance evidence;\s+unknown acceptance order stays unknown/i,
-    remediation: "do not invent acceptance evidence from creation/update timestamps",
-    contradictions: [
-      { label: "acceptance timestamps are invented from task timestamps", pattern: /(?:Use|derive|infer|set) (?:the )?(?:acceptedAt|acceptance timestamp|acceptance time)[^.\n]{0,100}(?:createdAt|updatedAt|creation time|update time)|(?:Creation\/update timestamps|createdAt|updatedAt) (?:are|is) (?:reliable )?acceptance evidence/i },
-    ],
-  },
-  {
-    label: "advisory versus scheduler boundary",
-    pattern: /An advisory agent\s+check cannot intercept acceptance or pause platform execution[\s\S]{0,100}Documentation or a passing checker does not enforce scheduling/i,
-    remediation: "distinguish agent advice and wording checks from unavailable acceptance/scheduling enforcement",
-    contradictions: [
-      { label: "documentation or checker enforces scheduling", pattern: /(?:Documentation|(?:a )?passing checker|(?:the )?policy checker) (?:enforces|guarantees|controls) (?:scheduling|acceptance order)|(?:An )?advisory agent check (?:pauses|suspends) (?:the )?(?:scheduler|platform execution)/i },
-    ],
-  },
-];
-
 const requirements: Requirement[] = [
-  ...orderingRequirements,
+  {
+    label: "discovered-error triage and repair",
+    pattern:
+      /Triage every error found during work[\s\S]{0,220}Record each concrete error in the owning task's failure ledger[\s\S]{0,220}fix it there when safe and authorized, even if (?:it was )?outside the (?:task's )?original scope[\s\S]{0,240}Never silently ignore[\s\S]{0,300}(?:exact risk\/blocker|exact blocker)[\s\S]{0,100}next action/i,
+    remediation:
+      "record every discovered error, fix it in the owning task when safe and authorized, and document any exact blocker and next action",
+  },
+  {
+    label: "genuine task dependencies only",
+    pattern:
+      /(?:Declare|Use) dependencies only for (?:real|genuine)(?: technical or user-outcome)? prerequisites[\s\S]{0,300}Unrelated active tasks do not block execution[\s\S]{0,180}(?:acceptance time|task number)[\s\S]{0,120}(?:do not establish|does not establish)/i,
+    remediation:
+      "record dependencies only for real prerequisites and do not delay work for unrelated tasks",
+    contradictions: [
+      {
+        label: "mandatory one-at-a-time acceptance ordering",
+        pattern:
+          /Future-task ordering:|acceptance-order startup (?:check|procedure)|wait for (?:all )?(?:earlier )?accepted tasks|one-at-a-time acceptance/i,
+      },
+      {
+        label: "acceptance time or task number establishes precedence",
+        pattern:
+          /Acceptance order is primary|(?:Task number|Creation time) (?:is primary|determines precedence|establishes precedence)/i,
+      },
+    ],
+  },
   {
     label: "follow-up priority gate",
     pattern:
@@ -147,30 +106,30 @@ const requirements: Requirement[] = [
     remediation: "state that one durable task owns each objective",
   },
   {
-    label: "per-task agent-owned execution contract",
+    label: "per-task execution and applicable safeguards contract",
     pattern:
-      /Every task description \(Draft, accepted task, or follow-up\) must include an\s+`?Agent-owned execution`?\s+section with this contract:[\s\S]{0,900}inspect relevant project evidence and authorized access paths before asking the user[\s\S]{0,300}keep all in-scope investigation, implementation, repairs, and verification in this task[\s\S]{0,300}ask only for decisions, approvals, or access permissions the user controls[\s\S]{0,300}never ask the user for evidence the agent or app can retrieve[\s\S]{0,300}if access is unavailable, investigate an approved agent-side route and state the exact missing capability/i,
+      /Every (?:Draft, accepted task, and follow-up|task description \(Draft, accepted task, or follow-up\)) must include `?## Agent-owned execution`? and `?## Applicable safeguards and verification`?[\s\S]{0,900}(?:task-specific evidence|evidence\/access) paths[\s\S]{0,500}user-controlled (?:decisions or permissions|inputs)[\s\S]{0,500}(?:applicable specialist|applicable project\/specialist) safety (?:checks|rules)[\s\S]{0,200}validation matrix/i,
     remediation:
-      "put evidence gathering, full in-scope ownership, and narrow user-input limits into every Draft, task, and follow-up description",
+      "put the full execution contract and applicable safeguards/verification into every Draft, task, and follow-up description",
   },
   {
     label: "task-scope capture rule",
     pattern:
-      /Before starting, capture the task's scope, affected surfaces, (?:expected )?owner, applicable specialist safety checks, and validation matrix/i,
+      /Before starting,[\s\S]{0,100}capture the task's scope, affected surfaces, (?:expected )?owner, applicable specialist safety checks, and validation matrix/i,
     remediation:
       "capture the task's scope, affected surfaces, owner, specialist safety checks, and validation matrix before starting",
   },
   {
     label: "failure-ledger closure rule",
     pattern:
-      /failure ledger[\s\S]{0,180}(?:Fix every in-scope finding before completion|close them before completion)/i,
+      /failure ledger[\s\S]{0,300}(?:fix|resolve)[\s\S]{0,180}(?:actionable errors|in-scope finding|in-scope failure|completion)/i,
     remediation:
       "keep same-objective discoveries in the owning task's failure ledger and close them before completion",
   },
   {
     label: "separate-task exception rule",
     pattern:
-      /genuinely independent outcome with separate acceptance criteria, an explicitly deferred user outcome, or an out-of-scope safety, security, data-integrity, or release blocker/i,
+      /genuinely independent outcome[\s\S]{0,160}(?:separate acceptance criteria|independent acceptance criteria)[\s\S]{0,240}(?:explicitly deferred user outcome|explicit deferral)[\s\S]{0,240}(?:safety|approval) need/i,
     remediation:
       "allow a separate task only for an independent outcome, explicitly deferred outcome, or out-of-scope safety, security, data-integrity, or release blocker",
   },
@@ -198,7 +157,7 @@ const requirements: Requirement[] = [
   {
     label: "follow-up justification requirement",
     pattern:
-      /Before creating another task[\s\S]{0,1000}document why the work cannot remain in the owning task/i,
+      /Before creating another task[\s\S]{0,1000}(?:document|explain) why (?:the work|it) cannot safely remain in the owning task/i,
     remediation:
       "document why proposed work cannot remain in its owning task",
   },
@@ -212,7 +171,7 @@ const requirements: Requirement[] = [
   {
     label: "existing-owner routing rule",
     pattern:
-      /new (?:in-scope )?findings?[\s\S]{0,180}(?:return|route)[\s\S]{0,180}(?:matching existing owner|matching existing task|matching owner)/i,
+      /(?:New|Newly discovered) findings?[\s\S]{0,180}(?:return|route)[\s\S]{0,180}(?:matching existing owner|matching existing task|matching owner)/i,
     remediation:
       "route new in-scope findings back to the matching existing owning task",
   },
@@ -226,7 +185,7 @@ const requirements: Requirement[] = [
   {
     label: "recursive sub-outcome prohibition",
     pattern:
-      /Test failures, fixture repairs, cleanup, validation work[\s\S]{0,180}(?:must not|do not)[\s\S]{0,80}recursive tasks/i,
+      /(?:Test failures, fixture repairs, cleanup, validation work[\s\S]{0,180}(?:must not|do not)[\s\S]{0,80}recursive tasks|Do not create a follow-up for an in-scope error, test failure, fixture repair, cleanup, validation step, or other sub-outcome)/i,
     remediation:
       "keep test failures, fixture repairs, cleanup, validation, and other in-scope sub-outcomes in the owning task",
   },
@@ -271,9 +230,9 @@ const taskAgentStartupRequirements: Requirement[] = [
   {
     label: "task startup rules and applicable skills",
     pattern:
-      /Before substantive work in either the main workspace or an isolated task copy:[\s\S]{0,260}Read the current task record, scope, and dependencies[\s\S]{0,220}applicable project skills in `\.agents\/skills\/`[\s\S]{0,240}Complete the acceptance\/dependency preflight/i,
+      /Before substantive work in either the main workspace or an isolated task copy:[\s\S]{0,260}Read the current task record, scope, and dependencies[\s\S]{0,220}applicable project skills in `\.agents\/skills\/`[\s\S]{0,300}Check only explicit, genuine task prerequisites and overlap[\s\S]{0,120}do not wait for unrelated active tasks/i,
     remediation:
-      "require task agents to refresh task context, read applicable skills, and complete the existing acceptance/dependency preflight",
+      "require task agents to refresh task context, read applicable skills, and check only genuine task prerequisites",
   },
   {
     label: "evidence-first access before asking the user",
@@ -281,13 +240,6 @@ const taskAgentStartupRequirements: Requirement[] = [
       /Before asking the user for evidence, first retrieve it through available authorized workspace, Replit, deployment, or connected-service access[\s\S]{0,240}Ask only for a decision, permission, or access grant the user controls/i,
     remediation:
       "retrieve available evidence through authorized workspace and connected-service access before asking the user",
-  },
-  {
-    label: "owning-task investigation and verification",
-    pattern:
-      /Keep all in-scope investigation through final verification in the owning task[\s\S]{0,240}Apply the separate-task exceptions[\s\S]{0,200}do not split symptoms, failures, or validation into child tasks/i,
-    remediation:
-      "keep same-objective investigation and validation with the owning task and use only documented follow-up exceptions",
   },
   {
     label: "supported instruction delivery and stale-session boundary",
@@ -313,54 +265,19 @@ const root = resolve(
 );
 const failures: string[] = [];
 
-const procedureRequirements: Requirement[] = [
-  ...orderingRequirements,
-  {
-    label: "complete state inventory procedure",
-    pattern: /PENDING[\s\S]{0,80}IN_PROGRESS[\s\S]{0,80}IMPLEMENTED[\s\S]{0,80}MERGING[\s\S]{0,80}QUEUED[\s\S]{0,300}truncated: false[\s\S]{0,100}totalCount[\s\S]{0,200}incomplete, stop/i,
-    remediation: "check all unfinished accepted states and stop on incomplete reads",
-  },
-  {
-    label: "acceptance provenance procedure",
-    pattern: /owner-attested sequential\/batch acceptance receipts[\s\S]{0,600}Missing acceptance evidence produces[\s\S]{0,80}acceptance order unknown/i,
-    remediation: "require reliable provenance and report unknown acceptance order explicitly",
-  },
-  {
-    label: "manual recording and race boundary",
-    pattern: /read\/create race[\s\S]*?dependsOn[\s\S]*?updateProjectTask[\s\S]{0,120}replaces[\s\S]{0,120}full list[\s\S]{0,180}genuine existing prerequisites/i,
-    remediation: "document non-atomic manual recording and full-list prerequisite preservation",
-  },
-  {
-    label: "bounded receipt procedure",
-    pattern: /Record a bounded outcome[\s\S]{0,1000}Capture time is not acceptance time; do not fabricate times/i,
-    remediation: "retain bounded provenance outcomes without fabricated acceptance times",
-  },
-  {
-    label: "future-only current record exclusion",
-    pattern: /user handles existing tasks[\s\S]{0,180}Do not change[\s\S]{0,180}current task record, dependency, scope, acceptance, assignment, or automation/i,
-    remediation: "leave existing task records and settings to the user",
-  },
-  {
-    label: "sequential acceptance limitations",
-    pattern: /User-coordinated sequential acceptance[\s\S]{0,1000}automatically[\s\S]{0,60}accept\/start work[\s\S]{0,100}unavailable/i,
-    remediation: "document sequential acceptance as a bounded alternative unavailable with automatic intake",
-  },
-];
-
 const taskPlanRequirements: Requirement[] = [
   {
-    label: "agent-owned execution section in task-plan instructions",
+    label: "full task execution contract in task-plan instructions",
     pattern:
-      /Agent-owned execution[\s\S]{0,220}Every task plan must include[\s\S]{0,180}inspect relevant project evidence and authorized access paths before asking the user[\s\S]{0,300}keep all in-scope investigation, implementation, repairs, and verification in this task[\s\S]{0,300}ask only for decisions, approvals, or access permissions the user controls[\s\S]{0,300}never ask the user for evidence the agent or app can retrieve[\s\S]{0,300}if access is unavailable, investigate an approved agent-side route and state the exact missing capability/i,
+      /## Agent-owned execution[\s\S]{0,500}(?:task-specific evidence\/access paths|task-specific evidence\/access paths)[\s\S]{0,500}inspect(?:s)? relevant (?:project )?evidence[\s\S]{0,500}ask only for (?:decisions, approvals, or access permissions|a product decision, approval, or specific access permission)[\s\S]{0,500}every concrete error[\s\S]{0,260}(?:outside|beyond) the original scope[\s\S]{0,350}never silently ignore[\s\S]{0,450}(?:exact risk\/blocker|exact blocker)[\s\S]{0,180}next action[\s\S]{0,500}## Applicable safeguards and verification[\s\S]{0,350}(?:specialist safety|repository and specialist safety)[\s\S]{0,220}validation matrix/i,
     remediation:
-      "require task-plan authors to put the self-sufficiency contract directly into each task description",
+      "require task plans to state evidence-first ownership, error repair, blockers, applicable safeguards, and validation",
   },
 ];
 
 for (const [relativePath, documentRequirements] of [
   ["AGENTS.md", requirements],
   ["replit.md", requirements],
-  ["docs/follow-up-dependency-submission.md", procedureRequirements],
   [".local/skills/project-tasks/SKILL.md", taskPlanRequirements],
   [".agents/skills/writing-plans/SKILL.md", taskPlanRequirements],
 ] as const) {
