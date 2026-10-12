@@ -12,8 +12,10 @@ vi.mock("@google/genai", () => ({
 import {
   GeminiProviderUnavailableError,
   openai,
+  probeGeminiModel,
   resetGeminiResilienceForTests,
   setGeminiMetricsObserver,
+  MODEL_FALLBACKS,
   type GeminiRequestMetrics,
 } from "@workspace/integrations-openai-ai-server";
 
@@ -49,6 +51,28 @@ describe("Gemini adapter resilience", () => {
     generateContentStream.mockReset();
     resetGeminiResilienceForTests();
     process.env.AI_INTEGRATIONS_GEMINI_API_KEY = "test-key";
+  });
+
+  it("probes each configured fallback with bounded synthetic input and discards output", async () => {
+    generateContent.mockResolvedValue({
+      text: "generated output must not escape",
+    });
+
+    for (const model of MODEL_FALLBACKS) {
+      await expect(probeGeminiModel(model)).resolves.toBeUndefined();
+    }
+
+    expect(generateContent.mock.calls.map(([request]) => request)).toEqual(
+      MODEL_FALLBACKS.map((model) => ({
+        model,
+        contents: "Reply with OK.",
+        config: {
+          maxOutputTokens: 1,
+          temperature: 0,
+          abortSignal: expect.any(AbortSignal),
+        },
+      })),
+    );
   });
 
   it("passes provider-native timeout and cancellation and reports safe metrics", async () => {

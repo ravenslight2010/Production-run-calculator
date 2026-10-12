@@ -11,7 +11,7 @@ export const AI_MODELS = {
 
 // These backups are used only after eligible provider failures or empty
 // successful responses. They do not replace the selected primary model.
-const MODEL_FALLBACKS = ["gemini-3.5-flash", "gemini-3.1-flash-lite"] as const;
+export const MODEL_FALLBACKS = ["gemini-3.5-flash", "gemini-3.1-flash-lite"] as const;
 
 export type ModelKind = keyof typeof AI_MODELS;
 

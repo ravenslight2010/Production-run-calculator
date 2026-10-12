@@ -1464,6 +1464,9 @@ importers:
       '@workspace/distill-dataset':
         specifier: workspace:*
         version: link:../lib/distill-dataset
+      '@workspace/integrations-openai-ai-server':
+        specifier: workspace:*
+        version: link:../lib/integrations-openai-ai-server
       '@workspace/name-match':
         specifier: workspace:*
         version: link:../lib/name-match

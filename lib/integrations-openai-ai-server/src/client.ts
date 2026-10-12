@@ -151,6 +151,23 @@ export function isGeminiProviderConfigured(
   );
 }
 
+/**
+ * Makes a bounded, synthetic request to confirm that one configured model is
+ * currently accepted by the provider. The response is intentionally discarded.
+ */
+export async function probeGeminiModel(model: string): Promise<void> {
+  if (!model.trim()) throw new Error("A Gemini model ID is required");
+  await client().models.generateContent({
+    model,
+    contents: "Reply with OK.",
+    config: {
+      maxOutputTokens: 1,
+      temperature: 0,
+      abortSignal: AbortSignal.timeout(15_000),
+    },
+  });
+}
+
 // Lazily construct the client so merely importing this module (e.g. in a
 // non-AI context or a mocked test) never throws on a missing env var.
 //
