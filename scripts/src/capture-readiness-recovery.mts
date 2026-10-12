@@ -256,7 +256,6 @@ export function validateReadinessDeploymentHandoff(
       !/^[a-f0-9]{64}$/u.test(handoff.expectedRecordSha256) ||
       sourceRecordDigest(expected) !== handoff.expectedRecordSha256 ||
       expected.mode !== "publish" ||
-      expected.appBuildId !== handoff.appBuildId ||
       expected.sourcePolicy !== handoff.sourcePolicy ||
       expected.sourceFingerprintSha256 !== handoff.sourceFingerprintSha256
     ) throw new Error("Readiness source handoff has invalid independent build/source binding");

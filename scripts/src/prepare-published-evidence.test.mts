@@ -12,7 +12,10 @@ import {
 import { sourceFixture } from "./fixtures/build-identity-fixture.mjs";
 import { preparePublishedEvidence } from "./prepare-published-evidence.mts";
 
-async function optionsFor(t: Parameters<typeof sourceFixture>[0]) {
+async function optionsFor(
+  t: Parameters<typeof sourceFixture>[0],
+  liveAppBuildId?: string,
+) {
   const root = await mkdtemp(path.join(os.tmpdir(), "published-evidence-"));
   t.after(async () => {
     const { rm } = await import("node:fs/promises");
@@ -31,7 +34,11 @@ async function optionsFor(t: Parameters<typeof sourceFixture>[0]) {
     const url = new URL(String(input));
     calls.push(url.pathname);
     if (url.pathname === "/api/build-info") {
-      return new Response(JSON.stringify(buildInfoFromRecord(expected, "release")), {
+      const info = buildInfoFromRecord(expected, "release");
+      return new Response(JSON.stringify({
+        ...info,
+        ...(liveAppBuildId ? { appBuildId: liveAppBuildId } : {}),
+      }), {
         status: 200,
         headers: { "content-type": "application/json", "cache-control": "no-store" },
       });
@@ -87,6 +94,7 @@ async function optionsFor(t: Parameters<typeof sourceFixture>[0]) {
   };
   return {
     expected,
+    liveAppBuildId: liveAppBuildId ?? expected.appBuildId,
     calls,
     options: {
       url: "https://published.example/",
@@ -137,6 +145,22 @@ test("post-publish evidence is staged and bound to the independent source record
   assert.deepEqual(reconciliation, { fixture: true });
   for (const file of result.files)
     assert(!JSON.stringify(JSON.parse(await readFile(file, "utf8"))).includes(fixture.options.url));
+});
+
+test("post-publish evidence accepts a different live app build ID for matching source", async (t) => {
+  const liveAppBuildId = "app-build:00000000-0000-0000-0000-000000000000";
+  const fixture = await optionsFor(t, liveAppBuildId);
+  const result = await preparePublishedEvidence(fixture.options, fixture.dependencies);
+  assert.equal(result.appBuildId, liveAppBuildId);
+  const handoffPath = result.files[1]!;
+  const handoffRecord = JSON.parse(await readFile(handoffPath, "utf8"));
+  const handoff = validateReadinessDeploymentHandoff(handoffRecord);
+  assert.equal(handoffRecord.appBuildId, liveAppBuildId);
+  assert.equal(handoff.deploymentId, liveAppBuildId);
+  assert.equal(
+    handoff.sourceFingerprintSha256,
+    fixture.expected.sourceFingerprintSha256,
+  );
 });
 
 test("a failed current reconciliation capture does not promote partial evidence", async (t) => {

@@ -73,6 +73,21 @@ test("source handoffs reject missing/mismatched independent expectations and exp
   }), /revision.*malformed/);
 });
 
+test("source handoffs accept different live build IDs when the full source identity matches", async (t) => {
+  const raw = await setup(t);
+  const liveBuildId = "app-build:00000000-0000-0000-0000-000000000000";
+  const handoff = validateReadinessDeploymentHandoff({
+    ...raw,
+    appBuildId: liveBuildId,
+    deploymentId: liveBuildId,
+  });
+  assert.equal(handoff.deploymentId, liveBuildId);
+  assert.equal(
+    handoff.sourceFingerprintSha256,
+    handoff.expectedSource.sourceFingerprintSha256,
+  );
+});
+
 test("release reports bind the source and test-definition fingerprints separately", () => {
   const identity = captureReleaseIdentity(path.resolve(new URL("../..", import.meta.url).pathname));
   const report = formatReleaseReport([], "standard", new Set(), {
