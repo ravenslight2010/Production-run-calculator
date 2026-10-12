@@ -107,3 +107,31 @@ active-machine count, provider limit/reservations, and representative-window
 confirmation remain Replit evidence until a supported metrics source is
 available. Missing evidence stays `UNKNOWN`; this tool does not change
 deployment settings or enable peer SSE.
+
+## 2026-10-12 platform metrics source recheck
+
+The current Replit documentation does not describe a supported feed that an
+application can use to read Autoscale peak machine/process counts or provider
+connection limits and reservations:
+
+- The [Admin API](https://docs.replit.com/teams/admin-api) documents account
+  usage, workspace, member, project, budget, approval, and compliance scopes;
+  it does not document runtime Autoscale instance metrics.
+- [Deployment Monitoring](https://docs.replit.com/features/publishing/monitoring-a-deployment)
+  documents uptime, requests, HTTP statuses, request durations, CPU and memory
+  charts, and logs. It does not document a metrics export/API for machine counts.
+- [Database connection details](https://docs.replit.com/features/data-and-storage/connection-details)
+  describes the managed connection string, storage usage, and advanced
+  connection details, not an API for provider connection limits or reservations.
+- [Development and production databases](https://docs.replit.com/features/data-and-storage/development-and-production)
+  identifies current production databases as Replit-managed (Helium) and
+  distinguishes legacy Neon development databases. No separate provider
+  metrics credential or supported production-provider metrics feed is configured
+  for this application.
+
+Therefore no automatic adapter is justified yet. Keep platform and provider
+values in the separate manual evidence file, leave unavailable values unknown,
+and retain the report's existing revision/sample checks. This documentation
+review does not change deployment settings or enable live peer SSE. Recheck
+these sources before adding an adapter if Replit or the configured provider
+documents a supported metrics export.
