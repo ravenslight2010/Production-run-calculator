@@ -158,8 +158,8 @@ test("post-publish evidence accepts a different live app build ID for matching s
   assert.equal(handoffRecord.appBuildId, liveAppBuildId);
   assert.equal(handoff.deploymentId, liveAppBuildId);
   assert.equal(
-    handoff.sourceFingerprintSha256,
-    fixture.expected.sourceFingerprintSha256,
+    handoff.deployedRevision,
+    `source-sha256:${fixture.expected.sourceFingerprintSha256}`,
   );
 });
 

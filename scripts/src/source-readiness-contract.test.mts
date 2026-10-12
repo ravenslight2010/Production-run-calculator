@@ -82,9 +82,10 @@ test("source handoffs accept different live build IDs when the full source ident
     deploymentId: liveBuildId,
   });
   assert.equal(handoff.deploymentId, liveBuildId);
+  assert(handoff.expectedSource);
   assert.equal(
-    handoff.sourceFingerprintSha256,
-    handoff.expectedSource.sourceFingerprintSha256,
+    handoff.deployedRevision,
+    `source-sha256:${handoff.expectedSource.sourceFingerprintSha256}`,
   );
 });
 

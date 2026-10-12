@@ -15,6 +15,12 @@ For published-build matching, compare the production source policy and complete 
 
 **How to apply:** Validate build mode, readiness, timestamps, source policy, and the full source fingerprint. Bind the receipt to the independent prepared record, record the actual live build ID, and keep the deployed revision expressed as `source-sha256:<fingerprint>`.
 
+Preserve the independently prepared expectation for a published build while refreshing its evidence. Do not regenerate a publish candidate merely because local verification tooling was corrected.
+
+**Why:** Regeneration targets the next source tree and overwrites the expectation for the existing deployment, creating an unnecessary republish loop. A corrected local verifier can still validate the already-prepared published source; that capture does not certify later workspace edits.
+
+**How to apply:** Capture against the preserved expectation and report the actual deployed source identity. Prepare a new candidate only when publishing a new source tree, and keep that candidate's release assessment separate.
+
 For test-only CI evidence that intentionally skips production source reconciliation, explicitly set `SOURCE_LIBRARY_RECONCILIATION_ENVIRONMENT=development`.
 
 **Why:** CI's default release environment can cause the report to infer a deployed revision from the checkout even though no deployment or production readiness was established.
