@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "kind": "sse-platform-capacity-metrics",
+  "windowStartUtc": "2026-10-11T00:00:00.000Z",
+  "windowEndUtc": "2026-10-11T01:00:00.000Z",
+  "deploymentSourceFingerprintSha256": null,
+  "deploymentSourceFingerprintSource": "unknown",
+  "apiProcessesPerMachine": null,
+  "apiProcessesPerMachineSource": "unknown",
+  "representativeWindowConfirmed": false,
+  "configuredMaximumMachines": null,
+  "configuredMaximumSource": "unknown",
+  "peakActiveMachines": null,
+  "peakDatabaseClientBackends": null,
+  "providerConnectionLimit": null,
+  "providerReservedSlots": null,
+  "providerMetricsSource": "unknown",
+  "peakMetricsSource": "unknown"
+}

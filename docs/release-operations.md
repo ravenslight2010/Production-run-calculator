@@ -114,8 +114,56 @@ representative peak headroom. No separate non-production deployed topology was
 available for cross-instance testing. Keep live peer SSE **NOT SUPPORTED** until
 deployment-bound process counts and peak-aligned capacity establish a safe
 budget and the deployed topology is verified.
+The 2026-10-11 follow-up is retained in
+[`evidence/sse-capacity-observation-2026-10-11.json`](evidence/sse-capacity-observation-2026-10-11.json).
+It summarizes 101 sanitized samples from the same logged source fingerprint:
+35 primary observations and 66 unavailable results, with pool waiters reaching
+16. The owner confirmed an Autoscale maximum of 3 machines. With one API
+process and a maximum pool size of 10 per machine, that bounds API pool usage
+to 30 connections against 446 ordinary PostgreSQL slots, leaving 416 for other
+clients before provider limits. But current/peak process counts, peak
+non-API clients, and provider limits remain unverified; the partial log window
+and one read-replica snapshot do not prove peak headroom. This remains a NO-GO
+capacity result; keep live peer SSE **NOT SUPPORTED**.
+The updated isolated two-process test, including retention-gap reconciliation,
+readiness, and shutdown cleanup, is retained in
+[`evidence/sync-peer-fanout-2026-10-11.json`](evidence/sync-peer-fanout-2026-10-11.json).
 This deployment constraint is not a `/readyz` check: optional AI and
 background-worker warnings remain warnings and do not fail core readiness.
+
+### Automatic capacity report
+
+The offline report generator summarizes allowlisted `database_capacity_sample`
+JSONL records and a small Replit-metrics JSON file. It performs no database
+queries or writes and does not call a Replit metrics API. Copy
+[`sse-capacity-platform-metrics.template.json`](evidence/sse-capacity-platform-metrics.template.json),
+set both files to the same representative monitoring window, and supply:
+
+- a source fingerprint verified against the published deployment handoff;
+- the API process count per machine from the verified published run configuration;
+- configured and observed peak machine counts;
+- the peak PostgreSQL client count, computed automatically from complete primary
+  database samples and conservatively combined with any independent monitoring peak;
+- provider connection limit and reserved slots, with their source; and
+- confirmation that the window represents peak demand.
+
+The report deliberately counts the aggregate observed database-client peak
+again on top of the maximum API pool bound. This is conservative and avoids
+assuming which clients belong to the API. Missing, inconsistent, incomplete,
+or unverified inputs produce `UNKNOWN`; a known over-budget result produces
+`NO_GO`. The report never enables peer SSE or changes deployment settings.
+
+```bash
+pnpm --filter @workspace/scripts run sse-capacity-report -- \
+  --samples /path/to/sanitized-capacity-samples.jsonl \
+  --platform /path/to/sse-capacity-platform-metrics.json
+pnpm --filter @workspace/scripts run test:sse-capacity-report
+```
+
+The generated revision-bound summary is written under `docs/evidence/` and
+retains only the allowlisted counts, source identities, gate result, and
+sanitization status. Do not put raw or mixed application logs into the retained
+evidence directory.
 
 ## Release commands
 

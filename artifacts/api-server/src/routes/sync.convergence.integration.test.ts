@@ -285,6 +285,33 @@ async function stopIsolatedSyncProcess(child: ChildProcess): Promise<void> {
   });
 }
 
+async function stopSyncOutboxListenerInProcess(child: ChildProcess): Promise<void> {
+  const requestId = "stop-sync-outbox-listener";
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => finish(new Error("timed out stopping sync outbox listener")), 5_000);
+    const finish = (error?: Error) => {
+      clearTimeout(timeout);
+      child.off("message", onMessage);
+      child.off("exit", onExit);
+      if (error) reject(error);
+      else resolve();
+    };
+    const onMessage = (message: unknown) => {
+      if (
+        message
+        && typeof message === "object"
+        && (message as { type?: string }).type === "sync-outbox-stopped"
+        && (message as { requestId?: string }).requestId === requestId
+      ) finish();
+    };
+    const onExit = (code: number | null) =>
+      finish(new Error(`isolated sync process exited while stopping its listener (${code})`));
+    child.on("message", onMessage);
+    child.once("exit", onExit);
+    child.send({ type: "stop-sync-outbox-listener", requestId });
+  });
+}
+
 type FrameReadState = {
   buffer: string;
   pendingChunk?: ReturnType<ReadableStreamDefaultReader<Uint8Array>["read"]>;
@@ -975,7 +1002,8 @@ describe("multi-client sync convergence soak", () => {
       await expectNoSyncOutboxFrame(todayPeer.reader, todayPeer.state, 350);
 
       // Kill process B's dedicated LISTEN connection, commit a real API write,
-      // then prove the recovered listener brings the peer to canonical state.
+      // then remove that retained event as if retention pruned its history.
+      // Listener catch-up must detect the cursor gap and reconcile canonically.
       const killed = await pool.query<{ terminated: boolean }>(
         "SELECT pg_terminate_backend($1) AS terminated",
         [processBPid],
@@ -998,20 +1026,21 @@ describe("multi-client sync convergence soak", () => {
         data?: { runValues?: Record<string, { casesNeeded?: number }> };
       };
       expect(disconnectedResult.data?.runValues?.["run-main"]?.casesNeeded).toBe(321);
+      const [gapCursor] = await db.select({ cursor: syncOutboxCursorsTable.cursor })
+        .from(syncOutboxCursorsTable)
+        .where(eq(syncOutboxCursorsTable.scope, "live"));
+      await db.delete(syncOutboxEventsTable).where(and(
+        eq(syncOutboxEventsTable.scope, "live"),
+        eq(syncOutboxEventsTable.cursor, gapCursor!.cursor),
+      ));
       await waitForSyncOutboxListeners(2, 10_000, (pids) => !pids.includes(processBPid!));
       const recoveredDayState = await readMatchingFrame(
         todayPeer.reader,
         todayPeer.state,
-        (frame) => (
-          frame.senderId === "process-a-recovery-writer"
-          || frame.canonicalReconcile === true
-        ) && frame.date === TODAY,
+        (frame) => frame.canonicalReconcile === true && frame.date === TODAY,
         8_000,
       );
-      expect(
-        recoveredDayState.senderId === "process-a-recovery-writer"
-        || recoveredDayState.canonicalReconcile === true,
-      ).toBe(true);
+      expect(recoveredDayState.canonicalReconcile).toBe(true);
       expect(
         (recoveredDayState.data as { runValues?: Record<string, { casesNeeded?: number }> })
           ?.runValues?.["run-main"]?.casesNeeded,
@@ -1176,6 +1205,18 @@ describe("multi-client sync convergence soak", () => {
         },
       });
 
+      // The peer listener is optional for core API readiness. Explicitly stop
+      // it while leaving process B serving, then verify readiness remains a
+      // truthful core-service result rather than claiming peer-fanout health.
+      await stopSyncOutboxListenerInProcess(processB.child);
+      await waitForSyncOutboxListeners(1);
+      const readinessResponse = await fetch(`${processB.baseUrl}/api/readyz`);
+      expect(readinessResponse.status).toBe(200);
+      expect(await readinessResponse.json()).toMatchObject({
+        status: "ok",
+        checks: { database: "ok", auditProtection: "ok" },
+      });
+
       console.info("[sync peer fanout evidence]", JSON.stringify({
         apiProcesses: 2,
         isolatedDisposableDatabase: true,
@@ -1183,15 +1224,18 @@ describe("multi-client sync convergence soak", () => {
         dateAndScopeIsolation: true,
         duplicateNotificationIdempotence: true,
         listenerRecoveryAfterBackendTermination: true,
+        prunedOutboxGapCanonicalReconciliation: true,
         missedNotificationPollingRecovery: true,
         resetAndRolloverCrossProcess: true,
         masterDataCrossProcess: true,
         canonicalReconnectRecovery: true,
+        coreReadinessUnaffectedByStoppedOptionalListener: true,
       }));
     } finally {
       await Promise.all(streams.map((stream) => stream.close().catch(() => {})));
       if (processB) await stopIsolatedSyncProcess(processB.child);
       await stopIsolatedSyncProcess(processA.child);
+      await waitForSyncOutboxListeners(0, 5_000);
     }
   }, 30_000);
 
