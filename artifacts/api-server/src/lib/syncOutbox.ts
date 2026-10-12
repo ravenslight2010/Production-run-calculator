@@ -308,6 +308,14 @@ export function startSyncOutboxListener(
   let retryDelayMs = 500;
   const drainBackoff = createBackgroundOperationBackoff();
   const cursors = processCursors;
+  const observeListenerLag = (
+    scope: string,
+    pendingEvents: number,
+    oldestPendingAt?: number,
+  ) => {
+    if (stopped) return;
+    observeSyncOutboxLag(scope, pendingEvents, oldestPendingAt);
+  };
 
   const scheduleDrain = () => {
     if (stopped || drainTimer || !drainBackoff.isReady()) return;
@@ -330,7 +338,7 @@ export function startSyncOutboxListener(
         throw new Error("Invalid sync outbox cursor state");
       }
       if (latest === cursor) {
-        observeSyncOutboxLag(scope, 0);
+        observeListenerLag(scope, 0);
         return;
       }
 
@@ -355,10 +363,10 @@ export function startSyncOutboxListener(
       if (rows.length === 0 || firstCursor !== cursor + 1) {
         // Retention passed this process's cursor. Reconcile canonical state
         // before moving forward; never silently jump over a missing interval.
-        observeSyncOutboxLag(scope, latest - cursor);
+        observeListenerLag(scope, latest - cursor);
         await handleGap(scope as Scope, latest);
         cursors.set(scope, latest);
-        observeSyncOutboxLag(scope, 0);
+        observeListenerLag(scope, 0);
         return;
       }
 
@@ -366,13 +374,13 @@ export function startSyncOutboxListener(
         const row = rows[rowIndex]!;
         const eventCursor = Number(row.cursor);
         if (eventCursor !== cursor + 1) {
-          observeSyncOutboxLag(scope, latest - cursor, new Date(row.created_at).getTime());
+          observeListenerLag(scope, latest - cursor, new Date(row.created_at).getTime());
           await handleGap(scope as Scope, latest);
           cursors.set(scope, latest);
-          observeSyncOutboxLag(scope, 0);
+          observeListenerLag(scope, 0);
           return;
         }
-        observeSyncOutboxLag(scope, latest - cursor, new Date(row.created_at).getTime());
+        observeListenerLag(scope, latest - cursor, new Date(row.created_at).getTime());
         const event = parseEvent({ ...row, cursor: eventCursor });
         if (event) {
           await handleEvent(event);
@@ -385,7 +393,7 @@ export function startSyncOutboxListener(
         cursors.set(scope, cursor);
       }
       if (cursor >= latest) {
-        observeSyncOutboxLag(scope, 0);
+        observeListenerLag(scope, 0);
         return;
       }
     }
@@ -502,7 +510,7 @@ export function startSyncOutboxListener(
 
   return () => {
     stopped = true;
-    for (const scope of syncOutboxLagByScope.keys()) observeSyncOutboxLag(scope, 0);
+    syncOutboxLagByScope.clear();
     if (retryTimer) clearTimeout(retryTimer);
     if (drainTimer) clearTimeout(drainTimer);
     if (retentionTimer) clearInterval(retentionTimer);

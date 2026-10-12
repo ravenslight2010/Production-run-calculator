@@ -150,3 +150,4 @@
 - [Crust batch UI](crust-run-no-dough-batches.md) + [run-need cap](autotrack-over-provisioning.md) — hide dough batches in crust mode and clamp live auto-track to actual demand.
 - [Sync reset](sync-reset-boundary-hardening.md) + [fixture isolation](sync-integration-reset-isolation.md) — fence writes by epoch; keep reset endpoints out of shared fixtures.
 - [SSE test-reader timeouts](sse-test-reader-timeouts.md) — retain pending raw stream reads across timeouts so an abandoned parser cannot consume the next event and create false delivery failures.
+- [Sync listener stop diagnostics](sync-listener-stop-diagnostics.md) — clear lag samples on shutdown and fence metric writes from in-flight drains that resume afterward.

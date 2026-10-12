@@ -1362,6 +1362,100 @@ describe("multi-client sync convergence soak", () => {
     }
   }, 20_000);
 
+  it("clears pending delivery diagnostics when the listener stops", async () => {
+    const syncOutbox = await import("../lib/syncOutbox");
+    syncOutbox.clearSyncOutboxProcessCursorsForTests();
+    await syncOutbox.registerSyncOutboxScope("live");
+    await syncOutbox.registerSyncOutboxScope("sandbox");
+
+    const payloadSentinel = "outbox-stop-private-payload";
+    const liveCursor = await syncOutbox.recordSyncOutboxEvent({
+      kind: "configuration",
+      scope: "live",
+      senderId: payloadSentinel,
+      family: "master-data",
+    });
+    await syncOutbox.recordSyncOutboxEvent({
+      kind: "configuration",
+      scope: "sandbox",
+      senderId: payloadSentinel,
+      family: "master-data",
+    });
+    await db.update(syncOutboxEventsTable)
+      .set({ createdAt: new Date(Date.now() - syncOutbox.SYNC_OUTBOX_LAG_WARNING_MS - 1) })
+      .where(and(
+        eq(syncOutboxEventsTable.scope, "live"),
+        eq(syncOutboxEventsTable.cursor, liveCursor),
+      ));
+
+    let releaseHandler!: () => void;
+    const handlerGate = new Promise<void>((resolve) => { releaseHandler = resolve; });
+    let markHandlerStarted!: () => void;
+    const handlerStarted = new Promise<void>((resolve) => { markHandlerStarted = resolve; });
+    let markHandlerFinished!: () => void;
+    const handlerFinished = new Promise<void>((resolve) => { markHandlerFinished = resolve; });
+    const previousTestFlag = process.env.SYNC_OUTBOX_LISTENER_TEST_ENABLED;
+    process.env.SYNC_OUTBOX_LISTENER_TEST_ENABLED = "1";
+    const stop = syncOutbox.startSyncOutboxListener(async () => {
+      markHandlerStarted();
+      await handlerGate;
+      markHandlerFinished();
+    }, async () => {});
+
+    try {
+      await waitForSyncOutboxListeners(1);
+      await handlerStarted;
+
+      // The live delivery is blocked in its handler. Seed a second scope's
+      // process-local sample before stopping the listener.
+      syncOutbox.observeSyncOutboxLag(
+        "sandbox",
+        1,
+        Date.now() - syncOutbox.SYNC_OUTBOX_LAG_WARNING_MS - 1,
+      );
+      const pending = syncOutbox.getSyncOutboxLagDiagnostics();
+      expect(pending).toMatchObject({
+        status: "warning",
+        lagging: true,
+        pendingEvents: 2,
+        warningThresholdMs: syncOutbox.SYNC_OUTBOX_LAG_WARNING_MS,
+      });
+      expect(JSON.stringify(pending)).not.toContain("live");
+      expect(JSON.stringify(pending)).not.toContain("sandbox");
+      expect(JSON.stringify(pending)).not.toContain("master-data");
+      expect(JSON.stringify(pending)).not.toContain(payloadSentinel);
+
+      stop();
+      expect(syncOutbox.getSyncOutboxLagDiagnostics()).toMatchObject({
+        status: "ok",
+        lagging: false,
+        pendingEvents: 0,
+        lagMs: 0,
+      });
+      const stoppedDiagnostics = JSON.stringify(syncOutbox.getSyncOutboxLagDiagnostics());
+      expect(stoppedDiagnostics).not.toContain("live");
+      expect(stoppedDiagnostics).not.toContain("sandbox");
+      expect(stoppedDiagnostics).not.toContain("master-data");
+      expect(stoppedDiagnostics).not.toContain(payloadSentinel);
+
+      releaseHandler();
+      await handlerFinished;
+      expect(syncOutbox.getSyncOutboxLagDiagnostics()).toMatchObject({
+        status: "ok",
+        lagging: false,
+        pendingEvents: 0,
+        lagMs: 0,
+      });
+    } finally {
+      releaseHandler();
+      stop();
+      await waitForSyncOutboxListeners(0);
+      syncOutbox.clearSyncOutboxProcessCursorsForTests();
+      if (previousTestFlag === undefined) delete process.env.SYNC_OUTBOX_LISTENER_TEST_ENABLED;
+      else process.env.SYNC_OUTBOX_LISTENER_TEST_ENABLED = previousTestFlag;
+    }
+  }, 20_000);
+
   it("keeps the aggregate delivery warning while another registered scope remains delayed", async () => {
     const syncOutbox = await import("../lib/syncOutbox");
     syncOutbox.clearSyncOutboxProcessCursorsForTests();
