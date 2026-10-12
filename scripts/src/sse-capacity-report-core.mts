@@ -15,11 +15,14 @@ export type SseCapacityPlatformMetrics = {
   apiProcessesPerMachineSource: "verified-deployment-config" | "unknown";
   representativeWindowConfirmed: boolean;
   configuredMaximumMachines: number | null;
+  configuredMaximumCapturedAtUtc: string | null;
   configuredMaximumSource: "owner-reported" | "replit-config" | "unknown";
   peakActiveMachines: number | null;
   peakDatabaseClientBackends: number | null;
+  peakMetricsCapturedAtUtc: string | null;
   providerConnectionLimit: number | null;
   providerReservedSlots: number | null;
+  providerMetricsCapturedAtUtc: string | null;
   providerMetricsSource: "provider-capacity-evidence" | "unknown";
   peakMetricsSource: "replit-monitoring-export" | "unknown";
 };
@@ -72,6 +75,10 @@ function utcTimestamp(value: unknown, label: string): string {
   const parsed = Date.parse(value);
   if (!Number.isFinite(parsed)) throw new Error(`Invalid ${label}.`);
   return new Date(parsed).toISOString();
+}
+
+function nullableUtcTimestamp(value: unknown, label: string): string | null {
+  return value === null || value === undefined ? null : utcTimestamp(value, label);
 }
 
 function readPlatformMetrics(value: unknown): SseCapacityPlatformMetrics {
@@ -129,10 +136,6 @@ function readPlatformMetrics(value: unknown): SseCapacityPlatformMetrics {
     value.configuredMaximumMachines, "configured maximum machines", 1,
   );
   const peakActiveMachines = nullableCount(value.peakActiveMachines, "peak active machines", 1);
-  if (configuredMaximumMachines !== null && peakActiveMachines !== null &&
-      peakActiveMachines > configuredMaximumMachines) {
-    throw new Error("Observed peak machines exceed the configured maximum.");
-  }
   return {
     windowStartUtc,
     windowEndUtc,
@@ -144,16 +147,44 @@ function readPlatformMetrics(value: unknown): SseCapacityPlatformMetrics {
     apiProcessesPerMachineSource,
     representativeWindowConfirmed: value.representativeWindowConfirmed,
     configuredMaximumMachines,
+    configuredMaximumCapturedAtUtc: nullableUtcTimestamp(
+      value.configuredMaximumCapturedAtUtc, "configured maximum capture timestamp",
+    ),
     configuredMaximumSource,
     peakActiveMachines,
     peakDatabaseClientBackends: nullableCount(
       value.peakDatabaseClientBackends, "peak database client backends",
     ),
+    peakMetricsCapturedAtUtc: nullableUtcTimestamp(
+      value.peakMetricsCapturedAtUtc, "peak metrics capture timestamp",
+    ),
     providerConnectionLimit: nullableCount(value.providerConnectionLimit, "provider limit", 1),
     providerReservedSlots: nullableCount(value.providerReservedSlots, "provider reserved slots"),
+    providerMetricsCapturedAtUtc: nullableUtcTimestamp(
+      value.providerMetricsCapturedAtUtc, "provider metrics capture timestamp",
+    ),
     providerMetricsSource,
     peakMetricsSource,
   };
+}
+
+function assessSourceFreshness(capturedAtUtc: string | null, generatedAtUtc: string) {
+  const ageMs = capturedAtUtc === null
+    ? null
+    : Date.parse(generatedAtUtc) - Date.parse(capturedAtUtc);
+  const status = ageMs === null
+    ? "missing"
+    : ageMs < 0
+      ? "future"
+      : ageMs > MAX_PLATFORM_METRICS_AGE_MS
+        ? "stale"
+        : "fresh";
+  return {
+    status,
+    capturedAtUtc,
+    ageMs,
+    maxAgeMs: MAX_PLATFORM_METRICS_AGE_MS,
+  } as const;
 }
 
 function parseCapacitySample(value: JsonRecord): CapacitySample {
@@ -319,6 +350,32 @@ export function buildSseCapacityReport(input: {
       ? "stale"
       : "fresh";
   const platformMetricsFresh = platformMetricsStatus === "fresh";
+  const autoscaleFreshness = assessSourceFreshness(
+    platform.configuredMaximumCapturedAtUtc, generatedAtUtc,
+  );
+  const providerFreshness = assessSourceFreshness(
+    platform.providerMetricsCapturedAtUtc, generatedAtUtc,
+  );
+  const peakFreshness = assessSourceFreshness(
+    platform.peakMetricsCapturedAtUtc, generatedAtUtc,
+  );
+  const autoscaleFresh = autoscaleFreshness.status === "fresh";
+  const providerFresh = providerFreshness.status === "fresh";
+  const peakFresh = peakFreshness.status === "fresh";
+  const configuredMaximumMachines = autoscaleFresh
+    ? platform.configuredMaximumMachines : null;
+  const configuredMaximumSource = autoscaleFresh
+    ? platform.configuredMaximumSource : "unknown";
+  const peakActiveMachines = peakFresh ? platform.peakActiveMachines : null;
+  const peakDatabaseClientBackends = peakFresh ? platform.peakDatabaseClientBackends : null;
+  const providerConnectionLimit = providerFresh ? platform.providerConnectionLimit : null;
+  const providerReservedSlots = providerFresh ? platform.providerReservedSlots : null;
+  const providerMetricsSource = providerFresh ? platform.providerMetricsSource : "unknown";
+  const peakMetricsSource = peakFresh ? platform.peakMetricsSource : "unknown";
+  if (configuredMaximumMachines !== null && peakActiveMachines !== null &&
+      peakActiveMachines > configuredMaximumMachines) {
+    throw new Error("Observed peak machines exceed the configured maximum.");
+  }
   if (!/^test-sha256:[a-f0-9]{64}$/.test(input.revision.assessmentRevision) ||
       !/^source-sha256:[a-f0-9]{64}$/.test(input.revision.sourceRevision) ||
       !/^[a-f0-9]{64}$/.test(input.revision.verificationFingerprintSha256)) {
@@ -356,8 +413,8 @@ export function buildSseCapacityReport(input: {
   const maxPoolWaiters = samples.length
     ? Math.max(...samples.map((sample) => sample.pool.waiting)) : null;
   const configuredMaximumApiProcesses =
-    platform.configuredMaximumMachines !== null && platform.apiProcessesPerMachine !== null
-      ? platform.configuredMaximumMachines * platform.apiProcessesPerMachine : null;
+    configuredMaximumMachines !== null && platform.apiProcessesPerMachine !== null
+      ? configuredMaximumMachines * platform.apiProcessesPerMachine : null;
   if (configuredMaximumApiProcesses !== null &&
       (!Number.isSafeInteger(configuredMaximumApiProcesses) ||
        configuredMaximumApiProcesses > MAX_COUNT)) {
@@ -370,32 +427,37 @@ export function buildSseCapacityReport(input: {
     throw new Error("Calculated API connection bound exceeds the supported limit.");
   }
   const observedDatabaseClientPeak =
-    platform.peakDatabaseClientBackends === null && sampledPeakClients === null
+    peakDatabaseClientBackends === null && sampledPeakClients === null
       ? null
-      : Math.max(platform.peakDatabaseClientBackends ?? 0, sampledPeakClients ?? 0);
+      : Math.max(peakDatabaseClientBackends ?? 0, sampledPeakClients ?? 0);
   const peakDatabaseClientSource = sampledPeakClients !== null
-    ? platform.peakDatabaseClientBackends !== null
+    ? peakDatabaseClientBackends !== null
       ? "combined-samples-and-monitoring"
       : "sanitized-database-samples"
-    : platform.peakDatabaseClientBackends !== null
+    : peakDatabaseClientBackends !== null
       ? "replit-monitoring-export"
       : "unknown";
   const canAssessBudget = apiPoolUpperBound !== null && postgresOrdinarySlots !== null &&
-    observedDatabaseClientPeak !== null && platform.providerConnectionLimit !== null &&
-    platform.providerReservedSlots !== null;
+    observedDatabaseClientPeak !== null && providerConnectionLimit !== null &&
+    providerReservedSlots !== null;
   const budget = canAssessBudget
     ? assessConnectionBudget({
       apiPoolUpperBound,
       observedDatabaseClientPeak,
       postgresOrdinarySlots,
-      providerConnectionLimit: platform.providerConnectionLimit!,
-      providerReservedSlots: platform.providerReservedSlots!,
+      providerConnectionLimit: providerConnectionLimit!,
+      providerReservedSlots: providerReservedSlots!,
     })
     : null;
   const blockers: string[] = [];
   if (!platformMetricsFresh) blockers.push("platform_metrics_window_not_fresh");
+  if (!autoscaleFresh) {
+    blockers.push(`configured_machine_maximum_capture_time_${autoscaleFreshness.status}`);
+  }
+  if (!providerFresh) blockers.push(`provider_metrics_capture_time_${providerFreshness.status}`);
+  if (!peakFresh) blockers.push(`peak_metrics_capture_time_${peakFreshness.status}`);
   if (!platform.representativeWindowConfirmed) blockers.push("peak_window_not_confirmed");
-  if (platform.peakMetricsSource !== "replit-monitoring-export") {
+  if (peakMetricsSource !== "replit-monitoring-export") {
     blockers.push("peak_metrics_source_unverified");
   }
   if (platform.deploymentSourceFingerprintSource !== "verified-deployment-handoff" ||
@@ -409,15 +471,15 @@ export function buildSseCapacityReport(input: {
   if (platform.apiProcessesPerMachineSource !== "verified-deployment-config") {
     blockers.push("api_process_count_source_unverified");
   }
-  if (platform.configuredMaximumMachines === null) blockers.push("configured_machine_maximum_missing");
-  if (platform.configuredMaximumSource === "unknown") {
+  if (configuredMaximumMachines === null) blockers.push("configured_machine_maximum_missing");
+  if (configuredMaximumSource === "unknown") {
     blockers.push("configured_machine_maximum_source_unverified");
   }
-  if (platform.peakActiveMachines === null) blockers.push("peak_machine_count_missing");
+  if (peakActiveMachines === null) blockers.push("peak_machine_count_missing");
   if (observedDatabaseClientPeak === null) blockers.push("peak_database_client_count_missing");
-  if (platform.providerConnectionLimit === null) blockers.push("provider_connection_limit_missing");
-  if (platform.providerReservedSlots === null) blockers.push("provider_reserved_slots_missing");
-  if (platform.providerMetricsSource !== "provider-capacity-evidence") {
+  if (providerConnectionLimit === null) blockers.push("provider_connection_limit_missing");
+  if (providerReservedSlots === null) blockers.push("provider_reserved_slots_missing");
+  if (providerMetricsSource !== "provider-capacity-evidence") {
     blockers.push("provider_capacity_source_unverified");
   }
   if (!coverage.complete) blockers.push("capacity_sample_window_incomplete");
@@ -425,9 +487,8 @@ export function buildSseCapacityReport(input: {
   if (poolMaximums.size !== 1) blockers.push("pool_maximum_inconsistent");
   if (postgresConfigs.size !== 1) blockers.push("postgres_capacity_configuration_inconsistent");
   if (parsedLogs.unstructuredLines > 0) blockers.push("unstructured_log_lines_present");
-  if (platform.peakActiveMachines !== null &&
-      platform.configuredMaximumMachines !== null &&
-      platform.peakActiveMachines > platform.configuredMaximumMachines) {
+  if (peakActiveMachines !== null && configuredMaximumMachines !== null &&
+      peakActiveMachines > configuredMaximumMachines) {
     blockers.push("observed_machine_peak_exceeds_configured_maximum");
   }
   if (budget?.status === "over_budget") blockers.push("connection_demand_exceeds_available_slots");
@@ -456,24 +517,32 @@ export function buildSseCapacityReport(input: {
       maxAgeMs: MAX_PLATFORM_METRICS_AGE_MS,
       windowEndAgeMs: platformMetricsAgeMs,
     },
+    sourceCaptureFreshness: {
+      autoscale: autoscaleFreshness,
+      providerLimits: providerFreshness,
+      peakMetrics: peakFreshness,
+    },
     deploymentMetrics: {
       verifiedSourceFingerprintSha256: platform.deploymentSourceFingerprintSha256,
       sourceFingerprintSource: platform.deploymentSourceFingerprintSource,
       apiProcessesPerMachine: platform.apiProcessesPerMachine,
       apiProcessesPerMachineSource: platform.apiProcessesPerMachineSource,
-      configuredMaximumMachines: platform.configuredMaximumMachines,
-      configuredMaximumSource: platform.configuredMaximumSource,
-      observedPeakMachines: platform.peakActiveMachines,
-      observedPeakApiProcesses: platform.peakActiveMachines !== null &&
+      configuredMaximumMachines,
+      configuredMaximumCapturedAtUtc: platform.configuredMaximumCapturedAtUtc,
+      configuredMaximumSource,
+      observedPeakMachines: peakActiveMachines,
+      observedPeakApiProcesses: peakActiveMachines !== null &&
           platform.apiProcessesPerMachine !== null
-        ? platform.peakActiveMachines * platform.apiProcessesPerMachine : null,
+        ? peakActiveMachines * platform.apiProcessesPerMachine : null,
       configuredMaximumApiProcesses,
       peakDatabaseClientBackends: observedDatabaseClientPeak,
       peakDatabaseClientSource,
-      peakMetricsSource: platform.peakMetricsSource,
-      providerConnectionLimit: platform.providerConnectionLimit,
-      providerReservedSlots: platform.providerReservedSlots,
-      providerMetricsSource: platform.providerMetricsSource,
+      peakMetricsSource,
+      peakMetricsCapturedAtUtc: platform.peakMetricsCapturedAtUtc,
+      providerConnectionLimit,
+      providerReservedSlots,
+      providerMetricsCapturedAtUtc: platform.providerMetricsCapturedAtUtc,
+      providerMetricsSource,
     },
     runtimeBuild: firstSample ? {
       appBuildId: identities.size === 1 ? firstSample.appBuildId : null,

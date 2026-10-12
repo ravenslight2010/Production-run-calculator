@@ -26,11 +26,14 @@ const platformMetrics = {
   apiProcessesPerMachineSource: "verified-deployment-config",
   representativeWindowConfirmed: true,
   configuredMaximumMachines: 3,
+  configuredMaximumCapturedAtUtc: "2026-10-11T00:10:00.000Z",
   configuredMaximumSource: "owner-reported",
   peakActiveMachines: 3,
   peakDatabaseClientBackends: 12,
+  peakMetricsCapturedAtUtc: "2026-10-11T00:10:00.000Z",
   providerConnectionLimit: 450,
   providerReservedSlots: 4,
+  providerMetricsCapturedAtUtc: "2026-10-11T00:10:00.000Z",
   providerMetricsSource: "provider-capacity-evidence",
   peakMetricsSource: "replit-monitoring-export",
 };
@@ -87,6 +90,15 @@ test("emits a sanitized revision-bound report but never enables peer SSE", () =>
   assert.equal(result.reportRevision.sourceRevision, revision.sourceRevision);
   assert.equal(result.platformEvidenceFreshness.status, "fresh");
   assert.equal(result.platformEvidenceFreshness.maxAgeMs, 24 * 60 * 60 * 1_000);
+  assert.equal(result.sourceCaptureFreshness.autoscale.status, "fresh");
+  assert.equal(result.sourceCaptureFreshness.providerLimits.status, "fresh");
+  assert.equal(result.sourceCaptureFreshness.peakMetrics.status, "fresh");
+  assert.equal(result.deploymentMetrics.configuredMaximumCapturedAtUtc,
+    platformMetrics.configuredMaximumCapturedAtUtc);
+  assert.equal(result.deploymentMetrics.providerMetricsCapturedAtUtc,
+    platformMetrics.providerMetricsCapturedAtUtc);
+  assert.equal(result.deploymentMetrics.peakMetricsCapturedAtUtc,
+    platformMetrics.peakMetricsCapturedAtUtc);
   assert.equal(result.conclusion.livePeerSseSupported, false);
   assert.equal(result.conclusion.deploymentSettingsChanged, false);
 });
@@ -172,6 +184,49 @@ test("uses automatic sampled client peaks without a separate Replit metric", () 
   assert.equal(result.budgetAssessment.gate, "PROVEN_WITHIN_BUDGET");
   assert.equal(result.budgetAssessment.conservativeObservedClientCount, 9);
   assert.equal(result.deploymentMetrics.peakDatabaseClientSource, "sanitized-database-samples");
+});
+
+test("stale Autoscale capture makes only Autoscale values unknown", () => {
+  const result = report(completeSamples, {
+    ...platformMetrics,
+    configuredMaximumCapturedAtUtc: "2026-10-10T00:10:00.000Z",
+  });
+  assert.equal(result.sourceCaptureFreshness.autoscale.status, "stale");
+  assert.equal(result.deploymentMetrics.configuredMaximumMachines, null);
+  assert.equal(result.deploymentMetrics.configuredMaximumSource, "unknown");
+  assert.equal(result.deploymentMetrics.providerConnectionLimit, 450);
+  assert.equal(result.deploymentMetrics.observedPeakMachines, 3);
+  assert.ok(result.budgetAssessment.blockers.includes(
+    "configured_machine_maximum_capture_time_stale",
+  ));
+  assert.equal(result.conclusion.livePeerSseSupported, false);
+});
+
+test("missing provider capture time makes only provider values unknown", () => {
+  const result = report(completeSamples, {
+    ...platformMetrics,
+    providerMetricsCapturedAtUtc: null,
+  });
+  assert.equal(result.sourceCaptureFreshness.providerLimits.status, "missing");
+  assert.equal(result.deploymentMetrics.providerConnectionLimit, null);
+  assert.equal(result.deploymentMetrics.providerReservedSlots, null);
+  assert.equal(result.deploymentMetrics.configuredMaximumMachines, 3);
+  assert.equal(result.deploymentMetrics.observedPeakMachines, 3);
+  assert.ok(result.budgetAssessment.blockers.includes(
+    "provider_metrics_capture_time_missing",
+  ));
+});
+
+test("future peak capture time makes only platform peak values unknown", () => {
+  const result = report(completeSamples, {
+    ...platformMetrics,
+    peakMetricsCapturedAtUtc: "2026-10-11T00:12:00.000Z",
+  });
+  assert.equal(result.sourceCaptureFreshness.peakMetrics.status, "future");
+  assert.equal(result.deploymentMetrics.observedPeakMachines, null);
+  assert.equal(result.deploymentMetrics.peakDatabaseClientBackends, 9);
+  assert.equal(result.deploymentMetrics.providerConnectionLimit, 450);
+  assert.ok(result.budgetAssessment.blockers.includes("peak_metrics_capture_time_future"));
 });
 
 test("unverified deployment configuration or a mismatched sample window cannot pass", () => {

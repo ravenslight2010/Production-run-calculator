@@ -141,11 +141,17 @@ set both files to the same representative monitoring window, and supply:
 
 - a source fingerprint verified against the published deployment handoff;
 - the API process count per machine from the verified published run configuration;
-- configured and observed peak machine counts;
+- configured and observed peak machine counts, with the Autoscale configuration
+  capture time recorded separately from the peak-metric capture time;
 - the peak PostgreSQL client count, computed automatically from complete primary
   database samples and conservatively combined with any independent monitoring peak;
-- provider connection limit and reserved slots, with their source; and
+- provider connection limit and reserved slots, with their source and capture time; and
 - confirmation that the window represents peak demand.
+
+Record capture times in UTC for the configured machine maximum, provider limits
+and reserves, and peak metrics. Each group is checked independently against the
+24-hour age limit; a missing, future, or older capture time makes only that
+group's manually supplied values unknown.
 
 The report deliberately counts the aggregate observed database-client peak
 again on top of the maximum API pool bound. This is conservative and avoids
