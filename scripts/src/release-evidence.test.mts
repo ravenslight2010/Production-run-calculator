@@ -2050,7 +2050,13 @@ async function run(): Promise<void> {
       new URL("../../artifacts/api-server/tsconfig.routes.json", import.meta.url),
       "utf8",
     ),
-  ) as { include?: string[] };
+  ) as {
+    compilerOptions?: {
+      noImplicitAny?: boolean;
+      strictNullChecks?: boolean;
+    };
+    include?: string[];
+  };
   const routeTypecheckCommand = (
     apiPackage.scripts?.["typecheck:routes"] ?? ""
   ).match(
@@ -2063,6 +2069,16 @@ async function run(): Promise<void> {
   assert.ok(
     apiRoutesTsconfig.include?.includes("src/routes/**/*.ts"),
     "the API route project must include route source files",
+  );
+  assert.equal(
+    apiRoutesTsconfig.compilerOptions?.noImplicitAny,
+    true,
+    "the API route project must explicitly reject implicit any types",
+  );
+  assert.equal(
+    apiRoutesTsconfig.compilerOptions?.strictNullChecks,
+    true,
+    "the API route project must explicitly enable strict null checks",
   );
   assert.match(
     apiPackage.scripts?.typecheck ?? "",
@@ -2086,7 +2102,13 @@ async function run(): Promise<void> {
     );
     await writeFile(
       routeFixtureSource,
-      "export const deliberateRouteTypeError: string = 42;\n",
+      [
+        "export const deliberateRouteTypeError: string = 42;",
+        "export function deliberateImplicitAny(parameter) { return parameter; }",
+        "const maybeNull: string | null = null;",
+        "export const deliberateNullError: string = maybeNull;",
+        "",
+      ].join("\n"),
       { flag: "wx" },
     );
     await writeFile(
@@ -2134,6 +2156,16 @@ async function run(): Promise<void> {
       routeTypecheckOutput,
       /deliberate-type-error\.ts.*error TS2322/u,
       "the API route typecheck must report the fixture's deliberate assignment error",
+    );
+    assert.match(
+      routeTypecheckOutput,
+      /deliberate-type-error\.ts.*error TS7006/u,
+      "the API route typecheck must reject an implicitly typed parameter",
+    );
+    assert.match(
+      routeTypecheckOutput,
+      /deliberate-type-error\.ts\(4,\d+\): error TS2322/u,
+      "the API route typecheck must reject assigning a nullable value to a non-nullable type",
     );
   } finally {
     await rm(routeFixtureRoot, { recursive: true, force: true });

@@ -3,6 +3,8 @@
   "compilerOptions": {
     "composite": false,
     "noEmit": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
     "paths": {
       "@workspace/api-zod": ["../../lib/api-zod/dist/index.d.ts"]
     }
