@@ -1,6 +1,6 @@
 {
   "schemaVersion": 3,
-  "sourceRevision": "test-sha256:aa551419d2caef7a5ebbcda5d1f0550137d1866dd27ff28c104c9c7c63fb11f0",
+  "sourceRevision": "test-sha256:e7cca8f06b6602ff554b300ad60e0eb4199bfd36330e4f71e601c119d775c5ad",
   "status": "ADVISORY_DRIFT",
   "authoritativeCompiler": "Version 6.0.3",
   "candidateCompiler": "Version 7.0.2",
@@ -54,211 +54,211 @@
     {
       "name": "frozen-install",
       "exitCode": 0,
-      "elapsedMs": 10156,
-      "peakRssKiB": 166244,
+      "elapsedMs": 13859,
+      "peakRssKiB": 165120,
       "diagnostics": []
     },
     {
       "name": "typescript-6-build-cold",
       "exitCode": 0,
-      "elapsedMs": 21704,
-      "peakRssKiB": 926220,
+      "elapsedMs": 21163,
+      "peakRssKiB": 925964,
       "diagnostics": []
     },
     {
       "name": "typescript-6-clean",
       "exitCode": 0,
-      "elapsedMs": 409,
-      "peakRssKiB": 97096,
+      "elapsedMs": 330,
+      "peakRssKiB": 96832,
       "diagnostics": []
     },
     {
       "name": "typescript-7-build-cold",
       "exitCode": 0,
-      "elapsedMs": 4712,
-      "peakRssKiB": 822160,
+      "elapsedMs": 3668,
+      "peakRssKiB": 826456,
       "diagnostics": []
     },
     {
       "name": "typescript-6-scripts-cold",
       "exitCode": 0,
-      "elapsedMs": 7286,
-      "peakRssKiB": 576516,
+      "elapsedMs": 8646,
+      "peakRssKiB": 586280,
       "diagnostics": []
     },
     {
       "name": "typescript-7-scripts-cold",
       "exitCode": 0,
-      "elapsedMs": 1655,
-      "peakRssKiB": 342240,
+      "elapsedMs": 993,
+      "peakRssKiB": 322524,
       "diagnostics": []
     },
     {
       "name": "typescript-6-api-server-cold",
       "exitCode": 0,
-      "elapsedMs": 22259,
-      "peakRssKiB": 1033792,
+      "elapsedMs": 14127,
+      "peakRssKiB": 1016904,
       "diagnostics": []
     },
     {
       "name": "typescript-7-api-server-cold",
       "exitCode": 0,
-      "elapsedMs": 2839,
-      "peakRssKiB": 769624,
+      "elapsedMs": 2344,
+      "peakRssKiB": 763472,
       "diagnostics": []
     },
     {
       "name": "typescript-6-run-calculator-cold",
       "exitCode": 0,
-      "elapsedMs": 77144,
-      "peakRssKiB": 1086792,
+      "elapsedMs": 54705,
+      "peakRssKiB": 1113940,
       "diagnostics": []
     },
     {
       "name": "typescript-7-run-calculator-cold",
       "exitCode": 0,
-      "elapsedMs": 4246,
-      "peakRssKiB": 774408,
+      "elapsedMs": 3017,
+      "peakRssKiB": 849688,
       "diagnostics": []
     },
     {
       "name": "typescript-6-mockup-sandbox-cold",
       "exitCode": 0,
-      "elapsedMs": 8435,
-      "peakRssKiB": 566052,
+      "elapsedMs": 5253,
+      "peakRssKiB": 574204,
       "diagnostics": []
     },
     {
       "name": "typescript-7-mockup-sandbox-cold",
       "exitCode": 0,
-      "elapsedMs": 948,
-      "peakRssKiB": 368768,
+      "elapsedMs": 883,
+      "peakRssKiB": 374076,
       "diagnostics": []
     },
     {
       "name": "typescript-6-ai-evaluation-cold",
       "exitCode": 0,
-      "elapsedMs": 1211,
-      "peakRssKiB": 224392,
+      "elapsedMs": 1076,
+      "peakRssKiB": 221824,
       "diagnostics": []
     },
     {
       "name": "typescript-7-ai-evaluation-cold",
       "exitCode": 0,
-      "elapsedMs": 240,
-      "peakRssKiB": 62976,
+      "elapsedMs": 246,
+      "peakRssKiB": 65064,
       "diagnostics": []
     },
     {
       "name": "typescript-6-corpus-harness-cold",
       "exitCode": 0,
-      "elapsedMs": 1010,
-      "peakRssKiB": 213844,
+      "elapsedMs": 870,
+      "peakRssKiB": 214544,
       "diagnostics": []
     },
     {
       "name": "typescript-7-corpus-harness-cold",
       "exitCode": 0,
-      "elapsedMs": 252,
-      "peakRssKiB": 63528,
+      "elapsedMs": 181,
+      "peakRssKiB": 64280,
       "diagnostics": []
     },
     {
       "name": "typescript-6-build-warm",
       "exitCode": 0,
-      "elapsedMs": 19878,
-      "peakRssKiB": 925200,
+      "elapsedMs": 15890,
+      "peakRssKiB": 934616,
       "diagnostics": []
     },
     {
       "name": "typescript-7-build-warm",
       "exitCode": 0,
-      "elapsedMs": 3914,
-      "peakRssKiB": 902752,
+      "elapsedMs": 3289,
+      "peakRssKiB": 889188,
       "diagnostics": []
     },
     {
       "name": "typescript-6-scripts-warm",
       "exitCode": 0,
-      "elapsedMs": 6191,
-      "peakRssKiB": 572184,
+      "elapsedMs": 5553,
+      "peakRssKiB": 565048,
       "diagnostics": []
     },
     {
       "name": "typescript-7-scripts-warm",
       "exitCode": 0,
-      "elapsedMs": 1179,
-      "peakRssKiB": 325896,
+      "elapsedMs": 2981,
+      "peakRssKiB": 325044,
       "diagnostics": []
     },
     {
       "name": "typescript-6-api-server-warm",
       "exitCode": 0,
-      "elapsedMs": 19770,
-      "peakRssKiB": 1063832,
+      "elapsedMs": 17209,
+      "peakRssKiB": 1011676,
       "diagnostics": []
     },
     {
       "name": "typescript-7-api-server-warm",
       "exitCode": 0,
-      "elapsedMs": 3509,
-      "peakRssKiB": 760648,
+      "elapsedMs": 2652,
+      "peakRssKiB": 778728,
       "diagnostics": []
     },
     {
       "name": "typescript-6-run-calculator-warm",
       "exitCode": 0,
-      "elapsedMs": 62763,
-      "peakRssKiB": 1110340,
+      "elapsedMs": 62118,
+      "peakRssKiB": 1105044,
       "diagnostics": []
     },
     {
       "name": "typescript-7-run-calculator-warm",
       "exitCode": 0,
-      "elapsedMs": 3878,
-      "peakRssKiB": 817076,
+      "elapsedMs": 3318,
+      "peakRssKiB": 770380,
       "diagnostics": []
     },
     {
       "name": "typescript-6-mockup-sandbox-warm",
       "exitCode": 0,
-      "elapsedMs": 5212,
-      "peakRssKiB": 564400,
+      "elapsedMs": 6091,
+      "peakRssKiB": 564620,
       "diagnostics": []
     },
     {
       "name": "typescript-7-mockup-sandbox-warm",
       "exitCode": 0,
-      "elapsedMs": 954,
-      "peakRssKiB": 373472,
+      "elapsedMs": 900,
+      "peakRssKiB": 367632,
       "diagnostics": []
     },
     {
       "name": "typescript-6-ai-evaluation-warm",
       "exitCode": 0,
-      "elapsedMs": 1304,
-      "peakRssKiB": 226704,
+      "elapsedMs": 1399,
+      "peakRssKiB": 224616,
       "diagnostics": []
     },
     {
       "name": "typescript-7-ai-evaluation-warm",
       "exitCode": 0,
-      "elapsedMs": 248,
-      "peakRssKiB": 68340,
+      "elapsedMs": 224,
+      "peakRssKiB": 64808,
       "diagnostics": []
     },
     {
       "name": "typescript-6-corpus-harness-warm",
       "exitCode": 0,
-      "elapsedMs": 1100,
-      "peakRssKiB": 213452,
+      "elapsedMs": 1179,
+      "peakRssKiB": 214200,
       "diagnostics": []
     },
     {
       "name": "typescript-7-corpus-harness-warm",
       "exitCode": 0,
-      "elapsedMs": 199,
-      "peakRssKiB": 67924,
+      "elapsedMs": 191,
+      "peakRssKiB": 63048,
       "diagnostics": []
     }
   ],
@@ -267,224 +267,224 @@
       "check": "build",
       "mode": "cold",
       "elapsedMs": {
-        "baseline": 21704,
-        "candidate": 4712,
-        "delta": -16992,
-        "ratio": 0.2171028381865094
+        "baseline": 21163,
+        "candidate": 3668,
+        "delta": -17495,
+        "ratio": 0.17332136275575297
       },
       "peakRssKiB": {
-        "baseline": 926220,
-        "candidate": 822160,
-        "delta": -104060,
-        "ratio": 0.8876508820798514
+        "baseline": 925964,
+        "candidate": 826456,
+        "delta": -99508,
+        "ratio": 0.8925357789287705
       }
     },
     {
       "check": "scripts",
       "mode": "cold",
       "elapsedMs": {
-        "baseline": 7286,
-        "candidate": 1655,
-        "delta": -5631,
-        "ratio": 0.22714795498215756
+        "baseline": 8646,
+        "candidate": 993,
+        "delta": -7653,
+        "ratio": 0.11485079805690493
       },
       "peakRssKiB": {
-        "baseline": 576516,
-        "candidate": 342240,
-        "delta": -234276,
-        "ratio": 0.5936348687633994
+        "baseline": 586280,
+        "candidate": 322524,
+        "delta": -263756,
+        "ratio": 0.5501193968752132
       }
     },
     {
       "check": "api-server",
       "mode": "cold",
       "elapsedMs": {
-        "baseline": 22259,
-        "candidate": 2839,
-        "delta": -19420,
-        "ratio": 0.1275439148209713
+        "baseline": 14127,
+        "candidate": 2344,
+        "delta": -11783,
+        "ratio": 0.16592340907482125
       },
       "peakRssKiB": {
-        "baseline": 1033792,
-        "candidate": 769624,
-        "delta": -264168,
-        "ratio": 0.7444669720794899
+        "baseline": 1016904,
+        "candidate": 763472,
+        "delta": -253432,
+        "ratio": 0.750780801334246
       }
     },
     {
       "check": "run-calculator",
       "mode": "cold",
       "elapsedMs": {
-        "baseline": 77144,
-        "candidate": 4246,
-        "delta": -72898,
-        "ratio": 0.055039925334439486
+        "baseline": 54705,
+        "candidate": 3017,
+        "delta": -51688,
+        "ratio": 0.05515035188739603
       },
       "peakRssKiB": {
-        "baseline": 1086792,
-        "candidate": 774408,
-        "delta": -312384,
-        "ratio": 0.7125632135680057
+        "baseline": 1113940,
+        "candidate": 849688,
+        "delta": -264252,
+        "ratio": 0.7627771693268938
       }
     },
     {
       "check": "mockup-sandbox",
       "mode": "cold",
       "elapsedMs": {
-        "baseline": 8435,
-        "candidate": 948,
-        "delta": -7487,
-        "ratio": 0.11238885595732069
+        "baseline": 5253,
+        "candidate": 883,
+        "delta": -4370,
+        "ratio": 0.1680944222349134
       },
       "peakRssKiB": {
-        "baseline": 566052,
-        "candidate": 368768,
-        "delta": -197284,
-        "ratio": 0.6514737161956852
+        "baseline": 574204,
+        "candidate": 374076,
+        "delta": -200128,
+        "ratio": 0.651468815960878
       }
     },
     {
       "check": "ai-evaluation",
       "mode": "cold",
       "elapsedMs": {
-        "baseline": 1211,
-        "candidate": 240,
-        "delta": -971,
-        "ratio": 0.1981833195706028
+        "baseline": 1076,
+        "candidate": 246,
+        "delta": -830,
+        "ratio": 0.22862453531598512
       },
       "peakRssKiB": {
-        "baseline": 224392,
-        "candidate": 62976,
-        "delta": -161416,
-        "ratio": 0.28065171663873933
+        "baseline": 221824,
+        "candidate": 65064,
+        "delta": -156760,
+        "ratio": 0.29331361800346223
       }
     },
     {
       "check": "corpus-harness",
       "mode": "cold",
       "elapsedMs": {
-        "baseline": 1010,
-        "candidate": 252,
-        "delta": -758,
-        "ratio": 0.2495049504950495
+        "baseline": 870,
+        "candidate": 181,
+        "delta": -689,
+        "ratio": 0.20804597701149424
       },
       "peakRssKiB": {
-        "baseline": 213844,
-        "candidate": 63528,
-        "delta": -150316,
-        "ratio": 0.2970763734310993
+        "baseline": 214544,
+        "candidate": 64280,
+        "delta": -150264,
+        "ratio": 0.2996122007606831
       }
     },
     {
       "check": "build",
       "mode": "warm",
       "elapsedMs": {
-        "baseline": 19878,
-        "candidate": 3914,
-        "delta": -15964,
-        "ratio": 0.19690109668980782
+        "baseline": 15890,
+        "candidate": 3289,
+        "delta": -12601,
+        "ratio": 0.20698552548772814
       },
       "peakRssKiB": {
-        "baseline": 925200,
-        "candidate": 902752,
-        "delta": -22448,
-        "ratio": 0.9757371379161263
+        "baseline": 934616,
+        "candidate": 889188,
+        "delta": -45428,
+        "ratio": 0.9513939414690097
       }
     },
     {
       "check": "scripts",
       "mode": "warm",
       "elapsedMs": {
-        "baseline": 6191,
-        "candidate": 1179,
-        "delta": -5012,
-        "ratio": 0.19043773219189145
+        "baseline": 5553,
+        "candidate": 2981,
+        "delta": -2572,
+        "ratio": 0.5368269403925806
       },
       "peakRssKiB": {
-        "baseline": 572184,
-        "candidate": 325896,
-        "delta": -246288,
-        "ratio": 0.5695650350236987
+        "baseline": 565048,
+        "candidate": 325044,
+        "delta": -240004,
+        "ratio": 0.5752502442270391
       }
     },
     {
       "check": "api-server",
       "mode": "warm",
       "elapsedMs": {
-        "baseline": 19770,
-        "candidate": 3509,
-        "delta": -16261,
-        "ratio": 0.17749114820435002
+        "baseline": 17209,
+        "candidate": 2652,
+        "delta": -14557,
+        "ratio": 0.1541054099599047
       },
       "peakRssKiB": {
-        "baseline": 1063832,
-        "candidate": 760648,
-        "delta": -303184,
-        "ratio": 0.7150076327841238
+        "baseline": 1011676,
+        "candidate": 778728,
+        "delta": -232948,
+        "ratio": 0.7697405098074878
       }
     },
     {
       "check": "run-calculator",
       "mode": "warm",
       "elapsedMs": {
-        "baseline": 62763,
-        "candidate": 3878,
-        "delta": -58885,
-        "ratio": 0.06178799611235919
+        "baseline": 62118,
+        "candidate": 3318,
+        "delta": -58800,
+        "ratio": 0.05341446923597025
       },
       "peakRssKiB": {
-        "baseline": 1110340,
-        "candidate": 817076,
-        "delta": -293264,
-        "ratio": 0.7358791000954662
+        "baseline": 1105044,
+        "candidate": 770380,
+        "delta": -334664,
+        "ratio": 0.6971487108205646
       }
     },
     {
       "check": "mockup-sandbox",
       "mode": "warm",
       "elapsedMs": {
-        "baseline": 5212,
-        "candidate": 954,
-        "delta": -4258,
-        "ratio": 0.18303914044512662
+        "baseline": 6091,
+        "candidate": 900,
+        "delta": -5191,
+        "ratio": 0.14775898867181086
       },
       "peakRssKiB": {
-        "baseline": 564400,
-        "candidate": 373472,
-        "delta": -190928,
-        "ratio": 0.661715095676825
+        "baseline": 564620,
+        "candidate": 367632,
+        "delta": -196988,
+        "ratio": 0.6511140235910878
       }
     },
     {
       "check": "ai-evaluation",
       "mode": "warm",
       "elapsedMs": {
-        "baseline": 1304,
-        "candidate": 248,
-        "delta": -1056,
-        "ratio": 0.1901840490797546
+        "baseline": 1399,
+        "candidate": 224,
+        "delta": -1175,
+        "ratio": 0.1601143674052895
       },
       "peakRssKiB": {
-        "baseline": 226704,
-        "candidate": 68340,
-        "delta": -158364,
-        "ratio": 0.301450349354224
+        "baseline": 224616,
+        "candidate": 64808,
+        "delta": -159808,
+        "ratio": 0.28852797663568047
       }
     },
     {
       "check": "corpus-harness",
       "mode": "warm",
       "elapsedMs": {
-        "baseline": 1100,
-        "candidate": 199,
-        "delta": -901,
-        "ratio": 0.1809090909090909
+        "baseline": 1179,
+        "candidate": 191,
+        "delta": -988,
+        "ratio": 0.1620016963528414
       },
       "peakRssKiB": {
-        "baseline": 213452,
-        "candidate": 67924,
-        "delta": -145528,
-        "ratio": 0.3182167419372974
+        "baseline": 214200,
+        "candidate": 63048,
+        "delta": -151152,
+        "ratio": 0.2943417366946779
       }
     }
   ],
@@ -507,230 +507,230 @@
     "regressedRevisions": [],
     "revisionSamples": [
       {
-        "sourceRevision": "test-sha256:aa551419d2caef7a5ebbcda5d1f0550137d1866dd27ff28c104c9c7c63fb11f0",
+        "sourceRevision": "test-sha256:e7cca8f06b6602ff554b300ad60e0eb4199bfd36330e4f71e601c119d775c5ad",
         "performanceComparison": [
           {
             "check": "build",
             "mode": "cold",
             "elapsedMs": {
-              "baseline": 21704,
-              "candidate": 4712,
-              "delta": -16992,
-              "ratio": 0.2171028381865094
+              "baseline": 21163,
+              "candidate": 3668,
+              "delta": -17495,
+              "ratio": 0.17332136275575297
             },
             "peakRssKiB": {
-              "baseline": 926220,
-              "candidate": 822160,
-              "delta": -104060,
-              "ratio": 0.8876508820798514
+              "baseline": 925964,
+              "candidate": 826456,
+              "delta": -99508,
+              "ratio": 0.8925357789287705
             }
           },
           {
             "check": "scripts",
             "mode": "cold",
             "elapsedMs": {
-              "baseline": 7286,
-              "candidate": 1655,
-              "delta": -5631,
-              "ratio": 0.22714795498215756
+              "baseline": 8646,
+              "candidate": 993,
+              "delta": -7653,
+              "ratio": 0.11485079805690493
             },
             "peakRssKiB": {
-              "baseline": 576516,
-              "candidate": 342240,
-              "delta": -234276,
-              "ratio": 0.5936348687633994
+              "baseline": 586280,
+              "candidate": 322524,
+              "delta": -263756,
+              "ratio": 0.5501193968752132
             }
           },
           {
             "check": "api-server",
             "mode": "cold",
             "elapsedMs": {
-              "baseline": 22259,
-              "candidate": 2839,
-              "delta": -19420,
-              "ratio": 0.1275439148209713
+              "baseline": 14127,
+              "candidate": 2344,
+              "delta": -11783,
+              "ratio": 0.16592340907482125
             },
             "peakRssKiB": {
-              "baseline": 1033792,
-              "candidate": 769624,
-              "delta": -264168,
-              "ratio": 0.7444669720794899
+              "baseline": 1016904,
+              "candidate": 763472,
+              "delta": -253432,
+              "ratio": 0.750780801334246
             }
           },
           {
             "check": "run-calculator",
             "mode": "cold",
             "elapsedMs": {
-              "baseline": 77144,
-              "candidate": 4246,
-              "delta": -72898,
-              "ratio": 0.055039925334439486
+              "baseline": 54705,
+              "candidate": 3017,
+              "delta": -51688,
+              "ratio": 0.05515035188739603
             },
             "peakRssKiB": {
-              "baseline": 1086792,
-              "candidate": 774408,
-              "delta": -312384,
-              "ratio": 0.7125632135680057
+              "baseline": 1113940,
+              "candidate": 849688,
+              "delta": -264252,
+              "ratio": 0.7627771693268938
             }
           },
           {
             "check": "mockup-sandbox",
             "mode": "cold",
             "elapsedMs": {
-              "baseline": 8435,
-              "candidate": 948,
-              "delta": -7487,
-              "ratio": 0.11238885595732069
+              "baseline": 5253,
+              "candidate": 883,
+              "delta": -4370,
+              "ratio": 0.1680944222349134
             },
             "peakRssKiB": {
-              "baseline": 566052,
-              "candidate": 368768,
-              "delta": -197284,
-              "ratio": 0.6514737161956852
+              "baseline": 574204,
+              "candidate": 374076,
+              "delta": -200128,
+              "ratio": 0.651468815960878
             }
           },
           {
             "check": "ai-evaluation",
             "mode": "cold",
             "elapsedMs": {
-              "baseline": 1211,
-              "candidate": 240,
-              "delta": -971,
-              "ratio": 0.1981833195706028
+              "baseline": 1076,
+              "candidate": 246,
+              "delta": -830,
+              "ratio": 0.22862453531598512
             },
             "peakRssKiB": {
-              "baseline": 224392,
-              "candidate": 62976,
-              "delta": -161416,
-              "ratio": 0.28065171663873933
+              "baseline": 221824,
+              "candidate": 65064,
+              "delta": -156760,
+              "ratio": 0.29331361800346223
             }
           },
           {
             "check": "corpus-harness",
             "mode": "cold",
             "elapsedMs": {
-              "baseline": 1010,
-              "candidate": 252,
-              "delta": -758,
-              "ratio": 0.2495049504950495
+              "baseline": 870,
+              "candidate": 181,
+              "delta": -689,
+              "ratio": 0.20804597701149424
             },
             "peakRssKiB": {
-              "baseline": 213844,
-              "candidate": 63528,
-              "delta": -150316,
-              "ratio": 0.2970763734310993
+              "baseline": 214544,
+              "candidate": 64280,
+              "delta": -150264,
+              "ratio": 0.2996122007606831
             }
           },
           {
             "check": "build",
             "mode": "warm",
             "elapsedMs": {
-              "baseline": 19878,
-              "candidate": 3914,
-              "delta": -15964,
-              "ratio": 0.19690109668980782
+              "baseline": 15890,
+              "candidate": 3289,
+              "delta": -12601,
+              "ratio": 0.20698552548772814
             },
             "peakRssKiB": {
-              "baseline": 925200,
-              "candidate": 902752,
-              "delta": -22448,
-              "ratio": 0.9757371379161263
+              "baseline": 934616,
+              "candidate": 889188,
+              "delta": -45428,
+              "ratio": 0.9513939414690097
             }
           },
           {
             "check": "scripts",
             "mode": "warm",
             "elapsedMs": {
-              "baseline": 6191,
-              "candidate": 1179,
-              "delta": -5012,
-              "ratio": 0.19043773219189145
+              "baseline": 5553,
+              "candidate": 2981,
+              "delta": -2572,
+              "ratio": 0.5368269403925806
             },
             "peakRssKiB": {
-              "baseline": 572184,
-              "candidate": 325896,
-              "delta": -246288,
-              "ratio": 0.5695650350236987
+              "baseline": 565048,
+              "candidate": 325044,
+              "delta": -240004,
+              "ratio": 0.5752502442270391
             }
           },
           {
             "check": "api-server",
             "mode": "warm",
             "elapsedMs": {
-              "baseline": 19770,
-              "candidate": 3509,
-              "delta": -16261,
-              "ratio": 0.17749114820435002
+              "baseline": 17209,
+              "candidate": 2652,
+              "delta": -14557,
+              "ratio": 0.1541054099599047
             },
             "peakRssKiB": {
-              "baseline": 1063832,
-              "candidate": 760648,
-              "delta": -303184,
-              "ratio": 0.7150076327841238
+              "baseline": 1011676,
+              "candidate": 778728,
+              "delta": -232948,
+              "ratio": 0.7697405098074878
             }
           },
           {
             "check": "run-calculator",
             "mode": "warm",
             "elapsedMs": {
-              "baseline": 62763,
-              "candidate": 3878,
-              "delta": -58885,
-              "ratio": 0.06178799611235919
+              "baseline": 62118,
+              "candidate": 3318,
+              "delta": -58800,
+              "ratio": 0.05341446923597025
             },
             "peakRssKiB": {
-              "baseline": 1110340,
-              "candidate": 817076,
-              "delta": -293264,
-              "ratio": 0.7358791000954662
+              "baseline": 1105044,
+              "candidate": 770380,
+              "delta": -334664,
+              "ratio": 0.6971487108205646
             }
           },
           {
             "check": "mockup-sandbox",
             "mode": "warm",
             "elapsedMs": {
-              "baseline": 5212,
-              "candidate": 954,
-              "delta": -4258,
-              "ratio": 0.18303914044512662
+              "baseline": 6091,
+              "candidate": 900,
+              "delta": -5191,
+              "ratio": 0.14775898867181086
             },
             "peakRssKiB": {
-              "baseline": 564400,
-              "candidate": 373472,
-              "delta": -190928,
-              "ratio": 0.661715095676825
+              "baseline": 564620,
+              "candidate": 367632,
+              "delta": -196988,
+              "ratio": 0.6511140235910878
             }
           },
           {
             "check": "ai-evaluation",
             "mode": "warm",
             "elapsedMs": {
-              "baseline": 1304,
-              "candidate": 248,
-              "delta": -1056,
-              "ratio": 0.1901840490797546
+              "baseline": 1399,
+              "candidate": 224,
+              "delta": -1175,
+              "ratio": 0.1601143674052895
             },
             "peakRssKiB": {
-              "baseline": 226704,
-              "candidate": 68340,
-              "delta": -158364,
-              "ratio": 0.301450349354224
+              "baseline": 224616,
+              "candidate": 64808,
+              "delta": -159808,
+              "ratio": 0.28852797663568047
             }
           },
           {
             "check": "corpus-harness",
             "mode": "warm",
             "elapsedMs": {
-              "baseline": 1100,
-              "candidate": 199,
-              "delta": -901,
-              "ratio": 0.1809090909090909
+              "baseline": 1179,
+              "candidate": 191,
+              "delta": -988,
+              "ratio": 0.1620016963528414
             },
             "peakRssKiB": {
-              "baseline": 213452,
-              "candidate": 67924,
-              "delta": -145528,
-              "ratio": 0.3182167419372974
+              "baseline": 214200,
+              "candidate": 63048,
+              "delta": -151152,
+              "ratio": 0.2943417366946779
             }
           }
         ]
@@ -775,11 +775,11 @@
       },
       {
         "path": "lib/api-client-react/dist/generated/api.d.ts",
-        "sha256": "7d1f34b90fde62173da938e40f93f2783591cbe25922b321aed1c3570c1f0d2d"
+        "sha256": "750f4d5ee0fca7e45d1cf5a7154df900cd47b1e12e0901ae776d73fb4ec4864f"
       },
       {
         "path": "lib/api-client-react/dist/generated/api.schemas.d.ts",
-        "sha256": "0c212bb375a0f3b3c0b8c982f44a5459a728c59ad36ce0807f6c703d07012225"
+        "sha256": "af6dfc78658dc1101881199297fdf8efc728e3152fe249eec76ca03ec89c8155"
       },
       {
         "path": "lib/api-client-react/dist/index.d.ts",
@@ -791,7 +791,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/api.d.ts",
-        "sha256": "b34d3518833247550db1875f207cc1eedb830dbdbb37ba27cb131a7b707e3b02"
+        "sha256": "acf1d22ee9ba25dd0fc8d2210ecd2deebc01b7ed4a1f76c24ead44ae0483c262"
       },
       {
         "path": "lib/api-zod/dist/generated/types/adjustInput.d.ts",
@@ -1007,7 +1007,11 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/backgroundOperationDiagnostics.d.ts",
-        "sha256": "0494e0e31b94a0aed7bb63d8b9145462d68d2b50f1ce41f05087c428b45143ca"
+        "sha256": "afd83745558d366d7b1a07472f58394be95ec8580d8fde2fbc1e9eaa8aa978e3"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/backgroundOperationDiagnosticsAutomaticTrackingBackoff.d.ts",
+        "sha256": "d54fddbaf1e445d06a5ac5ac345a85da5788963aaea4a2832b5df08dd2ec8ab3"
       },
       {
         "path": "lib/api-zod/dist/generated/types/backgroundOperationDiagnosticsWarningsItem.d.ts",
@@ -1567,7 +1571,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/healthStatus.d.ts",
-        "sha256": "a294236742465f67335b5e2cb9b42e2c7189e0d83564895fb13bc65da4f4e767"
+        "sha256": "6f966f01fd4e65075345465e743a5fa28e2c28a6f98984220677a94671ca3e8f"
       },
       {
         "path": "lib/api-zod/dist/generated/types/healthStatusCapabilities.d.ts",
@@ -1615,7 +1619,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/healthStatusDiagnostics.d.ts",
-        "sha256": "4373efa23459c68f216067007e4ad2e68c6fe27f54213541304e90d1e77600b4"
+        "sha256": "a4aec0a65d5f7df7a803df46b308235082e50848d196d4fae023f9632399a664"
       },
       {
         "path": "lib/api-zod/dist/generated/types/healthStatusStartup.d.ts",
@@ -1799,7 +1803,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/index.d.ts",
-        "sha256": "fe7fc0494a14a31117d514de76ea5a007a5f6e1fa8fcb16f466222161cfccda3"
+        "sha256": "60456ffb6c823a95bc02599a5b0c0a278577902e2a6bc87d00ce3c86886e158c"
       },
       {
         "path": "lib/api-zod/dist/generated/types/ingredient.d.ts",
@@ -3967,7 +3971,7 @@
       },
       {
         "path": "lib/db/dist/schema/backgroundOperations.d.ts",
-        "sha256": "342097b0d362be3986450d345c9cd4625f9a4df8ee4b1d515edc32fd87d6582b"
+        "sha256": "9cd871aad58e769983a71c32692dbe97f16eb7110a482dee67b003c183dff3ad"
       },
       {
         "path": "lib/db/dist/schema/brandProfiles.d.ts",
@@ -4529,11 +4533,11 @@
       },
       {
         "path": "lib/api-client-react/dist/generated/api.d.ts",
-        "sha256": "f1b19b33f662a0593d9271051544718de85c6d239112a1079d07bc874e1209ab"
+        "sha256": "6f3f55497d6a0eb6cdb7ee7f4fbc3c4a9398e4c2a7aa4cdfe4dcaac8e94ae512"
       },
       {
         "path": "lib/api-client-react/dist/generated/api.schemas.d.ts",
-        "sha256": "73f12d3ecb9cf414215027f61c1df98bee942574bb92cc545eb5a7cb69892862"
+        "sha256": "4b60fb99b40b27cc7848b280ca69ff47a1e6064d35c5dcfd59c58a07fabf725b"
       },
       {
         "path": "lib/api-client-react/dist/index.d.ts",
@@ -4545,7 +4549,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/api.d.ts",
-        "sha256": "e337a00420fab48115efe537a0be024ffe343990232a318101a0806011eb47d6"
+        "sha256": "fafe8c8cfe49390dadd451e35ff607365b3940d96bc820fd1cd3d8a86152a9a1"
       },
       {
         "path": "lib/api-zod/dist/generated/types/adjustInput.d.ts",
@@ -4761,7 +4765,11 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/backgroundOperationDiagnostics.d.ts",
-        "sha256": "0494e0e31b94a0aed7bb63d8b9145462d68d2b50f1ce41f05087c428b45143ca"
+        "sha256": "afd83745558d366d7b1a07472f58394be95ec8580d8fde2fbc1e9eaa8aa978e3"
+      },
+      {
+        "path": "lib/api-zod/dist/generated/types/backgroundOperationDiagnosticsAutomaticTrackingBackoff.d.ts",
+        "sha256": "d54fddbaf1e445d06a5ac5ac345a85da5788963aaea4a2832b5df08dd2ec8ab3"
       },
       {
         "path": "lib/api-zod/dist/generated/types/backgroundOperationDiagnosticsWarningsItem.d.ts",
@@ -5321,7 +5329,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/healthStatus.d.ts",
-        "sha256": "a294236742465f67335b5e2cb9b42e2c7189e0d83564895fb13bc65da4f4e767"
+        "sha256": "6f966f01fd4e65075345465e743a5fa28e2c28a6f98984220677a94671ca3e8f"
       },
       {
         "path": "lib/api-zod/dist/generated/types/healthStatusCapabilities.d.ts",
@@ -5369,7 +5377,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/healthStatusDiagnostics.d.ts",
-        "sha256": "4373efa23459c68f216067007e4ad2e68c6fe27f54213541304e90d1e77600b4"
+        "sha256": "a4aec0a65d5f7df7a803df46b308235082e50848d196d4fae023f9632399a664"
       },
       {
         "path": "lib/api-zod/dist/generated/types/healthStatusStartup.d.ts",
@@ -5553,7 +5561,7 @@
       },
       {
         "path": "lib/api-zod/dist/generated/types/index.d.ts",
-        "sha256": "fe7fc0494a14a31117d514de76ea5a007a5f6e1fa8fcb16f466222161cfccda3"
+        "sha256": "60456ffb6c823a95bc02599a5b0c0a278577902e2a6bc87d00ce3c86886e158c"
       },
       {
         "path": "lib/api-zod/dist/generated/types/ingredient.d.ts",
@@ -7721,7 +7729,7 @@
       },
       {
         "path": "lib/db/dist/schema/backgroundOperations.d.ts",
-        "sha256": "a75f987a42db6eb6dff523ae9ee321c01646e67843ecff4e7d02afad92b66dea"
+        "sha256": "ce1c7e87b00d30b19369c0987e7045a4464b3c827606f6dc5580c9412a7fec53"
       },
       {
         "path": "lib/db/dist/schema/brandProfiles.d.ts",
@@ -8540,7 +8548,7 @@
   "advisory": true,
   "authoritativeOutputsChanged": false,
   "containment": {
-    "beforeStatusSha256": "6106e555535d65a3894168ed467ace92165ca1c5477919ccb1dbf505a3f43a84",
-    "afterStatusSha256": "6106e555535d65a3894168ed467ace92165ca1c5477919ccb1dbf505a3f43a84"
+    "beforeStatusSha256": "bb85c8b736b499f684c0bbcc2910149959783ffb394a26cb675a8f4d65189f78",
+    "afterStatusSha256": "bb85c8b736b499f684c0bbcc2910149959783ffb394a26cb675a8f4d65189f78"
   }
 }
