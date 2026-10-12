@@ -70,6 +70,7 @@ const {
   RELEASE_CHECKPOINT_REPORT,
   RELEASE_CHECK_API_CONCURRENCY,
   RELEASE_CHECK_API_SHARD_STEPS,
+  RELEASE_CHECK_CONSUMER_TYPECHECK_STEPS,
   RELEASE_CHECK_DEFAULT_CONCURRENCY,
   FULL_RESPONSIVE_WEBKIT_GATE_LABEL,
   FULL_RESPONSIVE_WEBKIT_GATE_STEP,
@@ -1964,25 +1965,66 @@ async function run(): Promise<void> {
   const apiUnitReleaseStep = RELEASE_CHECK_API_SHARD_STEPS.find(
     (step) => step.label === "API unit tests (release shard 1/7)",
   );
+  const consumerTypecheckContracts = [
+    {
+      label: "API server typecheck",
+      packageName: "@workspace/api-server",
+      packagePath: "../../artifacts/api-server/package.json",
+    },
+    {
+      label: "run calculator typecheck",
+      packageName: "@workspace/run-calculator",
+      packagePath: "../../artifacts/run-calculator/package.json",
+    },
+    {
+      label: "mockup sandbox typecheck",
+      packageName: "@workspace/mockup-sandbox",
+      packagePath: "../../artifacts/mockup-sandbox/package.json",
+    },
+    {
+      label: "scripts typecheck",
+      packageName: "@workspace/scripts",
+      packagePath: "../package.json",
+    },
+  ] as const;
+  assert.equal(
+    RELEASE_CHECK_CONSUMER_TYPECHECK_STEPS.length,
+    consumerTypecheckContracts.length,
+    "every consumer typecheck package must have exactly one release gate",
+  );
+  for (const contract of consumerTypecheckContracts) {
+    const step = RELEASE_CHECK_CONSUMER_TYPECHECK_STEPS.find(
+      (candidate) => candidate.label === contract.label,
+    );
+    assert.ok(step, `the ${contract.label} release gate must exist`);
+    assert.deepEqual(
+      step.args,
+      ["--filter", contract.packageName, "run", "typecheck"],
+      `the ${contract.label} release gate must invoke its package-level typecheck script`,
+    );
+    const packageJson = JSON.parse(
+      await readFile(new URL(contract.packagePath, import.meta.url), "utf8"),
+    ) as { name?: string; scripts?: Record<string, string> };
+    assert.equal(
+      packageJson.name,
+      contract.packageName,
+      `${contract.label} must point to the matching workspace package`,
+    );
+    assert.ok(
+      packageJson.scripts?.typecheck?.trim(),
+      `${contract.packageName} must define its package-level typecheck script`,
+    );
+  }
   const apiPackage = JSON.parse(
     await readFile(
       new URL("../../artifacts/api-server/package.json", import.meta.url),
       "utf8",
     ),
   ) as { scripts?: Record<string, string> };
-  const releaseCheckSource = await readFile(
-    new URL("./release-check.mts", import.meta.url),
-    "utf8",
-  );
   assert.match(
     apiPackage.scripts?.typecheck ?? "",
     /(?:^|&&)\s*pnpm run typecheck:routes(?:\s|$)/u,
     "the API package typecheck must include the focused route compiler check",
-  );
-  assert.match(
-    releaseCheckSource,
-    /label:\s*"API server typecheck",\s*args:\s*\[\s*"--filter",\s*"@workspace\/api-server",\s*"run",\s*"typecheck"\s*\]/u,
-    "the release API gate must run the package-level typecheck",
   );
   assert.deepEqual(
     apiUnitReleaseStep?.env,

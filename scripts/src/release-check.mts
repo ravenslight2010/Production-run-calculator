@@ -1577,6 +1577,29 @@ const sourceLibraryPreflightEnabled =
     process.env.RELEASE_CHECK_FIXTURE_STEPS,
   );
 
+export const RELEASE_CHECK_CONSUMER_TYPECHECK_STEPS: readonly ReleaseStep[] = [
+  {
+    label: "API server typecheck",
+    args: ["--filter", "@workspace/api-server", "run", "typecheck"],
+    stage: "consumer-typechecks",
+  },
+  {
+    label: "run calculator typecheck",
+    args: ["--filter", "@workspace/run-calculator", "run", "typecheck"],
+    stage: "consumer-typechecks",
+  },
+  {
+    label: "mockup sandbox typecheck",
+    args: ["--filter", "@workspace/mockup-sandbox", "run", "typecheck"],
+    stage: "consumer-typechecks",
+  },
+  {
+    label: "scripts typecheck",
+    args: ["--filter", "@workspace/scripts", "run", "typecheck"],
+    stage: "consumer-typechecks",
+  },
+];
+
 const steps: ReleaseStep[] = [
   {
     label: "audit protection publish configuration",
@@ -1639,26 +1662,7 @@ const steps: ReleaseStep[] = [
     args: ["run", "typecheck:libs"],
     stage: "shared-output",
   },
-  {
-    label: "API server typecheck",
-    args: ["--filter", "@workspace/api-server", "run", "typecheck"],
-    stage: "consumer-typechecks",
-  },
-  {
-    label: "run calculator typecheck",
-    args: ["--filter", "@workspace/run-calculator", "run", "typecheck"],
-    stage: "consumer-typechecks",
-  },
-  {
-    label: "mockup sandbox typecheck",
-    args: ["--filter", "@workspace/mockup-sandbox", "run", "typecheck"],
-    stage: "consumer-typechecks",
-  },
-  {
-    label: "scripts typecheck",
-    args: ["--filter", "@workspace/scripts", "run", "typecheck"],
-    stage: "consumer-typechecks",
-  },
+  ...RELEASE_CHECK_CONSUMER_TYPECHECK_STEPS,
   {
     label: typescript7Promotion
       ? "TypeScript 7 promotion gate"
