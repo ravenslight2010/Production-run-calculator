@@ -2,10 +2,10 @@
   "schemaVersion": 2,
   "kind": "readiness-recovery",
   "environment": "release",
-  "deploymentId": "app-build:0b3efdef-fd53-46a0-a469-274acdb3243d",
-  "revision": "source-sha256:799efb31ed697fedfa5cb0f2aa8ca51038663c85bce6129122815b9d2f3be54a",
-  "generatedAt": "2026-10-06T00:22:38.238Z",
-  "expiresAt": "2026-10-13T00:22:38.238Z",
+  "deploymentId": "app-build:d4c79702-92fd-42fa-9c84-5434fe4d31af",
+  "revision": "source-sha256:bad76cc4c8ecd73028e18dd155290084343301e052c9df76012c426a4440843c",
+  "generatedAt": "2026-10-12T03:31:26.372Z",
+  "expiresAt": "2026-10-19T03:31:26.372Z",
   "retention": {
     "maxSamples": 60,
     "maxAgeMs": 604800000
@@ -15,7 +15,7 @@
   },
   "samples": [
     {
-      "capturedAt": "2026-10-06T00:22:35.363Z",
+      "capturedAt": "2026-10-12T03:31:15.121Z",
       "httpStatus": 200,
       "outcome": "healthy",
       "checks": {
@@ -46,15 +46,14 @@
         },
         {
           "operation": "web-push-schedule",
-          "status": "warning",
-          "recentFailureCount": 3,
-          "threshold": 3,
-          "lastFailureAt": "2026-10-06T00:21:50.022Z"
+          "status": "ok",
+          "recentFailureCount": 0,
+          "threshold": 3
         }
       ]
     },
     {
-      "capturedAt": "2026-10-06T00:22:36.633Z",
+      "capturedAt": "2026-10-12T03:31:20.407Z",
       "httpStatus": 200,
       "outcome": "healthy",
       "checks": {
@@ -85,15 +84,14 @@
         },
         {
           "operation": "web-push-schedule",
-          "status": "warning",
-          "recentFailureCount": 3,
-          "threshold": 3,
-          "lastFailureAt": "2026-10-06T00:21:50.022Z"
+          "status": "ok",
+          "recentFailureCount": 0,
+          "threshold": 3
         }
       ]
     },
     {
-      "capturedAt": "2026-10-06T00:22:37.900Z",
+      "capturedAt": "2026-10-12T03:31:25.810Z",
       "httpStatus": 200,
       "outcome": "healthy",
       "checks": {
@@ -124,10 +122,9 @@
         },
         {
           "operation": "web-push-schedule",
-          "status": "warning",
-          "recentFailureCount": 3,
-          "threshold": 3,
-          "lastFailureAt": "2026-10-06T00:21:50.022Z"
+          "status": "ok",
+          "recentFailureCount": 0,
+          "threshold": 3
         }
       ]
     }
