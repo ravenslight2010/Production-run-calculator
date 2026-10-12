@@ -71,6 +71,7 @@ const {
   RELEASE_CHECK_API_CONCURRENCY,
   RELEASE_CHECK_API_SHARD_STEPS,
   RELEASE_CHECK_CONSUMER_TYPECHECK_STEPS,
+  RELEASE_CHECK_STEPS,
   RELEASE_CHECK_DEFAULT_CONCURRENCY,
   FULL_RESPONSIVE_WEBKIT_GATE_LABEL,
   FULL_RESPONSIVE_WEBKIT_GATE_STEP,
@@ -1991,6 +1992,19 @@ async function run(): Promise<void> {
     RELEASE_CHECK_CONSUMER_TYPECHECK_STEPS.length,
     consumerTypecheckContracts.length,
     "every consumer typecheck package must have exactly one release gate",
+  );
+  const sharedLibraryTypecheckStep = RELEASE_CHECK_STEPS.find(
+    (step) => step.label === "shared library typechecks",
+  );
+  assert.ok(sharedLibraryTypecheckStep, "the shared-library release gate must exist");
+  assert.deepEqual(
+    sharedLibraryTypecheckStep.args,
+    ["run", "typecheck:libs"],
+    "the shared-library release gate must invoke the root typecheck:libs script",
+  );
+  assert.ok(
+    rootPackage.scripts?.["typecheck:libs"]?.trim(),
+    "the root package must keep its typecheck:libs script defined",
   );
   for (const contract of consumerTypecheckContracts) {
     const step = RELEASE_CHECK_CONSUMER_TYPECHECK_STEPS.find(

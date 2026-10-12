@@ -1844,6 +1844,8 @@ const steps: ReleaseStep[] = [
   },
 ];
 
+export { steps as RELEASE_CHECK_STEPS };
+
 export const FULL_RESPONSIVE_WEBKIT_GATE_STEP: ReleaseStep = {
   label: FULL_RESPONSIVE_WEBKIT_GATE_LABEL,
   command: "bash",
