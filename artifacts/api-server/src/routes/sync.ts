@@ -77,8 +77,10 @@ import {
   type SyncPutMode,
 } from "../lib/capacityTelemetry";
 import {
+  createBackgroundOperationBackoff,
   recordBackgroundOperationSuccess,
   runBackgroundOperation,
+  type BackgroundOperationBackoff,
 } from "../lib/backgroundOperations";
 import {
   SYNC_SNAPSHOT_ID_RE,
@@ -3383,6 +3385,11 @@ router.post(
 const SERVER_TICK_DEFAULT_MS = 15_000;
 const SERVER_TICK_MAX_CLAIMS = 24;
 const SERVER_TICK_LOOKBACK_DAYS = 45;
+const serverTickDateBackoffs = new Map<string, BackgroundOperationBackoff>();
+
+function serverTickBackoffKey(scope: Scope, date: string): string {
+  return `${scope}:${date}`;
+}
 
 function serverTickStartDate(nowMs: number): string {
   const date = new Date(nowMs - SERVER_TICK_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
@@ -3416,14 +3423,32 @@ export async function runAutoTrackServerTicks(opts: {
   ));
   let builtClaims = 0;
   let accepted = 0;
+  // Scoped invocations can recover their own date, but cannot certify health
+  // for dates or scopes they did not examine.
+  let passComplete = opts.scope === undefined && opts.date === undefined;
   const outcomes: Record<string, number> = {};
   for (const row of rows) {
-    if (builtClaims >= maxClaims) break;
+    if (builtClaims >= maxClaims) {
+      passComplete = false;
+      break;
+    }
     if (row.scope !== "live" && row.scope !== "sandbox") {
       outcomes.invalidScope = (outcomes.invalidScope ?? 0) + 1;
+      passComplete = false;
       continue;
     }
     const scope: Scope = row.scope;
+    const backoffKey = serverTickBackoffKey(scope, row.date);
+    let backoff = serverTickDateBackoffs.get(backoffKey);
+    if (!backoff) {
+      backoff = createBackgroundOperationBackoff();
+      serverTickDateBackoffs.set(backoffKey, backoff);
+    }
+    if (!backoff.isReady(nowMs)) {
+      outcomes.backoff = (outcomes.backoff ?? 0) + 1;
+      passComplete = false;
+      continue;
+    }
     try {
       // A transaction retry must keep the same event identity. If the database
       // committed but its reply was lost, the ledger then fences the rebuilt
@@ -3582,6 +3607,7 @@ export async function runAutoTrackServerTicks(opts: {
         })),
         { recordSuccess: false },
       );
+      backoff.recordSuccess(nowMs);
       builtClaims += result.claims;
       accepted += result.accepted;
       for (const [outcome, count] of Object.entries(result.outcomes)) outcomes[outcome] = (outcomes[outcome] ?? 0) + count;
@@ -3589,11 +3615,13 @@ export async function runAutoTrackServerTicks(opts: {
         broadcast(result.data, "server:tick", scope, row.date, result);
       }
     } catch (err) {
+      backoff.recordFailure(nowMs);
       logger.error({ err, event: "server_auto_track_tick", date: row.date }, "Server auto-track tick failed");
       outcomes.error = (outcomes.error ?? 0) + 1;
+      passComplete = false;
     }
   }
-  if (outcomes.error === undefined) {
+  if (passComplete && outcomes.error === undefined) {
     recordBackgroundOperationSuccess("server-auto-track-tick");
   }
   return { examinedDates: rows.length, builtClaims, accepted, outcomes };

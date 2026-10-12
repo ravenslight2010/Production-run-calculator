@@ -1510,6 +1510,11 @@ describe("server auto-track tick recovery under database pressure", () => {
 
   it("keeps persistent failures visible even when another date succeeds", async () => {
     await clearBackgroundOperationDiagnosticsForTests();
+    await db.insert(dailySyncTable).values({
+      ...dayRow(TICK_DATE),
+      scope: "sandbox",
+      updatedAt: new Date(0),
+    });
     await db.execute(sql`
       CREATE FUNCTION reject_auto_track_tick_always() RETURNS trigger
       LANGUAGE plpgsql AS $$
@@ -1526,12 +1531,37 @@ describe("server auto-track tick recovery under database pressure", () => {
     `);
 
     try {
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        const result = await runAutoTrackServerTicks({
-          nowMs: TICK_NOW, maxClaims: 4, scope: "live",
-        });
-        expect(result.outcomes.error).toBe(1);
-      }
+      const firstFailure = await runAutoTrackServerTicks({
+        nowMs: TICK_NOW, maxClaims: 8,
+      });
+      expect(firstFailure.outcomes.error).toBe(1);
+
+      const [healthyDate] = await db.select().from(dailySyncTable)
+        .where(and(eq(dailySyncTable.date, "2030-03-11"), eq(dailySyncTable.scope, "live")));
+      const [healthyScope] = await db.select().from(dailySyncTable)
+        .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "sandbox")));
+      expect(healthyDate.updatedAt.getTime()).toBeGreaterThan(0);
+      expect(healthyScope.updatedAt.getTime()).toBeGreaterThan(0);
+
+      const tooSoon = await runAutoTrackServerTicks({
+        nowMs: TICK_NOW + 999, maxClaims: 8,
+      });
+      expect(tooSoon.outcomes.error).toBeUndefined();
+      expect(tooSoon.outcomes.backoff).toBe(1);
+
+      const secondFailure = await runAutoTrackServerTicks({
+        nowMs: TICK_NOW + 1_000, maxClaims: 8,
+      });
+      expect(secondFailure.outcomes.error).toBe(1);
+      const secondTooSoon = await runAutoTrackServerTicks({
+        nowMs: TICK_NOW + 2_999, maxClaims: 8,
+      });
+      expect(secondTooSoon.outcomes.backoff).toBe(1);
+
+      const thirdFailure = await runAutoTrackServerTicks({
+        nowMs: TICK_NOW + 3_000, maxClaims: 8,
+      });
+      expect(thirdFailure.outcomes.error).toBe(1);
 
       const diagnostic = (await getBackgroundOperationDiagnostics())["server-auto-track-tick"];
       expect(diagnostic).toMatchObject({
@@ -1544,8 +1574,26 @@ describe("server auto-track tick recovery under database pressure", () => {
         .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
       expect(failedDate.canonicalRevision).toBe(0);
       expect(await db.select().from(operationalIntentLedgerTable)).toHaveLength(0);
+
+      const scopedSuccess = await runAutoTrackServerTicks({
+        nowMs: TICK_NOW + 7_000, maxClaims: 8, scope: "sandbox",
+      });
+      expect(scopedSuccess.outcomes.error).toBeUndefined();
+      expect((await getBackgroundOperationDiagnostics())["server-auto-track-tick"])
+        .toMatchObject({ status: "warning", recentFailureCount: 3 });
     } finally {
       await removeTickFailureTrigger();
+    }
+
+    try {
+      const recovered = await runAutoTrackServerTicks({
+        nowMs: TICK_NOW + 7_000, maxClaims: 8,
+      });
+      expect(recovered.outcomes.error).toBeUndefined();
+      expect(recovered.outcomes.backoff).toBeUndefined();
+      expect((await getBackgroundOperationDiagnostics())["server-auto-track-tick"])
+        .toMatchObject({ status: "ok", recentFailureCount: 0 });
+    } finally {
       await clearBackgroundOperationDiagnosticsForTests();
     }
   });
