@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, count, eq, inArray, sql } from "drizzle-orm";
 import { signLegacyTokenForTests } from "../lib/auth";
 import { syncSnapshotId } from "../lib/syncContract";
 import {
@@ -51,6 +51,10 @@ let dataResetTable: DbModule["dataResetTable"];
 let seedRoles: () => Promise<void>;
 let runDataHeals: () => Promise<void>;
 let runAutoTrackServerTicks: typeof import("./sync")["runAutoTrackServerTicks"];
+let clearBackgroundOperationDiagnosticsForTests:
+  typeof import("../lib/backgroundOperations")["clearBackgroundOperationDiagnosticsForTests"];
+let getBackgroundOperationDiagnostics:
+  typeof import("../lib/backgroundOperations")["getBackgroundOperationDiagnostics"];
 let setManualSectionFailureHookForTest: typeof import("./sync")["setManualSectionFailureHookForTest"];
 let setManualSectionBarrierHookForTest: typeof import("./sync")["setManualSectionBarrierHookForTest"];
 let derivedRunMapSharedInputFields: typeof import("./sync")["DERIVED_RUN_MAP_SHARED_INPUT_FIELDS"];
@@ -114,6 +118,10 @@ beforeAll(async () => {
   seedRoles = (await import("../lib/roles")).seedRoles;
   runDataHeals = (await import("../lib/dataHeals")).runDataHeals;
   runAutoTrackServerTicks = syncMod.runAutoTrackServerTicks;
+  const backgroundOperationsMod = await import("../lib/backgroundOperations");
+  clearBackgroundOperationDiagnosticsForTests =
+    backgroundOperationsMod.clearBackgroundOperationDiagnosticsForTests;
+  getBackgroundOperationDiagnostics = backgroundOperationsMod.getBackgroundOperationDiagnostics;
   setManualSectionFailureHookForTest = syncMod.setManualSectionFailureHookForTest;
   setManualSectionBarrierHookForTest = syncMod.setManualSectionBarrierHookForTest;
   derivedRunMapSharedInputFields = syncMod.DERIVED_RUN_MAP_SHARED_INPUT_FIELDS;
@@ -1407,6 +1415,139 @@ describe("server-owned applicator ticks — evidence transaction boundary", () =
       app1BatchesMade: 13,
     });
     expect(await db.select().from(applicatorBatchEvidenceTable)).toHaveLength(0);
+  });
+});
+
+describe("server auto-track tick recovery under database pressure", () => {
+  const TICK_DATE = "2030-03-10";
+  const TICK_RUN = "server-owned-applicator";
+  const TICK_NOW = new Date("2030-03-10T12:00:00.000Z").getTime();
+
+  async function seedTickRun() {
+    await db.update(dailySyncTable).set({
+      data: {
+        dayState: {
+          date: TICK_DATE,
+          currentIndex: 0,
+          runs: [{ id: TICK_RUN, subTab: "crusts", startedAt: TICK_NOW - 120_000, metaUpdatedAt: 1 }],
+        },
+        runValuesUpdatedAt: { [TICK_RUN]: 1 },
+        runValues: {
+          [TICK_RUN]: {
+            casesNeeded: 200, crustsPerCycle: 12, cycleSpeed: 600, speedAdjustment: 1,
+            approxLineSpeed: 400, freezerTime: 3, pizzasPerCase: 12, casesPerSkid: 48,
+            casesPerLayer: 12, doughballsPerTray: 36, crustsPerStack: 6, doughBatchYield: 150,
+            crustsPerCase: 12, skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 0,
+            batchesReady: 0, targetDoughballWeight: 8, doughRecipe: [],
+            sauceBarrelsMade: 0, sauceBarrelAnchorNetSec: 0, sauceBarrelCorrectionGeneration: 0,
+            sauceOzPerPizza: 0, frontlineRecipeName: "", frontlineRecipe: [],
+            app1Type: "Cheese", app1OzPerPizza: 2, app1BatchLbs: 50,
+            app1CheeseRecipe: [], app1BatchesMade: 0, app1BatchAnchorNetSec: 0,
+            app1BatchCorrectionGeneration: 0,
+            app2Type: "", app2OzPerPizza: 0, app2BatchLbs: 0, app2CheeseRecipe: [],
+            app3Type: "", app3OzPerPizza: 0, app3BatchLbs: 0, app3CheeseRecipe: [],
+            app4Type: "", app4OzPerPizza: 0, app4BatchLbs: 0, app4CheeseRecipe: [],
+            pep1Type: "", pep2Type: "", pep1Combined: true,
+          },
+        },
+      },
+    }).where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+  }
+
+  async function removeTickFailureTrigger() {
+    await db.execute(sql`
+      DROP TRIGGER IF EXISTS reject_auto_track_tick_trigger ON daily_sync;
+      DROP FUNCTION IF EXISTS reject_auto_track_tick_once();
+      DROP FUNCTION IF EXISTS reject_auto_track_tick_always();
+      DROP SEQUENCE IF EXISTS auto_track_tick_failure_seq;
+    `);
+  }
+
+  it("retries a transient date-transaction failure without duplicating accepted effects", async () => {
+    await clearBackgroundOperationDiagnosticsForTests();
+    await seedTickRun();
+    await db.execute(sql`
+      CREATE SEQUENCE auto_track_tick_failure_seq;
+      CREATE FUNCTION reject_auto_track_tick_once() RETURNS trigger
+      LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.date = '2030-03-10' AND NEW.scope = 'live'
+          AND nextval('auto_track_tick_failure_seq') = 1 THEN
+          RAISE EXCEPTION 'injected transient tick failure' USING ERRCODE = '57P01';
+        END IF;
+        RETURN NEW;
+      END;
+      $$;
+      CREATE TRIGGER reject_auto_track_tick_trigger
+      BEFORE UPDATE ON daily_sync
+      FOR EACH ROW EXECUTE FUNCTION reject_auto_track_tick_once();
+    `);
+
+    try {
+      const result = await runAutoTrackServerTicks({
+        nowMs: TICK_NOW, maxClaims: 4, scope: "live", date: TICK_DATE,
+      });
+      expect(result.outcomes.error).toBeUndefined();
+      expect(result.accepted).toBeGreaterThan(0);
+
+      const [row] = await db.select().from(dailySyncTable)
+        .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+      expect((row.data as any).runValues[TICK_RUN].app1BatchesMade).toBe(1);
+      expect(await db.select().from(applicatorBatchEvidenceTable)).toHaveLength(1);
+      const [ledgerCount] = await db.select({ value: count() }).from(operationalIntentLedgerTable)
+        .where(and(
+          eq(operationalIntentLedgerTable.scope, "live"),
+          eq(operationalIntentLedgerTable.date, TICK_DATE),
+        ));
+      expect(ledgerCount.value).toBeGreaterThan(0);
+      expect((await getBackgroundOperationDiagnostics())["server-auto-track-tick"])
+        .toMatchObject({ status: "ok", recentFailureCount: 0 });
+    } finally {
+      await removeTickFailureTrigger();
+      await clearBackgroundOperationDiagnosticsForTests();
+    }
+  });
+
+  it("keeps persistent failures visible even when another date succeeds", async () => {
+    await clearBackgroundOperationDiagnosticsForTests();
+    await db.execute(sql`
+      CREATE FUNCTION reject_auto_track_tick_always() RETURNS trigger
+      LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.date = '2030-03-10' AND NEW.scope = 'live' THEN
+          RAISE EXCEPTION 'injected persistent tick failure' USING ERRCODE = '57P01';
+        END IF;
+        RETURN NEW;
+      END;
+      $$;
+      CREATE TRIGGER reject_auto_track_tick_trigger
+      BEFORE UPDATE ON daily_sync
+      FOR EACH ROW EXECUTE FUNCTION reject_auto_track_tick_always();
+    `);
+
+    try {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const result = await runAutoTrackServerTicks({
+          nowMs: TICK_NOW, maxClaims: 4, scope: "live",
+        });
+        expect(result.outcomes.error).toBe(1);
+      }
+
+      const diagnostic = (await getBackgroundOperationDiagnostics())["server-auto-track-tick"];
+      expect(diagnostic).toMatchObject({
+        status: "warning",
+        recentFailureCount: 3,
+        threshold: 3,
+        errorCode: "57P01",
+      });
+      const [failedDate] = await db.select().from(dailySyncTable)
+        .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+      expect(failedDate.canonicalRevision).toBe(0);
+      expect(await db.select().from(operationalIntentLedgerTable)).toHaveLength(0);
+    } finally {
+      await removeTickFailureTrigger();
+      await clearBackgroundOperationDiagnosticsForTests();
+    }
   });
 });
 

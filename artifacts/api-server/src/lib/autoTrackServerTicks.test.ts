@@ -44,6 +44,22 @@ describe("server auto-track claim builders", () => {
     expect(claims.every((claim) => claim.mutations[0]!.to === claim.mutations[0]!.from + 1)).toBe(true);
   });
 
+  it("keeps a pass identity when rebuilding a claim after a committed event", () => {
+    const source = payload();
+    const tickNow = NOW + 180_000;
+    const namespace = "tick-retry-identity";
+    const first = buildNetSecondServerClaims(source, tickNow, namespace)
+      .find((claim) => claim.channel === "app1-batch")!;
+    const committed = applyAutoTrackClaim(source as never, first, tickNow);
+    expect(committed.outcome).toBe("accepted");
+
+    const rebuilt = buildNetSecondServerClaims(committed.data, tickNow, namespace)
+      .find((claim) => claim.channel === "app1-batch");
+    expect(rebuilt).toBeDefined();
+    expect(rebuilt?.sequence).toBe(first.sequence + 1);
+    expect(rebuilt?.eventId).toBe(first.eventId);
+  });
+
   it("uses the cumulative Sauce requirement as the lifetime cap, not the staged cap", () => {
     const source = payload();
     const calc = computeServerCalc(source as never, [], NOW)!.calc;

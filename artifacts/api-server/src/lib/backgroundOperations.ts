@@ -29,6 +29,7 @@ export type BackgroundOperationName =
   | "auth-retention"
   | "import-source-retention"
   | "daily-rollover"
+  | "server-auto-track-tick"
   | "server-job-run"
   | "server-job-prune"
   | "web-push-schedule"
@@ -87,6 +88,7 @@ const operationNames: BackgroundOperationName[] = [
   "auth-retention",
   "import-source-retention",
   "daily-rollover",
+  "server-auto-track-tick",
   "server-job-run",
   "server-job-prune",
   "web-push-schedule",
@@ -166,7 +168,11 @@ export async function recordBackgroundOperationFailure(
 export async function runBackgroundOperation<T>(
   name: BackgroundOperationName,
   operation: () => Promise<T>,
-  options: { delay?: (ms: number) => Promise<void>; now?: () => number } = {},
+  options: {
+    delay?: (ms: number) => Promise<void>;
+    now?: () => number;
+    recordSuccess?: boolean;
+  } = {},
 ): Promise<T> {
   // Keep the short retry timer referenced: once a pass has started, shutdown
   // should not silently abandon its one recovery attempt.
@@ -174,7 +180,7 @@ export async function runBackgroundOperation<T>(
   const now = options.now ?? Date.now;
   try {
     const result = await operation();
-    recordSuccess(name, now());
+    if (options.recordSuccess !== false) recordSuccess(name, now());
     return result;
   } catch (firstError) {
     if (!isTransientDatabaseConnectionError(firstError)) {
@@ -184,13 +190,20 @@ export async function runBackgroundOperation<T>(
     await delay(BACKGROUND_OPERATION_RETRY_DELAY_MS);
     try {
       const result = await operation();
-      recordSuccess(name, now());
+      if (options.recordSuccess !== false) recordSuccess(name, now());
       return result;
     } catch (retryError) {
       await recordBackgroundOperationFailure(name, retryError, now());
       throw retryError;
     }
   }
+}
+
+export function recordBackgroundOperationSuccess(
+  name: BackgroundOperationName,
+  now = Date.now(),
+): void {
+  recordSuccess(name, now);
 }
 
 function localBackgroundOperationDiagnostics(

@@ -76,7 +76,10 @@ import {
   syncRunCountBucket,
   type SyncPutMode,
 } from "../lib/capacityTelemetry";
-import { runBackgroundOperation } from "../lib/backgroundOperations";
+import {
+  recordBackgroundOperationSuccess,
+  runBackgroundOperation,
+} from "../lib/backgroundOperations";
 import {
   SYNC_SNAPSHOT_ID_RE,
   buildSyncWriteEnvelope,
@@ -3422,7 +3425,13 @@ export async function runAutoTrackServerTicks(opts: {
     }
     const scope: Scope = row.scope;
     try {
-      const result = await runWithScope(scope, () => db.transaction(async (tx) => {
+      // A transaction retry must keep the same event identity. If the database
+      // committed but its reply was lost, the ledger then fences the rebuilt
+      // claim instead of applying the operational effect a second time.
+      const claimIdNamespace = `tick-${randomUUID()}`;
+      const result = await runBackgroundOperation(
+        "server-auto-track-tick",
+        () => runWithScope(scope, () => db.transaction(async (tx) => {
         const serverTime = Date.now();
         await tx.insert(dataResetTable).values({ scope, epoch: 0, resetAt: new Date(serverTime) })
           .onConflictDoNothing();
@@ -3431,8 +3440,8 @@ export async function runAutoTrackServerTicks(opts: {
         const [locked] = await tx.select().from(dailySyncTable)
           .where(and(eq(dailySyncTable.date, row.date), eq(dailySyncTable.scope, scope))).for("update");
         const stored = locked?.data ?? emptySyncData(row.date);
-        const wall = buildWallClockServerClaims(stored, nowMs);
-        const netClaims = buildNetSecondServerClaims(stored, nowMs);
+        const wall = buildWallClockServerClaims(stored, nowMs, claimIdNamespace);
+        const netClaims = buildNetSecondServerClaims(stored, nowMs, claimIdNamespace);
         const remainingBudget = maxClaims - builtClaims;
         // Never persist an arm-state that has advanced past a claim omitted by
         // this pass's global budget. A later pass must see that due event.
@@ -3522,7 +3531,9 @@ export async function runAutoTrackServerTicks(opts: {
         const allWallAccepted = !!wall && wallFitsBudget
           && wall.claims.every((claim) => {
             const state = (data.autoTrackCoordination as any)?.runs?.[claim.runId]?.[claim.channel];
-            return state?.acceptedEventId === claim.eventId;
+            return state?.generation === claim.generation
+              && state?.sequence === claim.sequence
+              && state?.acceptedEventId === claim.eventId;
           });
         if (wall && (wall.claims.length === 0 || allWallAccepted)) {
           const previous = data.autoTrackServerState && typeof data.autoTrackServerState === "object"
@@ -3568,7 +3579,9 @@ export async function runAutoTrackServerTicks(opts: {
           canonicalRevision,
           serverTime,
         };
-      }));
+        })),
+        { recordSuccess: false },
+      );
       builtClaims += result.claims;
       accepted += result.accepted;
       for (const [outcome, count] of Object.entries(result.outcomes)) outcomes[outcome] = (outcomes[outcome] ?? 0) + count;
@@ -3579,6 +3592,9 @@ export async function runAutoTrackServerTicks(opts: {
       logger.error({ err, event: "server_auto_track_tick", date: row.date }, "Server auto-track tick failed");
       outcomes.error = (outcomes.error ?? 0) + 1;
     }
+  }
+  if (outcomes.error === undefined) {
+    recordBackgroundOperationSuccess("server-auto-track-tick");
   }
   return { examinedDates: rows.length, builtClaims, accepted, outcomes };
 }

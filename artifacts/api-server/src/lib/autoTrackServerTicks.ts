@@ -152,7 +152,11 @@ function schedule(
 }
 
 /** Builds due sauce/applicator claims entirely from canonical stored state. */
-export function buildNetSecondServerClaims(raw: unknown, nowMs = Date.now()): AutoTrackClaim[] {
+export function buildNetSecondServerClaims(
+  raw: unknown,
+  nowMs = Date.now(),
+  eventIdNamespace?: string,
+): AutoTrackClaim[] {
   const payload = (raw && typeof raw === "object" ? raw : {}) as Payload;
   let built: { schedule: AutoTrackSchedule; values: Record<string, unknown>; ppm: number } | null;
   try { built = schedule(payload, nowMs); } catch { return []; }
@@ -181,7 +185,10 @@ export function buildNetSecondServerClaims(raw: unknown, nowMs = Date.now()): Au
       return [{
         version: 1, runId: plan.runId, channel: entry.channel, generation: plan.generation,
         sequence: prior?.generation === plan.generation ? number(prior.sequence) + 1 : 1,
-        eventId: `srv:${entry.channel}:${randomUUID()}`, dueAt: entry.dueAt,
+        eventId: eventIdNamespace
+          ? `srv:${entry.channel}:${eventIdNamespace}`
+          : `srv:${entry.channel}:${randomUUID()}`,
+        dueAt: entry.dueAt,
         nextDueAt: entry.nextDueAt > entry.dueAt ? entry.nextDueAt : entry.dueAt + cadence,
         baseUpdatedAt, correctionGeneration,
         mutations: [
@@ -205,7 +212,10 @@ export function buildNetSecondServerClaims(raw: unknown, nowMs = Date.now()): Au
     return [{
       version: 1, runId: plan.runId, channel: entry.channel, generation: plan.generation,
       sequence: prior?.generation === plan.generation ? number(prior.sequence) + 1 : 1,
-      eventId: `srv:${entry.channel}:${randomUUID()}`, dueAt: entry.dueAt,
+      eventId: eventIdNamespace
+        ? `srv:${entry.channel}:${eventIdNamespace}`
+        : `srv:${entry.channel}:${randomUUID()}`,
+      dueAt: entry.dueAt,
       nextDueAt: claimNextDueAt, baseUpdatedAt, correctionGeneration, mutations,
     } as AutoTrackClaim];
   });
@@ -219,7 +229,11 @@ export type ServerWallClockBookkeeping = WallClockBookkeeping & {
   serverSequences: Partial<Record<WallClockChannel, number>>;
   appliedDoughControlUpdatedAt?: number;
 };
-export function buildWallClockServerClaims(raw: unknown, nowMs = Date.now()): { runId: string; bookkeeping: ServerWallClockBookkeeping; claims: AutoTrackClaim[] } | null {
+export function buildWallClockServerClaims(
+  raw: unknown,
+  nowMs = Date.now(),
+  eventIdNamespace?: string,
+): { runId: string; bookkeeping: ServerWallClockBookkeeping; claims: AutoTrackClaim[] } | null {
   const payload = (raw && typeof raw === "object" ? raw : {}) as Payload;
   const built = schedule(payload, nowMs, {
     allowEndedDrain: true,
@@ -379,7 +393,9 @@ export function buildWallClockServerClaims(raw: unknown, nowMs = Date.now()): { 
       version: 1, runId: plan.runId, channel: event.channel, generation: plan.generation,
       sequence: coordination?.[event.channel]?.generation === plan.generation
         ? number(coordination[event.channel]?.sequence) + 1 : 1,
-      eventId: `srv:wc:${event.channel}:${randomUUID()}`,
+      eventId: eventIdNamespace
+        ? `srv:wc:${event.channel}:${eventIdNamespace}`
+        : `srv:wc:${event.channel}:${randomUUID()}`,
       dueAt: event.dueAt, nextDueAt: event.nextDueAt, baseUpdatedAt: number(payload.runValuesUpdatedAt?.[plan.runId]),
       ...(event.channel === "case" ? { correctionGeneration: number(payload.packagingProgress?.[plan.runId]?.correctionGeneration) } : {}),
       mutations: event.mutations as AutoTrackMutation[],
