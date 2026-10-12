@@ -2039,6 +2039,23 @@ async function run(): Promise<void> {
       );
     }
   }
+  const workspaceNpmrc = await readFile(
+    new URL("../../.npmrc", import.meta.url),
+    "utf8",
+  );
+  const enablePrePostScriptsSetting = workspaceNpmrc
+    .split(/\r?\n/u)
+    .filter((line) => !/^\s*[#;]/u.test(line))
+    .map((line) =>
+      line.match(/^\s*enable-pre-post-scripts\s*=\s*(.*?)\s*$/iu)?.[1],
+    )
+    .filter((value): value is string => value !== undefined)
+    .at(-1);
+  assert.notEqual(
+    enablePrePostScriptsSetting?.toLowerCase(),
+    "false",
+    "the workspace .npmrc must not disable pnpm pre/post lifecycle scripts required by release typecheck setup checks",
+  );
   const apiPackage = JSON.parse(
     await readFile(
       new URL("../../artifacts/api-server/package.json", import.meta.url),
