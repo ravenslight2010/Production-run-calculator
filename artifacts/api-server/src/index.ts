@@ -3,7 +3,11 @@ import { logger } from "./lib/logger";
 import { seedRoles } from "./lib/roles";
 import { runDataHeals } from "./lib/dataHeals";
 import { sandboxAllowed, seedSandboxUser } from "./lib/sandbox";
-import { recordStartupEvent, recordStartupSlowWarning } from "./lib/observability";
+import {
+  recordGeminiFallbackResult,
+  recordStartupEvent,
+  recordStartupSlowWarning,
+} from "./lib/observability";
 import { runMasterDataHealthScan } from "./lib/masterDataHealth";
 import { classifyStartupRepairFailure } from "./lib/startupRepairFailure";
 import {
@@ -49,6 +53,10 @@ setGeminiMetricsObserver((metrics) => {
     },
     "bounded Gemini provider telemetry",
   );
+  recordGeminiFallbackResult({
+    requestResult: metrics.requestResult,
+    fallbackTrigger: metrics.fallbackTrigger,
+  });
 });
 
 if (!rawPort) {
