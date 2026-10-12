@@ -1362,6 +1362,64 @@ describe("multi-client sync convergence soak", () => {
     }
   }, 20_000);
 
+  it("keeps the aggregate delivery warning while another registered scope remains delayed", async () => {
+    const syncOutbox = await import("../lib/syncOutbox");
+    syncOutbox.clearSyncOutboxProcessCursorsForTests();
+    await syncOutbox.registerSyncOutboxScope("live");
+    await syncOutbox.registerSyncOutboxScope("sandbox");
+
+    try {
+      const payloadSentinel = "outbox-lag-private-payload";
+      await syncOutbox.recordSyncOutboxEvent({
+        kind: "configuration",
+        scope: "live",
+        senderId: payloadSentinel,
+        family: "master-data",
+      });
+      await syncOutbox.recordSyncOutboxEvent({
+        kind: "configuration",
+        scope: "sandbox",
+        senderId: payloadSentinel,
+        family: "master-data",
+      });
+
+      const oldestPendingAt = Date.now() - syncOutbox.SYNC_OUTBOX_LAG_WARNING_MS - 1;
+      syncOutbox.observeSyncOutboxLag("live", 4, oldestPendingAt);
+      syncOutbox.observeSyncOutboxLag("sandbox", 1, oldestPendingAt);
+
+      expect(syncOutbox.getSyncOutboxLagDiagnostics()).toMatchObject({
+        status: "warning",
+        lagging: true,
+        pendingEvents: 5,
+        warningThresholdMs: syncOutbox.SYNC_OUTBOX_LAG_WARNING_MS,
+      });
+
+      // The sandbox consumer catches up, but the live consumer is still behind.
+      syncOutbox.observeSyncOutboxLag("sandbox", 0);
+      const lag = syncOutbox.getSyncOutboxLagDiagnostics();
+      expect(lag).toMatchObject({
+        status: "warning",
+        lagging: true,
+        pendingEvents: 4,
+        warningThresholdMs: syncOutbox.SYNC_OUTBOX_LAG_WARNING_MS,
+      });
+      expect(JSON.stringify(lag)).not.toContain("live");
+      expect(JSON.stringify(lag)).not.toContain("sandbox");
+      expect(JSON.stringify(lag)).not.toContain("master-data");
+      expect(JSON.stringify(lag)).not.toContain(payloadSentinel);
+
+      syncOutbox.observeSyncOutboxLag("live", 0);
+      expect(syncOutbox.getSyncOutboxLagDiagnostics()).toMatchObject({
+        status: "ok",
+        lagging: false,
+        pendingEvents: 0,
+        lagMs: 0,
+      });
+    } finally {
+      syncOutbox.clearSyncOutboxProcessCursorsForTests();
+    }
+  });
+
   it("converges edits, offline reconnects, wake recovery, stale writes, and blank protection", async () => {
     const clients = ["A", "B", "C"].map((id) => new SimulatedClient(id));
     const start = Date.now();
