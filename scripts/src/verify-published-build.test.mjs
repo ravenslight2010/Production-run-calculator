@@ -39,7 +39,6 @@ test("an exact source match creates an expiring receipt, never production approv
 
 for (const [name, mutate] of [
   ["wrong source", (r) => ({ ...r, sourceFingerprintSha256: "f".repeat(64) })],
-  ["wrong app build", (r) => ({ ...r, appBuildId: "app-build:00000000-0000-0000-0000-000000000000" })],
   ["development build", (r) => ({ ...r, buildMode: "development" })],
   ["unsupported schema", (r) => ({ ...r, schemaVersion: 2 })],
   ["sensitive extra field", (r) => ({ ...r, token: "synthetic" })],
@@ -53,6 +52,21 @@ for (const [name, mutate] of [
     await assert.rejects(verifyPublishedBuild(input));
   });
 }
+
+test("different app build IDs are accepted when the published source fingerprint matches", async (t) => {
+  const input = await fixture(t, (res, info) => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({
+      ...info,
+      appBuildId: "app-build:00000000-0000-0000-0000-000000000000",
+    }));
+  });
+  const receipt = await verifyPublishedBuild(input);
+  assert.equal(receipt.appBuildId, "app-build:00000000-0000-0000-0000-000000000000");
+  const handoff = await createPublishedSourceHandoff(input);
+  assert.equal(handoff.appBuildId, "app-build:00000000-0000-0000-0000-000000000000");
+  assert.equal(handoff.deployedRevision, `source-sha256:${input.expected.sourceFingerprintSha256}`);
+});
 
 test("Git annotations are optional and cannot block an exact source match", async (t) => {
   const input = await fixture(t, (res, info) => {

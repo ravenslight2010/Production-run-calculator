@@ -94,7 +94,7 @@ export async function verifyPublishedBuild({
     throw new Error("Published build metadata is unavailable or has an unexpected response.");
   const actual = validateBuildInfo(await readBoundedJsonResponse(response, 8192, "Published build metadata"));
   if (actual.buildMode !== "release") throw new Error("Published metadata is not a complete release build.");
-  for (const key of ["appBuildId", "sourcePolicy", "sourceFingerprintSha256"]) {
+  for (const key of ["sourcePolicy", "sourceFingerprintSha256"]) {
     if (actual[key] !== expected[key]) throw new Error("Published source does not match the expected build.");
   }
   const now = new Date();
@@ -128,7 +128,6 @@ export function createPublishedSourceHandoffFromMatch(match, expected) {
   validateSourceRecord(expected);
   if (expected.mode !== "publish" || match.status !== "source-match" || match.productionGo !== false ||
       match.sourceFingerprintSha256 !== expected.sourceFingerprintSha256 ||
-      match.appBuildId !== expected.appBuildId ||
       match.sourcePolicy !== expected.sourcePolicy ||
       match.expectedRecordSha256 !== sourceRecordDigest(expected)) {
     throw new Error("Published source match does not bind to the independent expectation.");

@@ -449,11 +449,13 @@ stale, preparation exits nonzero.
 
 The handoff has schema version 2 and kind
 `published-source-deployment-handoff`. It carries the application-owned build
-ID, source policy, source fingerprint, exact independent expectation and
-digest, and an expiry of at most 24 hours. The `deploymentId` compatibility
-field contains the namespaced application build ID, **not** a Replit platform
-UUID. The deployed identity is `source-sha256:<fingerprint>`, not a Git
-revision. The source-match receipt continues to say `productionGo: false`.
+ID reported by the live build, source policy, source fingerprint, exact
+independent expectation and digest, and an expiry of at most 24 hours. The live
+and prepared application build IDs may differ; source policy and the full
+`source-sha256` fingerprint are the comparison identity. The `deploymentId`
+compatibility field contains the live namespaced application build ID, **not** a
+Replit platform UUID. The source-match receipt continues to say
+`productionGo: false`.
 
 The source reconciliation capture is bounded and uses the published app's
 configured database connection. Its verifier runs in a read-only transaction;

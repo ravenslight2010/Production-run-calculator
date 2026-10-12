@@ -9,6 +9,12 @@ Production reconciliation evidence must use an explicitly controlled full Git re
 
 **How to apply:** Keep the release runner's checkout revision separate from the deployed production revision. Pass the deployed revision explicitly through capture/import, checkpoint, retained report, promotion, and verification; never replace it with repository HEAD. A current bounded published-deployment handoff may supply that revision, but its expiry and any explicit SHA must be checked before querying production. Treat source-owned pool drift as a real verification failure even when marker, alias, profile, run-history, and stub checks pass.
 
+For published-build matching, compare the production source policy and complete source fingerprint; do not require the prepared and live application build IDs to be equal. Preserve the live build ID as deployment metadata in the resulting handoff.
+
+**Why:** Replit can assign a different application build ID while serving the exact prepared source. Treating that generated identifier as source identity blocks valid evidence despite a matching source fingerprint.
+
+**How to apply:** Validate build mode, readiness, timestamps, source policy, and the full source fingerprint. Bind the receipt to the independent prepared record, record the actual live build ID, and keep the deployed revision expressed as `source-sha256:<fingerprint>`.
+
 For test-only CI evidence that intentionally skips production source reconciliation, explicitly set `SOURCE_LIBRARY_RECONCILIATION_ENVIRONMENT=development`.
 
 **Why:** CI's default release environment can cause the report to infer a deployed revision from the checkout even though no deployment or production readiness was established.
