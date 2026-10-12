@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import express, { type Express } from "express";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -47,6 +48,8 @@ let qcWorkflowEventsTable: DbModule["qcWorkflowEventsTable"];
 let operationalIntentLedgerTable: DbModule["operationalIntentLedgerTable"];
 let completedRunHistoryTable: DbModule["completedRunHistoryTable"];
 let applicatorBatchEvidenceTable: DbModule["applicatorBatchEvidenceTable"];
+let syncOutboxCursorsTable: DbModule["syncOutboxCursorsTable"];
+let syncOutboxEventsTable: DbModule["syncOutboxEventsTable"];
 let dataResetTable: DbModule["dataResetTable"];
 let seedRoles: () => Promise<void>;
 let runDataHeals: () => Promise<void>;
@@ -114,6 +117,8 @@ beforeAll(async () => {
   operationalIntentLedgerTable = dbMod.operationalIntentLedgerTable;
   completedRunHistoryTable = dbMod.completedRunHistoryTable;
   applicatorBatchEvidenceTable = dbMod.applicatorBatchEvidenceTable;
+  syncOutboxCursorsTable = dbMod.syncOutboxCursorsTable;
+  syncOutboxEventsTable = dbMod.syncOutboxEventsTable;
   dataResetTable = dbMod.dataResetTable;
   seedRoles = (await import("../lib/roles")).seedRoles;
   runDataHeals = (await import("../lib/dataHeals")).runDataHeals;
@@ -193,7 +198,7 @@ function dayRow(date: string) {
 
 beforeEach(async () => {
   injectedSseWriteFailures = 0;
-  await db.execute(sql`TRUNCATE ${dailySyncTable}, ${dataResetTable}, ${operationalIntentLedgerTable}, ${completedRunHistoryTable}, ${applicatorBatchEvidenceTable}, ${dataHealsTable}, ${syncConflictLogsTable}, ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${qcWorkflowEventsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE ${dailySyncTable}, ${dataResetTable}, ${operationalIntentLedgerTable}, ${completedRunHistoryTable}, ${applicatorBatchEvidenceTable}, ${syncOutboxEventsTable}, ${syncOutboxCursorsTable}, ${dataHealsTable}, ${syncConflictLogsTable}, ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${qcWorkflowEventsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
   await db.insert(usersTable).values([
     { id: USER, username: "user", passwordHash: "x" },
@@ -1506,6 +1511,116 @@ describe("server auto-track tick recovery under database pressure", () => {
       await removeTickFailureTrigger();
       await clearBackgroundOperationDiagnosticsForTests();
     }
+  });
+
+  it("replays a committed date transaction after losing its reply without duplicating effects", async () => {
+    await clearBackgroundOperationDiagnosticsForTests();
+    await seedTickRun();
+    const [sauceItem] = await db.insert(inventoryItemsTable).values({
+      key: "ingredient:BBQ Sauce:lbs",
+      category: "ingredient",
+      name: "BBQ Sauce",
+      unit: "lbs",
+    }).returning();
+    await db.insert(inventoryLotsTable).values({
+      itemId: sauceItem.id,
+      qtyReceived: 100,
+      qtyRemaining: 100,
+    });
+
+    const [before] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+    const seededData = before.data as any;
+    seededData.runValues[TICK_RUN] = {
+      ...seededData.runValues[TICK_RUN],
+      sauceBarrelsMade: 0,
+      sauceBarrelAnchorNetSec: 0,
+      sauceBarrelCorrectionGeneration: 0,
+      sauceOzPerPizza: 2,
+      frontlineRecipeName: "BBQ Sauce",
+      frontlineRecipe: [],
+      sauceBarrelLbs: 10,
+    };
+    await db.update(dailySyncTable).set({ data: seededData })
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+
+    // The real PostgreSQL transaction commits first. Throwing a transient
+    // connection error before the operation returns models the caller losing
+    // that commit reply, so runBackgroundOperation replays the same date pass.
+    const transactionDb = db as unknown as {
+      transaction: (...args: any[]) => Promise<any>;
+    };
+    const realTransaction = transactionDb.transaction.bind(db);
+    let transactionAttempts = 0;
+    let lostReplyInjected = false;
+    transactionDb.transaction = async (...args: any[]) => {
+      transactionAttempts += 1;
+      const committed = await realTransaction(...args);
+      if (!lostReplyInjected) {
+        lostReplyInjected = true;
+        throw Object.assign(
+          new Error("injected lost database reply after transaction commit"),
+          { code: "08006" },
+        );
+      }
+      return committed;
+    };
+
+    try {
+      await runAutoTrackServerTicks({
+        nowMs: TICK_NOW, maxClaims: 4, scope: "live", date: TICK_DATE,
+      });
+    } finally {
+      transactionDb.transaction = realTransaction;
+      await clearBackgroundOperationDiagnosticsForTests();
+    }
+
+    expect(lostReplyInjected).toBe(true);
+    expect(transactionAttempts).toBe(2);
+
+    const [after] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+    const finalData = after.data as any;
+    expect(finalData.runValues[TICK_RUN]).toMatchObject({
+      app1BatchesMade: 1,
+      sauceBarrelsMade: 1,
+    });
+    expect(finalData.runValuesUpdatedAt[TICK_RUN]).toBe(TICK_NOW);
+
+    const automaticEvidence = (await db.select().from(applicatorBatchEvidenceTable))
+      .filter((row) => row.source === "automatic-observation");
+    expect(automaticEvidence).toHaveLength(1);
+
+    const tickLedger = (await db.select().from(operationalIntentLedgerTable))
+      .filter((entry) => entry.commandType === "auto-track");
+    for (const channel of ["app1-batch", "sauce-barrel"]) {
+      expect(tickLedger.filter((entry) => (entry.actionData as any)?.channel === channel))
+        .toHaveLength(1);
+    }
+    const appBatchEntry = tickLedger.find(
+      (entry) => (entry.actionData as any)?.channel === "app1-batch",
+    );
+    const appBatchEventId = (appBatchEntry?.actionData as any)?.eventId;
+    expect(finalData.autoTrackCoordination.runs[TICK_RUN]["app1-batch"].acceptedEventId)
+      .toBe(appBatchEventId);
+    expect(automaticEvidence[0]?.operationId).toBe(`auto:${createHash("sha256")
+      .update(JSON.stringify([TICK_DATE, TICK_RUN, 1, appBatchEventId]))
+      .digest("hex")}`);
+
+    const [remainingLot] = await db.select().from(inventoryLotsTable);
+    expect(remainingLot.qtyRemaining).toBe(90);
+    expect(await db.select().from(inventoryLedgerTable)).toMatchObject([
+      { type: "consume", qtyDelta: -10, runId: TICK_RUN },
+    ]);
+    expect(await db.select().from(inventoryConsumedRunsTable)).toHaveLength(1);
+
+    expect(await db.select().from(syncOutboxEventsTable)).toMatchObject([
+      { scope: "live", cursor: 1, kind: "day-state", date: TICK_DATE, senderId: "server:tick" },
+    ]);
+    expect(await db.select().from(syncOutboxCursorsTable))
+      .toMatchObject([{ scope: "live", cursor: 1 }]);
+    expect(await db.select().from(dataResetTable))
+      .toMatchObject([{ scope: "live", epoch: 0 }]);
   });
 
   it("keeps persistent failures visible even when another date succeeds", async () => {
