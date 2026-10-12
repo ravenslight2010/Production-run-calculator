@@ -40,11 +40,11 @@ intended resume assertions run.
 captured for that checkout, and keep the fixture's source-library environment
 consistent with whether production reconciliation actually ran.
 
-A GitHub push SHA proves which source commit was pushed, not which commit a production deployment actually published. Keep push evidence separate until a trusted publish event or provider-verified handoff binds that SHA to the deployment identity.
+A GitHub push SHA proves which source commit was pushed, not which source a production deployment serves. Replit's `getDeploymentInfo()` establishes deployment status, successful build, deployment type, and the official primary URL, but it does not return a provider deployment UUID or source revision. The current publish handoff is application-owned: compare the published `/api/build-info` app build ID and source fingerprint to an independently prepared publish-source record. The app's identity alone is not provider-verified proof; a mismatch blocks capture.
 
-**Why:** Publishing can be a separate action from pushing, so a valid pushed commit alone cannot establish the live deployment's identity.
+**Why:** Publishing is separate from source preparation, and a healthy public URL or app-reported build identity alone cannot establish that the active build matches the independently prepared source.
 
-**How to apply:** Require both the exact deployed SHA and deployment ID from the trusted publish context before collecting or accepting production evidence; re-check current platform interfaces for a supported binding mechanism.
+**How to apply:** Start with successful current `getDeploymentInfo()` metadata and its exact `primaryUrl`. Accept the generated application build ID and `source-sha256` handoff only after the live build matches the independent expected-source record; never substitute repository HEAD, a Git push SHA, a prior report, or a mismatch response.
 
 Do not assume the Replit Enterprise Admin API supplies deployment identity. Its published API reference reviewed on 2026-10-02 listed workspaces, members, groups, usage, and projects, but no deployment or publish-event operations; a documentation search summary had overstated this capability.
 
