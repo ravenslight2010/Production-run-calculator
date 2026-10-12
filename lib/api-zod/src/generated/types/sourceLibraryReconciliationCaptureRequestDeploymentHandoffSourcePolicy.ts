@@ -11,4 +11,5 @@ export type SourceLibraryReconciliationCaptureRequestDeploymentHandoffSourcePoli
 
 export const SourceLibraryReconciliationCaptureRequestDeploymentHandoffSourcePolicy = {
   'production-source-v2': 'production-source-v2',
+  'production-source-v3': 'production-source-v3',
 } as const;

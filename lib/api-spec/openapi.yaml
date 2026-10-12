@@ -5725,7 +5725,7 @@ components:
             deploymentId: { type: string, minLength: 1, maxLength: 128 }
             deployedRevision: { type: string, pattern: "^source-sha256:[a-f0-9]{64}$" }
             appBuildId: { type: string, pattern: "^app-build:[a-f0-9-]{36}$" }
-            sourcePolicy: { type: string, enum: [production-source-v2] }
+            sourcePolicy: { type: string, enum: [production-source-v2, production-source-v3] }
             sourceFingerprintSha256: { type: string, pattern: "^[a-f0-9]{64}$" }
             identityAuthority: { type: string, enum: [independent-expected-source-comparison] }
             expectedRecordSha256: { type: string, pattern: "^[a-f0-9]{64}$" }
@@ -6480,7 +6480,7 @@ components:
           type: string
           pattern: '^app-build:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$'
           description: Application-owned artifact-set ID, not a Replit Build UUID.
-        sourcePolicy: { type: string, enum: [production-source-v2] }
+        sourcePolicy: { type: string, enum: [production-source-v2, production-source-v3] }
         sourceFingerprintSha256: { type: string, pattern: '^[a-f0-9]{64}$' }
         gitRevision:
           type: string

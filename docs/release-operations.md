@@ -487,6 +487,10 @@ value fingerprints are covered; later edits or other failures remain blocking.
 The October 8 v1 manifest and reviewed evidence are unchanged historical records.
 A runtime capture must report the pinned active v2 digest before its approval
 counts can be used as current passing release evidence.
+The API build validates and copies the active manifest and all three referenced
+reviewed files, then verifies the copied bundle with the same loader used at
+runtime. These exact files are sealed source inputs under `production-source-v3`;
+unrelated retained evidence is still excluded.
 
 The public `GET` uses the running app's own database connection and build
 identity; it does not require a manager login, PostgreSQL owner name, request

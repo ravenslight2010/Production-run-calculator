@@ -2,11 +2,13 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { lstatSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
+import { SOURCE_LIBRARY_POOL_APPROVAL_ASSETS } from "./source-library-pool-approval-assets.mjs";
 
-export const SOURCE_POLICY = "production-source-v2";
+export const SOURCE_POLICY = "production-source-v3";
 const SOURCE_LIBRARY_RECONCILIATION_ASSETS = new Set([
   "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json",
   "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.sha256",
+  ...SOURCE_LIBRARY_POOL_APPROVAL_ASSETS,
 ]);
 const REQUIRED = ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml",
   "artifacts/api-server/src", "artifacts/run-calculator/src", "lib", "scripts/src",
@@ -20,11 +22,11 @@ const SKIP_FILES = new Set(["publish-source-record.json", "build-info.json",
   "build-source-part.json"]);
 
 export function isSourceInput(relative) {
+  if (SOURCE_LIBRARY_RECONCILIATION_ASSETS.has(relative)) return true;
   const parts = relative.split("/");
   if (parts.some((p) => SKIP_DIRS.has(p) || p.startsWith(".env")) ||
       SKIP_FILES.has(parts.at(-1)) || /\.(?:test|spec)\.[^.]+$/.test(relative) ||
       /\.(?:log|tsbuildinfo)$/.test(relative)) return false;
-  if (SOURCE_LIBRARY_RECONCILIATION_ASSETS.has(relative)) return true;
   if (parts.length === 1) return TOP_FILES.has(relative) || /^tsconfig.*\.json$/.test(relative);
   if (parts[0] === "lib" || relative.startsWith("scripts/src/")) return true;
   if (parts[0] !== "artifacts" || !["api-server", "run-calculator"].includes(parts[1])) return false;
@@ -84,6 +86,9 @@ export function fingerprintSource(root) {
       walk(`${base}/${name}`);
     }
   }
+  // These exact reviewed runtime assets are allowed through the otherwise
+  // excluded docs/evidence tree. Never walk unrelated retained evidence.
+  for (const asset of SOURCE_LIBRARY_POOL_APPROVAL_ASSETS) walk(asset);
   files.sort();
   const hash = createHash("sha256").update(`${SOURCE_POLICY}\0`);
   const gitFilesSha256 = new Map();

@@ -1,6 +1,7 @@
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { SOURCE_LIBRARY_POOL_APPROVAL_ASSETS } from "../source-library-pool-approval-assets.mjs";
 
 export function put(root, file, content = "fixture\n") {
   mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
@@ -18,7 +19,8 @@ export function sourceFixture(t) {
     "artifacts/api-server/build.mjs", "artifacts/run-calculator/vite.config.ts",
     "lib/math/src/index.ts", "scripts/src/build.mjs", "artifacts/run-calculator/public/icon.svg",
     "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json",
-    "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.sha256"])
+     "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.sha256",
+     ...SOURCE_LIBRARY_POOL_APPROVAL_ASSETS])
     put(root, file);
   return root;
 }

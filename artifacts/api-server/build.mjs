@@ -1,11 +1,12 @@
 import { createRequire } from "node:module";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { build as esbuild } from "esbuild";
 import esbuildPluginPino from "esbuild-plugin-pino";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { buildSourceRecord, completeBuildStage } from "../../scripts/src/build-source-identity.mjs";
+import { SOURCE_LIBRARY_POOL_APPROVAL_ASSETS } from "../../scripts/src/source-library-pool-approval-assets.mjs";
 
 // Plugins (e.g. 'esbuild-plugin-pino') may use `require` to resolve dependencies
 globalThis.require = createRequire(import.meta.url);
@@ -19,7 +20,10 @@ async function buildAll() {
   await rm(distDir, { recursive: true, force: true });
 
   await esbuild({
-    entryPoints: [path.resolve(artifactDir, "src/index.ts")],
+    entryPoints: {
+      index: path.resolve(artifactDir, "src/index.ts"),
+      "source-library-approval": path.resolve(root, "scripts/src/source-library-approval-bundle.mts"),
+    },
     platform: "node",
     bundle: true,
     format: "esm",
@@ -141,28 +145,37 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
     `${reportSha256}\n`,
     "utf8",
   );
+  const { DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS, loadSourceLibraryPoolExceptionApproval } =
+    await import(pathToFileURL(path.resolve(distDir, "source-library-approval.mjs")).href);
+  const manifestPath = path.resolve(root, DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS);
+  // Validate the canonical pin and every reviewed hash before copying anything.
+  const sourceApproval = loadSourceLibraryPoolExceptionApproval(manifestPath, reportBytes, root);
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  const reviewedPaths = [
+    manifest.ownerApproval.recordPath,
+    manifest.reviewedEvidence.diagnosticsPath,
+    manifest.reviewedEvidence.capturePath,
+  ];
+  const selectedInputs = [DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS, ...reviewedPaths].sort();
+  if (JSON.stringify(selectedInputs) !== JSON.stringify([...SOURCE_LIBRARY_POOL_APPROVAL_ASSETS].sort())) {
+    throw new Error("Reviewed approval files must match the sealed source-input allowlist.");
+  }
   const poolExceptionFiles = [
-    {
-      source: "docs/evidence/source-library-pool-owner-approved-differences-2026-10-08.json",
-      destination: "source-library-pool-owner-approved-differences-2026-10-08.json",
-    },
-    {
-      source: "docs/evidence/source-library-pool-owner-review-2026-10-08.md",
-      destination: "docs/evidence/source-library-pool-owner-review-2026-10-08.md",
-    },
-    {
-      source: "docs/evidence/source-library-pool-mismatch-diagnostics-2026-10-08.json",
-      destination: "docs/evidence/source-library-pool-mismatch-diagnostics-2026-10-08.json",
-    },
-    {
-      source: "docs/evidence/source-library-live-pool-capture-2026-10-08.json",
-      destination: "docs/evidence/source-library-live-pool-capture-2026-10-08.json",
-    },
+    { source: DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS, destination: path.basename(DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS) },
+    ...reviewedPaths.map((source) => ({ source, destination: source })),
   ];
   for (const file of poolExceptionFiles) {
     const destination = path.resolve(distDir, file.destination);
     await mkdir(path.dirname(destination), { recursive: true });
     await writeFile(destination, await readFile(path.resolve(root, file.source)));
+  }
+  const bundledApproval = loadSourceLibraryPoolExceptionApproval(
+    path.resolve(distDir, path.basename(DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS)),
+    reportBytes,
+    distDir,
+  );
+  if (bundledApproval.sha256 !== sourceApproval.sha256) {
+    throw new Error("Bundled source-library approval differs from the reviewed source.");
   }
   completeBuildStage(root, sourceRecord, "api");
 }

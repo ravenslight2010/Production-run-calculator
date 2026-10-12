@@ -5,6 +5,7 @@ import { readFileSync, rmSync, symlinkSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fingerprintSource, verifiedGitRevision } from "./build-source-files.mjs";
+import { SOURCE_LIBRARY_POOL_APPROVAL_ASSETS } from "./source-library-pool-approval-assets.mjs";
 import {
   assertSourceUnchanged, buildInfoFromRecord, completeBuildStage, createSourceRecord,
   EXPECTED_RECORD_PATH, preparePublishSource, readBoundedJson, sealBuildIdentity,
@@ -31,7 +32,8 @@ test("mutation property across each included source category and varied bytes", 
     "artifacts/api-server/build.mjs", "artifacts/run-calculator/vite.config.ts",
     "lib/math/src/index.ts", "scripts/src/build.mjs", "artifacts/run-calculator/public/icon.svg",
     "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json",
-    "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.sha256"];
+    "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.sha256",
+    ...SOURCE_LIBRARY_POOL_APPROVAL_ASSETS];
   for (const file of paths) {
     const original = readFileSync(path.join(root, file));
     const baseline = hash(root);
@@ -165,7 +167,7 @@ test("a stale build stage from an older source policy cannot block a fresh stage
 
   assert.equal(completeBuildStage(root, record, "api"), false);
   const sealed = completeBuildStage(root, record, "web");
-  assert.equal(sealed.sourcePolicy, "production-source-v2");
+  assert.equal(sealed.sourcePolicy, "production-source-v3");
 });
 
 test("development metadata is explicit and cannot serve as a complete release", (t) => {

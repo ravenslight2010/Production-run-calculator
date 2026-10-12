@@ -8,6 +8,7 @@ import {
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { fingerprintSource } from "./build-source-files.mjs";
@@ -186,6 +187,28 @@ test("real API/web producers, finalized PWA and bundled public getter share one 
     const apiBuild = await run(api, process.execPath, ["build.mjs"]);
     assert.equal(apiBuild.code, 0, "real API build must succeed");
     assert(existsSync(path.join(api, "dist/index.mjs")));
+    const bundledApprovalLoader = await import(
+      pathToFileURL(path.join(api, "dist/source-library-approval.mjs")).href
+    );
+    const bundledManifest = path.join(api, "dist",
+      path.basename(bundledApprovalLoader.DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS));
+    const bundledReport = readFileSync(path.join(api, "dist/source-library-reconciliation-report.json"));
+    const approval = bundledApprovalLoader.loadSourceLibraryPoolExceptionApproval(
+      bundledManifest, bundledReport, path.join(api, "dist"),
+    );
+    assert.equal(approval.formatVersion, 2, "real production bundle must load the active approval");
+    assert.equal(approval.approvedDifferences.length, 10);
+    const approvalManifest = JSON.parse(readFileSync(bundledManifest, "utf8"));
+    const reviewedCapturePath = path.join(api, "dist", approvalManifest.reviewedEvidence.capturePath);
+    const reviewedCaptureBytes = readFileSync(reviewedCapturePath);
+    rmSync(reviewedCapturePath);
+    assert.throws(
+      () => bundledApprovalLoader.loadSourceLibraryPoolExceptionApproval(
+        bundledManifest, bundledReport, path.join(api, "dist"),
+      ),
+      "missing referenced evidence must fail the production loader",
+    );
+    writeFileSync(reviewedCapturePath, reviewedCaptureBytes);
     assert.equal(existsSync(apiInfo), false, "API alone cannot acquire a release stamp");
     assert.throws(() => sealBuildIdentity(root), /Both API and web/);
 
@@ -287,33 +310,27 @@ test("real API/web producers, finalized PWA and bundled public getter share one 
     assert.equal(second.status, 200);
     assert.deepEqual(await second.json(), sealed);
     writeFileSync(apiInfo, sealedBytes);
+    assert.equal(databaseConnections, connectionsBeforeMetadata,
+      "public metadata requests must not acquire a database connection");
 
     const receiptFile = path.join(root, ".local/fixture-source-match.json");
     const cli = await run(root, "pnpm", ["run", "check:published-build", "--",
       "--url", url, "--expected-file", expectedFile, "--output", receiptFile]);
-    assert.equal(cli.code, 0, "documented CLI must match independently prepared expectation");
-    const receipt = JSON.parse(readFileSync(receiptFile, "utf8"));
-    assert.equal(receipt.status, "source-match");
-    assert.equal(receipt.productionGo, false);
-    assert.equal(receipt.authority, "application-source-comparison-only");
-    assert.equal(receipt.expectedRecordSha256, sourceRecordDigest(prepared));
-    assert.equal(receipt.appBuildId, prepared.appBuildId);
-    assert.equal(receipt.sourceFingerprintSha256, prepared.sourceFingerprintSha256);
-    assert.equal(receipt.gitRevision, null);
-    assert.equal(receipt.gitBinding, "unavailable");
-    assert.deepEqual(receipt.unresolvedIdentityRequirements,
-      ["controlled-published-deployment-handoff"]);
-    assert.equal(Date.parse(receipt.expiresAt) - Date.parse(receipt.capturedAt), 86_400_000);
+    // Matching metadata is not enough: this fixture deliberately failed DB
+    // startup. The current CLI also requires readiness and must fail closed.
+    assert.notEqual(cli.code, 0, "unready bundled API cannot create a published source handoff");
+    assert.match(cli.output, /readiness|become ready/u, "failure must be readiness-related, not packaging");
+    assert.equal(existsSync(receiptFile), false);
     assert.deepEqual(readFileSync(expectedFile), expectationBytes);
-    assert(!JSON.stringify(receipt).includes(url));
-    assert.equal(databaseConnections, connectionsBeforeMetadata,
-      "public metadata requests and CLI must not acquire a database connection");
+    assert(!JSON.stringify(sealed).includes(url));
+    // The CLI's separate readiness probe may query the database; the
+    // no-database invariant applies only to the public metadata getter.
 
     // Only these allowlisted fixture outcomes reach retained release logs.
     t.diagnostic(JSON.stringify({
       environment: "isolated-fixture", apiBuild: "pass", webBuild: "pass",
       finalizedPwa: "pass", missingCounterpart: "blocked", failedCounterpart: "blocked",
       bundledPublicGetter: "pass", metadataDatabaseConnections: 0,
-      cliSourceMatch: "pass", productionGo: false,
+      cliSourceMatch: "blocked-startup-not-ready", productionGo: false,
     }));
   });

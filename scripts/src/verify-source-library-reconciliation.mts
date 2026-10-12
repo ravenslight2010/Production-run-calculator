@@ -25,8 +25,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 export const DEFAULT_REPORT = "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json";
 export const DEFAULT_HEAL_ID = "source-library-reconciliation-2026-08-26-v2";
 export const DEFAULT_FROM_DATE = "2026-08-26";
-export const DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS =
-  "docs/evidence/source-library-pool-owner-approved-differences-2026-10-12-v2.json";
+export { DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS } from "./source-library-pool-approval-assets.mjs";
 export const APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256 =
   "42cf3d8d482a07657eeae5725710b098bb7f8de19a4f45d6356f670378cd2137";
 export const SOURCE_LIBRARY_EVIDENCE_ENVIRONMENTS = ["development", "release"] as const;

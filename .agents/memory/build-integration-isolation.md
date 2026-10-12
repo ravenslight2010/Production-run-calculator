@@ -20,3 +20,9 @@ When a production build consumes assets outside its ordinary source roots, allow
 **Why:** Isolated build copies are assembled from the fingerprinted file list. An unlisted report can be absent from the isolated build and can alter runtime behavior without changing the recorded source identity. Policy bumps can also leave old stage metadata in the other artifact's output directory.
 
 **How to apply:** Add exact external assets to required inputs and the fingerprint allowlist, include them in the isolated fixture, and test that changing each asset changes the identity. Treat an invalid old stage as incomplete during non-required sealing; require both current matching stages before writing final build identity.
+
+Verify runtime approval bundles with the canonical loader against the assembled artifact directory, not just against repository files.
+
+**Why:** Development can resolve reviewed evidence from the repository while production resolves it from the compiled directory. A source-only test can pass even when the publish build copies an obsolete manifest or omits its referenced evidence.
+
+**How to apply:** Derive the copied bundle from the active reviewed manifest, validate its pinned files before and after copying, and test the packaged loader. Keep zero-database metadata assertions separate from the CLI's readiness probes, which legitimately check database health.
