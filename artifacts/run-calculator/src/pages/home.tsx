@@ -499,6 +499,10 @@ import MixReconcilePanel from "../components/MixReconcilePanel";
 import ImportHistoryPanel from "../components/ImportHistoryPanel";
 import { recordImportHistory, setImportHistoryIdentity, type ImportHistoryImportType, type ImportHistoryItem, type ImportHistoryReopenRequest } from "../importHistory";
 import { createImportOperationId } from "../importOperations";
+import {
+  emitFieldCheckSignal,
+  FIELD_CHECK_WORKFLOW_MAX_DURATION_MS,
+} from "../fieldChecks";
 import { resetSandboxRequest, reportUnauthorized } from "../inventoryShared";
 import {
   fetchIngredientBatchWeights,
@@ -2871,9 +2875,30 @@ function loadPackagingAwareRunValues(runId: string): FormValues {
   return overlayPackagingProgressForRun(runId, loadRunValues(runId));
 }
 
+function emitProductionRunSaveOutcome(
+  outcome: "success" | "failure" | "incomplete",
+  startedAt: number | null,
+): void {
+  const now = typeof performance === "undefined" ? Date.now() : performance.now();
+  const durationMs = Math.min(
+    FIELD_CHECK_WORKFLOW_MAX_DURATION_MS,
+    Math.max(0, startedAt === null ? 0 : now - startedAt),
+  );
+  emitFieldCheckSignal("production-run-save-sync", outcome, { durationMs });
+}
+
 export default function Home() {
   const screenMode = useMemo(() => new URLSearchParams(window.location.search).get("screen"), []);
   const specImportOperationRef = useRef<string | null>(null);
+  const specImportStartedAtRef = useRef<number | null>(null);
+  function finishSpecImportOutcome(outcome: "success" | "failure" | "incomplete") {
+    const startedAt = specImportStartedAtRef.current;
+    if (startedAt === null) return;
+    specImportStartedAtRef.current = null;
+    const current = typeof performance === "undefined" ? Date.now() : performance.now();
+    const durationMs = Math.min(FIELD_CHECK_WORKFLOW_MAX_DURATION_MS, Math.max(0, current - startedAt));
+    emitFieldCheckSignal("spec-import-review-commit", outcome, { durationMs });
+  }
   const premixImportOperationRef = useRef<string | null>(null);
   const cheeseImportOperationRef = useRef<string | null>(null);
   const visibleTabScheduler = useMemo(() => new VisibleTabScheduler(), []);
@@ -10515,6 +10540,7 @@ export default function Home() {
       // Authentication failures are permanent for this request. Retrying them
       // only creates a storm while the session is being repaired.
       if (res.status === 401 || res.status === 403) {
+        emitProductionRunSaveOutcome("failure", requestStartedAt);
         if (res.status === 401) reportUnauthorized();
         setSyncPushFailed(true);
         setSyncPendingCount(0);
@@ -10621,6 +10647,7 @@ export default function Home() {
       }
       const { stale } = canonicalResult;
       if (recoveredWithoutReplay && !stale) {
+        emitProductionRunSaveOutcome("success", requestStartedAt);
         clearPendingSyncIntent(pendingScope, pendingDate, work.pendingIntentId);
         pushAcknowledgedRef.current = true;
         setSyncPushFailed(false);
@@ -10646,6 +10673,7 @@ export default function Home() {
       const acknowledgedAt = typeof performance === "undefined" ? null : performance.now();
       pushAcknowledgedRef.current = true;
       if (stale) {
+        emitProductionRunSaveOutcome("failure", requestStartedAt);
         // The server dropped this write (data reset not yet honoured). The
         // handler wipes + reloads when adoption applies; either way this push
         // did NOT persist, so flag it instead of recording it as synced.
@@ -10699,6 +10727,7 @@ export default function Home() {
         currentRunId,
         syncWriteFieldCheck(res),
       );
+      emitProductionRunSaveOutcome("success", requestStartedAt);
       clearPendingSyncIntent(pendingScope, pendingDate, work.pendingIntentId);
       // Record the synced signature ONLY after a successful PUT, so a failed
       // push is never treated as synced (which would block its retry).
@@ -10737,10 +10766,16 @@ export default function Home() {
       }
     }).catch(() => {
       if (generation !== syncPushGenerationRef.current) return;
+      if (controller.signal.aborted) {
+        emitProductionRunSaveOutcome("incomplete", requestStartedAt);
+        syncPushQueueRef.current.finish({ drainQueued: false });
+        return;
+      }
       if (responseStatus === 409 && !recoverableConflictResponse) {
         work.recoveryBlocked = true;
       }
       if (work.recoveryBlocked) {
+        emitProductionRunSaveOutcome("failure", requestStartedAt);
         setSyncRetryWaiting(false);
         setSyncPushFailed(true);
         setSyncPendingCount(0);
@@ -10768,6 +10803,7 @@ export default function Home() {
         }, retryDelay);
       } else {
         // All retries exhausted — stop blocking remote state so other devices can still sync
+        emitProductionRunSaveOutcome("failure", requestStartedAt);
         pushAcknowledgedRef.current = true;
         // ...but tell the user their changes aren't backed up / shared yet.
         setSyncPushFailed(true);
@@ -13692,6 +13728,8 @@ export default function Home() {
       return;
     }
     const files = selectedFiles.slice(0, (await loadWorkbookWorkflow()).specImport.MAX_SPEC_IMPORT_FILES);
+    finishSpecImportOutcome("incomplete");
+    specImportStartedAtRef.current = typeof performance === "undefined" ? Date.now() : performance.now();
     // Generation guard: parsing is slow (AI call), and a user importing files
     // back-to-back can close the dialog and pick the next file while the old
     // parse is still in flight. Without this guard the OLD promise resolves
@@ -13746,6 +13784,11 @@ export default function Home() {
       setSpecImportPrepared(prepared);
     } catch (err) {
       if (gen !== specImportGenRef.current) return;
+      finishSpecImportOutcome(
+        abortController.signal.aborted || (err instanceof Error && err.name === "AbortError")
+          ? "incomplete"
+          : "failure",
+      );
       void recordImportHistory({
         importType: "spec",
         sourceKey: deriveSourceKey(files.map((file) => file.name)),
@@ -13848,6 +13891,8 @@ export default function Home() {
       return;
     }
     const files = specPhotoFiles.slice(0, (await loadWorkbookWorkflow()).specImport.MAX_SPEC_IMPORT_FILES);
+    finishSpecImportOutcome("incomplete");
+    specImportStartedAtRef.current = typeof performance === "undefined" ? Date.now() : performance.now();
     const gen = ++specImportGenRef.current;
     specImportAbortRef.current?.abort();
     const controller = new AbortController();
@@ -13880,6 +13925,11 @@ export default function Home() {
       setSpecPhotoFiles([]);
     } catch (err) {
       if (gen === specImportGenRef.current) {
+        finishSpecImportOutcome(
+          controller.signal.aborted || (err instanceof Error && err.name === "AbortError")
+            ? "incomplete"
+            : "failure",
+        );
         setSpecImportError(err instanceof Error ? err.message : "Could not read or interpret those photos.");
       }
     } finally {
@@ -13941,6 +13991,7 @@ export default function Home() {
     try {
       const { mixesAdded, cheeseRecipesAdded, recipesUpdated, autoLinkedRecipes, touchedProfiles, crustProfiles, appliedParsed, finalImportReview, aliasSaveFailed, resultHash } =
         await (await loadWorkbookWorkflow()).specImport.commitSpecImport(toCommit, forceUpdateProfileKeys, acceptedNewMixIngredientNames, operationId);
+      finishSpecImportOutcome("success");
       if (commitStartedAt !== null && typeof performance !== "undefined")
         recordPerformance("import-spec-commit", performance.now() - commitStartedAt, "api");
       recordMasterDataChange(
@@ -13954,7 +14005,7 @@ export default function Home() {
         const key = deriveSourceKey(toCommit.sourceNames ?? []);
         specSnapshotId = saved.find((s) => key && s.sourceKey === key)?.id ?? saved[0]?.id ?? null;
       } catch { /* history still records without the optional snapshot reference */ }
-      if (!resultHash) void recordImportHistory({
+      if (!resultHash || specSnapshotId !== null) void recordImportHistory({
         operationId,
         importType: "spec",
         sourceKey: deriveSourceKey(toCommit.sourceNames ?? []),
@@ -14376,6 +14427,7 @@ export default function Home() {
           followUp: ["Retry the import; no rollback is implied by this record."],
         },
       }).catch(() => {});
+      finishSpecImportOutcome("failure");
       setSpecImportError(
         err instanceof Error ? err.message : "Import failed while saving. Please try again.",
       );
@@ -17425,13 +17477,16 @@ export default function Home() {
                             ...request,
                             requestId: (previous?.requestId ?? 0) + 1,
                           }));
-                          setManageCategory(
-                            request.importType === "premix"
-                              ? "mixes"
-                              : request.importType === "cheese"
-                                ? "cheeseRecipes"
-                                : "import",
-                          );
+                          if (request.importType === "spec") {
+                            setActiveTab("ai");
+                            setShowManageDialog(false);
+                          } else {
+                            setManageCategory(request.importType === "premix" ? "mixes" : "cheeseRecipes");
+                          }
+                          toast({
+                            title: "Saved import review reopened",
+                            description: "Review the retained source-versus-landed details before applying any scoped repair.",
+                          });
                         }}
                       />
                     )}
@@ -18238,7 +18293,13 @@ export default function Home() {
                           ...request,
                           requestId: (previous?.requestId ?? 0) + 1,
                         }));
-                        setActiveTab(request.importType === "premix" ? "mixes" : "summary");
+                        setActiveTab(
+                          request.importType === "premix"
+                            ? "mixes"
+                            : request.importType === "spec"
+                              ? "ai"
+                              : "summary",
+                        );
                       },
                     } : undefined}
                   />
@@ -18824,6 +18885,7 @@ export default function Home() {
             componentProps={{
               open: true,
               onClose: () => {
+            finishSpecImportOutcome("incomplete");
             // Bump the generation so a parse still in flight becomes a no-op
             // (its late result can't reopen stale data over the next import),
             // and clear the loading/progress flags it would have cleared.

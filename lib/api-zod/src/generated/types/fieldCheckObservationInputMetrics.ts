@@ -6,4 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
+/**
+ * Workflow categories accept only durationMs from 0 to 900000. Other metrics in these observations are rejected by the server.
+ */
 export type FieldCheckObservationInputMetrics = {[key: string]: number};

@@ -40,6 +40,29 @@ describe("field-check contract", () => {
     }).ok).toBe(false);
   });
 
+  it("accepts only fixed workflow outcomes and one capped duration", () => {
+    const workflow = {
+      ...validObservation,
+      observationId: "browser-abc123:spec-import-review-commit:1:success",
+      checkName: "spec-import-review-commit",
+      outcome: "success",
+      metrics: { durationMs: 15 * 60 * 1000 },
+    };
+    expect(validateFieldCheckBatch({ observations: [workflow] }).ok).toBe(true);
+    expect(validateFieldCheckBatch({
+      observations: [{ ...workflow, outcome: "incomplete" }],
+    }).ok).toBe(true);
+    expect(validateFieldCheckBatch({
+      observations: [{ ...workflow, metrics: { durationMs: 15 * 60 * 1000 + 1 } }],
+    }).ok).toBe(false);
+    expect(validateFieldCheckBatch({
+      observations: [{ ...workflow, metrics: { durationMs: 20, itemCount: 1 } }],
+    }).ok).toBe(false);
+    expect(validateFieldCheckBatch({
+      observations: [{ ...workflow, metrics: {} }],
+    }).ok).toBe(false);
+  });
+
   it("rejects overlarge batches and duplicate-shaped ids", () => {
     expect(validateFieldCheckBatch({ observations: [] }).ok).toBe(false);
     expect(validateFieldCheckBatch({
@@ -115,6 +138,14 @@ describe("field-check contract", () => {
   });
 
   it("classifies expanded checks by honest observation owner", () => {
+    expect(FIELD_CHECK_CATALOG.find((check) => check.name === "production-run-save-sync")).toMatchObject({
+      observedBy: "browser",
+      expiresHours: 72,
+    });
+    expect(FIELD_CHECK_CATALOG.find((check) => check.name === "spec-import-review-commit")).toMatchObject({
+      observedBy: "browser",
+      expiresHours: 168,
+    });
     expect(FIELD_CHECK_CATALOG.find((check) => check.name === "offline-queue-replay")).toMatchObject({
       observedBy: "browser",
       expiresHours: 168,

@@ -403,6 +403,53 @@ test(
       const values = server.runValues as Record<string, { casesNeeded?: number }> | undefined;
       return Object.values(values ?? {})[0]?.casesNeeded;
     }, { timeout: 15_000 }).toBe(17);
+
+    const telemetryClientId = await page.evaluate(() =>
+      localStorage.getItem("run-calc-field-check-client"),
+    );
+    expect(telemetryClientId).toBeTruthy();
+    const evidenceDb = new Client({
+      connectionString: requireIsolatedTestDatabase("sync-convergence workflow evidence"),
+    });
+    try {
+      await evidenceDb.connect();
+      await expect.poll(async () => {
+        const result = await evidenceDb.query<{
+          outcome: string;
+          metrics: Record<string, number>;
+        }>(
+          `SELECT outcome, metrics
+           FROM field_check_observations
+           WHERE check_name = $1 AND observation_id LIKE $2
+           ORDER BY observed_at DESC
+           LIMIT 10`,
+          ["production-run-save-sync", `${telemetryClientId}:production-run-save-sync:%:success`],
+        );
+        return result.rows.find((row) => row.outcome === "success") ?? null;
+      }, { timeout: 15_000 }).toEqual(expect.objectContaining({
+        outcome: "success",
+        metrics: expect.objectContaining({ durationMs: expect.any(Number) }),
+      }));
+      const stored = await evidenceDb.query<{ metrics: Record<string, number> }>(
+        `SELECT metrics
+         FROM field_check_observations
+         WHERE check_name = $1 AND outcome = 'success' AND observation_id LIKE $2
+         ORDER BY observed_at DESC
+         LIMIT 1`,
+        ["production-run-save-sync", `${telemetryClientId}:production-run-save-sync:%:success`],
+      );
+      expect(Object.keys(stored.rows[0]?.metrics ?? {})).toEqual(["durationMs"]);
+      expect(stored.rows[0]?.metrics.durationMs).toBeGreaterThanOrEqual(0);
+      expect(stored.rows[0]?.metrics.durationMs).toBeLessThanOrEqual(15 * 60 * 1000);
+    } finally {
+      await evidenceDb.end().catch(() => {});
+    }
+
+    // Verify the server-acknowledged progress is restored after a real reload.
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 20_000 });
+    await page.getByTestId("tab-run").click();
+    await expect(page.getByTestId("input-casesNeeded")).toHaveValue("17");
   },
 );
 

@@ -8,3 +8,9 @@ Reviewed multi-entity imports must keep one stable operation identity for ambigu
 **Why:** A fresh retry identity can duplicate an import after a lost response, and local adoption before acknowledgment can expose state that the server rolled back.
 
 **How to apply:** Preserve importer-specific normalization during projection, retain the exact reviewed payload for retry, and make undo compare and restore only the rows and aliases touched by that operation. Unrelated later edits must neither block undo nor be overwritten.
+
+When a retained source snapshot is saved after the atomic changes, an idempotent history retry may attach only a snapshot verified in the current scope and matching the original import/source. It must not rewrite the committed outcome or replay the import.
+
+**Why:** The atomic operation can create its durable history row before the optional review snapshot is available; deduplication must not make that reference impossible to add or allow cross-scope attachment.
+
+**How to apply:** Treat later snapshot metadata as a narrowly scoped reference enrichment on the same authenticated operation, and leave the original status, summary, and operation identity unchanged.

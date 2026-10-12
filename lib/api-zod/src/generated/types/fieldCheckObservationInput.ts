@@ -27,5 +27,6 @@ export interface FieldCheckObservationInput {
      */
   appBuild: string;
   deviceCategory: FieldCheckObservationInputDeviceCategory;
+  /** Workflow categories accept only durationMs from 0 to 900000. Other metrics in these observations are rejected by the server. */
   metrics: FieldCheckObservationInputMetrics;
 }

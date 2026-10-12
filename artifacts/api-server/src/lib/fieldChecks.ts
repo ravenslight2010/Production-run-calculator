@@ -18,6 +18,7 @@ export const FIELD_CHECK_MAX_METRICS = 8;
 export const FIELD_CHECK_MAX_OBSERVATION_BYTES = 24_000;
 export const FIELD_CHECK_INCOMPLETE_REVIEW_THRESHOLD = 3;
 export const FIELD_CHECK_MAX_CLOCK_SKEW_MS = 24 * 60 * 60 * 1000;
+export const FIELD_CHECK_WORKFLOW_MAX_DURATION_MS = 15 * 60 * 1000;
 
 export const FIELD_CHECK_CATALOG = [
   {
@@ -40,6 +41,20 @@ export const FIELD_CHECK_CATALOG = [
     observedBy: "browser",
     evidence: "The server acknowledged a naturally occurring sync write.",
     expiresHours: 72,
+  },
+  {
+    name: "production-run-save-sync",
+    label: "Production-run save and sync",
+    observedBy: "browser",
+    evidence: "Success requires a server acknowledgment; interrupted saves are incomplete, and only bounded durations are recorded.",
+    expiresHours: 72,
+  },
+  {
+    name: "spec-import-review-commit",
+    label: "Spec import parse, review, and commit",
+    observedBy: "browser",
+    evidence: "User cancellations are incomplete; success requires persisted changes, and only bounded durations are recorded.",
+    expiresHours: 168,
   },
   {
     name: "cross-device-convergence",
@@ -141,6 +156,10 @@ export type FieldCheckObservedBy = "browser" | "hardware";
 export type FieldCheckMetrics = Record<string, number>;
 
 const catalogByName = new Map(FIELD_CHECK_CATALOG.map((check) => [check.name, check]));
+const workflowCheckNames = new Set<FieldCheckName>([
+  "production-run-save-sync",
+  "spec-import-review-commit",
+]);
 const metricKey = /^[a-z][a-zA-Z0-9]{0,31}$/;
 const observationId = /^[a-zA-Z0-9:_-]{8,160}$/;
 
@@ -175,6 +194,20 @@ const observationSchema = z.object({
   for (const key of Object.keys(value.metrics ?? {})) {
     if (!metricKey.test(key)) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["metrics", key], message: "Invalid metric name" });
+    }
+  }
+  if (workflowCheckNames.has(value.checkName as FieldCheckName)) {
+    const metricNames = Object.keys(value.metrics ?? {});
+    if (
+      metricNames.length !== 1 ||
+      metricNames[0] !== "durationMs" ||
+      value.metrics.durationMs! > FIELD_CHECK_WORKFLOW_MAX_DURATION_MS
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["metrics"],
+        message: "Workflow evidence accepts only a bounded durationMs metric",
+      });
     }
   }
 });
@@ -281,6 +314,7 @@ export type FieldCheckSummary = {
   evidence: string;
   expiresHours: number | null;
   lastSuccessfulAt: string | null;
+  lastSuccessfulMetrics: FieldCheckMetrics | null;
   lastObservedAt: string | null;
   recentFailures: FieldCheckFailure[];
   failureCount: number;
@@ -479,6 +513,9 @@ export async function buildFieldChecksReport(now = Date.now()): Promise<FieldChe
       evidence: check.evidence,
       expiresHours: check.expiresHours,
       lastSuccessfulAt: iso(lastSuccess?.observedAt),
+      lastSuccessfulMetrics: workflowCheckNames.has(check.name)
+        ? ((lastSuccess?.metrics ?? null) as FieldCheckMetrics | null)
+        : null,
       lastObservedAt: iso(last?.observedAt),
       recentFailures,
       failureCount,

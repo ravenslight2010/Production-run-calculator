@@ -161,6 +161,7 @@ export * from './fieldChecksReportOverallStatus';
 export * from './fieldChecksReportScope';
 export * from './fieldCheckSummary';
 export * from './fieldCheckSummaryIssueStatus';
+export * from './fieldCheckSummaryLastSuccessfulMetrics';
 export * from './fieldCheckSummaryObservedBy';
 export * from './fieldCheckSummaryStatus';
 export * from './fillMissingValue';

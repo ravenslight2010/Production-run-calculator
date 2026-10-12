@@ -438,10 +438,16 @@ function FieldCheckCard({ check }: { check: FieldCheckSummary }) {
       <p className="mt-1 text-xs text-muted-foreground">{check.evidence}</p>
       <p className="mt-1 text-[11px] text-muted-foreground">
         Last success: {check.lastSuccessfulAt ? timeAgo(check.lastSuccessfulAt) : "Not yet"}
+        {typeof check.lastSuccessfulMetrics?.durationMs === "number"
+          ? ` · ${Math.round(check.lastSuccessfulMetrics.durationMs)} ms`
+          : ""}
       </p>
       {check.recentFailures.length > 0 && (
         <p className="mt-1 text-[11px] text-muted-foreground">
-          Recent failures: {check.recentFailures.length} · latest {timeAgo(check.recentFailures[0].observedAt)} · {check.recentFailures[0].deviceCategory}
+          Recent non-successes: {check.recentFailures.length} · latest {check.recentFailures[0].outcome} · {timeAgo(check.recentFailures[0].observedAt)} · {check.recentFailures[0].deviceCategory}
+          {typeof check.recentFailures[0].metrics.durationMs === "number"
+            ? ` · ${Math.round(check.recentFailures[0].metrics.durationMs)} ms`
+            : ""}
         </p>
       )}
       {check.status === "needs-review" && (

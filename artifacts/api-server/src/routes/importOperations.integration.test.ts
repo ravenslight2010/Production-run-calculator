@@ -19,6 +19,7 @@ let server: Server;
 let baseUrl: string;
 let tables: typeof import("@workspace/db");
 let route: typeof import("./importOperations");
+let importHistoryRoute: typeof import("./importHistory");
 let seedRoles: () => Promise<void>;
 let recordSession: typeof import("../lib/authSessions")["recordSession"];
 let signLegacyTokenForTests: typeof import("../lib/auth")["signLegacyTokenForTests"];
@@ -43,13 +44,14 @@ beforeAll(async () => {
   tables = await import("@workspace/db");
   db = tables.db; pool = tables.pool;
   route = await import("./importOperations");
+  importHistoryRoute = await import("./importHistory");
   seedRoles = (await import("../lib/roles")).seedRoles;
   const { requireAuth } = await import("../middlewares/requireAuth");
   const app = express();
   app.use(express.json({ limit: "1mb" }));
   app.use((req, _res, next) => { (req as any).log = { info() {}, warn() {}, error() {}, debug() {} }; next(); });
   app.use(observabilityMiddleware);
-  app.use("/api", requireAuth, route.default);
+  app.use("/api", requireAuth, route.default, importHistoryRoute.default);
   await new Promise<void>((resolve, reject) => {
     server = app.listen(0, () => resolve());
     server.once("error", reject);
@@ -67,7 +69,7 @@ afterAll(async () => {
 }, 120_000);
 
 beforeEach(async () => {
-  await db.execute(sql`TRUNCATE ${tables.importOperationsTable}, ${tables.importHistoryTable}, ${tables.auditLogsTable}, ${tables.brandProfilesTable}, ${tables.mixesTable}, ${tables.doughRecipesTable}, ${tables.sauceRecipesTable}, ${tables.specImportAliasesTable}, ${tables.authSessionsTable}, ${tables.userRolesTable}, ${tables.usersTable} RESTART IDENTITY CASCADE`);
+  await db.execute(sql`TRUNCATE ${tables.importOperationsTable}, ${tables.importHistoryTable}, ${tables.savedSpecSheetsTable}, ${tables.auditLogsTable}, ${tables.brandProfilesTable}, ${tables.mixesTable}, ${tables.doughRecipesTable}, ${tables.sauceRecipesTable}, ${tables.specImportAliasesTable}, ${tables.authSessionsTable}, ${tables.userRolesTable}, ${tables.usersTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
   await db.insert(tables.usersTable).values([
     { id: "inventory", username: "inventory", passwordHash: "x" },
@@ -511,6 +513,70 @@ describe("atomic import operations", () => {
     expect(first.status).toBe(200); expect(second.status).toBe(200);
     expect(await db.select().from(tables.mixesTable)).toHaveLength(1);
     expect((await apply("retry-operation-000001", { ...body, sourceLabel: "different" })).status).toBe(409);
+  });
+
+  it("attaches only an owned saved-spec snapshot to its existing import-history row", async () => {
+    const operationId = "snapshot-enrichment-000001";
+    const sourceKey = "fixture-spec-sheet";
+    const committed = await apply(operationId, {
+      ...change(),
+      importType: "spec",
+      sourceLabel: "fixture-spec-sheet.png",
+      sourceKey,
+    });
+    expect(committed.status).toBe(200);
+    const [original] = await db.select().from(tables.importHistoryTable)
+      .where(eq(tables.importHistoryTable.operationId, operationId));
+    expect(original?.snapshotId).toBeNull();
+
+    const [sandboxSnapshot] = await db.insert(tables.savedSpecSheetsTable).values({
+      scope: "sandbox",
+      label: "sandbox snapshot",
+      sourceKey,
+      data: { profiles: [], recipes: [] },
+    }).returning();
+    const historyRequest = (snapshotId: number) => fetch(`${baseUrl}/api/import-history`, {
+      method: "POST",
+      headers: headers("inventory"),
+      body: JSON.stringify({
+        operationId,
+        importType: "spec",
+        sourceKey,
+        sourceLabel: "fixture-spec-sheet.png",
+        status: "complete",
+        summary: { snapshotId },
+      }),
+    });
+    const foreignAttempt = await historyRequest(sandboxSnapshot.id);
+    expect(foreignAttempt.status).toBe(201);
+    expect(((await foreignAttempt.json()) as { import: { snapshotId: number | null } }).import.snapshotId)
+      .toBeNull();
+
+    const [unrelatedSnapshot] = await db.insert(tables.savedSpecSheetsTable).values({
+      scope: "live",
+      label: "unrelated live snapshot",
+      sourceKey: "another-spec-sheet",
+      data: { profiles: [], recipes: [] },
+    }).returning();
+    const unrelatedAttempt = await historyRequest(unrelatedSnapshot.id);
+    expect(((await unrelatedAttempt.json()) as { import: { snapshotId: number | null } }).import.snapshotId)
+      .toBeNull();
+
+    const [liveSnapshot] = await db.insert(tables.savedSpecSheetsTable).values({
+      scope: "live",
+      label: "live snapshot",
+      sourceKey,
+      data: { profiles: [], recipes: [] },
+    }).returning();
+    const attached = await historyRequest(liveSnapshot.id);
+    expect(attached.status).toBe(201);
+    expect(((await attached.json()) as { import: { snapshotId: number | null } }).import.snapshotId)
+      .toBe(liveSnapshot.id);
+    const [persisted] = await db.select().from(tables.importHistoryTable)
+      .where(eq(tables.importHistoryTable.operationId, operationId));
+    expect(persisted?.snapshotId).toBe(String(liveSnapshot.id));
+    expect(await db.select().from(tables.importHistoryTable)
+      .where(eq(tables.importHistoryTable.operationId, operationId))).toHaveLength(1);
   });
 
   it("rejects a stale reviewed-state precondition", async () => {

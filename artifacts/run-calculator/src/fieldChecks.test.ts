@@ -49,6 +49,30 @@ describe("field-check observer", () => {
     window.removeEventListener(FIELD_CHECK_SIGNAL_EVENT, listener);
   });
 
+  it("keeps workflow observations to one bounded duration metric", async () => {
+    const stop = createFieldCheckObserver("test-build");
+    emitFieldCheckSignal("spec-import-review-commit", "incomplete", {
+      durationMs: 12.345,
+      fileCount: 2,
+      recipeCount: 7,
+    });
+    emitFieldCheckSignal("spec-import-review-commit", "failure", {
+      durationMs: 15 * 60 * 1000 + 1,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const observations = submit.mock.calls.flatMap((call) => call[0]);
+    const workflow = observations.find((item: { checkName: string }) =>
+      item.checkName === "spec-import-review-commit",
+    );
+    expect(workflow?.outcome).toBe("incomplete");
+    expect(workflow?.metrics).toEqual({ durationMs: 12.35 });
+    expect(JSON.stringify(workflow)).not.toMatch(/fileCount|recipeCount/);
+    expect(observations.filter((item: { checkName: string }) =>
+      item.checkName === "spec-import-review-commit" && item.outcome === "failure",
+    )).toHaveLength(0);
+    stop();
+  });
+
   it("keeps visual and physical checks out of passive collection", () => {
     expect(FIELD_CHECK_CATALOG.find((check) => check.name === "offline-queue-replay")?.observedBy).toBe("browser");
     for (const name of ["orientation-layout", "safe-area-clearance", "camera-file-selection", "update-handoff"]) {

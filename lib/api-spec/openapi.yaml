@@ -4618,7 +4618,10 @@ paths:
       description: >-
         Stores bounded, authenticated, facility-scoped observations from normal
         staff use. Observations are deduplicated by observationId and never call
-        an AI provider or modify production data.
+        an AI provider or modify production data. Production-save and spec-import
+        categories accept only success, failure, or incomplete outcomes with one
+        durationMs value capped at 15 minutes; cancellations are incomplete and
+        success is reported only after server acknowledgment or persistence.
       requestBody:
         required: true
         content:
@@ -12905,6 +12908,8 @@ components:
             - startup
             - foreground-recovery
             - sync-acknowledgment
+            - production-run-save-sync
+            - spec-import-review-commit
             - cross-device-convergence
             - reload-persistence
             - offline-recovery
@@ -12936,6 +12941,9 @@ components:
         metrics:
           type: object
           maxProperties: 8
+          description: >-
+            Workflow categories accept only durationMs from 0 to 900000. Other
+            metrics in these observations are rejected by the server.
           additionalProperties:
             type: number
             minimum: 0
@@ -12995,6 +13003,7 @@ components:
         - evidence
         - expiresHours
         - lastSuccessfulAt
+        - lastSuccessfulMetrics
         - lastObservedAt
         - recentFailures
         - failureCount
@@ -13015,6 +13024,12 @@ components:
         lastSuccessfulAt:
           type: [string, "null"]
           format: date-time
+        lastSuccessfulMetrics:
+          type: [object, "null"]
+          additionalProperties:
+            type: number
+            minimum: 0
+            maximum: 10000000
         lastObservedAt:
           type: [string, "null"]
           format: date-time

@@ -6777,6 +6777,8 @@ export const FieldCheckObservationInputCheckName = {
   startup: 'startup',
   'foreground-recovery': 'foreground-recovery',
   'sync-acknowledgment': 'sync-acknowledgment',
+  'production-run-save-sync': 'production-run-save-sync',
+  'spec-import-review-commit': 'spec-import-review-commit',
   'cross-device-convergence': 'cross-device-convergence',
   'reload-persistence': 'reload-persistence',
   'offline-recovery': 'offline-recovery',
@@ -6806,6 +6808,9 @@ export const FieldCheckObservationInputDeviceCategory = {
   'other-browser': 'other-browser',
 } as const;
 
+/**
+ * Workflow categories accept only durationMs from 0 to 900000. Other metrics in these observations are rejected by the server.
+ */
 export type FieldCheckObservationInputMetrics = {[key: string]: number};
 
 export interface FieldCheckObservationInput {
@@ -6825,6 +6830,7 @@ export interface FieldCheckObservationInput {
      */
   appBuild: string;
   deviceCategory: FieldCheckObservationInputDeviceCategory;
+  /** Workflow categories accept only durationMs from 0 to 900000. Other metrics in these observations are rejected by the server. */
   metrics: FieldCheckObservationInputMetrics;
 }
 
@@ -6925,6 +6931,11 @@ export const FieldCheckSummaryObservedBy = {
 /**
  * @nullable
  */
+export type FieldCheckSummaryLastSuccessfulMetrics = {[key: string]: number} | null;
+
+/**
+ * @nullable
+ */
 export type FieldCheckSummaryIssueStatus = typeof FieldCheckSummaryIssueStatus[keyof typeof FieldCheckSummaryIssueStatus] | null;
 
 
@@ -6943,6 +6954,8 @@ export interface FieldCheckSummary {
   expiresHours: number | null;
   /** @nullable */
   lastSuccessfulAt: string | null;
+  /** @nullable */
+  lastSuccessfulMetrics: FieldCheckSummaryLastSuccessfulMetrics;
   /** @nullable */
   lastObservedAt: string | null;
   recentFailures: FieldCheckFailure[];

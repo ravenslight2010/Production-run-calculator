@@ -13,6 +13,8 @@ export const FieldCheckObservationInputCheckName = {
   startup: 'startup',
   'foreground-recovery': 'foreground-recovery',
   'sync-acknowledgment': 'sync-acknowledgment',
+  'production-run-save-sync': 'production-run-save-sync',
+  'spec-import-review-commit': 'spec-import-review-commit',
   'cross-device-convergence': 'cross-device-convergence',
   'reload-persistence': 'reload-persistence',
   'offline-recovery': 'offline-recovery',

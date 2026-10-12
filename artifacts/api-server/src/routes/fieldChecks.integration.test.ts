@@ -186,6 +186,45 @@ function syncAcknowledgmentObservation(
 }
 
 describe("field-check evidence from two authenticated clients", () => {
+  it("persists bounded workflow outcomes and exposes only their duration summary", async () => {
+    const observation = {
+      observationId: "browser-spec-import:spec-import-review-commit:1:success",
+      checkName: "spec-import-review-commit",
+      checkVersion: "1",
+      outcome: "success",
+      observedAt: new Date().toISOString(),
+      appBuild: "workflow-evidence-integration",
+      deviceCategory: "desktop-chrome",
+      metrics: { durationMs: 8_321 },
+    };
+    const accepted = await request(PHONE_USER, "POST", "/api/field-checks/observations", {
+      observations: [observation],
+    });
+    expect(accepted.status).toBe(202);
+    expect(await accepted.json()).toEqual({ accepted: 1, duplicate: 0 });
+
+    const invalid = await request(PHONE_USER, "POST", "/api/field-checks/observations", {
+      observations: [{
+        ...observation,
+        observationId: "browser-spec-import:spec-import-review-commit:2:success",
+        metrics: { durationMs: 8_321, recipeCount: 4 },
+      }],
+    });
+    expect(invalid.status).toBe(400);
+
+    const reportResponse = await request(MANAGER, "GET", "/api/field-checks");
+    expect(reportResponse.status).toBe(200);
+    const report = await reportResponse.json() as {
+      checks: Array<{
+        name: string;
+        lastSuccessfulMetrics: Record<string, number> | null;
+      }>;
+    };
+    expect(report.checks.find((check) => check.name === "spec-import-review-commit")?.lastSuccessfulMetrics)
+      .toEqual({ durationMs: 8_321 });
+    expect((await db.select().from(dailySyncTable))).toEqual([]);
+  });
+
   it("deduplicates a shared failure and preserves bounded context after recovery", async () => {
     const failure = observation("phone-tablet-shared-failure", "failure", "mobile-chrome");
     const first = await request(PHONE_USER, "POST", "/api/field-checks/observations", {

@@ -7,6 +7,7 @@
  */
 import type { FieldCheckFailure } from './fieldCheckFailure';
 import type { FieldCheckSummaryIssueStatus } from './fieldCheckSummaryIssueStatus';
+import type { FieldCheckSummaryLastSuccessfulMetrics } from './fieldCheckSummaryLastSuccessfulMetrics';
 import type { FieldCheckSummaryObservedBy } from './fieldCheckSummaryObservedBy';
 import type { FieldCheckSummaryStatus } from './fieldCheckSummaryStatus';
 
@@ -20,6 +21,8 @@ export interface FieldCheckSummary {
   expiresHours: number | null;
   /** @nullable */
   lastSuccessfulAt: Date | null;
+  /** @nullable */
+  lastSuccessfulMetrics: FieldCheckSummaryLastSuccessfulMetrics;
   /** @nullable */
   lastObservedAt: Date | null;
   recentFailures: FieldCheckFailure[];

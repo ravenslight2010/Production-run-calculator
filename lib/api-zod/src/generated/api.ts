@@ -447,6 +447,8 @@ export const submitFieldCheckObservationsBodyObservationsItemMetricsMaxOne = 100
 export const submitFieldCheckObservationsBodyObservationsMax = 20;
 export const submitFieldCheckObservationsResponseAcceptedMin = 0;
 export const submitFieldCheckObservationsResponseDuplicateMin = 0;
+export const getFieldChecksResponseChecksItemLastSuccessfulMetricsMinOne = 0;
+export const getFieldChecksResponseChecksItemLastSuccessfulMetricsMaxOne = 10000000;
 export const confirmHardwareFieldCheckResponseAcceptedMin = 0;
 export const confirmHardwareFieldCheckResponseDuplicateMin = 0;
 export const applyAiRetentionCleanupResponseReportCandidatesConversationTurnsMin = 0;
@@ -6944,7 +6946,7 @@ export const SavePhotoAliasesResponse = zod.object({
 
 
 /**
- * Stores bounded, authenticated, facility-scoped observations from normal staff use. Observations are deduplicated by observationId and never call an AI provider or modify production data.
+ * Stores bounded, authenticated, facility-scoped observations from normal staff use. Observations are deduplicated by observationId and never call an AI provider or modify production data. Production-save and spec-import categories accept only success, failure, or incomplete outcomes with one durationMs value capped at 15 minutes; cancellations are incomplete and success is reported only after server acknowledgment or persistence.
  * @summary Submit passive browser field-check observations
  */
 
@@ -6957,13 +6959,13 @@ export const SavePhotoAliasesResponse = zod.object({
 export const SubmitFieldCheckObservationsBody = zod.object({
   "observations": zod.array(zod.object({
   "observationId": zod.string().min(submitFieldCheckObservationsBodyObservationsItemObservationIdMin).max(submitFieldCheckObservationsBodyObservationsItemObservationIdMax),
-  "checkName": zod.enum(['startup', 'foreground-recovery', 'sync-acknowledgment', 'cross-device-convergence', 'reload-persistence', 'offline-recovery', 'pwa-update-handoff', 'performance']),
+  "checkName": zod.enum(['startup', 'foreground-recovery', 'sync-acknowledgment', 'production-run-save-sync', 'spec-import-review-commit', 'cross-device-convergence', 'reload-persistence', 'offline-recovery', 'pwa-update-handoff', 'performance']),
   "checkVersion": zod.string().max(submitFieldCheckObservationsBodyObservationsItemCheckVersionMax),
   "outcome": zod.enum(['success', 'failure', 'incomplete']),
   "observedAt": zod.coerce.date(),
   "appBuild": zod.string().min(1).max(submitFieldCheckObservationsBodyObservationsItemAppBuildMax),
   "deviceCategory": zod.enum(['desktop-chrome', 'desktop-safari', 'desktop-firefox', 'mobile-chrome', 'mobile-safari', 'tablet-browser', 'other-browser']),
-  "metrics": zod.record(zod.string(), zod.number().min(submitFieldCheckObservationsBodyObservationsItemMetricsMinOne).max(submitFieldCheckObservationsBodyObservationsItemMetricsMaxOne))
+  "metrics": zod.record(zod.string(), zod.number().min(submitFieldCheckObservationsBodyObservationsItemMetricsMinOne).max(submitFieldCheckObservationsBodyObservationsItemMetricsMaxOne)).describe('Workflow categories accept only durationMs from 0 to 900000. Other metrics in these observations are rejected by the server.')
 })).min(1).max(submitFieldCheckObservationsBodyObservationsMax)
 })
 
@@ -6981,6 +6983,9 @@ export const SubmitFieldCheckObservationsResponse = zod.object({
  * Returns deterministic health rollups for passive browser evidence and explicit unsupported states for hardware-only checks.
  * @summary Get manager field-check health
  */
+
+
+
 export const GetFieldChecksResponse = zod.object({
   "version": zod.string(),
   "scope": zod.enum(['current facility']),
@@ -6993,6 +6998,7 @@ export const GetFieldChecksResponse = zod.object({
   "evidence": zod.string(),
   "expiresHours": zod.number().nullable(),
   "lastSuccessfulAt": zod.coerce.date().nullable(),
+  "lastSuccessfulMetrics": zod.record(zod.string(), zod.number().min(getFieldChecksResponseChecksItemLastSuccessfulMetricsMinOne).max(getFieldChecksResponseChecksItemLastSuccessfulMetricsMaxOne)).nullable(),
   "lastObservedAt": zod.coerce.date().nullable(),
   "recentFailures": zod.array(zod.object({
   "outcome": zod.enum(['success', 'failure', 'incomplete']),

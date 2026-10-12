@@ -1,6 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { and, desc, eq, ilike, inArray } from "drizzle-orm";
-import { db, importHistoryTable, type ImportHistoryRow } from "@workspace/db";
+import { and, desc, eq, ilike, inArray, isNull } from "drizzle-orm";
+import { db, importHistoryTable, savedSpecSheetsTable, type ImportHistoryRow } from "@workspace/db";
 import { currentScope } from "../lib/requestScope";
 import { requireAnyCapability } from "../middlewares/requireCapability";
 
@@ -101,6 +101,57 @@ function toApi(row: ImportHistoryRow) {
   };
 }
 
+async function ownsSpecSnapshot(snapshotId: number, sourceKey: string | null): Promise<boolean> {
+  if (!Number.isSafeInteger(snapshotId) || snapshotId <= 0) return false;
+  const [snapshot] = await db.select({ sourceKey: savedSpecSheetsTable.sourceKey })
+    .from(savedSpecSheetsTable)
+    .where(and(
+      eq(savedSpecSheetsTable.scope, currentScope()),
+      eq(savedSpecSheetsTable.id, snapshotId),
+    ))
+    .limit(1);
+  return Boolean(snapshot && snapshot.sourceKey === sourceKey);
+}
+
+async function attachSnapshotToExistingSpecImport(
+  existing: ImportHistoryRow,
+  values: {
+    importType: string;
+    sourceKey: string | null;
+    snapshotId: string | null;
+  },
+): Promise<ImportHistoryRow> {
+  if (
+    existing.importType !== "spec" ||
+    values.importType !== "spec" ||
+    existing.sourceKey !== values.sourceKey ||
+    existing.snapshotId !== null ||
+    values.snapshotId === null
+  ) return existing;
+
+  const snapshotId = Number(values.snapshotId);
+  if (!await ownsSpecSnapshot(snapshotId, values.sourceKey)) return existing;
+
+  const [updated] = await db.update(importHistoryTable)
+    .set({ snapshotId: String(snapshotId) })
+    .where(and(
+      eq(importHistoryTable.id, existing.id),
+      eq(importHistoryTable.scope, currentScope()),
+      eq(importHistoryTable.actorId, existing.actorId!),
+      isNull(importHistoryTable.snapshotId),
+    ))
+    .returning();
+  if (updated) return updated;
+  const [latest] = await db.select().from(importHistoryTable)
+    .where(and(
+      eq(importHistoryTable.id, existing.id),
+      eq(importHistoryTable.scope, currentScope()),
+      eq(importHistoryTable.actorId, existing.actorId!),
+    ))
+    .limit(1);
+  return latest ?? existing;
+}
+
 router.get("/import-history", requireAnyCapability(["manage-profiles", "manage-inventory"]), async (req: Request, res: Response) => {
   try {
     const type = String(req.query.type ?? "").trim();
@@ -151,15 +202,22 @@ router.post("/import-history", requireAnyCapability(["manage-profiles", "manage-
   }
   try {
     const summary = sanitizeSummary(body.summary);
+    const sourceKey = String(body.sourceKey ?? "").trim().slice(0, MAX_TEXT) || null;
+    const requestedSnapshotId = summary.snapshotId;
+    const snapshotId = importType === "spec" &&
+      requestedSnapshotId != null &&
+      await ownsSpecSnapshot(requestedSnapshotId, sourceKey)
+      ? String(requestedSnapshotId)
+      : null;
     const values = {
       scope: currentScope(),
       importType,
-      sourceKey: String(body.sourceKey ?? "").trim().slice(0, MAX_TEXT) || null,
+      sourceKey,
       sourceLabel,
       customerScope: String(body.customerScope ?? "").trim().slice(0, MAX_TEXT) || null,
       status,
       summary,
-      snapshotId: summary.snapshotId ? String(summary.snapshotId) : null,
+      snapshotId,
       operationId,
       actorId: req.userId,
     };
@@ -173,7 +231,8 @@ router.post("/import-history", requireAnyCapability(["manage-profiles", "manage-
         eq(importHistoryTable.operationId, operationId),
       )).limit(1);
       if (existing[0]) {
-        res.status(201).json({ import: toApi(existing[0]) });
+        const row = await attachSnapshotToExistingSpecImport(existing[0], values);
+        res.status(201).json({ import: toApi(row) });
         return;
       }
     }
@@ -189,7 +248,8 @@ router.post("/import-history", requireAnyCapability(["manage-profiles", "manage-
         eq(importHistoryTable.operationId, operationId),
       )).limit(1);
       if (existing[0]) {
-        res.status(201).json({ import: toApi(existing[0]) });
+        const row = await attachSnapshotToExistingSpecImport(existing[0], values);
+        res.status(201).json({ import: toApi(row) });
         return;
       }
     }

@@ -1582,6 +1582,7 @@ export type FieldCheckSummary = {
   evidence: string;
   expiresHours: number | null;
   lastSuccessfulAt: string | null;
+  lastSuccessfulMetrics: Record<string, number> | null;
   lastObservedAt: string | null;
   recentFailures: FieldCheckFailure[];
   failureCount: number;

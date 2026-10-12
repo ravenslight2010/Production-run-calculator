@@ -4,11 +4,14 @@ import { useAuth } from "./useAuth";
 
 export const FIELD_CHECK_VERSION = "1";
 export const FIELD_CHECK_SIGNAL_EVENT = "calculator-field-check-signal";
+export const FIELD_CHECK_WORKFLOW_MAX_DURATION_MS = 15 * 60 * 1000;
 
 export const FIELD_CHECK_CATALOG = [
   { name: "startup", label: "Startup", observedBy: "browser" as const },
   { name: "foreground-recovery", label: "Background / foreground recovery", observedBy: "browser" as const },
   { name: "sync-acknowledgment", label: "Sync acknowledgment", observedBy: "browser" as const },
+  { name: "production-run-save-sync", label: "Production-run save and sync", observedBy: "browser" as const },
+  { name: "spec-import-review-commit", label: "Spec import parse, review, and commit", observedBy: "browser" as const },
   { name: "cross-device-convergence", label: "Cross-device convergence", observedBy: "browser" as const },
   { name: "reload-persistence", label: "Reload persistence", observedBy: "browser" as const },
   { name: "offline-recovery", label: "Offline recovery", observedBy: "browser" as const },
@@ -38,6 +41,10 @@ const bucketMs = 10 * 60 * 1000;
 const maxQueue = 80;
 const maxMetrics = 8;
 const defaultRetryMs = 30_000;
+const workflowChecks = new Set<CheckName>([
+  "production-run-save-sync",
+  "spec-import-review-commit",
+]);
 
 function randomId(): string {
   try {
@@ -72,8 +79,14 @@ function deviceCategory(): "desktop-chrome" | "desktop-safari" | "desktop-firefo
   return "other-browser";
 }
 
-function safeMetrics(metrics: Record<string, number> | undefined): Record<string, number> {
+function safeMetrics(checkName: CheckName, metrics: Record<string, number> | undefined): Record<string, number> {
   if (!metrics) return {};
+  if (workflowChecks.has(checkName)) {
+    const durationMs = metrics.durationMs;
+    return Number.isFinite(durationMs) && durationMs! >= 0 && durationMs! <= FIELD_CHECK_WORKFLOW_MAX_DURATION_MS
+      ? { durationMs: Math.round(durationMs! * 100) / 100 }
+      : {};
+  }
   return Object.fromEntries(
     Object.entries(metrics)
       .filter(([key, value]) => /^[a-z][a-zA-Z0-9]{0,31}$/.test(key) && Number.isFinite(value) && value >= 0 && value <= 10_000_000)
@@ -119,11 +132,13 @@ function saveQueue(queue: ReturnType<typeof loadQueue>): void {
 export function emitFieldCheckSignal(checkName: CheckName, outcome: Outcome, metrics?: Record<string, number>): void {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent<Signal>(FIELD_CHECK_SIGNAL_EVENT, {
-    detail: { checkName, outcome, metrics: safeMetrics(metrics) },
+    detail: { checkName, outcome, metrics: safeMetrics(checkName, metrics) },
   }));
 }
 
 function queueSignal(signal: Signal, appBuild: string): void {
+  const metrics = safeMetrics(signal.checkName, signal.metrics);
+  if (workflowChecks.has(signal.checkName) && metrics.durationMs === undefined) return;
   const now = Date.now();
   const id = `${localClientId()}:${signal.checkName}:${Math.floor(now / bucketMs)}:${signal.outcome}`;
   const queue = loadQueue();
@@ -136,7 +151,7 @@ function queueSignal(signal: Signal, appBuild: string): void {
     observedAt: new Date(now).toISOString(),
     appBuild: appBuild.slice(0, 100) || "local",
     deviceCategory: deviceCategory(),
-    metrics: safeMetrics(signal.metrics),
+    metrics,
   });
   saveQueue(queue);
 }
