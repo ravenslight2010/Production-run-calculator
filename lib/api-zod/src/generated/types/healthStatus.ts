@@ -21,7 +21,7 @@ export interface HealthStatus {
   checks: HealthStatusChecks;
   capabilities: HealthStatusCapabilities;
   startup?: HealthStatusStartup;
-  /** Bounded operational diagnostics; excludes provider credentials and request payloads. */
+  /** Bounded operational diagnostics; excludes provider credentials and request payloads. Scheduled-evaluation queue diagnostics include sampleAvailability (pending, available, or unavailable) separately from the last measured queue status and a bounded inventory of duplicate buckets with queue-state counts and review rules. Bucket fingerprints are process-local opaque references; diagnostics omit job IDs, raw scope and time-bucket values, and job inputs. */
   diagnostics?: HealthStatusDiagnostics;
   correlationId: string;
   timestamp: Date;

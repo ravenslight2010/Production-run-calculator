@@ -16,6 +16,8 @@ function queueSample(queued: number, duplicateTimeBucketGroups = 0) {
     terminalLastWindow: { succeeded: 2, failed: 0, cancelled: 0 },
     duplicateTimeBucketGroups,
     duplicateGroupsTruncated: false,
+    duplicateBucketInventory: [],
+    duplicateBucketInventoryTruncated: false,
   };
 }
 
@@ -94,6 +96,10 @@ describe("scheduled evaluation queue monitoring", () => {
       status: "warning",
       duplicateTimeBucketGroups: 1,
       warningCodes: ["duplicate_time_buckets"],
+      duplicateBucketReviewRules: expect.arrayContaining([
+        expect.stringContaining("Preserve queued jobs"),
+        expect.stringContaining("without a lease"),
+      ]),
     });
     expect(JSON.stringify(transition.diagnostics)).not.toMatch(/scope|idempotency|input|result/i);
   });

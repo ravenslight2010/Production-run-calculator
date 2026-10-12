@@ -18,3 +18,9 @@ Gemini fallback-exhaustion counters are process-local and best-effort; they are 
 **Why:** Keeping this alert in memory avoids a database write for every failed provider request, but requests distributed across API instances can each stay below the local threshold.
 
 **How to apply:** Treat the current warning as a per-process degradation signal. If deployment topology or operator needs require fleet-wide detection, design a bounded shared event path and measure its added database load first.
+
+Public health diagnostics that need to distinguish groups derived from predictable operational values should use process-random keyed fingerprints, not plain hashes; treat those references as process-local, not durable identifiers.
+
+**Why:** Scope and time-bucket candidates are low-entropy and can be recovered from an unkeyed digest by enumeration, even when the raw values are omitted.
+
+**How to apply:** When diagnostics need a within-process grouping reference, use a keyed digest with an ephemeral key and keep the payload bounded. Do not expose a plain hash of guessable scope, date, or bucket values.

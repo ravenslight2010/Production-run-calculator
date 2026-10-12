@@ -294,6 +294,22 @@ describe("GET /healthz background operation diagnostics", () => {
       terminalLastWindow: { succeeded: 3, failed: 1, cancelled: 0 },
       duplicateTimeBucketGroups: 0,
       duplicateGroupsTruncated: false,
+      duplicateBucketInventory: [{
+        bucketFingerprint: "a".repeat(24),
+        rowCount: 2,
+        statuses: { queued: 1, running: 1, succeeded: 0, failed: 0, cancelled: 0 },
+        queuedRunnable: 1,
+        queuedExhausted: 0,
+        runningWithValidLease: 1,
+        runningWithoutLease: 0,
+        runningLeaseExpiredRetryable: 0,
+        runningLeaseExpiredExhausted: 0,
+        reviewClass: "preserve_runnable_or_leased",
+      }],
+      duplicateBucketInventoryTruncated: false,
+      duplicateBucketReviewRules: [
+        "Preserve queued jobs with attempts remaining and running jobs with a valid lease.",
+      ],
       warningCodes: ["backlog_stalled"],
       sampleCount: 6,
       windowMs: 300_000,
@@ -314,6 +330,14 @@ describe("GET /healthz background operation diagnostics", () => {
       status: "warning",
       queued: 4,
       running: 1,
+      duplicateBucketInventory: [{
+        bucketFingerprint: "a".repeat(24),
+        rowCount: 2,
+        reviewClass: "preserve_runnable_or_leased",
+      }],
+      duplicateBucketReviewRules: expect.arrayContaining([
+        expect.stringContaining("Preserve queued jobs"),
+      ]),
       warningCodes: ["backlog_stalled"],
     });
     expect(JSON.stringify(body.diagnostics.scheduledEvaluationQueue))

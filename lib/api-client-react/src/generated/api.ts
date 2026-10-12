@@ -429,7 +429,7 @@ export const getHealthCheckUrl = () => {
 }
 
 /**
- * Reports core API readiness and optional capability degradation. Startup completion, database reachability, and required audit-log protection are hard readiness gates. An unavailable AI credential or degraded background workers are reported as warnings and do not by themselves make the core API unready. The AI signal reports credential configuration only; it does not probe the remote provider.
+ * Reports core API readiness and optional capability degradation. Startup completion, database reachability, and required audit-log protection are hard readiness gates. An unavailable AI credential or degraded background workers are reported as warnings and do not by themselves make the core API unready. The AI signal reports credential configuration only; it does not probe the remote provider. Scheduled-evaluation diagnostics report sample availability separately from the last measured queue state and include a bounded duplicate-bucket inventory with queue-state counts and review guidance.
  * @summary Health check
  */
 export const healthCheck = async ( options?: Parameters<typeof customFetch>[1]): Promise<HealthStatus> => {
@@ -531,7 +531,7 @@ export const getReadinessCheckUrl = () => {
 }
 
 /**
- * Canonical readiness probe. Returns 503 only while startup, database, or required audit-log protection is not ready. AI credential and background-worker degradation are non-blocking warnings.
+ * Canonical readiness probe. Returns 503 only while startup, database, or required audit-log protection is not ready. AI credential and background-worker degradation are non-blocking warnings. Scheduled-evaluation diagnostics distinguish pending, available, and unavailable samples from queue backlog warnings and include bounded duplicate-bucket state counts and review guidance.
  * @summary Core API readiness
  */
 export const readinessCheck = async ( options?: Parameters<typeof customFetch>[1]): Promise<HealthStatus> => {

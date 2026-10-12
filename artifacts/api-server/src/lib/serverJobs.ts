@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import { and, asc, eq, gt, lte, or, sql } from "drizzle-orm";
 import {
   db,
@@ -84,9 +84,35 @@ export type ScheduledEvaluationQueueSnapshot = {
   };
   duplicateTimeBucketGroups: number;
   duplicateGroupsTruncated: boolean;
+  duplicateBucketInventory: ScheduledEvaluationDuplicateBucket[];
+  duplicateBucketInventoryTruncated: boolean;
+};
+
+export type ScheduledEvaluationDuplicateBucket = {
+  bucketFingerprint: string;
+  rowCount: number;
+  statuses: {
+    queued: number;
+    running: number;
+    succeeded: number;
+    failed: number;
+    cancelled: number;
+  };
+  queuedRunnable: number;
+  queuedExhausted: number;
+  runningWithValidLease: number;
+  runningWithoutLease: number;
+  runningLeaseExpiredRetryable: number;
+  runningLeaseExpiredExhausted: number;
+  reviewClass:
+    | "preserve_runnable_or_leased"
+    | "worker_resolution_required"
+    | "manual_review_required"
+    | "terminal_only";
 };
 
 export type ScheduledEvaluationQueueDiagnostics = ScheduledEvaluationQueueSnapshot & {
+  duplicateBucketReviewRules: readonly string[];
   status: "pending" | "ok" | "warning";
   sampleAvailability: "pending" | "available" | "unavailable";
   warningCodes: ScheduledEvaluationQueueWarningCode[];
@@ -109,7 +135,19 @@ const EMPTY_SCHEDULED_EVALUATION_SNAPSHOT: ScheduledEvaluationQueueSnapshot = {
   terminalLastWindow: { succeeded: 0, failed: 0, cancelled: 0 },
   duplicateTimeBucketGroups: 0,
   duplicateGroupsTruncated: false,
+  duplicateBucketInventory: [],
+  duplicateBucketInventoryTruncated: false,
 };
+
+const duplicateInventoryFingerprintKey = randomBytes(32);
+
+export const SCHEDULED_EVALUATION_DUPLICATE_REVIEW_RULES = [
+  "Preserve queued jobs with attempts remaining and running jobs with a valid lease.",
+  "Leave expired retryable leases to the worker; it can safely reclaim them.",
+  "Leave exhausted queued jobs and expired exhausted leases to the worker's terminalization path.",
+  "Do not change running jobs without a lease; flag them for explicit review because the worker cannot safely reclaim them.",
+  "Terminal jobs are historical records; do not merge or delete them as duplicate cleanup.",
+] as const;
 
 function nonNegativeCount(value: number): number {
   return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
@@ -136,10 +174,13 @@ export function createScheduledEvaluationQueueMonitor() {
           terminalLastWindow: latest.terminalLastWindow,
           duplicateTimeBucketGroups: latest.duplicateTimeBucketGroups,
           duplicateGroupsTruncated: latest.duplicateGroupsTruncated,
+          duplicateBucketInventory: latest.duplicateBucketInventory,
+          duplicateBucketInventoryTruncated: latest.duplicateBucketInventoryTruncated,
         }
         : {}),
       status: samples.length === 0 ? "pending" : warningCodes.size ? "warning" : "ok",
       sampleAvailability,
+      duplicateBucketReviewRules: SCHEDULED_EVALUATION_DUPLICATE_REVIEW_RULES,
       warningCodes: [...warningCodes].sort(),
       sampleCount: samples.length,
       windowMs: SCHEDULED_EVALUATION_MONITOR_WINDOW_MS,
@@ -170,6 +211,11 @@ export function createScheduledEvaluationQueueMonitor() {
         },
         duplicateTimeBucketGroups: nonNegativeCount(snapshot.duplicateTimeBucketGroups),
         duplicateGroupsTruncated: snapshot.duplicateGroupsTruncated === true,
+        duplicateBucketInventory: snapshot.duplicateBucketInventory.slice(
+          0,
+          SCHEDULED_EVALUATION_MAX_DUPLICATE_GROUPS,
+        ),
+        duplicateBucketInventoryTruncated: snapshot.duplicateBucketInventoryTruncated === true,
       });
       if (samples.length > SCHEDULED_EVALUATION_MAX_SAMPLES) {
         samples = samples.slice(-SCHEDULED_EVALUATION_MAX_SAMPLES);
@@ -231,12 +277,79 @@ export async function readScheduledEvaluationQueueSnapshot(
   const duplicateGroups = await db.select({
     scope: serverJobsTable.scope,
     bucket,
+    rowCount: sql<number>`count(*)::int`,
+    queued: sql<number>`count(*) filter (where ${serverJobsTable.status} = 'queued')::int`,
+    running: sql<number>`count(*) filter (where ${serverJobsTable.status} = 'running')::int`,
+    succeeded: sql<number>`count(*) filter (where ${serverJobsTable.status} = 'succeeded')::int`,
+    failed: sql<number>`count(*) filter (where ${serverJobsTable.status} = 'failed')::int`,
+    cancelled: sql<number>`count(*) filter (where ${serverJobsTable.status} = 'cancelled')::int`,
+    queuedRunnable: sql<number>`count(*) filter (
+      where ${serverJobsTable.status} = 'queued' and ${serverJobsTable.attempt} < ${serverJobsTable.maxAttempts}
+    )::int`,
+    queuedExhausted: sql<number>`count(*) filter (
+      where ${serverJobsTable.status} = 'queued' and ${serverJobsTable.attempt} >= ${serverJobsTable.maxAttempts}
+    )::int`,
+    runningWithValidLease: sql<number>`count(*) filter (
+      where ${serverJobsTable.status} = 'running'
+        and ${serverJobsTable.leaseToken} is not null
+        and ${serverJobsTable.leaseExpiresAt} > ${new Date(nowMs)}
+    )::int`,
+    runningWithoutLease: sql<number>`count(*) filter (
+      where ${serverJobsTable.status} = 'running'
+        and (${serverJobsTable.leaseToken} is null or ${serverJobsTable.leaseExpiresAt} is null)
+    )::int`,
+    runningLeaseExpiredRetryable: sql<number>`count(*) filter (
+      where ${serverJobsTable.status} = 'running'
+        and ${serverJobsTable.leaseExpiresAt} <= ${new Date(nowMs)}
+        and ${serverJobsTable.attempt} < ${serverJobsTable.maxAttempts}
+    )::int`,
+    runningLeaseExpiredExhausted: sql<number>`count(*) filter (
+      where ${serverJobsTable.status} = 'running'
+        and ${serverJobsTable.leaseExpiresAt} <= ${new Date(nowMs)}
+        and ${serverJobsTable.attempt} >= ${serverJobsTable.maxAttempts}
+    )::int`,
   }).from(serverJobsTable).where(and(
     eq(serverJobsTable.type, "scheduled-evaluation"),
     gt(serverJobsTable.expiresAt, new Date(nowMs)),
     sql`${serverJobsTable.idempotencyKey} ~ '^scheduled-evaluation:[^:]+:[0-9]+$'`,
   )).groupBy(serverJobsTable.scope, bucket).having(sql`count(*) > 1`)
+    .orderBy(sql`min(${serverJobsTable.createdAt}) asc`, asc(serverJobsTable.scope), asc(bucket))
     .limit(SCHEDULED_EVALUATION_MAX_DUPLICATE_GROUPS + 1);
+
+  const boundedDuplicateGroups = duplicateGroups.slice(0, SCHEDULED_EVALUATION_MAX_DUPLICATE_GROUPS);
+  const duplicateBucketInventory = boundedDuplicateGroups.map((group): ScheduledEvaluationDuplicateBucket => {
+    const hasRunnableOrLeasedWork = group.queuedRunnable > 0 ||
+      group.runningWithValidLease > 0 || group.runningLeaseExpiredRetryable > 0;
+    const hasWorkerResolutionWork = group.queuedExhausted > 0 || group.runningLeaseExpiredExhausted > 0;
+    const hasUnleasedRunningWork = group.runningWithoutLease > 0;
+    return {
+      bucketFingerprint: createHmac("sha256", duplicateInventoryFingerprintKey)
+        .update(`${group.scope}\u0000${group.bucket}`)
+        .digest("hex")
+        .slice(0, 24),
+      rowCount: nonNegativeCount(group.rowCount),
+      statuses: {
+        queued: nonNegativeCount(group.queued),
+        running: nonNegativeCount(group.running),
+        succeeded: nonNegativeCount(group.succeeded),
+        failed: nonNegativeCount(group.failed),
+        cancelled: nonNegativeCount(group.cancelled),
+      },
+      queuedRunnable: nonNegativeCount(group.queuedRunnable),
+      queuedExhausted: nonNegativeCount(group.queuedExhausted),
+      runningWithValidLease: nonNegativeCount(group.runningWithValidLease),
+      runningWithoutLease: nonNegativeCount(group.runningWithoutLease),
+      runningLeaseExpiredRetryable: nonNegativeCount(group.runningLeaseExpiredRetryable),
+      runningLeaseExpiredExhausted: nonNegativeCount(group.runningLeaseExpiredExhausted),
+      reviewClass: hasUnleasedRunningWork
+        ? "manual_review_required"
+        : hasRunnableOrLeasedWork
+        ? "preserve_runnable_or_leased"
+        : hasWorkerResolutionWork
+        ? "worker_resolution_required"
+        : "terminal_only",
+    };
+  });
 
   return {
     queued: nonNegativeCount(aggregate?.queued ?? 0),
@@ -248,6 +361,8 @@ export async function readScheduledEvaluationQueueSnapshot(
     },
     duplicateTimeBucketGroups: Math.min(duplicateGroups.length, SCHEDULED_EVALUATION_MAX_DUPLICATE_GROUPS),
     duplicateGroupsTruncated: duplicateGroups.length > SCHEDULED_EVALUATION_MAX_DUPLICATE_GROUPS,
+    duplicateBucketInventory,
+    duplicateBucketInventoryTruncated: duplicateGroups.length > SCHEDULED_EVALUATION_MAX_DUPLICATE_GROUPS,
   };
 }
 

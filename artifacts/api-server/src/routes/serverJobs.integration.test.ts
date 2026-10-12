@@ -16,7 +16,7 @@ import type { Server } from "node:http";
 import type { Readable } from "node:stream";
 import express, { type Express, type Response as ExpressResponse } from "express";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { and, eq, sql } from "drizzle-orm";
+import { and, count, eq, sql } from "drizzle-orm";
 import pg from "pg";
 import { signLegacyTokenForTests } from "../lib/auth";
 
@@ -25,12 +25,16 @@ type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
 let pool: DbModule["pool"];
 let serverJobsTable: DbModule["serverJobsTable"];
+let serverJobAttemptsTable: DbModule["serverJobAttemptsTable"];
+let auditLogsTable: DbModule["auditLogsTable"];
 let usersTable: DbModule["usersTable"];
 let userRolesTable: DbModule["userRolesTable"];
 let rolesTable: DbModule["rolesTable"];
 let seedRoles: () => Promise<void>;
 let clearUserValidityCache: () => void;
 let clearSandboxCache: () => void;
+let readScheduledEvaluationQueueSnapshot: typeof import("../lib/serverJobs")["readScheduledEvaluationQueueSnapshot"];
+let ServerJobWorker: typeof import("../lib/serverJobs")["ServerJobWorker"];
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 
 let adminPool: pg.Pool;
@@ -89,18 +93,23 @@ beforeAll(async () => {
 
   const dbMod = await import("@workspace/db");
   const routerMod = await import("./index");
+  const jobsMod = await import("../lib/serverJobs");
   const rolesMod = await import("../lib/roles");
   const userValidityMod = await import("../lib/userValidity");
   const sandboxMod = await import("../lib/sandbox");
   db = dbMod.db;
   pool = dbMod.pool;
   serverJobsTable = dbMod.serverJobsTable;
+  serverJobAttemptsTable = dbMod.serverJobAttemptsTable;
+  auditLogsTable = dbMod.auditLogsTable;
   usersTable = dbMod.usersTable;
   userRolesTable = dbMod.userRolesTable;
   rolesTable = dbMod.rolesTable;
   seedRoles = rolesMod.seedRoles;
   clearUserValidityCache = userValidityMod.clearUserValidityCache;
   clearSandboxCache = sandboxMod.clearSandboxCache;
+  readScheduledEvaluationQueueSnapshot = jobsMod.readScheduledEvaluationQueueSnapshot;
+  ServerJobWorker = jobsMod.ServerJobWorker;
 
   killer = new pg.Client({ connectionString: testUrlString });
   killer.on("error", () => {});
@@ -168,7 +177,7 @@ beforeEach(async () => {
   confirmationLoss = undefined;
   clearUserValidityCache();
   await db.execute(sql`
-    TRUNCATE ${serverJobsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable}
+    TRUNCATE ${serverJobsTable}, ${serverJobAttemptsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable}
     RESTART IDENTITY CASCADE
   `);
   await seedRoles();
@@ -513,5 +522,162 @@ describe("server job route idempotency", () => {
     } finally {
       await Promise.all(instances.map(({ child }) => stopIsolatedApiProcess(child)));
     }
+  });
+
+  it("inventories duplicate scheduled buckets without mutating rows or audit records", async () => {
+    const now = Date.now();
+    const bucketStart = Date.parse("2030-04-02T12:00:00.000Z");
+    const expiresAt = new Date(now + 60 * 60_000);
+    const key = `scheduled-evaluation:live:${bucketStart}`;
+    const rows = await db.insert(serverJobsTable).values([
+      {
+        scope: "live", type: "scheduled-evaluation", actorId: "legacy-queued", idempotencyKey: key,
+        input: { scheduledFor: bucketStart }, expiresAt,
+      },
+      {
+        scope: "live", type: "scheduled-evaluation", actorId: "legacy-leased", idempotencyKey: key,
+        input: { scheduledFor: bucketStart }, status: "running", attempt: 1, maxAttempts: 3,
+        leaseToken: "00000000-0000-4000-8000-000000000002", leaseExpiresAt: new Date(now + 60_000), expiresAt,
+      },
+      {
+        scope: "live", type: "scheduled-evaluation", actorId: "legacy-retryable", idempotencyKey: key,
+        input: { scheduledFor: bucketStart }, status: "running", attempt: 1, maxAttempts: 3,
+        leaseToken: "00000000-0000-4000-8000-000000000003", leaseExpiresAt: new Date(now - 1), expiresAt,
+      },
+      {
+        scope: "live", type: "scheduled-evaluation", actorId: "legacy-exhausted", idempotencyKey: key,
+        input: { scheduledFor: bucketStart }, status: "running", attempt: 3, maxAttempts: 3,
+        leaseToken: "00000000-0000-4000-8000-000000000004", leaseExpiresAt: new Date(now - 1), expiresAt,
+      },
+      {
+        scope: "live", type: "scheduled-evaluation", actorId: "legacy-terminal", idempotencyKey: key,
+        input: { scheduledFor: bucketStart }, status: "succeeded", finishedAt: new Date(now), expiresAt,
+      },
+      {
+        scope: "live", type: "scheduled-evaluation", actorId: "legacy-no-lease-a",
+        idempotencyKey: `scheduled-evaluation:live:${bucketStart + 180_000}`,
+        input: { scheduledFor: bucketStart + 180_000 }, status: "running", attempt: 1, maxAttempts: 3, expiresAt,
+      },
+      {
+        scope: "live", type: "scheduled-evaluation", actorId: "legacy-no-lease-b",
+        idempotencyKey: `scheduled-evaluation:live:${bucketStart + 180_000}`,
+        input: { scheduledFor: bucketStart + 180_000 }, status: "running", attempt: 1, maxAttempts: 3, expiresAt,
+      },
+      {
+        scope: "live", type: "scheduled-evaluation", actorId: "legacy-exhausted-queued-a",
+        idempotencyKey: `scheduled-evaluation:live:${bucketStart + 240_000}`,
+        input: { scheduledFor: bucketStart + 240_000 }, attempt: 3, maxAttempts: 3, expiresAt,
+      },
+      {
+        scope: "live", type: "scheduled-evaluation", actorId: "legacy-exhausted-queued-b",
+        idempotencyKey: `scheduled-evaluation:live:${bucketStart + 240_000}`,
+        input: { scheduledFor: bucketStart + 240_000 }, attempt: 3, maxAttempts: 3, expiresAt,
+      },
+      {
+        scope: "live", type: "scheduled-evaluation", actorId: "legacy-terminal-success",
+        idempotencyKey: `scheduled-evaluation:live:${bucketStart + 300_000}`,
+        input: { scheduledFor: bucketStart + 300_000 }, status: "succeeded", finishedAt: new Date(now), expiresAt,
+      },
+      {
+        scope: "live", type: "scheduled-evaluation", actorId: "legacy-terminal-cancelled",
+        idempotencyKey: `scheduled-evaluation:live:${bucketStart + 300_000}`,
+        input: { scheduledFor: bucketStart + 300_000 }, status: "cancelled", finishedAt: new Date(now), expiresAt,
+      },
+    ]).returning();
+    const auditCountBefore = (await db.select({ value: count() }).from(auditLogsTable))[0]?.value;
+    const rowState = (await db.select({
+      id: serverJobsTable.id,
+      status: serverJobsTable.status,
+      leaseToken: serverJobsTable.leaseToken,
+      leaseExpiresAt: serverJobsTable.leaseExpiresAt,
+    }).from(serverJobsTable)).sort((left, right) => left.id.localeCompare(right.id));
+
+    const snapshot = await readScheduledEvaluationQueueSnapshot(now);
+    const repeated = await readScheduledEvaluationQueueSnapshot(now);
+    const mixedState = snapshot.duplicateBucketInventory.find((group) => group.rowCount === 5);
+
+    expect(mixedState).toMatchObject({
+      statuses: { queued: 1, running: 3, succeeded: 1, failed: 0, cancelled: 0 },
+      queuedRunnable: 1,
+      runningWithValidLease: 1,
+      runningLeaseExpiredRetryable: 1,
+      runningLeaseExpiredExhausted: 1,
+      reviewClass: "preserve_runnable_or_leased",
+    });
+    expect(snapshot.duplicateBucketInventory.map(({ reviewClass }) => reviewClass)).toEqual(
+      expect.arrayContaining([
+        "manual_review_required",
+        "preserve_runnable_or_leased",
+        "worker_resolution_required",
+        "terminal_only",
+      ]),
+    );
+    expect(snapshot.duplicateBucketInventory).toEqual(repeated.duplicateBucketInventory);
+    expect(snapshot.duplicateBucketInventoryTruncated).toBe(false);
+    expect(JSON.stringify(snapshot)).not.toMatch(/legacy-|idempotencyKey|scheduledFor|scope/i);
+    expect((await db.select({ value: count() }).from(serverJobAttemptsTable))[0]?.value).toBe(0);
+    expect((await db.select({ value: count() }).from(auditLogsTable))[0]?.value).toBe(auditCountBefore);
+    expect((await db.select({
+      id: serverJobsTable.id,
+      status: serverJobsTable.status,
+      leaseToken: serverJobsTable.leaseToken,
+      leaseExpiresAt: serverJobsTable.leaseExpiresAt,
+    }).from(serverJobsTable)).sort((left, right) => left.id.localeCompare(right.id))).toEqual(rowState);
+    expect(rows).toHaveLength(11);
+  });
+
+  it("keeps duplicate work claimable by a worker after an inventory read", async () => {
+    const now = Date.now();
+    const bucketStart = Date.parse("2030-04-04T12:00:00.000Z");
+    const expiresAt = new Date(now + 60 * 60_000);
+    const key = `scheduled-evaluation:live:${bucketStart}`;
+    const rows = await db.insert(serverJobsTable).values([
+      {
+        scope: "live", type: "scheduled-evaluation", actorId: "race-queued", idempotencyKey: key,
+        input: { scheduledFor: bucketStart }, expiresAt,
+      },
+      {
+        scope: "live", type: "scheduled-evaluation", actorId: "race-leased", idempotencyKey: key,
+        input: { scheduledFor: bucketStart }, status: "running", attempt: 1, maxAttempts: 3,
+        leaseToken: "00000000-0000-4000-8000-000000000005", leaseExpiresAt: new Date(now + 60_000), expiresAt,
+      },
+    ]).returning();
+    const auditCountBefore = (await db.select({ value: count() }).from(auditLogsTable))[0]?.value;
+
+    const [inventory, claim] = await Promise.all([
+      readScheduledEvaluationQueueSnapshot(now),
+      new ServerJobWorker("duplicate-inventory-race-worker").claimNext(),
+    ]);
+
+    expect(inventory.duplicateTimeBucketGroups).toBe(1);
+    expect(claim?.job.id).toBe(rows[0]?.id);
+    expect((await db.select().from(serverJobsTable)).map(({ status }) => status).sort())
+      .toEqual(["running", "running"]);
+    expect((await db.select({ value: count() }).from(serverJobAttemptsTable))[0]?.value).toBe(1);
+    expect((await db.select({ value: count() }).from(auditLogsTable))[0]?.value).toBe(auditCountBefore);
+  });
+
+  it("bounds the duplicate inventory and reports truncation", async () => {
+    const now = Date.now();
+    const expiresAt = new Date(now + 60 * 60_000);
+    const rows = Array.from({ length: 101 }, (_, index) => {
+      const bucketStart = Date.parse("2030-04-03T12:00:00.000Z") + index * 60_000;
+      return ["a", "b"].map((suffix) => ({
+        scope: "live",
+        type: "scheduled-evaluation",
+        actorId: `bounded-${index}-${suffix}`,
+        idempotencyKey: `scheduled-evaluation:live:${bucketStart}`,
+        input: { scheduledFor: bucketStart },
+        expiresAt,
+      }));
+    }).flat();
+    await db.insert(serverJobsTable).values(rows);
+
+    const inventory = await readScheduledEvaluationQueueSnapshot(now);
+
+    expect(inventory.duplicateTimeBucketGroups).toBe(100);
+    expect(inventory.duplicateGroupsTruncated).toBe(true);
+    expect(inventory.duplicateBucketInventory).toHaveLength(100);
+    expect(inventory.duplicateBucketInventoryTruncated).toBe(true);
   });
 });

@@ -669,7 +669,7 @@ export const GetBuildInfoResponse = zod.object({
 
 
 /**
- * Reports core API readiness and optional capability degradation. Startup completion, database reachability, and required audit-log protection are hard readiness gates. An unavailable AI credential or degraded background workers are reported as warnings and do not by themselves make the core API unready. The AI signal reports credential configuration only; it does not probe the remote provider.
+ * Reports core API readiness and optional capability degradation. Startup completion, database reachability, and required audit-log protection are hard readiness gates. An unavailable AI credential or degraded background workers are reported as warnings and do not by themselves make the core API unready. The AI signal reports credential configuration only; it does not probe the remote provider. Scheduled-evaluation diagnostics report sample availability separately from the last measured queue state and include a bounded duplicate-bucket inventory with queue-state counts and review guidance.
  * @summary Health check
  */
 export const HealthCheckResponse = zod.object({
@@ -694,14 +694,14 @@ export const HealthCheckResponse = zod.object({
   "durationMs": zod.number(),
   "errorCode": zod.string().optional()
 }).optional(),
-  "diagnostics": zod.record(zod.string(), zod.unknown()).optional().describe('Bounded operational diagnostics; excludes provider credentials and request payloads.'),
+  "diagnostics": zod.record(zod.string(), zod.unknown()).optional().describe('Bounded operational diagnostics; excludes provider credentials and request payloads. Scheduled-evaluation queue diagnostics include sampleAvailability (pending, available, or unavailable) separately from the last measured queue status and a bounded inventory of duplicate buckets with queue-state counts and review rules. Bucket fingerprints are process-local opaque references; diagnostics omit job IDs, raw scope and time-bucket values, and job inputs.'),
   "correlationId": zod.string(),
   "timestamp": zod.coerce.date()
 }).describe('Readiness response. HTTP 200 means startup, database, and required audit protection are ready, even when optional checks report warnings. HTTP 503 is reserved for a failed core readiness gate.')
 
 
 /**
- * Canonical readiness probe. Returns 503 only while startup, database, or required audit-log protection is not ready. AI credential and background-worker degradation are non-blocking warnings.
+ * Canonical readiness probe. Returns 503 only while startup, database, or required audit-log protection is not ready. AI credential and background-worker degradation are non-blocking warnings. Scheduled-evaluation diagnostics distinguish pending, available, and unavailable samples from queue backlog warnings and include bounded duplicate-bucket state counts and review guidance.
  * @summary Core API readiness
  */
 export const ReadinessCheckResponse = zod.object({
@@ -726,7 +726,7 @@ export const ReadinessCheckResponse = zod.object({
   "durationMs": zod.number(),
   "errorCode": zod.string().optional()
 }).optional(),
-  "diagnostics": zod.record(zod.string(), zod.unknown()).optional().describe('Bounded operational diagnostics; excludes provider credentials and request payloads.'),
+  "diagnostics": zod.record(zod.string(), zod.unknown()).optional().describe('Bounded operational diagnostics; excludes provider credentials and request payloads. Scheduled-evaluation queue diagnostics include sampleAvailability (pending, available, or unavailable) separately from the last measured queue status and a bounded inventory of duplicate buckets with queue-state counts and review rules. Bucket fingerprints are process-local opaque references; diagnostics omit job IDs, raw scope and time-bucket values, and job inputs.'),
   "correlationId": zod.string(),
   "timestamp": zod.coerce.date()
 }).describe('Readiness response. HTTP 200 means startup, database, and required audit protection are ready, even when optional checks report warnings. HTTP 503 is reserved for a failed core readiness gate.')

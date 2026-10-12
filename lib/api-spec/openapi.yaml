@@ -86,7 +86,8 @@ paths:
         themselves make the core API unready. The AI signal reports credential
         configuration only; it does not probe the remote provider.
         Scheduled-evaluation diagnostics report sample availability separately
-        from the last measured queue state.
+        from the last measured queue state and include a bounded duplicate-bucket
+        inventory with queue-state counts and review guidance.
       responses:
         "200":
           description: Core API is ready; optional AI or background work may be degraded.
@@ -109,9 +110,10 @@ paths:
       description: >-
         Canonical readiness probe. Returns 503 only while startup, database,
         or required audit-log protection is not ready. AI credential and
-        background-worker degradation are non-blocking warnings. Scheduled-
-        evaluation diagnostics distinguish pending, available, and unavailable
-        samples from queue backlog warnings.
+        background-worker degradation are non-blocking warnings. Scheduled-evaluation
+        diagnostics distinguish pending, available, and unavailable
+        samples from queue backlog warnings and include bounded duplicate-bucket
+        state counts and review guidance.
       responses:
         "200":
           description: Core API is ready; optional capabilities may be degraded.
@@ -6555,7 +6557,10 @@ components:
             Bounded operational diagnostics; excludes provider credentials and
             request payloads. Scheduled-evaluation queue diagnostics include
             sampleAvailability (pending, available, or unavailable) separately
-            from the last measured queue status.
+            from the last measured queue status and a bounded inventory of
+            duplicate buckets with queue-state counts and review rules. Bucket
+            fingerprints are process-local opaque references; diagnostics omit
+            job IDs, raw scope and time-bucket values, and job inputs.
           additionalProperties: true
         correlationId: { type: string }
         timestamp: { type: string, format: date-time }
