@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import express, { type Express } from "express";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -1553,11 +1553,57 @@ describe("server auto-track tick recovery under database pressure", () => {
     const realTransaction = transactionDb.transaction.bind(db);
     let transactionAttempts = 0;
     let lostReplyInjected = false;
+    let applyingManagerEdit = false;
+    let managerEditStamp: number | undefined;
+    let managerEditStatus: number | undefined;
     transactionDb.transaction = async (...args: any[]) => {
-      transactionAttempts += 1;
+      if (!applyingManagerEdit) transactionAttempts += 1;
       const committed = await realTransaction(...args);
       if (!lostReplyInjected) {
         lostReplyInjected = true;
+        applyingManagerEdit = true;
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          const read = await fetch(`${baseUrl}/api/sync/today?today=${TICK_DATE}`, {
+            headers: authHeaders(),
+          });
+          expect(read.status).toBe(200);
+          const current = await read.json() as Record<string, any>;
+          const serverClock = vi.spyOn(Date, "now").mockReturnValue(TICK_NOW + 1);
+          try {
+            const correction = await fetch(
+              `${baseUrl}/api/sync/today?today=${TICK_DATE}&epoch=0`,
+              {
+                method: "PUT",
+                headers: { ...authHeaders(), "content-type": "application/json" },
+                body: JSON.stringify({
+                  senderId: "manager-recovery-correction",
+                  payload: {
+                    syncVersion: 1,
+                    completeness: "partial",
+                    baseSnapshotId: read.headers.get("X-Sync-Snapshot"),
+                    runValues: {
+                      [TICK_RUN]: { ...current.runValues[TICK_RUN], app1BatchesMade: 7 },
+                    },
+                    runValuesUpdatedAt: {
+                      [TICK_RUN]: Number(current.runValuesUpdatedAt[TICK_RUN]) + 1,
+                    },
+                  },
+                }),
+              },
+            );
+            managerEditStatus = correction.status;
+            expect(correction.status).toBe(200);
+            const corrected = await correction.json() as {
+              data?: { runValuesUpdatedAt?: Record<string, number> };
+            };
+            managerEditStamp = corrected.data?.runValuesUpdatedAt?.[TICK_RUN];
+          } finally {
+            serverClock.mockRestore();
+          }
+        } finally {
+          applyingManagerEdit = false;
+        }
         throw Object.assign(
           new Error("injected lost database reply after transaction commit"),
           { code: "08006" },
@@ -1577,15 +1623,22 @@ describe("server auto-track tick recovery under database pressure", () => {
 
     expect(lostReplyInjected).toBe(true);
     expect(transactionAttempts).toBe(2);
+    expect(managerEditStatus).toBe(200);
+    expect(managerEditStamp).toBeGreaterThan(TICK_NOW);
 
     const [after] = await db.select().from(dailySyncTable)
       .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
     const finalData = after.data as any;
     expect(finalData.runValues[TICK_RUN]).toMatchObject({
-      app1BatchesMade: 1,
+      app1BatchesMade: 7,
       sauceBarrelsMade: 1,
     });
-    expect(finalData.runValuesUpdatedAt[TICK_RUN]).toBe(TICK_NOW);
+    expect(finalData.runValuesUpdatedAt[TICK_RUN]).toBe(managerEditStamp);
+    expect(finalData.autoTrackCoordination.runs[TICK_RUN]["app1-batch"]).toMatchObject({
+      generation: `manual:${managerEditStamp}`,
+      sequence: 0,
+      nextDueAt: 0,
+    });
 
     const automaticEvidence = (await db.select().from(applicatorBatchEvidenceTable))
       .filter((row) => row.source === "automatic-observation");
@@ -1600,9 +1653,15 @@ describe("server auto-track tick recovery under database pressure", () => {
     const appBatchEntry = tickLedger.find(
       (entry) => (entry.actionData as any)?.channel === "app1-batch",
     );
+    const sauceEntry = tickLedger.find(
+      (entry) => (entry.actionData as any)?.channel === "sauce-barrel",
+    );
     const appBatchEventId = (appBatchEntry?.actionData as any)?.eventId;
+    const sauceEventId = (sauceEntry?.actionData as any)?.eventId;
     expect(finalData.autoTrackCoordination.runs[TICK_RUN]["app1-batch"].acceptedEventId)
-      .toBe(appBatchEventId);
+      .toBeUndefined();
+    expect(finalData.autoTrackCoordination.runs[TICK_RUN]["sauce-barrel"].acceptedEventId)
+      .toBe(sauceEventId);
     expect(automaticEvidence[0]?.operationId).toBe(`auto:${createHash("sha256")
       .update(JSON.stringify([TICK_DATE, TICK_RUN, 1, appBatchEventId]))
       .digest("hex")}`);
@@ -1616,9 +1675,13 @@ describe("server auto-track tick recovery under database pressure", () => {
 
     expect(await db.select().from(syncOutboxEventsTable)).toMatchObject([
       { scope: "live", cursor: 1, kind: "day-state", date: TICK_DATE, senderId: "server:tick" },
+      {
+        scope: "live", cursor: 2, kind: "day-state", date: TICK_DATE,
+        senderId: "manager-recovery-correction",
+      },
     ]);
     expect(await db.select().from(syncOutboxCursorsTable))
-      .toMatchObject([{ scope: "live", cursor: 1 }]);
+      .toMatchObject([{ scope: "live", cursor: 2 }]);
     expect(await db.select().from(dataResetTable))
       .toMatchObject([{ scope: "live", epoch: 0 }]);
   });
