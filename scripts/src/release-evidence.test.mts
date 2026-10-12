@@ -1964,6 +1964,26 @@ async function run(): Promise<void> {
   const apiUnitReleaseStep = RELEASE_CHECK_API_SHARD_STEPS.find(
     (step) => step.label === "API unit tests (release shard 1/7)",
   );
+  const apiPackage = JSON.parse(
+    await readFile(
+      new URL("../../artifacts/api-server/package.json", import.meta.url),
+      "utf8",
+    ),
+  ) as { scripts?: Record<string, string> };
+  const releaseCheckSource = await readFile(
+    new URL("./release-check.mts", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    apiPackage.scripts?.typecheck ?? "",
+    /(?:^|&&)\s*pnpm run typecheck:routes(?:\s|$)/u,
+    "the API package typecheck must include the focused route compiler check",
+  );
+  assert.match(
+    releaseCheckSource,
+    /label:\s*"API server typecheck",\s*args:\s*\[\s*"--filter",\s*"@workspace\/api-server",\s*"run",\s*"typecheck"\s*\]/u,
+    "the release API gate must run the package-level typecheck",
+  );
   assert.deepEqual(
     apiUnitReleaseStep?.env,
     {
