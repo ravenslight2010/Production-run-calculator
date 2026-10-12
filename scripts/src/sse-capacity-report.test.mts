@@ -60,12 +60,13 @@ function report(
   samples: unknown[],
   metrics: Record<string, unknown> = platformMetrics,
   extraLines: string[] = [],
+  generatedAtUtc = "2026-10-11T00:11:00.000Z",
 ) {
   return buildSseCapacityReport({
     rawLogLines: [...samples, ...extraLines].map((entry) => JSON.stringify(entry)).join("\n"),
     platformMetrics: metrics,
     revision,
-    generatedAtUtc: "2026-10-11T00:11:00.000Z",
+    generatedAtUtc,
   });
 }
 
@@ -84,8 +85,64 @@ test("emits a sanitized revision-bound report but never enables peer SSE", () =>
   assert.equal(result.budgetAssessment.conservativeDemand, 42);
   assert.equal(result.budgetAssessment.doubleCountsObservedApplicationClients, true);
   assert.equal(result.reportRevision.sourceRevision, revision.sourceRevision);
+  assert.equal(result.platformEvidenceFreshness.status, "fresh");
+  assert.equal(result.platformEvidenceFreshness.maxAgeMs, 24 * 60 * 60 * 1_000);
   assert.equal(result.conclusion.livePeerSseSupported, false);
   assert.equal(result.conclusion.deploymentSettingsChanged, false);
+});
+
+test("platform metrics remain fresh through 24 hours; older or future windows cannot prove a budget", () => {
+  const freshnessBoundaryGeneratedAt = "2026-10-11T00:10:00.000Z";
+  const staleWindowEnd = "2026-10-10T00:09:59.999Z";
+  const staleWindowStart = "2026-10-09T23:59:59.999Z";
+  const staleSamples = completeSamples.map((entry) => ({
+    ...entry,
+    capturedAt: new Date(Date.parse(entry.capturedAt) - 24 * 60 * 60 * 1_000 - 1)
+      .toISOString(),
+  }));
+  const staleMetrics = {
+    ...platformMetrics,
+    windowStartUtc: staleWindowStart,
+    windowEndUtc: staleWindowEnd,
+  };
+  const stale = report(staleSamples, staleMetrics, [], freshnessBoundaryGeneratedAt);
+  assert.equal(stale.platformEvidenceFreshness.status, "stale");
+  assert.equal(stale.platformEvidenceFreshness.windowEndAgeMs, 24 * 60 * 60 * 1_000 + 1);
+  assert.equal(stale.budgetAssessment.gate, "UNKNOWN");
+  assert.equal(stale.budgetAssessment.safeBudgetProven, false);
+  assert.ok(stale.budgetAssessment.blockers.includes("platform_metrics_window_not_fresh"));
+  assert.equal(stale.conclusion.livePeerSseSupported, false);
+
+  const staleOverBudget = report(staleSamples, {
+    ...staleMetrics,
+    peakDatabaseClientBackends: 420,
+  }, [], freshnessBoundaryGeneratedAt);
+  assert.equal(staleOverBudget.budgetAssessment.gate, "UNKNOWN");
+  assert.ok(staleOverBudget.budgetAssessment.blockers.includes(
+    "platform_metrics_window_not_fresh",
+  ));
+
+  const freshWindowEnd = "2026-10-10T00:10:00.000Z";
+  const freshWindowStart = "2026-10-10T00:00:00.000Z";
+  const freshSamples = completeSamples.map((entry) => ({
+    ...entry,
+    capturedAt: new Date(Date.parse(entry.capturedAt) - 24 * 60 * 60 * 1_000)
+      .toISOString(),
+  }));
+  const freshAtLimit = report(freshSamples, {
+    ...platformMetrics,
+    windowStartUtc: freshWindowStart,
+    windowEndUtc: freshWindowEnd,
+  }, [], freshnessBoundaryGeneratedAt);
+  assert.equal(freshAtLimit.platformEvidenceFreshness.status, "fresh");
+  assert.equal(freshAtLimit.platformEvidenceFreshness.windowEndAgeMs, 24 * 60 * 60 * 1_000);
+  assert.equal(freshAtLimit.budgetAssessment.gate, "PROVEN_WITHIN_BUDGET");
+
+  const future = report(completeSamples, platformMetrics, [], "2026-10-11T00:09:00.000Z");
+  assert.equal(future.platformEvidenceFreshness.status, "future");
+  assert.equal(future.budgetAssessment.gate, "UNKNOWN");
+  assert.ok(future.budgetAssessment.blockers.includes("platform_metrics_window_not_fresh"));
+  assert.equal(future.conclusion.livePeerSseSupported, false);
 });
 
 test("database client peak is derived from samples; missing platform/provider metrics remain UNKNOWN", () => {

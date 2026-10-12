@@ -1,6 +1,7 @@
 const MAX_COUNT = 10_000_000;
 const MAX_LOG_BYTES = 16 * 1024 * 1024;
 const MAX_LOG_LINES = 20_000;
+const MAX_PLATFORM_METRICS_AGE_MS = 24 * 60 * 60 * 1_000;
 const SAMPLE_EVENT = "database_capacity_sample";
 
 type JsonRecord = Record<string, unknown>;
@@ -310,6 +311,14 @@ export function buildSseCapacityReport(input: {
 }) {
   const platform = readPlatformMetrics(input.platformMetrics);
   const generatedAtUtc = utcTimestamp(input.generatedAtUtc, "report timestamp");
+  const platformMetricsAgeMs =
+    Date.parse(generatedAtUtc) - Date.parse(platform.windowEndUtc);
+  const platformMetricsStatus = platformMetricsAgeMs < 0
+    ? "future"
+    : platformMetricsAgeMs > MAX_PLATFORM_METRICS_AGE_MS
+      ? "stale"
+      : "fresh";
+  const platformMetricsFresh = platformMetricsStatus === "fresh";
   if (!/^test-sha256:[a-f0-9]{64}$/.test(input.revision.assessmentRevision) ||
       !/^source-sha256:[a-f0-9]{64}$/.test(input.revision.sourceRevision) ||
       !/^[a-f0-9]{64}$/.test(input.revision.verificationFingerprintSha256)) {
@@ -384,6 +393,7 @@ export function buildSseCapacityReport(input: {
     })
     : null;
   const blockers: string[] = [];
+  if (!platformMetricsFresh) blockers.push("platform_metrics_window_not_fresh");
   if (!platform.representativeWindowConfirmed) blockers.push("peak_window_not_confirmed");
   if (platform.peakMetricsSource !== "replit-monitoring-export") {
     blockers.push("peak_metrics_source_unverified");
@@ -421,7 +431,9 @@ export function buildSseCapacityReport(input: {
     blockers.push("observed_machine_peak_exceeds_configured_maximum");
   }
   if (budget?.status === "over_budget") blockers.push("connection_demand_exceeds_available_slots");
-  const gate = budget?.status === "over_budget"
+  const gate = !platformMetricsFresh
+    ? "UNKNOWN"
+    : budget?.status === "over_budget"
     ? "NO_GO"
     : blockers.length > 0 ? "UNKNOWN" : "PROVEN_WITHIN_BUDGET";
   const firstSample = samples[0];
@@ -438,6 +450,11 @@ export function buildSseCapacityReport(input: {
       start: platform.windowStartUtc,
       end: platform.windowEndUtc,
       representativePeakConfirmed: platform.representativeWindowConfirmed,
+    },
+    platformEvidenceFreshness: {
+      status: platformMetricsStatus,
+      maxAgeMs: MAX_PLATFORM_METRICS_AGE_MS,
+      windowEndAgeMs: platformMetricsAgeMs,
     },
     deploymentMetrics: {
       verifiedSourceFingerprintSha256: platform.deploymentSourceFingerprintSha256,
