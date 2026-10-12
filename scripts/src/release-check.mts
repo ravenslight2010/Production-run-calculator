@@ -1091,6 +1091,11 @@ export const RELEASE_CHECK_API_SHARD_STEPS: readonly ReleaseStep[] = [
   {
     label: "API unit tests (release shard 1/7)",
     args: ["--filter", "@workspace/api-server", "run", "test:release:unit"],
+    env: {
+      NODE_ENV: "test",
+      E2E_TEST_DB: "1",
+      E2E_APPROVED_DESTRUCTIVE_MODE: "1",
+    },
     timeoutMs: API_SHARD_TIMEOUT_MS,
     warningMs: API_SHARD_WARNING_MS,
     group: "api-test-shards",
@@ -2116,10 +2121,23 @@ export function releaseConcurrencyLimit(
   return configuredLimit;
 }
 
+export function defaultReleaseConcurrencyForEnvironment(
+  environment: Readonly<Record<string, string | undefined>>,
+): number {
+  // Replit workspaces have a tighter process/thread budget than the release
+  // CI runners. This only selects test scheduling; it is not a production or
+  // destructive-test safety signal.
+  return environment.REPL_IMAGE?.trim() ||
+    environment.REPLIT_ENVIRONMENT?.trim() ||
+    environment.REPLIT_DEV_DOMAIN?.trim()
+    ? 1
+    : RELEASE_CHECK_DEFAULT_CONCURRENCY;
+}
+
 function configuredReleaseConcurrency(): number {
   const configured = process.env.RELEASE_CHECK_MAX_CONCURRENCY;
   if (configured === undefined || configured.trim() === "") {
-    return RELEASE_CHECK_DEFAULT_CONCURRENCY;
+    return defaultReleaseConcurrencyForEnvironment(process.env);
   }
   const value = Number(configured);
   if (!Number.isInteger(value) || value < 1 || value > 16) {

@@ -144,7 +144,7 @@ function StationProviders({
     dayStateRef,
     doughSubTab: "dough",
     form,
-    freezerSurplus: [],
+    freezerSurplus: { lots: [], allocations: [] },
     freezerSurplusBusy: false,
     freezerSurplusError: null,
     freezerSurplusLoaded: true,

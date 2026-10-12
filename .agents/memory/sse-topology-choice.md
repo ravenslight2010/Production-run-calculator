@@ -53,3 +53,16 @@ a safe connection budget, and cross-process delivery/replay tests pass. A
 single always-on process is no longer the selected requirement. Require owner
 approval before changing deployment target or publishing; never infer live
 topology from `.replit` or a successful build.
+
+Replit's Deployment types documentation says Autoscale supports long-lived HTTP
+connections such as SSE, but does not pin connections to a single instance with
+sticky sessions; instances may be scaled and connections distributed.
+
+**Why:** Platform support for the transport does not prove that application
+events reach peers connected to another instance or that the deployment has
+sufficient peak connection capacity.
+
+**How to apply:** Keep Autoscale as the selected target. Require shared,
+cross-instance fan-out and production-bound capacity/delivery evidence before
+marking live peer SSE supported; do not treat SSE itself as a platform
+limitation or use this fact to waive the production trial.

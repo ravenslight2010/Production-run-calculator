@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "node": "24.21.0",
-    "pnpmLockSha256": "3a25a065ab3926f3a4a1f5fda1121485174d2e3271965d6201aef95fce38fecd",
+    "pnpmLockSha256": "a24bc0c8b34fccec9f8c22b52e529c99828cc4fa36c109d74e6e79b51fce4e29",
     "xlsx": "npm:@e965/xlsx@^0.20.3",
     "vitest": "5.0.3"
   },

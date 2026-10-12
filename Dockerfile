@@ -94,16 +94,19 @@ RUN pnpm install --frozen-lockfile
 # Application source is intentionally copied only after dependencies install.
 COPY . .
 
-# Build the web app (served at the domain root) and the API server bundle.
+# The Docker context intentionally excludes the host .local directory, so create
+# a fresh source identity inside the builder and seal it after both stages build.
 # Deployment systems can provide VITE_APP_VERSION (or a Replit deployment id).
 # Keep a timestamped container fallback so incident reports never carry an
 # empty/local identifier from a production Docker build.
 ARG VITE_APP_VERSION
 ARG REPLIT_DEPLOYMENT_ID
-RUN PORT=3000 BASE_PATH=/ \
-    VITE_APP_VERSION="${VITE_APP_VERSION:-${REPLIT_DEPLOYMENT_ID:-docker-$(date -u +%Y%m%d%H%M%S)}}" \
+RUN build_version="${VITE_APP_VERSION:-${REPLIT_DEPLOYMENT_ID:-docker-$(date -u +%Y%m%d%H%M%S)}}" \
+  && pnpm run prepare:publish \
+  && PORT=3000 BASE_PATH=/ VITE_APP_VERSION="$build_version" \
     pnpm --filter @workspace/run-calculator run build \
-  && pnpm --filter @workspace/api-server run build
+  && pnpm --filter @workspace/api-server run build \
+  && node scripts/src/finalize-build-identity.mjs
 
 ########## api-migrate-runtime: only the DB package + migration dependencies ##########
 # Render runs the migration as a pre-deploy command in the API image. Deploying

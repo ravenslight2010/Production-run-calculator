@@ -25,7 +25,7 @@ export function releaseBrowserWebServers():
     },
     {
       command:
-        `VITE_API_PROXY_TARGET=${RELEASE_BROWSER_API_URL} pnpm run build && ` +
+        `BUILD_IDENTITY_MODE=development VITE_API_PROXY_TARGET=${RELEASE_BROWSER_API_URL} pnpm run build && ` +
         `VITE_API_PROXY_TARGET=${RELEASE_BROWSER_API_URL} exec ./node_modules/.bin/vite ` +
         `preview --config vite.config.ts --host 0.0.0.0 --port ${process.env.RELEASE_BROWSER_WEB_PORT ?? "18084"}`,
       url: RELEASE_BROWSER_BASE_URL,

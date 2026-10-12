@@ -69,6 +69,7 @@ const {
   READINESS_EVIDENCE_PATH,
   RELEASE_CHECKPOINT_REPORT,
   RELEASE_CHECK_API_CONCURRENCY,
+  RELEASE_CHECK_API_SHARD_STEPS,
   RELEASE_CHECK_DEFAULT_CONCURRENCY,
   FULL_RESPONSIVE_WEBKIT_GATE_LABEL,
   FULL_RESPONSIVE_WEBKIT_GATE_STEP,
@@ -94,6 +95,7 @@ const {
   PRODUCTION_AUDIT_WARNING_MS,
   PRODUCTION_DEPENDENCY_AUDIT_STEP,
   defaultReleaseEvidenceDir,
+  defaultReleaseConcurrencyForEnvironment,
   formatTypescript7TrendHistorySummary,
   formatReleaseReport,
   parseBrowserDurationRegressions,
@@ -1932,6 +1934,33 @@ async function run(): Promise<void> {
   );
   assert.equal(RELEASE_CHECK_DEFAULT_CONCURRENCY, 4);
   assert.equal(RELEASE_CHECK_API_CONCURRENCY, 2);
+  assert.equal(
+    defaultReleaseConcurrencyForEnvironment({ REPLIT_ENVIRONMENT: "production" }),
+    1,
+    "Replit release checks must serialize even when this workspace label says production",
+  );
+  assert.equal(
+    defaultReleaseConcurrencyForEnvironment({ REPLIT_DEV_DOMAIN: "present" }),
+    1,
+    "a Replit development domain must select the constrained-workspace budget",
+  );
+  assert.equal(
+    defaultReleaseConcurrencyForEnvironment({ CI: "true" }),
+    RELEASE_CHECK_DEFAULT_CONCURRENCY,
+    "non-Replit CI should preserve its configured release concurrency",
+  );
+  const apiUnitReleaseStep = RELEASE_CHECK_API_SHARD_STEPS.find(
+    (step) => step.label === "API unit tests (release shard 1/7)",
+  );
+  assert.deepEqual(
+    apiUnitReleaseStep?.env,
+    {
+      NODE_ENV: "test",
+      E2E_TEST_DB: "1",
+      E2E_APPROVED_DESTRUCTIVE_MODE: "1",
+    },
+    "the API unit release shard must opt into its own guarded disposable database",
+  );
   assert.equal(
     releaseConcurrencyLimit({ label: "package", args: [] }, 4),
     4,

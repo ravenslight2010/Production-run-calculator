@@ -405,14 +405,20 @@ test_ci_docker_image_check_is_build_only() {
   echo "PASS: retains the required Docker image check as a build-only test"
 }
 
-test_render_image_smoke_remains_local_and_test_only() {
+test_release_build_identity_is_prepared_for_container_and_browser_smoke() {
   local release_configuration
   local smoke_script
   local scripts_package
+  local dockerfile
+  local web_identity_script
+  local browser_servers
 
   release_configuration=$(<"${SCRIPT_DIR}/release-check.mts")
   smoke_script=$(<"${SCRIPT_DIR}/verify-render-image.mts")
   scripts_package=$(<"${SCRIPT_DIR}/../package.json")
+  dockerfile=$(<"${SCRIPT_DIR}/../../Dockerfile")
+  web_identity_script=$(<"${SCRIPT_DIR}/build-web-source.mjs")
+  browser_servers=$(<"${SCRIPT_DIR}/../../artifacts/run-calculator/playwright.release-servers.ts")
 
   assert_contains "$release_configuration" 'label: "Render image smoke"'
   assert_contains "$release_configuration" 'args: ["run", "check:render-image"]'
@@ -420,12 +426,16 @@ test_render_image_smoke_remains_local_and_test_only() {
   assert_contains "$smoke_script" "Building Render API image as"
   assert_contains "$smoke_script" '"build"'
   assert_contains "$smoke_script" '"run"'
+  assert_contains "$dockerfile" "pnpm run prepare:publish"
+  assert_contains "$dockerfile" "node scripts/src/finalize-build-identity.mjs"
+  assert_contains "$web_identity_script" "BUILD_IDENTITY_MODE"
+  assert_contains "$browser_servers" "BUILD_IDENTITY_MODE=development"
   if grep -Eiq 'ghcr\.io|render\.com|docker[[:space:]]+push|"push"|"login"' \
     <<<"$smoke_script"; then
     printf 'Render image smoke must stay a disposable local Docker test, not an external publish/deploy path.\n' >&2
     return 1
   fi
-  echo "PASS: keeps the Render image smoke as a local release test only"
+  echo "PASS: prepares shared identities for container and isolated browser builds"
 }
 
 test_rejects_github_package_publishing() {
@@ -1694,7 +1704,7 @@ test_rejects_non_positive_remaining_workflow_job_timeout
 test_department_navigation_readiness_contract
 test_ci_runs_routine_scripts_tests
 test_ci_docker_image_check_is_build_only
-test_render_image_smoke_remains_local_and_test_only
+test_release_build_identity_is_prepared_for_container_and_browser_smoke
 test_rejects_github_package_publishing
 test_rejects_registry_image_pushes
 test_rejects_production_deploy_and_promotion_authority

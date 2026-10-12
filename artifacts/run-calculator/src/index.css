@@ -235,6 +235,7 @@
 @media (min-width: 40rem) {
   :root {
     --app-gutter: 1rem;
+    --app-bottom-nav-space: calc(4.5rem + env(safe-area-inset-bottom));
   }
 }
 

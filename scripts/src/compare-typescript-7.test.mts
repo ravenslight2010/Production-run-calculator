@@ -466,50 +466,56 @@ test("resource approval generator derives compact deterministic samples", () => 
 });
 
 test("runner fingerprints retain only bounded non-sensitive labels", () => {
-  const previousImage = process.env.TYPESCRIPT_7_RUNNER_IMAGE;
-  const previousImageOs = process.env.ImageOS;
-  const previousImageVersion = process.env.ImageVersion;
-  try {
-    delete process.env.ImageOS;
-    delete process.env.ImageVersion;
-    process.env.TYPESCRIPT_7_RUNNER_IMAGE = `ubuntu label/${"x".repeat(100)}`;
-    const fingerprint = typescript7RunnerFingerprint();
-    assert.match(fingerprint.image, /^[A-Za-z0-9._@+-]{1,80}$/);
-    assert.match(fingerprint.hardwareClass, /^[a-f0-9]{64}$/);
-    assert.ok(fingerprint.logicalCpuCount > 0);
-    assert.ok(fingerprint.memoryGiB > 0);
-  } finally {
-    if (previousImage === undefined) delete process.env.TYPESCRIPT_7_RUNNER_IMAGE;
-    else process.env.TYPESCRIPT_7_RUNNER_IMAGE = previousImage;
-    if (previousImageOs === undefined) delete process.env.ImageOS;
-    else process.env.ImageOS = previousImageOs;
-    if (previousImageVersion === undefined) delete process.env.ImageVersion;
-    else process.env.ImageVersion = previousImageVersion;
-  }
+  const fingerprint = typescript7RunnerFingerprint({
+    environment: {
+      TYPESCRIPT_7_RUNNER_IMAGE: `ubuntu label/${"x".repeat(100)}`,
+    },
+    localRuntime: null,
+  });
+  assert.match(fingerprint.image, /^[A-Za-z0-9._@+-]{1,80}$/);
+  assert.match(fingerprint.hardwareClass, /^[a-f0-9]{64}$/);
+  assert.ok(fingerprint.logicalCpuCount > 0);
+  assert.ok(fingerprint.memoryGiB > 0);
+});
+
+test("Replit image identity is retained as a digest, not a registry path", () => {
+  const fingerprint = typescript7RunnerFingerprint({
+    environment: { REPL_IMAGE: "internal-registry/private-runner:stable" },
+    localRuntime: null,
+  });
+  assert.match(fingerprint.image, /^repl-image-[a-f0-9]{64}$/);
+  assert.doesNotMatch(fingerprint.image, /internal-registry|private-runner/u);
+});
+
+test("local runner identity changes when its OS/runtime fingerprint changes", () => {
+  const environment = {};
+  const localRuntime = {
+    platform: "linux",
+    arch: "x64",
+    osRelease: 'ID=ubuntu\nVERSION_ID="24.04"\n',
+    kernelRelease: "6.18.55",
+    nodeVersion: "v24.13.0",
+  };
+  const first = typescript7RunnerFingerprint({ environment, localRuntime });
+  const repeated = typescript7RunnerFingerprint({ environment, localRuntime });
+  const changed = typescript7RunnerFingerprint({
+    environment,
+    localRuntime: { ...localRuntime, kernelRelease: "6.18.56" },
+  });
+  assert.match(first.image, /^runtime-[a-f0-9]{64}$/);
+  assert.equal(repeated.image, first.image);
+  assert.notEqual(changed.image, first.image);
 });
 
 test("runner fingerprint refuses to capture evidence without an image identity", () => {
-  const previous = {
-    explicit: process.env.TYPESCRIPT_7_RUNNER_IMAGE,
-    os: process.env.ImageOS,
-    version: process.env.ImageVersion,
-  };
-  try {
-    delete process.env.TYPESCRIPT_7_RUNNER_IMAGE;
-    delete process.env.ImageOS;
-    delete process.env.ImageVersion;
-    assert.throws(
-      () => typescript7RunnerFingerprint(),
-      /runner image identity is unavailable/,
-    );
-  } finally {
-    if (previous.explicit === undefined) delete process.env.TYPESCRIPT_7_RUNNER_IMAGE;
-    else process.env.TYPESCRIPT_7_RUNNER_IMAGE = previous.explicit;
-    if (previous.os === undefined) delete process.env.ImageOS;
-    else process.env.ImageOS = previous.os;
-    if (previous.version === undefined) delete process.env.ImageVersion;
-    else process.env.ImageVersion = previous.version;
-  }
+  assert.throws(
+    () =>
+      typescript7RunnerFingerprint({
+        environment: {},
+        localRuntime: null,
+      }),
+    /runner image identity is unavailable/,
+  );
 });
 
 test("retained comparison evidence is revision-bound and advisory", () => {

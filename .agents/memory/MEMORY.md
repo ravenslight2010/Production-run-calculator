@@ -27,7 +27,7 @@
 - [web](web-test-harness.md) + [SSE](playwright-offline-sse.md) + [layout](responsive-browser-fixtures.md) + [ack](onboarding-ack-latch.md) — stable offline and dialog checks.
 - [Phone forms](phone-e2e-form-overrides.md) + [query coercion](orval-query-coerce-quirk.md) — isolate inputs and guard missing query parameters.
 - [AI merge assist](merge-suggest.md) — sanitize request bodies before cost checks; keep learned aliases consistent across clients.
-- [Spec-sheet importer](spec-import.md) + [scale](spec-import-scale-harness.md) + [corpus](corpus-harness.md) — ground sauce rows to FRONTLINE, bound prompt cells, and rerun model checks.
+- [Spec-sheet importer](spec-import.md) + [scale](spec-import-scale-harness.md) + [corpus](corpus-harness.md) — ground sauce rows to FRONTLINE, bound prompt cells, and regenerate corpus snapshots under the pinned release Node.
 - [Shared memory](learned-memory-pattern.md) + [aliases](learned-import-aliases.md) — corrections and learned aliases are shared.
 - [Reviewer coverage](ai-corrections-full-coverage.md) + [memory health](ai-memory-health-audits.md) — fail-safe review treats historic aliases as evidence.
 - [Crust batch UI](crust-run-no-dough-batches.md) + [run-need cap](autotrack-over-provisioning.md) — hide dough batches in crust mode and clamp live auto-track to actual demand.

@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { captureReleaseIdentity, isEvidenceRevision } from "./release-source-identity.mjs";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import {
   cp,
   mkdir,
@@ -10,7 +11,7 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { cpus, totalmem, tmpdir } from "node:os";
+import { cpus, release as kernelRelease, totalmem, tmpdir } from "node:os";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -260,6 +261,74 @@ export type Typescript7RunnerFingerprint = {
   memoryGiB: number;
 };
 
+export type Typescript7LocalRuntimeIdentity = Readonly<{
+  platform: string;
+  arch: string;
+  osRelease: string;
+  kernelRelease: string;
+  nodeVersion: string;
+}>;
+
+type Typescript7RunnerEnvironment = Readonly<
+  Record<string, string | undefined>
+>;
+
+function localRuntimeIdentityFromHost():
+  | Typescript7LocalRuntimeIdentity
+  | null {
+  try {
+    return {
+      platform: process.platform,
+      arch: process.arch,
+      osRelease: readFileSync("/etc/os-release", "utf8"),
+      kernelRelease: kernelRelease(),
+      nodeVersion: process.version,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function derivedLocalRuntimeLabel(
+  runtime: Typescript7LocalRuntimeIdentity | null,
+): string | undefined {
+  if (
+    !runtime ||
+    runtime.platform !== "linux" ||
+    !runtime.arch.trim() ||
+    !runtime.osRelease.trim() ||
+    !runtime.kernelRelease.trim() ||
+    !runtime.nodeVersion.trim()
+  ) {
+    return undefined;
+  }
+  // This identifies observed OS/runtime metadata without claiming it is a
+  // provider image tag or retaining raw host paths/metadata in the report.
+  return `runtime-${createHash("sha256")
+    .update(JSON.stringify(runtime))
+    .digest("hex")}`;
+}
+
+function runnerImageLabel(
+  environment: Typescript7RunnerEnvironment,
+  localRuntime: Typescript7LocalRuntimeIdentity | null,
+): string | undefined {
+  if (environment.ImageOS && environment.ImageVersion) {
+    return `${environment.ImageOS}@${environment.ImageVersion}`;
+  }
+  const configuredImage =
+    environment.TYPESCRIPT_7_RUNNER_IMAGE ?? environment.ImageOS;
+  if (configuredImage?.trim()) return configuredImage;
+
+  const replImage = environment.REPL_IMAGE?.trim();
+  if (replImage) {
+    // Keep the Replit-provided image identity comparable without retaining a
+    // potentially internal registry path.
+    return `repl-image-${createHash("sha256").update(replImage).digest("hex")}`;
+  }
+  return derivedLocalRuntimeLabel(localRuntime);
+}
+
 function boundedRunnerLabel(value: string | undefined): string {
   const normalized = value?.trim().replace(/[^A-Za-z0-9._@+-]/g, "-").slice(0, 80);
   if (!normalized) {
@@ -270,15 +339,23 @@ function boundedRunnerLabel(value: string | undefined): string {
   return normalized;
 }
 
-export function typescript7RunnerFingerprint(): Typescript7RunnerFingerprint {
+export function typescript7RunnerFingerprint(
+  options: {
+    environment?: Typescript7RunnerEnvironment;
+    localRuntime?: Typescript7LocalRuntimeIdentity | null;
+  } = {},
+): Typescript7RunnerFingerprint {
   const processors = cpus();
   const logicalCpuCount = processors.length;
   const memoryGiB = Math.max(1, Math.round(totalmem() / 1024 ** 3));
   const cpuModel = processors[0]?.model.trim().replace(/\s+/g, " ") ?? "unknown";
+  const environment = options.environment ?? process.env;
+  const localRuntime =
+    options.localRuntime === undefined
+      ? localRuntimeIdentityFromHost()
+      : options.localRuntime;
   const image = boundedRunnerLabel(
-    process.env.ImageOS && process.env.ImageVersion
-      ? `${process.env.ImageOS}@${process.env.ImageVersion}`
-      : process.env.TYPESCRIPT_7_RUNNER_IMAGE ?? process.env.ImageOS,
+    runnerImageLabel(environment, localRuntime),
   );
   const hardwareClass = createHash("sha256")
     .update(

@@ -297,6 +297,12 @@ test("manager can preview an authoritative operational report", async ({ page })
   const reportToggle = page.getByTestId("summary-report-toggle");
   await expect(reportToggle).toBeVisible();
   await expect(reportToggle).toHaveAttribute("aria-expanded", "false");
+  // Put the disclosure clear of the fixed station bar before tapping it. On
+  // WebKit, the button can count as visible while its center remains under
+  // that overlay after the Summary tab change.
+  await reportToggle.evaluate((element) =>
+    element.scrollIntoView({ block: "center", inline: "nearest" }),
+  );
   await reportToggle.click();
   await expect(reportToggle).toHaveAttribute("aria-expanded", "true");
   const report = page.getByTestId("operational-report");
