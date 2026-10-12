@@ -7,6 +7,6 @@
       "@workspace/api-zod": ["../../lib/api-zod/dist/index.d.ts"]
     }
   },
-  "include": ["src/routes/**/*.ts"],
+  "include": ["src/routes/**/*.ts", "src/types/web-push.d.ts"],
   "references": []
 }
