@@ -294,6 +294,12 @@ describe("GET /healthz background operation diagnostics", () => {
       terminalLastWindow: { succeeded: 3, failed: 1, cancelled: 0 },
       duplicateTimeBucketGroups: 101,
       duplicateGroupsTruncated: true,
+      duplicateGroupTrend: {
+        direction: "increasing",
+        firstCount: 97,
+        latestCount: 101,
+        change: 4,
+      },
       duplicateBucketInventory: [{
         bucketFingerprint: "a".repeat(24),
         rowCount: 2,
@@ -332,6 +338,12 @@ describe("GET /healthz background operation diagnostics", () => {
       running: 1,
       duplicateTimeBucketGroups: 101,
       duplicateGroupsTruncated: true,
+      duplicateGroupTrend: {
+        direction: "increasing",
+        firstCount: 97,
+        latestCount: 101,
+        change: 4,
+      },
       duplicateBucketInventoryTruncated: true,
       duplicateBucketInventory: [{
         bucketFingerprint: "a".repeat(24),
@@ -356,6 +368,12 @@ describe("GET /healthz background operation diagnostics", () => {
       terminalLastWindow: { succeeded: 3, failed: 1, cancelled: 0 },
       duplicateTimeBucketGroups: 0,
       duplicateGroupsTruncated: false,
+      duplicateGroupTrend: {
+        direction: "unavailable",
+        firstCount: null,
+        latestCount: null,
+        change: null,
+      },
       warningCodes: [],
       sampleCount: 6,
       windowMs: 300_000,
@@ -375,6 +393,12 @@ describe("GET /healthz background operation diagnostics", () => {
       sampleAvailability: "unavailable",
       queued: 4,
       warningCodes: [],
+      duplicateGroupTrend: {
+        direction: "unavailable",
+        firstCount: null,
+        latestCount: null,
+        change: null,
+      },
     });
     expect(mocks.info.mock.calls.at(-1)?.[0]).toMatchObject({
       checks: { backgroundWorkers: "warning" },

@@ -88,7 +88,9 @@ paths:
         Scheduled-evaluation diagnostics report sample availability separately
         from the last measured queue state, report the exact duplicate-bucket
         group count, and include a bounded inventory with queue-state counts and
-        review guidance.
+        review guidance. They also report an aggregate duplicate-group trend
+        with first and latest counts and their change over the bounded sample
+        window; unavailable samples do not produce a trend.
       responses:
         "200":
           description: Core API is ready; optional AI or background work may be degraded.
@@ -114,7 +116,9 @@ paths:
         background-worker degradation are non-blocking warnings. Scheduled-evaluation
         diagnostics distinguish pending, available, and unavailable
         samples from queue backlog warnings and include bounded duplicate-bucket
-        state counts and review guidance.
+        state counts, review guidance, and an aggregate duplicate-group trend
+        with first and latest counts and their change over the bounded sample
+        window.
       responses:
         "200":
           description: Core API is ready; optional capabilities may be degraded.
@@ -6561,7 +6565,11 @@ components:
             from the last measured queue status and a bounded inventory of
             duplicate buckets with queue-state counts and review rules. Bucket
             fingerprints are process-local opaque references; diagnostics omit
-            job IDs, raw scope and time-bucket values, and job inputs.
+            job IDs, raw scope and time-bucket values, and job inputs. The
+            duplicateGroupTrend summary contains only aggregate firstCount,
+            latestCount, change, and direction values. Direction is
+            insufficient_samples before two observations and unavailable when
+            no current sample is available; unavailable trend counts are null.
           additionalProperties: true
         correlationId: { type: string }
         timestamp: { type: string, format: date-time }

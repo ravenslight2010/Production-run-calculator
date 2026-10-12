@@ -7,6 +7,6 @@
  */
 
 /**
- * Bounded operational diagnostics; excludes provider credentials and request payloads. Scheduled-evaluation queue diagnostics include sampleAvailability (pending, available, or unavailable) separately from the last measured queue status and a bounded inventory of duplicate buckets with queue-state counts and review rules. Bucket fingerprints are process-local opaque references; diagnostics omit job IDs, raw scope and time-bucket values, and job inputs.
+ * Bounded operational diagnostics; excludes provider credentials and request payloads. Scheduled-evaluation queue diagnostics include sampleAvailability (pending, available, or unavailable) separately from the last measured queue status and a bounded inventory of duplicate buckets with queue-state counts and review rules. Bucket fingerprints are process-local opaque references; diagnostics omit job IDs, raw scope and time-bucket values, and job inputs. The duplicateGroupTrend summary contains only aggregate firstCount, latestCount, change, and direction values. Direction is insufficient_samples before two observations and unavailable when no current sample is available; unavailable trend counts are null.
  */
 export type HealthStatusDiagnostics = { [key: string]: unknown };

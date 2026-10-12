@@ -113,6 +113,12 @@ export type ScheduledEvaluationDuplicateBucket = {
 
 export type ScheduledEvaluationQueueDiagnostics = ScheduledEvaluationQueueSnapshot & {
   duplicateBucketReviewRules: readonly string[];
+  duplicateGroupTrend: {
+    direction: "increasing" | "stable" | "decreasing" | "insufficient_samples" | "unavailable";
+    firstCount: number | null;
+    latestCount: number | null;
+    change: number | null;
+  };
   status: "pending" | "ok" | "warning";
   sampleAvailability: "pending" | "available" | "unavailable";
   warningCodes: ScheduledEvaluationQueueWarningCode[];
@@ -165,6 +171,26 @@ export function createScheduledEvaluationQueueMonitor() {
 
   const diagnostics = (): ScheduledEvaluationQueueDiagnostics => {
     const latest = samples.at(-1);
+    const first = samples[0];
+    const duplicateGroupTrend = sampleAvailability !== "available" || !first || !latest
+      ? {
+        direction: "unavailable" as const,
+        firstCount: null,
+        latestCount: null,
+        change: null,
+      }
+      : {
+        direction: samples.length < 2
+          ? "insufficient_samples" as const
+          : latest.duplicateTimeBucketGroups > first.duplicateTimeBucketGroups
+          ? "increasing" as const
+          : latest.duplicateTimeBucketGroups < first.duplicateTimeBucketGroups
+          ? "decreasing" as const
+          : "stable" as const,
+        firstCount: first.duplicateTimeBucketGroups,
+        latestCount: latest.duplicateTimeBucketGroups,
+        change: latest.duplicateTimeBucketGroups - first.duplicateTimeBucketGroups,
+      };
     return {
       ...EMPTY_SCHEDULED_EVALUATION_SNAPSHOT,
       ...(latest
@@ -180,6 +206,7 @@ export function createScheduledEvaluationQueueMonitor() {
         : {}),
       status: samples.length === 0 ? "pending" : warningCodes.size ? "warning" : "ok",
       sampleAvailability,
+      duplicateGroupTrend,
       duplicateBucketReviewRules: SCHEDULED_EVALUATION_DUPLICATE_REVIEW_RULES,
       warningCodes: [...warningCodes].sort(),
       sampleCount: samples.length,

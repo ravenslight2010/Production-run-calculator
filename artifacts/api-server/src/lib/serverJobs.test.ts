@@ -104,9 +104,55 @@ describe("scheduled evaluation queue monitoring", () => {
     expect(JSON.stringify(transition.diagnostics)).not.toMatch(/scope|idempotency|input|result/i);
   });
 
+  it.each([
+    { direction: "increasing", values: [2, 5], change: 3 },
+    { direction: "stable", values: [2, 2], change: 0 },
+    { direction: "decreasing", values: [5, 2], change: -3 },
+  ] as const)("reports an aggregate $direction duplicate-group trend", ({ direction, values, change }) => {
+    const monitor = createScheduledEvaluationQueueMonitor();
+    values.forEach((count, index) => {
+      monitor.observe(queueSample(0, count), index * SCHEDULED_EVALUATION_MONITOR_SAMPLE_INTERVAL_MS);
+    });
+
+    expect(monitor.getDiagnostics().duplicateGroupTrend).toEqual({
+      direction,
+      firstCount: values[0],
+      latestCount: values[1],
+      change,
+    });
+  });
+
+  it("uses only the retained monitoring window and restarts comparison after a long gap", () => {
+    const monitor = createScheduledEvaluationQueueMonitor();
+    const interval = SCHEDULED_EVALUATION_MONITOR_SAMPLE_INTERVAL_MS;
+    for (let count = 1; count <= 8; count += 1) {
+      monitor.observe(queueSample(0, count), (count - 1) * interval);
+    }
+    expect(monitor.getDiagnostics()).toMatchObject({
+      sampleCount: 6,
+      duplicateGroupTrend: {
+        direction: "increasing",
+        firstCount: 3,
+        latestCount: 8,
+        change: 5,
+      },
+    });
+
+    monitor.observe(queueSample(0, 20), 11 * interval);
+    expect(monitor.getDiagnostics()).toMatchObject({
+      sampleCount: 1,
+      duplicateGroupTrend: {
+        direction: "insufficient_samples",
+        firstCount: 20,
+        latestCount: 20,
+        change: 0,
+      },
+    });
+  });
+
   it("labels unavailable samples without treating missing data as queue recovery", () => {
     const monitor = createScheduledEvaluationQueueMonitor();
-    monitor.observe(queueSample(5), 0);
+    monitor.observe(queueSample(5, 2), 0);
     monitor.markUnavailable();
 
     expect(monitor.getDiagnostics()).toMatchObject({
@@ -114,6 +160,12 @@ describe("scheduled evaluation queue monitoring", () => {
       sampleAvailability: "unavailable",
       queued: 5,
       sampleCount: 1,
+      duplicateGroupTrend: {
+        direction: "unavailable",
+        firstCount: null,
+        latestCount: null,
+        change: null,
+      },
     });
 
     const recovered = monitor.observe(queueSample(3), SCHEDULED_EVALUATION_MONITOR_SAMPLE_INTERVAL_MS);
