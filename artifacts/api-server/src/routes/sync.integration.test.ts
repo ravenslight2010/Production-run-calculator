@@ -5694,6 +5694,13 @@ describe("/sync/events — date-scoped broadcasts", () => {
         }
         canonical = writeBody.data;
 
+        if (writeBody.snapshotId === priorSnapshotId) {
+          // An exact-snapshot no-op is not broadcast. Peers already hold this
+          // baseline, so waiting for a frame here would block the whole soak.
+          expect(step).toBe(0);
+          continue;
+        }
+
         for (const peer of peers.values()) {
           if (peer.id === senderId) {
             peer.baseline = canonical;
@@ -5755,11 +5762,11 @@ describe("/sync/events — date-scoped broadcasts", () => {
       lifecycleMetrics,
     });
     // Step 0 leaves run-0's seeded skid value at 0, so the canonical snapshot
-    // does not change. The server correctly sends a complete fallback to both
-    // peers when there is no delta; the other 94 peer updates are partial.
-    expect(deliveredPeerFrames).toBe(96);
-    expect(completePeerSteps).toEqual([0, 0]);
-    expect(completePeerFrames).toBe(2);
+    // does not change and no peer frame is sent. The remaining 47 writes each
+    // deliver a partial update to the other two peers.
+    expect(deliveredPeerFrames).toBe(94);
+    expect(completePeerSteps).toEqual([]);
+    expect(completePeerFrames).toBe(0);
     expect(partialFrames).toBe(94);
     expect(initialFrames).toBe(6);
     expect(completeFrames).toBe(initialFrames + completePeerFrames);

@@ -9,8 +9,17 @@ export const AI_MODELS = {
   cheap: "gemini-2.5-flash",
 } as const;
 
+// These backups are used only after eligible provider failures or empty
+// successful responses. They do not replace the selected primary model.
+const MODEL_FALLBACKS = ["gemini-3.5-flash", "gemini-3.1-flash-lite"] as const;
+
 export type ModelKind = keyof typeof AI_MODELS;
 
 export function pickModel(kind: ModelKind = "full"): string {
   return AI_MODELS[kind];
+}
+
+/** The selected model stays primary; fallback models are tried in fixed order. */
+export function modelChain(primary: string): readonly string[] {
+  return [primary, ...MODEL_FALLBACKS.filter((fallback) => fallback !== primary)];
 }

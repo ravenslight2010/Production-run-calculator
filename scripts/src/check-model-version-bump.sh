@@ -66,15 +66,25 @@ MODELS_DIFF=$(git diff "${DIFF_BASE}..${DIFF_TARGET}" -- "${MODELS_FILE}" 2>/dev
 
 MODEL_VALUE_CHANGE=""
 if [ -n "${MODELS_DIFF}" ]; then
-  # Look only at added/changed lines ('+' prefix, not '+++').
-  # Match lines carrying a quoted model string (e.g. "gemini-…"), not comments.
-  MODEL_VALUE_CHANGE=$(
-    echo "${MODELS_DIFF}" \
-      | grep -E '^\+[^+]' \
-      | grep -E '"[a-zA-Z0-9._/-]+"' \
-      | grep -vE '^\+\s*//' \
-      || true
-  )
+  # Only the primary-model selection contract changes saved parse identity.
+  # A fallback-only ladder addition preserves the requested primary and must
+  # not invalidate every cached spec parse.
+  model_contract() {
+    local ref="$1"
+    git show "${ref}:${MODELS_FILE}" 2>/dev/null | awk '
+      /^export const AI_MODELS =/ { in_models = 1 }
+      in_models { print }
+      in_models && /^} as const;/ { in_models = 0 }
+      /^export function pickModel\(/ { in_picker = 1 }
+      in_picker { print }
+      in_picker && /^}/ { in_picker = 0 }
+    '
+  }
+  BASE_MODEL_CONTRACT=$(model_contract "${DIFF_BASE}")
+  TARGET_MODEL_CONTRACT=$(model_contract "${DIFF_TARGET}")
+  if [ "${BASE_MODEL_CONTRACT}" != "${TARGET_MODEL_CONTRACT}" ]; then
+    MODEL_VALUE_CHANGE="AI_MODELS or pickModel selection changed"
+  fi
 fi
 
 # ── Step 2: did the prompt builder file change non-trivially? ─────────────────
@@ -114,7 +124,7 @@ if [ -z "${MODEL_VALUE_CHANGE}" ] && [ -z "${PROMPT_MEANINGFUL_CHANGE}" ] && [ -
   if [ -z "${MODELS_DIFF}" ] && [ -z "${PROMPT_DIFF}" ] && [ -z "${SANITIZER_DIFF}" ]; then
     echo "OK: neither ${MODELS_FILE}, ${PROMPT_FILE}, nor ${SANITIZER_FILE} changed — no SPEC_PARSE_VERSION bump required."
   elif [ -z "${MODEL_VALUE_CHANGE}" ] && [ -n "${MODELS_DIFF}" ]; then
-    echo "OK: ${MODELS_FILE} changed but no quoted model value lines detected (comments/types only)."
+    echo "OK: ${MODELS_FILE} changed without changing AI_MODELS or pickModel (fallback-only or non-primary edit)."
   elif [ -z "${PROMPT_MEANINGFUL_CHANGE}" ] && [ -n "${PROMPT_DIFF}" ]; then
     echo "OK: ${PROMPT_FILE} changed but only comments or whitespace — no SPEC_PARSE_VERSION bump required."
   elif [ -z "${SANITIZER_MEANINGFUL_CHANGE}" ] && [ -n "${SANITIZER_DIFF}" ]; then
@@ -127,7 +137,7 @@ fi
 
 # Report what triggered the check.
 if [ -n "${MODEL_VALUE_CHANGE}" ]; then
-  echo "Detected AI_MODELS value change in ${MODELS_FILE}:"
+  echo "Detected primary model selection change in ${MODELS_FILE}:"
   while IFS= read -r model_change_line; do
     printf '  %s\n' "${model_change_line}"
   done <<< "${MODEL_VALUE_CHANGE}"
@@ -197,10 +207,10 @@ FAIL: AI model, prompt, or sanitizer/type-shape changed but SPEC_PARSE_VERSION w
   Base version  (${DIFF_BASE}): ${BASE_VERSION:-"<not found>"}
   Target version (${DIFF_TARGET}): ${TARGET_VERSION:-"<not found>"}
 
-Every model change, non-trivial prompt rewrite, AND non-trivial change to the
-sanitizer or ParsedRecipe/ParsedProfile type definitions must be paired with a
-SPEC_PARSE_VERSION bump so that cached spec-sheet parses (saved_spec_sheets DB
-table) are invalidated.
+Every primary model selection change, non-trivial prompt rewrite, AND
+non-trivial change to the sanitizer or ParsedRecipe/ParsedProfile type
+definitions must be paired with a SPEC_PARSE_VERSION bump so that cached
+spec-sheet parses (saved_spec_sheets DB table) are invalidated.
 
 Without the bump, managers re-import the same file and silently receive stale
 parse results built against the old model, old prompt, or old field shape —
@@ -210,7 +220,7 @@ Fix:
   1. Increment SPEC_PARSE_VERSION in:
        ${SPEC_FILE}
 
-  2. After a model change, run the large-spec harness to re-verify that the new
+  2. After a primary model selection change, run the large-spec harness to re-verify that the new
      model can still handle the current chunk budget (DEFAULT_LIMITS.maxTotalChars in lib/spec-import):
 
        # Quick smoke run (~2 min, real AI calls):

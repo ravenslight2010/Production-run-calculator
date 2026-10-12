@@ -23,7 +23,7 @@ import {
 } from "../middlewares/requireCapability";
 import { noStoreMiddleware } from "../lib/cacheControl";
 import { startupGate } from "../lib/startupGate";
-import type { Capability } from "../lib/roles";
+import { CAPABILITIES, type Capability } from "../lib/roles";
 // Domain handlers register against the generic lifecycle without making that
 // lifecycle import its workloads (which would create an initialization cycle).
 import "../lib/serverJobWorkloads";
@@ -273,7 +273,7 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
   ]),
   ...writes("capability-gated", "scoped", "allowed", "record-qc", [
     "POST /qc/lots", "POST /qc/weight-checks", "POST /qc/allergen-reviews",
-    "POST /qc/cleaning-records", "POST /qc/cleaning-records/:recordId/verification",
+    "POST /qc/cleaning-records", "POST /qc/cleaning-records/:eventId/verification",
   ]),
   ...writes("capability-gated", "scoped", "allowed", "manage-qc", [
     "POST /qc/targets", "POST /qc/run-signoffs",
@@ -354,13 +354,11 @@ export const mutationAuthorizationInventory: readonly MutationAuthorization[] = 
   ...writes("capability-gated", "scoped", "allowed", "manage-staff", ["PUT /supervisor-pin"]),
   {
     method: "POST", path: "/server-jobs", ownership: "capability-gated", scope: "scoped", sandbox: "allowed",
-    capabilities: ["manage-staff", "manage-inventory", "edit-production-rules", "approve-password-resets",
-      "review-incidents", "use-ai-tools", "manage-factory-settings", "manage-profiles", "manage-allergens"], capabilityMatch: "any",
+    capabilities: CAPABILITIES, capabilityMatch: "any",
   },
   {
     method: "POST", path: "/server-jobs/:id/cancel", ownership: "capability-gated", scope: "scoped", sandbox: "allowed",
-    capabilities: ["manage-staff", "manage-inventory", "edit-production-rules", "approve-password-resets",
-      "review-incidents", "use-ai-tools", "manage-factory-settings", "manage-profiles", "manage-allergens"], capabilityMatch: "any",
+    capabilities: CAPABILITIES, capabilityMatch: "any",
   },
 ];
 
@@ -400,15 +398,24 @@ export function validateMutationAuthorizationInventory(
           throw new Error(`${owned.name} write ${method} ${paths.join(", ")} is missing from mutationAuthorizationInventory`);
         }
         const required = layer.route.stack
-          .map(({ handle }, index) => ({ capabilities: getRequiredCapabilities(handle), index }))
-          .filter((item): item is { capabilities: readonly Capability[]; index: number } => !!item.capabilities);
+          .map(({ handle }, index) => ({
+            capabilities: getRequiredCapabilities(handle),
+            match: getCapabilityMatch(handle),
+            index,
+          }))
+          .filter((item): item is {
+            capabilities: readonly Capability[];
+            match: "all" | "any" | undefined;
+            index: number;
+          } => !!item.capabilities);
         const liveScopeIndex = layer.route.stack.findIndex(({ handle }) => isRequireLiveScope(handle));
         const managerRoleIndex = layer.route.stack.findIndex(({ handle }) => isRequireManagerRole(handle));
         const matches = entries.some((entry) => {
           const expected = entry.capabilities ?? [];
           const capabilityMatches = required.length === (expected.length ? 1 : 0) &&
-            (expected.length === 0 || required.some(({ capabilities, index }) =>
+            (expected.length === 0 || required.some(({ capabilities, match, index }) =>
               index < layer.route!.stack.length - 1 &&
+              match === (entry.capabilityMatch ?? "all") &&
               capabilities.length === expected.length &&
               expected.every((capability) => capabilities.includes(capability)),
             ));

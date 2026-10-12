@@ -151,6 +151,15 @@ class AiResponseError extends Error {
   }
 }
 
+function servedByFallback(
+  effectiveModel: string | undefined,
+  requestedModel: string,
+): boolean {
+  return typeof effectiveModel === "string" &&
+    effectiveModel.length > 0 &&
+    effectiveModel !== requestedModel;
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -502,6 +511,7 @@ router.post(
           value.pepTypeMatches.every(isObject) &&
           (value.aiStatus === "enriched" || value.aiStatus === "unavailable"),
         load: async () => {
+          let effectiveModel: string | undefined;
           const result = await fetchModelJsonWithRetry({
             label: "ai-match-import",
             log: req.log,
@@ -515,6 +525,7 @@ router.post(
                   { role: "user", content: userPrompt },
                 ],
               });
+              effectiveModel = response.model;
               return response.choices[0]?.message?.content ?? "";
             },
           });
@@ -565,7 +576,10 @@ router.post(
             aiStatus: "enriched",
             ...(note ? { note } : {}),
           };
-          return { value, cacheable: rawIsValidShape };
+          return {
+            value,
+            cacheable: rawIsValidShape && !servedByFallback(effectiveModel, model),
+          };
         },
           });
           return {
@@ -886,6 +900,7 @@ router.post(
           value.matches.every(isObject) &&
           (value.aiStatus === "enriched" || value.aiStatus === "unavailable"),
         load: async () => {
+          let effectiveModel: string | undefined;
           const result = await fetchModelJsonWithRetry({
             label: "ai-match-premix",
             log: req.log,
@@ -899,6 +914,7 @@ router.post(
                   { role: "user", content: userPrompt },
                 ],
               });
+              effectiveModel = response.model;
               return response.choices[0]?.message?.content ?? "";
             },
           });
@@ -919,7 +935,10 @@ router.post(
             matches,
             aiStatus: "enriched",
           };
-          return { value, cacheable: rawIsValidShape };
+          return {
+            value,
+            cacheable: rawIsValidShape && !servedByFallback(effectiveModel, model),
+          };
         },
           });
           return {

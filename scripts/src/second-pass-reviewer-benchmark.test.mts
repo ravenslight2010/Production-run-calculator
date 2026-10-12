@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import {
   ACCEPTANCE,
@@ -38,6 +39,27 @@ assert.equal(
   liveObservations.toolchain.pnpmLockSha256,
   expected.evaluationManifest.dependencies.pnpmLockSha256,
 );
+const historicalRoot = fs.mkdtempSync(path.join(os.tmpdir(), "reviewer-historical-lock-"));
+const sourceRelativePath = "attached_assets/source-library/audits/source-library-reconciliation-2026-08-26.json";
+const observationsRelativePath = "docs/second-pass-reviewer-live-observations-2026-10-06.json";
+fs.mkdirSync(path.dirname(path.join(historicalRoot, sourceRelativePath)), { recursive: true });
+fs.mkdirSync(path.dirname(path.join(historicalRoot, observationsRelativePath)), { recursive: true });
+fs.copyFileSync(path.join(root, sourceRelativePath), path.join(historicalRoot, sourceRelativePath));
+fs.copyFileSync(
+  path.join(root, observationsRelativePath),
+  path.join(historicalRoot, observationsRelativePath),
+);
+fs.writeFileSync(path.join(historicalRoot, "pnpm-lock.yaml"), "lockfileVersion: 'current-test'\n");
+try {
+  const rebuiltHistorical = buildReviewerBenchmark(historicalRoot);
+  assert.equal(
+    rebuiltHistorical.evaluationManifest.dependencies.pnpmLockSha256,
+    liveObservations.toolchain.pnpmLockSha256,
+    "historical evidence keeps the lockfile digest recorded at capture time",
+  );
+} finally {
+  fs.rmSync(historicalRoot, { recursive: true, force: true });
+}
 assert.match(liveObservations.evaluatorSha256, /^[a-f0-9]{64}$/u);
 assert.equal(expected.evaluationManifest.provenance.evaluator.sha256, liveObservations.evaluatorSha256);
 assert.equal(

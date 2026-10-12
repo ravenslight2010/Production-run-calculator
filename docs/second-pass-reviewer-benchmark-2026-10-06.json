@@ -188,7 +188,7 @@
       "pnpm": "12.8.1",
       "pnpmLockSha256": "3a25a065ab3926f3a4a1f5fda1121485174d2e3271965d6201aef95fce38fecd",
       "benchmarkReporter": "1",
-      "benchmarkReporterSha256": "9f3fc59ddfcf9a7da797245796518ad7a01851667e20c6153670739820819779"
+      "benchmarkReporterSha256": "f6653b41ce97fc795e259aa6934a7501e610c23b4e3ffaa27aaf8a51d36e7de5"
     },
     "provider": {
       "identityState": "identified",

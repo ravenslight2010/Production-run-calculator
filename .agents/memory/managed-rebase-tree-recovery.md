@@ -16,3 +16,9 @@ In managed rebases, an `INDEX_LOCKED` response can occur while the operation is 
 **Why:** A continuation reported `INDEX_LOCKED` despite having recorded progress and exposing the next conflict; a blind retry or manual index recovery could disrupt the managed operation.
 
 **How to apply:** Re-check merge status and the current index, then continue only through the managed merge-resolution flow. Do not run manual `git rebase --continue`, reset, or checkout commands.
+
+A task rebase also requires a clean worktree before it can start. Preserve intentional untracked workspace files; do not delete or locally ignore them just to satisfy the precondition. If they are not part of the task, ask before committing them or changing their visibility to Git. A GitHub backup operation is not a substitute for the managed rebase source.
+
+**Why:** The managed rebase rejected a worktree containing workspace custom-skill files, and the repository intentionally leaves those files visible to Git.
+
+**How to apply:** Inspect the exact untracked paths, confirm their contents and ignore rules, and resolve them with the owner before retrying the managed continuation callback.

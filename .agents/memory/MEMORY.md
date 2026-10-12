@@ -11,6 +11,7 @@
 - [Dough families](dough-family-collapse.md) + [customer matching](doughball-variant-customers-matching.md) + [weights](dough-weight-server-pool.md) — specific flavors first; fill only unset weights.
 - [Near-dup scan](near-dup-scan-perf.md) + [print/share](recipe-print-share.md) + [import matcher](name-match-near-dup.md) — share one matcher; loose matches auto-rename; aborts preserve clipboard.
 - [AI JSON bounded retry](ai-json-retry.md) — AI routes must use the shared 2-attempt retry helper; retry malformed JSON + free 429 rejections (backoff→friendly 429), never other provider throws.
+- [Gemini fallback cache identity](gemini-fallback-cache-identity.md) — fallback IDs are availability-only; preserve primary parse/cache identity and never cache their output as primary.
 - [Diagnostic persistence scope](diagnostic-persistence-scope.md) — architecture checks must distinguish diagnostic writes from unrelated transactions in the same module.
 - [src](die-size-source.md) + [heal](die-type-master-heal.md) + [defaults](die-defaults-switch-aware.md) + [pick](die-picker-e2e-names.md) — crust owns die; bought crusts none; picks switch-aware.
 - [Frontline is sauce](frontline-is-sauce.md) + [ready-made](ready-made-sauce.md) — "frontline" IS the UI Sauce Recipe; sauce w/o rows (BBQ) = bought as-is, consume ingredient lbs not Sauce batches.
@@ -109,7 +110,7 @@
 - [Physical-total attestations](physical-total-attestations.md) — automatic observations and manager-confirmed totals remain separate append-only evidence streams.
 - [Repair definition fingerprints](repair-definition-fingerprints.md) — hash immutable metadata and source contracts, never callbacks; independently digested payloads stay separate.
 - [Replit production detection](replit-production-detection.md) — REPLIT_ENVIRONMENT=production can appear in isolated workspaces; use deployment/runtime markers for destructive-operation fences.
-- [Server/local alert ownership](server-local-alert-ownership.md) — use identical pause-aware IDs, crossing arms, and one atomic device claim so push and offline fallback never double-display.
+- [Server/local alert ownership](server-local-alert-ownership.md) + [MPL web-push approval](mpl-web-push-approval.md) — keep one atomic alert claim; package approval is limited to web-push@3.6.7.
 - [Scheduled queue warning channel](scheduled-queue-warning-channel.md) — stalled/duplicate queue warnings use readiness and transition logs, not generic staff push.
 - [Dated sync authorization](dated-sync-authorization.md) — staff use `/sync/today`; dated writes must not trust client-claimed scheduling dates.
 - [Bounded archive range reads](bounded-archive-range-reads.md) — cap date spans and results, align the index, and split exact/range endpoints when OpenAPI cannot type query unions.
@@ -155,5 +156,4 @@
 - [Sandbox network](codeexecution-network-globals.md) + [DB test startup](disposable-database-test-startup.md) — verify AbortSignal; extend fixture startup timeout before diagnosing failure.
 - [QC/allergen Phase 1](qc-allergen-phase1-decisions.md) — record-first, non-blocking workflow with explicit target, role, sign-off, and retention rules.
 - [Run to Time policy](run-to-time-operator-policy.md) — elapsed targets mean reached today; reset restores the standard evening target rather than copying now.
-- [MPL web-push approval](mpl-web-push-approval.md) — approval is limited to `web-push@3.6.7`; do not generalize it to other packages or versions.
 - [SSE test-reader timeouts](sse-test-reader-timeouts.md) — retain pending raw stream reads across timeouts so an abandoned parser cannot consume the next event and create false delivery failures.

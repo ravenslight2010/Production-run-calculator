@@ -22,8 +22,12 @@ const params = {
   messages: [{ role: "user" as const, content: "sensitive prompt" }],
 };
 
-function transient(status = 503, retryAfter?: string): Error {
-  return Object.assign(new Error("provider payload must not be logged"), {
+function transient(
+  status = 503,
+  retryAfter?: string,
+  message = "provider payload must not be logged",
+): Error {
+  return Object.assign(new Error(message), {
     status,
     response: retryAfter
       ? { headers: { get: (name: string) => name === "retry-after" ? retryAfter : null } }
@@ -243,6 +247,8 @@ describe("Gemini adapter resilience", () => {
     await rejected;
     expect(generateContent.mock.calls[0]?.[0].config.abortSignal.aborted).toBe(true);
     expect(generateContent).toHaveBeenCalledTimes(2);
+    expect(generateContent.mock.calls.map(([request]) => request.model))
+      .toEqual(["gemini-test", "gemini-test"]);
   });
 
   it("retries one transient failure and honors Retry-After", async () => {
@@ -270,6 +276,184 @@ describe("Gemini adapter resilience", () => {
     expect(generateContent).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps other transient statuses on the primary instead of advancing the model chain", async () => {
+    vi.useFakeTimers();
+    generateContent.mockRejectedValue(transient(502));
+
+    const request = openai.chat.completions.create(params);
+    const rejected = expect(request).rejects.toBeInstanceOf(GeminiProviderUnavailableError);
+    await vi.advanceTimersByTimeAsync(250);
+    await rejected;
+
+    expect(generateContent.mock.calls.map(([request]) => request.model))
+      .toEqual(["gemini-test", "gemini-test"]);
+  });
+
+  it("advances to a fallback after exhausting transient retries and preserves the primary", async () => {
+    vi.useFakeTimers();
+    generateContent
+      .mockRejectedValueOnce(transient(503))
+      .mockRejectedValueOnce(transient(503))
+      .mockResolvedValueOnce({ text: "recovered" });
+
+    const request = openai.chat.completions.create(params);
+    const settled = expect(request).resolves.toEqual({
+      choices: [{ message: { content: "recovered" } }],
+      model: "gemini-3.5-flash",
+    });
+    await vi.advanceTimersByTimeAsync(250);
+    await settled;
+
+    expect(generateContent.mock.calls.map(([request]) => request.model)).toEqual([
+      "gemini-test",
+      "gemini-test",
+      "gemini-3.5-flash",
+    ]);
+  });
+
+  it("advances to a fallback after the primary exhausts 429 retries", async () => {
+    vi.useFakeTimers();
+    generateContent
+      .mockRejectedValueOnce(transient(429))
+      .mockRejectedValueOnce(transient(429))
+      .mockResolvedValueOnce({ text: "recovered" });
+
+    const request = openai.chat.completions.create(params);
+    const settled = expect(request).resolves.toMatchObject({
+      choices: [{ message: { content: "recovered" } }],
+      model: "gemini-3.5-flash",
+    });
+    await vi.advanceTimersByTimeAsync(250);
+    await settled;
+
+    expect(generateContent.mock.calls.map(([request]) => request.model)).toEqual([
+      "gemini-test",
+      "gemini-test",
+      "gemini-3.5-flash",
+    ]);
+  });
+
+  it("advances for a retired-model 404 but not an unrelated 404", async () => {
+    generateContent
+      .mockRejectedValueOnce(transient(404, undefined, "Model gemini-test is no longer available"))
+      .mockResolvedValueOnce({ text: "recovered" });
+
+    await expect(openai.chat.completions.create(params)).resolves.toMatchObject({
+      choices: [{ message: { content: "recovered" } }],
+      model: "gemini-3.5-flash",
+    });
+    expect(generateContent.mock.calls.map(([request]) => request.model)).toEqual([
+      "gemini-test",
+      "gemini-3.5-flash",
+    ]);
+
+    resetGeminiResilienceForTests();
+    generateContent.mockReset();
+    generateContent.mockRejectedValue(transient(404, undefined, "Endpoint not found"));
+    await expect(openai.chat.completions.create(params))
+      .rejects.toBeInstanceOf(GeminiProviderUnavailableError);
+    expect(generateContent).toHaveBeenCalledTimes(1);
+  });
+
+  it("advances to a fallback after an empty successful response", async () => {
+    generateContent
+      .mockResolvedValueOnce({ text: "  " })
+      .mockResolvedValueOnce({ text: "recovered" });
+
+    await expect(openai.chat.completions.create(params)).resolves.toEqual({
+      choices: [{ message: { content: "recovered" } }],
+      model: "gemini-3.5-flash",
+    });
+    expect(generateContent.mock.calls.map(([request]) => request.model)).toEqual([
+      "gemini-test",
+      "gemini-3.5-flash",
+    ]);
+  });
+
+  it("does not advance the model chain after a safety block or deterministic 4xx", async () => {
+    generateContent.mockResolvedValueOnce({
+      text: "",
+      candidates: [{ finishReason: "SAFETY" }],
+    });
+
+    await expect(openai.chat.completions.create(params)).resolves.toEqual({
+      choices: [{ message: { content: null } }],
+    });
+    expect(generateContent).toHaveBeenCalledTimes(1);
+
+    resetGeminiResilienceForTests();
+    generateContent.mockReset();
+    generateContent.mockRejectedValue(transient(400));
+    await expect(openai.chat.completions.create(params))
+      .rejects.toBeInstanceOf(GeminiProviderUnavailableError);
+    expect(generateContent).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not advance the model chain after caller cancellation", async () => {
+    const controller = new AbortController();
+    generateContent.mockImplementation(() => {
+      controller.abort();
+      return Promise.reject(transient(503));
+    });
+
+    await expect(
+      openai.chat.completions.create(params, { signal: controller.signal }),
+    ).rejects.toThrow(/cancelled/);
+    expect(generateContent).toHaveBeenCalledTimes(1);
+    expect(generateContent.mock.calls[0]?.[0].model).toBe("gemini-test");
+  });
+
+  it("falls back on stream setup failure but never after a chunk is emitted", async () => {
+    vi.useFakeTimers();
+    generateContentStream
+      .mockRejectedValueOnce(transient(503))
+      .mockRejectedValueOnce(transient(503))
+      .mockResolvedValueOnce({
+        async *[Symbol.asyncIterator]() {
+          yield { text: "first" };
+        },
+      });
+
+    const request = openai.chat.completions.create({ ...params, stream: true });
+    await vi.advanceTimersByTimeAsync(250);
+    const stream = await request;
+    const iterator = stream[Symbol.asyncIterator]();
+    await expect(iterator.next()).resolves.toMatchObject({
+      done: false,
+      value: { choices: [{ delta: { content: "first" } }] },
+    });
+    expect(generateContentStream.mock.calls.map(([request]) => request.model)).toEqual([
+      "gemini-test",
+      "gemini-test",
+      "gemini-3.5-flash",
+    ]);
+  });
+
+  it("falls back on a pre-output stream failure", async () => {
+    generateContentStream
+      .mockResolvedValueOnce({
+        async *[Symbol.asyncIterator]() {
+          throw transient(503);
+        },
+      })
+      .mockResolvedValueOnce({
+        async *[Symbol.asyncIterator]() {
+          yield { text: "recovered" };
+        },
+      });
+
+    const stream = await openai.chat.completions.create({ ...params, stream: true });
+    const iterator = stream[Symbol.asyncIterator]();
+    await expect(iterator.next()).resolves.toMatchObject({
+      done: false,
+      value: { choices: [{ delta: { content: "recovered" } }] },
+    });
+    expect(generateContentStream.mock.calls.map(([request]) => request.model)).toEqual([
+      "gemini-test",
+      "gemini-3.5-flash",
+    ]);
+  });
+
   it("opens after repeated transient failures and permits only one half-open probe", async () => {
     vi.useFakeTimers();
     generateContent.mockRejectedValue(transient());
@@ -277,12 +461,12 @@ describe("Gemini adapter resilience", () => {
     for (let call = 0; call < 3; call += 1) {
       const request = openai.chat.completions.create(params);
       const rejected = expect(request).rejects.toBeInstanceOf(GeminiProviderUnavailableError);
-      await vi.advanceTimersByTimeAsync(250);
+      await vi.advanceTimersByTimeAsync(750);
       await rejected;
     }
     await expect(openai.chat.completions.create(params))
       .rejects.toBeInstanceOf(GeminiProviderUnavailableError);
-    expect(generateContent).toHaveBeenCalledTimes(6);
+    expect(generateContent).toHaveBeenCalledTimes(18);
 
     await vi.advanceTimersByTimeAsync(30_000);
     let resolveProbe!: (value: { text: string }) => void;

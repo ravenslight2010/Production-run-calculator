@@ -34,7 +34,13 @@ EOF
 export const SPEC_PARSE_VERSION = "10";
 EOF
   cat > "${repo}/lib/integrations-openai-ai-server/src/models.ts" <<'EOF'
-export const AI_MODELS = ["original-model"];
+export const AI_MODELS = {
+  full: "original-model",
+  cheap: "original-model",
+} as const;
+export function pickModel(kind = "full") {
+  return AI_MODELS[kind];
+}
 EOF
   cat > "${repo}/lib/spec-import/src/index.ts" <<'EOF'
 export type ParsedRecipe = { name: string };
@@ -123,6 +129,38 @@ EOF
   echo "PASS: accepts a sanitizer/type change with a SPEC_PARSE_VERSION bump"
 }
 
+test_rejects_primary_model_change_without_version_bump() {
+  local repo="${TEST_ROOT}/model-without-bump"
+  make_base_repo "${repo}"
+  cat > "${repo}/lib/integrations-openai-ai-server/src/models.ts" <<'EOF'
+export const AI_MODELS = {
+  full: "replacement-model",
+  cheap: "original-model",
+} as const;
+export function pickModel(kind = "full") {
+  return AI_MODELS[kind];
+}
+EOF
+  git -C "${repo}" add .
+  git -C "${repo}" commit -q -m "change primary model without version bump"
+
+  run_guard "${repo}" 1
+  echo "PASS: rejects a primary model change without a SPEC_PARSE_VERSION bump"
+}
+
+test_accepts_fallback_only_model_change_without_version_bump() {
+  local repo="${TEST_ROOT}/fallback-without-bump"
+  make_base_repo "${repo}"
+  cat >> "${repo}/lib/integrations-openai-ai-server/src/models.ts" <<'EOF'
+export const MODEL_FALLBACKS = ["fallback-model"];
+EOF
+  git -C "${repo}" add .
+  git -C "${repo}" commit -q -m "add fallback model without changing primary identity"
+
+  run_guard "${repo}" 0
+  echo "PASS: accepts fallback-only changes without invalidating saved parse identity"
+}
+
 test_shared_version() {
   local repo="${TEST_ROOT}/shared-$1"
   local expected_status="$1"
@@ -159,6 +197,8 @@ test_rejects_prompt_change_without_version_bump
 test_accepts_prompt_change_with_version_bump
 test_rejects_sanitizer_change_without_version_bump
 test_accepts_sanitizer_change_with_version_bump
+test_rejects_primary_model_change_without_version_bump
+test_accepts_fallback_only_model_change_without_version_bump
 test_shared_version 1 10
 test_shared_version 0 11
 test_rejects_unreadable_target_version

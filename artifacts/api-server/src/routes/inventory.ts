@@ -1350,13 +1350,14 @@ async function findExpectedConsumptionForRun(
   tx?: InventoryExecutor,
 ): Promise<Map<string, number> | null> {
   const executor = tx ?? db;
+  const initialConsumptionOptions = { treatZeroActualCasesAsPlanned: true } as const;
   const rows = await executor
     .select({ date: dailySyncTable.date, data: dailySyncTable.data })
     .from(dailySyncTable)
     .where(eq(dailySyncTable.scope, scope));
   for (const row of rows) {
     let source = row.data;
-    if (tx && expectedConsumptionFromSnapshot(source, runId)) {
+    if (tx && expectedConsumptionFromSnapshot(source, runId, initialConsumptionOptions)) {
       const [locked] = await tx.select({ data: dailySyncTable.data })
         .from(dailySyncTable)
         .where(and(
@@ -1366,7 +1367,11 @@ async function findExpectedConsumptionForRun(
         .for("update");
       source = locked?.data ?? null;
     }
-    const expected = expectedConsumptionFromSnapshot(source, runId);
+    const expected = expectedConsumptionFromSnapshot(
+      source,
+      runId,
+      initialConsumptionOptions,
+    );
     if (expected) return expected;
   }
   return null;
@@ -1464,6 +1469,7 @@ type RunConsumptionSnapshot = {
 function expectedConsumptionFromSnapshot(
   snapshot: unknown,
   runId: string,
+  options: { treatZeroActualCasesAsPlanned?: boolean } = {},
 ): Map<string, number> | null {
   if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return null;
   const data = snapshot as RunConsumptionSnapshot;
@@ -1485,9 +1491,12 @@ function expectedConsumptionFromSnapshot(
     actualCases != null &&
     Number.isFinite(actualCases) &&
     actualCases >= 0 &&
+    !(options.treatZeroActualCasesAsPlanned && actualCases === 0) &&
     casesNeeded > 0 &&
     actualCases !== casesNeeded
   ) {
+    // Initial claims pass the option above to preserve plan at zero. Saved-run
+    // corrections leave it unset so zero is a real corrected target.
     const scale = actualCases / casesNeeded;
     return new Map(lines.map((line) => [
       line.itemKey,
