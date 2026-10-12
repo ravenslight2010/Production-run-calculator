@@ -86,8 +86,9 @@ paths:
         themselves make the core API unready. The AI signal reports credential
         configuration only; it does not probe the remote provider.
         Scheduled-evaluation diagnostics report sample availability separately
-        from the last measured queue state and include a bounded duplicate-bucket
-        inventory with queue-state counts and review guidance.
+        from the last measured queue state, report the exact duplicate-bucket
+        group count, and include a bounded inventory with queue-state counts and
+        review guidance.
       responses:
         "200":
           description: Core API is ready; optional AI or background work may be degraded.

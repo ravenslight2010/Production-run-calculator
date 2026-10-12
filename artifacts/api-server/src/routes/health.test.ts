@@ -292,8 +292,8 @@ describe("GET /healthz background operation diagnostics", () => {
       queued: 4,
       running: 1,
       terminalLastWindow: { succeeded: 3, failed: 1, cancelled: 0 },
-      duplicateTimeBucketGroups: 0,
-      duplicateGroupsTruncated: false,
+      duplicateTimeBucketGroups: 101,
+      duplicateGroupsTruncated: true,
       duplicateBucketInventory: [{
         bucketFingerprint: "a".repeat(24),
         rowCount: 2,
@@ -306,7 +306,7 @@ describe("GET /healthz background operation diagnostics", () => {
         runningLeaseExpiredExhausted: 0,
         reviewClass: "preserve_runnable_or_leased",
       }],
-      duplicateBucketInventoryTruncated: false,
+      duplicateBucketInventoryTruncated: true,
       duplicateBucketReviewRules: [
         "Preserve queued jobs with attempts remaining and running jobs with a valid lease.",
       ],
@@ -330,6 +330,9 @@ describe("GET /healthz background operation diagnostics", () => {
       status: "warning",
       queued: 4,
       running: 1,
+      duplicateTimeBucketGroups: 101,
+      duplicateGroupsTruncated: true,
+      duplicateBucketInventoryTruncated: true,
       duplicateBucketInventory: [{
         bucketFingerprint: "a".repeat(24),
         rowCount: 2,

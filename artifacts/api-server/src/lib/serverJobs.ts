@@ -277,6 +277,7 @@ export async function readScheduledEvaluationQueueSnapshot(
   const duplicateGroups = await db.select({
     scope: serverJobsTable.scope,
     bucket,
+    totalDuplicateGroups: sql<number>`count(*) over()::int`,
     rowCount: sql<number>`count(*)::int`,
     queued: sql<number>`count(*) filter (where ${serverJobsTable.status} = 'queued')::int`,
     running: sql<number>`count(*) filter (where ${serverJobsTable.status} = 'running')::int`,
@@ -359,10 +360,12 @@ export async function readScheduledEvaluationQueueSnapshot(
       failed: nonNegativeCount(aggregate?.failed ?? 0),
       cancelled: nonNegativeCount(aggregate?.cancelled ?? 0),
     },
-    duplicateTimeBucketGroups: Math.min(duplicateGroups.length, SCHEDULED_EVALUATION_MAX_DUPLICATE_GROUPS),
-    duplicateGroupsTruncated: duplicateGroups.length > SCHEDULED_EVALUATION_MAX_DUPLICATE_GROUPS,
+    duplicateTimeBucketGroups: nonNegativeCount(duplicateGroups[0]?.totalDuplicateGroups ?? 0),
+    duplicateGroupsTruncated:
+      (duplicateGroups[0]?.totalDuplicateGroups ?? 0) > SCHEDULED_EVALUATION_MAX_DUPLICATE_GROUPS,
     duplicateBucketInventory,
-    duplicateBucketInventoryTruncated: duplicateGroups.length > SCHEDULED_EVALUATION_MAX_DUPLICATE_GROUPS,
+    duplicateBucketInventoryTruncated:
+      (duplicateGroups[0]?.totalDuplicateGroups ?? 0) > SCHEDULED_EVALUATION_MAX_DUPLICATE_GROUPS,
   };
 }
 

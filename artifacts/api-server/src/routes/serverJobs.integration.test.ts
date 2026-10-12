@@ -657,10 +657,18 @@ describe("server job route idempotency", () => {
     expect((await db.select({ value: count() }).from(auditLogsTable))[0]?.value).toBe(auditCountBefore);
   });
 
-  it("bounds the duplicate inventory and reports truncation", async () => {
+  it.each([
+    { groupCount: 99, inventoryCount: 99, truncated: false },
+    { groupCount: 100, inventoryCount: 100, truncated: false },
+    { groupCount: 101, inventoryCount: 100, truncated: true },
+  ])("reports $groupCount duplicate groups and bounds detailed inventory", async ({
+    groupCount,
+    inventoryCount,
+    truncated,
+  }) => {
     const now = Date.now();
     const expiresAt = new Date(now + 60 * 60_000);
-    const rows = Array.from({ length: 101 }, (_, index) => {
+    const rows = Array.from({ length: groupCount }, (_, index) => {
       const bucketStart = Date.parse("2030-04-03T12:00:00.000Z") + index * 60_000;
       return ["a", "b"].map((suffix) => ({
         scope: "live",
@@ -675,9 +683,9 @@ describe("server job route idempotency", () => {
 
     const inventory = await readScheduledEvaluationQueueSnapshot(now);
 
-    expect(inventory.duplicateTimeBucketGroups).toBe(100);
-    expect(inventory.duplicateGroupsTruncated).toBe(true);
-    expect(inventory.duplicateBucketInventory).toHaveLength(100);
-    expect(inventory.duplicateBucketInventoryTruncated).toBe(true);
+    expect(inventory.duplicateTimeBucketGroups).toBe(groupCount);
+    expect(inventory.duplicateGroupsTruncated).toBe(truncated);
+    expect(inventory.duplicateBucketInventory).toHaveLength(inventoryCount);
+    expect(inventory.duplicateBucketInventoryTruncated).toBe(truncated);
   });
 });

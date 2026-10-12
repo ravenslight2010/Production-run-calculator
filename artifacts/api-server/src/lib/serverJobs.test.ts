@@ -125,17 +125,19 @@ describe("scheduled evaluation queue monitoring", () => {
     });
   });
 
-  it("retains high backlog counts and marks the bounded duplicate-group sample", () => {
+  it("retains exact duplicate-group totals above the bounded inventory limit", () => {
     const monitor = createScheduledEvaluationQueueMonitor();
-    const sample = queueSample(50_000, 100);
+    const sample = queueSample(50_000, 101);
     sample.duplicateGroupsTruncated = true;
+    sample.duplicateBucketInventoryTruncated = true;
 
     const diagnostics = monitor.observe(sample, 0).diagnostics;
 
     expect(diagnostics).toMatchObject({
       queued: 50_000,
-      duplicateTimeBucketGroups: 100,
+      duplicateTimeBucketGroups: 101,
       duplicateGroupsTruncated: true,
+      duplicateBucketInventoryTruncated: true,
       sampleAvailability: "available",
     });
   });
