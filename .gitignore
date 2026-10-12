@@ -63,4 +63,5 @@ Thumbs.db
 !.local/custom_skills/
 !.local/custom_skills/**
 .local/custom_skills/**/.fingerprint
+.local/custom_skills/review-before-shipping/
 .local/test-evidence/
