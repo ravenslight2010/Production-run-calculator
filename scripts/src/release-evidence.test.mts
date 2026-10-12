@@ -11,6 +11,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { captureReleaseIdentity } from "./release-source-identity.mjs";
 import {
   discoverRetainedEvaluationPaths as discoverRoutineRetainedEvaluationPaths,
@@ -2050,9 +2051,13 @@ async function run(): Promise<void> {
       "utf8",
     ),
   ) as { include?: string[] };
-  assert.match(
-    apiPackage.scripts?.["typecheck:routes"] ?? "",
-    /^node\s+\.\.\/\.\.\/node_modules\/typescript\/bin\/tsc\s+-p\s+tsconfig\.routes\.json\s+--noEmit$/u,
+  const routeTypecheckCommand = (
+    apiPackage.scripts?.["typecheck:routes"] ?? ""
+  ).match(
+    /^node\s+(\.\.\/\.\.\/node_modules\/typescript\/bin\/tsc)\s+-p\s+tsconfig\.routes\.json\s+--noEmit$/u,
+  );
+  assert.ok(
+    routeTypecheckCommand,
     "the API route typecheck must run TypeScript on its route project without emitting",
   );
   assert.ok(
@@ -2064,6 +2069,75 @@ async function run(): Promise<void> {
     /(?:^|&&)\s*pnpm run typecheck:routes(?:\s|$)/u,
     "the API package typecheck must include the focused route compiler check",
   );
+  const apiServerRoot = fileURLToPath(
+    new URL("../../artifacts/api-server/", import.meta.url),
+  );
+  const routeFixtureRoot = await mkdtemp(
+    join(apiServerRoot, ".release-route-typecheck-"),
+  );
+  try {
+    const routeFixtureSource = join(
+      routeFixtureRoot,
+      "deliberate-type-error.ts",
+    );
+    const routeFixtureTsconfig = join(
+      routeFixtureRoot,
+      "tsconfig.routes.json",
+    );
+    await writeFile(
+      routeFixtureSource,
+      "export const deliberateRouteTypeError: string = 42;\n",
+      { flag: "wx" },
+    );
+    await writeFile(
+      routeFixtureTsconfig,
+      `${JSON.stringify(
+        {
+          extends: join(apiServerRoot, "tsconfig.routes.json"),
+          compilerOptions: { rootDir: routeFixtureRoot },
+          include: [routeFixtureSource],
+        },
+        null,
+        2,
+      )}\n`,
+      { flag: "wx" },
+    );
+    const routeTypecheckProbe = spawnSync(
+      process.execPath,
+      [
+        routeTypecheckCommand[1],
+        "-p",
+        routeFixtureTsconfig,
+        "--noEmit",
+      ],
+      {
+        cwd: apiServerRoot,
+        encoding: "utf8",
+        timeout: 120_000,
+      },
+    );
+    const routeTypecheckOutput = [
+      routeTypecheckProbe.stdout,
+      routeTypecheckProbe.stderr,
+    ].join("\n");
+    assert.equal(
+      routeTypecheckProbe.error,
+      undefined,
+      "the isolated API route typecheck must start successfully",
+    );
+    assert.notEqual(
+      routeTypecheckProbe.status,
+      0,
+      "the API route typecheck must reject a deliberate route type error",
+    );
+    assert.match(
+      routeTypecheckOutput,
+      /deliberate-type-error\.ts.*error TS2322/u,
+      "the API route typecheck must report the fixture's deliberate assignment error",
+    );
+  } finally {
+    await rm(routeFixtureRoot, { recursive: true, force: true });
+  }
   assert.deepEqual(
     apiUnitReleaseStep?.env,
     {
