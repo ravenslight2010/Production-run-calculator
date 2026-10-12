@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  clearScheduledEvaluationQueueMonitorForTests,
   getScheduledEvaluationQueueDiagnostics,
   getServerJobDefinition,
 } from "./serverJobs";
@@ -98,6 +99,27 @@ describe("server web-push alert candidates", () => {
     expect(logger.warn).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(vi.mocked(logger.warn).mock.calls)).toMatch(/scheduled_evaluation_queue_monitor/);
     expect(JSON.stringify(vi.mocked(logger.warn).mock.calls)).not.toMatch(/scope|idempotency|customer-visible-label/i);
+  });
+
+  it("marks queue diagnostics unavailable when its scheduled sample fails", async () => {
+    vi.useFakeTimers();
+    clearScheduledEvaluationQueueMonitorForTests();
+    const sampleQueue = vi.fn().mockRejectedValue(new Error("database unavailable"));
+    const enqueue = vi.fn(async () => ({ examined: 0, enqueued: 0 }));
+    const scheduler = startWebPushAlertScheduler({ enqueue, sampleQueue });
+
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sampleQueue).toHaveBeenCalledTimes(1);
+      expect(getScheduledEvaluationQueueDiagnostics()).toMatchObject({
+        sampleAvailability: "unavailable",
+        sampleCount: 0,
+      });
+    } finally {
+      scheduler.stop();
+      clearScheduledEvaluationQueueMonitorForTests();
+      vi.useRealTimers();
+    }
   });
 
   it("does not emit live timing alerts while paused or ended", () => {

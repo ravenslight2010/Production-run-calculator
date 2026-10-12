@@ -288,6 +288,7 @@ describe("GET /healthz background operation diagnostics", () => {
   it("reports a scheduled-evaluation warning without blocking core readiness", async () => {
     mocks.scheduledQueueDiagnostics.mockReturnValue({
       status: "warning",
+      sampleAvailability: "available",
       queued: 4,
       running: 1,
       terminalLastWindow: { succeeded: 3, failed: 1, cancelled: 0 },
@@ -317,6 +318,40 @@ describe("GET /healthz background operation diagnostics", () => {
     });
     expect(JSON.stringify(body.diagnostics.scheduledEvaluationQueue))
       .not.toMatch(/scope|idempotency|input|result/i);
+  });
+
+  it("distinguishes an unavailable queue sample from a measured backlog warning", async () => {
+    mocks.scheduledQueueDiagnostics.mockReturnValue({
+      status: "ok",
+      sampleAvailability: "unavailable",
+      queued: 4,
+      running: 1,
+      terminalLastWindow: { succeeded: 3, failed: 1, cancelled: 0 },
+      duplicateTimeBucketGroups: 0,
+      duplicateGroupsTruncated: false,
+      warningCodes: [],
+      sampleCount: 6,
+      windowMs: 300_000,
+      lastSampleAt: "2026-10-08T12:00:00.000Z",
+    });
+
+    const response = await fetch(`${baseUrl}/readyz`);
+    const body = await response.json() as {
+      checks: Record<string, string>;
+      diagnostics: { scheduledEvaluationQueue: Record<string, unknown> };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.checks.backgroundWorkers).toBe("warning");
+    expect(body.diagnostics.scheduledEvaluationQueue).toMatchObject({
+      status: "ok",
+      sampleAvailability: "unavailable",
+      queued: 4,
+      warningCodes: [],
+    });
+    expect(mocks.info.mock.calls.at(-1)?.[0]).toMatchObject({
+      checks: { backgroundWorkers: "warning" },
+    });
   });
 });
 

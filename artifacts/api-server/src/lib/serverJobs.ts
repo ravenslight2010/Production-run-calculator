@@ -61,6 +61,8 @@ const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_INPUT_BYTES = 512 * 1024;
 const MAX_RESULT_BYTES = 512 * 1024;
 const DEFAULT_EXECUTION_TIMEOUT_MS = 5 * 60_000;
+
+export const SCHEDULED_EVALUATION_CANONICAL_ACTOR = "system:scheduled-alert-scheduler";
 export const SCHEDULED_EVALUATION_MONITOR_SAMPLE_INTERVAL_MS = 60_000;
 export const SCHEDULED_EVALUATION_MONITOR_WINDOW_MS = 5 * 60_000;
 const SCHEDULED_EVALUATION_MAX_DUPLICATE_GROUPS = 100;
@@ -86,6 +88,7 @@ export type ScheduledEvaluationQueueSnapshot = {
 
 export type ScheduledEvaluationQueueDiagnostics = ScheduledEvaluationQueueSnapshot & {
   status: "pending" | "ok" | "warning";
+  sampleAvailability: "pending" | "available" | "unavailable";
   warningCodes: ScheduledEvaluationQueueWarningCode[];
   sampleCount: number;
   windowMs: number;
@@ -120,6 +123,7 @@ function nonNegativeCount(value: number): number {
 export function createScheduledEvaluationQueueMonitor() {
   let samples: ScheduledEvaluationQueueSample[] = [];
   let warningCodes = new Set<ScheduledEvaluationQueueWarningCode>();
+  let sampleAvailability: ScheduledEvaluationQueueDiagnostics["sampleAvailability"] = "pending";
 
   const diagnostics = (): ScheduledEvaluationQueueDiagnostics => {
     const latest = samples.at(-1);
@@ -135,6 +139,7 @@ export function createScheduledEvaluationQueueMonitor() {
         }
         : {}),
       status: samples.length === 0 ? "pending" : warningCodes.size ? "warning" : "ok",
+      sampleAvailability,
       warningCodes: [...warningCodes].sort(),
       sampleCount: samples.length,
       windowMs: SCHEDULED_EVALUATION_MONITOR_WINDOW_MS,
@@ -152,6 +157,7 @@ export function createScheduledEvaluationQueueMonitor() {
         samples = [];
         warningCodes = new Set();
       }
+      sampleAvailability = "available";
 
       samples.push({
         at: nowMs,
@@ -186,10 +192,14 @@ export function createScheduledEvaluationQueueMonitor() {
       warningCodes = next;
       return { started, cleared, diagnostics: diagnostics() };
     },
+    markUnavailable() {
+      sampleAvailability = "unavailable";
+    },
     getDiagnostics: diagnostics,
     clearForTests() {
       samples = [];
       warningCodes = new Set();
+      sampleAvailability = "pending";
     },
   };
 }
@@ -258,6 +268,9 @@ export function clearScheduledEvaluationQueueMonitorForTests(): void {
   scheduledEvaluationQueueMonitor.clearForTests();
 }
 
+export function markScheduledEvaluationQueueSampleUnavailable(): void {
+  scheduledEvaluationQueueMonitor.markUnavailable();
+}
 function safeMessage(value: unknown): string {
   return String(value instanceof Error ? value.message : value).replace(/[\r\n]/g, " ").slice(0, 500);
 }
@@ -284,24 +297,35 @@ export async function enqueueServerJob(args: {
   const definition = getServerJobDefinition(args.type);
   if (!definition) throw new Error("Unknown server job type");
   assertBoundedJobInput(args.input);
-  const existing = await db.select().from(serverJobsTable).where(and(
-    eq(serverJobsTable.scope, args.scope),
-    eq(serverJobsTable.actorId, args.actorId),
-    eq(serverJobsTable.idempotencyKey, args.idempotencyKey),
-  )).limit(1);
+  // Scheduled evaluations are one workload per scope/time bucket, regardless
+  // of which scheduler process submitted it. Legacy actor-specific rows remain
+  // readable and are returned as-is; all new contenders share the existing
+  // unique index's canonical actor so concurrent inserts converge durably.
+  const actorId = args.type === "scheduled-evaluation" ? SCHEDULED_EVALUATION_CANONICAL_ACTOR : args.actorId;
+  const identity = args.type === "scheduled-evaluation"
+    ? and(
+      eq(serverJobsTable.scope, args.scope),
+      eq(serverJobsTable.type, args.type),
+      eq(serverJobsTable.idempotencyKey, args.idempotencyKey),
+    )
+    : and(
+      eq(serverJobsTable.scope, args.scope),
+      eq(serverJobsTable.actorId, actorId),
+      eq(serverJobsTable.idempotencyKey, args.idempotencyKey),
+    );
+  const existing = await db.select().from(serverJobsTable).where(identity)
+    .orderBy(asc(serverJobsTable.createdAt)).limit(1);
   if (existing[0]) return { job: existing[0], created: false };
   const now = new Date();
   const inserted = await db.insert(serverJobsTable).values({
-    scope: args.scope, actorId: args.actorId, type: args.type, idempotencyKey: args.idempotencyKey,
+    scope: args.scope, actorId, type: args.type, idempotencyKey: args.idempotencyKey,
     input: args.input, snapshotId: args.snapshotId ?? null, maxAttempts: definition.maxAttempts ?? 3,
     expiresAt: new Date(now.getTime() + RETENTION_MS),
   }).onConflictDoNothing().returning();
   if (inserted[0]) return { job: inserted[0], created: true };
   // The unique index resolves concurrent retries without creating duplicate work.
-  const winner = await db.select().from(serverJobsTable).where(and(
-    eq(serverJobsTable.scope, args.scope), eq(serverJobsTable.actorId, args.actorId),
-    eq(serverJobsTable.idempotencyKey, args.idempotencyKey),
-  )).limit(1);
+  const winner = await db.select().from(serverJobsTable).where(identity)
+    .orderBy(asc(serverJobsTable.createdAt)).limit(1);
   if (!winner[0]) throw new Error("Unable to create idempotent server job");
   return { job: winner[0], created: false };
 }

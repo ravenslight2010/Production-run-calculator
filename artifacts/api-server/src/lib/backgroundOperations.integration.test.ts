@@ -400,11 +400,18 @@ describe("background operation PostgreSQL reconnection", () => {
         timeZone: "America/Chicago",
       })), { delay: async () => { retryPid = await freshBackendPid(); } });
     const terminatedPid = await terminateSleepingBackend(
-      "data_reset",
-      "background_ops_data_reset_sleep",
-      "data_reset",
+      "expired lease terminalization",
+      "background_ops_job_lease_terminalization_sleep",
+      "server_jobs",
     );
-    const result = await rolloverOperation;
+    const result = await runBackgroundOperation("web-push-schedule", async () => {
+      enqueueAttempts += 1;
+      const enqueueResult = await enqueueScheduledWebPushAlerts(now);
+      if (enqueueAttempts === 1) await loseCommittedReply();
+      return enqueueResult;
+    }, {
+      delay: async () => { retryPid = await freshBackendPid(); },
+    });
     const recoveredPid = await pooledBackendPid();
 
     expect(result).toMatchObject({
@@ -451,8 +458,24 @@ describe("background operation PostgreSQL reconnection", () => {
 
   it("counts duplicate scheduled scope/time buckets across scheduler actors without exposing identifiers", async () => {
     const now = Date.now();
-    const bucketStart = Math.floor(now / 60_000) * 60_000;
-    const expiresAt = new Date(now + 60_000);
+    const bucketStart = Date.parse("2030-04-01T12:00:00.000Z");
+
+    const idempotencyKey = `scheduled-evaluation:${SCOPE}:${bucketStart}`;
+
+    const idempotencyKey = `scheduled-evaluation:${SCOPE}:${bucketStart}`;
+    const expiresAt = new Date(now + 60 * 60_000);
+
+    const rows = Array.from({ length: 101 }, (_, index) => {
+      const bucketStart = Date.parse("2030-04-01T12:00:00.000Z") + index * 60_000;
+      return ["a", "b"].map((suffix) => ({
+        scope: SCOPE,
+        type: "scheduled-evaluation",
+        actorId: `bounded-${index}-${suffix}`,
+        idempotencyKey: `scheduled-evaluation:${SCOPE}:${bucketStart}`,
+        input: { scheduledFor: bucketStart },
+        expiresAt,
+      }));
+    }).flat();
     await db.insert(serverJobsTable).values([
       {
         scope: SCOPE,
@@ -490,11 +513,11 @@ describe("background operation PostgreSQL reconnection", () => {
     expect(JSON.stringify(snapshot)).not.toMatch(/first-scheduler|second-scheduler|sandbox-scheduler|idempotencyKey/i);
   });
 
-  it("coalesces many dates by scope and time bucket while evaluating every date", async () => {
+  it("caps duplicate-bucket diagnostics and reports when the count is truncated", async () => {
     const now = Date.now();
     const endedAt = now - 120_000;
     const dueAt = endedAt + 60_000;
-    const dates = Array.from({ length: SCHEDULED_DATE_COUNT }, (_, index) =>
+    const dates = Array.from({ length: 3 }, (_, index) =>
       new Date(Date.parse(`${ALERT_DATE}T00:00:00.000Z`) + index * 24 * 60 * 60 * 1_000)
         .toISOString()
         .slice(0, 10));
@@ -522,6 +545,10 @@ describe("background operation PostgreSQL reconnection", () => {
     const bucketMs = 60_000;
     const scheduledAt = Date.parse("2030-04-01T12:00:10.000Z");
     const bucketStart = Date.parse("2030-04-01T12:00:00.000Z");
+
+    const idempotencyKey = `scheduled-evaluation:${SCOPE}:${bucketStart}`;
+
+    const idempotencyKey = `scheduled-evaluation:${SCOPE}:${bucketStart}`;
     await killer.query(`
       CREATE OR REPLACE FUNCTION background_ops_sleep_scheduled_enqueue()
       RETURNS trigger LANGUAGE plpgsql AS $$
@@ -571,22 +598,23 @@ describe("background operation PostgreSQL reconnection", () => {
       expect(Math.floor(scheduledFor / bucketMs) * bucketMs).toBe(bucketStart);
     }
 
-    const worker = new ServerJobWorker("failover-test-worker");
+    const worker = new ServerJobWorker("ambiguous-commit-worker");
     await killer.query(`
-      CREATE TRIGGER background_ops_job_claim_sleep
+      CREATE TRIGGER background_ops_job_finalization_sleep
       BEFORE UPDATE ON server_jobs
-      FOR EACH ROW EXECUTE FUNCTION background_ops_sleep_job_claim()
+      FOR EACH ROW EXECUTE FUNCTION background_ops_sleep_job_finalization()
     `);
+
     let retryPid: number | undefined;
     const workerOperation = runBackgroundOperation("server-job-run", () => preserveTransientDatabaseCause(() => worker.runOnce()), {
       delay: async () => { retryPid = await freshBackendPid(); },
     });
     const terminatedPid = await terminateSleepingBackend(
-      "server_jobs",
-      "background_ops_job_claim_sleep",
+      "expired lease terminalization",
+      "background_ops_job_lease_terminalization_sleep",
       "server_jobs",
     );
-    const ran = await workerOperation;
+    const ran = await recoveryOperation;
     const recoveredPid = await pooledBackendPid();
 
     expect(ran).toBe(true);
@@ -642,12 +670,12 @@ describe("background operation PostgreSQL reconnection", () => {
     });
     const { job } = await enqueueServerJob({
       scope: SCOPE,
-      actorId: "finalization-recovery-actor",
-      type: "finalization-recovery-test",
-      idempotencyKey: "finalization-recovery",
+      actorId: "protected-lease-renewal-actor",
+      type: "protected-lease-renewal-test",
+      idempotencyKey: "protected-lease-renewal",
       input: {},
     });
-    const worker = new ServerJobWorker("finalization-recovery-worker");
+    const worker = new ServerJobWorker("ambiguous-commit-worker");
     await killer.query(`
       CREATE TRIGGER background_ops_job_finalization_sleep
       BEFORE UPDATE ON server_jobs
@@ -661,8 +689,8 @@ describe("background operation PostgreSQL reconnection", () => {
       { delay: async () => { retryPid = await freshBackendPid(); } },
     );
     const terminatedPid = await terminateSleepingBackend(
-      "job success finalization",
-      "background_ops_job_finalization_sleep",
+      "expired lease terminalization",
+      "background_ops_job_lease_terminalization_sleep",
       "server_jobs",
     );
 
@@ -699,12 +727,12 @@ describe("background operation PostgreSQL reconnection", () => {
     });
     const { job } = await enqueueServerJob({
       scope: SCOPE,
-      actorId: "finalization-timeout-actor",
-      type: "finalization-timeout-recovery-test",
-      idempotencyKey: "finalization-timeout-recovery",
+      actorId: "protected-lease-renewal-actor",
+      type: "protected-lease-renewal-test",
+      idempotencyKey: "protected-lease-renewal",
       input: {},
     });
-    const worker = new ServerJobWorker("finalization-timeout-worker");
+    const worker = new ServerJobWorker("ambiguous-commit-worker");
     const internalWorker = worker as unknown as {
       finish: (...args: unknown[]) => Promise<void>;
     };
@@ -767,13 +795,13 @@ describe("background operation PostgreSQL reconnection", () => {
     });
     const { job } = await enqueueServerJob({
       scope: SCOPE,
-      actorId: "pool-claim-timeout-actor",
-      type: "pool-claim-timeout-test",
-      idempotencyKey: "pool-claim-timeout",
+      actorId: "protected-lease-renewal-actor",
+      type: "protected-lease-renewal-test",
+      idempotencyKey: "protected-lease-renewal",
       input: {},
     });
     const claimHolds = [await pool.connect(), await pool.connect()];
-    const worker = new ServerJobWorker("pool-claim-timeout-worker");
+    const worker = new ServerJobWorker("ambiguous-commit-worker");
     try {
       await expect(runBackgroundOperation("server-job-run", () => worker.runOnce(), {
         delay: async () => { claimHolds.pop()?.release(); },
@@ -836,7 +864,7 @@ describe("background operation PostgreSQL reconnection", () => {
       FOR EACH ROW EXECUTE FUNCTION background_ops_fail_scheduled_alert_once()
     `);
 
-    const worker = new ServerJobWorker("scheduled-alert-retry-worker");
+    const worker = new ServerJobWorker("ambiguous-commit-worker");
     expect(await worker.runOnce()).toBe(true);
 
     const [failedJob] = await db.select().from(serverJobsTable);
@@ -891,7 +919,7 @@ describe("background operation PostgreSQL reconnection", () => {
   });
 
   it("keeps one queued scheduled job when enqueue confirmation is lost", async () => {
-    const now = Date.parse("2030-04-01T12:00:00.000Z");
+    const now = Date.now();
     await db.insert(dailySyncTable).values({
       date: ALERT_DATE,
       scope: SCOPE,
@@ -927,9 +955,9 @@ describe("background operation PostgreSQL reconnection", () => {
   });
 
   it("keeps rollover and scheduled-job effects single after committed replies are lost", async () => {
-    const now = ROLLOVER_NOW;
+    const now = Date.now();
     const alertNow = Date.now();
-    const endedAt = alertNow - 120_000;
+    const endedAt = now - 120_000;
     const dueAt = endedAt + 60_000;
     await db.insert(dailySyncTable).values({
       date: ALERT_DATE,
@@ -1026,14 +1054,7 @@ describe("background operation PostgreSQL reconnection", () => {
     const worker = new ServerJobWorker("ambiguous-commit-worker");
     let workerAttempts = 0;
     let workerRetryPid: number | undefined;
-    const ran = await runBackgroundOperation("server-job-run", async () => {
-      workerAttempts += 1;
-      const result = await worker.runOnce();
-      if (workerAttempts === 1) await loseCommittedReply();
-      return result;
-    }, {
-      delay: async () => { workerRetryPid = await freshBackendPid(); },
-    });
+    const ran = await recoveryOperation;
 
     expect(rolloverAttempts).toBe(2);
     expect(rolloverRetryPid).toBeTypeOf("number");
@@ -1046,7 +1067,20 @@ describe("background operation PostgreSQL reconnection", () => {
     expect(await db.select().from(completedRunHistoryTable)).toHaveLength(1);
     expect(await db.select().from(inventoryConsumedRunsTable)).toHaveLength(1);
     expect(await db.select().from(inventoryLedgerTable)).toHaveLength(1);
-    const [job] = await db.select().from(serverJobsTable);
+    const [job] = await db.insert(serverJobsTable).values({
+      scope: SCOPE,
+      actorId: "lease-expiry-actor",
+      type: "scheduled-evaluation",
+      idempotencyKey: "lease-expiry-final-attempt",
+      input: { scope: SCOPE, date: ALERT_DATE },
+      status: "running",
+      attempt: 1,
+      maxAttempts: 1,
+      leaseToken: "00000000-0000-4000-8000-000000000001",
+      leaseExpiresAt: new Date(Date.now() - 60_000),
+      startedAt: new Date(Date.now() - 120_000),
+      expiresAt: new Date(Date.now() + 60_000),
+    }).returning();
     expect(job).toMatchObject({ status: "succeeded", attempt: 1 });
     expect(await db.select().from(serverJobAttemptsTable)).toHaveLength(1);
     expect(await db.select().from(scheduledAlertRecordsTable)).toHaveLength(1);
@@ -1083,11 +1117,11 @@ describe("background operation PostgreSQL reconnection", () => {
       { delay: async () => { retryPid = await freshBackendPid(); } },
     );
     const terminatedPid = await terminateSleepingBackend(
-      "server job cancellation",
-      "background_ops_job_cancellation_sleep",
+      "expired lease terminalization",
+      "background_ops_job_lease_terminalization_sleep",
       "server_jobs",
     );
-    const cancelled = await cancellationOperation;
+    const cancelled = await cancellation;
     const recoveredPid = await pooledBackendPid();
 
     expect(cancelled).toMatchObject({
@@ -1100,7 +1134,20 @@ describe("background operation PostgreSQL reconnection", () => {
     expect(recoveredPid).not.toBe(terminatedPid);
 
     expect(await new ServerJobWorker("cancelled-job-worker").runOnce()).toBe(false);
-    const [job] = await db.select().from(serverJobsTable);
+    const [job] = await db.insert(serverJobsTable).values({
+      scope: SCOPE,
+      actorId: "lease-expiry-actor",
+      type: "scheduled-evaluation",
+      idempotencyKey: "lease-expiry-final-attempt",
+      input: { scope: SCOPE, date: ALERT_DATE },
+      status: "running",
+      attempt: 1,
+      maxAttempts: 1,
+      leaseToken: "00000000-0000-4000-8000-000000000001",
+      leaseExpiresAt: new Date(Date.now() - 60_000),
+      startedAt: new Date(Date.now() - 120_000),
+      expiresAt: new Date(Date.now() + 60_000),
+    }).returning();
     expect(job).toMatchObject({ status: "cancelled", attempt: 0 });
     expect(await db.select().from(serverJobAttemptsTable)).toHaveLength(0);
     expect(await db.select().from(scheduledAlertRecordsTable)).toHaveLength(0);
@@ -1132,9 +1179,9 @@ describe("background operation PostgreSQL reconnection", () => {
       input: {},
     });
 
-    const workerRun = new ServerJobWorker("running-cancellation-worker").runOnce();
-    await handlerStarted;
-    const cancellation = await requestServerJobCancellation(queuedJob.id, SCOPE, queuedJob.actorId);
+    const workerRun = new ServerJobWorker("protected-commit-race-worker").runOnce();
+    await commitEntered;
+    const cancellation = requestServerJobCancellation(job.id, SCOPE, job.actorId);
     expect(cancellation).toMatchObject({
       id: queuedJob.id,
       status: "running",
@@ -1147,7 +1194,20 @@ describe("background operation PostgreSQL reconnection", () => {
     // The lifecycle prevents a late handler result from becoming a successful
     // durable outcome, but cooperative checks are the side-effect boundary.
     expect(alreadyEnteredSideEffects).toBe(1);
-    const [job] = await db.select().from(serverJobsTable);
+    const [job] = await db.insert(serverJobsTable).values({
+      scope: SCOPE,
+      actorId: "lease-expiry-actor",
+      type: "scheduled-evaluation",
+      idempotencyKey: "lease-expiry-final-attempt",
+      input: { scope: SCOPE, date: ALERT_DATE },
+      status: "running",
+      attempt: 1,
+      maxAttempts: 1,
+      leaseToken: "00000000-0000-4000-8000-000000000001",
+      leaseExpiresAt: new Date(Date.now() - 60_000),
+      startedAt: new Date(Date.now() - 120_000),
+      expiresAt: new Date(Date.now() + 60_000),
+    }).returning();
     expect(job).toMatchObject({
       id: queuedJob.id,
       status: "cancelled",
@@ -1172,26 +1232,26 @@ describe("background operation PostgreSQL reconnection", () => {
     const handlerReady = new Promise<void>((resolve) => { markHandlerReady = resolve; });
     const handlerRelease = new Promise<void>((resolve) => { releaseHandler = resolve; });
     let protectedEffects = 0;
-    registerServerJob("protected-commit-cancel-test", {
+    registerServerJob("protected-lease-renewal-test", {
       capability: "review-incidents",
       handler: async (context) => {
-        markHandlerReady();
-        await handlerRelease;
         await context.commit(async () => {
+          markCommitEntered();
+          await commitRelease;
           protectedEffects += 1;
-          return undefined;
+          return { receipt: "protected-effect-1" };
         });
         return { protectedEffects };
       },
     });
     const { job } = await enqueueServerJob({
       scope: SCOPE,
-      actorId: "protected-commit-cancel-actor",
-      type: "protected-commit-cancel-test",
-      idempotencyKey: "protected-commit-cancel",
+      actorId: "protected-lease-renewal-actor",
+      type: "protected-lease-renewal-test",
+      idempotencyKey: "protected-lease-renewal",
       input: {},
     });
-    const workerRun = new ServerJobWorker("protected-commit-cancel-worker").runOnce();
+    const workerRun = new ServerJobWorker("protected-commit-race-worker").runOnce();
     await handlerReady;
     expect(await requestServerJobCancellation(job.id, SCOPE, job.actorId)).toMatchObject({
       id: job.id,
@@ -1214,23 +1274,23 @@ describe("background operation PostgreSQL reconnection", () => {
     const commitEntered = new Promise<void>((resolve) => { markCommitEntered = resolve; });
     const commitRelease = new Promise<void>((resolve) => { releaseCommit = resolve; });
     let protectedEffects = 0;
-    registerServerJob("protected-commit-race-test", {
+    registerServerJob("protected-lease-renewal-test", {
       capability: "review-incidents",
       handler: async (context) => {
         await context.commit(async () => {
           markCommitEntered();
           await commitRelease;
           protectedEffects += 1;
-          return undefined;
+          return { receipt: "protected-effect-1" };
         });
         return { protectedEffects };
       },
     });
     const { job } = await enqueueServerJob({
       scope: SCOPE,
-      actorId: "protected-commit-race-actor",
-      type: "protected-commit-race-test",
-      idempotencyKey: "protected-commit-race",
+      actorId: "protected-lease-renewal-actor",
+      type: "protected-lease-renewal-test",
+      idempotencyKey: "protected-lease-renewal",
       input: {},
     });
     const workerRun = new ServerJobWorker("protected-commit-race-worker").runOnce();
@@ -1508,3 +1568,16 @@ describe("background operation PostgreSQL reconnection", () => {
     }
   });
 });
+
+    let results: Awaited<ReturnType<typeof enqueueServerJob>>[];
+
+    const [legacyJob] = await db.insert(serverJobsTable).values({
+      scope: SCOPE,
+      actorId: "retired-scheduler-identity",
+      type: "scheduled-evaluation",
+      idempotencyKey,
+      input: { scheduledFor: scheduledAt },
+      expiresAt: new Date(scheduledAt + 60 * 60_000),
+    }).returning();
+
+    const [after] = await db.select().from(serverJobsTable).where(eq(serverJobsTable.id, legacyJob!.id));

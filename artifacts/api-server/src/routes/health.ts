@@ -89,10 +89,14 @@ async function readiness(req: Request, res: Response): Promise<void> {
     const backgroundOperationDiagnostics = await getBackgroundOperationDiagnostics();
     const scheduledEvaluationQueue = getScheduledEvaluationQueueDiagnostics();
     const backgroundOperationsWarning = backgroundOperationsDegraded(backgroundOperationDiagnostics);
-    checks.backgroundWorkers = backgroundOperationsWarning || scheduledEvaluationQueue.status === "warning"
+    const scheduledQueueUnavailable = scheduledEvaluationQueue.sampleAvailability === "unavailable";
+    checks.backgroundWorkers = backgroundOperationsWarning || scheduledQueueUnavailable ||
+      scheduledEvaluationQueue.status === "warning"
       ? {
         status: "warning",
-        detail: scheduledEvaluationQueue.status === "warning"
+        detail: scheduledQueueUnavailable
+          ? "scheduled_evaluation_queue_sample_unavailable"
+          : scheduledEvaluationQueue.status === "warning"
           ? "scheduled_evaluation_queue_warning"
           : "sustained_background_worker_failures",
       }

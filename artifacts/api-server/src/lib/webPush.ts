@@ -16,8 +16,10 @@ import { getUserCapabilities } from "./roles";
 import { computeAutoTrackElapsedMs } from "@workspace/live-calc";
 import {
   enqueueServerJob,
+  markScheduledEvaluationQueueSampleUnavailable,
   registerServerJob,
   sampleScheduledEvaluationQueue,
+  SCHEDULED_EVALUATION_CANONICAL_ACTOR,
   SCHEDULED_EVALUATION_MONITOR_SAMPLE_INTERVAL_MS,
   type ScheduledEvaluationQueueTransition,
 } from "./serverJobs";
@@ -26,7 +28,6 @@ export const WEB_PUSH_KINDS = ["fifteenMin", "batchDue", "warehouseStaging", "ru
 export type WebPushKind = (typeof WEB_PUSH_KINDS)[number];
 const RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 const MAX_ENDPOINT = 2048;
-const SCHEDULED_EVALUATION_ACTOR = "system:scheduled-alert-scheduler";
 const DEFAULT_ALERT_INTERVAL_MS = 60_000;
 
 export function vapidPublicKey(): string | null {
@@ -415,7 +416,7 @@ export async function enqueueScheduledWebPushAlerts(
     const scope = row.scope as Scope;
     const result = await enqueueServerJob({
       scope,
-      actorId: SCHEDULED_EVALUATION_ACTOR,
+      actorId: SCHEDULED_EVALUATION_CANONICAL_ACTOR,
       type: "scheduled-evaluation",
       idempotencyKey: scheduledEvaluationIdempotencyKey(scope, nowMs, bucketMs),
       input: { scheduledFor: nowMs },
@@ -478,6 +479,7 @@ function logScheduledEvaluationQueueTransitions(
     terminalLastWindow: diagnostics.terminalLastWindow,
     duplicateTimeBucketGroups: diagnostics.duplicateTimeBucketGroups,
     duplicateGroupsTruncated: diagnostics.duplicateGroupsTruncated,
+    sampleAvailability: diagnostics.sampleAvailability,
     sampleCount: diagnostics.sampleCount,
     windowMs: diagnostics.windowMs,
   };
@@ -528,6 +530,7 @@ export function startWebPushAlertScheduler(options: {
         logScheduledEvaluationQueueTransitions(transition);
       })
       .catch(() => {
+        markScheduledEvaluationQueueSampleUnavailable();
         if (!monitorUnavailable) {
           logger.warn({
             event: "scheduled_evaluation_queue_monitor",

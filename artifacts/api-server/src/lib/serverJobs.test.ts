@@ -97,4 +97,40 @@ describe("scheduled evaluation queue monitoring", () => {
     });
     expect(JSON.stringify(transition.diagnostics)).not.toMatch(/scope|idempotency|input|result/i);
   });
+
+  it("labels unavailable samples without treating missing data as queue recovery", () => {
+    const monitor = createScheduledEvaluationQueueMonitor();
+    monitor.observe(queueSample(5), 0);
+    monitor.markUnavailable();
+
+    expect(monitor.getDiagnostics()).toMatchObject({
+      status: "ok",
+      sampleAvailability: "unavailable",
+      queued: 5,
+      sampleCount: 1,
+    });
+
+    const recovered = monitor.observe(queueSample(3), SCHEDULED_EVALUATION_MONITOR_SAMPLE_INTERVAL_MS);
+    expect(recovered.diagnostics).toMatchObject({
+      status: "ok",
+      sampleAvailability: "available",
+      queued: 3,
+      sampleCount: 2,
+    });
+  });
+
+  it("retains high backlog counts and marks the bounded duplicate-group sample", () => {
+    const monitor = createScheduledEvaluationQueueMonitor();
+    const sample = queueSample(50_000, 100);
+    sample.duplicateGroupsTruncated = true;
+
+    const diagnostics = monitor.observe(sample, 0).diagnostics;
+
+    expect(diagnostics).toMatchObject({
+      queued: 50_000,
+      duplicateTimeBucketGroups: 100,
+      duplicateGroupsTruncated: true,
+      sampleAvailability: "available",
+    });
+  });
 });
