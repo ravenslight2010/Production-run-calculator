@@ -83,10 +83,8 @@ test("source handoffs accept different live build IDs when the full source ident
   });
   assert.equal(handoff.deploymentId, liveBuildId);
   assert(handoff.expectedSource);
-  assert.equal(
-    handoff.deployedRevision,
-    `source-sha256:${handoff.expectedSource.sourceFingerprintSha256}`,
-  );
+  assert.equal(handoff.deployedRevision, raw.deployedRevision);
+  assert.deepEqual(handoff.expectedSource, raw.expectedSource);
 });
 
 test("release reports bind the source and test-definition fingerprints separately", () => {

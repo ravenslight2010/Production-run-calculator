@@ -135,6 +135,8 @@ export const DEFAULT_HEAL_ID: string;
 export const DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS: string;
 export const APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID: string;
 export const APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256: string;
+export const APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_V2_ID: string;
+export const APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_V2_SHA256: string | null;
 export const SOURCE_LIBRARY_POOL_DIAGNOSTIC_MAX_ITEMS: number;
 export function parseReport(value: unknown): unknown;
 export function isValidSourceLibraryDatabaseOwner(value: unknown): value is string;

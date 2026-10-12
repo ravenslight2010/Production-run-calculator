@@ -26,7 +26,7 @@ export const DEFAULT_REPORT = "attached_assets/source-library/audits/source-libr
 export const DEFAULT_HEAL_ID = "source-library-reconciliation-2026-08-26-v2";
 export const DEFAULT_FROM_DATE = "2026-08-26";
 export const DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS =
-  "docs/evidence/source-library-pool-owner-approved-differences-2026-10-08.json";
+  "docs/evidence/source-library-pool-owner-approved-differences-2026-10-12-v2.json";
 export const APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256 =
   "42cf3d8d482a07657eeae5725710b098bb7f8de19a4f45d6356f670378cd2137";
 export const SOURCE_LIBRARY_EVIDENCE_ENVIRONMENTS = ["development", "release"] as const;
@@ -126,10 +126,10 @@ export const APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID =
   "source-library-pool-owner-approved-differences-2026-10-08-v1";
 export const APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_V2_ID =
   "source-library-pool-owner-approved-differences-2026-10-08-v2";
-// Keep unset until a fresh production capture and a new owner-review record
-// bind the exact v2 manifest bytes. A v1 digest is historical, not an active
-// release exception.
-export const APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_V2_SHA256: string | null = null;
+// Fresh production capture and explicit owner review bind these exact v2 bytes.
+// The v1 digest remains immutable historical evidence, not an active exception.
+export const APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_V2_SHA256: string | null =
+  "3b8e3237d6576e91b820cd1791553f5a40a29f16ae5095de523fc4e3080a7183";
 const OWNER_REVIEW_PATH =
   "docs/evidence/source-library-pool-owner-review-2026-10-08.md";
 const DIAGNOSTICS_PATH =

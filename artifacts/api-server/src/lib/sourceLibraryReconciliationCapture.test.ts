@@ -54,6 +54,11 @@ const reportBytes = fs.readFileSync(
 );
 const reportSha256 = createHash("sha256").update(reportBytes).digest("hex");
 const poolExceptionApproval = loadSourceLibraryPoolExceptionApproval(
+  path.resolve(repoRoot, "docs/evidence/source-library-pool-owner-approved-differences-2026-10-08.json"),
+  reportBytes,
+  repoRoot,
+);
+const activePoolExceptionApproval = loadSourceLibraryPoolExceptionApproval(
   path.resolve(repoRoot, DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS),
   reportBytes,
   repoRoot,
@@ -304,11 +309,44 @@ describe("source-library reconciliation capture", () => {
     expect(fake.calls).toContain("ROLLBACK");
   });
 
+  it("accepts the pinned active v2 approval and rejects an unbound capture digest", async () => {
+    const fake = fakePool();
+    const selectedDependencies = {
+      ...dependencies(fake.pool),
+      poolExceptionApproval: activePoolExceptionApproval,
+    };
+    const activeEvidence = {
+      ...evidenceOutput,
+      databaseAttestation: "published-app-runtime-connection" as const,
+      pools: { ...evidenceOutput.pools, exactMatches: 58, mismatches: 10 },
+      poolExceptions: {
+        id: activePoolExceptionApproval.id,
+        sha256: activePoolExceptionApproval.sha256,
+        approvedMismatches: 10,
+        unresolvedMismatches: 0,
+      },
+    };
+    vi.mocked(verifySourceLibraryReconciliation).mockResolvedValueOnce(activeEvidence);
+    expect(await captureSourceLibraryReconciliationFromPublishedApp(
+      selectedDependencies,
+    )).toEqual(activeEvidence);
+    expect(GetPublishedSourceLibraryReconciliationCaptureResponse.safeParse(
+      activeEvidence,
+    ).success).toBe(true);
+    vi.mocked(verifySourceLibraryReconciliation).mockResolvedValueOnce({
+      ...activeEvidence,
+      poolExceptions: { ...activeEvidence.poolExceptions, sha256: "f".repeat(64) },
+    });
+    await expect(captureSourceLibraryReconciliationFromPublishedApp(
+      selectedDependencies,
+    )).rejects.toThrow();
+  });
+
   it("returns at most ten safe mismatch descriptors from the published app pool", async () => {
     const fake = fakePool();
     const result =
       await captureSourceLibraryReconciliationDiagnosticsFromPublishedApp(
-        dependencies(fake.pool),
+        { ...dependencies(fake.pool), poolExceptionApproval: activePoolExceptionApproval },
       );
 
     expect(result).toMatchObject({
@@ -324,8 +362,8 @@ describe("source-library reconciliation capture", () => {
         mismatches: 0,
       },
       poolExceptions: {
-        id: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
-        sha256: APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
+        id: activePoolExceptionApproval.id,
+        sha256: activePoolExceptionApproval.sha256,
         approvedMismatches: 0,
         unresolvedMismatches: 0,
       },

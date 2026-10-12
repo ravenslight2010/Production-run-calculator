@@ -5506,8 +5506,8 @@ export const GetPublishedSourceLibraryReconciliationCaptureResponse = zod.object
   "stubs": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponseReportStubsMin).max(getPublishedSourceLibraryReconciliationCaptureResponseReportStubsMax)
 }),
   "poolExceptions": zod.object({
-  "id": zod.enum(['source-library-pool-owner-approved-differences-2026-10-08-v1']),
-  "sha256": zod.enum(['42cf3d8d482a07657eeae5725710b098bb7f8de19a4f45d6356f670378cd2137']),
+  "id": zod.enum(['source-library-pool-owner-approved-differences-2026-10-08-v1', 'source-library-pool-owner-approved-differences-2026-10-08-v2']),
+  "sha256": zod.enum(['42cf3d8d482a07657eeae5725710b098bb7f8de19a4f45d6356f670378cd2137', '3b8e3237d6576e91b820cd1791553f5a40a29f16ae5095de523fc4e3080a7183']),
   "approvedMismatches": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponsePoolExceptionsApprovedMismatchesMin).max(getPublishedSourceLibraryReconciliationCaptureResponsePoolExceptionsApprovedMismatchesMax),
   "unresolvedMismatches": zod.int().min(getPublishedSourceLibraryReconciliationCaptureResponsePoolExceptionsUnresolvedMismatchesMin).max(getPublishedSourceLibraryReconciliationCaptureResponsePoolExceptionsUnresolvedMismatchesMax)
 }),
@@ -5663,8 +5663,8 @@ export const CaptureSourceLibraryReconciliationResponse = zod.object({
   "stubs": zod.int().min(captureSourceLibraryReconciliationResponseReportStubsMin).max(captureSourceLibraryReconciliationResponseReportStubsMax)
 }),
   "poolExceptions": zod.object({
-  "id": zod.enum(['source-library-pool-owner-approved-differences-2026-10-08-v1']),
-  "sha256": zod.enum(['42cf3d8d482a07657eeae5725710b098bb7f8de19a4f45d6356f670378cd2137']),
+  "id": zod.enum(['source-library-pool-owner-approved-differences-2026-10-08-v1', 'source-library-pool-owner-approved-differences-2026-10-08-v2']),
+  "sha256": zod.enum(['42cf3d8d482a07657eeae5725710b098bb7f8de19a4f45d6356f670378cd2137', '3b8e3237d6576e91b820cd1791553f5a40a29f16ae5095de523fc4e3080a7183']),
   "approvedMismatches": zod.int().min(captureSourceLibraryReconciliationResponsePoolExceptionsApprovedMismatchesMin).max(captureSourceLibraryReconciliationResponsePoolExceptionsApprovedMismatchesMax),
   "unresolvedMismatches": zod.int().min(captureSourceLibraryReconciliationResponsePoolExceptionsUnresolvedMismatchesMin).max(captureSourceLibraryReconciliationResponsePoolExceptionsUnresolvedMismatchesMax)
 }),
@@ -5768,8 +5768,8 @@ export const GetPublishedSourceLibraryReconciliationDiagnosticsResponse = zod.ob
   "mismatches": zod.int().min(getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsMismatchesMin).max(getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolsMismatchesMax).describe('Raw field-mismatch count before approved exceptions are applied.')
 }),
   "poolExceptions": zod.object({
-  "id": zod.enum(['source-library-pool-owner-approved-differences-2026-10-08-v1']),
-  "sha256": zod.enum(['42cf3d8d482a07657eeae5725710b098bb7f8de19a4f45d6356f670378cd2137']),
+  "id": zod.enum(['source-library-pool-owner-approved-differences-2026-10-08-v1', 'source-library-pool-owner-approved-differences-2026-10-08-v2']),
+  "sha256": zod.enum(['42cf3d8d482a07657eeae5725710b098bb7f8de19a4f45d6356f670378cd2137', '3b8e3237d6576e91b820cd1791553f5a40a29f16ae5095de523fc4e3080a7183']),
   "approvedMismatches": zod.int().min(getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolExceptionsApprovedMismatchesMin).max(getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolExceptionsApprovedMismatchesMax),
   "unresolvedMismatches": zod.int().min(getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolExceptionsUnresolvedMismatchesMin).max(getPublishedSourceLibraryReconciliationDiagnosticsResponsePoolExceptionsUnresolvedMismatchesMax)
 }),

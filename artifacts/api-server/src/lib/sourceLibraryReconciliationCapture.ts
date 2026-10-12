@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import {
   APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_V2_ID,
   APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_V2_SHA256,
   assertBoundedSourceLibraryReconciliationEvidence,
   DEFAULT_FROM_DATE,
   DEFAULT_HEAL_ID,
@@ -25,6 +27,14 @@ export const SOURCE_LIBRARY_CAPTURE_OUTPUT_MAX_BYTES = 32 * 1024;
 export const SOURCE_LIBRARY_CAPTURE_STATEMENT_TIMEOUT = "15s";
 export const SOURCE_LIBRARY_CAPTURE_LOCK_TIMEOUT = "2s";
 const SOURCE_LIBRARY_CAPTURE_ADVISORY_LOCK_KEY = "6389014719231";
+
+function isPinnedPoolException(id: unknown, sha256: unknown): boolean {
+  return (id === APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID &&
+    sha256 === APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256) ||
+    (id === APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_V2_ID &&
+      APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_V2_SHA256 !== null &&
+      sha256 === APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_V2_SHA256);
+}
 
 type QueryResult = { rows: Array<Record<string, unknown>> };
 type ReadOnlyClient = {
@@ -193,8 +203,7 @@ function validateDiagnosticsOutput(
     !isBoundedCount(pools.mismatches) ||
     pools.exactMatches + pools.guardedRenames + pools.missing + pools.mismatches !==
       pools.expected ||
-    poolExceptions.id !== APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID ||
-    poolExceptions.sha256 !== APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256 ||
+    !isPinnedPoolException(poolExceptions.id, poolExceptions.sha256) ||
     !isBoundedCount(poolExceptions.approvedMismatches) ||
     !isBoundedCount(poolExceptions.unresolvedMismatches) ||
     poolExceptions.approvedMismatches + poolExceptions.unresolvedMismatches !==
@@ -492,8 +501,9 @@ async function runReadOnlyCapture(
       assertBoundedSourceLibraryReconciliationEvidence(output);
       if (
         output.databaseAttestation !== databaseAttestation ||
-        output.poolExceptions.id !== APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID ||
-        output.poolExceptions.sha256 !== APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256 ||
+        !isPinnedPoolException(output.poolExceptions.id, output.poolExceptions.sha256) ||
+        output.poolExceptions.id !== dependencies.poolExceptionApproval.id ||
+        output.poolExceptions.sha256 !== dependencies.poolExceptionApproval.sha256 ||
         output.poolExceptions.approvedMismatches >
           dependencies.poolExceptionApproval.approvedDifferences.length
       ) {

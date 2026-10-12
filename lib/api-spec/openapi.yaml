@@ -5755,10 +5755,10 @@ components:
       properties:
         id:
           type: string
-          enum: [source-library-pool-owner-approved-differences-2026-10-08-v1]
+          enum: [source-library-pool-owner-approved-differences-2026-10-08-v1, source-library-pool-owner-approved-differences-2026-10-08-v2]
         sha256:
           type: string
-          enum: [42cf3d8d482a07657eeae5725710b098bb7f8de19a4f45d6356f670378cd2137]
+          enum: [42cf3d8d482a07657eeae5725710b098bb7f8de19a4f45d6356f670378cd2137, 3b8e3237d6576e91b820cd1791553f5a40a29f16ae5095de523fc4e3080a7183]
         approvedMismatches: { type: integer, minimum: 0, maximum: 68 }
         unresolvedMismatches: { type: integer, minimum: 0, maximum: 68 }
     SourceLibraryReconciliationEvidence:

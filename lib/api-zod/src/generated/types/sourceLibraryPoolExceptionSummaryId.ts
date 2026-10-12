@@ -11,4 +11,5 @@ export type SourceLibraryPoolExceptionSummaryId = typeof SourceLibraryPoolExcept
 
 export const SourceLibraryPoolExceptionSummaryId = {
   'source-library-pool-owner-approved-differences-2026-10-08-v1': 'source-library-pool-owner-approved-differences-2026-10-08-v1',
+  'source-library-pool-owner-approved-differences-2026-10-08-v2': 'source-library-pool-owner-approved-differences-2026-10-08-v2',
 } as const;

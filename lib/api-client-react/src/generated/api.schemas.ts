@@ -89,6 +89,7 @@ export type SourceLibraryPoolExceptionSummaryId = typeof SourceLibraryPoolExcept
 
 export const SourceLibraryPoolExceptionSummaryId = {
   'source-library-pool-owner-approved-differences-2026-10-08-v1': 'source-library-pool-owner-approved-differences-2026-10-08-v1',
+  'source-library-pool-owner-approved-differences-2026-10-08-v2': 'source-library-pool-owner-approved-differences-2026-10-08-v2',
 } as const;
 
 export type SourceLibraryPoolExceptionSummarySha256 = typeof SourceLibraryPoolExceptionSummarySha256[keyof typeof SourceLibraryPoolExceptionSummarySha256];
@@ -96,6 +97,7 @@ export type SourceLibraryPoolExceptionSummarySha256 = typeof SourceLibraryPoolEx
 
 export const SourceLibraryPoolExceptionSummarySha256 = {
   '42cf3d8d482a07657eeae5725710b098bb7f8de19a4f45d6356f670378cd2137': '42cf3d8d482a07657eeae5725710b098bb7f8de19a4f45d6356f670378cd2137',
+  '3b8e3237d6576e91b820cd1791553f5a40a29f16ae5095de523fc4e3080a7183': '3b8e3237d6576e91b820cd1791553f5a40a29f16ae5095de523fc4e3080a7183',
 } as const;
 
 export interface SourceLibraryPoolExceptionSummary {

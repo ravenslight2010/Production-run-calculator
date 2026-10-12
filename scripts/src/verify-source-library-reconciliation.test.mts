@@ -17,6 +17,7 @@ import {
   APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_ID,
   APPROVED_SOURCE_LIBRARY_POOL_EXCEPTION_V2_ID,
   APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_SHA256,
+  APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_V2_SHA256,
   DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS,
   fingerprintSourceLibraryPoolField,
   isRetryableSourceLibraryDatabaseError,
@@ -438,7 +439,7 @@ assert.match(output.idempotencyFingerprint.value, /^[a-f0-9]{64}$/);
 assert.ok(queries.length > 0);
 
 const ownerApprovedPoolExceptions = loadSourceLibraryPoolExceptionApproval(
-  path.resolve(rootDir, DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS),
+  path.resolve(rootDir, "docs/evidence/source-library-pool-owner-approved-differences-2026-10-08.json"),
   reportBytes,
 );
 assert.equal(
@@ -448,12 +449,21 @@ assert.equal(
 assert.equal(ownerApprovedPoolExceptions.approvedDifferences.length, 10);
 assert.equal(ownerApprovedPoolExceptions.formatVersion, 1);
 assert.equal(ownerApprovedPoolExceptions.historical, true);
+const activePoolExceptions = loadSourceLibraryPoolExceptionApproval(
+  path.resolve(rootDir, DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS),
+  reportBytes,
+);
+assert.equal(activePoolExceptions.formatVersion, 2);
+assert.equal(activePoolExceptions.historical, false);
+assert.equal(activePoolExceptions.sha256, APPROVED_SOURCE_LIBRARY_POOL_EXCEPTIONS_V2_SHA256);
+assert.equal(activePoolExceptions.approvedDifferences.length, 10);
+assert(activePoolExceptions.approvedDifferences.every((item) => item.fieldFingerprints));
 const exceptionTamperDirectory = await mkdtemp(
   path.join(tmpdir(), "source-library-pool-exception-tamper-"),
 );
 try {
   const exceptionBytes = await readFile(
-    path.resolve(rootDir, DEFAULT_SOURCE_LIBRARY_POOL_EXCEPTIONS),
+    path.resolve(rootDir, "docs/evidence/source-library-pool-owner-approved-differences-2026-10-08.json"),
   );
   const tamperedManifest = JSON.parse(exceptionBytes.toString("utf8"));
   tamperedManifest.approvedDifferences.pop();

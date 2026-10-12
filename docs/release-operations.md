@@ -479,6 +479,15 @@ to require the current, validated published-deployment handoff described below.
 
 ### Published reconciliation endpoint
 
+The active owner-approved exception is the fingerprint-bound v2 manifest at
+`docs/evidence/source-library-pool-owner-approved-differences-2026-10-12-v2.json`.
+It preserves the ten explicitly approved current differences without repairs:
+nine brand fields and the Brand Cheese Mix component field. Only those exact
+value fingerprints are covered; later edits or other failures remain blocking.
+The October 8 v1 manifest and reviewed evidence are unchanged historical records.
+A runtime capture must report the pinned active v2 digest before its approval
+counts can be used as current passing release evidence.
+
 The public `GET` uses the running app's own database connection and build
 identity; it does not require a manager login, PostgreSQL owner name, request
 body, or database credentials. Its `published-app-runtime-connection`
