@@ -11,6 +11,7 @@ export const MANUAL_SECTION_FIELDS = {
   packaging: ["skidsCompleted", "casesOnCurrentSkid"],
   dough: ["traysOnLine", "batchesReady"],
   sauce: ["sauceBarrelsMade", "sauceBarrelAnchorNetSec", "sauceBarrelCorrectionGeneration"],
+  "sauce-stock": ["sauceStockBarrels", "sauceStockAnchorNetSec", "sauceStockCorrectionGeneration"],
   app1: ["app1BatchesMade", "app1BatchAnchorNetSec", "app1BatchCorrectionGeneration", "app1StockLbs", "app1StockAnchorNetSec", "app1StockCorrectionGeneration"],
   app2: ["app2BatchesMade", "app2BatchAnchorNetSec", "app2BatchCorrectionGeneration", "app2StockLbs", "app2StockAnchorNetSec", "app2StockCorrectionGeneration"],
   app3: ["app3BatchesMade", "app3BatchAnchorNetSec", "app3BatchCorrectionGeneration", "app3StockLbs", "app3StockAnchorNetSec", "app3StockCorrectionGeneration"],

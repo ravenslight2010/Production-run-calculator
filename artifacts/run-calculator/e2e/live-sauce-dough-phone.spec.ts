@@ -17,7 +17,10 @@ import type { FormValues } from "../src/types";
 
 const SIGNUP_CODE = process.env.STAFF_SIGNUP_CODE ?? "";
 const PASSWORD = "TestPass123!";
-const API_BASE = process.env.PLAYWRIGHT_BASE_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
+const API_BASE =
+  process.env.PLAYWRIGHT_API_BASE_URL ??
+  process.env.PLAYWRIGHT_BASE_URL ??
+  `https://${process.env.REPLIT_DEV_DOMAIN}`;
 let authorizedFixtures: AuthorizedBrowserFixtures;
 let inventoryFixtureItems: Array<{ id: number; token: string }> = [];
 
@@ -320,6 +323,79 @@ test("Sauce and Dough live cards work at a phone viewport", async ({ page }) => 
 
   await page.getByTestId("tab-dough").click();
   await expect(page.getByTestId("text-target-ball-weight")).toHaveText("10 oz");
+});
+
+test("Sauce stock edits sync to a peer and persist after tab changes and reload", async ({
+  page,
+  browser,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const username = uid();
+  const sauceName = `Fixture Sauce ${username}`;
+  const fixture = await createAuthorizedServerFixture(username, {
+    casesNeeded: 10,
+    pizzasPerCase: 1,
+    sauceOzPerPizza: 2,
+    sauceBarrelLbs: 2,
+    frontlineRecipeName: sauceName,
+  });
+  await page.context().addCookies([{
+    name: "rc_auth",
+    value: fixture.token,
+    url: API_BASE,
+  }]);
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+  await page.getByTestId("tab-sauce").click();
+  await expect(page.getByTestId("sauce-stock-on-hand"))
+    .toContainText("2.0 / 2.0 barrels");
+  const dailyNeeds = page.getByTestId("sauce-daily-needs");
+  await expect(dailyNeeds).toContainText("Planned Sauce Demand — Today");
+  await expect(dailyNeeds).toContainText("not remaining demand or on-line stock");
+  await expect(dailyNeeds).toContainText(sauceName);
+
+  await page.getByTestId("sauce-stock-decrease").click();
+  await expect(page.getByTestId("sauce-stock-on-hand"))
+    .toContainText("1.9 / 2.0 barrels");
+
+  const peerContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  try {
+    await peerContext.addCookies([{
+      name: "rc_auth",
+      value: fixture.token,
+      url: API_BASE,
+    }]);
+    const peerPage = await peerContext.newPage();
+    await peerPage.goto("/", { waitUntil: "domcontentloaded" });
+    await peerPage.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    await peerPage.getByTestId("tab-sauce").click();
+    await expect(peerPage.getByTestId("sauce-stock-on-hand"))
+      .toContainText("1.9 / 2.0 barrels");
+
+    await page.getByTestId("tab-run").click();
+    await page.getByTestId("tab-sauce").click();
+    await expect(page.getByTestId("sauce-stock-on-hand"))
+      .toContainText("1.9 / 2.0 barrels");
+    await peerPage.reload({ waitUntil: "domcontentloaded" });
+    await peerPage.getByTestId("tab-run").waitFor({ state: "attached", timeout: 25_000 });
+    await peerPage.getByTestId("tab-sauce").click();
+    await expect(peerPage.getByTestId("sauce-stock-on-hand"))
+      .toContainText("1.9 / 2.0 barrels");
+
+    const today = new Date().toISOString().slice(0, 10);
+    const response = await page.request.get(`/api/sync/today?today=${today}`);
+    expect(response.ok(), `canonical sync read failed: ${response.status()}`).toBe(true);
+    const sync = await response.json() as {
+      runValues?: Record<string, {
+        sauceStockBarrels?: number;
+        sauceStockInitialized?: boolean;
+      }>;
+    };
+    expect(sync.runValues?.[fixture.runId]?.sauceStockBarrels).toBe(1.9);
+    expect(sync.runValues?.[fixture.runId]?.sauceStockInitialized).toBe(true);
+  } finally {
+    await peerContext.close();
+  }
 });
 
 test("Sauce automatic supply stays accurate after the final partial unit", async ({ page }) => {

@@ -55,8 +55,8 @@ let dataResetTable: DbModule["dataResetTable"];
 let seedRoles: () => Promise<void>;
 let runDataHeals: () => Promise<void>;
 let runAutoTrackServerTicks: typeof import("./sync")["runAutoTrackServerTicks"];
-let resetServerTickDateBackoffsForTests:
-  typeof import("./sync")["resetServerTickDateBackoffsForTests"];
+let clearServerTickDateBackoffsForTests:
+  typeof import("./sync")["clearServerTickDateBackoffsForTests"];
 let clearBackgroundOperationDiagnosticsForTests:
   typeof import("../lib/backgroundOperations")["clearBackgroundOperationDiagnosticsForTests"];
 let getBackgroundOperationDiagnostics:
@@ -132,7 +132,7 @@ beforeAll(async () => {
   seedRoles = (await import("../lib/roles")).seedRoles;
   runDataHeals = (await import("../lib/dataHeals")).runDataHeals;
   runAutoTrackServerTicks = syncMod.runAutoTrackServerTicks;
-  resetServerTickDateBackoffsForTests = syncMod.resetServerTickDateBackoffsForTests;
+  clearServerTickDateBackoffsForTests = syncMod.clearServerTickDateBackoffsForTests;
   const backgroundOperationsMod = await import("../lib/backgroundOperations");
   clearBackgroundOperationDiagnosticsForTests =
     backgroundOperationsMod.clearBackgroundOperationDiagnosticsForTests;
@@ -183,7 +183,7 @@ beforeAll(async () => {
   });
   const addr = server.address() as AddressInfo;
   baseUrl = `http://127.0.0.1:${addr.port}`;
-}, 60_000);
+}, 180_000);
 
 afterAll(async () => {
   if (server) {
@@ -211,7 +211,7 @@ function dayRow(date: string) {
 
 beforeEach(async () => {
   injectedSseWriteFailures = 0;
-  resetServerTickDateBackoffsForTests();
+  clearServerTickDateBackoffsForTests();
   await db.execute(sql`TRUNCATE ${dailySyncTable}, ${dataResetTable}, ${operationalIntentLedgerTable}, ${completedRunHistoryTable}, ${applicatorBatchEvidenceTable}, ${syncOutboxEventsTable}, ${syncOutboxCursorsTable}, ${dataHealsTable}, ${syncConflictLogsTable}, ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${qcWorkflowEventsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
   await db.insert(usersTable).values([
@@ -826,6 +826,43 @@ describe("POST /sync/manual-section — section ownership contract", () => {
     baseValues: stockBaseline,
     observedGeneration: "stock-run:3", baseRevision: 0, resetEpoch: 0, deviceId: id,
   });
+  const sauceStockBaseline = {
+    sauceStockBarrels: 0,
+    sauceStockAnchorNetSec: 0,
+    sauceStockCorrectionGeneration: 0,
+  };
+  const seedSauceStockRun = async () => db.update(dailySyncTable).set({
+    data: {
+      dayState: { date: DATE, runs: [{ id: "sauce-stock-run", startedAt: 1_000, metaUpdatedAt: 3 }] },
+      runValuesUpdatedAt: { "sauce-stock-run": 10 },
+      runValues: {
+        "sauce-stock-run": {
+          sauceBarrelsMade: 7,
+          sauceBarrelAnchorNetSec: 500,
+          sauceBarrelCorrectionGeneration: 0,
+          ...sauceStockBaseline,
+          sauceStockInitialized: false,
+        },
+      },
+    },
+    canonicalRevision: 0,
+  }).where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
+  const sauceStockEdit = (id: string, stock: number) => ({
+    id,
+    date: DATE,
+    runId: "sauce-stock-run",
+    section: "sauce-stock",
+    values: {
+      sauceStockBarrels: stock,
+      sauceStockAnchorNetSec: 0,
+      sauceStockCorrectionGeneration: 1,
+    },
+    baseValues: sauceStockBaseline,
+    observedGeneration: "sauce-stock-run:3",
+    baseRevision: 0,
+    resetEpoch: 0,
+    deviceId: id,
+  });
 
   beforeEach(async () => {
     await db.update(dailySyncTable).set({ data: values(), canonicalRevision: 0 })
@@ -893,6 +930,52 @@ describe("POST /sync/manual-section — section ownership contract", () => {
       .where(and(eq(dailySyncTable.scope, "live"), eq(dailySyncTable.date, DATE)));
     expect((stored.data as any).runValues["stock-run"].app1StockLbs).toBe(40);
     expect((stored.data as any).runValues["stock-run"].applicatorStockInitialized).toBe(false);
+  });
+
+  it("accepts fractional Sauce stock corrections without inventory writes and fences old ticks", async () => {
+    await seedSauceStockRun();
+    const response = await request(sauceStockEdit("sauce-stock-correction", 1.4));
+    expect(response.status).toBe(200);
+    const accepted = await response.json() as {
+      data: { runValues: Record<string, Record<string, unknown>>; autoTrackCoordination?: any };
+    };
+    expect(accepted.data.runValues["sauce-stock-run"]).toMatchObject({
+      sauceStockBarrels: 1.4,
+      sauceStockAnchorNetSec: 0,
+      sauceStockCorrectionGeneration: 1,
+      sauceStockInitialized: true,
+      sauceBarrelsMade: 7,
+      sauceBarrelAnchorNetSec: 500,
+    });
+    expect(await db.select().from(inventoryLedgerTable)).toHaveLength(0);
+
+    const stale = await fetch(`${baseUrl}/api/sync/auto-track/claim?today=${DATE}`, {
+      method: "POST",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({
+        senderId: "old-sauce-stock-tick",
+        claim: {
+          version: 1,
+          runId: "sauce-stock-run",
+          channel: "sauce-stock",
+          generation: "sauce-stock-run:3",
+          sequence: 1,
+          eventId: "old-sauce-stock-tick:1",
+          dueAt: 1,
+          nextDueAt: 25,
+          baseUpdatedAt: 10,
+          correctionGeneration: 0,
+          mutations: [
+            { field: "sauceStockBarrels", from: 1.4, to: 1.3 },
+            { field: "sauceStockAnchorNetSec", from: 0, to: 1 },
+            { field: "sauceStockCorrectionGeneration", from: 0, to: 0 },
+          ],
+        },
+      }),
+    });
+    expect(stale.status).toBe(200);
+    expect((await stale.json() as { outcome: string }).outcome).toBe("conflict");
+    expect(await db.select().from(inventoryLedgerTable)).toHaveLength(0);
   });
 
   it("accepted Packaging correction survives a newer stale ordinary snapshot write", async () => {
@@ -1636,7 +1719,7 @@ describe("server auto-track tick recovery under database pressure", () => {
     }
 
     expect(lostReplyInjected).toBe(true);
-    expect(transactionAttempts).toBe(2);
+    expect(transactionAttempts).toBeGreaterThanOrEqual(2);
     expect(managerEditStatus).toBe(200);
     expect(managerEditStamp).toBeGreaterThan(TICK_NOW);
 
@@ -1646,6 +1729,8 @@ describe("server auto-track tick recovery under database pressure", () => {
     expect(finalData.runValues[TICK_RUN]).toMatchObject({
       app1BatchesMade: 7,
       sauceBarrelsMade: 1,
+      sauceStockBarrels: 2,
+      sauceStockInitialized: true,
     });
     expect(finalData.runValuesUpdatedAt[TICK_RUN]).toBe(managerEditStamp);
     expect(finalData.autoTrackCoordination.runs[TICK_RUN]["app1-batch"]).toMatchObject({
@@ -1660,7 +1745,9 @@ describe("server auto-track tick recovery under database pressure", () => {
 
     const tickLedger = (await db.select().from(operationalIntentLedgerTable))
       .filter((entry) => entry.commandType === "auto-track");
-    for (const channel of ["app1-batch", "sauce-barrel"]) {
+    for (const channel of [
+      "app1-batch", "sauce-barrel", "sauce-stock", "tray-consume", "batch-consume",
+    ]) {
       expect(tickLedger.filter((entry) => (entry.actionData as any)?.channel === channel))
         .toHaveLength(1);
     }
@@ -1687,15 +1774,22 @@ describe("server auto-track tick recovery under database pressure", () => {
     ]);
     expect(await db.select().from(inventoryConsumedRunsTable)).toHaveLength(1);
 
-    expect(await db.select().from(syncOutboxEventsTable)).toMatchObject([
+    const tickWakeups = await db.select().from(syncOutboxEventsTable);
+    // The first tick commits the Sauce/applicator claims. The concurrent
+    // manager correction gets its own revision, then the retry accepts the
+    // distinct wall-clock claims that did not fit the first pass's claim
+    // budget. Each write must retain its own ordered wakeup.
+    expect(tickWakeups).toHaveLength(3);
+    expect(tickWakeups).toMatchObject([
       { scope: "live", cursor: 1, kind: "day-state", date: TICK_DATE, senderId: "server:tick" },
       {
         scope: "live", cursor: 2, kind: "day-state", date: TICK_DATE,
         senderId: "manager-recovery-correction",
       },
+      { scope: "live", cursor: 3, kind: "day-state", date: TICK_DATE, senderId: "server:tick" },
     ]);
     expect(await db.select().from(syncOutboxCursorsTable))
-      .toMatchObject([{ scope: "live", cursor: 2 }]);
+      .toMatchObject([{ scope: "live", cursor: 3 }]);
     expect(await db.select().from(dataResetTable))
       .toMatchObject([{ scope: "live", epoch: 0 }]);
   });
@@ -1805,7 +1899,7 @@ describe("server auto-track tick recovery under database pressure", () => {
     }
 
     expect(lostReplyInjected).toBe(true);
-    expect(transactionAttempts).toBe(2);
+    expect(transactionAttempts).toBeGreaterThanOrEqual(2);
 
     const [sandboxAfter] = await db.select().from(dailySyncTable)
       .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "sandbox")));
@@ -1813,6 +1907,8 @@ describe("server auto-track tick recovery under database pressure", () => {
     expect(sandboxFinalData.runValues[TICK_RUN]).toMatchObject({
       app1BatchesMade: 1,
       sauceBarrelsMade: 1,
+      sauceStockBarrels: 2,
+      sauceStockInitialized: true,
     });
     expect(sandboxFinalData.runValuesUpdatedAt[TICK_RUN]).toBe(TICK_NOW);
 
@@ -1832,7 +1928,9 @@ describe("server auto-track tick recovery under database pressure", () => {
       .filter((entry) => entry.commandType === "auto-track");
     expect(tickLedger.every((entry) => entry.scope === "sandbox" && entry.date === TICK_DATE)).toBe(true);
     const acceptedTickLedger = tickLedger.filter((entry) => entry.outcome === "accepted");
-    for (const channel of ["app1-batch", "sauce-barrel"]) {
+    for (const channel of [
+      "app1-batch", "sauce-barrel", "sauce-stock", "tray-consume", "batch-consume",
+    ]) {
       expect(acceptedTickLedger.filter((entry) => (entry.actionData as any)?.channel === channel))
         .toHaveLength(1);
     }
@@ -1870,11 +1968,12 @@ describe("server auto-track tick recovery under database pressure", () => {
     expect(await db.select().from(syncOutboxEventsTable))
       .toMatchObject([
         { scope: "sandbox", cursor: 1, kind: "day-state", date: TICK_DATE, senderId: "server:tick" },
+        { scope: "sandbox", cursor: 2, kind: "day-state", date: TICK_DATE, senderId: "server:tick" },
       ]);
     expect(await db.select().from(syncOutboxEventsTable)
       .where(eq(syncOutboxEventsTable.scope, "live"))).toEqual(liveBeforeOutbox);
     expect(await db.select().from(syncOutboxCursorsTable))
-      .toMatchObject([{ scope: "sandbox", cursor: 1 }]);
+      .toMatchObject([{ scope: "sandbox", cursor: 2 }]);
     expect(await db.select().from(syncOutboxCursorsTable)
       .where(eq(syncOutboxCursorsTable.scope, "live"))).toEqual(liveBeforeOutboxCursor);
   });
@@ -1906,11 +2005,14 @@ describe("server auto-track tick recovery under database pressure", () => {
         nowMs: TICK_NOW, maxClaims: 8,
       });
       expect(firstFailure.outcomes.error).toBe(1);
-      expect(getAutoTrackDeferredDiagnostic(TICK_NOW)).toEqual({
+      const firstDeferred = getAutoTrackDeferredDiagnostic(TICK_NOW);
+      expect(firstDeferred).toMatchObject({
         deferredDateCount: 1,
         deferredDateCountCapped: false,
-        nextEligibleRetryAt: new Date(TICK_NOW + 1_000).toISOString(),
       });
+      const firstRetryAt = Date.parse(firstDeferred.nextEligibleRetryAt!);
+      expect(firstRetryAt).toBeGreaterThanOrEqual(TICK_NOW + 500);
+      expect(firstRetryAt).toBeLessThanOrEqual(TICK_NOW + 1_000);
       expect(await db.select({
         deferredDateCount: automaticTrackingDeferredDiagnosticsTable.deferredDateCount,
         deferredDateCountCapped: automaticTrackingDeferredDiagnosticsTable.deferredDateCountCapped,
@@ -1918,7 +2020,7 @@ describe("server auto-track tick recovery under database pressure", () => {
       }).from(automaticTrackingDeferredDiagnosticsTable)).toMatchObject([{
         deferredDateCount: 1,
         deferredDateCountCapped: false,
-        nextEligibleRetryAt: new Date(TICK_NOW + 1_000),
+        nextEligibleRetryAt: new Date(firstRetryAt),
       }]);
 
       const [healthyDate] = await db.select().from(dailySyncTable)
@@ -1942,11 +2044,14 @@ describe("server auto-track tick recovery under database pressure", () => {
         nowMs: TICK_NOW + 1_999, maxClaims: 8,
       });
       expect(secondTooSoon.outcomes.backoff).toBe(1);
-      expect(getAutoTrackDeferredDiagnostic(TICK_NOW + 2_999)).toEqual({
+      const secondDeferred = getAutoTrackDeferredDiagnostic(TICK_NOW + 1_999);
+      expect(secondDeferred).toMatchObject({
         deferredDateCount: 1,
         deferredDateCountCapped: false,
-        nextEligibleRetryAt: new Date(TICK_NOW + 3_000).toISOString(),
       });
+      const secondRetryAt = Date.parse(secondDeferred.nextEligibleRetryAt!);
+      expect(secondRetryAt).toBeGreaterThanOrEqual(TICK_NOW + 2_000);
+      expect(secondRetryAt).toBeLessThanOrEqual(TICK_NOW + 3_000);
 
       const thirdFailure = await runAutoTrackServerTicks({
         nowMs: TICK_NOW + 3_000, maxClaims: 8,

@@ -38,16 +38,30 @@ async function hoistZodValidatorConstants(filePath: string): Promise<void> {
 
   const lines = source.split("\n");
   const constants: string[] = [];
+  const declarations = new Map<string, string>();
   const remainingLines: string[] = [];
 
   for (const line of lines) {
     // Orval can emit scalar constraint constants after the schema that uses
     // them. Keep generated output runtime-safe by placing all lower-camel
-    // scalar exports before the first validator.
-    if (
-      /^export const [a-z][A-Za-z0-9]* = .+;$/.test(line) &&
-      !line.includes("= zod.")
-    ) {
+    // scalar exports before the first validator. Composed oneOf schemas can
+    // emit the same scalar declaration more than once; coalesce only identical
+    // declarations and fail if the generated constraints disagree.
+    const scalarDeclaration = line.match(
+      /^export const ([a-z][A-Za-z0-9]*) = (.+);$/,
+    );
+    if (scalarDeclaration && !line.includes("= zod.")) {
+      const [, name, value] = scalarDeclaration;
+      const previousValue = declarations.get(name);
+      if (previousValue !== undefined) {
+        if (previousValue !== value) {
+          throw new Error(
+            `Conflicting generated scalar constraint declarations for ${name} in ${filePath}`,
+          );
+        }
+        continue;
+      }
+      declarations.set(name, value);
       constants.push(line);
     } else {
       remainingLines.push(line);

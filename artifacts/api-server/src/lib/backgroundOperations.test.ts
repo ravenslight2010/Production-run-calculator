@@ -19,8 +19,6 @@ describe("background operation connection recovery", () => {
   it("backs off repeated scheduler failures and resets after a successful pass", () => {
     const backoff = createBackgroundOperationBackoff({ baseDelayMs: 100, maxDelayMs: 250 });
 
-    const samples = [0, 0.5, 0.99];
-
     expect(backoff.isReady(0)).toBe(true);
     backoff.recordFailure(0);
     expect(backoff.isReady(99)).toBe(false);
@@ -83,7 +81,9 @@ describe("background operation connection recovery", () => {
 
   it("recovers a wrapped pool-acquisition timeout without degrading readiness", async () => {
     const timeout = new Error("timeout exceeded when trying to connect");
-    const operation = vi.fn(async () => { throw failure; });
+    const operation = vi.fn()
+      .mockRejectedValueOnce(new Error("database operation failed", { cause: timeout }))
+      .mockResolvedValueOnce("recovered");
 
     await expect(runBackgroundOperation("daily-rollover", operation, {
       delay: async () => {},
@@ -98,7 +98,7 @@ describe("background operation connection recovery", () => {
 
   it("reports persistent pool-acquisition timeouts after one bounded retry per pass", async () => {
     const timeout = new Error("timeout exceeded when trying to connect");
-    const operation = vi.fn(async () => { throw failure; });
+    const operation = vi.fn(async () => { throw timeout; });
     for (let pass = 0; pass < BACKGROUND_OPERATION_FAILURE_THRESHOLD; pass += 1) {
       await expect(runBackgroundOperation("web-push-schedule", operation, {
         delay: async () => {},
@@ -113,7 +113,10 @@ describe("background operation connection recovery", () => {
   });
 
   it("retries a bounded pool-acquisition timeout once and clears degradation after recovery", async () => {
-    const operation = vi.fn(async () => { throw failure; });
+    const timeout = new Error("timeout exceeded when trying to connect");
+    const operation = vi.fn()
+      .mockRejectedValueOnce(timeout)
+      .mockResolvedValueOnce("recovered");
     const delay = vi.fn(async () => {});
 
     await expect(runBackgroundOperation("daily-rollover", operation, { delay })).resolves.toBe("recovered");
@@ -125,8 +128,32 @@ describe("background operation connection recovery", () => {
     });
   });
 
+  it("spreads retries with bounded equal jitter", () => {
+    const samples = [0, 0.5, 0.99];
+    const retryAt = samples.map((sample) => {
+      const backoff = createBackgroundOperationBackoff({
+        baseDelayMs: 1_000,
+        maxDelayMs: 2_500,
+        jitter: true,
+        random: () => sample,
+      });
+      backoff.recordFailure(10_000);
+      return backoff.nextRetryAt(10_000);
+    });
+    expect(retryAt).toEqual([10_500, 10_750, 10_995]);
+
+    const cappedBackoff = createBackgroundOperationBackoff({
+      baseDelayMs: 1_000,
+      maxDelayMs: 2_500,
+      jitter: true,
+      random: () => 1,
+    });
+    for (let failure = 0; failure < 4; failure += 1) cappedBackoff.recordFailure(0);
+    expect(cappedBackoff.nextRetryAt(0)).toBe(2_500);
+  });
+
   it("does not retry non-transient failures and exposes sustained degradation", async () => {
-    const failure = Object.assign(new Error("worker unavailable"), { code: "57P03" });
+    const failure = Object.assign(new Error("invalid operation"), { code: "23505" });
     const operation = vi.fn(async () => { throw failure; });
     for (let attempt = 1; attempt <= BACKGROUND_OPERATION_FAILURE_THRESHOLD; attempt += 1) {
       await expect(runBackgroundOperation("web-push-schedule", operation)).rejects.toBe(failure);
@@ -247,17 +274,3 @@ describe("background operation connection recovery", () => {
     });
   });
 });
-
-    const backoffs = samples.map((sample) => createBackgroundOperationBackoff({
-      baseDelayMs: 1_000,
-      maxDelayMs: 2_500,
-      jitter: true,
-      random: () => sample,
-    }));
-
-    const cappedBackoff = createBackgroundOperationBackoff({
-      baseDelayMs: 1_000,
-      maxDelayMs: 2_500,
-      jitter: true,
-      random: () => 1,
-    });

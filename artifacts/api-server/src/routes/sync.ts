@@ -107,6 +107,7 @@ import {
   APPLICATOR_STOCK_REGISTERS,
   applicatorStockFields,
   computeApplicatorStockCapacityLbs,
+  capSauceStock,
 } from "@workspace/live-calc";
 import {
   DEFAULT_LIVE_CALC_TICK_MS,
@@ -1929,6 +1930,42 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
       }
       stockUpdates.push({ register, stock: onHand, anchor, generation: correctionGeneration });
     }
+    const sauceStockFields = [
+      "sauceStockBarrels", "sauceStockAnchorNetSec", "sauceStockCorrectionGeneration",
+    ] as const;
+    const hasSauceStockUpdate = section === "sauce-stock" && sauceStockFields.some((field) =>
+      Object.prototype.hasOwnProperty.call(values, field));
+    if (hasSauceStockUpdate) {
+      if (!sauceStockFields.every((field) => Object.prototype.hasOwnProperty.call(values, field))) {
+        return { status: 400, data: current, revision: currentRevision, duplicate: false, serverTime };
+      }
+      const onHand = Number((values as Record<string, unknown>).sauceStockBarrels);
+      const anchor = Number((values as Record<string, unknown>).sauceStockAnchorNetSec);
+      const correctionGeneration = Number((values as Record<string, unknown>).sauceStockCorrectionGeneration);
+      const previousAnchor = Number(currentValues.sauceStockAnchorNetSec) || 0;
+      const previousGeneration = Number(currentValues.sauceStockCorrectionGeneration) || 0;
+      const maxAnchor = computeAutoTrackElapsedMs({
+        startedAt: Number(run.startedAt) || 0,
+        pausedAt: Number(run.pausedAt) || undefined,
+        nowMs: serverTime,
+        stoppages: Array.isArray(run.stoppages) ? run.stoppages as never : [],
+      }) / 1000;
+      if (
+        !run.startedAt
+        || run.endedAt
+        || !Number.isFinite(onHand)
+        || onHand < 0
+        || onHand > 2
+        || capSauceStock(onHand) !== onHand
+        || !Number.isFinite(anchor)
+        || anchor < previousAnchor
+        || anchor > maxAnchor + 2
+        || !Number.isSafeInteger(correctionGeneration)
+        || correctionGeneration !== previousGeneration + 1
+      ) {
+        return { status: 400, data: current, revision: currentRevision, duplicate: false, serverTime };
+      }
+    }
     for (const key of allowed) {
       const expected = (baseValues as Record<string, unknown>)[key];
       if (expected !== undefined && Number(currentValues[key] ?? 0) !== expected) {
@@ -1938,6 +1975,7 @@ router.post("/sync/manual-section", async (req: Request, res: Response): Promise
     const next = JSON.parse(JSON.stringify(current)) as Record<string, any>;
     const updatedRunValues = { ...(next.runValues?.[runId] ?? {}), ...values };
     if (stockUpdates.length) updatedRunValues.applicatorStockInitialized = true;
+    if (hasSauceStockUpdate) updatedRunValues.sauceStockInitialized = true;
     next.runValues = { ...(next.runValues ?? {}), [runId]: updatedRunValues };
     next.runValuesUpdatedAt = { ...(next.runValuesUpdatedAt ?? {}), [runId]: serverTime };
     if (section === "packaging") {
@@ -3389,7 +3427,7 @@ const SERVER_TICK_MAX_CLAIMS = 24;
 const SERVER_TICK_LOOKBACK_DAYS = 45;
 const serverTickDateBackoffs = new Map<string, BackgroundOperationBackoff>();
 
-export function resetServerTickDateBackoffsForTests(): void {
+export function clearServerTickDateBackoffsForTests(): void {
   serverTickDateBackoffs.clear();
 }
 
@@ -3551,7 +3589,7 @@ export async function runAutoTrackServerTicks(opts: {
               });
             }
             acceptedNet.push(claim);
-          } else if (claim.channel === "sauce-barrel") {
+          } else if (claim.channel === "sauce-barrel" || claim.channel === "sauce-stock") {
             acceptedNet.push(claim);
           }
           acceptedHere++;

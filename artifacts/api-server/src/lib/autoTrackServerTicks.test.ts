@@ -40,8 +40,75 @@ describe("server auto-track claim builders", () => {
 
   it("builds one advancing net-second claim per eligible due channel", () => {
     const claims = buildNetSecondServerClaims(payload(), NOW);
-    expect(claims.map((claim) => claim.channel)).toEqual(["sauce-barrel", "app1-batch"]);
-    expect(claims.every((claim) => claim.mutations[0]!.to === claim.mutations[0]!.from + 1)).toBe(true);
+    expect(claims.map((claim) => claim.channel)).toEqual(["sauce-barrel", "sauce-stock", "app1-batch"]);
+    expect(claims.find((claim) => claim.channel === "sauce-barrel")?.mutations[0]?.to)
+      .toBe(claims.find((claim) => claim.channel === "sauce-barrel")?.mutations[0]?.from! + 1);
+    expect(claims.find((claim) => claim.channel === "sauce-stock")?.mutations[0]).toMatchObject({
+      field: "sauceStockBarrels",
+      from: 0,
+      to: 2,
+    });
+    expect(claims.find((claim) => claim.channel === "app1-batch")?.mutations[0]?.to)
+      .toBe(claims.find((claim) => claim.channel === "app1-batch")?.mutations[0]?.from! + 1);
+  });
+
+  it("initializes legacy Sauce stock once, then claims tenths without inventory effects", () => {
+    const source = payload({
+      sauceStockBarrels: 0,
+      sauceStockAnchorNetSec: 0,
+      sauceStockCorrectionGeneration: 0,
+      sauceStockInitialized: false,
+    });
+    const initialClaim = buildNetSecondServerClaims(source, NOW)
+      .find((claim) => claim.channel === "sauce-stock")!;
+    expect(initialClaim.mutations).toEqual([
+      { field: "sauceStockBarrels", from: 0, to: 2 },
+      { field: "sauceStockAnchorNetSec", from: 0, to: initialClaim.dueAt },
+      { field: "sauceStockCorrectionGeneration", from: 0, to: 0 },
+    ]);
+    const initialized = applyAutoTrackClaim(source as never, initialClaim, NOW);
+    expect(initialized.outcome).toBe("accepted");
+    expect(initialized.values).toMatchObject({
+      sauceStockBarrels: 2,
+      sauceStockInitialized: true,
+      sauceStockAnchorNetSec: initialClaim.dueAt,
+      sauceBarrelsMade: 0,
+    });
+    expect(initialized.inventoryConsumption).toBeUndefined();
+    expect(applyAutoTrackClaim(initialized.data, initialClaim, NOW).outcome).toBe("duplicate");
+
+    const secondsUntilNext = initialClaim.nextDueAt - initialClaim.dueAt;
+    const nextClaim = buildNetSecondServerClaims(
+      initialized.data,
+      NOW + secondsUntilNext * 1000,
+    ).find((claim) => claim.channel === "sauce-stock")!;
+    expect(nextClaim.mutations[0]).toEqual({
+      field: "sauceStockBarrels",
+      from: 2,
+      to: 1.9,
+    });
+    expect(nextClaim.mutations[1]).toMatchObject({
+      field: "sauceStockAnchorNetSec",
+      to: nextClaim.dueAt,
+    });
+    const depleted = applyAutoTrackClaim(
+      initialized.data,
+      nextClaim,
+      NOW + secondsUntilNext * 1000,
+    );
+    expect(depleted.outcome).toBe("accepted");
+    expect(depleted.values.sauceStockBarrels).toBe(1.9);
+    expect(depleted.values.sauceBarrelsMade).toBe(0);
+    expect(depleted.inventoryConsumption).toBeUndefined();
+  });
+
+  it("initializes legacy Sauce stock even when the current sauce rate is zero", () => {
+    const source = payload({ sauceOzPerPizza: 0, sauceStockInitialized: false });
+    const claim = buildNetSecondServerClaims(source, NOW)
+      .find((entry) => entry.channel === "sauce-stock")!;
+    expect(claim).toBeDefined();
+    expect(claim.nextDueAt - claim.dueAt).toBe(1);
+    expect(applyAutoTrackClaim(source as never, claim, NOW).outcome).toBe("accepted");
   });
 
   it("keeps a pass identity when rebuilding a claim after a committed event", () => {
@@ -124,7 +191,12 @@ describe("server auto-track claim builders", () => {
   });
 
   it("does not build net-second claims for invalid rates or paused runs", () => {
-    expect(buildNetSecondServerClaims(payload({ sauceOzPerPizza: 0, app1OzPerPizza: 0 }), NOW)).toEqual([]);
+    expect(buildNetSecondServerClaims(payload({
+      sauceOzPerPizza: 0,
+      app1OzPerPizza: 0,
+      sauceStockBarrels: 0,
+      sauceStockInitialized: true,
+    }), NOW)).toEqual([]);
     const paused = payload();
     (paused.dayState.runs[0] as Record<string, unknown>).pausedAt = NOW - 1;
     expect(buildNetSecondServerClaims(paused, NOW)).toEqual([]);

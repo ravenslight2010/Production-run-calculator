@@ -511,6 +511,7 @@ export const PROFILE_EXCLUDED_FIELDS = [
   "tempFreezerTime", "tempCrustsPerCycle", "tempCycleSpeed",
   ...PROGRESS_FIELDS,
   "sauceBarrelsMade", "sauceBarrelAnchorNetSec", "sauceBarrelCorrectionGeneration",
+  "sauceStockBarrels", "sauceStockAnchorNetSec", "sauceStockCorrectionGeneration", "sauceStockInitialized",
   "app1BatchesMade", "app1BatchAnchorNetSec", "app1BatchCorrectionGeneration",
   "app2BatchesMade", "app2BatchAnchorNetSec", "app2BatchCorrectionGeneration",
   "app3BatchesMade", "app3BatchAnchorNetSec", "app3BatchCorrectionGeneration",

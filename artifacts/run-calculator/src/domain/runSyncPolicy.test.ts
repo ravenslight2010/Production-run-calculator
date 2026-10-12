@@ -111,6 +111,53 @@ describe("run sync policy", () => {
       app1StockAnchorNetSec: 13,
     })).toBeNull();
   });
+  it("adopts canonical Sauce stock progress from a peer, including a legitimate zero", () => {
+    const remote = {
+      ...DEFAULT_VALUES,
+      sauceStockBarrels: 0,
+      sauceStockAnchorNetSec: 12,
+      sauceStockCorrectionGeneration: 0,
+      sauceStockInitialized: true,
+    };
+    const payload: any = {
+      runValues: { "sauce-stock-run": remote },
+      runValuesUpdatedAt: { "sauce-stock-run": 200 },
+      autoTrackCoordination: {
+        version: 1,
+        runs: {
+          "sauce-stock-run": {
+            "sauce-stock": {
+              generation: "sauce-stock-run:2",
+              sequence: 1,
+              nextDueAt: 20,
+              acceptedRunValuesUpdatedAt: 200,
+              acceptedEventId: "sauce-stock-event",
+              updatedAt: 190,
+            },
+          },
+        },
+      },
+      autoTrackServerState: {
+        netOwnership: {
+          "sauce-stock-run": {
+            "sauce-stock": { generation: "sauce-stock-run:2", sequence: 1, updatedAt: 190 },
+          },
+        },
+      },
+    };
+    const staleLocal = {
+      ...DEFAULT_VALUES,
+      sauceStockBarrels: 2,
+      sauceStockAnchorNetSec: 0,
+      sauceStockCorrectionGeneration: 0,
+      sauceStockInitialized: false,
+    };
+    expect(serverOwnedApplicatorStockProgress(payload, "sauce-stock-run", staleLocal)).toMatchObject({
+      sauceStockBarrels: 0,
+      sauceStockAnchorNetSec: 12,
+      sauceStockInitialized: true,
+    });
+  });
   it("adopts canonical stock seeded by Start without changing historical made counters", () => {
     const canonicalValues = {
       ...DEFAULT_VALUES,
@@ -120,10 +167,20 @@ describe("run sync policy", () => {
       app1StockAnchorNetSec: 0,
       app1StockCorrectionGeneration: 0,
       applicatorStockInitialized: true,
+      sauceStockBarrels: 2,
+      sauceStockAnchorNetSec: 0,
+      sauceStockCorrectionGeneration: 0,
+      sauceStockInitialized: true,
     };
     const result = reconcileOperationalIntentCanonical({
       dayState: day([{ id: "stock-run", brand: "", flavor: "", metaUpdatedAt: 100 }]),
-      runValues: { ...DEFAULT_VALUES, app1BatchesMade: 7, app1StockLbs: 0 },
+      runValues: {
+        ...DEFAULT_VALUES,
+        app1BatchesMade: 7,
+        app1StockLbs: 0,
+        sauceStockBarrels: 0,
+        sauceStockInitialized: false,
+      },
       runValuesUpdatedAt: { "stock-run": 10 },
       payload: {
         dayState: { runs: [{ id: "stock-run", brand: "", flavor: "", startedAt: 200, metaUpdatedAt: 201 }] },
@@ -136,6 +193,8 @@ describe("run sync policy", () => {
     expect(result.runValues.app1StockLbs).toBe(50);
     expect(result.runValues.applicatorStockInitialized).toBe(true);
     expect(result.runValues.app1BatchesMade).toBe(7);
+    expect(result.runValues.sauceStockBarrels).toBe(2);
+    expect(result.runValues.sauceStockInitialized).toBe(true);
     expect(result.runValuesUpdatedAt["stock-run"]).toBe(200);
   });
 });

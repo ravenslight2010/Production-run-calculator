@@ -282,6 +282,10 @@ const CURRENT_BLANK_RUN_VALUE: Record<string, unknown> = {
   sauceBarrelsMade: 0,
   sauceBarrelAnchorNetSec: 0,
   sauceBarrelCorrectionGeneration: 0,
+  sauceStockBarrels: 0,
+  sauceStockAnchorNetSec: 0,
+  sauceStockCorrectionGeneration: 0,
+  sauceStockInitialized: false,
   app1BatchesMade: 0,
   app1BatchAnchorNetSec: 0,
   app1BatchCorrectionGeneration: 0,
@@ -412,6 +416,9 @@ function isBlankRunValue(v: unknown): boolean {
     "sauceBarrelsMade",
     "sauceBarrelAnchorNetSec",
     "sauceBarrelCorrectionGeneration",
+    "sauceStockBarrels",
+    "sauceStockAnchorNetSec",
+    "sauceStockCorrectionGeneration",
     "app1BatchesMade",
     "app1BatchAnchorNetSec",
     "app1BatchCorrectionGeneration",
@@ -437,6 +444,9 @@ function isBlankRunValue(v: unknown): boolean {
   }
   if (!("applicatorStockInitialized" in withMachineDefaults)) {
     withMachineDefaults.applicatorStockInitialized = false;
+  }
+  if (!("sauceStockInitialized" in withMachineDefaults)) {
+    withMachineDefaults.sauceStockInitialized = false;
   }
   for (const [k, def] of Object.entries(FACTORY_TIMING_DEFAULTS)) {
     if (withMachineDefaults[k] === HISTORICAL_ZERO_TIMING_SENTINEL) {
@@ -572,6 +582,12 @@ function preserveAndInvalidateAutoTrackCoordination(
     ) {
       changedChannels.add("sauce-barrel");
     }
+    if (
+      asNumber(rawNext.sauceStockBarrels) !== asNumber(rawPrior.sauceStockBarrels)
+      || asNumber(rawNext.sauceStockAnchorNetSec) !== asNumber(rawPrior.sauceStockAnchorNetSec)
+      || asNumber(rawNext.sauceStockCorrectionGeneration) !== asNumber(rawPrior.sauceStockCorrectionGeneration)
+      || rawNext.sauceStockInitialized !== rawPrior.sauceStockInitialized
+    ) changedChannels.add("sauce-stock");
     for (const slot of [1, 2, 3, 4]) {
       const prefix = `app${slot}Batch`;
       if (
@@ -594,7 +610,7 @@ function preserveAndInvalidateAutoTrackCoordination(
         // Sauce and applicator coordination use pause-aware net-production
         // seconds, not epoch milliseconds. Zero tells clients to rebuild the
         // next identity from the corrected canonical anchor and current cadence.
-        nextDueAt: channel === "sauce-barrel" || /^app[1-4]-batch$/.test(channel) ? 0 : now,
+        nextDueAt: channel === "sauce-barrel" || channel === "sauce-stock" || /^app[1-4]-batch$/.test(channel) ? 0 : now,
         updatedAt: now,
       };
     }
@@ -1217,6 +1233,7 @@ function overlayPackagingIntoRunValues(
 }
 
 const APPLICATOR_STOCK_VALUE_FIELDS = [
+  "sauceStockBarrels", "sauceStockAnchorNetSec", "sauceStockCorrectionGeneration", "sauceStockInitialized",
   "applicatorStockInitialized",
   "app1StockLbs", "app1StockAnchorNetSec", "app1StockCorrectionGeneration",
   "app2StockLbs", "app2StockAnchorNetSec", "app2StockCorrectionGeneration",
@@ -1240,7 +1257,11 @@ function preserveCanonicalApplicatorStock(
     for (const field of APPLICATOR_STOCK_VALUE_FIELDS) {
       if (Object.prototype.hasOwnProperty.call(previous, field)) {
         values[field] = previous[field];
-      } else if (previous.applicatorStockInitialized === true) {
+      } else if (
+        field.startsWith("sauceStock")
+          ? previous.sauceStockInitialized === true
+          : previous.applicatorStockInitialized === true
+      ) {
         values[field] = CURRENT_BLANK_RUN_VALUE[field];
       } else {
         delete values[field];

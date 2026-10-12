@@ -17,6 +17,13 @@ type GeneratedOrderViolation = {
   validatorLine: number;
 };
 
+type GeneratedDuplicateConstraint = {
+  sourceName: string;
+  constantName: string;
+  firstLine: number;
+  duplicateLine: number;
+};
+
 type GeneratedZodSource = {
   sourceName: string;
   source: string;
@@ -82,6 +89,35 @@ function findScalarConstraintViolations(
   }
 
   return violations;
+}
+
+function findDuplicateScalarConstraints(
+  { source, sourceName }: GeneratedZodSource,
+): GeneratedDuplicateConstraint[] {
+  const firstDeclaration = new Map<string, number>();
+  const duplicates: GeneratedDuplicateConstraint[] = [];
+
+  for (const [index, line] of source.split("\n").entries()) {
+    const declaration = line.match(
+      /^export const ([a-z][A-Za-z0-9]*) = (?!zod\.).+;$/,
+    );
+    if (!declaration) continue;
+
+    const [constantName] = declaration.slice(1);
+    const firstLine = firstDeclaration.get(constantName);
+    if (firstLine === undefined) {
+      firstDeclaration.set(constantName, index);
+    } else {
+      duplicates.push({
+        sourceName,
+        constantName,
+        firstLine,
+        duplicateLine: index,
+      });
+    }
+  }
+
+  return duplicates;
 }
 
 export function assertGeneratedZodSourcesHaveSafeDeclarationOrder(
@@ -161,6 +197,13 @@ describe("generated Zod schema runtime contracts", () => {
     assertGeneratedZodSourcesHaveSafeDeclarationOrder(
       await readGeneratedZodSources(),
     );
+  });
+
+  it("emits each scalar constraint declaration once per generated file", async () => {
+    const duplicates = (await readGeneratedZodSources()).flatMap(
+      findDuplicateScalarConstraints,
+    );
+    expect(duplicates).toEqual([]);
   });
 
   it("reports the constraint and validator from a split generated file", () => {

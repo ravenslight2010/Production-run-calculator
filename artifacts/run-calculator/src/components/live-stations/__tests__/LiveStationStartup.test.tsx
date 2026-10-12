@@ -199,7 +199,7 @@ const STATIONS = [
     name: "Sauce",
     Component: LiveSauceTabContent,
     pendingSelector: { role: "button" as const, name: "Start Prep" },
-    runningSelector: { text: "Sauce Batches Needed" },
+    runningSelector: { text: "Current-run Sauce needs" },
   },
   {
     name: "Frontline",
@@ -320,25 +320,22 @@ describe("live station startup", () => {
     expect((screen.getByTestId("btn-inc-casesOnCurrentSkid") as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("keeps Sauce correction controls disabled while a peer owns the Sauce section, then restores them", () => {
-    claimManualSectionLock(RUN_ID, "sauce", "peer-device", 30_000, true);
+  it("keeps Sauce stock controls disabled while a peer owns the stock section, then restores them", () => {
+    claimManualSectionLock(RUN_ID, "sauce-stock", "peer-device", 30_000, true);
     render(
       <StationProviders status="running">
         <LiveSauceTabContent />
       </StationProviders>,
     );
 
-    const controls = within(screen.getAllByText("House Sauce")[0].parentElement!).getAllByRole(
-      "button",
-      { name: /consumed batches correction/ },
-    );
-    expect(controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(true);
+    const increase = screen.getByTestId("sauce-stock-increase") as HTMLButtonElement;
+    expect(increase.disabled).toBe(true);
 
     act(() => {
-      releaseManualSectionLock(RUN_ID, "sauce", "peer-device");
+      releaseManualSectionLock(RUN_ID, "sauce-stock", "peer-device");
     });
 
-    expect(controls.every((control) => (control as HTMLButtonElement).disabled)).toBe(false);
+    expect(increase.disabled).toBe(false);
   });
 
   it.each(FRONTLINE_APPLICATOR_LOCK_CASES)(
@@ -697,7 +694,14 @@ describe("live station edits and stamped browser persistence", () => {
     localStorage.clear();
   });
 
-  it("keeps the dough quick-check edit after remount and rejects a stale peer snapshot", async () => {
+  it("keeps Sauce stock after remount and rejects a stale peer snapshot", async () => {
+    saveRunValues(RUN_ID, {
+      ...loadRunValues(RUN_ID),
+      sauceStockBarrels: 1.2,
+      sauceStockAnchorNetSec: 0,
+      sauceStockCorrectionGeneration: 0,
+      sauceStockInitialized: true,
+    });
     const view = render(
       <LiveStationPersistenceHarness>
         <LiveSauceTabContent />
@@ -705,13 +709,11 @@ describe("live station edits and stamped browser persistence", () => {
     );
 
     await act(async () => {
-      fireEvent.click(
-        screen.getByRole("button", { name: "Increase consumed batches correction" }),
-      );
+      fireEvent.click(screen.getByTestId("sauce-stock-increase"));
     });
 
     await waitFor(() => {
-      expect(loadRunValues(RUN_ID).sauceBarrelsMade).toBe(1);
+      expect(loadRunValues(RUN_ID).sauceStockBarrels).toBe(1.3);
     });
     const editedStamp = loadRunValuesUpdated()[RUN_ID] ?? 0;
     expect(editedStamp).toBeGreaterThan(100);
@@ -722,10 +724,10 @@ describe("live station edits and stamped browser persistence", () => {
         <LiveSauceTabContent />
       </LiveStationPersistenceHarness>,
     );
-    expect(screen.getByText(/consumed 1\.00/)).toBeTruthy();
+    expect(screen.getByLabelText("Sauce stock on hand").textContent).toContain("1.3");
 
     const localValues = loadRunValues(RUN_ID);
-    const stalePeerValues = { ...localValues, sauceBarrelsMade: 0 };
+    const stalePeerValues = { ...localValues, sauceStockBarrels: 1.2 };
     const acceptsStalePeer = acceptRemoteRunValueOnSync(
       stalePeerValues,
       localValues,
@@ -736,89 +738,7 @@ describe("live station edits and stamped browser persistence", () => {
 
     if (acceptsStalePeer) saveRunValues(RUN_ID, stalePeerValues);
     expect(loadRunValues(RUN_ID).casesOnCurrentSkid).toBe(3);
-    expect(loadRunValues(RUN_ID).sauceBarrelsMade).toBe(1);
+    expect(loadRunValues(RUN_ID).sauceStockBarrels).toBe(1.3);
   });
 
-  it("keeps a sauce count after remount and rejects a stale peer snapshot", async () => {
-    const view = render(
-      <LiveStationPersistenceHarness>
-        <LiveSauceTabContent />
-      </LiveStationPersistenceHarness>,
-    );
-
-    await act(async () => {
-      fireEvent.click(
-        screen.getByRole("button", { name: "Increase consumed batches correction" }),
-      );
-    });
-
-    await waitFor(() => {
-      expect(loadRunValues(RUN_ID).sauceBarrelsMade).toBe(1);
-    });
-    const editedStamp = loadRunValuesUpdated()[RUN_ID] ?? 0;
-    expect(editedStamp).toBeGreaterThan(100);
-
-    view.unmount();
-    render(
-      <LiveStationPersistenceHarness>
-        <LiveSauceTabContent />
-      </LiveStationPersistenceHarness>,
-    );
-    expect(screen.getByText(/consumed 1\.00/)).toBeTruthy();
-
-    const localValues = loadRunValues(RUN_ID);
-    const stalePeerValues = { ...localValues, sauceBarrelsMade: 0 };
-    const acceptsStalePeer = acceptRemoteRunValueOnSync(
-      stalePeerValues,
-      localValues,
-      editedStamp - 1,
-      editedStamp,
-    );
-    expect(acceptsStalePeer).toBe(false);
-
-    if (acceptsStalePeer) saveRunValues(RUN_ID, stalePeerValues);
-    expect(loadRunValues(RUN_ID).casesOnCurrentSkid).toBe(3);
-    expect(loadRunValues(RUN_ID).sauceBarrelsMade).toBe(1);
-  });
-
-  it("keeps a sauce count after remount and rejects a stale peer snapshot", async () => {
-    const view = render(
-      <LiveStationPersistenceHarness>
-        <LiveSauceTabContent />
-      </LiveStationPersistenceHarness>,
-    );
-
-    await act(async () => {
-      fireEvent.click(
-        screen.getByRole("button", { name: "Increase consumed batches correction" }),
-      );
-    });
-
-    await waitFor(() => {
-      expect(loadRunValues(RUN_ID).sauceBarrelsMade).toBe(1);
-    });
-    const editedStamp = loadRunValuesUpdated()[RUN_ID] ?? 0;
-    expect(editedStamp).toBeGreaterThan(100);
-
-    view.unmount();
-    render(
-      <LiveStationPersistenceHarness>
-        <LiveSauceTabContent />
-      </LiveStationPersistenceHarness>,
-    );
-    expect(screen.getByText(/consumed 1\.00/)).toBeTruthy();
-
-    const localValues = loadRunValues(RUN_ID);
-    const stalePeerValues = { ...localValues, sauceBarrelsMade: 0 };
-    const acceptsStalePeer = acceptRemoteRunValueOnSync(
-      stalePeerValues,
-      localValues,
-      editedStamp - 1,
-      editedStamp,
-    );
-    expect(acceptsStalePeer).toBe(false);
-
-    if (acceptsStalePeer) saveRunValues(RUN_ID, stalePeerValues);
-    expect(loadRunValues(RUN_ID).sauceBarrelsMade).toBe(1);
-  });
 });

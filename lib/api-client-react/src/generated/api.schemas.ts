@@ -835,6 +835,9 @@ export const AutoTrackMutationField = {
   sauceBarrelsMade: 'sauceBarrelsMade',
   sauceBarrelAnchorNetSec: 'sauceBarrelAnchorNetSec',
   sauceBarrelCorrectionGeneration: 'sauceBarrelCorrectionGeneration',
+  sauceStockBarrels: 'sauceStockBarrels',
+  sauceStockAnchorNetSec: 'sauceStockAnchorNetSec',
+  sauceStockCorrectionGeneration: 'sauceStockCorrectionGeneration',
   app1BatchesMade: 'app1BatchesMade',
   app1BatchAnchorNetSec: 'app1BatchAnchorNetSec',
   app1BatchCorrectionGeneration: 'app1BatchCorrectionGeneration',
@@ -881,6 +884,7 @@ export const AutoTrackClaimChannel = {
   'batch-produce': 'batch-produce',
   hopper: 'hopper',
   'sauce-barrel': 'sauce-barrel',
+  'sauce-stock': 'sauce-stock',
   'app1-batch': 'app1-batch',
   'app2-batch': 'app2-batch',
   'app3-batch': 'app3-batch',
@@ -1071,6 +1075,7 @@ export const ManualSectionEditRequestSection = {
   packaging: 'packaging',
   dough: 'dough',
   sauce: 'sauce',
+  'sauce-stock': 'sauce-stock',
   app1: 'app1',
   app2: 'app2',
   app3: 'app3',
@@ -1159,6 +1164,36 @@ export type ManualSauceEdit = ManualSectionEditRequestBase & {
   section?: 'sauce';
   values?: ManualSauceEditValues;
   baseValues?: ManualSauceEditBaseValues;
+};
+
+export type ManualSauceStockEditValues = {
+  /**
+     * @minimum 0
+     * @maximum 2
+     */
+  sauceStockBarrels?: number;
+  /** @minimum 0 */
+  sauceStockAnchorNetSec?: number;
+  /** @minimum 0 */
+  sauceStockCorrectionGeneration?: number;
+};
+
+export type ManualSauceStockEditBaseValues = {
+  /**
+     * @minimum 0
+     * @maximum 2
+     */
+  sauceStockBarrels: number;
+  /** @minimum 0 */
+  sauceStockAnchorNetSec: number;
+  /** @minimum 0 */
+  sauceStockCorrectionGeneration: number;
+};
+
+export type ManualSauceStockEdit = ManualSectionEditRequestBase & {
+  section?: 'sauce-stock';
+  values?: ManualSauceStockEditValues;
+  baseValues?: ManualSauceStockEditBaseValues;
 };
 
 export type ManualApp1EditValues = {
@@ -1358,6 +1393,32 @@ export type ManualSectionEditRequest = (ManualPackagingEdit & {
      */
   deviceId: string;
 }) | (ManualSauceEdit & {
+  /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
+  id: string;
+  date: string;
+  /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
+  runId: string;
+  section: ManualSectionEditRequestSection;
+  /** Only fields belonging to section */
+  values: ManualSectionEditRequestValues;
+  /** Complete baseline for every field in section */
+  baseValues: ManualSectionEditRequestBaseValues;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  observedGeneration: string;
+  /** @minimum 0 */
+  baseRevision: number;
+  /** @minimum 0 */
+  resetEpoch: number;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     * @pattern ^[A-Za-z0-9:_-]{1,160}$
+     */
+  deviceId: string;
+}) | (ManualSauceStockEdit & {
   /** @pattern ^[A-Za-z0-9:_-]{1,160}$ */
   id: string;
   date: string;

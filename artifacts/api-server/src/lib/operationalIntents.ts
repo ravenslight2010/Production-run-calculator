@@ -1,4 +1,4 @@
-import { initializeApplicatorStockOnRunStart } from "@workspace/live-calc";
+import { initializeApplicatorStockOnRunStart, initializeSauceStockOnRunStart } from "@workspace/live-calc";
 
 /**
  * Versioned, replay-safe offline operator commands.  These are deliberately
@@ -153,7 +153,10 @@ export function applyOperationalIntent(stored: unknown, intent: OperationalInten
       ) {
         const allValues = obj(data.runValues);
         const currentValues = obj(allValues[intent.runId]);
-        const initialized = initializeApplicatorStockOnRunStart(currentValues);
+        const initialized = {
+          ...initializeApplicatorStockOnRunStart(currentValues),
+          ...initializeSauceStockOnRunStart(currentValues),
+        };
         if (Object.keys(initialized).length) {
           allValues[intent.runId] = { ...currentValues, ...initialized };
           data.runValues = allValues;

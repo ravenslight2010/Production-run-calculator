@@ -62,6 +62,10 @@ export const formSchema = z.object({
   sauceBarrelsMade: z.coerce.number().min(0).default(0),
   sauceBarrelAnchorNetSec: z.coerce.number().min(0).default(0),
   sauceBarrelCorrectionGeneration: z.coerce.number().int().min(0).default(0),
+  sauceStockBarrels: z.coerce.number().min(0).max(2).default(0),
+  sauceStockAnchorNetSec: z.coerce.number().min(0).default(0),
+  sauceStockCorrectionGeneration: z.coerce.number().int().min(0).default(0),
+  sauceStockInitialized: z.boolean().default(false),
   app1OzPerPizza: z.coerce.number().min(0).default(0),
   app1BatchLbs: z.coerce.number().min(0).default(0),
   app1BatchesMade: z.coerce.number().min(0).default(0),
@@ -234,6 +238,10 @@ export const DEFAULT_VALUES: FormValues = {
   sauceBarrelsMade: 0,
   sauceBarrelAnchorNetSec: 0,
   sauceBarrelCorrectionGeneration: 0,
+  sauceStockBarrels: 0,
+  sauceStockAnchorNetSec: 0,
+  sauceStockCorrectionGeneration: 0,
+  sauceStockInitialized: false,
   app1OzPerPizza: 0,
   app1BatchLbs: 0,
   app1BatchesMade: 0,
@@ -551,7 +559,7 @@ export type SyncPayload = {
     version: 1;
     runs: Record<string, Partial<Record<
        "case" | "tray-consume" | "tray-produce" | "batch-consume" | "batch-produce" | "hopper"
-        | "sauce-barrel" | "app1-batch" | "app2-batch" | "app3-batch" | "app4-batch"
+        | "sauce-barrel" | "sauce-stock" | "app1-batch" | "app2-batch" | "app3-batch" | "app4-batch"
         | "app1-stock" | "app2-stock" | "app3-stock" | "app4-stock"
         | "pep1-stock" | "pep1b-stock" | "pep2-stock" | "pep2b-stock",
       {

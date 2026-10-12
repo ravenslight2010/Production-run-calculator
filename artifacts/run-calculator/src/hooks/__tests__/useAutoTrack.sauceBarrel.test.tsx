@@ -31,6 +31,10 @@ function props(elapsedBatchSec: number, claimAutoTrackEvent: any, values = {}, o
       sauceBarrelsMade: 0,
       sauceBarrelAnchorNetSec: 0,
       sauceBarrelCorrectionGeneration: 0,
+      sauceStockBarrels: 0,
+      sauceStockAnchorNetSec: 0,
+      sauceStockCorrectionGeneration: 0,
+      sauceStockInitialized: true,
       sauceOzPerPizza: 4,
       ...values,
     } as any,
@@ -246,5 +250,77 @@ describe("useAutoTrack sauce barrel coordination", () => {
     }, { calc: calcAt(20) }));
     await waitFor(() => expect(claim).toHaveBeenCalledTimes(1));
     expect(claim.mock.calls[0][0]).toMatchObject({ dueAt: 50, nextDueAt: 70 });
+  });
+
+  it("initializes a legacy live run once through the stock-only claim", async () => {
+    const claim = vi.fn(async (request) => ({
+      outcome: "accepted" as const,
+      state: { generation: request.generation, sequence: request.sequence, nextDueAt: request.nextDueAt },
+      values: Object.fromEntries(request.mutations.map((mutation: any) => [mutation.field, mutation.to])),
+    }));
+    renderHook(() => useAutoTrack(props(25, claim, {
+      sauceStockBarrels: 0,
+      sauceStockAnchorNetSec: 0,
+      sauceStockCorrectionGeneration: 0,
+      sauceStockInitialized: false,
+    })));
+
+    await waitFor(() => expect(
+      claim.mock.calls.some(([request]) => request.channel === "sauce-stock"),
+    ).toBe(true));
+    const stockClaim = claim.mock.calls.find(([request]) => request.channel === "sauce-stock")![0];
+    expect(stockClaim).toMatchObject({
+      channel: "sauce-stock",
+      dueAt: 25,
+      correctionGeneration: 0,
+      mutations: expect.arrayContaining([
+        { field: "sauceStockBarrels", from: 0, to: 2 },
+        { field: "sauceStockAnchorNetSec", from: 0, to: 25 },
+        { field: "sauceStockCorrectionGeneration", from: 0, to: 0 },
+      ]),
+    });
+  });
+
+  it("depletes exactly one tenth and rearms the stock countdown at its due anchor", async () => {
+    const claim = vi.fn(async (request) => ({
+      outcome: "accepted" as const,
+      state: { generation: request.generation, sequence: request.sequence, nextDueAt: request.nextDueAt },
+      values: Object.fromEntries(request.mutations.map((mutation: any) => [mutation.field, mutation.to])),
+    }));
+    renderHook(() => useAutoTrack(props(13, claim, {
+      sauceStockBarrels: 1,
+      sauceStockAnchorNetSec: 0,
+      sauceStockCorrectionGeneration: 0,
+      sauceStockInitialized: true,
+    })));
+
+    await waitFor(() => expect(
+      claim.mock.calls.some(([request]) => request.channel === "sauce-stock"),
+    ).toBe(true));
+    const stockClaim = claim.mock.calls.find(([request]) => request.channel === "sauce-stock")![0];
+    expect(stockClaim).toMatchObject({
+      channel: "sauce-stock",
+      dueAt: 12,
+      nextDueAt: 24,
+      mutations: expect.arrayContaining([
+        { field: "sauceStockBarrels", from: 1, to: 0.9 },
+        { field: "sauceStockAnchorNetSec", from: 0, to: 12 },
+      ]),
+    });
+  });
+
+  it.each([
+    ["paused", { runStatus: "paused" }],
+    ["completed", { calc: { ...props(30, null).calc, pressDone: true } }],
+    ["ended", { runStatus: "ended" }],
+    ["recovery suppression", { autoTrackBlocked: true }],
+  ])("does not deplete stock while %s", async (_label, overrides) => {
+    const claim = vi.fn();
+    renderHook(() => useAutoTrack(props(30, claim, {
+      sauceStockBarrels: 1,
+      sauceStockInitialized: true,
+    }, overrides) as any));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(claim.mock.calls.some(([request]) => request.channel === "sauce-stock")).toBe(false);
   });
 });

@@ -6209,6 +6209,9 @@ components:
             - sauceBarrelsMade
             - sauceBarrelAnchorNetSec
             - sauceBarrelCorrectionGeneration
+            - sauceStockBarrels
+            - sauceStockAnchorNetSec
+            - sauceStockCorrectionGeneration
             - app1BatchesMade
             - app1BatchAnchorNetSec
             - app1BatchCorrectionGeneration
@@ -6231,7 +6234,7 @@ components:
         runId: { type: string, minLength: 1, maxLength: 160 }
         channel:
           type: string
-          enum: [case, tray-consume, tray-produce, batch-consume, batch-produce, hopper, sauce-barrel, app1-batch, app2-batch, app3-batch, app4-batch, app1-stock, app2-stock, app3-stock, app4-stock, pep1-stock, pep1b-stock, pep2-stock, pep2b-stock]
+          enum: [case, tray-consume, tray-produce, batch-consume, batch-produce, hopper, sauce-barrel, sauce-stock, app1-batch, app2-batch, app3-batch, app4-batch, app1-stock, app2-stock, app3-stock, app4-stock, pep1-stock, pep1b-stock, pep2-stock, pep2b-stock]
         generation: { type: string, minLength: 1, maxLength: 160 }
         sequence: { type: integer, minimum: 1, maximum: 10000000 }
         eventId: { type: string, minLength: 1, maxLength: 160 }
@@ -6322,7 +6325,7 @@ components:
         id: { type: string, pattern: "^[A-Za-z0-9:_-]{1,160}$" }
         date: { type: string, format: date }
         runId: { type: string, pattern: "^[A-Za-z0-9:_-]{1,160}$" }
-        section: { type: string, enum: [packaging, dough, sauce, app1, app2, app3, app4, pep1, pep2] }
+        section: { type: string, enum: [packaging, dough, sauce, sauce-stock, app1, app2, app3, app4, pep1, pep2] }
         values: { type: object, minProperties: 1, additionalProperties: { type: number, minimum: 0, maximum: 1000000 }, description: Only fields belonging to section }
         baseValues: { type: object, minProperties: 2, additionalProperties: { type: number, minimum: 0, maximum: 1000000 }, description: Complete baseline for every field in section }
         observedGeneration: { type: string, minLength: 1, maxLength: 160 }
@@ -6333,6 +6336,7 @@ components:
         - $ref: "#/components/schemas/ManualPackagingEdit"
         - $ref: "#/components/schemas/ManualDoughEdit"
         - $ref: "#/components/schemas/ManualSauceEdit"
+        - $ref: "#/components/schemas/ManualSauceStockEdit"
         - $ref: "#/components/schemas/ManualApp1Edit"
         - $ref: "#/components/schemas/ManualApp2Edit"
         - $ref: "#/components/schemas/ManualApp3Edit"
@@ -6363,6 +6367,14 @@ components:
             section: { const: sauce }
             values: { type: object, minProperties: 1, maxProperties: 3, additionalProperties: false, properties: { sauceBarrelsMade: { type: number }, sauceBarrelAnchorNetSec: { type: number }, sauceBarrelCorrectionGeneration: { type: number } } }
             baseValues: { type: object, required: [sauceBarrelsMade, sauceBarrelAnchorNetSec, sauceBarrelCorrectionGeneration], minProperties: 3, maxProperties: 3, additionalProperties: false, properties: { sauceBarrelsMade: { type: number }, sauceBarrelAnchorNetSec: { type: number }, sauceBarrelCorrectionGeneration: { type: number } } }
+    ManualSauceStockEdit:
+      allOf:
+        - $ref: "#/components/schemas/ManualSectionEditRequestBase"
+        - type: object
+          properties:
+            section: { const: sauce-stock }
+            values: { type: object, minProperties: 1, maxProperties: 3, additionalProperties: false, properties: { sauceStockBarrels: { type: number, minimum: 0, maximum: 2 }, sauceStockAnchorNetSec: { type: number, minimum: 0 }, sauceStockCorrectionGeneration: { type: integer, minimum: 0 } } }
+            baseValues: { type: object, required: [sauceStockBarrels, sauceStockAnchorNetSec, sauceStockCorrectionGeneration], minProperties: 3, maxProperties: 3, additionalProperties: false, properties: { sauceStockBarrels: { type: number, minimum: 0, maximum: 2 }, sauceStockAnchorNetSec: { type: number, minimum: 0 }, sauceStockCorrectionGeneration: { type: integer, minimum: 0 } } }
     ManualApp1Edit:
       allOf:
         - $ref: "#/components/schemas/ManualSectionEditRequestBase"

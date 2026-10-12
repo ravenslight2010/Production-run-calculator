@@ -16,6 +16,9 @@ import {
   computeApplicatorStockCadenceSeconds,
   computeApplicatorStockCapacityLbs,
   depleteApplicatorStock,
+  capSauceStock,
+  computeSauceStockStepSeconds,
+  depleteSauceStock,
   computeAppSlotInfo,
   computeAutoTrackSuggestion,
   computeCaseTickWrite,
@@ -83,6 +86,10 @@ interface AutoTrackValues {
   sauceOzPerPizza: number;
   sauceBarrelAnchorNetSec: number;
   sauceBarrelCorrectionGeneration: number;
+  sauceStockBarrels: number;
+  sauceStockAnchorNetSec: number;
+  sauceStockCorrectionGeneration: number;
+  sauceStockInitialized: boolean;
   app1Type: string; app1OzPerPizza: number; app1BatchLbs: number; app1CheeseRecipe: Array<{ lbs: number }>;
   app1BatchesMade: number; app1BatchAnchorNetSec: number; app1BatchCorrectionGeneration: number;
   app2Type: string; app2OzPerPizza: number; app2BatchLbs: number; app2CheeseRecipe: Array<{ lbs: number }>;
@@ -112,6 +119,7 @@ export type AutoTrackChannel =
   | "batch-produce"
   | "hopper"
   | "sauce-barrel"
+  | "sauce-stock"
   | "app1-batch"
   | "app2-batch"
   | "app3-batch"
@@ -122,6 +130,7 @@ export type AutoTrackChannel =
 export type AutoTrackMutation = {
   field: "skidsCompleted" | "casesOnCurrentSkid" | "traysOnLine" | "batchesReady"
     | "sauceBarrelsMade" | "sauceBarrelAnchorNetSec" | "sauceBarrelCorrectionGeneration"
+    | "sauceStockBarrels" | "sauceStockAnchorNetSec" | "sauceStockCorrectionGeneration"
     | "app1BatchesMade" | "app1BatchAnchorNetSec" | "app1BatchCorrectionGeneration"
     | "app2BatchesMade" | "app2BatchAnchorNetSec" | "app2BatchCorrectionGeneration"
     | "app3BatchesMade" | "app3BatchAnchorNetSec" | "app3BatchCorrectionGeneration"
@@ -492,6 +501,7 @@ export function useAutoTrack({
   const [coordinationDelayed, setCoordinationDelayed] = useState(false);
   // Net-elapsed seconds (not a wall-clock display due time) for sauce claims.
   const sauceNextDueNetSecRef = useRef(0);
+  const sauceStockNextDueNetSecRef = useRef(0);
   const appNextDueNetSecRefs = {
     app1: useRef(0),
     app2: useRef(0),
@@ -530,6 +540,7 @@ export function useAutoTrack({
     if (channel === "batch-consume") return batchNextDueMsRef;
     if (channel === "batch-produce") return batchProdNextDueMsRef;
     if (channel === "sauce-barrel") return sauceNextDueNetSecRef;
+    if (channel === "sauce-stock") return sauceStockNextDueNetSecRef;
     if (channel === "app1-batch") return appNextDueNetSecRefs.app1;
     if (channel === "app2-batch") return appNextDueNetSecRefs.app2;
     if (channel === "app3-batch") return appNextDueNetSecRefs.app3;
@@ -674,6 +685,7 @@ useEffect(() => {
     coordinationRetryEventRef.current = {};
     coordinationPendingRef.current.clear();
     sauceNextDueNetSecRef.current = 0;
+    sauceStockNextDueNetSecRef.current = 0;
     appNextDueNetSecRefs.app1.current = 0;
     appNextDueNetSecRefs.app2.current = 0;
     appNextDueNetSecRefs.app3.current = 0;
@@ -773,6 +785,13 @@ useEffect(() => {
       }
       if (typeof values.sauceBarrelCorrectionGeneration === "number") {
         form.setValue("sauceBarrelCorrectionGeneration", values.sauceBarrelCorrectionGeneration, { shouldDirty: true });
+      }
+      for (const field of ["sauceStockBarrels", "sauceStockAnchorNetSec", "sauceStockCorrectionGeneration"] as const) {
+        const value = values[field];
+        if (typeof value === "number") form.setValue(field, value, { shouldDirty: true });
+      }
+      if (channel === "sauce-stock") {
+        form.setValue("sauceStockInitialized", true, { shouldDirty: true });
       }
       (["app1", "app2", "app3", "app4"] as const).forEach((slot) => {
         const made = values[`${slot}BatchesMade` as keyof FormValues];
@@ -1377,6 +1396,96 @@ useEffect(() => {
     v.sauceOzPerPizza,
     v.casesNeeded,
     v.pizzasPerCase,
+  ]);
+
+  const previousSauceStockCorrectionGenerationRef = useRef(v.sauceStockCorrectionGeneration);
+  useEffect(() => {
+    const cadence = computeSauceStockStepSeconds(
+      v.sauceOzPerPizza,
+      calc.ppm,
+      calc.sauceEffBarrel,
+    );
+    const anchor = Math.max(0, Number(v.sauceStockAnchorNetSec) || 0);
+    sauceStockNextDueNetSecRef.current =
+      v.sauceStockInitialized === true && cadence > 0 ? anchor + cadence : 0;
+    if (previousSauceStockCorrectionGenerationRef.current !== v.sauceStockCorrectionGeneration) {
+      coordinationSequenceRef.current["sauce-stock"] = 0;
+      coordinationRetryEventRef.current["sauce-stock"] = undefined;
+      previousSauceStockCorrectionGenerationRef.current = v.sauceStockCorrectionGeneration;
+    }
+  }, [
+    calc.ppm,
+    calc.sauceEffBarrel,
+    v.sauceOzPerPizza,
+    v.sauceStockAnchorNetSec,
+    v.sauceStockCorrectionGeneration,
+    v.sauceStockInitialized,
+  ]);
+
+  // This register is independent of the full-barrel inventory claim above:
+  // each accepted event consumes one tenth on line and resets its countdown.
+  useEffect(() => {
+    const initialize = v.sauceStockInitialized !== true;
+    if (
+      !claimAutoTrackEvent ||
+      disabled ||
+      autoTrackBlocked ||
+      autoTrackBlockedRef?.current ||
+      !autoTrackProgress ||
+      (!productionNeedsAvailable && !initialize) ||
+      runStatus !== "running" ||
+      endedAt != null ||
+      calc.pressDone ||
+      nextRunPrepActive ||
+      Date.now() < autoSuppressUntilRef.current ||
+      serverOwnsChannel("sauce-stock") ||
+      !Number.isFinite(elapsedBatchSec)
+    ) return;
+    const cadence = computeSauceStockStepSeconds(
+      v.sauceOzPerPizza,
+      calc.ppm,
+      calc.sauceEffBarrel,
+    );
+    const onHand = initialize ? 0 : Number(v.sauceStockBarrels);
+    if (
+      !Number.isFinite(onHand)
+      || (!initialize && (onHand <= 0 || capSauceStock(onHand) !== onHand))
+      || (!initialize && cadence <= 0)
+    ) return;
+    const anchor = Math.max(0, Number(v.sauceStockAnchorNetSec) || 0);
+    const dueAt = initialize
+      ? elapsedBatchSec
+      : sauceStockNextDueNetSecRef.current || anchor + cadence;
+    if (elapsedBatchSec < dueAt) return;
+    const correctionGeneration = Math.max(0, Number(v.sauceStockCorrectionGeneration) || 0);
+    sauceStockNextDueNetSecRef.current = dueAt;
+    commitAutomatic("sauce-stock", dueAt, dueAt + Math.max(cadence, 1), [
+      { field: "sauceStockBarrels", from: onHand, to: initialize ? 2 : depleteSauceStock(onHand) },
+      { field: "sauceStockAnchorNetSec", from: initialize ? 0 : anchor, to: dueAt },
+      { field: "sauceStockCorrectionGeneration", from: correctionGeneration, to: correctionGeneration },
+    ]);
+  }, [
+    autoSuppressUntilRef,
+    autoTrackBlocked,
+    autoTrackBlockedRef,
+    autoTrackProgress,
+    productionNeedsAvailable,
+    calc.pressDone,
+    calc.ppm,
+    calc.sauceEffBarrel,
+    commitAutomatic,
+    disabled,
+    elapsedBatchSec,
+    endedAt,
+    nextRunPrepActive,
+    runGeneration,
+    runId,
+    runStatus,
+    v.sauceOzPerPizza,
+    v.sauceStockAnchorNetSec,
+    v.sauceStockBarrels,
+    v.sauceStockCorrectionGeneration,
+    v.sauceStockInitialized,
   ]);
 
   // The cumulative made-count register remains an independent historical

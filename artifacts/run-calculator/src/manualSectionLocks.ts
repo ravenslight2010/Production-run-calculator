@@ -17,6 +17,7 @@ export const MANUAL_SECTION_CONTROLS = {
   packaging: ["calculator-skids", "calculator-cases", "packaging-skids", "packaging-cases", "floor-skid-done", "floor-cases", "dough-quick-check-skids", "dough-quick-check-cases"],
   dough: ["dough-trays", "dough-batches", "dough-crust-trays", "dough-crust-batches"],
   sauce: ["sauce-batches"],
+  "sauce-stock": ["sauce-stock"],
   app1: ["applicator-1-batches", "applicator-1-stock"],
   app2: ["applicator-2-batches", "applicator-2-stock"],
   app3: ["applicator-3-batches", "applicator-3-stock"],

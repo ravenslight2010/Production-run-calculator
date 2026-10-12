@@ -27,6 +27,8 @@ function values(overrides: Record<string, unknown> = {}) {
     casesPerSkid: 10, pizzasPerCase: 10, casesNeeded: 100, freezerTime: 0,
     traysOnLine: 0, batchesReady: 0, sauceBarrelsMade: 0, sauceOzPerPizza: 4,
     sauceBarrelAnchorNetSec: 0, sauceBarrelCorrectionGeneration: 0,
+    sauceStockBarrels: 0, sauceStockAnchorNetSec: 0, sauceStockCorrectionGeneration: 0,
+    sauceStockInitialized: true,
     app1Type: "Mozzarella", app1OzPerPizza: 4, app1BatchLbs: 25, app1CheeseRecipe: [],
     app1BatchesMade: 0, app1BatchAnchorNetSec: 0, app1BatchCorrectionGeneration: 0,
     app1StockLbs: 50, app1StockAnchorNetSec: 0, app1StockCorrectionGeneration: 0,

@@ -2,8 +2,12 @@ import {
   applicatorStockFields,
   applicatorStockRegisterForChannel,
   capApplicatorStock,
+  capSauceStock,
   computeApplicatorStockCapacityLbs,
   computeApplicatorStockRateLbsPerSecond,
+  computeAutoTrackElapsedMs,
+  computeSauceStockStepSeconds,
+  depleteSauceStock,
   computeServerCalc,
 } from "@workspace/live-calc";
 
@@ -16,6 +20,7 @@ export const AUTO_TRACK_CHANNELS = [
   "batch-produce",
   "hopper",
   "sauce-barrel",
+  "sauce-stock",
   "app1-batch",
   "app2-batch",
   "app3-batch",
@@ -55,6 +60,7 @@ export type AutoTrackMutation = {
     | "sauceBarrelsMade"
     | "sauceBarrelAnchorNetSec"
     | "sauceBarrelCorrectionGeneration"
+    | "sauceStockBarrels" | "sauceStockAnchorNetSec" | "sauceStockCorrectionGeneration"
     | "app1BatchesMade"
     | "app1BatchAnchorNetSec"
     | "app1BatchCorrectionGeneration"
@@ -116,6 +122,7 @@ const MUTATING_FIELDS = new Set<AutoTrackMutation["field"]>([
   "sauceBarrelsMade",
   "sauceBarrelAnchorNetSec",
   "sauceBarrelCorrectionGeneration",
+  "sauceStockBarrels", "sauceStockAnchorNetSec", "sauceStockCorrectionGeneration",
   "app1BatchesMade",
   "app1BatchAnchorNetSec",
   "app1BatchCorrectionGeneration",
@@ -149,6 +156,7 @@ const CHANNEL_FIELDS: Record<AutoTrackChannel, ReadonlySet<AutoTrackMutation["fi
     "sauceBarrelAnchorNetSec",
     "sauceBarrelCorrectionGeneration",
   ]),
+  "sauce-stock": new Set(["sauceStockBarrels", "sauceStockAnchorNetSec", "sauceStockCorrectionGeneration"]),
   "app1-batch": new Set([
     "app1BatchesMade",
     "app1BatchAnchorNetSec",
@@ -210,7 +218,8 @@ export function parseAutoTrackClaim(input: unknown, now = Date.now()): AutoTrack
     || body.mutations.length > 3
   ) return null;
   const stockChannel = !!applicatorStockRegisterForChannel(body.channel);
-  const netTimeChannel = body.channel === "sauce-barrel" || /^app[1-4]-batch$/.test(body.channel) || stockChannel;
+  const sauceStockChannel = body.channel === "sauce-stock";
+  const netTimeChannel = body.channel === "sauce-barrel" || sauceStockChannel || /^app[1-4]-batch$/.test(body.channel) || stockChannel;
   if (
     netTimeChannel
       ? body.dueAt < 0 || body.nextDueAt > 1_000_000
@@ -222,7 +231,7 @@ export function parseAutoTrackClaim(input: unknown, now = Date.now()): AutoTrack
         || body.nextDueAt > now + 24 * 60 * 60_000
   ) return null;
   if (
-    (body.channel === "case" || body.channel === "sauce-barrel" || /^app[1-4]-batch$/.test(body.channel) || stockChannel)
+    (body.channel === "case" || body.channel === "sauce-barrel" || sauceStockChannel || /^app[1-4]-batch$/.test(body.channel) || stockChannel)
     && (!Number.isSafeInteger(body.correctionGeneration) || (body.correctionGeneration as number) < 0)
   ) return null;
 
@@ -298,6 +307,30 @@ export function parseAutoTrackClaim(input: unknown, now = Date.now()): AutoTrack
       || correction.from !== body.correctionGeneration
     ) return null;
   }
+  if (sauceStockChannel) {
+    const byField = new Map(mutations.map((mutation) => [mutation.field, mutation]));
+    const stock = byField.get("sauceStockBarrels");
+    const anchor = byField.get("sauceStockAnchorNetSec");
+    const correction = byField.get("sauceStockCorrectionGeneration");
+    const initializationClaim = stock?.from === 0
+      && stock.to === 2
+      && anchor?.from === 0
+      && correction?.from === 0;
+    if (
+      mutations.length !== 3
+      || !stock || !anchor || !correction
+      || (!initializationClaim && (
+        stock.to >= stock.from
+        || Math.abs(stock.from - capSauceStock(stock.from)) > 0.0001
+        || Math.abs(stock.to - depleteSauceStock(stock.from)) > 0.0001
+      ))
+      || anchor.to !== body.dueAt
+      || (initializationClaim ? anchor.to < 0 : anchor.to <= anchor.from)
+      || !Number.isSafeInteger(correction.from)
+      || correction.from !== correction.to
+      || correction.from !== body.correctionGeneration
+    ) return null;
+  }
 
   return {
     version: AUTO_TRACK_COORDINATION_VERSION,
@@ -309,7 +342,7 @@ export function parseAutoTrackClaim(input: unknown, now = Date.now()): AutoTrack
     dueAt: body.dueAt,
     nextDueAt: body.nextDueAt,
     baseUpdatedAt: body.baseUpdatedAt,
-    ...(body.channel === "case" || body.channel === "sauce-barrel" || /^app[1-4]-batch$/.test(body.channel) || stockChannel
+    ...(body.channel === "case" || body.channel === "sauce-barrel" || sauceStockChannel || /^app[1-4]-batch$/.test(body.channel) || stockChannel
       ? { correctionGeneration: body.correctionGeneration as number }
       : {}),
     mutations,
@@ -424,6 +457,46 @@ export function applyAutoTrackClaim(
       || !stockMutation
       || Math.abs(stockMutation.to - expected) > 0.011
     ) outcome = "conflict";
+  } else if (outcome === "accepted" && claim.channel === "sauce-stock") {
+    const stock = Number(values.sauceStockBarrels ?? 0);
+    const anchorMutation = claim.mutations.find(({ field }) => field === "sauceStockAnchorNetSec");
+    const stockMutation = claim.mutations.find(({ field }) => field === "sauceStockBarrels");
+    const correctionGeneration = Number(values.sauceStockCorrectionGeneration) || 0;
+    let calc;
+    try { calc = computeServerCalc(data as never, [], now)?.calc; } catch { calc = undefined; }
+    const cadence = computeSauceStockStepSeconds(values.sauceOzPerPizza, calc?.ppm, calc?.sauceEffBarrel);
+    if (
+      !Number.isFinite(stock)
+      || !Number.isSafeInteger(correctionGeneration)
+      || correctionGeneration !== claim.correctionGeneration
+      || !anchorMutation
+      || !stockMutation
+    ) outcome = "conflict";
+    else if (values.sauceStockInitialized !== true) {
+      const elapsed = computeAutoTrackElapsedMs({
+        startedAt: Number(runMeta.startedAt) || 0,
+        pausedAt: Number(runMeta.pausedAt) || undefined,
+        nowMs: now,
+        stoppages: Array.isArray(runMeta.stoppages) ? runMeta.stoppages as never : [],
+      }) / 1000;
+      if (
+        stock !== 0
+        || stockMutation.from !== 0
+        || stockMutation.to !== 2
+        || anchorMutation.from !== 0
+        || anchorMutation.to !== claim.dueAt
+        || claim.dueAt > elapsed + 2
+        || Math.abs((claim.nextDueAt - claim.dueAt) - cadence) > Math.max(2, cadence * 0.02)
+        || !Number.isSafeInteger(Number(values.sauceStockCorrectionGeneration ?? 0))
+        || correctionGeneration !== 0
+      ) outcome = "conflict";
+    } else if (
+      stock <= 0
+      || stock > 2
+      || capSauceStock(stock) !== stock
+      || Math.abs((anchorMutation.to - anchorMutation.from) - cadence) > Math.max(2, cadence * 0.02)
+      || Math.abs(stockMutation.to - depleteSauceStock(stock)) > 0.0001
+    ) outcome = "conflict";
   } else if (outcome === "accepted" && (claim.channel === "sauce-barrel" || /^app[1-4]-batch$/.test(claim.channel))) {
     const correctionField = claim.channel === "sauce-barrel"
       ? "sauceBarrelCorrectionGeneration"
@@ -497,6 +570,7 @@ export function applyAutoTrackClaim(
   }
 
   for (const mutation of claim.mutations) values[mutation.field] = mutation.to;
+  if (claim.channel === "sauce-stock") values.sauceStockInitialized = true;
   const acceptedRunValuesUpdatedAt = Math.max(
     now,
     Number(object(data.runValuesUpdatedAt)[claim.runId]) || 0,

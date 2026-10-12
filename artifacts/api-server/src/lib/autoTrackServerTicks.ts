@@ -7,6 +7,8 @@ import {
   capApplicatorStock,
   computeApplicatorStockCapacityLbs,
   computeApplicatorStockRateLbsPerSecond,
+  computeSauceStockStepSeconds,
+  depleteSauceStock,
   computeAutoTrackSuggestion,
   computeLinePhases,
   computePackagingDrainElapsedSec,
@@ -24,6 +26,7 @@ import type { AutoTrackClaim, AutoTrackMutation } from "./autoTrackCoordination"
 
 const NET_CHANNELS = [
   "sauce-barrel",
+  "sauce-stock",
   "app1-batch", "app2-batch", "app3-batch", "app4-batch",
   "app1-stock", "app2-stock", "app3-stock", "app4-stock",
   "pep1-stock", "pep1b-stock", "pep2-stock", "pep2b-stock",
@@ -166,6 +169,44 @@ export function buildNetSecondServerClaims(
   const coordination = payload.autoTrackCoordination?.runs?.[plan.runId];
   return plan.entries.flatMap((entry) => {
     if (!(NET_CHANNELS as readonly string[]).includes(entry.channel) || !entry.dueNow) return [];
+    if (entry.channel === "sauce-stock") {
+      const onHand = number(values.sauceStockBarrels);
+      const anchor = number(values.sauceStockAnchorNetSec);
+      const correctionGeneration = Math.max(0, number(values.sauceStockCorrectionGeneration));
+      const calc = computeServerCalc(payload as never, [], nowMs)?.calc;
+      const cadence = computeSauceStockStepSeconds(
+        values.sauceOzPerPizza,
+        ppm,
+        Number(calc?.sauceEffBarrel) || 0,
+      );
+      const prior = coordination?.["sauce-stock"];
+      const initialize = values.sauceStockInitialized !== true;
+      if (!initialize && (onHand <= 0 || onHand > 2 || cadence <= 0)) return [];
+      const mutationAnchor = initialize ? 0 : anchor;
+      const dueAt = entry.dueAt;
+      const nextDueAt = entry.nextDueAt > dueAt
+        ? entry.nextDueAt
+        : dueAt + Math.max(cadence, 1);
+      return [{
+        version: 1,
+        runId: plan.runId,
+        channel: "sauce-stock",
+        generation: plan.generation,
+        sequence: prior?.generation === plan.generation ? number(prior.sequence) + 1 : 1,
+        eventId: eventIdNamespace
+          ? `srv:sauce-stock:${eventIdNamespace}`
+          : `srv:sauce-stock:${randomUUID()}`,
+        dueAt,
+        nextDueAt,
+        baseUpdatedAt,
+        correctionGeneration,
+        mutations: [
+          { field: "sauceStockBarrels", from: onHand, to: initialize ? 2 : depleteSauceStock(onHand) },
+          { field: "sauceStockAnchorNetSec", from: mutationAnchor, to: dueAt },
+          { field: "sauceStockCorrectionGeneration", from: correctionGeneration, to: correctionGeneration },
+        ],
+      } as AutoTrackClaim];
+    }
     const register = applicatorStockRegisterForChannel(entry.channel);
     if (register) {
       const fields = applicatorStockFields(register);

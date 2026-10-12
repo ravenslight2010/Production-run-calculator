@@ -4,13 +4,14 @@ import {
   applicatorStockFields,
   computeApplicatorStockCadenceSeconds,
 } from "./applicatorStock";
+import { computeSauceStockStepSeconds } from "./sauceStock";
 import { computeSauceRunRequirement } from "./stagedSupply";
 import { computeWallClockDueRefs } from "./wallClockEngine";
 import type { Calc, CalcFormValues, CalcStoppage, ServerCalcResult } from "./index";
 
 export const AUTO_TRACK_SCHEDULE_CHANNELS = [
   "case", "tray-consume", "tray-produce", "batch-consume", "batch-produce", "hopper",
-  "sauce-barrel", "app1-batch", "app2-batch", "app3-batch", "app4-batch",
+  "sauce-barrel", "sauce-stock", "app1-batch", "app2-batch", "app3-batch", "app4-batch",
   "app1-stock", "app2-stock", "app3-stock", "app4-stock",
   "pep1-stock", "pep1b-stock", "pep2-stock", "pep2b-stock",
 ] as const;
@@ -155,6 +156,53 @@ export function computeAutoTrackSchedule(input: AutoTrackScheduleInput): AutoTra
       nextDueAt: owned ? canonicalDue : dueAt + input.calc.sauceDepletionSec,
       canonical: owned,
     });
+  }
+  if (live && !input.calc.pressDone && input.progress?.sauceStockInitialized === true) {
+    const stock = number(input.progress?.sauceStockBarrels);
+    const cadence = computeSauceStockStepSeconds(
+      input.v.sauceOzPerPizza,
+      input.calc.ppm,
+      input.calc.sauceEffBarrel,
+    );
+    if (stock > 0 && stock <= 2 && cadence > 0) {
+      const channel = "sauce-stock" as const;
+      const anchor = Math.max(0, number(input.progress?.sauceStockAnchorNetSec));
+      const dueAt = anchor + cadence;
+      const state = input.coordination?.[channel];
+      const owned = netCanonical(channel);
+      const canonicalDue = owned ? Math.max(number(state?.nextDueAt), dueAt) : dueAt;
+      entries.push({
+        channel,
+        dueAt: canonicalDue,
+        dueNow: elapsedSec >= canonicalDue,
+        nextDueAt: owned ? canonicalDue : dueAt + cadence,
+        canonical: owned,
+      });
+    }
+  }
+  if (
+    live
+    && !input.calc.pressDone
+    && input.progress?.sauceStockInitialized !== true
+  ) {
+    const cadence = computeSauceStockStepSeconds(
+      input.v.sauceOzPerPizza,
+      input.calc.ppm,
+      input.calc.sauceEffBarrel,
+    );
+    if (cadence > 0) {
+      const channel = "sauce-stock" as const;
+      const state = input.coordination?.[channel];
+      const owned = netCanonical(channel);
+      const dueAt = owned ? Math.max(number(state?.nextDueAt), elapsedSec) : elapsedSec;
+      entries.push({
+        channel,
+        dueAt,
+        dueNow: elapsedSec >= dueAt,
+        nextDueAt: owned ? Math.max(dueAt + cadence, dueAt + 1) : elapsedSec + cadence,
+        canonical: owned,
+      });
+    }
   }
   // Keep the legacy cumulative-made register on its existing observation
   // channel. It is historical production evidence, not the stock ticker; the

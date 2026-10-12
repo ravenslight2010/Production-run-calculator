@@ -4,6 +4,7 @@ import {
   capApplicatorStock,
   computeApplicatorStockRateLbsPerSecond,
   computeServerCalc,
+  computeSauceStockStepSeconds,
 } from "@workspace/live-calc";
 
 const NOW = 1_800_000_000_000;
@@ -61,6 +62,14 @@ function stockClaim(overrides: Partial<AutoTrackClaim> = {}): AutoTrackClaim {
   });
 }
 
+function sauceStockMutations(stock: number, anchor: number, generation: number, dueAt: number) {
+  return [
+    { field: "sauceStockBarrels" as const, from: stock, to: Math.round((stock - 0.1) * 10) / 10 },
+    { field: "sauceStockAnchorNetSec" as const, from: anchor, to: dueAt },
+    { field: "sauceStockCorrectionGeneration" as const, from: generation, to: generation },
+  ];
+}
+
 describe("auto-track coordination", () => {
   it("validates allow-listed channels, fields, times, and bounded values", () => {
     expect(parseAutoTrackClaim(claim(), NOW)).toEqual(claim());
@@ -112,6 +121,28 @@ describe("auto-track coordination", () => {
         { field: "sauceBarrelsMade", from: 0, to: 2 },
         { field: "sauceBarrelAnchorNetSec", from: 0, to: 60 },
         { field: "sauceBarrelCorrectionGeneration", from: 0, to: 0 },
+      ],
+    }), NOW)).toBeNull();
+    expect(parseAutoTrackClaim(claim({
+      channel: "sauce-stock",
+      correctionGeneration: 0,
+      dueAt: 60,
+      nextDueAt: 84,
+      mutations: [
+        { field: "sauceStockBarrels", from: 0, to: 2 },
+        { field: "sauceStockAnchorNetSec", from: 0, to: 60 },
+        { field: "sauceStockCorrectionGeneration", from: 0, to: 0 },
+      ],
+    }), NOW)).not.toBeNull();
+    expect(parseAutoTrackClaim(claim({
+      channel: "sauce-stock",
+      correctionGeneration: 0,
+      dueAt: 60,
+      nextDueAt: 84,
+      mutations: [
+        { field: "sauceStockBarrels", from: 0.7, to: 0.5 },
+        { field: "sauceStockAnchorNetSec", from: 0, to: 60 },
+        { field: "sauceStockCorrectionGeneration", from: 0, to: 0 },
       ],
     }), NOW)).toBeNull();
     expect(parseAutoTrackClaim(claim({
@@ -321,6 +352,94 @@ describe("auto-track coordination", () => {
       itemKey: "ingredient:Tomato Sauce:lbs",
       qty: 200,
     });
+  });
+
+  it("initializes and depletes Sauce stock independently from inventory and barrel history", () => {
+    const stored = {
+      dayState: { runs: [{ id: "run-1", startedAt: NOW - 90_000, metaUpdatedAt: 2 }] },
+      runValues: {
+        "run-1": {
+          casesNeeded: 200,
+          crustsPerCycle: 12,
+          cycleSpeed: 600,
+          speedAdjustment: 1,
+          approxLineSpeed: 400,
+          freezerTime: 3,
+          pizzasPerCase: 12,
+          casesPerSkid: 48,
+          casesPerLayer: 12,
+          doughballsPerTray: 36,
+          crustsPerStack: 6,
+          doughBatchYield: 150,
+          crustsPerCase: 12,
+          sauceBarrelLbs: 50,
+          sauceOzPerPizza: 2,
+          frontlineRecipeName: "Sauce",
+          frontlineRecipe: [],
+          sauceBarrelsMade: 0,
+          sauceBarrelAnchorNetSec: 0,
+          sauceBarrelCorrectionGeneration: 0,
+          sauceStockBarrels: 0,
+          sauceStockAnchorNetSec: 0,
+          sauceStockCorrectionGeneration: 0,
+          sauceStockInitialized: false,
+        },
+      },
+      runValuesUpdatedAt: { "run-1": 10 },
+    };
+    const calc = computeServerCalc(stored as never, [], NOW)!.calc;
+    const cadence = computeSauceStockStepSeconds(2, calc.ppm, calc.sauceEffBarrel);
+    const initial = applyAutoTrackClaim(stored, claim({
+      channel: "sauce-stock",
+      eventId: "client-a:sauce-stock:init",
+      dueAt: 90,
+      nextDueAt: 90 + cadence,
+      correctionGeneration: 0,
+      mutations: [
+        { field: "sauceStockBarrels", from: 0, to: 2 },
+        { field: "sauceStockAnchorNetSec", from: 0, to: 90 },
+        { field: "sauceStockCorrectionGeneration", from: 0, to: 0 },
+      ],
+    }), NOW);
+    expect(initial.outcome).toBe("accepted");
+    expect(initial.values).toMatchObject({
+      sauceStockBarrels: 2,
+      sauceStockInitialized: true,
+      sauceStockAnchorNetSec: 90,
+      sauceBarrelsMade: 0,
+    });
+    expect(initial.inventoryConsumption).toBeUndefined();
+    expect(applyAutoTrackClaim(initial.data, claim({
+      channel: "sauce-stock",
+      eventId: "client-a:sauce-stock:init",
+      dueAt: 90,
+      nextDueAt: 90 + cadence,
+      correctionGeneration: 0,
+      mutations: [
+        { field: "sauceStockBarrels", from: 0, to: 2 },
+        { field: "sauceStockAnchorNetSec", from: 0, to: 90 },
+        { field: "sauceStockCorrectionGeneration", from: 0, to: 0 },
+      ],
+    }), NOW + 1).outcome).toBe("duplicate");
+
+    const dueAt = 90 + cadence;
+    const depleted = applyAutoTrackClaim(initial.data, claim({
+      channel: "sauce-stock",
+      eventId: "client-a:sauce-stock:deplete-1",
+      sequence: 2,
+      dueAt,
+      nextDueAt: dueAt + cadence,
+      correctionGeneration: 0,
+      mutations: sauceStockMutations(2, 90, 0, dueAt),
+    }), NOW + cadence * 1000);
+    expect(depleted.outcome).toBe("accepted");
+    expect(depleted.values).toMatchObject({
+      sauceStockBarrels: 1.9,
+      sauceStockAnchorNetSec: dueAt,
+      sauceStockInitialized: true,
+      sauceBarrelsMade: 0,
+    });
+    expect(depleted.inventoryConsumption).toBeUndefined();
   });
 
   it("defaults a legacy configured Sauce correction generation to zero", () => {

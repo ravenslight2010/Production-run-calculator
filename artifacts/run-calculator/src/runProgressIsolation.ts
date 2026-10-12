@@ -20,6 +20,10 @@ export function isolatePendingRunPackagingProgress(
       && Number(values.sauceBarrelsMade) === 0
       && Number(values.sauceBarrelAnchorNetSec) === 0
       && Number(values.sauceBarrelCorrectionGeneration) === 0
+      && values.sauceStockInitialized !== true
+      && Number(values.sauceStockBarrels) === 0
+      && Number(values.sauceStockAnchorNetSec) === 0
+      && Number(values.sauceStockCorrectionGeneration) === 0
       && Number(values.app1BatchesMade) === 0
       && Number(values.app1BatchAnchorNetSec) === 0
       && Number(values.app1BatchCorrectionGeneration) === 0
@@ -53,6 +57,10 @@ export function isolatePendingRunPackagingProgress(
     sauceBarrelsMade: 0,
     sauceBarrelAnchorNetSec: 0,
     sauceBarrelCorrectionGeneration: 0,
+    sauceStockBarrels: 0,
+    sauceStockAnchorNetSec: 0,
+    sauceStockCorrectionGeneration: 0,
+    sauceStockInitialized: false,
     app1BatchesMade: 0,
     app1BatchAnchorNetSec: 0,
     app1BatchCorrectionGeneration: 0,

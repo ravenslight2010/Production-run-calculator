@@ -14,6 +14,7 @@ import {
   APPLICATOR_STOCK_REGISTERS,
   applicatorStockFields,
   applicatorStockRegisterForChannel,
+  capSauceStock,
   computeApplicatorStockCapacityLbs,
 } from "@workspace/live-calc";
 
@@ -263,13 +264,12 @@ export function serverOwnedApplicatorStockProgress(
   const remoteStamp = Number(payload.runValuesUpdatedAt?.[runId]);
   if (
     !remoteValues
-    || remoteValues.applicatorStockInitialized !== true
     || !Number.isFinite(remoteStamp)
     || remoteStamp <= 0
   ) return null;
 
   const result: Partial<FormValues> = {};
-  for (const channel of APPLICATOR_STOCK_CHANNELS) {
+  if (remoteValues.applicatorStockInitialized === true) for (const channel of APPLICATOR_STOCK_CHANNELS) {
     const register = applicatorStockRegisterForChannel(channel);
     if (!register) continue;
     const coordination = payload.autoTrackCoordination?.runs?.[runId]?.[channel];
@@ -318,6 +318,53 @@ export function serverOwnedApplicatorStockProgress(
     (result as Record<string, unknown>)[fields.anchor] = remoteAnchor;
     (result as Record<string, unknown>)[fields.correctionGeneration] = remoteGeneration;
     result.applicatorStockInitialized = true;
+  }
+  const sauceCoordination = payload.autoTrackCoordination?.runs?.[runId]?.["sauce-stock"];
+  const sauceOwnership = payload.autoTrackServerState?.netOwnership?.[runId]?.["sauce-stock"];
+  if (
+    remoteValues.sauceStockInitialized === true
+    && sauceCoordination
+    && sauceOwnership
+    && Number.isFinite(sauceOwnership.updatedAt)
+    && Number(sauceOwnership.updatedAt) > 0
+    && remoteStamp >= Number(sauceOwnership.updatedAt)
+    && Number.isSafeInteger(sauceCoordination.sequence)
+    && sauceCoordination.sequence >= 1
+    && sauceCoordination.generation === sauceOwnership.generation
+    && sauceCoordination.sequence === sauceOwnership.sequence
+    && Number(sauceCoordination.acceptedRunValuesUpdatedAt) === remoteStamp
+    && typeof sauceCoordination.acceptedEventId === "string"
+    && sauceCoordination.acceptedEventId.length > 0
+  ) {
+    const remoteStock = Number(remoteValues.sauceStockBarrels);
+    const localStock = Number(localValues.sauceStockBarrels);
+    const remoteAnchor = Number(remoteValues.sauceStockAnchorNetSec);
+    const localAnchor = Number(localValues.sauceStockAnchorNetSec);
+    const remoteGeneration = Number(remoteValues.sauceStockCorrectionGeneration);
+    const localGeneration = Number(localValues.sauceStockCorrectionGeneration);
+    const localUninitialized = localValues.sauceStockInitialized !== true;
+    if (
+      Number.isFinite(remoteStock)
+      && remoteStock >= 0
+      && remoteStock <= 2
+      && capSauceStock(remoteStock) === remoteStock
+      && Number.isFinite(remoteAnchor)
+      && remoteAnchor >= 0
+      && Number.isFinite(localAnchor)
+      && Number.isSafeInteger(remoteGeneration)
+      && remoteGeneration >= 0
+      && Number.isSafeInteger(localGeneration)
+      && localGeneration >= 0
+      && (localUninitialized || remoteGeneration >= localGeneration)
+      && (localUninitialized
+        || remoteGeneration > localGeneration
+        || (remoteStock <= localStock && remoteAnchor >= localAnchor))
+    ) {
+      result.sauceStockBarrels = remoteStock;
+      result.sauceStockAnchorNetSec = remoteAnchor;
+      result.sauceStockCorrectionGeneration = remoteGeneration;
+      result.sauceStockInitialized = true;
+    }
   }
   return Object.keys(result).length ? result : null;
 }
@@ -384,7 +431,8 @@ export function reconcileOperationalIntentCanonical(args: {
   // match their optimistic local projection.
   const acceptedStockStart = args.intent.action === "lifecycle"
     && args.intent.lifecycle === "start"
-    && args.payload.runValues[args.intent.runId]?.applicatorStockInitialized === true;
+    && (args.payload.runValues[args.intent.runId]?.applicatorStockInitialized === true
+      || args.payload.runValues[args.intent.runId]?.sauceStockInitialized === true);
   if (args.outcome === "accepted"
     && args.intent.action !== "correction"
     && !acceptedStockStart
@@ -465,6 +513,32 @@ export function reconcileOperationalIntentCanonical(args: {
     }
     restored.applicatorStockInitialized = true;
     valueFields.push("applicatorStockInitialized");
+    if (canonical.sauceStockInitialized === true) {
+      const stock = Number(canonical.sauceStockBarrels);
+      const anchor = Number(canonical.sauceStockAnchorNetSec);
+      const generation = Number(canonical.sauceStockCorrectionGeneration);
+      if (
+        Number.isFinite(stock)
+        && stock >= 0
+        && stock <= 2
+        && capSauceStock(stock) === stock
+        && Number.isFinite(anchor)
+        && anchor >= 0
+        && Number.isSafeInteger(generation)
+        && generation >= 0
+      ) {
+        restored.sauceStockBarrels = stock;
+        restored.sauceStockAnchorNetSec = anchor;
+        restored.sauceStockCorrectionGeneration = generation;
+        restored.sauceStockInitialized = true;
+        valueFields.push(
+          "sauceStockBarrels",
+          "sauceStockAnchorNetSec",
+          "sauceStockCorrectionGeneration",
+          "sauceStockInitialized",
+        );
+      }
+    }
     runValues = restored;
     runValuesUpdatedAt = {
       ...args.runValuesUpdatedAt,

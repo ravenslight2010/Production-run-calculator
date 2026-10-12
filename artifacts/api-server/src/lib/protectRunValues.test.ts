@@ -1490,6 +1490,53 @@ describe("packagingProgress merge (Task 974)", () => {
 });
 
 describe("auto-track coordination snapshot invalidation", () => {
+  it("preserves canonical Sauce stock against an older full-run snapshot", () => {
+    const existing = {
+      dayState: { runs: [{ id: "r1", startedAt: 1 }], resetAt: 1 },
+      runValues: {
+        r1: {
+          sauceStockBarrels: 1.4,
+          sauceStockAnchorNetSec: 60,
+          sauceStockCorrectionGeneration: 1,
+          sauceStockInitialized: true,
+        },
+      },
+      runValuesUpdatedAt: { r1: 10 },
+      autoTrackCoordination: {
+        version: 1,
+        runs: {
+          r1: {
+            "sauce-stock": {
+              generation: "r1:2",
+              sequence: 1,
+              nextDueAt: 10_000,
+              acceptedEventId: "stock-event",
+              updatedAt: 10,
+            },
+          },
+        },
+      },
+    };
+    const incoming = {
+      dayState: { runs: [{ id: "r1", startedAt: 1 }], resetAt: 1 },
+      runValues: {
+        r1: {
+          sauceStockBarrels: 0,
+          sauceStockAnchorNetSec: 0,
+          sauceStockCorrectionGeneration: 0,
+          sauceStockInitialized: false,
+        },
+      },
+      runValuesUpdatedAt: { r1: 11 },
+    };
+
+    const out = protectRunValues(incoming, existing) as Record<string, any>;
+    expect(out.runValues.r1).toMatchObject(existing.runValues.r1);
+    expect(out.autoTrackCoordination.runs.r1["sauce-stock"]).toEqual(
+      existing.autoTrackCoordination.runs.r1["sauce-stock"],
+    );
+  });
+
   it("invalidates a stored sauce-barrel channel after a manual progress snapshot", () => {
     const existing = {
       dayState: { runs: [{ id: "r1" }], resetAt: 1 },
