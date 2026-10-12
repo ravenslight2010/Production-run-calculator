@@ -75,7 +75,7 @@ const slowFile = fileURLToPath(new URL("./slow.spec.ts", import.meta.url));
 const quietFile = fileURLToPath(new URL("./quiet.spec.ts", import.meta.url));
 
 assert.equal(EXPECTED_CASES, FULL_BROWSER_EXPECTED_CASES);
-assert.equal(FULL_BROWSER_EXPECTED_CASE_IDENTITIES.length, 170);
+assert.equal(FULL_BROWSER_EXPECTED_CASE_IDENTITIES.length, 172);
 assert.equal(
   new Set(FULL_BROWSER_EXPECTED_CASE_IDENTITIES).size,
   FULL_BROWSER_EXPECTED_CASE_IDENTITIES.length,
