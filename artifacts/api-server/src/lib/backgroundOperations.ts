@@ -1,5 +1,9 @@
-import { and, desc, eq, gte, lt, notInArray, sql } from "drizzle-orm";
-import { backgroundOperationEventsTable, db } from "@workspace/db";
+import { and, desc, eq, gte, gt, lt, ne, notInArray, sql } from "drizzle-orm";
+import {
+  automaticTrackingDeferredDiagnosticsTable,
+  backgroundOperationEventsTable,
+  db,
+} from "@workspace/db";
 import { randomUUID } from "node:crypto";
 import { createSharedDiagnosticPersistence } from "./sharedDiagnosticPersistence";
 
@@ -11,6 +15,7 @@ export const BACKGROUND_OPERATION_BACKOFF_BASE_MS = 1_000;
 export const BACKGROUND_OPERATION_BACKOFF_MAX_MS = 30_000;
 export const AUTO_TRACK_DEFERRED_DATE_DIAGNOSTIC_CAP = 100;
 const AUTO_TRACK_DEFERRED_RETRY_TRACKING_CAP = 256;
+const AUTO_TRACK_DEFERRED_DIAGNOSTIC_STALE_MS = 60_000;
 const BACKGROUND_OPERATION_SHARED_TIMEOUT_MS = 1_000;
 const BACKGROUND_OPERATION_SHARED_DB_TIMEOUT_MS =
   BACKGROUND_OPERATION_SHARED_TIMEOUT_MS - 100;
@@ -86,6 +91,89 @@ export function getAutoTrackDeferredDiagnostic(now = Date.now()): AutoTrackDefer
       ? new Date(activeRetryTimes[0]).toISOString()
       : null,
   };
+}
+
+export async function getSharedAutoTrackDeferredDiagnostic(
+  now = Date.now(),
+): Promise<AutoTrackDeferredDiagnostic> {
+  const local = getAutoTrackDeferredDiagnostic(now);
+  const [remote] = await sharedBackgroundOperationPersistence.run((tx) =>
+    tx.select({
+      deferredDateCount: sql<number>`LEAST(
+        COALESCE(SUM(${automaticTrackingDeferredDiagnosticsTable.deferredDateCount}), 0),
+        ${AUTO_TRACK_DEFERRED_DATE_DIAGNOSTIC_CAP + 1}
+      )::int`,
+      deferredDateCountCapped: sql<boolean>`COALESCE(
+        BOOL_OR(${automaticTrackingDeferredDiagnosticsTable.deferredDateCountCapped}),
+        false
+      )`,
+      nextEligibleRetryAt: sql<Date | null>`MIN(
+        ${automaticTrackingDeferredDiagnosticsTable.nextEligibleRetryAt}
+      )`,
+    })
+      .from(automaticTrackingDeferredDiagnosticsTable)
+      .where(and(
+        gte(
+          automaticTrackingDeferredDiagnosticsTable.updatedAt,
+          new Date(now - AUTO_TRACK_DEFERRED_DIAGNOSTIC_STALE_MS),
+        ),
+        gt(automaticTrackingDeferredDiagnosticsTable.nextEligibleRetryAt, new Date(now)),
+        ne(automaticTrackingDeferredDiagnosticsTable.sourceInstance, PROCESS_INSTANCE_ID),
+      )),
+  );
+  const remoteCount = Number(remote?.deferredDateCount ?? 0);
+  const total = local.deferredDateCount + remoteCount;
+  const remoteRetryAt = remote?.nextEligibleRetryAt == null
+    ? Number.POSITIVE_INFINITY
+    : Date.parse(String(remote.nextEligibleRetryAt));
+  const retryTimes = [
+    local.nextEligibleRetryAt ? Date.parse(local.nextEligibleRetryAt) : Number.POSITIVE_INFINITY,
+    remoteRetryAt,
+  ];
+  const nextRetryAt = Math.min(...retryTimes);
+  return {
+    deferredDateCount: Math.min(total, AUTO_TRACK_DEFERRED_DATE_DIAGNOSTIC_CAP),
+    deferredDateCountCapped:
+      local.deferredDateCountCapped ||
+      Boolean(remote?.deferredDateCountCapped) ||
+      remoteCount > AUTO_TRACK_DEFERRED_DATE_DIAGNOSTIC_CAP ||
+      total > AUTO_TRACK_DEFERRED_DATE_DIAGNOSTIC_CAP,
+    nextEligibleRetryAt: Number.isFinite(nextRetryAt) ? new Date(nextRetryAt).toISOString() : null,
+  };
+}
+
+export async function persistAutoTrackDeferredDiagnostic(now = Date.now()): Promise<void> {
+  const diagnostic = getAutoTrackDeferredDiagnostic(now);
+  await sharedBackgroundOperationPersistence.runOrFallback(
+    async (tx) => {
+      await tx.delete(automaticTrackingDeferredDiagnosticsTable).where(
+        lt(
+          automaticTrackingDeferredDiagnosticsTable.updatedAt,
+          new Date(now - AUTO_TRACK_DEFERRED_DIAGNOSTIC_STALE_MS),
+        ),
+      );
+      await tx.insert(automaticTrackingDeferredDiagnosticsTable).values({
+        sourceInstance: PROCESS_INSTANCE_ID,
+        deferredDateCount: diagnostic.deferredDateCount,
+        deferredDateCountCapped: diagnostic.deferredDateCountCapped,
+        nextEligibleRetryAt: diagnostic.nextEligibleRetryAt
+          ? new Date(diagnostic.nextEligibleRetryAt)
+          : null,
+        updatedAt: new Date(now),
+      }).onConflictDoUpdate({
+        target: automaticTrackingDeferredDiagnosticsTable.sourceInstance,
+        set: {
+          deferredDateCount: diagnostic.deferredDateCount,
+          deferredDateCountCapped: diagnostic.deferredDateCountCapped,
+          nextEligibleRetryAt: diagnostic.nextEligibleRetryAt
+            ? new Date(diagnostic.nextEligibleRetryAt)
+            : null,
+          updatedAt: new Date(now),
+        },
+      });
+    },
+    () => undefined,
+  );
 }
 
 export function createBackgroundOperationBackoff(options: {
@@ -415,6 +503,7 @@ export async function clearBackgroundOperationDiagnosticsForTests(
   if (options.preserveShared) return;
   try {
     await db.delete(backgroundOperationEventsTable);
+    await db.delete(automaticTrackingDeferredDiagnosticsTable);
   } catch {
     // Unit tests may not provide the shared diagnostics table or database.
   }

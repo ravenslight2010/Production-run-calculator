@@ -48,6 +48,7 @@ let qcWorkflowEventsTable: DbModule["qcWorkflowEventsTable"];
 let operationalIntentLedgerTable: DbModule["operationalIntentLedgerTable"];
 let completedRunHistoryTable: DbModule["completedRunHistoryTable"];
 let applicatorBatchEvidenceTable: DbModule["applicatorBatchEvidenceTable"];
+let automaticTrackingDeferredDiagnosticsTable: DbModule["automaticTrackingDeferredDiagnosticsTable"];
 let syncOutboxCursorsTable: DbModule["syncOutboxCursorsTable"];
 let syncOutboxEventsTable: DbModule["syncOutboxEventsTable"];
 let dataResetTable: DbModule["dataResetTable"];
@@ -60,6 +61,8 @@ let getBackgroundOperationDiagnostics:
   typeof import("../lib/backgroundOperations")["getBackgroundOperationDiagnostics"];
 let getAutoTrackDeferredDiagnostic:
   typeof import("../lib/backgroundOperations")["getAutoTrackDeferredDiagnostic"];
+let getSharedAutoTrackDeferredDiagnostic:
+  typeof import("../lib/backgroundOperations")["getSharedAutoTrackDeferredDiagnostic"];
 let setManualSectionFailureHookForTest: typeof import("./sync")["setManualSectionFailureHookForTest"];
 let setManualSectionBarrierHookForTest: typeof import("./sync")["setManualSectionBarrierHookForTest"];
 let derivedRunMapSharedInputFields: typeof import("./sync")["DERIVED_RUN_MAP_SHARED_INPUT_FIELDS"];
@@ -119,6 +122,8 @@ beforeAll(async () => {
   operationalIntentLedgerTable = dbMod.operationalIntentLedgerTable;
   completedRunHistoryTable = dbMod.completedRunHistoryTable;
   applicatorBatchEvidenceTable = dbMod.applicatorBatchEvidenceTable;
+  automaticTrackingDeferredDiagnosticsTable =
+    dbMod.automaticTrackingDeferredDiagnosticsTable;
   syncOutboxCursorsTable = dbMod.syncOutboxCursorsTable;
   syncOutboxEventsTable = dbMod.syncOutboxEventsTable;
   dataResetTable = dbMod.dataResetTable;
@@ -130,6 +135,8 @@ beforeAll(async () => {
     backgroundOperationsMod.clearBackgroundOperationDiagnosticsForTests;
   getBackgroundOperationDiagnostics = backgroundOperationsMod.getBackgroundOperationDiagnostics;
   getAutoTrackDeferredDiagnostic = backgroundOperationsMod.getAutoTrackDeferredDiagnostic;
+  getSharedAutoTrackDeferredDiagnostic =
+    backgroundOperationsMod.getSharedAutoTrackDeferredDiagnostic;
   setManualSectionFailureHookForTest = syncMod.setManualSectionFailureHookForTest;
   setManualSectionBarrierHookForTest = syncMod.setManualSectionBarrierHookForTest;
   derivedRunMapSharedInputFields = syncMod.DERIVED_RUN_MAP_SHARED_INPUT_FIELDS;
@@ -1900,6 +1907,15 @@ describe("server auto-track tick recovery under database pressure", () => {
         deferredDateCountCapped: false,
         nextEligibleRetryAt: new Date(TICK_NOW + 1_000).toISOString(),
       });
+      expect(await db.select({
+        deferredDateCount: automaticTrackingDeferredDiagnosticsTable.deferredDateCount,
+        deferredDateCountCapped: automaticTrackingDeferredDiagnosticsTable.deferredDateCountCapped,
+        nextEligibleRetryAt: automaticTrackingDeferredDiagnosticsTable.nextEligibleRetryAt,
+      }).from(automaticTrackingDeferredDiagnosticsTable)).toMatchObject([{
+        deferredDateCount: 1,
+        deferredDateCountCapped: false,
+        nextEligibleRetryAt: new Date(TICK_NOW + 1_000),
+      }]);
 
       const [healthyDate] = await db.select().from(dailySyncTable)
         .where(and(eq(dailySyncTable.date, "2030-03-11"), eq(dailySyncTable.scope, "live")));
@@ -1966,8 +1982,75 @@ describe("server auto-track tick recovery under database pressure", () => {
         deferredDateCountCapped: false,
         nextEligibleRetryAt: null,
       });
+      expect(await db.select({
+        deferredDateCount: automaticTrackingDeferredDiagnosticsTable.deferredDateCount,
+        deferredDateCountCapped: automaticTrackingDeferredDiagnosticsTable.deferredDateCountCapped,
+        nextEligibleRetryAt: automaticTrackingDeferredDiagnosticsTable.nextEligibleRetryAt,
+      }).from(automaticTrackingDeferredDiagnosticsTable)).toMatchObject([{
+        deferredDateCount: 0,
+        deferredDateCountCapped: false,
+        nextEligibleRetryAt: null,
+      }]);
       expect((await getBackgroundOperationDiagnostics())["server-auto-track-tick"])
         .toMatchObject({ status: "ok", recentFailureCount: 0 });
+    } finally {
+      await clearBackgroundOperationDiagnosticsForTests();
+    }
+  });
+
+  it("shows another API worker's deferred dates in the shared diagnostic without exposing row identity", async () => {
+    await clearBackgroundOperationDiagnosticsForTests();
+    try {
+      const diagnosticNow = new Date("2031-06-15T12:00:00.000Z").getTime();
+      const firstRetryAt = diagnosticNow + 5_000;
+      const earlierRetryAt = diagnosticNow + 2_000;
+      await db.insert(automaticTrackingDeferredDiagnosticsTable).values([
+        {
+          sourceInstance: "peer-api-worker-a",
+          deferredDateCount: 2,
+          deferredDateCountCapped: false,
+          nextEligibleRetryAt: new Date(firstRetryAt),
+          updatedAt: new Date(diagnosticNow),
+        },
+        {
+          sourceInstance: "peer-api-worker-b",
+          deferredDateCount: 3,
+          deferredDateCountCapped: false,
+          nextEligibleRetryAt: new Date(earlierRetryAt),
+          updatedAt: new Date(diagnosticNow),
+        },
+        {
+          sourceInstance: "stale-api-worker",
+          deferredDateCount: 90,
+          deferredDateCountCapped: false,
+          nextEligibleRetryAt: new Date(diagnosticNow + 1_000),
+          updatedAt: new Date(diagnosticNow - 61_000),
+        },
+      ]);
+
+      const diagnostic = await getSharedAutoTrackDeferredDiagnostic(diagnosticNow);
+
+      expect(diagnostic).toEqual({
+        deferredDateCount: 5,
+        deferredDateCountCapped: false,
+        nextEligibleRetryAt: new Date(earlierRetryAt).toISOString(),
+      });
+      const diagnosticText = JSON.stringify(diagnostic);
+      expect(diagnosticText).not.toContain("peer-api-worker");
+      expect(diagnosticText).not.toContain(TICK_DATE);
+      expect(diagnosticText).not.toContain(TICK_RUN);
+
+      await db.update(automaticTrackingDeferredDiagnosticsTable)
+        .set({ deferredDateCount: 100 })
+        .where(eq(
+          automaticTrackingDeferredDiagnosticsTable.sourceInstance,
+          "peer-api-worker-b",
+        ));
+      expect(await getSharedAutoTrackDeferredDiagnostic(diagnosticNow)).toEqual({
+        deferredDateCount: 100,
+        deferredDateCountCapped: true,
+        nextEligibleRetryAt: new Date(earlierRetryAt).toISOString(),
+      });
     } finally {
       await clearBackgroundOperationDiagnosticsForTests();
     }

@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getDiagnostics: vi.fn(),
-  getAutoTrackDeferredDiagnostic: vi.fn(),
+  getSharedAutoTrackDeferredDiagnostic: vi.fn(),
 }));
 
 vi.mock("../middlewares/requireCapability", () => ({
@@ -13,7 +13,7 @@ vi.mock("../middlewares/requireCapability", () => ({
 }));
 
 vi.mock("../lib/backgroundOperations", () => ({
-  getAutoTrackDeferredDiagnostic: mocks.getAutoTrackDeferredDiagnostic,
+  getSharedAutoTrackDeferredDiagnostic: mocks.getSharedAutoTrackDeferredDiagnostic,
   getBackgroundOperationDiagnostics: mocks.getDiagnostics,
 }));
 
@@ -67,7 +67,7 @@ describe("GET /background-operations/diagnostics", () => {
         windowMs: 300_000,
       },
     });
-    mocks.getAutoTrackDeferredDiagnostic.mockReturnValue({
+    mocks.getSharedAutoTrackDeferredDiagnostic.mockResolvedValue({
       deferredDateCount: 2,
       deferredDateCountCapped: false,
       nextEligibleRetryAt: "2026-09-15T12:31:00.000Z",

@@ -1,8 +1,8 @@
 import { Router, type Request, type Response } from "express";
 import { requireCapability } from "../middlewares/requireCapability";
 import {
-  getAutoTrackDeferredDiagnostic,
   getBackgroundOperationDiagnostics,
+  getSharedAutoTrackDeferredDiagnostic,
 } from "../lib/backgroundOperations";
 
 const router = Router();
@@ -21,7 +21,7 @@ router.get(
 
     res.json({
       warnings,
-      automaticTrackingBackoff: getAutoTrackDeferredDiagnostic(),
+      automaticTrackingBackoff: await getSharedAutoTrackDeferredDiagnostic(),
       windowMs: Math.max(...Object.values(diagnostics).map(({ windowMs }) => windowMs)),
     });
   },

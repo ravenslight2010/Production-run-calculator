@@ -78,6 +78,7 @@ import {
 } from "../lib/capacityTelemetry";
 import {
   createBackgroundOperationBackoff,
+  persistAutoTrackDeferredDiagnostic,
   recordAutoTrackDeferredRetries,
   recordBackgroundOperationSuccess,
   runBackgroundOperation,
@@ -3644,6 +3645,9 @@ export async function runAutoTrackServerTicks(opts: {
       .map((backoff) => backoff.nextRetryAt(nowMs))
       .filter((retryAt): retryAt is number => retryAt !== undefined),
   );
+  // Persist only the bounded aggregate, after all per-date transactions have
+  // completed; diagnostic writes must not join an automatic-tracking tx.
+  await persistAutoTrackDeferredDiagnostic(nowMs);
   if (passComplete && outcomes.error === undefined) {
     recordBackgroundOperationSuccess("server-auto-track-tick");
   }
