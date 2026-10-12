@@ -1976,6 +1976,8 @@ async function run(): Promise<void> {
       label: "run calculator typecheck",
       packageName: "@workspace/run-calculator",
       packagePath: "../../artifacts/run-calculator/package.json",
+      pretypecheck:
+        "pnpm run test:vite-config-loading && pnpm run check:vite-config-loading && pnpm --filter @workspace/inventory-math exec node ../../node_modules/typescript/bin/tsc -b --force && pnpm --filter @workspace/spec-import exec node ../../node_modules/typescript/bin/tsc -b && pnpm --filter @workspace/recipe-guide-import exec node ../../node_modules/typescript/bin/tsc -b --force",
     },
     {
       label: "mockup sandbox typecheck",
@@ -2028,6 +2030,13 @@ async function run(): Promise<void> {
       packageJson.scripts?.typecheck?.trim(),
       `${contract.packageName} must define its package-level typecheck script`,
     );
+    if ("pretypecheck" in contract) {
+      assert.equal(
+        packageJson.scripts?.pretypecheck,
+        contract.pretypecheck,
+        "the calculator typecheck lifecycle must run configuration-loading checks and dependency builds, in order, before typechecking",
+      );
+    }
   }
   const apiPackage = JSON.parse(
     await readFile(
