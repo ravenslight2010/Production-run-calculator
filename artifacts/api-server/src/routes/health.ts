@@ -16,6 +16,7 @@ import {
   getBackgroundOperationDiagnostics,
 } from "../lib/backgroundOperations";
 import { getScheduledEvaluationQueueDiagnostics } from "../lib/serverJobs";
+import { getSyncOutboxLagDiagnostics } from "../lib/syncOutbox";
 
 const router: IRouter = Router();
 
@@ -88,9 +89,11 @@ async function readiness(req: Request, res: Response): Promise<void> {
       : { status: "not_configured", detail: "ai_provider_not_configured" };
     const backgroundOperationDiagnostics = await getBackgroundOperationDiagnostics();
     const scheduledEvaluationQueue = getScheduledEvaluationQueueDiagnostics();
+    const syncOutboxLag = getSyncOutboxLagDiagnostics();
     const backgroundOperationsWarning = backgroundOperationsDegraded(backgroundOperationDiagnostics);
     const scheduledQueueUnavailable = scheduledEvaluationQueue.sampleAvailability === "unavailable";
     checks.backgroundWorkers = backgroundOperationsWarning || scheduledQueueUnavailable ||
+      syncOutboxLag.status === "warning" ||
       scheduledEvaluationQueue.status === "warning"
       ? {
         status: "warning",
@@ -98,11 +101,14 @@ async function readiness(req: Request, res: Response): Promise<void> {
           ? "scheduled_evaluation_queue_sample_unavailable"
           : scheduledEvaluationQueue.status === "warning"
           ? "scheduled_evaluation_queue_warning"
+          : syncOutboxLag.status === "warning"
+          ? "sync_outbox_delivery_lag"
           : "sustained_background_worker_failures",
       }
       : { status: "ok" };
     res.locals.backgroundOperationDiagnostics = backgroundOperationDiagnostics;
     res.locals.scheduledEvaluationQueue = scheduledEvaluationQueue;
+    res.locals.syncOutboxLag = syncOutboxLag;
   }
 
   // Only conditions required to safely serve core operational traffic block
@@ -121,6 +127,7 @@ async function readiness(req: Request, res: Response): Promise<void> {
         auditProtection: res.locals.auditProtection,
         backgroundOperations: res.locals.backgroundOperationDiagnostics,
         scheduledEvaluationQueue: res.locals.scheduledEvaluationQueue,
+        syncOutboxLag: res.locals.syncOutboxLag,
       }
       : undefined;
   logger.info(

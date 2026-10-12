@@ -41,6 +41,7 @@ const mocks = vi.hoisted(() => ({
   info: vi.fn(),
   buildInfo: vi.fn(),
   scheduledQueueDiagnostics: vi.fn(),
+  syncOutboxLagDiagnostics: vi.fn(),
 }));
 
 vi.mock("../lib/buildInfo", () => ({ getBuildInfo: mocks.buildInfo }));
@@ -57,6 +58,10 @@ vi.mock("../lib/logger", () => ({
 vi.mock("../lib/serverJobs", async (importOriginal) => ({
   ...await importOriginal<typeof import("../lib/serverJobs")>(),
   getScheduledEvaluationQueueDiagnostics: mocks.scheduledQueueDiagnostics,
+}));
+
+vi.mock("../lib/syncOutbox", () => ({
+  getSyncOutboxLagDiagnostics: mocks.syncOutboxLagDiagnostics,
 }));
 
 let server: Server;
@@ -115,6 +120,13 @@ beforeEach(async () => {
     warningCodes: [],
     sampleCount: 0,
     windowMs: 300_000,
+  });
+  mocks.syncOutboxLagDiagnostics.mockReturnValue({
+    status: "ok",
+    lagging: false,
+    pendingEvents: 0,
+    lagMs: 0,
+    warningThresholdMs: 30_000,
   });
   setProviderEnv({ AI_INTEGRATIONS_GEMINI_API_KEY: "test-replit-gemini-key" });
 });
@@ -254,6 +266,36 @@ describe("GET /healthz cache maintenance diagnostics", () => {
 });
 
 describe("GET /healthz background operation diagnostics", () => {
+  it("surfaces sustained sync delivery lag without blocking core readiness or exposing scope data", async () => {
+    mocks.syncOutboxLagDiagnostics.mockReturnValue({
+      status: "warning",
+      lagging: true,
+      pendingEvents: 12,
+      lagMs: 45_000,
+      warningThresholdMs: 30_000,
+      lastObservedAt: "2031-06-15T12:00:00.000Z",
+    });
+
+    const response = await fetch(`${baseUrl}/readyz`);
+    const body = (await response.json()) as {
+      status: string;
+      checks: Record<string, string>;
+      diagnostics: { syncOutboxLag: Record<string, unknown> };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.status).toBe("ok");
+    expect(body.checks.backgroundWorkers).toBe("warning");
+    expect(body.diagnostics.syncOutboxLag).toMatchObject({
+      status: "warning",
+      lagging: true,
+      pendingEvents: 12,
+      lagMs: 45_000,
+    });
+    expect(JSON.stringify(body.diagnostics.syncOutboxLag)).not.toContain("scope");
+    expect(JSON.stringify(body.diagnostics.syncOutboxLag)).not.toContain("payload");
+  });
+
   it("reports sustained failures without blocking core readiness and recovers after success", async () => {
     for (let i = 0; i < BACKGROUND_OPERATION_FAILURE_THRESHOLD; i += 1) {
       await expect(runBackgroundOperation("daily-rollover", async () => {

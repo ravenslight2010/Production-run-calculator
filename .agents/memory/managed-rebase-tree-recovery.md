@@ -22,3 +22,9 @@ A task rebase also requires a clean worktree before it can start. Preserve inten
 **Why:** The managed rebase rejected a worktree containing workspace custom-skill files, and the repository intentionally leaves those files visible to Git.
 
 **How to apply:** Inspect the exact untracked paths, confirm their contents and ignore rules, and resolve them with the owner before retrying the managed continuation callback.
+
+If managed finalization fails during Git LFS fetch and the designated base remote prompts for SSH authentication, treat it as a remote-access setup failure, not a file conflict. Keep the task commit intact; do not attempt a manual rebase or provide an interactive credential.
+
+**Why:** A task could not complete its managed rebase because the LFS fetch had no usable SSH authentication, even though the code validation passed and the worktree was clean.
+
+**How to apply:** Confirm the branch and worktree remain intact, report the remote-access blocker, and retry managed finalization only after that access is restored.

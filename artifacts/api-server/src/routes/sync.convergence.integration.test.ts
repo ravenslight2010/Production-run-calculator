@@ -1285,6 +1285,83 @@ describe("multi-client sync convergence soak", () => {
     }
   }, 20_000);
 
+  it("warns on old pending delivery and clears the warning after a slow consumer catches up", async () => {
+    const syncOutbox = await import("../lib/syncOutbox");
+    syncOutbox.clearSyncOutboxProcessCursorsForTests();
+    await syncOutbox.registerSyncOutboxScope("live");
+    const cursor = await syncOutbox.recordSyncOutboxEvent({
+      kind: "configuration",
+      scope: "live",
+      senderId: "outbox-lag-test",
+      family: "master-data",
+    });
+    await db.update(syncOutboxEventsTable)
+      .set({
+        createdAt: new Date(Date.now() - syncOutbox.SYNC_OUTBOX_LAG_WARNING_MS - 1),
+      })
+      .where(and(
+        eq(syncOutboxEventsTable.scope, "live"),
+        eq(syncOutboxEventsTable.cursor, cursor),
+      ));
+
+    let releaseHandler!: () => void;
+    const handlerGate = new Promise<void>((resolve) => { releaseHandler = resolve; });
+    let markHandlerStarted!: () => void;
+    const handlerStarted = new Promise<void>((resolve) => { markHandlerStarted = resolve; });
+    const delivered: number[] = [];
+    const previousTestFlag = process.env.SYNC_OUTBOX_LISTENER_TEST_ENABLED;
+    process.env.SYNC_OUTBOX_LISTENER_TEST_ENABLED = "1";
+    const stop = syncOutbox.startSyncOutboxListener(async (event) => {
+      markHandlerStarted();
+      await handlerGate;
+      delivered.push(event.cursor);
+    }, async () => {});
+
+    try {
+      await waitForSyncOutboxListeners(1);
+      const handlerDeadline = Date.now() + 10_000;
+      let handlerStartupTimeout: NodeJS.Timeout | undefined;
+      const started = await Promise.race([
+        handlerStarted.then(() => true),
+        new Promise<boolean>((resolve) => {
+          handlerStartupTimeout = setTimeout(() => resolve(false), 10_000);
+        }),
+      ]);
+      if (handlerStartupTimeout) clearTimeout(handlerStartupTimeout);
+      expect(started, `outbox handler did not start before ${handlerDeadline}`).toBe(true);
+
+      const lag = syncOutbox.getSyncOutboxLagDiagnostics();
+      expect(lag).toMatchObject({
+        status: "warning",
+        lagging: true,
+        pendingEvents: 1,
+        warningThresholdMs: syncOutbox.SYNC_OUTBOX_LAG_WARNING_MS,
+      });
+      expect(JSON.stringify(lag)).not.toContain("live");
+      expect(JSON.stringify(lag)).not.toContain("master-data");
+
+      releaseHandler();
+      const recoveryDeadline = Date.now() + 10_000;
+      while (syncOutbox.getSyncOutboxLagDiagnostics().lagging && Date.now() < recoveryDeadline) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      expect(delivered).toEqual([cursor]);
+      expect(syncOutbox.getSyncOutboxLagDiagnostics()).toMatchObject({
+        status: "ok",
+        lagging: false,
+        pendingEvents: 0,
+        lagMs: 0,
+      });
+    } finally {
+      releaseHandler();
+      stop();
+      await waitForSyncOutboxListeners(0);
+      syncOutbox.clearSyncOutboxProcessCursorsForTests();
+      if (previousTestFlag === undefined) delete process.env.SYNC_OUTBOX_LISTENER_TEST_ENABLED;
+      else process.env.SYNC_OUTBOX_LISTENER_TEST_ENABLED = previousTestFlag;
+    }
+  }, 20_000);
+
   it("converges edits, offline reconnects, wake recovery, stale writes, and blank protection", async () => {
     const clients = ["A", "B", "C"].map((id) => new SimulatedClient(id));
     const start = Date.now();
