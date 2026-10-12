@@ -469,6 +469,8 @@ export const reportIncidentBodyDiagnosticsRetryCountMin = 0;
 export const reportIncidentBodyDiagnosticsRetryCountMax = 10;
 export const reportIncidentBodyDiagnosticsCorrelationIdMax = 128;
 export const getBackgroundOperationDiagnosticsResponseWarningsMax = 4;
+export const getBackgroundOperationDiagnosticsResponseAutomaticTrackingBackoffDeferredDateCountMin = 0;
+export const getBackgroundOperationDiagnosticsResponseAutomaticTrackingBackoffDeferredDateCountMax = 100;
 export const updateManagerActionItemBodyDeferReasonMax = 2000;
 export const updateManagerActionItemBodyResolutionNoteMax = 2000;
 export const updateIncidentWorkflowBodyNoteMax = 2000;
@@ -7420,8 +7422,9 @@ export const ListManagerActionQueueResponse = zod.object({
 
 
 /**
- * @summary List sustained background-operation failures visible to managers
+ * @summary List background failures and automatic-tracking retry status for managers
  */
+
 
 
 
@@ -7431,7 +7434,12 @@ export const GetBackgroundOperationDiagnosticsResponse = zod.object({
   "operation": zod.enum(['daily-rollover', 'server-job-run', 'server-job-prune', 'web-push-schedule']),
   "lastFailureAt": zod.coerce.date()
 })).max(getBackgroundOperationDiagnosticsResponseWarningsMax),
-  "windowMs": zod.int().min(1)
+  "windowMs": zod.int().min(1),
+  "automaticTrackingBackoff": zod.object({
+  "deferredDateCount": zod.int().min(getBackgroundOperationDiagnosticsResponseAutomaticTrackingBackoffDeferredDateCountMin).max(getBackgroundOperationDiagnosticsResponseAutomaticTrackingBackoffDeferredDateCountMax),
+  "deferredDateCountCapped": zod.boolean(),
+  "nextEligibleRetryAt": zod.coerce.date().nullable()
+})
 })
 
 

@@ -7330,11 +7330,23 @@ export type BackgroundOperationDiagnosticsWarningsItem = {
   lastFailureAt: string;
 };
 
+export type BackgroundOperationDiagnosticsAutomaticTrackingBackoff = {
+  /**
+     * @minimum 0
+     * @maximum 100
+     */
+  deferredDateCount: number;
+  deferredDateCountCapped: boolean;
+  /** @nullable */
+  nextEligibleRetryAt: string | null;
+};
+
 export interface BackgroundOperationDiagnostics {
   /** @maxItems 4 */
   warnings: BackgroundOperationDiagnosticsWarningsItem[];
   /** @minimum 1 */
   windowMs: number;
+  automaticTrackingBackoff: BackgroundOperationDiagnosticsAutomaticTrackingBackoff;
 }
 
 export type ManagerActionQueueCounts = {[key: string]: number};

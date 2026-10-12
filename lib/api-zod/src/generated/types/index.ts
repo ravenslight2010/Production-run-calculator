@@ -60,6 +60,7 @@ export * from './autoTrackClaimVersion';
 export * from './autoTrackMutation';
 export * from './autoTrackMutationField';
 export * from './backgroundOperationDiagnostics';
+export * from './backgroundOperationDiagnosticsAutomaticTrackingBackoff';
 export * from './backgroundOperationDiagnosticsWarningsItem';
 export * from './backgroundOperationDiagnosticsWarningsItemOperation';
 export * from './brandProfile';

@@ -9,6 +9,8 @@ export const BACKGROUND_OPERATION_FAILURE_WINDOW_MS = 5 * 60 * 1000;
 export const BACKGROUND_OPERATION_FAILURE_MAX_EVENTS = 100;
 export const BACKGROUND_OPERATION_BACKOFF_BASE_MS = 1_000;
 export const BACKGROUND_OPERATION_BACKOFF_MAX_MS = 30_000;
+export const AUTO_TRACK_DEFERRED_DATE_DIAGNOSTIC_CAP = 100;
+const AUTO_TRACK_DEFERRED_RETRY_TRACKING_CAP = 256;
 const BACKGROUND_OPERATION_SHARED_TIMEOUT_MS = 1_000;
 const BACKGROUND_OPERATION_SHARED_DB_TIMEOUT_MS =
   BACKGROUND_OPERATION_SHARED_TIMEOUT_MS - 100;
@@ -54,9 +56,37 @@ export type BackgroundOperationDiagnostic = {
 
 export type BackgroundOperationBackoff = {
   isReady(now?: number): boolean;
+  nextRetryAt(now?: number): number | undefined;
   recordSuccess(now?: number): void;
   recordFailure(now?: number): void;
 };
+
+export type AutoTrackDeferredDiagnostic = {
+  deferredDateCount: number;
+  deferredDateCountCapped: boolean;
+  nextEligibleRetryAt: string | null;
+};
+
+let autoTrackDeferredRetryTimes: number[] = [];
+
+export function recordAutoTrackDeferredRetries(retryTimes: number[]): void {
+  autoTrackDeferredRetryTimes = retryTimes
+    .filter((retryAt) => Number.isFinite(retryAt) && retryAt > 0)
+    .sort((left, right) => left - right)
+    .slice(0, AUTO_TRACK_DEFERRED_RETRY_TRACKING_CAP);
+}
+
+export function getAutoTrackDeferredDiagnostic(now = Date.now()): AutoTrackDeferredDiagnostic {
+  const activeRetryTimes = autoTrackDeferredRetryTimes.filter((retryAt) => retryAt > now);
+  const deferredDateCount = Math.min(activeRetryTimes.length, AUTO_TRACK_DEFERRED_DATE_DIAGNOSTIC_CAP);
+  return {
+    deferredDateCount,
+    deferredDateCountCapped: activeRetryTimes.length > AUTO_TRACK_DEFERRED_DATE_DIAGNOSTIC_CAP,
+    nextEligibleRetryAt: activeRetryTimes.length > 0
+      ? new Date(activeRetryTimes[0]).toISOString()
+      : null,
+  };
+}
 
 export function createBackgroundOperationBackoff(options: {
   baseDelayMs?: number;
@@ -70,6 +100,9 @@ export function createBackgroundOperationBackoff(options: {
   return {
     isReady(now = Date.now()) {
       return now >= retryAt;
+    },
+    nextRetryAt(now = Date.now()) {
+      return retryAt > now ? retryAt : undefined;
     },
     recordSuccess() {
       consecutiveFailures = 0;
@@ -377,6 +410,7 @@ export async function clearBackgroundOperationDiagnosticsForTests(
   options: { preserveShared?: boolean } = {},
 ): Promise<void> {
   states.clear();
+  autoTrackDeferredRetryTimes = [];
   await sharedBackgroundOperationPersistence.settlePending();
   if (options.preserveShared) return;
   try {

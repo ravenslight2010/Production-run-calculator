@@ -18639,7 +18639,7 @@ export const getGetBackgroundOperationDiagnosticsUrl = () => {
 }
 
 /**
- * @summary List sustained background-operation failures visible to managers
+ * @summary List background failures and automatic-tracking retry status for managers
  */
 export const getBackgroundOperationDiagnostics = async ( options?: Parameters<typeof customFetch>[1]): Promise<BackgroundOperationDiagnostics> => {
 
@@ -18710,7 +18710,7 @@ export function useGetBackgroundOperationDiagnostics<TData = Awaited<ReturnType<
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary List sustained background-operation failures visible to managers
+ * @summary List background failures and automatic-tracking retry status for managers
  */
 
 export function useGetBackgroundOperationDiagnostics<TData = Awaited<ReturnType<typeof getBackgroundOperationDiagnostics>>, TError = ErrorType<void>>(

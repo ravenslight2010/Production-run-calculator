@@ -4911,7 +4911,7 @@ paths:
     get:
       operationId: getBackgroundOperationDiagnostics
       tags: [audit]
-      summary: List sustained background-operation failures visible to managers
+      summary: List background failures and automatic-tracking retry status for managers
       responses:
         "200":
           description: Bounded sanitized background-operation warnings
@@ -13371,7 +13371,7 @@ components:
     BackgroundOperationDiagnostics:
       type: object
       additionalProperties: false
-      required: [warnings, windowMs]
+      required: [warnings, automaticTrackingBackoff, windowMs]
       properties:
         warnings:
           type: array
@@ -13390,6 +13390,20 @@ components:
         windowMs:
           type: integer
           minimum: 1
+        automaticTrackingBackoff:
+          type: object
+          additionalProperties: false
+          required: [deferredDateCount, deferredDateCountCapped, nextEligibleRetryAt]
+          properties:
+            deferredDateCount:
+              type: integer
+              minimum: 0
+              maximum: 100
+            deferredDateCountCapped:
+              type: boolean
+            nextEligibleRetryAt:
+              type: [string, "null"]
+              format: date-time
 
     ManagerActionQueue:
       type: object

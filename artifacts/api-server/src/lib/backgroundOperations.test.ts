@@ -2,11 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   BACKGROUND_OPERATION_FAILURE_THRESHOLD,
   BACKGROUND_OPERATION_FAILURE_WINDOW_MS,
+  AUTO_TRACK_DEFERRED_DATE_DIAGNOSTIC_CAP,
   backgroundOperationsDegraded,
   clearBackgroundOperationDiagnosticsForTests,
   createBackgroundOperationBackoff,
+  getAutoTrackDeferredDiagnostic,
   getBackgroundOperationDiagnostics,
   isTransientDatabaseConnectionError,
+  recordAutoTrackDeferredRetries,
   runBackgroundOperation,
 } from "./backgroundOperations";
 
@@ -19,7 +22,9 @@ describe("background operation connection recovery", () => {
     expect(backoff.isReady(0)).toBe(true);
     backoff.recordFailure(0);
     expect(backoff.isReady(99)).toBe(false);
+    expect(backoff.nextRetryAt(99)).toBe(100);
     expect(backoff.isReady(100)).toBe(true);
+    expect(backoff.nextRetryAt(100)).toBeUndefined();
     backoff.recordFailure(100);
     expect(backoff.isReady(299)).toBe(false);
     expect(backoff.isReady(300)).toBe(true);
@@ -32,6 +37,31 @@ describe("background operation connection recovery", () => {
     backoff.recordFailure(550);
     expect(backoff.isReady(649)).toBe(false);
     expect(backoff.isReady(650)).toBe(true);
+  });
+
+  it("reports only a bounded aggregate and advances its next eligible time", () => {
+    const now = 10_000;
+    const retryTimes = Array.from(
+      { length: AUTO_TRACK_DEFERRED_DATE_DIAGNOSTIC_CAP + 3 },
+      (_, index) => now + (index + 1) * 1_000,
+    );
+    recordAutoTrackDeferredRetries(retryTimes);
+
+    expect(getAutoTrackDeferredDiagnostic(now)).toEqual({
+      deferredDateCount: AUTO_TRACK_DEFERRED_DATE_DIAGNOSTIC_CAP,
+      deferredDateCountCapped: true,
+      nextEligibleRetryAt: new Date(now + 1_000).toISOString(),
+    });
+    expect(getAutoTrackDeferredDiagnostic(now + 5_000)).toEqual({
+      deferredDateCount: AUTO_TRACK_DEFERRED_DATE_DIAGNOSTIC_CAP - 2,
+      deferredDateCountCapped: false,
+      nextEligibleRetryAt: new Date(now + 6_000).toISOString(),
+    });
+    expect(getAutoTrackDeferredDiagnostic(now + 103_000)).toEqual({
+      deferredDateCount: 0,
+      deferredDateCountCapped: false,
+      nextEligibleRetryAt: null,
+    });
   });
 
   it("characterizes terminated PostgreSQL and network connections as transient", () => {

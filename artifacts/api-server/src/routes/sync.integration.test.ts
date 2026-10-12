@@ -58,6 +58,8 @@ let clearBackgroundOperationDiagnosticsForTests:
   typeof import("../lib/backgroundOperations")["clearBackgroundOperationDiagnosticsForTests"];
 let getBackgroundOperationDiagnostics:
   typeof import("../lib/backgroundOperations")["getBackgroundOperationDiagnostics"];
+let getAutoTrackDeferredDiagnostic:
+  typeof import("../lib/backgroundOperations")["getAutoTrackDeferredDiagnostic"];
 let setManualSectionFailureHookForTest: typeof import("./sync")["setManualSectionFailureHookForTest"];
 let setManualSectionBarrierHookForTest: typeof import("./sync")["setManualSectionBarrierHookForTest"];
 let derivedRunMapSharedInputFields: typeof import("./sync")["DERIVED_RUN_MAP_SHARED_INPUT_FIELDS"];
@@ -127,6 +129,7 @@ beforeAll(async () => {
   clearBackgroundOperationDiagnosticsForTests =
     backgroundOperationsMod.clearBackgroundOperationDiagnosticsForTests;
   getBackgroundOperationDiagnostics = backgroundOperationsMod.getBackgroundOperationDiagnostics;
+  getAutoTrackDeferredDiagnostic = backgroundOperationsMod.getAutoTrackDeferredDiagnostic;
   setManualSectionFailureHookForTest = syncMod.setManualSectionFailureHookForTest;
   setManualSectionBarrierHookForTest = syncMod.setManualSectionBarrierHookForTest;
   derivedRunMapSharedInputFields = syncMod.DERIVED_RUN_MAP_SHARED_INPUT_FIELDS;
@@ -1892,6 +1895,11 @@ describe("server auto-track tick recovery under database pressure", () => {
         nowMs: TICK_NOW, maxClaims: 8,
       });
       expect(firstFailure.outcomes.error).toBe(1);
+      expect(getAutoTrackDeferredDiagnostic(TICK_NOW)).toEqual({
+        deferredDateCount: 1,
+        deferredDateCountCapped: false,
+        nextEligibleRetryAt: new Date(TICK_NOW + 1_000).toISOString(),
+      });
 
       const [healthyDate] = await db.select().from(dailySyncTable)
         .where(and(eq(dailySyncTable.date, "2030-03-11"), eq(dailySyncTable.scope, "live")));
@@ -1914,6 +1922,11 @@ describe("server auto-track tick recovery under database pressure", () => {
         nowMs: TICK_NOW + 2_999, maxClaims: 8,
       });
       expect(secondTooSoon.outcomes.backoff).toBe(1);
+      expect(getAutoTrackDeferredDiagnostic(TICK_NOW + 2_999)).toEqual({
+        deferredDateCount: 1,
+        deferredDateCountCapped: false,
+        nextEligibleRetryAt: new Date(TICK_NOW + 3_000).toISOString(),
+      });
 
       const thirdFailure = await runAutoTrackServerTicks({
         nowMs: TICK_NOW + 3_000, maxClaims: 8,
@@ -1948,6 +1961,11 @@ describe("server auto-track tick recovery under database pressure", () => {
       });
       expect(recovered.outcomes.error).toBeUndefined();
       expect(recovered.outcomes.backoff).toBeUndefined();
+      expect(getAutoTrackDeferredDiagnostic(TICK_NOW + 7_000)).toEqual({
+        deferredDateCount: 0,
+        deferredDateCountCapped: false,
+        nextEligibleRetryAt: null,
+      });
       expect((await getBackgroundOperationDiagnostics())["server-auto-track-tick"])
         .toMatchObject({ status: "ok", recentFailureCount: 0 });
     } finally {

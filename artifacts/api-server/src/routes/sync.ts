@@ -78,6 +78,7 @@ import {
 } from "../lib/capacityTelemetry";
 import {
   createBackgroundOperationBackoff,
+  recordAutoTrackDeferredRetries,
   recordBackgroundOperationSuccess,
   runBackgroundOperation,
   type BackgroundOperationBackoff,
@@ -3621,6 +3622,28 @@ export async function runAutoTrackServerTicks(opts: {
       passComplete = false;
     }
   }
+  if (opts.scope === undefined && opts.date === undefined) {
+    const currentDates = new Set(rows.flatMap((row) =>
+      row.scope === "live" || row.scope === "sandbox"
+        ? [serverTickBackoffKey(row.scope, row.date)]
+        : [],
+    ));
+    for (const key of serverTickDateBackoffs.keys()) {
+      if (!currentDates.has(key)) serverTickDateBackoffs.delete(key);
+    }
+  } else if (opts.scope !== undefined && opts.date === undefined) {
+    const currentDates = new Set(rows.map((row) => serverTickBackoffKey(opts.scope!, row.date)));
+    for (const key of serverTickDateBackoffs.keys()) {
+      if (key.startsWith(`${opts.scope}:`) && !currentDates.has(key)) {
+        serverTickDateBackoffs.delete(key);
+      }
+    }
+  }
+  recordAutoTrackDeferredRetries(
+    [...serverTickDateBackoffs.values()]
+      .map((backoff) => backoff.nextRetryAt(nowMs))
+      .filter((retryAt): retryAt is number => retryAt !== undefined),
+  );
   if (passComplete && outcomes.error === undefined) {
     recordBackgroundOperationSuccess("server-auto-track-tick");
   }
