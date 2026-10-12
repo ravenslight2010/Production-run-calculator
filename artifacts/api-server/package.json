@@ -8,7 +8,7 @@
     "dev:without-schema-push": "export NODE_ENV=development && pnpm run build && exec pnpm run start",
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
-    "typecheck": "node ../../node_modules/typescript/bin/tsc --build ../../lib/db ../../lib/api-zod ../../lib/integrations-openai-ai-server --force && node ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
+    "typecheck": "node ../../node_modules/typescript/bin/tsc --build ../../lib/db ../../lib/api-zod ../../lib/integrations-openai-ai-server --force && node ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit && pnpm run typecheck:routes",
     "typecheck:routes": "node ../../node_modules/typescript/bin/tsc -p tsconfig.routes.json --noEmit",
     "test": "vitest run --exclude src/routes/sync.convergence.integration.test.ts",
     "repair-fingerprints": "../../scripts/node_modules/.bin/tsx scripts/generate-repair-fingerprint-manifest.mts",
