@@ -45,6 +45,19 @@ the application assertions are wrong.
 the same disposable database and complete test inventory; do not remove tests
 or extend timeouts to hide process pressure.
 
+The release-node runner holds a workspace-wide lock for its entire command tree.
+A long or stalled release workflow therefore blocks task-completion validation,
+even when the task's own check is small.
+
+**Why:** Launching repeated checks while the lock owner is still active only
+queues more work and can exhaust the completion poll budget without running the
+requested validation.
+
+**How to apply:** Inspect the lock-owning workflow's process tree and latest log
+before retrying. Do not terminate an unrelated release workflow without owner
+approval; if it remains stuck, report the blocked check and the specific retry
+needed.
+
 Parallel release commands can also race while pnpm installs workspace links,
 producing symlink-collision errors after the initial thread failures.
 

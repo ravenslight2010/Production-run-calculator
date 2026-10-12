@@ -3389,6 +3389,10 @@ const SERVER_TICK_MAX_CLAIMS = 24;
 const SERVER_TICK_LOOKBACK_DAYS = 45;
 const serverTickDateBackoffs = new Map<string, BackgroundOperationBackoff>();
 
+export function resetServerTickDateBackoffsForTests(): void {
+  serverTickDateBackoffs.clear();
+}
+
 function serverTickBackoffKey(scope: Scope, date: string): string {
   return `${scope}:${date}`;
 }
@@ -3443,7 +3447,7 @@ export async function runAutoTrackServerTicks(opts: {
     const backoffKey = serverTickBackoffKey(scope, row.date);
     let backoff = serverTickDateBackoffs.get(backoffKey);
     if (!backoff) {
-      backoff = createBackgroundOperationBackoff();
+      backoff = createBackgroundOperationBackoff({ jitter: true });
       serverTickDateBackoffs.set(backoffKey, backoff);
     }
     if (!backoff.isReady(nowMs)) {

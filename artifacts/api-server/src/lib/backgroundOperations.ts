@@ -179,9 +179,12 @@ export async function persistAutoTrackDeferredDiagnostic(now = Date.now()): Prom
 export function createBackgroundOperationBackoff(options: {
   baseDelayMs?: number;
   maxDelayMs?: number;
+  jitter?: boolean;
+  random?: () => number;
 } = {}): BackgroundOperationBackoff {
   const baseDelayMs = Math.max(1, Math.floor(options.baseDelayMs ?? BACKGROUND_OPERATION_BACKOFF_BASE_MS));
   const maxDelayMs = Math.max(baseDelayMs, Math.floor(options.maxDelayMs ?? BACKGROUND_OPERATION_BACKOFF_MAX_MS));
+  const random = options.random ?? Math.random;
   let consecutiveFailures = 0;
   let retryAt = 0;
 
@@ -198,7 +201,17 @@ export function createBackgroundOperationBackoff(options: {
     },
     recordFailure(now = Date.now()) {
       const exponent = Math.min(consecutiveFailures, 30);
-      const delayMs = Math.min(maxDelayMs, baseDelayMs * (2 ** exponent));
+      const exponentialDelayMs = Math.min(maxDelayMs, baseDelayMs * (2 ** exponent));
+      let delayMs = exponentialDelayMs;
+      if (options.jitter) {
+        const sample = random();
+        const boundedSample = Number.isFinite(sample)
+          ? Math.min(1, Math.max(0, sample))
+          : 0.5;
+        // Equal jitter spreads retries while retaining at least half the
+        // exponential delay and never exceeding the configured maximum.
+        delayMs = Math.max(1, Math.floor(exponentialDelayMs * (0.5 + boundedSample * 0.5)));
+      }
       consecutiveFailures = Math.min(consecutiveFailures + 1, 31);
       retryAt = now + delayMs;
     },

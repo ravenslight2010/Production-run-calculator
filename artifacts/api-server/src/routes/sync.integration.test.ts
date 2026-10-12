@@ -55,6 +55,8 @@ let dataResetTable: DbModule["dataResetTable"];
 let seedRoles: () => Promise<void>;
 let runDataHeals: () => Promise<void>;
 let runAutoTrackServerTicks: typeof import("./sync")["runAutoTrackServerTicks"];
+let resetServerTickDateBackoffsForTests:
+  typeof import("./sync")["resetServerTickDateBackoffsForTests"];
 let clearBackgroundOperationDiagnosticsForTests:
   typeof import("../lib/backgroundOperations")["clearBackgroundOperationDiagnosticsForTests"];
 let getBackgroundOperationDiagnostics:
@@ -130,6 +132,7 @@ beforeAll(async () => {
   seedRoles = (await import("../lib/roles")).seedRoles;
   runDataHeals = (await import("../lib/dataHeals")).runDataHeals;
   runAutoTrackServerTicks = syncMod.runAutoTrackServerTicks;
+  resetServerTickDateBackoffsForTests = syncMod.resetServerTickDateBackoffsForTests;
   const backgroundOperationsMod = await import("../lib/backgroundOperations");
   clearBackgroundOperationDiagnosticsForTests =
     backgroundOperationsMod.clearBackgroundOperationDiagnosticsForTests;
@@ -208,6 +211,7 @@ function dayRow(date: string) {
 
 beforeEach(async () => {
   injectedSseWriteFailures = 0;
+  resetServerTickDateBackoffsForTests();
   await db.execute(sql`TRUNCATE ${dailySyncTable}, ${dataResetTable}, ${operationalIntentLedgerTable}, ${completedRunHistoryTable}, ${applicatorBatchEvidenceTable}, ${syncOutboxEventsTable}, ${syncOutboxCursorsTable}, ${dataHealsTable}, ${syncConflictLogsTable}, ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${qcWorkflowEventsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`);
   await seedRoles();
   await db.insert(usersTable).values([
@@ -1925,7 +1929,7 @@ describe("server auto-track tick recovery under database pressure", () => {
       expect(healthyScope.updatedAt.getTime()).toBeGreaterThan(0);
 
       const tooSoon = await runAutoTrackServerTicks({
-        nowMs: TICK_NOW + 999, maxClaims: 8,
+        nowMs: TICK_NOW + 499, maxClaims: 8,
       });
       expect(tooSoon.outcomes.error).toBeUndefined();
       expect(tooSoon.outcomes.backoff).toBe(1);
@@ -1935,7 +1939,7 @@ describe("server auto-track tick recovery under database pressure", () => {
       });
       expect(secondFailure.outcomes.error).toBe(1);
       const secondTooSoon = await runAutoTrackServerTicks({
-        nowMs: TICK_NOW + 2_999, maxClaims: 8,
+        nowMs: TICK_NOW + 1_999, maxClaims: 8,
       });
       expect(secondTooSoon.outcomes.backoff).toBe(1);
       expect(getAutoTrackDeferredDiagnostic(TICK_NOW + 2_999)).toEqual({
