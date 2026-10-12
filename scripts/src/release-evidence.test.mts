@@ -1494,6 +1494,18 @@ async function run(): Promise<void> {
     "focused screen-off/wake evidence must be retained through the release allowlist",
   );
   assert.ok(
+    RELEASE_EVIDENCE_ALLOWLIST.includes(
+      "sse-topology-observation-2026-10-09.json",
+    ),
+    "the retained SSE deployment-topology decision must be included in release evidence",
+  );
+  assert.ok(
+    RELEASE_EVIDENCE_ALLOWLIST.includes(
+      "web-push-license-approval-2026-10-09.md",
+    ),
+    "the retained production web-push license approval must be included in release evidence",
+  );
+  assert.ok(
     releaseGateLabelsForMode("standard").includes(
       "source-library reconciliation verification",
     ),

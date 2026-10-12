@@ -26,10 +26,10 @@
     },
     "reviewer": {
       "uniqueMaterialCatches": 0,
-      "duplicateWarnings": 2,
+      "duplicateWarnings": 0,
       "falseWarnings": 0,
       "falseRejects": 0,
-      "noOpVerdicts": 302,
+      "noOpVerdicts": 304,
       "reviewerFailures": 301,
       "reviewerFailureRate": 0.9901315789473685,
       "falseWarningRate": null
@@ -75,7 +75,7 @@
         "falseRejects": 0,
         "noOpVerdicts": 76,
         "providerRetries": 0,
-        "latencyMs": 17001,
+        "latencyMs": 16795,
         "inputTokens": null,
         "outputTokens": null
       },
@@ -90,7 +90,7 @@
         "falseRejects": 0,
         "noOpVerdicts": 22,
         "providerRetries": 0,
-        "latencyMs": 15982,
+        "latencyMs": 19084,
         "inputTokens": null,
         "outputTokens": null
       },
@@ -105,7 +105,7 @@
         "falseRejects": 0,
         "noOpVerdicts": 78,
         "providerRetries": 0,
-        "latencyMs": 15722,
+        "latencyMs": 17048,
         "inputTokens": null,
         "outputTokens": null
       },
@@ -115,14 +115,14 @@
         "nonMaterialCases": 0,
         "providerCalls": 1,
         "reviewerFailures": 0,
-        "duplicateWarnings": 2,
+        "duplicateWarnings": 0,
         "falseWarnings": 0,
         "falseRejects": 0,
-        "noOpVerdicts": 1,
+        "noOpVerdicts": 3,
         "providerRetries": 0,
-        "latencyMs": 8209,
+        "latencyMs": 10590,
         "inputTokens": 726,
-        "outputTokens": 252
+        "outputTokens": 148
       },
       "fill-missing": {
         "cases": 125,
@@ -135,20 +135,20 @@
         "falseRejects": 0,
         "noOpVerdicts": 125,
         "providerRetries": 0,
-        "latencyMs": 14660,
+        "latencyMs": 17644,
         "inputTokens": null,
         "outputTokens": null
       }
     },
     "measuredTokens": false,
     "addedCostRatio": null,
-    "p95LatencyMs": 17001
+    "p95LatencyMs": 19084
   },
   "latencyAndRetry": {
     "addedSerialProviderRoundTripsPerMiss": 1,
     "reviewerRetries": 0,
     "reviewerFailureBehavior": "fail-open-with-no-verdict",
-    "measuredLatencyP95Ms": 17001,
+    "measuredLatencyP95Ms": 19084,
     "note": "One logical reviewer request may include provider-adapter retries; captured retry counts are summed here."
   },
   "decision": {
@@ -186,7 +186,7 @@
     "dependencies": {
       "node": "24.21.0",
       "pnpm": "12.8.1",
-      "pnpmLockSha256": "f0de32515ea5526d874c8490c91669890ac77f8d6e1eea26157b8dd590f47d45",
+      "pnpmLockSha256": "3a25a065ab3926f3a4a1f5fda1121485174d2e3271965d6201aef95fce38fecd",
       "benchmarkReporter": "1",
       "benchmarkReporterSha256": "4a390c7d217b98072e8563e0d6d08699063e4d18bc39a8e86c2f37a27846c2fe"
     },
@@ -210,7 +210,7 @@
       },
       "latencyP95": {
         "state": "measured",
-        "value": 17001,
+        "value": 19084,
         "unit": "ms"
       }
     },
@@ -231,7 +231,7 @@
       "sourceSha256": "1d8a2a3ddda96c32959e43fdcd901f3a14308bf12bc4d65ef4e2e3ce12505294",
       "evidence": {
         "state": "hashed",
-        "sha256": "aba7f166b4f3b1ade914af9d4bccac882148eb0b0308c3f85a7851c3c690f737"
+        "sha256": "58639d8159b281bbfe4d057ae77380606ace110aa123a4c091a67038ca405bce"
       },
       "evidenceType": "deterministic-reconciliation-with-provider-observations",
       "evaluator": {

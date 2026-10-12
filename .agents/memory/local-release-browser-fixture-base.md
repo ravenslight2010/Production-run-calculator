@@ -59,3 +59,20 @@ review before the run can resume.
 **How to apply:** Keep lifecycle commands on the server's time base; when a
 test needs synthetic elapsed time, mock projections separately from canonical
 run transitions.
+
+## Active-run fixtures and lifecycle-owned state
+
+A fixture that seeds a run with `startedAt` directly bypasses the real Start
+handler. Tests using such a fixture must explicitly model any state that Start
+initializes, or invoke the actual UI action before asserting it. After a pause
+or resume click, wait until the canonical sync response reflects that lifecycle
+change before sending a deterministic server auto-track tick.
+
+**Why:** Directly seeded active runs do not exercise start-time stock
+initialization, and a locally visible pause button can precede the server's
+accepted lifecycle write.
+
+**How to apply:** For start-behavior coverage, use the Start action. For an
+already-running fixture, explicitly load or initialize stock, then poll the
+canonical sync endpoint for pause/resume state before testing server-owned
+automatic progress.

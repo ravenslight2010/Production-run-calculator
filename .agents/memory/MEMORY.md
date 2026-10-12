@@ -95,7 +95,7 @@
 - [Push](github-git-push.md) + [cancelled runs](github-actions-job-summary-visibility.md) + [forks](github-external-fork-verification.md) — secure remotes; verify cancellation and external ownership.
 - [AI gates](deterministic-ai-gates.md) + [evaluation](ai-evaluation-framework-boundary.md) + [QLoRA](qlora-power-margin-boundary.md) — offline gates; ties fail; use ignored caches for local weights.
 - [Local model memory headroom](local-model-memory-headroom.md) — verify available RAM at the required context on the actual evaluator; a 16-GiB cap did not guarantee Qwen3 8B fit.
-- [seed](browser-fixture-seeding.md) + [base](local-release-browser-fixture-base.md) + [DB](browser-e2e-disposable-database.md) — deterministic data and disposable API database for browser proof.
+- [seed](browser-fixture-seeding.md) + [base](local-release-browser-fixture-base.md) + [DB](browser-e2e-disposable-database.md) — E2E fixtures must preserve real lifecycle and server-ack boundaries.
 - [String-reference purge safety](string-reference-purge-safety.md) — recipe stub purges must scan profiles and every historical/current run snapshot before deleting text-linked master data.
 - [Wake/offline claims](wake-sync-claim-fence.md) + [intents](offline-operational-intents.md) + [receipts](offline-command-receipts.md) — fence stale claims; adopt outcomes before finalizing.
 - [Warehouse and Inventory boundary](warehouse-inventory-boundary.md) — Warehouse prepares production; Inventory maintains stock records; keep destinations and permissions distinct.
@@ -153,7 +153,7 @@
 - [Per-pizza advisory limits](per-pizza-advisory-limits.md) — owner chose 16 oz for sauce, each applicator, and each pepperoni entry; warn only above it, never clamp or block Apply.
 - [Signal cleanup](shell-signal-cleanup-output.md) + [skill refresh](skill-session-registry-refresh.md) — show cleanup warnings, close inherited locks, and refresh loaded skills after registry changes.
 - [Pool fingerprints](source-library-pool-exception-fingerprints.md) — preserve v1 bytes; waive drift only with fresh owner-reviewed pins.
-- [Sandbox network](codeexecution-network-globals.md) + [DB test startup](disposable-database-test-startup.md) — verify AbortSignal; extend fixture startup timeout before diagnosing failure.
+- [Sandbox network](codeexecution-network-globals.md) + [DB test startup](disposable-database-test-startup.md) + [release DB readiness](release-db-readiness.md) — verify AbortSignal; wait for API schema startup before DB-backed release preflights.
 - [QC/allergen Phase 1](qc-allergen-phase1-decisions.md) — record-first, non-blocking workflow with explicit target, role, sign-off, and retention rules.
 - [Run to Time policy](run-to-time-operator-policy.md) — elapsed targets mean reached today; reset restores the standard evening target rather than copying now.
 - [SSE test-reader timeouts](sse-test-reader-timeouts.md) — retain pending raw stream reads across timeouts so an abandoned parser cannot consume the next event and create false delivery failures.

@@ -951,6 +951,8 @@ export const RELEASE_EVIDENCE_ALLOWLIST = [
   "browser-compatibility/webkit-result.json",
   "screen-off-wake/FINAL-REPORT.md",
   "browser-smoke/webkit-result.json",
+  "sse-topology-observation-2026-10-09.json",
+  "web-push-license-approval-2026-10-09.md",
   SOURCE_LIBRARY_RECONCILIATION_EVIDENCE,
   IMPORT_CORPUS_EVALUATION_EVIDENCE,
   TYPESCRIPT_7_COMPARISON_EVIDENCE,
