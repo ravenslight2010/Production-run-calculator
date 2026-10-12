@@ -1428,7 +1428,7 @@ describe("server auto-track tick recovery under database pressure", () => {
   const TICK_RUN = "server-owned-applicator";
   const TICK_NOW = new Date("2030-03-10T12:00:00.000Z").getTime();
 
-  async function seedTickRun() {
+  async function seedTickRun(scope: "live" | "sandbox" = "live") {
     await db.update(dailySyncTable).set({
       data: {
         dayState: {
@@ -1456,7 +1456,7 @@ describe("server auto-track tick recovery under database pressure", () => {
           },
         },
       },
-    }).where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+    }).where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, scope)));
   }
 
   async function removeTickFailureTrigger() {
@@ -1621,6 +1621,185 @@ describe("server auto-track tick recovery under database pressure", () => {
       .toMatchObject([{ scope: "live", cursor: 1 }]);
     expect(await db.select().from(dataResetTable))
       .toMatchObject([{ scope: "live", epoch: 0 }]);
+  });
+
+  it("keeps a retried sandbox date transaction isolated from same-date live state", async () => {
+    await clearBackgroundOperationDiagnosticsForTests();
+    await seedTickRun();
+    await db.insert(dailySyncTable).values({
+      ...dayRow(TICK_DATE),
+      scope: "sandbox",
+    });
+    await seedTickRun("sandbox");
+
+    const [liveSauceItem] = await db.insert(inventoryItemsTable).values({
+      scope: "live",
+      key: "ingredient:BBQ Sauce:lbs",
+      category: "ingredient",
+      name: "BBQ Sauce",
+      unit: "lbs",
+    }).returning();
+    const [sandboxSauceItem] = await db.insert(inventoryItemsTable).values({
+      scope: "sandbox",
+      key: "ingredient:BBQ Sauce:lbs",
+      category: "ingredient",
+      name: "BBQ Sauce",
+      unit: "lbs",
+    }).returning();
+    await db.insert(inventoryLotsTable).values([
+      { scope: "live", itemId: liveSauceItem.id, qtyReceived: 50, qtyRemaining: 50 },
+      { scope: "sandbox", itemId: sandboxSauceItem.id, qtyReceived: 100, qtyRemaining: 100 },
+    ]);
+
+    const [liveBefore] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+    await db.insert(dataResetTable).values({
+      scope: "live",
+      epoch: 17,
+      resetAt: new Date("2030-03-10T10:00:00.000Z"),
+    });
+    const liveBeforeState = {
+      data: liveBefore.data,
+      canonicalRevision: liveBefore.canonicalRevision,
+      updatedAt: liveBefore.updatedAt,
+    };
+    const liveBeforeInventory = {
+      items: await db.select().from(inventoryItemsTable)
+        .where(eq(inventoryItemsTable.scope, "live")),
+      lots: await db.select().from(inventoryLotsTable)
+        .where(eq(inventoryLotsTable.scope, "live")),
+      ledger: await db.select().from(inventoryLedgerTable)
+        .where(eq(inventoryLedgerTable.scope, "live")),
+      consumedRuns: await db.select().from(inventoryConsumedRunsTable)
+        .where(eq(inventoryConsumedRunsTable.scope, "live")),
+    };
+    const liveBeforeEvidence = await db.select().from(applicatorBatchEvidenceTable)
+      .where(eq(applicatorBatchEvidenceTable.scope, "live"));
+    const liveBeforeIntentLedger = await db.select().from(operationalIntentLedgerTable)
+      .where(eq(operationalIntentLedgerTable.scope, "live"));
+    const liveBeforeReset = await db.select().from(dataResetTable)
+      .where(eq(dataResetTable.scope, "live"));
+    const liveBeforeOutbox = await db.select().from(syncOutboxEventsTable)
+      .where(eq(syncOutboxEventsTable.scope, "live"));
+    const liveBeforeOutboxCursor = await db.select().from(syncOutboxCursorsTable)
+      .where(eq(syncOutboxCursorsTable.scope, "live"));
+
+    const sandboxData = (await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "sandbox"))))[0]!.data as any;
+    sandboxData.runValues[TICK_RUN] = {
+      ...sandboxData.runValues[TICK_RUN],
+      sauceBarrelsMade: 0,
+      sauceBarrelAnchorNetSec: 0,
+      sauceBarrelCorrectionGeneration: 0,
+      sauceOzPerPizza: 2,
+      frontlineRecipeName: "BBQ Sauce",
+      frontlineRecipe: [],
+      sauceBarrelLbs: 10,
+    };
+    await db.update(dailySyncTable).set({ data: sandboxData })
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "sandbox")));
+
+    const transactionDb = db as unknown as {
+      transaction: (...args: any[]) => Promise<any>;
+    };
+    const realTransaction = transactionDb.transaction.bind(db);
+    let transactionAttempts = 0;
+    let lostReplyInjected = false;
+    transactionDb.transaction = async (...args: any[]) => {
+      transactionAttempts += 1;
+      const committed = await realTransaction(...args);
+      if (!lostReplyInjected) {
+        lostReplyInjected = true;
+        throw Object.assign(
+          new Error("injected sandbox lost database reply after transaction commit"),
+          { code: "08006" },
+        );
+      }
+      return committed;
+    };
+
+    try {
+      await runAutoTrackServerTicks({
+        nowMs: TICK_NOW, maxClaims: 4, scope: "sandbox", date: TICK_DATE,
+      });
+    } finally {
+      transactionDb.transaction = realTransaction;
+      await clearBackgroundOperationDiagnosticsForTests();
+    }
+
+    expect(lostReplyInjected).toBe(true);
+    expect(transactionAttempts).toBe(2);
+
+    const [sandboxAfter] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "sandbox")));
+    const sandboxFinalData = sandboxAfter.data as any;
+    expect(sandboxFinalData.runValues[TICK_RUN]).toMatchObject({
+      app1BatchesMade: 1,
+      sauceBarrelsMade: 1,
+    });
+    expect(sandboxFinalData.runValuesUpdatedAt[TICK_RUN]).toBe(TICK_NOW);
+
+    const [liveAfter] = await db.select().from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, TICK_DATE), eq(dailySyncTable.scope, "live")));
+    expect({
+      data: liveAfter.data,
+      canonicalRevision: liveAfter.canonicalRevision,
+      updatedAt: liveAfter.updatedAt,
+    }).toEqual(liveBeforeState);
+
+    const automaticEvidence = await db.select().from(applicatorBatchEvidenceTable);
+    expect(automaticEvidence).toHaveLength(1);
+    expect(automaticEvidence[0]).toMatchObject({ scope: "sandbox", date: TICK_DATE });
+
+    const tickLedger = (await db.select().from(operationalIntentLedgerTable))
+      .filter((entry) => entry.commandType === "auto-track");
+    expect(tickLedger.every((entry) => entry.scope === "sandbox" && entry.date === TICK_DATE)).toBe(true);
+    const acceptedTickLedger = tickLedger.filter((entry) => entry.outcome === "accepted");
+    for (const channel of ["app1-batch", "sauce-barrel"]) {
+      expect(acceptedTickLedger.filter((entry) => (entry.actionData as any)?.channel === channel))
+        .toHaveLength(1);
+    }
+
+    const sandboxLots = await db.select().from(inventoryLotsTable)
+      .where(eq(inventoryLotsTable.scope, "sandbox"));
+    expect(sandboxLots).toMatchObject([{ qtyRemaining: 90 }]);
+    expect(await db.select().from(inventoryLedgerTable))
+      .toMatchObject([{ scope: "sandbox", type: "consume", qtyDelta: -10, runId: TICK_RUN }]);
+    const sandboxConsumedRuns = await db.select().from(inventoryConsumedRunsTable);
+    expect(sandboxConsumedRuns).toHaveLength(1);
+    expect(sandboxConsumedRuns[0]).toMatchObject({
+      scope: "sandbox",
+      runId: expect.stringContaining(`${TICK_RUN}:sauce-event:`),
+    });
+
+    expect({
+      items: await db.select().from(inventoryItemsTable).where(eq(inventoryItemsTable.scope, "live")),
+      lots: await db.select().from(inventoryLotsTable).where(eq(inventoryLotsTable.scope, "live")),
+      ledger: await db.select().from(inventoryLedgerTable).where(eq(inventoryLedgerTable.scope, "live")),
+      consumedRuns: await db.select().from(inventoryConsumedRunsTable)
+        .where(eq(inventoryConsumedRunsTable.scope, "live")),
+    }).toEqual(liveBeforeInventory);
+    expect(await db.select().from(applicatorBatchEvidenceTable)
+      .where(eq(applicatorBatchEvidenceTable.scope, "live"))).toEqual(liveBeforeEvidence);
+    expect(await db.select().from(operationalIntentLedgerTable)
+      .where(eq(operationalIntentLedgerTable.scope, "live"))).toEqual(liveBeforeIntentLedger);
+
+    const resetRows = await db.select().from(dataResetTable);
+    expect(Object.fromEntries(resetRows.map((row) => [row.scope, row.epoch])))
+      .toEqual({ live: 17, sandbox: 0 });
+    expect(await db.select().from(dataResetTable).where(eq(dataResetTable.scope, "live")))
+      .toEqual(liveBeforeReset);
+
+    expect(await db.select().from(syncOutboxEventsTable))
+      .toMatchObject([
+        { scope: "sandbox", cursor: 1, kind: "day-state", date: TICK_DATE, senderId: "server:tick" },
+      ]);
+    expect(await db.select().from(syncOutboxEventsTable)
+      .where(eq(syncOutboxEventsTable.scope, "live"))).toEqual(liveBeforeOutbox);
+    expect(await db.select().from(syncOutboxCursorsTable))
+      .toMatchObject([{ scope: "sandbox", cursor: 1 }]);
+    expect(await db.select().from(syncOutboxCursorsTable)
+      .where(eq(syncOutboxCursorsTable.scope, "live"))).toEqual(liveBeforeOutboxCursor);
   });
 
   it("keeps persistent failures visible even when another date succeeds", async () => {
