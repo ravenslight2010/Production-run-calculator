@@ -26,6 +26,7 @@ Follow the `project-tasks` skill as the source of truth. A task plan in `.local/
 - A short descriptive title as its first line.
 - `## What & Why` — the requested change and its purpose.
 - `## Done looks like` — visible or otherwise observable acceptance outcomes.
+- `## Agent-owned execution` — every task plan must include this section with this contract: inspect relevant project evidence and authorized access paths before asking the user; keep all in-scope investigation, implementation, repairs, and verification in this task; ask only for decisions, approvals, or access permissions the user controls; never ask the user for evidence the agent or app can retrieve; if access is unavailable, investigate an approved agent-side route and state the exact missing capability. Name the task-specific evidence sources and user-controlled inputs; write `None expected` when none is known.
 - `## Out of scope` — exclusions that prevent assumptions from expanding the work.
 - `## Steps` — short, outcome-focused implementation boundaries, not separate project tasks.
 - `## Relevant files` — only verified paths, formatted exactly as required by `project-tasks`.

@@ -65,3 +65,21 @@ documentation confirms that task startup captures project configuration.
 **How to apply:** When a validation change appears ineffective, compare the
 task's start snapshot with the current main project. Verify the change on a task
 started afterward rather than claiming it altered an in-flight task.
+
+## Self-sufficient task descriptions
+
+Every Draft, accepted task, and follow-up description should contain an
+agent-owned execution contract: inspect available project evidence and
+authorized access paths before asking the user; keep all in-scope investigation,
+implementation, repair, and verification in the owning task; and ask only for
+decisions or permissions the user controls. If a system source is inaccessible,
+the agent should investigate an approved agent-side route and identify the exact
+missing capability rather than ask the user to supply retrievable evidence.
+
+**Why:** The owner reported that tasks repeatedly shifted evidence-gathering and
+in-scope work back to them. Shared policy prose alone had not made each task
+description self-contained.
+
+**How to apply:** Put this contract in every plan's `Agent-owned execution`
+section, including follow-ups. A policy test can guard the authoring instructions,
+but it cannot guarantee that Replit's isolated task runner follows them.

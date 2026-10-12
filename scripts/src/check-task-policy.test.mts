@@ -123,6 +123,15 @@ const taskAgentStartupRules = [
   },
 ];
 
+const taskDescriptionContract =
+  "Every task description (Draft, accepted task, or follow-up) must include an `Agent-owned execution` section with this contract: inspect relevant project evidence and authorized access paths before asking the user; keep all in-scope investigation, implementation, repairs, and verification in this task; ask only for decisions, approvals, or access permissions the user controls; never ask the user for evidence the agent or app can retrieve; if access is unavailable, investigate an approved agent-side route and state the exact missing capability.";
+const taskPlanContract =
+  "inspect relevant project evidence and authorized access paths before asking the user; keep all in-scope investigation, implementation, repairs, and verification in this task; ask only for decisions, approvals, or access permissions the user controls; never ask the user for evidence the agent or app can retrieve; if access is unavailable, investigate an approved agent-side route and state the exact missing capability.";
+const taskPlanSkillPaths = [
+  ".local/skills/project-tasks/SKILL.md",
+  ".agents/skills/writing-plans/SKILL.md",
+];
+
 const validDocuments: Record<string, string> = {
   "AGENTS.md": [
     "Use one durable task per objective.",
@@ -133,6 +142,7 @@ const validDocuments: Record<string, string> = {
     "Before creating another task, name the parent or owning task, search active and draft work for overlap, state independent acceptance criteria, name the approved exception, and document why the work cannot remain in the owning task.",
     "Finish every in-scope finding in its owning task; do not create child tasks for symptoms, test failures, fixture repairs, or other sub-outcomes. High- and medium-priority independent outcomes may be submitted as child tasks. Low-priority outcomes may be submitted only when the plan states a concrete benefit and bounded scope. Optional work is not categorically excluded; physical-device-only work is excluded.",
     "Every eligible child plan must state its parent, evidence, explicit priority and rationale, separate acceptance criteria, why it cannot remain in the owning task, and the result of checking current work for overlap.",
+    taskDescriptionContract,
     ...acceptancePolicy,
     "Platform settings determine whether a submitted task immediately becomes Active or remains a Draft. Priority is recorded in the plan, not enforced as native task metadata; the repository checker validates policy wording, not runtime task creation.",
     "Applying this rule to current draft and active tasks must not merge, cancel, or re-scope them. New in-scope findings return to the matching existing owner.",
@@ -151,6 +161,7 @@ const validDocuments: Record<string, string> = {
       "- Keep all in-scope investigation through final verification in the owning task. Apply the separate-task exceptions below and the applicable Replit follow-up skill; do not split symptoms, failures, or validation into child tasks.",
     ].join("\n"),
     "Before starting, capture the task's scope, affected surfaces, expected owner, applicable specialist safety checks, and validation matrix.",
+    taskDescriptionContract,
     "Keep newly discovered in-scope failures in the owning task's failure ledger and close them before completion.",
     "A separate project task requires a genuinely independent outcome with separate acceptance criteria, an explicitly deferred user outcome, or an out-of-scope safety, security, data-integrity, or release blocker.",
     "Before creating another task, name the parent or owning task, search current draft and active tasks for overlap, state independent acceptance criteria, name the approved exception, and document why the work cannot remain in the owning task.",
@@ -167,9 +178,22 @@ const validDocuments: Record<string, string> = {
     ...acceptancePolicy,
     ...procedureRules.map(rule => rule.phrase),
   ].join("\n"),
+  ".local/skills/project-tasks/SKILL.md": [
+    "## Agent-owned execution",
+    `Every task plan must include a \`## Agent-owned execution\` section with this contract: ${taskPlanContract}`,
+  ].join("\n"),
+  ".agents/skills/writing-plans/SKILL.md": [
+    "## Agent-owned execution",
+    `Every task plan must include this section with this contract: ${taskPlanContract}`,
+  ].join("\n"),
 };
 
 const newPolicyRules = [
+  {
+    label: "per-task agent-owned execution contract",
+    omissions: [taskDescriptionContract],
+    contradictions: [],
+  },
   {
     label: "follow-up priority gate",
     omissions: [
@@ -386,6 +410,28 @@ for (const driftCase of [
 }
 
 for (const relativePath of Object.keys(validDocuments)) {
+  if (taskPlanSkillPaths.includes(relativePath)) {
+    test(`${relativePath} fails when the agent-owned execution contract is omitted`, async () => {
+      const root = await createFixture({
+        [relativePath]: validDocuments[relativePath].replace(taskPlanContract, ""),
+      });
+
+      try {
+        const result = await runChecker(root);
+        assert.equal(result.exitCode, 1);
+        assert.match(
+          result.stderr,
+          new RegExp(
+            `${relativePath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}: missing agent-owned execution section in task-plan instructions`,
+          ),
+        );
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+    continue;
+  }
+
   const rules = acceptancePolicyRules.map(rule => ({
     label: rule.label, omissions: [rule.phrase], contradictions: rule.contradictions,
   }));

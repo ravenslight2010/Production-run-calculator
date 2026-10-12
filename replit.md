@@ -90,6 +90,7 @@ Before substantive work in either the main workspace or an isolated task copy:
 ### Universal task intake
 
 - Generate one durable task per work objective. The owning task includes investigation, implementation, integration and persistence impacts, regression coverage, final verification, and all in-scope repair work. Do not create a new task for each symptom, test failure, fixture repair, or sub-outcome inside the same objective.
+- **Put the execution contract in every task description.** Every task description (Draft, accepted task, or follow-up) must include an `Agent-owned execution` section with this contract: inspect relevant project evidence and authorized access paths before asking the user; keep all in-scope investigation, implementation, repairs, and verification in this task; ask only for decisions, approvals, or access permissions the user controls; never ask the user for evidence the agent or app can retrieve; if access is unavailable, investigate an approved agent-side route and state the exact missing capability. Name task-specific evidence sources and user-controlled inputs; state `None expected` when none are known.
 - Before starting, capture the task's scope, affected surfaces, expected owner, applicable specialist safety checks, and validation matrix. Search the task board for overlap and dependencies; do not duplicate an existing task.
 - Before creating another task, complete this decision checklist:
   1. Name the parent or owning task.

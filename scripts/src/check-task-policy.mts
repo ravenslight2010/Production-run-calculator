@@ -147,6 +147,13 @@ const requirements: Requirement[] = [
     remediation: "state that one durable task owns each objective",
   },
   {
+    label: "per-task agent-owned execution contract",
+    pattern:
+      /Every task description \(Draft, accepted task, or follow-up\) must include an\s+`?Agent-owned execution`?\s+section with this contract:[\s\S]{0,900}inspect relevant project evidence and authorized access paths before asking the user[\s\S]{0,300}keep all in-scope investigation, implementation, repairs, and verification in this task[\s\S]{0,300}ask only for decisions, approvals, or access permissions the user controls[\s\S]{0,300}never ask the user for evidence the agent or app can retrieve[\s\S]{0,300}if access is unavailable, investigate an approved agent-side route and state the exact missing capability/i,
+    remediation:
+      "put evidence gathering, full in-scope ownership, and narrow user-input limits into every Draft, task, and follow-up description",
+  },
+  {
     label: "task-scope capture rule",
     pattern:
       /Before starting, capture the task's scope, affected surfaces, (?:expected )?owner, applicable specialist safety checks, and validation matrix/i,
@@ -340,10 +347,22 @@ const procedureRequirements: Requirement[] = [
   },
 ];
 
+const taskPlanRequirements: Requirement[] = [
+  {
+    label: "agent-owned execution section in task-plan instructions",
+    pattern:
+      /Agent-owned execution[\s\S]{0,220}Every task plan must include[\s\S]{0,180}inspect relevant project evidence and authorized access paths before asking the user[\s\S]{0,300}keep all in-scope investigation, implementation, repairs, and verification in this task[\s\S]{0,300}ask only for decisions, approvals, or access permissions the user controls[\s\S]{0,300}never ask the user for evidence the agent or app can retrieve[\s\S]{0,300}if access is unavailable, investigate an approved agent-side route and state the exact missing capability/i,
+    remediation:
+      "require task-plan authors to put the self-sufficiency contract directly into each task description",
+  },
+];
+
 for (const [relativePath, documentRequirements] of [
   ["AGENTS.md", requirements],
   ["replit.md", requirements],
   ["docs/follow-up-dependency-submission.md", procedureRequirements],
+  [".local/skills/project-tasks/SKILL.md", taskPlanRequirements],
+  [".agents/skills/writing-plans/SKILL.md", taskPlanRequirements],
 ] as const) {
   const path = resolve(root, relativePath);
   let content: string;
