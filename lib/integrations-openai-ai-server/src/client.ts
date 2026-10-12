@@ -72,9 +72,27 @@ export type GeminiRequestOutcome =
   | "circuit_open"
   | "provider_error";
 
+export type GeminiFallbackTrigger =
+  | "rate_limited"
+  | "service_unavailable"
+  | "retired_model"
+  | "empty_response";
+
+export type GeminiRequestResult =
+  | "primary_success"
+  | "fallback_success"
+  | "fallback_triggered"
+  | "fallback_exhausted"
+  | "attempt_failed";
+
 export interface GeminiRequestMetrics {
   durationMs: number;
   outcome: GeminiRequestOutcome;
+  /** Zero is the selected model; positive values are bounded fallback rungs. */
+  modelRung: number;
+  requestResult: GeminiRequestResult;
+  /** Why this fallback rung was selected; null for the primary model. */
+  fallbackTrigger: GeminiFallbackTrigger | null;
   retryCount: number;
   promptTokens: number;
   completionTokens: number;
@@ -252,6 +270,17 @@ function statusOf(error: unknown): number | undefined {
   if (typeof status === "number") return status;
   const responseStatus = (error as { response?: { status?: unknown } }).response?.status;
   return typeof responseStatus === "number" ? responseStatus : undefined;
+}
+
+function fallbackTriggerFor(error: unknown): GeminiFallbackTrigger | null {
+  const cause = error instanceof Error && error.cause !== undefined
+    ? error.cause
+    : error;
+  const status = statusOf(cause);
+  if (status === 429) return "rate_limited";
+  if (status === 503) return "service_unavailable";
+  if (isRetiredModelError(cause)) return "retired_model";
+  return null;
 }
 
 function isTransientProviderError(error: unknown): boolean {
@@ -444,11 +473,13 @@ async function createForModel(
   options: CreateRequestOptions | undefined,
   chainIndex: number,
   finalModel: boolean,
+  fallbackTrigger: GeminiFallbackTrigger | null = null,
 ): Promise<ChainAttempt | AsyncIterable<ChatChunk>> {
   const startedAt = performance.now();
   let retryCount = 0;
   let responseForMetrics: GenerateContentResponse | undefined;
   let outcome: GeminiRequestOutcome = "provider_error";
+  let requestResult: GeminiRequestResult = "attempt_failed";
   let deferStreamCleanup = false;
   let circuitMode: "closed" | "half_open";
   try {
@@ -457,6 +488,9 @@ async function createForModel(
     observeMetrics({
       durationMs: boundedInteger(performance.now() - startedAt, MAX_TIMEOUT_MS),
       outcome: "circuit_open",
+      modelRung: boundedInteger(chainIndex, 2),
+      requestResult: chainIndex > 0 && finalModel ? "fallback_exhausted" : "attempt_failed",
+      fallbackTrigger,
       retryCount: 0,
       ...usageMetrics(),
     });
@@ -508,6 +542,9 @@ async function createForModel(
                 MAX_TIMEOUT_MS * 2,
               ),
               outcome,
+              modelRung: boundedInteger(chainIndex, 2),
+              requestResult,
+              fallbackTrigger,
               retryCount,
               ...usageMetrics(responseForMetrics),
             });
@@ -522,14 +559,17 @@ async function createForModel(
           request.signal.addEventListener("abort", onStreamAbort, { once: true });
           if (request.signal.aborted) onStreamAbort();
           return (async function* () {
+            let emittedChunk = false;
             try {
               for await (const chunk of stream) {
+                emittedChunk = true;
                 yield { choices: [{ delta: { content: chunk.text ?? null } }] };
               }
               if (request.timedOut()) throw new GeminiRequestTimeoutError();
               if (options?.signal?.aborted) {
                 throw new GeminiRequestCancelledError();
               }
+              requestResult = chainIndex === 0 ? "primary_success" : "fallback_success";
               finishStream("success", "success");
             } catch (error) {
               const normalized = request.timedOut()
@@ -543,6 +583,12 @@ async function createForModel(
                 : normalized instanceof GeminiRequestTimeoutError
                   ? "timeout"
                   : "provider_error";
+              requestResult = finalModel && chainIndex > 0 && !emittedChunk &&
+                  !(normalized instanceof GeminiRequestCancelledError)
+                ? "fallback_exhausted"
+                : !finalModel && !emittedChunk && isChainAdvanceError(normalized)
+                  ? "fallback_triggered"
+                  : "attempt_failed";
               finishStream(
                 outcome,
                 transient ? "transient_failure" : "other_failure",
@@ -568,8 +614,14 @@ async function createForModel(
         outcome = "success";
         releaseCircuit(circuitMode, "success");
         const blocked = isSafetyBlockedResponse(response);
+        const content = blocked ? null : response.text ?? null;
+        const hasUsableContent = blocked ||
+          (typeof content === "string" && content.trim().length > 0);
+        requestResult = hasUsableContent
+          ? chainIndex === 0 ? "primary_success" : "fallback_success"
+          : finalModel ? "fallback_exhausted" : "fallback_triggered";
         return {
-          choices: [{ message: { content: blocked ? null : response.text ?? null } }],
+          choices: [{ message: { content } }],
           blocked,
           ...(chainIndex > 0 ? { model: params.model } : {}),
         };
@@ -591,6 +643,12 @@ async function createForModel(
           : normalized instanceof GeminiRequestTimeoutError
             ? "timeout"
             : "provider_error";
+        requestResult = finalModel && chainIndex > 0 &&
+            !(normalized instanceof GeminiRequestCancelledError)
+          ? "fallback_exhausted"
+          : !finalModel && isChainAdvanceError(normalized)
+            ? "fallback_triggered"
+            : "attempt_failed";
         if (isChainAdvanceError(normalized) && !finalModel) {
           releaseIntermediateCircuit(circuitMode);
         } else {
@@ -610,6 +668,9 @@ async function createForModel(
       observeMetrics({
         durationMs: boundedInteger(performance.now() - startedAt, MAX_TIMEOUT_MS * 2),
         outcome,
+        modelRung: boundedInteger(chainIndex, 2),
+        requestResult,
+        fallbackTrigger,
         retryCount,
         ...usageMetrics(responseForMetrics),
       });
@@ -627,6 +688,7 @@ function streamWithModelFallback(
   return (async function* () {
     let stream = initial;
     let lastError: unknown;
+    let fallbackTrigger: GeminiFallbackTrigger | null = null;
 
     for (let index = startIndex; index < models.length; index += 1) {
       const finalModel = index === models.length - 1;
@@ -637,11 +699,13 @@ function streamWithModelFallback(
             options,
             index,
             finalModel,
+            fallbackTrigger,
           );
           stream = attempt as AsyncIterable<ChatChunk>;
         } catch (error) {
           lastError = error;
           if (finalModel || !isChainAdvanceError(error)) throw error;
+          fallbackTrigger = fallbackTriggerFor(error);
           continue;
         }
       }
@@ -656,6 +720,7 @@ function streamWithModelFallback(
       } catch (error) {
         lastError = error;
         if (emittedChunk || finalModel || !isChainAdvanceError(error)) throw error;
+        fallbackTrigger = fallbackTriggerFor(error);
       }
     }
 
@@ -671,6 +736,7 @@ async function create(
 ): Promise<ChatResponse | AsyncIterable<ChatChunk>> {
   const models = modelChain(params.model);
   let lastError: unknown;
+  let fallbackTrigger: GeminiFallbackTrigger | null = null;
 
   for (const [index, model] of models.entries()) {
     const finalModel = index === models.length - 1;
@@ -681,10 +747,12 @@ async function create(
         options,
         index,
         finalModel,
+        fallbackTrigger,
       );
     } catch (error) {
       if (finalModel || !isChainAdvanceError(error)) throw error;
       lastError = error;
+      fallbackTrigger = fallbackTriggerFor(error);
       continue;
     }
 
@@ -706,6 +774,7 @@ async function create(
     if (typeof content === "string" && content.trim().length > 0) return response;
 
     // A successful HTTP response with no text is still unusable for an import.
+    fallbackTrigger = "empty_response";
     lastError = new GeminiProviderUnavailableError(
       `AI provider returned empty content from ${model}`,
     );

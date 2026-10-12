@@ -4,8 +4,10 @@ export {
   GeminiProviderUnavailableError,
   resetGeminiResilienceForTests,
   setGeminiMetricsObserver,
+  type GeminiFallbackTrigger,
   type GeminiRequestMetrics,
   type GeminiRequestOutcome,
+  type GeminiRequestResult,
   type GeminiProviderEnvironment,
 } from "./client";
 export { pickModel, AI_MODELS, type ModelKind } from "./models";

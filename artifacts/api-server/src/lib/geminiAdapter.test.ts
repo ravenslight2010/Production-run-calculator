@@ -19,7 +19,10 @@ import {
 
 const params = {
   model: "gemini-test",
-  messages: [{ role: "user" as const, content: "sensitive prompt" }],
+  messages: [{
+    role: "user" as const,
+    content: "sensitive prompt; workbook cell: Sensitive Cheddar row",
+  }],
 };
 
 function transient(
@@ -68,6 +71,9 @@ describe("Gemini adapter resilience", () => {
     expect(request.config.abortSignal).toBeInstanceOf(AbortSignal);
     expect(metrics).toEqual([expect.objectContaining({
       outcome: "success",
+      modelRung: 0,
+      requestResult: "primary_success",
+      fallbackTrigger: null,
       retryCount: 0,
       promptTokens: 12,
       completionTokens: 7,
@@ -78,12 +84,19 @@ describe("Gemini adapter resilience", () => {
       "completionTokens",
       "costMicrousd",
       "durationMs",
+      "fallbackTrigger",
+      "modelRung",
       "outcome",
       "promptTokens",
+      "requestResult",
       "retryCount",
       "totalTokens",
     ]);
-    expect(JSON.stringify(metrics)).not.toContain("sensitive prompt");
+    const serializedMetrics = JSON.stringify(metrics);
+    expect(serializedMetrics).not.toContain("sensitive prompt");
+    expect(serializedMetrics).not.toContain("Sensitive Cheddar row");
+    expect(serializedMetrics).not.toContain("{\"ok\":true}");
+    expect(serializedMetrics).not.toContain("gemini-test");
   });
 
   it("keeps Gemini selected when only a proposed local endpoint is configured", async () => {
@@ -291,6 +304,8 @@ describe("Gemini adapter resilience", () => {
 
   it("advances to a fallback after exhausting transient retries and preserves the primary", async () => {
     vi.useFakeTimers();
+    const metrics: GeminiRequestMetrics[] = [];
+    setGeminiMetricsObserver((sample) => metrics.push(sample));
     generateContent
       .mockRejectedValueOnce(transient(503))
       .mockRejectedValueOnce(transient(503))
@@ -309,10 +324,24 @@ describe("Gemini adapter resilience", () => {
       "gemini-test",
       "gemini-3.5-flash",
     ]);
+    expect(metrics.map(({ modelRung, requestResult, fallbackTrigger }) => ({
+      modelRung,
+      requestResult,
+      fallbackTrigger,
+    }))).toEqual([
+      { modelRung: 0, requestResult: "fallback_triggered", fallbackTrigger: null },
+      { modelRung: 1, requestResult: "fallback_success", fallbackTrigger: "service_unavailable" },
+    ]);
+    expect(JSON.stringify(metrics)).not.toContain("provider payload must not be logged");
+    expect(JSON.stringify(metrics)).not.toContain("sensitive prompt");
+    expect(JSON.stringify(metrics)).not.toContain("Sensitive Cheddar row");
+    expect(JSON.stringify(metrics)).not.toContain("recovered");
   });
 
   it("advances to a fallback after the primary exhausts 429 retries", async () => {
     vi.useFakeTimers();
+    const metrics: GeminiRequestMetrics[] = [];
+    setGeminiMetricsObserver((sample) => metrics.push(sample));
     generateContent
       .mockRejectedValueOnce(transient(429))
       .mockRejectedValueOnce(transient(429))
@@ -331,9 +360,19 @@ describe("Gemini adapter resilience", () => {
       "gemini-test",
       "gemini-3.5-flash",
     ]);
+    expect(metrics.map(({ modelRung, requestResult, fallbackTrigger }) => ({
+      modelRung,
+      requestResult,
+      fallbackTrigger,
+    }))).toEqual([
+      { modelRung: 0, requestResult: "fallback_triggered", fallbackTrigger: null },
+      { modelRung: 1, requestResult: "fallback_success", fallbackTrigger: "rate_limited" },
+    ]);
   });
 
   it("advances for a retired-model 404 but not an unrelated 404", async () => {
+    const metrics: GeminiRequestMetrics[] = [];
+    setGeminiMetricsObserver((sample) => metrics.push(sample));
     generateContent
       .mockRejectedValueOnce(transient(404, undefined, "Model gemini-test is no longer available"))
       .mockResolvedValueOnce({ text: "recovered" });
@@ -346,6 +385,14 @@ describe("Gemini adapter resilience", () => {
       "gemini-test",
       "gemini-3.5-flash",
     ]);
+    expect(metrics.map(({ modelRung, requestResult, fallbackTrigger }) => ({
+      modelRung,
+      requestResult,
+      fallbackTrigger,
+    }))).toEqual([
+      { modelRung: 0, requestResult: "fallback_triggered", fallbackTrigger: null },
+      { modelRung: 1, requestResult: "fallback_success", fallbackTrigger: "retired_model" },
+    ]);
 
     resetGeminiResilienceForTests();
     generateContent.mockReset();
@@ -356,6 +403,8 @@ describe("Gemini adapter resilience", () => {
   });
 
   it("advances to a fallback after an empty successful response", async () => {
+    const metrics: GeminiRequestMetrics[] = [];
+    setGeminiMetricsObserver((sample) => metrics.push(sample));
     generateContent
       .mockResolvedValueOnce({ text: "  " })
       .mockResolvedValueOnce({ text: "recovered" });
@@ -368,6 +417,61 @@ describe("Gemini adapter resilience", () => {
       "gemini-test",
       "gemini-3.5-flash",
     ]);
+    expect(metrics.map(({ modelRung, requestResult, fallbackTrigger }) => ({
+      modelRung,
+      requestResult,
+      fallbackTrigger,
+    }))).toEqual([
+      { modelRung: 0, requestResult: "fallback_triggered", fallbackTrigger: null },
+      { modelRung: 1, requestResult: "fallback_success", fallbackTrigger: "empty_response" },
+    ]);
+    expect(JSON.stringify(metrics)).not.toContain("recovered");
+  });
+
+  it("reports an exhausted fallback ladder using only bounded rung and trigger labels", async () => {
+    vi.useFakeTimers();
+    const metrics: GeminiRequestMetrics[] = [];
+    setGeminiMetricsObserver((sample) => metrics.push(sample));
+    generateContent.mockRejectedValue(transient(
+      503,
+      undefined,
+      "provider response must not be logged",
+    ));
+
+    const request = openai.chat.completions.create(params);
+    const rejected = expect(request).rejects.toBeInstanceOf(GeminiProviderUnavailableError);
+    await vi.advanceTimersByTimeAsync(750);
+    await rejected;
+
+    expect(metrics.map(({ modelRung, requestResult, fallbackTrigger, outcome }) => ({
+      modelRung,
+      requestResult,
+      fallbackTrigger,
+      outcome,
+    }))).toEqual([
+      {
+        modelRung: 0,
+        requestResult: "fallback_triggered",
+        fallbackTrigger: null,
+        outcome: "provider_error",
+      },
+      {
+        modelRung: 1,
+        requestResult: "fallback_triggered",
+        fallbackTrigger: "service_unavailable",
+        outcome: "provider_error",
+      },
+      {
+        modelRung: 2,
+        requestResult: "fallback_exhausted",
+        fallbackTrigger: "service_unavailable",
+        outcome: "provider_error",
+      },
+    ]);
+    const serializedMetrics = JSON.stringify(metrics);
+    expect(serializedMetrics).not.toContain("sensitive prompt");
+    expect(serializedMetrics).not.toContain("provider response must not be logged");
+    expect(serializedMetrics).not.toContain("gemini-test");
   });
 
   it("does not advance the model chain after a safety block or deterministic 4xx", async () => {
@@ -430,6 +534,8 @@ describe("Gemini adapter resilience", () => {
   });
 
   it("falls back on a pre-output stream failure", async () => {
+    const metrics: GeminiRequestMetrics[] = [];
+    setGeminiMetricsObserver((sample) => metrics.push(sample));
     generateContentStream
       .mockResolvedValueOnce({
         async *[Symbol.asyncIterator]() {
@@ -448,10 +554,21 @@ describe("Gemini adapter resilience", () => {
       done: false,
       value: { choices: [{ delta: { content: "recovered" } }] },
     });
+    await expect(iterator.next()).resolves.toMatchObject({ done: true });
     expect(generateContentStream.mock.calls.map(([request]) => request.model)).toEqual([
       "gemini-test",
       "gemini-3.5-flash",
     ]);
+    expect(metrics.map(({ modelRung, requestResult, fallbackTrigger }) => ({
+      modelRung,
+      requestResult,
+      fallbackTrigger,
+    }))).toEqual([
+      { modelRung: 0, requestResult: "fallback_triggered", fallbackTrigger: null },
+      { modelRung: 1, requestResult: "fallback_success", fallbackTrigger: "service_unavailable" },
+    ]);
+    expect(JSON.stringify(metrics)).not.toContain("sensitive prompt");
+    expect(JSON.stringify(metrics)).not.toContain("recovered");
   });
 
   it("opens after repeated transient failures and permits only one half-open probe", async () => {

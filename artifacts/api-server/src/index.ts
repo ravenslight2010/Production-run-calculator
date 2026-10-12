@@ -34,7 +34,19 @@ const rawPort = process.env["PORT"];
 
 setGeminiMetricsObserver((metrics) => {
   logger.info(
-    { event: "gemini_request", ...metrics },
+    {
+      event: "gemini_request",
+      durationMs: metrics.durationMs,
+      outcome: metrics.outcome,
+      modelRung: metrics.modelRung,
+      requestResult: metrics.requestResult,
+      fallbackTrigger: metrics.fallbackTrigger,
+      retryCount: metrics.retryCount,
+      promptTokens: metrics.promptTokens,
+      completionTokens: metrics.completionTokens,
+      totalTokens: metrics.totalTokens,
+      costMicrousd: metrics.costMicrousd,
+    },
     "bounded Gemini provider telemetry",
   );
 });
