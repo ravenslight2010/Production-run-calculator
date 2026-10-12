@@ -2035,6 +2035,21 @@ async function run(): Promise<void> {
       "utf8",
     ),
   ) as { scripts?: Record<string, string> };
+  const apiRoutesTsconfig = JSON.parse(
+    await readFile(
+      new URL("../../artifacts/api-server/tsconfig.routes.json", import.meta.url),
+      "utf8",
+    ),
+  ) as { include?: string[] };
+  assert.match(
+    apiPackage.scripts?.["typecheck:routes"] ?? "",
+    /^node\s+\.\.\/\.\.\/node_modules\/typescript\/bin\/tsc\s+-p\s+tsconfig\.routes\.json\s+--noEmit$/u,
+    "the API route typecheck must run TypeScript on its route project without emitting",
+  );
+  assert.ok(
+    apiRoutesTsconfig.include?.includes("src/routes/**/*.ts"),
+    "the API route project must include route source files",
+  );
   assert.match(
     apiPackage.scripts?.typecheck ?? "",
     /(?:^|&&)\s*pnpm run typecheck:routes(?:\s|$)/u,
