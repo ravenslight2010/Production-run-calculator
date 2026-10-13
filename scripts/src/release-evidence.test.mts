@@ -2071,6 +2071,7 @@ async function run(): Promise<void> {
     compilerOptions?: {
       noImplicitAny?: boolean;
       strictNullChecks?: boolean;
+      useUnknownInCatchVariables?: boolean;
     };
     include?: string[];
   };
@@ -2096,6 +2097,11 @@ async function run(): Promise<void> {
     apiRoutesTsconfig.compilerOptions?.strictNullChecks,
     true,
     "the API route project must explicitly enable strict null checks",
+  );
+  assert.equal(
+    apiRoutesTsconfig.compilerOptions?.useUnknownInCatchVariables,
+    true,
+    "the API route project must explicitly treat catch variables as unknown",
   );
   assert.match(
     apiPackage.scripts?.typecheck ?? "",
@@ -2124,6 +2130,11 @@ async function run(): Promise<void> {
         "export function deliberateImplicitAny(parameter) { return parameter; }",
         "const maybeNull: string | null = null;",
         "export const deliberateNullError: string = maybeNull;",
+        "export function deliberateUnknownCatch(): string {",
+        "  try { throw new Error('fixture'); } catch (error) {",
+        "    return error.message;",
+        "  }",
+        "}",
         "",
       ].join("\n"),
       { flag: "wx" },
@@ -2183,6 +2194,11 @@ async function run(): Promise<void> {
       routeTypecheckOutput,
       /deliberate-type-error\.ts\(4,\d+\): error TS2322/u,
       "the API route typecheck must reject assigning a nullable value to a non-nullable type",
+    );
+    assert.match(
+      routeTypecheckOutput,
+      /deliberate-type-error\.ts.*error TS18046/u,
+      "the API route typecheck must reject using an unknown catch variable without narrowing",
     );
   } finally {
     await rm(routeFixtureRoot, { recursive: true, force: true });
