@@ -6809,7 +6809,7 @@ export const FieldCheckObservationInputDeviceCategory = {
 } as const;
 
 /**
- * Workflow categories accept only durationMs from 0 to 900000. Other metrics in these observations are rejected by the server.
+ * Workflow categories require durationMs from 0 to 900000. Only a production-run-save-sync failure may additionally include failureCode as integer 1 through 4; other workflow metrics are rejected.
  */
 export type FieldCheckObservationInputMetrics = {[key: string]: number};
 
@@ -6830,7 +6830,7 @@ export interface FieldCheckObservationInput {
      */
   appBuild: string;
   deviceCategory: FieldCheckObservationInputDeviceCategory;
-  /** Workflow categories accept only durationMs from 0 to 900000. Other metrics in these observations are rejected by the server. */
+  /** Workflow categories require durationMs from 0 to 900000. Only a production-run-save-sync failure may additionally include failureCode as integer 1 through 4; other workflow metrics are rejected. */
   metrics: FieldCheckObservationInputMetrics;
 }
 

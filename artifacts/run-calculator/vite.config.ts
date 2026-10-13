@@ -2,8 +2,14 @@ import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
+import { existsSync } from "node:fs";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 import { VitePWA } from "vite-plugin-pwa";
+import {
+  PROJECT_ROOT,
+  readBoundedJson,
+  validateSourceRecord,
+} from "../../scripts/src/build-source-identity.mjs";
 
 const rawPort = process.env.PORT;
 
@@ -22,11 +28,19 @@ const basePath = process.env.BASE_PATH ?? "/";
 const suppressPreviewReload =
   process.env.REPL_ID !== undefined ||
   process.env.CLEAN_START_REPLIT_PREVIEW === "1";
-const webBuildId =
-  process.env.VITE_APP_VERSION?.trim() ||
-  process.env.REPLIT_DEPLOYMENT_ID?.trim() ||
-  process.env.REPLIT_DEPLOYMENT?.trim() ||
-  "local";
+const webBuildStagePath = path.join(PROJECT_ROOT, ".local/build-identity/web-stage-start.json");
+
+function resolveWebBuildId(command: string): string {
+  if (command === "build" && existsSync(webBuildStagePath)) {
+    return validateSourceRecord(readBoundedJson(webBuildStagePath)).appBuildId;
+  }
+  return (
+    process.env.VITE_APP_VERSION?.trim() ||
+    process.env.REPLIT_DEPLOYMENT_ID?.trim() ||
+    process.env.REPLIT_DEPLOYMENT?.trim() ||
+    "local"
+  );
+}
 
 // Dev-only (Replit). The preview runs inside an HTTPS-proxied iframe where
 // Vite's HMR websocket can't stay connected — it drops every so often, and
@@ -105,10 +119,10 @@ function workbookBoundaryManifest(): Plugin {
   };
 }
 
-export default defineConfig({
+export default defineConfig(async ({ command }) => ({
   base: basePath,
   define: {
-    "import.meta.env.VITE_APP_VERSION": JSON.stringify(webBuildId),
+    "import.meta.env.VITE_APP_VERSION": JSON.stringify(resolveWebBuildId(command)),
   },
   plugins: [
     ...(suppressPreviewReload ? [suppressViteClientReload()] : []),
@@ -242,4 +256,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));

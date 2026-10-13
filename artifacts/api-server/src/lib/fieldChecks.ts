@@ -160,6 +160,7 @@ const workflowCheckNames = new Set<FieldCheckName>([
   "production-run-save-sync",
   "spec-import-review-commit",
 ]);
+const productionRunSaveFailureCodes = new Set([1, 2, 3, 4]);
 const metricKey = /^[a-z][a-zA-Z0-9]{0,31}$/;
 const observationId = /^[a-zA-Z0-9:_-]{8,160}$/;
 
@@ -197,16 +198,25 @@ const observationSchema = z.object({
     }
   }
   if (workflowCheckNames.has(value.checkName as FieldCheckName)) {
-    const metricNames = Object.keys(value.metrics ?? {});
+    const metrics = value.metrics ?? {};
+    const metricNames = Object.keys(metrics);
+    const hasFailureCode = Object.prototype.hasOwnProperty.call(metrics, "failureCode");
+    const failureCodeAllowed =
+      value.checkName === "production-run-save-sync" &&
+      value.outcome === "failure" &&
+      Number.isInteger(metrics.failureCode) &&
+      productionRunSaveFailureCodes.has(metrics.failureCode!);
     if (
-      metricNames.length !== 1 ||
-      metricNames[0] !== "durationMs" ||
-      value.metrics.durationMs! > FIELD_CHECK_WORKFLOW_MAX_DURATION_MS
+      !Object.prototype.hasOwnProperty.call(metrics, "durationMs") ||
+      metricNames.some((name) => name !== "durationMs" && name !== "failureCode") ||
+      metricNames.length > (hasFailureCode ? 2 : 1) ||
+      (hasFailureCode && !failureCodeAllowed) ||
+      metrics.durationMs! > FIELD_CHECK_WORKFLOW_MAX_DURATION_MS
     ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["metrics"],
-        message: "Workflow evidence accepts only a bounded durationMs metric",
+        message: "Workflow evidence accepts only bounded durationMs and an approved save failureCode",
       });
     }
   }

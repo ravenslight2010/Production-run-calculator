@@ -4,6 +4,8 @@ import {
   emitFieldCheckSignal,
   FIELD_CHECK_SIGNAL_EVENT,
   FIELD_CHECK_CATALOG,
+  productionRunSaveFailureLabel,
+  PRODUCTION_RUN_SAVE_FAILURE_CODES,
 } from "./fieldChecks";
 
 const submit = vi.hoisted(() => vi.fn().mockResolvedValue({ accepted: 1, duplicate: 0 }));
@@ -49,12 +51,25 @@ describe("field-check observer", () => {
     window.removeEventListener(FIELD_CHECK_SIGNAL_EVENT, listener);
   });
 
-  it("keeps workflow observations to one bounded duration metric", async () => {
+  it("keeps workflow metrics bounded and includes only allowlisted save failure causes", async () => {
     const stop = createFieldCheckObserver("test-build");
     emitFieldCheckSignal("spec-import-review-commit", "incomplete", {
       durationMs: 12.345,
       fileCount: 2,
       recipeCount: 7,
+    });
+    emitFieldCheckSignal("production-run-save-sync", "failure", {
+      durationMs: 80.128,
+      failureCode: PRODUCTION_RUN_SAVE_FAILURE_CODES.staleOrResetWrite,
+      status: 401,
+    });
+    emitFieldCheckSignal("production-run-save-sync", "success", {
+      durationMs: 15,
+      failureCode: PRODUCTION_RUN_SAVE_FAILURE_CODES.authenticationRejected,
+    });
+    emitFieldCheckSignal("production-run-save-sync", "failure", {
+      durationMs: 25,
+      failureCode: 99,
     });
     emitFieldCheckSignal("spec-import-review-commit", "failure", {
       durationMs: 15 * 60 * 1000 + 1,
@@ -67,6 +82,21 @@ describe("field-check observer", () => {
     expect(workflow?.outcome).toBe("incomplete");
     expect(workflow?.metrics).toEqual({ durationMs: 12.35 });
     expect(JSON.stringify(workflow)).not.toMatch(/fileCount|recipeCount/);
+    const saveFailure = observations.find((item: { checkName: string; outcome: string }) =>
+      item.checkName === "production-run-save-sync" && item.outcome === "failure",
+    );
+    expect(saveFailure?.metrics).toEqual({
+      durationMs: 80.13,
+      failureCode: PRODUCTION_RUN_SAVE_FAILURE_CODES.staleOrResetWrite,
+    });
+    expect(saveFailure?.observationId).toContain(":production-run-save-sync:v2:");
+    const saveSuccess = observations.find((item: { checkName: string; outcome: string }) =>
+      item.checkName === "production-run-save-sync" && item.outcome === "success",
+    );
+    expect(saveSuccess?.metrics).toEqual({ durationMs: 15 });
+    expect(productionRunSaveFailureLabel(PRODUCTION_RUN_SAVE_FAILURE_CODES.authenticationRejected))
+      .toBe("Login or permission rejected");
+    expect(productionRunSaveFailureLabel(99)).toBeNull();
     expect(observations.filter((item: { checkName: string }) =>
       item.checkName === "spec-import-review-commit" && item.outcome === "failure",
     )).toHaveLength(0);

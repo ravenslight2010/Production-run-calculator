@@ -239,6 +239,14 @@ test("real API/web producers, finalized PWA and bundled public getter share one 
     assert.deepEqual(readFileSync(expectedFile), expectationBytes);
     const publicDir = path.join(web, "dist/public");
     assert(existsSync(path.join(publicDir, "index.html")));
+    const webAssetDirectory = path.join(publicDir, "assets");
+    const webAssets = readdirSync(webAssetDirectory)
+      .filter((name) => name.endsWith(".js"))
+      .map((name) => readFileSync(path.join(webAssetDirectory, name), "utf8"));
+    assert(
+      webAssets.some((asset) => asset.includes(prepared.appBuildId)),
+      "browser field-checks must carry the appBuildId from the prepared source record",
+    );
     const manifest = JSON.parse(readFileSync(path.join(publicDir, "manifest.webmanifest"), "utf8"));
     assert(manifest.icons.length > 0);
     for (const icon of manifest.icons) assert(existsSync(path.join(publicDir, icon.src)));

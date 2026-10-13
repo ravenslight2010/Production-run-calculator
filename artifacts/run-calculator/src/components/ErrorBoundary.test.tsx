@@ -7,6 +7,7 @@ import ErrorBoundary, {
   isStaleDeploymentAssetError,
 } from "./ErrorBoundary";
 import { reportIncident } from "../inventoryShared";
+import { reportAutomaticUpdateReloadSafety } from "../updateReloadSafety";
 
 vi.mock("../inventoryShared", () => ({
   reportIncident: vi.fn().mockResolvedValue(undefined),
@@ -19,6 +20,7 @@ function ThrowError({ error }: { error: Error }): never {
 afterEach(() => {
   cleanup();
   sessionStorage.clear();
+  reportAutomaticUpdateReloadSafety(false);
   vi.restoreAllMocks();
 });
 
@@ -123,6 +125,35 @@ describe("ErrorBoundary recovery actions", () => {
       errorMessage: expect.stringContaining("[stale_deployment_asset]"),
       errorStack: expect.stringMatching(/^x{4000}$/),
     }));
+  });
+
+  it("schedules one stale-chunk recovery only when the captured app state is safe", async () => {
+    const updateAndReload = vi.fn().mockResolvedValue(undefined);
+    let recoverWhenSafe: ((canReload: () => boolean) => void | Promise<void>) | undefined;
+    const scheduleSafeIdleRecovery = vi.fn((safeAtFailure, recover) => {
+      expect(safeAtFailure).toBe(true);
+      recoverWhenSafe = recover;
+      return vi.fn();
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    reportAutomaticUpdateReloadSafety(true);
+
+    render(
+      <ErrorBoundary
+        onUpdateAndReload={updateAndReload}
+        scheduleSafeIdleRecovery={scheduleSafeIdleRecovery}
+      >
+        <ThrowError error={new TypeError("Failed to fetch dynamically imported module")} />
+      </ErrorBoundary>,
+    );
+
+    expect(scheduleSafeIdleRecovery).toHaveBeenCalledOnce();
+    expect(updateAndReload).not.toHaveBeenCalled();
+    await recoverWhenSafe?.(() => false);
+    expect(updateAndReload).not.toHaveBeenCalled();
+    await recoverWhenSafe?.(() => true);
+    expect(updateAndReload).toHaveBeenCalledOnce();
+    expect(updateAndReload).toHaveBeenCalledWith(expect.any(Function));
   });
 
   it("keeps the ordinary reload experience for unrelated errors", () => {

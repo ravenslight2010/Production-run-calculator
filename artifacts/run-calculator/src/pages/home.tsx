@@ -502,6 +502,7 @@ import { createImportOperationId } from "../importOperations";
 import {
   emitFieldCheckSignal,
   FIELD_CHECK_WORKFLOW_MAX_DURATION_MS,
+  PRODUCTION_RUN_SAVE_FAILURE_CODES,
 } from "../fieldChecks";
 import { resetSandboxRequest, reportUnauthorized } from "../inventoryShared";
 import {
@@ -2878,13 +2879,17 @@ function loadPackagingAwareRunValues(runId: string): FormValues {
 function emitProductionRunSaveOutcome(
   outcome: "success" | "failure" | "incomplete",
   startedAt: number | null,
+  failureCode?: number,
 ): void {
   const now = typeof performance === "undefined" ? Date.now() : performance.now();
   const durationMs = Math.min(
     FIELD_CHECK_WORKFLOW_MAX_DURATION_MS,
     Math.max(0, startedAt === null ? 0 : now - startedAt),
   );
-  emitFieldCheckSignal("production-run-save-sync", outcome, { durationMs });
+  emitFieldCheckSignal("production-run-save-sync", outcome, {
+    durationMs,
+    ...(failureCode === undefined ? {} : { failureCode }),
+  });
 }
 
 export default function Home() {
@@ -10540,7 +10545,11 @@ export default function Home() {
       // Authentication failures are permanent for this request. Retrying them
       // only creates a storm while the session is being repaired.
       if (res.status === 401 || res.status === 403) {
-        emitProductionRunSaveOutcome("failure", requestStartedAt);
+        emitProductionRunSaveOutcome(
+          "failure",
+          requestStartedAt,
+          PRODUCTION_RUN_SAVE_FAILURE_CODES.authenticationRejected,
+        );
         if (res.status === 401) reportUnauthorized();
         setSyncPushFailed(true);
         setSyncPendingCount(0);
@@ -10673,7 +10682,11 @@ export default function Home() {
       const acknowledgedAt = typeof performance === "undefined" ? null : performance.now();
       pushAcknowledgedRef.current = true;
       if (stale) {
-        emitProductionRunSaveOutcome("failure", requestStartedAt);
+        emitProductionRunSaveOutcome(
+          "failure",
+          requestStartedAt,
+          PRODUCTION_RUN_SAVE_FAILURE_CODES.staleOrResetWrite,
+        );
         // The server dropped this write (data reset not yet honoured). The
         // handler wipes + reloads when adoption applies; either way this push
         // did NOT persist, so flag it instead of recording it as synced.
@@ -10775,7 +10788,11 @@ export default function Home() {
         work.recoveryBlocked = true;
       }
       if (work.recoveryBlocked) {
-        emitProductionRunSaveOutcome("failure", requestStartedAt);
+        emitProductionRunSaveOutcome(
+          "failure",
+          requestStartedAt,
+          PRODUCTION_RUN_SAVE_FAILURE_CODES.unrecoverableConflict,
+        );
         setSyncRetryWaiting(false);
         setSyncPushFailed(true);
         setSyncPendingCount(0);
@@ -10803,7 +10820,11 @@ export default function Home() {
         }, retryDelay);
       } else {
         // All retries exhausted — stop blocking remote state so other devices can still sync
-        emitProductionRunSaveOutcome("failure", requestStartedAt);
+        emitProductionRunSaveOutcome(
+          "failure",
+          requestStartedAt,
+          PRODUCTION_RUN_SAVE_FAILURE_CODES.retriesExhausted,
+        );
         pushAcknowledgedRef.current = true;
         // ...but tell the user their changes aren't backed up / shared yet.
         setSyncPushFailed(true);

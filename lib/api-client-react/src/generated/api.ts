@@ -17599,7 +17599,7 @@ export const getSubmitFieldCheckObservationsUrl = () => {
 }
 
 /**
- * Stores bounded, authenticated, facility-scoped observations from normal staff use. Observations are deduplicated by observationId and never call an AI provider or modify production data. Production-save and spec-import categories accept only success, failure, or incomplete outcomes with one durationMs value capped at 15 minutes; cancellations are incomplete and success is reported only after server acknowledgment or persistence.
+ * Stores bounded, authenticated, facility-scoped observations from normal staff use. Observations are deduplicated by observationId and never call an AI provider or modify production data. Production-save and spec-import categories accept only success, failure, or incomplete outcomes with a durationMs value capped at 15 minutes. A production-run-save-sync failure may also include one bounded failureCode (1 authentication/authorization, 2 stale/reset write, 3 unrecoverable conflict, 4 retries exhausted). Cancellations are incomplete and success is reported only after server acknowledgment or persistence.
  * @summary Submit passive browser field-check observations
  */
 export const submitFieldCheckObservations = async (fieldCheckObservationBatch: FieldCheckObservationBatch, options?: Parameters<typeof customFetch>[1]): Promise<FieldCheckIngestResult> => {

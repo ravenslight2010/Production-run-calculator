@@ -7,6 +7,7 @@ import {
   isAutomaticUpdateReloadSafe,
   reportAutomaticUpdateReloadBlocker,
   reportAutomaticUpdateReloadSafety,
+  scheduleSafeIdleAutomaticRecovery,
   startUpdateReloadIdleTracking,
   subscribeAutomaticUpdateReloadSafety,
   useAutomaticUpdateReloadBlocker,
@@ -132,5 +133,42 @@ describe("update reload inactivity tracking", () => {
     window.dispatchEvent(new TouchEvent("touchstart"));
     vi.advanceTimersByTime(120_000);
     expect(onIdleChange).not.toHaveBeenCalled();
+  });
+
+  it("runs stale recovery only after safe idle and keeps the reload guard live", () => {
+    reportAutomaticUpdateReloadSafety(false);
+    const recover = vi.fn();
+    const stop = scheduleSafeIdleAutomaticRecovery(recover, false, 100);
+
+    vi.advanceTimersByTime(100);
+    expect(recover).not.toHaveBeenCalled();
+
+    reportAutomaticUpdateReloadSafety(true);
+    expect(recover).not.toHaveBeenCalled();
+    stop();
+    const safeStop = scheduleSafeIdleAutomaticRecovery(recover, true, 100);
+    vi.advanceTimersByTime(100);
+    expect(recover).toHaveBeenCalledOnce();
+    const canReload = recover.mock.calls[0][0] as () => boolean;
+    expect(canReload()).toBe(true);
+
+    window.dispatchEvent(new KeyboardEvent("keydown"));
+    expect(canReload()).toBe(false);
+    vi.advanceTimersByTime(100);
+    expect(recover).toHaveBeenCalledOnce();
+
+    safeStop();
+    reportAutomaticUpdateReloadSafety(false);
+  });
+
+  it("cancels a pending safe-idle recovery", () => {
+    reportAutomaticUpdateReloadSafety(true);
+    const recover = vi.fn();
+    const stop = scheduleSafeIdleAutomaticRecovery(recover, true, 100);
+    stop();
+
+    vi.advanceTimersByTime(100);
+    expect(recover).not.toHaveBeenCalled();
+    reportAutomaticUpdateReloadSafety(false);
   });
 });

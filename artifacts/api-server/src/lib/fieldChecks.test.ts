@@ -40,7 +40,7 @@ describe("field-check contract", () => {
     }).ok).toBe(false);
   });
 
-  it("accepts only fixed workflow outcomes and one capped duration", () => {
+  it("accepts fixed workflow metrics and bounded save-failure cause codes only", () => {
     const workflow = {
       ...validObservation,
       observationId: "browser-abc123:spec-import-review-commit:1:success",
@@ -60,6 +60,24 @@ describe("field-check contract", () => {
     }).ok).toBe(false);
     expect(validateFieldCheckBatch({
       observations: [{ ...workflow, metrics: {} }],
+    }).ok).toBe(false);
+
+    const saveFailure = {
+      ...workflow,
+      observationId: "browser-abc123:production-run-save-sync:1:failure",
+      checkName: "production-run-save-sync",
+      outcome: "failure",
+      metrics: { durationMs: 20, failureCode: 2 },
+    };
+    expect(validateFieldCheckBatch({ observations: [saveFailure] }).ok).toBe(true);
+    expect(validateFieldCheckBatch({
+      observations: [{ ...saveFailure, metrics: { durationMs: 20, failureCode: 99 } }],
+    }).ok).toBe(false);
+    expect(validateFieldCheckBatch({
+      observations: [{ ...saveFailure, outcome: "success" }],
+    }).ok).toBe(false);
+    expect(validateFieldCheckBatch({
+      observations: [{ ...saveFailure, checkName: "spec-import-review-commit" }],
     }).ok).toBe(false);
   });
 

@@ -34,6 +34,7 @@ import { WEB_BUILD_ID } from "./buildIdentity";
 import { installBrowserFailureCapture } from "./browserIncidentCapture";
 import {
   getAutomaticUpdateReloadSafety,
+  scheduleSafeIdleAutomaticRecovery,
   startUpdateReloadIdleTracking,
   subscribeAutomaticUpdateReloadSafety,
 } from "./updateReloadSafety";
@@ -147,7 +148,11 @@ function AppRoutes() {
 }
 
 type AppUpdateContextValue = {
-  updateAndReload: () => Promise<void>;
+  updateAndReload: (canReload?: () => boolean) => Promise<void>;
+  scheduleSafeIdleRecovery: (
+    safeAtFailure: boolean,
+    recover: (canReload: () => boolean) => void | Promise<void>,
+  ) => () => void;
 };
 
 const AppUpdateContext = createContext<AppUpdateContextValue | null>(null);
@@ -244,15 +249,30 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
     [updateServiceWorker],
   );
   const handleUpdateAndReload = useCallback(
-    () => {
+    (canReload: () => boolean = () => true) => {
       emitFieldCheckSignal("pwa-update-handoff", "success");
       return updateAndReload(
         registrationRef.current,
         activateWaitingWorker,
         () => window.location.reload(),
+        canReload,
       );
     },
     [activateWaitingWorker],
+  );
+  const scheduleSafeIdleRecovery = useCallback(
+    (
+      safeAtFailure: boolean,
+      recover: (canReload: () => boolean) => void | Promise<void>,
+    ) =>
+      scheduleSafeIdleAutomaticRecovery((canReload) => {
+        if (automaticReloadStartedRef.current) return;
+        automaticReloadStartedRef.current = true;
+        void Promise.resolve(recover(canReload)).finally(() => {
+          automaticReloadStartedRef.current = false;
+        });
+      }, safeAtFailure),
+    [],
   );
   const handleAutomaticUpdateAndReload = useCallback(
     (generation: number) => {
@@ -348,7 +368,10 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
   ]);
 
   return (
-    <AppUpdateContext.Provider value={{ updateAndReload: handleUpdateAndReload }}>
+    <AppUpdateContext.Provider value={{
+      updateAndReload: handleUpdateAndReload,
+      scheduleSafeIdleRecovery,
+    }}>
       {children}
     </AppUpdateContext.Provider>
   );
@@ -357,7 +380,10 @@ function AppUpdatePrompt({ children }: { children: ReactNode }) {
 function ErrorBoundaryWithRecovery({ children }: { children: ReactNode }) {
   const updateContext = useContext(AppUpdateContext);
   return (
-    <ErrorBoundary onUpdateAndReload={updateContext?.updateAndReload}>
+    <ErrorBoundary
+      onUpdateAndReload={updateContext?.updateAndReload}
+      scheduleSafeIdleRecovery={updateContext?.scheduleSafeIdleRecovery}
+    >
       {children}
     </ErrorBoundary>
   );

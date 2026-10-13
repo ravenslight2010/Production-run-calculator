@@ -27,6 +27,7 @@ import {
 } from "../inventoryShared";
 import { useMe } from "../useRole";
 import { useIdle } from "../hooks/useIdle";
+import { productionRunSaveFailureLabel } from "../fieldChecks";
 import { IncidentPatternsPanel } from "./IncidentPatternsPanel";
 
 type StatusFilter = "all" | "new" | "reviewed" | "resolved";
@@ -411,6 +412,9 @@ function FieldChecksPanel({
                     </div>
                     <p className="mt-1 text-muted-foreground">
                       {failure.outcome === "incomplete" ? "Repeatedly incomplete" : "Failed"} · build {failure.appBuild} · {failure.deviceCategory}
+                      {check.name === "production-run-save-sync" && productionRunSaveFailureLabel(failure.metrics.failureCode)
+                        ? ` · ${productionRunSaveFailureLabel(failure.metrics.failureCode)}`
+                        : ""}
                     </p>
                     <p className="text-muted-foreground">
                       {check.observedBy === "browser" ? "Browser-observed" : "Guided hardware"} evidence only; measurements are bounded and contain no production payload.
@@ -447,6 +451,10 @@ function FieldCheckCard({ check }: { check: FieldCheckSummary }) {
           Recent non-successes: {check.recentFailures.length} · latest {check.recentFailures[0].outcome} · {timeAgo(check.recentFailures[0].observedAt)} · {check.recentFailures[0].deviceCategory}
           {typeof check.recentFailures[0].metrics.durationMs === "number"
             ? ` · ${Math.round(check.recentFailures[0].metrics.durationMs)} ms`
+            : ""}
+          {check.name === "production-run-save-sync" &&
+          productionRunSaveFailureLabel(check.recentFailures[0].metrics.failureCode)
+            ? ` · ${productionRunSaveFailureLabel(check.recentFailures[0].metrics.failureCode)}`
             : ""}
         </p>
       )}

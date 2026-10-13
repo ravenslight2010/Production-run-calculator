@@ -2,9 +2,27 @@ import { useEffect } from "react";
 import { submitFieldCheckObservations } from "./inventoryShared";
 import { useAuth } from "./useAuth";
 
-export const FIELD_CHECK_VERSION = "1";
+export const FIELD_CHECK_VERSION = "2";
 export const FIELD_CHECK_SIGNAL_EVENT = "calculator-field-check-signal";
 export const FIELD_CHECK_WORKFLOW_MAX_DURATION_MS = 15 * 60 * 1000;
+
+export const PRODUCTION_RUN_SAVE_FAILURE_CODES = {
+  authenticationRejected: 1,
+  staleOrResetWrite: 2,
+  unrecoverableConflict: 3,
+  retriesExhausted: 4,
+} as const;
+
+const productionRunSaveFailureLabels: Record<number, string> = {
+  [PRODUCTION_RUN_SAVE_FAILURE_CODES.authenticationRejected]: "Login or permission rejected",
+  [PRODUCTION_RUN_SAVE_FAILURE_CODES.staleOrResetWrite]: "Server rejected a stale/reset save",
+  [PRODUCTION_RUN_SAVE_FAILURE_CODES.unrecoverableConflict]: "Unrecoverable sync conflict",
+  [PRODUCTION_RUN_SAVE_FAILURE_CODES.retriesExhausted]: "Sync retries exhausted",
+};
+
+export function productionRunSaveFailureLabel(failureCode: number | undefined): string | null {
+  return Number.isInteger(failureCode) ? productionRunSaveFailureLabels[failureCode!] ?? null : null;
+}
 
 export const FIELD_CHECK_CATALOG = [
   { name: "startup", label: "Startup", observedBy: "browser" as const },
@@ -79,13 +97,30 @@ function deviceCategory(): "desktop-chrome" | "desktop-safari" | "desktop-firefo
   return "other-browser";
 }
 
-function safeMetrics(checkName: CheckName, metrics: Record<string, number> | undefined): Record<string, number> {
+function safeMetrics(
+  checkName: CheckName,
+  outcome: Outcome,
+  metrics: Record<string, number> | undefined,
+): Record<string, number> {
   if (!metrics) return {};
   if (workflowChecks.has(checkName)) {
     const durationMs = metrics.durationMs;
-    return Number.isFinite(durationMs) && durationMs! >= 0 && durationMs! <= FIELD_CHECK_WORKFLOW_MAX_DURATION_MS
-      ? { durationMs: Math.round(durationMs! * 100) / 100 }
-      : {};
+    if (!Number.isFinite(durationMs) || durationMs! < 0 || durationMs! > FIELD_CHECK_WORKFLOW_MAX_DURATION_MS) {
+      return {};
+    }
+    const safe: Record<string, number> = { durationMs: Math.round(durationMs! * 100) / 100 };
+    const failureCode = metrics.failureCode;
+    if (
+      checkName === "production-run-save-sync" &&
+      outcome === "failure" &&
+      Number.isInteger(failureCode) &&
+      Object.values(PRODUCTION_RUN_SAVE_FAILURE_CODES).includes(
+        failureCode as (typeof PRODUCTION_RUN_SAVE_FAILURE_CODES)[keyof typeof PRODUCTION_RUN_SAVE_FAILURE_CODES],
+      )
+    ) {
+      safe.failureCode = failureCode!;
+    }
+    return safe;
   }
   return Object.fromEntries(
     Object.entries(metrics)
@@ -132,15 +167,15 @@ function saveQueue(queue: ReturnType<typeof loadQueue>): void {
 export function emitFieldCheckSignal(checkName: CheckName, outcome: Outcome, metrics?: Record<string, number>): void {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent<Signal>(FIELD_CHECK_SIGNAL_EVENT, {
-    detail: { checkName, outcome, metrics: safeMetrics(checkName, metrics) },
+    detail: { checkName, outcome, metrics: safeMetrics(checkName, outcome, metrics) },
   }));
 }
 
 function queueSignal(signal: Signal, appBuild: string): void {
-  const metrics = safeMetrics(signal.checkName, signal.metrics);
+  const metrics = safeMetrics(signal.checkName, signal.outcome, signal.metrics);
   if (workflowChecks.has(signal.checkName) && metrics.durationMs === undefined) return;
   const now = Date.now();
-  const id = `${localClientId()}:${signal.checkName}:${Math.floor(now / bucketMs)}:${signal.outcome}`;
+  const id = `${localClientId()}:${signal.checkName}:v${FIELD_CHECK_VERSION}:${Math.floor(now / bucketMs)}:${signal.outcome}`;
   const queue = loadQueue();
   if (queue.some((item) => item.observationId === id)) return;
   queue.push({

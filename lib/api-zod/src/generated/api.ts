@@ -7037,7 +7037,7 @@ export const SavePhotoAliasesResponse = zod.object({
 
 
 /**
- * Stores bounded, authenticated, facility-scoped observations from normal staff use. Observations are deduplicated by observationId and never call an AI provider or modify production data. Production-save and spec-import categories accept only success, failure, or incomplete outcomes with one durationMs value capped at 15 minutes; cancellations are incomplete and success is reported only after server acknowledgment or persistence.
+ * Stores bounded, authenticated, facility-scoped observations from normal staff use. Observations are deduplicated by observationId and never call an AI provider or modify production data. Production-save and spec-import categories accept only success, failure, or incomplete outcomes with a durationMs value capped at 15 minutes. A production-run-save-sync failure may also include one bounded failureCode (1 authentication/authorization, 2 stale/reset write, 3 unrecoverable conflict, 4 retries exhausted). Cancellations are incomplete and success is reported only after server acknowledgment or persistence.
  * @summary Submit passive browser field-check observations
  */
 
@@ -7056,7 +7056,7 @@ export const SubmitFieldCheckObservationsBody = zod.object({
   "observedAt": zod.coerce.date(),
   "appBuild": zod.string().min(1).max(submitFieldCheckObservationsBodyObservationsItemAppBuildMax),
   "deviceCategory": zod.enum(['desktop-chrome', 'desktop-safari', 'desktop-firefox', 'mobile-chrome', 'mobile-safari', 'tablet-browser', 'other-browser']),
-  "metrics": zod.record(zod.string(), zod.number().min(submitFieldCheckObservationsBodyObservationsItemMetricsMinOne).max(submitFieldCheckObservationsBodyObservationsItemMetricsMaxOne)).describe('Workflow categories accept only durationMs from 0 to 900000. Other metrics in these observations are rejected by the server.')
+  "metrics": zod.record(zod.string(), zod.number().min(submitFieldCheckObservationsBodyObservationsItemMetricsMinOne).max(submitFieldCheckObservationsBodyObservationsItemMetricsMaxOne)).describe('Workflow categories require durationMs from 0 to 900000. Only a production-run-save-sync failure may additionally include failureCode as integer 1 through 4; other workflow metrics are rejected.')
 })).min(1).max(submitFieldCheckObservationsBodyObservationsMax)
 })
 
