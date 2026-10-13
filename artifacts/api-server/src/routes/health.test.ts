@@ -352,11 +352,21 @@ describe("GET /healthz background operation diagnostics", () => {
         runningWithoutLease: 0,
         runningLeaseExpiredRetryable: 0,
         runningLeaseExpiredExhausted: 0,
+        candidateCounts: {
+          preserveQueuedRunnable: 1,
+          preserveValidLease: 1,
+          preserveExpiredRetryableLease: 0,
+          workerResolutionRequired: 0,
+          manualReviewRequired: 0,
+          preserveTerminalHistory: 0,
+          safeRemoval: 0,
+        },
         reviewClass: "preserve_runnable_or_leased",
       }],
       duplicateBucketInventoryTruncated: true,
       duplicateBucketReviewRules: [
         "Preserve queued jobs with attempts remaining and running jobs with a valid lease.",
+        "No rows are automatically designated safe to remove; cleanup requires a separate owner-approved, audited transaction.",
       ],
       warningCodes: ["backlog_stalled"],
       sampleCount: 6,
@@ -391,9 +401,15 @@ describe("GET /healthz background operation diagnostics", () => {
         bucketFingerprint: "a".repeat(24),
         rowCount: 2,
         reviewClass: "preserve_runnable_or_leased",
+        candidateCounts: {
+          preserveQueuedRunnable: 1,
+          preserveValidLease: 1,
+          safeRemoval: 0,
+        },
       }],
       duplicateBucketReviewRules: expect.arrayContaining([
         expect.stringContaining("Preserve queued jobs"),
+        expect.stringContaining("No rows are automatically designated safe to remove"),
       ]),
       warningCodes: ["backlog_stalled"],
     });

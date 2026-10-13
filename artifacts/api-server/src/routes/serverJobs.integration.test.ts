@@ -545,6 +545,11 @@ describe("server job route idempotency", () => {
         leaseToken: "00000000-0000-4000-8000-000000000003", leaseExpiresAt: new Date(now - 1), expiresAt,
       },
       {
+        scope: "live", type: "scheduled-evaluation", actorId: "legacy-expired-without-token", idempotencyKey: key,
+        input: { scheduledFor: bucketStart }, status: "running", attempt: 1, maxAttempts: 3,
+        leaseExpiresAt: new Date(now - 1), expiresAt,
+      },
+      {
         scope: "live", type: "scheduled-evaluation", actorId: "legacy-exhausted", idempotencyKey: key,
         input: { scheduledFor: bucketStart }, status: "running", attempt: 3, maxAttempts: 3,
         leaseToken: "00000000-0000-4000-8000-000000000004", leaseExpiresAt: new Date(now - 1), expiresAt,
@@ -594,14 +599,24 @@ describe("server job route idempotency", () => {
 
     const snapshot = await readScheduledEvaluationQueueSnapshot(now);
     const repeated = await readScheduledEvaluationQueueSnapshot(now);
-    const mixedState = snapshot.duplicateBucketInventory.find((group) => group.rowCount === 5);
+    const mixedState = snapshot.duplicateBucketInventory.find((group) => group.rowCount === 6);
 
     expect(mixedState).toMatchObject({
-      statuses: { queued: 1, running: 3, succeeded: 1, failed: 0, cancelled: 0 },
+      statuses: { queued: 1, running: 4, succeeded: 1, failed: 0, cancelled: 0 },
       queuedRunnable: 1,
       runningWithValidLease: 1,
-      runningLeaseExpiredRetryable: 1,
+      runningWithoutLease: 1,
+      runningLeaseExpiredRetryable: 2,
       runningLeaseExpiredExhausted: 1,
+      candidateCounts: {
+        preserveQueuedRunnable: 1,
+        preserveValidLease: 1,
+        preserveExpiredRetryableLease: 2,
+        workerResolutionRequired: 1,
+        manualReviewRequired: 0,
+        preserveTerminalHistory: 1,
+        safeRemoval: 0,
+      },
       reviewClass: "preserve_runnable_or_leased",
     });
     expect(snapshot.duplicateBucketInventory.map(({ reviewClass }) => reviewClass)).toEqual(
@@ -613,6 +628,7 @@ describe("server job route idempotency", () => {
       ]),
     );
     expect(snapshot.duplicateBucketInventory).toEqual(repeated.duplicateBucketInventory);
+    expect(snapshot.duplicateBucketInventory.every((group) => group.candidateCounts.safeRemoval === 0)).toBe(true);
     expect(snapshot.duplicateBucketInventoryTruncated).toBe(false);
     expect(JSON.stringify(snapshot)).not.toMatch(/legacy-|idempotencyKey|scheduledFor|scope/i);
     expect((await db.select({ value: count() }).from(serverJobAttemptsTable))[0]?.value).toBe(0);
@@ -623,7 +639,7 @@ describe("server job route idempotency", () => {
       leaseToken: serverJobsTable.leaseToken,
       leaseExpiresAt: serverJobsTable.leaseExpiresAt,
     }).from(serverJobsTable)).sort((left, right) => left.id.localeCompare(right.id))).toEqual(rowState);
-    expect(rows).toHaveLength(11);
+    expect(rows).toHaveLength(12);
   });
 
   it("keeps duplicate work claimable by a worker after an inventory read", async () => {

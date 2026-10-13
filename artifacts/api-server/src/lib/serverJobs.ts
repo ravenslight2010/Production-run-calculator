@@ -104,6 +104,15 @@ export type ScheduledEvaluationDuplicateBucket = {
   runningWithoutLease: number;
   runningLeaseExpiredRetryable: number;
   runningLeaseExpiredExhausted: number;
+  candidateCounts: {
+    preserveQueuedRunnable: number;
+    preserveValidLease: number;
+    preserveExpiredRetryableLease: number;
+    workerResolutionRequired: number;
+    manualReviewRequired: number;
+    preserveTerminalHistory: number;
+    safeRemoval: 0;
+  };
   reviewClass:
     | "preserve_runnable_or_leased"
     | "worker_resolution_required"
@@ -153,6 +162,7 @@ export const SCHEDULED_EVALUATION_DUPLICATE_REVIEW_RULES = [
   "Leave exhausted queued jobs and expired exhausted leases to the worker's terminalization path.",
   "Do not change running jobs without a lease; flag them for explicit review because the worker cannot safely reclaim them.",
   "Terminal jobs are historical records; do not merge or delete them as duplicate cleanup.",
+  "No rows are automatically designated safe to remove; cleanup requires a separate owner-approved, audited transaction.",
 ] as const;
 
 function nonNegativeCount(value: number): number {
@@ -326,6 +336,13 @@ export async function readScheduledEvaluationQueueSnapshot(
       where ${serverJobsTable.status} = 'running'
         and (${serverJobsTable.leaseToken} is null or ${serverJobsTable.leaseExpiresAt} is null)
     )::int`,
+    runningManualReview: sql<number>`count(*) filter (
+      where ${serverJobsTable.status} = 'running'
+        and (
+          ${serverJobsTable.leaseExpiresAt} is null
+          or (${serverJobsTable.leaseToken} is null and ${serverJobsTable.leaseExpiresAt} > ${new Date(nowMs)})
+        )
+    )::int`,
     runningLeaseExpiredRetryable: sql<number>`count(*) filter (
       where ${serverJobsTable.status} = 'running'
         and ${serverJobsTable.leaseExpiresAt} <= ${new Date(nowMs)}
@@ -349,7 +366,7 @@ export async function readScheduledEvaluationQueueSnapshot(
     const hasRunnableOrLeasedWork = group.queuedRunnable > 0 ||
       group.runningWithValidLease > 0 || group.runningLeaseExpiredRetryable > 0;
     const hasWorkerResolutionWork = group.queuedExhausted > 0 || group.runningLeaseExpiredExhausted > 0;
-    const hasUnleasedRunningWork = group.runningWithoutLease > 0;
+    const hasUnleasedRunningWork = group.runningManualReview > 0;
     return {
       bucketFingerprint: createHmac("sha256", duplicateInventoryFingerprintKey)
         .update(`${group.scope}\u0000${group.bucket}`)
@@ -369,6 +386,18 @@ export async function readScheduledEvaluationQueueSnapshot(
       runningWithoutLease: nonNegativeCount(group.runningWithoutLease),
       runningLeaseExpiredRetryable: nonNegativeCount(group.runningLeaseExpiredRetryable),
       runningLeaseExpiredExhausted: nonNegativeCount(group.runningLeaseExpiredExhausted),
+      candidateCounts: {
+        preserveQueuedRunnable: nonNegativeCount(group.queuedRunnable),
+        preserveValidLease: nonNegativeCount(group.runningWithValidLease),
+        preserveExpiredRetryableLease: nonNegativeCount(group.runningLeaseExpiredRetryable),
+        workerResolutionRequired: nonNegativeCount(group.queuedExhausted) +
+          nonNegativeCount(group.runningLeaseExpiredExhausted),
+        manualReviewRequired: nonNegativeCount(group.runningManualReview),
+        preserveTerminalHistory: nonNegativeCount(group.succeeded) +
+          nonNegativeCount(group.failed) +
+          nonNegativeCount(group.cancelled),
+        safeRemoval: 0,
+      },
       reviewClass: hasUnleasedRunningWork
         ? "manual_review_required"
         : hasRunnableOrLeasedWork
