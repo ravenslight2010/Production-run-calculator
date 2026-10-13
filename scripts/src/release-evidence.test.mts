@@ -2056,6 +2056,16 @@ async function run(): Promise<void> {
     sharedLibraryProjects,
     "the root TypeScript project must reference every composite shared library under lib/",
   );
+  for (const requiredProject of [
+    "./lib/factory-constants",
+    "./lib/formula-guard",
+    "./lib/ingredient-catalog",
+  ]) {
+    assert.ok(
+      sharedLibraryProjects.includes(requiredProject),
+      `${requiredProject} must remain in the shared-library TypeScript project graph`,
+    );
+  }
   const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
   const sharedLibraryPackages = await Promise.all(
     sharedLibraryProjects.map(async (projectPath) => {
@@ -2169,9 +2179,9 @@ async function run(): Promise<void> {
             : referencePath;
         }),
       );
-      // Dependencies without a TypeScript project under lib/ (for example,
-      // factory-constants, formula-guard, ingredient-catalog, and
-      // typescript-api-v6) cannot participate in the project-reference graph.
+      // Dependencies without a TypeScript project under lib/ cannot
+      // participate in the project-reference graph (for example,
+      // typescript-api-v6, which is JavaScript plus declarations).
       const missingBuildableDependencies = dependencyNames.filter((name) => {
         const dependencyDirectory = buildableLibraryDirectories.get(name);
         return dependencyDirectory && !referencedDirectories.has(dependencyDirectory);

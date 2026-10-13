@@ -46,7 +46,16 @@
       "path": "../../lib/fill-missing"
     },
     {
+      "path": "../../lib/factory-constants"
+    },
+    {
       "path": "../../lib/freezer-pull"
+    },
+    {
+      "path": "../../lib/formula-guard"
+    },
+    {
+      "path": "../../lib/ingredient-catalog"
     },
     {
       "path": "../../lib/inventory-math"

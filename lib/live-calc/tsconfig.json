@@ -8,6 +8,9 @@
     "rootDir": "src",
     "lib": ["es2022"]
   },
-  "references": [{ "path": "../inventory-math" }],
+  "references": [
+    { "path": "../factory-constants" },
+    { "path": "../inventory-math" }
+  ],
   "include": ["src"]
 }

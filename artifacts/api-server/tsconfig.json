@@ -32,7 +32,13 @@
       "path": "../../lib/freezer-pull"
     },
     {
+      "path": "../../lib/factory-constants"
+    },
+    {
       "path": "../../lib/incident-cluster"
+    },
+    {
+      "path": "../../lib/ingredient-catalog"
     },
     {
       "path": "../../lib/integrations-openai-ai-server"
