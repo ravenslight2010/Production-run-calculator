@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import {
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   rm,
   symlink,
@@ -2013,6 +2014,47 @@ async function run(): Promise<void> {
     rootPackage.scripts?.["typecheck:libs"] ?? "",
     /^node\s+\.\/node_modules\/typescript\/bin\/tsc\s+--build(?:\s|$)/u,
     "the root typecheck:libs script must run the TypeScript project-reference build",
+  );
+  const rootTypeScriptProject = JSON.parse(
+    await readFile(new URL("../../tsconfig.json", import.meta.url), "utf8"),
+  ) as { references?: Array<{ path: string }> };
+  const discoverSharedLibraryProjects = async (
+    directory: string,
+    relativePath: string,
+  ): Promise<string[]> => {
+    const entries = await readdir(directory, { withFileTypes: true });
+    const projects: string[] = [];
+    if (entries.some((entry) => entry.isFile() && entry.name === "tsconfig.json")) {
+      projects.push(`./lib/${relativePath}`);
+    }
+    const nestedProjects = await Promise.all(
+      entries
+        .filter((entry) => entry.isDirectory())
+        .map((entry) =>
+          discoverSharedLibraryProjects(
+            join(directory, entry.name),
+            relativePath ? `${relativePath}/${entry.name}` : entry.name,
+          ),
+        ),
+    );
+    return [...projects, ...nestedProjects.flat()];
+  };
+  const sharedLibraryProjects = (
+    await discoverSharedLibraryProjects(
+      fileURLToPath(new URL("../../lib/", import.meta.url)),
+      "",
+    )
+  ).sort();
+  const referencedSharedLibraryProjects = (
+    rootTypeScriptProject.references ?? []
+  )
+    .map(({ path }) => path)
+    .filter((path) => path.startsWith("./lib/"))
+    .sort();
+  assert.deepEqual(
+    referencedSharedLibraryProjects,
+    sharedLibraryProjects,
+    "the root TypeScript project must reference every composite shared library under lib/",
   );
   for (const contract of consumerTypecheckContracts) {
     const step = RELEASE_CHECK_CONSUMER_TYPECHECK_STEPS.find(

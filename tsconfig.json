@@ -25,7 +25,13 @@
       "path": "./lib/inventory-math"
     },
     {
+      "path": "./lib/live-calc"
+    },
+    {
       "path": "./lib/cheese-recipes"
+    },
+    {
+      "path": "./lib/cheese-reconcile"
     },
     {
       "path": "./lib/named-recipes"
@@ -107,6 +113,15 @@
     },
     {
       "path": "./lib/recipe-apply"
+    },
+    {
+      "path": "./lib/recipe-guide-import"
+    },
+    {
+      "path": "./lib/setup-math-check"
+    },
+    {
+      "path": "./lib/sync-contract"
     },
     {
       "path": "./lib/integrations-openai-ai-server"
