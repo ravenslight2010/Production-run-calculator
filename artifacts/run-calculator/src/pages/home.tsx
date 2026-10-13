@@ -7253,6 +7253,7 @@ export default function Home() {
   const [caseUpdateAccepted, setCaseUpdateAccepted] = useState<Record<string, boolean>>({});
   // ── Spec-sheet importer (AI-interpreted brand/flavor profiles + recipes) ──
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
+  const [specImportAiRetryCount, setSpecImportAiRetryCount] = useState(0);
   const [specPhotoFiles, setSpecPhotoFiles] = useState<File[]>([]);
   const [specPhotoReplaceIndex, setSpecPhotoReplaceIndex] = useState<number | null>(null);
   const specPhotoPreviews = useMemo(
@@ -13762,6 +13763,7 @@ export default function Home() {
     const abortController = new AbortController();
     specImportAbortRef.current = abortController;
     setSpecImportPrepared(null);
+    setSpecImportAiRetryCount(0);
     specImportOperationRef.current = null;
     setSpecImportError(null);
     setSpecImportProgress(files.length > 1 ? { done: 0, total: files.length } : null);
@@ -13778,13 +13780,18 @@ export default function Home() {
         buffers.push(await f.arrayBuffer().catch(() => new ArrayBuffer(0)));
       }
       // The multi-file preparation releases its input buffers. Keep a private
-      // copy only while this review is open for the explicit unresolved AI
-      // fallback; never persist the raw workbook bytes.
+      // copy only while an incomplete review is open so an authorized user can
+      // make one bounded retry; never persist the raw workbook bytes.
       specImportBuffersRef.current = buffers.map((buffer) => buffer.slice(0));
       specImportSourceNamesRef.current = files.map((file) => file.name);
       const prepared =
         buffers.length === 1
-          ? await (await loadWorkbookWorkflow()).specImport.prepareSpecImport(buffers[0], files[0]?.name, abortController.signal)
+          ? await (await loadWorkbookWorkflow()).specImport.prepareSpecImport(
+              buffers[0],
+              files[0]?.name,
+              abortController.signal,
+              { allowAi: canUseAiTools },
+            )
           : await (await loadWorkbookWorkflow()).specImport.prepareSpecImportMulti(
               buffers,
               (done, total) => {
@@ -13792,6 +13799,7 @@ export default function Home() {
               },
               files.map((f) => f.name),
               abortController.signal,
+              { allowAi: canUseAiTools },
             );
       if (gen !== specImportGenRef.current) return;
       if (parseStartedAt !== null && typeof performance !== "undefined") {
@@ -13836,7 +13844,13 @@ export default function Home() {
   async function handleSpecAiFallback() {
     const baseline = specImportPrepared;
     const buffers = specImportBuffersRef.current;
-    if (!canUseAiTools || !baseline?.unresolved?.length || buffers.length === 0) return;
+    if (
+      !canUseAiTools ||
+      !baseline?.unresolved?.length ||
+      buffers.length === 0 ||
+      specImportAiRetryCount >= 1
+    ) return;
+    setSpecImportAiRetryCount((count) => count + 1);
     const gen = ++specImportGenRef.current;
     specImportAbortRef.current?.abort();
     const controller = new AbortController();
@@ -13845,55 +13859,48 @@ export default function Home() {
     setSpecImportError(null);
     try {
       const workflow = await loadWorkbookWorkflow();
-      const aiPrepared =
+      const retried =
         buffers.length === 1
-          ? await workflow.specImport.prepareSpecImportWithAi(
+          ? await workflow.specImport.prepareSpecImport(
               buffers[0].slice(0),
               specImportSourceNamesRef.current[0],
               controller.signal,
+              { allowAi: true },
             )
-          : await workflow.specImport.prepareSpecImportMultiWithAi(
+          : await workflow.specImport.prepareSpecImportMulti(
               buffers.map((buffer) => buffer.slice(0)),
               undefined,
               specImportSourceNamesRef.current,
               controller.signal,
+              { allowAi: true },
             );
       if (gen !== specImportGenRef.current) return;
-      const profileKeys = new Set(
-        baseline.parsed.profiles.map((profile) => `${profile.brand}\u0000${profile.flavor}`.toLowerCase()),
-      );
-      const recipeKeys = new Set(
-        baseline.parsed.recipes.map((recipe) => `${recipe.kind}\u0000${recipe.name}`.toLowerCase()),
-      );
-      const merged = {
-        ...aiPrepared,
+      setSpecImportPrepared({
+        ...retried,
         sourceNames: baseline.sourceNames,
-        parsed: {
-          ...aiPrepared.parsed,
-          profiles: [
-            ...baseline.parsed.profiles,
-            ...aiPrepared.parsed.profiles.filter((profile) => {
-              const key = `${profile.brand}\u0000${profile.flavor}`.toLowerCase();
-              return !profileKeys.has(key);
-            }),
-          ],
-          recipes: [
-            ...baseline.parsed.recipes,
-            ...aiPrepared.parsed.recipes.filter((recipe) => {
-              const key = `${recipe.kind}\u0000${recipe.name}`.toLowerCase();
-              return !recipeKeys.has(key);
-            }),
-          ],
-        },
-      };
-      setSpecImportPrepared(merged);
-      toast({
-        title: "Unresolved items interpreted",
-        description: "Review the additions below. Nothing was applied automatically.",
       });
+      if (!retried.unresolved?.length) {
+        toast({
+          title: "Interpretation retry complete",
+          description: "Review the results below. Nothing was applied automatically.",
+        });
+      }
     } catch (err) {
       if (gen === specImportGenRef.current) {
-        setSpecImportError(err instanceof Error ? err.message : "Could not interpret the unresolved import items.");
+        const detail = err instanceof Error
+          ? err.message
+          : "Could not interpret the unresolved import items.";
+        setSpecImportError(null);
+        setSpecImportPrepared({
+          ...baseline,
+          note: [
+            baseline.note,
+            `The bounded AI retry did not complete: ${detail} Previously prepared results remain available for review.`,
+          ].filter(Boolean).join("\n"),
+          ...(err instanceof Error && err.name === "ParseSpecAuthorizationError"
+            ? { aiRetryBlocked: true }
+            : {}),
+        });
       }
     } finally {
       if (gen === specImportGenRef.current) setSpecImportLoading(false);
@@ -17587,9 +17594,12 @@ export default function Home() {
                     {canImportSpec && (
                       <div className="space-y-2">
                         <p className="text-[11px] text-muted-foreground" data-testid="spec-workbook-ai-disclosure">
-                          Selected workbook rows, bounded saved-name candidates, and confirmed name
-                          corrections are sent to the configured AI provider for a reviewable import.
-                          Credentials, logs, unrelated recipes, and user details are not included.
+                          Workbooks are checked locally first. If valid spec or recipe content remains
+                          unresolved, authorized users automatically send extracted text from the selected
+                          workbook—including supporting rows and source context—plus bounded saved-name
+                          candidates and confirmed name corrections to the configured AI provider. Users
+                          without AI access get unresolved-content guidance. Nothing is applied until you
+                          review and confirm. Credentials, logs, and user details are not included.
                         </p>
                         <button type="button" onClick={() => { noteBreadcrumb("Import Spec Sheet clicked (picker opening)"); specImportInputRef.current?.click(); }}
                           className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90">
@@ -18802,6 +18812,7 @@ export default function Home() {
             accept=".xlsx"
             multiple
             className="hidden"
+            data-testid="spec-workbook-input"
             onChange={handleSpecImportFile}
           />
         )}
@@ -18938,6 +18949,9 @@ export default function Home() {
               applying: specImportApplying,
               canUseAiTools,
               onUseAiFallback: () => void handleSpecAiFallback(),
+              aiRetryAvailable: specImportAiRetryCount === 0 &&
+                !specImportPrepared?.aiRetryBlocked &&
+                !specImportPrepared?.aiFallbackUnsupported,
               existingRecipeNamesByKind: existingImportRecipeNames,
               inventoryImpactRun: currentRun?.brand && currentRun?.flavor
                 ? {

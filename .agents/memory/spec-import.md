@@ -865,3 +865,32 @@ imports in prod. Rules now in force:
   the existing registry spelling (a loose match must not mint "Aldo" beside
   "Aldo's"). A dough workbook once minted 4 junk brands in prod this way.
 - profileAutofill's planner must mirror any change here exactly.
+
+## Automatic fallback for valid unresolved workbooks (WEB ONLY)
+- Run the existing AI parser automatically only when deterministic preparation
+  leaves valid spec/dough/sauce content unresolved and the user has the
+  `use-ai-tools` capability. Fully resolved deterministic inputs stay model-free.
+  The AI result is review-only: preserve deterministic values and require explicit
+  user confirmation before any apply. Show the AI disclosure before file selection.
+
+**Why:** Native customer workbooks can be valid while using layouts the
+deterministic export parser does not recognize; requiring a separate AI action
+hid the fallback behind review and made the picker report valid files as junk.
+
+**How to apply:** Keep eligibility, permission checks, source context, cache
+versioning, cancellation fences, and failure states in the normal preparation
+flow. Do not broaden this behavior to unrelated importers or auto-apply results.
+
+## Workbook audit identity
+- For corpus audits, deduplicate paid AI work by SHA-256, but still exercise each
+  distinct importer/hash pair. A byte-identical upload inherits the expected
+  output of its retained source-library copy; a matching filename alone is not
+  enough to inherit expectations.
+
+**Why:** Workbook snapshots can contain many renamed copies and revisions, and
+one workbook can enter through different importer paths. Counting only filenames
+overstates AI work; counting only hashes can hide importer-specific defects.
+
+**How to apply:** Bind the inventory to workbook hashes and a source revision,
+group exact duplicates for AI cost, retain per-importer preparation results, and
+label genuinely unenumerated content as unknown rather than guessing.

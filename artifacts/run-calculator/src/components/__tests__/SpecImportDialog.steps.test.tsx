@@ -67,6 +67,7 @@ function makePrepared(
 function renderDialog(
   prepared: SpecImportPrepared,
   onConfirm: (p: ParsedSpecImport, learnedRenames: SpecImportAlias[]) => void = () => {},
+  ai: { allowed?: boolean; retryAvailable?: boolean; onRetry?: () => void } = {},
 ) {
   return render(
     <SpecImportDialog
@@ -76,6 +77,9 @@ function renderDialog(
       error={null}
       prepared={prepared}
       applying={false}
+      canUseAiTools={ai.allowed ?? false}
+      aiRetryAvailable={ai.retryAvailable ?? false}
+      onUseAiFallback={ai.onRetry ?? (() => {})}
       existingRecipeNamesByKind={{ dough: [], sauce: [], cheese: [], mix: [] }}
       onConfirm={onConfirm}
     />,
@@ -83,6 +87,54 @@ function renderDialog(
 }
 
 describe("SpecImportDialog two-step wizard", () => {
+  it("shows unresolved guidance without offering AI to users who lack permission", () => {
+    const prepared = makePrepared([]);
+    prepared.unresolved = [{ source: "Native OZ", values: ["A product"] }] as never;
+    prepared.note = "Automatic AI interpretation did not complete.";
+    renderDialog(prepared);
+
+    expect(screen.getByText("Automatic AI interpretation did not complete.")).toBeTruthy();
+    expect(screen.getByTestId("spec-import-unresolved").textContent)
+      .toContain("Ask an authorized manager for use-ai-tools access");
+    expect(screen.getByTestId("spec-import-empty-review").textContent)
+      .toContain("incomplete review");
+    expect(screen.queryByText("Retry AI interpretation")).toBeNull();
+    expect((screen.getByText("Next").closest("button") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("offers only the bounded retry action when AI permission is present", () => {
+    const prepared = makePrepared([]);
+    prepared.unresolved = [{ source: "Native OZ", values: ["A product"] }] as never;
+    const retry = vi.fn();
+    renderDialog(prepared, () => {}, { allowed: true, retryAvailable: true, onRetry: retry });
+
+    fireEvent.click(screen.getByText("Retry AI interpretation"));
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/Use AI for/)).toBeNull();
+  });
+
+  it("does not offer retries for unsupported workbooks or authorization rejection", () => {
+    const unsupported = makePrepared([]);
+    unsupported.unresolved = [{ source: "Shipping", values: ["PIZZA/BOX"] }] as never;
+    unsupported.aiFallbackUnsupported = true;
+    const { unmount } = renderDialog(unsupported, () => {}, {
+      allowed: true,
+      retryAvailable: true,
+    });
+    expect(screen.getByTestId("spec-import-unresolved").textContent)
+      .toContain("dedicated importer");
+    expect(screen.queryByText("Retry AI interpretation")).toBeNull();
+
+    unmount();
+    const denied = makePrepared([]);
+    denied.unresolved = [{ source: "Native OZ", values: ["A product"] }] as never;
+    denied.aiRetryBlocked = true;
+    renderDialog(denied, () => {}, { allowed: true, retryAvailable: true });
+    expect(screen.getByTestId("spec-import-unresolved").textContent)
+      .toContain("authorization");
+    expect(screen.queryByText("Retry AI interpretation")).toBeNull();
+  });
+
   it("requires explicit acknowledgement for a single destructive formula removal", () => {
     const prepared = makePrepared([{ brand: "A", flavor: "X" }]);
     prepared.importReview = {

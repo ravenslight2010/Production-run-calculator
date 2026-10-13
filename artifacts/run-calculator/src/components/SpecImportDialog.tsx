@@ -57,6 +57,7 @@ type Props = {
   applying: boolean;
   canUseAiTools: boolean;
   onUseAiFallback: () => void;
+  aiRetryAvailable?: boolean;
   /**
    * Existing recipe names, per display kind, the "use my existing recipe" picker
    * can offer. Cheese and mix are server-backed factory master-data (and dough /
@@ -787,6 +788,7 @@ export default function SpecImportDialog({
   applying,
   canUseAiTools,
   onUseAiFallback,
+  aiRetryAvailable = false,
   existingRecipeNamesByKind,
   inventoryImpactRun = null,
   onConfirm,
@@ -1977,37 +1979,59 @@ export default function SpecImportDialog({
                 />
               )}
 
-              {step === 2 && prepared.note && (
+              {prepared.note && (
                 <div className="rounded-md border border-amber-400/60 bg-amber-500/10 p-3">
                   <div className="flex items-center gap-2 text-amber-600">
                     <AlertTriangle className="h-4 w-4" />
                     <span className="text-sm font-medium">Note from the parser</span>
                   </div>
                   <p className="mt-1 text-sm text-amber-700">{prepared.note}</p>
-                  {prepared.unresolved?.length && canUseAiTools ? (
-                    <>
-                      <p className="mt-3 text-xs text-amber-800" data-testid="ai-import-data-disclosure">
-                        This sends only the selected workbook rows, unresolved names, bounded saved-name
-                        candidates, and confirmed name corrections to the configured AI provider. It does not
-                        send credentials, unrelated recipes, logs, or user details. Suggestions are not applied
-                        until you review and confirm the import.
-                      </p>
-                      <button
-                        type="button"
-                        onClick={onUseAiFallback}
-                        disabled={loading || applying}
-                        className="mt-2 rounded-md bg-amber-700 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-800 disabled:opacity-50"
-                      >
-                        Use AI for {prepared.unresolved.length} unresolved item{prepared.unresolved.length === 1 ? "" : "s"}
-                      </button>
-                    </>
+                </div>
+              )}
+
+              {!!prepared.unresolved?.length && (
+                <div
+                  className="rounded-md border border-amber-400/60 bg-amber-500/10 p-3"
+                  data-testid="spec-import-unresolved"
+                  role="status"
+                >
+                  <p className="text-sm font-medium text-amber-800">
+                    {prepared.unresolved.length} unresolved source section{prepared.unresolved.length === 1 ? "" : "s"}
+                  </p>
+                  <p className="mt-1 text-sm text-amber-700">
+                    {prepared.aiFallbackUnsupported
+                      ? "This workbook is not a supported pizza-spec, dough, or sauce recipe source. Use its dedicated importer or choose a supported workbook."
+                      : prepared.aiRetryBlocked
+                      ? "The AI service rejected this request for authorization. Ask an authorized manager to restore use-ai-tools access; authorization failures are not retried."
+                      : canUseAiTools
+                        ? "Automatic AI interpretation did not resolve all content. Review the readable results and retry once if needed; nothing is applied until you confirm."
+                        : "AI interpretation is unavailable for your account. Ask an authorized manager for use-ai-tools access, or select a supported workbook export. Nothing has been applied."}
+                  </p>
+                  {canUseAiTools && aiRetryAvailable && !prepared.aiRetryBlocked && !prepared.aiFallbackUnsupported ? (
+                    <button
+                      type="button"
+                      onClick={onUseAiFallback}
+                      disabled={loading || applying}
+                      className="mt-2 rounded-md bg-amber-700 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-800 disabled:opacity-50"
+                    >
+                      Retry AI interpretation
+                    </button>
                   ) : null}
                 </div>
               )}
 
               {nothingParsed && (
-                <div className="rounded-md border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
-                  Nothing recognizable was found in this workbook. Try a different file.
+                <div
+                  className="rounded-md border border-border bg-muted/40 p-3 text-sm text-muted-foreground"
+                  data-testid="spec-import-empty-review"
+                  role="status"
+                >
+                  No products or recipes could be prepared. This is an incomplete review, not a successful empty import.
+                  {prepared.aiFallbackUnsupported
+                    ? " Choose the workbook's dedicated importer."
+                    : canUseAiTools && aiRetryAvailable
+                    ? " Retry interpretation once or choose a supported export."
+                    : " Choose a supported export or ask an authorized manager for AI tools access."}
                 </div>
               )}
             </>

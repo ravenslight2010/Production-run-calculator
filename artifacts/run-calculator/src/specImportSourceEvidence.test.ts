@@ -223,6 +223,7 @@ async function expectAppliedEvidence(
     });
   }
   expect(body.changes).not.toHaveProperty("sourceEvidence");
+  expect(JSON.stringify(body.changes)).not.toContain("sourceLocations");
   expect(body).not.toHaveProperty("sourcePreviewCells");
   expect(body).not.toHaveProperty("missingFormulaResults");
 
@@ -234,6 +235,7 @@ async function expectAppliedEvidence(
   expect(savedParse).not.toHaveProperty("sourceEvidence");
   expect(savedParse).not.toHaveProperty("sourcePreviewCells");
   expect(savedParse).not.toHaveProperty("missingFormulaResults");
+  expect(JSON.stringify(savedParse)).not.toContain("sourceLocations");
 }
 
 beforeEach(() => {
@@ -296,6 +298,89 @@ describe("spec Apply source evidence", () => {
     expect(typedCell).not.toHaveProperty("savedResult");
     const expected = await renderedSource(buffer);
     await expectAppliedEvidence(prepared, expected, "import-spec-preview-memory-0001");
+  });
+
+  it("derives only unique exact source cells for AI values in the active review", async () => {
+    parseSpy.mockResolvedValueOnce({
+      profiles: [{
+        brand: "Acme",
+        flavor: "Classic",
+        applicators: [],
+        pepperonis: [],
+      }],
+      recipes: [{
+        kind: "dough",
+        name: "House Dough",
+        rowsUnit: "lbs",
+        rows: [{ ingredient: "Flour", lbs: 2 }],
+      }],
+    });
+    const buffer = workbookBuffer([["Acme", "Classic", "Flour", "2"]]);
+    const prepared = await prepareSpecImportWithAi(buffer, "unresolved-pizza-recipe.xlsx");
+
+    expect(parseSpy).toHaveBeenCalledOnce();
+    expect(prepared.sourcePreviewCells).toEqual(expect.arrayContaining([
+      {
+        file: "unresolved-pizza-recipe.xlsx",
+        sheet: "Specs",
+        cell: "A1",
+        value: "Acme",
+      },
+      {
+        file: "unresolved-pizza-recipe.xlsx",
+        sheet: "Specs",
+        cell: "B1",
+        value: "Classic",
+      },
+      {
+        file: "unresolved-pizza-recipe.xlsx",
+        sheet: "Specs",
+        cell: "C1",
+        value: "Flour",
+      },
+      {
+        file: "unresolved-pizza-recipe.xlsx",
+        sheet: "Specs",
+        cell: "D1",
+        value: "2",
+      },
+    ]));
+    expect(prepared.parsed.profiles[0]?.sourceLocations).toMatchObject({
+      brand: [{ file: "unresolved-pizza-recipe.xlsx", sheet: "Specs", cell: "A1" }],
+      flavor: [{ file: "unresolved-pizza-recipe.xlsx", sheet: "Specs", cell: "B1" }],
+    });
+    expect(prepared.parsed.recipes[0]?.rows[0]?.sourceLocations).toMatchObject([
+      { file: "unresolved-pizza-recipe.xlsx", sheet: "Specs", cell: "C1" },
+      { file: "unresolved-pizza-recipe.xlsx", sheet: "Specs", cell: "D1" },
+    ]);
+    await expectAppliedEvidence(
+      prepared,
+      "=== SHEET: Specs ===\nAcme\tClassic\tFlour\t2",
+      "import-spec-ai-review-source-0001",
+    );
+  });
+
+  it("leaves repeated source values uncited instead of guessing a cell", async () => {
+    parseSpy.mockResolvedValueOnce({
+      profiles: [{
+        brand: "Acme",
+        flavor: "Classic",
+        applicators: [],
+        pepperonis: [],
+      }],
+      recipes: [],
+    });
+    const buffer = workbookBuffer([["Acme", "Acme", "Classic"]]);
+    const prepared = await prepareSpecImportWithAi(buffer, "unresolved-pizza-ambiguous.xlsx");
+
+    expect(parseSpy).toHaveBeenCalledOnce();
+    expect(prepared.parsed.profiles[0]?.sourceLocations).toMatchObject({
+      flavor: [{ file: "unresolved-pizza-ambiguous.xlsx", sheet: "Specs", cell: "C1" }],
+    });
+    expect(prepared.parsed.profiles[0]?.sourceLocations).not.toHaveProperty("brand");
+    expect(prepared.sourcePreviewCells).not.toContainEqual(
+      expect.objectContaining({ value: "Acme" }),
+    );
   });
 
   it("shows a formula and saved result only in the active review", async () => {
@@ -488,7 +573,7 @@ describe("spec Apply source evidence", () => {
 
   it("carries the current single-file source only on the final Apply", async () => {
     const buffer = workbookBuffer([["raw source", "single-file marker"]]);
-    const prepared = await prepareSpecImportWithAi(buffer, "single.xlsx");
+    const prepared = await prepareSpecImportWithAi(buffer, "single-pizza.xlsx");
     const expected = "=== SHEET: Specs ===\nraw source\tsingle-file marker";
 
     expect(prepared.sourceEvidence?.sourceText).toBe(expected);
@@ -501,7 +586,7 @@ describe("spec Apply source evidence", () => {
     const prepared = await prepareSpecImportMultiWithAi(
       [first, second],
       undefined,
-      ["first.xlsx", "second.xlsx"],
+      ["first-pizza.xlsx", "second-pizza.xlsx"],
     );
     const expected = [
       "=== SHEET: First ===\nraw source\tfirst marker",
@@ -514,7 +599,7 @@ describe("spec Apply source evidence", () => {
 
   it("uses current bytes, not snapshot contents, for a cached single-file parse", async () => {
     const buffer = workbookBuffer([["current source", "cached marker"]]);
-    const names = ["cached.xlsx"];
+    const names = ["cached-pizza.xlsx"];
     const hash = await hashSpecImportSource([buffer]);
     fetchSheetsSpy.mockResolvedValue([{
       id: 1,
@@ -599,10 +684,10 @@ describe("spec Apply source evidence", () => {
 
   it("retains text-based review input through the generated workbook", async () => {
     const prepared = await prepareSpecImportFromText(
-      "raw text\tphoto marker",
-      "photo.txt",
+      "pizza recipe\tphoto marker",
+      "pizza-photo.txt",
     );
-    const expected = "=== SHEET: Photographed spec sheets ===\nraw text\tphoto marker";
+    const expected = "=== SHEET: Photographed spec sheets ===\npizza recipe\tphoto marker";
 
     expect(prepared.sourceEvidence?.sourceText).toBe(expected);
     expect(prepared.sourcePreviewCells).toBeUndefined();
@@ -610,14 +695,17 @@ describe("spec Apply source evidence", () => {
   });
 
   it("omits evidence when any file in the reviewed batch is skipped", async () => {
-    const goodFile = workbookBuffer([["complete file", "first marker"]], "First");
+    const goodFile = workbookBuffer(
+      [["Brand", "Flavor"], ["Acme", "Classic"]],
+      "Profiles",
+    );
     // The XLSX reader throws on an empty byte buffer, before source evidence
     // can be added to the per-file list.
     const unreadableFile = new ArrayBuffer(0);
     const prepared = await prepareSpecImportMultiWithAi(
       [goodFile, unreadableFile],
       undefined,
-      ["good.xlsx", "unreadable.xlsx"],
+      ["good-pizza.xlsx", "unreadable.xlsx"],
     );
 
     expect(prepared.note).toMatch(/could not be read/i);
@@ -646,7 +734,7 @@ describe("spec Apply source evidence", () => {
 
   it("omits a cell whose tail was truncated before parsing", async () => {
     const buffer = workbookBuffer([["x".repeat(PROMPT_MAX_CELL_CHARS + 1)]]);
-    const prepared = await prepareSpecImportWithAi(buffer, "truncated.xlsx");
+    const prepared = await prepareSpecImportWithAi(buffer, "truncated-pizza.xlsx");
 
     expect(prepared.note).toMatch(/shortened before reading/i);
     expect(prepared.sourceEvidence).toBeUndefined();
