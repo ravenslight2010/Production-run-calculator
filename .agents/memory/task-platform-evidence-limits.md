@@ -9,31 +9,18 @@ Assignment and mode are also separate evidence questions. A read-only task recor
 
 A client-side queue read followed by creation is not an atomic acceptance snapshot. Retrofitting dependencies after submission can race with acceptance and launch. Explicit manual dependency support also does not establish that the generated-follow-up path accepts the same inputs or retains the same hierarchy metadata.
 
-Creation/update timestamps and equal creation times cannot establish acceptance
-order or batch acceptance ties. Missing acceptance provenance must remain unknown,
-even when stored task dependencies can be inspected.
+## Genuine dependencies, not global sequencing
 
-**Why:** The owner clarified that clicking Accept, not draft creation or task
-number, establishes future precedence; exposed task reads do not provide a reliable
-acceptance sequence. Inferring one would turn advisory checks into false assurances.
+The owner discarded the one-task-at-a-time rule. Use dependency links only for
+genuine technical or user-outcome prerequisites. Unrelated work does not block a
+task, and task numbers, acceptance time, or creation time do not establish priority.
 
-**How to apply:** Require reliable event evidence or explicit owner-attested
-acceptance receipts before claiming ordered startup. Keep missing provenance and
-missing persisted links as advisory blockers; never claim an agent's decision to
-wait has paused platform execution.
+**Why:** The owner explicitly removed the rule after it failed to govern Drafts
+and follow-ups and added unnecessary coordination.
 
-## Task sequencing where supported
-
-Use real dependency links when work genuinely depends on prior work. Do not
-promise that Drafts or generated follow-ups will enforce one-at-a-time execution;
-the owner accepts that the platform may allow concurrent tasks.
-
-**Why:** The owner said the one-at-a-time rule may not be enforceable through
-Drafts and follow-ups and is okay with that limitation.
-
-**How to apply:** Preserve dependencies that represent technical or release
-ordering, but do not treat concurrent task states as a blocker or infer
-acceptance order from task numbers or creation times.
+**How to apply:** Preserve real prerequisites and prevent conflicting edits on
+shared surfaces, but never demand acceptance-order receipts or wait for unrelated
+tasks. Agent prose cannot pause the platform scheduler.
 
 ## Task-completion validation scope
 
@@ -68,18 +55,18 @@ started afterward rather than claiming it altered an in-flight task.
 
 ## Self-sufficient task descriptions
 
-Every Draft, accepted task, and follow-up description should contain an
-agent-owned execution contract: inspect available project evidence and
-authorized access paths before asking the user; keep all in-scope investigation,
-implementation, repair, and verification in the owning task; and ask only for
-decisions or permissions the user controls. If a system source is inaccessible,
-the agent should investigate an approved agent-side route and identify the exact
-missing capability rather than ask the user to supply retrievable evidence.
+Every Draft, accepted task, and follow-up description must carry all applicable
+task rules, including evidence-first ownership and task-specific safeguards.
+Fix discovered errors in the owning task when safe and authorized, even outside
+the original scope; never silently ignore them. If not safely fixable, retain the
+evidence, exact blocker/risk, accountable owner, and next action. Ask only for
+decisions or permissions the user controls, not retrievable evidence.
 
-**Why:** The owner reported that tasks repeatedly shifted evidence-gathering and
-in-scope work back to them. Shared policy prose alone had not made each task
-description self-contained.
+**Why:** The owner reported that new tasks still shifted work back to them and
+explicitly requested all applicable rules plus repairs outside the original
+scope. Shared policy prose alone had not made descriptions self-contained.
 
-**How to apply:** Put this contract in every plan's `Agent-owned execution`
-section, including follow-ups. A policy test can guard the authoring instructions,
-but it cannot guarantee that Replit's isolated task runner follows them.
+**How to apply:** Put the contract and applicable safeguards directly in each
+description, including follow-ups. Keep project-specific authoring guidance in
+editable project-owned files, not platform-managed skills. A policy test guards
+instructions but cannot guarantee isolated task-runner compliance.

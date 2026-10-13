@@ -21,7 +21,7 @@ Turn an approved design into a bounded, testable plan. Record decisions that an 
 
 ## Plan format in Plan mode
 
-Follow the `project-tasks` skill as the source of truth. A task plan in `.local/tasks/` has:
+Follow the `project-tasks` skill for platform operations and `.agents/skills/task-execution-rules/SKILL.md` for this project's complete execution contract. Keep platform-managed skills unchanged. A task plan in `.local/tasks/` has:
 
 - A short descriptive title as its first line.
 - `## What & Why` — the requested change and its purpose.

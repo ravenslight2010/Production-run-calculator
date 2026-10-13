@@ -38,7 +38,7 @@ const requirements: Requirement[] = [
   {
     label: "follow-up priority gate",
     pattern:
-      /High- and medium-priority independent outcomes may be submitted as child tasks[\s\S]{0,220}Low-priority outcomes may be submitted only when the plan states a concrete benefit and bounded scope/i,
+      /High- and medium-priority independent outcomes may be (?:submitted as child tasks|proposed)[\s\S]{0,220}low-priority (?:outcomes|ones)[\s\S]{0,150}concrete benefit and bounded scope/i,
     remediation:
       "allow high/medium independent outcomes and gate low-priority work on concrete benefit and bounded scope",
     contradictions: [
@@ -74,14 +74,14 @@ const requirements: Requirement[] = [
   {
     label: "follow-up child-plan evidence requirement",
     pattern:
-      /Every eligible child plan must state its parent, evidence, explicit priority and rationale, separate acceptance criteria, why it cannot remain in the owning task, and the result of checking current work for overlap/i,
+      /Every eligible child plan must state its parent, evidence, explicit priority and rationale, separate acceptance criteria, why it cannot (?:safely )?remain in the owning task, and the result of checking current work for overlap/i,
     remediation:
       "require every eligible child plan to document its parent, evidence, priority and rationale, independent criteria, why it cannot remain with the owner, and an overlap check",
   },
   {
     label: "task-platform and checker limitation",
     pattern:
-      /Platform settings determine whether a submitted task immediately becomes Active or remains a Draft[\s\S]{0,150}Priority is recorded in the plan, not enforced as native task metadata[\s\S]{0,150}repository checker validates policy wording, not runtime task creation/i,
+      /Platform settings determine whether a submitted task immediately becomes Active or remains a Draft[\s\S]{0,150}Priority is recorded in the plan, not enforced as native task metadata[\s\S]{0,150}repository (?:checker validates policy wording|checks protect authoring guidance), not runtime task creation/i,
     remediation:
       "state that platform settings control Draft/Active status, priority is plan text rather than native metadata, and the checker validates wording only",
     contradictions: [
@@ -108,56 +108,56 @@ const requirements: Requirement[] = [
   {
     label: "per-task execution and applicable safeguards contract",
     pattern:
-      /Every (?:Draft, accepted task, and follow-up|task description \(Draft, accepted task, or follow-up\)) must include `?## Agent-owned execution`? and `?## Applicable safeguards and verification`?[\s\S]{0,900}(?:task-specific evidence|evidence\/access) paths[\s\S]{0,500}user-controlled (?:decisions or permissions|inputs)[\s\S]{0,500}(?:applicable specialist|applicable project\/specialist) safety (?:checks|rules)[\s\S]{0,200}validation matrix/i,
+      /Every Draft, accepted task, and follow-up(?: description)? must include `?## Agent-owned execution`? and `?## Applicable safeguards and verification`?[\s\S]{0,900}task-specific evidence(?: and access|\/access) paths[\s\S]{0,900}(?:user input|user-controlled decisions or permissions)[\s\S]{0,900}applicable specialist/i,
     remediation:
       "put the full execution contract and applicable safeguards/verification into every Draft, task, and follow-up description",
   },
   {
     label: "task-scope capture rule",
     pattern:
-      /Before starting,[\s\S]{0,100}capture the task's scope, affected surfaces, (?:expected )?owner, applicable specialist safety checks, and validation matrix/i,
+      /Before starting,[\s\S]{0,100}capture (?:the task's scope|the scope), affected surfaces, (?:expected )?owner, applicable (?:specialist )?safety checks, (?:and )?validation matrix/i,
     remediation:
       "capture the task's scope, affected surfaces, owner, specialist safety checks, and validation matrix before starting",
   },
   {
     label: "failure-ledger closure rule",
     pattern:
-      /failure ledger[\s\S]{0,300}(?:fix|resolve)[\s\S]{0,180}(?:actionable errors|in-scope finding|in-scope failure|completion)/i,
+      /failure ledger[\s\S]{0,300}(?:fix|resolve)[\s\S]{0,180}(?:actionable error|in-scope finding|in-scope failure|completion)/i,
     remediation:
       "keep same-objective discoveries in the owning task's failure ledger and close them before completion",
   },
   {
     label: "separate-task exception rule",
     pattern:
-      /genuinely independent outcome[\s\S]{0,160}(?:separate acceptance criteria|independent acceptance criteria)[\s\S]{0,240}(?:explicitly deferred user outcome|explicit deferral)[\s\S]{0,240}(?:safety|approval) need/i,
+      /separate acceptance criteria[\s\S]{0,250}genuinely independent outcome[\s\S]{0,180}explicitly deferred user outcome[\s\S]{0,180}separate safety\/approval need/i,
     remediation:
-      "allow a separate task only for an independent outcome, explicitly deferred outcome, or out-of-scope safety, security, data-integrity, or release blocker",
+      "allow a separate task only for a distinct outcome, explicit deferral, or separate safety/approval need",
   },
   {
     label: "follow-up owner requirement",
     pattern:
-      /Before creating another task[\s\S]{0,500}(?:parent or owning task|owning task)/i,
+      /Before creating another task[^\n]*?name (?:its|the) parent or owning task/i,
     remediation:
       "require every proposed follow-up to name its parent or owning task",
   },
   {
     label: "follow-up de-duplication requirement",
     pattern:
-      /Before creating another task[\s\S]{0,700}(?:search|de-duplicate)[\s\S]{0,160}(?:active and draft|draft and active|current draft and active|existing matching task)/i,
+      /Before creating another task[^\n]*?(?:search|de-duplicate)[^\n]*?(?:active and drafts?|drafts? and active|current drafts? and active|existing matching task)/i,
     remediation:
       "require an overlap search across current work before creating a follow-up",
   },
   {
     label: "follow-up acceptance criteria requirement",
     pattern:
-      /Before creating another task[\s\S]{0,800}independent acceptance criteria/i,
+      /Before creating another task[^\n]*?state (?:independent|separate) acceptance criteria/i,
     remediation:
       "require independent acceptance criteria for a separate follow-up",
   },
   {
     label: "follow-up justification requirement",
     pattern:
-      /Before creating another task[\s\S]{0,1000}(?:document|explain) why (?:the work|it) cannot safely remain in the owning task/i,
+      /Before creating another task[^\n]*?(?:document|explain) why (?:the work|it) cannot safely remain in the owning task/i,
     remediation:
       "document why proposed work cannot remain in its owning task",
   },
@@ -169,11 +169,11 @@ const requirements: Requirement[] = [
       "preserve every current draft and active task without merging, cancelling, or re-scoping it",
   },
   {
-    label: "existing-owner routing rule",
+    label: "active-task overlap safety",
     pattern:
-      /(?:New|Newly discovered) findings?[\s\S]{0,180}(?:return|route)[\s\S]{0,180}(?:matching existing owner|matching existing task|matching owner)/i,
+      /If another active task already owns a repair on the same surface[\s\S]{0,220}prevent conflicting duplicate edits[\s\S]{0,260}resolve it with that owner through existing work[\s\S]{0,120}without creating a recursive follow-up/i,
     remediation:
-      "route new in-scope findings back to the matching existing owning task",
+      "avoid conflicting edits when another active task already owns the same repair and resolve it through existing work",
   },
   {
     label: "completion ledger resolution rule",
@@ -185,7 +185,7 @@ const requirements: Requirement[] = [
   {
     label: "recursive sub-outcome prohibition",
     pattern:
-      /(?:Test failures, fixture repairs, cleanup, validation work[\s\S]{0,180}(?:must not|do not)[\s\S]{0,80}recursive tasks|Do not create a follow-up for an in-scope error, test failure, fixture repair, cleanup, validation step, or other sub-outcome)/i,
+      /(?:Keep in-scope symptoms, errors, test failures, fixture repairs, cleanup, and validation in the owning task; do not create recursive child tasks|Do not create a follow-up for a discovered error, test failure, fixture repair, cleanup, validation step, or other sub-outcome)/i,
     remediation:
       "keep test failures, fixture repairs, cleanup, validation, and other in-scope sub-outcomes in the owning task",
   },
@@ -213,7 +213,7 @@ const requirements: Requirement[] = [
   {
     label: "physical-device evidence distinction",
     pattern:
-      /responsive browser emulation[\s\S]{0,240}physical Android Chrome[\s\S]{0,240}iOS Safari\/PWA/i,
+      /(?:responsive )?browser emulation[\s\S]{0,240}physical Android Chrome[\s\S]{0,240}iOS Safari\/PWA/i,
     remediation:
       "distinguish responsive emulation from physical Android Chrome and iOS Safari/PWA evidence",
   },
@@ -267,18 +267,36 @@ const failures: string[] = [];
 
 const taskPlanRequirements: Requirement[] = [
   {
-    label: "full task execution contract in task-plan instructions",
-    pattern:
-      /## Agent-owned execution[\s\S]{0,500}(?:task-specific evidence\/access paths|task-specific evidence\/access paths)[\s\S]{0,500}inspect(?:s)? relevant (?:project )?evidence[\s\S]{0,500}ask only for (?:decisions, approvals, or access permissions|a product decision, approval, or specific access permission)[\s\S]{0,500}every concrete error[\s\S]{0,260}(?:outside|beyond) the original scope[\s\S]{0,350}never silently ignore[\s\S]{0,450}(?:exact risk\/blocker|exact blocker)[\s\S]{0,180}next action[\s\S]{0,500}## Applicable safeguards and verification[\s\S]{0,350}(?:specialist safety|repository and specialist safety)[\s\S]{0,220}validation matrix/i,
-    remediation:
-      "require task plans to state evidence-first ownership, error repair, blockers, applicable safeguards, and validation",
+    label: "agent-owned execution heading",
+    pattern: /## Agent-owned execution/,
+    remediation: "require the execution contract directly in task descriptions",
+  },
+  {
+    label: "applicable safeguards heading",
+    pattern: /## Applicable safeguards and verification/,
+    remediation: "require task-specific safeguards and verification directly in descriptions",
+  },
+  {
+    label: "evidence-first task-plan contract",
+    pattern: /Before asking the user, inspect the task record, relevant project evidence, configured workflows, and authorized Replit\/deployment\/service access/i,
+    remediation: "require evidence gathering before asking the user",
+  },
+  {
+    label: "discovered-error task-plan contract",
+    pattern: /Record every concrete error[\s\S]{0,200}fix it there when safe and authorized[\s\S]{0,100}outside the original scope[\s\S]{0,100}Never silently ignore[\s\S]{0,350}exact risk\/blocker[\s\S]{0,100}next action/i,
+    remediation: "require safe error repair beyond original scope and explicit blockers",
+  },
+  {
+    label: "task-plan verification matrix",
+    pattern: /repository and specialist safety rules[\s\S]{0,200}validation matrix/i,
+    remediation: "require applicable specialist rules and a task-specific validation matrix",
   },
 ];
 
 for (const [relativePath, documentRequirements] of [
   ["AGENTS.md", requirements],
   ["replit.md", requirements],
-  [".local/skills/project-tasks/SKILL.md", taskPlanRequirements],
+  [".agents/skills/task-execution-rules/SKILL.md", taskPlanRequirements],
   [".agents/skills/writing-plans/SKILL.md", taskPlanRequirements],
 ] as const) {
   const path = resolve(root, relativePath);
@@ -293,12 +311,19 @@ for (const [relativePath, documentRequirements] of [
     continue;
   }
 
+  const projectContractPointer: Requirement = {
+    label: "project-owned task contract pointer",
+    pattern: /\.agents\/skills\/task-execution-rules\/SKILL\.md/,
+    remediation: "route task and follow-up authoring through the project-owned contract",
+  };
   const additionalRequirements =
     relativePath === "replit.md"
-      ? taskAgentStartupRequirements
+      ? [...taskAgentStartupRequirements, projectContractPointer]
       : relativePath === "AGENTS.md"
-        ? agentEntryRequirements
-        : [];
+        ? [...agentEntryRequirements, projectContractPointer]
+        : relativePath === ".agents/skills/writing-plans/SKILL.md"
+          ? [projectContractPointer]
+          : [];
 
   for (const requirement of [...documentRequirements, ...additionalRequirements]) {
     if (!requirement.pattern.test(content)) {
